@@ -3,7 +3,7 @@ import type { TimerTrigger } from "../contracts";
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
-export const localDateInTimeZone = (instant: number, timeZone: string): string => {
+const localDateInTimeZone = (instant: number, timeZone: string): string => {
   const values = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
     timeZone,
     year: "numeric",
@@ -13,7 +13,7 @@ export const localDateInTimeZone = (instant: number, timeZone: string): string =
   return `${String(values.year)}-${String(values.month)}-${String(values.day)}`;
 };
 
-export const shiftLocalDate = (date: string, amount: number): string => {
+const shiftLocalDate = (date: string, amount: number): string => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(date);
   if (match === null) throw new RangeError("Invalid local calendar date.");
   const shifted = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + amount));

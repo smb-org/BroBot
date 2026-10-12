@@ -9,7 +9,7 @@ import {
   parseKeyRing,
 } from "./auth/crypto";
 import { logMaintenanceError, TwitchApiError } from "./bot-maintenance";
-import { APP_TOKEN_REFRESH_THRESHOLD_MS } from "../maintenance-policy";
+import { TOKEN_MAINTENANCE_WINDOW_MS } from "../maintenance-policy";
 
 const APP_TOKEN_REQUEST_TIMEOUT_MS = 5_000;
 
@@ -43,7 +43,7 @@ export const shouldRefreshAppAccessToken = (expiresAt: string, now: string): boo
   const expiresAtMs = Date.parse(expiresAt);
   const nowMs = Date.parse(now);
   return !Number.isFinite(expiresAtMs) || !Number.isFinite(nowMs) ||
-    expiresAtMs <= nowMs + APP_TOKEN_REFRESH_THRESHOLD_MS;
+    expiresAtMs <= nowMs + TOKEN_MAINTENANCE_WINDOW_MS;
 };
 
 export const requestAppAccessToken = async (

@@ -1,13 +1,13 @@
 import { createTheme } from "@mantine/core";
 import type { MantineColorsTuple, MantineTheme, MantineThemeOverride } from "@mantine/core";
 
-export interface StateToken {
+interface StateToken {
   readonly color: string;
   readonly background?: string;
   readonly wordColor?: string;
 }
 
-export interface FamilyToken {
+interface FamilyToken {
   readonly color: string;
   readonly background: string;
 }

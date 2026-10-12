@@ -1,5 +1,5 @@
 import { PanelApiError } from "../../../contracts/panel-error";
-import { TEXT_LIBRARY_LIBRARY_PATH, type TextBlock, type TextBlockCategory, type TextLibraryData, type TextBlockUsage, type TwitchGame, type TextBlockMutationInput, type TextBlockSaveInput } from "../contracts";
+import { TEXT_LIBRARY_LIBRARY_PATH, type TextBlock, type TextBlockCategory, type TextLibraryData, type TwitchGame, type TextBlockMutationInput, type TextBlockSaveInput } from "../contracts";
 import type { ModuleRegisteredTemplateVariable } from "../../contract";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../../contract";
 
@@ -119,4 +119,4 @@ export const deleteTextCategory = async (channelId: string, id: string): Promise
   await mutate<{ ok: boolean }>(channelId, `/categories/${encodeURIComponent(id)}`, "DELETE");
 };
 
-export type { TextBlock, TextBlockUsage, TwitchGame };
+export type { TextBlock,  TwitchGame };

@@ -689,7 +689,7 @@ interface ModuleToggleListProperties {
  * embed it next to the immediate actions and the event feed. `ModuleWorkspace`
  * below wraps this with the full "Module" page's own heading and error line.
  */
-export const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onChanged }: ModuleToggleListProperties): ReactElement => {
+const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onChanged }: ModuleToggleListProperties): ReactElement => {
   const texts = dashboardTexts();
   const manageable = canManageModules(ownRole);
   // Holds the clicked value only while the request is in flight; afterwards

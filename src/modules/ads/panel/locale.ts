@@ -19,7 +19,6 @@ export interface AdsPanelTexts {
   recentSection: string;
   noRecent: string;
   recentDuration: (duration: string) => string;
-  recentTime: (timestamp: string) => string;
   loading: string;
   loadError: string;
   refreshSchedule: string;
@@ -55,7 +54,6 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     recentSection: "Letzte Werbepausen",
     noRecent: "Noch keine Werbepausen im Ereignisprotokoll.",
     recentDuration: (duration) => `${duration} Sekunden`,
-    recentTime: (timestamp) => timestamp,
     loading: "Werbeplan wird geladen …",
     loadError: "Der Werbeplan konnte nicht geladen werden.",
     refreshSchedule: "Werbeplan aktualisieren",
@@ -89,7 +87,6 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     recentSection: "Recent ad breaks",
     noRecent: "No ad breaks are in the event log yet.",
     recentDuration: (duration) => `${duration} seconds`,
-    recentTime: (timestamp) => timestamp,
     loading: "Loading the ad schedule …",
     loadError: "The ad schedule could not be loaded.",
     refreshSchedule: "Refresh ad schedule",

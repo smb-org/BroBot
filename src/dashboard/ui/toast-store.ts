@@ -1,4 +1,4 @@
-export type ToastTone = "success" | "info" | "error";
+type ToastTone = "success" | "info" | "error";
 
 export interface ToastInput {
   tone: ToastTone;

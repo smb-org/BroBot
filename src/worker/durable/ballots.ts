@@ -9,8 +9,8 @@ import type {
 } from "../../modules/contract";
 import { isBlockedFreeTextVote } from "../../modules/chat_voting/domain";
 
-export const BALLOT_MAX_LIFETIME_MS = 24 * 60 * 60 * 1_000;
-export const BALLOT_FINALIZATION_RETENTION_MS = 24 * 60 * 60 * 1_000;
+const BALLOT_MAX_LIFETIME_MS = 24 * 60 * 60 * 1_000;
+const BALLOT_FINALIZATION_RETENTION_MS = 24 * 60 * 60 * 1_000;
 export const BALLOT_EXPIRY_ALARM_HANDLER = "host:ballot_expiry";
 export const BALLOT_HARD_DELETE_ALARM_HANDLER = "host:ballot_hard_delete";
 const BALLOT_MAX_TEXT_TERMS = 200;

@@ -1,6 +1,6 @@
 import { MODULE_NAVIGATION_CATEGORIES, type ModuleNavigationCategory } from "../modules/contract";
 
-export type OverlayElementPaletteGroupId = "variables" | ModuleNavigationCategory;
+type OverlayElementPaletteGroupId = "variables" | ModuleNavigationCategory;
 
 export interface OverlayElementPaletteItem {
   id: string;

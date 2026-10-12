@@ -2,8 +2,8 @@ import { parseKeyRing, signJson, verifyJson } from "./crypto";
 import { readCookieValue } from "./session";
 
 export const CSRF_COOKIE_NAME = "__Host-brobot_csrf";
-export const CSRF_HEADER_NAME = "X-CSRF-Token";
-export const CSRF_TOKEN_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
+const CSRF_HEADER_NAME = "X-CSRF-Token";
+const CSRF_TOKEN_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 
 interface CsrfPayload {
   sessionId: string;

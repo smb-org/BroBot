@@ -6,7 +6,7 @@ import { mergeBelaboxRealtimeState } from "./state";
 const german = belaboxOverlayLabels("de");
 const english = belaboxOverlayLabels("en");
 
-export const belaboxStatusOverlayElement: ModuleOverlayElementDefinition = {
+const belaboxStatusOverlayElement: ModuleOverlayElementDefinition = {
   kind: BELABOX_STATUS_ELEMENT_KIND,
   configVersion: 1,
   defaultSize: { width: 320, height: 40 },

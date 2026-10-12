@@ -1,12 +1,12 @@
 import { z } from "zod";
 
-import { timeoutDurationRangeSchema, type TimeoutDurationRange } from "../../contracts/moderation";
+import { timeoutDurationRangeSchema } from "../../contracts/moderation";
 import { VOTEKICK_DEFAULT_TEXTS } from "./chat-defaults";
 
 export const VOTEKICK_MODULE_ID = "votekick";
 export const VOTEKICK_WINDOW_MS = 10 * 60 * 1000;
-export const VOTEKICK_MAX_WINDOW_SECONDS = 180;
-export const VOTEKICK_MIN_WINDOW_SECONDS = 30;
+const VOTEKICK_MAX_WINDOW_SECONDS = 180;
+const VOTEKICK_MIN_WINDOW_SECONDS = 30;
 export const VOTEKICK_HISTORY_DAYS = 14;
 
 export const votekickSettingsSchema = z.object({
@@ -27,8 +27,6 @@ export const votekickSettingsSchema = z.object({
 });
 
 export type VotekickSettings = z.output<typeof votekickSettingsSchema>;
-export type VotekickDuration = TimeoutDurationRange;
-
 export const DEFAULT_VOTEKICK_SETTINGS: VotekickSettings = {
   starterMinRole: "vip",
   minNetVotes: 5,

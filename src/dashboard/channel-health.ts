@@ -7,10 +7,10 @@ import type {
   PanelModeratorStatus,
   PanelTokenStatus,
 } from "../panel-contract";
-import { BOT_MAINTENANCE_INTERVAL_MS, BOT_MAINTENANCE_STALE_AFTER_MS } from "../maintenance-policy";
+import { TOKEN_MAINTENANCE_WINDOW_MS } from "../maintenance-policy";
 import { dashboardTexts } from "./locale";
 
-export type TokenHealthKind =
+type TokenHealthKind =
   | "bot-unavailable"
   | "login-unavailable"
   | "identity-missing"
@@ -27,7 +27,7 @@ export interface TokenHealth {
   kind: TokenHealthKind;
 }
 
-export type ChannelNoticeKind =
+type ChannelNoticeKind =
   | "moderator-missing"
   | "bot-permissions-missing"
   | "broadcaster-permissions-missing"
@@ -56,8 +56,8 @@ export const parseDashboardDate = (value: string | null): number | null => {
 };
 
 const renewalOverdue = (expiresAt: number, lastMaintenanceAt: number, now: number): boolean =>
-  expiresAt <= now + BOT_MAINTENANCE_INTERVAL_MS &&
-  lastMaintenanceAt >= expiresAt - BOT_MAINTENANCE_INTERVAL_MS;
+  expiresAt <= now + TOKEN_MAINTENANCE_WINDOW_MS &&
+  lastMaintenanceAt >= expiresAt - TOKEN_MAINTENANCE_WINDOW_MS;
 
 export const tokenHealth = (
   tokens: PanelTokenStatus,
@@ -81,7 +81,7 @@ export const tokenHealth = (
   if (botExpiresAt <= now || loginExpiresAt <= now) return { tone: "neutral", label: texts.status.refreshing, kind: "refreshing" };
   if (bot?.status !== "connected") return { tone: "neutral", label: texts.status.notChecked, kind: "unchecked" };
   const lastMaintenanceAt = parseDashboardDate(bot.updatedAt);
-  if (lastMaintenanceAt === null || lastMaintenanceAt <= now - BOT_MAINTENANCE_STALE_AFTER_MS) {
+  if (lastMaintenanceAt === null || lastMaintenanceAt <= now - TOKEN_MAINTENANCE_WINDOW_MS) {
     return { tone: "warning", label: texts.status.maintenanceOverdue, kind: "maintenance-overdue" };
   }
   if (renewalOverdue(botExpiresAt, lastMaintenanceAt, now) || renewalOverdue(loginExpiresAt, lastMaintenanceAt, now)) {

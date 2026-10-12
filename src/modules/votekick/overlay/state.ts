@@ -1,4 +1,4 @@
-export type VotekickOverlayStatus = "running" | "passed" | "expired" | "cancelled" | "failed";
+type VotekickOverlayStatus = "running" | "passed" | "expired" | "cancelled" | "failed";
 
 export interface VotekickOverlayState {
   votekickId: string;

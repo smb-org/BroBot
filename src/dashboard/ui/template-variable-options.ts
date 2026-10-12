@@ -23,7 +23,7 @@ interface RegisteredModuleTemplateVariable {
   pickerGroup?: ModuleTemplateVariableGroupCopy & { id: string };
 }
 
-export const moduleTemplatePickerGroup = (
+const moduleTemplatePickerGroup = (
   id: string,
   group: ModuleTemplateVariableGroupCopy | undefined,
   language: DashboardLanguage,

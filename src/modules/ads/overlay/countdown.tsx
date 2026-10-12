@@ -20,7 +20,7 @@ interface AdsCountdownProperties {
   language?: "de" | "en";
 }
 
-export const AdsCountdown = ({ config, state, language = "en" }: AdsCountdownProperties): ReactElement | null => {
+const AdsCountdown = ({ config, state, language = "en" }: AdsCountdownProperties): ReactElement | null => {
   const serverNow = isRecord(state) && typeof state.serverNow === "string" ? Date.parse(state.serverNow) : Number.NaN;
   const [clock, setClock] = useState(() => ({
     serverNow,

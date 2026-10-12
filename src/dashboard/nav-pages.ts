@@ -18,7 +18,7 @@ type ChannelSection = Extract<DashboardRoute, { kind: "channel" }>["section"];
  * the sidebar renders from; `keywords` are Spotlight-only match aliases
  * (not shown anywhere), so they don't need a translation-catalog entry.
  */
-export interface NavPageDefinition {
+interface NavPageDefinition {
   id: string;
   group: NavPageGroup;
   iconKind: string;
@@ -48,7 +48,7 @@ export interface DashboardNavEntry {
   route: DashboardRoute;
 }
 
-export interface ModuleSidebarEntry {
+interface ModuleSidebarEntry {
   id: string;
   moduleId: string;
   category: ModuleNavigationCategory;
@@ -71,7 +71,7 @@ export interface ModuleNavigationState {
 }
 
 /** Module pages are readable by every channel role; missing membership, disabled modules, or missing scopes hide them. */
-export const moduleNavigationIsVisible = (state: ModuleNavigationState, memberRole: ChannelRole | null): boolean =>
+const moduleNavigationIsVisible = (state: ModuleNavigationState, memberRole: ChannelRole | null): boolean =>
   memberRole !== null && state.enabled && !modulePermissionsAreMissing(state);
 
 /** Shared visibility predicate for sidebar entries and their idle chunk preloads. */
@@ -140,7 +140,7 @@ export const dashboardNavEntries = (
 
 const channelRoute = (section: ChannelSection) => (channelId: string): DashboardRoute => ({ kind: "channel", channelId, section });
 
-export const NAV_PAGES: readonly NavPageDefinition[] = [
+const NAV_PAGES: readonly NavPageDefinition[] = [
   {
     id: "events",
     group: "operation",
@@ -215,13 +215,6 @@ export const NAV_PAGES: readonly NavPageDefinition[] = [
   },
 ];
 
-/** Looks up a known page by id -- for a page every caller expects to always exist (e.g. the sidebar's own "modules" entry point), instead of an `Array.find` result callers would have to null-check for no reason. */
-export const navPageById = (id: string): NavPageDefinition => {
-  const page = NAV_PAGES.find((candidate) => candidate.id === id);
-  if (page === undefined) throw new Error(`Unknown nav page: ${id}`);
-  return page;
-};
-
 /** Section heading for a page's group -- same catalogs the sidebar renders from, so a relabel there can't drift out of sync here. */
 export const navPageGroupHeading = (group: NavPageGroup, texts: DashboardTexts): string => {
   switch (group) {
@@ -240,8 +233,5 @@ export const moduleCategoryHeading = (category: ModuleNavigationCategory, texts:
  * never a per-channel role, and never shown just because a channel's own
  * role happens to be named "operator".
  */
-export const visibleNavPages = (context: { isPlatformAdmin: boolean }): readonly NavPageDefinition[] =>
+const visibleNavPages = (context: { isPlatformAdmin: boolean }): readonly NavPageDefinition[] =>
   NAV_PAGES.filter((page) => page.group !== "platform" || context.isPlatformAdmin);
-
-export const navPageActive = (page: NavPageDefinition, route: DashboardRoute): boolean =>
-  page.group === "platform" ? route.kind === "platform" : route.kind === "channel" && route.section === page.id;

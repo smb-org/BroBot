@@ -132,7 +132,7 @@ export const dashboardLanguage = (): DashboardLanguage => browserModuleLanguage(
 
 export const dashboardCommonTexts = (language: DashboardLanguage = dashboardLanguage()): DashboardCommonTexts => commonTexts[language];
 
-export interface SystemTemplateVariableLocale {
+interface SystemTemplateVariableLocale {
   label: string;
   description: string;
   sample: string;
@@ -204,9 +204,7 @@ export interface ChannelVariablesTexts {
   limitSuffix: string;
   filteredSuffix: string;
   create: string;
-  count: (count: number, maximum: number) => string;
   empty: string;
-  loading: string;
   loadError: string;
   saveError: string;
   deleteError: string;
@@ -226,7 +224,6 @@ export interface ChannelVariablesTexts {
   minimumValueReached: string;
   maximumValueReached: string;
   resetOnStreamStart: string;
-  limitNote: (maximum: number) => string;
   resetHint: string;
   renameHint: string;
   usages: string;
@@ -248,9 +245,6 @@ export interface ChannelVariablesTexts {
   save: string;
   discard: string;
   close: string;
-  conflict: string;
-  created: string;
-  updated: string;
   useInOverlay: string;
   useOverlayHint: string;
   chooseOverlay: string;
@@ -266,8 +260,8 @@ export interface ChannelVariablesTexts {
 
 const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
   de: {
-    title: "Kanalvariablen", list: "Variablen", search: "Variablen suchen", countSuffix: "Variablen", limitSuffix: "Variablen belegt", filteredSuffix: "Variablen", create: "Variable anlegen", count: (count, maximum) => `${String(count)} von ${String(maximum)}`,
-    empty: "Noch keine Kanalvariablen angelegt.", loading: "Kanalvariablen werden geladen …", loadError: "Kanalvariablen konnten nicht geladen werden.",
+    title: "Kanalvariablen", list: "Variablen", search: "Variablen suchen", countSuffix: "Variablen", limitSuffix: "Variablen belegt", filteredSuffix: "Variablen", create: "Variable anlegen",
+    empty: "Noch keine Kanalvariablen angelegt.", loadError: "Kanalvariablen konnten nicht geladen werden.",
     saveError: "Die Kanalvariable konnte nicht gespeichert werden.", deleteError: "Die Kanalvariable konnte nicht gelöscht werden.",
     name: "Name", nameHint: "Kleinbuchstaben, Zahlen und Unterstrich; höchstens 32 Zeichen.", nameInvalid: "Nur Kleinbuchstaben, Zahlen und Unterstrich.",
     description: "Beschreibung", descriptionHint: "Erscheint in der Variablenauswahl. Höchstens 80 Zeichen.", noDescription: "Keine Beschreibung",
@@ -275,7 +269,6 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     valueHint: "Ganze Zahl von −999.999.999 bis 999.999.999.", editValue: "Wert bearbeiten", applyValue: "Übernehmen", cancelValueEdit: "Abbrechen",
     minimumValueReached: "Der Mindestwert ist erreicht.", maximumValueReached: "Der Höchstwert ist erreicht.",
     resetOnStreamStart: "Bei Streamstart auf null setzen", resetHint: "Wird zurückgesetzt, wenn der nächste Stream startet.",
-    limitNote: (maximum) => `Bis zu ${String(maximum)} Variablen pro Kanal.`,
     renameHint: "Vorlagen und gespeicherte Overlay-Elemente werden angepasst.", usages: "Verwendet in", noUsages: "Noch nicht verwendet.",
     usageKindLabel: (kind) => kind === "action" ? "Aktion" : kind === "display" ? "Anzeige" : "Vorlage",
     usageModuleLabel: (moduleId) => moduleId === "text_commands" ? "Textbefehle" : moduleId === "overlays" ? "Overlays" : moduleId.replace(/[_-]+/gu, " "),
@@ -288,7 +281,6 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     inUseReason: (usages) => `Wird von ${usages} verwendet. Entferne zuerst die Befehlsaktion.`,
     managementLocked: "Nur Broadcaster und Verwalter dürfen Variablen anlegen, umbenennen, beschreiben oder löschen.",
     limitReached: "Die maximale Zahl der Kanalvariablen ist erreicht.", newVariable: "Neue Variable", save: "Speichern", discard: "Verwerfen", close: "Schließen",
-    conflict: "Die Variable wurde inzwischen geändert.", created: "Variable angelegt.", updated: "Variable gespeichert.",
     useInOverlay: "In Overlay verwenden", useOverlayHint: "Wähle ein Overlay. Die Variable wird im Editor als ungespeicherter Entwurf eingefügt.",
     chooseOverlay: "Overlay auswählen", createOverlay: "Neues Overlay", newOverlayName: "Name des neuen Overlays",
     defaultOverlayName: (variableName) => `Overlay ${variableName}`,
@@ -297,8 +289,8 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     legacyRenameWarning: "Alte Links mit #var=… zeigen diese Variable nach der Umbenennung nicht mehr an.",
   },
   en: {
-    title: "Channel variables", list: "Variables", search: "Search variables", countSuffix: "variables", limitSuffix: "variables used", filteredSuffix: "variables", create: "Create variable", count: (count, maximum) => `${String(count)} of ${String(maximum)}`,
-    empty: "No channel variables yet.", loading: "Loading channel variables …", loadError: "Channel variables could not be loaded.",
+    title: "Channel variables", list: "Variables", search: "Search variables", countSuffix: "variables", limitSuffix: "variables used", filteredSuffix: "variables", create: "Create variable",
+    empty: "No channel variables yet.", loadError: "Channel variables could not be loaded.",
     saveError: "The channel variable could not be saved.", deleteError: "The channel variable could not be deleted.",
     name: "Name", nameHint: "Lowercase letters, numbers, and underscores; up to 32 characters.", nameInvalid: "Use lowercase letters, numbers, and underscores only.",
     description: "Description", descriptionHint: "Shown in the variable picker. Up to 80 characters.", noDescription: "No description",
@@ -306,7 +298,6 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     valueHint: "Integer from −999,999,999 to 999,999,999.", editValue: "Edit value", applyValue: "Apply", cancelValueEdit: "Cancel",
     minimumValueReached: "The minimum value has been reached.", maximumValueReached: "The maximum value has been reached.",
     resetOnStreamStart: "Reset to zero when the stream starts", resetHint: "Resets when the next stream starts.",
-    limitNote: (maximum) => `Up to ${String(maximum)} variables per channel.`,
     renameHint: "Templates and saved overlay elements are updated.", usages: "Used in", noUsages: "Not used yet.",
     usageKindLabel: (kind) => kind === "action" ? "action" : kind === "display" ? "display" : "template",
     usageModuleLabel: (moduleId) => moduleId === "text_commands" ? "Text commands" : moduleId === "overlays" ? "Overlays" : moduleId.replace(/[_-]+/gu, " "),
@@ -319,7 +310,6 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     inUseReason: (usages) => `Used by ${usages}. Remove the command action first.`,
     managementLocked: "Only broadcasters and managers may create, rename, describe, or delete variables.",
     limitReached: "The channel has reached its variable limit.", newVariable: "New variable", save: "Save", discard: "Discard", close: "Close",
-    conflict: "This variable has changed since it was loaded.", created: "Variable created.", updated: "Variable saved.",
     useInOverlay: "Use in overlay", useOverlayHint: "Choose an overlay. The variable is added as an unsaved draft in the editor.",
     chooseOverlay: "Choose an overlay", createOverlay: "New overlay", newOverlayName: "New overlay name",
     defaultOverlayName: (variableName) => `${variableName} overlay`,
@@ -332,11 +322,11 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
 export const channelVariablesTexts = (language: DashboardLanguage = dashboardLanguage()): ChannelVariablesTexts => channelVariablesCatalog[language];
 
 export interface OverlaysTexts {
-  title: string; list: string; search: string; countSuffix: string; limitSuffix: string; filteredSuffix: string; limitReached: string; details: string; count: (count: number, maximum: number) => string; empty: string; loading: string;
+  title: string; list: string; search: string; countSuffix: string; limitSuffix: string; filteredSuffix: string; limitReached: string; details: string; empty: string; loading: string;
   loadError: string; actionError: string; managementLocked: string; create: string; createTitle: string;
   name: string; size: string; width: string; height: string; standardSize: string; compactSize: string; customSize: string;
   createSubmit: string; cancel: string; elements: string; accesses: string; lastUsedAt: string; statusLabel: string;
-  openAccesses: string; issue: string; issueLabel: string; issueHint: string; copied: string;
+  issue: string; issueLabel: string; copied: string;
   editComposition: string; editorBack: string; editorLoading: string; editorLoadError: string;
   editorElements: string; editorPreview: string; editorPreviewCanvas: string; editorProperties: string;
   editorPropertiesTab: string; editorStyleTab: string; editorCssTab: string;
@@ -391,7 +381,7 @@ export interface OverlaysTexts {
   setupAccessInactive: string;
   active: string; expired: string; revokedStatus: string; noAccesses: string; delete: string; deleteTitle: (name: string) => string;
   deleteDescription: (name: string) => string; deleteConfirm: (name: string) => string; close: string;
-  conflict: string; guide: string; issueReason: string; elementCount: (count: number) => string;
+  conflict: string;
   elementsSummary: (count: number, names: string) => string;
   missingVariable: (name: string) => string;
   legacyTitle: string; legacyDescription: string; legacyEmpty: string; legacyTokenName: string; legacyCreatedByUnknown: string;
@@ -405,13 +395,13 @@ export interface OverlaysTexts {
 
 const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
   de: {
-    title: "Overlays", list: "Overlays", search: "Overlays suchen", countSuffix: "Overlays", limitSuffix: "Overlays belegt", filteredSuffix: "Overlays", limitReached: "Das Overlay-Limit ist erreicht.", count: (count, maximum) => `${String(count)} von ${String(maximum)}`,
+    title: "Overlays", list: "Overlays", search: "Overlays suchen", countSuffix: "Overlays", limitSuffix: "Overlays belegt", filteredSuffix: "Overlays", limitReached: "Das Overlay-Limit ist erreicht.",
     details: "Übersicht",
     empty: "Noch keine Overlays angelegt.", loading: "Overlays werden geladen …", loadError: "Overlays konnten nicht geladen werden.",
     actionError: "Die Änderung konnte nicht durchgeführt werden.", managementLocked: "Nur Broadcaster und Verwalter dürfen Overlays oder Zugänge ändern.",
     create: "Neues Overlay", createTitle: "Neues Overlay anlegen", name: "Name", size: "Größe", width: "Breite", height: "Höhe",
     standardSize: "1920 × 1080", compactSize: "1280 × 720", customSize: "Eigene Fläche", createSubmit: "Overlay anlegen", cancel: "Abbrechen",
-    elements: "Elemente", accesses: "Zugänge", lastUsedAt: "Zuletzt benutzt", statusLabel: "Status", openAccesses: "Zugänge verwalten", editComposition: "Komposition bearbeiten",
+    elements: "Elemente", accesses: "Zugänge", lastUsedAt: "Zuletzt benutzt", statusLabel: "Status", editComposition: "Komposition bearbeiten",
     editorBack: "Zurück zu Overlays", editorLoading: "Overlay wird geladen …", editorLoadError: "Das Overlay konnte nicht geladen werden.",
     editorElements: "Elemente", editorPreview: "Live-Vorschau", editorPreviewCanvas: "Overlay-Vorschau", editorProperties: "Eigenschaften",
     editorPropertiesTab: "Position", editorStyleTab: "Stil-Editor", editorCssTab: "CSS-Code",
@@ -454,7 +444,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorConflictKeep: "Weiter bearbeiten", editorConflictReload: "Neu laden", editorConflictOverwrite: "Überschreiben",
     editorUnsavedTitle: "Ungespeicherte Änderungen", editorUnsavedDescription: "Beim Verlassen gehen deine ungespeicherten Änderungen verloren.",
     editorContinue: "Weiter bearbeiten", editorDiscardAndLeave: "Verwerfen und verlassen", editorSaveAndLeave: "Speichern und verlassen",
-    issue: "Zugang ausstellen", issueLabel: "Name des Zugangs", issueHint: "Zum Beispiel OBS Hauptrechner.",
+    issue: "Zugang ausstellen", issueLabel: "Name des Zugangs",
     copied: "Kopiert", copyError: "Der Link konnte nicht kopiert werden.", copyLink: "Link kopieren",
     copyLinkUnrecoverableReason: "Link nicht wiederherstellbar – für einen neuen ersetzen.", linkExpiredReason: "Link abgelaufen – ersetzen oder widerrufen.",
     accessActions: (name) => `Aktionen für ${name}`, showLink: "Link anzeigen", hideLink: "Link verbergen", replace: "Ersetzen", revoke: "Widerrufen", remove: "Entfernen",
@@ -488,8 +478,6 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     expired: "Abgelaufen", revokedStatus: "Widerrufen", noAccesses: "Für dieses Overlay gibt es noch keine Zugänge.", delete: "Overlay löschen",
     deleteTitle: (name) => `Overlay „${name}“ löschen?`, deleteDescription: () => `Das Overlay mit seinen Elementen wird gelöscht und alle Zugänge werden widerrufen.`,
     deleteConfirm: (name) => `Overlay löschen: ${name}`, close: "Schließen", conflict: "Das Overlay wurde zwischenzeitlich geändert. Lade es neu und versuche es erneut.",
-    guide: "In OBS einrichten", issueReason: "Widerruf über das Dashboard",
-    elementCount: (count) => `${String(count)} Elemente`,
     elementsSummary: (count, names) => count === 0 ? "Noch keine – in der Komposition hinzufügen" : `${String(count)} · ${names}`,
     missingVariable: (name) => `Variable ${name} fehlt`,
     legacyTitle: "Alte Links",
@@ -513,13 +501,13 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     legacyImportClosingPending: "Overlay importiert. Die verbundene alte Quelle wird noch geschlossen.",
   },
   en: {
-    title: "Overlays", list: "Overlays", search: "Search overlays", countSuffix: "overlays", limitSuffix: "overlays used", filteredSuffix: "overlays", limitReached: "The overlay limit has been reached.", count: (count, maximum) => `${String(count)} of ${String(maximum)}`,
+    title: "Overlays", list: "Overlays", search: "Search overlays", countSuffix: "overlays", limitSuffix: "overlays used", filteredSuffix: "overlays", limitReached: "The overlay limit has been reached.",
     details: "Overview",
     empty: "No overlays yet.", loading: "Loading overlays …", loadError: "Overlays could not be loaded.",
     actionError: "The change could not be completed.", managementLocked: "Only broadcasters and managers may change overlays or accesses.",
     create: "New overlay", createTitle: "Create an overlay", name: "Name", size: "Size", width: "Width", height: "Height",
     standardSize: "1920 × 1080", compactSize: "1280 × 720", customSize: "Custom size", createSubmit: "Create overlay", cancel: "Cancel",
-    elements: "Elements", accesses: "Accesses", lastUsedAt: "Last used", statusLabel: "Status", openAccesses: "Manage accesses", editComposition: "Edit composition",
+    elements: "Elements", accesses: "Accesses", lastUsedAt: "Last used", statusLabel: "Status", editComposition: "Edit composition",
     editorBack: "Back to overlays", editorLoading: "Loading overlay …", editorLoadError: "The overlay could not be loaded.",
     editorElements: "Elements", editorPreview: "Live preview", editorPreviewCanvas: "Overlay preview", editorProperties: "Properties",
     editorPropertiesTab: "Layout", editorStyleTab: "Style editor", editorCssTab: "CSS code",
@@ -562,7 +550,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorConflictKeep: "Keep editing", editorConflictReload: "Reload", editorConflictOverwrite: "Overwrite",
     editorUnsavedTitle: "Unsaved changes", editorUnsavedDescription: "Your unsaved changes will be lost if you leave.",
     editorContinue: "Keep editing", editorDiscardAndLeave: "Discard and leave", editorSaveAndLeave: "Save and leave",
-    issue: "Issue access", issueLabel: "Access name", issueHint: "For example, OBS main PC.",
+    issue: "Issue access", issueLabel: "Access name",
     copied: "Copied", copyError: "The link could not be copied.", copyLink: "Copy link",
     copyLinkUnrecoverableReason: "Link cannot be recovered — replace it to issue a new one.", linkExpiredReason: "Link expired — replace or revoke it.",
     accessActions: (name) => `Actions for ${name}`, showLink: "Show link", hideLink: "Hide link", replace: "Replace", revoke: "Revoke", remove: "Remove",
@@ -596,8 +584,6 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     expired: "Expired", revokedStatus: "Revoked", noAccesses: "This overlay has no accesses yet.", delete: "Delete overlay",
     deleteTitle: (name) => `Delete overlay “${name}”?`, deleteDescription: () => `The overlay and its elements will be deleted, and all accesses will be revoked.`,
     deleteConfirm: (name) => `Delete overlay: ${name}`, close: "Close", conflict: "This overlay changed while you were viewing it. Reload it and try again.",
-    guide: "Set up in OBS", issueReason: "Revoked from the dashboard",
-    elementCount: (count) => `${String(count)} elements`,
     elementsSummary: (count, names) => count === 0 ? "None yet — add elements in the composition" : `${String(count)} · ${names}`,
     missingVariable: (name) => `Variable ${name} is missing`,
     legacyTitle: "Legacy links",
@@ -627,12 +613,6 @@ export const overlaysTexts = (language: DashboardLanguage = dashboardLanguage())
 export interface DashboardTexts {
   header: {
     connectionRunning: string;
-    connectionWaiting: string;
-    connectionInterrupted: string;
-    channelIdentity: string;
-    noConnection: string;
-    switchOn: string;
-    switchOff: string;
     streamLive: (duration: string | null) => string;
     streamOffline: string;
     streamUnknown: string;
@@ -674,7 +654,6 @@ export interface DashboardTexts {
     missing: string;
     active: string;
     pending: string;
-    notRequired: string;
     present: string;
     botPermissionsMissing: (count: string) => string;
   };
@@ -692,9 +671,6 @@ export interface DashboardTexts {
     events: string;
     audit: string;
     selectChannel: string;
-    selectModule: string;
-    signInWithTwitch: string;
-    twitchAccount: string;
     signingOut: string;
     signOut: string;
     /** Sidebar section heading; the "what you open during an incident" group. */
@@ -706,12 +682,9 @@ export interface DashboardTexts {
   };
   overview: {
     oneChannelAvailable: string;
-    channelsAvailable: (count: string) => string;
     channelsAvailableShort: (count: string) => string;
     noChannelAvailable: string;
     noMembership: string;
-    activeModules: string;
-    loadState: string;
   };
   moderation: {
     noCheckForChannel: string;
@@ -728,7 +701,6 @@ export interface DashboardTexts {
     lastUpdated: (timestamp: string) => string;
     optionalModules: string;
     normalOperation: string;
-    channelBotRequired: string;
     botPermissionsOperator: string;
     botPermissionsComplete: string;
   };
@@ -742,7 +714,6 @@ export interface DashboardTexts {
     noCause: string;
   };
   statusCard: {
-    yourRole: string;
     broadcasterOauth: string;
     chatConsent: string;
     botAccount: string;
@@ -751,8 +722,6 @@ export interface DashboardTexts {
     chatSubscription: string;
     tokenStatus: string;
     broadcasterConsentMissing: string;
-    broadcastExplanation: string;
-    noBotStatus: string;
     chatBotRequired: string;
   };
   time: {
@@ -841,10 +810,8 @@ export interface DashboardTexts {
     error: string;
     notice: string;
     unknown: string;
-    code: string;
     timestamp: string;
     operation: string;
-    participants: string;
     history: string;
     load: string;
     none: string;
@@ -863,7 +830,6 @@ export interface DashboardTexts {
     activeFilters: string;
     resetFilters: string;
     noMatches: string;
-    loadMoreAtEnd: string;
     feedEnd: string;
     realtimeConnecting: string;
     realtimeConnected: string;
@@ -897,25 +863,15 @@ export interface DashboardTexts {
     required: string;
     explanation: string;
     signInWithTwitch: string;
-    checkChannelAccess: string;
-    loadMembers: string;
   };
   module: {
     module: string;
     available: string;
     load: string;
-    registered: string;
-    active: string;
-    inactive: string;
-    enable: string;
-    disable: string;
-    moduleList: string;
-    moduleOverview: string;
     managementLocked: string;
     noneActive: string;
     noView: string;
     views: string;
-    loadingViews: string;
     settingsLoadError: string;
     componentLoadError: string;
     unsavedChangesTitle: string;
@@ -923,8 +879,6 @@ export interface DashboardTexts {
     continueEditing: string;
     discardAndSwitch: string;
     saveAndSwitch: string;
-    notActive: (name: string) => string;
-    unknown: (name: string) => string;
     scopesMissing: (name: string) => string;
     requestScopeConsent: string;
     scopeConsentLocked: string;
@@ -988,7 +942,6 @@ export interface DashboardTexts {
     pauseRemaining: (minutes: string) => string;
     untilStreamEnd: string;
     pendingUntilStreamStart: string;
-    unlimited: string;
     durationTitle: (control: string) => string;
     durationDescription: (control: string) => string;
     durationLabel: string;
@@ -1046,12 +999,6 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
   de: {
     header: {
       connectionRunning: "Läuft",
-      connectionWaiting: "Wartet",
-      connectionInterrupted: "Gestört",
-      channelIdentity: "Kanal",
-      noConnection: "Keine Verbindung",
-      switchOn: "An",
-      switchOff: "Aus",
       streamLive: (duration) => duration === null ? "Live" : `Live · ${duration} h`,
       streamOffline: "Offline",
       streamUnknown: "Status unbekannt",
@@ -1074,7 +1021,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       botError: "Bot-Fehler", botTokenRevoked: "Bot-Token widerrufen", broadcasterConsentMissing: "Broadcaster-Zustimmung fehlt",
       chatSubscriptionMissing: "Chat-Abo fehlt", chatSubscriptionNotNeeded: "Nicht benötigt — kein aktives Modul liest den Chat.", healthy: "Gesund", stateIncomplete: "Zustand unvollständig",
       notConnected: "Nicht verbunden", notSetUp: "Nicht eingerichtet", moderator: "Moderator", missing: "Fehlt",
-      active: "Aktiv", pending: "Ausstehend", notRequired: "Nicht erforderlich", present: "Vorhanden",
+      active: "Aktiv", pending: "Ausstehend", present: "Vorhanden",
       botPermissionsMissing: (count) => `${count} fehlen`,
     },
     navigation: {
@@ -1082,8 +1029,6 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       members: "Mitglieder", variables: "Variablen", module: "Module", events: "Ereignisse", audit: "Audit-Log", selectChannel: "Kanal auswählen",
       manageModules: "Module verwalten", moduleCategories: { chat: "Chat", interaction: "Interaktion", data: "Daten", twitch: "Twitch" },
       overlays: "Overlays",
-      selectModule: "Modul auswählen",
-      signInWithTwitch: "Mit Twitch anmelden", twitchAccount: "Twitch-Konto",
       signingOut: "Abmeldung …", signOut: "Abmelden",
       operationSection: "Betrieb",
       collapseSidebar: "Seitenleiste einklappen", expandSidebar: "Seitenleiste ausklappen",
@@ -1091,11 +1036,9 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     overview: {
       oneChannelAvailable: "1 Kanal freigegeben",
-      channelsAvailable: (count) => `${count} Kanäle sind für dich freigegeben.`,
       channelsAvailableShort: (count) => `${count} Kanäle freigegeben`,
       noChannelAvailable: "Noch kein Kanal freigegeben",
       noMembership: "Für dieses Konto gibt es keine Mitgliedschaft in einem freigegebenen Kanal.",
-      activeModules: "Aktive Module", loadState: "Kanalzustand wird geladen …",
     },
     moderation: {
       noCheckForChannel: "Für diesen Kanal liegt noch keine Prüfung vor.",
@@ -1111,7 +1054,6 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       lastUpdated: (timestamp) => `Zuletzt aktualisiert: ${timestamp}`,
       optionalModules: "Für optionale Broadcaster-Module verbunden.",
       normalOperation: "Optional; für den normalen Bot-Betrieb nicht erforderlich.",
-      channelBotRequired: "channel:bot wird vom Broadcaster benötigt.",
       botPermissionsOperator: "Der Betreiber muss die Anwendung neu autorisieren.",
       botPermissionsComplete: "Alle angeforderten Bot-Berechtigungen sind vorhanden.",
     },
@@ -1121,10 +1063,10 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       noCause: "Keine gespeicherte Ursache",
     },
     statusCard: {
-      yourRole: "Deine Rolle", broadcasterOauth: "Broadcaster-OAuth", chatConsent: "Chat-Zustimmung",
+      broadcasterOauth: "Broadcaster-OAuth", chatConsent: "Chat-Zustimmung",
       botAccount: "Bot-Account", botPermissions: "Bot-Berechtigungen", moderatorStatus: "Moderatorstatus", chatSubscription: "Chat-Abo", tokenStatus: "Token-Zustand",
-      broadcasterConsentMissing: "Broadcaster-Zustimmung fehlt", broadcastExplanation: "Für optionale Broadcaster-Module verbunden.",
-      noBotStatus: "Es gibt noch keinen gespeicherten Botstatus.", chatBotRequired: "channel:bot wird vom Broadcaster benötigt.",
+      broadcasterConsentMissing: "Broadcaster-Zustimmung fehlt",
+      chatBotRequired: "channel:bot wird vom Broadcaster benötigt.",
     },
     time: {
       updated: (relativeTime) => `aktualisiert ${relativeTime}`, secondsAgo: (count) => `vor ${String(count)} s`,
@@ -1223,12 +1165,12 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     events: {
       title: "Ereignisse", count: (count) => `${count} Einträge`, log: "Ereignisprotokoll", time: "Zeit", event: "Ereignis",
-      module: "Modul", who: "Wer", automatic: "Automatisch", info: "Info", error: "Fehler", notice: "Hinweis", unknown: "Unbekannt", code: "Code", timestamp: "Zeitstempel", operation: "Vorgang", participants: "Beteiligte", history: "Verlauf",
+      module: "Modul", who: "Wer", automatic: "Automatisch", info: "Info", error: "Fehler", notice: "Hinweis", unknown: "Unbekannt", timestamp: "Zeitstempel", operation: "Vorgang", history: "Verlauf",
       load: "Ereignisse werden geladen …",
       none: "Noch keine Ereignisse protokolliert.", detail: "Detail", loadOlder: "Ältere Ereignisse laden", loadingOlder: "Ältere Ereignisse werden geladen …",
       filter: "Filter", origin: "Herkunft", moduleFilter: "Modul", allModules: "Alle Module", tone: "Ton", person: "Person", all: "Alle",
       channelEvents: "Kanalereignisse", moduleDiagnostics: "Moduldiagnosen", activeFilters: "Aktive Filter:", resetFilters: "Filter zurücksetzen",
-      noMatches: "Keine Ereignisse passen zu den Filtern.", loadMoreAtEnd: "Am Ende werden ältere Ereignisse nachgeladen.",
+      noMatches: "Keine Ereignisse passen zu den Filtern.",
       feedEnd: "Ende des Ereignisverlaufs erreicht.",
       realtimeConnecting: "Verbindet …", realtimeConnected: "Verbunden", realtimeReconnecting: "Verbindet neu …",
       realtimeOffline: "Offline", realtimeRenewSession: "Sitzung erneuern", realtimeNew: (count) => `${count} neue Ereignisse`,
@@ -1241,22 +1183,17 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     signIn: {
       required: "Anmeldung erforderlich", explanation: "Bitte melde dich mit deinem Twitch-Konto an, um freigegebene Kanäle zu sehen.",
-      signInWithTwitch: "Mit Twitch anmelden", checkChannelAccess: "Kanalzugriff wird geprüft …", loadMembers: "Mitglieder werden geladen …",
+      signInWithTwitch: "Mit Twitch anmelden",
     },
     module: {
       module: "Modul", available: "Verfügbare Module", load: "Module werden geladen …",
-      registered: "Für diesen Bot ist noch kein Modul registriert.", active: "Aktiv", inactive: "Inaktiv",
-      enable: "aktivieren", disable: "deaktivieren", moduleList: "Modulliste",
-      moduleOverview: "Modulübersicht",
       managementLocked: "Nur Broadcaster und Verwalter dürfen Module ändern.", noneActive: "Keine Module aktiv.",
       noView: "Für dieses aktive Modul gibt es noch keine Panel-Ansicht.", views: "Modulansichten",
-      loadingViews: "Modulansichten werden geladen …",
       settingsLoadError: "Moduleinstellungen konnten nicht geladen werden.",
       componentLoadError: "Modulinhalte konnten nicht geladen werden.",
       unsavedChangesTitle: "Ungespeicherte Änderungen",
       unsavedChangesDescription: "Du hast ungespeicherte Moduleinstellungen. Was möchtest du tun?",
       continueEditing: "Weiter bearbeiten", discardAndSwitch: "Verwerfen und wechseln", saveAndSwitch: "Speichern und wechseln",
-      notActive: (name) => `Das Modul „${name}“ ist in diesem Kanal nicht aktiv.`,
       scopesMissing: (name) => `Das Modul „${name}“ ist deaktiviert, weil Broadcaster-Berechtigungen fehlen.`,
       requestScopeConsent: "Broadcaster-Berechtigungen erteilen",
       scopeConsentLocked: "Nur der Broadcaster dieses Kanals darf diese Zustimmung erteilen.",
@@ -1274,7 +1211,6 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         broadcaster: "Broadcaster",
         configurable: "in den Votekick-Einstellungen (Standard: VIP)",
       },
-      unknown: (name) => `Das Modul „${name}“ ist nicht bekannt.`,
     },
     streamManager: {
       immediateActions: "Sofortaktionen",
@@ -1327,7 +1263,6 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       pauseRemaining: (minutes) => `Pause · ${minutes} min`,
       untilStreamEnd: "Bis Streamende",
       pendingUntilStreamStart: "Gilt ab dem nächsten Stream",
-      unlimited: "Unbegrenzt",
       durationTitle: (control) => `${control} aktivieren`,
       durationDescription: (control) => `Wähle, wie lange ${control.toLowerCase()} aktiv bleibt.`,
       durationLabel: "Dauer",
@@ -1377,12 +1312,6 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
   en: {
     header: {
       connectionRunning: "Running",
-      connectionWaiting: "Waiting",
-      connectionInterrupted: "Interrupted",
-      channelIdentity: "Channel",
-      noConnection: "No connection",
-      switchOn: "On",
-      switchOff: "Off",
       streamLive: (duration) => duration === null ? "Live" : `Live · ${duration} h`,
       streamOffline: "Offline",
       streamUnknown: "Status unknown",
@@ -1405,7 +1334,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       botTokenRevoked: "Bot token revoked", broadcasterConsentMissing: "Broadcaster consent missing",
       chatSubscriptionMissing: "Chat subscription missing", chatSubscriptionNotNeeded: "Not needed — no active module reads chat.", healthy: "Healthy", stateIncomplete: "Incomplete status",
       notConnected: "Not connected", notSetUp: "Not set up", moderator: "Moderator", missing: "Missing", active: "Active",
-      pending: "Pending", notRequired: "Not required", present: "Present",
+      pending: "Pending", present: "Present",
       botPermissionsMissing: (count) => `${count} missing`,
     },
     navigation: {
@@ -1413,8 +1342,6 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       members: "Members", variables: "Variables", module: "Modules", events: "Events", audit: "Audit log", selectChannel: "Select channel",
       manageModules: "Manage modules", moduleCategories: { chat: "Chat", interaction: "Interaction", data: "Data", twitch: "Twitch" },
       overlays: "Overlays",
-      selectModule: "Select module",
-      signInWithTwitch: "Sign in with Twitch", twitchAccount: "Twitch account",
       signingOut: "Signing out …", signOut: "Sign out",
       operationSection: "Operation",
       collapseSidebar: "Collapse sidebar", expandSidebar: "Expand sidebar",
@@ -1422,10 +1349,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     overview: {
       oneChannelAvailable: "1 channel available",
-      channelsAvailable: (count) => `${count} channels are available to you.`,
       channelsAvailableShort: (count) => `${count} channels available`,
       noChannelAvailable: "No channel available yet", noMembership: "This account is not a member of an available channel.",
-      activeModules: "Active modules", loadState: "Loading channel status …",
     },
     moderation: {
       noCheckForChannel: "This channel has not been checked yet.", lastCheck: (timestamp) => `Last checked: ${timestamp}`,
@@ -1437,7 +1362,6 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     bot: {
       noSavedStatus: "No bot status has been saved yet.", lastUpdated: (timestamp) => `Last updated: ${timestamp}`,
       optionalModules: "Connected for optional broadcaster modules.", normalOperation: "Optional; not required for normal bot operation.",
-      channelBotRequired: "channel:bot is required from the broadcaster.",
       botPermissionsOperator: "The operator must authorize the application again.",
       botPermissionsComplete: "All requested bot permissions are present.",
     },
@@ -1447,10 +1371,10 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       last: "Last error", noCause: "No saved cause",
     },
     statusCard: {
-      yourRole: "Your role", broadcasterOauth: "Broadcaster OAuth", chatConsent: "Chat consent", botAccount: "Bot account", botPermissions: "Bot permissions",
+      broadcasterOauth: "Broadcaster OAuth", chatConsent: "Chat consent", botAccount: "Bot account", botPermissions: "Bot permissions",
       moderatorStatus: "Moderator status", chatSubscription: "Chat subscription", tokenStatus: "Token status",
-      broadcasterConsentMissing: "Broadcaster consent missing", broadcastExplanation: "Connected for optional broadcaster modules.",
-      noBotStatus: "No bot status has been saved yet.", chatBotRequired: "channel:bot is required from the broadcaster.",
+      broadcasterConsentMissing: "Broadcaster consent missing",
+      chatBotRequired: "channel:bot is required from the broadcaster.",
     },
     time: {
       updated: (relativeTime) => `updated ${relativeTime}`, secondsAgo: (count) => `${String(count)} sec ago`,
@@ -1549,11 +1473,11 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     events: {
       title: "Events", count: (count) => `${count} entries`, log: "Event log", time: "Time", event: "Event", module: "Module",
-      who: "Who", automatic: "Automatic", info: "Info", error: "Error", notice: "Notice", unknown: "Unknown", code: "Code", timestamp: "Timestamp", operation: "Operation", participants: "Participants", history: "History", load: "Loading events …", none: "No events logged yet.", detail: "Detail",
+      who: "Who", automatic: "Automatic", info: "Info", error: "Error", notice: "Notice", unknown: "Unknown", timestamp: "Timestamp", operation: "Operation", history: "History", load: "Loading events …", none: "No events logged yet.", detail: "Detail",
       loadOlder: "Load older events", loadingOlder: "Loading older events …",
       filter: "Filters", origin: "Origin", moduleFilter: "Module", allModules: "All modules", tone: "Tone", person: "Person", all: "All",
       channelEvents: "Channel events", moduleDiagnostics: "Module diagnostics", activeFilters: "Active filters:", resetFilters: "Reset filters",
-      noMatches: "No events match the filters.", loadMoreAtEnd: "Older events load at the end.",
+      noMatches: "No events match the filters.",
       feedEnd: "End of the event history reached.",
       realtimeConnecting: "Connecting …", realtimeConnected: "Connected", realtimeReconnecting: "Reconnecting …",
       realtimeOffline: "Offline", realtimeRenewSession: "Renew session", realtimeNew: (count) => `${count} new events`,
@@ -1566,19 +1490,15 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     signIn: {
       required: "Sign-in required", explanation: "Sign in with your Twitch account to see available channels.",
-      signInWithTwitch: "Sign in with Twitch", checkChannelAccess: "Checking channel access …", loadMembers: "Loading members …",
+      signInWithTwitch: "Sign in with Twitch",
     },
     module: {
-      module: "Module", available: "Available modules", load: "Loading modules …", registered: "No module is registered for this bot yet.",
-      active: "Active", inactive: "Inactive", enable: "enable", disable: "disable", moduleList: "Module list",
-      moduleOverview: "Module overview",
+      module: "Module", available: "Available modules", load: "Loading modules …",
       managementLocked: "Only broadcasters and managers may change modules.", noneActive: "No modules active.",
-      noView: "This active module does not have a panel view yet.", views: "Module views", loadingViews: "Loading module views …", settingsLoadError: "Module settings could not be loaded.", componentLoadError: "Module content could not be loaded.",
+      noView: "This active module does not have a panel view yet.", views: "Module views", settingsLoadError: "Module settings could not be loaded.", componentLoadError: "Module content could not be loaded.",
       unsavedChangesTitle: "Unsaved changes",
       unsavedChangesDescription: "You have unsaved module settings. What would you like to do?",
       continueEditing: "Continue editing", discardAndSwitch: "Discard and switch", saveAndSwitch: "Save and switch",
-      notActive: (name) => `The module “${name}” is not active in this channel.`,
-      unknown: (name) => `The module “${name}” is unknown.`,
       scopesMissing: (name) => `The module “${name}” is disabled because broadcaster permissions are missing.`,
       requestScopeConsent: "Grant broadcaster permissions",
       scopeConsentLocked: "Only this channel’s broadcaster may grant this consent.",
@@ -1648,7 +1568,6 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       pauseRemaining: (minutes) => `Paused · ${minutes} min`,
       untilStreamEnd: "Until stream ends",
       pendingUntilStreamStart: "Applies starting with the next stream",
-      unlimited: "Unlimited",
       durationTitle: (control) => `Enable ${control.toLowerCase()}`,
       durationDescription: (control) => `Choose how long ${control.toLowerCase()} stays active.`,
       durationLabel: "Duration",
@@ -2430,8 +2349,8 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
   },
 };
 
-export type EventFamily = "community" | "raid" | "moderation" | "operations";
-export type EventTier = "full" | "outlined";
+type EventFamily = "community" | "raid" | "moderation" | "operations";
+type EventTier = "full" | "outlined";
 export type EventNumberKey = "viewers" | "count" | "duration" | "seconds" | "remainingSeconds" | "tier" | null;
 export interface EventToneEntry {
   family: EventFamily;
@@ -3087,7 +3006,7 @@ export const immediateActionUnavailableReasonText = (
   language: DashboardLanguage = dashboardLanguage(),
 ): string => dashboardTextsCatalog[language].streamManager.availabilityReasons[reason];
 
-export const formatDashboardDate = (
+const formatDashboardDate = (
   value: string,
   options: Intl.DateTimeFormatOptions,
 ): string => {

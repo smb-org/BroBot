@@ -25,5 +25,3 @@ export const VOTEKICK_DEFAULT_TEXTS: Readonly<Record<ModuleLanguage, {
     busyText: "Another ballot is already running.",
   },
 };
-
-export const votekickDefaultTexts = (language: ModuleLanguage) => VOTEKICK_DEFAULT_TEXTS[language];

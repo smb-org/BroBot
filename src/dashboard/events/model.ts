@@ -23,7 +23,7 @@ export const eventMetadata = (code: string) =>
 export const eventTone = (code: string): EventTone | null =>
   eventMetadata(code)?.tone ?? null;
 
-export const eventToneRank = (tone: EventTone | null): number =>
+const eventToneRank = (tone: EventTone | null): number =>
   tone === "error" ? 3 : tone === "warning" ? 2 : tone === "info" ? 1 : 0;
 
 export const eventToneFromValue = (value: string): EventTone | null =>

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema-jsonc.json",
+  "entry": [
+    "src/overlay/main.tsx",
+    "src/modules/*/index.ts",
+    "scripts/**/*.{js,mjs,cjs,ts,tsx}",
+    "tests/unit/**/*.test.{ts,tsx}",
+    "tests/unit/**/*.type-test.{ts,tsx}",
+    "tests/components/**/*.test.{ts,tsx}",
+    "tests/e2e/**/*.spec.{ts,tsx}",
+    "tests/e2e/fixtures/**/*.{ts,tsx}",
+    "tests/**/*-fixture.{ts,tsx}",
+    "tests/worker/**/*.test.{ts,tsx}",
+    "wrangler.jsonc"
+  ],
+  "project": [
+    "src/**/*.{ts,tsx}",
+    "scripts/**/*.{js,mjs,cjs,ts,tsx}",
+    "tests/**/*.{ts,tsx}",
+    "*.config.{js,ts}"
+  ],
+  "ignoreDependencies": [
+    // Cloudflare Workers exposes `cloudflare:workers` as a runtime built-in, not an npm dependency.
+    "cloudflare"
+  ]
+}

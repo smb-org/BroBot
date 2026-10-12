@@ -5,7 +5,7 @@ import { FormDensity } from "./FormDensity";
 import { Icon, type IconName } from "./Icon";
 import { colors } from "./theme";
 
-export type ButtonVariant = "primary" | "neutral" | "subtle" | "secondary";
+type ButtonVariant = "primary" | "neutral" | "subtle" | "secondary";
 export type ButtonSize = "md" | "compact";
 
 interface ButtonBaseProps {

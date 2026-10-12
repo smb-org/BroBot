@@ -1,7 +1,7 @@
 import { colors } from "./theme";
 import { Button } from "./Button";
 
-export interface EmptyStateAction {
+interface EmptyStateAction {
   label: string;
   onClick: () => void;
 }

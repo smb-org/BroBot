@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 
 import { ToastHost } from "./Toast";
 
-export interface ShellNavContext {
+interface ShellNavContext {
   collapsed: boolean;
   onToggleCollapsed: () => void;
   /** Called after a navbar entry navigates, so the mobile drawer closes behind it. */

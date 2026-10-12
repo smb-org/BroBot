@@ -179,7 +179,7 @@ export const dashboardRoutePath = (route: DashboardRoute): string => {
   return path;
 };
 
-export const navigateToDashboardRoute = (route: DashboardRoute, onNavigated?: () => void): void => {
+const navigateToDashboardRoute = (route: DashboardRoute, onNavigated?: () => void): void => {
   const path = dashboardRoutePath(route);
   runDashboardNavigationGuards(() => {
     if (`${window.location.pathname}${window.location.search}` !== path) {

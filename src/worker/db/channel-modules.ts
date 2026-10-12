@@ -66,7 +66,6 @@ export const listChannelModulesForChannel = async (
   ).bind(channelId).all<ChannelModuleRow>();
   return result.results.map(mapChannelModule);
 };
-
 /**
  * The same role threshold as for member changes: only broadcasters and
  * managers may toggle modules, enforced in the mutation's own actorGuard,

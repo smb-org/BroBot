@@ -34,7 +34,7 @@ export interface PlatformAuditCursor {
   id: string;
 }
 
-export interface PlatformAuditEntry {
+interface PlatformAuditEntry {
   auditId: string;
   actorUserId: string;
   actorLogin: string | null;
@@ -53,7 +53,7 @@ export interface PlatformAuditPage {
   nextCursor: string | null;
 }
 
-export type PlatformAction =
+type PlatformAction =
   | "channel.released"
   | "channel.full_consent_changed"
   | "member.added"

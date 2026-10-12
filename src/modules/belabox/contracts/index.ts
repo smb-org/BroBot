@@ -130,7 +130,7 @@ export interface BelaboxStatusResponse {
   intervalSeconds: number;
 }
 
-export interface BelaboxAlertNotice {
+interface BelaboxAlertNotice {
   phase: "pending" | "alarm" | "recovering";
   kind: "low" | "disconnect";
   bitrateKbps: number | null;

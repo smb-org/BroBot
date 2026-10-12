@@ -4,7 +4,7 @@ import { Button, Led, ListRow } from "../../../dashboard/ui";
 import type { ChatVote, ChatVoteTemplate } from "../contracts";
 import { templateStartProblem } from "../domain";
 
-export interface ChatVoteTemplateListLabels {
+interface ChatVoteTemplateListLabels {
   untitled: string;
   running: string;
   incomplete: string;

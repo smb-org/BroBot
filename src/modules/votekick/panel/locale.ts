@@ -179,7 +179,6 @@ const panelCopy: LocaleCatalog<{
   lifted: string;
   status: Record<VotekickStatus, string>;
   duration: (seconds: number | null) => string;
-  started: (value: string) => string;
 }> = {
   de: {
     ariaLabel: "Votekick-Betrieb", running: "Laufender Votekick", history: "Letzte Votekicks",
@@ -193,7 +192,6 @@ const panelCopy: LocaleCatalog<{
     loadError: "Votekicks konnten nicht geladen werden.", actionError: "Die Aktion konnte nicht abgeschlossen werden.", lifted: "Timeout aufgehoben.",
     status: { running: "Läuft", passed: "Bestanden", expired: "Abgelaufen", cancelled: "Abgebrochen", failed: "Fehlgeschlagen" },
     duration: (seconds) => seconds === null ? "—" : `${String(seconds)} s`,
-    started: (value) => `Gestartet ${value}`,
   },
   en: {
     ariaLabel: "Votekick operations", running: "Running votekick", history: "Recent votekicks",
@@ -207,7 +205,6 @@ const panelCopy: LocaleCatalog<{
     loadError: "Votekicks could not be loaded.", actionError: "The action could not be completed.", lifted: "Timeout lifted.",
     status: { running: "Running", passed: "Passed", expired: "Expired", cancelled: "Cancelled", failed: "Failed" },
     duration: (seconds) => seconds === null ? "—" : `${String(seconds)} s`,
-    started: (value) => `Started ${value}`,
   },
 };
 

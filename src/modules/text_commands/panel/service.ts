@@ -130,13 +130,6 @@ export const toggleTextCommand = async (
   enabled: boolean,
 ): Promise<TextCommandMutationResult> => mutation<TextCommandMutationResult>(channelId, "PATCH", { revision, enabled }, name);
 
-export const setTextCommandMinimumTier = async (
-  channelId: string,
-  name: string,
-  revision: number,
-  minimumTier: TextCommandMinimumTier,
-): Promise<TextCommandMutationResult> => mutation<TextCommandMutationResult>(channelId, "PATCH", { revision, minimumTier: minimumTier }, name);
-
 export const deleteTextCommand = async (channelId: string, name: string, revision: number): Promise<void> => {
   await mutation<{ ok: true }>(channelId, "DELETE", undefined, name, `revision=${String(revision)}`);
 };

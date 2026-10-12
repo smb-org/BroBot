@@ -1,9 +1,8 @@
 import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "../../../dashboard/locale";
-import type { TextBlock, TextBlockUsage } from "../contracts";
+import type { TextBlockUsage } from "../contracts";
 import type { GamePickerMessages, TemplateVariablePickerMessages } from "../../../dashboard/ui";
 
 export interface TextLibraryTexts {
-  title: string;
   library: string;
   search: string;
   activeFilters: string;
@@ -16,7 +15,6 @@ export interface TextLibraryTexts {
   allCategories: string;
   addBlock: string;
   empty: string;
-  loading: string;
   loadError: string;
   save: string;
   create: string;
@@ -46,7 +44,6 @@ export interface TextLibraryTexts {
   categoryEmpty: string;
   categoryLimit: string;
   categoryDeleteBlocked: string;
-  blockLimit: (maximum: number) => string;
   blockLimitReached: (count: number, maximum: number) => string;
   managementLocked: string;
   gameBound: string;
@@ -107,17 +104,14 @@ export interface TextLibraryTexts {
   inputContextWarning: string;
   filterAny: string;
   variantsCount: (count: number) => string;
-  textsCount: (count: number) => string;
   gamePicker: GamePickerMessages;
   categoryLabels: Record<"social" | "info" | "faq" | "game" | "fun", string>;
   weekdaysLabels: readonly string[];
   errors: Record<string, string>;
-  textValue: (variant: TextBlock["variants"][number], index: number) => string;
 }
 
 const catalog: LocaleCatalog<TextLibraryTexts> = {
   de: {
-    title: "Texte",
     library: "Textbausteine",
     search: "Textbausteine suchen",
     activeFilters: "Aktive Filter:",
@@ -130,7 +124,6 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     gameFilter: "Spiel",
     addBlock: "Textbaustein anlegen",
     empty: "Noch keine Textbausteine gefunden.",
-    loading: "Textbausteine werden geladen …",
     loadError: "Die Textbibliothek konnte nicht geladen werden.",
     save: "Änderungen speichern",
     create: "Anlegen",
@@ -160,7 +153,6 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     categoryEmpty: "Kategorie ist leer.",
     categoryLimit: "Es können höchstens 25 Kategorien angelegt werden.",
     categoryDeleteBlocked: "Kategorie kann nur gelöscht werden, wenn sie leer ist.",
-    blockLimit: (maximum) => `Höchstens ${String(maximum)} Textbausteine pro Kanal.`,
     blockLimitReached: (count, maximum) => `${String(count)} von ${String(maximum)} genutzt: Grenze erreicht.`,
     managementLocked: "Nur Broadcaster und Verwalter dürfen Textbausteine anlegen.",
     gameBound: "Nur für diese Spiele",
@@ -230,7 +222,6 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     inputContextWarning: "Diese Vorlage enthält Eingabevariablen aus einem Chatbefehl. Außerhalb von Befehlen erscheint deren Nutzungs- oder Fehlertext.",
     filterAny: "Alle Spiele",
     variantsCount: (count) => `${String(count)} ${count === 1 ? "Variante" : "Varianten"}`,
-    textsCount: (count) => `${String(count)} Texte`,
     gamePicker: {
       label: "Twitch-Spiele",
       hint: "Spiele über Twitch-Kategorien suchen und auswählen.",
@@ -259,10 +250,8 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
       text_library_management_denied: "Nur Broadcaster und Verwalter dürfen Änderungen speichern.",
       text_library_category_limit: "Es können höchstens 25 Kategorien angelegt werden.",
     },
-    textValue: (_variant, index) => `Text ${String(index + 1)}`,
   },
   en: {
-    title: "Texts",
     library: "Text blocks",
     search: "Search text blocks",
     activeFilters: "Active filters:",
@@ -275,7 +264,6 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     gameFilter: "Game",
     addBlock: "Add text block",
     empty: "No text blocks found.",
-    loading: "Loading text blocks …",
     loadError: "The text library could not be loaded.",
     save: "Save changes",
     create: "Create",
@@ -305,7 +293,6 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     categoryEmpty: "Category is empty.",
     categoryLimit: "A channel can have up to 25 categories.",
     categoryDeleteBlocked: "A category can only be deleted when it is empty.",
-    blockLimit: (maximum) => `A channel can have up to ${String(maximum)} text blocks.`,
     blockLimitReached: (count, maximum) => `${String(count)} of ${String(maximum)} used: limit reached.`,
     managementLocked: "Only broadcasters and managers may add text blocks.",
     gameBound: "Only for these games",
@@ -375,7 +362,6 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     inputContextWarning: "This template uses chat command input. Outside commands, the variable's usage or error text appears.",
     filterAny: "All games",
     variantsCount: (count) => `${String(count)} ${count === 1 ? "variant" : "variants"}`,
-    textsCount: (count) => `${String(count)} texts`,
     gamePicker: {
       label: "Twitch games",
       hint: "Search and select games from Twitch categories.",
@@ -404,7 +390,6 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
       text_library_management_denied: "Only broadcasters and managers can save changes.",
       text_library_category_limit: "A channel can have up to 25 categories.",
     },
-    textValue: (_variant, index) => `Text ${String(index + 1)}`,
   },
 };
 

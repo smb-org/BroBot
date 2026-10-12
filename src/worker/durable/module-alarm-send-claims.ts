@@ -1,13 +1,7 @@
-import {
-  AUTOMATED_CHAT_OUTPUT_INTERVAL_MS,
-  AUTOMATED_CHAT_OUTPUT_LAST_ATTEMPT_STORAGE_KEY,
-  claimAutomatedChatOutputInTransaction,
-} from "./automated-chat-output";
+import { claimAutomatedChatOutputInTransaction } from "./automated-chat-output";
 
-export const MODULE_ALARM_SEND_CLAIMS_STORAGE_KEY = "module_alarm:send_claims";
-export const MODULE_ALARM_SEND_LAST_ATTEMPT_STORAGE_KEY = AUTOMATED_CHAT_OUTPUT_LAST_ATTEMPT_STORAGE_KEY;
-export const MODULE_ALARM_SEND_CLAIM_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
-export const MODULE_ALARM_SEND_INTERVAL_MS = AUTOMATED_CHAT_OUTPUT_INTERVAL_MS;
+const MODULE_ALARM_SEND_CLAIMS_STORAGE_KEY = "module_alarm:send_claims";
+const MODULE_ALARM_SEND_CLAIM_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 
 export type ModuleAlarmDelivery = "sent" | "rejected" | "ambiguous";
 export type ModuleAlarmSendClaim = { status: "sending" | "sent"; at: number };

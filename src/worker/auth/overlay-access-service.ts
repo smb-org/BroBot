@@ -36,7 +36,7 @@ export interface IssueOverlayAccessInput {
   createdAt: string;
 }
 
-export interface IssuedOverlayAccess {
+interface IssuedOverlayAccess {
   tokenId: string;
   overlayUrl: string;
   label: string;

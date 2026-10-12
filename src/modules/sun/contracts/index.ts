@@ -1,6 +1,6 @@
 export const SUN_ERROR_TEXT_MAX_LENGTH = 200;
 
-export interface SunErrorTexts {
+interface SunErrorTexts {
   de: string;
   en: string;
 }

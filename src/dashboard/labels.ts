@@ -45,7 +45,7 @@ export const channelPanelTexts = (
   language: DashboardLanguage = dashboardLanguage(),
 ): ChannelPanelTexts => channelPanelCatalog[language];
 
-export type PlatformAction =
+type PlatformAction =
   | "channel.released"
   | "channel.full_consent_changed"
   | "member.added"
@@ -74,7 +74,6 @@ export interface PlatformTexts {
   consentPending: string;
   consentPendingShort: string;
   consentPendingHint: string;
-  load: string;
   noChannels: string;
   error: string;
   releaseChannel: string;
@@ -85,7 +84,6 @@ export interface PlatformTexts {
   searching: string;
   userFound: string;
   twitchId: (id: string) => string;
-  setFullConsent: string;
   /** Description on the full-consent switch card in "Release channel" (3.6). */
   fullConsentCardDescription: string;
   releaseChannelQuestion: (name: string) => string;
@@ -93,7 +91,6 @@ export interface PlatformTexts {
   confirmRelease: string;
   invitationLink: string;
   invitationLinkHint: string;
-  selectChannel: string;
   copyLink: string;
   linkCopied: string;
   editChannel: (name: string) => string;
@@ -105,19 +102,16 @@ export interface PlatformTexts {
   role: string;
   /** Hint under the role `ChoiceCards` when adding a member (3.0, shared with `MemberGrantEditor`). */
   roleHint: string;
-  newRole: string;
   add: string;
   addMemberConfirmTitle: (name: string) => string;
   addMemberConfirmDescription: (name: string, role: string) => string;
   addMemberConfirmButton: string;
-  change: string;
   remove: string;
   removeConfirmTitle: (name: string) => string;
   removeBroadcasterHint: string;
   removeQuestion: (name: string) => string;
   confirmRemove: (name: string) => string;
   audit: string;
-  loadAudit: string;
   auditEmpty: string;
   timestamp: string;
   action: string;
@@ -153,7 +147,6 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     consentPending: "Zustimmung ausstehend",
     consentPendingShort: "Ausstehend",
     consentPendingHint: "Vollzustimmung ist gesetzt. Der Streamer muss den Einladungslink öffnen und Twitch bestätigen.",
-    load: "Betreiberdaten werden geladen …",
     noChannels: "Noch kein Kanal freigegeben.",
     error: "Die Betreiberdaten konnten nicht geladen werden.",
     releaseChannel: "Kanal freigeben",
@@ -163,14 +156,12 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     searching: "Suche läuft …",
     userFound: "Gefundener Nutzer",
     twitchId: (id) => `Twitch-ID ${id}`,
-    setFullConsent: "Vollzustimmung setzen",
     fullConsentCardDescription: "Der Bot darf alle Funktionen mit Broadcaster-Einwilligung nutzen.",
     releaseChannelQuestion: (name) => `Kanal für ${name} freigeben?`,
     releaseChannelDescription: (name, id, withConsent) => `${name} (${id}) wird ${withConsent} Vollzustimmung angelegt.`,
     confirmRelease: "Endgültig freigeben",
     invitationLink: "Einladungslink",
     invitationLinkHint: "Diesen Link bekommt der Streamer. Er startet die Twitch-Zustimmung für den gewählten Kanal.",
-    selectChannel: "Wähle zuerst eine Kanalzeile.",
     copyLink: "Link kopieren",
     linkCopied: "Link kopiert",
     editChannel: (name) => `Kanal bearbeiten: ${name}`,
@@ -181,19 +172,16 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     addMember: "Mitglied hinzufügen",
     role: "Rolle",
     roleHint: "Bestimmt, was diese Person im Kanal darf.",
-    newRole: "Rolle für neue Mitgliedschaft",
     add: "Hinzufügen",
     addMemberConfirmTitle: (name) => `${name} hinzufügen?`,
     addMemberConfirmDescription: (name, role) => `${name} erhält Zugriff auf diesen Kanal mit der Rolle „${role}“.`,
     addMemberConfirmButton: "Endgültig hinzufügen",
-    change: "Ändern",
     remove: "Entfernen",
     removeConfirmTitle: (name) => `Zugriff für „${name}“ entfernen?`,
     removeBroadcasterHint: "Die Broadcaster-Rolle kann der Betreiber nicht entfernen.",
     removeQuestion: (name) => `${name} verliert den Zugriff auf diesen Kanal.`,
     confirmRemove: (name) => `Mitgliedszugriff entfernen: ${name}`,
     audit: "Betreiber-Audit",
-    loadAudit: "Audit wird geladen …",
     auditEmpty: "Noch keine Betreiberhandlungen protokolliert.",
     timestamp: "Zeitpunkt",
     action: "Handlung",
@@ -233,7 +221,6 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     consentPending: "Consent pending",
     consentPendingShort: "Pending",
     consentPendingHint: "Full consent is set. The streamer must open the invitation link and confirm Twitch.",
-    load: "Loading operator data …",
     noChannels: "No channel has been released yet.",
     error: "Operator data could not be loaded.",
     releaseChannel: "Release channel",
@@ -243,14 +230,12 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     searching: "Searching …",
     userFound: "Found user",
     twitchId: (id) => `Twitch ID ${id}`,
-    setFullConsent: "Set full consent",
     fullConsentCardDescription: "The bot may use every feature with broadcaster consent.",
     releaseChannelQuestion: (name) => `Release the channel for ${name}?`,
     releaseChannelDescription: (name, id, withConsent) => `${name} (${id}) will be created ${withConsent} full consent.`,
     confirmRelease: "Release permanently",
     invitationLink: "Invitation link",
     invitationLinkHint: "Give this link to the streamer. It starts Twitch consent for the selected channel.",
-    selectChannel: "Select a channel row first.",
     copyLink: "Copy link",
     linkCopied: "Link copied",
     editChannel: (name) => `Edit channel: ${name}`,
@@ -261,19 +246,16 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     addMember: "Add member",
     role: "Role",
     roleHint: "Determines what this person can do in the channel.",
-    newRole: "Role for new membership",
     add: "Add",
     addMemberConfirmTitle: (name) => `Add ${name}?`,
     addMemberConfirmDescription: (name, role) => `${name} gets access to this channel with the ${role} role.`,
     addMemberConfirmButton: "Add permanently",
-    change: "Change",
     remove: "Remove",
     removeConfirmTitle: (name) => `Remove access for “${name}”?`,
     removeBroadcasterHint: "The operator cannot remove the broadcaster role.",
     removeQuestion: (name) => `${name} will lose access to this channel.`,
     confirmRemove: (name) => `Remove member access: ${name}`,
     audit: "Operator audit",
-    loadAudit: "Loading audit …",
     auditEmpty: "No operator actions have been logged yet.",
     timestamp: "Time",
     action: "Action",
@@ -330,7 +312,6 @@ export interface MembersTexts {
   searchMembers: string;
   countSuffix: string;
   filteredSuffix: string;
-  count: (count: string) => string;
   name: string;
   role: string;
   /** Hint under the role `ChoiceCards`, both when granting access and in the member inspector (3.0). */
@@ -346,7 +327,6 @@ export interface MembersTexts {
   removeAccessFor: (name: string) => string;
   empty: string;
   grantAccess: string;
-  newMemberRoleLabel: string;
   confirmationTitle: (name: string) => string;
   confirmationText: (role: string) => string;
   grantPermanently: string;
@@ -370,13 +350,13 @@ export interface MembersTexts {
 const membersCatalog: LocaleCatalog<MembersTexts> = {
   de: {
     managementLocked: "Nur Broadcaster und Verwalter dürfen Mitglieder ändern.", grantAccessTitle: "Zugriff vergeben",
-    twitchName: "Twitch-Name", twitchNameHint: "Genau wie auf Twitch, ohne @.", search: "Suchen", searching: "Suche läuft …", title: "Mitglieder", searchMembers: "Mitglieder suchen", countSuffix: "Mitglieder", filteredSuffix: "Mitglieder", count: (count) => `${count} Mitglieder`, name: "Name",
+    twitchName: "Twitch-Name", twitchNameHint: "Genau wie auf Twitch, ohne @.", search: "Suchen", searching: "Suche läuft …", title: "Mitglieder", searchMembers: "Mitglieder suchen", countSuffix: "Mitglieder", filteredSuffix: "Mitglieder", name: "Name",
     role: "Rolle", roleHint: "Bestimmt, was diese Person im Kanal darf.", accessSince: "Zugriff seit", editMember: (name) => `Mitglied bearbeiten: ${name}`, remove: "Entziehen",
     removeConfirmTitle: (name) => `Zugriff für ${name} entziehen?`,
     lastBroadcaster: "Der letzte Broadcaster kann nicht herabgestuft oder entfernt werden.", unresolvable: "Nicht auflösbar", twitchId: (userId) => `Twitch-ID ${userId}`,
     roleFor: (name) => `Rolle für ${name}`, removeAccessFor: (name) => `Zugriff für ${name} entziehen`,
     empty: "Für diesen Kanal ist noch niemand zusätzlich freigegeben.", grantAccess: "Zugriff freigeben",
-    newMemberRoleLabel: "Rolle für neue Mitgliedschaft", confirmationTitle: (name) => `Zugriff für ${name} freigeben?`,
+    confirmationTitle: (name) => `Zugriff für ${name} freigeben?`,
     confirmationText: (role) => `Diese Person hat keinerlei Beziehung zum Kanal, die Twitch belegen würde. Mit der Rolle „${role}“ erhält sie Zugriff auf die Mitgliederliste und auf die kanalbezogenen Panel-Funktionen, die diese Rolle erlaubt.`,
     grantPermanently: "Zugriff endgültig freigeben", membersWithAccess: "Freigegebene Mitglieder",
     load: "Mitglieder werden geladen …", loadMore: "Weitere Mitglieder laden", loadingMore: "Weitere Mitglieder werden geladen …", loaded: "geladen",
@@ -389,11 +369,11 @@ const membersCatalog: LocaleCatalog<MembersTexts> = {
   },
   en: {
     managementLocked: "Only broadcasters and managers may change members.", grantAccessTitle: "Grant access", twitchName: "Twitch name",
-    twitchNameHint: "Exactly as on Twitch, without @.", search: "Search", searching: "Searching …", title: "Members", searchMembers: "Search members", countSuffix: "members", filteredSuffix: "members", count: (count) => `${count} members`, name: "Name", role: "Role",
+    twitchNameHint: "Exactly as on Twitch, without @.", search: "Search", searching: "Searching …", title: "Members", searchMembers: "Search members", countSuffix: "members", filteredSuffix: "members", name: "Name", role: "Role",
     roleHint: "Determines what this person can do in the channel.", accessSince: "Access since",
     editMember: (name) => `Edit member: ${name}`, remove: "Remove", removeConfirmTitle: (name) => `Remove access for ${name}?`, lastBroadcaster: "The last broadcaster cannot be demoted or removed.", unresolvable: "Unresolvable",
     twitchId: (userId) => `Twitch ID ${userId}`, roleFor: (name) => `Role for ${name}`, removeAccessFor: (name) => `Remove access for ${name}`,
-    empty: "No one else has access to this channel yet.", grantAccess: "Grant access", newMemberRoleLabel: "Role for new membership",
+    empty: "No one else has access to this channel yet.", grantAccess: "Grant access",
     confirmationTitle: (name) => `Grant access for ${name}?`, confirmationText: (role) => `This person has no Twitch relationship proving access to this channel. The ${role} role grants access to the member list and the channel features allowed by that role.`,
     grantPermanently: "Grant access permanently", membersWithAccess: "Members with access",
     load: "Loading members …", loadMore: "Load more members", loadingMore: "Loading more members …", loaded: "loaded",

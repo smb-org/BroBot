@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { UiProvider } from "../../src/dashboard/ui";
 import { ToastHost } from "../../src/dashboard/ui/Toast";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
-import { ChatVotingPanel } from "../../src/modules/chat_voting/panel";
+import ChatVotingPanel from "../../src/modules/chat_voting/panel";
 import ChatVotingImmediateAction from "../../src/modules/chat_voting/panel/immediate-actions";
 import type { ChatVote, ChatVoteTemplate } from "../../src/modules/chat_voting/contracts";
 import type { ChatVotingPanelState } from "../../src/modules/chat_voting/panel/service";

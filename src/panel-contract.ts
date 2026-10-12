@@ -1,7 +1,6 @@
 import type {
   AuditActorKind,
   AuditArea,
-  ChannelControlDuration,
   ChannelStreamState,
   ChannelRole,
   EventSubSubscriptionType,
@@ -22,10 +21,10 @@ export interface PanelCommandAliasConflict {
   command: string;
 }
 
-export type PanelBroadcasterConnectionStatus = "connected" | "not_connected";
-export type PanelChannelBotConsentStatus = "granted" | "missing";
-export type PanelChatSubscriptionStatus = "enabled" | "missing" | "error" | "revoked";
-export type PanelEventSubSubscriptionStatus = PanelChatSubscriptionStatus | "pending";
+type PanelBroadcasterConnectionStatus = "connected" | "not_connected";
+type PanelChannelBotConsentStatus = "granted" | "missing";
+type PanelChatSubscriptionStatus = "enabled" | "missing" | "error" | "revoked";
+type PanelEventSubSubscriptionStatus = PanelChatSubscriptionStatus | "pending";
 
 export interface PanelBotStatus {
   status: IdentityStatus;
@@ -39,7 +38,7 @@ export interface PanelModeratorStatus {
   reason: string | null;
 }
 
-export interface PanelChatSubscription {
+interface PanelChatSubscription {
   status: PanelChatSubscriptionStatus;
   subscriptionId: string | null;
   reason: string | null;
@@ -137,8 +136,6 @@ export interface PanelChannelControls {
   pause: PanelChannelControl;
 }
 
-export type PanelChannelControlDuration = ChannelControlDuration;
-
 export interface PanelActiveModule {
   moduleId: string;
   settings: string;
@@ -177,7 +174,7 @@ export interface PanelChannelsResponse {
   botLogin?: string;
 }
 
-export interface PanelPlatformChannel {
+interface PanelPlatformChannel {
   channelId: string;
   login: string;
   displayName: string;

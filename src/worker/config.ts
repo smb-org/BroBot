@@ -1,6 +1,6 @@
 import { isBase64url32Byte, parseKeyRing } from "./auth/crypto";
 
-export const REQUIRED_SECRET_NAMES = [
+const REQUIRED_SECRET_NAMES = [
   "TWITCH_CLIENT_ID",
   "TWITCH_CLIENT_SECRET",
   "TWITCH_EVENTSUB_SECRET",

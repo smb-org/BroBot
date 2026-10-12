@@ -20,7 +20,7 @@ const formatTimestamp = (value: string | null, language: DashboardLanguage): str
   }).format(date);
 };
 
-export const AdsPanel = ({ channelId, language = "de", canManage = false }: { channelId: string; language?: DashboardLanguage; canManage?: boolean }): ReactElement => {
+const AdsPanel = ({ channelId, language = "de", canManage = false }: { channelId: string; language?: DashboardLanguage; canManage?: boolean }): ReactElement => {
   const labels = adsPanelTexts(language);
   const loadError = labels.loadError;
   const realtimeStatus = useDashboardRealtimeStatus(channelId);

@@ -72,7 +72,7 @@ export interface OAuthStart {
  * browser of whoever started the flow. The callback requires both.
  */
 export const OAUTH_STATE_COOKIE_NAME = "__Host-brobot_oauth_state";
-export const OAUTH_STATE_MAX_AGE_SECONDS = 10 * 60;
+const OAUTH_STATE_MAX_AGE_SECONDS = 10 * 60;
 
 export const serializeOAuthStateCookie = (
   value: string,

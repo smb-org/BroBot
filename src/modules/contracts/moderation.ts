@@ -16,7 +16,7 @@ export interface TimeoutDurationRange {
   maxSeconds: number;
 }
 
-export type ModerationOutcome = "applied" | "rejected" | "ambiguous";
+type ModerationOutcome = "applied" | "rejected" | "ambiguous";
 
 export interface ModerationResult {
   outcome: ModerationOutcome;

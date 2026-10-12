@@ -1,6 +1,6 @@
-import type { TemplateVariable, TemplateContext } from "./template";
+import type { TemplateVariable } from "./template";
 
-export const SYSTEM_TEMPLATE_VARIABLES = {
+const SYSTEM_TEMPLATE_VARIABLES = {
   user: { name: "user", group: "context", contexts: ["chat_command"], sample: "viewer", maxLength: 25 },
   displayname: { name: "displayname", group: "context", contexts: ["chat_command"], sample: "Viewer", maxLength: 25 },
   channel: { name: "channel", group: "context", contexts: ["chat_command"], sample: "samplechannel", maxLength: 25 },
@@ -29,6 +29,3 @@ export type SystemVariableName = keyof typeof SYSTEM_TEMPLATE_VARIABLES;
 
 export const SYSTEM_TEMPLATE_VARIABLE_LIST: readonly TemplateVariable[] =
   Object.values(SYSTEM_TEMPLATE_VARIABLES);
-
-export const systemVariablesForContext = (context: TemplateContext): readonly TemplateVariable[] =>
-  SYSTEM_TEMPLATE_VARIABLE_LIST.filter((variable) => variable.contexts?.includes(context) ?? true);

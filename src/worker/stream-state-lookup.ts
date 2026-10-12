@@ -20,7 +20,7 @@ const arrayValue = (value: unknown): value is readonly unknown[] => Array.isArra
  * Ten minutes bounds how stale any stored stream state may get before the
  * next read pays for a fresh Helix check.
  */
-export const HELIX_STREAM_STATE_TTL_MS = 10 * 60 * 1000;
+const HELIX_STREAM_STATE_TTL_MS = 10 * 60 * 1000;
 
 /** Cron cap (#178): oldest rows are refreshed first so a large backlog is
  *  spread across ticks without starving later channel ids. */

@@ -2,7 +2,7 @@ import type { RealtimeEnvelope } from "../realtime-contract";
 
 export type PanelResourceRevisionVector = Readonly<Record<string, number>>;
 
-export interface PanelResourceRevisionRow {
+interface PanelResourceRevisionRow {
   resource: string;
   revision: number;
 }

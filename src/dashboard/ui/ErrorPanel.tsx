@@ -1,7 +1,7 @@
 import { colors } from "./theme";
 import { Button } from "./Button";
 
-export interface ErrorPanelAction {
+interface ErrorPanelAction {
   label: string;
   onClick: () => void;
 }

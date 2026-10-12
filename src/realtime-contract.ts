@@ -2,7 +2,7 @@ import type { ChannelRole, ChannelStreamState } from "./contracts/values";
 import type { PanelChannelControls } from "./panel-contract";
 
 /** The only protocol version used on the wire. */
-export type RealtimeProtocolVersion = 1;
+type RealtimeProtocolVersion = 1;
 
 export const REALTIME_PROTOCOL = "brobot.v1";
 export const OVERLAY_TOKEN_SUBPROTOCOL_PREFIX = "brobot.token.";
@@ -20,14 +20,14 @@ export const REALTIME_MESSAGE_TYPES = [
 export type FixedRealtimeMessageType = (typeof REALTIME_MESSAGE_TYPES)[number];
 export type ModuleOverlayRealtimeMessageType = `modul.${string}.${string}`;
 
-export interface ModuleOverlayRealtimePayloads {
+interface ModuleOverlayRealtimePayloads {
   "modul.text_library.blocks_updated": { blockName: string };
   "modul.text_library.state_changed": {
     reason: "channel.game.changed" | "stream.state.changed" | "template.data.changed" | "channel.update" | "stream.online" | "stream.offline";
   };
 }
 
-export type KnownModuleOverlayRealtimeMessageType = keyof ModuleOverlayRealtimePayloads
+type KnownModuleOverlayRealtimeMessageType = keyof ModuleOverlayRealtimePayloads
   | `modul.ads.${string}`
   | `modul.clips.${string}`
   | `modul.channel_events.${string}`
@@ -51,7 +51,7 @@ export interface RealtimeEventLogHint {
   actorUserId: string | null;
 }
 
-export interface RealtimePayloads {
+interface RealtimePayloads {
   "system.hello": Record<string, never>;
   "panel.resources.changed": {
     resources: readonly string[];

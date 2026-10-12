@@ -8,7 +8,7 @@ import { moduleName } from "../module-labels";
 import { MODULES } from "../../modules/registry";
 import type { IconName } from "../ui/Icon";
 
-export { auditAreaForAction, auditSubjectUserId } from "./areas";
+export { auditAreaForAction } from "./areas";
 
 export const emptyAuditFilter: PanelAuditFilters = { person: null, area: null };
 
@@ -65,7 +65,7 @@ const withRawSettingsField = (flat: FlattenedRecord): Record<string, unknown> =>
 
 const deepEqual = (a: unknown, b: unknown): boolean => a === b || JSON.stringify(a) === JSON.stringify(b);
 
-export type AuditDiffKind = "changed" | "added" | "removed" | "changed-truncated";
+type AuditDiffKind = "changed" | "added" | "removed" | "changed-truncated";
 
 export interface AuditDiffRow {
   key: string;

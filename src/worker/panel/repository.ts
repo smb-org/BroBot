@@ -520,7 +520,7 @@ export const auditAreaSqlClause = (area: AuditArea): { sql: string; values: stri
  * input, or a login that only Twitch could resolve) or a partial-login
  * `LIKE` pattern matched against locally known logins (#250).
  */
-export type ResolvedAuditPersonFilter =
+type ResolvedAuditPersonFilter =
   | { kind: "id"; userId: string }
   | { kind: "loginLike"; pattern: string }
   // A local partial-login match no longer suppresses the exact Twitch

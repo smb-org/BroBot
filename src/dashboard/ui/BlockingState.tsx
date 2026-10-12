@@ -1,7 +1,7 @@
 import { colors } from "./theme";
 import { Button } from "./Button";
 
-export interface BlockingStateAction {
+interface BlockingStateAction {
   label: string;
   onClick: () => void;
 }

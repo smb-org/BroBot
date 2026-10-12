@@ -2,7 +2,7 @@ import { PanelApiError } from "../../../contracts/panel-error";
 import type { ModuleLanguage } from "../../contract";
 import type { Timer, TimerMutationInput } from "../contracts";
 
-export interface TimerEventTimeSource {
+interface TimerEventTimeSource {
   id: string;
   label: Readonly<Record<ModuleLanguage, string>>;
 }

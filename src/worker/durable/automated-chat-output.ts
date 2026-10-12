@@ -1,8 +1,8 @@
-export const AUTOMATED_CHAT_OUTPUT_INTERVAL_MS = 5_000;
+const AUTOMATED_CHAT_OUTPUT_INTERVAL_MS = 5_000;
 export const AUTOMATED_CHAT_OUTPUT_LAST_ATTEMPT_STORAGE_KEY = "module_alarm:last_chat_attempt";
-export const RECENT_BOT_CHAT_MESSAGES_STORAGE_KEY = "channel:recent_bot_chat_messages";
-export const RECENT_BOT_CHAT_MESSAGE_TTL_MS = 10 * 60 * 1_000;
-export const RECENT_BOT_CHAT_MESSAGE_LIMIT = 20;
+const RECENT_BOT_CHAT_MESSAGES_STORAGE_KEY = "channel:recent_bot_chat_messages";
+const RECENT_BOT_CHAT_MESSAGE_TTL_MS = 10 * 60 * 1_000;
+const RECENT_BOT_CHAT_MESSAGE_LIMIT = 20;
 
 interface ChatOutputTransaction {
   get(key: string): Promise<unknown>;

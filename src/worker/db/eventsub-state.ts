@@ -1,7 +1,5 @@
 import type { EventSubAuthorizationIdentity, EventSubSubscriptionType } from "../../contracts/values";
 
-export type { EventSubAuthorizationIdentity } from "../../contracts/values";
-
 export interface EventSubRevocationRecord {
   subscriptionId: string;
   channelId: string;

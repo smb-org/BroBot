@@ -45,7 +45,6 @@ export interface TimersTexts {
   roleLocked: string;
   noNextRun: string;
   weekdaysNames: readonly string[];
-  triggerSummary: (timerType: string, detail: string) => string;
 }
 
 const catalog: LocaleCatalog<TimersTexts> = {
@@ -94,7 +93,6 @@ const catalog: LocaleCatalog<TimersTexts> = {
     roleLocked: "Nur Broadcaster und Verwalter dürfen Timer bearbeiten.",
     noNextRun: "Kein Lauf geplant",
     weekdaysNames: ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"],
-    triggerSummary: (timerType, detail) => `${timerType} · ${detail}`,
   },
   en: {
     title: "Timers",
@@ -141,7 +139,6 @@ const catalog: LocaleCatalog<TimersTexts> = {
     roleLocked: "Only broadcasters and managers can edit timers.",
     noNextRun: "No run scheduled",
     weekdaysNames: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
-    triggerSummary: (timerType, detail) => `${timerType} · ${detail}`,
   },
 };
 

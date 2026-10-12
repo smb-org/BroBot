@@ -2,8 +2,7 @@ export const CHANNEL_ROLES = ["broadcaster", "manager", "operator"] as const;
 export type ChannelRole = (typeof CHANNEL_ROLES)[number];
 
 /** Generic destinations for host-executed chat output actions. */
-export const CHAT_OUTPUT_TARGETS = ["all_chats", "source_only", "where_asked"] as const;
-export type ChatOutputTarget = (typeof CHAT_OUTPUT_TARGETS)[number];
+export type ChatOutputTarget = "all_chats" | "source_only" | "where_asked";
 
 /**
  * Named role thresholds per docs/decisions/0006-rollenschwellen.md, so a
@@ -19,45 +18,35 @@ export const PLATFORM_ASSIGNABLE_ROLES = ["manager", "operator"] as const satisf
 export const canManage = (role: ChannelRole): boolean =>
   (MANAGING_ROLES as readonly ChannelRole[]).includes(role);
 
-export const AUDIT_ACTOR_KINDS = ["member", "platform_admin", "system"] as const;
-export type AuditActorKind = (typeof AUDIT_ACTOR_KINDS)[number];
+export type AuditActorKind = "member" | "platform_admin" | "system";
 
 export const EVENT_TONES = ["info", "warning", "error"] as const;
 export type EventTone = (typeof EVENT_TONES)[number];
 
 /** Persisted Twitch stream state exposed to the channel dashboard. */
-export const CHANNEL_STREAM_STATES = ["online", "offline"] as const;
-export type ChannelStreamState = (typeof CHANNEL_STREAM_STATES)[number];
+export type ChannelStreamState = "online" | "offline";
 
 /** Conditions a registered immediate action can declare before it is rendered as available. */
-export const IMMEDIATE_ACTION_REQUIREMENTS = ["streamLive"] as const;
-export type ImmediateActionRequirement = (typeof IMMEDIATE_ACTION_REQUIREMENTS)[number];
+export type ImmediateActionRequirement = "streamLive";
 
 /** Stable catalogue keys for immediate actions that cannot currently run. */
-export const IMMEDIATE_ACTION_UNAVAILABLE_REASONS = ["stream_offline", "stream_state_unknown"] as const;
-export type ImmediateActionUnavailableReason = (typeof IMMEDIATE_ACTION_UNAVAILABLE_REASONS)[number];
+export type ImmediateActionUnavailableReason = "stream_offline" | "stream_state_unknown";
 
 /** Durations accepted when a channel member enables an operational brake. */
 export const CHANNEL_CONTROL_DURATIONS = ["15m", "1h", "until_stream_end", "unlimited"] as const;
 export type ChannelControlDuration = (typeof CHANNEL_CONTROL_DURATIONS)[number];
 
 /** Groups that organize the template-variable catalog and picker. */
-export const TEMPLATE_VARIABLE_GROUPS = [
-  "context", "stream", "person", "command", "time_random", "event", "channel",
-] as const;
-export type TemplateVariableGroup = (typeof TEMPLATE_VARIABLE_GROUPS)[number];
+export type TemplateVariableGroup = "context" | "stream" | "person" | "command" | "time_random" | "event" | "channel";
 
 /** Template positions supported by the host renderer. */
-export const TEMPLATE_CONTEXTS = ["chat_command", "event", "system"] as const;
-export type TemplateContext = (typeof TEMPLATE_CONTEXTS)[number];
+export type TemplateContext = "chat_command" | "event" | "system";
 
 /** Origins of values shown in template editors. */
-export const TEMPLATE_VARIABLE_SOURCES = ["system", "module", "channel"] as const;
-export type TemplateVariableSource = (typeof TEMPLATE_VARIABLE_SOURCES)[number];
+export type TemplateVariableSource = "system" | "module" | "channel";
 
 /** Closed operations available to text-command variable actions and dashboard controls. */
-export const CHANNEL_VARIABLE_OPERATIONS = ["add", "subtract", "set", "set_argument"] as const;
-export type ChannelVariableOperation = (typeof CHANNEL_VARIABLE_OPERATIONS)[number];
+export type ChannelVariableOperation = "add" | "subtract" | "set" | "set_argument";
 
 export const CHANNEL_VARIABLE_MAXIMUM_COUNT = 50;
 export const CHANNEL_VARIABLE_MINIMUM_VALUE = -999_999_999;
@@ -66,8 +55,7 @@ export const CHANNEL_VARIABLE_MAXIMUM_VALUE = 999_999_999;
 /** Limits for the first stored-overlay editor iteration. */
 export const OVERLAY_MAXIMUM_COUNT = 20;
 export const OVERLAY_ELEMENT_MAXIMUM_COUNT = 20;
-export const OVERLAY_ELEMENT_KINDS = ["variable"] as const;
-export type OverlayElementKind = (typeof OVERLAY_ELEMENT_KINDS)[number] | `${string}.${string}`;
+export type OverlayElementKind = "variable" | `${string}.${string}`;
 
 /** Closed reasons persisted when an overlay access is revoked. */
 export const OVERLAY_ACCESS_REVOCATION_REASONS = ["manual", "overlay_deleted", "replaced"] as const;
@@ -89,20 +77,18 @@ export const SHOUTOUT_FAILURE_REASONS = [
 export type ShoutoutFailureReason = (typeof SHOUTOUT_FAILURE_REASONS)[number];
 
 /** Stable outcomes for a host moderation action or lifted ban. */
-export const MODERATION_FAILURE_REASONS = [
-  "already_banned",
-  "bot_identity_missing",
-  "conflict",
-  "invalid_request",
-  "network_error",
-  "not_moderator",
-  "protected_target",
-  "rate_limited",
-  "timeout",
-  "token_invalid",
-  "twitch_error",
-] as const;
-export type ModerationFailureReason = (typeof MODERATION_FAILURE_REASONS)[number];
+export type ModerationFailureReason =
+  | "already_banned"
+  | "bot_identity_missing"
+  | "conflict"
+  | "invalid_request"
+  | "network_error"
+  | "not_moderator"
+  | "protected_target"
+  | "rate_limited"
+  | "timeout"
+  | "token_invalid"
+  | "twitch_error";
 
 /** Stable reasons for a rejected Start Commercial request. */
 export const COMMERCIAL_FAILURE_REASONS = [
@@ -128,8 +114,7 @@ export type ShoutoutSuppressedReason = (typeof SHOUTOUT_SUPPRESSED_REASONS)[numb
 export const ADS_SKIPPED_REASONS = ["duration_zero", "duration_invalid", "start_invalid"] as const;
 export type AdsSkippedReason = (typeof ADS_SKIPPED_REASONS)[number];
 
-export const IDENTITY_STATUSES = ["connected", "revoked", "error"] as const;
-export type IdentityStatus = (typeof IDENTITY_STATUSES)[number];
+export type IdentityStatus = "connected" | "revoked" | "error";
 
 export type EventSubAuthorizationIdentity =
   | { kind: "bot"; userId: string }
@@ -341,7 +326,7 @@ export const AUDIT_ACTIONS = [
   "overlay.legacy.imported",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
-export type ModuleSettingsChangedAction = `${string}.settings_changed`;
+type ModuleSettingsChangedAction = `${string}.settings_changed`;
 export type AuditWriteAction = AuditAction | ModuleSettingsChangedAction;
 
 /**

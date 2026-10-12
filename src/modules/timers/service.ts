@@ -4,9 +4,8 @@ import type {
 } from "../contract";
 import type { Timer, TimerMutationInput } from "./contracts";
 import { TIMER_BLOCK_NAME_PATTERN, timerTriggerSchema } from "./contracts";
-import { validateEventTextBlock, validateEventTextBlockMutation, type EventTextBlockValidation } from "../contracts/text-block-validation";
+import { validateEventTextBlock, validateEventTextBlockMutation } from "../contracts/text-block-validation";
 
-export type TimerBlockValidation = EventTextBlockValidation;
 export const validateTimerBlock = validateEventTextBlock;
 
 export interface TimerRow {

@@ -8,7 +8,7 @@ import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store
 import { TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES, type TextCommand } from "../../src/modules/text_commands/contracts";
 import { TEXT_COMMAND_DEFAULT_TEXTS } from "../../src/modules/text_commands/contracts/chat-defaults";
 import { statusForTier, renderCommandText } from "../../src/modules/text_commands/domain";
-import { TextCommandsPanel } from "../../src/modules/text_commands/panel";
+import TextCommandsPanel from "../../src/modules/text_commands/panel";
 import { textCommandsTexts } from "../../src/modules/text_commands/panel/locale";
 import { useDashboardRoute } from "../../src/dashboard/router";
 import { jsonResponse } from "../unit/fixtures";

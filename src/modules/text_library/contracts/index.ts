@@ -4,7 +4,6 @@ import { TEMPLATE_BARE_VARIABLE_NAME_PATTERN } from "../../../contracts/template
 export {
   TEXT_LIBRARY_LIBRARY_PATH,
 } from "../../contracts/text-library";
-export type { TextLibraryBlockSummary } from "../../contracts/text-library";
 
 export const TEXT_BLOCK_NAME_PATTERN = TEMPLATE_BARE_VARIABLE_NAME_PATTERN;
 export const TEXT_BLOCK_MAXIMUMS = {

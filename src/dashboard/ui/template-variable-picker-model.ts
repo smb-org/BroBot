@@ -1,9 +1,8 @@
 import type { TemplateVariableGroup } from "../../contracts/values";
 import type { IconName } from "./Icon";
 
-export type TemplateVariablePickerGroupKey = TemplateVariableGroup | "text_blocks";
-export type TemplateVariablePickerGroup = TemplateVariableGroup;
-export type TemplateVariablePickerKind = "system" | "module" | "channel";
+type TemplateVariablePickerGroupKey = TemplateVariableGroup | "text_blocks";
+type TemplateVariablePickerKind = "system" | "module" | "channel";
 
 export interface TemplateVariablePickerGroupPresentation {
   id: string;
@@ -106,7 +105,7 @@ export const filterTemplateVariableOptions = (
     .map(({ option }) => option);
 };
 
-export const resolveTemplateVariablePickerGroup = (
+const resolveTemplateVariablePickerGroup = (
   option: TemplateVariablePickerOption,
   messages: Pick<TemplateVariablePickerMessages, "groupLabels">,
 ): TemplateVariablePickerGroupPresentation => {

@@ -1,5 +1,5 @@
 import { PanelApiError } from "../../../contracts/panel-error";
-import type { ChatVote, ChatVoteCloseReason, ChatVoteTemplate, ChatVoteTemplateDraft, ChatVoteTerm, ChatVotingKind, ChatVotingTextMode } from "../contracts";
+import type { ChatVote, ChatVoteTemplate, ChatVoteTemplateDraft, ChatVoteTerm, ChatVotingKind, ChatVotingTextMode } from "../contracts";
 
 export interface ChatVotingPanelState {
   vote: ChatVote | null;
@@ -162,5 +162,3 @@ export const closeChatVoting = async (channelId: string): Promise<void> => {
     headers: { "X-CSRF-Token": token },
   })));
 };
-
-export type { ChatVoteCloseReason };

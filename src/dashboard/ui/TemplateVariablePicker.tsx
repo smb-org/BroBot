@@ -14,10 +14,7 @@ import {
 import "./TemplateVariablePicker.css";
 
 export type {
-  TemplateVariablePickerGroup,
-  TemplateVariablePickerGroupKey,
   TemplateVariablePickerGroupPresentation,
-  TemplateVariablePickerKind,
   TemplateVariablePickerMessages,
   TemplateVariablePickerOption,
 } from "./template-variable-picker-model";
@@ -28,7 +25,7 @@ export interface TemplateVariablePickerRange {
 }
 
 /** The details required to replace the editor selection and position the caret. */
-export interface TemplateVariableInsertion {
+interface TemplateVariableInsertion {
   option: TemplateVariablePickerOption;
   /** Complete token, including braces. */
   text: string;

@@ -45,7 +45,7 @@ const MAX_MEMBER_LIMIT = 100;
 
 const nowIso = (): string => new Date().toISOString();
 
-export const isJsonRecord = (value: unknown): value is JsonRecord =>
+const isJsonRecord = (value: unknown): value is JsonRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 export const readJsonBody = async (request: Request): Promise<JsonRecord | null> => {

@@ -29,7 +29,7 @@ export interface ChannelAuthorizationVariables {
   writeModuleAudit: WriteModuleAudit;
 }
 
-export interface SessionAuthorizationVariables {
+interface SessionAuthorizationVariables {
   session: SessionRecord;
 }
 
@@ -152,7 +152,6 @@ export const requireChannelAuthorization = () => requireChannelAuthorizationFor(
 export const requireBrowserChannelAuthorization = () => requireChannelAuthorizationFor(true);
 
 export const requirePlatform = () => requirePlatformAuthorizationFor(false);
-export const requireBrowserPlatformAuthorization = () => requirePlatformAuthorizationFor(true);
 
 export const requireBrowserBotAuthorization = () => createMiddleware<SessionAuthorizationEnvironment>(
   async (context, next) => {

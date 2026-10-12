@@ -4,7 +4,7 @@ import { useId, type KeyboardEvent } from "react";
 import { describedHelper, useDisabledFieldReason } from "./DisabledFieldReason";
 import { Icon } from "./Icon";
 
-export interface SegmentedControlOption {
+interface SegmentedControlOption {
   value: string;
   label: string;
 }

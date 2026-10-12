@@ -5,13 +5,7 @@ import type {
   HelixResult,
 } from "../../modules/contract";
 
-export type {
-  HelixErrorReason,
-  HelixMethod,
-  HelixRequest,
-  HelixRequestOptions,
-  HelixResult,
-} from "../../modules/contract";
+export type { HelixRequest, HelixResult } from "../../modules/contract";
 
 const DEFAULT_TIMEOUT_MS = 5_000;
 

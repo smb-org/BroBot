@@ -206,7 +206,6 @@ export interface ModuleWorkspaceTexts {
   mainSwitch: string;
   content: string;
   unknown: (name: string) => string;
-  notActive: (name: string) => string;
   switchedOff: (name: string) => string;
   disabled: string;
   mandatoryReason: string;
@@ -220,7 +219,6 @@ const workspaceCatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
     mainSwitch: "Hauptschalter",
     content: "Modulinhalt",
     unknown: (name) => `Das Modul „${name}“ ist nicht bekannt.`,
-    notActive: (name) => `Das Modul „${name}“ ist in diesem Kanal nicht aktiv.`,
     switchedOff: (name) => `Das Modul „${name}“ ist ausgeschaltet.`,
     disabled: "Deaktiviert",
     mandatoryReason: "Kanalereignisse sind immer aktiv.",
@@ -232,7 +230,6 @@ const workspaceCatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
     mainSwitch: "Main switch",
     content: "Module content",
     unknown: (name) => `The module “${name}” is unknown.`,
-    notActive: (name) => `The module “${name}” is not active in this channel.`,
     switchedOff: (name) => `The module “${name}” is switched off.`,
     disabled: "Disabled",
     mandatoryReason: "Channel events are always active.",
@@ -244,5 +241,3 @@ const workspaceCatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
 export const moduleWorkspaceTexts = (
   language: DashboardLanguage = dashboardLanguage(),
 ): ModuleWorkspaceTexts => workspaceCatalog[language];
-
-export const disabledStatusWord = (language: DashboardLanguage = dashboardLanguage()): string => moduleStatus[language].disabled;

@@ -5,7 +5,7 @@ import { Button } from "./Button";
 import { Field } from "./Field";
 import { LoadState, type QueryError } from "./LoadState";
 
-export interface ListToolbarUsage {
+interface ListToolbarUsage {
   count: number;
   maximum?: number;
   filteredCount?: number;

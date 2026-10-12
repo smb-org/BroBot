@@ -5,8 +5,7 @@ import type { AuditWriteAction, ChannelRole, ChannelStreamState, ChannelVariable
 import type { TemplateContext, TemplateFields, TemplateVariable } from "../template";
 import type { SettingsEditorDefinition } from "../dashboard/ui";
 import type { ModerationResult, ModerationTimeoutExpectation } from "./contracts/moderation";
-export type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../panel-contract";
-export { CHAT_OUTPUT_TARGETS } from "../contracts/values";
+export type { PanelTemplateWarning } from "../panel-contract";
 export type { ChatOutputTarget } from "../contracts/values";
 
 /** The default channel timezone used by host template values and channel settings. */
@@ -207,7 +206,7 @@ export const wallTimeInstantsInTimeZone = (localDate: string, time: string, time
   return instants.length > 0 ? instants.sort((left, right) => left - right) : [transition];
 };
 
-export type JsonValue = string | number | boolean | null | readonly JsonValue[] | { readonly [key: string]: JsonValue };
+type JsonValue = string | number | boolean | null | readonly JsonValue[] | { readonly [key: string]: JsonValue };
 export type JsonObject = Readonly<Record<string, JsonValue>>;
 
 export interface ModuleOverlayElementProps {
@@ -316,20 +315,15 @@ export type ModuleOverlayHostEvent = "channel.game.changed" | "stream.state.chan
 
 export { truncateTo200Chars, textFingerprintIfTruncated } from "../text";
 export {
-  closestTemplateVariable,
   effectiveTemplateVariables,
   invalidTemplateParameters,
   renderTemplate,
-  templateFieldsWarnings,
   templateVariableNames,
   templateWarnings,
-  tokenizeTemplate,
   unknownTemplateVariables,
   worstCaseTemplateLength,
-  TEMPLATE_TOKEN_CANDIDATE_PATTERN,
-  TEMPLATE_VARIABLE_PATTERN,
 } from "../template";
-export type { TemplateContext, TemplateFields, TemplateVariable, TemplateValues, TemplateWarning } from "../template";
+export type { TemplateFields, TemplateVariable, TemplateValues } from "../template";
 export { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../template-variables";
 
 /** Status of the chat-triggering person, derived from Twitch badges. */
@@ -362,7 +356,7 @@ export const ballotChoiceFromMessage = (text: string, optionCount: number): numb
  *
  * Adding a key means adding it here, and whoever adds it sees its neighbours.
  */
-export type ModuleDiagnosticDetailKey =
+type ModuleDiagnosticDetailKey =
   | "action" | "allowed" | "arguments" | "art" | "cause" | "count" | "current"
   | "currentTier" | "missing"
   | "duration" | "endsAt" | "gifter" | "kind" | "lastAdBreakAt" | "message"
@@ -493,10 +487,10 @@ export interface ModuleMutationAuthorization {
   values: readonly (string | number | null)[];
 }
 
-export type ModuleAuditValue = string | number | boolean | null | readonly string[];
+type ModuleAuditValue = string | number | boolean | null | readonly string[];
 
 /** Business values a module has explicitly cleared for the audit. */
-export type ModuleAuditSnapshot = Readonly<Record<string, ModuleAuditValue>>;
+type ModuleAuditSnapshot = Readonly<Record<string, ModuleAuditValue>>;
 
 export interface ModuleAuditEntry {
   channelId: string;
@@ -553,7 +547,7 @@ export interface ActiveChatterActivity {
   lastSeenAt: string;
 }
 
-export interface ModuleTwitchUser {
+interface ModuleTwitchUser {
   userId: string;
   login: string;
   displayName: string;
@@ -677,7 +671,7 @@ export interface ModuleAlarmContext {
   writeDiagnostics?: (triggerId: string, diagnostics: readonly ModuleDiagnostic[], now: string) => Promise<unknown>;
 }
 
-export type ModuleTimeoutOutcome = "applied" | "rejected" | "ambiguous" | "suppressed";
+type ModuleTimeoutOutcome = "applied" | "rejected" | "ambiguous" | "suppressed";
 
 export interface ModuleEventTimeContext {
   DB: D1Database;
@@ -687,7 +681,7 @@ export interface ModuleEventTimeContext {
   channelLocation: () => Promise<ModuleChannelLocation | null>;
 }
 
-export interface ModuleEventTimeSource {
+interface ModuleEventTimeSource {
   /** Local to the declaring module; the host adds a stable namespace. */
   id: string;
   label: Readonly<Record<ModuleLanguage, string>>;
@@ -834,7 +828,7 @@ export interface ModuleChannelInfo {
 }
 
 /** A localized, module-owned item in the channel navigation. */
-export interface ModuleNavigationEntry {
+interface ModuleNavigationEntry {
   id: string;
   label: Readonly<Record<ModuleLanguage, string>>;
   description?: Readonly<Record<ModuleLanguage, string>>;
@@ -845,7 +839,7 @@ export interface ModuleNavigationEntry {
 }
 
 /** Path data for the module's dashboard glyph; the host renders every descriptor through the same SVG frame. */
-export interface ModuleIconDescriptor {
+interface ModuleIconDescriptor {
   paths: readonly string[];
 }
 
@@ -971,7 +965,7 @@ export interface ModuleChannelVariable {
 }
 
 /** Host-backed variable access for module routes; each call is channel-scoped. */
-export interface ModuleChannelVariableAccess {
+interface ModuleChannelVariableAccess {
   listChannelVariables: (channelId: string) => Promise<readonly ModuleChannelVariable[]>;
   findChannelVariable: (channelId: string, name: string) => Promise<ModuleChannelVariable | null>;
 }
@@ -1059,7 +1053,7 @@ export interface ModuleImmediateActionProperties {
   availabilityReason: string | null;
 }
 
-export interface ModuleImmediateActionDefinition {
+interface ModuleImmediateActionDefinition {
   /** Conditions are evaluated by the host; the module remains enabled implicitly. */
   requires: readonly ImmediateActionRequirement[];
   /** Kept lazy so disabled modules add no immediate-action bytes to the panel bundle. */
@@ -1094,7 +1088,7 @@ export const browserModuleLanguage = (): ModuleLanguage => {
 };
 
 /** HTTP method a Helix request may use; `helixRequest` sets no default body encoding beyond JSON. */
-export type HelixMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+type HelixMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 /**
  * Base transport-level classification `helixRequest` derives from the raw
@@ -1380,7 +1374,7 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
  * The name is shown in the command's syntax, and the hint explains it in the
  * dashboard language.
  */
-export interface ModuleChatCommandArgument {
+interface ModuleChatCommandArgument {
   name: string;
   hint: Readonly<Record<ModuleLanguage, string>>;
 }
