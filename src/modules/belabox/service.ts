@@ -75,11 +75,13 @@ export const belaboxAlertDefaultsOnEnable = async (
   const language: ModuleLanguage = channel?.language === "en" ? "en" : "de";
   const defaults = belaboxDefaultAlertTexts(language);
   const authorization = context.authorizeMutation(channelId, context.actor, context.now);
+  // The host audit precedes this statement in the activation batch and only writes after row creation.
   return [context.DB.prepare(
     `UPDATE channel_modules
         SET settings = json_set(settings, '$.lowText', ?, '$.disconnectText', ?, '$.recoveryText', ?),
             revision = revision + 1
-      WHERE channel_id = ? AND module_id = 'belabox' AND enabled = 1 ${authorization.sql}`,
+      WHERE channel_id = ? AND module_id = 'belabox' AND enabled = 1
+        AND changes() > 0 ${authorization.sql}`,
   ).bind(defaults.lowText, defaults.disconnectText, defaults.recoveryText, channelId, ...authorization.values)];
 };
 

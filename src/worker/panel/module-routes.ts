@@ -624,16 +624,18 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
     }, channelId) ?? [];
   }
   const settings = existing === null ? defaultSettingsJson : existing.settings;
-  const changed = existing === null
-    ? await createChannelModuleWithAudit(
+  let changed = true;
+  if (existing === null && enabled) {
+    changed = await createChannelModuleWithAudit(
       context.env.DB,
       actor,
       { channelId, moduleId, enabled, settings },
       action,
       now,
       dependentMutations,
-    )
-    : await updateChannelModuleWithAudit(
+    );
+  } else if (existing !== null) {
+    changed = await updateChannelModuleWithAudit(
       context.env.DB,
       actor,
       channelId,
@@ -643,7 +645,9 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       action,
       now,
       dependentMutations,
+      existing.revision,
     );
+  }
   if (!changed) return context.json({ error: "module_changed_concurrently" }, 409);
   if (module.id === "belabox" && module.settingsChangedAlarm !== undefined) {
     await runModuleAlarmAfterMutation(
