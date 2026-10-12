@@ -41,8 +41,4 @@ function SelectItem({ className, children, ...props }: ComponentProps<typeof Sel
   </SelectPrimitive.Item>;
 }
 
-function SelectSeparator({ className, ...props }: ComponentProps<typeof SelectPrimitive.Separator>) {
-  return <SelectPrimitive.Separator data-slot="select-separator" className={cn("my-1 h-px bg-[var(--color-border)]", className)} {...props} />;
-}
-
-export { SelectPrimitive, SelectGroup, SelectValue, SelectTrigger, SelectContent, SelectLabel, SelectItem, SelectSeparator };
+export { SelectPrimitive, SelectGroup, SelectValue, SelectTrigger, SelectContent, SelectLabel, SelectItem };

@@ -3,13 +3,11 @@ import { useId, type KeyboardEvent } from "react";
 import { useDisabledFieldReason } from "./DisabledFieldReason";
 import { Input } from "./primitives/input";
 
-export type Unit = string;
-
 export interface UnitInputProps {
   id?: string;
   label: string;
   ariaLabel?: string;
-  unit?: Unit;
+  unit?: string;
   value: number | "";
   onChange: (value: number | "") => void;
   min?: number;

@@ -20,16 +20,8 @@ function DialogHeader({ className, ...props }: ComponentProps<"div">) {
   return <div data-ui="" data-slot="dialog-header" className={cn("grid gap-2", className)} {...props} />;
 }
 
-function DialogFooter({ className, ...props }: ComponentProps<"div">) {
-  return <div data-ui="" data-slot="dialog-footer" className={cn("flex flex-col-reverse justify-end gap-2 border-t border-[var(--color-border)] pt-4 sm:flex-row", className)} {...props} />;
-}
-
 function DialogTitle({ className, ...props }: ComponentProps<typeof DialogPrimitive.Title>) {
   return <DialogPrimitive.Title data-slot="dialog-title" className={cn("text-[16px] font-semibold", className)} {...props} />;
 }
 
-function DialogDescription({ className, ...props }: ComponentProps<typeof DialogPrimitive.Description>) {
-  return <DialogPrimitive.Description data-slot="dialog-description" className={cn("text-[13px] leading-normal text-[var(--color-text-2)]", className)} {...props} />;
-}
-
-export { DialogPrimitive, DialogOverlay, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription };
+export { DialogPrimitive, DialogContent, DialogHeader, DialogTitle };

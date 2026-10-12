@@ -2,12 +2,6 @@ import { useId, type KeyboardEvent } from "react";
 
 import { Icon } from "./Icon";
 
-export interface SegmentChoiceOption {
-  value: string;
-  label: string;
-  description?: string;
-}
-
 export interface SegmentChoiceProps<T extends string = string> {
   label: string;
   hint?: string;
