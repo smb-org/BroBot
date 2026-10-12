@@ -70,7 +70,7 @@ export function Sidebar({ groups, collapsed, onToggleCollapsed, onEntryNavigate,
         title={moduleChild || collapsed ? accessibleName : undefined}
         aria-label={moduleChild || collapsed ? accessibleName : undefined}
         leftSection={entry.icon}
-        rightSection={entry.led === undefined || collapsed ? undefined : <StatusLed state={entry.led.status} label={entry.led.word} />}
+        rightSection={entry.led === undefined || collapsed ? undefined : <StatusLed state={entry.led.status} label={entry.led.word} dotOnly />}
         active={entry.active}
         aria-current={entry.active ? "page" : undefined}
         className={`sidebar-nav-link${moduleChild ? " sidebar-nav-link--module-child" : ""}`}

@@ -3671,7 +3671,7 @@ describe("Dashboard skeleton", () => {
         if (page.currentLink === "Textbefehle · Läuft") {
           const status = currentLink.querySelector(".status-led");
           expect(status?.querySelector(".status-led__dot")).toBeInTheDocument();
-          expect(status).toHaveTextContent("Läuft");
+          expect(status).not.toHaveTextContent("Läuft");
         }
       }
     }
