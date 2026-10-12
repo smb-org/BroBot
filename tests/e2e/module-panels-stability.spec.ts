@@ -231,7 +231,7 @@ test("timer and FAQ dialogs submit from Enter", async ({ page }) => {
     faqCreated = true;
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entry: {
       id: "faq-created", name: "Greeting", enabled: true, matcher: { type: "keywords", patterns: ["hello"] },
-      answerText: "Hello, chat!", cooldownSeconds: 30, games: [], chatTarget: "source_only", order: 0, revision: 1,
+      answerText: "Hello, chat!", cooldownSeconds: 30, userCooldownSeconds: 0, games: [], chatTarget: "source_only", order: 0, revision: 1,
       lastUsedAt: null, createdAt: "2030-01-01T12:00:00.000Z", updatedAt: "2030-01-01T12:00:00.000Z",
     } }) });
   });

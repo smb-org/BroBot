@@ -2,7 +2,7 @@ import { z } from "zod";
 import { columnVariableReferences } from "../contract";
 import type { BotModule, ModuleTemplateContentValidationContext, ModuleTemplateUsageSource } from "../contract";
 import { validateEventTemplateContentMutation } from "../contracts/text-block-validation";
-import { createFaqRepository } from "./adapters/d1";
+import { createFaqRepository, purgeExpiredFaqUserCooldowns } from "./adapters/d1";
 import { FAQ_MODULE_ID } from "./contracts";
 import { faqRoutes } from "./routes";
 import { processFaqMessage } from "./service";
@@ -55,6 +55,7 @@ export const faqModule: BotModule<typeof settingsSchema> = {
     keywords: ["faq", "auto reply", "auto replies", "automatic answer", "automatische antwort", "auto-antwort", "chat answer"],
   }],
   eventSubTypes: ["channel.chat.message"],
+  scheduledMaintenance: purgeExpiredFaqUserCooldowns,
   routes: faqRoutes,
   panel: () => import("./panel"),
   handleEvent: (event, context) => processFaqMessage(event, createFaqRepository(context.DB), context),

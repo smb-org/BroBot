@@ -212,6 +212,57 @@ describe("FAQ routes", () => {
     expect(faqTexts("en").cooldownMinError).toBe("Cooldown must be at least 30 seconds.");
   });
 
+  it("validates RE2 patterns on save and returns the pattern field with a reason", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-1");
+    await insertMember(database, "channel-a", "manager-1", "manager");
+    await database.prepare("INSERT INTO text_library_settings (channel_id, graph_revision, updated_at) VALUES ('channel-a', 1, '2026-09-18T00:00:00.000Z')").run();
+
+    const invalid = await panelRouter.fetch(
+      await requestFor("manager-1", "/api/channels/channel-a/modules/faq/entries", "POST", {
+        name: "Lookahead",
+        matcher: { type: "regex", pattern: "(?=hello)hello" },
+        answerText: "Hello!",
+        cooldownSeconds: 30,
+        userCooldownSeconds: 60,
+        games: [],
+        chatTarget: "source_only",
+      }),
+      environmentFor(database),
+    );
+    expect(invalid.status).toBe(400);
+    const invalidBody: unknown = await invalid.json();
+    expect(invalidBody).toMatchObject({
+      error: "faq_matcher_invalid",
+      path: "matcher.pattern",
+    });
+    if (typeof invalidBody !== "object" || invalidBody === null || Array.isArray(invalidBody)) {
+      throw new Error("The invalid matcher response must be an object.");
+    }
+    expect(typeof Object.getOwnPropertyDescriptor(invalidBody, "reason")?.value).toBe("string");
+
+    const valid = await panelRouter.fetch(
+      await requestFor("manager-1", "/api/channels/channel-a/modules/faq/entries", "POST", {
+        name: "Greeting",
+        matcher: { type: "regex", pattern: "(?i)\\bhello\\b" },
+        answerText: "Hello!",
+        cooldownSeconds: 30,
+        userCooldownSeconds: 60,
+        games: [],
+        chatTarget: "source_only",
+      }),
+      environmentFor(database),
+    );
+    expect(valid.status).toBe(201);
+    await expect(valid.json()).resolves.toMatchObject({
+      entry: {
+        matcher: { type: "regex", pattern: "(?i)\\bhello\\b" },
+        userCooldownSeconds: 60,
+      },
+    });
+  });
+
   it("defaults the tester to the channel's live game and explains a skipped restricted entry", async () => {
     database = new TestD1Database();
     await insertChannel(database, "channel-a");

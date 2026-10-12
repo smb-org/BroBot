@@ -1,16 +1,17 @@
 import { useCallback, useState, type ReactElement } from "react";
 
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
-import { Button, ChatOutputTargetControl, ConfirmDialog, Field, FormDialog, GamePicker, InspectorSection, LoadState, NumberField, Skeleton, Switch, TextArea, notify } from "../../../dashboard/ui";
+import { Button, ChatOutputTargetControl, ConfirmDialog, Field, FormDialog, GamePicker, InspectorSection, LoadState, NumberField, Select, Skeleton, Switch, TextArea, notify } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { FaqEntry, FaqGame } from "../contracts";
-import { FAQ_ANSWER_MAX_LENGTH, FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH } from "../contracts";
+import { FAQ_ANSWER_MAX_LENGTH, FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH, FAQ_USER_COOLDOWN_MAXIMUM_SECONDS } from "../contracts";
 import { inputFromDraft, type FaqDraft } from "./draft";
 import { faqTexts } from "./locale";
 import {
   createFaqEntry,
   deleteFaqEntry,
   faqErrorCode,
+  faqMatcherErrorReason,
   loadFaqPanel,
   moveFaqEntry,
   searchFaqGames,
@@ -21,13 +22,15 @@ import {
   type FaqPanelData,
 } from "./service";
 
-const emptyDraft = (): FaqDraft => ({ name: "", patterns: "", answerText: "", cooldownSeconds: FAQ_COOLDOWN_MINIMUM_SECONDS, games: [], chatTarget: "source_only" });
+const emptyDraft = (): FaqDraft => ({ name: "", matcherType: "keywords", patterns: "", answerText: "", cooldownSeconds: FAQ_COOLDOWN_MINIMUM_SECONDS, userCooldownSeconds: 0, games: [], chatTarget: "source_only" });
 
 const draftFromEntry = (entry: FaqEntry): FaqDraft => ({
   name: entry.name,
-  patterns: entry.matcher.type === "keywords" ? entry.matcher.patterns.join("\n") : "",
+  matcherType: entry.matcher.type,
+  patterns: entry.matcher.type === "keywords" ? entry.matcher.patterns.join("\n") : entry.matcher.pattern,
   answerText: entry.answerText,
   cooldownSeconds: entry.cooldownSeconds,
+  userCooldownSeconds: entry.userCooldownSeconds,
   games: [...entry.games],
   chatTarget: entry.chatTarget,
 });
@@ -81,6 +84,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
   const data = query.data;
   const loading = query.isPending;
   const [error, setError] = useState<string | null>(null);
+  const [matcherError, setMatcherError] = useState<string | null>(null);
   const [draft, setDraft] = useState<FaqDraft | null>(null);
   const [editing, setEditing] = useState<FaqEntry | null>(null);
   const [pending, setPending] = useState(false);
@@ -94,10 +98,13 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
   const [testError, setTestError] = useState<string | null>(null);
   const searchGames = useCallback((query: string) => searchFaqGames(channelId, query), [channelId]);
 
-  const openCreate = (): void => { setEditing(null); setDraft(emptyDraft()); setError(null); };
-  const openEdit = (entry: FaqEntry): void => { setEditing(entry); setDraft(draftFromEntry(entry)); setError(null); };
-  const closeDialog = (): void => { if (!pending) { setDraft(null); setEditing(null); setError(null); } };
-  const patchDraft = (change: Partial<FaqDraft>): void => setDraft((current) => current === null ? null : { ...current, ...change });
+  const openCreate = (): void => { setEditing(null); setDraft(emptyDraft()); setError(null); setMatcherError(null); };
+  const openEdit = (entry: FaqEntry): void => { setEditing(entry); setDraft(draftFromEntry(entry)); setError(null); setMatcherError(null); };
+  const closeDialog = (): void => { if (!pending) { setDraft(null); setEditing(null); setError(null); setMatcherError(null); } };
+  const patchDraft = (change: Partial<FaqDraft>): void => {
+    if ("matcherType" in change || "patterns" in change) setMatcherError(null);
+    setDraft((current) => current === null ? null : { ...current, ...change });
+  };
 
   const save = async (): Promise<void> => {
     if (draft === null) return;
@@ -109,6 +116,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
     if (input === null) { setError(labels.saveError); return; }
     setPending(true);
     setError(null);
+    setMatcherError(null);
     try {
       await runModuleQueryWrite(queryClient, channelId, "faq", "panel", (revision) =>
         editing === null ? createFaqEntry(channelId, input) : updateFaqEntry(channelId, editing.id, input, requireBaselineRevision(revision)), {
@@ -119,7 +127,11 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
       setEditing(null);
     } catch (failure: unknown) {
       const code = faqErrorCode(failure);
-      setError(code === "faq_cooldown_too_short" ? labels.cooldownMinError
+      const matcherReason = faqMatcherErrorReason(failure);
+      if (matcherReason !== null) {
+        setMatcherError(labels.regexError(matcherReason));
+        setError(null);
+      } else setError(code === "faq_cooldown_too_short" ? labels.cooldownMinError
         : code === "faq_text_input_dependent" ? labels.inputDependentText
         : code === "faq_text_block_missing" ? labels.missingTextBlock
           : code === "faq_entry_limit_reached" ? labels.entryLimit : labels.saveError);
@@ -200,9 +212,10 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
             <article key={entry.id} className="timer-row">
               <div className="timer-row__copy">
                 <strong>{entry.name}</strong>
-                <span>{entry.matcher.type === "keywords" ? entry.matcher.patterns.join(" · ") : entry.matcher.pattern}</span>
+                <span>{entry.matcher.type === "keywords" ? entry.matcher.patterns.join(" · ") : `${labels.regexType}: ${entry.matcher.pattern}`}</span>
                 <span>{labels.answer} · {entry.answerText}</span>
                 <span>{labels.cooldown} · {String(entry.cooldownSeconds)} s</span>
+                {entry.userCooldownSeconds === 0 ? null : <span>{labels.userCooldown} · {String(entry.userCooldownSeconds)} s</span>}
                 {entry.games.length === 0 ? null : <span>{labels.games} · {entry.games.map((game) => game.name).join(", ")}</span>}
               </div>
               <div className="timer-row__actions">
@@ -261,12 +274,20 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
       >
         {draft === null ? null : <div className="module-stack">
           <Field label={labels.name} value={draft.name} onChange={(name) => patchDraft({ name })} maxLength={FAQ_ENTRY_NAME_MAX_LENGTH} countLabel={(count, max) => `${String(count)}/${String(max)}`} required />
+          <Select
+            label={labels.matcherType}
+            value={draft.matcherType}
+            onChange={(matcherType) => { if (matcherType === "keywords" || matcherType === "regex") patchDraft({ matcherType }); }}
+            options={[{ value: "keywords", label: labels.keywordsType }, { value: "regex", label: labels.regexType }]}
+            disabled={pending}
+          />
           <TextArea
-            label={labels.patterns}
-            hint={labels.patternsHint}
+            label={draft.matcherType === "keywords" ? labels.patterns : labels.regexPattern}
+            hint={draft.matcherType === "keywords" ? labels.patternsHint : labels.regexPatternHint}
             value={draft.patterns}
             onChange={(patterns) => patchDraft({ patterns })}
-            maxLength={FAQ_PATTERN_MAXIMUM_COUNT * (FAQ_PATTERN_MAX_LENGTH + 1)}
+            maxLength={draft.matcherType === "keywords" ? FAQ_PATTERN_MAXIMUM_COUNT * (FAQ_PATTERN_MAX_LENGTH + 1) : FAQ_PATTERN_MAX_LENGTH}
+            {...(matcherError === null ? {} : { error: matcherError })}
             messages={labels.textAreaMessages}
             minRows={3}
             disabled={pending}
@@ -294,6 +315,16 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
             unit="s"
             disabled={pending}
             required
+          />
+          <NumberField
+            label={labels.userCooldown}
+            hint={labels.userCooldownHint}
+            value={draft.userCooldownSeconds}
+            onChange={(userCooldownSeconds) => patchDraft({ userCooldownSeconds })}
+            min={0}
+            max={FAQ_USER_COOLDOWN_MAXIMUM_SECONDS}
+            unit="s"
+            disabled={pending}
           />
           <GamePicker
             searchGames={searchGames}

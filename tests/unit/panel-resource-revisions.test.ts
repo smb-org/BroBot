@@ -1590,6 +1590,7 @@ describe("panel resource revisions", () => {
         "currency_rate_cache",
         "eventsub_maintenance_locks",
         "eventsub_messages",
+        "faq_entry_user_cooldowns",
         "oauth_transactions",
         "panel_global_resource_revisions",
         "panel_global_resource_publications",

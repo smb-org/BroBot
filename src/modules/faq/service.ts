@@ -33,10 +33,10 @@ export const processFaqMessage = async (
   if (await context.isRecentBotMessage?.(senderId, text)) return { actions: [], diagnostics: [] };
 
   const prepared = await repository.matchers(event.channelId);
-  // Cheap keyword scan first, with no game resolved: a hit against an
-  // unrestricted entry needs no Helix lookup at all, and a total miss rules
-  // the message out without any I/O. Only a keyword hit against a
-  // game-bound entry (recorded in skippedByGame) needs the current game.
+  // Scan triggers first, with no game resolved: a hit against an unrestricted
+  // entry needs no Helix lookup at all, and a total miss rules the message out
+  // without any I/O. Only a trigger hit against a game-bound entry (recorded in
+  // skippedByGame) needs the current game.
   const withoutGame = selectFaqMatch(prepared, text, null);
   // Any game-bound entry skipped before this result was decided (whether it
   // ended in a match or not) might turn eligible once the real game is
@@ -50,7 +50,7 @@ export const processFaqMessage = async (
   if (match === null) return { actions: [], diagnostics: [] };
   const rendered = await context.renderTemplate(match.entry.answerText, {});
   if (rendered.text.length === 0) return { actions: [], diagnostics: rendered.diagnostics };
-  const claim = await repository.claim(event.channelId, match.entry, new Date().toISOString());
+  const claim = await repository.claim(event.channelId, match.entry, senderId, new Date().toISOString());
   if (!claim.claimed) return { actions: [], diagnostics: [] };
   return {
     actions: [{
@@ -60,7 +60,7 @@ export const processFaqMessage = async (
       automated: true,
       onDelivery: async (delivery) => {
         if (delivery === "rejected" || delivery === "not_attempted") {
-          await repository.releaseClaim(event.channelId, match.entry, claim.claimedAt);
+          await repository.releaseClaim(event.channelId, match.entry, senderId, claim.claimedAt);
         }
       },
     }],
