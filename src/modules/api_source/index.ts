@@ -157,4 +157,4 @@ export const apiSourceModule: BotModule<typeof settingsSchema> = {
   panel: () => import("./panel/index"),
 };
 
-export { API_SOURCE_MAXIMUMS, API_SOURCE_VALUE_VARIABLE } from "./contracts";
+export { API_SOURCE_VALUE_VARIABLE } from "./contracts";

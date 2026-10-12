@@ -4,7 +4,7 @@ import type { JsonObject, ModuleLanguage } from "../../contract";
 
 const editorLabels = { de: adsCountdownLabels("de"), en: adsCountdownLabels("en") };
 
-export const adsCountdownElement = {
+const adsCountdownElement = {
   kind: ADS_COUNTDOWN_ELEMENT_KIND,
   configVersion: 2,
   defaultSize: { width: 300, height: 96 },

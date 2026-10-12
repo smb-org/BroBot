@@ -1083,7 +1083,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   </>;
 };
 
-export const TextCommandsPanel = (props: {
+const TextCommandsPanel = (props: {
   channelId: string;
   language?: DashboardLanguage | undefined;
   canManage?: boolean;

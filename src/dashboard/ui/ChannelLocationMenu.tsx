@@ -2,17 +2,10 @@ import { Menu } from "@mantine/core";
 import { useEffect, useState, type ReactElement } from "react";
 
 import type { PanelChannelLocation } from "../../panel-contract";
+import type { DashboardTexts } from "../locale";
 import { Button } from "./Button";
 
-export interface ChannelLocationMenuMessages {
-  openIn: string;
-  openStreetMap: string;
-  googleMaps: string;
-  appleMaps: string;
-  copyCoordinates: string;
-  coordinatesCopied: string;
-  copyCoordinatesFailed: string;
-}
+type ChannelLocationMenuMessages = DashboardTexts["header"]["locationMenu"];
 
 interface ExternalLocationTarget {
   label: string;

@@ -43,7 +43,6 @@ const ALLOWLIST: Record<string, string> = {
   "src/modules/chat_voting/contracts/chat-commands.ts": "Bilingual DE/EN built-in chat command help catalogue; only its `de` half is German.",
   "src/modules/chat_voting/contracts/template-variable-catalog.ts": "Bilingual DE/EN result template-variable catalogue; only its `de` half is German.",
   "src/modules/chat_voting/overlay/locale.ts": "Bilingual DE/EN voting overlay text catalogue; only its `de` half is German.",
-  "src/modules/chat_voting/panel/locale-panel.ts": "Bilingual DE/EN voting panel text catalogue; only its `de` half is German.",
   "src/modules/chat_voting/panel/locale.ts": "Bilingual DE/EN voting settings-editor text catalogue; only its `de` half is German.",
   "src/modules/chat_voting/panel/locale-saved.ts": "Bilingual DE/EN saved-voting panel text catalogue; only its `de` half is German.",
   "src/modules/text_library/panel/locale.ts": "Bilingual DE/EN text-library panel text catalogue; only its `de` half is German.",

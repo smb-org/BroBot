@@ -20,10 +20,7 @@ const templateUsageSources = async (db: D1Database, channelId: string): Promise<
   });
 };
 
-export { decideRaid, renderRaidText } from "./domain";
 export { processRaid } from "./service";
-export { RAID_TEMPLATE_FIELDS, RAID_VARIABLES } from "./contracts";
-export type { RaidSettings } from "./contracts";
 
 export const raidModule: BotModule<typeof raidSettingsSchema> = {
   id: "raid",

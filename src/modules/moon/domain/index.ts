@@ -52,7 +52,7 @@ const LATITUDE_TERMS: readonly LunarLatitudeTerm[] = [
   [4, 0, 1, -1, 132], [1, 0, -1, -1, -119], [4, -1, 0, -1, 115], [2, -2, 0, 1, 107],
 ];
 
-export interface MoonPosition {
+interface MoonPosition {
   rightAscension: number;
   declination: number;
   distanceKm: number;
@@ -108,7 +108,7 @@ export const localDateInTimeZone = (instant: number, timeZone: string): string =
   return `${String(values.year)}-${String(values.month)}-${String(values.day)}`;
 };
 
-export const shiftLocalDate = (date: string, amount: number): string => {
+const shiftLocalDate = (date: string, amount: number): string => {
   const parts = dateParts(date);
   if (parts === null) throw new RangeError("Invalid local calendar date.");
   const shifted = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + amount));
@@ -116,7 +116,7 @@ export const shiftLocalDate = (date: string, amount: number): string => {
 };
 
 /** Meeus Chapter 47 lunar periodic terms transformed to apparent equatorial coordinates. */
-export const calculateMoonPosition = (instant: number): MoonPosition => {
+const calculateMoonPosition = (instant: number): MoonPosition => {
   const t = (julianDay(instant) - 2_451_545) / 36_525;
   const lPrime = normalizeDegrees(218.3164477 + (481267.88123421 + (-0.0015786 + (1 / 538841 - t / 65_194_000) * t) * t) * t);
   const d = normalizeDegrees(297.8501921 + (445267.1114034 + (-0.0018819 + (1 / 545868 - t / 113_065_000) * t) * t) * t);

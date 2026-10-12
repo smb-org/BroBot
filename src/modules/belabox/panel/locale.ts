@@ -67,7 +67,6 @@ export interface BelaboxPanelTexts {
   alertPending: string;
   fetchFailureNotice: string;
   checkNow: string;
-  checkNowDone: string;
   statusUnavailable: string;
 }
 
@@ -138,7 +137,6 @@ const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
     alertPending: "BELABOX-Alarm wird geprüft",
     fetchFailureNotice: "BELABOX-Status konnte dreimal nicht abgerufen werden.",
     checkNow: "Jetzt prüfen",
-    checkNowDone: "BELABOX-Status geprüft.",
     statusUnavailable: "BELABOX-Status noch nicht verfügbar.",
   },
   en: {
@@ -207,7 +205,6 @@ const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
     alertPending: "BELABOX alert is pending",
     fetchFailureNotice: "BELABOX status could not be fetched three times.",
     checkNow: "Check now",
-    checkNowDone: "BELABOX status checked.",
     statusUnavailable: "BELABOX status is not available yet.",
   },
 };

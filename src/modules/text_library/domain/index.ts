@@ -3,7 +3,7 @@ import { MODULE_TEMPLATE_TIER_CHAT_STATUSES } from "../../contract";
 import type { TextBlock, TextBlockConditions, TextBlockVariant, TwitchGame } from "../contracts";
 import { TEXT_BLOCK_MAXIMUMS, TEXT_BLOCK_NAME_PATTERN } from "../contracts";
 import { blockReferencesInText } from "../../contracts/text-block-references";
-import { localMidnightInTimeZone, nextLocalMidnightInTimeZone, validChannelTimeZone, wallTimeInstantsInTimeZone } from "../../contract";
+import { localMidnightInTimeZone, nextLocalMidnightInTimeZone, wallTimeInstantsInTimeZone } from "../../contract";
 
 export { blockReferencesInText } from "../../contracts/text-block-references";
 
@@ -24,8 +24,6 @@ export type TextBlockGraphError =
 const VALID_TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 
 export const validTextBlockName = (name: string): boolean => TEXT_BLOCK_NAME_PATTERN.test(name);
-
-export const validTimeZone = validChannelTimeZone;
 
 export const validTextBlockConditions = (conditions: TextBlockConditions): boolean => {
   const stream: unknown = conditions.stream;
@@ -69,7 +67,7 @@ const formatterFor = (timeZone: string): Intl.DateTimeFormat => {
   return formatter;
 };
 
-export const localTimeParts = (now: number, timeZone: string): { weekday: number; minuteOfDay: number } | null => {
+const localTimeParts = (now: number, timeZone: string): { weekday: number; minuteOfDay: number } | null => {
   try {
     const parts = formatterFor(timeZone).formatToParts(now);
     const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
@@ -280,13 +278,3 @@ export const validateTextBlockGraph = (
   }
   return null;
 };
-
-export const chooseTextIndex = (length: number, previous: number, randomIndex: (maximumExclusive: number) => number): number => {
-  if (length <= 1) return 0;
-  const selected = Math.max(0, Math.min(length - 1, randomIndex(length - (previous >= 0 && previous < length ? 1 : 0))));
-  return previous >= 0 && previous < length && selected >= previous ? selected + 1 : selected;
-};
-
-export const truncateResolvedText = (text: string): { text: string; truncated: boolean } => text.length <= TEXT_BLOCK_MAXIMUMS.renderedLength
-  ? { text, truncated: false }
-  : { text: `${text.slice(0, TEXT_BLOCK_MAXIMUMS.renderedLength - 1)}…`, truncated: true };

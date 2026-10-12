@@ -1,7 +1,7 @@
 import { schedulePanelResourceBackgroundWork } from "./worker/panel-resources";
 
 export type ServerTimingPhase = "auth" | "d1" | "do" | "helix";
-export type ServerTimingRecord = Record<ServerTimingPhase, number>;
+type ServerTimingRecord = Record<ServerTimingPhase, number>;
 
 declare module "hono" {
   interface ContextVariableMap {

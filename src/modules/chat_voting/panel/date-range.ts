@@ -2,7 +2,7 @@ import type { DashboardLanguage } from "../../../dashboard/locale";
 
 const localeFor = (language: DashboardLanguage): string => (language === "de" ? "de-DE" : "en-US");
 
-export const dateText = (value: string | null, language: DashboardLanguage): string => {
+const dateText = (value: string | null, language: DashboardLanguage): string => {
   if (value === null || !Number.isFinite(Date.parse(value))) return "—";
   return new Intl.DateTimeFormat(localeFor(language), { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
 };

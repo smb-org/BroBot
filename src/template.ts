@@ -4,20 +4,15 @@ import {
   TEMPLATE_DOTTED_VARIABLE_NAME_SOURCE,
 } from "./contracts/template-names";
 
-export {
-  TEMPLATE_BARE_VARIABLE_NAME_PATTERN,
-  TEMPLATE_DOTTED_VARIABLE_NAME_PATTERN,
-} from "./contracts/template-names";
+export type { TemplateContext } from "./contracts/values";
 
-export type { TemplateContext, TemplateVariableSource } from "./contracts/values";
-
-export interface TemplateVariablePickerLocale {
+interface TemplateVariablePickerLocale {
   label: string;
   description: string;
   sample?: string;
 }
 
-export type TemplateVariablePickerCatalog = Readonly<Record<"de" | "en", TemplateVariablePickerLocale>>;
+type TemplateVariablePickerCatalog = Readonly<Record<"de" | "en", TemplateVariablePickerLocale>>;
 
 export interface TemplateVariable {
   readonly name: string;
@@ -52,7 +47,7 @@ export type TemplateWarning =
 const strictTemplateName = `(?:${TEMPLATE_BARE_VARIABLE_NAME_SOURCE}|${TEMPLATE_DOTTED_VARIABLE_NAME_SOURCE})`;
 const candidateTemplateName = "(?:[A-Za-z0-9_]{1,32}|[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+)";
 export const TEMPLATE_VARIABLE_PATTERN = new RegExp(`\\{(${strictTemplateName})(?: ([^{}\\n]{1,200}))?\\}`, "gu");
-export const TEMPLATE_TOKEN_CANDIDATE_PATTERN = new RegExp(`\\{(${candidateTemplateName})(?: ([^{}\\n]{1,200}))?\\}`, "gu");
+const TEMPLATE_TOKEN_CANDIDATE_PATTERN = new RegExp(`\\{(${candidateTemplateName})(?: ([^{}\\n]{1,200}))?\\}`, "gu");
 
 const matches = (text: string, pattern: RegExp): RegExpExecArray[] => {
   const expression = new RegExp(pattern.source, "g");
@@ -283,11 +278,3 @@ export const templateWarnings = (
   if (worstCaseLength > 500) warnings.push({ field, code: "template_worst_case_too_long", worstCaseLength });
   return warnings;
 };
-
-export const templateFieldsWarnings = (
-  settings: Readonly<Record<string, unknown>>,
-  fields: Readonly<Record<string, readonly TemplateVariable[]>>,
-): TemplateWarning[] => Object.entries(fields).flatMap(([field, variables]) => {
-  const value = settings[field];
-  return typeof value === "string" ? templateWarnings(field, value, variables) : [];
-});

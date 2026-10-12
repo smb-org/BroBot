@@ -17,7 +17,6 @@ export const parseCurrencyAmount = (input: string): number | null => {
   const amount = Number(firstArgument.replace(",", "."));
   return Number.isFinite(amount) && amount >= 0 && amount <= 1_000_000_000_000 ? amount : null;
 };
-
 const convert = async (parameter: string, context: ModuleTemplateValueContext): Promise<string> => {
   const match = /^([A-Za-z]{3}) ([A-Za-z]{3})$/u.exec(parameter);
   if (match === null) return unavailableText[(await context.channelLanguage())];
@@ -68,5 +67,3 @@ export const currencyModule: BotModule<typeof settingsSchema> = {
     ? convert(parameter, context)
     : Promise.resolve(null),
 };
-
-export { exchangeRate } from "./adapters/rates";

@@ -8,7 +8,7 @@ import { droppedPacketDelta } from "./history";
 
 const unhealthy = (phase: BelaboxPhase): boolean => phase === "low" || phase === "disconnected";
 
-export const belaboxPhase = (
+const belaboxPhase = (
   sample: Pick<BelaboxSample, "connected" | "bitrateKbps">,
   classified = true,
   lowBitrateKbps = BELABOX_DEFAULT_LOW_BITRATE_KBPS,

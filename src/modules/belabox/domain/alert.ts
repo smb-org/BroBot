@@ -1,7 +1,7 @@
 import type { BelaboxFetchFailureReason } from "../contracts";
 
-export type BelaboxAlertKind = "low" | "disconnect";
-export type BelaboxAlertPhase = "ok" | "pending" | "alarm" | "recovering";
+type BelaboxAlertKind = "low" | "disconnect";
+type BelaboxAlertPhase = "ok" | "pending" | "alarm" | "recovering";
 export type BelaboxAlertMessageKind = "low" | "disconnect" | "recovery";
 export type BelaboxAlertIdempotencyKind = "alert" | "escalate" | "recovered";
 

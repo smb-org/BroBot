@@ -6,7 +6,6 @@ import { chatVotingDurationVariableCatalog, chatVotingOptionsVariableCatalog, ch
 import { chatVotingAlarmDefinition, chatVotingStartAnnouncementAlarmDefinition, processChatVotingMessage } from "./service";
 import { CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_MODULE_ID, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingPresetForKind, chatVotingSettingsSchema } from "./contracts";
 import { chatVotingOverlayElements } from "./overlay/element";
-import { chatVotingOverlayLabels } from "./overlay/locale";
 import { chatVotingRoutes } from "./routes";
 
 const settingsSchema = chatVotingSettingsSchema;
@@ -87,7 +86,6 @@ const initialTallyState = async (
     voterCount: vote.voterCount,
   };
 };
-
 export const chatVotingModule: BotModule<typeof settingsSchema> = {
   id: CHAT_VOTING_MODULE_ID,
   navigationCategory: "interaction",
@@ -122,7 +120,3 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
   })),
   handleEvent: (event, context) => processChatVotingMessage(event, createChatVotingRepository(context.DB), context),
 };
-
-export { CHAT_VOTING_ELEMENT_KIND };
-export type { ChatVote, ChatVoteCloseReason, ChatVotePreset, ChatVotingSettings } from "./contracts";
-export { chatVotingOverlayLabels };

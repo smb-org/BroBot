@@ -1,6 +1,6 @@
 import type { BelaboxStatsUrlError } from "../contracts";
 
-export const BELABOX_STATS_HOST_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.belabox\.net$/u;
+const BELABOX_STATS_HOST_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.belabox\.net$/u;
 const BELABOX_STATS_PATH_PATTERN = /^\/[A-Za-z0-9._~-]{8,256}$/u;
 const RAW_URL_PATTERN = /^[A-Za-z][A-Za-z\d+.-]*:\/\/([^/?#\\]*)(\/[^?#\\]*)?$/u;
 

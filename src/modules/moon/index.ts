@@ -51,7 +51,6 @@ const resolveValues = async (names: readonly string[], context: ModuleTemplateVa
   });
   return Object.fromEntries(names.flatMap((name) => resolved.values[name] === undefined ? [] : [[name, resolved.values[name]]]));
 };
-
 const resolveOverlayValues: NonNullable<BotModule<typeof settingsSchema>["resolveOverlayTemplateValues"]> = async (names, context) => {
   const requested = new Set(names);
   const nextHour = new Date((Math.floor(context.now / (60 * 60 * 1_000)) + 1) * 60 * 60 * 1_000).toISOString();
@@ -114,6 +113,3 @@ export const moonModule: BotModule<typeof settingsSchema> = {
   routes: moonRoutes,
   panel: () => import("./panel/settings"),
 };
-
-export { calculateMoonDay, calculateMoonPosition, calculateMoonState, localDateInTimeZone, nextMoonEvents, resolveMoonTemplateValues, shiftLocalDate } from "./domain";
-export type { MoonDay, MoonLocation, MoonPosition, ResolvedMoonTemplateValues } from "./domain";

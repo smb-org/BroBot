@@ -10,7 +10,7 @@
  * as `dashboard/locale.ts` -- and is allowlisted in the German guard
  * (`tests/unit/german-guard.test.ts`) on that basis.
  */
-export const OAUTH_ERROR_TEXTS = {
+const OAUTH_ERROR_TEXTS = {
   oauth_state_missing: { de: "OAuth-State fehlt.", en: "OAuth state is missing." },
   oauth_state_invalid: { de: "OAuth-State ist ungültig oder abgelaufen.", en: "OAuth state is invalid or expired." },
   oauth_transaction_invalid: {
@@ -68,7 +68,7 @@ export const OAUTH_ERROR_TEXTS = {
 
 export type OAuthErrorKey = keyof typeof OAUTH_ERROR_TEXTS;
 
-export const requestLanguage = (request: Request): "de" | "en" =>
+const requestLanguage = (request: Request): "de" | "en" =>
   /\ben\b/i.test((request.headers.get("Accept-Language") ?? "").split(",")[0] ?? "") ? "en" : "de";
 
 export const oauthError = (

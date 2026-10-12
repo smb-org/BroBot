@@ -16,7 +16,7 @@ import {
   setBotChannelStatus,
 } from "./db/bot-channel-status";
 import { decryptJson, encryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
-import { BOT_TOKEN_REFRESH_THRESHOLD_MS } from "../maintenance-policy";
+import { TOKEN_MAINTENANCE_WINDOW_MS } from "../maintenance-policy";
 import { truncateTo200Chars } from "../text";
 import { missingBotScopes } from "./auth/oauth";
 import { helixRequest } from "./twitch/helix";
@@ -92,7 +92,7 @@ export const logMaintenanceError = (
   );
 };
 
-export const MODERATOR_STATUS_REQUEST_TIMEOUT_MS = 5_000;
+const MODERATOR_STATUS_REQUEST_TIMEOUT_MS = 5_000;
 
 const isFinitePositiveNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value) && value > 0;
@@ -112,7 +112,7 @@ export const shouldRefreshBotToken = (expiresAt: string, now: string): boolean =
   const expiresAtMs = Date.parse(expiresAt);
   const nowMs = Date.parse(now);
   return !Number.isFinite(expiresAtMs) || !Number.isFinite(nowMs) ||
-    expiresAtMs <= nowMs + BOT_TOKEN_REFRESH_THRESHOLD_MS;
+    expiresAtMs <= nowMs + TOKEN_MAINTENANCE_WINDOW_MS;
 };
 
 export const refreshBotToken = async (

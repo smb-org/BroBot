@@ -1,6 +1,6 @@
 import type { ModuleExternalFetchBudget } from "../modules/contract";
 
-export const MAX_EXTERNAL_FETCHES_PER_INVOCATION = 3;
+const MAX_EXTERNAL_FETCHES_PER_INVOCATION = 3;
 
 export const createModuleExternalFetchBudget = (): ModuleExternalFetchBudget => {
   let count = 0;

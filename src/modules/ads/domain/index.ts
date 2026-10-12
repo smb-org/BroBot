@@ -56,7 +56,7 @@ export const decideAdBreak = (
   };
 };
 
-export interface AdPrewarningSchedule {
+interface AdPrewarningSchedule {
   nextAdAt: string | null;
   lastAdAt: string | null;
 }

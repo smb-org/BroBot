@@ -1,9 +1,8 @@
 import { z } from "zod";
 import type { ChatOutputTarget } from "../../contract";
 
-export const TIMER_NAME_MAX_LENGTH = 60;
 export const TIMER_MAXIMUM_COUNT = 50;
-export const TIMER_MINUTES_MAXIMUM = 24 * 60;
+const TIMER_MINUTES_MAXIMUM = 24 * 60;
 export const TIMER_BLOCK_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
 
 const minutes = z.number().int().min(1).max(TIMER_MINUTES_MAXIMUM);

@@ -75,7 +75,7 @@ const dataAt = (state: TextBlockState, now: number): Readonly<Record<string, str
   return values;
 };
 
-export const TextBlockOverlayElement = ({ state: rawState, language = "en" }: ModuleOverlayElementProps): ReactElement | null => {
+const TextBlockOverlayElement = ({ state: rawState, language = "en" }: ModuleOverlayElementProps): ReactElement | null => {
   const parsed = textBlockState(rawState);
   const serverNow = parsed === null ? Number.NaN : Date.parse(parsed.serverNow);
   const [clock, setClock] = useState(() => ({ serverNow: Number.NaN, offset: Number.NaN, now: serverNow }));

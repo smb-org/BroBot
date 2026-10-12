@@ -7,7 +7,7 @@ export const CHAT_VOTING_MODULE_ID = "chat_voting";
 export const CHAT_VOTING_ELEMENT_KIND = "chat_voting.tally";
 export const CHAT_VOTING_ALARM_HANDLER = "close";
 export const CHAT_VOTING_START_ANNOUNCEMENT_HANDLER = "announce_start";
-export const CHAT_VOTING_START_ANNOUNCEMENT_ALARM_PREFIX = "start:";
+const CHAT_VOTING_START_ANNOUNCEMENT_ALARM_PREFIX = "start:";
 
 export const chatVotingStartAnnouncementAlarmKey = (pollId: string): string =>
   `${CHAT_VOTING_START_ANNOUNCEMENT_ALARM_PREFIX}${pollId}`;
@@ -18,8 +18,6 @@ export const chatVotingStartAnnouncementPollId = (alarmKey: string): string | nu
   return /^[A-Za-z0-9_-]{1,128}$/u.test(pollId) ? pollId : null;
 };
 
-export const CHAT_VOTING_MAX_OPTIONS = 9;
-export const CHAT_VOTING_MAX_TEXT_TERMS = 200;
 export const CHAT_VOTING_TITLE_MAX_LENGTH = 80;
 export const CHAT_VOTING_HARD_LIMIT_MS = 4 * 60 * 60 * 1_000;
 export const CHAT_VOTING_BALLOT_RETENTION_MS = 24 * 60 * 60 * 1_000 - 60_000;
@@ -42,17 +40,14 @@ export const DEFAULT_CHAT_VOTING_SETTINGS: ChatVotingSettings = {
   resultTarget: "source_only",
 };
 
-export const CHAT_VOTING_PRESETS = ["yes_no", "scale_5", "options_n", "digit_01", "digit_12", "free_text"] as const;
-export type ChatVotingPreset = (typeof CHAT_VOTING_PRESETS)[number];
+export type ChatVotingPreset = "yes_no" | "scale_5" | "options_n" | "digit_01" | "digit_12" | "free_text";
 export type ChatVotePreset = ChatVotingPreset;
-export const CHAT_VOTING_KINDS = ["yes_no", "options", "free_text"] as const;
-export type ChatVotingKind = (typeof CHAT_VOTING_KINDS)[number];
+export type ChatVotingKind = "yes_no" | "options" | "free_text";
 export const chatVotingKindForPreset = (preset: ChatVotingPreset): ChatVotingKind =>
   preset === "free_text" ? "free_text" : preset === "yes_no" ? "yes_no" : "options";
 export const chatVotingPresetForKind = (kind: ChatVotingKind): ChatVotingPreset =>
   kind === "free_text" ? "free_text" : kind === "yes_no" ? "yes_no" : "options_n";
-export const CHAT_VOTING_TEXT_MODES = ["first_word", "whole_message"] as const;
-export type ChatVotingTextMode = (typeof CHAT_VOTING_TEXT_MODES)[number];
+export type ChatVotingTextMode = "first_word" | "whole_message";
 
 export interface ChatVoteTerm {
   term: string;
@@ -60,8 +55,7 @@ export interface ChatVoteTerm {
   approved: boolean;
 }
 
-export const CHAT_VOTE_CLOSE_REASONS = ["manual", "timer", "limit"] as const;
-export type ChatVoteCloseReason = (typeof CHAT_VOTE_CLOSE_REASONS)[number];
+export type ChatVoteCloseReason = "manual" | "timer" | "limit";
 
 export interface ChatVote {
   id: string;
@@ -89,12 +83,10 @@ export interface ChatVoteDraft extends Omit<ChatVote, "status" | "closedAt" | "c
 }
 
 export const CHAT_VOTE_TEMPLATE_MAXIMUM = 100;
-export const CHAT_VOTE_TEMPLATE_SHORTCUT_MAX_LENGTH = 24;
 export const CHAT_VOTE_TEMPLATE_RESERVED_SHORTCUTS = [
   "end", "help", "again", "yesno", "scale", "text", "word", "message",
 ] as const;
-export const CHAT_VOTE_TEMPLATE_LEGACY_ALIASES = ["yesno", "zeroOne", "oneTwo", "scale", "options"] as const;
-export type ChatVoteTemplateLegacyAlias = (typeof CHAT_VOTE_TEMPLATE_LEGACY_ALIASES)[number];
+type ChatVoteTemplateLegacyAlias = "yesno" | "zeroOne" | "oneTwo" | "scale" | "options";
 
 export interface ChatVoteTemplate {
   id: string;

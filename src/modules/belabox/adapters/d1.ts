@@ -279,9 +279,6 @@ export const getBelaboxStatus = async (db: D1Database, channelId: string): Promi
   };
 };
 
-export const getLatestBelaboxSample = async (db: D1Database, channelId: string): Promise<BelaboxSample | null> =>
-  (await getBelaboxStatus(db, channelId))?.sample ?? null;
-
 export const getBelaboxStreamSession = async (
   db: D1Database,
   channelId: string,

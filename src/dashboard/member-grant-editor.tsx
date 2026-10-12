@@ -8,7 +8,7 @@ import { dashboardCommonTexts } from "./locale";
 import { Button, ChoiceCards, ConfirmDialog, EditorShell, Field } from "./ui";
 import { MemberAvatar } from "./member-avatar";
 
-export interface MemberGrantEditorTexts {
+interface MemberGrantEditorTexts {
   ariaLabel: string;
   title: string;
   searchLabel: string;

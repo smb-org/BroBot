@@ -11,7 +11,7 @@ import {
   nextTimerAt,
   triggerDelayMs,
 } from "./domain";
-import { TIMER_MAXIMUM_COUNT, timerTriggerSchema } from "./contracts";
+import { TIMER_MAXIMUM_COUNT } from "./contracts";
 import type { Timer } from "./contracts";
 import { mapTimerRow, timerMutationInput, validateTimerBlock, type TimerRow } from "./service";
 
@@ -284,5 +284,3 @@ timerRoutes.delete("/timers/:timerId", async (context) => {
   await stub.clearModuleAlarm(MODULE_ID, alarmKeyFor(timerId), revision + 1);
   return context.body(null, 204);
 });
-
-export { timerTriggerSchema };

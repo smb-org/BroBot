@@ -33,7 +33,7 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
     readOnlyReason: "Nur Broadcaster und Verwalter dürfen diese Einstellungen ändern.",
     saveLabel: "Abrufeinstellungen speichern", discardLabel: "Verwerfen", savedLabel: "Abrufeinstellungen gespeichert.",
     pendingLabel: "Wird gespeichert …", invalidMessage: "Bitte korrigiere die markierten Felder.", numberMissing: "Zahl eingeben.",
-    loadError: "Die Abrufeinstellungen konnten nicht geladen werden.", saveError: "Die Abrufeinstellungen konnten nicht gespeichert werden.",
+    saveError: "Die Abrufeinstellungen konnten nicht gespeichert werden.",
     conflictMessage: "Die Abrufeinstellungen wurden inzwischen geändert.", reloadLabel: "Serverstand laden",
     sections: { polling: "Abruf", alerts: "Alarme" },
     fields: {
@@ -66,7 +66,7 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
     readOnlyReason: "Only broadcasters and managers may change these settings.",
     saveLabel: "Save polling settings", discardLabel: "Discard", savedLabel: "Polling settings saved.",
     pendingLabel: "Saving …", invalidMessage: "Please correct the marked fields.", numberMissing: "Enter a number.",
-    loadError: "Polling settings could not be loaded.", saveError: "Polling settings could not be saved.",
+    saveError: "Polling settings could not be saved.",
     conflictMessage: "Polling settings have changed since they were loaded.", reloadLabel: "Load server version",
     sections: { polling: "Polling", alerts: "Alerts" },
     fields: {

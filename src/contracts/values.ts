@@ -2,8 +2,7 @@ export const CHANNEL_ROLES = ["broadcaster", "manager", "operator"] as const;
 export type ChannelRole = (typeof CHANNEL_ROLES)[number];
 
 /** Generic destinations for host-executed chat output actions. */
-export const CHAT_OUTPUT_TARGETS = ["all_chats", "source_only", "where_asked"] as const;
-export type ChatOutputTarget = (typeof CHAT_OUTPUT_TARGETS)[number];
+export type ChatOutputTarget = "all_chats" | "source_only" | "where_asked";
 
 /**
  * Named role thresholds per docs/decisions/0006-rollenschwellen.md, so a
@@ -19,45 +18,35 @@ export const PLATFORM_ASSIGNABLE_ROLES = ["manager", "operator"] as const satisf
 export const canManage = (role: ChannelRole): boolean =>
   (MANAGING_ROLES as readonly ChannelRole[]).includes(role);
 
-export const AUDIT_ACTOR_KINDS = ["member", "platform_admin", "system"] as const;
-export type AuditActorKind = (typeof AUDIT_ACTOR_KINDS)[number];
+export type AuditActorKind = "member" | "platform_admin" | "system";
 
 export const EVENT_TONES = ["info", "warning", "error"] as const;
 export type EventTone = (typeof EVENT_TONES)[number];
 
 /** Persisted Twitch stream state exposed to the channel dashboard. */
-export const CHANNEL_STREAM_STATES = ["online", "offline"] as const;
-export type ChannelStreamState = (typeof CHANNEL_STREAM_STATES)[number];
+export type ChannelStreamState = "online" | "offline";
 
 /** Conditions a registered immediate action can declare before it is rendered as available. */
-export const IMMEDIATE_ACTION_REQUIREMENTS = ["streamLive"] as const;
-export type ImmediateActionRequirement = (typeof IMMEDIATE_ACTION_REQUIREMENTS)[number];
+export type ImmediateActionRequirement = "streamLive";
 
 /** Stable catalogue keys for immediate actions that cannot currently run. */
-export const IMMEDIATE_ACTION_UNAVAILABLE_REASONS = ["stream_offline", "stream_state_unknown"] as const;
-export type ImmediateActionUnavailableReason = (typeof IMMEDIATE_ACTION_UNAVAILABLE_REASONS)[number];
+export type ImmediateActionUnavailableReason = "stream_offline" | "stream_state_unknown";
 
 /** Durations accepted when a channel member enables an operational brake. */
 export const CHANNEL_CONTROL_DURATIONS = ["15m", "1h", "until_stream_end", "unlimited"] as const;
 export type ChannelControlDuration = (typeof CHANNEL_CONTROL_DURATIONS)[number];
 
 /** Groups that organize the template-variable catalog and picker. */
-export const TEMPLATE_VARIABLE_GROUPS = [
-  "context", "stream", "person", "command", "time_random", "event", "channel",
-] as const;
-export type TemplateVariableGroup = (typeof TEMPLATE_VARIABLE_GROUPS)[number];
+export type TemplateVariableGroup = "context" | "stream" | "person" | "command" | "time_random" | "event" | "channel";
 
 /** Template positions supported by the host renderer. */
-export const TEMPLATE_CONTEXTS = ["chat_command", "event", "system"] as const;
-export type TemplateContext = (typeof TEMPLATE_CONTEXTS)[number];
+export type TemplateContext = "chat_command" | "event" | "system";
 
 /** Origins of values shown in template editors. */
-export const TEMPLATE_VARIABLE_SOURCES = ["system", "module", "channel"] as const;
-export type TemplateVariableSource = (typeof TEMPLATE_VARIABLE_SOURCES)[number];
+export type TemplateVariableSource = "system" | "module" | "channel";
 
 /** Closed operations available to text-command variable actions and dashboard controls. */
-export const CHANNEL_VARIABLE_OPERATIONS = ["add", "subtract", "set", "set_argument"] as const;
-export type ChannelVariableOperation = (typeof CHANNEL_VARIABLE_OPERATIONS)[number];
+export type ChannelVariableOperation = "add" | "subtract" | "set" | "set_argument";
 
 export const CHANNEL_VARIABLE_MAXIMUM_COUNT = 50;
 export const CHANNEL_VARIABLE_MINIMUM_VALUE = -999_999_999;
@@ -66,8 +55,7 @@ export const CHANNEL_VARIABLE_MAXIMUM_VALUE = 999_999_999;
 /** Limits for the first stored-overlay editor iteration. */
 export const OVERLAY_MAXIMUM_COUNT = 20;
 export const OVERLAY_ELEMENT_MAXIMUM_COUNT = 20;
-export const OVERLAY_ELEMENT_KINDS = ["variable"] as const;
-export type OverlayElementKind = (typeof OVERLAY_ELEMENT_KINDS)[number] | `${string}.${string}`;
+export type OverlayElementKind = "variable" | `${string}.${string}`;
 
 /** Closed reasons persisted when an overlay access is revoked. */
 export const OVERLAY_ACCESS_REVOCATION_REASONS = ["manual", "overlay_deleted", "replaced"] as const;
@@ -89,20 +77,18 @@ export const SHOUTOUT_FAILURE_REASONS = [
 export type ShoutoutFailureReason = (typeof SHOUTOUT_FAILURE_REASONS)[number];
 
 /** Stable outcomes for a host moderation action or lifted ban. */
-export const MODERATION_FAILURE_REASONS = [
-  "already_banned",
-  "bot_identity_missing",
-  "conflict",
-  "invalid_request",
-  "network_error",
-  "not_moderator",
-  "protected_target",
-  "rate_limited",
-  "timeout",
-  "token_invalid",
-  "twitch_error",
-] as const;
-export type ModerationFailureReason = (typeof MODERATION_FAILURE_REASONS)[number];
+export type ModerationFailureReason =
+  | "already_banned"
+  | "bot_identity_missing"
+  | "conflict"
+  | "invalid_request"
+  | "network_error"
+  | "not_moderator"
+  | "protected_target"
+  | "rate_limited"
+  | "timeout"
+  | "token_invalid"
+  | "twitch_error";
 
 /** Stable reasons for a rejected Start Commercial request. */
 export const COMMERCIAL_FAILURE_REASONS = [
@@ -128,8 +114,7 @@ export type ShoutoutSuppressedReason = (typeof SHOUTOUT_SUPPRESSED_REASONS)[numb
 export const ADS_SKIPPED_REASONS = ["duration_zero", "duration_invalid", "start_invalid"] as const;
 export type AdsSkippedReason = (typeof ADS_SKIPPED_REASONS)[number];
 
-export const IDENTITY_STATUSES = ["connected", "revoked", "error"] as const;
-export type IdentityStatus = (typeof IDENTITY_STATUSES)[number];
+export type IdentityStatus = "connected" | "revoked" | "error";
 
 export type EventSubAuthorizationIdentity =
   | { kind: "bot"; userId: string }
@@ -341,7 +326,7 @@ export const AUDIT_ACTIONS = [
   "overlay.legacy.imported",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
-export type ModuleSettingsChangedAction = `${string}.settings_changed`;
+type ModuleSettingsChangedAction = `${string}.settings_changed`;
 export type AuditWriteAction = AuditAction | ModuleSettingsChangedAction;
 
 /**
@@ -366,99 +351,97 @@ export type AuditArea = (typeof AUDIT_AREAS)[number];
  * falls back to a generic, per-call-site localized text instead of ever
  * showing raw server text.
  */
-export const API_ERROR_CODES = [
-  "session_missing",
-  "websocket_origin_invalid",
-  "realtime_protocol_unsupported",
-  "csrf_invalid",
-  "channel_missing",
-  "channel_access_denied",
-  "platform_access_denied",
-  "panel_request_not_allowed",
-  "pagination_limit_invalid",
-  "pagination_cursor_invalid",
-  "twitch_login_invalid",
-  "twitch_user_not_found",
-  "twitch_user_search_failed",
-  "channel_not_found",
-  "broadcaster_role_immutable",
-  "broadcaster_role_change_requires_broadcaster",
-  "mutation_failed",
-  "member_changed_concurrently",
-  "release_input_invalid",
-  "channel_already_released",
-  "channel_release_failed",
-  "full_consent_invalid",
-  "full_consent_already_set",
-  "member_or_role_invalid",
-  "member_already_exists",
-  "member_management_denied",
-  "self_membership_denied",
-  "member_add_failed",
-  "role_invalid",
-  "member_not_found",
-  "role_already_set",
-  "self_role_escalation_denied",
-  "last_broadcaster_cannot_be_demoted",
-  "last_broadcaster_cannot_be_removed",
-  "event_origin_invalid",
-  "event_tone_invalid",
-  "audit_area_invalid",
-  "moderator_status_check_denied",
-  "moderator_status_check_rate_limited",
-  "moderator_status_check_failed",
-  "module_management_denied",
-  "module_unknown",
-  "module_not_configured",
-  "module_disabled",
-  "module_settings_invalid",
-  "module_settings_changed_concurrently",
-  "module_enabled_field_invalid",
-  "module_mandatory",
-  "module_changed_concurrently",
-  "command_management_denied",
-  "command_data_invalid",
-  "command_already_exists",
-  "command_alias_conflict",
-  "command_creation_denied",
-  "command_not_found",
-  "command_update_denied",
-  "command_changed_concurrently",
-  "command_delete_denied",
-  "variable_data_invalid",
-  "variable_not_found",
-  "variable_already_exists",
-  "variable_limit_reached",
-  "variable_in_use",
-  "variable_changed_concurrently",
-  "variable_management_denied",
-  "variable_value_change_denied",
-  "ad_schedule_read_failed",
-  "ad_snooze_denied",
-  "ad_snooze_failed",
-  "commercial_length_invalid",
-  "commercial_start_denied",
-  "commercial_start_failed",
-  "commercial_stream_offline",
-  "clip_create_failed",
-  "clip_stream_offline",
-  "channel_control_input_invalid",
-  "channel_control_changed_concurrently",
-  "shoutout_send_failed",
-  "overlay_token_manage_denied",
-  "overlay_expiry_invalid",
-  "overlay_revocation_reason_invalid",
-  "overlay_token_not_found",
-  "overlay_token_invalid",
-  "overlay_variable_not_found",
-  "overlay_management_denied",
-  "overlay_css_invalid",
-  "overlay_data_invalid",
-  "overlay_not_found",
-  "overlay_token_already_bound",
-  "overlay_limit_reached",
-  "overlay_element_limit_reached",
-  "overlay_changed_concurrently",
-  "unknown_api_route",
-] as const;
-export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
+export type ApiErrorCode =
+  | "session_missing"
+  | "websocket_origin_invalid"
+  | "realtime_protocol_unsupported"
+  | "csrf_invalid"
+  | "channel_missing"
+  | "channel_access_denied"
+  | "platform_access_denied"
+  | "panel_request_not_allowed"
+  | "pagination_limit_invalid"
+  | "pagination_cursor_invalid"
+  | "twitch_login_invalid"
+  | "twitch_user_not_found"
+  | "twitch_user_search_failed"
+  | "channel_not_found"
+  | "broadcaster_role_immutable"
+  | "broadcaster_role_change_requires_broadcaster"
+  | "mutation_failed"
+  | "member_changed_concurrently"
+  | "release_input_invalid"
+  | "channel_already_released"
+  | "channel_release_failed"
+  | "full_consent_invalid"
+  | "full_consent_already_set"
+  | "member_or_role_invalid"
+  | "member_already_exists"
+  | "member_management_denied"
+  | "self_membership_denied"
+  | "member_add_failed"
+  | "role_invalid"
+  | "member_not_found"
+  | "role_already_set"
+  | "self_role_escalation_denied"
+  | "last_broadcaster_cannot_be_demoted"
+  | "last_broadcaster_cannot_be_removed"
+  | "event_origin_invalid"
+  | "event_tone_invalid"
+  | "audit_area_invalid"
+  | "moderator_status_check_denied"
+  | "moderator_status_check_rate_limited"
+  | "moderator_status_check_failed"
+  | "module_management_denied"
+  | "module_unknown"
+  | "module_not_configured"
+  | "module_disabled"
+  | "module_settings_invalid"
+  | "module_settings_changed_concurrently"
+  | "module_enabled_field_invalid"
+  | "module_mandatory"
+  | "module_changed_concurrently"
+  | "command_management_denied"
+  | "command_data_invalid"
+  | "command_already_exists"
+  | "command_alias_conflict"
+  | "command_creation_denied"
+  | "command_not_found"
+  | "command_update_denied"
+  | "command_changed_concurrently"
+  | "command_delete_denied"
+  | "variable_data_invalid"
+  | "variable_not_found"
+  | "variable_already_exists"
+  | "variable_limit_reached"
+  | "variable_in_use"
+  | "variable_changed_concurrently"
+  | "variable_management_denied"
+  | "variable_value_change_denied"
+  | "ad_schedule_read_failed"
+  | "ad_snooze_denied"
+  | "ad_snooze_failed"
+  | "commercial_length_invalid"
+  | "commercial_start_denied"
+  | "commercial_start_failed"
+  | "commercial_stream_offline"
+  | "clip_create_failed"
+  | "clip_stream_offline"
+  | "channel_control_input_invalid"
+  | "channel_control_changed_concurrently"
+  | "shoutout_send_failed"
+  | "overlay_token_manage_denied"
+  | "overlay_expiry_invalid"
+  | "overlay_revocation_reason_invalid"
+  | "overlay_token_not_found"
+  | "overlay_token_invalid"
+  | "overlay_variable_not_found"
+  | "overlay_management_denied"
+  | "overlay_css_invalid"
+  | "overlay_data_invalid"
+  | "overlay_not_found"
+  | "overlay_token_already_bound"
+  | "overlay_limit_reached"
+  | "overlay_element_limit_reached"
+  | "overlay_changed_concurrently"
+  | "unknown_api_route";

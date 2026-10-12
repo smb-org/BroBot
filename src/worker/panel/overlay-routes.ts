@@ -43,7 +43,7 @@ const nameSchema = z.string().trim().min(1).max(40);
 
 const variableElementConfigSchema = z.record(z.string(), z.json());
 
-export const parseOverlayElementConfig = (kind: string, raw: unknown): JsonObject | null => {
+const parseOverlayElementConfig = (kind: string, raw: unknown): JsonObject | null => {
   if (kind === "variable") {
     const parsed = variableElementConfigSchema.safeParse(raw);
     return parsed.success ? parsed.data : null;

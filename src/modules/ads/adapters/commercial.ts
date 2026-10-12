@@ -1,7 +1,7 @@
 import type { HelixRequest, ModuleRouteVariables } from "../contract";
 import type { CommercialFailureReason } from "../../../contracts/values";
 
-export const START_COMMERCIAL_URL = "https://api.twitch.tv/helix/channels/commercial";
+const START_COMMERCIAL_URL = "https://api.twitch.tv/helix/channels/commercial";
 
 /** Twitch's own accepted lengths (seconds) for Start Commercial. */
 export const COMMERCIAL_LENGTHS = [30, 60, 90, 120, 150, 180] as const;

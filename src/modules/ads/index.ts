@@ -25,13 +25,7 @@ const templateUsageSources = async (db: D1Database, channelId: string): Promise<
   });
 };
 
-export { decideAdBreak, decideAdPrewarning, renderAdBreakText, renderPrewarningText } from "./domain";
 export { processAdBreak } from "./service";
-export type { AdsSettings, AdBreaksEvent } from "./contracts";
-export type { LastAdBreak, AdsSchedule, AdsScheduleResponse } from "./contracts";
-export { ADS_OPTIONAL_BROADCASTER_SCOPES, ADS_TEMPLATE_FIELDS, ADS_VARIABLES } from "./contracts";
-export { createAdCountdownOverlayAction } from "./overlay/countdown-action";
-export { ADS_COUNTDOWN_ELEMENT_KIND } from "./overlay/kinds";
 
 export const adsModule: BotModule<typeof adsSettingsSchema> = {
   id: "ads",

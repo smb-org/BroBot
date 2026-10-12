@@ -1,19 +1,19 @@
 export const OVERLAY_STYLE_BEGIN_MARKER = "/* brobot:style:begin - managed by the style editor, changes here are overwritten */";
 export const OVERLAY_STYLE_END_MARKER = "/* brobot:style:end */";
 
-export interface OverlayStyleStroke {
+interface OverlayStyleStroke {
   width: number;
   color: string;
 }
 
-export interface OverlayStyleShadow {
+interface OverlayStyleShadow {
   x: number;
   y: number;
   blur: number;
   color: string;
 }
 
-export interface OverlayStyleBackground {
+interface OverlayStyleBackground {
   color: string;
   opacityPercent: number;
 }

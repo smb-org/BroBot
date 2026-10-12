@@ -17,7 +17,7 @@ export const e2eWorkerPort = process.env.WORKER_PORT ?? "8787";
 export const e2eWorkerOrigin = `http://127.0.0.1:${e2eWorkerPort}`;
 export const e2eOverlayToken = testKey(7);
 export const e2eChannelId = "channel-e2e";
-export const e2eOverlayId = "overlay-e2e";
+const e2eOverlayId = "overlay-e2e";
 export const e2eWorkerEnvironment: Record<string, string> = {
   TWITCH_CLIENT_ID: "e2e-twitch-client-id",
   TWITCH_CLIENT_SECRET: "e2e-twitch-client-secret",

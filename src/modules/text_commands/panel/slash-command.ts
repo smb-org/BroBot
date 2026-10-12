@@ -2,7 +2,7 @@ import type { TextCommandKind, TextCommandResponseType, TextCommandVariableActio
 import type { TextCommandMinimumTier } from "../contracts";
 
 export const SLASH_COMMAND_NAMES = ["timeout", "announce", "shoutout"] as const;
-export type SlashCommandName = (typeof SLASH_COMMAND_NAMES)[number];
+type SlashCommandName = (typeof SLASH_COMMAND_NAMES)[number];
 
 export type LeadingSlashCommand =
   | { status: "none" }

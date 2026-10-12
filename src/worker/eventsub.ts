@@ -17,16 +17,11 @@ import {
   type EventSubRevocationRecord,
 } from "./db/eventsub-state";
 
-export {
-  fetchEventSubSubscriptions,
-  listDesiredEventSubTargets,
-  maintainEventSubSubscriptions,
-  reconcileEventSubSubscriptions,
-} from "./eventsub-subscriptions";
+export { listDesiredEventSubTargets } from "./eventsub-subscriptions";
 
-export const EVENTSUB_REPLAY_WINDOW_MS = 10 * 60 * 1000;
+const EVENTSUB_REPLAY_WINDOW_MS = 10 * 60 * 1000;
 /** Retain twice the replay window: the second window is a clock-skew reserve. */
-export const EVENTSUB_REPLAY_RETENTION_FACTOR = 2;
+const EVENTSUB_REPLAY_RETENTION_FACTOR = 2;
 export const eventSubMessageCutoff = (
   now: string,
   replayWindowMs: number = EVENTSUB_REPLAY_WINDOW_MS,
@@ -36,7 +31,7 @@ export const eventSubMessageCutoff = (
 // Twitch payloads are small; 64 KiB leaves plenty of headroom for metadata
 // while still preventing the unauthenticated input from growing unbounded.
 export const EVENTSUB_MAX_BODY_BYTES = 64 * 1024;
-export const EVENTSUB_TIMESTAMP_SKEW_TOLERANCE_MS = 30 * 1000;
+const EVENTSUB_TIMESTAMP_SKEW_TOLERANCE_MS = 30 * 1000;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -51,7 +46,7 @@ const decodeHex = (value: string): Uint8Array => {
 };
 
 /** Compares byte sequences of equal length without breaking off at the first difference. */
-export const constantTimeEqual = (left: Uint8Array, right: Uint8Array): boolean => {
+const constantTimeEqual = (left: Uint8Array, right: Uint8Array): boolean => {
   const length = Math.max(left.byteLength, right.byteLength);
   let difference = left.byteLength ^ right.byteLength;
   for (let index = 0; index < length; index += 1) {
@@ -65,7 +60,7 @@ export const constantTimeEqual = (left: Uint8Array, right: Uint8Array): boolean 
  * match, the remaining keys are still checked, so the runtime doesn't
  * depend on which key is the active one.
  */
-export const verifyEventSubSignature = async (
+const verifyEventSubSignature = async (
   messageId: string,
   timestamp: string,
   rawBody: Uint8Array,

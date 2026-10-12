@@ -5,7 +5,7 @@ import { sunModuleCatalog } from "../contracts/catalog";
 // Shared with moon and text_library so a DST-at-midnight fix lives in one place.
 export { localMidnightInTimeZone };
 
-export type SolarPolarState = "normal" | "day" | "night";
+type SolarPolarState = "normal" | "day" | "night";
 
 export interface SunDay {
   localDate: string;

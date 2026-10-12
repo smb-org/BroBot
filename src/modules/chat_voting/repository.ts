@@ -113,8 +113,8 @@ const mapTemplateRow = (row: ChatVoteTemplateRow): ChatVoteTemplate => ({
 export const chatVoteTemplateSelectColumns = `id, channel_id, shortcut, title, labels, free_text_mode, duration_seconds,
                                              revision, legacy_alias, last_used_at, created_at, updated_at`;
 
-export type ChatVoteTemplateWriteStatus = "saved" | "created" | "limit" | "conflict" | "shortcut_conflict" | "missing" | "unauthorized";
-export type ChatVoteTemplateSaveResult =
+type ChatVoteTemplateWriteStatus = "saved" | "created" | "limit" | "conflict" | "shortcut_conflict" | "missing" | "unauthorized";
+type ChatVoteTemplateSaveResult =
   | { status: "saved"; template: ChatVoteTemplate }
   | { status: "shortcut_conflict" }
   | { status: "conflict" }

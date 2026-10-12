@@ -4,8 +4,8 @@ import { useCallback, useState } from "react";
 import { queryKeys } from "./keys";
 
 export type ModuleQueryFunction<Value> = (signal: AbortSignal) => Promise<Value>;
-export type ModuleQueryRevision = number | null;
-export interface ModuleQueryPart {
+type ModuleQueryRevision = number | null;
+interface ModuleQueryPart {
   moduleId: string;
   part: string;
 }

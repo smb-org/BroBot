@@ -1,7 +1,7 @@
 import type { HelixRequest, ModuleRouteVariables } from "../contract";
 
-export const AD_SCHEDULE_URL = "https://api.twitch.tv/helix/channels/ads";
-export const SNOOZE_NEXT_AD_URL = "https://api.twitch.tv/helix/channels/ads/schedule/snooze";
+const AD_SCHEDULE_URL = "https://api.twitch.tv/helix/channels/ads";
+const SNOOZE_NEXT_AD_URL = "https://api.twitch.tv/helix/channels/ads/schedule/snooze";
 
 export interface AdSchedule {
   nextAdAt: string | null;

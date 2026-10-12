@@ -57,7 +57,7 @@ const lockReason = (
   return null;
 };
 
-export const ChatVotingPanel = (properties: ModulePanelProperties): ReactElement =>
+const ChatVotingPanel = (properties: ModulePanelProperties): ReactElement =>
   <ChatVotingPanelForChannel key={properties.channelId} {...properties} />;
 
 const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = true }: ModulePanelProperties): ReactElement => {

@@ -8,7 +8,7 @@ import {
 } from "../contracts";
 
 /** An entry whose pattern matched the text but was excluded by the game filter. */
-export interface FaqSkippedMatch {
+interface FaqSkippedMatch {
   entry: FaqEntry;
   matchedPattern: string;
 }

@@ -1,6 +1,6 @@
 import { Chip as MantineChip, Group as MantineGroup } from "@mantine/core";
 
-export interface ChipGroupOption {
+interface ChipGroupOption {
   value: string;
   label: string;
 }

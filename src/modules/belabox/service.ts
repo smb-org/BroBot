@@ -375,7 +375,7 @@ type StoredPollOutcome =
   | { kind: "secret_changed" }
   | { kind: "conflict" };
 
-export type BelaboxPollInvocation = {
+type BelaboxPollInvocation = {
   reason: "check_now" | "on_demand" | "connection_test" | "configuration_changed";
   statsUrl?: string;
 };

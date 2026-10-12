@@ -1,6 +1,6 @@
 import { helixRequest } from "./twitch/helix";
 
-export const CREATE_CLIP_URL = "https://api.twitch.tv/helix/clips";
+const CREATE_CLIP_URL = "https://api.twitch.tv/helix/clips";
 
 export interface CreateClipResult {
   created: boolean;

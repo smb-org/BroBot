@@ -32,7 +32,7 @@ export interface SettingsEditorSpec<Settings> {
   sections: readonly { id: string; icon: IconName; fields: readonly SettingsFieldSpec<Settings>[] }[];
 }
 
-export interface SettingsFieldText {
+interface SettingsFieldText {
   label: string;
   hint: string;
   unit?: string;
@@ -53,7 +53,7 @@ export interface SettingsFieldText {
   variables?: readonly TemplateVariableOption[];
 }
 
-export interface SettingsEditorTexts {
+interface SettingsEditorTexts {
   sections: Readonly<Record<string, string>>;
   fields: Readonly<Record<string, SettingsFieldText>>;
 }
@@ -69,7 +69,6 @@ export interface SettingsEditorCatalog extends SettingsEditorTexts {
   invalidMessage: string;
   numberMissing: string;
   issueLabels: { error: string; warning: string };
-  loadError: string;
   saveError: string;
   conflictMessage: string;
   reloadLabel: string;

@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { AdsCountdown } from "../../src/modules/ads/overlay/countdown";
+import AdsCountdown from "../../src/modules/ads/overlay/countdown";
 import AdsCountdownEditor from "../../src/modules/ads/overlay/countdown-editor";
 
 const variableCss = readFileSync(resolve(process.cwd(), "src/overlay/variable.css"), "utf8");

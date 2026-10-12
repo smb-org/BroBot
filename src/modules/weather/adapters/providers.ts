@@ -7,12 +7,12 @@ export interface WeatherCoordinates {
   longitude: number;
 }
 
-export interface WeatherValidators {
+interface WeatherValidators {
   etag: string | null;
   lastModified: string | null;
 }
 
-export interface WeatherProviderResponse {
+interface WeatherProviderResponse {
   notModified: boolean;
   weather?: NormalizedWeather;
   expiresAt: number | null;

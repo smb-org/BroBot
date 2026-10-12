@@ -43,7 +43,7 @@ export interface OverlayTokenRecord {
   language: ModuleLanguage;
 }
 
-export interface ActiveOverlayTokenRecord {
+interface ActiveOverlayTokenRecord {
   tokenId: string;
   name: null;
   createdAt: string;

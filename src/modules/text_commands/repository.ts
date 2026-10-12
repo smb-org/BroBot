@@ -7,7 +7,7 @@ import type {
   PrepareTextCommandVariableChange,
 } from "./contracts";
 
-export type TextCommandMutationReason =
+type TextCommandMutationReason =
   | "already_exists"
   | "not_found"
   | "conflict"

@@ -2,7 +2,7 @@ import type { ModuleStreamState } from "../../modules/contract";
 import { prepareBindPendingStreamControls } from "./channel-controls";
 
 export type StoredStreamState = Exclude<ModuleStreamState, "unknown">;
-export type StreamStateSource = "eventsub" | "helix";
+type StreamStateSource = "eventsub" | "helix";
 
 export interface StoredStreamStateRecord {
   state: StoredStreamState;
@@ -73,7 +73,7 @@ const compareTimestampOrders = (left: TimestampOrder, right: TimestampOrder): nu
       : compareFractions(left.fraction, right.fraction);
 
 /** Timestamp identity fallback for rows written before Twitch stream ids were stored. */
-export const timestampEpochMilliseconds = (value: string | null): number | null => {
+const timestampEpochMilliseconds = (value: string | null): number | null => {
   if (value === null) return null;
   const milliseconds = Date.parse(value);
   return Number.isFinite(milliseconds) ? milliseconds : null;
@@ -278,7 +278,7 @@ export const writeHelixStreamStateIfUnknown = async (
  * from Helix observations. The `changed_at` guard prevents a poll from
  * replacing a transition whose timestamp is later than the poll time.
  */
-export const prepareRefreshHelixStreamState = (
+const prepareRefreshHelixStreamState = (
   db: D1Database,
   channelId: string,
   state: StoredStreamState,

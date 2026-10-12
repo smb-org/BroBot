@@ -7,7 +7,7 @@ import {
   type OverlayElementKind,
 } from "../../contracts/values";
 
-export type OverlayJsonObject = Readonly<Record<string, unknown>>;
+type OverlayJsonObject = Readonly<Record<string, unknown>>;
 
 export interface OverlayDraftElement {
   id: string;
@@ -185,21 +185,6 @@ export const hasChannelVariableForOverlay = async (
   const row = await db.prepare(
     "SELECT 1 AS present FROM channel_variables WHERE channel_id = ? AND name = ?",
   ).bind(channelId, variableName).first<{ present: number }>();
-  return row !== null;
-};
-
-export const overlayUsesVariable = async (
-  db: D1Database,
-  channelId: string,
-  overlayId: string,
-  variableName: string,
-): Promise<boolean> => {
-  const row = await db.prepare(
-    `SELECT 1 AS present
-       FROM overlay_elements
-      WHERE channel_id = ? AND overlay_id = ? AND variable_name = ?
-      LIMIT 1`,
-  ).bind(channelId, overlayId, variableName).first<{ present: number }>();
   return row !== null;
 };
 

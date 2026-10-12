@@ -18,7 +18,6 @@ export interface TextCommandsTexts {
   details: (name: string) => string;
   add: string;
   empty: string;
-  load: string;
   loadError: string;
   templateVariablesLoadError: string;
   saveError: string;
@@ -46,7 +45,6 @@ export interface TextCommandsTexts {
   responseMissing: string;
   fieldTooLong: string;
   minimumTier: string;
-  minimumTierLocked: string;
   tierLabels: Record<TextCommandMinimumTier, string>;
   tierSubjects: Record<ModuleChatStatus, string>;
   tierDescription: (tier: TextCommandMinimumTier, subjects: readonly string[]) => string;
@@ -57,7 +55,6 @@ export interface TextCommandsTexts {
   responseTypeLabels: Record<TextCommandResponseType, string>;
   responseTypeHints: Record<TextCommandResponseType, string>;
   announcementWarning: string;
-  botIsModerator: string;
   streamCondition: string;
   streamLabels: Record<TextCommandStreamCondition, string>;
   streamHints: Record<TextCommandStreamCondition, string>;
@@ -68,7 +65,6 @@ export interface TextCommandsTexts {
   libraryText: string;
   libraryTextPlaceholder: string;
   insertLibraryText: string;
-  noLibraryTexts: string;
   cooldown: string;
   userCooldown: string;
   cooldownHint: string;
@@ -83,9 +79,6 @@ export interface TextCommandsTexts {
   aliasInvalid: (trigger: string) => string;
   aliasIsName: string;
   aliasHint: string;
-  aliasCount: (count: number, max: number) => string;
-  aliasAtLimit: string;
-  aliasDuplicate: (alias: string) => string;
   aliasRemove: (alias: string) => string;
   aliasList: string;
   delete: string;
@@ -103,7 +96,6 @@ export interface TextCommandsTexts {
   create: string;
   discard: string;
   saved: string;
-  saving: string;
   pending: string;
   invalid: string;
   issueError: string;
@@ -126,12 +118,10 @@ export interface TextCommandsTexts {
   lastUsed: string;
   previewLabel: string;
   previewSpeaker: string;
-  statusLabels: Record<ModuleChatStatus, string>;
   streamAny: string;
   streamOnline: string;
   streamOffline: string;
   cooldownOff: string;
-  notModerator: string;
   textAreaMessages: TextAreaMessages;
   variableAction: string;
   variableSelect: string;
@@ -144,7 +134,6 @@ export interface TextCommandsTexts {
   variableSilentHint: string;
   variableEveryoneWarning: string;
   timeoutAction: string;
-  timeoutActionHint: string;
   timeoutMinSeconds: string;
   timeoutMaxSeconds: string;
   timeoutDuration: string;
@@ -200,7 +189,7 @@ const templateMessages: LocaleCatalog<TextAreaMessages> = {
 const catalog: LocaleCatalog<TextCommandsTexts> = {
   de: {
     title: "Textbefehle", search: "Befehle suchen", activeFilters: "Aktive Filter:", resetFilters: "Zurücksetzen", countSuffix: "Befehle", filteredSuffix: "Befehle", tabs: { settings: "Einstellungen", advanced: "Erweitert" }, list: "Befehle", details: (name) => `Eigenschaften von !${name}`, add: "Befehl anlegen", empty: "Noch keine Textbefehle angelegt.",
-    load: "Textbefehle werden geladen …", loadError: "Die Textbefehle konnten nicht geladen werden.", templateVariablesLoadError: "Vorlagenvariablen konnten nicht geladen werden.",
+    loadError: "Die Textbefehle konnten nicht geladen werden.", templateVariablesLoadError: "Vorlagenvariablen konnten nicht geladen werden.",
     saveError: "Der Textbefehl konnte nicht gespeichert werden.", deleteError: "Der Textbefehl konnte nicht gelöscht werden.",
     name: "Name", aliases: "Aliase", templateFieldLabels: { usageText: "Antwort bei fehlenden oder ungültigen Argumenten" }, usageAdvanced: "Erweitert", usageTextHint: "Wird gesendet, wenn erforderliche Argumente fehlen oder ungültig sind.", createVariable: "Variable anlegen",
     shoutoutCooldownHint: "Twitch begrenzt Shoutouts selbst: 2 Minuten pro Kanal und 60 Minuten pro Ziel.",
@@ -226,7 +215,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     slashAnnouncementEffect: "Wird als Twitch-Ankündigung gesendet.",
     slashShoutoutEffect: "Shoutout-Ziel kommt aus dem Befehlsargument.",
     response: "Antwort", responseOptional: "Antwort (optional)", responseHint: "Was der Bot schreibt. { öffnet die Variablen.", responseMissing: "Antworttext ausfüllen.", fieldTooLong: "Höchstens 500 Zeichen.",
-    minimumTier: "Wer darf auslösen", minimumTierLocked: "Nur Broadcaster und Verwalter dürfen Mindeststufen ändern.",
+    minimumTier: "Wer darf auslösen",
     tierLabels: { everyone: "Alle", subscriber: "Abonnenten", vip: "VIPs", moderator: "Moderatoren", broadcaster: "Broadcaster" },
     tierSubjects: { viewer: "Zuschauer", subscriber: "Abonnenten", vip: "VIPs", moderator: "Moderatoren", broadcaster: "Broadcaster" },
     tierDescription: (tier, subjects) => {
@@ -243,7 +232,6 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
       announcement: "Hebt die Nachricht als Ankündigung hervor. Der Bot muss Moderator sein.",
     },
     announcementWarning: "Der Bot ist hier kein Moderator — der Text geht als normale Nachricht raus.",
-    botIsModerator: "Der Bot muss Moderator im Kanal sein.",
     streamCondition: "Stream", streamLabels: { any: "Immer", online: "Online", offline: "Offline" },
     streamHints: { any: "Wirkt unabhängig vom Stream.", online: "Wirkt nur, während der Stream läuft.", offline: "Wirkt nur, während der Stream aus ist." },
     gameFilter: "Twitch-Spiele",
@@ -253,7 +241,6 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     libraryText: "Text aus Bibliothek",
     libraryTextPlaceholder: "Textbaustein auswählen",
     insertLibraryText: "Text einsetzen",
-    noLibraryTexts: "Noch keine Textbausteine angelegt.",
     cooldown: "Abkühlzeit", userCooldown: "Je Nutzer", cooldownHint: "Für den ganzen Kanal. 0 bis 86 400.", userCooldownHint: "Für jeden Zuschauer einzeln. 0 = aus.", numberMissing: "Zahl eingeben.",
     nameHint: "a–z, 0–9, - und _",
     nameInvalid: "Nur Kleinbuchstaben, Zahlen, Bindestrich und Unterstrich.", nameMissing: "Namen ausfüllen.", nameExists: "Der Befehl existiert bereits.",
@@ -261,8 +248,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     aliasConflict: (trigger, command) => trigger === command ? `!${trigger} ist schon der Befehl !${command}.` : `!${trigger} ist schon ein Alias von !${command}.`,
     aliasInvalid: (trigger) => `!${trigger} — nur Kleinbuchstaben, Zahlen, - und _.`,
     aliasIsName: "Das ist schon der Name.", aliasHint: "Weitere Namen für denselben Befehl. Enter, Komma oder Leerzeichen trennt.",
-    aliasCount: (count, max) => `${String(count)} von ${String(max)}`, aliasAtLimit: "Höchstens 10 Aliase.",
-    aliasDuplicate: (alias) => `${alias} steht schon in der Liste.`, aliasRemove: (alias) => `Alias ${alias} entfernen`, aliasList: "Aliase",
+    aliasRemove: (alias) => `Alias ${alias} entfernen`, aliasList: "Aliase",
     delete: "Befehl löschen", deleteTitle: (name) => `Befehl !${name} löschen?`,
     deleteConfirmation: (name, aliases) => aliases.length === 0
       ? `Der Befehl !${name} wird gelöscht und antwortet danach nicht mehr im Chat.`
@@ -271,7 +257,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     draftGuardTitle: "Ungespeicherte Änderungen",
     draftGuardDescription: "Du hast Änderungen an diesem Befehl. Was möchtest du tun?",
     continueEditing: "Weiter bearbeiten", discardAndSwitch: "Verwerfen und wechseln", saveAndSwitch: "Speichern und wechseln", close: "Schließen",
-    save: "Änderungen speichern", create: "Anlegen", discard: "Verwerfen", saved: "Gespeichert.", saving: "Wird gespeichert …",
+    save: "Änderungen speichern", create: "Anlegen", discard: "Verwerfen", saved: "Gespeichert.",
     pending: "Wird gespeichert …", invalid: "Bitte korrigiere die markierten Felder.", issueError: "Fehler", issueWarning: "Hinweis",
     conflictMessage: "Inzwischen von jemand anderem geändert.", reloadError: "Der Serverstand konnte nicht geladen werden.", reload: "Serverstand laden",
     managementLocked: "Nur Broadcaster und Verwalter dürfen Befehle anlegen, bearbeiten oder löschen.",
@@ -279,8 +265,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     never: "noch nie", secondsAgo: (count) => `vor ${String(count)} s`, minutesAgo: (count) => `vor ${String(count)} min`, hoursAgo: (count) => `vor ${String(count)} h`,
     createdAt: "Angelegt", updatedAt: "Geändert", lastUsed: "Zuletzt verwendet",
     previewLabel: "Vorschau", previewSpeaker: "Bot",
-    statusLabels: { viewer: "Zuschauer", subscriber: "Abonnent", vip: "VIP", moderator: "Moderator", broadcaster: "Broadcaster" },
-    streamAny: "immer", streamOnline: "nur online", streamOffline: "nur offline", cooldownOff: "aus", notModerator: "kein Moderator",
+    streamAny: "immer", streamOnline: "nur online", streamOffline: "nur offline", cooldownOff: "aus",
     textAreaMessages: templateMessages.de,
     tagInputMessages: { countLabel: (count, max) => `${String(count)} von ${String(max)}`, atLimitHint: "Höchstens 10 Aliase.", duplicateWarning: (alias) => `${alias} steht schon in der Liste.` },
     warningLabel: (warning) => warning.code === "unknown_template_variables"
@@ -293,7 +278,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     variableOperations: { add: "+", subtract: "−", set: "=", set_argument: "Argument" },
     variableOperationHelp: { add: "Zählt hoch.", subtract: "Zählt herunter.", set: "Setzt auf den Wert.", set_argument: "Setzt auf das erste Argument. Ungültige Zahlen zeigen den Nutzungshinweis." },
     variableAmount: "Betrag", variableActionInvalid: "Kanalvariable und Betrag prüfen oder die Aktion ausschalten.", variableSilentHint: "Antwort leer lassen, um still zu zählen.", variableEveryoneWarning: "Jeder im Chat kann diese Variable ändern.",
-    timeoutAction: "Timeoutaktion", timeoutActionHint: "Würfelt beim Auslösen eine Dauer aus dem Bereich.",
+    timeoutAction: "Timeoutaktion",
     timeoutMinSeconds: "Mindestens", timeoutMaxSeconds: "Höchstens", timeoutDuration: "Dauer", timeoutRangeHint: "1 s bis 14 Tage.", timeoutRangeInvalid: "Die Dauer muss zwischen 1 s und 14 Tagen liegen; das Minimum darf das Maximum nicht überschreiten.",
     timeoutFallbackText: "Ersatztext, wenn der Timeout abgelehnt wird", timeoutFallbackTextOptional: "Ersatztext bei Ablehnung (optional)", timeoutBotWarning: "Der Bot ist kein Moderator. Timeouts können nicht ausgeführt werden.", timeoutNone: "Aus",
     timeoutReason: "Timeout-Grund", timeoutReasonHint: "Optionaler Grund, der an Twitch gesendet wird.",
@@ -305,7 +290,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
   },
   en: {
     title: "Text commands", search: "Search commands", activeFilters: "Active filters:", resetFilters: "Reset", countSuffix: "commands", filteredSuffix: "commands", tabs: { settings: "Settings", advanced: "Advanced" }, list: "Commands", details: (name) => `Properties for !${name}`, add: "Add command", empty: "No text commands yet.",
-    load: "Loading text commands …", loadError: "The text commands could not be loaded.", templateVariablesLoadError: "Template variables could not be loaded.",
+    loadError: "The text commands could not be loaded.", templateVariablesLoadError: "Template variables could not be loaded.",
     saveError: "The text command could not be saved.", deleteError: "The text command could not be deleted.",
     name: "Name", aliases: "Aliases", templateFieldLabels: { usageText: "Reply when arguments are missing or invalid" }, usageAdvanced: "Advanced", usageTextHint: "Sent when required arguments are missing or invalid.", createVariable: "Create variable",
     shoutoutCooldownHint: "Twitch enforces shoutout cooldowns: 2 minutes per channel and 60 minutes per target.",
@@ -331,7 +316,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     slashAnnouncementEffect: "Sent as a Twitch announcement.",
     slashShoutoutEffect: "The shoutout target comes from the command argument.",
     response: "Response", responseOptional: "Response (optional)", responseHint: "What the bot says. Type { to open variables.", responseMissing: "Enter a response.", fieldTooLong: "Use at most 500 characters.",
-    minimumTier: "Who can use it", minimumTierLocked: "Only broadcasters and managers may change minimum levels.",
+    minimumTier: "Who can use it",
     tierLabels: { everyone: "Everyone", subscriber: "Subscribers", vip: "VIPs", moderator: "Moderators", broadcaster: "Broadcaster" },
     tierSubjects: { viewer: "viewers", subscriber: "subscribers", vip: "VIPs", moderator: "moderators", broadcaster: "broadcasters" },
     tierDescription: (tier, subjects) => {
@@ -348,7 +333,6 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
       announcement: "Highlights the message as an announcement. The bot must be a moderator.",
     },
     announcementWarning: "The bot is not a moderator here — the text will be sent as a normal message.",
-    botIsModerator: "The bot must be a channel moderator.",
     streamCondition: "Stream", streamLabels: { any: "Always", online: "Online", offline: "Offline" },
     streamHints: { any: "Works regardless of stream status.", online: "Works only while the stream is live.", offline: "Works only while the stream is offline." },
     gameFilter: "Twitch games",
@@ -358,7 +342,6 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     libraryText: "Text from library",
     libraryTextPlaceholder: "Choose a text block",
     insertLibraryText: "Insert text",
-    noLibraryTexts: "No text blocks yet.",
     cooldown: "Cooldown", userCooldown: "Per user", cooldownHint: "For the whole channel. 0 to 86,400.", userCooldownHint: "For each viewer separately. 0 = off.", numberMissing: "Enter a number.",
     nameHint: "a–z, 0–9, - and _",
     nameInvalid: "Use lowercase letters, numbers, hyphen, and underscore.", nameMissing: "Enter a name.", nameExists: "This command already exists.",
@@ -366,8 +349,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     aliasConflict: (trigger, command) => trigger === command ? `!${trigger} is already the command !${command}.` : `!${trigger} is already an alias for !${command}.`,
     aliasInvalid: (trigger) => `!${trigger} — use lowercase letters, numbers, - and _.`,
     aliasIsName: "This is already the command name.", aliasHint: "Other names for the same command. Enter, comma, or space separates them.",
-    aliasCount: (count, max) => `${String(count)} of ${String(max)}`, aliasAtLimit: "Up to 10 aliases.",
-    aliasDuplicate: (alias) => `${alias} is already in the list.`, aliasRemove: (alias) => `Remove alias ${alias}`, aliasList: "Aliases",
+    aliasRemove: (alias) => `Remove alias ${alias}`, aliasList: "Aliases",
     delete: "Delete command", deleteTitle: (name) => `Delete command !${name}?`,
     deleteConfirmation: (name, aliases) => aliases.length === 0
       ? `Command !${name} will be deleted and will no longer reply in chat.`
@@ -376,7 +358,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     draftGuardTitle: "Unsaved changes",
     draftGuardDescription: "This command has unsaved changes. What would you like to do?",
     continueEditing: "Continue editing", discardAndSwitch: "Discard and switch", saveAndSwitch: "Save and switch", close: "Close",
-    save: "Save changes", create: "Create", discard: "Discard", saved: "Saved.", saving: "Saving …",
+    save: "Save changes", create: "Create", discard: "Discard", saved: "Saved.",
     pending: "Saving …", invalid: "Please correct the marked fields.", issueError: "Error", issueWarning: "Warning",
     conflictMessage: "This command was changed by someone else.", reloadError: "The server version could not be loaded.", reload: "Load server version",
     managementLocked: "Only broadcasters and managers may add, edit, or delete commands.",
@@ -384,8 +366,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     never: "never", secondsAgo: (count) => `${String(count)} s ago`, minutesAgo: (count) => `${String(count)} min ago`, hoursAgo: (count) => `${String(count)} h ago`,
     createdAt: "Created", updatedAt: "Updated", lastUsed: "Last used",
     previewLabel: "Preview", previewSpeaker: "Bot",
-    statusLabels: { viewer: "Viewer", subscriber: "Subscriber", vip: "VIP", moderator: "Moderator", broadcaster: "Broadcaster" },
-    streamAny: "always", streamOnline: "online only", streamOffline: "offline only", cooldownOff: "off", notModerator: "not a moderator",
+    streamAny: "always", streamOnline: "online only", streamOffline: "offline only", cooldownOff: "off",
     textAreaMessages: templateMessages.en,
     tagInputMessages: { countLabel: (count, max) => `${String(count)} of ${String(max)}`, atLimitHint: "Up to 10 aliases.", duplicateWarning: (alias) => `${alias} is already in the list.` },
     warningLabel: (warning) => warning.code === "unknown_template_variables"
@@ -398,7 +379,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     variableOperations: { add: "+", subtract: "−", set: "=", set_argument: "Argument" },
     variableOperationHelp: { add: "Increase the value.", subtract: "Decrease the value.", set: "Set the value directly.", set_argument: "Set from the first argument. Invalid numbers show the usage response." },
     variableAmount: "Amount", variableActionInvalid: "Choose a channel variable and valid amount, or turn this action off.", variableSilentHint: "Leave the response empty to count silently.", variableEveryoneWarning: "Everyone in chat can change this variable.",
-    timeoutAction: "Timeout action", timeoutActionHint: "Rolls a duration from this range when the command runs.",
+    timeoutAction: "Timeout action",
     timeoutMinSeconds: "Minimum", timeoutMaxSeconds: "Maximum", timeoutDuration: "Duration", timeoutRangeHint: "1 s to 14 days.", timeoutRangeInvalid: "Duration must be 1 s to 14 days, and the minimum cannot exceed the maximum.",
     timeoutFallbackText: "Fallback text when the timeout is rejected", timeoutFallbackTextOptional: "Fallback text on rejection (optional)", timeoutBotWarning: "The bot is not a moderator. It cannot time out callers.", timeoutNone: "Off",
     timeoutReason: "Timeout reason", timeoutReasonHint: "Optional reason sent to Twitch.",

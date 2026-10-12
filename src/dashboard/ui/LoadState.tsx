@@ -3,8 +3,8 @@ import type { CSSProperties, ReactNode } from "react";
 import { dashboardCommonTexts } from "../locale";
 import { ErrorPanel } from "./ErrorPanel";
 
-export type LoadStateKind = "loading" | "empty" | "error" | "success";
-export type LoadStateVariant =
+type LoadStateKind = "loading" | "empty" | "error" | "success";
+type LoadStateVariant =
   | "status-row"
   | "compact-64"
   | "feed-132"

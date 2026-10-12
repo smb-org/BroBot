@@ -19,7 +19,6 @@ export interface AdsPanelTexts {
   recentSection: string;
   noRecent: string;
   recentDuration: (duration: string) => string;
-  recentTime: (timestamp: string) => string;
   loading: string;
   loadError: string;
   refreshSchedule: string;
@@ -55,7 +54,6 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     recentSection: "Letzte Werbepausen",
     noRecent: "Noch keine Werbepausen im Ereignisprotokoll.",
     recentDuration: (duration) => `${duration} Sekunden`,
-    recentTime: (timestamp) => timestamp,
     loading: "Werbeplan wird geladen …",
     loadError: "Der Werbeplan konnte nicht geladen werden.",
     refreshSchedule: "Werbeplan aktualisieren",
@@ -89,7 +87,6 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     recentSection: "Recent ad breaks",
     noRecent: "No ad breaks are in the event log yet.",
     recentDuration: (duration) => `${duration} seconds`,
-    recentTime: (timestamp) => timestamp,
     loading: "Loading the ad schedule …",
     loadError: "The ad schedule could not be loaded.",
     refreshSchedule: "Refresh ad schedule",
@@ -149,7 +146,7 @@ const editorCatalog: LocaleCatalog<SettingsEditorCatalog> = {
     saveLabel: "Ansagen speichern", discardLabel: "Verwerfen", savedLabel: "Ansagen gespeichert.", pendingLabel: "Wird gespeichert …",
     invalidMessage: "Bitte korrigiere die markierten Felder.", numberMissing: "Zahl eingeben",
     issueLabels: { error: "Fehler", warning: "Hinweis" },
-    loadError: "Die Ansagen-Einstellungen konnten nicht geladen werden.", saveError: "Die Ansagen-Einstellungen konnten nicht gespeichert werden.",
+    saveError: "Die Ansagen-Einstellungen konnten nicht gespeichert werden.",
     conflictMessage: "Ansagen-Einstellungen wurden inzwischen geändert.", reloadLabel: "Serverstand laden", enabledLabel: "An", disabledLabel: "Aus",
     templateMessages: templateMessages.de,
     warningLabel: (warning) => warning.code === "unknown_template_variables"
@@ -187,7 +184,7 @@ const editorCatalog: LocaleCatalog<SettingsEditorCatalog> = {
     saveLabel: "Save announcements", discardLabel: "Discard", savedLabel: "Announcements saved.", pendingLabel: "Saving …",
     invalidMessage: "Please correct the marked fields.", numberMissing: "Enter a number",
     issueLabels: { error: "Error", warning: "Warning" },
-    loadError: "Announcement settings could not be loaded.", saveError: "Announcement settings could not be saved.",
+    saveError: "Announcement settings could not be saved.",
     conflictMessage: "Announcement settings have changed since they were loaded.", reloadLabel: "Load server version", enabledLabel: "On", disabledLabel: "Off",
     templateMessages: templateMessages.en,
     warningLabel: (warning) => warning.code === "unknown_template_variables"
