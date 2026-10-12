@@ -12,14 +12,15 @@ describe("module template variable namespaces", () => {
     expect(() => { validateModuleTemplateVariable(adsModule, "weather"); }).toThrow(/dotted name/u);
   });
 
-  it("allows bare text block names while keeping existing host variables reserved", () => {
-    expect(() => { validateModuleTemplateVariable(textLibraryModule, "welcome"); }).not.toThrow();
-    expect(() => { validateModuleTemplateVariable(textLibraryModule, "args"); }).toThrow(/reserved by the host/u);
+  it("requires namespaced text block variables and keeps host variables separate", () => {
+    expect(() => { validateModuleTemplateVariable(textLibraryModule, "text.welcome"); }).not.toThrow();
+    expect(() => { validateModuleTemplateVariable(textLibraryModule, "welcome"); }).toThrow(/text\.<name>/u);
+    expect(() => { validateModuleTemplateVariable(textLibraryModule, "text.args"); }).toThrow(/reserved by the host/u);
   });
 
   it.each(["1hello", "_hello"]) ("accepts and parses valid block name %s", (name) => {
-    expect(() => { validateModuleTemplateVariable(textLibraryModule, name); }).not.toThrow();
-    expect(templateVariableNames(`{${name}}`)).toEqual([name]);
+    expect(() => { validateModuleTemplateVariable(textLibraryModule, `text.${name}`); }).not.toThrow();
+    expect(templateVariableNames(`{text.${name}}`)).toEqual([`text.${name}`]);
   });
 
   it("accepts only dotted module names the template parser can read", () => {

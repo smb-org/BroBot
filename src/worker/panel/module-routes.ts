@@ -23,7 +23,7 @@ import { getAppAccessToken } from "../app-token";
 import { writeModuleDiagnostics } from "../event-log";
 import { helixRequest } from "../twitch/helix";
 import { readChannelBlockedTerms } from "../twitch/blocked-terms";
-import { effectiveTemplateVariables, templateWarnings, type TemplateVariable } from "../../template";
+import { effectiveTemplateVariables, templateTextLength, templateWarnings, type TemplateVariable } from "../../template";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../../template-variables";
 import { listChannelVariables } from "../db/channel-variables";
 import { findChannelVariable } from "../db/channel-variables";
@@ -40,6 +40,8 @@ import { createModuleExternalFetchBudget } from "../external-fetch-budget";
 import { moduleBallots } from "../module-ballots";
 import { createModuleSecretAccess, createModuleSecretReadAccess } from "../module-secrets";
 import { liftModerationBan } from "../moderation";
+import { readTextBlockGraphRevision, textBlockWriteGuard } from "../../modules/contracts/text-block-write-guard";
+import { effectiveEventTemplateDeclarations } from "../../modules/contracts/text-block-validation";
 
 interface ModuleRouteEnvironment {
   Bindings: Env;
@@ -95,7 +97,7 @@ const runModuleAlarmAfterMutation = async (
 };
 
 const previewSchema = z.object({
-  text: z.string().max(500),
+  text: z.string().refine((value) => templateTextLength(value) <= 500),
   templateContext: z.enum(["event", "chat_command"]),
   streamState: z.enum(["online", "offline", "unknown"]),
   game: z.object({ id: z.string().regex(/^[0-9]{1,20}$/u), name: z.string().trim().max(100) }).nullable(),
@@ -164,6 +166,7 @@ export const registeredTemplateVariablesForChannel = async (
         ...(picker === undefined ? {} : { picker }),
         moduleId: module.id,
         isTextBlock: module.templateVariableNamespace === "text_blocks",
+        availableInEventTemplates: module.resolveTemplateValues !== undefined || module.resolveTemplateParameter !== undefined,
         ...(pickerGroup === undefined ? {} : { pickerGroup }),
       };
     });
@@ -318,15 +321,18 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
       module.templateUsageSources?.(context.env.DB, channelId) ?? Promise.resolve([]),
     ));
     const overlayRows = await context.env.DB.prepare(
-      `SELECT overlay.name AS overlay_name, element.label, element.text, element.config_json
+      `SELECT overlay.name AS overlay_name, element.label, element.text, element.config_json,
+              CASE WHEN element.kind = 'text_library.block'
+                   THEN COALESCE('{text.' || json_extract(element.config_json, '$.blockName') || '}', '')
+                   ELSE '' END AS referenced_text_block
          FROM overlay_elements AS element JOIN overlays AS overlay
            ON overlay.channel_id = element.channel_id AND overlay.overlay_id = element.overlay_id
         WHERE element.channel_id = ? ORDER BY overlay.name, element.label`,
-    ).bind(channelId).all<{ overlay_name: string; label: string; text: string; config_json: string }>();
+    ).bind(channelId).all<{ overlay_name: string; label: string; text: string; config_json: string; referenced_text_block: string }>();
     return [
       ...moduleSources.flat(),
       ...overlayRows.results.map((row) => ({
-        text: `${row.text} ${row.config_json}`,
+        text: `${row.text} ${row.config_json} ${row.referenced_text_block}`,
         kind: "overlay" as const,
         label: row.label || row.overlay_name,
       })),
@@ -384,7 +390,7 @@ moduleRouter.get("/api/channels/:channelId/template-variables", async (context) 
     context.get("listRegisteredTemplateVariables")(channelId),
     context.get("listChannelVariables")(channelId),
   ]);
-  const variables = [
+  const variables = effectiveEventTemplateDeclarations([
     ...SYSTEM_TEMPLATE_VARIABLE_LIST.map((variable) => ({ ...variable, moduleId: "host", isTextBlock: false })),
     ...moduleVariables,
     ...channelVariables.map((variable) => ({
@@ -397,9 +403,8 @@ moduleRouter.get("/api/channels/:channelId/template-variables", async (context) 
       maxLength: 10,
       source: "channel" as const,
     })),
-  ];
-  const unique = new Map(variables.map((variable) => [variable.name, variable]));
-  return context.json({ variables: [...unique.values()], defaultTimeZone: DEFAULT_CHANNEL_TIME_ZONE });
+  ]);
+  return context.json({ variables, defaultTimeZone: DEFAULT_CHANNEL_TIME_ZONE });
 });
 
 moduleRouter.post("/api/channels/:channelId/template-preview", async (context) => {
@@ -543,6 +548,13 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
   const expectedRevision = Reflect.get(body, "revision") as number;
   const settings = module.settingsSchema.safeParse(Reflect.get(body, "settings"));
   if (!settings.success) return context.json({ error: "module_settings_invalid" }, 400);
+  const graphRevision = await readTextBlockGraphRevision(context.env.DB, channelId);
+  const settingsRecord = settings.data as Readonly<Record<string, unknown>>;
+  const templateTexts = Object.keys(module.templateFields ?? {}).flatMap((field) => {
+    const value = settingsRecord[field];
+    return typeof value === "string" ? [value] : [];
+  });
+  const blockGuard = textBlockWriteGuard(channelId, graphRevision, templateTexts);
   const channelVariables = (await listChannelVariables(context.env.DB, channelId)).map((variable) => ({
     name: `var.${variable.name}`, group: "channel" as const, sample: String(variable.value), maxLength: 10, source: "channel" as const,
   }));
@@ -564,6 +576,8 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
     nowIso(),
     [],
     expectedRevision,
+    false,
+    blockGuard.references.length === 0 ? undefined : blockGuard,
   );
   if (!changed) {
     const current = await getChannelModuleForChannel(context.env.DB, channelId, module.id);

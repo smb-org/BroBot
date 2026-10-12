@@ -14,13 +14,16 @@ import {
 } from "./contracts";
 import { timeoutDurationRangeSchema } from "../contracts/moderation";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST, effectiveTemplateVariables, templateWarnings, type ModuleChannelVariable, type ModuleRouteEnvironment, type TemplateVariable } from "../contract";
+import { templateTextLength } from "../../contracts/template-text-length";
 import { createTextCommandRepository } from "./adapters/d1";
 import { COMMAND_NAME_PATTERN, initialTextCommandRevision, validCommandName } from "./domain";
 import { textCommandDefaultsFor } from "./contracts/chat-defaults";
+import { readTextBlockGraphRevision, textBlockGraphRevisionChanged, textBlockWriteGuard } from "../contracts/text-block-write-guard";
 
 const aliasesSchema = z.array(z.string().regex(COMMAND_NAME_PATTERN))
   .max(TEXT_COMMAND_MAX_ALIASES)
   .refine((aliases) => new Set(aliases).size === aliases.length);
+const templateTextSchema = () => z.string().refine((value) => templateTextLength(value) <= 500);
 const boxArtUrlTemplateSchema = z.string().max(500).refine((value) => {
   try {
     const url = new URL(value.replaceAll("{width}", "100").replaceAll("{height}", "100"));
@@ -40,19 +43,19 @@ const gameSchema = z.object({
 const timeoutActionSchema = z.object({
   minSeconds: z.number().int(),
   maxSeconds: z.number().int(),
-  fallbackText: z.string().max(500),
-  reason: z.string().max(500).default(""),
+  fallbackText: templateTextSchema(),
+  reason: templateTextSchema().default(""),
 }).refine((value) => timeoutDurationRangeSchema().safeParse(value).success);
 
 const bodySchema = z.object({
   name: z.string(),
   kind: z.enum(TEXT_COMMAND_KINDS).default("text"),
   minimumTier: z.enum(TEXT_COMMAND_MINIMUM_TIERS).optional(),
-  text: z.string().max(500).optional(),
-  offlineText: z.string().max(500).optional(),
-  notFollowingText: z.string().max(500).optional(),
-  unavailableText: z.string().max(500).optional(),
-  usageText: z.string().max(500).optional(),
+  text: templateTextSchema().optional(),
+  offlineText: templateTextSchema().optional(),
+  notFollowingText: templateTextSchema().optional(),
+  unavailableText: templateTextSchema().optional(),
+  usageText: templateTextSchema().optional(),
   cooldownSeconds: z.number().int().min(0).max(86400),
   aliases: aliasesSchema.default([]),
   userCooldownSeconds: z.number().int().min(0).max(86400).default(0),
@@ -71,12 +74,12 @@ const bodySchema = z.object({
 const editBodySchema = z.object({
   revision: z.number().int().min(1).optional(),
   name: z.string().optional(),
-  text: z.string().max(500).optional(),
+  text: templateTextSchema().optional(),
   kind: z.enum(TEXT_COMMAND_KINDS).optional(),
-  offlineText: z.string().max(500).optional(),
-  notFollowingText: z.string().max(500).optional(),
-  unavailableText: z.string().max(500).optional(),
-  usageText: z.string().max(500).optional(),
+  offlineText: templateTextSchema().optional(),
+  notFollowingText: templateTextSchema().optional(),
+  unavailableText: templateTextSchema().optional(),
+  usageText: templateTextSchema().optional(),
   cooldownSeconds: z.number().int().min(0).max(86400).optional(),
   minimumTier: z.enum(TEXT_COMMAND_MINIMUM_TIERS).optional(),
   enabled: z.boolean().optional(),
@@ -105,6 +108,16 @@ const validVariableAction = (action: TextCommandVariableAction | null): boolean 
 );
 
 type TemplateInput = Pick<TextCommand, "offlineText" | "notFollowingText" | "unavailableText" | "usageText"> & { text: string };
+
+const commandTemplateTexts = (command: Pick<TextCommand, "text" | "offlineText" | "notFollowingText" | "unavailableText" | "usageText" | "timeoutAction">): string[] => [
+  command.text,
+  command.offlineText ?? "",
+  command.notFollowingText ?? "",
+  command.unavailableText ?? "",
+  command.usageText ?? "",
+  command.timeoutAction?.fallbackText ?? "",
+  command.timeoutAction?.reason ?? "",
+];
 
 const defaultsForKind = (kind: TextCommand["kind"]): Partial<TemplateInput> =>
   kind === "shoutout" ? textCommandDefaultsFor(kind) : {};
@@ -238,6 +251,8 @@ textCommandRoutes.post("/commands", async (context) => {
     context.get("prepareModuleAudit"),
   );
   const channelId = param(context, "channelId");
+  const graphRevision = await readTextBlockGraphRevision(context.env.DB, channelId);
+  const hasBlockReferences = textBlockWriteGuard(channelId, graphRevision, commandTemplateTexts(body)).references.length > 0;
   if (body.variableAction !== null && await context.get("findChannelVariable")(channelId, body.variableAction.name) === null) {
     return context.json({ error: "command_data_invalid" }, 400);
   }
@@ -249,7 +264,7 @@ textCommandRoutes.post("/commands", async (context) => {
   const warnings = body.kind === "list"
     ? []
     : warningsForCommand(body.text, body.timeoutAction, effectiveCommandVariables(channelVariables), registeredVariables.map(({ name }) => name));
-  const created = await repository.create({ channelId, ...body, now }, context.get("actor"));
+  const created = await repository.create({ channelId, ...body, now }, context.get("actor"), graphRevision);
   if (created.ok) {
     const command: TextCommand = {
       channelId,
@@ -279,6 +294,10 @@ textCommandRoutes.post("/commands", async (context) => {
     };
     return context.json({ command, warnings }, 201);
   }
+  if (created.reason === "not_authorized" && hasBlockReferences &&
+      await textBlockGraphRevisionChanged(context.env.DB, channelId, graphRevision)) {
+    return context.json({ error: "command_changed_concurrently" }, 409);
+  }
   if (created.reason === "alias_conflict" && created.conflict !== undefined) {
     return aliasConflictResponse(context, created.conflict);
   }
@@ -290,6 +309,7 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
   const body = await validEditBody(context.req.raw);
   if (body === null) return context.json({ error: "command_data_invalid" }, 400);
   const channelId = param(context, "channelId");
+  const graphRevision = await readTextBlockGraphRevision(context.env.DB, channelId);
   const oldName = param(context, "name");
   const repository = createTextCommandRepository(context.env.DB, context.get("authorizeMutation"));
   const before = await repository.find(channelId, oldName);
@@ -324,6 +344,7 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
     ...(unavailableText === undefined ? {} : { unavailableText }),
     ...(usageText === undefined ? {} : { usageText }),
   };
+  const hasBlockReferences = textBlockWriteGuard(channelId, graphRevision, commandTemplateTexts({ text, ...templateValues, timeoutAction })).references.length > 0;
   if (kind !== "list" && kind !== "timeout" && text.trim().length === 0 && variableAction === null) {
     return context.json({ error: "command_data_invalid" }, 400);
   }
@@ -374,6 +395,7 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
     timeoutAction,
     ...(before.legacyFallback === undefined ? {} : { legacyFallback: before.legacyFallback }),
     expectedRevision: body.revision,
+    expectedGraphRevision: graphRevision,
     onlyToggle: !contentChanged,
     now,
   }, context.get("actor"));
@@ -401,6 +423,10 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
       revision: before.revision + 1,
     };
     return context.json({ command, warnings });
+  }
+  if (changed.reason === "not_authorized" && hasBlockReferences &&
+      await textBlockGraphRevisionChanged(context.env.DB, channelId, graphRevision)) {
+    return context.json({ error: "command_changed_concurrently" }, 409);
   }
   if (changed.reason === "not_found") return context.json({ error: "command_not_found" }, 404);
   if (changed.reason === "not_authorized") return context.json({ error: "command_update_denied" }, 403);

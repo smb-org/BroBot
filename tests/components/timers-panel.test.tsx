@@ -31,7 +31,7 @@ describe("Timers panel", () => {
     const fetcher = vi.fn<typeof fetch>((input) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/timers")) return Promise.resolve(jsonResponse({ timers: [{
-        id: "timer-1", name: "Greeting timer", enabled: true, blockName: "greeting", chatTarget: "source_only",
+        id: "timer-1", name: "Greeting timer", enabled: true, messageText: "Hello there!", chatTarget: "source_only",
         trigger: { type: "interval", minutes: 30 }, revision: 1, nextRunAt: null, nextRunStreamId: null,
         lastRunAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
       }] }));
@@ -75,7 +75,7 @@ describe("Timers panel", () => {
         revision = 2;
         refreshFails = true;
         return Promise.resolve(jsonResponse({ timer: {
-          id: "timer-1", name: "Greeting timer", enabled, blockName: "greeting", chatTarget: "source_only",
+          id: "timer-1", name: "Greeting timer", enabled, messageText: "Hello there!", chatTarget: "source_only",
           trigger: { type: "interval", minutes: 30 }, revision, nextRunAt: null, nextRunStreamId: null,
           lastRunAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
         } }));
@@ -84,7 +84,7 @@ describe("Timers panel", () => {
         timerReads += 1;
         if (timerReads > 1 && refreshFails) return Promise.resolve(jsonResponse({ error: "temporarily unavailable" }, 503));
         return Promise.resolve(jsonResponse({ timers: [{
-          id: "timer-1", name: "Greeting timer", enabled, blockName: "greeting", chatTarget: "source_only",
+          id: "timer-1", name: "Greeting timer", enabled, messageText: "Hello there!", chatTarget: "source_only",
           trigger: { type: "interval", minutes: 30 }, revision, nextRunAt: null, nextRunStreamId: null,
           lastRunAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
         }] }));

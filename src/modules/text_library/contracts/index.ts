@@ -12,6 +12,7 @@ export const TEXT_BLOCK_MAXIMUMS = {
   textsPerVariant: 10,
   categoriesPerChannel: 25,
   categoryNameLength: 40,
+  // Namespaced references count as their legacy bare-name length, but the semantic limit remains 500.
   textLength: 500,
   renderedLength: 500,
   nestingDepth: 3,
@@ -78,7 +79,7 @@ export interface TextLibrarySettings {
 }
 
 export interface TextBlockUsage {
-  kind: "command" | "timer" | "overlay" | "event";
+  kind: "block" | "command" | "faq" | "timer" | "overlay" | "event";
   label: string;
 }
 
@@ -94,6 +95,7 @@ export interface TextLibraryData {
 
 export type TextBlockMutationError =
   | "already_exists"
+  | "in_use"
   | "not_found"
   | "conflict"
   | "category_not_found"

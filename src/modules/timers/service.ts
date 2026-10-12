@@ -3,16 +3,17 @@ import type {
   ModuleTemplateContentIssue,
 } from "../contract";
 import type { Timer, TimerMutationInput } from "./contracts";
-import { TIMER_BLOCK_NAME_PATTERN, timerTriggerSchema } from "./contracts";
-import { validateEventTextBlock, validateEventTextBlockMutation } from "../contracts/text-block-validation";
+import { TIMER_MESSAGE_MAX_LENGTH, timerTriggerSchema } from "./contracts";
+import { validateEventTemplateContentMutation, validateEventTemplateText } from "../contracts/text-block-validation";
+import { templateTextLength } from "../../contracts/template-text-length";
 
-export const validateTimerBlock = validateEventTextBlock;
+export const validateTimerText = validateEventTemplateText;
 
 export interface TimerRow {
   timer_id: string;
   name: string;
   enabled: number;
-  block_name: string;
+  message_text: string;
   trigger_type: string;
   trigger_json: string;
   chat_target?: Timer["chatTarget"];
@@ -33,7 +34,7 @@ export const mapTimerRow = (row: TimerRow): Timer => {
     id: row.timer_id,
     name: row.name,
     enabled: row.enabled === 1,
-    blockName: row.block_name,
+    messageText: row.message_text,
     chatTarget: row.chat_target ?? "source_only",
     trigger: parsed.data,
     revision: row.revision,
@@ -49,19 +50,20 @@ export const validateTimerTemplateMutation = async (
   context: ModuleTemplateContentValidationContext,
 ): Promise<readonly ModuleTemplateContentIssue[]> => {
   const rows = await context.DB.prepare(
-    "SELECT timer_id, name, block_name FROM timers WHERE channel_id = ? ORDER BY created_at, timer_id",
-  ).bind(context.channelId).all<{ timer_id: string; name: string; block_name: string }>();
-  return validateEventTextBlockMutation(context, rows.results.map((row) => ({ name: row.name, blockName: row.block_name })));
+    "SELECT timer_id, name, message_text FROM timers WHERE channel_id = ? ORDER BY created_at, timer_id",
+  ).bind(context.channelId).all<{ timer_id: string; name: string; message_text: string }>();
+  return validateEventTemplateContentMutation(context, rows.results.map((row) => ({ name: row.name, text: row.message_text })));
 };
 
 export const timerMutationInput = (value: unknown): TimerMutationInput | null => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   if (typeof record.name !== "string" || record.name.trim().length < 1 || record.name.trim().length > 60 ||
-      typeof record.blockName !== "string" || !TIMER_BLOCK_NAME_PATTERN.test(record.blockName)) return null;
+      typeof record.messageText !== "string" || record.messageText.trim().length === 0 ||
+      templateTextLength(record.messageText) > TIMER_MESSAGE_MAX_LENGTH) return null;
   const parsed = timerTriggerSchema.safeParse(record.trigger);
   if (!parsed.success) return null;
   const chatTarget = record.chatTarget === undefined ? "source_only" : record.chatTarget;
   if (chatTarget !== "all_chats" && chatTarget !== "source_only") return null;
-  return { name: record.name.trim(), blockName: record.blockName, chatTarget, trigger: parsed.data };
+  return { name: record.name.trim(), messageText: record.messageText, chatTarget, trigger: parsed.data };
 };

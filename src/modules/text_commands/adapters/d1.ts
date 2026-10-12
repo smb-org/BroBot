@@ -17,6 +17,7 @@ import type {
   TextCommandRepository,
 } from "../repository";
 import { cooldownRemaining, initialTextCommandRevision } from "../domain";
+import { textBlockWriteGuard } from "../../contracts/text-block-write-guard";
 
 const MODULE_ID = "text_commands";
 const extraTemplateKeys = ["offlineText", "notFollowingText", "unavailableText", "usageText"] as const;
@@ -292,7 +293,7 @@ export const createTextCommandRepository = (
     return row === null ? null : mapTextCommand(row);
   },
 
-  async create(input: NewTextCommand, actor: TextCommandActor): Promise<TextCommandMutationResult> {
+  async create(input: NewTextCommand, actor: TextCommandActor, expectedGraphRevision?: number): Promise<TextCommandMutationResult> {
     if (await this.find(input.channelId, input.name) !== null) return failed("already_exists");
     const authorization = authorizeMutation(input.channelId, actor, input.now);
     const minimumTier = input.minimumTier ?? "everyone";
@@ -303,6 +304,11 @@ export const createTextCommandRepository = (
     const chatTarget = input.chatTarget ?? "source_only";
     const aliasesJson = JSON.stringify(aliases);
     const extraTemplatesJson = JSON.stringify(extraTemplatesOf(input));
+    const blockGuard = expectedGraphRevision === undefined ? { sql: "", values: [] as (string | number)[] } : textBlockWriteGuard(
+      input.channelId,
+      expectedGraphRevision,
+      [input.text, ...extraTemplateKeys.map((key) => input[key] ?? ""), input.timeoutAction?.fallbackText ?? "", input.timeoutAction?.reason ?? ""],
+    );
     const mutation = db.prepare(
       `INSERT INTO text_commands
         (channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds,
@@ -325,6 +331,7 @@ export const createTextCommandRepository = (
              WHERE existing_alias.channel_id = ?
                AND (existing_alias.alias = ? OR existing_alias.alias IN (SELECT value FROM json_each(?)))
           )
+          ${blockGuard.sql}
           ${authorization.sql}`,
     ).bind(
       input.channelId,
@@ -358,6 +365,7 @@ export const createTextCommandRepository = (
       input.channelId,
       input.name,
       aliasesJson,
+      ...blockGuard.values,
       ...authorization.values,
     );
     const after: TextCommand = {
@@ -414,6 +422,12 @@ export const createTextCommandRepository = (
     const chatTarget = input.chatTarget ?? before.chatTarget;
     const extraTemplates = extraTemplatesOf({ ...before, ...input });
     const extraTemplatesJson = JSON.stringify(extraTemplates);
+    const blockGuard = input.expectedGraphRevision === undefined ? { sql: "", values: [] as (string | number)[] } : textBlockWriteGuard(
+      input.channelId,
+      input.expectedGraphRevision,
+      [input.text, ...Object.values(extraTemplates).filter((value): value is string => typeof value === "string"),
+        input.timeoutAction?.fallbackText ?? "", input.timeoutAction?.reason ?? ""],
+    );
     const mutation = input.onlyToggle === true
       ? db.prepare(
         `UPDATE text_commands
@@ -450,6 +464,7 @@ export const createTextCommandRepository = (
                WHERE existing_alias.channel_id = ? AND existing_alias.command_name <> ?
                  AND (existing_alias.alias = ? OR existing_alias.alias IN (SELECT value FROM json_each(?)))
             )
+            ${blockGuard.sql}
             ${authorization.sql}`,
       ).bind(
         input.newName,
@@ -487,6 +502,7 @@ export const createTextCommandRepository = (
         input.name,
         input.newName,
         JSON.stringify(input.aliases),
+        ...blockGuard.values,
         ...authorization.values,
       );
     const after: TextCommand = input.onlyToggle === true

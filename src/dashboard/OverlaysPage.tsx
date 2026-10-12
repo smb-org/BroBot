@@ -25,6 +25,7 @@ import { apiErrorText, dashboardCommonTexts, dashboardLanguage, formatTimestamp,
 import { ActionMenu, Button, ConfirmDialog, EmptyCellValue, Field, FormDialog, InspectorActions, InspectorSection, Led, ListDetail, ListPaginationFooter, ListToolbar, LoadState, notify, NumberField, PageHeader, Select, Skeleton, SubInspector } from "./ui";
 import { useLegacyOverlayTokensQuery, useOverlayAccessesQuery, useOverlayQuery, useOverlaysQuery } from "./data/lists";
 import { dashboardDataKeys } from "./data/keys";
+import { templateTextLength } from "../template";
 import { useDashboardQueryError } from "./data";
 
 interface OverlaysPageProperties {
@@ -76,7 +77,7 @@ const parseLegacyOverlayLink = (value: string): { token: string; variableName: s
     const variableName = fragment.get("var");
     const text = variableName === null ? null : fragment.get("text") ?? `${variableName}: {value}`;
     if (token === null || !/^[A-Za-z0-9_-]{43}$/u.test(token) || variableName === null ||
-        !VARIABLE_NAME_PATTERN.test(variableName) || text === null || text.length > 100) return null;
+        !VARIABLE_NAME_PATTERN.test(variableName) || text === null || templateTextLength(text) > 100) return null;
     return { token, variableName, text };
   } catch {
     return null;

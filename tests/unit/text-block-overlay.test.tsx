@@ -203,14 +203,14 @@ describe("text block overlay rendering", () => {
       variant("night", "Sunset {sun.set_in}", { data: { "sun.phase": "night" } }, 0),
       variant("default", "Sunrise {sun.rise_in}", {}, 1),
     ];
-    const db = overlayDatabase([variant("default", "{child}", {})], { child });
+    const db = overlayDatabase([variant("default", "{text.child}", {})], { child });
     const resolveValues = vi.fn(() => Promise.resolve({
       "sun.set_in": { available: true, targetAts: [sunset] },
       "sun.rise_in": { available: true, targetAts: ["2026-06-22T04:00:00.000Z"] },
     }));
     const resolveTransitions = vi.fn(() => Promise.resolve([{ at: sunset, values: { "sun.phase": "night" } }]));
     const context = contextFor({
-      renderTemplate: (text) => Promise.resolve({ text: text.replace("{child}", "Sunset {sun.set_in}"), diagnostics: [] }),
+      renderTemplate: (text) => Promise.resolve({ text: text.replace("{text.child}", "Sunset {sun.set_in}"), diagnostics: [] }),
       resolveOverlayTemplateValues: resolveValues,
       resolveTemplateConditionTransitions: resolveTransitions,
       dynamicTemplateVariableNames: new Set(["sun.set_in", "sun.rise_in"]),

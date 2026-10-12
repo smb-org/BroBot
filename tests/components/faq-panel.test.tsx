@@ -13,7 +13,7 @@ const entry: FaqEntry = {
   name: "Greeting",
   enabled: true,
   matcher: { type: "keywords", patterns: ["hello"] },
-  answerBlock: "greeting",
+  answerText: "Hello there!",
   cooldownSeconds: 30,
   games: [],
   chatTarget: "source_only",

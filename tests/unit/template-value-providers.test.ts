@@ -75,7 +75,7 @@ describe("template value providers", () => {
     expect(resolveSun).not.toHaveBeenCalled();
   });
 
-  it("asks the text-block provider only for bare names requested by the current template", async () => {
+  it("asks the text-block provider only for namespaced block tokens requested by the current template", async () => {
     const resolveBlocks = vi.fn((names: readonly string[]) => Promise.resolve(
       names.includes("welcome") ? { welcome: "Hello from the library" } : {},
     ));
@@ -103,8 +103,9 @@ describe("template value providers", () => {
     };
     const render = createTemplateRenderer(chatEvent, "chat_command", [], sources);
 
-    await expect(render("{welcome} {channel}", {})).resolves.toMatchObject({ text: "Hello from the library streamer" });
+    await expect(render("{text.welcome} {channel}", {})).resolves.toMatchObject({ text: "Hello from the library streamer" });
     await expect(render("plain text", {})).resolves.toMatchObject({ text: "plain text" });
+    await expect(render("{welcome}", {})).resolves.toMatchObject({ text: "{welcome}" });
 
     expect(resolveBlocks).toHaveBeenCalledTimes(1);
     expect(resolveBlocks).toHaveBeenCalledWith(["welcome"], expect.any(Object));

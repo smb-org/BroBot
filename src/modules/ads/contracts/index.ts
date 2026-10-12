@@ -3,18 +3,19 @@ import { z } from "zod";
 import { DEFAULT_PREWARNING_TEXT } from "./chat-defaults";
 import type { TemplateFields, TemplateVariable } from "../contract";
 import { adsTemplateVariableCatalog } from "./template-variable-catalog";
+import { templateTextLength } from "../../../contracts/template-text-length";
 
 /** Consent for control actions during a live stream; does not block the subscription. */
 export const ADS_OPTIONAL_BROADCASTER_SCOPES = ["channel:manage:ads"] as const;
 
 export const adsSettingsSchema = z.object({
-  automatic: z.string().trim().min(1).max(500),
-  manual: z.string().trim().min(1).max(500),
+  automatic: z.string().trim().min(1).refine((text) => templateTextLength(text) <= 500),
+  manual: z.string().trim().min(1).refine((text) => templateTextLength(text) <= 500),
   automaticTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
   manualTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
   prewarning: z.boolean().default(true),
   leadSeconds: z.number().int().min(30).max(300).default(60),
-  prewarningText: z.string().trim().min(1).max(500).default(DEFAULT_PREWARNING_TEXT),
+  prewarningText: z.string().trim().min(1).refine((text) => templateTextLength(text) <= 500).default(DEFAULT_PREWARNING_TEXT),
   prewarningTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
 });
 

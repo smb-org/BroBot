@@ -1,9 +1,12 @@
 import { PanelApiError } from "../../../contracts/panel-error";
+import { isEventTemplateVariableAvailable } from "../../../contracts/event-template-variables";
+import type { TemplateVariableOption } from "../../../dashboard/ui";
+import type { TemplateVariable } from "../../contract";
 import type { FaqEntry, FaqGame, FaqMutationInput } from "../contracts";
 
 export interface FaqPanelData {
   entries: FaqEntry[];
-  blocks: string[];
+  variables: TemplateVariableOption[];
 }
 
 export interface FaqTestResult {
@@ -36,11 +39,22 @@ export const loadFaqPanel = async (channelId: string, signal?: AbortSignal): Pro
   ]);
   const [entries, variables] = await Promise.all([
     readJson<{ entries: FaqEntry[] }>(entriesResponse),
-    readJson<{ variables: { name: string; isTextBlock?: boolean }[] }>(variablesResponse),
+    readJson<{ variables: { name: string; isTextBlock?: boolean; availableInEventTemplates?: boolean; description?: string; sample?: string; group?: TemplateVariableOption["group"]; contexts?: TemplateVariable["contexts"]; parameters?: TemplateVariableOption["parameters"]; parameterDefault?: string }[] }>(variablesResponse),
   ]);
   return {
     entries: entries.entries,
-    blocks: variables.variables.filter((variable) => variable.isTextBlock === true).map(({ name }) => name),
+    variables: variables.variables.filter(isEventTemplateVariableAvailable).map((variable) => ({
+      name: variable.name,
+      description: variable.description ?? variable.name,
+      sample: variable.sample ?? "",
+      ...(variable.group === undefined ? {} : { group: variable.group }),
+      ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
+      ...(variable.parameters === "choices" || variable.parameters === "currency_pair" || variable.parameters === "api_source_name"
+        ? { parameter: { value: variable.parameterDefault ?? (variable.parameters === "choices" ? "a|b|c" : variable.parameters === "currency_pair" ? "USD EUR" : "sunset") } }
+        : {}),
+      kind: "module",
+      ...(variable.isTextBlock === true ? { isTextBlock: true } : {}),
+    })),
   };
 };
 

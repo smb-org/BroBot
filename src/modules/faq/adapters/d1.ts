@@ -12,7 +12,7 @@ export interface FaqEntryRow {
   enabled: number;
   matcher_type: string;
   matcher_json: string;
-  answer_block: string;
+  answer_text: string;
   cooldown_seconds: number;
   games_json: string;
   chat_target: FaqEntry["chatTarget"];
@@ -70,7 +70,7 @@ export const mapFaqEntryRow = (row: FaqEntryRow): FaqEntry => ({
   name: row.name,
   enabled: row.enabled === 1,
   matcher: matcherFrom(row.matcher_type, row.matcher_json),
-  answerBlock: row.answer_block,
+  answerText: row.answer_text,
   cooldownSeconds: row.cooldown_seconds,
   games: gamesFrom(row.games_json),
   chatTarget: row.chat_target,
@@ -81,7 +81,7 @@ export const mapFaqEntryRow = (row: FaqEntryRow): FaqEntry => ({
   updatedAt: row.updated_at,
 });
 
-const selectFaqEntries = `SELECT faq_id, name, enabled, matcher_type, matcher_json, answer_block, cooldown_seconds,
+const selectFaqEntries = `SELECT faq_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds,
                                  games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at
                             FROM faq_entries
                            WHERE channel_id = ?`;

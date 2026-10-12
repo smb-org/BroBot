@@ -13,7 +13,8 @@ import {
 } from "./domain";
 import { TIMER_MAXIMUM_COUNT } from "./contracts";
 import type { Timer } from "./contracts";
-import { mapTimerRow, timerMutationInput, validateTimerBlock, type TimerRow } from "./service";
+import { mapTimerRow, timerMutationInput, validateTimerText, type TimerRow } from "./service";
+import { readTextBlockGraphRevision, textBlockGraphRevisionChanged, textBlockWriteGuard } from "../contracts/text-block-write-guard";
 
 const MODULE_ID = "timers";
 const ALARM_HANDLER = "run";
@@ -30,7 +31,7 @@ type TimerRouteContext = Context<ModuleRouteEnvironment>;
 
 const readTimer = async (db: D1Database, channelId: string, timerId: string): Promise<Timer | null> => {
   const row = await db.prepare(
-    `SELECT timer_id, name, enabled, block_name, trigger_type, trigger_json, chat_target, revision,
+    `SELECT timer_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, revision,
             next_run_at, next_run_stream_id, last_run_at, created_at, updated_at
        FROM timers WHERE channel_id = ? AND timer_id = ?`,
   ).bind(channelId, timerId).first<TimerRow>();
@@ -105,15 +106,15 @@ const setScheduledAlarm = async (
   }
 };
 
-const inputDependentError = (reason: "missing" | "input_dependent"): string =>
-  reason === "input_dependent" ? "timer_block_input_dependent" : "timer_block_missing";
+const textValidationError = (reason: "missing" | "input_dependent"): string =>
+  reason === "input_dependent" ? "timer_text_input_dependent" : "timer_text_block_missing";
 
 export const timerRoutes = new Hono<ModuleRouteEnvironment>();
 
 timerRoutes.get("/timers", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
   const result = await context.env.DB.prepare(
-    `SELECT timer_id, name, enabled, block_name, trigger_type, trigger_json, chat_target, revision,
+    `SELECT timer_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, revision,
             next_run_at, next_run_stream_id, last_run_at, created_at, updated_at
        FROM timers WHERE channel_id = ? ORDER BY created_at, timer_id`,
   ).bind(channelId).all<TimerRow>();
@@ -129,6 +130,7 @@ timerRoutes.post("/timers", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
   const input = timerMutationInput(await readBody(context.req.raw));
   if (input === null) return context.json({ error: "timer_invalid" }, 400);
+  const graphRevision = await readTextBlockGraphRevision(context.env.DB, channelId);
   const eventSourceId = input.trigger.type === "before_event" ? input.trigger.sourceId : null;
   if (eventSourceId !== null && !context.get("listEventTimeSources")().some((source) => source.id === eventSourceId)) {
     return context.json({ error: "timer_event_source_missing" }, 400);
@@ -138,8 +140,9 @@ timerRoutes.post("/timers", async (context) => {
     context.get("listRegisteredTemplateVariables")(channelId),
   ]);
   if ((countRow?.count ?? 0) >= TIMER_MAXIMUM_COUNT) return context.json({ error: "timer_limit_reached" }, 409);
-  const validation = await validateTimerBlock(context.env.DB, channelId, input.blockName, variables);
-  if (!validation.ok) return context.json({ error: inputDependentError(validation.reason) }, 400);
+  const validation = await validateTimerText(context.env.DB, channelId, input.messageText, variables);
+  if (!validation.ok) return context.json({ error: textValidationError(validation.reason) }, 400);
+  const blockGuard = textBlockWriteGuard(channelId, graphRevision, [input.messageText]);
 
   const timerId = crypto.randomUUID();
   const now = nowIso();
@@ -151,21 +154,24 @@ timerRoutes.post("/timers", async (context) => {
   try { activityCount = await stub.getChatActivityCount(); } catch { /* A missing baseline is initialized on first run. */ }
   const mutation = context.env.DB.prepare(
     `INSERT INTO timers
-      (timer_id, channel_id, name, enabled, block_name, trigger_type, trigger_json, chat_target, revision,
+      (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, revision,
        next_run_at, last_run_at, last_chat_activity_count, created_at, updated_at)
      SELECT ?, ?, ?, 1, ?, ?, ?, ?, 1, NULL, NULL, ?, ?, ?
-       WHERE (SELECT COUNT(*) FROM timers WHERE channel_id = ?) < ? ${authorization.sql}`,
-  ).bind(timerId, channelId, input.name, input.blockName, input.trigger.type, triggerJson, input.chatTarget,
-    activityCount, now, now, channelId, TIMER_MAXIMUM_COUNT, ...authorization.values);
+       WHERE (SELECT COUNT(*) FROM timers WHERE channel_id = ?) < ? ${blockGuard.sql} ${authorization.sql}`,
+  ).bind(timerId, channelId, input.name, input.messageText, input.trigger.type, triggerJson, input.chatTarget,
+    activityCount, now, now, channelId, TIMER_MAXIMUM_COUNT, ...blockGuard.values, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
     channelId,
     moduleId: MODULE_ID,
     action: "timers.timer.created" satisfies AuditAction,
     before: null,
-    after: { timerId, name: input.name, blockName: input.blockName, triggerType: input.trigger.type, chatTarget: input.chatTarget },
+    after: { timerId, name: input.name, messageText: input.messageText, triggerType: input.trigger.type, chatTarget: input.chatTarget },
   }, now);
   const results = await context.env.DB.batch([mutation, audit]);
   if (results[0]?.meta.changes === 0) {
+    if (await textBlockGraphRevisionChanged(context.env.DB, channelId, graphRevision)) {
+      return context.json({ error: "timer_conflict" }, 409);
+    }
     const currentCount = await context.env.DB.prepare("SELECT COUNT(*) AS count FROM timers WHERE channel_id = ?")
       .bind(channelId).first<{ count: number }>();
     return (currentCount?.count ?? 0) >= TIMER_MAXIMUM_COUNT
@@ -188,28 +194,30 @@ timerRoutes.patch("/timers/:timerId", async (context) => {
   if (!Number.isSafeInteger(revision) || (revision as number) < 1) return context.json({ error: "timer_invalid" }, 400);
   const input = timerMutationInput(body);
   if (input === null) return context.json({ error: "timer_invalid" }, 400);
+  const graphRevision = await readTextBlockGraphRevision(context.env.DB, channelId);
   const eventSourceId = input.trigger.type === "before_event" ? input.trigger.sourceId : null;
   if (eventSourceId !== null && !context.get("listEventTimeSources")().some((source) => source.id === eventSourceId)) {
     return context.json({ error: "timer_event_source_missing" }, 400);
   }
   const variables = await context.get("listRegisteredTemplateVariables")(channelId);
-  const validation = await validateTimerBlock(context.env.DB, channelId, input.blockName, variables);
-  if (!validation.ok) return context.json({ error: inputDependentError(validation.reason) }, 400);
+  const validation = await validateTimerText(context.env.DB, channelId, input.messageText, variables);
+  if (!validation.ok) return context.json({ error: textValidationError(validation.reason) }, 400);
+  const blockGuard = textBlockWriteGuard(channelId, graphRevision, [input.messageText]);
   const now = nowIso();
   const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
     `UPDATE timers
-        SET name = ?, block_name = ?, trigger_type = ?, trigger_json = ?, chat_target = ?,
+        SET name = ?, message_text = ?, trigger_type = ?, trigger_json = ?, chat_target = ?,
             next_run_at = NULL, next_run_stream_id = NULL, revision = revision + 1, updated_at = ?
-      WHERE channel_id = ? AND timer_id = ? AND revision = ? ${authorization.sql}`,
-  ).bind(input.name, input.blockName, input.trigger.type, JSON.stringify(input.trigger), input.chatTarget, now,
-    channelId, timerId, revision, ...authorization.values);
+      WHERE channel_id = ? AND timer_id = ? AND revision = ? ${blockGuard.sql} ${authorization.sql}`,
+  ).bind(input.name, input.messageText, input.trigger.type, JSON.stringify(input.trigger), input.chatTarget, now,
+    channelId, timerId, revision, ...blockGuard.values, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
     channelId,
     moduleId: MODULE_ID,
     action: "timers.timer.updated" satisfies AuditAction,
-    before: { timerId, name: existing.name, blockName: existing.blockName, triggerType: existing.trigger.type, chatTarget: existing.chatTarget },
-    after: { timerId, name: input.name, blockName: input.blockName, triggerType: input.trigger.type, chatTarget: input.chatTarget },
+    before: { timerId, name: existing.name, messageText: existing.messageText, triggerType: existing.trigger.type, chatTarget: existing.chatTarget },
+    after: { timerId, name: input.name, messageText: input.messageText, triggerType: input.trigger.type, chatTarget: input.chatTarget },
   }, now);
   const results = await context.env.DB.batch([mutation, audit]);
   if (results[0]?.meta.changes === 0) {
@@ -275,7 +283,7 @@ timerRoutes.delete("/timers/:timerId", async (context) => {
     channelId,
     moduleId: MODULE_ID,
     action: "timers.timer.removed" satisfies AuditAction,
-    before: { timerId, name: existing.name, blockName: existing.blockName, triggerType: existing.trigger.type, chatTarget: existing.chatTarget },
+    before: { timerId, name: existing.name, messageText: existing.messageText, triggerType: existing.trigger.type, chatTarget: existing.chatTarget },
     after: null,
   }, now);
   const results = await context.env.DB.batch([mutation, audit]);

@@ -48,7 +48,7 @@ export const processFaqMessage = async (
     : selectFaqMatch(prepared, text, await (context.channelGameId ?? (() => Promise.resolve(null)))());
   const match = selection.match;
   if (match === null) return { actions: [], diagnostics: [] };
-  const rendered = await context.renderTemplate(`{${match.entry.answerBlock}}`, {});
+  const rendered = await context.renderTemplate(match.entry.answerText, {});
   if (rendered.text.length === 0) return { actions: [], diagnostics: rendered.diagnostics };
   const claim = await repository.claim(event.channelId, match.entry, new Date().toISOString());
   if (!claim.claimed) return { actions: [], diagnostics: [] };

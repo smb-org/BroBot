@@ -91,6 +91,24 @@ describe("text library", () => {
     expect(textLibraryTexts("en").usesCount(2)).toBe("2 uses");
   });
 
+  it("uses the block text as its template variable catalogue example", async () => {
+    const snapshot = await service.list(CHANNEL_ID);
+    const created = await service.create({
+      channelId: CHANNEL_ID,
+      name: "welcome",
+      categoryId: "social",
+      games: [],
+      variants: [{ id: "default", conditions: {}, texts: ["Welcome to the stream", "Thanks for joining"] }],
+      expectedGraphRevision: snapshot.settings.graphRevision,
+      now: new Date(NOW).toISOString(),
+    }, ACTOR, snapshot);
+    expect(created.ok).toBe(true);
+
+    const variables = await textLibraryModule.templateVariables?.(database as unknown as D1Database, CHANNEL_ID);
+
+    expect(variables).toContainEqual({ name: "text.welcome", sample: "Welcome to the stream", maxLength: 500 });
+  });
+
   it("shows selected weekday conditions as a visible toggle state", async () => {
     const timestamp = new Date(NOW).toISOString();
     stubTextLibraryPanelApi({
@@ -114,7 +132,7 @@ describe("text library", () => {
     });
 
     renderTextLibraryPanel();
-    fireEvent.click(await screen.findByRole("button", { name: /\{schedule\}/u }));
+    fireEvent.click(await screen.findByRole("button", { name: /\{text\.schedule\}/u }));
 
     const weekdays = screen.getByRole("group", { name: "Weekdays" });
     const sunday = within(weekdays).getByRole("button", { name: "Sunday" });
@@ -162,12 +180,12 @@ describe("text library", () => {
     }
 
     renderWithQuery(<TogglePanel />, undefined, { gcTime: 600_000 });
-    expect(await screen.findByRole("button", { name: /\{cached_text\}/u })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /\{text\.cached_text\}/u })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Toggle panel" }));
     fireEvent.click(screen.getByRole("button", { name: "Toggle panel" }));
 
-    expect(screen.getByRole("button", { name: /\{cached_text\}/u })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /\{text\.cached_text\}/u })).toBeInTheDocument();
   });
 
   it("accepts a committed block from a recreated resource generation", async () => {
@@ -212,13 +230,13 @@ describe("text library", () => {
       undefined,
       { gcTime: 600_000 },
     );
-    fireEvent.click(await screen.findByRole("button", { name: /\{welcome\}/u }));
+    fireEvent.click(await screen.findByRole("button", { name: /\{text\.welcome\}/u }));
     fireEvent.change(screen.getByRole("textbox", { name: "Text" }), { target: { value: "Client draft" } });
     fireEvent.click(within(screen.getByRole("region", { name: "Name" })).getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Text" })).toHaveValue("New generation"));
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    fireEvent.click(screen.getByRole("button", { name: /\{welcome\}/u }));
+    fireEvent.click(screen.getByRole("button", { name: /\{text\.welcome\}/u }));
 
     expect(screen.getByRole("textbox", { name: "Text" })).toHaveValue("New generation");
   });
@@ -261,6 +279,49 @@ describe("text library", () => {
       now: new Date(NOW).toISOString(),
     }, ACTOR, snapshot);
   };
+
+  it("protects a block referenced directly by an otherwise unused parent", async () => {
+    const child = await createBlock("child", [variant("default", "Child text")]);
+    if (!child.ok) throw new Error("Could not create the child block.");
+    const parent = await createBlock("parent", [variant("default", "Nested: {text.child}")]);
+    if (!parent.ok) throw new Error("Could not create the parent block.");
+    const snapshot = await service.list(CHANNEL_ID);
+
+    const result = await service.delete(CHANNEL_ID, "child", child.block.revision, snapshot.settings.graphRevision, ACTOR, new Date(NOW).toISOString());
+
+    expect(result).toMatchObject({ ok: false, reason: "in_use" });
+    await expect(service.find(CHANNEL_ID, "child")).resolves.not.toBeNull();
+  });
+
+  it("rechecks consumer references atomically with block deletion", async () => {
+    const created = await createBlock("timed_text", [variant("default", "Timer text")]);
+    if (!created.ok) throw new Error("Could not create the timer block.");
+    const snapshot = await service.list(CHANNEL_ID);
+    await database.prepare(
+      `INSERT INTO timers (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, revision, created_at, updated_at)
+       VALUES ('timer-race', ?, 'Racing timer', 1, '{text.timed_text}', 'interval', '{"type":"interval","minutes":10}', 1, ?, ?)`,
+    ).bind(CHANNEL_ID, new Date(NOW).toISOString(), new Date(NOW).toISOString()).run();
+
+    const result = await service.delete(CHANNEL_ID, "timed_text", created.block.revision, snapshot.settings.graphRevision, ACTOR, new Date(NOW).toISOString());
+
+    expect(result).toMatchObject({ ok: false, reason: "in_use" });
+    await expect(service.find(CHANNEL_ID, "timed_text")).resolves.not.toBeNull();
+  });
+
+  it("rechecks FAQ references atomically with block deletion", async () => {
+    const created = await createBlock("faq_text", [variant("default", "FAQ text")]);
+    if (!created.ok) throw new Error("Could not create the FAQ block.");
+    const snapshot = await service.list(CHANNEL_ID);
+    await database.prepare(
+      `INSERT INTO faq_entries (faq_id, channel_id, name, matcher_type, matcher_json, answer_text, created_at, updated_at)
+       VALUES ('faq-race', ?, 'Racing FAQ', 'keywords', '{"patterns":["hello"]}', '{text.faq_text}', ?, ?)`,
+    ).bind(CHANNEL_ID, new Date(NOW).toISOString(), new Date(NOW).toISOString()).run();
+
+    const result = await service.delete(CHANNEL_ID, "faq_text", created.block.revision, snapshot.settings.graphRevision, ACTOR, new Date(NOW).toISOString());
+
+    expect(result).toMatchObject({ ok: false, reason: "in_use" });
+    await expect(service.find(CHANNEL_ID, "faq_text")).resolves.not.toBeNull();
+  });
 
   it("persists box art for a text block and its game condition", async () => {
     const game: TwitchGame = {
@@ -372,7 +433,7 @@ describe("text library", () => {
       chatStatus: ["viewer"],
     };
     const commands = createTextCommandRepository(database as unknown as D1Database, authorize);
-    await commands.create({ channelId: CHANNEL_ID, name: "guide", text: "{greeting}", kind: "text", cooldownSeconds: 0, now: new Date(NOW).toISOString() }, ACTOR);
+    await commands.create({ channelId: CHANNEL_ID, name: "guide", text: "{text.greeting}", kind: "text", cooldownSeconds: 0, now: new Date(NOW).toISOString() }, ACTOR);
     const runCommand = async (isLive: boolean): Promise<string | undefined> => {
       const result = await processTextCommandMessage(commandEvent, commands, {
         renderTemplate: await createRenderer("chat_command", isLive, commandEvent),
@@ -383,8 +444,8 @@ describe("text library", () => {
     await expect(runCommand(false)).resolves.toBe("Hello offline");
 
     const event: ModuleEvent = { ...commandEvent, subscriptionType: "channel.raid", payload: {}, actor: null, chatStatus: null };
-    await expect((await createRenderer("event", true, event))("{greeting}", {})).resolves.toMatchObject({ text: "Hello live" });
-    await expect((await createRenderer("event", false, event))("{greeting}", {})).resolves.toMatchObject({ text: "Hello offline" });
+    await expect((await createRenderer("event", true, event))("{text.greeting}", {})).resolves.toMatchObject({ text: "Hello live" });
+    await expect((await createRenderer("event", false, event))("{text.greeting}", {})).resolves.toMatchObject({ text: "Hello offline" });
   });
 
   it.each(["1hello", "_hello"]) ("discovers and renders block names beginning with %s", async (name) => {
@@ -399,7 +460,7 @@ describe("text library", () => {
       actor: null,
       chatStatus: null,
     };
-    await expect(renderWithBlocks(`{${name}}`, event, "event")).resolves.toMatchObject({ text: `Rendered ${name}` });
+    await expect(renderWithBlocks(`{text.${name}}`, event, "event")).resolves.toMatchObject({ text: `Rendered ${name}` });
   });
 
   it("fully resolves host variables (dotted, parameterized) that follow or sit inside a block", async () => {
@@ -423,11 +484,11 @@ describe("text library", () => {
     }));
 
     // A dotted channel variable right after a block, in the same command text (#252).
-    await expect((await createRenderer())("{welcome} {var.points}", {})).resolves.toMatchObject({ text: "Hello 42" });
+    await expect((await createRenderer())("{text.welcome} {var.points}", {})).resolves.toMatchObject({ text: "Hello 42" });
     // A parameterized system variable nested inside a block's own text.
-    await expect((await createRenderer())("{roll}", {})).resolves.toMatchObject({ text: "You rolled 2" });
+    await expect((await createRenderer())("{text.roll}", {})).resolves.toMatchObject({ text: "You rolled 2" });
     // A dotted channel variable nested inside a block's own text.
-    await expect((await createRenderer())("{stats}", {})).resolves.toMatchObject({ text: "Points: 42" });
+    await expect((await createRenderer())("{text.stats}", {})).resolves.toMatchObject({ text: "Points: 42" });
   });
 
   it("does not treat viewer arguments as text block references", async () => {
@@ -436,7 +497,7 @@ describe("text library", () => {
       channelId: CHANNEL_ID,
       subscriptionType: "channel.chat.message",
       triggerId: "fictional-command-trigger",
-      payload: { message: { text: "!echo {welcome}" }, chatter_user_login: "esembe" },
+      payload: { message: { text: "!echo {text.welcome}" }, chatter_user_login: "esembe" },
       settings: {},
       receivedAt: new Date(NOW).toISOString(),
       actor: { userId: "fictional-user", login: "esembe", role: null },
@@ -444,43 +505,46 @@ describe("text library", () => {
     };
     const rendered = await createTemplateRenderer(event, "chat_command", [], await sourcesFor())(
       "{args}",
-      { args: "{welcome}" },
+      { args: "{text.welcome}" },
     );
 
-    expect(rendered.text).toBe("{welcome}");
+    expect(rendered.text).toBe("{text.welcome}");
   });
 
   it("rejects cycles and nesting deeper than three blocks when saving", async () => {
-    await expect(createBlock("cycle_a", [variant("default", "{cycle_b}")])).resolves.toMatchObject({ ok: true });
-    await expect(createBlock("cycle_b", [variant("default", "{cycle_a}")])).resolves.toMatchObject({
+    await expect(createBlock("cycle_a", [variant("default", "{text.cycle_b}")])).resolves.toMatchObject({ ok: true });
+    await expect(createBlock("cycle_b", [variant("default", "{text.cycle_a}")])).resolves.toMatchObject({
       ok: false,
       reason: "reference_cycle",
       path: ["cycle_a", "cycle_b", "cycle_a"],
     });
 
-    await expect(createBlock("root", [variant("default", "{middle}")])).resolves.toMatchObject({ ok: true });
-    await expect(createBlock("middle", [variant("default", "{leaf}")])).resolves.toMatchObject({ ok: true });
+    await expect(createBlock("root", [variant("default", "{text.middle}")])).resolves.toMatchObject({ ok: true });
+    await expect(createBlock("middle", [variant("default", "{text.leaf}")])).resolves.toMatchObject({ ok: true });
     await expect(createBlock("leaf", [variant("default", "done")])).resolves.toMatchObject({ ok: true });
-    await expect(createBlock("too_deep", [variant("default", "{root}")])).resolves.toMatchObject({
+    await expect(createBlock("too_deep", [variant("default", "{text.root}")])).resolves.toMatchObject({
       ok: false,
       reason: "reference_depth_exceeded",
     });
   });
 
   it("reports direct and nested uses supplied by generic module contracts", async () => {
-    await expect(createBlock("answer", [variant("default", "{detail}")])).resolves.toMatchObject({ ok: true });
+    await expect(createBlock("answer", [variant("default", "{text.detail}")])).resolves.toMatchObject({ ok: true });
     await expect(createBlock("detail", [variant("default", "A reusable detail")])).resolves.toMatchObject({ ok: true });
-    const snapshot = await service.list(CHANNEL_ID, [{ text: "!faq {answer}", kind: "command", label: "!faq" }]);
+    const snapshot = await service.list(CHANNEL_ID, [{ text: "!faq {text.answer}", kind: "command", label: "!faq" }]);
     expect(snapshot.usages.answer).toEqual([{ kind: "command", label: "!faq" }]);
-    expect(snapshot.usages.detail).toEqual([{ kind: "command", label: "!faq" }]);
+    expect(snapshot.usages.detail).toEqual([
+      { kind: "block", label: "answer" },
+      { kind: "command", label: "!faq" },
+    ]);
   });
 
   it("includes ad and raid templates in generic block usage tracking", async () => {
     await expect(createBlock("answer", [variant("default", "A reusable answer")])).resolves.toMatchObject({ ok: true });
     await database.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, ?, 1, ?)")
-      .bind(CHANNEL_ID, "ads", JSON.stringify({ ...adsModule.defaultSettings, automatic: "{answer}" })).run();
+      .bind(CHANNEL_ID, "ads", JSON.stringify({ ...adsModule.defaultSettings, automatic: "{text.answer}" })).run();
     await database.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, ?, 1, ?)")
-      .bind(CHANNEL_ID, "raid", JSON.stringify({ ...raidModule.defaultSettings, textLong: "{answer}" })).run();
+      .bind(CHANNEL_ID, "raid", JSON.stringify({ ...raidModule.defaultSettings, textLong: "{text.answer}" })).run();
 
     const sources = [
       ...(await adsModule.templateUsageSources?.(database as unknown as D1Database, CHANNEL_ID) ?? []),
@@ -624,13 +688,13 @@ describe("text library", () => {
       chatStatus: null,
     };
     const renderRandom = async (): Promise<string> =>
-      (await renderWithBlocks("{random_line}", randomEvent, "event")).text;
+      (await renderWithBlocks("{text.random_line}", randomEvent, "event")).text;
     const results = await Promise.all(Array.from({ length: 8 }, renderRandom));
     for (let index = 1; index < results.length; index += 1) {
       expect(results[index]).not.toBe(results[index - 1]);
     }
 
-    await expect(createBlock("long_line", [variant("default", "x".repeat(400) + "{long_child}")])).resolves.toMatchObject({ ok: true });
+    await expect(createBlock("long_line", [variant("default", "x".repeat(400) + "{text.long_child}")])).resolves.toMatchObject({ ok: true });
     await expect(createBlock("long_child", [variant("default", "y".repeat(200))])).resolves.toMatchObject({ ok: true });
     const event: ModuleEvent = {
       channelId: CHANNEL_ID,
@@ -642,12 +706,12 @@ describe("text library", () => {
       actor: null,
       chatStatus: null,
     };
-    const longResult = await renderWithBlocks("{long_line}", event, "event");
+    const longResult = await renderWithBlocks("{text.long_line}", event, "event");
     expect(longResult.text).toHaveLength(500);
     expect(longResult.text.endsWith("…")).toBe(true);
 
     await expect(createBlock("full_line", [variant("default", "z".repeat(500))])).resolves.toMatchObject({ ok: true });
-    const message = await renderWithBlocks("{full_line} tail", event, "event");
+    const message = await renderWithBlocks("{text.full_line} tail", event, "event");
     expect(message.text).toHaveLength(505);
     expect(message.text.endsWith(" tail")).toBe(true);
     expect(truncateChatText(message.text)).toMatchObject({ truncated: true, text: `${"z".repeat(499)}…` });
@@ -668,9 +732,9 @@ describe("text library", () => {
       chatStatus: null,
     };
 
-    await renderWithBlocks("{single_line}", event, "event");
-    await renderWithBlocks("{multi_line}", event, "event", {}, "preview");
-    await renderWithBlocks("{multi_line}", event, "event", {}, "overlay");
+    await renderWithBlocks("{text.single_line}", event, "event");
+    await renderWithBlocks("{text.multi_line}", event, "event", {}, "preview");
+    await renderWithBlocks("{text.multi_line}", event, "event", {}, "overlay");
 
     const rows = await database.prepare(
       "SELECT block_name, last_chosen_index FROM text_block_variants WHERE channel_id = ? ORDER BY block_name",
@@ -683,7 +747,7 @@ describe("text library", () => {
 
   it("preserves suffix text when host variables shrink nested expansion below the output limit", async () => {
     await expect(createBlock("args_leaf", [variant("default", "{args}".repeat(83))])).resolves.toMatchObject({ ok: true });
-    await expect(createBlock("args_root", [variant("default", "{args_leaf}TAIL")])).resolves.toMatchObject({ ok: true });
+    await expect(createBlock("args_root", [variant("default", "{text.args_leaf}TAIL")])).resolves.toMatchObject({ ok: true });
 
     const event: ModuleEvent = {
       channelId: CHANNEL_ID,
@@ -697,7 +761,7 @@ describe("text library", () => {
     };
     const rendered = await createTemplateRenderer(event, "chat_command", [], await sourcesFor({
       streamState: () => Promise.resolve("offline"),
-    }))("{args_root}", { args: "" });
+    }))("{text.args_root}", { args: "" });
 
     expect(rendered.text).toBe("TAIL");
   });
@@ -714,7 +778,7 @@ describe("text library", () => {
       .bind(CHANNEL_ID, "status_line").run();
 
     const render = async (stream: "online" | "offline"): Promise<string> => {
-      return (await renderWithBlocks("{status_line}", {
+      return (await renderWithBlocks("{text.status_line}", {
         channelId: CHANNEL_ID,
         subscriptionType: "channel.raid",
         triggerId: "fictional-status-trigger",
@@ -731,12 +795,12 @@ describe("text library", () => {
   });
 
   it("bounds expansion while resolving exponentially repeated nested references", async () => {
-    const repeated = (name: string): string => Array.from({ length: 166 }, () => `{${name}}`).join("");
+    const repeated = (name: string): string => Array.from({ length: 166 }, () => `{text.${name}}`).join("");
     await expect(createBlock("a", [variant("default", repeated("b"))])).resolves.toMatchObject({ ok: true });
     await expect(createBlock("b", [variant("default", repeated("c"))])).resolves.toMatchObject({ ok: true });
     await expect(createBlock("c", [variant("default", "x".repeat(500))])).resolves.toMatchObject({ ok: true });
 
-    const result = await renderWithBlocks("{a}", {
+    const result = await renderWithBlocks("{text.a}", {
       channelId: CHANNEL_ID,
       subscriptionType: "channel.raid",
       triggerId: "fictional-depth-trigger",
@@ -790,7 +854,7 @@ describe("text library", () => {
     }));
 
     renderTextLibraryPanel();
-    fireEvent.click(await screen.findByRole("button", { name: /\{welcome\}/u }));
+    fireEvent.click(await screen.findByRole("button", { name: /\{text\.welcome\}/u }));
     fireEvent.click(within(screen.getByRole("region", { name: "Name" })).getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(patchStatus).toBe(200));
@@ -811,10 +875,10 @@ describe("text library", () => {
     await expect(reserved.json()).resolves.toEqual({ error: "text_library_block_reserved_name" });
   });
 
-  it("invalidates overlay blocks that transitively reference an edited or deleted block", async () => {
+  it("invalidates edited overlay blocks and refuses to delete a block used by an overlay", async () => {
     const created = await createBlock("welcome", [variant("default", "Before edit")]);
     if (!created.ok) throw new Error("Could not create the realtime test block.");
-    const parent = await createBlock("parent", [variant("default", "Nested: {welcome}")]);
+    const parent = await createBlock("parent", [variant("default", "Nested: {text.welcome}")]);
     if (!parent.ok) throw new Error("Could not create the parent realtime test block.");
     await insertLoginIdentityAndSession(database, "manager-overlay-edit");
     await insertMember(database, CHANNEL_ID, "manager-overlay-edit", "manager");
@@ -886,13 +950,15 @@ describe("text library", () => {
       },
     ), environment);
 
-    expect(deleted.status).toBe(200);
-    expect(published).toHaveLength(1);
-    expect(published[0]).toMatchObject({
-      type: "modul.text_library.blocks_updated",
-      payload: { blockName: "parent" },
-      overlayIds: ["overlay-welcome"],
+    expect(deleted.status).toBe(409);
+    await expect(deleted.json()).resolves.toEqual({
+      error: "text_library_block_in_use",
+      usages: [
+        { kind: "block", label: "parent" },
+        { kind: "overlay", label: "Welcome" },
+      ],
     });
+    expect(published).toHaveLength(0);
   });
 
   it("measures a three-block render with ten conditional variants under the 10 ms CPU budget", async () => {
@@ -924,7 +990,7 @@ describe("text library", () => {
       actor: { userId: "fictional-user", login: "esembe", role: "broadcaster" },
       chatStatus: ["broadcaster"],
     };
-    const render = () => renderWithBlocks("{top}", event, "chat_command", {
+    const render = () => renderWithBlocks("{text.top}", event, "chat_command", {
       channelGameId: () => Promise.resolve(currentGame.id),
       streamState: () => Promise.resolve("offline"),
     });
@@ -967,11 +1033,11 @@ describe("text library", () => {
     await screen.findByTestId("text-library-list-slot");
     expect(await screen.findByRole("heading", { name: "Text blocks" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Category" })).toHaveValue("All categories");
-    const welcomeRow = screen.getByRole("button", { name: /\{welcome\}/u });
+    const welcomeRow = screen.getByRole("button", { name: /\{text\.welcome\}/u });
     const welcomeTableRow = welcomeRow.closest("tr");
     expect(welcomeTableRow).toHaveTextContent("1 variant");
     expect(welcomeTableRow).toHaveTextContent("0 uses");
-    fireEvent.click(screen.getByRole("button", { name: /\{welcome\}/u }));
+    fireEvent.click(screen.getByRole("button", { name: /\{text\.welcome\}/u }));
     expect(screen.getAllByText("Only broadcasters and managers can change text blocks and categories.")).toHaveLength(2);
     expect(document.querySelector(".text-library__read-only-properties")).toHaveTextContent("Hello");
     expect(screen.queryByRole("textbox", { name: "Name" })).not.toBeInTheDocument();
@@ -1020,7 +1086,7 @@ describe("text library", () => {
     }));
 
     renderTextLibraryPanel();
-    fireEvent.click(await screen.findByRole("button", { name: /\{welcome\}/u }));
+    fireEvent.click(await screen.findByRole("button", { name: /\{text\.welcome\}/u }));
     fireEvent.change(screen.getByRole("textbox", { name: "Text" }), { target: { value: "Updated" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
@@ -1038,7 +1104,7 @@ describe("text library", () => {
     guard = await screen.findByRole("dialog", { name: "Unsaved changes" });
     fireEvent.click(within(guard).getByRole("button", { name: "Continue editing" }));
 
-    fireEvent.click(screen.getByRole("button", { name: /\{faq\}/u }));
+    fireEvent.click(screen.getByRole("button", { name: /\{text\.faq\}/u }));
     guard = await screen.findByRole("dialog", { name: "Unsaved changes" });
     fireEvent.click(within(guard).getByRole("button", { name: "Save and switch" }));
     await waitFor(() => expect(patchBodies).toHaveLength(1));
@@ -1047,7 +1113,7 @@ describe("text library", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => expect(document.querySelector(".list-detail__inspector")).not.toBeInTheDocument());
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: /\{faq\}/u }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /\{text\.faq\}/u }));
   });
 
   it("registers its dirty-draft guard with the dashboard router so router-driven navigation is blocked", async () => {
@@ -1077,7 +1143,7 @@ describe("text library", () => {
     }));
 
     renderTextLibraryPanel();
-    fireEvent.click(await screen.findByRole("button", { name: /\{welcome\}/u }));
+    fireEvent.click(await screen.findByRole("button", { name: /\{text\.welcome\}/u }));
     fireEvent.change(screen.getByRole("textbox", { name: "Text" }), { target: { value: "Updated" } });
 
     // Simulates the router running its registered guards for sidebar navigation
@@ -1120,7 +1186,7 @@ describe("text library", () => {
     expect(screen.getByText("This name is reserved for a template variable.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
 
-    fireEvent.click(screen.getByRole("button", { name: /\{user\}/u }));
+    fireEvent.click(screen.getByRole("button", { name: /\{text\.user\}/u }));
     fireEvent.change(screen.getByRole("textbox", { name: "Text" }), { target: { value: "{us" } });
     expect(screen.queryByText("Text block {user}")).not.toBeInTheDocument();
   });
@@ -1147,7 +1213,7 @@ describe("text library", () => {
     });
 
     renderTextLibraryPanel();
-    fireEvent.click(await screen.findByRole("button", { name: /\{everyone_line\}/u }));
+    fireEvent.click(await screen.findByRole("button", { name: /\{text\.everyone_line\}/u }));
     fireEvent.click(screen.getByRole("combobox", { name: "Preview context" }));
     fireEvent.click(await screen.findByRole("option", { name: "Command" }));
 
@@ -1189,7 +1255,7 @@ describe("text library", () => {
     vi.stubGlobal("fetch", fetcher);
 
     renderTextLibraryPanel();
-    fireEvent.click(await screen.findByRole("button", { name: /\{preview_line\}/u }));
+    fireEvent.click(await screen.findByRole("button", { name: /\{text\.preview_line\}/u }));
     await waitFor(() => expect(fetcher.mock.calls.filter(([input]) => new URL(input instanceof Request ? input.url : String(input), window.location.href).pathname.endsWith("/template-preview"))).toHaveLength(1));
     await waitFor(() => expect(document.querySelector(".ui-chat-preview__text")).toHaveTextContent("Rendered First"));
 
@@ -1250,7 +1316,7 @@ describe("text library", () => {
     vi.stubGlobal("fetch", fetcher);
 
     renderTextLibraryPanel();
-    fireEvent.click(await screen.findByRole("button", { name: /\{preview_line\}/u }));
+    fireEvent.click(await screen.findByRole("button", { name: /\{text\.preview_line\}/u }));
     await waitFor(() => expect(document.querySelector(".ui-chat-preview__text")).toHaveTextContent("Rendered First"));
 
     vi.useFakeTimers();
@@ -1304,7 +1370,7 @@ describe("text library", () => {
     vi.stubGlobal("fetch", fetcher);
 
     renderTextLibraryPanel();
-    fireEvent.click(await screen.findByRole("button", { name: /\{preview_line\}/u }));
+    fireEvent.click(await screen.findByRole("button", { name: /\{text\.preview_line\}/u }));
     await waitFor(() => expect(document.querySelector(".ui-chat-preview__text")).toHaveTextContent("Rendered First"));
 
     vi.useFakeTimers();

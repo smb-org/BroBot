@@ -559,7 +559,7 @@ describe("API source Node-side template CPU measurement", () => {
        VALUES (?, 'info', 'info', NULL, ?, ?)`,
     ).bind(CHANNEL_ID, new Date(NOW).toISOString(), new Date(NOW).toISOString()).run();
     const blockNames = ["root", "level_one", "level_two"] as const;
-    const blockTexts = ["{level_one}", "{level_two}", "{api_source.value sunset}"] as const;
+    const blockTexts = ["{text.level_one}", "{text.level_two}", "{api_source.value sunset}"] as const;
     for (const [index, name] of blockNames.entries()) {
       await database.prepare(
         `INSERT INTO text_blocks (channel_id, block_name, category_id, games_json, revision, created_at, updated_at)
@@ -640,7 +640,7 @@ describe("API source Node-side template CPU measurement", () => {
     for (let iteration = 0; iteration < 5; iteration += 1) {
       const startedAt = performance.now();
       const startedCpu = process.threadCpuUsage();
-      const result = await createTemplateRenderer(event, "event", [], sources)("{root}", {}, undefined, "preview");
+      const result = await createTemplateRenderer(event, "event", [], sources)("{text.root}", {}, undefined, "preview");
       const cpuUsage = process.threadCpuUsage(startedCpu);
       cpuMeasurementsMs.push((cpuUsage.user + cpuUsage.system) / 1_000);
       elapsedMeasurementsMs.push(performance.now() - startedAt);

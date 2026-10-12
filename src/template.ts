@@ -3,8 +3,10 @@ import {
   TEMPLATE_BARE_VARIABLE_NAME_SOURCE,
   TEMPLATE_DOTTED_VARIABLE_NAME_SOURCE,
 } from "./contracts/template-names";
+import { templateTextLength } from "./contracts/template-text-length";
 
 export type { TemplateContext } from "./contracts/values";
+export { templateTextLength } from "./contracts/template-text-length";
 
 interface TemplateVariablePickerLocale {
   label: string;
@@ -44,8 +46,8 @@ export type TemplateWarning =
   | { field: string; code: "template_parameters_invalid"; invalidVariables: readonly string[] }
   | { field: string; code: "template_worst_case_too_long"; worstCaseLength: number };
 
-const strictTemplateName = `(?:${TEMPLATE_BARE_VARIABLE_NAME_SOURCE}|${TEMPLATE_DOTTED_VARIABLE_NAME_SOURCE})`;
-const candidateTemplateName = "(?:[A-Za-z0-9_]{1,32}|[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+)";
+const strictTemplateName = `(?:${TEMPLATE_BARE_VARIABLE_NAME_SOURCE}|${TEMPLATE_DOTTED_VARIABLE_NAME_SOURCE}|text\\.${TEMPLATE_BARE_VARIABLE_NAME_SOURCE})`;
+const candidateTemplateName = "(?:[A-Za-z0-9_]{1,32}|[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+|text\\.[A-Za-z0-9_]{1,32})";
 export const TEMPLATE_VARIABLE_PATTERN = new RegExp(`\\{(${strictTemplateName})(?: ([^{}\\n]{1,200}))?\\}`, "gu");
 const TEMPLATE_TOKEN_CANDIDATE_PATTERN = new RegExp(`\\{(${candidateTemplateName})(?: ([^{}\\n]{1,200}))?\\}`, "gu");
 
@@ -242,7 +244,7 @@ export const worstCaseTemplateLength = (
 ): number => {
   const variables = new Map(declared.map((variable) => [variable.name, variable]));
   const present = new Set<string>();
-  let length = text.length;
+  let length = templateTextLength(text);
   for (const token of matches(text, TEMPLATE_VARIABLE_PATTERN)) {
     const name = token[1];
     if (name === undefined) continue;
@@ -256,7 +258,7 @@ export const worstCaseTemplateLength = (
         : variable.parameters === "choices"
           ? Math.max(0, ...token[2].split("|").map((choice) => choice.length))
           : token[0].length;
-    length += replacementLength - token[0].length;
+    length += replacementLength - templateTextLength(token[0]);
   }
   for (const variable of declared) if (!present.has(variable.name)) length += variable.fallbackWhenAbsent ?? 0;
   return length;

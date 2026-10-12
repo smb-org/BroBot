@@ -9,6 +9,7 @@ import {
   type OverlayElementKind,
 } from "../../contracts/values";
 import { isOverlayCssSafe } from "../../contracts/overlay-css";
+import { templateTextLength } from "../../template";
 import {
   countOverlaysForChannel,
   createOverlayWithAudit,
@@ -63,7 +64,7 @@ const elementSchema = z.object({
   label: z.string().max(40).default(""),
   variableName: z.string().regex(VARIABLE_PATTERN).nullable().default(null),
   // Legacy text can have zero or many markers; the renderer substitutes the first and preserves the remaining text.
-  text: z.string().max(100).default("{value}"),
+  text: z.string().refine((value) => templateTextLength(value) <= 100).default("{value}"),
   config: z.record(z.string(), z.json()).default({}),
   x: z.number().int().default(0),
   y: z.number().int().default(0),
@@ -136,7 +137,7 @@ const deleteOverlaySchema = z.object({ baseRevision: z.number().int().min(1) }).
 const legacyOverlayImportSchema = z.object({
   token: z.string().min(1).max(128),
   variableName: z.string().regex(VARIABLE_PATTERN),
-  text: z.string().max(100),
+  text: z.string().refine((value) => templateTextLength(value) <= 100),
 }).strict();
 
 const managementDenied = (context: { json: (body: { error: string }, status: 403) => Response }): Response =>

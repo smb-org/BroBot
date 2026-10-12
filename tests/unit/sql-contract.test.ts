@@ -27,7 +27,7 @@ import { overlayElementIdCollisionGuard, referencedVariablesGuard } from "../../
 import { platformRolesSql } from "../../src/worker/platform/repository";
 import { channelStateQuery } from "../../src/worker/panel/repository";
 import { textCommandSelectColumns } from "../../src/modules/text_commands/adapters/d1";
-import { textBlockCategorySelectColumns, textBlockSelectColumns } from "../../src/modules/text_library/adapters/d1";
+import { blockUsageExistsSql, textBlockCategorySelectColumns, textBlockSelectColumns } from "../../src/modules/text_library/adapters/d1";
 import { chatVoteSelectColumns, chatVoteTemplateSelectColumns } from "../../src/modules/chat_voting/repository";
 import {
   belaboxExpectedOpenStreamSetGuard,
@@ -37,6 +37,9 @@ import {
   belaboxStreamSessionGuard,
 } from "../../src/modules/belabox/adapters/d1";
 import { MANAGING_ROLES } from "../../src/contracts/values";
+import { textBlockWriteGuard } from "../../src/modules/contracts/text-block-write-guard";
+import { columnVariableReferences, moduleVariableRenameTarget } from "../../src/modules/contract";
+import { textLibraryModule } from "../../src/modules/text_library";
 import { ANY_MEMBER_ROLES } from "../../src/worker/db/guards";
 
 interface SchemaObject {
@@ -54,6 +57,29 @@ interface SqlContractQuery {
 
 const sourceDirectory = path.resolve(import.meta.dirname, "../../src");
 const now = "2026-01-01T00:00:00.000Z";
+const emptyReferenceDatabase = {
+  prepare: () => ({ bind: () => ({ all: () => Promise.resolve({ results: [] }) }) }),
+} as unknown as D1Database;
+const faqRenameValidation = await columnVariableReferences({
+  moduleId: "faq",
+  tableName: "faq_entries",
+  idColumn: "faq_id",
+  itemNameColumn: "name",
+  textColumn: "answer_text",
+}).validateRename?.(emptyReferenceDatabase, "channel-id", "score", "points");
+const timerRenameValidation = await columnVariableReferences({
+  moduleId: "timers",
+  tableName: "timers",
+  idColumn: "timer_id",
+  itemNameColumn: "name",
+  textColumn: "message_text",
+}).validateRename?.(emptyReferenceDatabase, "channel-id", "score", "points");
+const textLibraryRenameValidation = await textLibraryModule.variableReferences?.validateRename?.(
+  emptyReferenceDatabase,
+  "channel-id",
+  "score",
+  "points",
+);
 const actor = { userId: "actor-user", sessionId: "actor-session" };
 const baselineModulePath = "../../scripts/d1-baseline.mjs";
 const { generateBaseline } = await import(baselineModulePath) as unknown as {
@@ -107,13 +133,28 @@ const sqlGetFixtures = new Map<string, string>([
   ["placeholders", "?, ?, ?"],
   ["channelStateQuery", channelStateQuery],
   ["textCommandSelectColumns", textCommandSelectColumns],
+  ["quotedIdColumn", '"faq_id"'],
+  ["quotedItemNameColumn", '"name"'],
+  ["quotedTableName", '"faq_entries"'],
+  ["quotedTextColumn", '"answer_text"'],
+  ["columnUpdates.join(\", \")", '"answer_text" = replace("answer_text", ?, ?), "revision" = "revision" + 1, "updated_at" = strftime(\'%Y-%m-%dT%H:%M:%fZ\', \'now\')'],
+  ["renamePreconditionSql", [faqRenameValidation, timerRenameValidation, textLibraryRenameValidation]
+    .flatMap((validation) => validation === undefined ? [] : [`AND (${validation.precondition.sql})`]).join("\n") || ""],
+  ["target.sql", moduleVariableRenameTarget("channel-id", "points", {
+    value: 0,
+    description: "",
+    resetOnStreamStart: false,
+    createdAt: now,
+    updatedAt: now,
+  }).sql],
   ["rowColumns", "votekick_id, target_user_id, target_login, initiator_user_id, status, threshold, yes_votes, no_votes, ballot_revision, duration_seconds, started_at, expires_at, ended_at, lifted_at"],
-  ["selectFaqEntries", `SELECT faq_id, name, enabled, matcher_type, matcher_json, answer_block, cooldown_seconds,
+  ["selectFaqEntries", `SELECT faq_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds,
                                  games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at
                             FROM faq_entries
                            WHERE channel_id = ?`],
   ["textBlockSelectColumns", textBlockSelectColumns],
   ["textBlockCategorySelectColumns", textBlockCategorySelectColumns],
+  ["blockUsageExistsSql", blockUsageExistsSql],
   ["chatVoteSelectColumns", chatVoteSelectColumns],
   ["chatVoteTemplateSelectColumns", chatVoteTemplateSelectColumns],
   ["belaboxHistoryStatusGuard", belaboxHistoryStatusGuard],
@@ -125,6 +166,8 @@ const sqlGetFixtures = new Map<string, string>([
   ["guard", authorizeModuleMutation("channel-id", actor, now).sql],
   ["channelBotConsentCondition(\"channel\")", channelBotConsentCondition("channel")],
   ["authorization.sql", authorizeModuleMutation("channel-id", actor, now).sql],
+  ["blockGuard.sql", textBlockWriteGuard("channel-id", 1, ["{text.welcome}"]).sql],
+  ["textBlockGuard?.sql ?? \"\"", textBlockWriteGuard("channel-id", 1, ["{text.welcome}"]).sql],
 ]);
 
 // Wrangler manages this table itself and doesn't create it via our migrations.

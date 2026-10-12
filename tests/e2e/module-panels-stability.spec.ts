@@ -135,7 +135,7 @@ test("text-library picker space is reserved until populated variables arrive", a
     signalRequest();
     await new Promise<void>((resolve) => { releaseResponse = resolve; });
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ variables: [
-      { name: "welcome", moduleId: "text_library", isTextBlock: true },
+      { name: "text.welcome", moduleId: "text_library", isTextBlock: true },
     ] }) });
   });
 
@@ -201,7 +201,7 @@ test("votekick loading sections reserve their populated structure", async ({ pag
 });
 
 test("timer and FAQ dialogs submit from Enter", async ({ page }) => {
-  const variables = { variables: [{ name: "greeting", moduleId: "text_library", isTextBlock: true }] };
+  const variables = { variables: [{ name: "text.greeting", moduleId: "text_library", isTextBlock: true }] };
   await routeJson(page, "/api/csrf", { token: "csrf" });
   await routeJson(page, "/api/channels/channel-a/template-variables", variables);
 
@@ -210,7 +210,7 @@ test("timer and FAQ dialogs submit from Enter", async ({ page }) => {
     if (route.request().method() !== "POST") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ timers: [] }) });
     timerCreated = true;
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ timer: {
-      id: "timer-created", name: "Hourly", enabled: true, blockName: "greeting", chatTarget: "source_only",
+      id: "timer-created", name: "Hourly", enabled: true, messageText: "Hello, chat!", chatTarget: "source_only",
       trigger: { type: "interval", minutes: 30 }, revision: 1, nextRunAt: null, nextRunStreamId: null,
       lastRunAt: null, createdAt: "2030-01-01T12:00:00.000Z", updatedAt: "2030-01-01T12:00:00.000Z",
     } }) });
@@ -220,8 +220,7 @@ test("timer and FAQ dialogs submit from Enter", async ({ page }) => {
   await page.getByRole("button", { name: "Create timer" }).click();
   const timerDialog = page.getByRole("dialog", { name: "Create" });
   await timerDialog.getByRole("textbox", { name: "Name" }).fill("Hourly");
-  await timerDialog.getByRole("combobox", { name: "Text block" }).click();
-  await page.getByRole("option", { name: "greeting" }).click();
+  await timerDialog.getByRole("textbox", { name: "Message" }).fill("Hello, chat!");
   await expect(timerDialog.locator("form")).toBeAttached();
   await timerDialog.getByRole("textbox", { name: "Name" }).press("Enter");
   await expect.poll(() => timerCreated).toBe(true);
@@ -232,7 +231,7 @@ test("timer and FAQ dialogs submit from Enter", async ({ page }) => {
     faqCreated = true;
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entry: {
       id: "faq-created", name: "Greeting", enabled: true, matcher: { type: "keywords", patterns: ["hello"] },
-      answerBlock: "greeting", cooldownSeconds: 30, games: [], chatTarget: "source_only", order: 0, revision: 1,
+      answerText: "Hello, chat!", cooldownSeconds: 30, games: [], chatTarget: "source_only", order: 0, revision: 1,
       lastUsedAt: null, createdAt: "2030-01-01T12:00:00.000Z", updatedAt: "2030-01-01T12:00:00.000Z",
     } }) });
   });
@@ -241,8 +240,7 @@ test("timer and FAQ dialogs submit from Enter", async ({ page }) => {
   const faqDialog = page.getByRole("dialog", { name: "Create entry" });
   await faqDialog.getByRole("textbox", { name: "Name" }).fill("Greeting");
   await faqDialog.getByRole("textbox", { name: "Keywords and phrases" }).fill("hello");
-  await faqDialog.getByRole("combobox", { name: "Answer text block" }).click();
-  await page.getByRole("option", { name: "greeting" }).click();
+  await faqDialog.getByRole("textbox", { name: "Answer" }).fill("Hello, chat!");
   await expect(faqDialog.locator("form")).toBeAttached();
   await faqDialog.getByRole("textbox", { name: "Name" }).press("Enter");
   await expect.poll(() => faqCreated).toBe(true);
@@ -1386,7 +1384,7 @@ test("text-library inspector stays at its sticky offset while the page scrolls a
 
   await page.setViewportSize({ width: 1400, height: 800 });
   await gotoPanel(page, "text_library");
-  await page.getByRole("button", { name: "{block_1}" }).click();
+  await page.getByRole("button", { name: "{text.block_1}" }).click();
   const inspector = page.locator(".list-detail__inspector");
   await expect(inspector).toBeVisible();
   await page.evaluate(() => { window.scrollTo(0, 100); });

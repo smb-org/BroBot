@@ -2,7 +2,7 @@ import { Combobox, Input, useCombobox } from "@mantine/core";
 import { RichTextarea, type CaretPosition, type RichTextareaHandle } from "rich-textarea";
 import { useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ReactElement, type ReactNode, type SyntheticEvent } from "react";
 
-import { closestTemplateVariable, tokenizeTemplate, unknownTemplateVariables, type TemplateVariable } from "../../template";
+import { closestTemplateVariable, templateTextLength, tokenizeTemplate, unknownTemplateVariables, type TemplateVariable } from "../../template";
 import type { TemplateVariableGroup } from "../../contracts/values";
 import { Button } from "./Button";
 import { ChatPreview } from "./ChatPreview";
@@ -153,7 +153,7 @@ export function TextArea({
   const [activeIndex, setActiveIndex] = useState(0);
   const [variablePickerOpen, setVariablePickerOpen] = useState(false);
   const declarations = useMemo(() => templateDeclarations(variables ?? []), [variables]);
-  const count = value.length;
+  const count = variables === undefined ? value.length : templateTextLength(value);
   const overLimit = maxLength !== undefined && count > maxLength;
   const nearLimit = maxLength !== undefined && count >= maxLength * 0.9;
   const effectiveError = error ?? (overLimit ? messages.countLabel(count, maxLength) : undefined);
@@ -261,7 +261,8 @@ export function TextArea({
   const chooseSuggestion = (variableName: string): void => {
     const currentQuery = query;
     if (currentQuery === null) return;
-    insertText(`${variableName}}`, currentQuery.start, currentQuery.end);
+    const parameter = variables?.find((variable) => variable.name === variableName)?.parameter;
+    insertText(`{${variableName}${parameter === undefined ? "" : ` ${parameter.value}`}}`, currentQuery.start - 1, currentQuery.end);
   };
 
   const onCompositionEnd = (event: SyntheticEvent<HTMLTextAreaElement>): void => {

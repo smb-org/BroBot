@@ -4,6 +4,7 @@ import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { panelRouter } from "../../src/worker/panel/routes";
 import { publishOverlayChanged } from "../../src/worker/realtime";
+import { createFaqRepository } from "../../src/modules/faq/adapters/d1";
 import type { RealtimeMessage } from "../../src/realtime-contract";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
 import { TestD1Database } from "./test-d1";
@@ -91,7 +92,7 @@ describe("Channel variable routes", () => {
     expect(deleteDenied.status).toBe(403);
   });
 
-  it("renames template and action references atomically and protects action usage from deletion", async () => {
+  it("renames template and action references across modules atomically and protects action usage", async () => {
     await insertChannel(database, "channel-a");
     await insertLoginIdentityAndSession(database, "manager-a");
     await insertMember(database, "channel-a", "manager-a", "manager");
@@ -99,6 +100,23 @@ describe("Channel variable routes", () => {
     await fetchPanel("manager-a", "/api/channels/channel-a/variables", "POST", {
       name: "score", value: 0, description: "", resetOnStreamStart: false,
     });
+    await database.prepare(
+      `INSERT INTO text_library_settings (channel_id, graph_revision, updated_at)
+       VALUES ('channel-a', 1, '2026-09-24T00:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO text_library_categories
+        (channel_id, category_id, catalog_key, custom_name, created_at, updated_at)
+       VALUES ('channel-a', 'custom_score', NULL, 'Custom', '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO text_blocks (channel_id, block_name, category_id, revision, created_at, updated_at)
+       VALUES ('channel-a', 'score_block', 'custom_score', 1, '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO text_block_variants (channel_id, block_name, variant_id, position, conditions_json, texts_json)
+       VALUES ('channel-a', 'score_block', 'default', 0, '{}', ?)`,
+    ).bind(JSON.stringify(["Score: {var.score}"])).run();
     await database.prepare(
       `INSERT INTO text_commands
         (channel_id, command_name, response_text, created_at, updated_at, variable_name, variable_operation, variable_amount)
@@ -113,9 +131,39 @@ describe("Channel variable routes", () => {
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
        VALUES ('channel-a', 'ads', 1, '{"prewarningText":"Score {var.score}"}')`,
     ).run();
+    await database.prepare(
+      `INSERT INTO faq_entries
+        (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds,
+         games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at)
+       VALUES ('faq-score', 'channel-a', 'Score FAQ', 1, 'keywords', ?, 'Score: {var.score}', 30,
+               '[]', 'source_only', 0, 1, NULL, '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z')`,
+    ).bind(JSON.stringify({ type: "keywords", patterns: ["score"] })).run();
+    await database.prepare(
+      `INSERT INTO timers
+        (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, chat_target,
+         revision, next_run_at, next_run_stream_id, last_run_at, created_at, updated_at)
+       VALUES ('timer-score', 'channel-a', 'Score reminder', 1, 'Score: {var.score}', 'interval',
+               '{"type":"interval","minutes":10}', 'source_only', 1, '2026-09-24T00:10:00.000Z', 'stream-1', NULL,
+               '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z')`,
+    ).run();
+    const faqRepository = createFaqRepository(database as unknown as D1Database);
+    const cachedFaqEntries = await faqRepository.matchers("channel-a");
+    expect(cachedFaqEntries.find(({ entry }) => entry.id === "faq-score")?.entry.answerText).toBe("Score: {var.score}");
 
     const renamed = await fetchPanel("manager-a", "/api/channels/channel-a/variables/score", "PATCH", { newName: "points" });
     expect(renamed.status).toBe(200);
+    const renamedBody = await renamed.json<{ usages: Array<{ moduleId: string; itemName: string; kind: string }> }>();
+    expect(renamedBody.usages).toEqual(expect.arrayContaining([
+      { moduleId: "text_library", itemName: "score_block", kind: "template" },
+      { moduleId: "faq", itemName: "Score FAQ", kind: "template" },
+      { moduleId: "timers", itemName: "Score reminder", kind: "template" },
+    ]));
+    await expect(database.prepare(
+      "SELECT revision FROM text_blocks WHERE channel_id = 'channel-a' AND block_name = 'score_block'",
+    ).first()).resolves.toEqual({ revision: 2 });
+    await expect(database.prepare(
+      "SELECT texts_json FROM text_block_variants WHERE channel_id = 'channel-a' AND block_name = 'score_block'",
+    ).first()).resolves.toEqual({ texts_json: '["Score: {var.points}"]' });
     await expect(database.prepare(
       "SELECT response_text, variable_name, revision FROM text_commands WHERE channel_id = 'channel-a' AND command_name = 'points'",
     ).first()).resolves.toEqual({ response_text: "Score: {var.points}", variable_name: "points", revision: 2 });
@@ -125,10 +173,192 @@ describe("Channel variable routes", () => {
     await expect(database.prepare(
       "SELECT variable_name, revision FROM text_commands WHERE channel_id = 'channel-a' AND command_name = 'increment'",
     ).first()).resolves.toEqual({ variable_name: "points", revision: 2 });
+    await expect(database.prepare(
+      "SELECT answer_text, revision FROM faq_entries WHERE channel_id = 'channel-a' AND faq_id = 'faq-score'",
+    ).first()).resolves.toEqual({ answer_text: "Score: {var.points}", revision: 2 });
+    const refreshedFaqEntries = await faqRepository.matchers("channel-a");
+    expect(refreshedFaqEntries.find(({ entry }) => entry.id === "faq-score")?.entry.answerText).toBe("Score: {var.points}");
+    await expect(database.prepare(
+      "SELECT message_text, revision, next_run_at, next_run_stream_id FROM timers WHERE channel_id = 'channel-a' AND timer_id = 'timer-score'",
+    ).first()).resolves.toEqual({
+      message_text: "Score: {var.points}",
+      revision: 2,
+      next_run_at: "2026-09-24T00:10:00.000Z",
+      next_run_stream_id: "stream-1",
+    });
 
     const deletion = await fetchPanel("manager-a", "/api/channels/channel-a/variables/points", "DELETE");
     expect(deletion.status).toBe(409);
     await expect(deletion.json()).resolves.toMatchObject({ error: "variable_in_use" });
+  });
+
+  it("does not rewrite FAQ or timer references when a concurrent variable rename loses the update", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    await fetchPanel("manager-a", "/api/channels/channel-a/variables", "POST", {
+      name: "score", value: 5, description: "", resetOnStreamStart: false,
+    });
+    await database.prepare(
+      `INSERT INTO faq_entries
+        (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds,
+         games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at)
+       VALUES ('faq-race', 'channel-a', 'Score FAQ', 1, 'keywords', ?, 'Score: {var.score}', 30,
+               '[]', 'source_only', 0, 1, NULL, '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z')`,
+    ).bind(JSON.stringify({ type: "keywords", patterns: ["score"] })).run();
+    await database.prepare(
+      `INSERT INTO timers
+        (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, chat_target,
+         revision, next_run_at, created_at, updated_at)
+       VALUES ('timer-race', 'channel-a', 'Score reminder', 1, 'Score: {var.score}', 'interval',
+               '{"type":"interval","minutes":10}', 'source_only', 1, NULL,
+               '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z')`,
+    ).run();
+
+    let raced = false;
+    const interleavedDatabase = {
+      prepare: (sql: string) => database.prepare(sql),
+      batch: async (statements: Parameters<typeof database.batch>[0]) => {
+        if (!raced) {
+          raced = true;
+          await database.batch([
+            database.prepare("DELETE FROM channel_variables WHERE channel_id = 'channel-a' AND name = 'score'"),
+            database.prepare(
+              `INSERT INTO channel_variables
+                (channel_id, name, value, description, reset_on_stream_start, created_at, updated_at)
+               VALUES ('channel-a', 'points', 5, '', 0, '2026-09-25T00:00:00.000Z', '2026-09-25T00:00:00.000Z')`,
+            ),
+          ]);
+        }
+        return database.batch(statements);
+      },
+    } as unknown as D1Database;
+    const response = await panelRouter.fetch(
+      await requestFor("manager-a", "/api/channels/channel-a/variables/score", "PATCH", { newName: "points" }),
+      { ...environmentFor(database), DB: interleavedDatabase },
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "variable_already_exists" });
+    await expect(database.prepare(
+      "SELECT answer_text FROM faq_entries WHERE channel_id = 'channel-a' AND faq_id = 'faq-race'",
+    ).first()).resolves.toEqual({ answer_text: "Score: {var.score}" });
+    await expect(database.prepare(
+      "SELECT message_text FROM timers WHERE channel_id = 'channel-a' AND timer_id = 'timer-race'",
+    ).first()).resolves.toEqual({ message_text: "Score: {var.score}" });
+  });
+
+  it("rejects variable renames that would exceed a referenced template length limit", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    await fetchPanel("manager-a", "/api/channels/channel-a/variables", "POST", {
+      name: "score", value: 5, description: "", resetOnStreamStart: false,
+    });
+    const oldToken = "{var.score}";
+    const longTemplate = `${"x".repeat(500 - oldToken.length)}${oldToken}`;
+    await database.prepare(
+      `INSERT INTO text_library_settings (channel_id, graph_revision, updated_at)
+       VALUES ('channel-a', 1, '2026-09-24T00:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO text_library_categories
+        (channel_id, category_id, catalog_key, custom_name, created_at, updated_at)
+       VALUES ('channel-a', 'custom_score', NULL, 'Custom', '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO text_blocks (channel_id, block_name, category_id, revision, created_at, updated_at)
+       VALUES ('channel-a', 'score_block', 'custom_score', 1, '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO text_block_variants (channel_id, block_name, variant_id, position, conditions_json, texts_json)
+       VALUES ('channel-a', 'score_block', 'default', 0, '{}', ?)`,
+    ).bind(JSON.stringify([longTemplate])).run();
+    await database.prepare(
+      `INSERT INTO faq_entries
+        (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds,
+         games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at)
+       VALUES ('faq-long', 'channel-a', 'Long FAQ', 1, 'keywords', ?, ?, 30,
+               '[]', 'source_only', 0, 1, NULL, '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z')`,
+    ).bind(JSON.stringify({ type: "keywords", patterns: ["score"] }), longTemplate).run();
+    await database.prepare(
+      `INSERT INTO timers
+        (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, chat_target,
+         revision, next_run_at, created_at, updated_at)
+       VALUES ('timer-long', 'channel-a', 'Long timer', 1, ?, 'interval',
+               '{"type":"interval","minutes":10}', 'source_only', 1, NULL,
+               '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z')`,
+    ).bind(longTemplate).run();
+
+    const response = await fetchPanel("manager-a", "/api/channels/channel-a/variables/score", "PATCH", { newName: "points" });
+
+    expect(response.status).toBe(400);
+    const body = await response.json<{ error: string; usages: Array<{ moduleId: string; itemName: string; kind: string }> }>();
+    expect(body.error).toBe("variable_rename_template_too_long");
+    expect(body.usages).toEqual(expect.arrayContaining([
+      { moduleId: "text_library", itemName: "score_block", kind: "template" },
+      { moduleId: "faq", itemName: "Long FAQ", kind: "template" },
+      { moduleId: "timers", itemName: "Long timer", kind: "template" },
+    ]));
+    await expect(database.prepare(
+      "SELECT name FROM channel_variables WHERE channel_id = 'channel-a' AND name IN ('score', 'points') ORDER BY name",
+    ).all()).resolves.toMatchObject({ results: [{ name: "score" }] });
+    await expect(database.prepare(
+      "SELECT answer_text FROM faq_entries WHERE channel_id = 'channel-a' AND faq_id = 'faq-long'",
+    ).first()).resolves.toEqual({ answer_text: longTemplate });
+    await expect(database.prepare(
+      "SELECT message_text FROM timers WHERE channel_id = 'channel-a' AND timer_id = 'timer-long'",
+    ).first()).resolves.toEqual({ message_text: longTemplate });
+  });
+
+  it("rechecks text block length inside the rename batch", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    await fetchPanel("manager-a", "/api/channels/channel-a/variables", "POST", {
+      name: "score", value: 5, description: "", resetOnStreamStart: false,
+    });
+    await database.prepare(
+      `INSERT INTO text_library_settings (channel_id, graph_revision, updated_at)
+       VALUES ('channel-a', 1, '2026-09-24T00:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO text_library_categories
+        (channel_id, category_id, catalog_key, custom_name, created_at, updated_at)
+       VALUES ('channel-a', 'custom_score', NULL, 'Custom', '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO text_blocks (channel_id, block_name, category_id, revision, created_at, updated_at)
+       VALUES ('channel-a', 'score_block', 'custom_score', 1, '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO text_block_variants (channel_id, block_name, variant_id, position, conditions_json, texts_json)
+       VALUES ('channel-a', 'score_block', 'default', 0, '{}', '["Score: {var.score}"]')`,
+    ).run();
+    const longTemplate = `${"x".repeat(500 - "{var.score}".length)}{var.score}`;
+    const interleavedDatabase = {
+      prepare: (sql: string) => database.prepare(sql),
+      batch: async (statements: Parameters<typeof database.batch>[0]) => {
+        await database.prepare(
+          "UPDATE text_block_variants SET texts_json = ? WHERE channel_id = 'channel-a' AND block_name = 'score_block'",
+        ).bind(JSON.stringify([longTemplate])).run();
+        return database.batch(statements);
+      },
+    } as unknown as D1Database;
+
+    const response = await panelRouter.fetch(
+      await requestFor("manager-a", "/api/channels/channel-a/variables/score", "PATCH", { newName: "points" }),
+      { ...environmentFor(database), DB: interleavedDatabase },
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error: "variable_rename_template_too_long" });
+    await expect(database.prepare(
+      "SELECT name FROM channel_variables WHERE channel_id = 'channel-a' AND name IN ('score', 'points') ORDER BY name",
+    ).all()).resolves.toMatchObject({ results: [{ name: "score" }] });
+    await expect(database.prepare(
+      "SELECT texts_json FROM text_block_variants WHERE channel_id = 'channel-a' AND block_name = 'score_block'",
+    ).first()).resolves.toEqual({ texts_json: JSON.stringify([longTemplate]) });
   });
 
   it("bumps overlays on variable rename so an old draft cannot bind a recreated name", async () => {

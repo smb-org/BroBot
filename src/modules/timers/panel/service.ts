@@ -1,5 +1,7 @@
 import { PanelApiError } from "../../../contracts/panel-error";
-import type { ModuleLanguage } from "../../contract";
+import { isEventTemplateVariableAvailable } from "../../../contracts/event-template-variables";
+import type { TemplateVariableOption } from "../../../dashboard/ui";
+import type { ModuleLanguage, TemplateVariable } from "../../contract";
 import type { Timer, TimerMutationInput } from "../contracts";
 
 interface TimerEventTimeSource {
@@ -10,7 +12,7 @@ interface TimerEventTimeSource {
 export interface TimersPanelData {
   timers: Timer[];
   sources: TimerEventTimeSource[];
-  blocks: string[];
+  variables: TemplateVariableOption[];
 }
 
 const basePath = (channelId: string): string => `/api/channels/${encodeURIComponent(channelId)}/modules/timers`;
@@ -36,12 +38,23 @@ export const loadTimersPanel = async (channelId: string, signal?: AbortSignal): 
   const [timers, sources, variables] = await Promise.all([
     readJson<{ timers: Timer[] }>(timersResponse),
     readJson<{ sources: TimerEventTimeSource[] }>(sourcesResponse),
-    readJson<{ variables: { name: string; isTextBlock?: boolean }[] }>(variablesResponse),
+    readJson<{ variables: { name: string; isTextBlock?: boolean; availableInEventTemplates?: boolean; description?: string; sample?: string; group?: TemplateVariableOption["group"]; contexts?: TemplateVariable["contexts"]; parameters?: TemplateVariableOption["parameters"]; parameterDefault?: string }[] }>(variablesResponse),
   ]);
   return {
     timers: timers.timers,
     sources: sources.sources,
-    blocks: variables.variables.filter((variable) => variable.isTextBlock === true).map(({ name }) => name),
+    variables: variables.variables.filter(isEventTemplateVariableAvailable).map((variable) => ({
+      name: variable.name,
+      description: variable.description ?? variable.name,
+      sample: variable.sample ?? "",
+      ...(variable.group === undefined ? {} : { group: variable.group }),
+      ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
+      ...(variable.parameters === "choices" || variable.parameters === "currency_pair" || variable.parameters === "api_source_name"
+        ? { parameter: { value: variable.parameterDefault ?? (variable.parameters === "choices" ? "a|b|c" : variable.parameters === "currency_pair" ? "USD EUR" : "sunset") } }
+        : {}),
+      kind: "module",
+      ...(variable.isTextBlock === true ? { isTextBlock: true } : {}),
+    })),
   };
 };
 
@@ -69,13 +82,13 @@ export const deleteTimer = async (channelId: string, timerId: string, revision: 
   await mutate(channelId, `/timers/${encodeURIComponent(timerId)}?revision=${String(revision)}`, "DELETE");
 };
 
-export const previewTimerBlock = async (channelId: string, blockName: string): Promise<string> => {
+export const previewTimerText = async (channelId: string, messageText: string): Promise<string> => {
   const token = await csrf();
   const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/template-preview`, {
     method: "POST",
     headers: { "X-CSRF-Token": token, "Content-Type": "application/json" },
     body: JSON.stringify({
-      text: `{${blockName}}`,
+      text: messageText,
       templateContext: "event",
       streamState: "online",
       game: null,

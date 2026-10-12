@@ -227,7 +227,7 @@ const auditObject = (entry: PanelAuditEntry, language: DashboardLanguage): strin
   }
   const name = recordText(after, "name") ?? recordText(before, "name");
   if (entry.action.startsWith("text_commands.command.")) return name === null ? auditObjectFallback(entry.action, language) : `!${name.replace(/^!+/u, "")}`;
-  if (entry.action.startsWith("text_library.block.")) return name === null ? auditObjectFallback(entry.action, language) : `{${name}}`;
+  if (entry.action.startsWith("text_library.block.")) return name === null ? auditObjectFallback(entry.action, language) : `{text.${name}}`;
   if (entry.action.startsWith("text_library.category.")) return name ?? auditObjectFallback(entry.action, language);
   if (entry.action.startsWith("channel.variable.")) return name === null ? auditObjectFallback(entry.action, language) : `{var.${name}}`;
   if (entry.action.startsWith("overlay.") && ["overlay.created", "overlay.updated", "overlay.deleted", "overlay.legacy.imported"].includes(entry.action)) return name ?? auditObjectFallback(entry.action, language);

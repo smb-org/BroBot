@@ -28,6 +28,7 @@ export interface TextLibraryTexts {
   delete: string;
   deleteTitle: (name: string) => string;
   deleteConsequence: (name: string) => string;
+  deleteBlocked: string;
   deleteConfirm: (name: string) => string;
   name: string;
   nameHint: string;
@@ -136,10 +137,11 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     close: "Schließen",
     delete: "Textbaustein löschen",
     deleteTitle: (name) => `Textbaustein „${name}“ löschen?`,
-    deleteConsequence: (name) => `Der Textbaustein „${name}“ und alle Verweise darauf werden entfernt.`,
+    deleteConsequence: (name) => `Textbaustein „${name}“ kann nur gelöscht werden, wenn er nicht verwendet wird.`,
+    deleteBlocked: "Dieser Textbaustein wird verwendet und kann erst gelöscht werden, wenn alle Verwendungen entfernt sind.",
     deleteConfirm: (name) => `Textbaustein löschen: ${name}`,
     name: "Name",
-    nameHint: "Kleinbuchstaben, Zahlen und Unterstrich; wird als {name} eingesetzt.",
+    nameHint: "Kleinbuchstaben, Zahlen und Unterstrich; wird als {text.name} eingesetzt.",
     nameInvalid: "Nur a–z, 0–9 und Unterstriche; höchstens 32 Zeichen.",
     nameExists: "Dieser Name ist bereits vergeben.",
     nameReserved: "Dieser Name ist für eine Vorlagenvariable reserviert.",
@@ -184,8 +186,8 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     startTime: "Von",
     endTime: "Bis",
     text: "Text",
-    textHint: "Vorlagenvariablen wie {user} und Textbausteine wie {welcome} werden beim Senden aufgelöst.",
-    variableDescription: (name) => `Textbaustein {${name}}`,
+    textHint: "Vorlagenvariablen wie {user} und Textbausteine wie {text.welcome} werden beim Senden aufgelöst.",
+    variableDescription: (name) => `Textbaustein {text.${name}}`,
     variablePicker: {
       triggerLabel: "Variable einfügen", title: "Variable auswählen", searchLabel: "Variablen suchen", closeLabel: "Variablenauswahl schließen",
       noResults: "Keine Variablen gefunden.", createVariableLabel: "Variable anlegen …", externalHelp: "Fragt Twitch live ab, wenn die Vorlage gerendert wird",
@@ -204,7 +206,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     noMatchingVariant: "Keine Variante trifft unter diesen Bedingungen zu.",
     blockUnavailableForGame: "Der Textbaustein ist für das simulierte Spiel nicht aktiv.",
     previewTooLong: (blockNames) => {
-      const names = blockNames.map((name) => `{${name}}`).join(", ");
+      const names = blockNames.map((name) => `{text.${name}}`).join(", ");
       const cause = blockNames.length === 1 ? `den eingebetteten Textbaustein ${names}` : `eingebettete Textbausteine ${names}`;
       return `Diese Variante kann durch ${cause} mehr als 500 Zeichen ergeben. Chat-Ausgaben werden bei 500 Zeichen gekürzt.`;
     },
@@ -217,7 +219,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     uses: "Verwendet in",
     usesCount: (count) => `${String(count)} ${count === 1 ? "Verwendung" : "Verwendungen"}`,
     noUsages: "Noch keine Verwendungen.",
-    usageKind: { command: "Befehl", timer: "Timer", overlay: "Overlay", event: "Ereignis" },
+    usageKind: { block: "Textbaustein", command: "Befehl", faq: "FAQ", timer: "Timer", overlay: "Overlay", event: "Ereignis" },
     roleConditionHint: "Rollenbedingungen greifen nur in Chatbefehlen; in Ereignissen, Overlays und Timern sind sie immer falsch.",
     inputContextWarning: "Diese Vorlage enthält Eingabevariablen aus einem Chatbefehl. Außerhalb von Befehlen erscheint deren Nutzungs- oder Fehlertext.",
     filterAny: "Alle Spiele",
@@ -276,10 +278,11 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     close: "Close",
     delete: "Delete text block",
     deleteTitle: (name) => `Delete text block “${name}”?`,
-    deleteConsequence: (name) => `Text block “${name}” and all references to it will be removed.`,
+    deleteConsequence: (name) => `Text block “${name}” can only be deleted when it is unused.`,
+    deleteBlocked: "This text block is in use. Remove all listed uses before deleting it.",
     deleteConfirm: (name) => `Delete text block: ${name}`,
     name: "Name",
-    nameHint: "Lowercase letters, numbers, and underscores; insert it as {name}.",
+    nameHint: "Lowercase letters, numbers, and underscores; insert it as {text.name}.",
     nameInvalid: "Use only a–z, 0–9, and underscores; up to 32 characters.",
     nameExists: "This name is already in use.",
     nameReserved: "This name is reserved for a template variable.",
@@ -324,8 +327,8 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     startTime: "From",
     endTime: "To",
     text: "Text",
-    textHint: "Template variables like {user} and text blocks like {welcome} are resolved when sent.",
-    variableDescription: (name) => `Text block {${name}}`,
+    textHint: "Template variables like {user} and text blocks like {text.welcome} are resolved when sent.",
+    variableDescription: (name) => `Text block {text.${name}}`,
     variablePicker: {
       triggerLabel: "Insert variable", title: "Choose a variable", searchLabel: "Search variables", closeLabel: "Close variable picker",
       noResults: "No variables found.", createVariableLabel: "Create variable …", externalHelp: "Looks up live data when the template runs",
@@ -344,7 +347,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     noMatchingVariant: "No variant matches this state.",
     blockUnavailableForGame: "This text block is not active for the simulated game.",
     previewTooLong: (blockNames) => {
-      const names = blockNames.map((name) => `{${name}}`).join(", ");
+      const names = blockNames.map((name) => `{text.${name}}`).join(", ");
       const cause = blockNames.length === 1 ? `text block ${names}` : `text blocks ${names}`;
       return `This variant can exceed 500 characters because it embeds ${cause}. Chat output is truncated at 500 characters.`;
     },
@@ -357,7 +360,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     uses: "Used in",
     usesCount: (count) => `${String(count)} ${count === 1 ? "use" : "uses"}`,
     noUsages: "No usages yet.",
-    usageKind: { command: "Command", timer: "Timer", overlay: "Overlay", event: "Event" },
+    usageKind: { block: "Text block", command: "Command", faq: "FAQ", timer: "Timer", overlay: "Overlay", event: "Event" },
     roleConditionHint: "Role conditions only match in chat commands; they are always false in events, overlays, and timers.",
     inputContextWarning: "This template uses chat command input. Outside commands, the variable's usage or error text appears.",
     filterAny: "All games",

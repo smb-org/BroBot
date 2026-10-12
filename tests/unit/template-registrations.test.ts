@@ -21,10 +21,11 @@ describe("registered template variables", () => {
       const variables = await registeredTemplateVariablesForChannel(database as unknown as D1Database, "channel-a");
 
       expect(variables).toEqual(expect.arrayContaining([
-        expect.objectContaining({ moduleId: "text_library", name: "welcome", isTextBlock: true }),
+        expect.objectContaining({ moduleId: "text_library", name: "text.welcome", isTextBlock: true }),
+        expect.objectContaining({ moduleId: "votekick", name: "votekick.duration", availableInEventTemplates: false }),
+        expect.objectContaining({ moduleId: "currency", name: "currency.convert", availableInEventTemplates: true, parameters: "currency_pair" }),
         expect.objectContaining({ moduleId: "raid", name: "channel", isTextBlock: false, contexts: ["event"] }),
         expect.objectContaining({ moduleId: "raid", name: "viewers", isTextBlock: false, contexts: ["event"] }),
-        expect.objectContaining({ moduleId: "currency", name: "currency.convert", parameters: "currency_pair" }),
       ]));
     } finally {
       database.close();

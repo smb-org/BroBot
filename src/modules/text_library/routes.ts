@@ -10,6 +10,7 @@ import type { TextBlockInput } from "./repository";
 import { createTextLibraryService } from "./service";
 import { TEXT_BLOCK_OVERLAY_ELEMENT_KIND } from "./overlay/element";
 import { MODULE_TEMPLATE_MINIMUM_TIERS, SYSTEM_TEMPLATE_VARIABLE_LIST, type ModuleRouteEnvironment, type ModuleTextBlockConditionDefinition } from "../contract";
+import { templateTextLength } from "../../contracts/template-text-length";
 
 const TEXT_LIBRARY_MODULE_ID = "text_library";
 
@@ -39,7 +40,7 @@ const conditionsSchema = z.object({
 const variantSchema = z.object({
   id: z.string().min(1).max(80),
   conditions: conditionsSchema.default({}),
-  texts: z.array(z.string().trim().min(1).max(TEXT_BLOCK_MAXIMUMS.textLength)).min(1).max(TEXT_BLOCK_MAXIMUMS.textsPerVariant),
+  texts: z.array(z.string().trim().min(1).refine((text) => templateTextLength(text) <= TEXT_BLOCK_MAXIMUMS.textLength)).min(1).max(TEXT_BLOCK_MAXIMUMS.textsPerVariant),
 });
 const blockSchema = z.object({
   name: z.string(),
@@ -227,11 +228,18 @@ textLibraryRoutes.delete("/blocks/:name", async (context) => {
   if (!Number.isSafeInteger(revision) || revision < 1) return context.json({ error: "text_library_block_invalid" }, 400);
   const service = createTextLibraryService(createTextBlockRepository(context.env.DB, context.get("authorizeManagementMutation"), context.get("prepareModuleAudit")));
   const channelId = param(context, "channelId");
-  const snapshot = await service.list(channelId);
-  const result = await service.delete(channelId, param(context, "name"), revision, snapshot.settings.graphRevision, context.get("actor"), nowIso());
+  const snapshot = await service.list(channelId, await context.get("templateUsageSources")(channelId));
+  const name = param(context, "name");
+  const usages = snapshot.usages[name] ?? [];
+  if (usages.length > 0) return context.json({ error: "text_library_block_in_use", usages }, 409);
+  const result = await service.delete(channelId, name, revision, snapshot.settings.graphRevision, context.get("actor"), nowIso());
   if (result.ok) {
-    await publishBlockInvalidations(context.get("publishModuleOverlayMessage"), channelId, snapshot.blocks, param(context, "name"));
+    await publishBlockInvalidations(context.get("publishModuleOverlayMessage"), channelId, snapshot.blocks, name);
     return context.json({ ok: true });
+  }
+  if (result.reason === "in_use") {
+    const currentSnapshot = await service.list(channelId, await context.get("templateUsageSources")(channelId));
+    return context.json({ error: "text_library_block_in_use", usages: currentSnapshot.usages[name] ?? [] }, 409);
   }
   return context.json({ error: `text_library_${result.reason}`, ...(result.current === undefined ? {} : { current: result.current }) }, result.reason === "conflict" ? 409 : result.reason === "not_authorized" ? 403 : 404);
 });

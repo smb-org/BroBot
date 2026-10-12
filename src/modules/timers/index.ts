@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { columnVariableReferences } from "../contract";
 import type { BotModule, ModuleScheduleInputChangeReason, ModuleTemplateUsageSource } from "../contract";
 import type { Timer } from "./contracts";
 import { timersModuleCatalog } from "./contracts/catalog";
@@ -25,7 +26,7 @@ const TIMER_OCCURRENCE_GRACE_MS = 10 * 60_000;
 
 const listTimers = async (db: D1Database, channelId: string): Promise<Timer[]> => {
   const result = await db.prepare(
-    `SELECT timer_id, name, enabled, block_name, trigger_type, trigger_json, chat_target, revision,
+    `SELECT timer_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, revision,
             next_run_at, next_run_stream_id, last_run_at, created_at, updated_at
        FROM timers WHERE channel_id = ? ORDER BY created_at, timer_id`,
   ).bind(channelId).all<TimerRow>();
@@ -117,7 +118,19 @@ const rescheduleAfterRun = async (
   context: TimerAlarmContext,
   deadline: number,
 ): Promise<void> => {
-  await scheduleNextRun(timer, context, Date.now(), deadline);
+  if (await scheduleNextRun(timer, context, Date.now(), deadline)) return;
+  const row = await context.DB.prepare(
+    `SELECT timer_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, revision,
+            next_run_at, next_run_stream_id, last_run_at, created_at, updated_at
+       FROM timers WHERE channel_id = ? AND timer_id = ?`,
+  ).bind(context.channelId, timer.id).first<TimerRow>();
+  if (row === null || row.revision === timer.revision || row.next_run_at === null ||
+      Date.parse(row.next_run_at) !== deadline) return;
+  // A template-only rename can advance the timer revision while its alarm is
+  // already running. If that made the old revision's reschedule a no-op, arm
+  // the next occurrence from the current row, without overriding a timer edit
+  // that already changed or cleared the stored deadline.
+  await scheduleNextRun(mapTimerRow(row), context, Date.now(), deadline);
 };
 
 /**
@@ -221,11 +234,12 @@ const isDueOccurrenceCurrent = async (
   };
 };
 
-export const handleTimerAlarm = async (
+const handleTimerAlarmWithStaleRetry = async (
   context: TimerAlarmContext,
   alarmKey: string,
   deadline: number,
-  ownerRevision?: number,
+  ownerRevision: number | undefined,
+  staleContentRetries: number,
 ): Promise<void> => {
   const refreshMarker = ":refresh:";
   const refreshAt = alarmKey.indexOf(refreshMarker);
@@ -234,7 +248,7 @@ export const handleTimerAlarm = async (
     : "";
   const isEventTimeRefresh = refreshAt >= 0;
   const row = timerId.length === 0 ? null : await context.DB.prepare(
-    `SELECT timer_id, name, enabled, block_name, trigger_type, trigger_json, chat_target, revision,
+    `SELECT timer_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, revision,
             next_run_at, next_run_stream_id, last_run_at, created_at, updated_at
        FROM timers WHERE channel_id = ? AND timer_id = ?`,
   ).bind(context.channelId, timerId).first<TimerRow>();
@@ -252,8 +266,12 @@ export const handleTimerAlarm = async (
   }
   if (alarmKey !== alarmKeyFor(timer.id)) return;
   if (ownerRevision !== undefined && ownerRevision !== timer.revision) {
-    await scheduleNextRun(timer, context, Date.now());
-    return;
+    // Variable-template renames advance the content revision without changing
+    // the persisted deadline. Keep that due occurrence when it still matches.
+    if (row.next_run_at === null || Date.parse(row.next_run_at) !== deadline) {
+      await scheduleNextRun(timer, context, Date.now());
+      return;
+    }
   }
   if (row.next_run_at === null || Date.parse(row.next_run_at) !== deadline) {
     await scheduleNextRun(timer, context, Date.now());
@@ -307,7 +325,7 @@ export const handleTimerAlarm = async (
       }
     }
     if (shouldSend) {
-      const rendered = await context.renderTemplate(`{${timer.blockName}}`, now);
+      const rendered = await context.renderTemplate(timer.messageText, now);
       const idempotencyKey = timerOccurrenceKey(timer.id, deadline, occurrence.streamId);
       const result = await context.sendChat(rendered.text, idempotencyKey, rendered.attributions, async () => {
         const current = await context.DB.prepare(
@@ -318,6 +336,19 @@ export const handleTimerAlarm = async (
         return stillScheduled && await isStreamStillCurrentFor(timer, context, occurrence.streamId);
       }, timer.chatTarget);
       sent = result.sent;
+      if (!sent && result.reason === "stale_before_send" && staleContentRetries < 3) {
+        const latestRow = await context.DB.prepare(
+          `SELECT timer_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, revision,
+                  next_run_at, next_run_stream_id, last_run_at, created_at, updated_at
+             FROM timers WHERE channel_id = ? AND timer_id = ?`,
+        ).bind(context.channelId, timer.id).first<TimerRow>();
+        if (latestRow !== null && latestRow.enabled === 1 && latestRow.revision !== timer.revision &&
+            latestRow.message_text !== timer.messageText && latestRow.next_run_at !== null &&
+            Date.parse(latestRow.next_run_at) === deadline) {
+          await handleTimerAlarmWithStaleRetry(context, alarmKey, deadline, latestRow.revision, staleContentRetries + 1);
+          return;
+        }
+      }
       if (!result.sent && result.retryable) {
         throw new Error(`Timer chat send failed: ${result.reason ?? "unknown"}.`);
       }
@@ -336,6 +367,15 @@ export const handleTimerAlarm = async (
     await context.DB.prepare("UPDATE timers SET last_run_at = ? WHERE channel_id = ? AND timer_id = ?")
       .bind(new Date(completedAt).toISOString(), context.channelId, timer.id).run();
   }
+};
+
+export const handleTimerAlarm = async (
+  context: TimerAlarmContext,
+  alarmKey: string,
+  deadline: number,
+  ownerRevision?: number,
+): Promise<void> => {
+  await handleTimerAlarmWithStaleRetry(context, alarmKey, deadline, ownerRevision, 0);
 };
 
 /**
@@ -385,14 +425,23 @@ const refreshSchedules = async (
 };
 
 const templateUsageSources = async (db: D1Database, channelId: string): Promise<readonly ModuleTemplateUsageSource[]> => {
-  const result = await db.prepare("SELECT timer_id, name, block_name FROM timers WHERE channel_id = ?")
-    .bind(channelId).all<{ timer_id: string; name: string; block_name: string }>();
+  const result = await db.prepare("SELECT timer_id, name, message_text FROM timers WHERE channel_id = ?")
+    .bind(channelId).all<{ timer_id: string; name: string; message_text: string }>();
   return result.results.map((row) => ({
-    text: `{${row.block_name}}`,
+    text: row.message_text,
     kind: "timer",
     label: row.name || row.timer_id,
   }));
 };
+
+const timerVariableReferences = columnVariableReferences({
+  moduleId: TIMER_MODULE_ID,
+  tableName: "timers",
+  idColumn: "timer_id",
+  itemNameColumn: "name",
+  textColumn: "message_text",
+  maxTextLength: 500,
+});
 
 export const timersModule: BotModule<typeof settingsSchema> = {
   id: TIMER_MODULE_ID,
@@ -402,6 +451,7 @@ export const timersModule: BotModule<typeof settingsSchema> = {
   settingsSchema,
   defaultSettings: {},
   templateUsageSources,
+  variableReferences: timerVariableReferences,
   validateTemplateContent: validateTimerTemplateMutation,
   navigationEntries: [{
     id: "timers",

@@ -235,6 +235,22 @@ describe("Module management in the panel", () => {
     ]);
   });
 
+  it("keeps an event-resolvable host declaration when a module shadows its name without a resolver", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/template-variables"),
+      environment,
+    );
+    const body = await response.json<{ variables: Array<{ name: string; moduleId: string; contexts?: readonly string[] }> }>();
+    const viewers = body.variables.find((variable) => variable.name === "viewers");
+
+    expect(response.status).toBe(200);
+    expect(viewers).toMatchObject({ moduleId: "host", contexts: ["chat_command", "event", "system"] });
+  });
+
   it("binds route ballot access to the authorized channel and mounted module", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");

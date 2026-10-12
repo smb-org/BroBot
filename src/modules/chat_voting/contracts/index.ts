@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DEFAULT_CHAT_VOTING_START_TEXT } from "./chat-defaults";
+import { templateTextLength } from "../../../contracts/template-text-length";
 
 export { DEFAULT_CHAT_VOTING_START_TEXT, DEFAULT_CHAT_VOTING_START_TEXT_EN } from "./chat-defaults";
 
@@ -24,9 +25,9 @@ export const CHAT_VOTING_BALLOT_RETENTION_MS = 24 * 60 * 60 * 1_000 - 60_000;
 
 export const chatVotingSettingsSchema = z.object({
   autoCloseSeconds: z.number().int().min(0).max(CHAT_VOTING_HARD_LIMIT_MS / 1_000).default(0),
-  startText: z.string().max(500).default(DEFAULT_CHAT_VOTING_START_TEXT),
+  startText: z.string().refine((text) => templateTextLength(text) <= 500).default(DEFAULT_CHAT_VOTING_START_TEXT),
   announceResult: z.boolean().default(true),
-  resultText: z.string().max(500).default("{vote.result}"),
+  resultText: z.string().refine((text) => templateTextLength(text) <= 500).default("{vote.result}"),
   resultTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
 });
 

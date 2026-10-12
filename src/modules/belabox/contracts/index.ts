@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { belaboxDefaultAlertTexts } from "./alert-texts";
+import { templateTextLength } from "../../../contracts/template-text-length";
 
 export { BELABOX_ALERT_TEMPLATE_FIELDS, belaboxDefaultAlertTexts } from "./alert-texts";
 
@@ -27,9 +28,9 @@ const belaboxSettingsInputSchema = z.object({
   recoverHoldSeconds: z.number().int().min(1).max(86_400).optional(),
   chatCooldownSeconds: z.number().int().min(0).max(86_400).default(300),
   chatEnabled: z.boolean().default(false),
-  lowText: z.string().max(500).default(belaboxDefaultAlertTexts("en").lowText),
-  disconnectText: z.string().max(500).default(belaboxDefaultAlertTexts("en").disconnectText),
-  recoveryText: z.string().max(500).default(belaboxDefaultAlertTexts("en").recoveryText),
+  lowText: z.string().refine((text) => templateTextLength(text) <= 500).default(belaboxDefaultAlertTexts("en").lowText),
+  disconnectText: z.string().refine((text) => templateTextLength(text) <= 500).default(belaboxDefaultAlertTexts("en").disconnectText),
+  recoveryText: z.string().refine((text) => templateTextLength(text) <= 500).default(belaboxDefaultAlertTexts("en").recoveryText),
   lowTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
   disconnectTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
   recoveryTarget: z.enum(["all_chats", "source_only"]).default("source_only"),

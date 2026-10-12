@@ -1,10 +1,10 @@
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ModuleRouteEnvironment } from "../../src/modules/contract";
+import type { ModuleRegisteredTemplateVariable, ModuleRouteEnvironment } from "../../src/modules/contract";
 import { timerRoutes } from "../../src/modules/timers/routes";
 import { insertChannel } from "./fixtures";
-import { TestD1Database } from "./test-d1";
+import { createReadInterleavingDatabase, TestD1Database } from "./test-d1";
 
 const CHANNEL_ID = "timers-route-channel";
 const ACTOR_ID = "timers-route-actor";
@@ -15,6 +15,8 @@ const createDatabase = async (): Promise<TestD1Database> => {
   const database = new TestD1Database();
   databases.push(database);
   await insertChannel(database, CHANNEL_ID);
+  await database.prepare("INSERT INTO text_library_settings (channel_id, graph_revision, updated_at) VALUES (?, 1, ?)")
+    .bind(CHANNEL_ID, "2026-01-01T00:00:00.000Z").run();
   await database.prepare("INSERT INTO text_library_categories (channel_id, category_id, created_at, updated_at) VALUES (?, ?, ?, ?)")
     .bind(CHANNEL_ID, "custom", "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z").run();
   await database.prepare("INSERT INTO text_blocks (channel_id, block_name, category_id, revision, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)")
@@ -26,7 +28,18 @@ const createDatabase = async (): Promise<TestD1Database> => {
 
 type ScheduledAlarm = { moduleId: string; handlerKey: string; alarmKey: string; deadline: number };
 
-const appFor = (database: D1Database): Hono<ModuleRouteEnvironment> => {
+const raidViewersVariable = {
+  name: "viewers",
+  sample: "42",
+  maxLength: 7,
+  group: "event",
+  moduleId: "raid",
+  isTextBlock: false,
+  contexts: ["event"],
+  availableInEventTemplates: false,
+} satisfies ModuleRegisteredTemplateVariable;
+
+const appFor = (database: D1Database, variables: readonly ModuleRegisteredTemplateVariable[] = []): Hono<ModuleRouteEnvironment> => {
   const app = new Hono<ModuleRouteEnvironment>();
   app.use("*", async (context, next) => {
     context.set("channelRole", "manager");
@@ -34,7 +47,7 @@ const appFor = (database: D1Database): Hono<ModuleRouteEnvironment> => {
     context.set("authorizeManagementMutation", () => ({ sql: "AND 1 = 1", values: [] }));
     context.set("prepareModuleAudit", () => database.prepare("SELECT 1"));
     context.set("listEventTimeSources", () => [{ id: EVENT_SOURCE_ID, label: { de: "Sonnenaufgang", en: "Sunrise" } }]);
-    context.set("listRegisteredTemplateVariables", () => Promise.resolve([]));
+    context.set("listRegisteredTemplateVariables", () => Promise.resolve(variables));
     // No occurrence within the source's own horizon -- the polar-night case
     // this route must not leave dormant.
     context.set("resolveEventTimes", () => Promise.resolve([]));
@@ -63,7 +76,28 @@ afterEach(() => {
   for (const database of databases.splice(0)) database.close();
 });
 
-describe("before_event timer scheduling routes", () => {
+describe("timer scheduling and validation routes", () => {
+  it("accepts the host viewers token when raid also declares an unavailable local viewers variable", async () => {
+    const database = await createDatabase();
+    const app = appFor(database as unknown as D1Database, [raidViewersVariable]);
+    const response = await app.fetch(
+      new Request(`https://brobot.example/channels/${CHANNEL_ID}/timers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Viewer reminder",
+          messageText: "We have {viewers} viewers",
+          trigger: { type: "interval", minutes: 10 },
+        }),
+      }),
+      environmentFor(database as unknown as D1Database, []),
+    );
+
+    expect(response.status).toBe(201);
+    await expect(database.prepare("SELECT message_text FROM timers WHERE channel_id = ? AND name = ?")
+      .bind(CHANNEL_ID, "Viewer reminder").first()).resolves.toEqual({ message_text: "We have {viewers} viewers" });
+  });
+
   it("schedules a horizon replan instead of going dormant when creating during a source's polar night", async () => {
     const database = await createDatabase();
     const scheduled: ScheduledAlarm[] = [];
@@ -79,7 +113,7 @@ describe("before_event timer scheduling routes", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Sunrise reminder",
-          blockName: "welcome",
+          messageText: "Welcome to the chat!",
           trigger: { type: "before_event", sourceId: EVENT_SOURCE_ID, minutes: 30 },
         }),
       }),
@@ -96,6 +130,34 @@ describe("before_event timer scheduling routes", () => {
       .bind(CHANNEL_ID, body.timer.id).first<{ next_run_at: string | null }>();
     expect(row).toEqual({ next_run_at: null });
   });
+
+  it("rejects a timer save when its validated block is deleted before the SQL write", async () => {
+    const database = await createDatabase();
+    const interleavedDatabase = createReadInterleavingDatabase(
+      database,
+      (sql) => sql.includes("SELECT variant.texts_json"),
+      async () => {
+        await database.batch([
+          database.prepare("UPDATE text_library_settings SET graph_revision = graph_revision + 1 WHERE channel_id = ?").bind(CHANNEL_ID),
+          database.prepare("DELETE FROM text_blocks WHERE channel_id = ? AND block_name = ?").bind(CHANNEL_ID, "welcome"),
+        ]);
+      },
+    );
+    const app = appFor(interleavedDatabase);
+    const response = await app.fetch(
+      new Request(`https://brobot.example/channels/${CHANNEL_ID}/timers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Reminder", messageText: "{text.welcome}", trigger: { type: "interval", minutes: 10 } }),
+      }),
+      environmentFor(interleavedDatabase, []),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "timer_conflict" });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM timers WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first<{ count: number }>()).resolves.toEqual({ count: 0 });
+  });
 });
 
 describe("timer edit keeps the stream id in sync with next_run_at", () => {
@@ -103,11 +165,11 @@ describe("timer edit keeps the stream id in sync with next_run_at", () => {
     const realDatabase = await createDatabase();
     await realDatabase.prepare(
       `INSERT INTO timers
-        (timer_id, channel_id, name, enabled, block_name, trigger_type, trigger_json, revision,
+        (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, revision,
          next_run_at, next_run_stream_id, last_run_at, created_at, updated_at)
        VALUES (?, ?, ?, 1, ?, ?, ?, 1, ?, ?, NULL, ?, ?)`,
     ).bind(
-      "timer-1", CHANNEL_ID, "Reminder", "welcome", "interval", JSON.stringify({ type: "interval", minutes: 10 }),
+      "timer-1", CHANNEL_ID, "Reminder", "Welcome back!", "interval", JSON.stringify({ type: "interval", minutes: 10 }),
       new Date("2026-09-27T12:10:00.000Z").toISOString(), "stream-1",
       "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z",
     ).run();
@@ -134,7 +196,7 @@ describe("timer edit keeps the stream id in sync with next_run_at", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Reminder (edited)",
-          blockName: "welcome",
+          messageText: "New free text",
           trigger: { type: "interval", minutes: 10 },
           revision: 1,
         }),

@@ -7,7 +7,7 @@ import { textFingerprint } from "../../src/text";
 import { createTextBlockRepository } from "../../src/modules/text_library/adapters/d1";
 import { createTextLibraryService } from "../../src/modules/text_library/service";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
-import { TestD1Database } from "./test-d1";
+import { createReadInterleavingDatabase, TestD1Database } from "./test-d1";
 
 const environmentKeys = {
   SESSION_COOKIE_KEYS: JSON.stringify({ active: { id: "cookie-v1", key: key(1) }, retired: [] }),
@@ -667,7 +667,7 @@ describe("Text commands panel", () => {
 
     const createdCommand = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
-        name: "greeting", text: "Hello {welcome}", cooldownSeconds: 0,
+        name: "greeting", text: "Hello {text.welcome}", cooldownSeconds: 0,
       }),
       environmentFor(database),
     );
@@ -675,6 +675,105 @@ describe("Text commands panel", () => {
     expect(createdCommand.status).toBe(201);
     const body = await createdCommand.json<{ warnings: Array<{ code: string; unknownVariables?: string[] }> }>();
     expect(body.warnings.flatMap((warning) => warning.unknownVariables ?? [])).not.toContain("welcome");
+  });
+
+  it("keeps migrated-length command templates editable across every template field", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    const library = createTextLibraryService(createTextBlockRepository(
+      database as unknown as D1Database,
+      () => ({ sql: "AND 1 = 1", values: [] }),
+    ));
+    const snapshot = await library.list("kanal-a");
+    const block = await library.create({
+      channelId: "kanal-a",
+      name: "welcome",
+      categoryId: "social",
+      games: [],
+      variants: [{ id: "default", conditions: {}, texts: ["Welcome"] }],
+      expectedGraphRevision: snapshot.settings.graphRevision,
+      now: new Date().toISOString(),
+    }, { userId: "user-1", sessionId: "session-user-1" }, snapshot);
+    expect(block.ok).toBe(true);
+
+    const migratedText = `${"x".repeat(491)}{text.welcome}`;
+    expect(migratedText.length).toBe(505);
+    const extraTemplates = {
+      offlineText: migratedText,
+      notFollowingText: migratedText,
+      unavailableText: migratedText,
+      usageText: migratedText,
+    };
+    await database.prepare(
+      `INSERT INTO text_commands
+        (channel_id, command_name, response_text, created_at, updated_at, kind, template_fields_json,
+         revision, timeout_min_seconds, timeout_max_seconds, timeout_fallback_text, timeout_reason)
+       VALUES ('kanal-a', 'timeout', ?, '2026-09-18T00:00:00.000Z', '2026-09-18T00:00:00.000Z', 'timeout', ?, 2, 1, 10, ?, ?)`,
+    ).bind(migratedText, JSON.stringify(extraTemplates), migratedText, migratedText).run();
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands/timeout", "PATCH", {
+        text: migratedText,
+        ...extraTemplates,
+        timeoutAction: { minSeconds: 1, maxSeconds: 10, fallbackText: migratedText, reason: migratedText },
+      }),
+      environmentFor(database),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(database.prepare(
+      `SELECT response_text, template_fields_json, timeout_fallback_text, timeout_reason
+         FROM text_commands WHERE channel_id = 'kanal-a' AND command_name = 'timeout'`,
+    ).first()).resolves.toEqual({
+      response_text: migratedText,
+      template_fields_json: JSON.stringify(extraTemplates),
+      timeout_fallback_text: migratedText,
+      timeout_reason: migratedText,
+    });
+  });
+
+  it("rejects a command save when its validated block is deleted before the SQL write", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    const library = createTextLibraryService(createTextBlockRepository(
+      database as unknown as D1Database,
+      () => ({ sql: "AND 1 = 1", values: [] }),
+    ));
+    const snapshot = await library.list("kanal-a");
+    const block = await library.create({
+      channelId: "kanal-a",
+      name: "welcome",
+      categoryId: "social",
+      games: [],
+      variants: [{ id: "default", conditions: {}, texts: ["Welcome"] }],
+      expectedGraphRevision: snapshot.settings.graphRevision,
+      now: new Date().toISOString(),
+    }, { userId: "user-1", sessionId: "session-user-1" }, snapshot);
+    expect(block.ok).toBe(true);
+
+    const interleavedDatabase = createReadInterleavingDatabase(
+      database,
+      (sql) => sql.includes("FROM text_blocks AS block"),
+      async () => {
+        await database.batch([
+          database.prepare("UPDATE text_library_settings SET graph_revision = graph_revision + 1 WHERE channel_id = 'kanal-a'"),
+          database.prepare("DELETE FROM text_blocks WHERE channel_id = 'kanal-a' AND block_name = 'welcome'"),
+        ]);
+      },
+    );
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
+        name: "greeting", text: "Hello {text.welcome}", cooldownSeconds: 0,
+      }),
+      environmentFor(interleavedDatabase as unknown as TestD1Database),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "command_changed_concurrently" });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM text_commands WHERE channel_id = 'kanal-a'").first())
+      .resolves.toEqual({ count: 0 });
   });
 
   it("lets a manager toggle a command and audits the toggle", async () => {
