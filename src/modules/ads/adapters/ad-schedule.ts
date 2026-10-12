@@ -142,7 +142,7 @@ export const snoozeNextAd = async (
     return snoozeFailure("app_token_unavailable", { status: null, message: error instanceof Error ? error.message : String(error) });
   }
 
-  if (!await isManagementAuthorized()) return snoozeFailure("unauthorized", { status: null, message: null });
+  if (!await isManagementAuthorized()) return snoozeFailure("management_unauthorized", { status: null, message: null });
 
   const result = await helixRequest<Record<string, unknown>>({
     method: "POST",

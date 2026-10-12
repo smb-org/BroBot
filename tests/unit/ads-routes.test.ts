@@ -267,6 +267,36 @@ describe("ad routes", () => {
     expect(body.detail.twitchMessage).toBeUndefined();
   });
 
+  it("reports Twitch authentication failures as snooze failures with diagnostics", async () => {
+    const environment = await setup("manager");
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({ message: "Invalid OAuth token" }),
+      { status: 401 },
+    )));
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/snooze", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "ad_snooze_failed",
+      reason: "unauthorized",
+      detail: { status: 401, message: "Invalid OAuth token" },
+    });
+    const diagnostic = await database.prepare(
+      "SELECT code, detail_json FROM event_log WHERE channel_id = 'kanal-a'",
+    ).first<{ code: string; detail_json: string }>();
+    expect(diagnostic?.code).toBe("ads.snooze");
+    expect(JSON.parse(diagnostic?.detail_json ?? "{}") as unknown).toMatchObject({
+      outcome: "failed",
+      reason: "unauthorized",
+      status: 401,
+      twitchMessage: "Invalid OAuth token",
+    });
+  });
+
   it("separates snooze operation from the managing settings threshold", async () => {
     const environment = await setup("operator");
     const response = await panelRouter.fetch(
