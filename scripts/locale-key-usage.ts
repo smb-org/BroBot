@@ -1,4 +1,3 @@
-import { readdirSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 
@@ -14,16 +13,6 @@ const localeCataloguePath = (projectRoot: string, fileName: string): string | nu
   if (/^src\/dashboard\/(?:locale|labels|module-labels|.*-locale)\.ts$/u.test(relativePath)) return relativePath;
   if (/^src\/modules\/[^/]+\/(?:panel|overlay)\/[^/]*locale[^/]*\.ts$/u.test(relativePath)) return relativePath;
   return null;
-};
-
-const listTypeScriptFiles = (directory: string): string[] => {
-  if (!ts.sys.directoryExists(directory)) return [];
-  return readdirSync(directory, { withFileTypes: true })
-    .flatMap((entry) => {
-      const filePath = path.join(directory, entry.name);
-      if (entry.isDirectory()) return listTypeScriptFiles(filePath);
-      return /\.tsx?$/u.test(entry.name) ? [filePath] : [];
-    });
 };
 
 interface CatalogueRecord {
@@ -256,64 +245,132 @@ const isWriteOnlyAccess = (node: ts.Expression): boolean => {
     || (ts.isDeleteExpression(parent) && parent.expression === node);
 };
 
-const resolvedSymbol = (checker: ts.TypeChecker, node: ts.Node): ts.Symbol | undefined => {
-  const symbol = ts.isIdentifier(node) && ts.isShorthandPropertyAssignment(node.parent)
+const resolvedSymbol = (
+  checker: ts.TypeChecker,
+  node: ts.Node,
+  cache: WeakMap<ts.Node, ts.Symbol | null>,
+): ts.Symbol | undefined => {
+  if (cache.has(node)) return cache.get(node) ?? undefined;
+  const symbol = ts.isIdentifier(node)
+    && ts.isShorthandPropertyAssignment(node.parent)
+    && node.parent.name === node
     ? checker.getShorthandAssignmentValueSymbol(node.parent)
     : checker.getSymbolAtLocation(node);
-  if (symbol === undefined) return undefined;
-  return (symbol.flags & ts.SymbolFlags.Alias) !== 0 ? checker.getAliasedSymbol(symbol) : symbol;
+  if (symbol === undefined) {
+    cache.set(node, null);
+    return undefined;
+  }
+  const resolved = (symbol.flags & ts.SymbolFlags.Alias) !== 0 ? checker.getAliasedSymbol(symbol) : symbol;
+  cache.set(node, resolved);
+  return resolved;
+};
+
+const unaliasSymbol = (checker: ts.TypeChecker, symbol: ts.Symbol): ts.Symbol =>
+  (symbol.flags & ts.SymbolFlags.Alias) !== 0 ? checker.getAliasedSymbol(symbol) : symbol;
+
+const catalogueValue = (catalog: string): CatalogueValue => ({
+  catalog,
+  languageSelected: false,
+  path: [],
+  unknown: false,
+});
+
+const catalogueValuesInType = (
+  checker: ts.TypeChecker,
+  type: ts.Type,
+  roots: ReadonlyMap<ts.Symbol, string>,
+): CatalogueValue[] => {
+  const values = new Map<string, CatalogueValue>();
+  for (const part of typeParts(type)) {
+    for (const property of checker.getPropertiesOfType(part)) {
+      const catalog = roots.get(unaliasSymbol(checker, property));
+      if (catalog !== undefined) values.set(catalog, catalogueValue(catalog));
+    }
+  }
+  return [...values.values()];
+};
+
+const catalogueValuesAtMember = (
+  checker: ts.TypeChecker,
+  expression: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+  roots: ReadonlyMap<ts.Symbol, string>,
+): CatalogueValue[] => {
+  const names = ts.isPropertyAccessExpression(expression)
+    ? [expression.name.text]
+    : literalPropertyNames(checker, expression.argumentExpression);
+  const type = checker.getTypeAtLocation(expression.expression);
+  const properties = names.length === 0
+    ? checker.getPropertiesOfType(type)
+    : names.flatMap((name) => {
+      const property = checker.getPropertyOfType(type, name);
+      return property === undefined ? [] : [property];
+    });
+  const values = new Map<string, CatalogueValue>();
+  for (const property of properties) {
+    const catalog = roots.get(unaliasSymbol(checker, property));
+    if (catalog !== undefined) values.set(catalog, catalogueValue(catalog));
+  }
+  if (values.size === 0) {
+    const member = ts.isPropertyAccessExpression(expression) ? expression.name : expression.argumentExpression;
+    const symbol = checker.getSymbolAtLocation(member);
+    const catalog = symbol === undefined ? undefined : roots.get(unaliasSymbol(checker, symbol));
+    if (catalog !== undefined) values.set(catalog, catalogueValue(catalog));
+  }
+  if (values.size === 0) {
+    for (const value of catalogueValuesInType(checker, type, roots)) values.set(value.catalog, value);
+  }
+  return [...values.values()];
 };
 
 const resolveCatalogueValue = (
   checker: ts.TypeChecker,
   expression: ts.Expression,
   roots: ReadonlyMap<ts.Symbol, string>,
+  symbolCache: WeakMap<ts.Node, ts.Symbol | null>,
+  valueCache: WeakMap<ts.Expression, CatalogueValue | null>,
 ): CatalogueValue | null => {
+  if (valueCache.has(expression)) return valueCache.get(expression) ?? null;
   const value = unwrapExpression(expression);
+  let resolved: CatalogueValue | null = null;
   if (ts.isIdentifier(value)) {
-    const symbol = resolvedSymbol(checker, value);
+    const symbol = resolvedSymbol(checker, value, symbolCache);
     const catalog = symbol === undefined ? undefined : roots.get(symbol);
-    return catalog === undefined
-      ? null
-      : { catalog, languageSelected: false, path: [], unknown: false };
-  }
-
-  if (ts.isPropertyAccessExpression(value)) {
-    const owner = resolveCatalogueValue(checker, value.expression, roots);
+    resolved = catalog === undefined ? null : catalogueValue(catalog);
+  } else if (ts.isPropertyAccessExpression(value)) {
+    const owner = resolveCatalogueValue(checker, value.expression, roots, symbolCache, valueCache);
     if (owner === null) {
-      const member = resolvedSymbol(checker, value.name);
+      const member = resolvedSymbol(checker, value.name, symbolCache);
       const catalog = member === undefined ? undefined : roots.get(member);
-      return catalog === undefined
-        ? null
-        : { catalog, languageSelected: false, path: [], unknown: false };
+      resolved = catalog === undefined
+        ? catalogueValuesAtMember(checker, value, roots)[0] ?? null
+        : catalogueValue(catalog);
+    } else if (!owner.languageSelected) {
+      resolved = value.name.text === "de" || value.name.text === "en"
+        ? { ...owner, languageSelected: true }
+        : null;
+    } else {
+      resolved = { ...owner, path: [...owner.path, value.name.text] };
     }
-    if (!owner.languageSelected) {
-      if (value.name.text !== "de" && value.name.text !== "en") return null;
-      return { ...owner, languageSelected: true };
-    }
-    return { ...owner, path: [...owner.path, value.name.text] };
-  }
-
-  if (ts.isElementAccessExpression(value)) {
-    const owner = resolveCatalogueValue(checker, value.expression, roots);
-    if (owner === null) return null;
+  } else if (ts.isElementAccessExpression(value)) {
+    const owner = resolveCatalogueValue(checker, value.expression, roots, symbolCache, valueCache);
     const names = literalPropertyNames(checker, value.argumentExpression);
-    if (!owner.languageSelected) {
+    if (owner === null) {
+      resolved = catalogueValuesAtMember(checker, value, roots)[0] ?? null;
+    } else if (!owner.languageSelected) {
       const languageNames = names.filter((name) => name === "de" || name === "en");
-      if (names.length > 0 && languageNames.length === 0) return null;
-      return {
-        ...owner,
-        languageSelected: true,
-      };
+      resolved = names.length > 0 && languageNames.length === 0
+        ? null
+        : { ...owner, languageSelected: true };
+    } else if (names.length === 1) {
+      const name = names[0] as string;
+      resolved = { ...owner, path: [...owner.path, name] };
+    } else {
+      resolved = { ...owner, unknown: true };
     }
-    if (names.length === 1) {
-      const [name] = names;
-      if (name !== undefined) return { ...owner, path: [...owner.path, name] };
-    }
-    return { ...owner, unknown: true };
   }
 
-  return null;
+  valueCache.set(expression, resolved);
+  return resolved;
 };
 
 const propertyNames = (checker: ts.TypeChecker, name: ts.PropertyName | undefined): string[] => {
@@ -359,7 +416,7 @@ const markBindingPattern = (
 
 const isDeclarationIdentifier = (node: ts.Node): boolean =>
   ts.isIdentifier(node)
-  && !ts.isShorthandPropertyAssignment(node.parent)
+  && !(ts.isShorthandPropertyAssignment(node.parent) && node.parent.name === node)
   && (node.parent as ts.Node & { name?: ts.Node }).name === node;
 
 const propertyReads = (
@@ -397,12 +454,16 @@ const propertyReads = (
     fullyUsedPrefixes.add(key);
   };
 
+  const symbolCache = new WeakMap<ts.Node, ts.Symbol | null>();
+  const valueCache = new WeakMap<ts.Expression, CatalogueValue | null>();
+  const resolveValue = (expression: ts.Expression): CatalogueValue | null =>
+    resolveCatalogueValue(checker, expression, roots, symbolCache, valueCache);
   const handledDestructuringSources = new WeakSet<ts.Expression>();
   const visit = (node: ts.Node): void => {
     if (ts.isVariableDeclaration(node)
       && !ts.isIdentifier(node.name)
       && node.initializer !== undefined) {
-      const source = resolveCatalogueValue(checker, node.initializer, roots);
+      const source = resolveValue(node.initializer);
       if (source !== null) {
         if (ts.isObjectBindingPattern(node.name) && !source.unknown) {
           markBindingPattern(checker, node.name, source, markAll);
@@ -410,11 +471,28 @@ const propertyReads = (
           markAll(source);
         }
         handledDestructuringSources.add(unwrapExpression(node.initializer));
+      } else if (ts.isObjectBindingPattern(node.name)) {
+        const sourceType = checker.getTypeAtLocation(node.initializer);
+        for (const element of node.name.elements) {
+          const names = propertyNames(checker, element.propertyName)
+            .concat(element.propertyName === undefined && ts.isIdentifier(element.name) ? [element.name.text] : []);
+          const properties = names.length === 0
+            ? checker.getPropertiesOfType(sourceType)
+            : names.flatMap((name) => {
+              const property = checker.getPropertyOfType(sourceType, name);
+              return property === undefined ? [] : [property];
+            });
+          for (const property of properties) {
+            const catalog = roots.get(unaliasSymbol(checker, property));
+            if (catalog !== undefined) markAll(catalogueValue(catalog));
+          }
+        }
+        handledDestructuringSources.add(unwrapExpression(node.initializer));
       }
     }
 
     if ((ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) && !isWriteOnlyAccess(node)) {
-      const owner = resolveCatalogueValue(checker, node.expression, roots);
+      const owner = resolveValue(node.expression);
       if (owner !== null) {
         if (!owner.languageSelected) {
           // The first access selects de/en; it does not read a translated text key.
@@ -427,17 +505,28 @@ const propertyReads = (
           if (names.length === 0) markAll(owner);
           else for (const name of names) markExact(owner, [...owner.path, name]);
         }
+      } else {
+        const memberValue = resolveValue(node);
+        const continuesAccess = (ts.isPropertyAccessExpression(node.parent) || ts.isElementAccessExpression(node.parent))
+          && node.parent.expression === node;
+        if (ts.isElementAccessExpression(node)) {
+          for (const value of catalogueValuesAtMember(checker, node, roots)) markAll(value);
+        } else if (memberValue !== null && !continuesAccess) {
+          markAll(memberValue);
+        } else if (memberValue === null) {
+          for (const value of catalogueValuesAtMember(checker, node, roots)) markAll(value);
+        }
       }
     }
 
     if (ts.isExpression(node) && !isDeclarationIdentifier(node)) {
-      const value = resolveCatalogueValue(checker, node, roots);
+      const value = resolveValue(node);
       const continuesAccess = (ts.isPropertyAccessExpression(node.parent) || ts.isElementAccessExpression(node.parent))
         && node.parent.expression === node;
       const isHandledDestructuringSource = handledDestructuringSources.has(unwrapExpression(node));
       const isLiteralTextRead = ts.isElementAccessExpression(node)
         && literalPropertyNames(checker, node.argumentExpression).length > 0
-        && resolveCatalogueValue(checker, node.expression, roots)?.languageSelected === true
+        && resolveValue(node.expression)?.languageSelected === true
         && isLocaleTextType(checker, checker.getTypeAtLocation(node));
       if (value !== null
         && !continuesAccess
@@ -445,14 +534,20 @@ const propertyReads = (
         && !isLiteralTextRead
         && !isWriteOnlyAccess(node)) {
         markAll(value);
+      } else if (value === null
+        && !continuesAccess
+        && !isHandledDestructuringSource
+        && !isWriteOnlyAccess(node)) {
+        for (const carried of catalogueValuesInType(checker, checker.getTypeAtLocation(node), roots)) markAll(carried);
       }
     }
 
     ts.forEachChild(node, visit);
   };
 
-  for (const sourceFile of program.getSourceFiles()) {
-    if (!sourceFile.isDeclarationFile) visit(sourceFile);
+  for (const fileName of program.getRootFileNames()) {
+    const sourceFile = program.getSourceFile(fileName);
+    if (sourceFile !== undefined && !sourceFile.isDeclarationFile) visit(sourceFile);
   }
   return usedRecords;
 };
@@ -464,11 +559,14 @@ export const unusedLocaleKeys = (projectRoot = PROJECT_ROOT): UnusedLocaleKey[] 
   const configRead = ts.readConfigFile(configPath, (fileName) => ts.sys.readFile(fileName));
   if (configRead.error !== undefined) throw new Error(`Unable to read TypeScript configuration at ${configPath}`);
   const parsedConfig = ts.parseJsonConfigFileContent(configRead.config, ts.sys, root);
-  const program = ts.createProgram(parsedConfig.fileNames, parsedConfig.options);
+  // Runtime catalogue usage comes from application source, not test-only references.
+  const applicationFiles = parsedConfig.fileNames.filter((fileName) =>
+    path.relative(root, fileName).split(path.sep)[0] === "src");
+  const program = ts.createProgram(applicationFiles, parsedConfig.options);
   const checker = program.getTypeChecker();
   const roots = new Map<ts.Symbol, string>();
   const catalogueRecords = new Map<string, CatalogueRecord>();
-  const catalogueFiles = listTypeScriptFiles(path.join(root, "src"))
+  const catalogueFiles = program.getRootFileNames()
     .map((fileName) => ({ fileName, catalog: localeCataloguePath(root, fileName) }))
     .filter((entry): entry is { fileName: string; catalog: string } => entry.catalog !== null);
 

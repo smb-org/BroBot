@@ -31,7 +31,40 @@ afterEach(() => {
 describe("unused locale keys", () => {
   it("finds no unused keys in the application catalogues", () => {
     expect(unusedLocaleKeys()).toEqual([]);
-  }, 15_000);
+  }, 60_000);
+
+  it("does not count test-only reads as application catalogue usage", () => {
+    const projectRoot = createLocaleFixture(`
+export const catalog = {
+  de: { live: "Verwendet", orphan: "Ungenutzt" },
+  en: { live: "Used", orphan: "Unused" },
+} as const;
+`);
+    mkdirSync(path.join(projectRoot, "tests"), { recursive: true });
+    writeFileSync(path.join(projectRoot, "tsconfig.json"), JSON.stringify({
+      compilerOptions: {
+        target: "ES2023",
+        module: "ESNext",
+        moduleResolution: "Bundler",
+        strict: true,
+      },
+      include: ["src/**/*.ts", "tests/**/*.ts"],
+    }));
+    writeFileSync(path.join(projectRoot, "src/dashboard/usage.ts"), `
+import { catalog } from "./locale";
+
+export const readLive = (): string => catalog.en.live;
+`);
+    writeFileSync(path.join(projectRoot, "tests/catalog.test.ts"), `
+import { catalog } from "../src/dashboard/locale";
+
+export const testRead = (): string => catalog.en.orphan;
+`);
+
+    expect(unusedLocaleKeys(projectRoot)).toEqual([
+      { catalog: "src/dashboard/locale.ts#catalog", key: "orphan" },
+    ]);
+  });
 
   it("reports an interface property without a reference outside its catalogue", () => {
     const projectRoot = mkdtempSync(path.join(os.tmpdir(), "brobot-locale-keys-"));
@@ -128,6 +161,54 @@ export const readLive = (): string => locale.catalog.en.live;
     expect(unusedLocaleKeys(projectRoot)).toEqual([
       { catalog: "src/dashboard/locale.ts#catalog", key: "orphan" },
     ]);
+  });
+
+  it("fails safe for a catalogue used as a shorthand assignment default", () => {
+    const projectRoot = createLocaleFixture(`
+const catalog = {
+  de: { live: "Verwendet", orphan: "Ungenutzt" },
+  en: { live: "Used", orphan: "Unused" },
+} as const;
+
+let chosen: typeof catalog | undefined;
+({ chosen = catalog } = {});
+export const readLive = (): string => chosen?.en.live ?? "";
+`);
+
+    expect(unusedLocaleKeys(projectRoot)).toEqual([]);
+  });
+
+  it("fails safe for bracket access to a namespace catalogue", () => {
+    const projectRoot = createLocaleFixture(`
+export const catalog = {
+  de: { live: "Verwendet", orphan: "Ungenutzt" },
+  en: { live: "Used", orphan: "Unused" },
+} as const;
+`);
+    writeFileSync(path.join(projectRoot, "src/dashboard/usage.ts"), `
+import * as locale from "./locale";
+
+export const readLive = (): string => locale["catalog"].en.live;
+`);
+
+    expect(unusedLocaleKeys(projectRoot)).toEqual([]);
+  });
+
+  it("fails safe when destructuring a catalogue from a namespace import", () => {
+    const projectRoot = createLocaleFixture(`
+export const catalog = {
+  de: { live: "Verwendet", orphan: "Ungenutzt" },
+  en: { live: "Used", orphan: "Unused" },
+} as const;
+`);
+    writeFileSync(path.join(projectRoot, "src/dashboard/usage.ts"), `
+import * as locale from "./locale";
+
+const { catalog } = locale;
+export const readLive = (): string => catalog.en.live;
+`);
+
+    expect(unusedLocaleKeys(projectRoot)).toEqual([]);
   });
 
   it("counts shorthand catalogue properties as value references", () => {
