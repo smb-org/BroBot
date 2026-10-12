@@ -326,7 +326,8 @@ Fields that exist today (`src/modules/contract.ts`):
 - `defaultEnabled?: boolean` — create an enabled settings row when a channel
   is released; existing channels need a backfill migration.
 - `settingsSchema` (a Zod schema) and `defaultSettings` — `defaultSettings` is
-  written into `channel_modules.settings` on enable; the host exposes
+  written into `channel_modules.settings` on first enable; later re-enables
+  keep the saved settings. The host exposes
   GET/PATCH settings routes that validate reads and writes against
   `settingsSchema`.
 - `templateFields?` — which template variables are valid per settings field,
@@ -343,8 +344,8 @@ Fields that exist today (`src/modules/contract.ts`):
   the actions. A throw becomes a diagnostic in the event log; it never blocks
   the Worker or other modules.
 - `onEnable?(context, channelId)` — may asynchronously prepare statements for
-  initial data when the module is enabled; the panel route calls it on every
-  enable request, not only the first, so it must be idempotent.
+  initial data on first enable. The panel route calls it only when creating
+  the module's settings row.
 - `overlay?` / `panel?: () => Promise<{ default: ComponentType<...> }>` —
   must stay lazy `import()` promises, so a disabled module's panel or overlay
   view chunk never loads. Never turn these into direct imports.

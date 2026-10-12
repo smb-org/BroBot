@@ -1349,7 +1349,7 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
     event: ModuleEvent<z.output<SettingsSchema>>,
     context: ModuleExecutionContext,
   ) => ModuleResult | Promise<ModuleResult>;
-  /** Called before enabling to create module-specific initial data. */
+  /** Called on first enable to create module-specific initial data. */
   onEnable?: (
     context: ModuleEnableContext,
     channelId: string,

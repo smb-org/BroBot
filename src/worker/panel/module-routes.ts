@@ -614,7 +614,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
 
   const existing = await getChannelModuleForChannel(context.env.DB, channelId, moduleId);
   let dependentMutations: readonly D1PreparedStatement[] = [];
-  if (enabled && module.onEnable !== undefined) {
+  if (enabled && existing === null && module.onEnable !== undefined) {
     dependentMutations = await module.onEnable({
       DB: context.env.DB,
       authorizeMutation: context.get("authorizeManagementMutation"),
@@ -623,7 +623,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       now,
     }, channelId) ?? [];
   }
-  const settings = existing === null || enabled ? defaultSettingsJson : existing.settings;
+  const settings = existing === null ? defaultSettingsJson : existing.settings;
   const changed = existing === null
     ? await createChannelModuleWithAudit(
       context.env.DB,

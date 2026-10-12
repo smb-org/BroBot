@@ -70,7 +70,7 @@ describe("Text commands D1 adapter", () => {
     });
   });
 
-  it("rejects a stale save after the built-in list command is deleted and the module is re-enabled", async () => {
+  it("rejects a stale save after recreating the built-in list command", async () => {
     await insertChannel(database, "kanal-a");
     const repository = createTextCommandRepository(database as unknown as D1Database, authorize);
     await initializeListCommand(database as unknown as D1Database, "kanal-a", ACTOR, NOW, authorize);
