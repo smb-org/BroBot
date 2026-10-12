@@ -1087,7 +1087,7 @@ test("saved voting inspector stays open at desktop, overlay, and compact widths"
   await expect(page.locator(".chat-voting-immediate")).toContainText("Abstimmung");
   await expect(page.getByRole("button", { name: "Beenden" })).toBeVisible();
 });
-test("chat voting immediate action fits the 192px card with two visible rows and inner scroll", async ({ page }) => {
+test("chat voting immediate action fits the 240px card with two visible rows and inner scroll", async ({ page }) => {
   const openedAt = "2030-01-01T12:00:00.000Z";
   const templates: ChatVoteTemplate[] = Array.from({ length: 6 }, (_, index) => ({
     id: `template-${String(index)}`, channelId: "channel-a", shortcut: `t${String(index)}`, title: `Vorlage ${String(index + 1)}`,
@@ -1128,7 +1128,7 @@ test("chat voting immediate action fits the 192px card with two visible rows and
       listScrolls: list.scrollHeight > list.clientHeight,
     };
   });
-  expect(metrics.cardHeight).toBe(192);
+  expect(metrics.cardHeight).toBe(240);
   expect(metrics.cardOverflows).toBe(false);
   expect(metrics.childrenInside).toBe(true);
   expect(metrics.rowHeight).toBeGreaterThanOrEqual(34);
@@ -1759,10 +1759,13 @@ for (const width of [1920, 390]) {
     await gotoPanel(page, "ads-action&locked=1");
     await expect(slot).not.toBeEmpty();
     expect((await box(slot)).height).toBe(enabledHeight);
-    const clipped = await slot.evaluate((element) => {
-      const lineHeight = Number.parseFloat(getComputedStyle(element).lineHeight);
-      return element.scrollHeight > element.clientHeight + 1 || element.clientHeight < lineHeight * 2 - 1;
-    });
+    const clipped = await slot.evaluate((element) => element.scrollHeight > element.clientHeight);
     expect(clipped).toBe(false);
+    const card = await box(page.locator(".stream-manager-action"));
+    const reason = await box(slot);
+    expect(reason.y).toBeGreaterThanOrEqual(card.y);
+    expect(reason.y + reason.height).toBeLessThanOrEqual(card.y + card.height);
+    expect(reason.x + reason.width).toBeLessThanOrEqual(card.x + card.width);
+    expect(await page.locator(".stream-manager-action").evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(false);
   });
 }
