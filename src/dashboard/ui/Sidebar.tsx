@@ -27,6 +27,8 @@ export interface SidebarProps {
   groups: SidebarGroup[];
   onOpenCommandPalette: () => void;
   onEntryNavigate: () => void;
+  setupHeading: string;
+  setupDescription: string;
   paletteLabel: string;
   paletteShortcut: string;
 }
@@ -39,7 +41,7 @@ const stopAndNavigate = (entry: SidebarEntry, onEntryNavigate: () => void) =>
     onEntryNavigate();
   };
 
-export function Sidebar({ groups, onOpenCommandPalette, onEntryNavigate, paletteLabel, paletteShortcut }: SidebarProps) {
+export function Sidebar({ groups, onOpenCommandPalette, onEntryNavigate, setupHeading, setupDescription, paletteLabel, paletteShortcut }: SidebarProps) {
   const renderEntry = (entry: SidebarEntry): ReactNode => {
     const accessibleName = entry.led === undefined ? entry.label : `${entry.label} · ${entry.led.word}`;
     return (
@@ -66,21 +68,26 @@ export function Sidebar({ groups, onOpenCommandPalette, onEntryNavigate, palette
   return (
     <div className="sidebar" data-ui="">
       <div className="sidebar__main">
-        <button aria-label={paletteLabel} className="sidebar__palette-trigger" onClick={() => { onEntryNavigate(); onOpenCommandPalette(); }} type="button">
-          <Icon name="search" size={16} className="sidebar__palette-icon" />
-          <span className="sidebar__palette-label">{paletteLabel}</span>
-          <kbd className="sidebar__palette-shortcut">{paletteShortcut}</kbd>
-        </button>
+        <div className="sidebar__intro">
+          <h1 className="sidebar__title">{setupHeading}</h1>
+          <p className="sidebar__description">{setupDescription}</p>
+        </div>
         <div className="sidebar__scroll">
           {groups.map((group) => (
             <section aria-labelledby={`sidebar-heading-${group.id}`} className="sidebar__group" data-category={group.category} key={group.id}>
               <h2 className="sidebar__heading" id={`sidebar-heading-${group.id}`}>
-                <span className="sidebar__category-badge">{group.heading}</span>
+                <span aria-hidden="true" className="sidebar__category-marker" />
+                <span>{group.heading}</span>
               </h2>
               <div className="sidebar__items">{group.entries.map(renderEntry)}</div>
             </section>
           ))}
         </div>
+        <button aria-label={paletteLabel} className="sidebar__palette-trigger" onClick={() => { onEntryNavigate(); onOpenCommandPalette(); }} type="button">
+          <Icon name="search" size={16} className="sidebar__palette-icon" />
+          <span className="sidebar__palette-label">{paletteLabel}</span>
+          <kbd className="sidebar__palette-shortcut">{paletteShortcut}</kbd>
+        </button>
       </div>
     </div>
   );

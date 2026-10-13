@@ -18,6 +18,10 @@ const moderator = {
 };
 
 const relativeIso = (milliseconds: number): string => new Date(Date.now() + milliseconds).toISOString();
+const platformPaletteShortcut = (): { key: string; metaKey?: boolean; ctrlKey?: boolean } =>
+  /Mac|iPhone|iPad|iPod/u.test(navigator.platform || navigator.userAgent)
+    ? { key: "k", metaKey: true }
+    : { key: "k", ctrlKey: true };
 
 const healthyChannel = (channelId: string, displayName: string) => ({
   channelId,
@@ -2239,7 +2243,7 @@ describe("Dashboard skeleton", () => {
 
     expect(await screen.findByRole("heading", { name: "Textbefehle", level: 1 })).toBeInTheDocument();
     const channelSelect = screen.getByRole("combobox", { name: "Kanal auswählen" });
-    expect(channelSelect).toHaveTextContent("Esembe — 26876135");
+    expect(channelSelect).toHaveTextContent("Esembe");
     fireEvent.click(channelSelect);
     // jsdom does no real layout, so Floating UI's `hide` middleware always
     // treats the dropdown's reference as clipped and renders it `display:
@@ -2298,7 +2302,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
     try {
-      await waitFor(() => expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toHaveTextContent("Alpha — kanal-a"));
+      await waitFor(() => expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toHaveTextContent("Alpha"));
       await screen.findByRole("switch");
       const alphaSwitch = document.querySelector(".module-detail__switch [role='switch']");
       expect(alphaSwitch).not.toBeNull();
@@ -2306,7 +2310,7 @@ describe("Dashboard skeleton", () => {
       await waitFor(() => expect(toggleRequests.get("kanal-a")).toBe(1));
 
       navigateToPath("/channels/kanal-b/modules/ads");
-      await waitFor(() => expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toHaveTextContent("Beta — kanal-b"));
+      await waitFor(() => expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toHaveTextContent("Beta"));
       await waitFor(() => expect(overviewRequests.get("kanal-b")).toBeGreaterThan(0));
       await screen.findByRole("switch");
       const betaSwitch = document.querySelector(".module-detail__switch [role='switch']");
@@ -2315,7 +2319,7 @@ describe("Dashboard skeleton", () => {
       await waitFor(() => expect(toggleRequests.get("kanal-b")).toBe(1));
 
       navigateToPath("/channels/kanal-a/modules/ads");
-      await waitFor(() => expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toHaveTextContent("Alpha — kanal-a"));
+      await waitFor(() => expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toHaveTextContent("Alpha"));
       await screen.findByRole("switch");
       const returningAlphaSwitch = document.querySelector(".module-detail__switch [role='switch']");
       expect(returningAlphaSwitch).toBeDisabled();
@@ -3277,7 +3281,7 @@ describe("Dashboard skeleton", () => {
     await waitFor(() => {
       expect(container.querySelector(".dashboard-header__stream")).toHaveAttribute("data-state", "live");
     });
-    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    fireEvent.keyDown(document.body, platformPaletteShortcut());
     await screen.findByRole("dialog");
     fireEvent.change(screen.getByPlaceholderText("Suchen oder Aktion ausführen …"), { target: { value: "clip" } });
     fireEvent.click(await within(screen.getByRole("dialog")).findByText("Clip erstellen"));
@@ -3523,7 +3527,7 @@ describe("Dashboard skeleton", () => {
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
-    expect(await screen.findByText("Alpha — kanal-a")).toBeInTheDocument();
+    expect(await screen.findByRole("combobox", { name: "Kanal auswählen" })).toHaveTextContent("Alpha");
     await waitFor(() => expect(TestWebSocket.instances).toHaveLength(1));
     TestWebSocket.instances[0]?.open();
     await waitFor(() => expect(overviewCalls).toBe(1));
@@ -3668,7 +3672,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
     await screen.findByRole("heading", { name: "System", level: 1 });
-    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    fireEvent.keyDown(document.body, platformPaletteShortcut());
     await screen.findByRole("dialog");
     expect(await screen.findByText("!alphaonly")).toBeInTheDocument();
 
@@ -3681,7 +3685,7 @@ describe("Dashboard skeleton", () => {
     });
     await waitFor(() => { expect(screen.queryByRole("dialog")).not.toBeInTheDocument(); });
 
-    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    fireEvent.keyDown(document.body, platformPaletteShortcut());
     await screen.findByRole("dialog");
     expect(await screen.findByText("!betaonly")).toBeInTheDocument();
   });
@@ -3701,7 +3705,7 @@ describe("Dashboard skeleton", () => {
 
     await screen.findByRole("heading", { name: "Alpha", level: 1 });
     const select = screen.getByRole("combobox", { name: "Kanal auswählen" });
-    expect(select).toHaveTextContent("Alpha — kanal-a");
+    expect(select).toHaveTextContent("Alpha");
 
     fireEvent.click(select);
     clickSelectOption(screen.getByRole("option", { name: "Beta — kanal-b", hidden: true }));
@@ -3779,7 +3783,7 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
     await screen.findByRole("heading", { name: "System", level: 1 });
     const navigation = await openSetupNavigation();
-    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    fireEvent.keyDown(document.body, platformPaletteShortcut());
     const dialog = await screen.findByRole("dialog");
 
     const sidebar = navigation;
@@ -3820,7 +3824,7 @@ describe("Dashboard skeleton", () => {
     const response = await screen.findByRole("textbox", { name: "Antwort" });
     fireEvent.change(response, { target: { value: "Nicht gespeicherter Entwurf" } });
 
-    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    fireEvent.keyDown(document.body, platformPaletteShortcut());
     await screen.findByRole("dialog");
     fireEvent.change(screen.getByPlaceholderText("Suchen oder Aktion ausführen …"), { target: { value: "counter" } });
     fireEvent.click(await screen.findByText("{var.counter}"));
@@ -3866,7 +3870,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
     await screen.findByRole("heading", { name: "Alpha", level: 1 });
-    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    fireEvent.keyDown(document.body, platformPaletteShortcut());
     await screen.findByRole("dialog");
     fireEvent.change(screen.getByPlaceholderText("Suchen oder Aktion ausführen …"), { target: { value: "counter" } });
     fireEvent.click(await screen.findByText("{var.counter}"));

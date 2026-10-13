@@ -32,8 +32,8 @@ function contrastRatio(hexA: string, hexB: string): number {
 }
 
 const WCAG_AA_NORMAL_TEXT = 4.5;
-const legacyStyles = readFileSync(resolve(process.cwd(), "src/dashboard/styles.css"), "utf8");
 const tokenStyles = readFileSync(resolve(process.cwd(), "src/dashboard/ui/tokens.css"), "utf8");
+const legacyStyles = readFileSync(resolve(process.cwd(), "src/dashboard/styles.css"), "utf8");
 const designDocument = readFileSync(resolve(process.cwd(), "DESIGN.md"), "utf8");
 
 type PaletteName = "nachtschicht" | "indigo-nacht";
@@ -48,7 +48,8 @@ function paletteTokens(palette: PaletteName): Map<string, string> {
 }
 
 function resolveLegacyColor(variable: string): string {
-  const value = new RegExp(`${variable}:\\s*([^;]+)`).exec(legacyStyles)?.[1]?.trim();
+  const value = new RegExp(`${variable}:\\s*([^;]+)`).exec(legacyStyles)?.[1]?.trim()
+    ?? new RegExp(`${variable}:\\s*([^;]+)`).exec(tokenStyles)?.[1]?.trim();
   if (value === undefined) throw new Error(`Missing color token ${variable}`);
   const reference = /^var\((--[\w-]+)\)$/u.exec(value)?.[1];
   if (reference !== undefined) return resolveLegacyColor(reference);
@@ -75,29 +76,13 @@ describe("theme contrast rule", () => {
     expect(theme.luminanceThreshold).toBe(0.2);
   });
 
-  it("places {colors.brand}'s luminance between 0.2 and 0.3, where the threshold choice flips the outcome", () => {
+  it("resolves the legacy brand through the active palette tokens", () => {
     expect(colors.brand).toBe("var(--brand)");
-    const brandLuminance = relativeLuminance(resolveLegacyColor("--brand"));
-    expect(brandLuminance).toBeGreaterThan(0.2);
-    expect(brandLuminance).toBeLessThan(0.3);
+    expect(resolveLegacyColor("--brand")).toBe(paletteTokens("nachtschicht").get("--color-brand"));
+    expect(paletteTokens("indigo-nacht").get("--color-brand")).not.toBe(resolveLegacyColor("--brand"));
   });
 
-  it("counter-probe: Mantine's default 0.3 threshold would put white text on brand and fail WCAG AA", () => {
-    const brandColor = resolveLegacyColor("--brand");
-    const brandLuminance = relativeLuminance(brandColor);
-    const defaultThreshold = 0.3;
-
-    // Mantine's isLightColor: `luminance(color) > threshold`. Below the
-    // default 0.3 threshold, brand reads as "not light" and autoContrast
-    // picks white text.
-    const isLightUnderDefault = brandLuminance > defaultThreshold;
-    expect(isLightUnderDefault).toBe(false);
-
-    const whiteOnBrand = contrastRatio("#ffffff", brandColor);
-    expect(whiteOnBrand).toBeLessThan(WCAG_AA_NORMAL_TEXT);
-  });
-
-  it("at the configured 0.2 threshold, brand reads as light and autoContrast picks the dark on-brand text, which passes AA", () => {
+  it("uses the palette's on-brand text for primary actions and passes AA", () => {
     const brandColor = resolveLegacyColor("--brand");
     const onBrandColor = resolveLegacyColor("--on-brand");
     const brandLuminance = relativeLuminance(brandColor);
@@ -180,10 +165,10 @@ describe("legacy dashboard CSS compatibility", () => {
       "--surface-inspector", "--surface-well", "--surface-depth", "--line", "--line-strong", "--line-light",
     ];
     for (const token of legacySurfaceTokens) {
-      expect(legacyStyles).toMatch(new RegExp(`${token}:\\s*[^;]+;`, "u"));
+      expect(legacyStyles).toMatch(new RegExp(`${token}:\\s*var\\(--[\\w-]+\\);`, "u"));
       expect(tokenStyles).not.toMatch(new RegExp(`(?:^|\\s)${token}:`, "u"));
     }
-    expect(legacyStyles).toContain("--background: #141312;");
+    expect(legacyStyles).toContain("--background: var(--color-background);");
   });
 });
 

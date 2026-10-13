@@ -38,10 +38,11 @@ export const routeForDashboardMode = (
   route: DashboardRoute,
   mode: DashboardMode,
   channelId: string | null,
+  isPlatformAdmin = false,
 ): DashboardRoute => {
   if (dashboardModeForRoute(route) === mode) return route;
   if (mode === "live") return channelId === null ? { kind: "overview" } : { kind: "channel", channelId, section: "overview" };
-  if (channelId === null) return route;
+  if (channelId === null) return isPlatformAdmin ? { kind: "platform" } : route;
   return { kind: "channel", channelId, section: "system" };
 };
 

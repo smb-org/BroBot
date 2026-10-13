@@ -23,7 +23,9 @@ describe("Sidebar", () => {
         }] }]}
         onOpenCommandPalette={vi.fn()}
         onEntryNavigate={vi.fn()}
-        paletteLabel="Search or run an action …"
+        setupHeading="Setup"
+        setupDescription="Everything for your stream."
+        paletteLabel="Search everything"
         paletteShortcut="Ctrl K"
       />,
     );
@@ -35,14 +37,16 @@ describe("Sidebar", () => {
     expect(within(container).getByRole("heading", { name: "Chat", level: 2 })).toBeInTheDocument();
     expect(within(container).getByRole("heading", { name: "Administration", level: 2 })).toBeInTheDocument();
     expect(within(container).queryByText("Running")).toBeNull();
-    expect(container.querySelector(".sidebar__group[data-category='chat'] .sidebar__category-badge")).toHaveTextContent("Chat");
+    expect(container.querySelector(".sidebar__group[data-category='chat'] .sidebar__category-marker")).toBeInTheDocument();
+    expect((scrollRegion as Node).compareDocumentPosition(container.querySelector(".sidebar__palette-trigger") as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(container).getByRole("heading", { name: "Setup", level: 1 })).toBeInTheDocument();
   });
 
   it("opens the command palette from its search button", () => {
     const onOpenCommandPalette = vi.fn();
     const onEntryNavigate = vi.fn();
     render(
-      <Sidebar groups={[]} onOpenCommandPalette={onOpenCommandPalette} onEntryNavigate={onEntryNavigate} paletteLabel="Search" paletteShortcut="Ctrl K" />,
+      <Sidebar groups={[]} onOpenCommandPalette={onOpenCommandPalette} onEntryNavigate={onEntryNavigate} setupHeading="Setup" setupDescription="Everything for your stream." paletteLabel="Search" paletteShortcut="Ctrl K" />,
     );
 
     screen.getByRole("button", { name: "Search" }).click();

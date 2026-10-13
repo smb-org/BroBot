@@ -813,6 +813,10 @@ export interface DashboardTexts {
     /** Sidebar section heading; the "what you open during an incident" group. */
     openSidebar: string;
     closeSidebar: string;
+    sidebarSetupHeading: string;
+    sidebarSetupDescription: string;
+    sidebarSearch: string;
+    moduleOff: string;
   };
   overview: {
     oneChannelAvailable: string;
@@ -1173,6 +1177,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       overlays: "Overlays",
       signingOut: "Abmeldung …", signOut: "Abmelden",
       openSidebar: "Seitenleiste öffnen", closeSidebar: "Seitenleiste schließen",
+      sidebarSetupHeading: "Einrichten", sidebarSetupDescription: "Alles für deinen Stream.", sidebarSearch: "Alles durchsuchen", moduleOff: "Aus",
     },
     overview: {
       oneChannelAvailable: "1 Kanal freigegeben",
@@ -1497,6 +1502,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       overlays: "Overlays",
       signingOut: "Signing out …", signOut: "Sign out",
       openSidebar: "Open sidebar", closeSidebar: "Close sidebar",
+      sidebarSetupHeading: "Setup", sidebarSetupDescription: "Everything for your stream.", sidebarSearch: "Search everything", moduleOff: "Off",
     },
     overview: {
       oneChannelAvailable: "1 channel available",
@@ -1748,7 +1754,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       title: "Search pages",
       description: "Find a page in the dashboard.",
       placeholder: "Search or run action …",
-      navigateHint: "to navigate",
+      navigateHint: "navigate",
       openHint: "open",
       empty: "No matches.",
       groupRecentTargets: "Recently visited",

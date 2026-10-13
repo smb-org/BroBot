@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { dashboardTexts } from "../../src/dashboard/locale";
@@ -19,8 +20,8 @@ describe("cmdk command palette", () => {
   it("filters results and activates the highlighted item with Enter", async () => {
     const onTrigger = vi.fn();
     const items: CommandPaletteItem[] = [
-      { id: "timer", label: "Timer", group: "Chat", category: "chat", onTrigger },
-      { id: "members", label: "Members", group: "Administration", category: "admin", onTrigger: vi.fn() },
+      { id: "timer", label: "Timer", group: "Chat", onTrigger },
+      { id: "members", label: "Members", group: "Administration", onTrigger: vi.fn() },
     ];
     render(
       <UiProvider><CommandPalette
@@ -45,6 +46,35 @@ describe("cmdk command palette", () => {
     expect(onTrigger).toHaveBeenCalledOnce();
   });
 
+  it("restores focus to the control that opened it after Escape", async () => {
+    const item: CommandPaletteItem = { id: "members", label: "Members", group: "Administration", onTrigger: vi.fn() };
+    const Harness = () => {
+      const [open, setOpen] = useState(false);
+      return <>
+        <button onClick={() => { setOpen(true); }} type="button">Open search</button>
+        <UiProvider><CommandPalette
+          items={[item]}
+          open={open}
+          onOpenChange={setOpen}
+          emptyMessage={texts.empty}
+          title={texts.title}
+          description={texts.description}
+          placeholder={texts.placeholder}
+          navigateHint={texts.navigateHint}
+          openHint={texts.openHint}
+        /></UiProvider>
+      </>;
+    };
+    render(<Harness />);
+    const trigger = screen.getByRole("button", { name: "Open search" });
+    trigger.focus();
+    trigger.click();
+    const input = await screen.findByRole("combobox");
+    await waitFor(() => expect(input).toHaveFocus());
+    fireEvent.keyDown(input, { key: "Escape" });
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
   it("keeps inactive modules findable from the same navigation data", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const onNavigate = vi.fn<(route: DashboardRoute) => void>();
@@ -65,6 +95,8 @@ describe("cmdk command palette", () => {
     const input = screen.getByRole("combobox");
     fireEvent.change(input, { target: { value: "Timer" } });
     await waitFor(() => expect(screen.getByText("Timer")).toBeVisible());
+    expect(screen.getByText(/^(Off|Aus)$/u)).toBeVisible();
+    expect(document.querySelector(".command-palette__category")).toBeNull();
     fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onNavigate).toHaveBeenCalledWith({ kind: "module", channelId: "kanal-a", moduleId: "timers" });

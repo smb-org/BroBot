@@ -317,7 +317,9 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
       groups={groups}
       onOpenCommandPalette={onOpenCommandPalette}
       onEntryNavigate={onEntryNavigate}
-      paletteLabel={texts.commandPalette.placeholder}
+      setupHeading={texts.navigation.sidebarSetupHeading}
+      setupDescription={texts.navigation.sidebarSetupDescription}
+      paletteLabel={texts.navigation.sidebarSearch}
       paletteShortcut={navigator.userAgent.includes("Mac") ? "⌘ K" : "Ctrl K"}
     />
   );
@@ -623,14 +625,17 @@ const DashboardHeader = ({ route, mode, channels, activeChannel, loadedAt, palet
       <a aria-current={dashboardModeForRoute(route) === "live" ? "page" : undefined} className="brand-mark dashboard-header__brand" href="/" onClick={(event) => { event.preventDefault(); onNavigate({ kind: "overview" }); }}><span className="brand-mark__dot" /><span className="brand-mark__word">BroBot</span></a>
       {activeChannel === undefined ? null : (
       <div className="dashboard-header__channel">
-        <div className="dashboard-header__channel-select"><UiSelect
-            compact
-            value={activeChannel.channelId}
-            onChange={(channelId) => { if (channelId !== null) onNavigate(routeForSelectedChannel(route, channelId)); }}
-            options={channels.map((channel) => ({ value: channel.channelId, label: `${channel.displayName} — ${channel.channelId}` }))}
-            ariaLabel={texts.navigation.selectChannel}
-            id="dashboard-channel-select"
-          /></div>
+        <div className="dashboard-header__channel-select">
+          <span aria-hidden="true" className="dashboard-header__channel-avatar">{activeChannel.login.slice(0, 1).toUpperCase()}</span>
+          <UiSelect
+              compact
+              value={activeChannel.channelId}
+              onChange={(channelId) => { if (channelId !== null) onNavigate(routeForSelectedChannel(route, channelId)); }}
+              options={channels.map((channel) => ({ value: channel.channelId, label: `${channel.displayName} — ${channel.channelId}`, selectedLabel: channel.displayName }))}
+              ariaLabel={texts.navigation.selectChannel}
+              id="dashboard-channel-select"
+            />
+        </div>
         {activeChannel.location == null ? null : <ChannelLocationMenu location={activeChannel.location} messages={texts.header.locationMenu} />}
         </div>
       )}
@@ -1625,7 +1630,7 @@ export const DashboardApp = (): ReactElement => {
   };
   const switchMode = (mode: DashboardMode): void => {
     const channelId = activeHeaderChannel?.channelId ?? channels.data?.[0]?.channelId ?? null;
-    navigate(routeForDashboardMode(route, mode, channelId));
+    navigate(routeForDashboardMode(route, mode, channelId, isPlatform));
   };
 
   const handleLogout = async (): Promise<void> => {

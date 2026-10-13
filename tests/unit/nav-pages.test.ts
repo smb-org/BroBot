@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ChannelRole } from "../../src/contracts/values";
 import { dashboardNavigationGroups, DASHBOARD_NAVIGATION_CATEGORIES, MODULE_NAVIGATION_CATEGORY_GROUPS, visibleModuleNavigationIds } from "../../src/dashboard/nav-pages";
 import { dashboardTexts } from "../../src/dashboard/locale";
-import { dashboardModeForRoute, routeForSelectedChannel, type DashboardRoute } from "../../src/dashboard/router";
+import { dashboardModeForRoute, routeForDashboardMode, routeForSelectedChannel, type DashboardRoute } from "../../src/dashboard/router";
 import { moduleName } from "../../src/dashboard/module-labels";
 import { MODULES } from "../../src/modules/registry";
 
@@ -40,6 +40,22 @@ describe("dashboard navigation", () => {
     expect(entries[channelEventsIndex + 1]).toMatchObject({ pageId: "audit", label: "Log" });
   });
 
+  it("keeps Twitch Ereignisse distinct from the Kanalereignisse module", () => {
+    const groups = dashboardNavigationGroups(
+      { isPlatformAdmin: true },
+      "channel-a",
+      dashboardTexts("de"),
+      MODULES,
+      MODULES.map(({ id }) => ({ id, enabled: true })),
+      "manager",
+      "de",
+      (moduleId) => moduleName(moduleId, "de"),
+    );
+    const entries = groups.flatMap(({ entries: groupEntries }) => groupEntries);
+    expect(entries.find(({ pageId }) => pageId === "events")?.label).toBe("Ereignisse");
+    expect(entries.find(({ moduleId }) => moduleId === "channel_events")?.label).toBe("Kanalereignisse");
+  });
+
   it("keeps inactive modules out of the sidebar while leaving them searchable", () => {
     const states = MODULES.map(({ id }) => ({ id, enabled: id !== "timers" }));
     const groups = navigationFor(states);
@@ -70,6 +86,11 @@ describe("dashboard navigation", () => {
 
     for (const route of liveRoutes) expect(dashboardModeForRoute(route)).toBe("live");
     for (const route of setupRoutes) expect(dashboardModeForRoute(route)).toBe("setup");
+  });
+
+  it("keeps platform setup reachable when an admin has no released channels", () => {
+    expect(routeForDashboardMode({ kind: "overview" }, "setup", null, true)).toEqual({ kind: "platform" });
+    expect(routeForDashboardMode({ kind: "overview" }, "setup", null, false)).toEqual({ kind: "overview" });
   });
 
   it("keeps channel switching in the current Live or Setup area", () => {

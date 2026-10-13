@@ -125,6 +125,7 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
       ? `${description === undefined ? "" : `${description} `}${module.mandatoryReason?.[dashboardLanguage()] ?? moduleWorkspaceTexts().mandatoryReason}`
       : description;
     const blockedByBot = botBlocksRoute(entry.route, botSignedIn);
+    const moduleState = entry.moduleId === undefined ? undefined : modules.find((candidate) => candidate.id === entry.moduleId);
     return {
       id: entry.id,
       label: entry.label,
@@ -134,8 +135,7 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
         : { icon: <NavigationIcon kind={entry.iconKind} className="command-palette-module-icon" /> }),
       ...(accessibleDescription === undefined || accessibleDescription.length === 0 ? {} : { description: accessibleDescription }),
       group: group.heading,
-      category: entry.category,
-      categoryLabel: group.heading,
+      ...(moduleState?.enabled === false ? { stateLabel: texts.navigation.moduleOff } : {}),
       keywords: [...entry.keywords],
       ...(blockedByBot ? { disabled: true, disabledReason: texts.blocking.botTitle } : {}),
       onTrigger: () => { onNavigate(entry.route); },

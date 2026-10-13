@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
 
 test.use({ locale: "en-US" });
+
+const paletteShortcut = async (page: Page): Promise<string> => page.evaluate(() =>
+  /Mac|iPhone|iPad|iPod/u.test(navigator.platform || navigator.userAgent) ? "Meta+k" : "Control+k",
+);
 
 test("command palette and channel notices work on desktop and mobile", async ({ page }) => {
   const modules = [
@@ -75,7 +80,7 @@ test("command palette and channel notices work on desktop and mobile", async ({ 
   await paletteTrigger.click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.keyboard.press("Escape");
-  await page.keyboard.press("Control+k");
+  await page.keyboard.press(await paletteShortcut(page));
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.keyboard.press("Escape");
 
@@ -98,7 +103,7 @@ test("command palette and channel notices work on desktop and mobile", async ({ 
   await expect(sidebar).toBeInViewport();
   await expect(sidebar.locator(".sidebar__group")).not.toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await page.keyboard.press("Control+k");
+  await page.keyboard.press(await paletteShortcut(page));
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(sidebar).not.toBeInViewport();
   await page.keyboard.press("Escape");
@@ -106,6 +111,8 @@ test("command palette and channel notices work on desktop and mobile", async ({ 
 
   await mobileBurger.click();
   await expect(sidebar).toBeInViewport();
+  await page.keyboard.press("Escape");
+  await expect(sidebar).not.toBeInViewport();
   await paletteTrigger.click();
   const palette = page.getByRole("dialog");
   await expect(palette).toBeVisible();
