@@ -79,6 +79,7 @@
 .overlay-editor__style-section-toggle:focus-visible { outline: 2px solid var(--brand-text); outline-offset: 2px; }
 .overlay-editor__style-section-icon { display: grid; width: 16px; height: 16px; place-items: center; color: var(--text-2); }
 .overlay-editor__style-section-title { min-width: 0; overflow: hidden; color: var(--text); font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.overlay-editor__in-composition { display: flex; min-height: 44px; align-items: center; justify-content: space-between; gap: var(--s3); color: var(--text-2); font-size: 13px; }
 .overlay-editor__style-section-summary { min-width: 0; overflow: hidden; color: var(--text-3); font-size: 12px; font-weight: 400; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .overlay-editor__style-section-chevron { width: var(--s2); height: var(--s2); border-right: 1px solid var(--text-3); border-bottom: 1px solid var(--text-3); transform: rotate(45deg); }
 .overlay-editor__style-section-toggle[aria-expanded="true"] .overlay-editor__style-section-chevron { transform: rotate(225deg); }

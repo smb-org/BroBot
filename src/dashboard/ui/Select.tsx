@@ -4,6 +4,7 @@ import { useId, useState, type ReactNode } from "react";
 
 import { useDisabledFieldReason } from "./DisabledFieldReason";
 import { TruncatedText } from "./TruncatedText";
+import { FieldError } from "./FieldError";
 import { SelectContent, SelectGroup, SelectItem, SelectLabel, SelectPrimitive, SelectTrigger, SelectValue } from "./primitives/select";
 
 export interface SelectOption {
@@ -133,6 +134,6 @@ export function Select({ label, ariaLabel, hint, error, value, onChange, options
       </SelectContent>
     </SelectPrimitive.Root>}
     {compact ? null : <span data-ui="" id={descriptionId} className="ui-select__description">{hint === undefined ? null : <TruncatedText text={hint} />}{disabledReason === null ? null : <span className="sr-only">{disabledReason.reason}</span>}</span>}
-    {compact ? null : <span data-ui="" id={errorId} className="ui-select__error" aria-live="polite" role={error === undefined || error.length === 0 ? undefined : "alert"}>{error === undefined || error.length === 0 ? <span aria-hidden="true">&nbsp;</span> : <><span aria-hidden="true">× </span><TruncatedText text={error} /></>}</span>}
+    {compact ? null : <FieldError id={errorId} className="ui-select__error" message={error} />}
   </div>;
 }

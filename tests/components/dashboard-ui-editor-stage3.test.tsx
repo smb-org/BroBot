@@ -2,9 +2,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { useState, type ReactNode, type SyntheticEvent } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Button, ChipsInput, ConfirmDialog, EditorShell, Field, FieldPair, GamePicker, SegmentChoice, SettingsEditor, TemplateText, TemplateTextField, UiProvider, UnitInput, type GamePickerGame, type GamePickerMessages, type SettingsEditorSpec, type TemplateTextFieldMessages, type TemplateTextFieldVariable } from "../../src/dashboard/ui";
+import { Button, ChipsInput, ConfirmDialog, EditorShell, Field, FieldPair, GamePicker, SegmentChoice, SettingsEditor, SwitchRow, SwitchSection, TemplateText, TemplateTextField, UiProvider, UnitInput, type GamePickerGame, type GamePickerMessages, type SettingsEditorSpec, type TemplateTextFieldMessages, type TemplateTextFieldVariable } from "../../src/dashboard/ui";
 import { ChoiceCards } from "../../src/dashboard/ui/ChoiceCards";
-import { Switch } from "../../src/dashboard/ui/Switch";
 
 const renderUi = (node: ReactNode): ReturnType<typeof render> => render(<UiProvider>{node}</UiProvider>);
 
@@ -255,14 +254,14 @@ describe("editor field seam", () => {
       <ChipsInput label="Aliases" hint="Other names." values={[]} onChange={() => {}} removeLabel={(entry) => `Remove ${entry}`} listLabel="Alias list" messages={{ countLabel: (count, max) => `${String(count)} of ${String(max)}`, atLimitHint: "At the limit.", duplicateWarning: (entry) => `${entry} is already listed.` }} />
       <SegmentChoice label="Mode" hint="The active mode." value="one" onChange={() => {}} options={[{ value: "one", label: "One" }, { value: "two", label: "Two" }]} />
       <ChoiceCards label="Tier" hint="Who can run it." value="everyone" onChange={() => {}} options={[{ value: "everyone", label: "Everyone", description: "Anyone." }]} />
-      <Switch layout="inline" label="Enabled" hint="Takes effect now." checked onChange={() => {}} />
+      <SwitchRow label="Enabled" hint="Takes effect now." checked onChange={() => {}} />
       <TemplateTextField label="Reply" hint="What the bot says." value="Hello" onChange={() => {}} messages={templateTextFieldMessages} />
     </div>);
     expectHelperAfterField(screen.getByRole("textbox", { name: "Name" }), "The command name.");
     expectHelperAfterField(screen.getByRole("spinbutton", { name: "Cooldown" }), "Seconds between uses.");
     expectHelperAfterField(screen.getByRole("textbox", { name: "Aliases" }), "Other names.");
     expectHelperAfterField(screen.getByRole("group", { name: "Mode" }), "The active mode.");
-    expectHelperAfterField(screen.getByRole("radiogroup", { name: "Tier" }), "Who can run it.");
+    expectHelperAfterField(screen.getByRole("group", { name: "Tier" }), "Who can run it.");
     expectHelperAfterField(screen.getByRole("switch", { name: "Enabled" }), "Takes effect now.");
     expectHelperAfterField(screen.getByRole("textbox", { name: "Reply" }), "What the bot says.");
   });
@@ -303,7 +302,7 @@ describe("editor field seam", () => {
     expect(screen.getAllByRole("button", { name: /Message|Reply/u }).every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
   });
 
-  it("renders vertically stacked choice cards with accessible descriptions, hidden icons, arrow keys, and disabled options", () => {
+  it("renders keyboard-operable choice cards with accessible names, hidden icons, and disabled options", () => {
     function Harness({ disabled = false }: { disabled?: boolean }) {
       const [value, setValue] = useState("everyone");
       return <ChoiceCards label="Who can run it" hint="Moderators and broadcasters always can." value={value} onChange={setValue} disabled={disabled} options={[
@@ -312,36 +311,32 @@ describe("editor field seam", () => {
       ]} />;
     }
     renderUi(<Harness />);
-    const everyone = screen.getByRole("radio", { name: "Everyone. Anyone in chat." });
+    const everyone = screen.getByRole("button", { name: "Everyone. Anyone in chat." });
     expect(everyone.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
-    fireEvent.keyDown(everyone, { key: "ArrowRight", code: "ArrowRight" });
-    expect(screen.getByRole("radio", { name: "VIPs. VIPs, moderators, and broadcasters." })).toBeChecked();
+    everyone.focus();
+    fireEvent.click(screen.getByRole("button", { name: "VIPs. VIPs, moderators, and broadcasters." }));
+    expect(screen.getByRole("button", { name: "VIPs. VIPs, moderators, and broadcasters." })).toHaveAttribute("aria-pressed", "true");
 
     cleanup();
     renderUi(<Harness disabled />);
-    expect(screen.getAllByRole("radio").every((radio) => (radio as HTMLInputElement).disabled)).toBe(true);
+    expect(screen.getAllByRole("button", { name: /Everyone|VIPs/u }).every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
   });
 
-  it("lets the whole switch-card surface toggle and describes disabled dependent fields", () => {
+  it("keeps SwitchSection children hidden while off and exposes its hint", () => {
     const onChange = vi.fn();
     const { container } = renderUi(
-      <Switch layout="card" label="Shoutout" description="Send a shoutout on a large raid." hint="Controls the threshold below." checked={false} onChange={onChange} lockedReason="Shoutout is off.">
+      <SwitchSection title="Shoutout" hint="Controls the threshold below." checked={false} onChange={onChange}>
         <Field label="Viewer threshold" hint="Minimum viewer count." value="50" onChange={() => {}} />
-      </Switch>,
+      </SwitchSection>,
     );
-    const card = container.querySelector(".ui-switch-card");
-    expect(card).not.toBeNull();
-    fireEvent.click(card as HTMLElement);
+    const section = container.querySelector(".ui-switch-section");
+    expect(section).not.toBeNull();
+    expect(section).toHaveTextContent("Shoutout");
+    expect(section).toHaveTextContent("Controls the threshold below.");
+    expect(section?.querySelectorAll(".ui-switch-section__heading, .ui-switch-section__hint")).toHaveLength(2);
+    expect(section).not.toHaveTextContent("Viewer threshold");
+    fireEvent.click(screen.getByRole("switch", { name: "Shoutout" }));
     expect(onChange).toHaveBeenCalledWith(true);
-    const control = screen.getByRole("switch", { name: /^Shoutout/u });
-    const switchDescriptions = control.getAttribute("aria-describedby")?.split(" ") ?? [];
-    expect(switchDescriptions.some((id) => (document.getElementById(id)?.textContent ?? "").includes("Controls the threshold below."))).toBe(true);
-    expect(switchDescriptions.some((id) => (document.getElementById(id)?.textContent ?? "").includes("Shoutout is off."))).toBe(true);
-    const dependent = screen.getByRole("textbox", { name: "Viewer threshold" });
-    expect(dependent).toBeDisabled();
-    const dependentDescriptions = dependent.getAttribute("aria-describedby")?.split(" ") ?? [];
-    expect(dependentDescriptions.some((id) => (document.getElementById(id)?.textContent ?? "").includes("Shoutout is off."))).toBe(true);
-    expect(screen.getByText("Controls the threshold below.")).toBeInTheDocument();
   });
 
   it("parses and normalizes tags, retains invalid input, suppresses duplicates, counts tags, and allows removal at the limit", async () => {
@@ -1042,24 +1037,31 @@ describe("EditorShell and declaration renderer", () => {
         dependentThreshold: { label: "Dependent threshold", hint: "Minimum viewer count." },
       },
     };
-    renderUi(<SettingsEditor
-      spec={spec}
-      sectionId="general"
-      settings={{ threshold: 12, shoutoutName: "channel", message: "Hello {user}", mode: "one", enabled: false, dependentThreshold: 50 }}
-      onChange={() => {}}
-      texts={texts}
-      variables={{ message: templateOptions }}
-      templateMessages={templateTextFieldMessages}
-    />);
+    function Harness() {
+      const [enabled, setEnabled] = useState(false);
+      return <SettingsEditor<Settings>
+        spec={spec}
+        sectionId="general"
+        settings={{ threshold: 12, shoutoutName: "channel", message: "Hello {user}", mode: "one", enabled, dependentThreshold: 50 }}
+        onChange={(key, value) => { if (key === "enabled" && typeof value === "boolean") setEnabled(value); }}
+        texts={texts}
+        variables={{ message: templateOptions }}
+        templateMessages={templateTextFieldMessages}
+      />;
+    }
+    renderUi(<Harness />);
     const fieldHelp: readonly (readonly [string, string])[] = [
       ["Threshold", "Minimum viewer count."],
       ["Shoutout name", "The account sent a shoutout."],
       ["Message", "What the bot writes."],
       ["Mode", "First choice."],
-      ["Shoutout", "Send a shoutout after a large raid."],
-      ["Dependent threshold", "Minimum viewer count."],
     ];
     for (const [label, help] of fieldHelp) expect(screen.getByRole("button", { name: `${label}: ${help}` })).toHaveAttribute("title", help);
+    expect(screen.getByText("Send a shoutout after a large raid.")).toBeInTheDocument();
+    expect(screen.queryByRole("spinbutton", { name: "Dependent threshold" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("switch", { name: "Shoutout" }));
+    expect(screen.getByRole("spinbutton", { name: "Dependent threshold" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Dependent threshold: Minimum viewer count." })).toHaveAttribute("title", "Minimum viewer count.");
     expect(screen.getByRole("group", { name: "Mode" })).toBeInTheDocument();
   });
 });

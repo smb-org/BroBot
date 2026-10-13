@@ -170,7 +170,7 @@ test("inline switches, field adornments, and select errors keep stable layout", 
   const switchRow = page.getByRole("switch", { name: "Inline inspector switch" }).locator("xpath=..");
   const rowLayout = await switchRow.evaluate((row) => {
     const track = row.querySelector("[role='switch']");
-    const label = row.querySelector(".ui-switch-field__label");
+    const label = row.querySelector(".ui-switch-row__copy");
     if (track === null || label === null) return null;
     return {
       display: getComputedStyle(row).display,
@@ -178,6 +178,6 @@ test("inline switches, field adornments, and select errors keep stable layout", 
       labelLeft: label.getBoundingClientRect().left,
     };
   });
-  expect(rowLayout?.display).toBe("flex");
-  expect(rowLayout?.trackRight).toBeLessThanOrEqual(rowLayout?.labelLeft ?? 0);
+  expect(rowLayout?.display).toBe("grid");
+  expect(rowLayout?.trackRight).toBeGreaterThan(rowLayout?.labelLeft ?? 0);
 });

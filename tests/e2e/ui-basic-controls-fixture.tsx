@@ -1,7 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { useState } from "react";
 
-import { ActionMenu, Button, Dialog, Field, Popover, Select, SegmentChoice, StatusLed, Switch, UiProvider, UnitInput } from "../../src/dashboard/ui";
+import { ActionMenu, Button, Dialog, Field, Popover, Select, SegmentChoice, StatusLed, SwitchRow, UiProvider, UnitInput } from "../../src/dashboard/ui";
 import "../../src/dashboard/ui/tokens.css";
 
 export function BasicControlsFixture() {
@@ -23,7 +23,7 @@ export function BasicControlsFixture() {
         <Field label="Icon input" value="" onChange={() => {}} icon="member" />
         <Field variant="search" label="Members" value="" onChange={() => {}} clearLabel="Clear member search" />
         <SegmentChoice label="Layout" value={mode} onChange={setMode} options={[{ value: "one", label: "One" }, { value: "two", label: "Two" }]} />
-        <Switch layout="inline" label="Enabled" checked={enabled} onChange={setEnabled} />
+        <SwitchRow label="Enabled" checked={enabled} onChange={setEnabled} />
         <Popover triggerLabel="Popover help" icon="warning">A short help message.</Popover>
         <ActionMenu label="More actions" items={[{ label: "Edit settings", onSelect: () => {} }]} />
         <Button size="compact" onClick={() => { setDialogOpen(true); }}>Open dialog</Button>
@@ -37,7 +37,7 @@ export function BasicControlsFixture() {
             <Select label="Inspector search" value="utc" onChange={() => {}} searchable options={[{ value: "utc", label: "UTC" }, { value: "paris", label: "Paris" }]} />
             <ActionMenu label="Inspector actions" items={[{ label: "Inspector action", onSelect: () => {} }]} />
             <Popover triggerLabel="Inspector help" icon="warning">Inspector help text.</Popover>
-            <Switch layout="inline" label="Inline inspector switch" checked={enabled} onChange={setEnabled} />
+            <SwitchRow label="Inline inspector switch" checked={enabled} onChange={setEnabled} />
             <Button size="compact" onClick={() => { setDialogOpen(true); }}>Open inspector dialog</Button>
           </section>
         </aside>

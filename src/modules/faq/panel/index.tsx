@@ -1,7 +1,8 @@
 import { useCallback, useState, type ReactElement } from "react";
 
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
-import { Button, ChatOutputTargetControl, ConfirmDialog, Field, FormDialog, GamePicker, InspectorSection, LoadState, LoadStateLines, UnitInput, Select, Switch, TemplateTextField, mapServerFieldErrors, notify } from "../../../dashboard/ui";
+import { Button, ChatOutputTargetControl, ConfirmDialog, Field, FormDialog, GamePicker, InspectorSection, LoadState, LoadStateLines, UnitInput, Select, TemplateTextField, mapServerFieldErrors, notify } from "../../../dashboard/ui";
+import { Switch as SwitchPrimitive } from "../../../dashboard/ui/primitives/switch";
 import type { ModulePanelProperties } from "../../contract";
 import type { FaqEntry, FaqGame } from "../contracts";
 import { FAQ_ANSWER_MAX_LENGTH, FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH, FAQ_USER_COOLDOWN_MAXIMUM_SECONDS } from "../contracts";
@@ -224,12 +225,12 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
                 {entry.games.length === 0 ? null : <span>{labels.games} · {entry.games.map((game) => game.name).join(", ")}</span>}
               </div>
               <div className="timer-row__actions">
-                <Switch
-                  ariaLabel={`${entry.name}: ${entry.enabled ? labels.enabled : labels.disabled}`}
+                <SwitchPrimitive
+                  aria-label={`${entry.name}: ${entry.enabled ? labels.enabled : labels.disabled}`}
                   checked={entry.enabled}
-                  disabled={busyEntryId !== null && busyEntryId !== entry.id}
-                  pending={busyEntryId === entry.id}
-                  onChange={(enabled) => { void toggle(entry, enabled); }}
+                  aria-busy={busyEntryId === entry.id}
+                  disabled={busyEntryId !== null && busyEntryId !== entry.id || busyEntryId === entry.id}
+                  onCheckedChange={(enabled) => { void toggle(entry, enabled); }}
                 />
                 <Button variant="subtle" ariaLabel={labels.moveUp} disabled={!canManage || index === 0 || busyEntryId !== null} onClick={() => { void move(entry, "up"); }}>↑</Button>
                 <Button variant="subtle" ariaLabel={labels.moveDown} disabled={!canManage || index === orderedEntries.length - 1 || busyEntryId !== null} onClick={() => { void move(entry, "down"); }}>↓</Button>

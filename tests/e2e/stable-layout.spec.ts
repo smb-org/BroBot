@@ -282,7 +282,7 @@ test("returning from a module keeps the overview loaded at the same header posit
   await page.locator('a[href="/channels/stable-channel"]').click();
   await expect(page).toHaveURL("/channels/stable-channel");
   expect(await pageHeader.count()).toBe(1);
-  expect(await pageHeader.evaluate((element) => element.getBoundingClientRect().y)).toBe(firstHeaderY);
+  await expect.poll(() => pageHeader.evaluate((element) => element.getBoundingClientRect().y)).toBe(firstHeaderY);
   expect(await page.locator(".main-content .ui-load-state__reserved-lines").count()).toBe(0);
   expect(overviewRequests).toBe(initialOverviewRequestCount);
   const socketStats = await page.evaluate(() => {

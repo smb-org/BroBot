@@ -23,7 +23,7 @@ import {
 } from "./api";
 import { platformActionLabel, platformTexts, roleLabel } from "./labels";
 import { apiErrorText, dashboardCommonTexts, formatTimestamp, formatNumber } from "./locale";
-import { Badge, Button, ConfirmDialog, Field, FormDialog, InspectorActions, InspectorFieldRow, InspectorHeading, InspectorSection, ListDetail, ListPaginationFooter, LoadState as LoadStateView, LoadStateLines, notify, PageHeader, Select, SubInspector, Switch, Tabs, useInspectorSelection, type SelectOption } from "./ui";
+import { Badge, Button, ConfirmDialog, Field, FormDialog, InspectorActions, InspectorFieldRow, InspectorHeading, InspectorSection, ListDetail, ListPaginationFooter, LoadState as LoadStateView, LoadStateLines, notify, PageHeader, Select, SubInspector, SwitchRow, Tabs, useInspectorSelection, type SelectOption } from "./ui";
 import { MemberGrantEditor } from "./member-grant-editor";
 import { StateRow, type StateTone } from "./module-panels";
 
@@ -216,8 +216,7 @@ const ChannelInspector = ({
         detail={!channel.broadcasterConnected && channel.fullConsent ? texts.consentPendingHint : channel.login}
       />
       <section className="config-section platform-inspector-section" aria-label={texts.toggleConsent}>
-        <Switch
-          layout="inline"
+        <SwitchRow
           label={texts.fullConsent}
           hint={common.immediate}
           checked={channel.fullConsent}
@@ -386,7 +385,7 @@ const ChannelRelease = ({
           {found === null ? null : (
             <div className="member-grant-editor__result">
               <div><strong>{texts.userFound}: {found.displayName}</strong><span>@{found.login} · {texts.twitchId(found.userId)}</span></div>
-              <Switch layout="card" label={texts.fullConsent} description={texts.fullConsentCardDescription} checked={fullConsent} disabled={releaseInProgress} onChange={setFullConsent} />
+              <SwitchRow label={texts.fullConsent} description={texts.fullConsentCardDescription} checked={fullConsent} disabled={releaseInProgress} onChange={setFullConsent} />
             </div>
           )}
         </div>

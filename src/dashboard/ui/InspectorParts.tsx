@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { Icon } from "./Icon";
+import { Section } from "./Section";
 
 function InfoButton({ label, help }: { label: string; help: string }) {
   const id = useId();
@@ -41,13 +42,12 @@ function InfoButton({ label, help }: { label: string; help: string }) {
 }
 
 export function InspectorSection({ title, children, help }: { title: ReactNode; children: ReactNode; help?: string }) {
-  const headingId = useId();
-  return (
-    <section data-ui="" className="inspector-content-section" aria-labelledby={headingId}>
-      <h3 id={headingId} className="inspector-content-section__heading"><span>{title}</span>{help === undefined ? null : <InfoButton label={typeof title === "string" ? title : help} help={help} />}</h3>
-      <div className="inspector-content-section__body">{children}</div>
-    </section>
-  );
+  return <Section
+    title={title}
+    headingLevel="h3"
+    variant="inspector"
+    headingAction={help === undefined ? undefined : <InfoButton label={typeof title === "string" ? title : help} help={help} />}
+  >{children}</Section>;
 }
 
 export function InspectorFieldRow({ label, help, children, className }: { label: string; help?: string; children: ReactNode; className?: string }) {

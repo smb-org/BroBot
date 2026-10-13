@@ -2,8 +2,9 @@ import { useId, type KeyboardEvent, type ReactNode } from "react";
 
 import { Icon, type IconName } from "./Icon";
 import { Input } from "./primitives/input";
-import { TruncatedText } from "./TruncatedText";
 import { describedHelper, useDisabledFieldReason } from "./DisabledFieldReason";
+import { FieldError } from "./FieldError";
+import { TruncatedText } from "./TruncatedText";
 
 interface FieldBaseProps {
   label: string;
@@ -110,6 +111,6 @@ export function Field({ label, ariaLabel, labelHidden = false, hint, error, valu
       {maxLength === undefined || !showCount ? null : <span className={`ui-field__count${nearLimit && !overLimit ? " ui-field__count--warning" : ""}${overLimit ? " ui-field__count--error" : ""}`}>{countLabel(count, maxLength)}</span>}
       {describedHelper(null, disabledReason, `field-${id}`)}
     </span>
-    <span data-ui="" id={errorId} className="ui-field__error" aria-live="polite">{effectiveError == null || effectiveError === "" ? <span aria-hidden="true">&nbsp;</span> : <><span aria-hidden="true">× </span>{typeof effectiveError === "string" ? <TruncatedText className="ui-field__hint" text={effectiveError} /> : effectiveError}</>}</span>
+    <FieldError id={errorId} className="ui-field__error" message={effectiveError} />
   </div>;
 }

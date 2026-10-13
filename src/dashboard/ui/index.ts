@@ -14,6 +14,7 @@ export { EmptyCellValue } from "./EmptyCellValue";
 export { AuditSentence } from "./AuditSentence";
 export { Badge } from "./Badge";
 export { InspectorSection, InspectorFieldRow, InspectorActions } from "./InspectorParts";
+export { Section } from "./Section";
 export { ActionMenu } from "./ActionMenu";
 export { ChatOutputTargetControl } from "./ChatOutputTargetControl";
 
@@ -62,7 +63,12 @@ export type {
 } from "./SettingsEditor";
 export { Select } from "./Select";
 export type { SelectOption } from "./Select";
-export { Switch } from "./Switch";
+export { SwitchRow } from "./SwitchRow";
+export { SwitchSection } from "./SwitchSection";
+export { RoleThreshold } from "./RoleThreshold";
+export { FieldError } from "./FieldError";
+export { LockedReason } from "./LockedReason";
+export { RuleNote } from "./RuleNote";
 export { Button } from "./Button";
 export { FormDialog } from "./FormDialog";
 export { FormDensity } from "./FormDensity";

@@ -440,7 +440,7 @@ test("platform audit keeps its footer in place as rows arrive", async ({ page })
   const grantEditor = page.locator('.platform-inspector-section[aria-label="Add member"]');
   await expect(grantEditor).toBeVisible();
   const grantBefore = await measureBox(page, '.platform-inspector-section[aria-label="Add member"]');
-  const membersSection = page.locator(".inspector-content-section").filter({ has: page.getByRole("heading", { name: "Members" }) });
+  const membersSection = page.locator(".ui-section--inspector").filter({ has: page.getByRole("heading", { name: "Members" }) });
   const membersBefore = await membersSection.boundingBox();
   if (membersBefore === null) throw new Error("The members list section should have a layout box while loading.");
   expect(grantBefore[1] + grantBefore[3]).toBeLessThanOrEqual(membersBefore.y + 0.5);

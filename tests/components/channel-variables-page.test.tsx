@@ -59,11 +59,11 @@ describe("Channel variables page", () => {
     if (!(inspector instanceof HTMLElement)) throw new Error("Variable inspector is missing.");
     const controls = within(inspector);
     const resetSwitch = controls.getByRole("switch", { name: "Bei Streamstart auf null setzen" });
-    const resetField = resetSwitch.closest(".ui-switch-field");
+    const resetField = resetSwitch.closest(".channel-variable-switch-control");
     if (!(resetField instanceof HTMLElement)) throw new Error("Reset switch field is missing.");
-    expect(resetSwitch.closest(".ui-switch-card")).toBeNull();
+    expect(resetSwitch.closest(".channel-variable-switch-control")).toBeInTheDocument();
     expect(controls.getByRole("button", { name: "Bei Streamstart auf null setzen: Wird zurückgesetzt, wenn der nächste Stream startet." })).toHaveAttribute("title", "Wird zurückgesetzt, wenn der nächste Stream startet.");
-    const permissionNote = resetField.querySelector(".switch-locked-reason");
+    const permissionNote = resetField.querySelector(".ui-locked-reason");
     if (!(permissionNote instanceof HTMLElement)) throw new Error("Reset switch permission note is missing.");
     expect(permissionNote).toHaveAttribute("role", "note");
     expect(permissionNote).toHaveTextContent(/Nur Broadcaster und Verwalter dürfen Variablen/u);

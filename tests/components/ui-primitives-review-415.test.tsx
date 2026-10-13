@@ -7,7 +7,7 @@ import { Dialog } from "../../src/dashboard/ui/Dialog";
 import { Field } from "../../src/dashboard/ui/Field";
 import { Popover } from "../../src/dashboard/ui/Popover";
 import { Select } from "../../src/dashboard/ui/Select";
-import { Switch } from "../../src/dashboard/ui/Switch";
+import { SwitchRow } from "../../src/dashboard/ui/SwitchRow";
 
 const chipMessages = {
   countLabel: (count: number, max: number) => `${String(count)} / ${String(max)}`,
@@ -134,30 +134,30 @@ describe("issue 415 primitive regressions", () => {
 describe("issue 415 fieldset and hover-focus regressions", () => {
   afterEach(cleanup);
 
-  it("does not toggle a Switch inside a disabled fieldset", () => {
+  it("does not toggle a SwitchRow inside a disabled fieldset", () => {
     const onChange = vi.fn();
-    render(<fieldset disabled><Switch layout="inline" label="Chat messages" checked={false} onChange={onChange} /></fieldset>);
+    render(<fieldset disabled><SwitchRow label="Chat messages" checked={false} onChange={onChange} /></fieldset>);
     const control = screen.getByRole("switch", { name: "Chat messages" });
     expect(control).toBeDisabled();
     fireEvent.click(control);
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("toggles an inline Switch once per label click and ignores disabled ones", () => {
+  it("toggles a SwitchRow once per control click and ignores disabled ones", () => {
     const onChange = vi.fn();
-    const { unmount } = render(<Switch layout="inline" label="Chat messages" checked={false} onChange={onChange} />);
-    fireEvent.click(screen.getByText("Chat messages"));
+    const { unmount } = render(<SwitchRow label="Chat messages" checked={false} onChange={onChange} />);
+    fireEvent.click(screen.getByRole("switch", { name: "Chat messages" }));
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenCalledWith(true);
     unmount();
 
     const disabledChange = vi.fn();
     render(<>
-      <Switch layout="inline" label="Direct disabled" checked={false} disabled onChange={disabledChange} />
-      <fieldset disabled><Switch layout="inline" label="Fieldset disabled" checked={false} onChange={disabledChange} /></fieldset>
+      <SwitchRow label="Direct disabled" checked={false} disabled onChange={disabledChange} />
+      <fieldset disabled><SwitchRow label="Fieldset disabled" checked={false} onChange={disabledChange} /></fieldset>
     </>);
-    fireEvent.click(screen.getByText("Direct disabled"));
-    fireEvent.click(screen.getByText("Fieldset disabled"));
+    fireEvent.click(screen.getByRole("switch", { name: "Direct disabled" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Fieldset disabled" }));
     expect(disabledChange).not.toHaveBeenCalled();
   });
 

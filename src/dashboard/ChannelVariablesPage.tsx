@@ -15,7 +15,8 @@ import {
   type PanelOverlayElement,
 } from "./api";
 import { apiErrorText, channelVariablesTexts, dashboardCommonTexts, dashboardLanguage, dashboardTexts } from "./locale";
-import { Button, ConfirmDialog, EmptyCellValue, Field, Icon, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, ListToolbar, LoadState, LoadStateLines, notify, UnitInput, PageHeader, Select, SubInspector, Switch } from "./ui";
+import { Button, ConfirmDialog, EmptyCellValue, Field, Icon, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, ListToolbar, LoadState, LoadStateLines, notify, UnitInput, PageHeader, Select, SubInspector, LockedReason } from "./ui";
+import { Switch as SwitchPrimitive } from "./ui/primitives/switch";
 import { CHANNEL_VARIABLE_MAXIMUM_COUNT, CHANNEL_VARIABLE_MAXIMUM_VALUE, CHANNEL_VARIABLE_MINIMUM_VALUE } from "../contracts/values";
 import { dashboardDataKeys } from "./data/keys";
 import { useDashboardQueryClient } from "./data";
@@ -390,7 +391,10 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
             <Field id="channel-variable-description" label={labels.description} value={draftDescription} maxLength={80} countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={!canManageContent || pending} onChange={setDraftDescription} />
           </InspectorFieldRow>
           <InspectorFieldRow label={labels.resetOnStreamStart} help={labels.resetHint}>
-            <Switch layout="inline" ariaLabel={labels.resetOnStreamStart} checked={draftReset} disabled={!canManageContent || pending} {...(!canManageContent ? { lockedReason: labels.managementLocked } : {})} onChange={setDraftReset} />
+            <div className="channel-variable-switch-control">
+              <SwitchPrimitive aria-label={labels.resetOnStreamStart} aria-describedby={!canManageContent ? "channel-variable-reset-locked" : undefined} checked={draftReset} disabled={!canManageContent || pending} onCheckedChange={setDraftReset} />
+              <LockedReason id="channel-variable-reset-locked" {...(!canManageContent ? { reason: labels.managementLocked } : {})} />
+            </div>
           </InspectorFieldRow>
           {creating ? <InspectorFieldRow label={labels.value} help={labels.valueHint}>
             <UnitInput id="channel-variable-initial-value" label={labels.value} min={CHANNEL_VARIABLE_MINIMUM_VALUE} max={CHANNEL_VARIABLE_MAXIMUM_VALUE} step={1} value={draftSetValue} disabled={!canManageContent || pending} onChange={setDraftSetValue} />

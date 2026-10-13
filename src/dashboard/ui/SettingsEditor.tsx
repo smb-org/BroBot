@@ -7,11 +7,13 @@ import type { ChatOutputTarget } from "../../contracts/values";
 import { ChoiceCards } from "./ChoiceCards";
 import { ChatOutputTargetControl } from "./ChatOutputTargetControl";
 import { Field } from "./Field";
+import { FieldError } from "./FieldError";
 import { InspectorFieldRow, InspectorSection } from "./InspectorParts";
 import { UnitInput } from "./UnitInput";
 import { Select } from "./Select";
 import { SegmentChoice } from "./SegmentChoice";
-import { Switch } from "./Switch";
+import { SwitchRow } from "./SwitchRow";
+import { SwitchSection } from "./SwitchSection";
 import { TemplateText } from "./TemplateText";
 import { textFieldLength } from "./text-length";
 import { TemplateTextField, type TemplateTextFieldVariable, type TemplateTextFieldMessages } from "./TemplateTextField";
@@ -290,24 +292,33 @@ export function SettingsEditor<Settings extends object>({
       );
     }
     const children = field.children?.map(renderField) ?? [];
-    const lockedReason = copy.disabledReason ?? field.children?.map((child) => texts.fields[child.key]?.disabledReason).find((reason) => reason !== undefined);
-    return (
-      <InspectorFieldRow key={field.key} label={copy.label} help={copy.description ?? copy.hint}>
-        <Switch
-          id={id}
-          layout="card"
-          ariaLabel={copy.label}
-          checked={fieldValue === true}
-          onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
-          disabled={disabled}
-          {...(lockedReason === undefined ? {} : { lockedReason })}
-          reserveError
-          {...(error === undefined ? {} : { error })}
-        >
-          {field.children === undefined ? undefined : children as ReactElement[]}
-        </Switch>
-      </InspectorFieldRow>
-    );
+    const lockedReason = field.children === undefined ? copy.disabledReason : undefined;
+    const checked = fieldValue === true;
+    const onToggle = (next: boolean): void => { onChange(field.key, next as Settings[typeof field.key]); };
+    const fieldError = <FieldError className="ui-field__error" message={error} />;
+    if (field.children === undefined) return <div key={field.key}>
+      <SwitchRow
+        label={copy.label}
+        description={copy.description ?? copy.hint}
+        checked={checked}
+        onChange={onToggle}
+        disabled={disabled}
+        {...(lockedReason === undefined ? {} : { lockedReason })}
+      />
+      {fieldError}
+    </div>;
+    return <div key={field.key}>
+      <SwitchSection
+        id={id}
+        title={copy.label}
+        hint={copy.description ?? copy.hint}
+        checked={checked}
+        onChange={onToggle}
+        disabled={disabled}
+        {...(lockedReason === undefined ? {} : { lockedReason })}
+      >{children as ReactElement[]}</SwitchSection>
+      {fieldError}
+    </div>;
   };
 
   if (readOnly) {

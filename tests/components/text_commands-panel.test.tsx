@@ -112,6 +112,19 @@ const editor = (): HTMLElement => {
   return node;
 };
 
+const tierInclusion = (tier: TextCommand["minimumTier"]): string => {
+  const labels = textCommandsTexts("de");
+  return labels.tierDescription(tier, statusForTier[tier].map((status) => labels.tierSubjects[status]));
+};
+
+const selectMinimumTier = async (tier: TextCommand["minimumTier"]): Promise<HTMLElement> => {
+  const labels = textCommandsTexts("de");
+  const select = screen.getByRole("combobox", { name: labels.minimumTier });
+  fireEvent.click(select);
+  clickSelectOption(await screen.findByRole("option", { name: labels.tierLabels[tier], hidden: true }));
+  return select;
+};
+
 const templateEditorFor = (field: "text" | "usageText" | "timeoutFallbackText"): HTMLElement => {
   const control = editor().querySelector(`[name="${field}"]`);
   const node = control?.closest(".command-template-editor");
@@ -300,20 +313,13 @@ describe("Text command editor", () => {
     expect(screen.getByText(renderCommandText("Hallo {user} aus {channel}", { user: "zuschauerin", channel: "beispielkanal" }))).toBeInTheDocument();
     expect(within(editor()).getByRole("switch", { name: "Kanalvariable ändern" })).toBeInTheDocument();
     expect(screen.getAllByText(textCommandsTexts("de").variableSelectHint)).toHaveLength(1);
-    expect(within(editor()).getByRole("switch", { name: "Kanalvariable ändern" }).closest(".ui-switch-card")?.querySelector("[data-testid='command-variable-action-slot']")).toHaveAttribute("aria-hidden", "true");
+    expect(within(editor()).queryByTestId("command-variable-action-slot")).not.toBeInTheDocument();
 
     fireEvent.click(advancedTab);
-    const copy = textCommandsTexts("de");
-    const group = screen.getByRole("radiogroup", { name: "Wer darf auslösen" });
-    const included = { viewer: "Zuschauer", subscriber: "Abonnenten", vip: "VIPs", moderator: "Moderatoren", broadcaster: "Broadcaster" } as const;
+    expect(screen.getByText(tierInclusion("everyone"))).toBeInTheDocument();
     for (const tier of TEXT_COMMAND_MINIMUM_TIERS) {
-      const subjects = statusForTier[tier].map((status) => included[status]);
-      const lastSubject = subjects.at(-1) ?? "";
-      const description = subjects.length < 2
-        ? subjects[0] ?? ""
-        : `${subjects.slice(0, -1).join(", ")} und ${lastSubject}`;
-      const exclusion = tier === "subscriber" ? " VIPs nicht." : tier === "vip" ? " Abonnenten nicht." : "";
-      expect(within(group).getByRole("radio", { name: `${copy.tierLabels[tier]}. ${description}.${exclusion}` })).toBeInTheDocument();
+      await selectMinimumTier(tier);
+      expect(screen.getByText(tierInclusion(tier))).toBeInTheDocument();
     }
   });
 
@@ -697,17 +703,19 @@ describe("Text command editor", () => {
     expect(screen.queryByRole("button", { name: /Antwort bei fehlenden oder ungültigen Argumenten/u })).not.toBeInTheDocument();
   });
 
-  it("keeps the variable action in a left-aligned switch card and the command body scrollable", async () => {
+  it("shows variable action fields only while the optional section is on", async () => {
     renderPanel(panelFetch());
     await selectCommand();
 
     expect(editor()).toHaveClass("command-editor-shell");
     expect(editor().querySelector(".ui-editor-shell__body")).toHaveClass("ui-editor-shell__body");
     const toggle = screen.getByRole("switch", { name: "Kanalvariable ändern" });
-    expect(toggle.closest(".ui-switch-card")).toBeInTheDocument();
+    const section = toggle.closest(".ui-switch-section");
+    expect(section).toBeInTheDocument();
+    expect(within(section as HTMLElement).queryByTestId("command-variable-action-slot")).not.toBeInTheDocument();
     fireEvent.click(toggle);
-    expect(toggle.closest(".ui-switch-card")?.querySelector(".ui-switch-card__children")).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Variable" }).closest(".ui-switch-card__children")).not.toBeNull();
+    expect(within(section as HTMLElement).getByTestId("command-variable-action-slot")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Variable" }).closest(".ui-switch-section__content")).not.toBeNull();
   });
 
   it("defaults set_argument to moderators unless the draft already chose a tier", async () => {
@@ -716,23 +724,22 @@ describe("Text command editor", () => {
     fireEvent.click(screen.getByRole("switch", { name: "Kanalvariable ändern" }));
     fireEvent.click(within(screen.getByRole("group", { name: "Kanalvariable ändern" })).getByRole("button", { name: "Argument" }));
     fireEvent.click(screen.getByRole("tab", { name: "Erweitert" }));
-    expect(within(screen.getByRole("radiogroup", { name: "Wer darf auslösen" })).getByRole("radio", { checked: true }))
-      .toHaveAccessibleName("Moderatoren. Moderatoren und Broadcaster.");
+    expect(screen.getByRole("combobox", { name: "Wer darf auslösen" })).toHaveTextContent("Moderatoren");
+    expect(screen.getByText(tierInclusion("moderator"))).toBeInTheDocument();
   });
 
   it("keeps an explicit everyone tier when set_argument is selected later", async () => {
     renderPanel(panelFetch({ commands: () => [] }));
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
     fireEvent.click(screen.getByRole("tab", { name: "Erweitert" }));
-    const tierGroup = screen.getByRole("radiogroup", { name: "Wer darf auslösen" });
-    fireEvent.click(within(tierGroup).getByRole("radio", { name: "VIPs. VIPs, Moderatoren und Broadcaster. Abonnenten nicht." }));
-    fireEvent.click(within(tierGroup).getByRole("radio", { name: "Alle. Zuschauer, Abonnenten, VIPs, Moderatoren und Broadcaster." }));
+    await selectMinimumTier("vip");
+    await selectMinimumTier("everyone");
     fireEvent.click(screen.getByRole("tab", { name: "Einstellungen" }));
     fireEvent.click(screen.getByRole("switch", { name: "Kanalvariable ändern" }));
     fireEvent.click(within(screen.getByRole("group", { name: "Kanalvariable ändern" })).getByRole("button", { name: "Argument" }));
     fireEvent.click(screen.getByRole("tab", { name: "Erweitert" }));
-    const currentTierGroup = screen.getByRole("radiogroup", { name: "Wer darf auslösen" });
-    expect(within(currentTierGroup).getByRole("radio", { checked: true })).toHaveAccessibleName("Alle. Zuschauer, Abonnenten, VIPs, Moderatoren und Broadcaster.");
+    expect(screen.getByRole("combobox", { name: "Wer darf auslösen" })).toHaveTextContent("Alle");
+    expect(screen.getByText(tierInclusion("everyone"))).toBeInTheDocument();
   });
 
   it("describes a silent action in the response column", async () => {
@@ -773,8 +780,8 @@ describe("Text command editor", () => {
     expect(screen.getByRole("textbox", { name: "Antwort bei fehlenden oder ungültigen Argumenten" })).toBeInTheDocument();
     expect(screen.getByText("Twitch begrenzt Shoutouts selbst: 2 Minuten pro Kanal und 60 Minuten pro Ziel.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Erweitert" }));
-    const tierGroup = screen.getByRole("radiogroup", { name: "Wer darf auslösen" });
-    expect(within(tierGroup).getByRole("radio", { checked: true })).toHaveAccessibleName("Moderatoren. Moderatoren und Broadcaster.");
+    expect(screen.getByRole("combobox", { name: "Wer darf auslösen" })).toHaveTextContent("Moderatoren");
+    expect(screen.getByText(tierInclusion("moderator"))).toBeInTheDocument();
   });
 
   it("puts the Art select's hint below the field, not between the label and the control", async () => {
@@ -817,7 +824,7 @@ describe("Text command editor", () => {
     const panel = editor();
 
     const assertVisibleFieldHelpers = (): void => {
-      for (const role of ["textbox", "radiogroup", "group", "spinbutton", "switch"] as const) {
+      for (const role of ["textbox", "group", "spinbutton", "switch"] as const) {
         for (const field of within(panel).queryAllByRole(role)) {
           if (role === "group" && !field.classList.contains("segment-choice")) continue;
           const describedBy = field.getAttribute("aria-describedby");
@@ -1479,8 +1486,7 @@ describe("Text command editor", () => {
     renderPanel(fetcher);
     await selectCommand();
     fireEvent.click(within(editor()).getByRole("tab", { name: "Erweitert" }));
-    const minimumTierGroup = within(editor()).getByRole("radiogroup", { name: "Wer darf auslösen" });
-    fireEvent.click(within(minimumTierGroup).getByRole("radio", { name: /^Moderatoren\./u }));
+    await selectMinimumTier("moderator");
     fireEvent.click(within(editor()).getByRole("button", { name: "Änderungen speichern" }));
     await waitFor(() => expect(current).toMatchObject({ minimumTier: "moderator", revision: 2 }));
 

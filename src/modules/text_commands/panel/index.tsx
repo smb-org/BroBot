@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, 
 
 import { dashboardCommonTexts, dashboardLanguage, type DashboardLanguage } from "../../../dashboard/locale";
 import {
-  Badge, Button, ChatOutputTargetControl, ChatPreview, ChoiceCards, ConfirmDialog, EditorShell, EmptyCellValue, Field, FieldPair, ListDetail, ListToolbar, UnitInput, Select,
+  Badge, Button, ChatOutputTargetControl, ChatPreview, ConfirmDialog, EditorShell, EmptyCellValue, Field, FieldPair, ListDetail, ListToolbar, UnitInput, Select,
   GamePicker, InspectorFieldRow, InspectorSection, LoadState, LoadStateLines, TimeoutDurationRangeFields,
-  registerDashboardNavigationGuard, SegmentChoice, Switch, ChipsInput, TemplateText, TemplateTextField, useDraft, useDraftGuard, useInspectorSelection, notify,
+  registerDashboardNavigationGuard, SegmentChoice, ChipsInput, TemplateText, TemplateTextField, useDraft, useDraftGuard, useInspectorSelection, notify,
+  RoleThreshold, RuleNote, SwitchSection,
   type EditorInvalidField,
 } from "../../../dashboard/ui";
+import { Switch as SwitchPrimitive } from "../../../dashboard/ui/primitives/switch";
 import { PanelApiError } from "../../../contracts/panel-error";
 import { TEXT_COMMAND_KINDS, TEXT_COMMAND_MAX_ALIASES, TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_TEMPLATE_FIELDS, TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES, type TextCommand, type TextCommandGame, type TextCommandKind, type TextCommandMinimumTier, type TextCommandResponseType, type TextCommandStreamCondition } from "../contracts";
 import { MODERATION_TIMEOUT_MAX_SECONDS } from "../../contracts/moderation";
@@ -199,11 +201,12 @@ const TextCommandRow = ({ initial, language, selected, onSelect, rowRef, toggleB
       </td>
       <td><Badge tone={initial.minimumTier === "everyone" ? "neutral" : "brand"}>{labels.tierLabels[initial.minimumTier]}</Badge></td>
       <td><div onClick={(event) => { event.stopPropagation(); }} onKeyDown={(event) => { event.stopPropagation(); }}>
-        <Switch
-          ariaLabel={`${labels.active}: !${initial.name} · ${initial.enabled ? labels.enabled : labels.disabled}`}
+        <SwitchPrimitive
+          aria-label={`${labels.active}: !${initial.name} · ${initial.enabled ? labels.enabled : labels.disabled}`}
           checked={initial.enabled}
-          pending={toggleBusy}
-          onChange={() => { void onToggle(); }}
+          aria-busy={toggleBusy}
+          disabled={toggleBusy}
+          onCheckedChange={() => { void onToggle(); }}
         />
       </div></td>
     </tr>
@@ -379,8 +382,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const tierOptions = TEXT_COMMAND_MINIMUM_TIERS.map((tier) => ({
     value: tier,
     label: labels.tierLabels[tier],
-    description: tierDescription(tier, labels),
-    icon: `tier${tier[0]?.toUpperCase() ?? ""}${tier.slice(1)}` as "tierEveryone" | "tierSubscriber" | "tierVip" | "tierModerator" | "tierBroadcaster",
+    inclusion: tierDescription(tier, labels),
   }));
   const kindOptions = TEXT_COMMAND_KINDS.map((kind) => ({ value: kind, label: labels.kindLabels[kind], description: labels.kindHints[kind] }));
   const announcementWarning = draft.responseType === "announcement" && botIsModerator === false ? labels.announcementWarning : undefined;
@@ -464,11 +466,9 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     setSaved(false); setConcurrentConflict(false); setReloadError(false);
     if (key === "name" || key === "aliases") setFieldError(null);
   };
-  const variableActionEditor = draft.kind === "text" || draft.kind === "timeout" ? <Switch
-    id="command-variable-action"
-    layout="card"
-    label={labels.variableAction}
-    description={variableAction === null ? labels.variableSelectHint : labels.variableOperationHelp[variableAction.operation]}
+  const variableActionEditor = draft.kind === "text" || draft.kind === "timeout" ? <SwitchSection
+    title={labels.variableAction}
+    hint={variableAction === null ? labels.variableSelectHint : labels.variableOperationHelp[variableAction.operation]}
     checked={variableAction !== null}
     disabled={!canManageContent || pending}
     onChange={(enabled) => {
@@ -477,7 +477,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         : null);
     }}
   >
-    {variableAction === null ? <div className="command-variable-action" data-testid="command-variable-action-slot" style={{ height: "calc(var(--s10) * 8)", overflowY: "auto" }} aria-hidden="true" /> : <div className="command-variable-action" data-testid="command-variable-action-slot" style={{ height: "calc(var(--s10) * 8)", overflowY: "auto" }}>
+    {variableAction === null ? null : <div className="command-variable-action" data-testid="command-variable-action-slot">
       <Select
         id="command-variable-name"
         label={labels.variableSelect}
@@ -531,7 +531,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       <p className="form-warning" role="note" style={{ minHeight: "var(--s6)", margin: 0 }}>{variableAction.operation === "set_argument" && draft.minimumTier === "everyone" ? labels.variableEveryoneWarning : ""}</p>
       <p className="muted" style={{ minHeight: "var(--s6)", margin: 0 }}>{draft.kind === "text" && draft.text.trim().length === 0 ? labels.variableSilentHint : ""}</p>
     </div>}
-  </Switch> : null;
+  </SwitchSection> : null;
   const responseTypeEditor = draft.kind === "shoutout" ? null : <SegmentChoice
     label={labels.responseType}
     hint={labels.responseTypeHints[draft.responseType]}
@@ -919,14 +919,14 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
       icon: "tabAdvanced" as const,
       ...(advancedIssue === undefined ? {} : { issue: advancedIssue }),
       content: <>
-        <ChoiceCards
+        <RoleThreshold
           label={labels.minimumTier}
-          hint={labels.tierHelp}
           value={draft.minimumTier}
           options={tierOptions}
           disabled={!canManageContent || pending}
           onChange={(value) => { setDraftField("minimumTier", value as TextCommandMinimumTier); }}
         />
+        <RuleNote>{labels.tierHelp}</RuleNote>
         <InspectorSection title={labels.availability}>
           <InspectorFieldRow label={labels.streamCondition} help={labels.streamHints[draft.streamCondition]}>
             <SegmentChoice
@@ -999,7 +999,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
 
   const propertyList = <dl className="properties command-properties">
     <div><dt>{labels.name}</dt><dd className="mono">!{draft.name}</dd></div>
-    <div><dt>{labels.active}</dt><dd><Switch ariaLabel={labels.active} hint={labels.activeImmediately} checked={active} pending={activePending} onChange={(next) => { void toggleActive(next); }} layout="inline" /></dd></div>
+    <div><dt>{labels.active}</dt><dd><span className="command-property-switch"><SwitchPrimitive aria-label={labels.active} aria-describedby="command-active-immediate" checked={active} disabled={activePending} onCheckedChange={(next) => { void toggleActive(next); }} /><span id="command-active-immediate" className="sr-only">{labels.activeImmediately}</span></span></dd></div>
     <div><dt>{labels.aliases}</dt><dd className="mono">{props.aliases.length === 0 ? labels.noAliases : props.aliases.map((alias) => `!${alias}`).join(", ")}</dd></div>
     <div><dt>{labels.kind}</dt><dd>{props.kind}</dd></div>
     <div><dt>{labels.response}</dt><dd>{draft.kind === "list" ? <TemplateText value={listPreview} variables={[]} /> : templateView("text")}</dd></div>

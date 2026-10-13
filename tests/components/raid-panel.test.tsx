@@ -64,13 +64,12 @@ describe("Raid settings editor declaration", () => {
 
     fireEvent.click(shoutoutTab);
     const shoutout = screen.getByRole("switch", { name: /Helix-Shoutout automatisch senden/ });
-    const threshold = screen.getByRole("spinbutton", { name: "Shoutout-Schwelle" });
     expect(shoutout).not.toBeChecked();
-    expect(threshold).toBeDisabled();
-    expect(screen.getAllByText("Shoutout ist ausgeschaltet.")).toHaveLength(1);
+    expect(screen.queryByRole("spinbutton", { name: "Shoutout-Schwelle" })).not.toBeInTheDocument();
+    expect(screen.getByText("Twitch zeigt den raidenden Kanal als Empfehlung im Chat.")).toBeInTheDocument();
     fireEvent.click(shoutout);
     expect(shoutout).toBeChecked();
-    expect(threshold).toBeEnabled();
+    expect(screen.getByRole("spinbutton", { name: "Shoutout-Schwelle" })).toBeEnabled();
   });
 
   it("keeps a draft after a 409 concurrent settings change", async () => {

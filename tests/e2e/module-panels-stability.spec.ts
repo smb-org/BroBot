@@ -1429,7 +1429,7 @@ test("the immediate-action card merges refreshed template configuration and memb
   await expect(rows.nth(2)).toContainText("!vote d");
 });
 
-test("text command slash help and variable action keep editor boxes stable", async ({ page }) => {
+test("text command slash help stays stable and optional variable fields mount only when enabled", async ({ page }) => {
   await routeJson(page, "/api/channels/channel-a/modules/text_commands/commands", {
     commands: [], variables: [{ name: "score", value: 1, description: "Points" }],
   });
@@ -1449,12 +1449,12 @@ test("text command slash help and variable action keep editor boxes stable", asy
   expect(await box(editor)).toEqual(editorBeforeSlash);
 
   const actionSlot = page.getByTestId("command-variable-action-slot");
-  const actionBefore = await box(actionSlot);
-  const editorBeforeAction = await box(editor);
+  const actionSection = page.locator(".ui-switch-section").filter({ has: page.getByRole("switch", { name: "Change channel variable" }) });
+  await expect(actionSection).toContainText("Applied atomically with the command.");
+  await expect(actionSlot).toHaveCount(0);
   await page.getByRole("switch", { name: "Change channel variable" }).click();
   await expect(actionSlot.locator("#command-variable-name")).toBeVisible();
-  expect(await box(actionSlot)).toEqual(actionBefore);
-  expect(await box(editor)).toEqual(editorBeforeAction);
+  await expect(actionSection.locator(".ui-switch-section__content")).toBeVisible();
 });
 
 test("text-library game filter keeps the list position when games are selected and removed at desktop and 390px", async ({ page }) => {
@@ -1556,7 +1556,7 @@ test("custom duration fits with its controls and unit at desktop and mobile widt
     await page.locator(".chat-voting-template-list .list-row__link").first().click();
     const inspector = page.locator(".chat-voting-template-inspector");
     await expect(inspector).toBeVisible();
-    const durationSection = inspector.locator(".inspector-content-section").filter({ hasText: "Duration" }).last();
+    const durationSection = inspector.locator(".ui-section--inspector").filter({ hasText: "Duration" }).last();
     const segments = durationSection.locator(".segment-choice");
     const durationSlot = durationSection.locator(".chat-voting-editor__duration-slot");
     const numberField = durationSlot.locator(".unit-input__control");
@@ -1564,7 +1564,7 @@ test("custom duration fits with its controls and unit at desktop and mobile widt
     await expect(seconds).toHaveValue("90");
     const layout = await page.evaluate(() => {
       const root = document.querySelector(".chat-voting-template-inspector");
-      const section = [...document.querySelectorAll(".inspector-content-section")].find((element) => element.textContent.includes("Duration"));
+      const section = [...document.querySelectorAll(".ui-section--inspector")].find((element) => element.textContent.includes("Duration"));
       const controls = section?.querySelector(".segment-choice");
       const slot = section?.querySelector(".chat-voting-editor__duration-slot");
       const stepper = slot?.querySelector(".unit-input__control");
