@@ -27,10 +27,24 @@ export interface TimerRow {
   updated_at: string;
 }
 
+/** Accepts the pre-live/offline interval shape while keeping reads canonical. */
+const normalizeTimerTrigger = (value: unknown): unknown => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+  const trigger = value as Record<string, unknown>;
+  if (trigger.type !== "interval" || typeof trigger.minutes !== "number") return value;
+  return {
+    type: "interval",
+    live: {
+      minutes: trigger.minutes,
+      ...(trigger.minimumMessages === undefined ? {} : { minimumMessages: trigger.minimumMessages }),
+    },
+  };
+};
+
 export const mapTimerRow = (row: TimerRow): Timer => {
   let trigger: unknown;
   try { trigger = JSON.parse(row.trigger_json) as unknown; } catch { trigger = null; }
-  const parsed = timerTriggerSchema.safeParse(trigger);
+  const parsed = timerTriggerSchema.safeParse(normalizeTimerTrigger(trigger));
   if (!parsed.success || parsed.data.type !== row.trigger_type) throw new Error("Stored timer trigger is invalid.");
   return {
     id: row.timer_id,

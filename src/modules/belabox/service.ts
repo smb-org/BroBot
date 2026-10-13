@@ -946,7 +946,7 @@ const runBelaboxPoll = async (
 /** Ensures the poll alarm after activation or host schedule-input changes. */
 export const ensureBelaboxPollSchedule = async (
   context: ModuleAlarmContext,
-  reason: "event_times" | "channel_time_zone" | "activation",
+  reason: "event_times" | "channel_time_zone" | "activation" | "stream_state",
 ): Promise<void> => {
   void reason;
   await ensureBelaboxPoll(context);

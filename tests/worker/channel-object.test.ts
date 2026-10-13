@@ -1647,6 +1647,21 @@ describe("ChannelObject realtime path", () => {
     expect(storageOf(object).values.get(alarmTableKey) ?? {}).not.toHaveProperty(alarmKey);
   });
 
+  it("rejects timer alarm writes and clears from an older stream transition", async () => {
+    const object = objectFor([]);
+    const alarmKey = "module:timers:timer:timer-generation";
+    const alarmTableKey = "channel:alarm_schedule";
+
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-generation", 30_000, 1, 8);
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-generation", 40_000, 1, 9);
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-generation", 20_000, 1, 8);
+    await object.clearModuleAlarm("timers", "timer:timer-generation", 1, 8);
+
+    expect(storageOf(object).values.get(alarmTableKey)).toMatchObject({
+      [alarmKey]: { deadline: 40_000, ownerRevision: 1, streamGeneration: 9 },
+    });
+  });
+
   it("preserves an online ensure that arrives while a claimed poll decides to stop", async () => {
     vi.useFakeTimers();
     const now = Date.parse("2026-10-05T12:00:00.000Z");

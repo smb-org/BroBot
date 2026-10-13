@@ -132,6 +132,7 @@ const ACTIVE_CHATTER_RETENTION_MS = 60 * 60 * 1_000;
 const ACTIVE_CHATTER_KEY_ROTATION_MS = 24 * 60 * 60 * 1_000;
 const MODULE_ALARM_OWNER_REVISIONS_KEY = "module_alarm:owner_revisions";
 const MODULE_ALARM_OWNER_REVISION_RETENTION_MS = 24 * 60 * 60 * 1_000;
+const MODULE_ALARM_STREAM_GENERATIONS_KEY = "module_alarm:stream_generations";
 const SECURITY_DEADLINE_KEY = "security_round";
 const SECURITY_RETRY_KEY = "security_retry";
 const AD_PREWARNING_DEADLINE_KEY = "ad_prewarning";
@@ -305,6 +306,7 @@ type AlarmScheduleEntry = {
   failures?: number;
   revision?: number;
   ownerRevision?: number;
+  streamGeneration?: number;
   suppressedBy?: string;
 };
 
@@ -330,6 +332,7 @@ const validAlarmScheduleEntry = (value: unknown): value is AlarmScheduleEntry =>
   (value.failures === undefined || (typeof value.failures === "number" && Number.isInteger(value.failures) && value.failures >= 0)) &&
   (value.revision === undefined || (typeof value.revision === "number" && Number.isInteger(value.revision) && value.revision >= 0)) &&
   (value.ownerRevision === undefined || (typeof value.ownerRevision === "number" && Number.isInteger(value.ownerRevision) && value.ownerRevision >= 0)) &&
+  (value.streamGeneration === undefined || (typeof value.streamGeneration === "number" && Number.isSafeInteger(value.streamGeneration) && value.streamGeneration >= 0)) &&
   (value.suppressedBy === undefined || typeof value.suppressedBy === "string");
 
 const alarmAttemptAt = (entry: AlarmScheduleEntry): number =>
@@ -1124,12 +1127,14 @@ export class ChannelObject extends DurableObject<Env> {
     deadline: number,
     suppressedBy?: string,
     ownerRevision?: number,
+    streamGeneration?: number,
   ): Promise<void> {
     if (!Number.isFinite(deadline)) {
-      await this.clearAlarmEntry(key);
+      await this.clearAlarmEntry(key, ownerRevision, streamGeneration);
       return;
     }
     await this.mutateAlarmSchedule(async (table, storage) => {
+      if (!await this.acceptAlarmStreamGeneration(storage, key, streamGeneration)) return;
       if (ownerRevision !== undefined && !await this.acceptAlarmOwnerRevision(storage, key, ownerRevision)) return;
       const current = table[key];
       table[key] = {
@@ -1137,6 +1142,7 @@ export class ChannelObject extends DurableObject<Env> {
         handler,
         revision: (current?.revision ?? 0) + 1,
         ...(ownerRevision === undefined ? {} : { ownerRevision }),
+        ...(streamGeneration === undefined ? {} : { streamGeneration }),
         ...(suppressedBy === undefined ? {} : { suppressedBy }),
       };
       if (LEGACY_ALARM_DEFINITIONS.some((definition) => definition.key === key)) {
@@ -1144,6 +1150,27 @@ export class ChannelObject extends DurableObject<Env> {
       }
     });
     await this.scheduleEarliestAlarm();
+  }
+
+  private async acceptAlarmStreamGeneration(
+    storage: AlarmStorageAccess,
+    key: string,
+    streamGeneration: number | undefined,
+  ): Promise<boolean> {
+    const storedValue = await storage.get(MODULE_ALARM_STREAM_GENERATIONS_KEY);
+    const stored = isRecord(storedValue) ? storedValue as Record<string, number> : {};
+    const current = stored[key];
+    if (streamGeneration === undefined) {
+      // Older workers cannot replace a timer alarm after a versioned write.
+      return !key.startsWith("module:timers:timer:") || current === undefined;
+    }
+    if (!Number.isSafeInteger(streamGeneration) || streamGeneration < 0 ||
+        (current !== undefined && Number.isSafeInteger(current) && streamGeneration < current)) {
+      return false;
+    }
+    stored[key] = streamGeneration;
+    await storage.put(MODULE_ALARM_STREAM_GENERATIONS_KEY, stored);
+    return true;
   }
 
   private async acceptAlarmOwnerRevision(
@@ -1164,8 +1191,13 @@ export class ChannelObject extends DurableObject<Env> {
     return true;
   }
 
-  private async clearAlarmEntry(key: string, ownerRevision?: number): Promise<void> {
+  private async clearAlarmEntry(
+    key: string,
+    ownerRevision?: number,
+    streamGeneration?: number,
+  ): Promise<void> {
     await this.mutateAlarmSchedule(async (table, storage) => {
+      if (!await this.acceptAlarmStreamGeneration(storage, key, streamGeneration)) return;
       if (ownerRevision !== undefined && !await this.acceptAlarmOwnerRevision(storage, key, ownerRevision)) return;
       Reflect.deleteProperty(table, key);
       if (LEGACY_ALARM_DEFINITIONS.some((definition) => definition.key === key)) {
@@ -1283,6 +1315,7 @@ export class ChannelObject extends DurableObject<Env> {
     moduleId: string,
     registration: ModuleAlarmDefinition,
     externalFetchBudget: ModuleExternalFetchBudget,
+    streamGeneration?: number,
   ): ModuleAlarmContext {
     const channelId = this.ownChannelId();
     if (channelId === null) throw new Error("Module alarms require a named Durable Object.");
@@ -1291,6 +1324,7 @@ export class ChannelObject extends DurableObject<Env> {
     return {
       DB: this.env.DB,
       channelId,
+      ...(streamGeneration === undefined ? {} : { streamGeneration }),
       externalFetchBudget,
       ballots: this.ballotAccess(moduleId),
       secrets: createModuleSecretAccess(this.env, channelId, moduleId),
@@ -1330,7 +1364,7 @@ export class ChannelObject extends DurableObject<Env> {
           return deleted;
         },
       },
-      schedule: async (key, deadline, ownerRevision) => {
+      schedule: async (key, deadline, ownerRevision, scheduledStreamGeneration) => {
         const scheduledRegistration = MODULES.find((module) => module.id === moduleId)?.alarms?.find((alarm) => alarm.key === key);
         await this.scheduleAlarmEntry(
           `module:${moduleId}:${key}`,
@@ -1338,10 +1372,11 @@ export class ChannelObject extends DurableObject<Env> {
           deadline,
           undefined,
           ownerRevision,
+          scheduledStreamGeneration,
         );
       },
-      clear: async (key, ownerRevision) => {
-        await this.clearAlarmEntry(`module:${moduleId}:${key}`, ownerRevision);
+      clear: async (key, ownerRevision, scheduledStreamGeneration) => {
+        await this.clearAlarmEntry(`module:${moduleId}:${key}`, ownerRevision, scheduledStreamGeneration);
       },
       getAlarmDeadline: (key) => this.getModuleAlarmDeadline(moduleId, key),
       renderTemplate: async (text, moduleValuesOrNow = {}, nowOrModuleValues = Date.now()) => {
@@ -1945,7 +1980,7 @@ export class ChannelObject extends DurableObject<Env> {
         retryDelaysMs: [5_000, 15_000, 60_000],
         handle: async (key) => {
           const reason = key.slice(`${MODULE_SCHEDULE_INPUTS_CHANGED_KEY}:`.length);
-          if (reason !== "event_times" && reason !== "channel_time_zone" && reason !== "activation") return;
+          if (reason !== "event_times" && reason !== "channel_time_zone" && reason !== "activation" && reason !== "stream_state") return;
           for (const module of modules) {
             for (const registration of module.alarms ?? []) {
               if (registration.onScheduleInputsChanged === undefined) continue;
@@ -1963,7 +1998,7 @@ export class ChannelObject extends DurableObject<Env> {
         ...(registration.retryDelaysMs === undefined ? {} : { retryDelaysMs: registration.retryDelaysMs }),
         handle: async (key, entry) => {
           const execute = () => registration.handle(
-            this.moduleAlarmContext(moduleId, registration, externalFetchBudget),
+            this.moduleAlarmContext(moduleId, registration, externalFetchBudget, entry.streamGeneration),
             key.startsWith(modulePrefix) ? key.slice(modulePrefix.length) : key,
             entry.deadline,
             entry.ownerRevision,
@@ -2176,6 +2211,7 @@ export class ChannelObject extends DurableObject<Env> {
     alarmKey: string,
     deadline: number,
     ownerRevision?: number,
+    streamGeneration?: number,
   ): Promise<void> {
     const registration = MODULES.find((module) => module.id === moduleId)?.alarms?.find((alarm) => alarm.key === handlerKey);
     if (registration === undefined || alarmKey.length === 0) {
@@ -2187,6 +2223,7 @@ export class ChannelObject extends DurableObject<Env> {
       deadline,
       undefined,
       ownerRevision,
+      streamGeneration,
     );
   }
 
@@ -2201,11 +2238,16 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   /** Clear one module-owned alarm key without disturbing other module deadlines. */
-  public async clearModuleAlarm(moduleId: string, alarmKey: string, ownerRevision?: number): Promise<void> {
+  public async clearModuleAlarm(
+    moduleId: string,
+    alarmKey: string,
+    ownerRevision?: number,
+    streamGeneration?: number,
+  ): Promise<void> {
     if (!MODULES.some((module) => module.id === moduleId) || alarmKey.length === 0) {
       throw new Error(`Unknown module alarm key ${moduleId}.${alarmKey}.`);
     }
-    await this.clearAlarmEntry(`module:${moduleId}:${alarmKey}`, ownerRevision);
+    await this.clearAlarmEntry(`module:${moduleId}:${alarmKey}`, ownerRevision, streamGeneration);
   }
 
   /** Queues a generic replan after a host or module changes schedule inputs. */

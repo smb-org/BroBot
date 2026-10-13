@@ -15,12 +15,12 @@ const keyRing = JSON.stringify({
   retired: [],
 });
 
-const environment = (database: TestD1Database, publish = vi.fn()): Env => ({
+const environment = (database: TestD1Database, publish = vi.fn(), notifyScheduleInputsChanged = vi.fn()): Env => ({
   DB: database as unknown as D1Database,
   TWITCH_CLIENT_ID: "client-id",
   TWITCH_CLIENT_SECRET: "client-secret",
   TOKEN_ENCRYPTION_KEYS: keyRing,
-  CHANNEL: { idFromName: (channelId: string) => channelId, get: () => ({ publish }) },
+  CHANNEL: { idFromName: (channelId: string) => channelId, get: () => ({ publish, notifyScheduleInputsChanged }) },
 } as unknown as Env);
 
 const withAppToken = async (database: TestD1Database): Promise<void> => {
@@ -337,6 +337,31 @@ describe("lookupAndRefreshStreamState", () => {
       await expect(database.prepare(
         "SELECT state, source, started_at FROM channel_stream_state WHERE channel_id = 'kanal-a'",
       ).first()).resolves.toEqual({ state: "offline", source: "helix", started_at: null });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("notifies timer replanning when Helix first records an offline transition", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertStreamState(database, "kanal-a", "online", STALE, "eventsub", "2026-09-23T09:00:00.000Z");
+      await withAppToken(database);
+      const notifyScheduleInputsChanged = vi.fn().mockResolvedValue(undefined);
+
+      await lookupAndRefreshStreamState(
+        environment(database, vi.fn(), notifyScheduleInputsChanged),
+        "kanal-a",
+        NOW,
+        helixResponse(false),
+      );
+
+      expect(notifyScheduleInputsChanged).toHaveBeenCalledOnce();
+      expect(notifyScheduleInputsChanged).toHaveBeenCalledWith("stream_state");
+      await expect(database.prepare(
+        "SELECT state, transition_generation FROM channel_stream_state WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ state: "offline", transition_generation: 2 });
     } finally {
       database.close();
     }

@@ -260,6 +260,51 @@ describe("timer alarm execution", () => {
     expect(sends).toEqual([]);
   });
 
+  it("keeps the offline activity baseline when a live post finishes after the stream switch", async () => {
+    await insertChannel();
+    await insertTimer({
+      id: "interval-baseline-race",
+      triggerType: "interval",
+      trigger: { type: "interval", live: { minutes: 10, minimumMessages: 1 }, offline: { minutes: 5, minimumMessages: 1 } },
+      nextRunAt: firstDueAt,
+      activityCount: 10,
+    });
+    await database.prepare(
+      `INSERT INTO channel_stream_state
+        (channel_id, state, changed_at, source, started_at, stream_id)
+       VALUES (?, 'online', ?, 'eventsub', ?, 'stream-1')`,
+    ).bind(channelId, new Date(firstDueAt - 60_000).toISOString(), new Date(firstDueAt - 60_000).toISOString()).run();
+    let state: "online" | "offline" = "online";
+    const context = contextFor(() => 20, [], [], {
+      streamState: () => Promise.resolve(state),
+      streamStartedAt: () => Promise.resolve({ streamId: "stream-1", startedAt: new Date(firstDueAt - 60_000).toISOString() }),
+      sendChat: async (_text, _key, _attributions, stillValid) => {
+        if (!await (stillValid?.() ?? Promise.resolve(true))) {
+          return { sent: false, reason: "stale_before_send", retryable: false };
+        }
+        state = "offline";
+        await database.prepare(
+          `UPDATE channel_stream_state SET state = 'offline', started_at = NULL, stream_id = NULL,
+                                            transition_generation = transition_generation + 1
+            WHERE channel_id = ?`,
+        ).bind(channelId).run();
+        await database.prepare(
+          `UPDATE timers SET next_run_at = ?, next_run_stream_id = NULL, next_run_state = 'offline',
+                              last_chat_activity_count = 77 WHERE timer_id = ?`,
+        ).bind(new Date(firstDueAt + 5 * 60_000).toISOString(), "interval-baseline-race").run();
+        return { sent: true, reason: null, retryable: false };
+      },
+    });
+    vi.useFakeTimers();
+    vi.setSystemTime(firstDueAt);
+
+    await handleTimerAlarm(context, "timer:interval-baseline-race", firstDueAt);
+
+    expect(await database.prepare(
+      "SELECT next_run_state, last_chat_activity_count FROM timers WHERE timer_id = ?",
+    ).bind("interval-baseline-race").first()).toEqual({ next_run_state: "offline", last_chat_activity_count: 77 });
+  });
+
   it("rearms live and offline intervals across both switches without posting at a boundary", async () => {
     await insertChannel();
     await insertTimer({
@@ -364,6 +409,58 @@ describe("timer alarm execution", () => {
       `${timerId}:${String(secondOfflineDueAt)}`,
       `${timerId}:${String(liveDueAt + 3 * 60_000)}`,
     ]);
+  });
+
+  it("rejects an older online transition after the offline generation is armed", async () => {
+    await insertChannel();
+    await insertTimer({
+      triggerType: "interval",
+      trigger: { type: "interval", live: { minutes: 3 }, offline: { minutes: 5 } },
+      nextRunAt: firstDueAt,
+      activityCount: 42,
+    });
+    const offlineDeadline = firstDueAt + 5 * 60_000;
+    await database.prepare(
+      `INSERT INTO channel_stream_state
+        (channel_id, state, changed_at, source, started_at, stream_id, transition_generation)
+       VALUES (?, 'offline', ?, 'helix', NULL, NULL, 2)`,
+    ).bind(channelId, new Date(firstDueAt).toISOString()).run();
+    await database.prepare(
+      `UPDATE timers SET next_run_at = ?, next_run_state = 'offline', next_run_stream_id = NULL,
+                          last_chat_activity_count = 77 WHERE timer_id = ?`,
+    ).bind(new Date(offlineDeadline).toISOString(), timerId).run();
+    const scheduled: number[] = [];
+    const event: ModuleEvent<Record<string, never>> = {
+      channelId,
+      subscriptionType: "stream.online",
+      triggerId: "stale-online-transition",
+      payload: { id: "old-stream", started_at: new Date(firstDueAt).toISOString() },
+      settings: {},
+      receivedAt: new Date(firstDueAt).toISOString(),
+      actor: null,
+      chatStatus: null,
+    };
+
+    await timersModule.handleEvent?.(event, {
+      DB: database as unknown as D1Database,
+      streamStateTransitionAccepted: true,
+      streamStateTransitionGeneration: 1,
+      chatActivityCount: () => Promise.resolve(999),
+      scheduleAlarm: (_handlerKey: string, _alarmKey: string, deadline: number) => {
+        scheduled.push(deadline);
+        return Promise.resolve();
+      },
+      clearAlarm: () => Promise.resolve(),
+    } as unknown as ModuleExecutionContext);
+
+    expect(scheduled).toEqual([]);
+    expect(await database.prepare(
+      "SELECT next_run_at, next_run_state, last_chat_activity_count FROM timers WHERE timer_id = ?",
+    ).bind(timerId).first()).toEqual({
+      next_run_at: new Date(offlineDeadline).toISOString(),
+      next_run_state: "offline",
+      last_chat_activity_count: 77,
+    });
   });
 
   it("does not send a stream-start post if the stream rolls over to a new one between the due-occurrence check and the send", async () => {
@@ -1073,6 +1170,36 @@ describe("timer alarm execution", () => {
         next_run_stream_id: null,
         next_run_state: "offline",
         last_chat_activity_count: 23,
+      });
+    });
+
+    it("replans an offline-only timer when stream state changes to offline outside EventSub", async () => {
+      await insertChannel();
+      await insertTimer({
+        id: "offline-only-timer",
+        triggerType: "interval",
+        trigger: { type: "interval", offline: { minutes: 6 } },
+        nextRunAt: null,
+        activityCount: null,
+      });
+      await database.prepare(
+        `INSERT INTO channel_stream_state
+          (channel_id, state, changed_at, source, started_at, transition_generation)
+         VALUES (?, 'offline', ?, 'helix', NULL, 2)`,
+      ).bind(channelId, new Date(now).toISOString()).run();
+      const deadlines: number[] = [];
+      const context = contextFor(() => 0, [], deadlines, { streamState: () => Promise.resolve("offline") });
+      vi.useFakeTimers();
+      vi.setSystemTime(now);
+
+      await onInputsChangedOf()(context, "stream_state" satisfies ModuleScheduleInputChangeReason);
+
+      expect(deadlines).toEqual([now + 6 * 60_000]);
+      expect(await database.prepare(
+        "SELECT next_run_at, next_run_state FROM timers WHERE timer_id = ?",
+      ).bind("offline-only-timer").first()).toEqual({
+        next_run_at: new Date(now + 6 * 60_000).toISOString(),
+        next_run_state: "offline",
       });
     });
   });

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { UiProvider } from "../../src/dashboard/ui";
 import { moduleQueryKey } from "../../src/dashboard/data";
 import TimersPanel from "../../src/modules/timers/panel";
+import { inputFromDraft } from "../../src/modules/timers/panel/draft";
 import { renderWithQuery } from "../query-test-utils";
 import { jsonResponse } from "../unit/fixtures";
 
@@ -40,6 +41,18 @@ describe("Timers panel", () => {
     expect(screen.queryByText("offline off")).not.toBeInTheDocument();
     expect(screen.getAllByRole("spinbutton", { name: "Minutes" })).toHaveLength(2);
     expect(screen.getAllByRole("spinbutton", { name: "Minimum chat messages" })).toHaveLength(2);
+  });
+
+  it("saves valid interval parts after a hidden trigger's minutes field was cleared", () => {
+    const input = inputFromDraft({
+      name: "Reminder", messageText: "Hello", chatTarget: null, type: "interval",
+      live: { minutes: 30, minimumMessages: "" }, offline: { minutes: 30, minimumMessages: "" },
+      minutes: "", time: "12:00", weekdays: [], alsoOffline: false, sourceId: "",
+    });
+
+    expect(input?.trigger).toEqual({
+      type: "interval", live: { minutes: 30 }, offline: { minutes: 30 },
+    });
   });
 
   it("offers the channel-default inheritance option when creating a timer", async () => {

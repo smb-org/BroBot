@@ -4,12 +4,14 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { mapTimerRow, type TimerRow } from "../../src/modules/timers/service";
+
 const migrationsDirectory = resolve(import.meta.dirname, "../../migrations");
 const migrationFiles = readdirSync(migrationsDirectory).filter((name) => name.endsWith(".sql")).sort((a, b) => a.localeCompare(b));
 const migration = (name: string): string => readFileSync(resolve(migrationsDirectory, name), "utf8");
 
 describe("timer live and offline interval migration", () => {
-  it("converts existing interval timers to live-only without invalidating pending alarms", () => {
+  it("keeps legacy interval JSON readable before and after old-worker writes", () => {
     const database = new DatabaseSync(":memory:");
     try {
       const target = "0061_timer_live_offline_intervals.sql";
@@ -42,8 +44,7 @@ describe("timer live and offline interval migration", () => {
            FROM timers WHERE timer_id = 'pending'`,
       ).get() as Record<string, unknown>;
       expect(JSON.parse(String(pending.trigger_json)) as unknown).toEqual({
-        type: "interval",
-        live: { minutes: 12, minimumMessages: 4 },
+        type: "interval", minutes: 12, minimumMessages: 4,
       });
       expect(pending).toMatchObject({
         revision: 7,
@@ -57,8 +58,30 @@ describe("timer live and offline interval migration", () => {
       const unarmed = database.prepare(
         "SELECT trigger_json, next_run_at, next_run_state FROM timers WHERE timer_id = 'unarmed'",
       ).get() as Record<string, unknown>;
-      expect(JSON.parse(String(unarmed.trigger_json)) as unknown).toEqual({ type: "interval", live: { minutes: 30 } });
+      expect(JSON.parse(String(unarmed.trigger_json)) as unknown).toEqual({ type: "interval", minutes: 30 });
       expect(unarmed).toMatchObject({ next_run_at: null, next_run_state: null });
+
+      const pendingRow = database.prepare(
+        `SELECT timer_id, name, enabled, message_text, trigger_type, trigger_json, chat_target,
+                use_channel_default_target, revision, next_run_at, next_run_stream_id, next_run_state,
+                last_run_at, created_at, updated_at
+           FROM timers WHERE timer_id = 'pending'`,
+      ).get() as unknown as TimerRow;
+      expect(mapTimerRow(pendingRow).trigger).toEqual({
+        type: "interval", live: { minutes: 12, minimumMessages: 4 },
+      });
+
+      database.prepare("UPDATE timers SET trigger_json = ? WHERE timer_id = 'pending'")
+        .run('{"type":"interval","minutes":9,"minimumMessages":2}');
+      const oldWorkerWrite = database.prepare(
+        `SELECT timer_id, name, enabled, message_text, trigger_type, trigger_json, chat_target,
+                use_channel_default_target, revision, next_run_at, next_run_stream_id, next_run_state,
+                last_run_at, created_at, updated_at
+           FROM timers WHERE timer_id = 'pending'`,
+      ).get() as unknown as TimerRow;
+      expect(mapTimerRow(oldWorkerWrite).trigger).toEqual({
+        type: "interval", live: { minutes: 9, minimumMessages: 2 },
+      });
     } finally {
       database.close();
     }

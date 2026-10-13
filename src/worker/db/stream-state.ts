@@ -14,6 +14,7 @@ export interface StoredStreamStateRecord {
   streamId: string | null;
   /** Most recent successful state observation, used for freshness independently of EventSub ordering. */
   checkedAt: string | null;
+  transitionGeneration: number;
 }
 
 interface StreamStateRow {
@@ -23,6 +24,7 @@ interface StreamStateRow {
   started_at: string | null;
   stream_id: string | null;
   checked_at: string | null;
+  transition_generation: number;
 }
 
 interface TimestampOrder {
@@ -36,6 +38,11 @@ export type EventSubStreamWriteResult =
   | "stale_offline"
   | "ambiguous_offline"
   | "invalid_timestamp";
+
+export interface EventSubStreamStateWrite {
+  result: EventSubStreamWriteResult;
+  transitionGeneration: number | null;
+}
 
 /** Strips trailing zeros without backtracking-prone regex (`fraction` is bounded, but stay boring). */
 const trimTrailingZeros = (value: string): string => {
@@ -99,7 +106,7 @@ export const readChannelStreamState = async (
   channelId: string,
 ): Promise<StoredStreamStateRecord | null> => {
   const row = await db.prepare(
-    `SELECT state, source, changed_at, started_at, stream_id, checked_at
+    `SELECT state, source, changed_at, started_at, stream_id, checked_at, transition_generation
        FROM channel_stream_state
       WHERE channel_id = ?`,
   ).bind(channelId).first<StreamStateRow>();
@@ -110,19 +117,20 @@ export const readChannelStreamState = async (
     startedAt: row.started_at,
     streamId: row.stream_id,
     checkedAt: row.checked_at,
+    transitionGeneration: row.transition_generation,
   };
 };
 
-export const writeEventSubStreamState = async (
+export const writeEventSubStreamStateWithGeneration = async (
   db: D1Database,
   channelId: string,
   state: StoredStreamState,
   changedAt: string,
   startedAt: string | null,
   streamId: string | null = null,
-): Promise<EventSubStreamWriteResult> => {
+): Promise<EventSubStreamStateWrite> => {
   const eventOrder = timestampOrder(changedAt);
-  if (eventOrder === null) return "invalid_timestamp";
+  if (eventOrder === null) return { result: "invalid_timestamp", transitionGeneration: null };
   const [startedAtSeconds, startedAtFraction] = timestampOrderBindings(startedAt);
   const startedAtEpochMs = timestampEpochMilliseconds(startedAt);
   const changedAtEpochMs = timestampEpochMilliseconds(changedAt);
@@ -138,7 +146,7 @@ export const writeEventSubStreamState = async (
       // started_at (e.g. a restart within the same second); only a
       // strictly older start is superseded.
       if (!sameSessionId && incomingSessionMs < currentSessionMs) {
-        return "superseded";
+        return { result: "superseded", transitionGeneration: current.transitionGeneration };
       }
     }
   }
@@ -146,12 +154,12 @@ export const writeEventSubStreamState = async (
   if (state === "offline" && current?.state === "online") {
     const sessionOrder = timestampOrder(current.startedAt);
     const boundaryOrder = sessionOrder ?? timestampOrder(current.changedAt);
-    if (boundaryOrder === null) return "ambiguous_offline";
+    if (boundaryOrder === null) return { result: "ambiguous_offline", transitionGeneration: current.transitionGeneration };
     const order = compareTimestampOrders(eventOrder, boundaryOrder);
-    if (order < 0) return "stale_offline";
+    if (order < 0) return { result: "stale_offline", transitionGeneration: current.transitionGeneration };
     // An event at the exact known boundary cannot be ordered safely. Let a
     // forced Helix observation settle it.
-    if (order === 0) return "ambiguous_offline";
+    if (order === 0) return { result: "ambiguous_offline", transitionGeneration: current.transitionGeneration };
   }
 
   const [eventSeconds, eventFraction] = timestampOrderBindings(changedAt);
@@ -159,10 +167,23 @@ export const writeEventSubStreamState = async (
     `INSERT INTO channel_stream_state
        (channel_id, state, changed_at, source, started_at, checked_at, eventsub_changed_at,
         started_at_seconds, started_at_fraction, eventsub_changed_at_seconds, eventsub_changed_at_fraction,
-        stream_id, started_at_epoch_ms, changed_at_epoch_ms)
-     VALUES (?, ?, ?, 'eventsub', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        stream_id, started_at_epoch_ms, changed_at_epoch_ms, transition_generation)
+     VALUES (?, ?, ?, 'eventsub', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
      ON CONFLICT (channel_id) DO UPDATE
-       SET state = excluded.state,
+       SET transition_generation = CASE
+             WHEN channel_stream_state.state <> excluded.state
+               OR (excluded.state = 'online' AND (
+                    (excluded.stream_id IS NOT NULL AND channel_stream_state.stream_id IS NOT NULL
+                     AND excluded.stream_id <> channel_stream_state.stream_id)
+                    OR ((excluded.stream_id IS NULL OR channel_stream_state.stream_id IS NULL)
+                     AND COALESCE(excluded.started_at_epoch_ms,
+                          CAST(round((julianday(excluded.started_at) - 2440587.5) * 86400000.0) AS INTEGER))
+                         <> COALESCE(channel_stream_state.started_at_epoch_ms,
+                          CAST(round((julianday(channel_stream_state.started_at) - 2440587.5) * 86400000.0) AS INTEGER)))))
+             THEN channel_stream_state.transition_generation + 1
+             ELSE channel_stream_state.transition_generation
+           END,
+           state = excluded.state,
            changed_at = excluded.changed_at,
            source = 'eventsub',
            started_at = CASE WHEN excluded.state = 'online'
@@ -230,10 +251,11 @@ export const writeEventSubStreamState = async (
                CAST(round((julianday(excluded.started_at) - 2440587.5) * 86400000.0) AS INTEGER))
              >= COALESCE(channel_stream_state.started_at_epoch_ms,
                CAST(round((julianday(channel_stream_state.started_at) - 2440587.5) * 86400000.0) AS INTEGER)))
-         OR (excluded.stream_id IS NOT NULL AND channel_stream_state.stream_id IS NOT NULL
+            OR (excluded.stream_id IS NOT NULL AND channel_stream_state.stream_id IS NOT NULL
           AND excluded.stream_id <> channel_stream_state.stream_id
           AND excluded.started_at_epoch_ms >= COALESCE(channel_stream_state.started_at_epoch_ms,
-               CAST(round((julianday(channel_stream_state.started_at) - 2440587.5) * 86400000.0) AS INTEGER))))`,
+               CAST(round((julianday(channel_stream_state.started_at) - 2440587.5) * 86400000.0) AS INTEGER))))
+       RETURNING transition_generation`,
   ).bind(
     channelId, state, changedAt, startedAt, changedAt, changedAt,
     startedAtSeconds, startedAtFraction, eventSeconds, eventFraction,
@@ -244,8 +266,23 @@ export const writeEventSubStreamState = async (
     statements.push(prepareBindPendingStreamControls(db, channelId, startedAt, streamId));
   }
   const results = await db.batch(statements);
-  return (results[0]?.meta.changes ?? 0) > 0 ? "written" : "superseded";
+  const written = (results[0]?.meta.changes ?? 0) > 0;
+  const returned = results.at(0)?.results[0] as { transition_generation?: number } | undefined;
+  return {
+    result: written ? "written" : "superseded",
+    transitionGeneration: typeof returned?.transition_generation === "number" ? returned.transition_generation : null,
+  };
 };
+
+export const writeEventSubStreamState = async (
+  db: D1Database,
+  channelId: string,
+  state: StoredStreamState,
+  changedAt: string,
+  startedAt: string | null,
+  streamId: string | null = null,
+): Promise<EventSubStreamWriteResult> =>
+  (await writeEventSubStreamStateWithGeneration(db, channelId, state, changedAt, startedAt, streamId)).result;
 
 export const writeHelixStreamStateIfUnknown = async (
   db: D1Database,
@@ -259,8 +296,9 @@ export const writeHelixStreamStateIfUnknown = async (
   const statement = db.prepare(
     `INSERT INTO channel_stream_state
        (channel_id, state, changed_at, source, started_at, checked_at, eventsub_changed_at,
-        started_at_seconds, started_at_fraction, stream_id, started_at_epoch_ms, changed_at_epoch_ms)
-     VALUES (?, ?, ?, 'helix', ?, ?, NULL, ?, ?, ?, ?, ?)
+        started_at_seconds, started_at_fraction, stream_id, started_at_epoch_ms, changed_at_epoch_ms,
+        transition_generation)
+     VALUES (?, ?, ?, 'helix', ?, ?, NULL, ?, ?, ?, ?, ?, 1)
      ON CONFLICT (channel_id) DO NOTHING`,
   ).bind(channelId, state, changedAt, startedAt, changedAt, startedAtSeconds, startedAtFraction,
     streamId, timestampEpochMilliseconds(startedAt), timestampEpochMilliseconds(changedAt));
@@ -289,12 +327,22 @@ const prepareRefreshHelixStreamState = (
   const [startedAtSeconds, startedAtFraction] = timestampOrderBindings(startedAt);
   return db.prepare(
     `UPDATE channel_stream_state
-        SET state = ?, changed_at = ?, source = 'helix', started_at = ?, checked_at = ?,
+        SET transition_generation = transition_generation + CASE
+              WHEN state <> ?
+                OR (? = 'online' AND (
+                     (? IS NOT NULL AND stream_id IS NOT NULL AND ? <> stream_id)
+                     OR ((? IS NULL OR stream_id IS NULL)
+                      AND COALESCE(?, started_at_epoch_ms)
+                          <> COALESCE(started_at_epoch_ms,
+                               CAST(round((julianday(started_at) - 2440587.5) * 86400000.0) AS INTEGER)))))
+              THEN 1 ELSE 0 END,
+            state = ?, changed_at = ?, source = 'helix', started_at = ?, checked_at = ?,
             started_at_seconds = ?, started_at_fraction = ?, stream_id = ?,
             started_at_epoch_ms = ?, changed_at_epoch_ms = ?
       WHERE channel_id = ?
         AND julianday(?) >= julianday(changed_at)`,
-  ).bind(state, changedAt, startedAt, changedAt, startedAtSeconds, startedAtFraction,
+  ).bind(state, state, streamId, streamId, streamId, timestampEpochMilliseconds(startedAt),
+    state, changedAt, startedAt, changedAt, startedAtSeconds, startedAtFraction,
     state === "online" ? streamId : null, timestampEpochMilliseconds(startedAt),
     timestampEpochMilliseconds(changedAt), channelId, changedAt);
 };

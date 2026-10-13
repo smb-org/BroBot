@@ -1,12 +1,12 @@
 import { useMemo, useState, type ReactElement } from "react";
 
 import { runModuleQueryWrite, useChannelSettings, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
-import { templateTextLength } from "../../../contracts/template-text-length";
 import { formatTimestamp } from "../../../dashboard/locale";
 import { Button, ChatTargetField, ChatPreview, ConfirmDialog, Dialog, Field, FormDialog, InspectorSection, LoadState, LoadStateLines, Section, Select, SwitchRow, SwitchSection, TemplateTextField, UnitInput, notify } from "../../../dashboard/ui";
 import { Switch as SwitchPrimitive } from "../../../dashboard/ui/primitives/switch";
 import type { ModulePanelProperties } from "../../contract";
-import { timerTriggerSchema, type Timer, type TimerMutationInput, type TimerTrigger } from "../contracts";
+import type { Timer, TimerTrigger } from "../contracts";
+import { inputFromDraft, type TimerDraft } from "./draft";
 import { timersTexts } from "./locale";
 import {
   createTimer,
@@ -20,20 +20,6 @@ import {
 } from "./service";
 
 type TriggerType = TimerTrigger["type"];
-
-interface TimerDraft {
-  name: string;
-  messageText: string;
-  chatTarget: Timer["chatTarget"];
-  type: TriggerType;
-  live: TimerIntervalDraft | null;
-  offline: TimerIntervalDraft | null;
-  minutes: number | "";
-  time: string;
-  weekdays: number[];
-  alsoOffline: boolean;
-  sourceId: string;
-}
 
 interface TimerIntervalDraft {
   minutes: number | "";
@@ -74,34 +60,6 @@ const draftFromTimer = (timer: Timer): TimerDraft => {
     ...emptyDraft([]), name: timer.name, messageText: timer.messageText, chatTarget: timer.chatTarget, type: trigger.type,
     minutes: trigger.minutes, sourceId: trigger.sourceId,
   };
-};
-
-const inputFromDraft = (draft: TimerDraft): TimerMutationInput | null => {
-  if (typeof draft.minutes !== "number" && draft.type !== "time_of_day") return null;
-  if (draft.name.trim().length === 0 || draft.messageText.trim().length === 0 || templateTextLength(draft.messageText) > 500) return null;
-  let trigger: TimerTrigger;
-  if (draft.type === "interval") {
-    const partFor = (part: TimerIntervalDraft | null): { minutes: number; minimumMessages?: number } | undefined => {
-      if (part === null) return undefined;
-      if (typeof part.minutes !== "number") return undefined;
-      return { minutes: part.minutes, ...(typeof part.minimumMessages === "number" ? { minimumMessages: part.minimumMessages } : {}) };
-    };
-    const live = partFor(draft.live);
-    const offline = partFor(draft.offline);
-    if ((draft.live !== null && live === undefined) || (draft.offline !== null && offline === undefined) ||
-        (live === undefined && offline === undefined)) return null;
-    trigger = { type: "interval", ...(live === undefined ? {} : { live }), ...(offline === undefined ? {} : { offline }) };
-  } else if (draft.type === "stream_start") {
-    trigger = { type: "stream_start", minutes: draft.minutes as number };
-  } else if (draft.type === "time_of_day") {
-    trigger = { type: "time_of_day", time: draft.time, weekdays: draft.weekdays, alsoOffline: draft.alsoOffline };
-  } else {
-    if (draft.sourceId.length === 0) return null;
-    trigger = { type: "before_event", sourceId: draft.sourceId, minutes: draft.minutes as number };
-  }
-  const parsedTrigger = timerTriggerSchema.safeParse(trigger);
-  if (!parsedTrigger.success) return null;
-  return { name: draft.name.trim(), messageText: draft.messageText, chatTarget: draft.chatTarget, trigger: parsedTrigger.data };
 };
 
 const timersPanelDataFrom = (value: unknown): TimersPanelData => {
