@@ -37,7 +37,7 @@ export default defineConfig({
       port: Number(e2eWorkerPort),
       reuseExistingServer: false,
       timeout: 120_000,
-      env: e2eWorkerEnvironment,
+      env: { ...e2eWorkerEnvironment, E2E_WORKER_PERSIST: e2eWorkerPersist },
     },
   ],
   projects: [{ name: "chromium-desktop", use: { ...devices["Desktop Chrome"] } }],
