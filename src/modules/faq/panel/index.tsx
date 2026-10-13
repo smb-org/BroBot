@@ -1,6 +1,6 @@
 import { useCallback, useState, type ReactElement } from "react";
 
-import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { runModuleQueryWrite, useChannelSettings, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { Button, ChatTargetField, ConfirmDialog, Field, FormDialog, GameMultiSelect, InspectorSection, LoadState, LoadStateLines, UnitInput, Select, TemplateTextField, mapServerFieldErrors, notify } from "../../../dashboard/ui";
 import { Switch as SwitchPrimitive } from "../../../dashboard/ui/primitives/switch";
 import type { ModulePanelProperties } from "../../contract";
@@ -80,6 +80,7 @@ export default function FaqPanel(properties: ModulePanelProperties): ReactElemen
 
 function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelProperties): ReactElement {
   const labels = faqTexts(language);
+  const channelSettings = useChannelSettings(channelId);
   const queryClient = useDashboardQueryClient();
   const query = useModuleQuery(channelId, "faq", "panel", (signal) => loadFaqPanel(channelId, signal));
   const data = query.data;
@@ -344,6 +345,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
           <ChatTargetField
             label={labels.chatTarget}
             value={draft.chatTarget}
+            {...(channelSettings.data === undefined ? {} : { effectiveDefault: channelSettings.data.defaultChatTarget })}
             onChange={(chatTarget) => patchDraft({ chatTarget })}
             allowed={["all_chats", "source_only", "channel_default", "where_asked"]}
             disabled={pending}

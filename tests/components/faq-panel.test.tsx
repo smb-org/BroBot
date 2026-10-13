@@ -34,6 +34,10 @@ describe("FAQ panel", () => {
   it("reserves the result area for FAQ match tests", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>((input) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({
+        timeZone: "UTC", revision: 1, location: null, locationRevision: 1,
+        defaultChatTarget: "source_only", defaultChatTargetRevision: 1,
+      }));
       if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
       if (url.pathname.endsWith("/entries")) return Promise.resolve(jsonResponse({ entries: [] }));
       return Promise.resolve(jsonResponse({}, 404));
@@ -111,6 +115,10 @@ describe("FAQ panel", () => {
   it("reuses warm FAQ data when the panel is mounted again", async () => {
     const fetcher = vi.fn<typeof fetch>((input) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({
+        timeZone: "UTC", revision: 1, location: null, locationRevision: 1,
+        defaultChatTarget: "source_only", defaultChatTargetRevision: 1,
+      }));
       if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
       if (url.pathname.endsWith("/entries")) return Promise.resolve(jsonResponse({ entries: [entry] }));
       return Promise.resolve(jsonResponse({}, 404));
@@ -123,13 +131,13 @@ describe("FAQ panel", () => {
       { gcTime: 600_000, staleTime: 600_000 },
     );
     expect(await screen.findByText("Greeting")).toBeInTheDocument();
-    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenCalledTimes(3);
 
     view.rerender(<UiProvider>{null}</UiProvider>);
     view.rerender(<UiProvider><FaqPanel channelId="channel-a" language="en" /></UiProvider>);
 
     expect(await screen.findByText("Greeting")).toBeInTheDocument();
-    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenCalledTimes(3);
   });
 
   it("keeps a committed FAQ revision when the post-save refresh fails and offers retry", async () => {

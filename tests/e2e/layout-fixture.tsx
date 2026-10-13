@@ -31,6 +31,7 @@ const gameMultiSelectMessages = {
   error: "Games could not be loaded.",
   suggestions: "Suggestions",
   allGames: "All games",
+  limitReached: "10-game limit reached; remove one to add another.",
   selectedCount: (count: number, maximum: number) => `${String(count)} of ${String(maximum)}`,
   remove: (name: string) => `Remove ${name}`,
 };

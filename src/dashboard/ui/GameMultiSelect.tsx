@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
+import { ImageOff } from "lucide-react";
 
 import { PopoverPrimitive } from "./primitives/popover";
 
@@ -18,6 +19,7 @@ export interface GameMultiSelectMessages {
   error: string;
   suggestions: string;
   allGames: string;
+  limitReached: string;
   selectedCount: (count: number, maximum: number) => string;
   remove: (name: string) => string;
 }
@@ -40,7 +42,7 @@ const GameCover = ({ game, width, height }: { game: GameMultiSelectGame; width: 
   const [failed, setFailed] = useState(false);
   const src = failed ? null : coverUrl(game, width, height);
   return src === null
-    ? <span className="ui-game-multi-select__cover-placeholder" aria-hidden="true" style={{ width, height }} />
+    ? <span className="ui-game-multi-select__cover-placeholder" aria-hidden="true" style={{ width, height }}><ImageOff size={Math.min(width - 4, 18)} /></span>
     : <img
       className="ui-game-multi-select__cover"
       src={src}
@@ -76,6 +78,7 @@ export function GameMultiSelect({ searchGames, lookupGames, value, onChange, mes
   const rootRef = useRef<HTMLDivElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const ignoreNextInputFocusRef = useRef(false);
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [query, setQuery] = useState("");
   const [searchState, setSearchState] = useState<GameSearchState | null>(null);
@@ -186,6 +189,8 @@ export function GameMultiSelect({ searchGames, lookupGames, value, onChange, mes
 
   const handleInputKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
     if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
       setResultsOpen(false);
       return;
     }
@@ -202,7 +207,10 @@ export function GameMultiSelect({ searchGames, lookupGames, value, onChange, mes
 
   const handleOptionKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number): void => {
     if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
       setResultsOpen(false);
+      ignoreNextInputFocusRef.current = true;
       inputRef.current?.focus();
       return;
     }
@@ -236,11 +244,7 @@ export function GameMultiSelect({ searchGames, lookupGames, value, onChange, mes
             );
           })}
         </div>
-        <PopoverPrimitive.Trigger
-          nativeButton={false}
-          render={<div className="ui-game-multi-select__search" />}
-          tabIndex={-1}
-        >
+        <div className="ui-game-multi-select__search">
           <input
             ref={inputRef}
             id={id}
@@ -254,14 +258,21 @@ export function GameMultiSelect({ searchGames, lookupGames, value, onChange, mes
             aria-expanded={resultsOpen}
             aria-haspopup="listbox"
             disabled={disabled || atLimit}
-            onFocus={() => setResultsOpen(true)}
+            onFocus={() => {
+              if (ignoreNextInputFocusRef.current) {
+                ignoreNextInputFocusRef.current = false;
+                return;
+              }
+              setResultsOpen(true);
+            }}
             onKeyDown={handleInputKeyDown}
             onChange={(event) => { setQuery(event.currentTarget.value); setActiveIndex(0); setResultsOpen(true); }}
           />
-        </PopoverPrimitive.Trigger>
+        </div>
+        <p className="ui-game-multi-select__limit-message" aria-live="polite">{atLimit ? messages.limitReached : ""}</p>
         <span className="ui-game-multi-select__sr-hint sr-only" id={`${id}-hint`}>{messages.searchHint}</span>
         <PopoverPrimitive.Portal>
-          <PopoverPrimitive.Positioner side="bottom" align="start" sideOffset={4} className="ui-game-multi-select__positioner" style={{ zIndex: "var(--layer-popover)" }}>
+          <PopoverPrimitive.Positioner anchor={inputRef} side="bottom" align="start" sideOffset={4} className="ui-game-multi-select__positioner" style={{ zIndex: "var(--layer-popover)" }}>
             <PopoverPrimitive.Popup
               ref={popupRef}
               role="dialog"

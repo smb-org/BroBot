@@ -24,7 +24,7 @@ export type SettingsFieldSpec<Settings> =
   | { kind: "timeoutDurationRange"; key: keyof Settings & string; min: number; max: number }
   | { kind: "text"; key: keyof Settings & string; prefix?: string; maxLength?: number; lengthUnit?: "utf16" | "codePoints"; optional?: boolean; validate?: (value: string) => boolean }
   | { kind: "template"; key: keyof Settings & string; minRows?: number; optional?: boolean; preview: (template: string, samples: Readonly<Record<string, string>>) => string }
-  | { kind: "chatTarget"; key: keyof Settings & string; allowed?: readonly ChatOutputTarget[] }
+  | { kind: "chatTarget"; key: keyof Settings & string; allowed?: readonly (ChatOutputTarget | "channel_default")[] }
   | { kind: "select"; key: keyof Settings & string; options: readonly { value: string }[] }
   | { kind: "segment"; key: keyof Settings & string; options: readonly { value: string | number }[] }
   | { kind: "choice"; key: keyof Settings & string; options: readonly { value: string; icon?: IconName }[] }
@@ -135,7 +135,7 @@ export function SettingsEditor<Settings extends object>({
         <ChatTargetField
           key={field.key}
           label={copy.label}
-          value={String(fieldValue ?? "source_only") as ChatOutputTarget}
+          value={fieldValue === null || fieldValue === undefined ? null : String(fieldValue) as ChatOutputTarget}
           onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
           allowed={field.allowed ?? ["all_chats", "source_only"]}
           disabled={disabled}

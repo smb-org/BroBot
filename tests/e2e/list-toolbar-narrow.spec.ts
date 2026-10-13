@@ -82,3 +82,36 @@ for (const lang of ["de", "en"] as const) {
     }
   });
 }
+
+test("compact game chips shrink without clipping their remove button", async ({ page }) => {
+  await mock(page);
+  await page.route("**/api/channels/channel-a/games*", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ games: [{ id: "long", name: "A Game Name That Is Much Longer Than the Compact Filter Can Display" }] }) });
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/tests/e2e/module-panels-stability-fixture.html?panel=text_library&lang=en");
+
+  const search = page.getByRole("searchbox", { name: "Game" });
+  await expect(search).toBeEnabled();
+  await search.click();
+  await page.getByRole("option", { name: /A Game Name That Is Much Longer/u }).click();
+
+  const chip = page.locator(".text-library__list-toolbar .ui-game-multi-select__chip").first();
+  const geometry = await chip.evaluate((element) => {
+    const selected = element.parentElement;
+    const name = element.querySelector<HTMLElement>(".ui-game-multi-select__chip-name");
+    const remove = element.querySelector<HTMLElement>("button");
+    if (selected === null || name === null || remove === null) throw new Error("Compact game chip parts are missing.");
+    const selectedBounds = selected.getBoundingClientRect();
+    const chipBounds = element.getBoundingClientRect();
+    const removeBounds = remove.getBoundingClientRect();
+    return {
+      chipWithinSelected: chipBounds.left >= selectedBounds.left - 1 && chipBounds.right <= selectedBounds.right + 1,
+      removeWithinChip: removeBounds.left >= chipBounds.left - 1 && removeBounds.right <= chipBounds.right + 1,
+      nameHasEllipsis: name.scrollWidth > name.clientWidth && getComputedStyle(name).textOverflow === "ellipsis",
+    };
+  });
+  expect(geometry).toEqual({ chipWithinSelected: true, removeWithinChip: true, nameHasEllipsis: true });
+  await chip.getByRole("button", { name: "Remove A Game Name That Is Much Longer Than the Compact Filter Can Display" }).click();
+  await expect(page.locator(".text-library__list-toolbar .ui-game-multi-select__chip")).toHaveCount(0);
+});

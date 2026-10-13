@@ -532,11 +532,13 @@ form.content-section { display: grid; gap: var(--s4); }
 .ui-chat-target-field__options { display: grid; gap: 2px; }
 .ui-chat-target-field__option { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--s3); min-height: 56px; padding: var(--s2); border: 1px solid transparent; border-radius: var(--r-control); color: var(--text); background: transparent; cursor: pointer; text-align: left; }
 .ui-chat-target-field__option:hover, .ui-chat-target-field__option.is-selected { border-color: var(--line-strong); background: var(--surface-hover); }
+.ui-chat-target-field__option:focus-visible { outline: 2px solid var(--brand-text); outline-offset: 1px; }
 .ui-chat-target-field__option-copy { display: grid; gap: 2px; min-width: 0; }
 .ui-chat-target-field__option-copy strong { font-size: 13px; font-weight: 600; }
 .ui-chat-target-field__option-copy small { color: var(--text-3); font-size: 11px; line-height: 1.4; }
-.ui-chat-target-field__radio { display: block; width: 16px; height: 16px; border: 1px solid var(--line-strong); border-radius: 50%; }
+.ui-chat-target-field__radio { display: grid; width: 16px; height: 16px; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; }
 .ui-chat-target-field__option.is-selected .ui-chat-target-field__radio { border: 5px solid var(--brand-text); }
+.ui-chat-target-field__radio-indicator { display: block; width: 100%; height: 100%; border-radius: 50%; background: var(--brand-text); }
 .ui-game-multi-select { display: grid; gap: var(--s2); min-width: 0; }
 .ui-game-multi-select--compact { position: relative; display: block; }
 .ui-game-multi-select--compact .ui-game-multi-select__hint { display: none; }
@@ -546,13 +548,15 @@ form.content-section { display: grid; gap: var(--s4); }
 .ui-game-multi-select__chip { display: inline-flex; min-width: 0; min-height: 31px; align-items: center; gap: var(--s1); padding: 2px var(--s1) 2px 4px; border: 1px solid var(--line); border-radius: var(--r-control); color: var(--text-2); background: var(--surface-well); font-size: 12px; }
 .ui-game-multi-select__chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ui-game-multi-select__cover, .ui-game-multi-select__cover-placeholder { display: block; flex: none; border-radius: var(--r-control); object-fit: cover; }
-.ui-game-multi-select__cover-placeholder { border: 1px solid var(--line-strong); background: linear-gradient(135deg, var(--surface-hover), var(--surface-well)); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 5%); }
+.ui-game-multi-select__cover-placeholder { display: grid; place-items: center; box-sizing: border-box; border: 1px solid var(--line-strong); color: var(--text-3); background: var(--surface-raised); }
 .ui-game-multi-select__chip button { display: grid; width: 26px; height: 26px; flex: none; place-items: center; padding: 0; border: 0; border-radius: var(--r-control); color: var(--text-2); background: transparent; cursor: pointer; font-size: 16px; line-height: 1; }
 .ui-game-multi-select__chip button:hover:not(:disabled) { color: var(--error); background: var(--error-surface); }
 .ui-game-multi-select__chip button:disabled { cursor: not-allowed; }
 .ui-game-multi-select__search { display: block; width: 100%; min-width: 0; }
 .ui-game-multi-select__search > input { box-sizing: border-box; width: 100%; min-width: 0; }
 .ui-game-multi-select__search > input:focus-visible { outline-offset: 2px; }
+.ui-game-multi-select__limit-message { min-height: 18px; margin: 0; color: var(--text-3); font-size: 11px; line-height: 18px; }
+.ui-game-multi-select--compact .ui-game-multi-select__limit-message { display: none; }
 .ui-game-multi-select__positioner { box-sizing: border-box; width: min(max(var(--anchor-width, 320px), 280px), var(--available-width, calc(100vw - 24px))); max-width: calc(100vw - 24px); }
 .ui-game-multi-select__popup { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; box-sizing: border-box; width: 100%; max-height: min(380px, var(--available-height, calc(100vh - 24px))); min-width: 0; padding: var(--s2); overflow: hidden; border: 1px solid var(--line-strong); border-radius: var(--r-control); color: var(--text); background: var(--surface-raised); box-shadow: var(--mantine-shadow-xs); }
 .ui-game-multi-select__status { min-height: 20px; padding: 0 var(--s2); line-height: 20px; }
@@ -567,8 +571,8 @@ form.content-section { display: grid; gap: var(--s4); }
 .ui-game-multi-select__footer > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ui-game-multi-select__footer > span:last-child { flex: none; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .ui-game-multi-select--compact .ui-game-multi-select__search > input { box-sizing: border-box; height: 44px; min-width: 0; text-overflow: ellipsis; }
-.ui-game-multi-select--compact .ui-game-multi-select__selected { position: absolute; z-index: 1; top: 4px; left: 4px; display: flex; width: calc(50% - 8px); height: 36px; flex-wrap: nowrap; gap: 2px; overflow-x: auto; overflow-y: hidden; }
-.ui-game-multi-select--compact .ui-game-multi-select__chip { min-height: 26px; flex: none; padding: 1px 2px 1px 3px; gap: 3px; font-size: 11px; }
+.ui-game-multi-select--compact .ui-game-multi-select__selected { position: absolute; z-index: 1; top: 4px; left: 4px; display: flex; width: calc(50% - 8px); height: 36px; flex-wrap: nowrap; gap: 2px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.ui-game-multi-select--compact .ui-game-multi-select__chip { min-height: 26px; max-width: 100%; flex: 0 0 auto; padding: 1px 2px 1px 3px; gap: 3px; font-size: 11px; }
 .ui-game-multi-select--compact .ui-game-multi-select__chip button { width: 20px; height: 22px; }
 .ui-game-multi-select--compact:has(.ui-game-multi-select__chip) .ui-game-multi-select__search > input { padding-left: calc(50% + var(--s2)); }
 .ui-token-chip { display: inline-flex; max-width: 100%; min-height: 28px; align-items: center; gap: var(--s1); padding: 2px var(--s2); border: 1px solid var(--line); border-radius: var(--r-control); color: var(--text-2); background: var(--surface-well); cursor: pointer; vertical-align: middle; }
@@ -581,7 +585,7 @@ form.content-section { display: grid; gap: var(--s4); }
 .text-library__list-toolbar .list-toolbar__filters { flex: 1 1 auto; }
 .text-library__list-toolbar .ui-select { flex: 0 0 12rem; min-width: 8rem; }
 .text-library__list-toolbar .ui-game-multi-select { flex: 0 0 12rem; min-width: 8rem; }
-.text-library__list-toolbar .ui-game-multi-select--compact .ui-game-multi-select__selected { overflow: hidden; }
+.text-library__list-toolbar .ui-game-multi-select--compact .ui-game-multi-select__selected { overflow-x: auto; overflow-y: hidden; }
 .text-library__table { min-width: 560px; }
 .text-library__table tbody tr[aria-selected="true"] { background: var(--tint-1); }
 .text-library__table tbody tr:hover { background: var(--surface-hover); }
@@ -1217,6 +1221,8 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-field__count, .chips-input__count, .ui-template-text-field__count { flex: none; min-width: 8ch; color: var(--text-3); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 .ui-field__count--warning, .ui-template-text-field__count--warning { color: var(--warn); }
 .ui-field__count--error, .ui-template-text-field__count--error { color: var(--error-text); }
+.ui-template-text-field__helper-row > span { flex: 1 1 auto; min-width: 0; }
+.ui-template-text-field__helper-row .ui-truncated-text::before { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.4; text-overflow: clip; white-space: normal; }
 .ui-field, .unit-input, .chips-input, .ui-select { display: grid; position: relative; min-width: 0; gap: 4px; }
 .ui-select--compact { padding-bottom: 0; }
 .ui-field__label { color: var(--text-2); font-size: 13px; font-weight: 500; }
@@ -1308,6 +1314,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-switch-section__hint { min-height: 18px; margin: 0; color: var(--color-text-3); font-size: 12px; line-height: 18px; }
 .ui-role-threshold { display: grid; gap: 0; width: min(20rem, 100%); min-width: 0; }
 .ui-role-threshold .ui-select__description { min-height: 18px; }
+.ui-role-threshold .ui-select__description .ui-truncated-text::before { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.4; text-overflow: clip; white-space: normal; }
 .ui-locked-reason { display: flex; min-width: 0; min-height: 18px; align-items: flex-start; gap: 4px; color: var(--color-text-3); font-size: 12px; line-height: 18px; }
 .ui-locked-reason > .ui-icon { flex: none; margin-top: 1px; }
 .ui-locked-reason--reserved { display: block; overflow: hidden; color: transparent; }
@@ -1774,9 +1781,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .list-detail__inspector .sub-inspector.chat-voting-template-inspector { box-sizing: border-box; overflow: hidden; }
 .inspector-field-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); align-items: center; gap: var(--s4); min-width: 0; }
 .inspector-field-row--stacked { grid-template-columns: minmax(0, 1fr); gap: 0; }
-.channel-overview-settings__row { align-items: flex-end; }
-/* The select reserves 44px below its control for hint/error lines; lift the button onto the select's bottom edge. */
-.channel-overview-settings__row > .ui-button { margin-bottom: 44px; }
+.channel-overview-settings__row { align-items: center; }
 .channel-overview-settings__row > .inspector-field-row { flex: 1 1 16rem; max-width: 28rem; }
 @media (max-width: 640px) {
   .channel-overview-settings__row > .inspector-field-row { max-width: none; }
@@ -1860,6 +1865,16 @@ p.lock-reason { margin-bottom: 1em; }
   .state-row__label { grid-column: 1 / -1; }
   .state-row__detail { white-space: normal; }
   .state-row__action { grid-column: 1 / -1; justify-self: start; }
+  .module-workspace .list-row { flex-wrap: wrap; gap: 0; }
+  .module-workspace .list-row__link { flex: 1 1 100%; }
+  .module-workspace .list-row__action { flex: 1 1 100%; justify-content: flex-end; }
+  .module-workspace .module-switch-control { grid-template-columns: minmax(0, 1fr) auto; width: 100%; align-items: center; justify-items: stretch; }
+  .module-workspace .module-switch-control [data-slot="switch"] { grid-column: 2; grid-row: 1; justify-self: end; }
+  .module-workspace .module-switch-control .ui-locked-reason { grid-column: 1 / -1; justify-self: start; max-width: none; }
+  .ui-switch-section__heading { box-sizing: border-box; padding-inline-end: var(--s1); }
+  .ui-chat-target-field__trigger { grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--s1); padding-inline: var(--s2); }
+  .ui-chat-target-field__value { overflow: visible; overflow-wrap: anywhere; text-overflow: clip; white-space: normal; line-height: 1.25; }
+  .ui-chat-target-field__change { display: none; }
   .inspector-columns { grid-template-columns: 1fr; }
   .table { min-width: 0; }
   .members-table,

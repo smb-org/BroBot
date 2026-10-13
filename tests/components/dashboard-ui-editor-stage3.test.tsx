@@ -78,6 +78,7 @@ describe("editor field seam", () => {
       error: "Search failed.",
       suggestions: "Suggestions",
       allGames: "All games",
+      limitReached: "You can select up to 10 games.",
       selectedCount: (count, maximum) => `${String(count)} of ${String(maximum)}`,
       remove: (name) => `Remove ${name}`,
     };
@@ -111,7 +112,7 @@ describe("editor field seam", () => {
     };
     const messages: GameMultiSelectMessages = {
       label: "Games", hint: "Filter by game.", search: "Search games", searchHint: "Search for a game.",
-      loading: "Searching…", empty: "No games found.", error: "Search failed.", suggestions: "Suggestions", allGames: "All games",
+      loading: "Searching…", empty: "No games found.", error: "Search failed.", suggestions: "Suggestions", allGames: "All games", limitReached: "You can select up to 10 games.",
       selectedCount: (count, maximum) => `${String(count)} of ${String(maximum)}`, remove: (name) => `Remove ${name}`,
     };
     const searchGames = vi.fn().mockResolvedValue([gameWithArt]);
@@ -140,7 +141,7 @@ describe("editor field seam", () => {
     };
     const messages: GameMultiSelectMessages = {
       label: "Games", hint: "Filter by game.", search: "Search games", searchHint: "Search for a game.",
-      loading: "Searching…", empty: "No games found.", error: "Search failed.", suggestions: "Suggestions", allGames: "All games",
+      loading: "Searching…", empty: "No games found.", error: "Search failed.", suggestions: "Suggestions", allGames: "All games", limitReached: "You can select up to 10 games.",
       selectedCount: (count, maximum) => `${String(count)} of ${String(maximum)}`, remove: (name) => `Remove ${name}`,
     };
     const searchGames = vi.fn().mockResolvedValue([]);
@@ -164,7 +165,7 @@ describe("editor field seam", () => {
   it("keeps the same cover footprint for suggestions and selected games without box art", async () => {
     const messages: GameMultiSelectMessages = {
       label: "Games", hint: "Filter by game.", search: "Search games", searchHint: "Search for a game.",
-      loading: "Searching…", empty: "No games found.", error: "Search failed.", suggestions: "Suggestions", allGames: "All games",
+      loading: "Searching…", empty: "No games found.", error: "Search failed.", suggestions: "Suggestions", allGames: "All games", limitReached: "You can select up to 10 games.",
       selectedCount: (count, maximum) => `${String(count)} of ${String(maximum)}`, remove: (name) => `Remove ${name}`,
     };
     const game: GameMultiSelectGame = { id: "99", name: "Unlisted Game" };
@@ -184,7 +185,7 @@ describe("editor field seam", () => {
   it("closes game results on Escape from the input or an option and when focus leaves the picker", async () => {
     const messages: GameMultiSelectMessages = {
       label: "Games", hint: "h", search: "s", searchHint: "sh", loading: "l", empty: "e", error: "x",
-      suggestions: "Suggestions", allGames: "All games", selectedCount: (count, maximum) => `${String(count)} of ${String(maximum)}`,
+      suggestions: "Suggestions", allGames: "All games", limitReached: "You can select up to 10 games.", selectedCount: (count, maximum) => `${String(count)} of ${String(maximum)}`,
       remove: (name) => `Remove ${name}`,
     };
     const searchGames = vi.fn().mockResolvedValue([{ id: "1", name: "Example Game" }]);

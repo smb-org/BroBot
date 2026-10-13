@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactElement } from "react";
 
-import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { runModuleQueryWrite, useChannelSettings, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { templateTextLength } from "../../../contracts/template-text-length";
 import { formatTimestamp } from "../../../dashboard/locale";
 import { Button, ChatTargetField, ChatPreview, ConfirmDialog, Dialog, Field, FormDialog, InspectorSection, LoadState, LoadStateLines, Select, SwitchRow, SwitchSection, TemplateTextField, UnitInput, notify } from "../../../dashboard/ui";
@@ -145,6 +145,7 @@ export default function TimersPanel(properties: ModulePanelProperties): ReactEle
 
 function TimersPanelContent({ channelId, language, canManage = true, canOperate = true }: ModulePanelProperties): ReactElement {
   const labels = timersTexts(language);
+  const channelSettings = useChannelSettings(channelId);
   const queryClient = useDashboardQueryClient();
   const query = useModuleQuery(channelId, "timers", "panel", (signal) => loadTimersPanel(channelId, signal));
   const data = query.data;
@@ -315,7 +316,8 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
           <ChatTargetField
             label={labels.chatTarget}
             value={draft.chatTarget}
-            allowed={["all_chats", "source_only"]}
+            {...(channelSettings.data === undefined ? {} : { effectiveDefault: channelSettings.data.defaultChatTarget })}
+            allowed={["all_chats", "source_only", "channel_default"]}
             disabled={pending}
             onChange={(chatTarget) => { if (chatTarget !== "where_asked") patchDraft({ chatTarget }); }}
           />

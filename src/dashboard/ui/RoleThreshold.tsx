@@ -36,6 +36,6 @@ export function RoleThreshold({ label, value, onChange, options, disabled = fals
       disabled={disabled || lockedReason !== undefined}
       {...(lockedReason === undefined ? {} : { describedBy: reasonId })}
     />
-    <LockedReason id={reasonId} {...(lockedReason === undefined ? {} : { reason: lockedReason })} />
+    {lockedReason === undefined ? null : <LockedReason id={reasonId} reason={lockedReason} />}
   </div>;
 }

@@ -304,7 +304,7 @@ describe("Module panel loader", () => {
   });
 
   it("shows the mandatory module detail as always active without a switch", () => {
-    renderWithMantine(<ModulePage
+    render(<ModulePage
       channelId="kanal-a"
       moduleId="channel_events"
       ownRole="manager"
@@ -585,7 +585,7 @@ describe("Module panel loader", () => {
   });
 
   it("shows the operator the disabled detail switch with a reason", () => {
-    render(<ModulePage
+    renderWithMantine(<ModulePage
       channelId="kanal-a"
       moduleId="aktiv"
       ownRole="operator"
@@ -604,7 +604,7 @@ describe("Module panel loader", () => {
   });
 
   it("shows the module icon in the detail header; the breadcrumb lives in the top bar", () => {
-    render(<ModulePage
+    renderWithMantine(<ModulePage
       channelId="kanal-a"
       moduleId="aktiv"
       ownRole="manager"

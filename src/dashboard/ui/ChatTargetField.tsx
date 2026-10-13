@@ -1,3 +1,5 @@
+import { Radio } from "@base-ui/react/radio";
+import { RadioGroup } from "@base-ui/react/radio-group";
 import { MessageCircle } from "lucide-react";
 import { useId, useState, type ReactElement } from "react";
 
@@ -18,13 +20,14 @@ export interface ChatTargetFieldProps {
   value: ChatOutputTarget | null;
   onChange: (value: ChatOutputTarget | null) => void;
   allowed?: readonly ChatTargetChoice[];
+  effectiveDefault?: ChatOutputTarget;
   disabled?: boolean;
   error?: string;
   reserveError?: boolean;
 }
 
 /** Shared portal-backed destination picker for messages sent to chat. */
-export function ChatTargetField({ label, value, onChange, allowed = DEFAULT_ALLOWED, disabled = false, error, reserveError = false }: ChatTargetFieldProps): ReactElement {
+export function ChatTargetField({ label, value, onChange, allowed = DEFAULT_ALLOWED, effectiveDefault, disabled = false, error, reserveError = false }: ChatTargetFieldProps): ReactElement {
   const id = useId();
   const [open, setOpen] = useState(false);
   const texts = chatTargetFieldTexts[dashboardLanguage()];
@@ -35,12 +38,17 @@ export function ChatTargetField({ label, value, onChange, allowed = DEFAULT_ALLO
   const isSelected = (target: ChatTargetChoice): boolean => value === null
     ? allowed.includes("channel_default") ? target === "channel_default" : target === "source_only"
     : value === target;
-  const labelFor = (target: ChatTargetChoice): string => target === "all_chats"
+  const concreteLabelFor = (target: ChatOutputTarget): string => target === "all_chats"
     ? texts.allChats
-    : target === "source_only" ? texts.onlyOurChat : target === "where_asked" ? texts.automatic : texts.channelDefault;
-  const descriptionFor = (target: ChatTargetChoice): string => target === "all_chats"
+    : target === "source_only" ? texts.onlyOurChat : texts.automatic;
+  const labelFor = (target: ChatTargetChoice): string => target === "channel_default"
+    ? texts.channelDefault(effectiveDefault === undefined ? undefined : concreteLabelFor(effectiveDefault))
+    : concreteLabelFor(target);
+  const descriptionFor = (target: ChatTargetChoice): string => target === "channel_default"
+    ? texts.channelDefaultDescription(effectiveDefault === undefined ? undefined : concreteLabelFor(effectiveDefault))
+    : target === "all_chats"
     ? texts.allChatsDescription
-    : target === "source_only" ? texts.onlyOurChatDescription : target === "where_asked" ? texts.automaticDescription : texts.channelDefaultDescription;
+    : target === "source_only" ? texts.onlyOurChatDescription : texts.automaticDescription;
 
   return (
     <InspectorFieldRow label={label} help={texts.sharedChatInfo}>
@@ -62,24 +70,29 @@ export function ChatTargetField({ label, value, onChange, allowed = DEFAULT_ALLO
           </PopoverPrimitive.Trigger>
           <PopoverContent role="dialog" aria-label={label} className="ui-chat-target-field__popover" initialFocus={false}>
             <div className="ui-chat-target-field__title">{label}</div>
-            <div className="ui-chat-target-field__options" role="radiogroup" aria-label={label}>
+            <RadioGroup
+              className="ui-chat-target-field__options"
+              aria-label={label}
+              value={selected}
+              onValueChange={(target: ChatTargetChoice) => {
+                onChange(target === "channel_default" ? null : target);
+                setOpen(false);
+              }}
+            >
               {options.map((target) => (
-                <button
+                <Radio.Root
                   className={`ui-chat-target-field__option${isSelected(target) ? " is-selected" : ""}`}
                   key={target}
-                  type="button"
-                  role="radio"
-                  aria-checked={isSelected(target)}
-                  onClick={() => { onChange(target === "channel_default" ? null : target); setOpen(false); }}
+                  value={target}
                 >
                   <span className="ui-chat-target-field__option-copy">
                     <strong>{labelFor(target)}</strong>
                     <small>{descriptionFor(target)}</small>
                   </span>
-                  <span aria-hidden="true" className="ui-chat-target-field__radio" />
-                </button>
+                  <span aria-hidden="true" className="ui-chat-target-field__radio"><Radio.Indicator className="ui-chat-target-field__radio-indicator" /></span>
+                </Radio.Root>
               ))}
-            </div>
+            </RadioGroup>
           </PopoverContent>
           {reserveError || error !== undefined ? <FieldError id={`${id}-error`} className="ui-field__error" message={error} /> : null}
         </div>

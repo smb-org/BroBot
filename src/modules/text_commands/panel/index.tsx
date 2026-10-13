@@ -18,11 +18,12 @@ import { statusForTier, validCommandName } from "../domain";
 import { invalidTemplateParameters, renderTemplate, templateVariableNames, unknownTemplateVariables, worstCaseTemplateLength, type PanelTemplateWarning, type TemplateVariable } from "../contract";
 import { effectivePanelTemplateVariables, panelTemplateOptions, registeredModuleTemplateGroup } from "../../../dashboard/ui";
 import { createTextCommand, deleteTextCommand, loadTextCommandData, loadRegisteredTemplateVariables, lookupTextGames, saveTextCommand, searchTextGames, textBlockNamesForPicker, toggleTextCommand, type TextCommandChannelVariable } from "./service";
-import { moduleQueryKey, refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { moduleQueryKey, refetchModuleQueryData, runModuleQueryWrite, useChannelSettings, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import type { TextCommandPanelData } from "./service";
 import { textCommandsTexts } from "./locale";
 import { convertLeadingSlashCommand, parseLeadingSlashCommand, SLASH_COMMAND_NAMES } from "./slash-command";
 import { templateTextLength } from "../../../contracts/template-text-length";
+import type { ChatOutputTarget } from "../../../contracts/values";
 
 const normalizeCommandName = (name: string): string => name.trim().replace(/^!/u, "").toLowerCase();
 
@@ -215,6 +216,7 @@ const TextCommandRow = ({ initial, language, selected, onSelect, rowRef, toggleB
 
 interface TextCommandEditorProperties {
   channelId: string;
+  channelDefaultChatTarget?: ChatOutputTarget;
   language?: DashboardLanguage | undefined;
   initial: CommandDraft;
   command: TextCommand | null;
@@ -237,7 +239,7 @@ interface TextCommandEditorProperties {
   onDeleted: (token: number) => void;
 }
 
-const TextCommandEditor = ({ channelId, language, initial, command, commands, channelVariables, canManageContent, botIsModerator, onClose, onGuardChange, onRefresh, onSaved, generation, onWrite, onDeleted }: TextCommandEditorProperties): ReactElement => {
+const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, initial, command, commands, channelVariables, canManageContent, botIsModerator, onClose, onGuardChange, onRefresh, onSaved, generation, onWrite, onDeleted }: TextCommandEditorProperties): ReactElement => {
   const labels = useMemo(() => textCommandsTexts(language), [language]);
   const searchGames = useCallback((query: string) => searchTextGames(channelId, query), [channelId]);
   const lookupGames = useCallback((ids: readonly string[]) => lookupTextGames(channelId, ids), [channelId]);
@@ -545,6 +547,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const chatTargetEditor = <ChatTargetField
     label={labels.chatTarget}
     value={draft.chatTarget}
+    {...(channelDefaultChatTarget === undefined ? {} : { effectiveDefault: channelDefaultChatTarget })}
     allowed={["all_chats", "source_only", "channel_default", "where_asked"]}
     disabled={!canManageContent || pending}
     onChange={(chatTarget) => { setDraftField("chatTarget", chatTarget); }}
@@ -1116,6 +1119,7 @@ const TextCommandsPanelContent = ({
   const labels = textCommandsTexts(language);
   const resolvedLanguage = language ?? dashboardLanguage();
   const common = dashboardCommonTexts(resolvedLanguage);
+  const channelSettings = useChannelSettings(channelId);
   const queryClient = useDashboardQueryClient();
   const commandsQuery = useModuleQuery(channelId, "text_commands", "commands", (signal) => loadTextCommandData(channelId, signal));
   const refetchCommands = commandsQuery.refetch;
@@ -1273,6 +1277,7 @@ const TextCommandsPanelContent = ({
   const inspector = selected !== null ? <TextCommandEditor
     key={selected.name}
     channelId={channelId}
+    {...(channelSettings.data === undefined ? {} : { channelDefaultChatTarget: channelSettings.data.defaultChatTarget })}
     language={language}
     initial={draftFromCommand(selected)}
     command={selected}
@@ -1290,6 +1295,7 @@ const TextCommandsPanelContent = ({
   /> : createOpen ? <TextCommandEditor
     key="create"
     channelId={channelId}
+    {...(channelSettings.data === undefined ? {} : { channelDefaultChatTarget: channelSettings.data.defaultChatTarget })}
     language={language}
     initial={newCommandDraft()}
     command={null}

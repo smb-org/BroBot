@@ -13,6 +13,26 @@ afterEach(() => {
 });
 
 describe("Timers panel", () => {
+  it("offers the channel-default inheritance option when creating a timer", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>((input) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/timers")) return Promise.resolve(jsonResponse({ timers: [] }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({
+        timeZone: "UTC", revision: 1, location: null, locationRevision: 1,
+        defaultChatTarget: "all_chats", defaultChatTargetRevision: 1,
+      }));
+      if (url.pathname.endsWith("/event-time-sources")) return Promise.resolve(jsonResponse({ sources: [] }));
+      if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+
+    renderWithQuery(<UiProvider><TimersPanel channelId="channel-a" language="en" /></UiProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Create timer" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Chat target" }));
+
+    expect(await screen.findByRole("radio", { name: /Kanaleinstellung verwenden \(Alle Chats\)|Use channel default \(All chats\)/u, hidden: true })).toBeInTheDocument();
+  });
+
   it("keeps a reserved list area when no timers are configured", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>((input) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
@@ -35,6 +55,10 @@ describe("Timers panel", () => {
         trigger: { type: "interval", minutes: 30 }, revision: 1, nextRunAt: null, nextRunStreamId: null,
         lastRunAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
       }] }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({
+        timeZone: "UTC", revision: 1, location: null, locationRevision: 1,
+        defaultChatTarget: "source_only", defaultChatTargetRevision: 1,
+      }));
       if (url.pathname.endsWith("/event-time-sources")) return Promise.resolve(jsonResponse({ sources: [] }));
       if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
       return Promise.resolve(jsonResponse({}, 404));
@@ -47,13 +71,13 @@ describe("Timers panel", () => {
       { gcTime: 600_000, staleTime: 600_000 },
     );
     expect(await screen.findByText("Greeting timer")).toBeInTheDocument();
-    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher).toHaveBeenCalledTimes(4);
 
     view.rerender(<UiProvider>{null}</UiProvider>);
     view.rerender(<UiProvider><TimersPanel channelId="channel-a" language="en" /></UiProvider>);
 
     expect(screen.getByText("Greeting timer")).toBeInTheDocument();
-    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher).toHaveBeenCalledTimes(4);
   });
 
   it("keeps a committed timer revision when the post-save refresh fails and offers retry", async () => {

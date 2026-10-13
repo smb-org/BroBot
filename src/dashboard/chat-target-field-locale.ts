@@ -8,8 +8,8 @@ interface ChatTargetFieldTexts {
   onlyOurChatDescription: string;
   automatic: string;
   automaticDescription: string;
-  channelDefault: string;
-  channelDefaultDescription: string;
+  channelDefault: (effectiveTarget?: string) => string;
+  channelDefaultDescription: (effectiveTarget?: string) => string;
   change: string;
 }
 
@@ -22,8 +22,10 @@ export const chatTargetFieldTexts: LocaleCatalog<ChatTargetFieldTexts> = {
     onlyOurChatDescription: "Nur in unserem Chat",
     automatic: "Automatisch",
     automaticDescription: "Fragen aus unserem Chat: nur hier. Fragen aus Partnerchats: in allen Chats.",
-    channelDefault: "Kanaleinstellung verwenden",
-    channelDefaultDescription: "Das kanalweite Standard-Chat-Ziel verwenden.",
+    channelDefault: (effectiveTarget) => effectiveTarget === undefined ? "Kanaleinstellung verwenden" : `Kanaleinstellung verwenden (${effectiveTarget})`,
+    channelDefaultDescription: (effectiveTarget) => effectiveTarget === undefined
+      ? "Das kanalweite Standard-Chat-Ziel verwenden."
+      : `Das kanalweite Standard-Chat-Ziel verwenden. Aktuell: ${effectiveTarget}.`,
     change: "ändern",
   },
   en: {
@@ -34,8 +36,10 @@ export const chatTargetFieldTexts: LocaleCatalog<ChatTargetFieldTexts> = {
     onlyOurChatDescription: "Only in our chat",
     automatic: "Automatic",
     automaticDescription: "Questions from our chat: here only. Questions from partner chats: in all chats.",
-    channelDefault: "Use channel default",
-    channelDefaultDescription: "Use the channel-wide default chat target.",
+    channelDefault: (effectiveTarget) => effectiveTarget === undefined ? "Use channel default" : `Use channel default (${effectiveTarget})`,
+    channelDefaultDescription: (effectiveTarget) => effectiveTarget === undefined
+      ? "Use the channel-wide default chat target."
+      : `Use the channel-wide default chat target. Current value: ${effectiveTarget}.`,
     change: "change",
   },
 };

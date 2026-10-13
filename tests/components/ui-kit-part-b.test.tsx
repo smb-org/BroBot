@@ -15,6 +15,7 @@ const messages: GameMultiSelectMessages = {
   error: "Spiele konnten nicht geladen werden.",
   suggestions: "Vorschläge",
   allGames: "Alle Spiele",
+  limitReached: "Du kannst höchstens 10 Spiele auswählen.",
   selectedCount: (count, maximum) => `${String(count)} von ${String(maximum)}`,
   remove: (name) => `${name} entfernen`,
 };
@@ -46,13 +47,44 @@ describe("Part B shared UI", () => {
 
   it("shows channel default only when allowed and maps it to null", () => {
     const onChange = vi.fn();
-    renderUi(<ChatTargetField label="Chat-Ziel" value={null} onChange={onChange} allowed={["all_chats", "channel_default"]} />);
+    renderUi(<ChatTargetField label="Chat-Ziel" value="all_chats" onChange={onChange} allowed={["all_chats", "source_only", "channel_default", "where_asked"]} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Chat-Ziel" }));
     const channelDefault = screen.getByRole("radio", { name: /Kanaleinstellung verwenden/u, hidden: true });
-    expect(channelDefault).toHaveAttribute("aria-checked", "true");
+    expect(channelDefault).toHaveAttribute("aria-checked", "false");
     fireEvent.click(channelDefault);
     expect(onChange).toHaveBeenCalledWith(null);
+  });
+
+  it("keeps one tab stop in a radio group that supports inheritance", async () => {
+    const onChange = vi.fn();
+    renderUi(<ChatTargetField label="Chat-Ziel" value={null} onChange={onChange} allowed={["all_chats", "source_only", "channel_default", "where_asked"]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat-Ziel" }));
+    const selected = await screen.findByRole("radio", { name: /Kanaleinstellung verwenden/u, hidden: true });
+    expect(selected).toHaveAttribute("tabindex", "0");
+    expect(screen.getByRole("radio", { name: /Nur unser Chat/u, hidden: true })).toHaveAttribute("tabindex", "-1");
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("labels inheritance with the effective channel default when available", () => {
+    renderUi(<ChatTargetField
+      label="Chat-Ziel"
+      value={null}
+      onChange={() => undefined}
+      allowed={["all_chats", "source_only", "channel_default"]}
+      effectiveDefault="source_only"
+    />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat-Ziel" }));
+    expect(screen.getByRole("radio", { name: /Kanaleinstellung verwenden \(Nur unser Chat\)/u, hidden: true })).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("does not offer inheritance unless the caller declares backend support", () => {
+    renderUi(<ChatTargetField label="Chat-Ziel" value="source_only" onChange={() => undefined} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat-Ziel" }));
+    expect(screen.queryByRole("radio", { name: /Kanaleinstellung verwenden/u, hidden: true })).not.toBeInTheDocument();
   });
 
   it("requests empty-query suggestions before typing and refuses an eleventh game", async () => {
@@ -75,6 +107,8 @@ describe("Part B shared UI", () => {
     fireEvent.click(tenthOption);
 
     expect(await screen.findByText("10 von 10")).toBeInTheDocument();
+    expect(screen.getByText(messages.limitReached)).toBeInTheDocument();
+    expect(document.querySelector(".ui-game-multi-select__cover-placeholder svg")).toBeInTheDocument();
     const eleventhOption = screen.getByRole("option", { name: "Game Eleven", hidden: true });
     expect(eleventhOption).toBeDisabled();
     fireEvent.click(eleventhOption);
