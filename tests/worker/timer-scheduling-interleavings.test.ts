@@ -513,6 +513,42 @@ describe("timer scheduling interleavings through the channel Durable Object", ()
       expect(await run(false)).toEqual([]);
     });
 
+    // An interval claim of the same stream must never suppress a stream_start announcement.
+    for (const duringRollout of [true, false]) {
+      it(`ignores an interval claim of the same stream (rollout=${String(duringRollout)})`, async () => {
+        vi.useFakeTimers();
+        const start = Date.parse("2026-10-12T12:00:00.000Z");
+        vi.setSystemTime(start + 5 * 60_000);
+        const harness = channelObjectFor(onlineStream("stream-1", 4, start));
+        const config = timerConfig("interval-then-start", { type: "stream_start", minutes: 5 });
+        harness.setDatabaseConfig(config);
+        const state = stateOf(harness.values);
+        state.initialized = !duringRollout;
+        harness.values.set(TIMER_DURABLE_STATE_KEY, state);
+        harness.values.set("module_alarm:send_claims", {
+          [timerOccurrenceKey(config.id, start + 60_000, "stream-1")]: { status: "sent", at: start + 61_000 },
+        });
+        await harness.object.reconcileTimerSchedules("activation");
+        const storage = (harness.object as unknown as { ctx: { storage: ClaimStorage } }).ctx.storage;
+        const posts: string[] = [];
+        const context = timerAlarmContext(async (_text, key) => {
+          const claimed = await claimModuleAlarmSend(storage, key, Date.now());
+          if (claimed === true) posts.push(key);
+          return { sent: claimed === true, reason: null, retryable: false };
+        });
+        const current = duringRollout ? config : { ...config, revision: 2 };
+        if (!duringRollout) {
+          harness.setDatabaseConfig(current);
+          await harness.object.upsertTimerConfig(current);
+        }
+        const due = dueOccurrence(harness.values, config.id);
+        expect(due.identity.deadline).toBe(start + 5 * 60_000);
+        await harness.object.runTimerOccurrence(context, `timer:${config.id}`, due.identity.deadline,
+          current.revision, due.identity, due.sequence);
+        expect(posts).toHaveLength(1);
+      });
+    }
+
     for (const suffixed of [false, true]) {
       for (const withAlarm of [false, true]) {
         it(`matches a legacy claim across timestamp precision (suffixed=${String(suffixed)}, alarm=${String(withAlarm)})`, async () => {

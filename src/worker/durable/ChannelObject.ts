@@ -159,6 +159,7 @@ const CHAT_ACTIVITY_COUNT_KEY = "channel:chat_activity_count";
 const TIMER_MIRROR_RETRY_DELAY_MS = 5_000;
 const TIMER_TOMBSTONE_RETENTION_MS = 24 * 60 * 60_000;
 const MODULE_ALARM_SEND_CLAIMS_KEY = "module_alarm:send_claims";
+const LEGACY_TIMER_CLAIMS_IMPORTED_KEY = "timers:legacy_claims_imported";
 
 const streamStartIdempotencyKey = (timerId: string, streamId: string): string =>
   `${timerId}:stream_start:${encodeURIComponent(streamId)}`;
@@ -844,6 +845,8 @@ export class ChannelObject extends DurableObject<Env> {
     streamId: string,
     triggerType?: string,
   ): "sending" | "sent" | null {
+    // One-time rollout step: once the first bootstrap finished, legacy keys are never consulted again.
+    if (this.ctx.storage.kv.get(LEGACY_TIMER_CLAIMS_IMPORTED_KEY) === true) return null;
     const targetKey = triggerType === "stream_start"
       ? streamStartIdempotencyKey(timerId, streamId)
       : timerOccurrenceKey(timerId, deadline, streamId);
@@ -854,13 +857,14 @@ export class ChannelObject extends DurableObject<Env> {
     const sourceKeys = [timerOccurrenceKey(timerId, deadline), timerOccurrenceKey(timerId, deadline, streamId)];
     if (triggerType === "stream_start") {
       // Helix may report the same stream's start with different sub-second digits than the
-      // legacy worker saw, so match by stream suffix or by a deadline within one second.
+      // legacy worker saw, so accept a deadline within one second; the stream suffix alone
+      // never qualifies (it would also match interval claims of the same stream).
       const prefix = `${timerId}:`;
       const suffix = encodeURIComponent(streamId);
       for (const key of Object.keys(saved)) {
         const match = key.startsWith(prefix) ? /^(\d+)(?::(.*))?$/.exec(key.slice(prefix.length)) : null;
         if (match === null || sourceKeys.includes(key)) continue;
-        if (match[2] === undefined ? Math.abs(Number(match[1]) - deadline) < 1000 : match[2] === suffix) sourceKeys.push(key);
+        if (Math.abs(Number(match[1]) - deadline) < 1000 && (match[2] === undefined || match[2] === suffix)) sourceKeys.push(key);
       }
     }
     for (const sourceKey of sourceKeys) {
@@ -1045,6 +1049,7 @@ export class ChannelObject extends DurableObject<Env> {
         changedTimerIds.push(config.id);
       }
       this.writeTimerDurableStateSync(state);
+      this.ctx.storage.kv.put(LEGACY_TIMER_CLAIMS_IMPORTED_KEY, true);
     });
     await Promise.all(changedTimerIds.map((timerId) => this.writeTimerMirror(timerId)));
     await this.scheduleEarliestAlarm();
@@ -1456,10 +1461,6 @@ export class ChannelObject extends DurableObject<Env> {
       const idempotencyKey = trigger.type === "stream_start" && streamId !== undefined
         ? streamStartIdempotencyKey(timerId, streamId)
         : timerOccurrenceKey(timerId, deadline, streamId);
-      // A legacy worker may already have posted this stream's announcement under its deadline key.
-      if (trigger.type === "stream_start" && streamId !== undefined) {
-        this.importLegacyTimerSendClaim(timerId, deadline, streamId, trigger.type);
-      }
       const result = await context.sendChat(
         rendered.text,
         idempotencyKey,
