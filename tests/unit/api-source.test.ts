@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { performance } from "node:perf_hooks";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ModuleEvent, ModuleRouteEnvironment, ModuleTemplateUsageSource } from "../../src/modules/contract";
+import type { ModuleEvent, ModuleRouteEnvironment } from "../../src/modules/contract";
 import { apiSourceFailureText } from "../../src/dashboard/locale";
 import { apiSourceModule } from "../../src/modules/api_source";
 import { fetchCachedApiSourceJson } from "../../src/modules/api_source/adapters/fetch-json";
@@ -26,7 +26,7 @@ import { createTextBlockTemplateValueProvider } from "../../src/modules/text_lib
 import { readPanelResourceRevisions } from "../../src/worker/panel-resources";
 import { prepareModuleAudit } from "../../src/worker/module-audit";
 import { insertChannel } from "./fixtures";
-import { TestD1Database } from "./test-d1";
+import { createReadInterleavingDatabase, TestD1Database } from "./test-d1";
 
 const CHANNEL_ID = "api-source-test-channel";
 const NOW = Date.parse("2026-09-28T12:00:00.000Z");
@@ -457,6 +457,18 @@ describe("API source deletion guard", () => {
     await insertSource(database, "sunset", "$.sunset");
     const now = new Date(NOW).toISOString();
     await database.prepare(
+      `INSERT INTO timers
+        (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, chat_target,
+         revision, next_run_at, next_run_stream_id, last_run_at, created_at, updated_at)
+       VALUES (?, ?, ?, 1, ?, 'interval', ?, 'source_only', 1, NULL, NULL, NULL, ?, ?)`,
+    ).bind("timer-sunset", CHANNEL_ID, "Evening timer", "Timer says {api.sunset}", JSON.stringify({ type: "interval", minutes: 10 }), now, now).run();
+    await database.prepare(
+      `INSERT INTO faq_entries
+        (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds,
+         games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at)
+       VALUES (?, ?, ?, 1, 'keywords', ?, ?, 30, '[]', 'source_only', 0, 1, NULL, ?, ?)`,
+    ).bind("faq-sunset", CHANNEL_ID, "Sunset FAQ", JSON.stringify({ type: "keywords", patterns: ["sunset"] }), "FAQ says {api.sunset}", now, now).run();
+    await database.prepare(
       `INSERT INTO text_library_categories (channel_id, category_id, catalog_key, custom_name, created_at, updated_at)
        VALUES (?, 'info', 'info', NULL, ?, ?)`,
     ).bind(CHANNEL_ID, now, now).run();
@@ -471,10 +483,6 @@ describe("API source deletion guard", () => {
 
     const app = new Hono<ModuleRouteEnvironment>();
     const actorId = "api-source-manager";
-    const templateSources: readonly ModuleTemplateUsageSource[] = [
-      { text: "Timer says {api.sunset}", kind: "timer", label: "Evening timer" },
-      { text: "FAQ says {api.sunset}", kind: "faq", label: "Sunset FAQ" },
-    ];
     app.use("*", async (context, next) => {
       context.set("channelRole", "manager");
       context.set("actor", { userId: actorId, sessionId: "api-source-session" });
@@ -482,7 +490,6 @@ describe("API source deletion guard", () => {
       context.set("prepareModuleAudit", (entry, changedAt) =>
         prepareModuleAudit(database as unknown as D1Database, actorId, changedAt, entry));
       context.set("publishOverlayHostEvent", () => Promise.resolve());
-      context.set("templateUsageSources", () => Promise.resolve(templateSources));
       await next();
     });
     app.route("/channels/:channelId", apiSourceRoutes);
@@ -505,6 +512,52 @@ describe("API source deletion guard", () => {
         { kind: "text_block", label: "sunset_info" },
         { kind: "text_block_condition", label: "sunset_info" },
     ]);
+    await expect(getApiSource(database as unknown as D1Database, CHANNEL_ID, "sunset")).resolves.not.toBeNull();
+  });
+
+  it("rejects a timer reference saved after the scan but before the atomic delete", async () => {
+    const database = await createDatabase();
+    await insertSource(database, "sunset", "$.sunset");
+    const now = new Date(NOW).toISOString();
+    await database.prepare(
+      `INSERT INTO timers
+        (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, chat_target,
+         revision, next_run_at, next_run_stream_id, last_run_at, created_at, updated_at)
+       VALUES (?, ?, ?, 1, '', 'interval', ?, 'source_only', 1, NULL, NULL, NULL, ?, ?)`,
+    ).bind("timer-sunset", CHANNEL_ID, "Evening timer", JSON.stringify({ type: "interval", minutes: 10 }), now, now).run();
+
+    const interleavedDatabase = createReadInterleavingDatabase(
+      database,
+      (sql) => sql.includes("api_source_references") && sql.includes("FROM timers"),
+      async () => {
+        await database.prepare("UPDATE timers SET message_text = ? WHERE channel_id = ? AND timer_id = ?")
+          .bind("Timer says {api.sunset}", CHANNEL_ID, "timer-sunset").run();
+      },
+    );
+    const actorId = "api-source-manager";
+    const app = new Hono<ModuleRouteEnvironment>();
+    app.use("*", async (context, next) => {
+      context.set("channelRole", "manager");
+      context.set("actor", { userId: actorId, sessionId: "api-source-session" });
+      context.set("authorizeManagementMutation", () => ({ sql: "AND 1 = 1", values: [] }));
+      context.set("prepareModuleAudit", (entry, changedAt) =>
+        prepareModuleAudit(database as unknown as D1Database, actorId, changedAt, entry));
+      context.set("publishOverlayHostEvent", () => Promise.resolve());
+      await next();
+    });
+    app.route("/channels/:channelId", apiSourceRoutes);
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/sources/sunset`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ revision: 1 }),
+    }), { DB: interleavedDatabase });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "api_source_in_use",
+      usages: [{ kind: "timer", label: "Evening timer" }],
+    });
     await expect(getApiSource(database as unknown as D1Database, CHANNEL_ID, "sunset")).resolves.not.toBeNull();
   });
 });

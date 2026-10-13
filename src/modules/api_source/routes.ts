@@ -2,8 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 
 import { canManage } from "../../contracts/values";
-import { templateVariableNames } from "../contract";
-import type { ModuleRouteEnvironment, ModuleTemplateUsageSource } from "../contract";
+import type { ModuleRouteEnvironment } from "../contract";
 import { API_SOURCE_MAXIMUMS, API_SOURCE_NAME_PATTERN } from "./contracts";
 import { getApiSource, listApiSources } from "./adapters/d1";
 import { inspectApiSourceExpression } from "./domain";
@@ -31,79 +30,94 @@ const safeHost = (url: string): string | null => {
 };
 
 type ApiSourceUsage = {
-  kind: ModuleTemplateUsageSource["kind"] | "text_block" | "text_block_condition";
+  kind: "command" | "faq" | "timer" | "overlay" | "event" | "text_block" | "text_block_condition";
   label: string;
 };
 
-const stringArrayFromJson = (serialized: string): string[] => {
-  try {
-    const parsed: unknown = JSON.parse(serialized);
-    return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : [];
-  } catch {
-    return [];
-  }
-};
+type ApiSourceReferenceRow = { kind: ApiSourceUsage["kind"]; label: string };
 
-const hasConditionReference = (serialized: string, conditionId: string): boolean => {
-  try {
-    const parsed: unknown = JSON.parse(serialized);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return false;
-    const data: unknown = Reflect.get(parsed, "data");
-    return typeof data === "object" && data !== null && !Array.isArray(data) && Object.hasOwn(data, conditionId);
-  } catch {
-    return false;
-  }
-};
+const apiVariableReferencePredicate = (column: string): string =>
+  `(instr(${column}, ?) > 0 OR instr(${column}, ?) > 0)`;
 
-const apiSourceUsages = async (
-  db: D1Database,
-  channelId: string,
-  name: string,
-  templateSources: readonly ModuleTemplateUsageSource[],
-): Promise<readonly ApiSourceUsage[]> => {
-  const variableName = `api.${name}`;
+export const apiSourceReferenceQuery = (channelId: string, name: string): { sql: string; values: readonly string[] } => {
+  const token = `{api.${name}}`;
+  const tokenWithArguments = `{api.${name} `;
   const conditionId = `api_source.${name}`;
+  const textPredicate = (column: string): string => apiVariableReferencePredicate(column);
+  const textValues = (): string[] => [token, tokenWithArguments];
+  const sites: { sql: string; values: string[] }[] = [
+    {
+      sql: `SELECT 1 AS site_order, 'timer' AS kind, COALESCE(timer.name, timer.timer_id) AS label
+              FROM timers AS timer
+             WHERE timer.channel_id = ? AND ${textPredicate("timer.message_text")}`,
+      values: [channelId, ...textValues()],
+    },
+    {
+      sql: `SELECT 2 AS site_order, 'faq' AS kind, COALESCE(faq.name, faq.faq_id) AS label
+              FROM faq_entries AS faq
+             WHERE faq.channel_id = ? AND ${textPredicate("faq.answer_text")}`,
+      values: [channelId, ...textValues()],
+    },
+    {
+      sql: `SELECT 3 AS site_order, 'command' AS kind, '!' || command.command_name AS label
+              FROM text_commands AS command
+             WHERE command.channel_id = ? AND (
+               ${textPredicate("command.response_text")} OR ${textPredicate("command.template_fields_json")} OR
+               ${textPredicate("command.timeout_fallback_text")} OR ${textPredicate("command.timeout_reason")})`,
+      values: [channelId, ...textValues(), ...textValues(), ...textValues(), ...textValues()],
+    },
+    {
+      sql: `SELECT 4 AS site_order, 'overlay' AS kind, COALESCE(NULLIF(element.label, ''), overlay.name) AS label
+              FROM overlay_elements AS element
+              JOIN overlays AS overlay ON overlay.channel_id = element.channel_id AND overlay.overlay_id = element.overlay_id
+             WHERE element.channel_id = ? AND (${textPredicate("element.text")} OR ${textPredicate("element.config_json")})`,
+      values: [channelId, ...textValues(), ...textValues()],
+    },
+    {
+      sql: `SELECT 5 AS site_order, 'text_block' AS kind, variant.block_name AS label
+              FROM text_block_variants AS variant
+             WHERE variant.channel_id = ? AND ${textPredicate("variant.texts_json")}`,
+      values: [channelId, ...textValues()],
+    },
+    {
+      sql: `SELECT 6 AS site_order, 'text_block_condition' AS kind, variant.block_name AS label
+              FROM text_block_variants AS variant
+             WHERE variant.channel_id = ? AND EXISTS (
+               SELECT 1 FROM json_each(
+                 CASE WHEN json_valid(variant.conditions_json) THEN variant.conditions_json ELSE '{}' END,
+                 '$.data'
+               ) AS condition
+               WHERE condition.key = ?
+             )`,
+      values: [channelId, conditionId],
+    },
+    {
+      sql: `SELECT 7 AS site_order, 'event' AS kind, module.module_id AS label
+              FROM channel_modules AS module
+             WHERE module.channel_id = ? AND ${textPredicate("module.settings")}`,
+      values: [channelId, ...textValues()],
+    },
+    {
+      sql: `SELECT 8 AS site_order, 'event' AS kind, 'chat_vote_templates.' || template.id AS label
+              FROM chat_vote_templates AS template
+             WHERE template.channel_id = ? AND (${textPredicate("template.title")} OR ${textPredicate("template.labels")})`,
+      values: [channelId, ...textValues(), ...textValues()],
+    },
+  ];
+
+  const sql = sites.map((site) => site.sql).join("\nUNION ALL\n");
+  const values = sites.flatMap((site) => site.values);
+  return { sql, values };
+};
+
+const apiSourceUsages = async (db: D1Database, channelId: string, name: string): Promise<readonly ApiSourceUsage[]> => {
+  const referenceQuery = apiSourceReferenceQuery(channelId, name);
+  const rows = await db.prepare(
+    `SELECT kind, label FROM (${referenceQuery.sql}) AS api_source_references
+      ORDER BY site_order, label`,
+  ).bind(...referenceQuery.values).all<ApiSourceReferenceRow>();
   const usages = new Map<string, ApiSourceUsage>();
-  const addUsage = (usage: ApiSourceUsage): void => {
-    usages.set(`${usage.kind}\u0000${usage.label}`, usage);
-  };
-  for (const source of templateSources) {
-    if (templateVariableNames(source.text).includes(variableName)) {
-      addUsage({ kind: source.kind, label: source.label });
-    }
-  }
-
-  const variants = await db.prepare(
-    `SELECT block_name, conditions_json, texts_json
-       FROM text_block_variants
-      WHERE channel_id = ? ORDER BY block_name, position`,
-  ).bind(channelId).all<{ block_name: string; conditions_json: string; texts_json: string }>();
-  for (const variant of variants.results) {
-    const label = variant.block_name;
-    if (stringArrayFromJson(variant.texts_json).some((text) => templateVariableNames(text).includes(variableName))) {
-      addUsage({ kind: "text_block", label });
-    }
-    if (hasConditionReference(variant.conditions_json, conditionId)) {
-      addUsage({ kind: "text_block_condition", label });
-    }
-  }
-
-  const [moduleSettings, chatVoteTemplates] = await Promise.all([
-    db.prepare("SELECT module_id, settings FROM channel_modules WHERE channel_id = ? ORDER BY module_id")
-      .bind(channelId).all<{ module_id: string; settings: string }>(),
-    db.prepare("SELECT id, title, labels FROM chat_vote_templates WHERE channel_id = ? ORDER BY id")
-      .bind(channelId).all<{ id: string; title: string; labels: string }>(),
-  ]);
-  for (const module of moduleSettings.results) {
-    if (templateVariableNames(module.settings).includes(variableName)) {
-      addUsage({ kind: "event", label: module.module_id });
-    }
-  }
-  for (const template of chatVoteTemplates.results) {
-    if (templateVariableNames(`${template.title} ${template.labels}`).includes(variableName)) {
-      addUsage({ kind: "event", label: `chat_vote_templates.${template.id}` });
-    }
-  }
+  for (const row of rows.results) usages.set(`${row.kind}\u0000${row.label}`, row);
   return [...usages.values()];
 };
 
@@ -221,18 +235,17 @@ apiSourceRoutes.delete("/sources/:name", async (context) => {
   const before = await getApiSource(context.env.DB, channelId, name);
   if (before === null) return context.json({ error: "api_source_not_found" }, 404);
   if (parsed.data.revision !== before.revision) return context.json({ error: "api_source_conflict" }, 409);
-  const usages = await apiSourceUsages(
-    context.env.DB,
-    channelId,
-    name,
-    await context.get("templateUsageSources")(channelId),
-  );
+  const usages = await apiSourceUsages(context.env.DB, channelId, name);
   if (usages.length > 0) return context.json({ error: "api_source_in_use", usages }, 409);
   const now = new Date().toISOString();
   const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
+  const referenceQuery = apiSourceReferenceQuery(channelId, name);
   const mutation = context.env.DB.prepare(
-    `DELETE FROM api_sources WHERE channel_id = ? AND source_name = ? AND revision = ? ${authorization.sql}`,
-  ).bind(channelId, name, before.revision, ...authorization.values);
+    `DELETE FROM api_sources
+      WHERE channel_id = ? AND source_name = ? AND revision = ?
+        AND NOT EXISTS (SELECT 1 FROM (${referenceQuery.sql}) AS api_source_references)
+        ${authorization.sql}`,
+  ).bind(channelId, name, before.revision, ...referenceQuery.values, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
     channelId,
     moduleId: "api_source",
@@ -241,7 +254,14 @@ apiSourceRoutes.delete("/sources/:name", async (context) => {
     after: null,
   }, now);
   const result = await context.env.DB.batch([mutation, audit]);
-  if ((result[0]?.meta.changes ?? 0) === 0) return context.json({ error: "api_source_conflict" }, 409);
+  if ((result[0]?.meta.changes ?? 0) === 0) {
+    if (await getApiSource(context.env.DB, channelId, name) === null) {
+      return context.json({ error: "api_source_not_found" }, 404);
+    }
+    const currentUsages = await apiSourceUsages(context.env.DB, channelId, name);
+    if (currentUsages.length > 0) return context.json({ error: "api_source_in_use", usages: currentUsages }, 409);
+    return context.json({ error: "api_source_conflict" }, 409);
+  }
   await context.get("publishOverlayHostEvent")(channelId, "template.data.changed");
   return context.json({ ok: true });
 });
