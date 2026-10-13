@@ -6,8 +6,8 @@ import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, 
 import { moduleName } from "../module-labels";
 import { ModuleCount, ModuleHeading } from "../module-panels";
 import { useRealtimeEventFeed, type RealtimeFeedState, type RealtimeFeedStatus as RealtimeFeedStatusValue } from "../realtime";
-import { DEFAULT_CHANNEL_TIME_ZONE } from "../../modules/contract";
 import { useChannelSettings } from "../data/channel-settings";
+import { browserTimeZone } from "../ui/format-relative-time";
 import { Icon } from "../ui/Icon";
 import { ChipGroup, DataTable, EmptyState, InspectorSection, ListDetail, ListToolbar, LoadState as UiLoadState, LoadStateLines, notify, Popover, Select as UiSelect, StatusLed, SubInspector, useInspectorSelection, type QueryError, type SelectOption, type StatusLedState } from "../ui";
 import { PanelApiError } from "../api";
@@ -287,7 +287,8 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
 }): ReactElement => {
   const query = useEventsQuery(channelId, filters);
   const settingsQuery = useChannelSettings(channelId);
-  const channelTimeZone = settingsQuery.data?.timeZone ?? DEFAULT_CHANNEL_TIME_ZONE;
+  const timeZoneFallback = settingsQuery.isError;
+  const channelTimeZone = timeZoneFallback ? browserTimeZone() : settingsQuery.data?.timeZone ?? null;
   const queryClient = useQueryClient();
   const queryKey = useMemo(() => dashboardDataKeys.events(channelId, filters), [channelId, filters]);
   const identityKey = JSON.stringify(queryKey);
@@ -317,6 +318,7 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
     identityKey={identityKey}
     channelId={channelId}
     channelTimeZone={channelTimeZone}
+    timeZoneFallback={timeZoneFallback}
     filters={filters}
     moduleOptions={moduleOptions}
     onFiltersChange={onFiltersChange}
@@ -337,7 +339,8 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
 interface EventsPageContentProperties {
   identityKey: string;
   channelId: string;
-  channelTimeZone: string;
+  channelTimeZone: string | null;
+  timeZoneFallback: boolean;
   entries: readonly PanelEventEntry[];
   pages: readonly PanelEventsResponse[];
   nextCursor: string | null;
@@ -398,6 +401,7 @@ const EventsPageContent = (properties: EventsPageContentProperties): ReactElemen
 const EventsPageFilterState = ({
   identityKey,
   channelTimeZone,
+  timeZoneFallback,
   entries,
   pages,
   readerAtTop,
@@ -542,6 +546,7 @@ const EventsPageFilterState = ({
                       moduleGroup: group.representative.moduleId,
                     }))}
                     timeZone={channelTimeZone}
+                    {...(timeZoneFallback ? { timeZoneFallbackLabel: texts.streamManager.browserTimeZoneFallback } : {})}
                     emptyLabel={texts.events.none}
                     selectedId={selectedGroupKey}
                     onSelect={selectGroup}
@@ -583,7 +588,6 @@ const EventsPageFilterState = ({
                       {
                         key: "module",
                         label: texts.events.module,
-                        width: "20%",
                         moduleGroup: true,
                         hideOnMobile: true,
                         render: (group) => {
@@ -595,7 +599,6 @@ const EventsPageFilterState = ({
                       {
                         key: "actor",
                         label: texts.events.who,
-                        width: "24%",
                         hideOnMobile: true,
                         render: (group) => {
                           const entry = group.representative;

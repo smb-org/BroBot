@@ -361,6 +361,7 @@ describe("Dashboard skeleton", () => {
   it("shows events with module, code, detail and actor", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     stubDashboardFetch((url) => {
+      if (url.pathname === "/api/channels/kanal-a/settings") return jsonResponse({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 1, defaultChatTarget: "source_only", defaultChatTargetRevision: 1 });
       if (url.pathname.endsWith("/events")) return jsonResponse({
         entries: [{
           eventId: "event-1",
@@ -440,7 +441,7 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByText(/"grund": "raid_erkannt"/)).toBeInTheDocument();
     const displayedTime = eventRow?.querySelector("td:first-child time");
     expect(displayedTime).toHaveTextContent("06:00");
-    expect(displayedTime).toHaveAttribute("title", "18.09.2026, 06:00");
+    expect(displayedTime).toHaveAttribute("title", "18.09.2026, 06:00:00 GMT+2");
   });
 
   it("renders one table with sticky day rows, newest day first", async () => {
@@ -467,6 +468,7 @@ describe("Dashboard skeleton", () => {
   it("shows the event chip pair with family, tier, number and time tooltip", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     stubDashboardFetch((url) => {
+      if (url.pathname === "/api/channels/kanal-a/settings") return jsonResponse({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 1, defaultChatTarget: "source_only", defaultChatTargetRevision: 1 });
       if (url.pathname.endsWith("/events")) return jsonResponse({
         entries: [
           { eventId: "gift", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.chat.community_gift", detail: '{"count":5}', actorUserId: null },
@@ -502,7 +504,7 @@ describe("Dashboard skeleton", () => {
     expect(unknownRow.querySelector(".event-label > .mono")).toHaveTextContent("plugin.anderes");
     const timeCell = giftRow.querySelector("td:first-child time");
     if (timeCell === null) throw new Error("Zeitspalte fehlt");
-    expect(timeCell.getAttribute("title")).toBe("18.09.2026, 06:00");
+    expect(timeCell.getAttribute("title")).toBe("18.09.2026, 06:00:00 GMT+2");
   });
 
   it("shows subscription tiers in the number chip as T1/T2/T3/Prime instead of raw, unknown values without a chip", async () => {

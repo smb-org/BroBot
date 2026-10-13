@@ -1064,6 +1064,7 @@ export interface DashboardTexts {
     feedAll: string;
     today: string;
     yesterday: string;
+    browserTimeZoneFallback: string;
   };
   channelControls: {
     muteName: string;
@@ -1392,6 +1393,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       feedAll: "Alle im Ereignisprotokoll",
       today: "Heute",
       yesterday: "Gestern",
+      browserTimeZoneFallback: "Browser-Zeitzone wird verwendet",
     },
     channelControls: {
       muteName: "Stummschaltung",
@@ -1704,6 +1706,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       feedAll: "View all in the event log",
       today: "Today",
       yesterday: "Yesterday",
+      browserTimeZoneFallback: "Using browser time zone",
     },
     channelControls: {
       muteName: "Mute",

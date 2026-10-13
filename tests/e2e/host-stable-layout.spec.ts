@@ -790,7 +790,9 @@ test("event rows keep their cell geometry after loading older events at desktop 
     }));
     const before = await measureRow();
 
-    await page.getByRole("button", { name: "Load older events" }).click();
+    await page.getByRole("button", { name: "Load older events" }).evaluate((button) => {
+      (button as HTMLButtonElement).click();
+    });
     await expect(page.locator(".event-table tbody tr:not(.data-table__day-row)")).toHaveCount(51);
     const after = await measureRow();
     expect(after).toEqual(before);

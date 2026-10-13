@@ -41,3 +41,28 @@ test("page kit stays within narrow viewports, uses shared collection widths, and
   await page.getByRole("button", { name: "Save" }).click();
   await expect(page.locator(".ui-save-bar__status")).toContainText("Saved.");
 });
+
+test("the mobile tool editor keeps its preview and save bar visible while the window scrolls", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/tests/e2e/page-kit-fixture.html?tool");
+  const preview = page.getByTestId("sticky-preview");
+  const saveBar = page.locator(".overlay-editor .ui-save-bar--persistent");
+  const field = page.getByTestId("tool-field");
+
+  await expect(preview).toBeVisible();
+  await expect(saveBar).toBeVisible();
+  await field.click();
+  await expect(field).toBeFocused();
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight)).toBe(true);
+  await page.evaluate(() => { window.scrollTo(0, 600); });
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  await expect.poll(async () => (await preview.boundingBox())?.y ?? 0).toBeGreaterThanOrEqual(56);
+  await expect.poll(async () => (await preview.boundingBox())?.y ?? 0).toBeLessThanOrEqual(72);
+
+  await page.evaluate(() => { window.scrollTo(0, document.documentElement.scrollHeight); });
+  await expect.poll(async () => {
+    const previewBox = await preview.boundingBox();
+    const saveBox = await saveBar.boundingBox();
+    return previewBox !== null && saveBox !== null && previewBox.y >= 56 && previewBox.y <= 72 && Math.abs(saveBox.y + saveBox.height - 844) <= 2;
+  }).toBe(true);
+});

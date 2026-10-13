@@ -3,8 +3,8 @@ import { useCallback, useEffect, useState, type ReactElement } from "react";
 import type { PanelAuditEntry, PanelAuditFilters } from "../../panel-contract";
 import { AUDIT_AREAS } from "../../contracts/values";
 import { apiErrorText, auditFieldLabel, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber } from "../locale";
-import { DEFAULT_CHANNEL_TIME_ZONE } from "../../modules/contract";
 import { useChannelSettings } from "../data/channel-settings";
+import { browserTimeZone } from "../ui/format-relative-time";
 import { ModuleHeading } from "../module-panels";
 import { loadModuleSettingsEditor } from "../module-panel-loaders";
 import { formatEventDetail } from "../events/model";
@@ -152,7 +152,8 @@ interface AuditPageProperties {
 export const AuditPage = ({ channelId, filters, onFiltersChange }: AuditPageProperties): ReactElement => {
   const query = useAuditQuery(channelId, filters);
   const settingsQuery = useChannelSettings(channelId);
-  const channelTimeZone = settingsQuery.data?.timeZone ?? DEFAULT_CHANNEL_TIME_ZONE;
+  const timeZoneFallback = settingsQuery.isError;
+  const channelTimeZone = timeZoneFallback ? browserTimeZone() : settingsQuery.data?.timeZone ?? null;
   const queryKey = dashboardDataKeys.audit(channelId, filters);
   const identityKey = JSON.stringify(queryKey);
   useEffect(() => {
@@ -170,6 +171,7 @@ export const AuditPage = ({ channelId, filters, onFiltersChange }: AuditPageProp
   return <AuditPageContent
     identityKey={identityKey}
     channelTimeZone={channelTimeZone}
+    timeZoneFallback={timeZoneFallback}
     entries={entries}
     nextCursor={query.isPlaceholderData ? null : nextCursor}
     filters={filters}
@@ -183,9 +185,10 @@ export const AuditPage = ({ channelId, filters, onFiltersChange }: AuditPageProp
   />;
 };
 
-const AuditPageContent = ({ identityKey, channelTimeZone, entries, nextCursor, filters, onFiltersChange, loading, fetching, error, onNextPage, onRetry, loadingNextPage }: {
+const AuditPageContent = ({ identityKey, channelTimeZone, timeZoneFallback, entries, nextCursor, filters, onFiltersChange, loading, fetching, error, onNextPage, onRetry, loadingNextPage }: {
   identityKey: string;
-  channelTimeZone: string;
+  channelTimeZone: string | null;
+  timeZoneFallback: boolean;
   entries: readonly PanelAuditEntry[];
   nextCursor: string | null;
   filters: PanelAuditFilters;
@@ -250,6 +253,7 @@ const AuditPageContent = ({ identityKey, channelTimeZone, entries, nextCursor, f
                     moduleGroup: entry.moduleId ?? auditAreaForAction(entry.action),
                   }))}
                   timeZone={channelTimeZone}
+                  {...(timeZoneFallback ? { timeZoneFallbackLabel: texts.streamManager.browserTimeZoneFallback } : {})}
                   emptyLabel={texts.audit.empty}
                   selectedId={selectedAuditId}
                   onSelect={selectAudit}

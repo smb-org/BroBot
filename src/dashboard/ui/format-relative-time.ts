@@ -4,6 +4,8 @@ export type RelativeTimeValue = Date | number | string;
 
 const asDate = (value: RelativeTimeValue): Date => value instanceof Date ? value : new Date(value);
 
+export const browserTimeZone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+
 const dateParts = (date: Date, timeZone: string): { day: number; month: number; year: number } => {
   const formatter = (zone: string): Intl.DateTimeFormat => new Intl.DateTimeFormat("en", {
     timeZone: zone,
@@ -68,8 +70,13 @@ export const formatRelativeTime = (
   }
 
   const exact = new Intl.DateTimeFormat(language, {
-    dateStyle: "medium",
-    timeStyle: "short",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "shortOffset",
     timeZone: effectiveTimeZone,
   }).format(date);
   const difference = date.getTime() - current.getTime();
