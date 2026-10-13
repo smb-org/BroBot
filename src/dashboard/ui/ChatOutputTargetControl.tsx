@@ -11,6 +11,8 @@ export interface ChatOutputTargetControlProps {
   includeWhereAsked?: boolean;
   allowChannelDefault?: boolean;
   disabled?: boolean;
+  /** Label above the select instead of beside it. */
+  stacked?: boolean;
 }
 
 /** Compact, shared target control for all settings that produce chat output. */
@@ -21,6 +23,7 @@ export function ChatOutputTargetControl({
   includeWhereAsked = false,
   allowChannelDefault = false,
   disabled = false,
+  stacked = false,
 }: ChatOutputTargetControlProps) {
   const texts = chatOutputTargetTexts[dashboardLanguage()];
   const options = [
@@ -32,7 +35,7 @@ export function ChatOutputTargetControl({
       : []),
   ];
   return (
-    <InspectorFieldRow label={label} help={texts.sharedChatInfo}>
+    <InspectorFieldRow label={label} help={texts.sharedChatInfo} {...(stacked ? { className: "inspector-field-row--stacked" } : {})}>
       <Select
         ariaLabel={label}
         value={value ?? (allowChannelDefault ? "channel_default" : "source_only")}

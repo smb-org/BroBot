@@ -1168,9 +1168,11 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
         />
       </section>
       <ImmediateActions channelId={overview.channelId} streamState={overview.streamState} canManage={canManage(overview.role)} modules={modules} modulesLoaded={modulesLoaded} />
-      <section className="content-section channel-overview-settings" aria-label={settingsTexts.defaultChatTarget}>
-        <div className="form-actions">
+      <section className="content-section channel-overview-settings" aria-label={settingsTexts.defaultChatTargetSection}>
+        <div className="section-heading"><h2>{settingsTexts.defaultChatTargetSection}</h2></div>
+        <div className="form-actions channel-overview-settings__row">
           <ChatOutputTargetControl
+            stacked
             label={settingsTexts.defaultChatTarget}
             value={defaultChatTargetDraft}
             onChange={changeDefaultChatTargetDraft}

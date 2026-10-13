@@ -30,6 +30,7 @@ export interface ChannelSettingsTexts {
   locationTimeZoneAction: string;
   locationTimeZoneSaved: string;
   locationTimeZoneSaveFailed: string;
+  defaultChatTargetSection: string;
   defaultChatTarget: string;
   defaultChatTargetHint: string;
   defaultChatTargetSave: string;
@@ -69,6 +70,7 @@ const texts: Readonly<Record<"de" | "en", ChannelSettingsTexts>> = {
     locationTimeZoneAction: "Zeitzone übernehmen",
     locationTimeZoneSaved: "Die Kanalzeitzone wurde aktualisiert.",
     locationTimeZoneSaveFailed: "Die Kanalzeitzone konnte nicht aktualisiert werden.",
+    defaultChatTargetSection: "Chat-Ausgabe",
     defaultChatTarget: "Standard-Chat-Ziel",
     defaultChatTargetHint: "Wird für Einträge verwendet, die kein eigenes Chat-Ziel festlegen.",
     defaultChatTargetSave: "Standard-Chat-Ziel speichern",
@@ -106,6 +108,7 @@ const texts: Readonly<Record<"de" | "en", ChannelSettingsTexts>> = {
     locationTimeZoneAction: "Apply time zone",
     locationTimeZoneSaved: "Channel time zone updated.",
     locationTimeZoneSaveFailed: "Channel time zone could not be updated.",
+    defaultChatTargetSection: "Chat output",
     defaultChatTarget: "Default chat target",
     defaultChatTargetHint: "Used by entries that do not set their own chat target.",
     defaultChatTargetSave: "Save default chat target",
