@@ -1,7 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { useState } from "react";
 
-import { ChipsInput, Field, FormDialog, GameMultiSelect, SaveBar, Select, TemplateTextField, UiProvider, UnitInput, type GameMultiSelectGame, type TemplateTextFieldMessages } from "../../src/dashboard/ui";
+import { ChipsInput, Field, FormDialog, GameMultiSelect, SaveStatus, Select, TemplateTextField, UiProvider, UnitInput, type GameMultiSelectGame, type TemplateTextFieldMessages } from "../../src/dashboard/ui";
 import "../../src/dashboard/ui/tokens.css";
 
 const templateMessages: TemplateTextFieldMessages = {
@@ -75,7 +75,7 @@ export function LayoutFixture() {
           <ChipsInput id="layout-tags" label="Aliases" hint="A short alias hint." values={tags} onChange={setTags} {...(showIssues ? { error: "A validation error that should remain on one line beside its marker and not cover the warning row." } : {})} {...(showIssues ? { warning: "A duplicate warning that should remain in its own one-line row." } : {})} removeLabel={(entry) => `Remove ${entry}`} listLabel="Alias list" messages={{ countLabel: (count, max) => `${String(count)}/${String(max)}`, atLimitHint: "At limit.", duplicateWarning: (entry) => `${entry} is duplicated.` }} />
           <TemplateTextField id="layout-template" label="Reply" hint="A short reply hint." value={showIssues ? "Hi {missing}" : "Hi there"} onChange={() => {}} {...errorProps} variables={[]} preview={(text) => previewLong ? `${text} ${"long preview ".repeat(30)}` : text} previewLabel="Preview" previewSpeaker="Bot" messages={templateMessages} />
         </div>
-        <SaveBar dirty={showIssues} pending={savePending} {...(showIssues ? { error: "The module settings are invalid." } : {})} persistent saveLabel="Save" discardLabel="Discard" savedLabel="Saved." pendingLabel="Saving settings …" onSave={() => {}} onDiscard={() => {}} />
+        <SaveStatus dirty={showIssues} pending={savePending} {...(showIssues ? { error: "The module settings are invalid." } : {})} persistent saveLabel="Save" discardLabel="Discard" savedLabel="Saved." pendingLabel="Saving settings …" onSave={() => {}} onDiscard={() => {}} />
       </main>
       <FormDialog opened={dialogOpen} title="Layout dialog" children={<button type="button" onClick={() => { setDialogError((current) => !current); }}>Toggle dialog error</button>} confirmLabel="Save" cancelLabel="Cancel" onConfirm={() => {}} onCancel={() => { setDialogOpen(false); }} {...(dialogError ? { error: "A dialog error. This explains the complete reason and the step needed to correct the request." } : {})} />
     </UiProvider>

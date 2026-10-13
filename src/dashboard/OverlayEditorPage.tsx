@@ -39,7 +39,7 @@ import { moduleName } from "./module-labels";
 import { OverlayElementPalette, type OverlayElementPaletteOption } from "./OverlayElementPalette";
 import { useChannelVariablesQuery, useOverlayQuery } from "./data/lists";
 import { queryKeys } from "./data/keys";
-import { Button, CodeField, ColorField, ConfirmDialog, Field, Icon, LoadState, UnitInput, PageHeader, SaveBar, Select, notify, type IconName, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
+import { Button, CodeField, ColorField, ConfirmDialog, Field, Icon, LoadState, UnitInput, ToolPage, SaveStatus, Select, notify, type IconName, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
 import "./overlay-editor.css";
 
 interface OverlayEditorPageProperties {
@@ -1087,8 +1087,8 @@ function OverlayEditorWorkspace({
 
   const rendererMarkup = <OverlayCanvas overlay={rendererOverlay} language={language} variables={liveVariables} elementId={null} />;
 
-  return <div className="overlay-editor">
-    <PageHeader kind="overlays" title={overlay.name} subtitle={labels.editorReference(draft.width, draft.height)} actions={<Button variant="neutral" disabled={saving} onClick={onBack}>{labels.editorBack}</Button>} />
+  return <ToolPage kind="overlays" title={overlay.name} subtitle={labels.editorReference(draft.width, draft.height)} actions={<Button variant="neutral" disabled={saving} onClick={onBack}>{labels.editorBack}</Button>}>
+    <div className="overlay-editor">
     <div className="overlay-editor__workspace">
       <section className="overlay-editor__elements" aria-label={labels.editorElements}>
         <div className="overlay-editor__section-heading">
@@ -1367,7 +1367,7 @@ function OverlayEditorWorkspace({
       </section>
     </div>
 
-    <SaveBar dirty={dirty} pending={saving} saved={saved} persistent
+    <SaveStatus dirty={dirty} pending={saving} saved={saved} persistent
       {...(error === undefined ? {} : { error })}
       invalid={!textIsValid || draft.css.length > 16_000}
       invalidMessage={textIsValid ? labels.editorStyleCssLimit : labels.editorTextHint}
@@ -1381,6 +1381,7 @@ function OverlayEditorWorkspace({
       {...(canManage ? {} : { saveDescribedBy: "overlay-editor-readonly-reason", saveTitle: labels.editorReadOnly })}
       onSave={() => { void save(); }} onDiscard={discard}
       saveLabel={labels.editorSave} discardLabel={labels.editorDiscard} savedLabel={labels.editorSaved} pendingLabel={labels.editorSaving} />
+    </div>
 
     <ConfirmDialog opened={navigationGuard.confirmOpen} title={labels.editorUnsavedTitle}
       description={navigationGuard.saveError ?? labels.editorUnsavedDescription}
@@ -1393,5 +1394,5 @@ function OverlayEditorWorkspace({
       onCancel={() => { setConflictAtRevision(null); setError(labels.editorConflictDescription); }}
       onConfirm={() => { if (conflictAtRevision !== null) void save(conflictAtRevision); }}
       alternative={{ label: labels.editorConflictReload, onClick: onReload }} pending={saving} />
-  </div>;
+  </ToolPage>;
 }

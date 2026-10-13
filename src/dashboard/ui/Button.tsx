@@ -15,7 +15,7 @@ interface ButtonBaseProps {
   describedBy?: string;
   ariaLabel?: string;
   ariaPressed?: boolean;
-  ariaHasPopup?: "menu";
+  ariaHasPopup?: "menu" | "dialog";
   ariaExpanded?: boolean;
   ariaControls?: string;
   onClick?: () => void;

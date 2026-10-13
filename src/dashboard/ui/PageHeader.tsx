@@ -1,26 +1,103 @@
-import type { ReactNode } from "react";
+import type { ReactElement, ReactNode } from "react";
 
+import { dashboardCommonTexts } from "../locale";
 import { NavigationIcon } from "./NavigationIcon";
+import { Icon } from "./Icon";
+import { Switch } from "./primitives/switch";
+import { HeaderActions } from "./HeaderActions";
+import type { SaveStatusProps } from "./SaveStatus";
 
-export interface PageHeaderProps {
-  kind: string;
+interface ModuleStatusSwitchProps {
   title: string;
-  subtitle: ReactNode;
-  actions?: ReactNode;
-  icon?: ReactNode;
+  active: boolean;
+  onToggle: (active: boolean) => void;
+  disabled?: boolean;
+  busy?: boolean;
 }
 
-export function PageHeader({ kind, title, subtitle, actions, icon }: PageHeaderProps) {
+function ModuleStatusSwitch({ title, active, onToggle, disabled = false, busy = false }: ModuleStatusSwitchProps): ReactElement {
+  const texts = dashboardCommonTexts();
+  return (
+    <div className={`module-status-switch${active ? " is-on" : ""}`}>
+      <Switch aria-label={title} aria-busy={busy} checked={active} disabled={disabled || busy} onCheckedChange={onToggle} />
+      <span>{active ? texts.activeModule : texts.pausedModule}</span>
+    </div>
+  );
+}
+
+export interface PageHeaderProps {
+  kind?: string;
+  title: string;
+  titleContent?: ReactNode;
+  subtitle?: ReactNode;
+  meta?: ReactNode;
+  icon?: ReactNode | null;
+  active?: boolean;
+  onToggle?: (active: boolean) => void;
+  switchDisabled?: boolean;
+  switchBusy?: boolean;
+  switchTitle?: string;
+  moduleSwitch?: ReactNode;
+  badge?: ReactNode;
+  badges?: ReactNode;
+  saveStatus?: ReactNode;
+  save?: SaveStatusProps;
+  actions?: ReactNode;
+  pageActions?: ReactNode;
+  overflow?: ReactNode;
+  lockHint?: string;
+}
+
+export function PageHeader({
+  kind = "module",
+  title,
+  titleContent,
+  subtitle,
+  meta,
+  icon,
+  active,
+  onToggle,
+  switchDisabled = false,
+  switchBusy = false,
+  switchTitle = title,
+  moduleSwitch,
+  badge,
+  badges,
+  saveStatus,
+  save,
+  actions,
+  pageActions,
+  overflow,
+  lockHint,
+}: PageHeaderProps): ReactElement {
+  const common = dashboardCommonTexts();
+  const switchControl = moduleSwitch ?? (active === undefined || onToggle === undefined
+    ? null
+    : <ModuleStatusSwitch title={switchTitle} active={active} onToggle={onToggle} disabled={switchDisabled} busy={switchBusy} />);
+  const headerActions = actions === undefined ? pageActions : pageActions === undefined ? actions : <>{actions}{pageActions}</>;
+  const headerMeta = lockHint === undefined ? meta : <>{meta}{meta === undefined ? null : " "}<span className="page-header__lock"><Icon name="lock" size={16} />{lockHint}</span></>;
+
   return (
     <header data-ui="" className="page-header module-detail-heading">
-      <div className="page-header__icon module-detail__icon module-detail-heading__icon" aria-hidden="true">
-        {icon ?? <NavigationIcon kind={kind} className="module-heading-glyph" />}
+      {icon === null ? null : <div className="page-header__icon module-detail__icon module-detail-heading__icon" aria-hidden="true">
+        {icon === undefined ? <NavigationIcon kind={kind} className="module-heading-glyph" /> : icon}
+      </div>}
+      <div className="page-header__main page-header__copy module-detail-heading__copy">
+        <div className="page-header__title-row">
+          <h1>{titleContent ?? title}</h1>
+          {switchControl === null ? null : <div className="page-header__module-switch module-detail__switch">{switchControl}</div>}
+          {(badges ?? badge) === undefined || (badges ?? badge) === null ? null : <div className="page-header__badges">{badges ?? badge}</div>}
+        </div>
+        {subtitle === undefined || subtitle === null || subtitle === "" ? null : <p>{subtitle}</p>}
+        {headerMeta === undefined || headerMeta === null || headerMeta === "" ? null : <div className="page-header__meta">{headerMeta}</div>}
       </div>
-      <div className="page-header__copy module-detail-heading__copy">
-        <h1>{title}</h1>
-        <p>{subtitle}</p>
-      </div>
-      {actions === undefined ? null : <div className="page-header__actions module-detail-heading__actions">{actions}</div>}
+      <HeaderActions
+        saveStatus={saveStatus}
+        {...(save === undefined ? {} : { save })}
+        {...(headerActions === undefined ? {} : { pageActions: headerActions })}
+        {...(overflow === undefined ? {} : { overflow })}
+        moreActionsLabel={common.moreActions}
+      />
     </header>
   );
 }

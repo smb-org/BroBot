@@ -5,7 +5,7 @@ import { dashboardCommonTexts } from "../locale";
 import { FormDensity } from "./FormDensity";
 import { Icon, type IconName } from "./Icon";
 import { InspectorHeading } from "./Inspector";
-import { SaveBar, type SaveBarProps } from "./SaveBar";
+import { SaveStatus, type SaveStatusProps } from "./SaveStatus";
 
 export interface EditorSection {
   id: string;
@@ -43,7 +43,7 @@ export interface EditorShellProps {
   /** Reveals interaction-gated errors before the editor handles a save attempt. */
   onInvalidSave?: () => void;
   warnings?: readonly string[];
-  warningStatusLabel?: SaveBarProps["warningStatusLabel"];
+  warningStatusLabel?: SaveStatusProps["warningStatusLabel"];
   conflict?: { message: string; reloadLabel: string; onReload: () => void };
   onSave: () => void;
   onDiscard: () => void;
@@ -412,7 +412,7 @@ export function EditorShell({
             )}
           </div>
         </form>
-        <SaveBar
+        <SaveStatus
           persistent
           dirty={dirty}
           pending={pending}

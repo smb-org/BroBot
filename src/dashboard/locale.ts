@@ -39,13 +39,19 @@ export interface DashboardCommonTexts {
   save: string;
   /** `EditorShell.discardLabel` -- reverts an editor draft to its last saved value. */
   discard: string;
-  /** `EditorShell.savedLabel` -- the save bar's clean-after-save status text. */
+  /** `EditorShell.savedLabel` -- the clean-after-save status text. */
   saved: string;
-  /** `EditorShell.pendingLabel` -- the save bar's in-flight status text. */
+  /** `EditorShell.pendingLabel` -- the in-flight status text. */
   saving: string;
   /** `EditorShell.issueLabels` -- appended to a tab's accessible name. */
   error: string;
   warning: string;
+  moreActions: string;
+  activeModule: string;
+  pausedModule: string;
+  chooseCollection: string;
+  editSelection: string;
+  noCollectionEntries: string;
   /** `Switch.hint` on an immediate-action switch (2, "Sofort gegen gespeichert"). */
   immediate: string;
   roles: Record<ChannelRole, string>;
@@ -76,6 +82,12 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
     saving: "Wird gespeichert …",
     error: "Fehler",
     warning: "Hinweis",
+    moreActions: "Weitere Aktionen",
+    activeModule: "Aktiv",
+    pausedModule: "Pausiert",
+    chooseCollection: "Eintrag auswählen",
+    editSelection: "Eintrag bearbeiten",
+    noCollectionEntries: "Noch keine Einträge vorhanden.",
     immediate: "wirkt sofort",
     roles: {
       broadcaster: "Broadcaster",
@@ -110,6 +122,12 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
     saving: "Saving …",
     error: "Error",
     warning: "Notice",
+    moreActions: "More actions",
+    activeModule: "Active",
+    pausedModule: "Paused",
+    chooseCollection: "Select an entry",
+    editSelection: "Edit entry",
+    noCollectionEntries: "No entries yet.",
     immediate: "takes effect immediately",
     roles: {
       broadcaster: "Broadcaster",
@@ -999,8 +1017,12 @@ export interface DashboardTexts {
     scopeMissing: string;
     scopeGranted: string;
     chatCommands: string;
+    chatCommandsButtonLabel: (count: string) => string;
     chatCommandArguments: string;
     chatCommandAvailableTo: string;
+    chatCommandCopy: string;
+    chatCommandCopied: string;
+    chatCommandCopyFailed: string;
     chatCommandThresholds: Record<ModuleChatCommandThreshold, string>;
   };
   /** Stream Manager: the immediate-action row and the warnings/errors feed
@@ -1317,8 +1339,12 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       scopeMissing: "Fehlt",
       scopeGranted: "Erteilt",
       chatCommands: "Chatbefehle",
+      chatCommandsButtonLabel: (count) => `Chatbefehle · ${count}`,
       chatCommandArguments: "Argumente",
       chatCommandAvailableTo: "Im Chat ausführbar für",
+      chatCommandCopy: "Kopieren",
+      chatCommandCopied: "Chatbefehl kopiert.",
+      chatCommandCopyFailed: "Chatbefehl konnte nicht kopiert werden.",
       chatCommandThresholds: {
         everyone: "alle",
         subscriber: "Abonnenten und höher",
@@ -1625,8 +1651,12 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       scopeMissing: "Missing",
       scopeGranted: "Granted",
       chatCommands: "Chat commands",
+      chatCommandsButtonLabel: (count) => `Chat commands · ${count}`,
       chatCommandArguments: "Arguments",
       chatCommandAvailableTo: "Available in chat to",
+      chatCommandCopy: "Copy",
+      chatCommandCopied: "Chat command copied.",
+      chatCommandCopyFailed: "Chat command could not be copied.",
       chatCommandThresholds: {
         everyone: "everyone",
         subscriber: "subscribers and higher",
