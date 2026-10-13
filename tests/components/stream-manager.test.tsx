@@ -273,8 +273,31 @@ describe("Stream Manager immediate actions", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /Werbung jetzt/ }));
 
-    await expectActionResult("Zum Starten einer Werbepause braucht der Bot die Berechtigung channel:edit:commercial. Autorisiere den Bot erneut und erteile diese Berechtigung.", "error");
+    await expectActionResult("Zum Starten einer Werbepause braucht Ads die Berechtigung channel:edit:commercial. Autorisiere Ads für diesen Kanal erneut und erteile diese Berechtigung.", "error");
     expect(screen.queryByText("Clip erstellt")).not.toBeInTheDocument();
+  });
+
+  it("shows a cooldown from the previous commercial retry_after response", async () => {
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (path === "/api/channels/kanal-a/modules/ads/commercial" && init?.method === "POST") {
+        return Promise.resolve(jsonResponse({
+          error: "commercial_start_failed",
+          reason: "commercial_cooldown",
+          detail: { commercialCooldownUntil: Date.now() + 8_000 },
+        }, 400));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    renderWithMantine(<ImmediateActions channelId="kanal-a" streamState="online" canManage modules={ADS_ENABLED} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Werbung jetzt/ }));
+
+    const result = await screen.findByTestId("immediate-action-result-slot");
+    expect(result.textContent).toMatch(/Abklingzeit|cooldown/i);
+    expect(result.textContent).toMatch(/\d+/);
   });
 
   it("shows the remaining Twitch wait after a rate-limited commercial start", async () => {
@@ -299,6 +322,48 @@ describe("Stream Manager immediate actions", () => {
     const result = await screen.findByTestId("immediate-action-result-slot");
     expect(result.textContent).toMatch(/Versuche es in \d+ Sekunden erneut\./);
     expect(toastsSnapshot()).toContainEqual(expect.objectContaining({ tone: "error", message: result.textContent }));
+  });
+
+  it("does not turn a server error's rate-limit reset header into a commercial wait", async () => {
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (path === "/api/channels/kanal-a/modules/ads/commercial" && init?.method === "POST") {
+        return Promise.resolve(jsonResponse({
+          error: "commercial_start_failed",
+          reason: "twitch_error",
+          detail: { retryAfter: Date.now() + 8_000 },
+        }, 500));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    renderWithMantine(<ImmediateActions channelId="kanal-a" streamState="online" canManage modules={ADS_ENABLED} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Werbung jetzt/ }));
+
+    const result = await screen.findByTestId("immediate-action-result-slot");
+    expect(result.textContent).toMatch(/konnte nicht gestartet werden|could not be started/i);
+    expect(result.textContent).not.toMatch(/\d+ Sekunden|\d+ seconds/i);
+  });
+
+  it("shows reauthorization instructions for an invalid Ads token, not missing-scope copy", async () => {
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (path === "/api/channels/kanal-a/modules/ads/commercial" && init?.method === "POST") {
+        return Promise.resolve(jsonResponse({ error: "commercial_start_failed", reason: "token_invalid" }, 401));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    renderWithMantine(<ImmediateActions channelId="kanal-a" streamState="online" canManage modules={ADS_ENABLED} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Werbung jetzt/ }));
+
+    const result = await screen.findByTestId("immediate-action-result-slot");
+    expect(result.textContent).toMatch(/Ads-App-Token.*automatischen Erneuerung|Ads app token.*automatic renewal/i);
+    expect(result.textContent).not.toMatch(/channel:edit:commercial/i);
   });
 
   it("sends a shoutout by login and reports success at the button", async () => {

@@ -145,7 +145,21 @@ describe("Ad settings editor declaration", () => {
     renderAds(fetcher);
 
     expect(await screen.findByRole("button", { name: /Snooze · 0 verfügbar/ })).toBeDisabled();
-    expect(screen.getByText(/autorisiere den bot erneut und erteile diese berechtigung/i)).toBeInTheDocument();
+    expect(screen.getByText(/autorisiere ads für diesen kanal erneut und erteile diese berechtigung/i)).toBeInTheDocument();
+  });
+
+  it("shows the remaining Twitch wait when snooze returns a rate-limit reset", async () => {
+    const retryAfter = Date.now() + 8_000;
+    const fetcher = adsFetch(undefined, schedule, () => jsonResponse({
+      error: "ad_snooze_failed",
+      reason: "rate_limited",
+      detail: { retryAfter },
+    }, 429));
+    renderAds(fetcher);
+    fireEvent.click(await screen.findByRole("button", { name: /Snooze · 2 verfügbar/ }));
+
+    await waitFor(() => expect(toastsSnapshot().some((toast) =>
+      toast.tone === "error" && /Versuche es in \d+ Sekunden erneut/u.test(toast.message))).toBe(true));
   });
 
   it("shows the remaining Twitch rate limit wait when the schedule request includes retryAfter", async () => {

@@ -82,6 +82,8 @@ const AdsPanel = ({ channelId, language = "de", canManage = false }: { channelId
           ? labels.snoozeReadOnly
           : adFailureReason(error) === "scope_missing"
             ? labels.snoozeScopeMissing
+            : adFailureReason(error) === "snoozes_exhausted"
+              ? labels.snoozeNone
             : rateLimitWaitMessage(error, labels) ?? labels.snoozeError,
       });
     } finally {

@@ -51,7 +51,13 @@ describe("broadcaster scope route", () => {
     const scopes = location.searchParams.get("scope")?.split(" ") ?? [];
 
     expect(response.status).toBe(302);
-    expect(scopes).toEqual(["user:read:moderated_channels", "channel:bot", "channel:read:ads"]);
+    expect(scopes).toEqual([
+      "user:read:moderated_channels",
+      "channel:bot",
+      "channel:read:ads",
+      "channel:manage:ads",
+      "channel:edit:commercial",
+    ]);
     await expect(database.prepare(
       "SELECT redirect_path FROM oauth_transactions",
     ).first()).resolves.toEqual({ redirect_path: "/channels/kanal-a/modules/ads" });

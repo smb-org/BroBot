@@ -1294,6 +1294,8 @@ export type HelixResult<Data = unknown> =
     body: Readonly<Record<string, unknown>>;
     /** Absolute Unix timestamp in milliseconds from Twitch's rate-limit headers. */
     retryAfter?: number | null;
+    /** Remaining points in the general API bucket, when Twitch provides the header. */
+    rateLimitRemaining?: number | null;
   };
 
 export type HelixRequest = <Data = unknown>(options: HelixRequestOptions<Data>) => Promise<HelixResult<Data>>;
@@ -1364,7 +1366,7 @@ export interface ModuleRouteVariables {
   measureServerTiming: <T>(phase: "auth" | "d1" | "do" | "helix", run: () => Promise<T>) => Promise<T>;
   recordServerTiming: (phase: "auth" | "d1" | "do" | "helix", durationMs: number) => void;
   scheduleBackgroundWork: (work: Promise<unknown>) => void;
-  getAppAccessToken: (environment: Env, now: string, fetcher?: typeof fetch) => Promise<string>;
+  getAppAccessToken: (environment: Env, now: string, fetcher?: typeof fetch, forceRefresh?: boolean) => Promise<string>;
   /** Thin Helix HTTP transport (issue #163); modules never talk to `api.twitch.tv` directly. */
   helixRequest: HelixRequest;
   liftModerationBan: (channelId: string, userId: string, expected: ModerationTimeoutExpectation) => Promise<ModerationResult>;

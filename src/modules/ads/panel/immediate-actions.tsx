@@ -4,7 +4,7 @@ import { PanelApiError } from "../../../contracts/panel-error";
 import { Button, Icon, SegmentChoice, notify } from "../../../dashboard/ui";
 import type { ModuleImmediateActionProperties } from "../contract";
 import { adsPanelTexts } from "./locale";
-import { adFailureReason, rateLimitWaitMessage } from "./errors";
+import { adFailureReason, commercialCooldownWaitMessage, rateLimitWaitMessage } from "./errors";
 import { startCommercialNow } from "./service";
 
 const AD_LENGTHS = ["30", "60", "90", "120", "150", "180"];
@@ -34,7 +34,11 @@ const AdNowAction = ({ channelId, canManage = false, availabilityReason }: Modul
           ? labels.immediateOffline
           : adFailureReason(error) === "scope_missing"
             ? labels.immediateScopeMissing
-            : rateLimitWaitMessage(error, labels) ?? labels.immediateFailed;
+            : adFailureReason(error) === "token_invalid"
+              ? labels.immediateTokenInvalid
+              : adFailureReason(error) === "commercial_cooldown"
+                ? commercialCooldownWaitMessage(error, labels) ?? labels.immediateFailed
+                : rateLimitWaitMessage(error, labels) ?? labels.immediateFailed;
       setResultMessage(message);
       notify({ tone: "error", message });
     } finally {

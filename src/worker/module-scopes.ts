@@ -51,6 +51,10 @@ export const listAllBroadcasterScopes = (): string[] => unique([
 const declaredScopes = (module: BotModule | undefined): string[] =>
   unique(module?.broadcasterScopes ?? []);
 
+/** Scopes a module knows about for optional operator actions. */
+export const moduleOptionalBroadcasterScopes = (module: BotModule): string[] =>
+  module.id === "ads" ? [...ADS_OPTIONAL_BROADCASTER_SCOPES] : [];
+
 const parseScopes = (serialized: string | null | undefined): string[] => {
   if (serialized === null || serialized === undefined) return [];
   try {
@@ -121,11 +125,8 @@ export const listRequiredBroadcasterScopesForUserAndModule = async (
   module: BotModule,
 ): Promise<string[]> => unique([
   ...declaredScopes(module),
+  ...moduleOptionalBroadcasterScopes(module),
   ...await listRequiredBroadcasterScopesForUser(db, userId),
 ]);
 
 export const moduleScopeRequirement = (module: BotModule): string[] => declaredScopes(module);
-
-/** Scopes a module knows about for optional operator actions. */
-export const moduleOptionalBroadcasterScopes = (module: BotModule): string[] =>
-  module.id === "ads" ? [...ADS_OPTIONAL_BROADCASTER_SCOPES] : [];

@@ -245,9 +245,10 @@ describe("ad routes", () => {
 
   it("keeps Twitch's own message under the API's message key on a failed snooze (issue #201 follow-up)", async () => {
     const environment = await setup("manager");
+    const resetAt = Math.ceil((Date.now() + 45_000) / 1000);
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(
       JSON.stringify({ message: "slow down" }),
-      { status: 429 },
+      { status: 429, headers: { "Ratelimit-Remaining": "0", "Ratelimit-Reset": String(resetAt) } },
     )));
 
     const response = await panelRouter.fetch(
@@ -265,6 +266,31 @@ describe("ad routes", () => {
     expect(body).toMatchObject({ error: "ad_snooze_failed", reason: "rate_limited" });
     expect(body.detail.message).toBe("slow down");
     expect(body.detail.twitchMessage).toBeUndefined();
+    expect(body.detail.retryAfter).toBeGreaterThan(Date.now());
+    expect(body.detail.retryAfter).toBeLessThanOrEqual(resetAt * 1000);
+  });
+
+  it("does not show the bucket reset as a snooze wait when Twitch says no snoozes remain", async () => {
+    const environment = await setup("manager");
+    const resetAt = Math.ceil((Date.now() + 45_000) / 1000);
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({ message: "No remaining snoozes" }),
+      { status: 429, headers: { "Ratelimit-Remaining": "499", "Ratelimit-Reset": String(resetAt) } },
+    )));
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/snooze", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(429);
+    const body = await response.json<{ error: string; reason: string; detail: Record<string, unknown> }>();
+    expect(body).toMatchObject({
+      error: "ad_snooze_failed",
+      reason: "snoozes_exhausted",
+      detail: { message: "No remaining snoozes" },
+    });
+    expect(body.detail.retryAfter).toBeUndefined();
   });
 
   it("reports Twitch authentication failures as snooze failures with diagnostics", async () => {
@@ -644,7 +670,7 @@ describe("start commercial", () => {
     const retryAfterSeconds = 45;
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(
       JSON.stringify({ message: "slow down" }),
-      { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } },
+      { status: 429, headers: { "Ratelimit-Remaining": "0", "Retry-After": String(retryAfterSeconds) } },
     )));
 
     const response = await panelRouter.fetch(
@@ -662,6 +688,261 @@ describe("start commercial", () => {
     expect(body.detail.twitchMessage).toBeUndefined();
     expect(body.detail.retryAfter).toBeGreaterThan(Date.now());
     expect(body.detail.retryAfter).toBeLessThanOrEqual(Date.now() + retryAfterSeconds * 1000);
+  });
+
+  it("does not use a commercial 429 reset without evidence the API bucket is exhausted", async () => {
+    const environment = await setup("manager");
+    const resetAt = Math.ceil((Date.now() + 11_000) / 1000);
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({ message: "The request could not be completed." }),
+      { status: 429, headers: { "Ratelimit-Remaining": "499", "Ratelimit-Reset": String(resetAt) } },
+    )));
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/commercial", "POST", { length: 90 }),
+      environment,
+    );
+
+    expect(response.status).toBe(429);
+    const body = await response.json<{ reason: string; detail: Record<string, unknown> }>();
+    expect(body.reason).toBe("rate_limited");
+    expect(body.detail.retryAfter).toBeUndefined();
+  });
+
+  it("uses the last successful commercial retry_after for a cooldown rejection", async () => {
+    const environment = await setup("manager");
+    const resetAt = Math.ceil((Date.now() + 11_000) / 1000);
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ data: [{ length: 90, message: "", retry_after: 480 }] }),
+        { status: 200 },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ message: "The broadcaster may not run another commercial until the cooldown period expires." }),
+        { status: 400, headers: { "Ratelimit-Reset": String(resetAt) } },
+      )));
+
+    const firstResponse = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/commercial", "POST", { length: 90 }),
+      environment,
+    );
+    expect(firstResponse.status).toBe(200);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/commercial", "POST", { length: 90 }),
+      environment,
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json<{ reason: string; detail: Record<string, unknown> }>();
+    expect(body.reason).toBe("commercial_cooldown");
+    expect(body.detail.commercialCooldownUntil).toBeGreaterThan(Date.now());
+    expect(body.detail.retryAfter).toBeUndefined();
+    expect(body.detail.commercialCooldownUntil).toBeLessThanOrEqual(Date.now() + 480_000);
+  });
+
+  it("uses the previous commercial retry_after when Twitch reports cooldown as 429", async () => {
+    const environment = await setup("manager");
+    const resetAt = Math.ceil((Date.now() + 11_000) / 1000);
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ data: [{ length: 90, message: "", retry_after: 480 }] }),
+        { status: 200 },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ message: "The broadcaster may not run another commercial until the cooldown period expires." }),
+        { status: 429, headers: { "Ratelimit-Reset": String(resetAt) } },
+      )));
+
+    const firstResponse = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/commercial", "POST", { length: 90 }),
+      environment,
+    );
+    expect(firstResponse.status).toBe(200);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/commercial", "POST", { length: 90 }),
+      environment,
+    );
+
+    expect(response.status).toBe(429);
+    const body = await response.json<{ reason: string; detail: Record<string, unknown> }>();
+    expect(body.reason).toBe("commercial_cooldown");
+    expect(body.detail.commercialCooldownUntil).toBeGreaterThan(Date.now());
+    expect(body.detail.retryAfter).toBeUndefined();
+    expect(body.detail.commercialCooldownUntil).toBeLessThanOrEqual(Date.now() + 480_000);
+  });
+
+  it("uses the previous cooldown when a commercial 429 leaves the general bucket available", async () => {
+    const environment = await setup("manager");
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ data: [{ length: 90, message: "", retry_after: 480 }] }),
+        { status: 200 },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ message: "Another ad break must wait until the commercial interval expires." }),
+        { status: 429, headers: { "Ratelimit-Remaining": "499", "Ratelimit-Reset": String(Math.ceil((Date.now() + 11_000) / 1000)) } },
+      )));
+
+    const firstResponse = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/commercial", "POST", { length: 90 }),
+      environment,
+    );
+    expect(firstResponse.status).toBe(200);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/commercial", "POST", { length: 90 }),
+      environment,
+    );
+
+    expect(response.status).toBe(429);
+    const body = await response.json<{ reason: string; detail: Record<string, unknown> }>();
+    expect(body.reason).toBe("commercial_cooldown");
+    expect(body.detail.commercialCooldownUntil).toBeGreaterThan(Date.now());
+    expect(body.detail.retryAfter).toBeUndefined();
+  });
+
+  it("does not treat an unrelated 400 as a commercial cooldown", async () => {
+    const environment = await setup("manager");
+    const resetAt = Math.ceil((Date.now() + 11_000) / 1000);
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ data: [{ length: 90, message: "", retry_after: 480 }] }),
+        { status: 200 },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ message: "The broadcaster ID is not valid." }),
+        { status: 400, headers: { "Ratelimit-Reset": String(resetAt) } },
+      )));
+
+    const firstResponse = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/commercial", "POST", { length: 90 }),
+      environment,
+    );
+    expect(firstResponse.status).toBe(200);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/commercial", "POST", { length: 90 }),
+      environment,
+    );
+
+    expect(response.status).toBe(502);
+    const body = await response.json<{ reason: string; detail: Record<string, unknown> }>();
+    expect(body.reason).toBe("twitch_error");
+    expect(body.detail.commercialCooldownUntil).toBeUndefined();
+    expect(body.detail.retryAfter).toBeUndefined();
+  });
+
+  it("does not expose a rate-limit deadline for a Twitch server error", async () => {
+    const environment = await setup("manager");
+    const resetAt = Math.ceil((Date.now() + 11_000) / 1000);
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({ message: "Internal Server Error" }),
+      { status: 500, headers: { "Ratelimit-Reset": String(resetAt) } },
+    )));
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/commercial", "POST", { length: 90 }),
+      environment,
+    );
+
+    expect(response.status).toBe(502);
+    const body = await response.json<{ detail: Record<string, unknown> }>();
+    expect(body.detail.retryAfter).toBeUndefined();
+  });
+
+  it("distinguishes a missing commercial scope from an invalid Twitch token", async () => {
+    const environment = await setup("manager");
+    const fetcher = vi.fn<typeof fetch>((input) => requestUrl(input) === "https://id.twitch.tv/oauth2/token"
+      ? Promise.resolve(new Response(JSON.stringify({ access_token: "refreshed-app-token", expires_in: 3600 }), { status: 200 }))
+      : Promise.resolve(new Response(JSON.stringify({ message: "Invalid OAuth token" }), { status: 401 })));
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/commercial", "POST", { length: 90 }),
+      environment,
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "commercial_start_failed",
+      reason: "token_invalid",
+      detail: { status: 401, message: "Invalid OAuth token" },
+    });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it("renews an invalid app token and retries the commercial request once", async () => {
+    const environment = await setup("manager");
+    let helixCalls = 0;
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      if (requestUrl(input) === "https://id.twitch.tv/oauth2/token") {
+        return Promise.resolve(new Response(JSON.stringify({ access_token: "refreshed-app-token", expires_in: 3600 }), { status: 200 }));
+      }
+      helixCalls += 1;
+      return Promise.resolve(helixCalls === 1
+        ? new Response(JSON.stringify({ message: "Invalid OAuth token" }), { status: 401 })
+        : new Response(JSON.stringify({ data: [{ length: 90, message: "", retry_after: 480 }] }), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/commercial", "POST", { length: 90 }),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ length: 90, message: null, retryAfter: 480 });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it("classifies Twitch's explicit missing-scope response separately", async () => {
+    const environment = await setup("manager");
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({ message: "Missing required scope: channel:edit:commercial" }),
+      { status: 401 },
+    ));
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/commercial", "POST", { length: 90 }),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "commercial_start_failed",
+      reason: "scope_missing",
+      detail: { status: 401, message: "Missing required scope: channel:edit:commercial" },
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not label a broadcaster-ID mismatch as an invalid app token", async () => {
+    const environment = await setup("manager");
+    let helixCalls = 0;
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      if (requestUrl(input) === "https://id.twitch.tv/oauth2/token") {
+        return Promise.resolve(new Response(JSON.stringify({ access_token: "refreshed-app-token", expires_in: 3600 }), { status: 200 }));
+      }
+      helixCalls += 1;
+      return Promise.resolve(new Response(JSON.stringify({ message: "The ID in broadcaster_id is not valid." }), { status: 401 }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/commercial", "POST", { length: 90 }),
+      environment,
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "commercial_start_failed",
+      reason: "twitch_error",
+      detail: { status: 401, message: "The ID in broadcaster_id is not valid." },
+    });
+    expect(helixCalls).toBe(2);
   });
 
   it("maps Twitch's offline rejection to a closed error and diagnostic reason", async () => {

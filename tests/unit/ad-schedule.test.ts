@@ -172,7 +172,7 @@ describe("Twitch ad schedule", () => {
   it("returns a rate limit as its own snooze outcome", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(
       JSON.stringify({ message: "Twitch-Antwort" }),
-      { status: 429 },
+      { status: 429, headers: { "Ratelimit-Remaining": "0" } },
     ));
 
     await expect(snoozeNextAd(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", getAppAccessToken, () => Promise.resolve(true), helixRequest, fetcher)).resolves.toEqual({
