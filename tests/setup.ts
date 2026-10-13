@@ -31,7 +31,7 @@ if (typeof window !== "undefined") {
   // jsdom doesn't implement matchMedia. Reporting reduced motion as matched
   // makes modal transitions skip timers after a test environment is torn down.
   window.matchMedia = (query: string): MediaQueryList => ({
-    matches: query === "(prefers-reduced-motion: reduce)",
+    matches: query === "(prefers-reduced-motion: reduce)" || query === "(max-width: 768px)",
     media: query,
     onchange: null,
     addListener: () => {},

@@ -1,7 +1,18 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
 import { isCommandPaletteShortcut } from "../command-palette-shortcut";
 import { ToastHost } from "./Toast";
+
+// Must match the `max-width` of the drawer rules in styles.css (`.dashboard-shell__burger { display: flex }`).
+const MOBILE_LAYOUT_QUERY = "(max-width: 768px)";
+
+function subscribeMobileLayout(onChange: () => void): () => void {
+  const query = window.matchMedia(MOBILE_LAYOUT_QUERY);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
+const getMobileLayout = (): boolean => window.matchMedia(MOBILE_LAYOUT_QUERY).matches;
 
 interface ShellNavContext {
   openCommandPalette: () => void;
@@ -39,7 +50,10 @@ export function Shell({
   const wasMobileNavOpenRef = useRef(false);
   const isSetup = mode === "setup";
   // Derived: the drawer only exists in setup mode, so `inert` can never outlive it.
-  const mobileNavOpen = isSetup && navRequested;
+  const isMobileLayout = useSyncExternalStore(subscribeMobileLayout, getMobileLayout, () => false);
+  // Widening past the breakpoint hides burger and backdrop, so the drawer must not stay open (inert, focus trap).
+  const mobileNavOpen = isSetup && isMobileLayout && navRequested;
+  if (!isMobileLayout && navRequested) setMobileNavOpen(false);
   // A route change (e.g. browser Back) closes the drawer instead of leaving stale state behind.
   const [seenMode, setSeenMode] = useState(mode);
   if (seenMode !== mode) {

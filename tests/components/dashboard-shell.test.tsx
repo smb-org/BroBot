@@ -1,4 +1,4 @@
-import { fireEvent, render, within } from "@testing-library/react";
+import { act, fireEvent, render, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { isCommandPaletteShortcut } from "../../src/dashboard/command-palette-shortcut";
@@ -48,6 +48,40 @@ describe("dashboard shell shortcuts", () => {
     rerender(<Shell {...props} mode="live"><p>page</p></Shell>);
     expect(container.querySelectorAll("[inert]")).toHaveLength(0);
     rerender(<Shell {...props} mode="setup"><p>page</p></Shell>);
+    expect(container.querySelectorAll("[inert]")).toHaveLength(0);
+  });
+
+  it("closes the drawer when the layout widens past the mobile breakpoint", () => {
+    let mobile = true;
+    const listeners = new Set<() => void>();
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: mobile,
+      media: query,
+      addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+    }));
+    const { container } = render(<Shell
+      header={() => <button type="button">head</button>}
+      navbar={() => <a href="#a">link</a>}
+      navLabel="Navigation"
+      openSidebarLabel="Open sidebar"
+      closeSidebarLabel="Close sidebar"
+      mode="setup"
+      commandPaletteOpen={false}
+      onCommandPaletteOpenChange={vi.fn()}
+    ><button type="button">main</button></Shell>);
+    fireEvent.click(within(container).getByRole("button", { name: "Open sidebar" }));
+    expect(container.querySelectorAll("[inert]").length).toBeGreaterThan(0);
+    act(() => { mobile = false; listeners.forEach((listener) => listener()); });
+    expect(container.querySelectorAll("[inert]")).toHaveLength(0);
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    // Tab is no longer trapped: the handler must not redirect focus into the drawer.
+    const mainButton = within(container).getByRole("button", { name: "main" });
+    mainButton.focus();
+    expect(fireEvent.keyDown(mainButton, { key: "Tab" })).toBe(true);
+    expect(document.activeElement).toBe(mainButton);
+    // Narrowing again must not resurrect the stale open state.
+    act(() => { mobile = true; listeners.forEach((listener) => listener()); });
     expect(container.querySelectorAll("[inert]")).toHaveLength(0);
   });
 });
