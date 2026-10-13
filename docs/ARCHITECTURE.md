@@ -257,8 +257,11 @@ Speicherung nutzt den bestehenden Chat-Aktivitätsaufruf und fügt keinen zweite
 Schreibaufruf je Chatnachricht hinzu.
 
 Migration `0025_chat_output_targets.sql` ergänzt Textbefehle und Timer um
-ein Chat-Ausgabeziel; bestehende Zeilen erhalten `source_only`. Auch neue
-Ereignistexte verwenden standardmäßig dieses Ziel. Der gemeinsame
+ein Chat-Ausgabeziel; bestehende Zeilen erhalten `source_only`. Migration
+`0059_channel_default_chat_target.sql` ergänzt das kanalweite Standardziel
+und lässt vorhandene Eintragsziele unverändert. Neue Einträge ohne eigenes
+Ziel erben die Kanaleinstellung; ohne Kanalvorgabe gilt weiterhin `source_only`.
+Ereignisaktionen ohne Ziel erben ebenfalls die Kanaleinstellung. Der gemeinsame
 `ChatOutputTarget`-Contract kennt `all_chats`, `source_only` und für
 Antwortaktionen `where_asked`. Der Host übersetzt das Ziel für Chatnachrichten
 und Ankündigungen in `for_source_only`. Bei `where_asked` entscheidet

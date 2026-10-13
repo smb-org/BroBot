@@ -19,7 +19,7 @@ import type {
   PanelSystemResponse,
   PanelTwitchUser,
 } from "../panel-contract";
-import type { ChannelControlDuration, ChannelRole, OverlayElementKind } from "../contracts/values";
+import type { ChannelControlDuration, ChannelRole, ChatOutputTarget, OverlayElementKind } from "../contracts/values";
 
 import { PanelApiError } from "../contracts/panel-error";
 
@@ -353,6 +353,8 @@ export interface PanelChannelSettings {
   revision: number;
   location: PanelChannelLocation | null;
   locationRevision: number;
+  defaultChatTarget: ChatOutputTarget;
+  defaultChatTargetRevision: number;
 }
 
 export type { PanelChannelLocation } from "../panel-contract";
@@ -371,6 +373,16 @@ export const saveChannelTimeZone = (
   timeZone: string,
 ): Promise<{ ok: boolean; timeZone: string; revision: number }> =>
   requestMutation(channelPath(channelId, "settings"), "PATCH", { revision, timeZone });
+
+export const saveChannelDefaultChatTarget = (
+  channelId: string,
+  revision: number,
+  defaultChatTarget: ChatOutputTarget,
+): Promise<{ ok: boolean; defaultChatTarget: ChatOutputTarget; defaultChatTargetRevision: number }> =>
+  requestMutation(channelPath(channelId, "settings"), "PATCH", {
+    defaultChatTargetRevision: revision,
+    defaultChatTarget,
+  });
 
 export const searchChannelLocations = (
   channelId: string,

@@ -1091,6 +1091,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         "channel.released": ({ actor, object }) => `${actor} gab den Kanal ${object} frei`,
         "channel.full_consent_changed": ({ actor, object, from, to }) => `${actor} änderte die Vollzustimmung für ${object} von ${from ?? "—"} zu ${to ?? "—"}`,
         "channel.time_zone.updated": ({ actor, object, from, to }) => `${actor} änderte die Zeitzone für ${object} von ${from ?? "—"} zu ${to ?? "—"}`,
+        "channel.default_chat_target.updated": ({ actor, object, from, to }) => `${actor} änderte das Standard-Chat-Ziel für ${object} von ${from ?? "—"} zu ${to ?? "—"}`,
         "channel.location.updated": ({ actor, object, from, to }) => `${actor} änderte den Standort für ${object} von ${from ?? "—"} zu ${to ?? "—"}`,
         "member.added": ({ actor, object, to }) => `${actor} fügte ${object}${to === null ? "" : ` als ${to}`} hinzu`,
         "member.role_changed": ({ actor, object, from, to }) => `${actor} änderte die Rolle von ${object} von ${from ?? "—"} zu ${to ?? "—"}`,
@@ -1399,6 +1400,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       sentenceTemplates: {
         "channel.released": ({ actor, object }) => `${actor} released channel ${object}`,
         "channel.time_zone.updated": ({ actor, object, from, to }) => `${actor} changed the time zone for ${object} from ${from ?? "—"} to ${to ?? "—"}`,
+        "channel.default_chat_target.updated": ({ actor, object, from, to }) => `${actor} changed the default chat target for ${object} from ${from ?? "—"} to ${to ?? "—"}`,
         "channel.location.updated": ({ actor, object, from, to }) => `${actor} changed the location for ${object} from ${from ?? "—"} to ${to ?? "—"}`,
         "channel.full_consent_changed": ({ actor, object, from, to }) => `${actor} changed full consent for ${object} from ${from ?? "—"} to ${to ?? "—"}`,
         "member.added": ({ actor, object, to }) => `${actor} added ${object}${to === null ? "" : ` as ${to}`}`,
@@ -2472,6 +2474,7 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "channel.released": "Kanal freigegeben",
     "channel.full_consent_changed": "Vollzustimmung geändert",
     "channel.time_zone.updated": "Kanalzeitzone geändert",
+    "channel.default_chat_target.updated": "Standard-Chat-Ziel geändert",
     "channel.location.updated": "Kanalstandort geändert",
     "member.added": "Mitglied hinzugefügt",
     "member.role_changed": "Mitgliedsrolle geändert",
@@ -2538,6 +2541,7 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "channel.released": "Channel released",
     "channel.full_consent_changed": "Full consent changed",
     "channel.time_zone.updated": "Channel time zone changed",
+    "channel.default_chat_target.updated": "Default chat target changed",
     "channel.location.updated": "Channel location changed",
     "member.added": "Member added",
     "member.role_changed": "Member role changed",
@@ -2626,7 +2630,7 @@ export const auditUnknownActionLabel = (language: DashboardLanguage = dashboardL
 
 const auditObjectFallbacks: LocaleCatalog<Partial<Record<AuditAction, string>>> = {
   de: {
-    "channel.released": "Kanal", "channel.full_consent_changed": "Kanal", "channel.time_zone.updated": "Kanal", "channel.location.updated": "Kanal",
+    "channel.released": "Kanal", "channel.full_consent_changed": "Kanal", "channel.time_zone.updated": "Kanal", "channel.default_chat_target.updated": "Kanal", "channel.location.updated": "Kanal",
     "member.added": "Mitglied", "member.role_changed": "Mitglied", "member.removed": "Mitglied",
     "chat_voting.template.created": "Abstimmungsvorlage", "chat_voting.template.updated": "Abstimmungsvorlage", "chat_voting.template.deleted": "Abstimmungsvorlage",
     "module.enabled": "Modul", "module.disabled": "Modul",
@@ -2645,7 +2649,7 @@ const auditObjectFallbacks: LocaleCatalog<Partial<Record<AuditAction, string>>> 
     "overlay.created": "Overlay", "overlay.updated": "Overlay", "overlay.deleted": "Overlay", "overlay.legacy.imported": "Overlay-Link",
   },
   en: {
-    "channel.released": "channel", "channel.full_consent_changed": "channel", "channel.time_zone.updated": "channel", "channel.location.updated": "channel",
+    "channel.released": "channel", "channel.full_consent_changed": "channel", "channel.time_zone.updated": "channel", "channel.default_chat_target.updated": "channel", "channel.location.updated": "channel",
     "member.added": "member", "member.role_changed": "member", "member.removed": "member",
     "chat_voting.template.created": "chat vote template", "chat_voting.template.updated": "chat vote template", "chat_voting.template.deleted": "chat vote template",
     "module.enabled": "module", "module.disabled": "module",

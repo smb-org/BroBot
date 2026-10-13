@@ -64,12 +64,13 @@ const response = (
   } = {},
 ): ModuleResult => {
   const replyToMessageId = textValue(event.payload.message_id);
+  const chatTarget = command.chatTarget === null ? {} : { target: command.chatTarget };
   const action = !options.forceChat && command.responseType === "announcement"
-    ? { kind: "announcement" as const, text, target: command.chatTarget, automated: false }
+    ? { kind: "announcement" as const, text, ...chatTarget, automated: false }
     : {
       kind: "chat" as const,
       text,
-      target: command.chatTarget,
+      ...chatTarget,
       automated: false,
       ...(!options.forceChat && command.responseType === "reply" && replyToMessageId !== null
         ? { replyToMessageId }
@@ -294,13 +295,14 @@ const processTextCommandMessageAttempt = async (
     const replyToMessageId = textValue(event.payload.message_id);
     const followUp = (text: string): Extract<ModuleAction, { kind: "chat" | "announcement" }> | undefined => {
       if (text.trim().length === 0) return undefined;
+      const chatTarget = claimed.chatTarget === null ? {} : { target: claimed.chatTarget };
       if (claimed.responseType === "announcement") {
-        return { kind: "announcement", text, target: claimed.chatTarget, automated: false };
+        return { kind: "announcement", text, ...chatTarget, automated: false };
       }
       return {
         kind: "chat",
         text,
-        target: claimed.chatTarget,
+        ...chatTarget,
         automated: false,
         ...(claimed.responseType === "reply" && replyToMessageId !== null ? { replyToMessageId } : {}),
       };

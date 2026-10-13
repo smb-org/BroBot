@@ -45,6 +45,27 @@ const patchSettings = async (): Promise<Request> => {
   });
 };
 
+const patchDefaultChatTarget = async (defaultChatTarget: unknown, defaultChatTargetRevision: unknown = 1): Promise<Request> => {
+  const cookie = await createSessionCookie({ sessionId: "session-manager" }, keys.SESSION_COOKIE_KEYS, keys.SESSION_ENCRYPTION_KEYS);
+  const csrf = await createCsrfToken("session-manager", keys.SESSION_COOKIE_KEYS, new Date().toISOString());
+  return new Request("https://brobot.example/api/channels/channel-a/settings", {
+    method: "PATCH",
+    headers: new Headers({
+      Cookie: `__Host-brobot_session=${cookie}; __Host-brobot_csrf=${csrf}`,
+      "Content-Type": "application/json",
+      "X-CSRF-Token": csrf,
+    }),
+    body: JSON.stringify({ defaultChatTarget, defaultChatTargetRevision }),
+  });
+};
+
+const getChannelSettings = async (): Promise<Request> => {
+  const cookie = await createSessionCookie({ sessionId: "session-manager" }, keys.SESSION_COOKIE_KEYS, keys.SESSION_ENCRYPTION_KEYS);
+  return new Request("https://brobot.example/api/channels/channel-a/settings", {
+    headers: new Headers({ Cookie: `__Host-brobot_session=${cookie}` }),
+  });
+};
+
 describe("channel time zone settings route", () => {
   beforeEach(async () => {
     database = new TestD1Database();
@@ -84,6 +105,42 @@ describe("channel time zone settings route", () => {
       payload: { reason: "template.data.changed" },
       overlayIds: ["overlay-a"],
     }]);
+  });
+
+  it("exposes and updates the channel default chat target with its own revision", async () => {
+    const read = await panelRouter.fetch(await getChannelSettings(), environmentFor(database as unknown as D1Database));
+    const initial = await read.json();
+    const response = await panelRouter.fetch(await patchDefaultChatTarget("all_chats"), environmentFor(database as unknown as D1Database));
+    const channel = await database.prepare("SELECT default_chat_target, default_chat_target_revision FROM channels WHERE channel_id = 'channel-a'")
+      .first<{ default_chat_target: string; default_chat_target_revision: number }>();
+    const audit = await database.prepare(
+      "SELECT module_id, action, before_json, after_json FROM audit_log WHERE channel_id = 'channel-a'",
+    ).first<{ module_id: string | null; action: string; before_json: string; after_json: string }>();
+
+    expect(initial).toMatchObject({ defaultChatTarget: "source_only", defaultChatTargetRevision: 1 });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ ok: true, defaultChatTarget: "all_chats", defaultChatTargetRevision: 2 });
+    expect(channel).toEqual({ default_chat_target: "all_chats", default_chat_target_revision: 2 });
+    expect(audit).toEqual({
+      module_id: null,
+      action: "channel.default_chat_target.updated",
+      before_json: JSON.stringify({ defaultChatTarget: "source_only" }),
+      after_json: JSON.stringify({ defaultChatTarget: "all_chats" }),
+    });
+  });
+
+  it.each(["invalid", "where-asked", null, 1])("rejects invalid channel default chat target %s", async (target) => {
+    const response = await panelRouter.fetch(await patchDefaultChatTarget(target), environmentFor(database as unknown as D1Database));
+
+    expect(response.status).toBe(400);
+  });
+
+  it("requires channel membership to read channel chat settings", async () => {
+    await database.prepare("DELETE FROM channel_members WHERE channel_id = 'channel-a' AND user_id = 'manager'").run();
+
+    const response = await panelRouter.fetch(await getChannelSettings(), environmentFor(database as unknown as D1Database));
+
+    expect(response.status).toBe(403);
   });
 
   it.each(["session", "membership"] as const)("blocks a %s revocation before the SQL mutation", async (revocation) => {

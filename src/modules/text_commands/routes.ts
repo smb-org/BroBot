@@ -62,7 +62,7 @@ const bodySchema = z.object({
   streamCondition: z.enum(TEXT_COMMAND_STREAM_CONDITIONS).default("any"),
   games: z.array(gameSchema).max(50).default([]),
   responseType: z.enum(TEXT_COMMAND_RESPONSE_TYPES).default("say"),
-  chatTarget: z.enum(["all_chats", "source_only", "where_asked"]).default("source_only"),
+  chatTarget: z.enum(["all_chats", "source_only", "where_asked"]).nullable().default(null),
   variableAction: z.object({
     name: z.string().regex(/^[a-z][a-z0-9_]{0,31}$/u),
     operation: z.enum(["add", "subtract", "set", "set_argument"]),
@@ -88,7 +88,7 @@ const editBodySchema = z.object({
   streamCondition: z.enum(TEXT_COMMAND_STREAM_CONDITIONS).optional(),
   games: z.array(gameSchema).max(50).optional(),
   responseType: z.enum(TEXT_COMMAND_RESPONSE_TYPES).optional(),
-  chatTarget: z.enum(["all_chats", "source_only", "where_asked"]).optional(),
+  chatTarget: z.enum(["all_chats", "source_only", "where_asked"]).nullable().optional(),
   variableAction: z.object({
     name: z.string().regex(/^[a-z][a-z0-9_]{0,31}$/u),
     operation: z.enum(["add", "subtract", "set", "set_argument"]),
@@ -359,7 +359,7 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
   const streamCondition = body.streamCondition ?? before.streamCondition;
   const games = body.games ?? before.games ?? [];
   const responseType = body.responseType ?? before.responseType;
-  const chatTarget = body.chatTarget ?? before.chatTarget;
+  const chatTarget = body.chatTarget === undefined ? before.chatTarget : body.chatTarget;
   const [channelVariables, registeredVariables] = await Promise.all([
     context.get("listChannelVariables")(channelId),
     context.get("listRegisteredTemplateVariables")(channelId),

@@ -881,7 +881,7 @@ describe("Text command editor", () => {
       streamCondition: "any",
       games: [],
       responseType: "say",
-      chatTarget: "source_only",
+      chatTarget: null,
       variableAction: null,
       timeoutAction: null,
     }));
@@ -915,7 +915,7 @@ describe("Text command editor", () => {
       streamCondition: "any",
       games: [],
       responseType: "say",
-      chatTarget: "source_only",
+      chatTarget: null,
       variableAction: null,
       timeoutAction: null,
     }));

@@ -101,7 +101,7 @@ const newCommandDraft = (): CommandDraft => ({
   streamCondition: "any",
   games: [],
   responseType: "say",
-  chatTarget: "source_only",
+  chatTarget: null,
   variableAction: null,
   timeoutAction: null,
 });
@@ -537,6 +537,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     label={labels.chatTarget}
     value={draft.chatTarget}
     includeWhereAsked
+    allowChannelDefault
     disabled={!canManageContent || pending}
     onChange={(chatTarget) => { setDraftField("chatTarget", chatTarget); }}
   />;
@@ -978,7 +979,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     kind: labels.kindLabels[draft.kind],
     text: draft.text,
     responseType: labels.responseTypeLabels[draft.responseType],
-    chatTarget: labels.chatTargetLabels[draft.chatTarget],
+    chatTarget: draft.chatTarget === null ? labels.chatTargetDefault : labels.chatTargetLabels[draft.chatTarget],
     minimumTier: labels.tierLabels[draft.minimumTier],
     minimumDescription: tierDescription(draft.minimumTier, labels),
     stream: draft.streamCondition === "any" ? labels.streamAny : draft.streamCondition === "online" ? labels.streamOnline : labels.streamOffline,

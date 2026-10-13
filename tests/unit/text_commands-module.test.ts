@@ -399,7 +399,7 @@ describe("Text commands module", () => {
         [textCommandModule],
       );
 
-      expect(preparedSql).toHaveLength(8);
+      expect(preparedSql).toHaveLength(9);
       expect(preparedSql.filter((sql) => /(?:FROM|UPDATE) text_commands/u.test(sql))).toHaveLength(2);
       expect(preparedSql.some((sql) => sql.includes("json_each"))).toBe(false);
       expect(preparedSql.filter((sql) => sql.includes("text_command_user_cooldowns"))).toHaveLength(1);
@@ -983,6 +983,7 @@ describe("Text commands module", () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");
+      await database.prepare("UPDATE channels SET default_chat_target = 'all_chats' WHERE channel_id = 'kanal-a'").run();
       await textCommandModule.onEnable?.({
         DB: database as unknown as D1Database,
         authorizeMutation: () => ({ sql: "AND 1 = 1", values: [] as const }),
@@ -991,12 +992,19 @@ describe("Text commands module", () => {
       }, "kanal-a");
 
       await expect(database.prepare(
-        "SELECT command_name, response_text, kind, enabled FROM text_commands",
+        "SELECT command_name, response_text, kind, enabled, chat_target, use_channel_default_target FROM text_commands",
       ).all()).resolves.toEqual({
-        results: [{ command_name: "befehle", response_text: "", kind: "list", enabled: 1 }],
+        results: [{ command_name: "befehle", response_text: "", kind: "list", enabled: 1, chat_target: "source_only", use_channel_default_target: 1 }],
         success: true,
         meta: { changes: 0, size: 0 },
       });
+
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      await activate(database, "kanal-a");
+      await mitBot(database);
+      const fetcher = fetcherForChat();
+      await dispatchEventSubNotification(environment(database), eventFor("!befehle"), fetcher, [textCommandModule]);
+      expect(body(fetcher, 0)).toMatchObject({ for_source_only: false });
     } finally {
       database.close();
     }

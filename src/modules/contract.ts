@@ -660,7 +660,7 @@ export interface ModuleAlarmContext {
     idempotencyKey: string,
     attributions?: readonly string[],
     stillValid?: () => Promise<boolean>,
-    target?: Exclude<ChatOutputTarget, "where_asked">,
+    target?: ChatOutputTarget,
   ) => Promise<{ sent: boolean; reason: string | null; retryable: boolean }>;
   /** Monotonic count of accepted chat messages kept in this channel object. */
   chatActivityCount: () => Promise<number>;

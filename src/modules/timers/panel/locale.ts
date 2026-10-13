@@ -9,6 +9,7 @@ export interface TimersTexts {
   messageHint: string;
   trigger: string;
   chatTarget: string;
+  chatTargetDefault: string;
   chatTargetLabels: Record<"all_chats" | "source_only", string>;
   interval: string;
   streamStart: string;
@@ -58,6 +59,7 @@ const catalog: LocaleCatalog<TimersTexts> = {
     messageHint: "Freitext mit Variablen und Textbausteinen im Format {text.name}.",
     trigger: "Auslöser",
     chatTarget: "Chat-Ziel",
+    chatTargetDefault: "Kanaleinstellung",
     chatTargetLabels: { all_chats: "Alle Chats", source_only: "Nur unser Chat" },
     interval: "Intervall",
     streamStart: "Nach Streamstart",
@@ -111,6 +113,7 @@ const catalog: LocaleCatalog<TimersTexts> = {
     messageHint: "Free text with variables and text blocks in the {text.name} format.",
     trigger: "Trigger",
     chatTarget: "Chat target",
+    chatTargetDefault: "Channel default",
     chatTargetLabels: { all_chats: "All chats", source_only: "Only our chat" },
     interval: "Interval",
     streamStart: "After stream start",

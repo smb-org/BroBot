@@ -285,6 +285,27 @@ describe("FAQ literal matcher", () => {
     }
   });
 
+  it("leaves an inherited answer target unset for the host to resolve", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "channel-a");
+      await database.prepare(
+        `INSERT INTO faq_entries
+          (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds,
+           games_json, chat_target, use_channel_default_target, sort_order, revision, last_used_at, created_at, updated_at)
+         VALUES ('faq-default', 'channel-a', 'Sunset', 1, 'keywords', ?, 'The sun block answer.', 60, '[]', 'source_only', 1, 0, 1, NULL, ?, ?)`,
+      ).bind(JSON.stringify({ type: "keywords", patterns: ["get dark"] }), NOW, NOW).run();
+      const repository = createFaqRepository(database as unknown as D1Database);
+      const result = await processFaqMessage(eventFor("When does it get dark?"), repository, contextFor(database));
+
+      expect(result.actions).toHaveLength(1);
+      expect(result.actions[0]).toMatchObject({ kind: "chat", text: "The sun block answer.", automated: true });
+      expect(result.actions[0]).not.toHaveProperty("target");
+    } finally {
+      database.close();
+    }
+  });
+
   it("does not match its own bot messages or answer while the current game is unknown", async () => {
     const database = new TestD1Database();
     try {

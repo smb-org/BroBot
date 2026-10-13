@@ -61,7 +61,14 @@ const installApiMocks = async (page: Page): Promise<void> => {
     } else if (pathname === `/api/channels/${channelId}/overview`) {
       body = { ...channel, activeModules: [] };
     } else if (pathname === `/api/channels/${channelId}/settings`) {
-      body = { timeZone: "UTC", revision: 1, location: null, locationRevision: 1 };
+      body = {
+        timeZone: "UTC",
+        revision: 1,
+        location: null,
+        locationRevision: 1,
+        defaultChatTarget: "source_only",
+        defaultChatTargetRevision: 1,
+      };
     } else if (pathname === `/api/channels/${channelId}/members`) {
       body = { members: [], nextCursor: null, broadcasterCount: 1, viewerUserId: "viewer" };
     } else if (pathname === `/api/channels/${channelId}/variables`) {

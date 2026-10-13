@@ -8,6 +8,7 @@ interface ChatOutputTargetTexts {
   onlyOurChatDescription: string;
   automatic: string;
   automaticDescription: string;
+  channelDefault: string;
 }
 
 export const chatOutputTargetTexts: LocaleCatalog<ChatOutputTargetTexts> = {
@@ -21,6 +22,7 @@ export const chatOutputTargetTexts: LocaleCatalog<ChatOutputTargetTexts> = {
     automatic: "Automatisch",
     automaticDescription:
       "Fragen aus unserem Chat: nur hier. Fragen aus Partnerchats: in allen Chats (Twitch kann keinen einzelnen Partnerchat ansteuern).",
+    channelDefault: "Kanaleinstellung verwenden",
   },
   en: {
     sharedChatInfo:
@@ -32,5 +34,6 @@ export const chatOutputTargetTexts: LocaleCatalog<ChatOutputTargetTexts> = {
     automatic: "Automatic",
     automaticDescription:
       "Questions from our chat: here only. Questions from partner chats: in all chats (Twitch cannot target a single partner chat).",
+    channelDefault: "Use channel default",
   },
 };

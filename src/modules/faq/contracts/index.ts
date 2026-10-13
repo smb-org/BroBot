@@ -32,7 +32,7 @@ export interface FaqEntry {
   cooldownSeconds: number;
   userCooldownSeconds: number;
   games: readonly FaqGame[];
-  chatTarget: ChatOutputTarget;
+  chatTarget: ChatOutputTarget | null;
   order: number;
   revision: number;
   lastUsedAt: string | null;
@@ -47,7 +47,7 @@ export interface FaqMutationInput {
   cooldownSeconds: number;
   userCooldownSeconds: number;
   games: readonly FaqGame[];
-  chatTarget: ChatOutputTarget;
+  chatTarget: ChatOutputTarget | null;
 }
 
 export interface FaqMatch {

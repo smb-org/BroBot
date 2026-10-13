@@ -37,7 +37,7 @@ interface TimerDraft {
 const emptyDraft = (sources: TimersPanelData["sources"]): TimerDraft => ({
   name: "",
   messageText: "",
-  chatTarget: "source_only",
+  chatTarget: null,
   type: "interval",
   minutes: 30,
   minimumMessages: 10,
@@ -264,7 +264,7 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
                 <span>{labels.trigger} · {triggerTitle(timer.trigger.type, labels)}</span>
                 <span>{triggerDetail(timer, data as TimersPanelData, labels, language ?? "de")}</span>
                 <span>{labels.message} · {timer.messageText}</span>
-                <span>{labels.chatTarget} · {labels.chatTargetLabels[timer.chatTarget]}</span>
+                <span>{labels.chatTarget} · {timer.chatTarget === null ? labels.chatTargetDefault : labels.chatTargetLabels[timer.chatTarget]}</span>
                 <span>{labels.nextRun} · {timer.nextRunAt === null ? labels.noNextRun : formatTimestamp(timer.nextRunAt)}</span>
               </div>
               <div className="timer-row__actions">
@@ -316,6 +316,7 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
             value={draft.chatTarget}
             disabled={pending}
             onChange={(chatTarget) => { if (chatTarget !== "where_asked") patchDraft({ chatTarget }); }}
+            allowChannelDefault
           />
           <Select
             label={labels.trigger}

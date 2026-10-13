@@ -16,7 +16,8 @@ export interface FaqEntryRow {
   cooldown_seconds: number;
   user_cooldown_seconds: number;
   games_json: string;
-  chat_target: FaqEntry["chatTarget"];
+  chat_target: Exclude<FaqEntry["chatTarget"], null>;
+  use_channel_default_target: number;
   sort_order: number;
   revision: number;
   last_used_at: string | null;
@@ -75,7 +76,7 @@ export const mapFaqEntryRow = (row: FaqEntryRow): FaqEntry => ({
   cooldownSeconds: row.cooldown_seconds,
   userCooldownSeconds: row.user_cooldown_seconds,
   games: gamesFrom(row.games_json),
-  chatTarget: row.chat_target,
+  chatTarget: row.use_channel_default_target === 1 ? null : row.chat_target,
   order: row.sort_order,
   revision: row.revision,
   lastUsedAt: row.last_used_at,
@@ -84,7 +85,7 @@ export const mapFaqEntryRow = (row: FaqEntryRow): FaqEntry => ({
 });
 
 const selectFaqEntries = `SELECT faq_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds, user_cooldown_seconds,
-                                 games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at
+                                 games_json, chat_target, use_channel_default_target, sort_order, revision, last_used_at, created_at, updated_at
                             FROM faq_entries
                            WHERE channel_id = ?`;
 

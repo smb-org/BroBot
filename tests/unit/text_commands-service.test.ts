@@ -94,6 +94,20 @@ describe("Text commands service", () => {
     }]);
   });
 
+  it("leaves an inherited target unset for the host to resolve", async () => {
+    const result = await processTextCommandMessage(
+      eventFor("!hello"),
+      repositoryFor([{ ...command("hello", "Hi {user}"), chatTarget: null }]),
+    );
+
+    expect(result.actions).toEqual([{
+      kind: "chat",
+      text: "Hi alice",
+      automated: false,
+      replyToMessageId: "twitch-message-1",
+    }]);
+  });
+
   it("uses the shared renderer for system and channel variables", async () => {
     const renderTemplate = vi.fn((text: string) => Promise.resolve({
       text: text.replace("{user}", "alice").replace("{var.points}", "42"),

@@ -23,7 +23,7 @@ import {
   type FaqPanelData,
 } from "./service";
 
-const emptyDraft = (): FaqDraft => ({ name: "", matcherType: "keywords", patterns: "", answerText: "", cooldownSeconds: FAQ_COOLDOWN_MINIMUM_SECONDS, userCooldownSeconds: 0, games: [], chatTarget: "source_only" });
+const emptyDraft = (): FaqDraft => ({ name: "", matcherType: "keywords", patterns: "", answerText: "", cooldownSeconds: FAQ_COOLDOWN_MINIMUM_SECONDS, userCooldownSeconds: 0, games: [], chatTarget: null });
 
 const draftFromEntry = (entry: FaqEntry): FaqDraft => ({
   name: entry.name,
@@ -342,6 +342,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
             value={draft.chatTarget}
             onChange={(chatTarget) => patchDraft({ chatTarget })}
             includeWhereAsked
+            allowChannelDefault
             disabled={pending}
           />
         </div>}

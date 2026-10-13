@@ -159,6 +159,78 @@ const runDispatch = async (
   );
 };
 
+describe("channel default chat target dispatch", () => {
+  it("resolves targetless chat actions from the latest channel default", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      const module = fakeModule("default-target", () => ({
+        actions: [{ kind: "chat", text: "Hello from the channel default", automated: false }],
+        diagnostics: [],
+      }));
+      await activate(database, "kanal-a", module.id);
+      await database.prepare("UPDATE channels SET default_chat_target = 'all_chats' WHERE channel_id = 'kanal-a'").run();
+      const fetcher = sent();
+      const dispatch = (triggerId: string) => dispatchEventSubNotification(environment(database), {
+        channelId: "kanal-a",
+        subscriptionType: CHAT_TYPE,
+        triggerId,
+        payload: { message: { text: "Hello" }, chatter_user_id: "viewer-1" },
+        receivedAt: NOW,
+      }, fetcher, [module]);
+
+      await dispatch("first-message");
+      await database.prepare("UPDATE channels SET default_chat_target = 'source_only' WHERE channel_id = 'kanal-a'").run();
+      await dispatch("second-message");
+
+      expect(bodyOf(fetcher, 0)).toMatchObject({ for_source_only: false });
+      expect(bodyOf(fetcher, 1)).toMatchObject({ for_source_only: true });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("reads the channel default again for each targetless send in one action batch", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      const module = fakeModule("default-target-batch", () => ({
+        actions: [
+          { kind: "chat", text: "First message", automated: false },
+          { kind: "chat", text: "Second message", automated: false },
+        ],
+        diagnostics: [],
+      }));
+      await activate(database, "kanal-a", module.id);
+      await database.prepare("UPDATE channels SET default_chat_target = 'all_chats' WHERE channel_id = 'kanal-a'").run();
+      let sendCount = 0;
+      const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => {
+        sendCount += 1;
+        if (sendCount === 1) {
+          await database.prepare("UPDATE channels SET default_chat_target = 'source_only' WHERE channel_id = 'kanal-a'").run();
+        }
+        return new Response(JSON.stringify({ data: [{ is_sent: true, message_id: `message-${String(sendCount)}` }] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      });
+
+      await dispatchEventSubNotification(environment(database), {
+        channelId: "kanal-a",
+        subscriptionType: CHAT_TYPE,
+        triggerId: "two-targetless-sends",
+        payload: { message: { text: "Hello" }, chatter_user_id: "viewer-1" },
+        receivedAt: NOW,
+      }, fetcher, [module]);
+
+      expect(bodyOf(fetcher, 0)).toMatchObject({ for_source_only: false });
+      expect(bodyOf(fetcher, 1)).toMatchObject({ for_source_only: true });
+    } finally {
+      database.close();
+    }
+  });
+});
+
 describe("module selection", () => {
   it("skips disabled modules", () => {
     const { matches } = selectModulesForEvent(

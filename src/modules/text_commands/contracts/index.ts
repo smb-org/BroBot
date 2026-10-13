@@ -52,7 +52,7 @@ export interface TextCommand {
   streamCondition: TextCommandStreamCondition;
   games?: readonly TextCommandGame[];
   responseType: TextCommandResponseType;
-  chatTarget: ChatOutputTarget;
+  chatTarget: ChatOutputTarget | null;
   variableAction: TextCommandVariableAction | null;
   timeoutAction: TextCommandTimeoutAction | null;
   useCount: number;
@@ -93,7 +93,7 @@ export interface NewTextCommand {
   streamCondition?: TextCommandStreamCondition;
   games?: readonly TextCommandGame[];
   responseType?: TextCommandResponseType;
-  chatTarget?: ChatOutputTarget;
+  chatTarget?: ChatOutputTarget | null;
   variableAction?: TextCommandVariableAction | null;
   timeoutAction?: TextCommandTimeoutAction | null;
   now: string;
@@ -120,7 +120,7 @@ export interface TextCommandChange {
   streamCondition: TextCommandStreamCondition;
   games?: readonly TextCommandGame[];
   responseType: TextCommandResponseType;
-  chatTarget?: ChatOutputTarget;
+  chatTarget?: ChatOutputTarget | null;
   variableAction?: TextCommandVariableAction | null;
   timeoutAction?: TextCommandTimeoutAction | null;
   expectedRevision?: number;

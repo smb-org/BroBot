@@ -118,6 +118,7 @@ describe("text block token migration", () => {
       expect(database.prepare("SELECT revision FROM overlays WHERE overlay_id = 'overlay-a'").get()).toEqual({ revision: 2 });
       expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
 
+      database.exec(readMigration("0059_channel_default_chat_target.sql"));
       const d1Database = {
         prepare: (sql: string) => new TestPreparedStatement(database, database.prepare(sql), sql),
       } as unknown as D1Database;

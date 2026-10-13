@@ -1709,6 +1709,15 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .inspector-content-section__heading { display: flex; align-items: center; gap: var(--s2); margin: 0 0 var(--s3); padding-bottom: var(--s2); border-bottom: 1px solid var(--line); color: var(--text); font-size: 13px; font-weight: 600; }
 .inspector-content-section__body { display: grid; gap: var(--s3); min-width: 0; }
 .inspector-field-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); align-items: center; gap: var(--s4); min-width: 0; }
+.inspector-field-row--stacked { grid-template-columns: minmax(0, 1fr); gap: 0; }
+.channel-overview-settings__row { align-items: flex-end; }
+/* The select reserves 44px below its control for hint/error lines; lift the button onto the select's bottom edge. */
+.channel-overview-settings__row > .ui-button { margin-bottom: 44px; }
+.channel-overview-settings__row > .inspector-field-row { flex: 1 1 16rem; max-width: 28rem; }
+@media (max-width: 640px) {
+  .channel-overview-settings__row > .inspector-field-row { max-width: none; }
+  .channel-overview-settings__row > .ui-button { width: 100%; margin-bottom: 0; }
+}
 .inspector-field-row--align-start { align-items: start; }
 .inspector-field-row--align-start .inspector-field-row__label { align-items: flex-start; }
 .inspector-field-row__label { display: flex; min-width: 0; align-items: center; gap: var(--s1); color: var(--text-2); font-size: 12px; }

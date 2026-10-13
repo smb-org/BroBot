@@ -31,7 +31,7 @@ type TimerRouteContext = Context<ModuleRouteEnvironment>;
 
 const readTimer = async (db: D1Database, channelId: string, timerId: string): Promise<Timer | null> => {
   const row = await db.prepare(
-    `SELECT timer_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, revision,
+    `SELECT timer_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, use_channel_default_target, revision,
             next_run_at, next_run_stream_id, last_run_at, created_at, updated_at
        FROM timers WHERE channel_id = ? AND timer_id = ?`,
   ).bind(channelId, timerId).first<TimerRow>();
@@ -114,7 +114,7 @@ export const timerRoutes = new Hono<ModuleRouteEnvironment>();
 timerRoutes.get("/timers", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
   const result = await context.env.DB.prepare(
-    `SELECT timer_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, revision,
+    `SELECT timer_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, use_channel_default_target, revision,
             next_run_at, next_run_stream_id, last_run_at, created_at, updated_at
        FROM timers WHERE channel_id = ? ORDER BY created_at, timer_id`,
   ).bind(channelId).all<TimerRow>();
@@ -154,11 +154,12 @@ timerRoutes.post("/timers", async (context) => {
   try { activityCount = await stub.getChatActivityCount(); } catch { /* A missing baseline is initialized on first run. */ }
   const mutation = context.env.DB.prepare(
     `INSERT INTO timers
-      (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, revision,
+      (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, use_channel_default_target, revision,
        next_run_at, last_run_at, last_chat_activity_count, created_at, updated_at)
-     SELECT ?, ?, ?, 1, ?, ?, ?, ?, 1, NULL, NULL, ?, ?, ?
+     SELECT ?, ?, ?, 1, ?, ?, ?, ?, ?, 1, NULL, NULL, ?, ?, ?
        WHERE (SELECT COUNT(*) FROM timers WHERE channel_id = ?) < ? ${blockGuard.sql} ${authorization.sql}`,
-  ).bind(timerId, channelId, input.name, input.messageText, input.trigger.type, triggerJson, input.chatTarget,
+  ).bind(timerId, channelId, input.name, input.messageText, input.trigger.type, triggerJson, input.chatTarget ?? "source_only",
+    input.chatTarget === null ? 1 : 0,
     activityCount, now, now, channelId, TIMER_MAXIMUM_COUNT, ...blockGuard.values, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
     channelId,
@@ -207,10 +208,11 @@ timerRoutes.patch("/timers/:timerId", async (context) => {
   const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
     `UPDATE timers
-        SET name = ?, message_text = ?, trigger_type = ?, trigger_json = ?, chat_target = ?,
+        SET name = ?, message_text = ?, trigger_type = ?, trigger_json = ?, chat_target = ?, use_channel_default_target = ?,
             next_run_at = NULL, next_run_stream_id = NULL, revision = revision + 1, updated_at = ?
       WHERE channel_id = ? AND timer_id = ? AND revision = ? ${blockGuard.sql} ${authorization.sql}`,
-  ).bind(input.name, input.messageText, input.trigger.type, JSON.stringify(input.trigger), input.chatTarget, now,
+  ).bind(input.name, input.messageText, input.trigger.type, JSON.stringify(input.trigger), input.chatTarget ?? "source_only",
+    input.chatTarget === null ? 1 : 0, now,
     channelId, timerId, revision, ...blockGuard.values, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
     channelId,

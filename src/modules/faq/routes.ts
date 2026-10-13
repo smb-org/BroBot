@@ -45,7 +45,8 @@ const parseMutation = (value: unknown): FaqMutationInput | null => {
       typeof value.answerText !== "string" || value.answerText.trim().length === 0 || templateTextLength(value.answerText) > FAQ_ANSWER_MAX_LENGTH ||
       !Number.isSafeInteger(value.cooldownSeconds) || (value.cooldownSeconds as number) < FAQ_COOLDOWN_MINIMUM_SECONDS ||
       (value.cooldownSeconds as number) > FAQ_COOLDOWN_MAXIMUM_SECONDS ||
-      (value.chatTarget !== "all_chats" && value.chatTarget !== "source_only" && value.chatTarget !== "where_asked")) return null;
+      (value.chatTarget !== undefined && value.chatTarget !== null && value.chatTarget !== "all_chats" &&
+        value.chatTarget !== "source_only" && value.chatTarget !== "where_asked")) return null;
   const userCooldownSeconds = value.userCooldownSeconds ?? 0;
   if (!Number.isSafeInteger(userCooldownSeconds) || (userCooldownSeconds as number) < 0 ||
       (userCooldownSeconds as number) > FAQ_USER_COOLDOWN_MAXIMUM_SECONDS) return null;
@@ -64,14 +65,14 @@ const parseMutation = (value: unknown): FaqMutationInput | null => {
     cooldownSeconds: value.cooldownSeconds as number,
     userCooldownSeconds: userCooldownSeconds as number,
     games,
-    chatTarget: value.chatTarget,
+    chatTarget: value.chatTarget === undefined ? null : value.chatTarget,
   };
 };
 
 const readEntry = async (context: FaqRouteContext, channelId: string, id: string): Promise<FaqEntry | null> => {
   const row = await context.env.DB.prepare(
     `SELECT faq_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds, user_cooldown_seconds,
-            games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at
+            games_json, chat_target, use_channel_default_target, sort_order, revision, last_used_at, created_at, updated_at
        FROM faq_entries WHERE channel_id = ? AND faq_id = ?`,
   ).bind(channelId, id).first<FaqEntryRow>();
   return row === null ? null : mapFaqEntryRow(row);
@@ -164,12 +165,13 @@ faqRoutes.post("/entries", async (context) => {
   const authorization = authorizationFor(context, channelId, now);
   const mutation = context.env.DB.prepare(
     `INSERT INTO faq_entries
-      (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds, user_cooldown_seconds,
-       games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at)
-     SELECT ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?
+       (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds, user_cooldown_seconds,
+       games_json, chat_target, use_channel_default_target, sort_order, revision, last_used_at, created_at, updated_at)
+     SELECT ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?
       WHERE (SELECT COUNT(*) FROM faq_entries WHERE channel_id = ?) < ? ${blockGuard.sql} ${authorization.sql}`,
   ).bind(entryId, channelId, input.name, input.matcher.type, JSON.stringify(input.matcher), input.answerText,
-    input.cooldownSeconds, input.userCooldownSeconds, JSON.stringify(input.games), input.chatTarget, order,
+    input.cooldownSeconds, input.userCooldownSeconds, JSON.stringify(input.games), input.chatTarget ?? "source_only",
+    input.chatTarget === null ? 1 : 0, order,
     now, now, channelId, FAQ_ENTRY_MAXIMUM_COUNT, ...blockGuard.values, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
     channelId,
@@ -217,10 +219,11 @@ faqRoutes.patch("/entries/:entryId", async (context) => {
   const mutation = context.env.DB.prepare(
     `UPDATE faq_entries
         SET name = ?, matcher_type = ?, matcher_json = ?, answer_text = ?, cooldown_seconds = ?, user_cooldown_seconds = ?,
-            games_json = ?, chat_target = ?, revision = revision + 1, updated_at = ?
+            games_json = ?, chat_target = ?, use_channel_default_target = ?, revision = revision + 1, updated_at = ?
       WHERE channel_id = ? AND faq_id = ? AND revision = ? ${blockGuard.sql} ${authorization.sql}`,
   ).bind(input.name, input.matcher.type, JSON.stringify(input.matcher), input.answerText, input.cooldownSeconds,
-    input.userCooldownSeconds, JSON.stringify(input.games), input.chatTarget, now, channelId, entryId,
+    input.userCooldownSeconds, JSON.stringify(input.games), input.chatTarget ?? "source_only",
+    input.chatTarget === null ? 1 : 0, now, channelId, entryId,
     body.revision, ...blockGuard.values, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
     channelId,

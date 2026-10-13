@@ -68,6 +68,7 @@ import { createModuleSecretAccess } from "../module-secrets";
 import { sendChatMessage } from "../chat";
 import { sendModerationBan } from "../moderation";
 import { readChannelStreamState } from "../db/stream-state";
+import { readChannelDefaultChatTarget } from "../db/channel-settings";
 import { moduleEnabledForChannel, readDispatchChannelState } from "../db/channel-controls";
 import { chatOutputSuppressionReason } from "../chat-output-gate";
 import { resolveModuleEventTimes } from "../module-event-times";
@@ -1371,7 +1372,7 @@ export class ChannelObject extends DurableObject<Env> {
         });
         if (prepared.outcome === "ready") await this.publish([prepared.message]);
       },
-      sendChat: async (text, idempotencyKey, attributions = [], stillValid, target = "source_only") => {
+      sendChat: async (text, idempotencyKey, attributions = [], stillValid, target) => {
         const suppression = { reason: null as string | null };
         const validateOutput = async (): Promise<boolean> => {
           if (stillValid !== undefined && !await stillValid()) {
@@ -1408,7 +1409,7 @@ export class ChannelObject extends DurableObject<Env> {
           claimBeforePost,
           attributions,
           afterPost,
-          target,
+          target ?? await readChannelDefaultChatTarget(this.env.DB, channelId),
           undefined,
           (senderId, messageText) => this.recordBotChatMessage(senderId, messageText),
         );
