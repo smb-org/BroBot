@@ -48,7 +48,7 @@ export function Switch({ id: suppliedId, label, ariaLabel, checked, onChange, di
     return <div data-ui="" className="ui-switch-field" aria-busy={pending}>
       <div className="ui-switch-field__row">
         {visual}
-        {label === undefined ? null : <span className="ui-switch-field__label" id={labelId} onClick={() => { if (!isDisabled) onChange(!checked); }}>{label}</span>}
+        {label === undefined ? null : <label className="ui-switch-field__label" id={labelId} htmlFor={id}>{label}</label>}
       </div>
       {hintLine}{reasonLine}
     </div>;

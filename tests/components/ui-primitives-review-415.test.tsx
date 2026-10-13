@@ -143,6 +143,24 @@ describe("issue 415 fieldset and hover-focus regressions", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it("toggles an inline Switch once per label click and ignores disabled ones", () => {
+    const onChange = vi.fn();
+    const { unmount } = render(<Switch layout="inline" label="Chat messages" checked={false} onChange={onChange} />);
+    fireEvent.click(screen.getByText("Chat messages"));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith(true);
+    unmount();
+
+    const disabledChange = vi.fn();
+    render(<>
+      <Switch layout="inline" label="Direct disabled" checked={false} disabled onChange={disabledChange} />
+      <fieldset disabled><Switch layout="inline" label="Fieldset disabled" checked={false} onChange={disabledChange} /></fieldset>
+    </>);
+    fireEvent.click(screen.getByText("Direct disabled"));
+    fireEvent.click(screen.getByText("Fieldset disabled"));
+    expect(disabledChange).not.toHaveBeenCalled();
+  });
+
   it("keeps keyboard focus when a Popover opens on hover", async () => {
     render(<><input aria-label="Person" /><Popover triggerLabel="Cause" icon="cause">Details</Popover></>);
     const input = screen.getByLabelText("Person");
