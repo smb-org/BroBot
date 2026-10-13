@@ -2,6 +2,8 @@ import { createRoot } from "react-dom/client";
 import { useState } from "react";
 
 import { TemplateTextField, UiProvider, type TemplateTextFieldMessages, type TemplateTextFieldVariable } from "../../src/dashboard/ui";
+import { apiSourcePanelTexts } from "../../src/modules/api_source/panel/locale";
+import { ExpressionField } from "../../src/modules/api_source/panel/ExpressionField";
 import "../../src/dashboard/ui/tokens.css";
 
 const variables: readonly TemplateTextFieldVariable[] = [
@@ -28,10 +30,13 @@ const messages: TemplateTextFieldMessages = {
 
 export function TemplateTextFieldFixture() {
   const [value, setValue] = useState("");
+  const [expression, setExpression] = useState("");
   return <UiProvider>
     <main style={{ width: "min(720px, 100%)", padding: 16 }}>
       <TemplateTextField label="Reply" hint="Type a brace to choose a variable." value={value} onChange={setValue} variables={variables} messages={messages} minRows={3} />
       <p id="content-below-picker">This content stays in place while the picker is open.</p>
+      <ExpressionField id="expression" label="JSONata expression" value={expression} onChange={setExpression} maxLength={512} language="en" messages={apiSourcePanelTexts("en").expressionPicker} />
+      <p id="content-below-expression">This content stays in place while function suggestions are open.</p>
     </main>
   </UiProvider>;
 }

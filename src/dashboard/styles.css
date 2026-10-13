@@ -1369,6 +1369,10 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-template-text-field__key-hints { display: flex; justify-content: center; gap: 14px; padding: 8px 0 0; color: var(--text-3); font-size: 12px; }
 .ui-template-text-field__key-hints > span { display: flex; align-items: center; gap: 4px; }
 .ui-template-text-field__key-hints kbd { padding: 1px 4px; border: 1px solid var(--line); border-radius: 3px; color: var(--text-2); font: inherit; }
+.ui-expression-field { min-width: 0; }
+.ui-expression-field__input { min-height: 240px; resize: vertical; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 13px; line-height: 1.55; }
+.ui-expression-field__signature { display: flex; align-items: center; min-width: 0; min-height: 24px; overflow: hidden; color: var(--text-3); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.ui-expression-field__signature code { overflow: hidden; text-overflow: ellipsis; }
 .ui-editor-shell { display: flex; height: max-content; flex-direction: column; width: min(var(--dashboard-content-width), 100%); min-width: 0; max-height: calc(100vh - 32px); overflow: hidden; margin-top: 0; padding: 18px 16px; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--surface-inspector); container: inspector / inline-size; }
 .ui-editor-shell .inspector-section__heading { flex: none; margin: -4px 0 8px; }
 .ui-editor-shell__tabs { position: sticky; z-index: 2; top: 0; display: flex; flex: none; min-height: 44px; overflow-x: auto; border-bottom: 1px solid var(--line); background: var(--surface-inspector); }
@@ -1471,6 +1475,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
   .ui-field__input,
   .unit-input__input,
   .ui-code-field__input,
+  .ui-expression-field__input,
   .segment-choice__option { min-height: 40px; }
   .unit-input__unit { height: 40px; }
   .unit-input__suggestion { min-height: 40px; }

@@ -2,10 +2,11 @@ import { useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
-import { Button, CodeField, ConfirmDialog, Field, FormDialog, InspectorFieldRow, InspectorSection, LoadState, LoadStateLines, notify } from "../../../dashboard/ui";
+import { Button, ConfirmDialog, Field, FormDialog, InspectorFieldRow, InspectorSection, LoadState, LoadStateLines, notify } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { ApiSource } from "../contracts";
 import { apiSourcePanelTexts } from "./locale";
+import { ExpressionField } from "./ExpressionField";
 import { createApiSource, deleteApiSource, loadApiSources, updateApiSource } from "./service";
 
 interface SourceDraft {
@@ -197,7 +198,7 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
           <Field label={labels.url} value={draft.url} onChange={(url) => setDraft({ ...draft, url })} disabled={busy || !canEdit} mono />
         </InspectorFieldRow>
         <InspectorFieldRow label={labels.expression} help={labels.expressionHint}>
-          <CodeField id="api-source-expression" label={labels.expression} value={draft.expression} onChange={(expression) => setDraft({ ...draft, expression })} maxLength={512} disabled={busy || !canEdit} />
+          <ExpressionField id="api-source-expression" label={labels.expression} value={draft.expression} onChange={(expression) => setDraft({ ...draft, expression })} maxLength={512} language={language ?? "de"} messages={labels.expressionPicker} disabled={busy || !canEdit} />
         </InspectorFieldRow>
         <p className="muted" title={draft.expression.trim().length === 0 ? labels.noExpression : undefined}
           style={{ height: "var(--s6)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", margin: 0 }} aria-live="polite">

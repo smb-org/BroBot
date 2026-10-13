@@ -1,4 +1,5 @@
 import type { ModuleLanguage } from "../../contract";
+import type { ExpressionFieldMessages } from "./ExpressionField";
 
 export interface ApiSourcePanelTexts {
   title: string;
@@ -13,6 +14,7 @@ export interface ApiSourcePanelTexts {
   urlHint: string;
   expression: string;
   expressionHint: string;
+  expressionPicker: ExpressionFieldMessages;
   save: string;
   cancel: string;
   delete: string;
@@ -46,7 +48,12 @@ const texts: Readonly<Record<ModuleLanguage, ApiSourcePanelTexts>> = {
     url: "HTTPS-URL",
     urlHint: "Keine Zugangsdaten in der URL. Anfragen senden keine Cookies oder Zugangsdaten.",
     expression: "JSONata-Ausdruck (optional)",
-    expressionHint: "Erlaubt: Feldpfade mit [nichtnegativem Ganzzahlindex], String-/Zahlen-/Boolesche-/Null-Literale, + - * / %, Vergleiche, and/or, &, ?: sowie direkte Aufrufe von $string $number $boolean $not $exists $length $substring $substringBefore $substringAfter $uppercase $lowercase $trim $contains $join $sum $max $min $average $count $round $floor $ceil $abs $formatNumber $fromMillis $toMillis $now $split $replace. Keine freien Prädikate oder Array-/Objektkonstruktoren. Beispiele: $fromMillis($toMillis($.daily.sunset[0]), '[H01]:[m01]') · $formatNumber($.rates.EUR * $.amount, '#,##0.00') & ' EUR'.",
+    expressionHint: "Erlaubt: Feldpfade mit [nichtnegativem Ganzzahlindex], String-/Zahlen-/Boolesche-/Null-Literale, + - * / %, Vergleiche, and/or, &, ?: und direkte Funktionsaufrufe aus dem Picker. Keine freien Prädikate oder Array-/Objektkonstruktoren. Beispiele: $fromMillis($toMillis($.daily.sunset[0]), '[H01]:[m01]') · $formatNumber($.rates.EUR * $.amount, '#,##0.00') & ' EUR'.",
+    expressionPicker: {
+      picker: { title: "Funktionen einfügen", noResults: "Keine passende Funktion.", keyHints: { navigate: "Navigieren", insert: "Einfügen", close: "Schließen" } },
+      groupLabels: { text: "Text", number: "Zahlen", logic: "Logik", list: "Listen", date: "Datum" },
+      signatureLabel: "Funktionssignatur",
+    },
     save: "Speichern",
     cancel: "Abbrechen",
     delete: "Quelle löschen",
@@ -78,7 +85,12 @@ const texts: Readonly<Record<ModuleLanguage, ApiSourcePanelTexts>> = {
     url: "HTTPS URL",
     urlHint: "Do not put credentials in the URL. Requests send no cookies or credentials.",
     expression: "JSONata expression (optional)",
-    expressionHint: "Allowed: field paths with [non-negative integer indexes], string/number/boolean/null literals, + - * / %, comparisons, and/or, &, ?:, and direct calls to $string $number $boolean $not $exists $length $substring $substringBefore $substringAfter $uppercase $lowercase $trim $contains $join $sum $max $min $average $count $round $floor $ceil $abs $formatNumber $fromMillis $toMillis $now $split $replace. No free predicates or array/object constructors. Examples: $fromMillis($toMillis($.daily.sunset[0]), '[H01]:[m01]') · $formatNumber($.rates.EUR * $.amount, '#,##0.00') & ' EUR'.",
+    expressionHint: "Allowed: field paths with [non-negative integer indexes], string/number/boolean/null literals, + - * / %, comparisons, and/or, &, ?:, and direct function calls from the picker. No free predicates or array/object constructors. Examples: $fromMillis($toMillis($.daily.sunset[0]), '[H01]:[m01]') · $formatNumber($.rates.EUR * $.amount, '#,##0.00') & ' EUR'.",
+    expressionPicker: {
+      picker: { title: "Insert function", noResults: "No matching function.", keyHints: { navigate: "Navigate", insert: "Insert", close: "Close" } },
+      groupLabels: { text: "Text", number: "Number", logic: "Logic", list: "Lists", date: "Date" },
+      signatureLabel: "Function signature",
+    },
     save: "Save",
     cancel: "Cancel",
     delete: "Delete source",

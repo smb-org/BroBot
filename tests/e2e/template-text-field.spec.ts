@@ -40,3 +40,43 @@ test("TemplateTextField supports the brace, filter, insert, and Escape keyboard 
   await expect(input).toHaveValue("Hello {user} {missing");
   await expect(input).toBeFocused();
 });
+
+test("ExpressionField inserts a filtered function and keeps its picker inside a 390px viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/tests/e2e/template-text-field-fixture.html");
+
+  const input = page.getByRole("textbox", { name: "JSONata expression" });
+  const dropdown = page.locator(".ui-template-text-field__suggestions-dropdown");
+  const contentBelow = page.locator("#content-below-expression");
+  await expect(input).toBeVisible();
+  const beforeContent = await contentBelow.boundingBox();
+
+  await input.focus();
+  await page.keyboard.type("$");
+  await expect(page.getByRole("listbox", { name: "Insert function" })).toBeVisible();
+  await expect(page.getByText("Text", { exact: true })).toBeVisible();
+  await expect(page.getByText("Date", { exact: true })).toBeVisible();
+
+  const fullPicker = await dropdown.boundingBox();
+  expect(fullPicker).not.toBeNull();
+  expect(fullPicker?.x).toBeGreaterThanOrEqual(0);
+  expect((fullPicker?.x ?? 0) + (fullPicker?.width ?? 0)).toBeLessThanOrEqual(390);
+  expect(fullPicker?.y).toBeGreaterThanOrEqual(0);
+  expect((fullPicker?.y ?? 0) + (fullPicker?.height ?? 0)).toBeLessThanOrEqual(844);
+  expect(await contentBelow.boundingBox()).toEqual(beforeContent);
+
+  await page.keyboard.type("from");
+  await expect(page.getByRole("option", { name: /fromMillis/u })).toHaveCount(1);
+  await page.keyboard.press("Enter");
+  await expect(input).toHaveValue("$fromMillis(");
+  await expect(page.locator(".ui-expression-field__signature")).toContainText("$fromMillis(milliseconds, picture)");
+  await expect.poll(() => input.evaluate((element) => (element as HTMLTextAreaElement).selectionStart)).toBe("$fromMillis(".length);
+
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.type("$from");
+  await expect(dropdown).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dropdown).toBeHidden();
+  await expect(input).toHaveValue("$from");
+  await expect(input).toBeFocused();
+});

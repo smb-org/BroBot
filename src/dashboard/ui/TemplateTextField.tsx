@@ -1,4 +1,4 @@
-import { Combobox, Input, useCombobox } from "@mantine/core";
+import { Input } from "@mantine/core";
 import { RichTextarea, type CaretPosition, type RichTextareaHandle } from "rich-textarea";
 import { useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ReactElement, type ReactNode, type SyntheticEvent } from "react";
 
@@ -7,6 +7,7 @@ import type { TemplateVariableGroup } from "../../contracts/values";
 import { Button } from "./Button";
 import { ChatPreview } from "./ChatPreview";
 import { Icon } from "./Icon";
+import { InlineSuggestionPicker, InlineSuggestionPickerTarget } from "./InlineSuggestionPicker";
 import { TruncatedText } from "./TruncatedText";
 import { describedHelper, useDisabledFieldReason } from "./DisabledFieldReason";
 import {
@@ -106,6 +107,10 @@ const findOpenBrace = (value: string): number | null => {
   return opening > value.lastIndexOf("}") ? opening : null;
 };
 
+const suggestionQueryKey = (query: SuggestionQuery | null): string | null => query === null
+  ? null
+  : `${String(query.start)}:${String(query.end)}:${query.fragment}`;
+
 const optionForPicker = (variable: TemplateTextFieldVariable): TemplateTextFieldOption => ({
   name: variable.name,
   label: variable.label ?? variable.name,
@@ -119,35 +124,7 @@ const optionForPicker = (variable: TemplateTextFieldVariable): TemplateTextField
   ...(variable.parameter === undefined ? {} : { parameter: variable.parameter }),
 });
 
-const GroupIcon = ({ group }: { group: TemplateTextFieldGroupPresentation }): ReactElement => group.iconPaths === undefined
-  ? <Icon name={group.iconName ?? "variable"} size={16} />
-  : (
-    <svg className="ui-template-text-field__group-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-      {group.iconPaths.map((path, index) => <path key={`${group.id}-${String(index)}`} d={path} />)}
-    </svg>
-  );
-
-const TemplateTextFieldGroupHeading = ({ group }: { group: TemplateTextFieldGroupPresentation }): ReactElement => (
-  <span className="ui-template-text-field__group-title"><GroupIcon group={group} /><span>{group.label}</span></span>
-);
-
-const TemplateTextFieldKeyboardHints = ({ messages }: { messages: TemplateTextFieldPickerMessages }): ReactElement => (
-  <div className="ui-template-text-field__key-hints">
-    <span><kbd>↑↓</kbd>{messages.keyHints.navigate}</span>
-    <span><kbd>Enter</kbd>{messages.keyHints.insert}</span>
-    <span><kbd>Esc</kbd>{messages.keyHints.close}</span>
-  </div>
-);
-
 const isLegacyCompositionKey = (event: object): boolean => Reflect.get(event, "keyCode") === 229;
-
-const scrollOptionIntoView = (id: string | undefined): void => {
-  if (id === undefined) return;
-  const option = document.getElementById(id);
-  if (option === null) return;
-  const scrollIntoView = Reflect.get(option, "scrollIntoView");
-  if (typeof scrollIntoView === "function") Reflect.apply(scrollIntoView, option, [{ block: "nearest" }]);
-};
 
 export function TemplateTextField({
   label,
@@ -178,12 +155,12 @@ export function TemplateTextField({
   const frameRef = useRef<HTMLDivElement>(null);
   const selection = useRef({ start: 0, end: 0 });
   const selectionAfterValue = useRef<{ value: string; range: TextRange; focus: boolean } | null>(null);
+  const dismissedQuery = useRef<string | null>(null);
   const programmaticEdit = useRef(false);
   const composingRef = useRef(false);
   const [composing, setComposing] = useState(false);
   const [query, setQuery] = useState<SuggestionQuery | null>(null);
   const [caretAnchor, setCaretAnchor] = useState<CaretAnchor>({ left: 12, top: 32 });
-  const [activeIndex, setActiveIndex] = useState(0);
   const declarations = useMemo(() => templateDeclarations(variables ?? []), [variables]);
   const count = variables === undefined ? value.length : templateTextLength(value);
   const overLimit = maxLength !== undefined && count > maxLength;
@@ -215,15 +192,11 @@ export function TemplateTextField({
       query.fragment,
     ));
   }, [messages.picker, query, variables]);
-  const suggestions = suggestionGroups.flatMap(({ options }) => options.map(({ option }) => option));
   const suggestionOpen = !disabled && !readOnly && !composing && variables !== undefined && query !== null;
-  const activeSuggestion = suggestions[activeIndex] ?? suggestions[0];
-  const activeSuggestionId = activeSuggestion === undefined ? undefined : `${listboxId}-${activeSuggestion.name}`;
   const unknownAdvice = useMemo(() => unknownVariables.map((tokenName) => ({
     tokenName,
     suggestion: closestTemplateVariable(tokenName, declarations),
   })), [declarations, unknownVariables]);
-  const combobox = useCombobox({ onDropdownClose: () => { setActiveIndex(0); } });
 
   const rememberSelection = (target: HTMLTextAreaElement): void => {
     selection.current = { start: target.selectionStart, end: target.selectionEnd };
@@ -234,8 +207,16 @@ export function TemplateTextField({
       setQuery(null);
       return;
     }
-    setQuery(getSuggestionQuery(next, caret));
-    setActiveIndex(0);
+    const nextQuery = getSuggestionQuery(next, caret);
+    const nextKey = suggestionQueryKey(nextQuery);
+    if (dismissedQuery.current !== null) {
+      if (nextKey === dismissedQuery.current) {
+        setQuery(null);
+        return;
+      }
+      dismissedQuery.current = null;
+    }
+    setQuery(nextQuery);
   };
 
   const handleValueChange = (next: string, target: HTMLTextAreaElement): void => {
@@ -282,7 +263,6 @@ export function TemplateTextField({
     selectionAfterValue.current = { value: nextValue, range: targetSelection, focus: true };
     onChange(nextValue);
     setQuery(null);
-    combobox.closeDropdown();
   };
 
   const chooseSuggestion = (variableName: string): void => {
@@ -304,7 +284,11 @@ export function TemplateTextField({
     handleValueChange(event.currentTarget.value, event.currentTarget);
   };
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+  const handleKeyDown = (
+    event: React.KeyboardEvent<HTMLTextAreaElement>,
+    handlePickerKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => boolean,
+    closePicker: () => void,
+  ): void => {
     const native = event.nativeEvent;
     const isComposing = composingRef.current || native.isComposing || isLegacyCompositionKey(native);
     if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
@@ -314,23 +298,9 @@ export function TemplateTextField({
       return;
     }
     if (isComposing) return;
-    if (suggestionOpen && suggestions.length > 0 && event.key === "ArrowDown") {
-      event.preventDefault();
-      setActiveIndex((index) => (index + 1) % suggestions.length);
-    } else if (suggestionOpen && suggestions.length > 0 && event.key === "ArrowUp") {
-      event.preventDefault();
-      setActiveIndex((index) => (index - 1 + suggestions.length) % suggestions.length);
-    } else if (suggestionOpen && event.key === "Enter" && activeSuggestion !== undefined) {
-      event.preventDefault();
-      chooseSuggestion(activeSuggestion.name);
-    } else if (suggestionOpen && event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      setQuery(null);
-      combobox.closeDropdown();
-    } else if (suggestionOpen && (event.key === "}" || event.key === " ")) {
-      setQuery(null);
-      combobox.closeDropdown();
+    if (handlePickerKeyDown(event)) return;
+    if (suggestionOpen && (event.key === "}" || event.key === " ")) {
+      closePicker();
     }
   };
 
@@ -338,16 +308,6 @@ export function TemplateTextField({
     if (composing) return;
     onIssuesChange?.({ unknown: unknownVariables, worstCaseExceeded });
   }, [composing, onIssuesChange, unknownVariables, worstCaseExceeded]);
-
-  useEffect(() => {
-    if (suggestionOpen) combobox.openDropdown();
-    else combobox.closeDropdown();
-  }, [combobox, suggestionOpen]);
-
-  useEffect(() => {
-    if (!suggestionOpen || activeSuggestionId === undefined) return;
-    scrollOptionIntoView(activeSuggestionId);
-  }, [activeSuggestionId, suggestionOpen]);
 
   useEffect(() => {
     const pendingSelection = selectionAfterValue.current;
@@ -410,16 +370,33 @@ export function TemplateTextField({
     ));
 
   return (
-    <Combobox
-      store={combobox}
-      onOptionSubmit={chooseSuggestion}
-      withinPortal
-      position="bottom-start"
-      hideDetached={false}
-      middlewares={{ flip: true, shift: true }}
-      shadow="xs"
-      width="min(400px, calc(100vw - 24px))"
+    <InlineSuggestionPicker
+      listboxId={listboxId}
+      open={suggestionOpen}
+      groups={suggestionGroups}
+      messages={messages.picker}
+      onSelect={chooseSuggestion}
+      onClose={() => {
+        dismissedQuery.current = suggestionQueryKey(query);
+        setQuery(null);
+      }}
+      renderOption={(variable, active) => <>
+        <span className="ui-template-text-field__suggestion-copy">
+          <span className="ui-template-text-field__suggestion-name">{variable.label ?? variable.name}</span>
+          <span className="ui-template-text-field__suggestion-token">{`{${variable.name}${variable.parameter === undefined ? "" : ` ${variable.parameter.value}`}}`}</span>
+          {active ? <span className="ui-template-text-field__suggestion-description">{variable.description}</span> : null}
+        </span>
+        <span className={`ui-template-text-field__suggestion-sample${variable.isTextBlock ? " ui-template-text-field__suggestion-sample--tag" : ""}`}>
+          {variable.sample}
+        </span>
+        {variable.external ? (
+          <span className="ui-template-text-field__suggestion-external" role="img" title={messages.picker.externalHelp} aria-label={messages.picker.externalHelp}>
+            <Icon name="cause" size={16} />
+          </span>
+        ) : null}
+      </>}
     >
+      {({ activeOptionId, handleKeyDown: handlePickerKeyDown, close }) => (
       <Input.Wrapper
         data-ui=""
         className="ui-template-text-field"
@@ -456,7 +433,7 @@ export function TemplateTextField({
               updateSuggestionQuery(event.currentTarget.value, event.currentTarget.selectionStart);
             }}
             onClick={(event) => { rememberSelection(event.currentTarget); }}
-            onKeyDown={handleKeyDown}
+            onKeyDown={(event) => { handleKeyDown(event, handlePickerKeyDown, close); }}
             onCompositionStart={() => { composingRef.current = true; setComposing(true); setQuery(null); }}
             onCompositionEnd={onCompositionEnd}
             onBlur={() => { setQuery(null); }}
@@ -471,53 +448,17 @@ export function TemplateTextField({
             aria-autocomplete="list"
             aria-expanded={suggestionOpen}
             aria-controls={suggestionOpen ? listboxId : undefined}
-            aria-activedescendant={suggestionOpen && activeSuggestion !== undefined ? `${listboxId}-${activeSuggestion.name}` : undefined}
+            aria-activedescendant={suggestionOpen ? activeOptionId : undefined}
             spellCheck
           >
             {renderDecoratedValue}
           </RichTextarea>
-          <Combobox.Target withKeyboardNavigation={false} withAriaAttributes={false}>
+            <InlineSuggestionPickerTarget>
             <span aria-hidden="true" className="template-text-field__caret-anchor" style={{ left: caretAnchor.left, top: caretAnchor.top }} />
-          </Combobox.Target>
+            </InlineSuggestionPickerTarget>
         </div>
       </Input.Wrapper>
-      {suggestionOpen ? (
-        <Combobox.Dropdown data-ui="" className="ui-template-text-field__suggestions-dropdown">
-          <Combobox.Options id={listboxId} className="ui-template-text-field__suggestions" role="listbox" aria-label={messages.picker.title}>
-            {suggestionGroups.map(({ group, options: groupOptions }) => (
-              <Combobox.Group key={group.id} label={<TemplateTextFieldGroupHeading group={group} />}>
-                {groupOptions.map(({ option: variable, index }) => (
-                  <Combobox.Option
-                    id={`${listboxId}-${variable.name}`}
-                    key={variable.name}
-                    value={variable.name}
-                    active={index === activeIndex}
-                    className="ui-template-text-field__suggestion"
-                    aria-selected={index === activeIndex}
-                    onMouseDown={(event) => { event.preventDefault(); }}
-                  >
-                    <span className="ui-template-text-field__suggestion-copy">
-                      <span className="ui-template-text-field__suggestion-name">{variable.label ?? variable.name}</span>
-                      <span className="ui-template-text-field__suggestion-token">{`{${variable.name}${variable.parameter === undefined ? "" : ` ${variable.parameter.value}`}}`}</span>
-                      {index === activeIndex ? <span className="ui-template-text-field__suggestion-description">{variable.description}</span> : null}
-                    </span>
-                    <span className={`ui-template-text-field__suggestion-sample${variable.isTextBlock ? " ui-template-text-field__suggestion-sample--tag" : ""}`}>
-                      {variable.sample}
-                    </span>
-                    {variable.external ? (
-                      <span className="ui-template-text-field__suggestion-external" role="img" title={messages.picker.externalHelp} aria-label={messages.picker.externalHelp}>
-                        <Icon name="cause" size={16} />
-                      </span>
-                    ) : null}
-                  </Combobox.Option>
-                ))}
-              </Combobox.Group>
-            ))}
-            {suggestions.length === 0 ? <Combobox.Empty className="ui-template-text-field__no-results">{messages.picker.noResults}</Combobox.Empty> : null}
-          </Combobox.Options>
-          <TemplateTextFieldKeyboardHints messages={messages.picker} />
-        </Combobox.Dropdown>
-      ) : null}
-    </Combobox>
+      )}
+    </InlineSuggestionPicker>
   );
 }
