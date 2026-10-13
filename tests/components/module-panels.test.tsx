@@ -474,6 +474,32 @@ describe("Module panel loader", () => {
     expect(handle.closest(".ui-field")?.querySelector(".ui-field__error")).toBeInTheDocument();
   });
 
+  it("localizes a known server field reason and keeps the raw reason as a fallback only", async () => {
+    const rawReason = "This text cannot be sent by the chat bot.";
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      if (path.endsWith("/modules/editor-fixture/settings") && init?.method === "PATCH") {
+        return Promise.resolve(Response.json({
+          error: "module_settings_invalid",
+          path: "settings.message",
+          reasonCode: "template_text_invalid",
+          reason: rawReason,
+        }, { status: 400 }));
+      }
+      return Promise.resolve(path.endsWith("/modules/editor-fixture/settings")
+        ? Response.json({ settings: editorFixtureSettings, revision: 1, variables: [] })
+        : Response.json({}));
+    });
+    renderSettingsFixture(fetcher);
+
+    const message = await screen.findByRole("textbox", { name: "Nachricht" });
+    fireEvent.change(message, { target: { value: "Changed {viewer}" } });
+    fireEvent.click(screen.getByRole("button", { name: "Fixture speichern" }));
+
+    expect(await screen.findByText("Der Chattext kann nicht gesendet werden.")).toBeVisible();
+    expect(screen.queryByText(rawReason)).not.toBeInTheDocument();
+  });
+
   it("focuses an enabled switch when a disabled child still blocks saving", async () => {
     const fetcher = vi.fn<typeof fetch>((input) => {
       const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;

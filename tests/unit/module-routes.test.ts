@@ -901,10 +901,10 @@ describe("Module management in the panel", () => {
       }),
       environment,
     );
-    const body = await invalid.json<{ error: string; path: string; reason: string }>();
+    const body = await invalid.json<{ error: string; path: string; reasonCode: string; reason: string }>();
 
     expect(invalid.status).toBe(400);
-    expect(body).toMatchObject({ error: "module_settings_invalid", path: "settings.betrag" });
+    expect(body).toMatchObject({ error: "module_settings_invalid", path: "settings.betrag", reasonCode: "invalid_type" });
     expect(body.reason.length).toBeGreaterThan(0);
   });
 

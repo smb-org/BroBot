@@ -329,7 +329,7 @@ test("FAQ pattern error renders in its reserved slot without moving the Answer f
   await routeJson(page, "/api/channels/channel-a/modules/faq/entries", { entries: [entry] });
   await page.route("**/api/channels/channel-a/modules/faq/entries/faq-regex*", async (route) => {
     if (route.request().method() === "GET") return route.fallback();
-    await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "faq_matcher_invalid", path: "matcher.pattern", reason: "missing closing ): `(foo`" }) });
+    await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "faq_matcher_invalid", path: "matcher.pattern", reasonCode: "faq_regex_invalid", reason: "missing closing ): `(foo`" }) });
   });
   await gotoPanel(page, "faq");
   await page.getByRole("button", { name: /edit/i }).first().click();
@@ -340,7 +340,7 @@ test("FAQ pattern error renders in its reserved slot without moving the Answer f
   const gap = async (): Promise<number> => (await box(answer)).y - (await box(pattern)).y;
   const before = await gap();
   await dialog.getByRole("button", { name: "Save" }).click();
-  await expect(dialog.getByText("Invalid RE2 pattern")).toBeVisible();
+  await expect(dialog.getByText("The RE2 pattern is invalid or uses unsupported syntax.")).toBeVisible();
   // Sub-pixel settling is tolerated; the pre-fix shift was ~40px.
   expect(Math.abs(await gap() - before)).toBeLessThan(2);
 });

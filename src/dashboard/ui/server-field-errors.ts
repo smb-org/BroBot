@@ -1,4 +1,5 @@
 export type ServerFieldPathMap = Readonly<Record<string, string>>;
+export type ServerFieldErrorReasonResolver = (reasonCode: string) => string | undefined;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -7,13 +8,18 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 export const mapServerFieldErrors = (
   failure: unknown,
   pathToField: ServerFieldPathMap,
+  resolveReason?: ServerFieldErrorReasonResolver,
 ): Readonly<Record<string, string>> => {
   const payload = isRecord(failure) && "details" in failure && failure.details !== null
     ? failure.details
     : failure;
-  if (!isRecord(payload) || typeof payload.path !== "string" || typeof payload.reason !== "string" || payload.reason.length === 0) return {};
+  if (!isRecord(payload) || typeof payload.path !== "string") return {};
   const path = payload.path;
-  const reason = payload.reason;
+  const rawReason = typeof payload.reason === "string" && payload.reason.length > 0 ? payload.reason : undefined;
+  const reasonCode = typeof payload.reasonCode === "string" ? payload.reasonCode : undefined;
+  const reason = reasonCode === undefined ? undefined : resolveReason?.(reasonCode);
+  const message = reason ?? rawReason;
+  if (message === undefined) return {};
   const matchedPath = Object.prototype.hasOwnProperty.call(pathToField, path)
     ? path
     : Object.keys(pathToField)
@@ -21,5 +27,5 @@ export const mapServerFieldErrors = (
       .sort((left, right) => right.length - left.length)[0];
   if (matchedPath === undefined) return {};
   const field = pathToField[matchedPath];
-  return field === undefined ? {} : { [field]: reason };
+  return field === undefined ? {} : { [field]: message };
 };

@@ -49,12 +49,21 @@ test("field error and warning slots keep their layout boxes stable", async ({ pa
   expect(dialogAfterError.height).toBeCloseTo(dialogHeight, 2);
 });
 
-test("the save bar keeps its height on mobile", async ({ page }) => {
+test("the save bar puts its complete error above the buttons on mobile", async ({ page }) => {
   await page.goto("/tests/e2e/layout-fixture.html");
   await expect(page.locator(".ui-save-bar")).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
-  const mobileHeight = (await page.locator(".ui-save-bar").boundingBox())?.height;
-  expect(mobileHeight).toBe(64);
+  await page.getByRole("button", { name: "Toggle issues" }).click();
+  const saveBar = page.locator(".ui-save-bar");
+  const status = saveBar.locator(".ui-save-bar__status");
+  const actions = saveBar.locator(".ui-save-bar__actions");
+  await expect(status.locator(".sr-only")).toHaveText("× The module settings are invalid.");
+  expect(await status.locator(".ui-save-bar__message-copy").evaluate((element) => getComputedStyle(element, "::before").whiteSpace)).toBe("normal");
+  const statusBox = await status.boundingBox();
+  const actionsBox = await actions.boundingBox();
+  if (statusBox === null || actionsBox === null) throw new Error("The mobile save status and buttons need layout boxes.");
+  expect(statusBox.y + statusBox.height).toBeLessThanOrEqual(actionsBox.y);
+  expect((await saveBar.boundingBox())?.height).toBe(88);
 });
 
 test("compact header selects remain 44px when hints and errors change", async ({ page }) => {

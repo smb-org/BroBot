@@ -56,6 +56,7 @@ describe("FAQ panel", () => {
         return Promise.resolve(jsonResponse({
           error: "faq_matcher_invalid",
           path: "matcher.pattern",
+          reasonCode: "faq_regex_invalid",
           reason: "invalid Perl operator: (?=",
         }, 400));
       }
@@ -71,7 +72,7 @@ describe("FAQ panel", () => {
     fireEvent.change(patternField, { target: { value: "(?=hello)" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(await screen.findByText("Invalid RE2 pattern: invalid Perl operator: (?=")).toBeInTheDocument();
+    expect(await screen.findByText("The RE2 pattern is invalid or uses unsupported syntax.")).toBeInTheDocument();
     expect(patternField).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByRole("spinbutton", { name: "Per-person cooldown" })).toHaveValue(60);
   });

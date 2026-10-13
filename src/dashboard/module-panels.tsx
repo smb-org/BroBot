@@ -8,7 +8,7 @@ import { canManage, type ChannelRole } from "../contracts/values";
 import type { PanelActiveModule, PanelModuleState, PanelTemplateWarning } from "../panel-contract";
 import { PanelApiError, getChannelModuleSettings, saveChannelModuleSettings, setChannelModuleEnabled } from "./api";
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "./data";
-import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber, type DashboardLanguage } from "./locale";
+import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber, serverFieldErrorText, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
 import { templateTextLength } from "../template";
 import { ChatCommands } from "./chat-commands";
@@ -222,6 +222,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       module={module}
       channelId={channelId}
       canManageContent={canManageContent}
+      language={language}
       definition={loaded.definition}
       copy={copy}
       retryLabel={dashboardCommonTexts(language).retry}
@@ -241,10 +242,11 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
   </LoadState>;
 };
 
-const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, definition, copy, retryLabel, channelVariables, initial, initialRevision, onReload }: {
+const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, language, definition, copy, retryLabel, channelVariables, initial, initialRevision, onReload }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
+  language: DashboardLanguage;
   definition: SettingsEditorDefinition<Record<string, unknown>>;
   copy: SettingsEditorDefinition<Record<string, unknown>>["locales"]["de"];
   retryLabel: string;
@@ -452,7 +454,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
         return copy.conflictMessage;
       }
       const message = caught instanceof PanelApiError ? apiErrorText(caught.code, copy.saveError) : copy.saveError;
-      setServerFieldErrors(mapServerFieldErrors(caught, fieldPathMap));
+      setServerFieldErrors(mapServerFieldErrors(caught, fieldPathMap, (reasonCode) => serverFieldErrorText(reasonCode, language)));
       setError(message);
       return message;
     } finally { setPending(false); }

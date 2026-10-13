@@ -6,7 +6,7 @@ import type { ModulePanelProperties } from "../../contract";
 import type { FaqEntry, FaqGame } from "../contracts";
 import { FAQ_ANSWER_MAX_LENGTH, FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH, FAQ_USER_COOLDOWN_MAXIMUM_SECONDS } from "../contracts";
 import { inputFromDraft, type FaqDraft } from "./draft";
-import { faqTexts } from "./locale";
+import { faqMatcherValidationReasonText, faqTexts } from "./locale";
 import {
   createFaqEntry,
   deleteFaqEntry,
@@ -131,10 +131,10 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
       const fieldErrors = mapServerFieldErrors(failure, {
         "matcher.pattern": "patterns",
         "matcher.patterns": "patterns",
-      });
+      }, (reasonCode) => faqMatcherValidationReasonText(reasonCode, labels));
       const matcherReason = fieldErrors.patterns;
       if (matcherReason !== undefined) {
-        setMatcherError(labels.regexError(matcherReason));
+        setMatcherError(matcherReason);
         setError(null);
       } else setError(code === "faq_cooldown_too_short" ? labels.cooldownMinError
         : code === "faq_text_input_dependent" ? labels.inputDependentText

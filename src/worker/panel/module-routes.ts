@@ -672,10 +672,16 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
   if (stored === null) return context.json({ error: "module_not_configured" }, 404);
   const body = await readJsonBody(context.req.raw);
   if (body === null || typeof body !== "object" || Array.isArray(body)) return context.json({
-    error: "module_settings_invalid", path: "settings", reason: "Settings data and revision are required.",
+    error: "module_settings_invalid",
+    path: "settings",
+    reasonCode: "settings_payload_invalid",
+    reason: "Settings data and revision are required.",
   }, 400);
   if (!Number.isSafeInteger(Reflect.get(body, "revision")) || (Reflect.get(body, "revision") as number) < 1) return context.json({
-    error: "module_settings_invalid", path: "revision", reason: "A valid settings revision is required.",
+    error: "module_settings_invalid",
+    path: "revision",
+    reasonCode: "settings_revision_invalid",
+    reason: "A valid settings revision is required.",
   }, 400);
   const expectedRevision = Reflect.get(body, "revision") as number;
   const settings = module.settingsSchema.safeParse(Reflect.get(body, "settings"));
@@ -684,9 +690,11 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
     const path = issue === undefined || issue.path.length === 0
       ? "settings"
       : `settings.${issue.path.map(String).join(".")}`;
+    const templateField = typeof issue?.path[0] === "string" && Object.hasOwn(module.templateFields ?? {}, issue.path[0]);
     return context.json({
       error: "module_settings_invalid",
       path,
+      reasonCode: issue === undefined ? "settings_invalid" : issue.code === "custom" && templateField ? "template_text_invalid" : issue.code,
       reason: issue?.message ?? "Settings do not match the module schema.",
     }, 400);
   }

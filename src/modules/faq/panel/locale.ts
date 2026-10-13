@@ -1,5 +1,6 @@
 import type { DashboardLanguage, LocaleCatalog } from "../../../dashboard/locale";
 import type { GamePickerMessages, TemplateTextFieldMessages } from "../../../dashboard/ui";
+import type { FaqMatcherValidationReasonCode } from "../domain";
 
 export interface FaqTexts {
   title: string;
@@ -12,7 +13,7 @@ export interface FaqTexts {
   patternsHint: string;
   regexPattern: string;
   regexPatternHint: string;
-  regexError: (reason: string) => string;
+  matcherValidationReasons: Record<FaqMatcherValidationReasonCode, string>;
   answer: string;
   answerHint: string;
   cooldown: string;
@@ -89,7 +90,13 @@ const catalog: LocaleCatalog<FaqTexts> = {
     title: "FAQ & Auto-Antworten", add: "FAQ-Eintrag anlegen", name: "Name", matcherType: "Auslösertyp", keywordsType: "Schlüsselwörter und Wortgruppen", regexType: "Regulärer Ausdruck (RE2)", patterns: "Schlüsselwörter und Wortgruppen",
     patternsHint: "Ein Eintrag pro Zeile. Groß-/Kleinschreibung und Akzente werden ignoriert; Wörter müssen vollständig übereinstimmen.",
     regexPattern: "RE2-Ausdruck", regexPatternHint: "RE2-Syntax; Groß-/Kleinschreibung wird beachtet. Lookaround und Rückverweise werden nicht unterstützt.",
-    regexError: (reason) => `Ungültiger RE2-Ausdruck: ${reason}`,
+    matcherValidationReasons: {
+      faq_matcher_required: "Gib einen FAQ-Auslöser ein.",
+      faq_regex_required: "Gib einen regulären Ausdruck ein.",
+      faq_regex_too_long: "Der reguläre Ausdruck ist zu lang.",
+      faq_regex_invalid: "Der RE2-Ausdruck ist ungültig oder verwendet nicht unterstützte Syntax.",
+      faq_keywords_invalid: "Gib 1 bis 20 gültige Schlüsselwörter oder Wortgruppen ein.",
+    },
     answer: "Antwort", answerHint: "Freitext mit Variablen und Textbausteinen im Format {text.name}.", cooldown: "Abkühlzeit", cooldownHint: "Mindestens 30 Sekunden; höchstens 86.400 Sekunden.",
     cooldownMinError: "Die Abkühlzeit muss mindestens 30 Sekunden betragen.",
     userCooldown: "Abkühlzeit pro Person", userCooldownHint: "0 deaktiviert diese zusätzliche Abkühlzeit. Höchstens 86.400 Sekunden.",
@@ -120,7 +127,13 @@ const catalog: LocaleCatalog<FaqTexts> = {
     title: "FAQ & Auto replies", add: "Create FAQ entry", name: "Name", matcherType: "Trigger type", keywordsType: "Keywords and phrases", regexType: "Regular expression (RE2)", patterns: "Keywords and phrases",
     patternsHint: "One per line. Case and accents are ignored; words must match in full.", answer: "Answer", answerHint: "Free text with variables and text blocks in the {text.name} format.", cooldown: "Cooldown",
     regexPattern: "RE2 pattern", regexPatternHint: "RE2 syntax; matching is case-sensitive. Lookaround and backreferences are not supported.",
-    regexError: (reason) => `Invalid RE2 pattern: ${reason}`,
+    matcherValidationReasons: {
+      faq_matcher_required: "Enter an FAQ trigger.",
+      faq_regex_required: "Enter a regular expression.",
+      faq_regex_too_long: "The regular expression is too long.",
+      faq_regex_invalid: "The RE2 pattern is invalid or uses unsupported syntax.",
+      faq_keywords_invalid: "Enter 1 to 20 valid keywords or phrases.",
+    },
     cooldownHint: "At least 30 seconds; up to 86,400 seconds.", cooldownMinError: "Cooldown must be at least 30 seconds.",
     userCooldown: "Per-person cooldown", userCooldownHint: "0 disables this additional cooldown. Up to 86,400 seconds.",
     games: "Games",
@@ -147,5 +160,10 @@ const catalog: LocaleCatalog<FaqTexts> = {
     },
   },
 };
+
+export const faqMatcherValidationReasonText = (reasonCode: string, texts: FaqTexts): string | undefined =>
+  Object.hasOwn(texts.matcherValidationReasons, reasonCode)
+    ? texts.matcherValidationReasons[reasonCode as FaqMatcherValidationReasonCode]
+    : undefined;
 
 export const faqTexts = (language?: DashboardLanguage): FaqTexts => catalog[language ?? "de"];

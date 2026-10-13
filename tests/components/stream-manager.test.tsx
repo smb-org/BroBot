@@ -273,7 +273,12 @@ describe("Stream Manager immediate actions", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /Werbung jetzt/ }));
 
-    await expectActionResult("Zum Starten einer Werbepause braucht Ads die Berechtigung channel:edit:commercial. Autorisiere Ads für diesen Kanal erneut und erteile diese Berechtigung.", "error");
+    const fullMessage = "Zum Starten einer Werbepause braucht Ads die Berechtigung channel:edit:commercial. Autorisiere Ads für diesen Kanal erneut und erteile diese Berechtigung.";
+    const result = await screen.findByTestId("immediate-action-result-slot");
+    expect(result).toHaveTextContent("Ads-Berechtigung fehlt.");
+    expect(result).toHaveAttribute("title", fullMessage);
+    expect(result).toHaveAttribute("aria-label", fullMessage);
+    expect(toastsSnapshot()).toContainEqual(expect.objectContaining({ tone: "error", message: fullMessage }));
     expect(screen.queryByText("Clip erstellt")).not.toBeInTheDocument();
   });
 
@@ -362,7 +367,8 @@ describe("Stream Manager immediate actions", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Werbung jetzt/ }));
 
     const result = await screen.findByTestId("immediate-action-result-slot");
-    expect(result.textContent).toMatch(/Ads-App-Token.*automatischen Erneuerung|Ads app token.*automatic renewal/i);
+    expect(result).toHaveTextContent("Ads-Verbindung prüfen.");
+    expect(result.getAttribute("aria-label")).toMatch(/Ads-App-Token.*automatischen Erneuerung/u);
     expect(result.textContent).not.toMatch(/channel:edit:commercial/i);
   });
 

@@ -132,6 +132,76 @@ export const dashboardLanguage = (): DashboardLanguage => browserModuleLanguage(
 
 export const dashboardCommonTexts = (language: DashboardLanguage = dashboardLanguage()): DashboardCommonTexts => commonTexts[language];
 
+type ServerFieldErrorReasonCode =
+  | "settings_payload_invalid"
+  | "settings_revision_invalid"
+  | "settings_invalid"
+  | "invalid_type"
+  | "too_small"
+  | "too_big"
+  | "invalid_enum_value"
+  | "invalid_value"
+  | "invalid_literal"
+  | "invalid_string"
+  | "invalid_format"
+  | "not_multiple_of"
+  | "unrecognized_keys"
+  | "invalid_union"
+  | "invalid_key"
+  | "invalid_element"
+  | "custom"
+  | "template_text_invalid";
+
+const serverFieldErrorCatalog: LocaleCatalog<Record<ServerFieldErrorReasonCode, string>> = {
+  de: {
+    settings_payload_invalid: "Die Einstellungsdaten sind ungültig.",
+    settings_revision_invalid: "Der Einstellungsstand ist ungültig.",
+    settings_invalid: "Die Einstellungen entsprechen nicht dem Modulschema.",
+    invalid_type: "Verwende einen Wert vom erwarteten Typ.",
+    too_small: "Der Wert liegt unter dem erlaubten Minimum.",
+    too_big: "Der Wert überschreitet das erlaubte Maximum.",
+    invalid_enum_value: "Wähle einen der verfügbaren Werte.",
+    invalid_value: "Wähle einen der verfügbaren Werte.",
+    invalid_literal: "Wähle einen der verfügbaren Werte.",
+    invalid_string: "Das Format ist ungültig.",
+    invalid_format: "Das Format ist ungültig.",
+    not_multiple_of: "Verwende einen erlaubten Schrittwert.",
+    unrecognized_keys: "Die Einstellungen enthalten ein unbekanntes Feld.",
+    invalid_union: "Der Wert entspricht keinem unterstützten Format.",
+    invalid_key: "Ein Feldname ist ungültig.",
+    invalid_element: "Ein Eintrag hat einen ungültigen Wert.",
+    custom: "Dieser Wert ist ungültig.",
+    template_text_invalid: "Der Chattext kann nicht gesendet werden.",
+  },
+  en: {
+    settings_payload_invalid: "The settings data is invalid.",
+    settings_revision_invalid: "The settings revision is invalid.",
+    settings_invalid: "The settings do not match the module schema.",
+    invalid_type: "Use a value of the expected type.",
+    too_small: "This value is below the allowed minimum.",
+    too_big: "This value exceeds the allowed maximum.",
+    invalid_enum_value: "Choose one of the available values.",
+    invalid_value: "Choose one of the available values.",
+    invalid_literal: "Choose one of the available values.",
+    invalid_string: "The format is invalid.",
+    invalid_format: "The format is invalid.",
+    not_multiple_of: "Use an allowed step value.",
+    unrecognized_keys: "The settings include an unsupported field.",
+    invalid_union: "The value does not match a supported format.",
+    invalid_key: "A field name is invalid.",
+    invalid_element: "An entry has an invalid value.",
+    custom: "This value is invalid.",
+    template_text_invalid: "This chat message cannot be sent.",
+  },
+};
+
+export const serverFieldErrorText = (
+  reasonCode: string,
+  language: DashboardLanguage = dashboardLanguage(),
+): string | undefined => Object.hasOwn(serverFieldErrorCatalog[language], reasonCode)
+  ? serverFieldErrorCatalog[language][reasonCode as ServerFieldErrorReasonCode]
+  : undefined;
+
 interface SystemTemplateVariableLocale {
   label: string;
   description: string;

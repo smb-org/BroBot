@@ -93,7 +93,7 @@ export function SaveBar({
   const saveDisabled = pending || conflict !== undefined || !dirty;
   const showButtons = dirty || persistent;
   return (
-    <div data-ui="" className={`ui-save-bar${persistent ? " ui-save-bar--persistent" : ""}`} aria-busy={pending}>
+    <div data-ui="" className={`ui-save-bar${persistent ? " ui-save-bar--persistent" : ""}${error === undefined ? "" : " ui-save-bar--error"}`} aria-busy={pending}>
       <div className="ui-save-bar__status" role="status" aria-live="polite">
         {warningStatus !== null && statusText === warningStatus || warningStatus !== null && saved && !dirty ? <Icon name="warning" size={16} /> : null}
         <div className="ui-save-bar__message" style={{ color: conflict !== undefined || error !== undefined || (invalid && dirty) ? colors.errorText : warningStatus !== null ? colors.amber : colors.text3 }}>
