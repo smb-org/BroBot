@@ -464,7 +464,8 @@ test("FAQ pattern error renders in its reserved slot without moving the Answer f
   await pattern.fill("(foo");
   const gap = async (): Promise<number> => (await box(answer)).y - (await box(pattern)).y;
   const before = await gap();
-  await dialog.getByRole("button", { name: "Save" }).click();
+  const saveButton = dialog.getByRole("button", { name: "Save" });
+  await saveButton.press("Enter");
   await expect(dialog.getByText("The RE2 pattern is invalid or uses unsupported syntax.")).toBeVisible();
   // Sub-pixel settling is tolerated; the pre-fix shift was ~40px.
   expect(Math.abs(await gap() - before)).toBeLessThan(2);

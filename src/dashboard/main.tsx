@@ -1183,7 +1183,7 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
       />
       <section className="content-section channel-overview-settings" aria-label={settingsTexts.section}>
         <div className="section-heading"><h2>{settingsTexts.section}</h2></div>
-        <div className="form-actions">
+        <div className="form-actions channel-overview-settings__row channel-overview-settings__row--timezone">
           <ChannelTimeZoneField
             label={settingsTexts.timeZone}
             hint={settingsTexts.timeZoneHint}

@@ -76,10 +76,13 @@ test("overview save action aligns with the chat target field at 1280px", async (
   const save = page.getByRole("button", { name: "Save default chat target", exact: true });
   await expect(field).toBeVisible();
   await expect(save).toBeVisible();
-  const topDifference = await field.evaluate((element) => {
-    const action = document.querySelector<HTMLButtonElement>(".channel-overview-settings__row > .ui-button");
-    if (action === null) throw new Error("The chat target save button is missing.");
-    return Math.abs(element.getBoundingClientRect().top - action.getBoundingClientRect().top);
+  const topDifference = await save.evaluate((element) => {
+    const row = element.closest(".channel-overview-settings__row");
+    const action = row?.querySelector<HTMLButtonElement>(".ui-button");
+    if (action === null || action === undefined) throw new Error("The chat target save button is missing.");
+    const field = row?.querySelector<HTMLButtonElement>(".ui-chat-target-field__trigger");
+    if (field === null || field === undefined) throw new Error("The chat target field is missing.");
+    return Math.abs(field.getBoundingClientRect().top - action.getBoundingClientRect().top);
   });
   expect(topDifference).toBeLessThanOrEqual(8);
 });

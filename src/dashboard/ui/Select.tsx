@@ -109,7 +109,7 @@ export function Select({ label, ariaLabel, hint, error, value, onChange, options
       required={required}
     >
       <div className="ui-select__search-control">
-        <Combobox.Input id={controlId} aria-label={ariaLabel ?? label} aria-describedby={describedByIds} aria-invalid={error === undefined || error.length === 0 ? undefined : true} aria-busy={busy} title={title} placeholder={placeholder} disabled={disabled} onClick={() => { if (!disabled) setSearchOpen(true); }} className="ui-select__search-input" />
+        <Combobox.Input data-ui="" id={controlId} aria-label={ariaLabel ?? label} aria-describedby={describedByIds} aria-invalid={error === undefined || error.length === 0 ? undefined : true} aria-busy={busy} title={title} placeholder={placeholder} disabled={disabled} onClick={() => { if (!disabled) setSearchOpen(true); }} className="ui-select__search-input" />
         <Combobox.Trigger aria-label={ariaLabel ?? label} className="ui-select__trigger"><ChevronDown aria-hidden="true" size={16} /></Combobox.Trigger>
       </div>
       <Combobox.Portal>

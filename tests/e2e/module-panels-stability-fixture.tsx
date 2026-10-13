@@ -50,7 +50,7 @@ createRoot(document.getElementById("root") as HTMLElement).render(
           {panel}
           {panelName === "chat_voting" ? <button type="button" onClick={() => {
             runDashboardNavigationGuards(() => { window.location.assign("/tests/e2e/module-panels-stability-fixture.html?panel=api_source"); }, () => undefined);
-          }}>Leave panel</button> : null}
+          }}>{language === "de" ? "Panel verlassen" : "Leave panel"}</button> : null}
         </main>
       </UiProvider>
     </RealtimeHarness>
