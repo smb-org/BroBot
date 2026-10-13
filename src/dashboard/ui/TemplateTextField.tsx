@@ -10,6 +10,7 @@ import { Icon } from "./Icon";
 import { InlineSuggestionPicker, InlineSuggestionPickerTarget } from "./InlineSuggestionPicker";
 import { TruncatedText } from "./TruncatedText";
 import { describedHelper, useDisabledFieldReason } from "./DisabledFieldReason";
+import { insertTextareaText } from "./textarea-insertion";
 import {
   filterTemplateTextFieldOptions,
   groupTemplateTextFieldOptions,
@@ -41,6 +42,7 @@ export interface TemplateTextFieldMessages {
   openBrace: string;
   unknownVariable: (name: string, suggestion: string | null) => ReactNode;
   insertSuggestionLabel: (name: string) => string;
+  insertionLimit: string;
   worstCaseLength: (length: number, maxLength: number) => ReactNode;
   picker: TemplateTextFieldPickerMessages;
 }
@@ -160,6 +162,7 @@ export function TemplateTextField({
   const composingRef = useRef(false);
   const [composing, setComposing] = useState(false);
   const [query, setQuery] = useState<SuggestionQuery | null>(null);
+  const [insertionLimitReached, setInsertionLimitReached] = useState(false);
   const [caretAnchor, setCaretAnchor] = useState<CaretAnchor>({ left: 12, top: 32 });
   const declarations = useMemo(() => templateDeclarations(variables ?? []), [variables]);
   const count = variables === undefined ? value.length : templateTextLength(value);
@@ -220,6 +223,7 @@ export function TemplateTextField({
   };
 
   const handleValueChange = (next: string, target: HTMLTextAreaElement): void => {
+    setInsertionLimitReached(false);
     rememberSelection(target);
     const caret = target.selectionStart === 0 && target.selectionEnd === 0 && next.length > value.length
       ? next.length
@@ -255,9 +259,15 @@ export function TemplateTextField({
     const textarea = textareaRef.current;
     if (textarea === null || disabled || readOnly) return;
     const nextValue = `${textarea.value.slice(0, start)}${insert}${textarea.value.slice(end)}`;
+    const nextCount = variables === undefined ? nextValue.length : templateTextLength(nextValue);
+    if (maxLength !== undefined && nextCount > maxLength) {
+      setInsertionLimitReached(true);
+      return;
+    }
     programmaticEdit.current = true;
-    textarea.setRangeText(insert, start, end, "end");
+    insertTextareaText(textarea, insert, start, end);
     programmaticEdit.current = false;
+    setInsertionLimitReached(false);
     const targetSelection = selectionAfter ?? { start: start + insert.length, end: start + insert.length };
     selection.current = targetSelection;
     selectionAfterValue.current = { value: nextValue, range: targetSelection, focus: true };
@@ -334,6 +344,9 @@ export function TemplateTextField({
         {countNode}
       </div>
       <div className="ui-template-text-field__warnings" id={`${id}-warnings`} aria-live="polite">
+          {insertionLimitReached ? (
+            <div className="ui-template-text-field__warning" role="status"><Icon name="warning" size={16} /><span>{messages.insertionLimit}</span></div>
+          ) : null}
           {openBrace ? (
             <div className="ui-template-text-field__warning"><Icon name="warning" size={16} /><span>{messages.openBrace}</span></div>
           ) : null}

@@ -83,6 +83,7 @@ export interface TextLibraryTexts {
   picker: TemplateTextFieldPickerMessages;
   addText: string;
   insertSuggestionLabel: (name: string) => string;
+  insertionLimit: string;
   removeText: string;
   preview: string;
   simulateStream: string;
@@ -199,6 +200,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     },
     addText: "Zufallstext hinzufügen",
     insertSuggestionLabel: (name) => `{${name}} einsetzen`,
+    insertionLimit: "Einfügen würde das Zeichenlimit überschreiten.",
     removeText: "Text entfernen",
     preview: "Vorschau",
     simulateStream: "Simulierter Streamstatus",
@@ -342,6 +344,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     },
     addText: "Add random text",
     insertSuggestionLabel: (name) => `Insert {${name}}`,
+    insertionLimit: "This insertion would exceed the character limit.",
     removeText: "Remove text",
     preview: "Preview",
     simulateStream: "Simulated stream status",

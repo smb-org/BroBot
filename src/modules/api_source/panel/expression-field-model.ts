@@ -27,12 +27,47 @@ const normalizeSearch = (value: string): string => value
   .replace(/[\u0300-\u036f]/gu, "")
   .toLowerCase();
 
-const isInsideString = (value: string, end: number): boolean => {
+const skipExpressionTrivia = (value: string, start: number): number => {
+  let index = start;
+  while (index < value.length) {
+    const character = value[index];
+    if (character !== undefined && /[ \t\n\r\v]/u.test(character)) {
+      index += 1;
+      continue;
+    }
+    if (character === "/" && value[index + 1] === "*") {
+      const commentEnd = value.indexOf("*/", index + 2);
+      if (commentEnd < 0) return value.length;
+      index = commentEnd + 2;
+      continue;
+    }
+    break;
+  }
+  return index;
+};
+
+export const expressionHasCallOpeningParenthesis = (value: string, start: number): boolean =>
+  value[skipExpressionTrivia(value, start)] === "(";
+
+const isInsideProtectedExpressionRegion = (value: string, end: number): boolean => {
   let quote: "'" | '"' | null = null;
+  let backtick = false;
+  let comment = false;
   let escaped = false;
   for (let index = 0; index < end; index += 1) {
     const character = value[index];
     if (character === undefined) continue;
+    if (comment) {
+      if (character === "*" && value[index + 1] === "/") {
+        comment = false;
+        index += 1;
+      }
+      continue;
+    }
+    if (backtick) {
+      if (character === "`") backtick = false;
+      continue;
+    }
     if (escaped) {
       escaped = false;
       continue;
@@ -41,14 +76,26 @@ const isInsideString = (value: string, end: number): boolean => {
       escaped = true;
       continue;
     }
-    if (quote === null && (character === "'" || character === '"')) quote = character;
-    else if (quote === character) quote = null;
+    if (quote !== null) {
+      if (character === quote) quote = null;
+      continue;
+    }
+    if (character === "/" && value[index + 1] === "*") {
+      comment = true;
+      index += 1;
+      continue;
+    }
+    if (character === "`") {
+      backtick = true;
+      continue;
+    }
+    if (character === "'" || character === '"') quote = character;
   }
-  return quote !== null;
+  return quote !== null || backtick || comment;
 };
 
 export const expressionFunctionQueryAtCaret = (value: string, caret: number): ExpressionFunctionQuery | null => {
-  if (isInsideString(value, caret)) return null;
+  if (isInsideProtectedExpressionRegion(value, caret)) return null;
   const prefix = value.slice(0, caret);
   const match = /\$([\p{L}\p{N}_]*)$/u.exec(prefix);
   if (match === null || value[caret] === ".") return null;
@@ -64,11 +111,24 @@ export const apiSourceFunctionAtCaret = (
   const byName = new Map(functions.map((entry) => [entry.name, entry]));
   const calls: (ApiSourceFunction | null)[] = [];
   let quote: "'" | '"' | null = null;
+  let backtick = false;
+  let comment = false;
   let escaped = false;
 
   for (let index = 0; index < caret; index += 1) {
     const character = value[index];
     if (character === undefined) continue;
+    if (comment) {
+      if (character === "*" && value[index + 1] === "/") {
+        comment = false;
+        index += 1;
+      }
+      continue;
+    }
+    if (backtick) {
+      if (character === "`") backtick = false;
+      continue;
+    }
     if (escaped) {
       escaped = false;
       continue;
@@ -81,16 +141,25 @@ export const apiSourceFunctionAtCaret = (
       if (character === quote) quote = null;
       continue;
     }
+    if (character === "/" && value[index + 1] === "*") {
+      comment = true;
+      index += 1;
+      continue;
+    }
+    if (character === "`") {
+      backtick = true;
+      continue;
+    }
     if (character === "'" || character === '"') {
       quote = character;
       continue;
     }
     if (character === "$") {
-      const match = /^\$([A-Za-z][A-Za-z0-9_]*)\s*\(/u.exec(value.slice(index));
+      const match = /^\$([A-Za-z][A-Za-z0-9_]*)/u.exec(value.slice(index));
       const entry = match === null ? undefined : byName.get(match[1] ?? "");
       if (match !== null) {
-        const openParenthesis = index + match[0].lastIndexOf("(");
-        if (openParenthesis < caret) {
+        const openParenthesis = skipExpressionTrivia(value, index + match[0].length);
+        if (value[openParenthesis] === "(" && openParenthesis < caret) {
           calls.push(entry ?? null);
           index = openParenthesis;
         }

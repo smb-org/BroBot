@@ -668,6 +668,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
                               openBrace: labels.openBrace,
                               unknownVariable: labels.unknownVariable,
                               insertSuggestionLabel: labels.insertSuggestionLabel,
+                              insertionLimit: labels.insertionLimit,
                               worstCaseLength: (length, maximum) => `${String(length)} / ${String(maximum)}`,
                               picker: labels.picker,
                             }} />

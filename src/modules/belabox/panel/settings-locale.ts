@@ -8,6 +8,7 @@ const templateMessages: LocaleCatalog<SettingsEditorCatalog["templateMessages"]>
     openBrace: "Offene Variable: Schließe die geschweifte Klammer mit } ab.",
     unknownVariable: (name, suggestion) => suggestion === null ? `Unbekannte Variable {${name}}.` : `Unbekannte Variable {${name}} – meintest du {${suggestion}}?`,
     insertSuggestionLabel: (name) => `{${name}} einsetzen`,
+    insertionLimit: "Einfügen würde das Zeichenlimit überschreiten.",
     worstCaseLength: (length) => String(length),
     picker: {
       title: "Variable auswählen", noResults: "Keine Variablen gefunden.", externalHelp: "Fragt Twitch live ab, wenn die Vorlage gerendert wird",
@@ -21,6 +22,7 @@ const templateMessages: LocaleCatalog<SettingsEditorCatalog["templateMessages"]>
     openBrace: "Unclosed variable: add a closing brace }.",
     unknownVariable: (name, suggestion) => suggestion === null ? `Unknown variable {${name}}.` : `Unknown variable {${name}} — did you mean {${suggestion}}?`,
     insertSuggestionLabel: (name) => `Insert {${name}}`,
+    insertionLimit: "This insertion would exceed the character limit.",
     worstCaseLength: (length) => String(length),
     picker: {
       title: "Choose a variable", noResults: "No variables found.", externalHelp: "Looks up live data from Twitch when the template runs",

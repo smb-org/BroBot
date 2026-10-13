@@ -160,6 +160,77 @@ test("text-library picker space is reserved until populated variables arrive", a
   expect({ editor: await box(editor), slot: await box(pickerSlot) }).toEqual(mobileBefore);
 });
 
+test("template picker keeps its footer visible and scrolls options within the available height", async ({ page }) => {
+  const variables = Array.from({ length: 16 }, (_, index) => ({
+    name: `variable_${String(index)}`,
+    group: "context",
+    sample: `value_${String(index)}`,
+    maxLength: 20,
+    moduleId: "host",
+    isTextBlock: false,
+    contexts: ["chat_command", "event", "system"],
+  }));
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await routeJson(page, "/api/channels/channel-a/modules/text_commands/commands", { commands: [], variables });
+  await routeJson(page, "/api/channels/channel-a/template-variables", { variables });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await gotoPanel(page, "text_commands");
+  await page.getByRole("button", { name: "Add command" }).click();
+  const response = page.getByRole("textbox", { name: "Response" });
+  await response.click();
+  await page.keyboard.type("{");
+
+  const dropdown = page.locator(".ui-template-text-field__suggestions-dropdown");
+  const options = page.getByRole("listbox", { name: "Choose a variable" });
+  await expect(dropdown).toBeVisible();
+  expect(await options.getByRole("option").count()).toBeGreaterThanOrEqual(variables.length);
+  const geometry = await page.evaluate(() => {
+    const popup = document.querySelector(".ui-template-text-field__suggestions-dropdown");
+    const list = document.querySelector(".ui-template-text-field__suggestions");
+    const footerNode = document.querySelector(".ui-template-text-field__key-hints");
+    if (!(popup instanceof HTMLElement) || !(list instanceof HTMLElement) || !(footerNode instanceof HTMLElement)) {
+      throw new Error("The picker layout elements are missing.");
+    }
+    const popupRect = popup.getBoundingClientRect();
+    const listRect = list.getBoundingClientRect();
+    const footerRect = footerNode.getBoundingClientRect();
+    return {
+      scrollable: list.scrollHeight > list.clientHeight,
+      listBottom: listRect.bottom,
+      footerTop: footerRect.top,
+      footerBottom: footerRect.bottom,
+      popupBottom: popupRect.bottom,
+    };
+  });
+  expect(geometry.scrollable).toBe(true);
+  expect(geometry.listBottom).toBeLessThanOrEqual(geometry.footerTop + 0.5);
+  expect(geometry.footerBottom).toBeLessThanOrEqual(geometry.popupBottom + 0.5);
+
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await expect.poll(() => dropdown.evaluate((element) => element.getBoundingClientRect().height)).toBeLessThanOrEqual(440.5);
+  const tallGeometry = await page.evaluate(() => {
+    const popup = document.querySelector(".ui-template-text-field__suggestions-dropdown");
+    const list = document.querySelector(".ui-template-text-field__suggestions");
+    const footerNode = document.querySelector(".ui-template-text-field__key-hints");
+    if (!(popup instanceof HTMLElement) || !(list instanceof HTMLElement) || !(footerNode instanceof HTMLElement)) {
+      throw new Error("The picker layout elements are missing.");
+    }
+    const popupRect = popup.getBoundingClientRect();
+    const listRect = list.getBoundingClientRect();
+    const footerRect = footerNode.getBoundingClientRect();
+    return {
+      scrollable: list.scrollHeight > list.clientHeight,
+      listBottom: listRect.bottom,
+      footerTop: footerRect.top,
+      footerBottom: footerRect.bottom,
+      popupBottom: popupRect.bottom,
+    };
+  });
+  expect(tallGeometry.scrollable).toBe(true);
+  expect(tallGeometry.listBottom).toBeLessThanOrEqual(tallGeometry.footerTop + 0.5);
+  expect(tallGeometry.footerBottom).toBeLessThanOrEqual(tallGeometry.popupBottom + 0.5);
+});
+
 test("votekick loading sections reserve their populated structure", async ({ page }) => {
   const running = {
     id: "running-a", targetUserId: "target-a", targetLogin: "sampleviewer", initiatorUserId: "starter-a",

@@ -163,6 +163,7 @@ const templateMessages: LocaleCatalog<TemplateTextFieldMessages> = {
       ? `Unbekannte Variable {${name}}.`
       : `Unbekannte Variable {${name}} – meintest du {${suggestion}}?`,
     insertSuggestionLabel: (name) => `{${name}} einsetzen`,
+    insertionLimit: "Einfügen würde das Zeichenlimit überschreiten.",
     worstCaseLength: (length, maximum) => `Mit den längsten Werten bis zu ${String(length)} Zeichen — Twitch lehnt Nachrichten über ${String(maximum)} ab.`,
     picker: {
       title: "Variable auswählen", noResults: "Keine Variablen gefunden.", externalHelp: "Fragt Twitch live ab, wenn der Befehl ausgeführt wird",
@@ -178,6 +179,7 @@ const templateMessages: LocaleCatalog<TemplateTextFieldMessages> = {
       ? `Unknown variable {${name}}.`
       : `Unknown variable {${name}} — did you mean {${suggestion}}?`,
     insertSuggestionLabel: (name) => `Insert {${name}}`,
+    insertionLimit: "This insertion would exceed the character limit.",
     worstCaseLength: (length, maximum) => `With the longest values, this can reach ${String(length)} characters — Twitch rejects messages over ${String(maximum)}.`,
     picker: {
       title: "Choose a variable", noResults: "No variables found.", externalHelp: "Looks up live data from Twitch when the command runs",

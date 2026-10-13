@@ -30,6 +30,7 @@ const templateTextFieldMessages: TemplateTextFieldMessages = {
     ? `Unbekannte Variable {${name}}.`
     : `Unbekannte Variable {${name}} – meintest du {${suggestion}}?`,
   insertSuggestionLabel: (name) => `{${name}} einsetzen`,
+  insertionLimit: "Einfügen würde das Zeichenlimit überschreiten.",
   worstCaseLength: (length) => `Mit den längsten Werten bis zu ${String(length)} Zeichen.`,
   picker: {
     title: "Choose a variable", noResults: "No variables found.",

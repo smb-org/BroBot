@@ -148,7 +148,7 @@ export function InlineSuggestionPicker<Option extends { name: string }>({
         size: {
           padding: 12,
           apply: ({ availableHeight, elements }) => {
-            elements.floating.style.maxHeight = `${String(Math.max(0, availableHeight))}px`;
+            elements.floating.style.maxHeight = `${String(Math.max(0, Math.min(440, availableHeight)))}px`;
           },
         },
       }}

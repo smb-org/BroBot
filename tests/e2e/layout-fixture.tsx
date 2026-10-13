@@ -11,6 +11,7 @@ const templateMessages: TemplateTextFieldMessages = {
   openBrace: "Unclosed variable: add a closing brace }.",
   unknownVariable: (name) => `Unknown variable {${name}}.`,
   insertSuggestionLabel: (name) => `Insert {${name}}`,
+  insertionLimit: "This insertion would exceed the character limit.",
   worstCaseLength: (length, max) => `${String(length)} exceeds ${String(max)} characters.`,
   picker: {
     title: "Choose a variable",

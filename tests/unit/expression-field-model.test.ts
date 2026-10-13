@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { API_SOURCE_FUNCTION_CATALOG, type ApiSourceFunctionGroup } from "../../src/modules/api_source/contracts/function-catalog";
-import { apiSourceFunctionAtCaret, expressionFunctionQueryAtCaret, groupApiSourceFunctions } from "../../src/modules/api_source/panel/expression-field-model";
+import { apiSourceFunctionAtCaret, expressionFunctionQueryAtCaret, expressionHasCallOpeningParenthesis, groupApiSourceFunctions } from "../../src/modules/api_source/panel/expression-field-model";
 
 const groupLabels: Readonly<Record<ApiSourceFunctionGroup, string>> = {
   text: "Text",
@@ -24,6 +24,33 @@ describe("ExpressionField model", () => {
     expect(apiSourceFunctionAtCaret("$substring($trim($.value),", 26, API_SOURCE_FUNCTION_CATALOG)?.name).toBe("substring");
     expect(apiSourceFunctionAtCaret("'$substring(", 12, API_SOURCE_FUNCTION_CATALOG)).toBeNull();
     expect(apiSourceFunctionAtCaret("$trim($.value)", 15, API_SOURCE_FUNCTION_CATALOG)).toBeNull();
+  });
+
+  it("ignores function-like text in comments when showing a call signature", () => {
+    const expression = "$round(3.141, /* $trim( */ 2)";
+    expect(apiSourceFunctionAtCaret(expression, expression.length - 1, API_SOURCE_FUNCTION_CATALOG)?.name).toBe("round");
+    const commentedCall = "$round /* preserve this */ (3.141, /* $trim( */ 2)";
+    expect(apiSourceFunctionAtCaret(commentedCall, commentedCall.length - 1, API_SOURCE_FUNCTION_CATALOG)?.name).toBe("round");
+    expect(expressionHasCallOpeningParenthesis(commentedCall, "$round".length)).toBe(true);
+  });
+
+  it("does not open the function picker inside a comment", () => {
+    expect(expressionFunctionQueryAtCaret("$round(3.141, /* $trim", 22)).toBeNull();
+  });
+
+  it("opens the function picker after a backtick field name containing an apostrophe", () => {
+    const fieldName = "$.`owner's field` + $tri";
+    expect(expressionFunctionQueryAtCaret(fieldName, fieldName.length)).toEqual({
+      fragment: "tri",
+      start: fieldName.lastIndexOf("$"),
+      end: fieldName.length,
+    });
+    const commentText = "$trim('/*') + $tri";
+    expect(expressionFunctionQueryAtCaret(commentText, commentText.length)).toEqual({
+      fragment: "tri",
+      start: commentText.lastIndexOf("$"),
+      end: commentText.length,
+    });
   });
 
   it("filters and groups functions without duplicate entries", () => {

@@ -3,12 +3,14 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactElement } from "
 import { API_SOURCE_FUNCTION_CATALOG, type ApiSourceFunctionGroup } from "../contracts/function-catalog";
 import type { ModuleLanguage } from "../../contract";
 import { InlineSuggestionPicker, InlineSuggestionPickerTarget, Textarea, type InlineSuggestionPickerMessages } from "../../../dashboard/ui";
-import { apiSourceFunctionAtCaret, expressionFunctionQueryAtCaret, groupApiSourceFunctions } from "./expression-field-model";
+import { insertTextareaText } from "../../../dashboard/ui/textarea-insertion";
+import { apiSourceFunctionAtCaret, expressionFunctionQueryAtCaret, expressionHasCallOpeningParenthesis, groupApiSourceFunctions } from "./expression-field-model";
 
 export interface ExpressionFieldMessages {
   picker: InlineSuggestionPickerMessages;
   groupLabels: Readonly<Record<ApiSourceFunctionGroup, string>>;
   signatureLabel: string;
+  insertionLimit: string;
 }
 
 interface ExpressionFieldProps {
@@ -36,8 +38,10 @@ export function ExpressionField({ id, label, value, onChange, maxLength, languag
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const pendingSelection = useRef<PendingSelection | null>(null);
   const dismissedQuery = useRef<string | null>(null);
+  const programmaticEdit = useRef(false);
   const [caret, setCaret] = useState(0);
   const [query, setQuery] = useState<ReturnType<typeof expressionFunctionQueryAtCaret>>(null);
+  const [insertionLimitReached, setInsertionLimitReached] = useState(false);
   const localizedFunctions = useMemo(
     () => groupApiSourceFunctions(API_SOURCE_FUNCTION_CATALOG, language, messages.groupLabels, query?.fragment ?? ""),
     [language, messages.groupLabels, query],
@@ -66,10 +70,16 @@ export function ExpressionField({ id, label, value, onChange, maxLength, languag
   const insertFunction = (name: string): void => {
     const target = textareaRef.current;
     if (target === null || disabled || query === null) return;
-    const insertion = `$${name}(`;
+    const insertion = `$${name}${expressionHasCallOpeningParenthesis(target.value, query.end) ? "" : "("}`;
     const next = `${target.value.slice(0, query.start)}${insertion}${target.value.slice(query.end)}`;
-    target.setRangeText(insertion, query.start, query.end, "end");
-    const nextCaret = query.start + insertion.length;
+    if (next.length > maxLength) {
+      setInsertionLimitReached(true);
+      return;
+    }
+    programmaticEdit.current = true;
+    const { caret: nextCaret } = insertTextareaText(target, insertion, query.start, query.end);
+    programmaticEdit.current = false;
+    setInsertionLimitReached(false);
     pendingSelection.current = { value: next, caret: nextCaret };
     updateSelectionState(next, nextCaret);
     onChange(next);
@@ -140,6 +150,11 @@ export function ExpressionField({ id, label, value, onChange, maxLength, languag
               disabled={disabled}
               onChange={(event) => {
                 const target = event.currentTarget;
+                if (programmaticEdit.current) {
+                  programmaticEdit.current = false;
+                  return;
+                }
+                setInsertionLimitReached(false);
                 onChange(target.value);
                 updateSelectionState(target.value, target.selectionStart);
               }}
@@ -152,7 +167,8 @@ export function ExpressionField({ id, label, value, onChange, maxLength, languag
             />
           </InlineSuggestionPickerTarget>
           <div className="ui-expression-field__signature" aria-live="polite" aria-label={messages.signatureLabel}>
-            {activeFunction === null ? <span aria-hidden="true">&nbsp;</span> : <code>{`$${activeFunction.signature}`}</code>}
+            {insertionLimitReached ? <span role="status" className="ui-expression-field__limit">{messages.insertionLimit}</span>
+              : activeFunction === null ? <span aria-hidden="true">&nbsp;</span> : <code>{`$${activeFunction.signature}`}</code>}
           </div>
         </div>
       )}

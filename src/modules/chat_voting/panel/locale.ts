@@ -10,6 +10,7 @@ const templateMessages = {
       ? `Unbekannte Variable {${name}}.`
       : `Unbekannte Variable {${name}} – meintest du {${suggestion}}?`,
     insertSuggestionLabel: (name: string) => `{${name}} einsetzen`,
+    insertionLimit: "Einfügen würde das Zeichenlimit überschreiten.",
     worstCaseLength: (length: number, maximum: number) => `Mit den längsten Werten bis zu ${String(length)} Zeichen — Twitch lehnt Nachrichten über ${String(maximum)} ab.`,
     picker: {
       title: "Variable auswählen", noResults: "Keine Variablen gefunden.", externalHelp: "Fragt Twitch live ab, wenn die Vorlage gerendert wird",
@@ -25,6 +26,7 @@ const templateMessages = {
       ? `Unknown variable {${name}}.`
       : `Unknown variable {${name}} — did you mean {${suggestion}}?`,
     insertSuggestionLabel: (name: string) => `Insert {${name}}`,
+    insertionLimit: "This insertion would exceed the character limit.",
     worstCaseLength: (length: number, maximum: number) => `With the longest values, this can reach ${String(length)} characters — Twitch rejects messages over ${String(maximum)}.`,
     picker: {
       title: "Choose a variable", noResults: "No variables found.", externalHelp: "Looks up live data from Twitch when the template runs",
