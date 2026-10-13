@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test.use({ locale: "en-US" });
 
-test("Spotlight trigger and channel notices work on desktop and mobile", async ({ page }) => {
+test("command palette and channel notices work on desktop and mobile", async ({ page }) => {
   const modules = [
     { id: "ads", enabled: false, settings: "{}", missingBroadcasterScopes: ["channel:manage:ads"] },
   ];
@@ -69,21 +69,15 @@ test("Spotlight trigger and channel notices work on desktop and mobile", async (
   await expect(notices.locator(".state-row")).toHaveCount(2);
   await expect(notices).toHaveAttribute("data-status", "error");
 
-  const sidebar = page.getByRole("navigation", { name: "Main navigation" });
-  const spotlightTrigger = sidebar.getByRole("button", { name: "Search or run action …" });
-  await expect(spotlightTrigger).toBeVisible();
-  await expect(spotlightTrigger.locator(".sidebar__spotlight-shortcut")).toHaveText(/^(⌘K|Ctrl\+K)$/u);
-  await spotlightTrigger.click();
+  const paletteTrigger = page.getByRole("banner").getByRole("button", { name: "Search or run action …" });
+  await expect(paletteTrigger).toBeVisible();
+  await expect(paletteTrigger.locator("kbd")).toHaveText(/^(⌘ K|Ctrl K)$/u);
+  await paletteTrigger.click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.keyboard.press("Escape");
   await page.keyboard.press("Control+k");
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.keyboard.press("Escape");
-
-  await sidebar.getByRole("button", { name: "Collapse sidebar" }).click();
-  await expect(spotlightTrigger).toHaveCSS("width", "44px");
-  await expect(spotlightTrigger.locator(".sidebar__spotlight-label")).toHaveCount(0);
-  await sidebar.getByRole("button", { name: "Expand sidebar" }).click();
 
   await page.getByRole("button", { name: "Show all 3 notices" }).click();
   await expect(notices.locator(".state-row")).toHaveCount(3);
@@ -95,24 +89,28 @@ test("Spotlight trigger and channel notices work on desktop and mobile", async (
   await expect(modulePermissionButton).toBeDisabled();
   await expect(page.locator(`#${await modulePermissionButton.getAttribute("aria-describedby") ?? ""}`)).toHaveText(/Only this channel’s broadcaster/u);
 
+  await page.getByRole("button", { name: "Setup" }).click();
+  const sidebar = page.getByRole("navigation", { name: "Main navigation" });
   await page.setViewportSize({ width: 390, height: 844 });
   const mobileBurger = page.getByRole("button", { name: "Open sidebar" });
   await expect(mobileBurger).toBeVisible();
   await mobileBurger.click();
-  await expect(spotlightTrigger).toBeVisible();
-  await spotlightTrigger.click();
+  await expect(sidebar).toBeInViewport();
+  await expect(sidebar.locator(".sidebar__group")).not.toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.keyboard.press("Control+k");
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(sidebar).not.toBeInViewport();
   await page.keyboard.press("Escape");
-  await expect(notices.locator(".state-row")).toHaveCount(3);
+  await expect(page.getByRole("button", { name: "Setup" })).toHaveAttribute("aria-pressed", "true");
 
   await mobileBurger.click();
   await expect(sidebar).toBeInViewport();
-  await spotlightTrigger.click();
-  const spotlight = page.getByRole("dialog");
-  await expect(spotlight).toBeVisible();
-  await spotlight.getByRole("textbox").fill("Members");
-  const membersResult = spotlight.locator('[data-spotlight-item-id="page:members"]');
+  await paletteTrigger.click();
+  const palette = page.getByRole("dialog");
+  await expect(palette).toBeVisible();
+  await palette.getByRole("combobox").fill("Members");
+  const membersResult = palette.locator('[data-command-palette-item-id="page:members"]');
   await expect(membersResult).toBeVisible();
   await membersResult.click();
   await expect(page).toHaveURL("/channels/kanal-e2e/members");

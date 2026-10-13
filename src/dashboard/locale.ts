@@ -791,6 +791,8 @@ export interface DashboardTexts {
   navigation: {
     mainNavigation: string;
     overview: string;
+    live: string;
+    setup: string;
     channel: string;
     system: string;
     members: string;
@@ -802,12 +804,13 @@ export interface DashboardTexts {
     events: string;
     audit: string;
     selectChannel: string;
+    accountMenu: string;
+    appearance: string;
+    appearanceNightShift: string;
+    appearanceIndigoNight: string;
     signingOut: string;
     signOut: string;
     /** Sidebar section heading; the "what you open during an incident" group. */
-    operationSection: string;
-    collapseSidebar: string;
-    expandSidebar: string;
     openSidebar: string;
     closeSidebar: string;
   };
@@ -1055,7 +1058,7 @@ export interface DashboardTexts {
     availabilityReasons: Record<ImmediateActionUnavailableReason, string>;
     checksHealthy: (count: string) => string;
     checksNeedAttention: (problems: string, checks: string) => string;
-    /** Shortcut labels used by Spotlight; action cards use their module catalogue. */
+    /** Command palette action labels; action cards use their module catalogue. */
     runAd: (length: string) => string;
     createClip: string;
     sendShoutout: string;
@@ -1096,12 +1099,13 @@ export interface DashboardTexts {
     failure: string;
     refreshFailure: string;
   };
-  /** ⌘K/Ctrl+K (#164): jumps to an entity, explicitly not a navigation
-   *  replacement -- "raid" opens the module, "!clip" opens that text
-   *  command, "max" opens the member, "ads off"/"clip"/"shoutout &lt;login&gt;"
-   *  run a registered action. */
-  spotlight: {
+  /** Cmd/Ctrl+K searches pages, entities, and registered channel actions. */
+  commandPalette: {
+    title: string;
+    description: string;
     placeholder: string;
+    navigateHint: string;
+    openHint: string;
     empty: string;
     groupRecentTargets: string;
     groupModules: string;
@@ -1162,13 +1166,12 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       botPermissionsMissing: (count) => `${count} fehlen`,
     },
     navigation: {
-      mainNavigation: "Hauptnavigation", overview: "Übersicht", channel: "Kanal", system: "System",
-      members: "Mitglieder", variables: "Variablen", module: "Module", events: "Ereignisse", audit: "Audit-Log", selectChannel: "Kanal auswählen",
-      manageModules: "Module verwalten", moduleCategories: { chat: "Chat", interaction: "Interaktion", data: "Daten", twitch: "Twitch" },
+      mainNavigation: "Hauptnavigation", overview: "Übersicht", live: "Live", setup: "Einrichten", channel: "Kanal", system: "System",
+      members: "Mitglieder", variables: "Variablen", module: "Module", events: "Ereignisse", audit: "Protokoll", selectChannel: "Kanal auswählen",
+      accountMenu: "Konto", appearance: "Darstellung", appearanceNightShift: "Nachtschicht", appearanceIndigoNight: "Indigo-Nacht",
+      manageModules: "Module verwalten", moduleCategories: { chat: "Chat", participation: "Mitmachen", twitch: "Twitch", data: "Daten", stream: "Stream", admin: "Verwaltung" },
       overlays: "Overlays",
       signingOut: "Abmeldung …", signOut: "Abmelden",
-      operationSection: "Betrieb",
-      collapseSidebar: "Seitenleiste einklappen", expandSidebar: "Seitenleiste ausklappen",
       openSidebar: "Seitenleiste öffnen", closeSidebar: "Seitenleiste schließen",
     },
     overview: {
@@ -1425,8 +1428,12 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       failure: "Die Kanalsteuerung konnte nicht geändert werden.",
       refreshFailure: "Die Kanalsteuerung wurde geändert, aber ihr Status konnte nicht aktualisiert werden.",
     },
-    spotlight: {
+    commandPalette: {
+      title: "Seite suchen",
+      description: "Finde eine Seite im Bedienpanel.",
       placeholder: "Suchen oder Aktion ausführen …",
+      navigateHint: "navigieren",
+      openHint: "öffnen",
       empty: "Keine Treffer.",
       groupRecentTargets: "Zuletzt besucht",
       groupModules: "Module",
@@ -1483,13 +1490,12 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       botPermissionsMissing: (count) => `${count} missing`,
     },
     navigation: {
-      mainNavigation: "Main navigation", overview: "Overview", channel: "Channel", system: "System",
-      members: "Members", variables: "Variables", module: "Modules", events: "Events", audit: "Audit log", selectChannel: "Select channel",
-      manageModules: "Manage modules", moduleCategories: { chat: "Chat", interaction: "Interaction", data: "Data", twitch: "Twitch" },
+      mainNavigation: "Main navigation", overview: "Overview", live: "Live", setup: "Setup", channel: "Channel", system: "System",
+      members: "Members", variables: "Variables", module: "Modules", events: "Events", audit: "Log", selectChannel: "Select channel",
+      accountMenu: "Account", appearance: "Appearance", appearanceNightShift: "Night shift", appearanceIndigoNight: "Indigo night",
+      manageModules: "Manage modules", moduleCategories: { chat: "Chat", participation: "Participation", twitch: "Twitch", data: "Data", stream: "Stream", admin: "Administration" },
       overlays: "Overlays",
       signingOut: "Signing out …", signOut: "Sign out",
-      operationSection: "Operation",
-      collapseSidebar: "Collapse sidebar", expandSidebar: "Expand sidebar",
       openSidebar: "Open sidebar", closeSidebar: "Close sidebar",
     },
     overview: {
@@ -1738,8 +1744,12 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       failure: "The channel control could not be changed.",
       refreshFailure: "The channel control changed, but its status could not be refreshed.",
     },
-    spotlight: {
+    commandPalette: {
+      title: "Search pages",
+      description: "Find a page in the dashboard.",
       placeholder: "Search or run action …",
+      navigateHint: "to navigate",
+      openHint: "open",
       empty: "No matches.",
       groupRecentTargets: "Recently visited",
       groupModules: "Modules",

@@ -266,6 +266,8 @@ test("returning from a module keeps the overview loaded at the same header posit
   const initialOverviewRequestCount = overviewRequests;
   expect(initialOverviewRequestCount).toBeGreaterThan(0);
 
+  await page.getByRole("button", { name: "Setup" }).click();
+  await expect(page).toHaveURL("/channels/stable-channel/system");
   await page.locator('a[href="/channels/stable-channel/modules/text_commands"]').click();
   await expect(page).toHaveURL("/channels/stable-channel/modules/text_commands");
   await expect(page.getByRole("heading", { name: "Text commands", level: 1 })).toBeVisible();
@@ -279,7 +281,7 @@ test("returning from a module keeps the overview loaded at the same header posit
   expect(await moduleHeaderHandle.evaluate((element) => element.isConnected)).toBe(true);
   expect(await moduleHeader.evaluate((element) => element.getBoundingClientRect().y)).toBe(moduleHeaderY);
 
-  await page.locator('a[href="/channels/stable-channel"]').click();
+  await page.getByRole("button", { name: "Live" }).click();
   await expect(page).toHaveURL("/channels/stable-channel");
   expect(await pageHeader.count()).toBe(1);
   await expect.poll(() => pageHeader.evaluate((element) => element.getBoundingClientRect().y)).toBe(firstHeaderY);

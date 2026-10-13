@@ -3,65 +3,41 @@ import type { DashboardTexts } from "./locale";
 import type { DashboardRoute } from "./router";
 import { modulePermissionsAreMissing } from "./channel-health";
 import type { ChannelRole } from "../contracts/values";
-import { MODULE_NAVIGATION_CATEGORIES, type BotModule, type ModuleLanguage, type ModuleNavigationCategory } from "../modules/contract";
+import type { BotModule, ModuleLanguage, ModuleNavigationCategory } from "../modules/contract";
 
-export type NavPageGroup = "operation" | "channel" | "platform";
+export const DASHBOARD_NAVIGATION_CATEGORIES = ["chat", "participation", "twitch", "data", "stream", "admin"] as const;
+export type DashboardNavigationCategory = (typeof DASHBOARD_NAVIGATION_CATEGORIES)[number];
+
+/** Every module contract category has an explicit home in the dashboard shell. */
+export const MODULE_NAVIGATION_CATEGORY_GROUPS = {
+  chat: "chat",
+  participation: "participation",
+  twitch: "twitch",
+  data: "data",
+  stream: "stream",
+  admin: "admin",
+} as const satisfies Readonly<Record<ModuleNavigationCategory, DashboardNavigationCategory>>;
 
 type ChannelSection = Extract<DashboardRoute, { kind: "channel" }>["section"];
 
-/**
- * One entry per sidebar page (#208): the single source `PanelSidebar`
- * (main.tsx) and `ChannelSpotlight` (spotlight.tsx) both read, so a page
- * added to one shows up in the other automatically instead of drifting the
- * way Spotlight did until #208 (it only knew modules/commands/members).
- * Labels and group headings come from the same navigation/platform catalogs
- * the sidebar renders from; `keywords` are Spotlight-only match aliases
- * (not shown anywhere), so they don't need a translation-catalog entry.
- */
-interface NavPageDefinition {
+interface DashboardNavigationEntry {
   id: string;
-  group: NavPageGroup;
-  iconKind: string;
-  route: (channelId: string) => DashboardRoute;
-  label: (texts: DashboardTexts) => string;
-  keywords: readonly string[];
-}
-
-export interface RegisteredModuleNavEntry {
-  id: string;
-  moduleId: string;
-  category: ModuleNavigationCategory;
-  label: string;
-  description?: string;
-  showMainSwitch?: boolean;
-  iconKind: string;
-  keywords: readonly string[];
-  route: DashboardRoute;
-}
-
-export interface DashboardNavEntry {
-  id: string;
-  group: NavPageGroup;
-  label: string;
-  iconKind: string;
-  keywords: readonly string[];
-  route: DashboardRoute;
-}
-
-interface ModuleSidebarEntry {
-  id: string;
-  moduleId: string;
-  category: ModuleNavigationCategory;
+  pageId?: string;
+  moduleId?: string;
+  category: DashboardNavigationCategory;
+  area: "live" | "setup";
   label: string;
   description?: string;
   iconKind: string | null;
   keywords: readonly string[];
   route: DashboardRoute;
+  sidebarVisible: boolean;
 }
 
-export interface ModuleSidebarGroup {
-  category: ModuleNavigationCategory;
-  entries: readonly ModuleSidebarEntry[];
+export interface DashboardNavigationGroup {
+  category: DashboardNavigationCategory;
+  heading: string;
+  entries: readonly DashboardNavigationEntry[];
 }
 
 export interface ModuleNavigationState {
@@ -70,168 +46,219 @@ export interface ModuleNavigationState {
   missingBroadcasterScopes?: readonly string[];
 }
 
-/** Module pages are readable by every channel role; missing membership, disabled modules, or missing scopes hide them. */
+interface NavPageDefinition {
+  id: string;
+  category: DashboardNavigationCategory;
+  area: "live" | "setup";
+  iconKind: string;
+  route: (channelId: string) => DashboardRoute;
+  label: (texts: DashboardTexts) => string;
+  keywords: readonly string[];
+  requiresChannel: boolean;
+}
+
+type ModuleNavigationDefinition = Pick<BotModule, "id" | "navigationCategory" | "navigationEntries">;
+
+/** Module pages are hidden from the sidebar when disabled, blocked, or unavailable to the current channel member. */
 const moduleNavigationIsVisible = (state: ModuleNavigationState, memberRole: ChannelRole | null): boolean =>
   memberRole !== null && state.enabled && !modulePermissionsAreMissing(state);
 
-/** Shared visibility predicate for sidebar entries and their idle chunk preloads. */
 export const visibleModuleNavigationIds = (
   moduleStates: readonly ModuleNavigationState[],
   memberRole: ChannelRole | null,
-): ReadonlySet<string> => new Set(moduleStates.filter((state) => moduleNavigationIsVisible(state, memberRole)).map((state) => state.id));
-
-/** Converts module-owned navigation declarations into host routes and labels. */
-export const registeredModuleNavEntries = (
-  modules: readonly Pick<BotModule, "id" | "navigationCategory" | "navigationEntries">[],
-  channelId: string,
-  language: ModuleLanguage,
-): readonly RegisteredModuleNavEntry[] => modules.flatMap((module) => (module.navigationEntries ?? []).map((entry) => ({
-  id: `${module.id}:${entry.id}`,
-  moduleId: module.id,
-  category: module.navigationCategory,
-  label: entry.label[language],
-  ...(entry.description === undefined ? {} : { description: entry.description[language] }),
-  ...(entry.showMainSwitch === undefined ? {} : { showMainSwitch: entry.showMainSwitch }),
-  iconKind: entry.iconKind,
-  keywords: entry.keywords ?? [],
-  route: { kind: "module", channelId, moduleId: module.id },
-})));
-
-/** Enabled, permitted modules grouped in contract category order for the sidebar. */
-export const enabledModuleNavigationGroups = (
-  modules: readonly Pick<BotModule, "id" | "navigationCategory" | "navigationEntries">[],
-  moduleStates: readonly ModuleNavigationState[],
-  memberRole: ChannelRole | null,
-  channelId: string,
-  language: ModuleLanguage,
-  fallbackLabel: (moduleId: string) => string,
-): readonly ModuleSidebarGroup[] => {
-  const enabledModuleIds = visibleModuleNavigationIds(moduleStates, memberRole);
-  const registeredEntries = registeredModuleNavEntries(modules, channelId, language);
-
-  return MODULE_NAVIGATION_CATEGORIES.flatMap((category) => {
-    const entries = modules
-      .filter((module) => module.navigationCategory === category && enabledModuleIds.has(module.id))
-      .flatMap((module): ModuleSidebarEntry[] => {
-        const customEntries = registeredEntries.filter((entry) => entry.moduleId === module.id);
-        if (customEntries.length > 0) return customEntries.map((entry) => ({ ...entry, iconKind: entry.iconKind }));
-        const route: DashboardRoute = { kind: "module", channelId, moduleId: module.id };
-        return [{ id: module.id, moduleId: module.id, category, label: fallbackLabel(module.id), iconKind: null, keywords: [], route }];
-      });
-    return entries.length === 0 ? [] : [{ category, entries }];
-  });
-};
-
-/** Static pages shared by the sidebar and Spotlight. Module pages use their own contract entries. */
-export const dashboardNavEntries = (
-  context: { isPlatformAdmin: boolean },
-  channelId: string,
-  texts: DashboardTexts,
-): readonly DashboardNavEntry[] => {
-  return visibleNavPages(context).map((page) => ({
-    id: page.id,
-    group: page.group,
-    label: page.label(texts),
-    iconKind: page.iconKind,
-    keywords: page.keywords,
-    route: page.route(channelId),
-  }));
-};
+): ReadonlySet<string> => new Set(
+  moduleStates.filter((state) => moduleNavigationIsVisible(state, memberRole)).map((state) => state.id),
+);
 
 const channelRoute = (section: ChannelSection) => (channelId: string): DashboardRoute => ({ kind: "channel", channelId, section });
 
 const NAV_PAGES: readonly NavPageDefinition[] = [
   {
-    id: "events",
-    group: "operation",
-    iconKind: "events",
-    route: channelRoute("events"),
-    label: (texts) => texts.navigation.events,
-    keywords: ["log", "logs", "protokoll", "logbuch", "verlauf", "history"],
+    id: "live",
+    category: "stream",
+    area: "live",
+    iconKind: "channel",
+    route: () => ({ kind: "overview" }),
+    label: (texts) => texts.navigation.live,
+    keywords: ["overview", "cockpit", "stream", "home", "start"],
+    requiresChannel: false,
   },
   {
     id: "overview",
-    group: "channel",
+    category: "stream",
+    area: "live",
     iconKind: "channel",
     route: channelRoute("overview"),
     label: (texts) => texts.navigation.channel,
-    keywords: ["overview", "uebersicht", "home", "start"],
-  },
-  {
-    id: "system",
-    group: "channel",
-    iconKind: "system",
-    route: channelRoute("system"),
-    label: (texts) => texts.navigation.system,
-    keywords: ["settings", "einstellungen", "konfiguration", "configuration"],
-  },
-  {
-    id: "members",
-    group: "channel",
-    iconKind: "members",
-    route: channelRoute("members"),
-    label: (texts) => texts.navigation.members,
-    keywords: ["people", "team", "mitarbeiter", "crew"],
-  },
-  {
-    id: "variables",
-    group: "channel",
-    iconKind: "variable",
-    route: channelRoute("variables"),
-    label: (texts) => texts.navigation.variables,
-    keywords: ["variable", "variablen", "counter", "zaehler"],
+    keywords: ["overview", "kanal", "channel"],
+    requiresChannel: true,
   },
   {
     id: "overlays",
-    group: "channel",
+    category: "stream",
+    area: "setup",
     iconKind: "overlays",
     route: channelRoute("overlays"),
     label: (texts) => texts.navigation.overlays,
     keywords: ["overlay", "obs", "link", "links", "token", "widget"],
+    requiresChannel: true,
   },
   {
-    id: "audit",
-    group: "channel",
-    iconKind: "audit",
-    route: channelRoute("audit"),
-    label: (texts) => texts.navigation.audit,
-    keywords: ["audit", "changes", "aenderungen", "protokoll"],
+    id: "events",
+    category: "twitch",
+    area: "setup",
+    iconKind: "events",
+    route: channelRoute("events"),
+    label: (texts) => texts.navigation.events,
+    keywords: ["events", "ereignisse", "eventsub", "history"],
+    requiresChannel: true,
   },
   {
     id: "modules",
-    group: "channel",
+    category: "admin",
+    area: "setup",
     iconKind: "modules",
     route: channelRoute("modules"),
     label: (texts) => texts.navigation.manageModules,
     keywords: ["modules", "module", "modulliste", "plugins"],
+    requiresChannel: true,
+  },
+  {
+    id: "members",
+    category: "admin",
+    area: "setup",
+    iconKind: "members",
+    route: channelRoute("members"),
+    label: (texts) => texts.navigation.members,
+    keywords: ["people", "team", "mitarbeiter", "crew"],
+    requiresChannel: true,
+  },
+  {
+    id: "variables",
+    category: "admin",
+    area: "setup",
+    iconKind: "variable",
+    route: channelRoute("variables"),
+    label: (texts) => texts.navigation.variables,
+    keywords: ["variable", "variablen", "counter", "zaehler"],
+    requiresChannel: true,
+  },
+  {
+    id: "system",
+    category: "admin",
+    area: "setup",
+    iconKind: "system",
+    route: channelRoute("system"),
+    label: (texts) => texts.navigation.system,
+    keywords: ["settings", "einstellungen", "konfiguration", "configuration"],
+    requiresChannel: true,
+  },
+  {
+    id: "audit",
+    category: "admin",
+    area: "setup",
+    iconKind: "audit",
+    route: channelRoute("audit"),
+    label: (texts) => texts.navigation.audit,
+    keywords: ["audit", "changes", "aenderungen", "protokoll", "log"],
+    requiresChannel: true,
   },
   {
     id: "platform",
-    group: "platform",
+    category: "admin",
+    area: "setup",
     iconKind: "platform",
     route: () => ({ kind: "platform" }),
     label: () => platformTexts().navigation,
     keywords: ["operator", "betreiber", "admin", "platform", "plattform"],
+    requiresChannel: false,
   },
 ];
 
-/** Section heading for a page's group -- same catalogs the sidebar renders from, so a relabel there can't drift out of sync here. */
-export const navPageGroupHeading = (group: NavPageGroup, texts: DashboardTexts): string => {
-  switch (group) {
-    case "operation": return texts.navigation.operationSection;
-    case "channel": return texts.navigation.channel;
-    case "platform": return platformTexts().navigation;
-  }
+const registeredModuleEntries = (
+  modules: readonly ModuleNavigationDefinition[],
+  channelId: string,
+  language: ModuleLanguage,
+  moduleStates: readonly ModuleNavigationState[],
+  memberRole: ChannelRole | null,
+  fallbackLabel: (moduleId: string) => string,
+): DashboardNavigationEntry[] => {
+  const visibleModules = visibleModuleNavigationIds(moduleStates, memberRole);
+  return modules.flatMap((module): DashboardNavigationEntry[] => {
+    const category = MODULE_NAVIGATION_CATEGORY_GROUPS[module.navigationCategory];
+    const route: DashboardRoute = { kind: "module", channelId, moduleId: module.id };
+    const entries = module.navigationEntries ?? [];
+    if (entries.length === 0) {
+      return [{
+        id: `module:${module.id}`,
+        moduleId: module.id,
+        category,
+        area: "setup" as const,
+        label: fallbackLabel(module.id),
+        iconKind: null,
+        keywords: [],
+        route,
+        sidebarVisible: visibleModules.has(module.id),
+      }];
+    }
+    return entries.map((entry) => ({
+      id: `module:${module.id}:${entry.id}`,
+      moduleId: module.id,
+      category,
+      area: "setup" as const,
+      label: entry.label[language],
+      ...(entry.description === undefined ? {} : { description: entry.description[language] }),
+      iconKind: entry.iconKind,
+      keywords: entry.keywords ?? [],
+      route,
+      sidebarVisible: visibleModules.has(module.id),
+    }));
+  });
 };
+/** One localized navigation list feeds both the sidebar and the command palette. */
+export const dashboardNavigationGroups = (
+  context: { isPlatformAdmin: boolean },
+  channelId: string,
+  texts: DashboardTexts,
+  modules: readonly ModuleNavigationDefinition[],
+  moduleStates: readonly ModuleNavigationState[],
+  memberRole: ChannelRole | null,
+  language: ModuleLanguage,
+  fallbackLabel: (moduleId: string) => string,
+): readonly DashboardNavigationGroup[] => {
+  const pages = NAV_PAGES
+    .filter((page) => (page.id !== "platform" || context.isPlatformAdmin) && (!page.requiresChannel || channelId.length > 0))
+    .map((page): DashboardNavigationEntry => ({
+      id: `page:${page.id}`,
+      pageId: page.id,
+      category: page.category,
+      area: page.area,
+      label: page.label(texts),
+      iconKind: page.iconKind,
+      keywords: page.keywords,
+      route: page.route(channelId),
+      sidebarVisible: page.area === "setup",
+    }));
+  const moduleEntries = channelId.length === 0
+    ? []
+    : registeredModuleEntries(modules, channelId, language, moduleStates, memberRole, fallbackLabel);
 
-export const moduleCategoryHeading = (category: ModuleNavigationCategory, texts: DashboardTexts): string =>
-  texts.navigation.moduleCategories[category];
-
-/**
- * The sidebar's only role-gated group: the platform page appears only for
- * an account-wide platform admin, same flag `PanelSidebar` checks --
- * never a per-channel role, and never shown just because a channel's own
- * role happens to be named "operator".
- */
-const visibleNavPages = (context: { isPlatformAdmin: boolean }): readonly NavPageDefinition[] =>
-  NAV_PAGES.filter((page) => page.group !== "platform" || context.isPlatformAdmin);
+  return DASHBOARD_NAVIGATION_CATEGORIES.flatMap((category) => {
+    const categoryPages = pages.filter((entry) => entry.category === category);
+    const categoryModules = moduleEntries.filter((entry) => entry.category === category);
+    let entries: DashboardNavigationEntry[];
+    if (category === "admin") {
+      const channelEvents = categoryModules.filter((entry) => entry.moduleId === "channel_events");
+      const otherModules = categoryModules.filter((entry) => entry.moduleId !== "channel_events");
+      const beforeAudit = categoryPages.filter((entry) => entry.pageId !== "audit" && entry.pageId !== "platform");
+      const afterAudit = categoryPages.filter((entry) => entry.pageId === "platform");
+      const audit = categoryPages.filter((entry) => entry.pageId === "audit");
+      entries = [...beforeAudit, ...otherModules, ...channelEvents, ...audit, ...afterAudit];
+    } else if (category === "stream") {
+      entries = [...categoryPages, ...categoryModules];
+    } else {
+      entries = [...categoryModules, ...categoryPages];
+    }
+    return entries.length === 0 ? [] : [{ category, heading: texts.navigation.moduleCategories[category], entries }];
+  });
+};

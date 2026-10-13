@@ -127,10 +127,8 @@ test("the header location button shows the short name with an ellipsis instead o
   }
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await checkTruncation();
-  // Below the header's narrow breakpoint the coordinates move into the menu
-  // and drop out of the accessible name too (CSS `display: none` removes a
-  // node from accessible-name computation, unlike the visually-hidden
-  // full-name suffix).
+  // The compact shell keeps the channel selector and mode controls visible;
+  // the header location action is omitted at phone widths.
+  await expect(locationButton).toBeHidden();
   await expect(coordinates).toBeHidden();
 });

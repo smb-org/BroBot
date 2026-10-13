@@ -43,8 +43,8 @@ describe("editor seam styles", () => {
     expect(styles).toContain(".ui-save-bar__invalid-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }");
   });
 
-  it("applies the shared hand-drawn SVG stroke family to Spotlight module icons", () => {
+  it("applies the shared hand-drawn SVG stroke family to command palette module icons", () => {
     expect(styles).toMatch(/\.module-glyph \{[^}]*fill: none; stroke: currentColor; stroke-width: 1\.5; stroke-linecap: round; stroke-linejoin: round;/u);
-    expect(styles).toContain(".spotlight-module-icon { width: 20px; height: 20px; }");
+    expect(styles).toContain(".command-palette-module-icon { width: 20px; height: 20px; }");
   });
 });

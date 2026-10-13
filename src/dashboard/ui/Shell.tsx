@@ -1,83 +1,90 @@
-import { AppShell, Burger } from "@mantine/core";
-import { useDisclosure, useSessionStorage } from "@mantine/hooks";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { ToastHost } from "./Toast";
 
 interface ShellNavContext {
-  collapsed: boolean;
-  onToggleCollapsed: () => void;
-  /** Called after a navbar entry navigates, so the mobile drawer closes behind it. */
+  openCommandPalette: () => void;
   closeMobileNav: () => void;
 }
 
 export interface ShellProps {
-  header: ReactNode;
+  header: (context: ShellNavContext) => ReactNode;
   navbar: (context: ShellNavContext) => ReactNode;
   navLabel: string;
   openSidebarLabel: string;
   closeSidebarLabel: string;
+  mode: "live" | "setup";
+  commandPaletteOpen: boolean;
+  onCommandPaletteOpenChange: (open: boolean) => void;
   children: ReactNode;
 }
 
-const SIDEBAR_WIDTH_EXPANDED = 240;
-const SIDEBAR_WIDTH_COLLAPSED = 80;
+/** Fixed 64px header and 256px setup navigation, with a sheet at narrow widths. */
+export function Shell({
+  header,
+  navbar,
+  navLabel,
+  openSidebarLabel,
+  closeSidebarLabel,
+  mode,
+  commandPaletteOpen,
+  onCommandPaletteOpenChange,
+  children,
+}: ShellProps) {
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const isSetup = mode === "setup";
 
-/**
- * "Layout" (docs/input/DESIGN-neu.md): the fixed-measure shell -- a 56px
- * desktop header and a 240/80px navbar that becomes a drawer below the `md`
- * breakpoint. The static shell grid lets the rail paint beside the full
- * document; its navigation contents remain sticky. Mantine's AppShell and Burger live here so no page
- * outside `ui/` touches them; panels only ever see `header`/`navbar`
- * content they compose from plain markup and other seam components.
- *
- * The collapsed state "survives the session in the browser" -- session
- * storage, not local storage: it resets when the browser session ends.
- */
-export function Shell({ header, navbar, navLabel, openSidebarLabel, closeSidebarLabel, children }: ShellProps) {
-  const [collapsed, setCollapsed] = useSessionStorage({
-    key: "brobot-dashboard-sidebar-collapsed",
-    defaultValue: false,
-  });
-  const [mobileOpened, { toggle: toggleMobile, close: closeMobile }] = useDisclosure(false);
-  const onToggleCollapsed = (): void => { setCollapsed((current) => !current); };
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setMobileNavOpen(false);
+        onCommandPaletteOpenChange(!commandPaletteOpen);
+      }
+      if (event.key === "Escape") setMobileNavOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [commandPaletteOpen, onCommandPaletteOpenChange]);
+
+  const openCommandPalette = (): void => {
+    setMobileNavOpen(false);
+    onCommandPaletteOpenChange(true);
+  };
+  const closeMobileNav = (): void => { setMobileNavOpen(false); };
 
   return (
-    <>
-    <AppShell
-      className="dashboard-shell"
-      mode="static"
-      header={{ height: { base: 172, md: 56 } }}
-      navbar={{
-        width: collapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH_EXPANDED,
-        breakpoint: "md",
-        collapsed: { mobile: !mobileOpened },
-      }}
-      padding={0}
-      withBorder={false}
-    >
-      <AppShell.Header className="dashboard-shell__header">
+    <div className={`dashboard-shell dashboard-shell--${mode}`} data-mode={mode}>
+      <header className="dashboard-shell__header">
         <div className="dashboard-shell__header-inner">
-          <Burger
-            className="dashboard-shell__burger"
-            opened={mobileOpened}
-            onClick={toggleMobile}
-            hiddenFrom="md"
-            size="sm"
-            aria-label={mobileOpened ? closeSidebarLabel : openSidebarLabel}
-          />
-          <div className="dashboard-shell__header-content">{header}</div>
+          {isSetup ? (
+            <button
+              aria-expanded={mobileNavOpen}
+              aria-label={mobileNavOpen ? closeSidebarLabel : openSidebarLabel}
+              className="dashboard-shell__burger"
+              onClick={() => { setMobileNavOpen((open) => !open); }}
+              type="button"
+            >
+              <span />
+              <span />
+              <span />
+            </button>
+          ) : null}
+          <div className="dashboard-shell__header-content">{header({ openCommandPalette, closeMobileNav })}</div>
         </div>
-      </AppShell.Header>
-      <AppShell.Navbar
-        className="dashboard-shell__navbar"
-        aria-label={navLabel}
-      >
-        {navbar({ collapsed, onToggleCollapsed, closeMobileNav: closeMobile })}
-      </AppShell.Navbar>
-      <AppShell.Main className="dashboard-shell__main">{children}</AppShell.Main>
-    </AppShell>
+      </header>
+      <div className={`dashboard-shell__workspace${isSetup ? " has-navigation" : ""}`}>
+        {isSetup ? (
+          <>
+            {mobileNavOpen ? <button aria-label={closeSidebarLabel} className="dashboard-shell__drawer-backdrop" onClick={closeMobileNav} type="button" /> : null}
+            <aside className="dashboard-shell__navbar" data-open={mobileNavOpen ? "true" : "false"}>
+              <nav aria-label={navLabel}>{navbar({ openCommandPalette, closeMobileNav })}</nav>
+            </aside>
+          </>
+        ) : null}
+        <main className="dashboard-shell__main">{children}</main>
+      </div>
       <ToastHost />
-    </>
+    </div>
   );
 }

@@ -891,7 +891,7 @@ export interface ModuleBallotAccess {
 
 export type ModuleStreamState = "online" | "offline" | "unknown";
 
-export const MODULE_NAVIGATION_CATEGORIES = ["chat", "interaction", "data", "twitch"] as const;
+export const MODULE_NAVIGATION_CATEGORIES = ["chat", "participation", "twitch", "data", "stream", "admin"] as const;
 export type ModuleNavigationCategory = (typeof MODULE_NAVIGATION_CATEGORIES)[number];
 
 export interface ModuleChannelInfo {
@@ -1278,7 +1278,7 @@ export interface ModulePanelProperties {
   botIsModerator?: boolean | null;
   /** Called by the host when an inspector is closed. */
   onCloseInspector?: () => void;
-  /** Deep-link target set by the host (Spotlight, #164) -- a module reads
+  /** Deep-link target set by the host (command palette, #164) -- a module reads
    *  its own identifier out of this if it wants to pre-select something on
    *  mount (e.g. text_commands selects the command by name); most modules
    *  ignore it. */

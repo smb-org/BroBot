@@ -56,13 +56,13 @@ test("the mobile tool editor keeps its preview and save bar visible while the wi
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight)).toBe(true);
   await page.evaluate(() => { window.scrollTo(0, 600); });
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
-  await expect.poll(async () => (await preview.boundingBox())?.y ?? 0).toBeGreaterThanOrEqual(56);
-  await expect.poll(async () => (await preview.boundingBox())?.y ?? 0).toBeLessThanOrEqual(72);
+  await expect.poll(async () => (await preview.boundingBox())?.y ?? 0).toBeGreaterThanOrEqual(76);
+  await expect.poll(async () => (await preview.boundingBox())?.y ?? 0).toBeLessThanOrEqual(92);
 
   await page.evaluate(() => { window.scrollTo(0, document.documentElement.scrollHeight); });
   await expect.poll(async () => {
     const previewBox = await preview.boundingBox();
     const saveBox = await saveBar.boundingBox();
-    return previewBox !== null && saveBox !== null && previewBox.y >= 56 && previewBox.y <= 72 && Math.abs(saveBox.y + saveBox.height - 844) <= 2;
+    return previewBox !== null && saveBox !== null && previewBox.y >= 76 && previewBox.y <= 92 && Math.abs(saveBox.y + saveBox.height - 844) <= 2;
   }).toBe(true);
 });

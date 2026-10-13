@@ -68,7 +68,7 @@ test("the real worker protects the dashboard and shows the login", async ({ page
   await expect(page.getByRole("link", { name: "Mit Twitch anmelden" })).toBeVisible();
 });
 
-test("the sidebar stays reachable across every viewport width -- inline above 768px, behind a burger drawer below it", async ({ page }) => {
+test("setup navigation stays reachable across desktop and mobile widths", async ({ page }) => {
   const channel = {
     channelId: "kanal-e2e",
     login: "brotkrumen-kanal",
@@ -117,70 +117,46 @@ test("the sidebar stays reachable across every viewport width -- inline above 76
   await expect(page.getByRole("heading", { name: "Textbefehle", level: 1 })).toBeVisible();
 
   const sidebar = page.getByRole("navigation", { name: "Hauptnavigation" });
-  const burger = page.getByRole("button", { name: "Seitenleiste öffnen" });
+  const burger = page.getByRole("banner").getByRole("button", { name: /Seitenleiste/u });
   const modulesLink = sidebar.getByRole("link", { name: "Module verwalten", exact: true });
   await modulesLink.focus();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL("/channels/kanal-e2e/modules");
   await expect(modulesLink).toHaveAttribute("aria-current", "page");
 
-  // Above the md breakpoint (768px): the sidebar sits inline, no burger needed.
+  // Desktop setup navigation sits inline, with no drawer trigger.
   for (const width of [1280, 1920, 3440]) {
     await page.setViewportSize({ width, height: 900 });
     await expect(sidebar).toBeVisible();
-    await expect(sidebar.getByRole("link", { name: "Kanal" })).toBeVisible();
+    await expect(sidebar.getByRole("link", { name: /Textbefehle/u })).toBeVisible();
     await expect(burger).toBeHidden();
   }
 
-  // Below it: the sidebar becomes a drawer, off-canvas until the burger
-  // opens it -- Mantine slides it out with a transform rather than
-  // `display: none`, so it stays "visible" by Playwright's own definition
-  // and the check has to be about where it is, not whether it's shown.
+  // Below the desktop breakpoint the navigation becomes a drawer.
   await page.setViewportSize({ width: 600, height: 900 });
   await expect(burger).toBeVisible();
   await expect(sidebar).not.toBeInViewport();
   await burger.click();
   await expect(sidebar).toBeInViewport();
-  await expect(sidebar.getByRole("link", { name: "Kanal" })).toBeVisible();
+  await expect(sidebar.getByRole("link", { name: /Textbefehle/u })).toBeVisible();
 
-  // At 240px the Spotlight trigger and channel links share a scroll region,
-  // while every interactive target keeps its 44px minimum height.
-  await page.setViewportSize({ width: 390, height: 240 });
-  // Mantine transitions the open drawer's top and height when the viewport
-  // changes; wait for the compact layout before measuring its scroll region.
-  await expect(sidebar).toHaveCSS("top", "96px");
-  await expect(sidebar).toHaveCSS("height", "144px");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(burger).toBeVisible();
   await expect(sidebar).toBeInViewport();
-  const sidebarMain = sidebar.locator(".sidebar__main");
-  const sidebarMainHeight = await sidebarMain.evaluate((element) => element.clientHeight);
-  const sidebarContentHeight = await sidebarMain.evaluate((element) => element.scrollHeight);
-  expect(sidebarMainHeight).toBeGreaterThan(0);
-  expect(sidebarContentHeight).toBeGreaterThan(sidebarMainHeight);
-  const spotlightTrigger = sidebar.getByRole("button", { name: "Suchen oder Aktion ausführen …" });
-  await expect(spotlightTrigger).toBeInViewport();
-  expect((await spotlightTrigger.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
-  const channelLink = sidebar.getByRole("link", { name: "Kanal" });
-  await channelLink.scrollIntoViewIfNeeded();
-  await expect(channelLink).toBeInViewport();
-  expect((await channelLink.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
-  // The last entry (the enabled module) is reachable once scrolled to the end.
+  await expect(sidebar.getByRole("link", { name: /Textbefehle/u })).toBeVisible();
   const lastEntry = sidebar.getByRole("link", { name: /Textbefehle/ });
   await lastEntry.scrollIntoViewIfNeeded();
   await expect(lastEntry).toBeInViewport();
-  const collapseToggleRect = await sidebar.locator(".sidebar__collapse-toggle").evaluate((element) => {
-    const { height, bottom } = element.getBoundingClientRect();
-    return { height, bottom };
-  });
-  expect(collapseToggleRect.height).toBeGreaterThanOrEqual(44);
-  expect(collapseToggleRect.bottom).toBeLessThanOrEqual(240);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
-  // The channel select drops to its own full-width row alongside the burger.
+  // The fixed 64px topbar keeps its controls on one row at tablet widths.
   await page.setViewportSize({ width: 600, height: 900 });
-  const brandBox = await page.getByRole("link", { name: "BroBot" }).boundingBox();
+  const topbarBox = await page.locator(".dashboard-shell__header").boundingBox();
   const channelSelectBox = await page.getByRole("combobox", { name: "Kanal auswählen" }).boundingBox();
-  expect(brandBox).not.toBeNull();
+  expect(topbarBox).not.toBeNull();
   expect(channelSelectBox).not.toBeNull();
-  expect(channelSelectBox?.y ?? 0).toBeGreaterThan((brandBox?.y ?? 0) + (brandBox?.height ?? 0) - 1);
+  expect(channelSelectBox?.y ?? 0).toBeGreaterThanOrEqual(topbarBox?.y ?? 0);
+  expect((channelSelectBox?.y ?? 0) + (channelSelectBox?.height ?? 0)).toBeLessThanOrEqual((topbarBox?.y ?? 0) + (topbarBox?.height ?? 0));
 });
 
 test("ListDetail uses the shared desktop grid and mobile overlay inspector", async ({ page }) => {

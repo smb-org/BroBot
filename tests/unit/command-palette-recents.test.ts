@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { readRecentTargets, rememberRecentTarget, type RecentTargetStorage } from "../../src/dashboard/spotlight-recents";
+import { readRecentTargets, rememberRecentTarget, type RecentTargetStorage } from "../../src/dashboard/command-palette-recents";
 
 const createStorage = (): RecentTargetStorage & { values: Map<string, string> } => {
   const values = new Map<string, string>();
@@ -11,7 +11,7 @@ const createStorage = (): RecentTargetStorage & { values: Map<string, string> } 
   };
 };
 
-describe("Spotlight recent targets", () => {
+describe("command palette recent targets", () => {
   it("keeps the most recently visited five targets in order and moves a revisit to the front", () => {
     const storage = createStorage();
     for (let index = 1; index <= 7; index += 1) {
@@ -61,7 +61,7 @@ describe("Spotlight recent targets", () => {
       getItem: (key) => values.get(key) ?? null,
       setItem: () => { throw new Error("storage is read-only"); },
     };
-    const key = `brobot-dashboard-spotlight-recent-v1:${encodeURIComponent(viewer)}:channel-write-failure`;
+    const key = `brobot-dashboard-command-palette-recent-v1:${encodeURIComponent(viewer)}:channel-write-failure`;
     values.set(key, JSON.stringify(["page-a"]));
 
     expect(rememberRecentTarget(viewer, "channel-write-failure", "page-b", storage)).toEqual(["page-b", "page-a"]);

@@ -26,7 +26,7 @@ interface ChannelVariablesPageProperties {
   channelId: string;
   canManage: boolean;
   onOpenCommand: (name: string) => void;
-  /** Deep-link request from Spotlight (#208), applied after variables load and then consumed by the parent. */
+  /** Deep-link request from the command palette (#208), applied after variables load and then consumed by the parent. */
   initialSelection?: string;
   /** Clears the parent-owned request after this page has applied it. */
   onInitialSelectionConsumed?: (name: string) => void;
