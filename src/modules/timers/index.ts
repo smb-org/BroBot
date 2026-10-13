@@ -20,6 +20,7 @@ import {
 } from "./domain";
 import { timerRoutes } from "./routes";
 import { persistIntervalTimerPlan } from "./scheduling";
+import { sameTimerAlarmIdentity, timerAlarmIdentity } from "./identity";
 
 const settingsSchema = z.object({});
 const TIMER_MODULE_ID = "timers";
@@ -29,7 +30,8 @@ const TIMER_OCCURRENCE_GRACE_MS = 10 * 60_000;
 const listTimers = async (db: D1Database, channelId: string): Promise<Timer[]> => {
   const result = await db.prepare(
     `SELECT timer_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, use_channel_default_target, revision,
-            next_run_at, next_run_stream_id, next_run_state, last_run_at, created_at, updated_at
+            next_run_at, next_run_stream_id, next_run_state, next_run_generation, next_run_plan_sequence,
+            last_run_at, created_at, updated_at
        FROM timers WHERE channel_id = ? ORDER BY created_at, timer_id`,
   ).bind(channelId).all<TimerRow>();
   return result.results.map(mapTimerRow);
@@ -50,19 +52,24 @@ const saveNextRunAt = async (
   at: number | null,
   streamId: string | null = null,
   state: TimerIntervalState | null = null,
+  expectedPlan: Timer,
   streamGeneration?: number,
-  expectedPlan?: { nextRunAt: string | null; nextRunStreamId: string | null; nextRunState: TimerIntervalState | null },
 ): Promise<boolean> => {
+  const generation = at !== null && (timer.trigger.type === "interval" || timer.trigger.type === "stream_start")
+    ? streamGeneration ?? null
+    : null;
   const result = await db.prepare(
-    `UPDATE timers SET next_run_at = ?, next_run_stream_id = ?, next_run_state = ?
+    `UPDATE timers SET next_run_at = ?, next_run_stream_id = ?, next_run_state = ?, next_run_generation = ?,
+                        next_run_plan_sequence = next_run_plan_sequence + 1
       WHERE channel_id = ? AND timer_id = ? AND revision = ? AND enabled = 1
         AND (? IS NULL OR COALESCE((SELECT transition_generation FROM channel_stream_state
                                      WHERE channel_id = timers.channel_id), 0) = ?)
-        AND (? = 0 OR (next_run_at IS ? AND next_run_stream_id IS ? AND next_run_state IS ?))`,
+        AND trigger_type IS ? AND next_run_at IS ? AND next_run_stream_id IS ? AND
+            next_run_state IS ? AND next_run_generation IS ? AND next_run_plan_sequence = ?`,
   ).bind(at === null ? null : new Date(at).toISOString(), at === null ? null : streamId, at === null ? null : state,
-    channelId, timer.id, timer.revision, streamGeneration ?? null, streamGeneration ?? null,
-    expectedPlan === undefined ? 0 : 1, expectedPlan?.nextRunAt ?? null,
-    expectedPlan?.nextRunStreamId ?? null, expectedPlan?.nextRunState ?? null).run();
+    generation, channelId, timer.id, timer.revision, streamGeneration ?? null, streamGeneration ?? null,
+    expectedPlan.trigger.type, expectedPlan.nextRunAt, expectedPlan.nextRunStreamId, expectedPlan.nextRunState,
+    expectedPlan.nextRunGeneration, expectedPlan.nextRunPlanSequence).run();
   return result.meta.changes > 0;
 };
 
@@ -94,6 +101,11 @@ const streamStateSnapshot = async (
   };
 };
 
+const persistedTimerAlarmIdentity = (timer: Timer) => timer.nextRunAt === null
+  ? null
+  : timerAlarmIdentity(timer, Date.parse(timer.nextRunAt), timer.nextRunState,
+    timer.nextRunStreamId, timer.nextRunGeneration);
+
 const persistAndSchedule = async (
   timer: Timer,
   context: TimerAlarmContext,
@@ -102,14 +114,21 @@ const persistAndSchedule = async (
   state: TimerIntervalState | null = null,
   expectedStreamGeneration?: number,
 ): Promise<boolean> => {
-  const streamGeneration = timer.trigger.type === "interval"
+  const streamScoped = timer.trigger.type === "interval" || timer.trigger.type === "stream_start";
+  const streamGeneration = streamScoped
     ? expectedStreamGeneration ?? await streamTransitionGeneration(context.DB, context.channelId)
     : null;
+  const generation = nextAt !== null && streamScoped ? streamGeneration : null;
   if (!await saveNextRunAt(context.DB, context.channelId, timer, nextAt, streamId, state,
-    streamGeneration ?? undefined, timer)) return false;
+    timer, streamGeneration ?? undefined)) return false;
   const key = alarmKeyFor(timer.id);
-  if (nextAt === null) await context.clear(key, timer.revision, streamGeneration);
-  else await context.schedule(key, nextAt, timer.revision, streamGeneration);
+  const planSequence = timer.nextRunPlanSequence + 1;
+  const expectedIdentity = timer.nextRunAt === null ? null : timerAlarmIdentity(
+    timer, Date.parse(timer.nextRunAt), timer.nextRunState, timer.nextRunStreamId, timer.nextRunGeneration,
+  );
+  if (nextAt === null) await context.clear(key, timer.revision, streamGeneration, expectedIdentity, planSequence);
+  else await context.schedule(key, nextAt, timer.revision, streamGeneration,
+    timerAlarmIdentity(timer, nextAt, state, streamId, generation), planSequence);
   return true;
 };
 
@@ -127,8 +146,13 @@ const persistIntervalReplanAndSchedule = async (
   if (!await persistIntervalTimerPlan(context.DB, context.channelId, timer, nextAt, streamId, state,
     activityCount, expectedGeneration, timer)) return false;
   const key = alarmKeyFor(timer.id);
-  if (nextAt === null) await context.clear(key, timer.revision, expectedGeneration);
-  else await context.schedule(key, nextAt, timer.revision, expectedGeneration);
+  const planSequence = timer.nextRunPlanSequence + 1;
+  const expectedIdentity = timer.nextRunAt === null ? null : timerAlarmIdentity(
+    timer, Date.parse(timer.nextRunAt), timer.nextRunState, timer.nextRunStreamId, timer.nextRunGeneration,
+  );
+  if (nextAt === null) await context.clear(key, timer.revision, expectedGeneration, expectedIdentity, planSequence);
+  else await context.schedule(key, nextAt, timer.revision, expectedGeneration,
+    timerAlarmIdentity(timer, nextAt, state, streamId, expectedGeneration), planSequence);
   return true;
 };
 
@@ -155,8 +179,11 @@ const nextDeadlineFor = async (
     if (state === null) return { at: null, streamId: null, state: null, streamGeneration: stream.generation };
     const part = intervalPartFor(timer.trigger, state);
     if (part === undefined) return { at: null, streamId: null, state: null, streamGeneration: stream.generation };
-    const samePlan = timer.nextRunAt !== null && timer.nextRunState === state &&
-      (state === "offline" || timer.nextRunStreamId === stream.streamId);
+    const currentIdentity = persistedTimerAlarmIdentity(timer);
+    const candidateIdentity = timer.nextRunAt === null ? null : timerAlarmIdentity(
+      timer, Date.parse(timer.nextRunAt), state, state === "live" ? stream.streamId : null, stream.generation,
+    );
+    const samePlan = sameTimerAlarmIdentity(currentIdentity, candidateIdentity);
     const deadline = samePlan
       ? nextIntervalAt(previousDeadline, now, part.minutes)
       : now + part.minutes * 60_000;
@@ -188,7 +215,8 @@ const scheduleNextRun = async (
     const nextStreamId = deadline === null ? null : streamId;
     const planChanged = timer.nextRunAt === null
       ? deadline !== null || timer.nextRunState !== null || timer.nextRunStreamId !== null
-      : deadline === null || timer.nextRunState !== nextState || timer.nextRunStreamId !== nextStreamId;
+      : deadline === null || timer.nextRunState !== nextState || timer.nextRunStreamId !== nextStreamId ||
+        timer.nextRunGeneration !== (streamGeneration ?? null);
     if (planChanged) {
       const scheduled = await persistIntervalReplanAndSchedule(timer, context, deadline, streamId, state, streamGeneration);
       if (scheduled) return true;
@@ -211,16 +239,19 @@ const rescheduleAfterRun = async (
   if (await scheduleNextRun(timer, context, Date.now(), deadline)) return;
   const row = await context.DB.prepare(
     `SELECT timer_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, use_channel_default_target, revision,
-            next_run_at, next_run_stream_id, next_run_state, last_run_at, created_at, updated_at
+            next_run_at, next_run_stream_id, next_run_state, next_run_generation, next_run_plan_sequence,
+            last_run_at, created_at, updated_at
        FROM timers WHERE channel_id = ? AND timer_id = ?`,
   ).bind(context.channelId, timer.id).first<TimerRow>();
-  if (row === null || row.revision === timer.revision || row.next_run_at === null ||
-      Date.parse(row.next_run_at) !== deadline) return;
+  if (row === null) return;
+  const current = mapTimerRow(row);
+  if (sameTimerAlarmIdentity(persistedTimerAlarmIdentity(timer), persistedTimerAlarmIdentity(current)) &&
+      current.nextRunPlanSequence === timer.nextRunPlanSequence) return;
   // A template-only rename can advance the timer revision while its alarm is
   // already running. If that made the old revision's reschedule a no-op, arm
   // the next occurrence from the current row, without overriding a timer edit
   // that already changed or cleared the stored deadline.
-  await scheduleNextRun(mapTimerRow(row), context, Date.now(), deadline);
+  await scheduleNextRun(current, context, Date.now(), deadline);
 };
 
 /**
@@ -243,18 +274,38 @@ const rearmStreamScopedTimer = async (
     return;
   }
   if (timer.trigger.type !== "stream_start") return;
-  const deadline = nextStreamStartAt(stream.startedAt, now, triggerDelayMs(timer.trigger));
+  const expectedDeadline = stream.startedAt === null
+    ? Number.NaN
+    : Date.parse(stream.startedAt) + triggerDelayMs(timer.trigger);
+  const deadline = nextStreamStartAt(stream.startedAt, now, triggerDelayMs(timer.trigger)) ??
+    (timer.nextRunAt !== null && Date.parse(timer.nextRunAt) === expectedDeadline ? expectedDeadline : null);
   await persistAndSchedule(timer, context, deadline, deadline === null ? null : stream.streamId, null, streamGeneration);
 };
 
 const replanStreamStartTimer = async (timer: Timer, context: TimerAlarmContext, now: number): Promise<void> => {
   if (timer.trigger.type !== "stream_start") return;
   const [state, stream] = await Promise.all([context.streamState(), context.streamStartedAt()]);
-  if (state === "online" && stream.streamId !== null &&
-      (timer.nextRunAt === null || timer.nextRunStreamId !== stream.streamId)) {
-    await rearmStreamScopedTimer(timer, context, now, { streamId: stream.streamId, startedAt: stream.startedAt });
-  } else if (state === "offline" && timer.nextRunAt !== null) {
-    await persistAndSchedule(timer, context, null, null, null);
+  const generation = await streamTransitionGeneration(context.DB, context.channelId);
+  if (state === "online" && stream.streamId !== null) {
+    const identity = persistedTimerAlarmIdentity(timer);
+    const candidateIdentity = timer.nextRunAt === null ? null : timerAlarmIdentity(
+      timer, Date.parse(timer.nextRunAt), null, stream.streamId, generation,
+    );
+    const planMatchesStream = sameTimerAlarmIdentity(identity, candidateIdentity);
+    if (planMatchesStream) {
+      const storedPlan = await context.getAlarmPlan?.(alarmKeyFor(timer.id));
+      if (storedPlan !== undefined && storedPlan !== null &&
+          sameTimerAlarmIdentity(identity, storedPlan.identity) &&
+          storedPlan.planSequence === timer.nextRunPlanSequence) return;
+      await persistAndSchedule(timer, context, Date.parse(timer.nextRunAt as string),
+        timer.nextRunStreamId, null, generation);
+      return;
+    }
+    await rearmStreamScopedTimer(timer, context, now,
+      { streamId: stream.streamId, startedAt: stream.startedAt }, generation);
+  } else if (state === "offline" &&
+      (timer.nextRunAt !== null || timer.nextRunGeneration !== null)) {
+    await persistAndSchedule(timer, context, null, null, null, generation);
   }
 };
 
@@ -273,24 +324,6 @@ const rearmIntervalTimer = async (
 };
 
 /**
- * A schedule from before the stream-id migration (or otherwise still missing
- * one) whose recorded deadline already falls inside `stream` -- the old,
- * start-time-only heuristic, kept as a one-time fallback so a legacy row
- * that is genuinely still armed for the current stream doesn't get rearmed
- * out from under itself: that would defer an interval occurrence by a full
- * interval, or silently drop a stream_start occurrence whose due time has
- * already passed (rearming computes a *new* deadline, which is in the past
- * by then). A row that already carries a stream id is judged on that id
- * alone; this never overrides an actual mismatch.
- */
-const isLegacyArmedForStream = (
-  storedStreamId: string | null,
-  nextRunAt: number,
-  stream: { startedAt: string | null },
-): boolean =>
-  storedStreamId === null && (stream.startedAt === null || nextRunAt >= Date.parse(stream.startedAt));
-
-/**
  * Re-checks the live stream right before sending, in the same validity check
  * as the revision and deadline -- `renderTemplate` and the chat-activity
  * lookup above it can take long enough for the stream to end or roll over to
@@ -300,16 +333,28 @@ const isStreamStillCurrentFor = async (
   timer: Timer,
   context: TimerAlarmContext,
   occurrenceStreamId: string | undefined,
+  expectedGeneration: number,
 ): Promise<boolean> => {
   if (timer.trigger.type === "interval") {
-    if (timer.nextRunState === "offline") return await context.streamState() === "offline";
+    if (timer.nextRunState === "offline") {
+      const [state, generation] = await Promise.all([
+        context.streamState(), streamTransitionGeneration(context.DB, context.channelId),
+      ]);
+      return state === "offline" && generation === expectedGeneration;
+    }
     if (timer.nextRunState !== "live") return false;
-    const [state, stream] = await Promise.all([context.streamState(), context.streamStartedAt()]);
-    return state === "online" && stream.streamId === (occurrenceStreamId ?? null);
+    const [state, stream, generation] = await Promise.all([
+      context.streamState(), context.streamStartedAt(), streamTransitionGeneration(context.DB, context.channelId),
+    ]);
+    return state === "online" && stream.streamId === (occurrenceStreamId ?? null) &&
+      generation === expectedGeneration;
   }
   if (timer.trigger.type === "stream_start") {
-    const [state, stream] = await Promise.all([context.streamState(), context.streamStartedAt()]);
-    return state === "online" && stream.streamId !== null && stream.streamId === occurrenceStreamId;
+    const [state, stream, generation] = await Promise.all([
+      context.streamState(), context.streamStartedAt(), streamTransitionGeneration(context.DB, context.channelId),
+    ]);
+    return state === "online" && stream.streamId !== null && stream.streamId === occurrenceStreamId &&
+      generation === expectedGeneration;
   }
   if (timer.trigger.type === "time_of_day") {
     return timer.trigger.alsoOffline || await context.streamState() === "online";
@@ -326,11 +371,13 @@ const isDueOccurrenceCurrent = async (
   if (alarmKey !== alarmKeyFor(timer.id)) return { current: false };
   if (timer.trigger.type === "interval") {
     const state = await context.streamState();
-    if (timer.nextRunState === "offline") return { current: state === "offline" };
+    if (timer.nextRunState === "offline") {
+      return { current: state === "offline" && timer.nextRunStreamId === null };
+    }
     if (timer.nextRunState !== "live" || state !== "online") return { current: false };
     const stream = await context.streamStartedAt();
     return {
-      current: timer.nextRunStreamId === null || stream.streamId === timer.nextRunStreamId,
+      current: timer.nextRunStreamId !== null && stream.streamId === timer.nextRunStreamId,
       ...(stream.streamId === null ? {} : { streamId: stream.streamId }),
     };
   }
@@ -345,7 +392,10 @@ const isDueOccurrenceCurrent = async (
     const [state, stream] = await Promise.all([context.streamState(), context.streamStartedAt()]);
     if (state !== "online" || stream.startedAt === null || stream.streamId === null) return { current: false };
     const expected = Date.parse(stream.startedAt) + triggerDelayMs(timer.trigger);
-    return { current: expected === deadline, streamId: stream.streamId };
+    return {
+      current: expected === deadline && timer.nextRunStreamId === stream.streamId,
+      streamId: stream.streamId,
+    };
   }
   const events = await context.resolveEventTimes(Date.now());
   const leadMs = timer.trigger.minutes * 60_000;
@@ -372,21 +422,25 @@ const handleTimerAlarmWithStaleRetry = async (
   const isEventTimeRefresh = refreshAt >= 0;
   const row = timerId.length === 0 ? null : await context.DB.prepare(
     `SELECT timer_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, use_channel_default_target, revision,
-            next_run_at, next_run_stream_id, next_run_state, last_run_at, created_at, updated_at
+            next_run_at, next_run_stream_id, next_run_state, next_run_generation, next_run_plan_sequence,
+            last_run_at, created_at, updated_at
        FROM timers WHERE channel_id = ? AND timer_id = ?`,
   ).bind(context.channelId, timerId).first<TimerRow>();
   if (row === null) return;
   const timer = mapTimerRow(row);
-  if (!timer.enabled) {
-    const generation = await streamTransitionGeneration(context.DB, context.channelId);
-    await context.clear(alarmKeyFor(timer.id), timer.revision,
-      timer.trigger.type === "interval" ? generation : null);
-    return;
-  }
   if (isEventTimeRefresh) {
-    if (timer.trigger.type === "before_event") {
+    if (timer.enabled && timer.trigger.type === "before_event") {
       await scheduleNextRun(timer, context, Date.now());
     }
+    return;
+  }
+  if (alarmKey !== alarmKeyFor(timer.id)) return;
+  if (!timer.enabled) {
+    const generation = timer.trigger.type === "interval" || timer.trigger.type === "stream_start"
+      ? await streamTransitionGeneration(context.DB, context.channelId)
+      : null;
+    await context.clear(alarmKeyFor(timer.id), timer.revision, generation,
+      context.alarmIdentity ?? null, timer.nextRunPlanSequence);
     return;
   }
   const currentStreamGeneration = await streamTransitionGeneration(context.DB, context.channelId);
@@ -397,22 +451,35 @@ const handleTimerAlarmWithStaleRetry = async (
     else await replanStreamStartTimer(timer, context, Date.now());
     return;
   }
-  const scheduledStreamGeneration = context.streamGeneration ?? currentStreamGeneration;
-  if (alarmKey !== alarmKeyFor(timer.id)) return;
-  if (ownerRevision !== undefined && ownerRevision !== timer.revision) {
-    // Variable-template renames advance the content revision without changing
-    // the persisted deadline. Keep that due occurrence when it still matches.
-    if (row.next_run_at === null || Date.parse(row.next_run_at) !== deadline) {
-      if (timer.trigger.type === "stream_start") return;
-      await scheduleNextRun(timer, context, Date.now());
-      return;
-    }
-  }
-  if (row.next_run_at === null || Date.parse(row.next_run_at) !== deadline) {
-    if (timer.trigger.type === "stream_start") return;
-    await scheduleNextRun(timer, context, Date.now());
+  if (streamScoped && timer.nextRunGeneration !== currentStreamGeneration) {
+    if (timer.trigger.type === "interval") await scheduleNextRun(timer, context, Date.now());
+    else await replanStreamStartTimer(timer, context, Date.now());
     return;
   }
+  const currentIdentity = persistedTimerAlarmIdentity(timer);
+  const storedAlarmPlan = context.alarmIdentity === undefined
+    ? await context.getAlarmPlan?.(alarmKeyFor(timer.id))
+    : null;
+  const suppliedIdentity = context.alarmIdentity === undefined
+    ? storedAlarmPlan?.identity ?? null
+    : context.alarmIdentity;
+  const alarmPlanSequence = context.alarmPlanSequence ?? storedAlarmPlan?.planSequence ?? undefined;
+  const alarmIsCurrent = currentIdentity !== null &&
+    sameTimerAlarmIdentity(suppliedIdentity, currentIdentity) &&
+    alarmPlanSequence === timer.nextRunPlanSequence &&
+    (ownerRevision === undefined || ownerRevision === currentIdentity.revision) &&
+    currentIdentity.deadline === deadline;
+  if (!alarmIsCurrent) {
+    if (timer.nextRunAt === null) {
+      await persistAndSchedule(timer, context, null, null, null,
+        streamScoped ? currentStreamGeneration : undefined);
+    } else {
+      await persistAndSchedule(timer, context, Date.parse(timer.nextRunAt), timer.nextRunStreamId,
+        timer.nextRunState, timer.nextRunGeneration ?? undefined);
+    }
+    return;
+  }
+  const scheduledStreamGeneration = currentIdentity.generation ?? currentStreamGeneration;
   // The alarm fired on a deadline that still matches the stored row, but a
   // short gap between streams can leave that deadline armed for a stream
   // that already ended (see `refreshSchedules`'s activation replan for the
@@ -438,28 +505,16 @@ const handleTimerAlarmWithStaleRetry = async (
     if (state === "online") {
       const stream = await context.streamStartedAt();
       if (stream.streamId !== null && stream.streamId !== row.next_run_stream_id) {
-        if (isLegacyArmedForStream(row.next_run_stream_id, deadline, stream)) {
-          if (!await saveNextRunAt(context.DB, context.channelId, timer, deadline, stream.streamId,
-            "live", scheduledStreamGeneration, timer)) return;
-          timer.nextRunStreamId = stream.streamId;
-        } else {
-          await rearmIntervalTimer(timer, context, Date.now(), "live", stream.streamId, scheduledStreamGeneration);
-          return;
-        }
+        await rearmIntervalTimer(timer, context, Date.now(), "live", stream.streamId, scheduledStreamGeneration);
+        return;
       }
     }
   } else if (timer.trigger.type === "stream_start") {
     const [state, stream] = await Promise.all([context.streamState(), context.streamStartedAt()]);
     if (state === "online" && stream.streamId !== null && stream.streamId !== row.next_run_stream_id) {
-      if (isLegacyArmedForStream(row.next_run_stream_id, deadline, stream)) {
-        // A legacy row (from before the stream-id column existed) whose
-        // deadline is already due inside the current stream: backfill the
-        // id instead of rearming, so this occurrence still fires on time.
-        await saveNextRunAt(context.DB, context.channelId, timer, deadline, stream.streamId, null, undefined, timer);
-      } else {
-        await rearmStreamScopedTimer(timer, context, Date.now(), { streamId: stream.streamId, startedAt: stream.startedAt }, scheduledStreamGeneration);
-        return;
-      }
+      await rearmStreamScopedTimer(timer, context, Date.now(),
+        { streamId: stream.streamId, startedAt: stream.startedAt }, scheduledStreamGeneration);
+      return;
     }
   }
   const occurrence = await isDueOccurrenceCurrent(timer, context, alarmKey, deadline);
@@ -488,10 +543,12 @@ const handleTimerAlarmWithStaleRetry = async (
         await context.DB.prepare(
           `UPDATE timers SET last_chat_activity_count = ?
             WHERE channel_id = ? AND timer_id = ? AND revision = ? AND enabled = 1
-              AND next_run_at = ? AND next_run_state = ?
+              AND trigger_type = ? AND next_run_at = ? AND next_run_stream_id IS ? AND next_run_state IS ?
+              AND next_run_generation IS ? AND next_run_plan_sequence = ?
               AND COALESCE((SELECT transition_generation FROM channel_stream_state WHERE channel_id = timers.channel_id), 0) = ?`,
-        ).bind(activityCount, context.channelId, timer.id, timer.revision, new Date(deadline).toISOString(),
-          intervalState, scheduledStreamGeneration).run();
+        ).bind(activityCount, context.channelId, timer.id, timer.revision, timer.trigger.type,
+          new Date(deadline).toISOString(), timer.nextRunStreamId, intervalState,
+          timer.nextRunGeneration, timer.nextRunPlanSequence, scheduledStreamGeneration).run();
         shouldSend = false;
       } else {
         shouldSend = activityCount - countRow.last_chat_activity_count >= minimumMessages;
@@ -503,26 +560,37 @@ const handleTimerAlarmWithStaleRetry = async (
         timer.trigger.type === "interval" ? undefined : occurrence.streamId);
       const result = await context.sendChat(rendered.text, idempotencyKey, rendered.attributions, async () => {
         const current = await context.DB.prepare(
-          `SELECT enabled, revision, next_run_at, next_run_state FROM timers WHERE channel_id = ? AND timer_id = ?`,
+          `SELECT enabled, revision, trigger_type, next_run_at, next_run_stream_id, next_run_state,
+                  next_run_generation, next_run_plan_sequence
+             FROM timers WHERE channel_id = ? AND timer_id = ?`,
         ).bind(context.channelId, timer.id).first<{
           enabled: number;
           revision: number;
+          trigger_type: string;
           next_run_at: string | null;
+          next_run_stream_id: string | null;
           next_run_state: TimerIntervalState | null;
+          next_run_generation: number | null;
+          next_run_plan_sequence: number;
         }>();
         const stillScheduled = current?.enabled === 1 && current.revision === timer.revision &&
+          current.trigger_type === timer.trigger.type &&
           current.next_run_at !== null && Date.parse(current.next_run_at) === deadline &&
-          (intervalState === null || current.next_run_state === intervalState) &&
-          (timer.trigger.type !== "interval" ||
-            await streamTransitionGeneration(context.DB, context.channelId) === scheduledStreamGeneration) &&
+          current.next_run_stream_id === timer.nextRunStreamId &&
+          current.next_run_state === timer.nextRunState &&
+          current.next_run_generation === timer.nextRunGeneration &&
+          current.next_run_plan_sequence === alarmPlanSequence &&
           Date.now() <= graceEndsAt;
-        return stillScheduled && await isStreamStillCurrentFor(timer, context, occurrence.streamId);
+        return stillScheduled && (!streamScoped || await isStreamStillCurrentFor(
+          timer, context, occurrence.streamId, scheduledStreamGeneration,
+        ));
       }, timer.chatTarget ?? undefined);
       sent = result.sent;
       if (!sent && result.reason === "stale_before_send" && staleContentRetries < 3) {
         const latestRow = await context.DB.prepare(
           `SELECT timer_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, use_channel_default_target, revision,
-                  next_run_at, next_run_stream_id, next_run_state, last_run_at, created_at, updated_at
+                  next_run_at, next_run_stream_id, next_run_state, next_run_generation, next_run_plan_sequence,
+                  last_run_at, created_at, updated_at
              FROM timers WHERE channel_id = ? AND timer_id = ?`,
         ).bind(context.channelId, timer.id).first<TimerRow>();
         if (latestRow !== null && latestRow.enabled === 1 && latestRow.revision !== timer.revision &&
@@ -539,10 +607,12 @@ const handleTimerAlarmWithStaleRetry = async (
         await context.DB.prepare(
           `UPDATE timers SET last_chat_activity_count = ?
             WHERE channel_id = ? AND timer_id = ? AND revision = ? AND enabled = 1
-              AND next_run_at = ? AND next_run_state = ?
+              AND trigger_type = ? AND next_run_at = ? AND next_run_stream_id IS ? AND next_run_state IS ?
+              AND next_run_generation IS ? AND next_run_plan_sequence = ?
               AND COALESCE((SELECT transition_generation FROM channel_stream_state WHERE channel_id = timers.channel_id), 0) = ?`,
-        ).bind(activityCount, context.channelId, timer.id, timer.revision, new Date(deadline).toISOString(),
-          intervalState, scheduledStreamGeneration).run();
+        ).bind(activityCount, context.channelId, timer.id, timer.revision, timer.trigger.type,
+          new Date(deadline).toISOString(), timer.nextRunStreamId, intervalState,
+          timer.nextRunGeneration, timer.nextRunPlanSequence, scheduledStreamGeneration).run();
       }
     }
   }
@@ -599,27 +669,42 @@ const refreshSchedules = async (
       if (!timer.enabled || (timer.trigger.type !== "interval" && timer.trigger.type !== "stream_start")) continue;
       if (timer.trigger.type === "interval") {
         const streamId = state === "live" ? stream?.streamId ?? null : null;
-        if (timer.nextRunAt !== null && timer.nextRunState === state &&
-            (state === "offline" || timer.nextRunStreamId === streamId)) continue;
-        if (state === "live" && timer.nextRunAt !== null && timer.nextRunState === "live" &&
-            stream !== null && isLegacyArmedForStream(timer.nextRunStreamId, Date.parse(timer.nextRunAt), stream)) {
-          await saveNextRunAt(context.DB, context.channelId, timer, Date.parse(timer.nextRunAt), streamId,
-            "live", streamGeneration, timer);
+        const identity = persistedTimerAlarmIdentity(timer);
+        const candidateIdentity = timer.nextRunAt === null ? null : timerAlarmIdentity(
+          timer, Date.parse(timer.nextRunAt), state, streamId, streamGeneration,
+        );
+        const planMatchesState = sameTimerAlarmIdentity(identity, candidateIdentity);
+        if (planMatchesState) {
+          const storedPlan = await context.getAlarmPlan?.(alarmKeyFor(timer.id));
+          if (storedPlan !== undefined && storedPlan !== null &&
+              sameTimerAlarmIdentity(identity, storedPlan.identity) &&
+              storedPlan.planSequence === timer.nextRunPlanSequence) continue;
+          await persistAndSchedule(timer, context, Date.parse(timer.nextRunAt as string),
+            timer.nextRunStreamId, timer.nextRunState, streamGeneration);
           continue;
         }
         await rearmIntervalTimer(timer, context, now, state, streamId, streamGeneration);
         continue;
       }
       if (state !== "live" || stream === null || stream.streamId === null) {
-        await persistAndSchedule(timer, context, null, null, null, streamGeneration);
+        const storedPlan = await context.getAlarmPlan?.(alarmKeyFor(timer.id));
+        if (timer.nextRunAt !== null || timer.nextRunGeneration !== null || storedPlan !== undefined && storedPlan !== null) {
+          await persistAndSchedule(timer, context, null, null, null, streamGeneration);
+        }
         continue;
       }
-      // A null `nextRunAt` is unarmed regardless of what stream id happens
-      // to be stored alongside it (an edit or disable can leave one behind).
-      if (timer.nextRunAt !== null && timer.nextRunStreamId === stream.streamId) continue;
-      if (timer.nextRunAt !== null && isLegacyArmedForStream(timer.nextRunStreamId, Date.parse(timer.nextRunAt), stream)) {
-        await saveNextRunAt(context.DB, context.channelId, timer, Date.parse(timer.nextRunAt), stream.streamId,
-          null, undefined, timer);
+      const identity = persistedTimerAlarmIdentity(timer);
+      const candidateIdentity = timer.nextRunAt === null ? null : timerAlarmIdentity(
+        timer, Date.parse(timer.nextRunAt), null, stream.streamId, streamGeneration,
+      );
+      const planMatchesStream = sameTimerAlarmIdentity(identity, candidateIdentity);
+      if (planMatchesStream) {
+        const storedPlan = await context.getAlarmPlan?.(alarmKeyFor(timer.id));
+        if (storedPlan !== undefined && storedPlan !== null &&
+            sameTimerAlarmIdentity(identity, storedPlan.identity) &&
+            storedPlan.planSequence === timer.nextRunPlanSequence) continue;
+        await persistAndSchedule(timer, context, Date.parse(timer.nextRunAt as string),
+          timer.nextRunStreamId, null, streamGeneration);
         continue;
       }
       await rearmStreamScopedTimer(timer, context, now, { streamId: stream.streamId, startedAt: stream.startedAt }, streamGeneration);
@@ -697,11 +782,16 @@ export const timersModule: BotModule<typeof settingsSchema> = {
           const state = deadline === null ? null : "offline";
           if (!await persistIntervalTimerPlan(context.DB, event.channelId, timer, deadline, null, state,
             activityCount, streamGeneration, timer)) continue;
-          if (deadline === null) await context.clearAlarm(alarmKeyFor(timer.id), timer.revision, streamGeneration);
-          else await context.scheduleAlarm(TIMER_ALARM_HANDLER, alarmKeyFor(timer.id), deadline, timer.revision, streamGeneration);
+          const planSequence = timer.nextRunPlanSequence + 1;
+          const expectedIdentity = persistedTimerAlarmIdentity(timer);
+          if (deadline === null) await context.clearAlarm(alarmKeyFor(timer.id), timer.revision, streamGeneration,
+            expectedIdentity, planSequence);
+          else await context.scheduleAlarm(TIMER_ALARM_HANDLER, alarmKeyFor(timer.id), deadline, timer.revision,
+            streamGeneration, timerAlarmIdentity(timer, deadline, state, null, streamGeneration), planSequence);
         } else if (timer.trigger.type === "stream_start" &&
-            await saveNextRunAt(context.DB, event.channelId, timer, null, null, null, streamGeneration)) {
-          await context.clearAlarm(alarmKeyFor(timer.id), timer.revision, streamGeneration);
+            await saveNextRunAt(context.DB, event.channelId, timer, null, null, null, timer, streamGeneration)) {
+          await context.clearAlarm(alarmKeyFor(timer.id), timer.revision, streamGeneration,
+            persistedTimerAlarmIdentity(timer), timer.nextRunPlanSequence + 1);
         }
       }
       return { actions: [], diagnostics: [] };
@@ -722,14 +812,20 @@ export const timersModule: BotModule<typeof settingsSchema> = {
         const state = deadline === null ? null : "live";
         if (!await persistIntervalTimerPlan(context.DB, event.channelId, timer, deadline,
           deadline === null ? null : streamId, state, activityCount, streamGeneration, timer)) continue;
-        if (deadline === null) await context.clearAlarm(alarmKeyFor(timer.id), timer.revision, streamGeneration);
-        else await context.scheduleAlarm(TIMER_ALARM_HANDLER, alarmKeyFor(timer.id), deadline, timer.revision, streamGeneration);
+        const planSequence = timer.nextRunPlanSequence + 1;
+        const expectedIdentity = persistedTimerAlarmIdentity(timer);
+        if (deadline === null) await context.clearAlarm(alarmKeyFor(timer.id), timer.revision, streamGeneration,
+          expectedIdentity, planSequence);
+        else await context.scheduleAlarm(TIMER_ALARM_HANDLER, alarmKeyFor(timer.id), deadline, timer.revision,
+          streamGeneration, timerAlarmIdentity(timer, deadline, state, streamId, streamGeneration), planSequence);
         continue;
       }
       if (!timer.enabled || timer.trigger.type !== "stream_start") continue;
       const deadline = startedAt + triggerDelayMs(timer.trigger);
-      if (await saveNextRunAt(context.DB, event.channelId, timer, deadline, streamId, null, streamGeneration, timer)) {
-        await context.scheduleAlarm(TIMER_ALARM_HANDLER, alarmKeyFor(timer.id), deadline, timer.revision, streamGeneration);
+      if (await saveNextRunAt(context.DB, event.channelId, timer, deadline, streamId, null, timer, streamGeneration)) {
+        await context.scheduleAlarm(TIMER_ALARM_HANDLER, alarmKeyFor(timer.id), deadline, timer.revision,
+          streamGeneration, timerAlarmIdentity(timer, deadline, null, streamId, streamGeneration),
+          timer.nextRunPlanSequence + 1);
       }
     }
     return { actions: [], diagnostics: [] };

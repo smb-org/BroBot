@@ -43,6 +43,7 @@ import type {
   BotModule,
   ModuleAlarmContext,
   ModuleAlarmDefinition,
+  ModuleAlarmIdentity,
   ModuleExecutionContext,
   ModuleExternalFetchBudget,
 } from "../../src/modules/contract";
@@ -1659,6 +1660,87 @@ describe("ChannelObject realtime path", () => {
 
     expect(storageOf(object).values.get(alarmTableKey)).toMatchObject({
       [alarmKey]: { deadline: 40_000, ownerRevision: 1, streamGeneration: 9 },
+    });
+  });
+
+  it("keeps a newer stream_start alarm when an old post-D1 clear arrives later", async () => {
+    const object = objectFor([]);
+    const alarmKey = "module:timers:timer:timer-stream-start-race";
+    const alarmTableKey = "channel:alarm_schedule";
+    const oldIdentity: ModuleAlarmIdentity = {
+      timerId: "timer-stream-start-race",
+      revision: 1,
+      triggerType: "stream_start",
+      state: null,
+      streamId: "stream-old",
+      generation: 8,
+      deadline: 30_000,
+    };
+    const newIdentity: ModuleAlarmIdentity = {
+      ...oldIdentity,
+      streamId: "stream-new",
+      generation: 10,
+      deadline: 40_000,
+    };
+
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-stream-start-race",
+      oldIdentity.deadline, oldIdentity.revision, oldIdentity.generation, oldIdentity, 1);
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-stream-start-race",
+      newIdentity.deadline, newIdentity.revision, newIdentity.generation, newIdentity, 3);
+    await object.clearModuleAlarm("timers", "timer:timer-stream-start-race",
+      oldIdentity.revision, null, oldIdentity, 2);
+
+    expect(storageOf(object).values.get(alarmTableKey)).toMatchObject({
+      [alarmKey]: { deadline: newIdentity.deadline, identity: newIdentity, planSequence: 3 },
+    });
+  });
+
+  it("retains a clear sequence after deleting an alarm so a delayed set cannot restore it", async () => {
+    const object = objectFor([]);
+    const alarmKey = "module:timers:timer:timer-clear-fence";
+    const alarmTableKey = "channel:alarm_schedule";
+    const identity: ModuleAlarmIdentity = {
+      timerId: "timer-clear-fence",
+      revision: 2,
+      triggerType: "time_of_day",
+      state: null,
+      streamId: null,
+      generation: null,
+      deadline: 30_000,
+    };
+
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-clear-fence",
+      identity.deadline, identity.revision, null, identity, 4);
+    await object.clearModuleAlarm("timers", "timer:timer-clear-fence",
+      identity.revision, null, identity, 5);
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-clear-fence",
+      identity.deadline, identity.revision, null, identity, 4);
+
+    expect(storageOf(object).values.get(alarmTableKey) ?? {}).not.toHaveProperty(alarmKey);
+  });
+
+  it("rejects identity-less timer writes and clears after a complete plan has been stored", async () => {
+    const object = objectFor([]);
+    const alarmKey = "module:timers:timer:timer-legacy-fence";
+    const alarmTableKey = "channel:alarm_schedule";
+    const identity: ModuleAlarmIdentity = {
+      timerId: "timer-legacy-fence",
+      revision: 4,
+      triggerType: "stream_start",
+      state: null,
+      streamId: "stream-new",
+      generation: 10,
+      deadline: 40_000,
+    };
+
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-legacy-fence",
+      identity.deadline, identity.revision, identity.generation, identity, 6);
+    await object.clearModuleAlarm("timers", "timer:timer-legacy-fence", identity.revision, null);
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-legacy-fence",
+      30_000, identity.revision, 8);
+
+    expect(storageOf(object).values.get(alarmTableKey)).toMatchObject({
+      [alarmKey]: { deadline: identity.deadline, identity, planSequence: 6 },
     });
   });
 

@@ -1024,28 +1024,35 @@ export const dispatchEventSubNotification = async (
             secureRandomInteger,
             channelLanguage,
             channelTimeZone,
-            scheduleAlarm: async (handlerKey, alarmKey, deadline, ownerRevision, streamGeneration) => {
+            scheduleAlarm: async (handlerKey, alarmKey, deadline, ownerRevision, streamGeneration, identity, planSequence) => {
               if (environment.CHANNEL === undefined) return;
               const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
-              if (ownerRevision === undefined && streamGeneration === undefined) {
+              if (ownerRevision === undefined && streamGeneration === undefined && identity === undefined && planSequence === undefined) {
                 await object.scheduleModuleAlarm(module.id, handlerKey, alarmKey, deadline);
               } else {
-                await object.scheduleModuleAlarm(module.id, handlerKey, alarmKey, deadline, ownerRevision, streamGeneration);
+                await object.scheduleModuleAlarm(module.id, handlerKey, alarmKey, deadline,
+                  ownerRevision, streamGeneration, identity, planSequence);
               }
             },
-            clearAlarm: async (alarmKey, ownerRevision, streamGeneration) => {
+            clearAlarm: async (alarmKey, ownerRevision, streamGeneration, expectedIdentity, planSequence) => {
               if (environment.CHANNEL === undefined) return;
               const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
-              if (ownerRevision === undefined && streamGeneration === undefined) {
+              if (ownerRevision === undefined && streamGeneration === undefined && expectedIdentity === undefined && planSequence === undefined) {
                 await object.clearModuleAlarm(module.id, alarmKey);
               } else {
-                await object.clearModuleAlarm(module.id, alarmKey, ownerRevision, streamGeneration);
+                await object.clearModuleAlarm(module.id, alarmKey, ownerRevision, streamGeneration,
+                  expectedIdentity, planSequence);
               }
             },
             getAlarmDeadline: async (alarmKey) => {
               if (environment.CHANNEL === undefined) return null;
               const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
               return await object.getModuleAlarmDeadline(module.id, alarmKey);
+            },
+            getAlarmPlan: async (alarmKey) => {
+              if (environment.CHANNEL === undefined) return null;
+              const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
+              return await object.getModuleAlarmPlan(module.id, alarmKey);
             },
           });
     } catch (error: unknown) {

@@ -16,6 +16,7 @@ import { CHANNEL_ROLES, type ChannelRole } from "../../contracts/values";
 import { processAdPrewarning } from "../ad-prewarning";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../realtime-protocol";
 import type { AdsSchedule } from "../../modules/ads/contracts";
+import { acceptsTimerAlarmClear, acceptsTimerAlarmSet } from "../../modules/timers/identity";
 import { CHAT_VOTING_MODULE_ID } from "../../modules/chat_voting/contracts";
 import { OVERLAY_STREAM_DETAILS_CACHE_TTL_MS } from "../../modules/contract";
 import type {
@@ -31,6 +32,8 @@ import type {
   HelixRequestOptions,
   ModuleAlarmContext,
   ModuleAlarmDefinition,
+  ModuleAlarmIdentity,
+  ModuleAlarmPlan,
   ModuleBallotAccess,
   ModuleExternalFetchBudget,
   ModuleScheduleInputChangeReason,
@@ -133,6 +136,10 @@ const ACTIVE_CHATTER_KEY_ROTATION_MS = 24 * 60 * 60 * 1_000;
 const MODULE_ALARM_OWNER_REVISIONS_KEY = "module_alarm:owner_revisions";
 const MODULE_ALARM_OWNER_REVISION_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const MODULE_ALARM_STREAM_GENERATIONS_KEY = "module_alarm:stream_generations";
+const MODULE_ALARM_PLAN_SEQUENCES_KEY = "module_alarm:plan_sequences";
+const MODULE_ALARM_PLAN_SEQUENCE_RETENTION_MS = 24 * 60 * 60 * 1_000;
+const isTimerOccurrenceAlarmKey = (key: string): boolean =>
+  key.startsWith("module:timers:timer:") && !key.includes(":refresh:");
 const SECURITY_DEADLINE_KEY = "security_round";
 const SECURITY_RETRY_KEY = "security_retry";
 const AD_PREWARNING_DEADLINE_KEY = "ad_prewarning";
@@ -307,10 +314,18 @@ type AlarmScheduleEntry = {
   revision?: number;
   ownerRevision?: number;
   streamGeneration?: number;
+  identity?: ModuleAlarmIdentity;
+  planSequence?: number;
   suppressedBy?: string;
 };
 
 type AlarmScheduleTable = Record<string, AlarmScheduleEntry>;
+type ModuleAlarmPlanFenceRecord = {
+  identity: ModuleAlarmIdentity | null;
+  planSequence: number;
+  cleared: boolean;
+  updatedAt: number;
+};
 type AlarmHandlerResult = undefined | "retain";
 type AlarmHandler = (key: string, entry: AlarmScheduleEntry, now: number, nowIso: string) => Promise<AlarmHandlerResult>;
 type AlarmHandlerRegistration = {
@@ -324,6 +339,13 @@ interface AlarmStorageAccess {
   delete(key: string): Promise<boolean>;
 }
 
+const validModuleAlarmIdentity = (value: unknown): value is ModuleAlarmIdentity =>
+  isRecord(value) && typeof value.timerId === "string" && Number.isSafeInteger(value.revision) &&
+  typeof value.triggerType === "string" && (typeof value.state === "string" || value.state === null) &&
+  (typeof value.streamId === "string" || value.streamId === null) &&
+  ((typeof value.generation === "number" && Number.isSafeInteger(value.generation)) || value.generation === null) &&
+  typeof value.deadline === "number" && Number.isFinite(value.deadline);
+
 const validAlarmScheduleEntry = (value: unknown): value is AlarmScheduleEntry =>
   isRecord(value) && typeof value.deadline === "number" && Number.isFinite(value.deadline) &&
   typeof value.handler === "string" && value.handler.length > 0 &&
@@ -333,7 +355,16 @@ const validAlarmScheduleEntry = (value: unknown): value is AlarmScheduleEntry =>
   (value.revision === undefined || (typeof value.revision === "number" && Number.isInteger(value.revision) && value.revision >= 0)) &&
   (value.ownerRevision === undefined || (typeof value.ownerRevision === "number" && Number.isInteger(value.ownerRevision) && value.ownerRevision >= 0)) &&
   (value.streamGeneration === undefined || (typeof value.streamGeneration === "number" && Number.isSafeInteger(value.streamGeneration) && value.streamGeneration >= 0)) &&
+  (value.planSequence === undefined || (typeof value.planSequence === "number" && Number.isSafeInteger(value.planSequence) && value.planSequence >= 0)) &&
+  (value.identity === undefined || validModuleAlarmIdentity(value.identity)) &&
+  ((value.identity === undefined) === (value.planSequence === undefined)) &&
+  (value.identity === undefined || value.identity.deadline === value.deadline) &&
   (value.suppressedBy === undefined || typeof value.suppressedBy === "string");
+
+const validModuleAlarmPlanFence = (value: unknown): value is ModuleAlarmPlanFenceRecord =>
+  isRecord(value) && Number.isSafeInteger(value.planSequence) && (value.planSequence as number) >= 0 &&
+  (value.identity === null || validModuleAlarmIdentity(value.identity)) &&
+  typeof value.cleared === "boolean" && typeof value.updatedAt === "number" && Number.isFinite(value.updatedAt);
 
 const alarmAttemptAt = (entry: AlarmScheduleEntry): number =>
   entry.claimUntil ?? entry.nextAttemptAt ?? entry.deadline;
@@ -1128,14 +1159,63 @@ export class ChannelObject extends DurableObject<Env> {
     suppressedBy?: string,
     ownerRevision?: number,
     streamGeneration?: number | null,
+    identity?: ModuleAlarmIdentity,
+    planSequence?: number,
   ): Promise<void> {
     if (!Number.isFinite(deadline)) {
-      await this.clearAlarmEntry(key, ownerRevision, streamGeneration);
+      await this.clearAlarmEntry(key, ownerRevision, streamGeneration, identity, planSequence);
       return;
     }
     await this.mutateAlarmSchedule(async (table, storage) => {
       if (!await this.acceptAlarmStreamGeneration(storage, key, streamGeneration)) return;
       if (ownerRevision !== undefined && !await this.acceptAlarmOwnerRevision(storage, key, ownerRevision)) return;
+      if (identity !== undefined || planSequence !== undefined) {
+        if (identity === undefined || planSequence === undefined || !Number.isSafeInteger(planSequence) || planSequence < 0 ||
+            identity.deadline !== deadline || identity.revision !== ownerRevision ||
+            identity.generation !== (streamGeneration ?? null)) return;
+        const savedValue = await storage.get(MODULE_ALARM_PLAN_SEQUENCES_KEY);
+        const saved = isRecord(savedValue) ? savedValue : {};
+        const savedFence = validModuleAlarmPlanFence(saved[key]) ? saved[key] : undefined;
+        const current = table[key];
+        const entryFence = current?.planSequence === undefined ? undefined : {
+          ...(current.identity === undefined ? {} : { identity: current.identity }),
+          planSequence: current.planSequence,
+        };
+        const savedFenceForComparison = savedFence === undefined ? undefined : {
+          identity: savedFence.identity,
+          planSequence: savedFence.planSequence,
+          cleared: savedFence.cleared,
+        };
+        const fence = entryFence !== undefined && (savedFence === undefined ||
+          entryFence.planSequence > savedFence.planSequence) ? entryFence : savedFenceForComparison;
+        if (!acceptsTimerAlarmSet(fence, identity, planSequence)) return;
+        const now = Date.now();
+        const fences = Object.fromEntries(Object.entries(saved).filter(([, value]) =>
+          validModuleAlarmPlanFence(value) && now - value.updatedAt <= MODULE_ALARM_PLAN_SEQUENCE_RETENTION_MS,
+        )) as Record<string, ModuleAlarmPlanFenceRecord>;
+        fences[key] = { identity, planSequence, cleared: false, updatedAt: now };
+        table[key] = {
+          deadline,
+          handler,
+          revision: (current?.revision ?? 0) + 1,
+          ownerRevision,
+          ...(typeof streamGeneration === "number" ? { streamGeneration } : {}),
+          identity,
+          planSequence,
+          ...(suppressedBy === undefined ? {} : { suppressedBy }),
+        };
+        await storage.put(MODULE_ALARM_PLAN_SEQUENCES_KEY, fences);
+        if (LEGACY_ALARM_DEFINITIONS.some((definition) => definition.key === key)) {
+          await storage.put(key, deadline);
+        }
+        return;
+      }
+      if (isTimerOccurrenceAlarmKey(key)) {
+        const savedValue = await storage.get(MODULE_ALARM_PLAN_SEQUENCES_KEY);
+        const saved = isRecord(savedValue) ? savedValue : {};
+        if (validModuleAlarmPlanFence(saved[key]) || table[key]?.identity !== undefined ||
+            table[key]?.planSequence !== undefined) return;
+      }
       const current = table[key];
       table[key] = {
         deadline,
@@ -1199,10 +1279,53 @@ export class ChannelObject extends DurableObject<Env> {
     key: string,
     ownerRevision?: number,
     streamGeneration?: number | null,
+    expectedIdentity?: ModuleAlarmIdentity | null,
+    planSequence?: number,
   ): Promise<void> {
     await this.mutateAlarmSchedule(async (table, storage) => {
       if (!await this.acceptAlarmStreamGeneration(storage, key, streamGeneration)) return;
       if (ownerRevision !== undefined && !await this.acceptAlarmOwnerRevision(storage, key, ownerRevision)) return;
+      if (planSequence !== undefined) {
+        if (!Number.isSafeInteger(planSequence) || planSequence < 0) return;
+        const savedValue = await storage.get(MODULE_ALARM_PLAN_SEQUENCES_KEY);
+        const saved = isRecord(savedValue) ? savedValue : {};
+        const savedFence = validModuleAlarmPlanFence(saved[key]) ? saved[key] : undefined;
+        const current = table[key];
+        const entryFence = current?.planSequence === undefined ? undefined : {
+          ...(current.identity === undefined ? {} : { identity: current.identity }),
+          planSequence: current.planSequence,
+        };
+        const savedFenceForComparison = savedFence === undefined ? undefined : {
+          identity: savedFence.identity,
+          planSequence: savedFence.planSequence,
+          cleared: savedFence.cleared,
+        };
+        const fence = entryFence !== undefined && (savedFence === undefined ||
+          entryFence.planSequence > savedFence.planSequence) ? entryFence : savedFenceForComparison;
+        if (!acceptsTimerAlarmClear(fence, expectedIdentity, planSequence)) return;
+        const now = Date.now();
+        const fences = Object.fromEntries(Object.entries(saved).filter(([, value]) =>
+          validModuleAlarmPlanFence(value) && now - value.updatedAt <= MODULE_ALARM_PLAN_SEQUENCE_RETENTION_MS,
+        )) as Record<string, ModuleAlarmPlanFenceRecord>;
+        Reflect.deleteProperty(table, key);
+        fences[key] = {
+          identity: expectedIdentity ?? null,
+          planSequence,
+          cleared: true,
+          updatedAt: now,
+        };
+        await storage.put(MODULE_ALARM_PLAN_SEQUENCES_KEY, fences);
+        if (LEGACY_ALARM_DEFINITIONS.some((definition) => definition.key === key)) {
+          await storage.delete(key);
+        }
+        return;
+      }
+      if (isTimerOccurrenceAlarmKey(key)) {
+        const savedValue = await storage.get(MODULE_ALARM_PLAN_SEQUENCES_KEY);
+        const saved = isRecord(savedValue) ? savedValue : {};
+        if (validModuleAlarmPlanFence(saved[key]) || table[key]?.identity !== undefined ||
+            table[key]?.planSequence !== undefined) return;
+      }
       Reflect.deleteProperty(table, key);
       if (LEGACY_ALARM_DEFINITIONS.some((definition) => definition.key === key)) {
         await storage.delete(key);
@@ -1320,6 +1443,8 @@ export class ChannelObject extends DurableObject<Env> {
     registration: ModuleAlarmDefinition,
     externalFetchBudget: ModuleExternalFetchBudget,
     streamGeneration?: number,
+    alarmIdentity?: ModuleAlarmIdentity,
+    alarmPlanSequence?: number,
   ): ModuleAlarmContext {
     const channelId = this.ownChannelId();
     if (channelId === null) throw new Error("Module alarms require a named Durable Object.");
@@ -1328,6 +1453,8 @@ export class ChannelObject extends DurableObject<Env> {
     return {
       DB: this.env.DB,
       channelId,
+      alarmIdentity: alarmIdentity ?? null,
+      ...(alarmPlanSequence === undefined ? {} : { alarmPlanSequence }),
       ...(streamGeneration === undefined ? {} : { streamGeneration }),
       externalFetchBudget,
       ballots: this.ballotAccess(moduleId),
@@ -1368,7 +1495,7 @@ export class ChannelObject extends DurableObject<Env> {
           return deleted;
         },
       },
-      schedule: async (key, deadline, ownerRevision, scheduledStreamGeneration) => {
+      schedule: async (key, deadline, ownerRevision, scheduledStreamGeneration, identity, planSequence) => {
         const scheduledRegistration = MODULES.find((module) => module.id === moduleId)?.alarms?.find((alarm) => alarm.key === key);
         await this.scheduleAlarmEntry(
           `module:${moduleId}:${key}`,
@@ -1377,12 +1504,16 @@ export class ChannelObject extends DurableObject<Env> {
           undefined,
           ownerRevision,
           scheduledStreamGeneration,
+          identity,
+          planSequence,
         );
       },
-      clear: async (key, ownerRevision, scheduledStreamGeneration) => {
-        await this.clearAlarmEntry(`module:${moduleId}:${key}`, ownerRevision, scheduledStreamGeneration);
+      clear: async (key, ownerRevision, scheduledStreamGeneration, expectedIdentity, planSequence) => {
+        await this.clearAlarmEntry(`module:${moduleId}:${key}`, ownerRevision, scheduledStreamGeneration,
+          expectedIdentity, planSequence);
       },
       getAlarmDeadline: (key) => this.getModuleAlarmDeadline(moduleId, key),
+      getAlarmPlan: (key) => this.getModuleAlarmPlan(moduleId, key),
       renderTemplate: async (text, moduleValuesOrNow = {}, nowOrModuleValues = Date.now()) => {
         const now = typeof moduleValuesOrNow === "number"
           ? moduleValuesOrNow
@@ -2002,7 +2133,8 @@ export class ChannelObject extends DurableObject<Env> {
         ...(registration.retryDelaysMs === undefined ? {} : { retryDelaysMs: registration.retryDelaysMs }),
         handle: async (key, entry) => {
           const execute = () => registration.handle(
-            this.moduleAlarmContext(moduleId, registration, externalFetchBudget, entry.streamGeneration),
+            this.moduleAlarmContext(moduleId, registration, externalFetchBudget, entry.streamGeneration,
+              entry.identity, entry.planSequence),
             key.startsWith(modulePrefix) ? key.slice(modulePrefix.length) : key,
             entry.deadline,
             entry.ownerRevision,
@@ -2216,6 +2348,8 @@ export class ChannelObject extends DurableObject<Env> {
     deadline: number,
     ownerRevision?: number,
     streamGeneration?: number | null,
+    identity?: ModuleAlarmIdentity,
+    planSequence?: number,
   ): Promise<void> {
     const registration = MODULES.find((module) => module.id === moduleId)?.alarms?.find((alarm) => alarm.key === handlerKey);
     if (registration === undefined || alarmKey.length === 0) {
@@ -2228,6 +2362,8 @@ export class ChannelObject extends DurableObject<Env> {
       undefined,
       ownerRevision,
       streamGeneration,
+      identity,
+      planSequence,
     );
   }
 
@@ -2241,17 +2377,33 @@ export class ChannelObject extends DurableObject<Env> {
     return entry.claimUntil === undefined ? entry.nextAttemptAt ?? entry.deadline : entry.deadline;
   }
 
+  /** Returns the identity and sequence stored on one module alarm entry. */
+  public async getModuleAlarmPlan(moduleId: string, alarmKey: string): Promise<ModuleAlarmPlan | null> {
+    if (!MODULES.some((module) => module.id === moduleId) || alarmKey.length === 0) return null;
+    const stored = await this.ctx.storage.get(ALARM_TABLE_KEY);
+    if (!isRecord(stored)) return null;
+    const entry = stored[`module:${moduleId}:${alarmKey}`];
+    if (!validAlarmScheduleEntry(entry)) return null;
+    return {
+      identity: entry.identity ?? null,
+      planSequence: entry.planSequence ?? null,
+    };
+  }
+
   /** Clear one module-owned alarm key without disturbing other module deadlines. */
   public async clearModuleAlarm(
     moduleId: string,
     alarmKey: string,
     ownerRevision?: number,
     streamGeneration?: number | null,
+    expectedIdentity?: ModuleAlarmIdentity | null,
+    planSequence?: number,
   ): Promise<void> {
     if (!MODULES.some((module) => module.id === moduleId) || alarmKey.length === 0) {
       throw new Error(`Unknown module alarm key ${moduleId}.${alarmKey}.`);
     }
-    await this.clearAlarmEntry(`module:${moduleId}:${alarmKey}`, ownerRevision, streamGeneration);
+    await this.clearAlarmEntry(`module:${moduleId}:${alarmKey}`, ownerRevision, streamGeneration,
+      expectedIdentity, planSequence);
   }
 
   /** Queues a generic replan after a host or module changes schedule inputs. */

@@ -120,6 +120,16 @@ describe("text block token migration", () => {
 
       database.exec(readMigration("0059_channel_default_chat_target.sql"));
       database.exec(readMigration("0061_timer_live_offline_intervals.sql"));
+      database.exec(readMigration("0062_timer_occurrence_identity.sql"));
+      database.exec(`
+        INSERT INTO channel_stream_state
+          (channel_id, state, changed_at, source, started_at, stream_id, transition_generation)
+        VALUES ('channel-a', 'online', '2026-10-12T00:00:00.000Z', 'eventsub',
+                '2026-10-12T00:00:00.000Z', 'stream-a', 1);
+        UPDATE timers
+           SET next_run_generation = 1, next_run_plan_sequence = 1
+         WHERE timer_id = 'timer-a';
+      `);
       const d1Database = {
         prepare: (sql: string) => new TestPreparedStatement(database, database.prepare(sql), sql),
       } as unknown as D1Database;
@@ -127,6 +137,17 @@ describe("text block token migration", () => {
       const alarmContext = {
         DB: d1Database,
         channelId: "channel-a",
+        alarmIdentity: {
+          timerId: "timer-a",
+          revision: 7,
+          triggerType: "stream_start",
+          state: null,
+          streamId: "stream-a",
+          generation: 1,
+          deadline: Date.parse("2026-10-12T00:10:00.000Z"),
+        },
+        alarmPlanSequence: 1,
+        streamGeneration: 1,
         clear: () => Promise.resolve(),
         schedule: () => Promise.resolve(),
         streamState: () => Promise.resolve("online"),

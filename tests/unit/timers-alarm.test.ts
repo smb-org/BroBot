@@ -47,10 +47,30 @@ const insertTimer = async (input: {
     "2026-01-01T00:00:00.000Z",
     "2026-01-01T00:00:00.000Z",
   ).run();
+  if (input.nextRunAt !== undefined && input.nextRunAt !== null) {
+    await database.prepare(
+      "UPDATE timers SET next_run_plan_sequence = 1 WHERE timer_id = ?",
+    ).bind(input.id ?? timerId).run();
+  }
+  if ((input.triggerType === "interval" || input.triggerType === "stream_start") && input.nextRunAt != null) {
+    const stream = await database.prepare(
+      "SELECT state, stream_id, transition_generation FROM channel_stream_state WHERE channel_id = ?",
+    ).bind(channelId).first<{ state: string; stream_id: string | null; transition_generation: number }>();
+    const generation = stream?.transition_generation ?? 1;
+    const streamId = stream?.state === "online" ? stream.stream_id ?? "stream-1" : null;
+    await database.prepare(
+      "UPDATE timers SET next_run_stream_id = ?, next_run_generation = ?, next_run_plan_sequence = 1 WHERE timer_id = ?",
+    ).bind(streamId, generation, input.id ?? timerId).run();
+  }
 };
 
 const prepareDatabase = async (chatTarget: "all_chats" | "source_only" = "source_only"): Promise<void> => {
   await insertChannel();
+  await database.prepare(
+    `INSERT INTO channel_stream_state
+      (channel_id, state, changed_at, source, stream_id, transition_generation)
+     VALUES (?, 'online', ?, 'eventsub', 'stream-1', 1)`,
+  ).bind(channelId, new Date(firstDueAt - 60_000).toISOString()).run();
   await insertTimer({
     triggerType: "interval",
     trigger: { type: "interval", live: { minutes: 10, minimumMessages: 3 } },
@@ -58,11 +78,6 @@ const prepareDatabase = async (chatTarget: "all_chats" | "source_only" = "source
     nextRunAt: firstDueAt,
     activityCount: 10,
   });
-  await database.prepare(
-    `INSERT INTO channel_stream_state
-      (channel_id, state, changed_at, source, stream_id, transition_generation)
-     VALUES (?, 'online', ?, 'eventsub', NULL, 1)`,
-  ).bind(channelId, new Date(firstDueAt - 60_000).toISOString()).run();
 };
 
 const contextFor = (
@@ -92,6 +107,36 @@ const contextFor = (
   },
   schedule: (_key, deadline) => { deadlines.push(deadline); return Promise.resolve(); },
   clear: () => Promise.resolve(),
+  getAlarmPlan: async (key) => {
+    const timerKey = key.slice("timer:".length).split(":refresh:", 1)[0] ?? "";
+    const row = await database.prepare(
+      `SELECT timer_id, revision, trigger_type, next_run_at, next_run_stream_id,
+              next_run_state, next_run_generation, next_run_plan_sequence
+         FROM timers WHERE channel_id = ? AND timer_id = ?`,
+    ).bind(channelId, timerKey).first<{
+      timer_id: string;
+      revision: number;
+      trigger_type: string;
+      next_run_at: string | null;
+      next_run_stream_id: string | null;
+      next_run_state: string | null;
+      next_run_generation: number | null;
+      next_run_plan_sequence: number;
+    }>();
+    if (row === null || row.next_run_at === null) return null;
+    return {
+      identity: {
+        timerId: row.timer_id,
+        revision: row.revision,
+        triggerType: row.trigger_type,
+        state: row.next_run_state,
+        streamId: row.next_run_stream_id,
+        generation: row.next_run_generation,
+        deadline: Date.parse(row.next_run_at),
+      },
+      planSequence: row.next_run_plan_sequence,
+    };
+  },
   renderTemplate: () => Promise.resolve({ text: "Scheduled message" }),
   sendChat: (_text, idempotencyKey) => {
     sends.push(idempotencyKey);
@@ -100,7 +145,7 @@ const contextFor = (
   chatActivityCount: () => Promise.resolve(activityCount()),
   resolveEventTimes: () => Promise.resolve([]),
   streamState: () => Promise.resolve("online"),
-  streamStartedAt: () => Promise.resolve({ streamId: null, startedAt: null }),
+  streamStartedAt: () => Promise.resolve({ streamId: "stream-1", startedAt: null }),
   ...overrides,
 });
 
@@ -237,19 +282,19 @@ describe("timer alarm execution", () => {
     expect(scheduleGenerations).toEqual([null]);
   });
 
-  it("reschedules an interval from the same stream snapshot used for its generation fence", async () => {
+  it("replans an interval after the stream generation changes during its due check", async () => {
     await insertChannel();
+    await database.prepare(
+      `INSERT INTO channel_stream_state
+        (channel_id, state, changed_at, source, started_at, stream_id, transition_generation)
+       VALUES (?, 'online', ?, 'eventsub', ?, 'stream-1', 1)`,
+    ).bind(channelId, new Date(firstDueAt - 60_000).toISOString(), new Date(firstDueAt - 60_000).toISOString()).run();
     await insertTimer({
       triggerType: "interval",
       trigger: { type: "interval", live: { minutes: 10 }, offline: { minutes: 5 } },
       nextRunAt: firstDueAt,
       activityCount: null,
     });
-    await database.prepare(
-      `INSERT INTO channel_stream_state
-        (channel_id, state, changed_at, source, started_at, stream_id, transition_generation)
-       VALUES (?, 'online', ?, 'eventsub', ?, 'stream-1', 1)`,
-    ).bind(channelId, new Date(firstDueAt - 60_000).toISOString(), new Date(firstDueAt - 60_000).toISOString()).run();
     let stateReads = 0;
     const deadlines: number[] = [];
     const context = contextFor(() => 0, [], deadlines, {
@@ -397,6 +442,11 @@ describe("timer alarm execution", () => {
 
   it("passes no target for a timer that inherits the channel default", async () => {
     await insertChannel();
+    await database.prepare(
+      `INSERT INTO channel_stream_state
+        (channel_id, state, changed_at, source, started_at, stream_id, transition_generation)
+       VALUES (?, 'online', ?, 'eventsub', ?, 'stream-1', 1)`,
+    ).bind(channelId, new Date(firstDueAt - 60_000).toISOString(), new Date(firstDueAt - 60_000).toISOString()).run();
     await insertTimer({
       triggerType: "interval",
       trigger: { type: "interval", live: { minutes: 10 } },
@@ -418,7 +468,7 @@ describe("timer alarm execution", () => {
     expect(targets).toEqual([undefined]);
   });
 
-  it("uses the renamed template when a scheduled alarm carries the previous revision", async () => {
+  it("resynchronizes a renamed timer before accepting an alarm from its previous revision", async () => {
     await prepareDatabase();
     await database.prepare("UPDATE timers SET message_text = ?, revision = 2 WHERE timer_id = ?")
       .bind("Score: {var.points}", timerId).run();
@@ -436,9 +486,9 @@ describe("timer alarm execution", () => {
 
     await handleTimerAlarm(context, `timer:${timerId}`, firstDueAt, 1);
 
-    expect(renderedTemplates).toEqual(["Score: {var.points}"]);
-    expect(sends).toEqual([`${timerId}:${String(firstDueAt)}`]);
-    expect(deadlines).toEqual([secondDueAt]);
+    expect(renderedTemplates).toEqual([]);
+    expect(sends).toEqual([]);
+    expect(deadlines).toEqual([firstDueAt]);
   });
 
   it("retries the due occurrence with the renamed template when a rename lands during rendering", async () => {
@@ -509,6 +559,11 @@ describe("timer alarm execution", () => {
 
   it("keeps the offline activity baseline when a live post finishes after the stream switch", async () => {
     await insertChannel();
+    await database.prepare(
+      `INSERT INTO channel_stream_state
+        (channel_id, state, changed_at, source, started_at, stream_id)
+       VALUES (?, 'online', ?, 'eventsub', ?, 'stream-1')`,
+    ).bind(channelId, new Date(firstDueAt - 60_000).toISOString(), new Date(firstDueAt - 60_000).toISOString()).run();
     await insertTimer({
       id: "interval-baseline-race",
       triggerType: "interval",
@@ -516,11 +571,6 @@ describe("timer alarm execution", () => {
       nextRunAt: firstDueAt,
       activityCount: 10,
     });
-    await database.prepare(
-      `INSERT INTO channel_stream_state
-        (channel_id, state, changed_at, source, started_at, stream_id)
-       VALUES (?, 'online', ?, 'eventsub', ?, 'stream-1')`,
-    ).bind(channelId, new Date(firstDueAt - 60_000).toISOString(), new Date(firstDueAt - 60_000).toISOString()).run();
     let state: "online" | "offline" = "online";
     const context = contextFor(() => 20, [], [], {
       streamState: () => Promise.resolve(state),
@@ -537,6 +587,7 @@ describe("timer alarm execution", () => {
         ).bind(channelId).run();
         await database.prepare(
           `UPDATE timers SET next_run_at = ?, next_run_stream_id = NULL, next_run_state = 'offline',
+                              next_run_generation = 2, next_run_plan_sequence = next_run_plan_sequence + 1,
                               last_chat_activity_count = 77 WHERE timer_id = ?`,
         ).bind(new Date(firstDueAt + 5 * 60_000).toISOString(), "interval-baseline-race").run();
         return { sent: true, reason: null, retryable: false };
@@ -756,7 +807,7 @@ describe("timer alarm execution", () => {
       activityCount: null,
     });
     await database.prepare(
-      `UPDATE timers SET next_run_stream_id = 'stream-2' WHERE timer_id = ?`,
+      `UPDATE timers SET next_run_stream_id = 'stream-2', next_run_generation = 2 WHERE timer_id = ?`,
     ).bind("stream-start-generation-race").run();
     await database.prepare(
       `INSERT INTO channel_stream_state
@@ -1116,7 +1167,7 @@ describe("timer alarm execution", () => {
       });
     });
 
-    it("fires (rather than deferring) an interval timer whose legacy row (null stream id, from before migration 0024) is already due inside the current stream", async () => {
+    it("rearms an interval timer whose legacy plan lacks the current stream id", async () => {
       await insertChannel();
       await insertTimer({
         id: "interval-legacy",
@@ -1125,6 +1176,8 @@ describe("timer alarm execution", () => {
         nextRunAt: firstDueAt,
         activityCount: 5,
       });
+      await database.prepare("UPDATE timers SET next_run_stream_id = NULL WHERE timer_id = ?")
+        .bind("interval-legacy").run();
       await database.prepare(
         `INSERT INTO channel_stream_state
           (channel_id, state, changed_at, source, started_at, stream_id, transition_generation)
@@ -1143,7 +1196,7 @@ describe("timer alarm execution", () => {
 
       await handleTimerAlarm(context, "timer:interval-legacy", firstDueAt);
 
-      expect(sends).toEqual([`interval-legacy:${String(firstDueAt)}`]);
+      expect(sends).toEqual([]);
       expect(deadlines).toEqual([firstDueAt + 10 * 60_000]);
       expect(await database.prepare(
         "SELECT next_run_at, next_run_stream_id FROM timers WHERE timer_id = ?",
@@ -1153,8 +1206,13 @@ describe("timer alarm execution", () => {
       });
     });
 
-    it("fires (rather than dropping) a stream-start timer whose legacy row (null stream id, from before migration 0024) is already due inside the current stream", async () => {
+    it("rearms a stream-start timer whose legacy plan lacks the current stream id", async () => {
       await insertChannel();
+      await database.prepare(
+        `INSERT INTO channel_stream_state
+          (channel_id, state, changed_at, source, started_at, stream_id, transition_generation)
+         VALUES (?, 'online', ?, 'eventsub', ?, 'stream-9', 1)`,
+      ).bind(channelId, new Date(firstDueAt - 10 * 60_000).toISOString(), new Date(firstDueAt - 10 * 60_000).toISOString()).run();
       await insertTimer({
         id: "stream-start-legacy",
         triggerType: "stream_start",
@@ -1162,6 +1220,8 @@ describe("timer alarm execution", () => {
         nextRunAt: firstDueAt,
         activityCount: null,
       });
+      await database.prepare("UPDATE timers SET next_run_stream_id = NULL WHERE timer_id = ?")
+        .bind("stream-start-legacy").run();
       const sends: string[] = [];
       const deadlines: number[] = [];
       const context = contextFor(() => 0, sends, deadlines, {
@@ -1173,7 +1233,11 @@ describe("timer alarm execution", () => {
 
       await handleTimerAlarm(context, "timer:stream-start-legacy", firstDueAt);
 
-      expect(sends).toEqual([`stream-start-legacy:${String(firstDueAt)}:stream-9`]);
+      expect(sends).toEqual([]);
+      expect(deadlines).toEqual([firstDueAt]);
+      expect(await database.prepare(
+        "SELECT next_run_stream_id, next_run_generation FROM timers WHERE timer_id = ?",
+      ).bind("stream-start-legacy").first()).toEqual({ next_run_stream_id: "stream-9", next_run_generation: 1 });
     });
   });
 
@@ -1224,8 +1288,13 @@ describe("timer alarm execution", () => {
       expect(rows.results.map((row) => row.next_run_at)).not.toContain(null);
     });
 
-    it("does not touch a timer that is already armed for this session", async () => {
+    it("does not touch a timer with a full plan identity already armed for this session", async () => {
       await insertChannel();
+      await database.prepare(
+        `INSERT INTO channel_stream_state
+          (channel_id, state, changed_at, source, started_at, stream_id, transition_generation)
+         VALUES (?, 'online', ?, 'eventsub', ?, 'stream-1', 1)`,
+      ).bind(channelId, new Date(now - 60_000).toISOString(), new Date(now - 60_000).toISOString()).run();
       const armedAt = now + 30 * 60_000;
       await insertTimer({
         id: "interval-timer",
