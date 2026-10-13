@@ -40,14 +40,8 @@ export interface Timer {
   trigger: TimerTrigger;
   revision: number;
   nextRunAt: string | null;
-  /** Twitch stream id `nextRunAt` was armed for, when the trigger is stream-scoped. */
-  nextRunStreamId: string | null;
-  /** Stream state `nextRunAt` was armed for when the trigger is an interval. */
+  /** Display mirror of the occurrence planned by the channel Durable Object. */
   nextRunState: TimerIntervalState | null;
-  /** Stream transition generation that produced the current stream-scoped occurrence. */
-  nextRunGeneration: number | null;
-  /** Monotonic fence for writes to this timer's D1 and Durable Object alarm plan. */
-  nextRunPlanSequence: number;
   lastRunAt: string | null;
   createdAt: string;
   updatedAt: string;

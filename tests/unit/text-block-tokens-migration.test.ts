@@ -2,21 +2,19 @@ import { DatabaseSync } from "node:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { validTextBlock } from "../../src/modules/text_library/domain";
 import { templateTextLength } from "../../src/template";
-import { handleTimerAlarm } from "../../src/modules/timers";
 import { adsSettingsSchema } from "../../src/modules/ads/contracts";
 import { raidSettingsSchema } from "../../src/modules/raid/contracts";
-import { TestPreparedStatement } from "./test-d1";
 
 const migrationsDirectory = resolve(import.meta.dirname, "../../migrations");
 const migrationFiles = readdirSync(migrationsDirectory).filter((name) => name.endsWith(".sql")).sort((a, b) => a.localeCompare(b));
 const readMigration = (name: string): string => readFileSync(resolve(migrationsDirectory, name), "utf8");
 
 describe("text block token migration", () => {
-  it("moves timer and FAQ content to free text and preserves pending stream-start alarms", async () => {
+  it("moves timer and FAQ content to free text and preserves pending stream-start alarms", () => {
     const database = new DatabaseSync(":memory:");
     try {
       database.exec("PRAGMA foreign_keys = ON");
@@ -118,56 +116,6 @@ describe("text block token migration", () => {
       expect(database.prepare("SELECT revision FROM overlays WHERE overlay_id = 'overlay-a'").get()).toEqual({ revision: 2 });
       expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
 
-      database.exec(readMigration("0059_channel_default_chat_target.sql"));
-      database.exec(readMigration("0061_timer_live_offline_intervals.sql"));
-      database.exec(readMigration("0062_timer_occurrence_identity.sql"));
-      database.exec(`
-        INSERT INTO channel_stream_state
-          (channel_id, state, changed_at, source, started_at, stream_id, transition_generation)
-        VALUES ('channel-a', 'online', '2026-10-12T00:00:00.000Z', 'eventsub',
-                '2026-10-12T00:00:00.000Z', 'stream-a', 1);
-        UPDATE timers
-           SET next_run_generation = 1, next_run_plan_sequence = 1
-         WHERE timer_id = 'timer-a';
-      `);
-      const d1Database = {
-        prepare: (sql: string) => new TestPreparedStatement(database, database.prepare(sql), sql),
-      } as unknown as D1Database;
-      const sends: string[] = [];
-      const alarmContext = {
-        DB: d1Database,
-        channelId: "channel-a",
-        alarmIdentity: {
-          timerId: "timer-a",
-          revision: 7,
-          triggerType: "stream_start",
-          state: null,
-          streamId: "stream-a",
-          generation: 1,
-          deadline: Date.parse("2026-10-12T00:10:00.000Z"),
-        },
-        alarmPlanSequence: 1,
-        streamGeneration: 1,
-        clear: () => Promise.resolve(),
-        schedule: () => Promise.resolve(),
-        streamState: () => Promise.resolve("online"),
-        streamStartedAt: () => Promise.resolve({ streamId: "stream-a", startedAt: "2026-10-12T00:00:00.000Z" }),
-        renderTemplate: () => Promise.resolve({ text: "Migrated reminder" }),
-        sendChat: (_text: string, idempotencyKey: string) => {
-          sends.push(idempotencyKey);
-          return Promise.resolve({ sent: true, reason: null, retryable: false });
-        },
-      } as unknown as Parameters<typeof handleTimerAlarm>[0];
-      vi.useFakeTimers();
-      try {
-        vi.setSystemTime(Date.parse("2026-10-12T00:10:00.000Z"));
-        await handleTimerAlarm(alarmContext, "timer:timer-a", Date.parse("2026-10-12T00:10:00.000Z"), 7);
-      } finally {
-        vi.useRealTimers();
-      }
-      expect(sends).toHaveLength(1);
-      expect(database.prepare("SELECT next_run_at FROM timers WHERE timer_id = 'timer-a'").get())
-        .toEqual({ next_run_at: null });
     } finally {
       database.close();
     }

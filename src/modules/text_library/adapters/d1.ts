@@ -6,6 +6,7 @@ import type { TextBlockRenameInput, TextBlockRepository, TextLibrarySnapshot } f
 import type { ModuleTemplateUsageSource } from "../../contract";
 import { blockReferencesInText } from "../domain";
 import { templateTextLength } from "../../../contracts/template-text-length";
+import { timerScheduleReconciliationMutation } from "../../contracts/timer-schedule-reconciliation";
 
 const MODULE_ID = "text_library";
 
@@ -388,6 +389,7 @@ export const createTextBlockRepository = (
       const expectedLibraryRevision = startLibraryRevision;
       const authorization = authorizeMutation(input.channelId, actor, input.now);
       const nextRevision = before.revision + 1;
+      const scheduleMutationId = input.scheduleMutationId ?? crypto.randomUUID();
       const renameToken = crypto.randomUUID();
       const renamedBlockGuard = `EXISTS (
         SELECT 1 FROM text_blocks
@@ -508,7 +510,9 @@ export const createTextBlockRepository = (
       if (audit !== undefined) statements.push(audit);
       statements.push(removeRenamedVariants, ...saveRenamedVariants);
       statements.push(rewriteParentRevisions, rewriteVariants,
-        rewriteCommands, rewriteTimers, rewriteFaq, rewriteModuleSettings);
+        rewriteCommands, rewriteTimers,
+        timerScheduleReconciliationMutation(db, input.channelId, scheduleMutationId, input.now, true),
+        rewriteFaq, rewriteModuleSettings);
       const overlayUpdateIndex = statements.length;
       statements.push(updateOverlayRevisions, rewriteOverlayElements);
       let results: Awaited<ReturnType<typeof db.batch>>;

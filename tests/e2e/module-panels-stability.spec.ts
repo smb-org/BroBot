@@ -406,7 +406,7 @@ test("timer and FAQ dialogs submit from Enter", async ({ page }) => {
     timerCreated = true;
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ timer: {
       id: "timer-created", name: "Hourly", enabled: true, messageText: "Hello, chat!", chatTarget: "source_only",
-      trigger: { type: "interval", live: { minutes: 30 } }, revision: 1, nextRunAt: null, nextRunStreamId: null, nextRunState: null,
+      trigger: { type: "interval", live: { minutes: 30 } }, revision: 1, nextRunAt: null, nextRunState: null,
       lastRunAt: null, createdAt: "2030-01-01T12:00:00.000Z", updatedAt: "2030-01-01T12:00:00.000Z",
     } }) });
   });

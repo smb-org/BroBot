@@ -13,6 +13,7 @@ export interface TextBlockInput extends TextBlockMutationInput {
 export interface TextBlockRenameInput extends TextBlockInput {
   expectedRevision: number;
   expectedLibraryRevision?: number;
+  scheduleMutationId?: string;
 }
 
 interface TextBlockOverlayRevision {

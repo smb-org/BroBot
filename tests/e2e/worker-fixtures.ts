@@ -15,6 +15,7 @@ const keyRing = (id: string, byte: number): string => JSON.stringify({
 /** Port of the e2e wrangler worker; override with WORKER_PORT to run checks in parallel. */
 export const e2eWorkerPort = process.env.WORKER_PORT ?? "8787";
 export const e2eWorkerOrigin = `http://127.0.0.1:${e2eWorkerPort}`;
+export const e2eWorkerPersist = process.env.E2E_WORKER_PERSIST ?? "../../.wrangler/e2e-worker";
 export const e2eOverlayToken = testKey(7);
 export const e2eChannelId = "channel-e2e";
 const e2eOverlayId = "overlay-e2e";
@@ -110,6 +111,21 @@ export const seedE2EOverlay = (): void => {
       throw new Error(`Wrangler e2e database setup failed.\n${result.stdout}\n${result.stderr}`);
     }
   };
-  wrangler(["--cwd", "dist/brobot_local", "--config", "wrangler.json", "d1", "migrations", "apply", "DB", "--local", "--persist-to", "../../.wrangler/e2e-worker"]);
-  wrangler(["--cwd", "dist/brobot_local", "--config", "wrangler.json", "d1", "execute", "DB", "--local", "--yes", "--persist-to", "../../.wrangler/e2e-worker", "--command", sql]);
+  const applyMigrations = (): void => {
+    let lastFailure = "";
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const result = spawnSync("./node_modules/.bin/wrangler", [
+        "--cwd", "dist/brobot_local", "--config", "wrangler.json", "d1", "migrations", "apply", "DB", "--local",
+        "--persist-to", e2eWorkerPersist,
+      ], {
+        encoding: "utf8",
+        env: { ...process.env, CI: "1", ...e2eWorkerEnvironment },
+      });
+      if (result.status === 0) return;
+      lastFailure = `${result.stdout}\n${result.stderr}`;
+    }
+    throw new Error(`Wrangler e2e database migrations did not finish after three batches.\n${lastFailure}`);
+  };
+  applyMigrations();
+  wrangler(["--cwd", "dist/brobot_local", "--config", "wrangler.json", "d1", "execute", "DB", "--local", "--yes", "--persist-to", e2eWorkerPersist, "--command", sql]);
 };

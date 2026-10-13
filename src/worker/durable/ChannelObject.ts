@@ -16,7 +16,34 @@ import { CHANNEL_ROLES, type ChannelRole } from "../../contracts/values";
 import { processAdPrewarning } from "../ad-prewarning";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../realtime-protocol";
 import type { AdsSchedule } from "../../modules/ads/contracts";
+import {
+  alarmKeyFor as timerAlarmKeyFor,
+  eventTimeRefreshKeyFor,
+  intervalPartFor,
+  isDailyTimerDeadlineCurrent,
+  timerOccurrenceKey,
+  triggerDelayMs,
+} from "../../modules/timers/domain";
+import {
+  emptyDurableTimerState,
+  makeTimerPlan,
+  sameTimerOccurrence,
+  TIMER_ALARM_PREFIX,
+  TIMER_ACTIVITY_COUNTS_KEY,
+  TIMER_DURABLE_STATE_KEY,
+  TIMER_OCCURRENCE_HANDLER,
+  type DurableTimerConfig,
+  type DurableTimerEntry,
+  type DurableTimerState,
+  type DurableTimerStream,
+  type TimerOccurrence,
+  type TimerPlan,
+  type TimerScheduleInputs,
+} from "../../modules/timers/durable";
+import { sameTimerAlarmIdentity } from "../../modules/timers/identity";
 import { acceptsTimerAlarmClear, acceptsTimerAlarmSet } from "../../modules/timers/identity";
+import type { TimerIntervalState } from "../../modules/timers/contracts";
+import { mapTimerRow, type TimerRow } from "../../modules/timers/service";
 import { CHAT_VOTING_MODULE_ID } from "../../modules/chat_voting/contracts";
 import { OVERLAY_STREAM_DETAILS_CACHE_TTL_MS } from "../../modules/contract";
 import type {
@@ -127,6 +154,9 @@ const D1_IDS_PER_QUERY = D1_IN_PARAMETER_LIMIT - FIXED_D1_PARAMETER_COUNT;
 const ALARM_TABLE_KEY = "channel:alarm_schedule";
 const PANEL_DURABLE_REVISIONS_KEY = "channel:panel_resource_revisions";
 const CHAT_ACTIVITY_COUNT_KEY = "channel:chat_activity_count";
+const TIMER_MIRROR_RETRY_DELAY_MS = 5_000;
+const TIMER_OCCURRENCE_GRACE_MS = 10 * 60_000;
+const TIMER_TOMBSTONE_RETENTION_MS = 24 * 60 * 60_000;
 const LEGACY_ACTIVE_CHATTER_STREAM_KEY = "chatter:stream";
 const ACTIVE_CHATTER_TABLE = "active_chatters";
 const ACTIVE_CHATTER_KEY_TABLE = "active_chatter_key";
@@ -280,6 +310,9 @@ type RealtimeSocketAttachment = RealtimePrincipal;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+const timerSchedulesNeedCalendarRefresh = (reason: ModuleScheduleInputChangeReason): boolean =>
+  reason === "channel_time_zone" || reason === "event_times";
 
 const activeChatterKey = async (secretHex: string, channelId: string, userId: string): Promise<string> => {
   const encoder = new TextEncoder();
@@ -501,6 +534,8 @@ export class ChannelObject extends DurableObject<Env> {
   private adScheduleRefreshGeneration = 0;
   private adScheduleOperationQueue: Promise<void> = Promise.resolve();
   private belaboxPollQueue: Promise<void> = Promise.resolve();
+  private alarmScheduleQueue: Promise<void> = Promise.resolve();
+  private timerScheduleReconciliationQueue: Promise<void> = Promise.resolve();
   private activeChatterSchemaReady = false;
   // ponytail: This Set is per-instance memory and is empty after hibernation, so the residual window is bounded by the security alarm. Persist token IDs in DO storage if that window needs to be shorter.
   private recentlyBoundOverlayTokenIds = new Set<string>();
@@ -515,6 +550,9 @@ export class ChannelObject extends DurableObject<Env> {
         else ctx.storage.kv.delete(LEGACY_ACTIVE_CHATTER_STREAM_KEY);
       });
     }
+    void ctx.blockConcurrencyWhile(async () => {
+      await this.ensureTimerSchedulesInitialized();
+    });
   }
 
   private ownChannelId(): string | null {
@@ -571,14 +609,814 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   private incrementChatActivityCountSync(): number {
+    const schedule = this.timerScheduleStateSync();
     const next = this.currentChatActivityCountSync() + 1;
     this.ctx.storage.kv.put(CHAT_ACTIVITY_COUNT_KEY, next);
+    if (schedule.stream.state === "online") schedule.activityCounts.live += 1;
+    else if (schedule.stream.state === "offline") schedule.activityCounts.offline += 1;
+    this.ctx.storage.kv.put(TIMER_ACTIVITY_COUNTS_KEY, schedule.activityCounts);
     return next;
   }
 
   private currentChatActivityCountSync(): number {
     const current = this.ctx.storage.kv.get<number>(CHAT_ACTIVITY_COUNT_KEY);
     return typeof current === "number" && Number.isSafeInteger(current) && current >= 0 ? current : 0;
+  }
+
+  private timerScheduleStateSync(): DurableTimerState {
+    const saved = this.ctx.storage.kv.get<DurableTimerState>(TIMER_DURABLE_STATE_KEY);
+    const state = saved ?? emptyDurableTimerState();
+    state.activityCounts = this.timerActivityCountsSync(saved?.initialized === true ? saved.activityCounts : undefined);
+    return state;
+  }
+
+  private timerActivityCountsSync(legacyCounts?: Record<TimerIntervalState, number>): Record<TimerIntervalState, number> {
+    const saved = this.ctx.storage.kv.get<Record<TimerIntervalState, number>>(TIMER_ACTIVITY_COUNTS_KEY);
+    if (saved !== undefined && Number.isSafeInteger(saved.live) && saved.live >= 0 &&
+        Number.isSafeInteger(saved.offline) && saved.offline >= 0) return saved;
+    const count = Math.max(this.currentChatActivityCountSync(),
+      Number.isSafeInteger(legacyCounts?.live) && (legacyCounts?.live ?? 0) >= 0 ? legacyCounts?.live ?? 0 : 0,
+      Number.isSafeInteger(legacyCounts?.offline) && (legacyCounts?.offline ?? 0) >= 0 ? legacyCounts?.offline ?? 0 : 0);
+    const baseline = { live: count, offline: count };
+    this.ctx.storage.kv.put(TIMER_ACTIVITY_COUNTS_KEY, baseline);
+    return baseline;
+  }
+
+  private writeTimerDurableStateSync(state: DurableTimerState): void {
+    const persisted = { ...state } as Partial<DurableTimerState>;
+    Reflect.deleteProperty(persisted, "activityCounts");
+    this.ctx.storage.kv.put(TIMER_ACTIVITY_COUNTS_KEY, state.activityCounts);
+    this.ctx.storage.kv.put(TIMER_DURABLE_STATE_KEY, persisted);
+  }
+
+  private pruneTimerTombstonesSync(state: DurableTimerState): void {
+    const cutoff = Date.now() - TIMER_TOMBSTONE_RETENTION_MS;
+    for (const [timerId, tombstone] of Object.entries(state.tombstones)) {
+      if (!Number.isFinite(tombstone.deletedAt) || tombstone.deletedAt < cutoff) {
+        Reflect.deleteProperty(state.tombstones, timerId);
+      }
+    }
+  }
+
+  private timerTombstoneRevision(state: DurableTimerState, timerId: string): number {
+    return state.tombstones[timerId]?.revision ?? -1;
+  }
+
+  private timerAlarmScheduleSync(): AlarmScheduleTable {
+    const saved = this.ctx.storage.kv.get(ALARM_TABLE_KEY);
+    const table: AlarmScheduleTable = {};
+    if (isRecord(saved)) {
+      for (const [key, value] of Object.entries(saved)) {
+        if (validAlarmScheduleEntry(value)) table[key] = value;
+      }
+    }
+    return table;
+  }
+
+  private timerAlarmEntryKey(timerId: string): string {
+    return `${TIMER_ALARM_PREFIX}${timerAlarmKeyFor(timerId)}`;
+  }
+
+  private writeTimerAlarmEntriesSync(timerId: string, entry: DurableTimerEntry | undefined): void {
+    const table = this.timerAlarmScheduleSync();
+    const occurrenceKey = this.timerAlarmEntryKey(timerId);
+    const previous = table[occurrenceKey];
+    if (entry?.plannedOccurrence !== null && entry?.plannedOccurrence !== undefined) {
+      const { identity, sequence } = entry.plannedOccurrence;
+      table[occurrenceKey] = {
+        deadline: identity.deadline,
+        handler: TIMER_OCCURRENCE_HANDLER,
+        revision: (previous?.revision ?? 0) + 1,
+        ownerRevision: entry.config.revision,
+        ...(identity.generation === null ? {} : { streamGeneration: identity.generation }),
+        identity,
+        planSequence: sequence,
+      };
+    } else {
+      Reflect.deleteProperty(table, occurrenceKey);
+    }
+    const refreshPrefix = `${occurrenceKey}:refresh:`;
+    for (const key of Object.keys(table)) {
+      if (key.startsWith(refreshPrefix)) Reflect.deleteProperty(table, key);
+    }
+    if (entry?.refreshAt !== null && entry?.refreshAt !== undefined) {
+      const refreshKey = eventTimeRefreshKeyFor(timerId, entry.refreshAt);
+      const alarmKey = `${TIMER_ALARM_PREFIX}${refreshKey}`;
+      table[alarmKey] = {
+        deadline: entry.refreshAt,
+        handler: TIMER_OCCURRENCE_HANDLER,
+        revision: (table[alarmKey]?.revision ?? 0) + 1,
+        ownerRevision: entry.config.revision,
+      };
+    }
+    this.ctx.storage.kv.put(ALARM_TABLE_KEY, table);
+  }
+
+  private writeTimerMirrorRetryAlarmSync(timerId: string, sequence: number, deadline: number | null): void {
+    const table = this.timerAlarmScheduleSync();
+    const key = `${TIMER_ALARM_PREFIX}mirror:${timerId}:${String(sequence)}`;
+    if (deadline === null) Reflect.deleteProperty(table, key);
+    else table[key] = {
+      deadline,
+      handler: TIMER_OCCURRENCE_HANDLER,
+      revision: (table[key]?.revision ?? 0) + 1,
+    };
+    this.ctx.storage.kv.put(ALARM_TABLE_KEY, table);
+  }
+
+  private persistTimerScheduleSync(state: DurableTimerState, timerId: string, entry?: DurableTimerEntry): void {
+    if (entry === undefined) Reflect.deleteProperty(state.timers, timerId);
+    else state.timers[timerId] = entry;
+    this.writeTimerDurableStateSync(state);
+    this.writeTimerAlarmEntriesSync(timerId, entry);
+  }
+
+  private setTimerPlanSync(entry: DurableTimerEntry, plan: TimerPlan): void {
+    entry.planSequence += 1;
+    entry.plannedOccurrence = plan.identity === null
+      ? null
+      : { identity: plan.identity, sequence: entry.planSequence } satisfies TimerOccurrence;
+    entry.inFlightClaim = null;
+    entry.refreshAt = plan.refreshAt;
+    entry.mirrorSequence += 1;
+  }
+
+  private newDurableTimerEntry(config: DurableTimerConfig, state: DurableTimerState): DurableTimerEntry {
+    return {
+      config,
+      plannedOccurrence: null,
+      inFlightClaim: null,
+      planSequence: 0,
+      mirrorSequence: 0,
+      activityBaselines: { live: state.activityCounts.live, offline: state.activityCounts.offline },
+      lastRunAt: null,
+      refreshAt: null,
+    };
+  }
+
+  private previousTimerOccurrenceFromAlarm(
+    config: DurableTimerConfig,
+    stream: DurableTimerStream,
+    inputs: TimerScheduleInputs,
+    legacyStreamId: string | null | undefined,
+  ): TimerOccurrence | null {
+    const alarm = this.timerAlarmScheduleSync()[this.timerAlarmEntryKey(config.id)];
+    const trigger = config.trigger;
+    const identity = alarm?.identity;
+    const sequence = alarm?.planSequence;
+    if (identity !== undefined && sequence !== undefined) {
+      if (identity.timerId !== config.id || identity.revision !== config.revision ||
+          identity.triggerType !== config.trigger.type) return null;
+      const occurrence = { identity, sequence };
+      switch (trigger.type) {
+        case "interval":
+        case "stream_start":
+          return this.timerStreamMatchesOccurrence(stream, occurrence) ? occurrence : null;
+        case "time_of_day":
+          return isDailyTimerDeadlineCurrent(trigger, identity.deadline, inputs.timeZone) ? occurrence : null;
+        case "before_event":
+          return inputs.eventTimes.some((event) => event.id === trigger.sourceId &&
+            Date.parse(event.at) - trigger.minutes * 60_000 === identity.deadline)
+            ? occurrence
+            : null;
+      }
+    }
+
+    // Prior releases stored only deadline and owner revision in the channel alarm table.
+    // Upgrade that same durable alarm into a full occurrence identity once, without
+    // consulting D1's display mirror.
+    if (alarm === undefined || alarm.handler !== TIMER_OCCURRENCE_HANDLER ||
+        alarm.ownerRevision !== config.revision || !Number.isFinite(alarm.deadline)) return null;
+    const deadline = alarm.deadline;
+    let state: string | null = null;
+    let streamId: string | null = null;
+    let generation: number | null = null;
+    switch (trigger.type) {
+      case "interval": {
+        const intervalState = stream.state === "online" ? "live" : stream.state === "offline" ? "offline" : null;
+        if (intervalState === null || intervalPartFor(trigger, intervalState) === undefined) return null;
+        if (intervalState === "live" ? legacyStreamId !== stream.streamId : legacyStreamId !== null) return null;
+        state = intervalState;
+        streamId = intervalState === "live" ? stream.streamId : null;
+        generation = stream.generation;
+        break;
+      }
+      case "stream_start": {
+        if (stream.state !== "online" || stream.streamId === null || stream.startedAt === null ||
+            Date.parse(stream.startedAt) + triggerDelayMs(trigger) !== deadline) return null;
+        streamId = stream.streamId;
+        generation = stream.generation;
+        break;
+      }
+      case "time_of_day":
+        if (!isDailyTimerDeadlineCurrent(trigger, deadline, inputs.timeZone)) return null;
+        break;
+      case "before_event":
+        if (!inputs.eventTimes.some((event) => event.id === trigger.sourceId &&
+            Date.parse(event.at) - trigger.minutes * 60_000 === deadline)) return null;
+        break;
+    }
+    return {
+      identity: {
+        timerId: config.id,
+        revision: config.revision,
+        triggerType: trigger.type,
+        state,
+        streamId,
+        generation,
+        deadline,
+      },
+      sequence: sequence ?? 0,
+    };
+  }
+
+  private async readTimerConfigsFromDatabase(): Promise<DurableTimerConfig[]> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) throw new Error("Timer schedules require a named Durable Object.");
+    const rows = await this.env.DB.prepare(
+      `SELECT timer_id, name, enabled, message_text, trigger_type, trigger_json, chat_target,
+              use_channel_default_target, revision, created_at, updated_at
+         FROM timers WHERE channel_id = ? ORDER BY created_at, timer_id`,
+    ).bind(channelId).all<Omit<TimerRow, "next_run_at" | "next_run_state" | "last_run_at">>();
+    return rows.results.map((row) => {
+      const timer = mapTimerRow({ ...row, next_run_at: null, next_run_state: null, last_run_at: null });
+      return {
+        id: timer.id,
+        name: timer.name,
+        enabled: timer.enabled,
+        messageText: timer.messageText,
+        chatTarget: timer.chatTarget,
+        trigger: timer.trigger,
+        revision: timer.revision,
+      };
+    });
+  }
+
+  private async readLegacyTimerActivityBaselines(): Promise<Map<string, {
+    count: number | null;
+    streamId: string | null;
+    nextRunStreamId: string | null;
+  }>> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) throw new Error("Timer schedules require a named Durable Object.");
+    const rows = await this.env.DB.prepare(
+      `SELECT timer_id, last_chat_activity_count, chat_baseline_stream_id, next_run_stream_id
+         FROM timers WHERE channel_id = ? AND trigger_type = 'interval'`,
+    ).bind(channelId).all<{
+      timer_id: string;
+      last_chat_activity_count: number | null;
+      chat_baseline_stream_id: string | null;
+      next_run_stream_id: string | null;
+    }>();
+    return new Map(rows.results.map((row) => [row.timer_id, {
+      count: Number.isSafeInteger(row.last_chat_activity_count) && (row.last_chat_activity_count ?? -1) >= 0
+        ? row.last_chat_activity_count ?? 0
+        : null,
+      streamId: row.chat_baseline_stream_id,
+      nextRunStreamId: row.next_run_stream_id,
+    }]));
+  }
+
+  private async readTimerConfigFromDatabase(timerId: string): Promise<DurableTimerConfig | null> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) throw new Error("Timer schedules require a named Durable Object.");
+    const row = await this.env.DB.prepare(
+      `SELECT timer_id, name, enabled, message_text, trigger_type, trigger_json, chat_target,
+              use_channel_default_target, revision, created_at, updated_at
+         FROM timers WHERE channel_id = ? AND timer_id = ?`,
+    ).bind(channelId, timerId).first<Omit<TimerRow, "next_run_at" | "next_run_state" | "last_run_at">>();
+    if (row === null) return null;
+    const timer = mapTimerRow({ ...row, next_run_at: null, next_run_state: null, last_run_at: null });
+    return {
+      id: timer.id,
+      name: timer.name,
+      enabled: timer.enabled,
+      messageText: timer.messageText,
+      chatTarget: timer.chatTarget,
+      trigger: timer.trigger,
+      revision: timer.revision,
+    };
+  }
+
+  private async refreshTimerOccurrenceSnapshot(timerId: string): Promise<void> {
+    const [config, stream] = await Promise.all([
+      this.readTimerConfigFromDatabase(timerId),
+      this.readTimerStreamFromDatabase(),
+    ]);
+    await this.transitionTimerStream(stream);
+    if (config === null) {
+      const current = this.timerScheduleStateSync().timers[timerId];
+      if (current !== undefined) await this.deleteTimerConfig(timerId, current.config.revision);
+      return;
+    }
+    await this.upsertTimerConfig(config);
+  }
+
+  private async readTimerStreamFromDatabase(): Promise<DurableTimerStream> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) throw new Error("Timer schedules require a named Durable Object.");
+    const row = await this.env.DB.prepare(
+      `SELECT state, stream_id, started_at, transition_generation
+         FROM channel_stream_state WHERE channel_id = ?`,
+    ).bind(channelId).first<{
+      state: "online" | "offline" | "unknown";
+      stream_id: string | null;
+      started_at: string | null;
+      transition_generation: number;
+    }>();
+    return {
+      state: row?.state ?? "unknown",
+      streamId: row?.stream_id ?? null,
+      startedAt: row?.started_at ?? null,
+      generation: row?.transition_generation ?? 0,
+    };
+  }
+
+  private async timerScheduleInputs(
+    configs: readonly DurableTimerConfig[],
+    now: number,
+  ): Promise<TimerScheduleInputs> {
+    const needsCalendar = configs.some(({ trigger }) => trigger.type === "time_of_day" || trigger.type === "before_event");
+    const needsEventTimes = configs.some(({ trigger }) => trigger.type === "before_event");
+    const channelId = this.ownChannelId();
+    if (channelId === null) throw new Error("Timer schedules require a named Durable Object.");
+    const [channel, eventTimes] = await Promise.all([
+      needsCalendar
+        ? this.env.DB.prepare("SELECT time_zone FROM channels WHERE channel_id = ?")
+          .bind(channelId).first<{ time_zone: string }>()
+        : Promise.resolve(null),
+      needsEventTimes ? resolveModuleEventTimes(this.env.DB, channelId, now) : Promise.resolve([]),
+    ]);
+    return { now, timeZone: channel?.time_zone ?? "Europe/Berlin", eventTimes };
+  }
+
+  private async ensureTimerSchedulesInitialized(): Promise<void> {
+    if (this.timerScheduleStateSync().initialized) return;
+    const [configs, stream, legacyActivityBaselines] = await Promise.all([
+      this.readTimerConfigsFromDatabase(),
+      this.readTimerStreamFromDatabase(),
+      this.readLegacyTimerActivityBaselines(),
+    ]);
+    const inputs = await this.timerScheduleInputs(configs, Date.now());
+    const changedTimerIds: string[] = [];
+    this.ctx.storage.transactionSync(() => {
+      const state = this.timerScheduleStateSync();
+      if (state.initialized) return;
+      if (stream.generation >= state.stream.generation) state.stream = stream;
+      state.initialized = true;
+      for (const config of configs) {
+        if (this.timerTombstoneRevision(state, config.id) >= config.revision) continue;
+        const existing = state.timers[config.id];
+        if (existing !== undefined && existing.config.revision >= config.revision) continue;
+        const entry = existing ?? this.newDurableTimerEntry(config, state);
+        entry.config = config;
+        entry.activityBaselines = { ...state.activityCounts };
+        const legacyBaseline = legacyActivityBaselines.get(config.id);
+        if (config.trigger.type === "interval" && state.stream.state === "online" &&
+            legacyBaseline?.streamId === state.stream.streamId && legacyBaseline.count !== null) {
+          entry.activityBaselines.live = Math.min(state.activityCounts.live, legacyBaseline.count);
+        }
+        const existingOccurrence = existing?.plannedOccurrence;
+        const persistedOccurrence = existingOccurrence?.identity.revision === config.revision
+          ? existingOccurrence
+          : this.previousTimerOccurrenceFromAlarm(config, state.stream, inputs, legacyBaseline?.nextRunStreamId);
+        if (persistedOccurrence === null) {
+          this.setTimerPlanSync(entry, makeTimerPlan(config, state.stream, null, inputs));
+        } else {
+          entry.plannedOccurrence = persistedOccurrence;
+          entry.planSequence = persistedOccurrence.sequence;
+          entry.inFlightClaim = null;
+          entry.refreshAt = null;
+          entry.mirrorSequence += 1;
+        }
+        state.timers[config.id] = entry;
+        this.writeTimerAlarmEntriesSync(config.id, entry);
+        changedTimerIds.push(config.id);
+      }
+      this.writeTimerDurableStateSync(state);
+    });
+    await Promise.all(changedTimerIds.map((timerId) => this.writeTimerMirror(timerId)));
+    await this.scheduleEarliestAlarm();
+  }
+
+  /** Applies a committed timer config revision in the channel's single scheduler. */
+  public async upsertTimerConfig(config: DurableTimerConfig): Promise<void> {
+    await this.ensureTimerSchedulesInitialized();
+    await this.transitionTimerStream(await this.readTimerStreamFromDatabase());
+    const inputs = await this.timerScheduleInputs([config], Date.now());
+    const changed = this.ctx.storage.transactionSync(() => {
+      const state = this.timerScheduleStateSync();
+      if (this.timerTombstoneRevision(state, config.id) >= config.revision) return false;
+      const current = state.timers[config.id];
+      if (current !== undefined && current.config.revision >= config.revision) return false;
+      const entry = current ?? this.newDurableTimerEntry(config, state);
+      const triggerChanged = current === undefined || JSON.stringify(current.config.trigger) !== JSON.stringify(config.trigger);
+      entry.config = config;
+      entry.activityBaselines = { ...state.activityCounts };
+      this.setTimerPlanSync(entry, makeTimerPlan(config, state.stream, current?.plannedOccurrence ?? null, inputs,
+        triggerChanged ? "reset" : "preserve_cadence"));
+      this.persistTimerScheduleSync(state, config.id, entry);
+      return true;
+    });
+    if (changed) await this.writeTimerMirror(config.id);
+    await this.scheduleEarliestAlarm();
+  }
+
+  /** Removes a committed D1 timer and fences any config snapshot read before its delete. */
+  public async deleteTimerConfig(timerId: string, expectedRevision: number): Promise<void> {
+    await this.ensureTimerSchedulesInitialized();
+    await this.transitionTimerStream(await this.readTimerStreamFromDatabase());
+    const changed = this.ctx.storage.transactionSync(() => {
+      const state = this.timerScheduleStateSync();
+      const current = state.timers[timerId];
+      if (current !== undefined && current.config.revision > expectedRevision) return false;
+      const revision = Math.max(state.tombstones[timerId]?.revision ?? 0, expectedRevision + 1);
+      Reflect.deleteProperty(state.tombstones, timerId);
+      state.tombstones[timerId] = { revision, deletedAt: Date.now() };
+      this.pruneTimerTombstonesSync(state);
+      this.persistTimerScheduleSync(state, timerId);
+      return true;
+    });
+    if (changed) await this.clearTimerMirrorRetryAlarms(timerId);
+    await this.scheduleEarliestAlarm();
+  }
+
+  /** Commits an accepted EventSub or Helix stream transition before replanning stream-scoped timers. */
+  public async transitionTimerStream(stream: DurableTimerStream): Promise<void> {
+    await this.ensureTimerSchedulesInitialized();
+    const now = Date.now();
+    const changedTimerIds: string[] = [];
+    this.ctx.storage.transactionSync(() => {
+      const state = this.timerScheduleStateSync();
+      if (stream.generation < state.stream.generation) return;
+      const streamChanged = stream.generation > state.stream.generation || stream.state !== state.stream.state ||
+        stream.streamId !== state.stream.streamId || stream.startedAt !== state.stream.startedAt;
+      if (!streamChanged) return;
+      state.stream = stream;
+      if (stream.state === "online") state.activityCounts.live = 0;
+      if (stream.state === "offline") state.activityCounts.offline = 0;
+      const inputs: TimerScheduleInputs = { now, timeZone: "Europe/Berlin", eventTimes: [] };
+      for (const [timerId, entry] of Object.entries(state.timers)) {
+        if (entry.config.trigger.type !== "interval" && entry.config.trigger.type !== "stream_start") continue;
+        entry.activityBaselines = { ...state.activityCounts };
+        this.setTimerPlanSync(entry, makeTimerPlan(entry.config, state.stream, entry.plannedOccurrence, inputs));
+        this.writeTimerAlarmEntriesSync(timerId, entry);
+        changedTimerIds.push(timerId);
+      }
+      this.writeTimerDurableStateSync(state);
+    });
+    await Promise.all(changedTimerIds.map((timerId) => this.writeTimerMirror(timerId)));
+    await this.scheduleEarliestAlarm();
+  }
+
+  /** Replans host-owned timer inputs after activation, timezone, event-time, or repair notifications. */
+  public async reconcileTimerSchedules(reason: ModuleScheduleInputChangeReason): Promise<void> {
+    const previous = this.timerScheduleReconciliationQueue;
+    let release!: () => void;
+    this.timerScheduleReconciliationQueue = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      await this.reconcileTimerSchedulesSerial(reason);
+    } finally {
+      release();
+    }
+  }
+
+  private async reconcileTimerSchedulesSerial(reason: ModuleScheduleInputChangeReason): Promise<void> {
+    if (reason === "stream_state") {
+      await this.transitionTimerStream(await this.readTimerStreamFromDatabase());
+      return;
+    }
+    await this.ensureTimerSchedulesInitialized();
+    const timerRevisionsBeforeRead = new Map(Object.entries(this.timerScheduleStateSync().timers)
+      .map(([timerId, entry]) => [timerId, entry.config.revision]));
+    const [configs, databaseStream] = await Promise.all([
+      this.readTimerConfigsFromDatabase(),
+      this.readTimerStreamFromDatabase(),
+    ]);
+    const inputs = await this.timerScheduleInputs(configs, Date.now());
+    const changedTimerIds: string[] = [];
+    this.ctx.storage.transactionSync(() => {
+      const state = this.timerScheduleStateSync();
+      let streamChanged = false;
+      if (databaseStream.generation >= state.stream.generation) {
+        streamChanged = databaseStream.generation > state.stream.generation ||
+          databaseStream.state !== state.stream.state || databaseStream.streamId !== state.stream.streamId ||
+          databaseStream.startedAt !== state.stream.startedAt;
+        state.stream = databaseStream;
+        if (streamChanged && databaseStream.state === "online") state.activityCounts.live = 0;
+        if (streamChanged && databaseStream.state === "offline") state.activityCounts.offline = 0;
+      }
+      if (streamChanged) {
+        for (const [timerId, entry] of Object.entries(state.timers)) {
+          if (entry.config.trigger.type !== "interval" && entry.config.trigger.type !== "stream_start") continue;
+          entry.activityBaselines = { ...state.activityCounts };
+          this.setTimerPlanSync(entry, makeTimerPlan(entry.config, state.stream, entry.plannedOccurrence, {
+            now: inputs.now,
+            timeZone: inputs.timeZone,
+            eventTimes: [],
+          }));
+          this.persistTimerScheduleSync(state, timerId, entry);
+          changedTimerIds.push(timerId);
+        }
+      }
+      for (const config of configs) {
+        if (this.timerTombstoneRevision(state, config.id) >= config.revision) continue;
+        const current = state.timers[config.id];
+        if (current !== undefined && current.config.revision > config.revision) continue;
+        const configChanged = current === undefined || current.config.revision < config.revision;
+        const entry = current ?? this.newDurableTimerEntry(config, state);
+        const triggerChanged = current === undefined || JSON.stringify(current.config.trigger) !== JSON.stringify(config.trigger);
+        entry.config = config;
+        const relevantInputChanged = timerSchedulesNeedCalendarRefresh(reason) &&
+          (reason !== "event_times" || config.trigger.type === "before_event");
+        if (!configChanged && !relevantInputChanged) continue;
+        if (configChanged) entry.activityBaselines = { ...state.activityCounts };
+        const plan = makeTimerPlan(config, state.stream, entry.plannedOccurrence, inputs,
+          triggerChanged ? "reset" : "preserve_cadence");
+        const sameIdentity = plan.identity === null
+          ? entry.plannedOccurrence === null
+          : sameTimerAlarmIdentity(entry.plannedOccurrence?.identity, plan.identity);
+        if (!configChanged && sameIdentity && entry.refreshAt === plan.refreshAt) continue;
+        this.setTimerPlanSync(entry, plan);
+        this.persistTimerScheduleSync(state, config.id, entry);
+        changedTimerIds.push(config.id);
+      }
+      const currentConfigIds = new Set(configs.map((config) => config.id));
+      for (const [timerId, entry] of Object.entries(state.timers)) {
+        if (currentConfigIds.has(timerId)) continue;
+        if (timerRevisionsBeforeRead.get(timerId) !== entry.config.revision) continue;
+        const revision = Math.max(state.tombstones[timerId]?.revision ?? 0, entry.config.revision + 1);
+        Reflect.deleteProperty(state.tombstones, timerId);
+        state.tombstones[timerId] = { revision, deletedAt: Date.now() };
+        this.pruneTimerTombstonesSync(state);
+        this.persistTimerScheduleSync(state, timerId);
+        changedTimerIds.push(timerId);
+      }
+      state.initialized = true;
+      this.writeTimerDurableStateSync(state);
+    });
+    await Promise.all(changedTimerIds.map((timerId) =>
+      this.timerScheduleStateSync().timers[timerId] === undefined
+        ? this.clearTimerMirrorRetryAlarms(timerId)
+        : this.writeTimerMirror(timerId)));
+    await this.scheduleEarliestAlarm();
+  }
+
+  private async clearTimerMirrorRetryAlarms(timerId: string, throughSequence = Number.POSITIVE_INFINITY): Promise<void> {
+    this.ctx.storage.transactionSync(() => {
+      const table = this.timerAlarmScheduleSync();
+      const prefix = `${TIMER_ALARM_PREFIX}mirror:${timerId}:`;
+      let changed = false;
+      for (const key of Object.keys(table)) {
+        if (!key.startsWith(prefix)) continue;
+        const sequence = Number(key.slice(prefix.length));
+        if (!Number.isSafeInteger(sequence) || sequence > throughSequence) continue;
+        Reflect.deleteProperty(table, key);
+        changed = true;
+      }
+      if (changed) this.ctx.storage.kv.put(ALARM_TABLE_KEY, table);
+    });
+    await this.scheduleEarliestAlarm();
+  }
+
+  private async writeTimerMirror(timerId: string): Promise<void> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return;
+    const entry = this.timerScheduleStateSync().timers[timerId];
+    if (entry === undefined) return;
+    const occurrence = entry.plannedOccurrence?.identity;
+    try {
+      await this.env.DB.prepare(
+        `UPDATE timers
+            SET next_run_at = ?, next_run_state = ?, last_run_at = COALESCE(?, last_run_at),
+                schedule_mirror_sequence = ?
+          WHERE channel_id = ? AND timer_id = ? AND revision = ? AND schedule_mirror_sequence < ?`,
+      ).bind(
+        occurrence === undefined ? null : new Date(occurrence.deadline).toISOString(),
+        occurrence?.state === "live" || occurrence?.state === "offline" ? occurrence.state : null,
+        entry.lastRunAt,
+        entry.mirrorSequence,
+        channelId,
+        timerId,
+        entry.config.revision,
+        entry.mirrorSequence,
+      ).run();
+      await this.clearTimerMirrorRetryAlarms(timerId, entry.mirrorSequence);
+      const current = this.timerScheduleStateSync().timers[timerId];
+      if (current !== undefined && current.mirrorSequence > entry.mirrorSequence) {
+        await this.writeTimerMirror(timerId);
+      }
+    } catch (error: unknown) {
+      console.warn("Timer schedule display mirror could not be updated.", timerId, error);
+      this.ctx.storage.transactionSync(() => {
+        const current = this.timerScheduleStateSync().timers[timerId];
+        if (current === undefined || current.mirrorSequence !== entry.mirrorSequence) return;
+        this.writeTimerMirrorRetryAlarmSync(timerId, entry.mirrorSequence, Date.now() + TIMER_MIRROR_RETRY_DELAY_MS);
+      });
+      await this.scheduleEarliestAlarm();
+    }
+  }
+
+  private timerClaimIsCurrentSync(timerId: string, token: string, occurrence: TimerOccurrence): boolean {
+    const entry = this.timerScheduleStateSync().timers[timerId];
+    return entry !== undefined && entry.config.enabled && entry.inFlightClaim?.token === token &&
+      sameTimerOccurrence(entry.inFlightClaim.occurrence, occurrence) &&
+      sameTimerOccurrence(entry.plannedOccurrence, occurrence);
+  }
+
+  private timerStreamMatchesOccurrence(stream: DurableTimerStream, occurrence: TimerOccurrence): boolean {
+    const { identity } = occurrence;
+    if (identity.triggerType === "interval") {
+      return identity.state === "offline"
+        ? stream.state === "offline" && stream.generation === identity.generation
+        : identity.state === "live" && stream.state === "online" && stream.streamId === identity.streamId &&
+          stream.generation === identity.generation;
+    }
+    if (identity.triggerType === "stream_start") {
+      return stream.state === "online" && stream.streamId === identity.streamId && stream.generation === identity.generation;
+    }
+    return true;
+  }
+
+  private async refreshTimerPlanFromAlarm(
+    timerId: string,
+    deadline: number,
+    ownerRevision: number | undefined,
+  ): Promise<void> {
+    const current = this.timerScheduleStateSync().timers[timerId];
+    if (current === undefined || current.refreshAt !== deadline ||
+        ownerRevision !== undefined && current.config.revision !== ownerRevision) return;
+    const inputs = await this.timerScheduleInputs([current.config], Date.now());
+    const changed = this.ctx.storage.transactionSync(() => {
+      const state = this.timerScheduleStateSync();
+      const entry = state.timers[timerId];
+      if (entry === undefined || entry.refreshAt !== deadline || entry.config.revision !== current.config.revision) return false;
+      const plan = makeTimerPlan(entry.config, state.stream, entry.plannedOccurrence, inputs, "preserve_cadence");
+      const sameIdentity = plan.identity === null
+        ? entry.plannedOccurrence === null
+        : sameTimerAlarmIdentity(entry.plannedOccurrence?.identity, plan.identity);
+      if (sameIdentity && entry.refreshAt === plan.refreshAt) return false;
+      this.setTimerPlanSync(entry, plan);
+      this.persistTimerScheduleSync(state, timerId, entry);
+      return true;
+    });
+    if (changed) await this.writeTimerMirror(timerId);
+    await this.scheduleEarliestAlarm();
+  }
+
+  public async runTimerOccurrence(
+    context: ModuleAlarmContext,
+    key: string,
+    deadline: number,
+    ownerRevision?: number,
+    identity?: ModuleAlarmIdentity | null,
+    planSequence?: number,
+  ): Promise<"retain" | undefined> {
+    if (key.startsWith("mirror:")) {
+      const timerId = key.slice("mirror:".length).split(":")[0] ?? "";
+      if (timerId.length > 0) await this.writeTimerMirror(timerId);
+      return;
+    }
+    const refreshMarker = ":refresh:";
+    const refreshAt = key.indexOf(refreshMarker);
+    const timerId = key.startsWith("timer:")
+      ? key.slice("timer:".length, refreshAt < 0 ? undefined : refreshAt)
+      : "";
+    if (timerId.length === 0) return;
+    if (refreshAt >= 0) {
+      await this.refreshTimerPlanFromAlarm(timerId, deadline, ownerRevision);
+      return;
+    }
+    if (identity === undefined || identity === null || planSequence === undefined) return;
+    await this.ensureTimerSchedulesInitialized();
+    await this.refreshTimerOccurrenceSnapshot(timerId);
+
+    const claimed = this.ctx.storage.transactionSync((): {
+      config: DurableTimerConfig;
+      occurrence: TimerOccurrence;
+      token: string;
+      activityCount: number;
+    } | null => {
+      const state = this.timerScheduleStateSync();
+      const entry = state.timers[timerId];
+      const currentOccurrence = entry?.plannedOccurrence;
+      if (entry === undefined || !entry.config.enabled || currentOccurrence === null || currentOccurrence === undefined ||
+          entry.config.revision !== identity.revision || ownerRevision !== undefined && entry.config.revision !== ownerRevision ||
+          deadline !== identity.deadline || currentOccurrence.sequence !== planSequence ||
+          !sameTimerAlarmIdentity(currentOccurrence.identity, identity) || deadline > Date.now()) return null;
+      const occurrence = { identity: currentOccurrence.identity, sequence: currentOccurrence.sequence };
+      const token = crypto.randomUUID();
+      const streamState = identity.state === "live" ? "live" : identity.state === "offline" ? "offline" : null;
+      const activityCount = streamState === null ? 0 : state.activityCounts[streamState];
+      entry.inFlightClaim = { occurrence, token, activityCount };
+      this.writeTimerDurableStateSync(state);
+      return { config: entry.config, occurrence, token, activityCount };
+    });
+    if (claimed === null) return;
+
+    const planInputs = await this.timerScheduleInputs([claimed.config], Date.now());
+    if (!this.timerClaimIsCurrentSync(timerId, claimed.token, claimed.occurrence)) return;
+    const now = Date.now();
+    const trigger = claimed.config.trigger;
+    const intervalState: TimerIntervalState | null = trigger.type === "interval" &&
+      (claimed.occurrence.identity.state === "live" || claimed.occurrence.identity.state === "offline")
+      ? claimed.occurrence.identity.state
+      : null;
+    if (trigger.type === "interval" && intervalState === null) return;
+    const minimumMessages = trigger.type === "interval" && intervalState !== null
+      ? trigger[intervalState]?.minimumMessages
+      : undefined;
+    const activityBaseline = intervalState === "live" || intervalState === "offline"
+      ? this.timerScheduleStateSync().timers[timerId]?.activityBaselines[intervalState] ?? claimed.activityCount
+      : claimed.activityCount;
+    const enoughActivity = minimumMessages === undefined || claimed.activityCount - activityBaseline >= minimumMessages;
+    if (!this.timerStreamMatchesOccurrence(this.timerScheduleStateSync().stream, claimed.occurrence)) return;
+
+    let matchingEventAt: number | undefined;
+    let validOccurrence = true;
+    if (trigger.type === "before_event") {
+      const event = planInputs.eventTimes.find((candidate) => candidate.id === trigger.sourceId &&
+        Date.parse(candidate.at) - trigger.minutes * 60_000 === deadline);
+      validOccurrence = event !== undefined;
+      if (event !== undefined) matchingEventAt = Date.parse(event.at);
+    } else if (trigger.type === "time_of_day") {
+      validOccurrence = isDailyTimerDeadlineCurrent(trigger, deadline, planInputs.timeZone);
+    }
+
+    const graceEndsAt = trigger.type === "before_event"
+      ? matchingEventAt ?? deadline
+      : deadline + TIMER_OCCURRENCE_GRACE_MS;
+    const withinGrace = now <= graceEndsAt;
+    const streamEligible = trigger.type !== "time_of_day" || trigger.alsoOffline ||
+      this.timerScheduleStateSync().stream.state === "online";
+    const shouldSend = validOccurrence && withinGrace && enoughActivity && streamEligible &&
+      this.timerClaimIsCurrentSync(timerId, claimed.token, claimed.occurrence);
+    let sent = false;
+    let sendReason: string | null = null;
+    if (shouldSend) {
+      const rendered = await context.renderTemplate(claimed.config.messageText, now);
+      if (!this.timerClaimIsCurrentSync(timerId, claimed.token, claimed.occurrence)) return;
+      const streamId = claimed.occurrence.identity.streamId ?? undefined;
+      const idempotencyKey = timerOccurrenceKey(timerId, deadline, streamId);
+      const result = await context.sendChat(
+        rendered.text,
+        idempotencyKey,
+        rendered.attributions,
+        () => Promise.resolve(this.timerClaimIsCurrentSync(timerId, claimed.token, claimed.occurrence) && Date.now() <= graceEndsAt &&
+          (trigger.type !== "time_of_day" || trigger.alsoOffline || this.timerScheduleStateSync().stream.state === "online")),
+        claimed.config.chatTarget ?? undefined,
+      );
+      sent = result.sent;
+      sendReason = result.reason;
+      if (!result.sent && result.retryable) throw new Error(`Timer chat send failed: ${result.reason ?? "unknown"}.`);
+      if (!result.sent && result.reason === "stale_before_send" &&
+          this.timerClaimIsCurrentSync(timerId, claimed.token, claimed.occurrence)) return "retain";
+    }
+
+    if (!validOccurrence && this.timerClaimIsCurrentSync(timerId, claimed.token, claimed.occurrence)) {
+      await this.finishTimerOccurrence(timerId, claimed, false, planInputs);
+      return;
+    }
+    if (!withinGrace && this.timerClaimIsCurrentSync(timerId, claimed.token, claimed.occurrence)) {
+      await this.finishTimerOccurrence(timerId, claimed, false, planInputs);
+      return;
+    }
+    if (!enoughActivity || sent || sendReason !== "stale_before_send") {
+      await this.finishTimerOccurrence(timerId, claimed, sent, planInputs);
+    }
+  }
+
+  private async finishTimerOccurrence(
+    timerId: string,
+    claim: { config: DurableTimerConfig; occurrence: TimerOccurrence; token: string; activityCount: number },
+    sent: boolean,
+    inputs: TimerScheduleInputs,
+  ): Promise<void> {
+    const now = Date.now();
+    const finished = this.ctx.storage.transactionSync(() => {
+      const state = this.timerScheduleStateSync();
+      const entry = state.timers[timerId];
+      if (entry === undefined || entry.config.revision !== claim.config.revision ||
+          entry.inFlightClaim?.token !== claim.token ||
+          !sameTimerOccurrence(entry.inFlightClaim.occurrence, claim.occurrence) ||
+          !sameTimerOccurrence(entry.plannedOccurrence, claim.occurrence)) return false;
+      const trigger = entry.config.trigger;
+      if (sent && trigger.type === "interval" &&
+          (claim.occurrence.identity.state === "live" || claim.occurrence.identity.state === "offline")) {
+        entry.activityBaselines[claim.occurrence.identity.state] = claim.activityCount;
+      }
+      if (sent) entry.lastRunAt = new Date(now).toISOString();
+      const nextInputs = { ...inputs, now };
+      const plan = makeTimerPlan(entry.config, state.stream, entry.plannedOccurrence, nextInputs,
+        trigger.type === "stream_start" ? "after_occurrence" : "after_occurrence");
+      this.setTimerPlanSync(entry, plan);
+      this.persistTimerScheduleSync(state, timerId, entry);
+      return true;
+    });
+    if (!finished) return;
+    await this.writeTimerMirror(timerId);
+    await this.scheduleEarliestAlarm();
   }
 
   private writeActiveChatterExpiryEntrySync(deadline: number): void {
@@ -1445,12 +2283,13 @@ export class ChannelObject extends DurableObject<Env> {
     streamGeneration?: number,
     alarmIdentity?: ModuleAlarmIdentity,
     alarmPlanSequence?: number,
+    sendChatImpl: typeof sendChatMessage = sendChatMessage,
   ): ModuleAlarmContext {
     const channelId = this.ownChannelId();
     if (channelId === null) throw new Error("Module alarms require a named Durable Object.");
     const storagePrefix = `module:${moduleId}:storage:`;
     const handler = `module:${moduleId}:${registration.key}`;
-    return {
+    const context: ModuleAlarmContext = {
       DB: this.env.DB,
       channelId,
       alarmIdentity: alarmIdentity ?? null,
@@ -1560,7 +2399,12 @@ export class ChannelObject extends DurableObject<Env> {
             paused: channelState.controls.pause.active,
             muted: channelState.controls.mute.active,
           });
-          return suppression.reason === null;
+          if (suppression.reason !== null) return false;
+          if (stillValid !== undefined && !await stillValid()) {
+            suppression.reason = "stale_before_send";
+            return false;
+          }
+          return true;
         };
         const claimBeforePost = async (): Promise<boolean | "rate_limited"> => {
           if (!await validateOutput()) return false;
@@ -1569,7 +2413,7 @@ export class ChannelObject extends DurableObject<Env> {
         const afterPost = async (delivery: "sent" | "rejected" | "ambiguous" | "not_attempted"): Promise<void> => {
           if (delivery !== "not_attempted") await finishModuleAlarmSend(this.ctx.storage, idempotencyKey, delivery, Date.now());
         };
-        const result = await sendChatMessage(
+        const result = await sendChatImpl(
           this.env,
           channelId,
           text,
@@ -1602,6 +2446,12 @@ export class ChannelObject extends DurableObject<Env> {
       writeDiagnostics: (triggerId, diagnostics, now) =>
         writeModuleDiagnostics(this.env.DB, channelId, moduleId, triggerId, null, diagnostics, now),
     };
+    if (moduleId === "timers") {
+      context.runTimerOccurrence = (key, deadline, ownerRevision, identity, planSequence, alarmContext) =>
+        this.runTimerOccurrence(alarmContext ?? context, key, deadline, ownerRevision, identity, planSequence);
+      context.reconcileTimerSchedules = (reason) => this.reconcileTimerSchedules(reason);
+    }
+    return context;
   }
 
   /** Counts accepted chat in either stream state; timer baselines separate each interval state. */
@@ -2139,8 +2989,8 @@ export class ChannelObject extends DurableObject<Env> {
             entry.deadline,
             entry.ownerRevision,
           );
-          await this.runModuleAlarmHandler(moduleId, registration.key, execute);
-          return undefined;
+          const result = await this.runModuleAlarmHandler(moduleId, registration.key, execute);
+          return result === "retain" ? "retain" : undefined;
         },
       });
     }
@@ -2194,13 +3044,21 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   private async scheduleEarliestAlarm(): Promise<void> {
-    const table = await this.ensureAlarmScheduleTable();
-    const nextAlarmAt = earliestAlarmAt(table, Date.now());
-    if (nextAlarmAt === null) {
-      await this.ctx.storage.deleteAlarm();
-      return;
+    const previous = this.alarmScheduleQueue;
+    let release!: () => void;
+    this.alarmScheduleQueue = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      const table = await this.ensureAlarmScheduleTable();
+      const nextAlarmAt = earliestAlarmAt(table, Date.now());
+      if (nextAlarmAt === null) {
+        await this.ctx.storage.deleteAlarm();
+        return;
+      }
+      await this.ctx.storage.setAlarm(nextAlarmAt);
+    } finally {
+      release();
     }
-    await this.ctx.storage.setAlarm(nextAlarmAt);
   }
 
   private async scheduleSecurityAlarm(): Promise<void> {

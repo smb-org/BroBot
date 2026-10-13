@@ -1,4 +1,5 @@
 import type { ModuleStreamState } from "../../modules/contract";
+import { timerScheduleReconciliationMutation } from "../../modules/contracts/timer-schedule-reconciliation";
 import { prepareBindPendingStreamControls } from "./channel-controls";
 
 export type StoredStreamState = Exclude<ModuleStreamState, "unknown">;
@@ -261,7 +262,10 @@ export const writeEventSubStreamStateWithGeneration = async (
     startedAtSeconds, startedAtFraction, eventSeconds, eventFraction,
     streamId, startedAtEpochMs, changedAtEpochMs, current?.changedAt ?? null,
   );
-  const statements = [statement];
+  const statements = [
+    statement,
+    timerScheduleReconciliationMutation(db, channelId, crypto.randomUUID(), changedAt, true, "stream_state"),
+  ];
   if (state === "online" && startedAt !== null) {
     statements.push(prepareBindPendingStreamControls(db, channelId, startedAt, streamId));
   }
@@ -302,7 +306,10 @@ export const writeHelixStreamStateIfUnknown = async (
      ON CONFLICT (channel_id) DO NOTHING`,
   ).bind(channelId, state, changedAt, startedAt, changedAt, startedAtSeconds, startedAtFraction,
     streamId, timestampEpochMilliseconds(startedAt), timestampEpochMilliseconds(changedAt));
-  const statements = [statement];
+  const statements = [
+    statement,
+    timerScheduleReconciliationMutation(db, channelId, crypto.randomUUID(), changedAt, true, "stream_state"),
+  ];
   if (state === "online" && startedAt !== null) {
     statements.push(prepareBindPendingStreamControls(db, channelId, startedAt, streamId));
   }
@@ -355,7 +362,10 @@ export const refreshHelixStreamState = async (
   startedAt: string | null,
   streamId: string | null = null,
 ): Promise<boolean> => {
-  const statements: D1PreparedStatement[] = [prepareRefreshHelixStreamState(db, channelId, state, changedAt, startedAt, streamId)];
+  const statements: D1PreparedStatement[] = [
+    prepareRefreshHelixStreamState(db, channelId, state, changedAt, startedAt, streamId),
+    timerScheduleReconciliationMutation(db, channelId, crypto.randomUUID(), changedAt, true, "stream_state"),
+  ];
   if (state === "online" && startedAt !== null) {
     statements.push(prepareBindPendingStreamControls(db, channelId, startedAt, streamId));
   }

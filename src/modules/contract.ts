@@ -665,6 +665,17 @@ export interface ModuleAlarmContext {
   /** Full identity and D1 plan sequence for the alarm currently being handled. */
   alarmIdentity?: ModuleAlarmIdentity | null;
   alarmPlanSequence?: number;
+  /** Runs a timer occurrence in the channel object's durable scheduler. */
+  runTimerOccurrence?: (
+    key: string,
+    deadline: number,
+    ownerRevision?: number,
+    identity?: ModuleAlarmIdentity | null,
+    planSequence?: number,
+    context?: ModuleAlarmContext,
+  ) => Promise<"retain" | undefined>;
+  /** Reconciles timer config and trigger inputs inside the channel object. */
+  reconcileTimerSchedules?: (reason: ModuleScheduleInputChangeReason) => Promise<void>;
   /** Shared per-dispatch allowance for external provider requests. */
   externalFetchBudget?: ModuleExternalFetchBudget;
   /** Secret access bound to this alarm's channel and module. */
@@ -1394,6 +1405,8 @@ export interface ModuleRouteVariables {
   listEventTimeSources: () => readonly { id: string; label: Readonly<Record<ModuleLanguage, string>> }[];
   resolveEventTimes: (channelId: string, now: number) => Promise<readonly ResolvedModuleEventTime[]>;
   notifyScheduleInputsChanged: (channelId: string, reason: ModuleScheduleInputChangeReason) => Promise<void>;
+  /** Refreshes timer config snapshots after host-managed template rewrites. */
+  reconcileTimerSchedules: (channelId: string) => Promise<void>;
   validateTemplateContentMutation: (
     channelId: string,
     candidate: ModuleTemplateContentCandidate,

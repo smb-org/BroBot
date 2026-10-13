@@ -69,6 +69,12 @@ const objectFor = (channelId: string): ChannelObject => {
           release();
         }
       }),
+      transactionSync: <T>(closure: () => T): T => closure(),
+      kv: {
+        get: vi.fn((key: string) => values.get(key)),
+        put: vi.fn((key: string, value: unknown) => { values.set(key, value); }),
+        delete: vi.fn((key: string) => values.delete(key)),
+      },
     },
   } as unknown as DurableObjectState;
   // A no-op D1 stub: this test never asserts on countdown-overlay caching,

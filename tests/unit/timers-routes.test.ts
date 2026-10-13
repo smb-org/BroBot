@@ -2,6 +2,8 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleRegisteredTemplateVariable, ModuleRouteEnvironment } from "../../src/modules/contract";
+import type { DurableTimerConfig } from "../../src/modules/timers/durable";
+import { makeTimerPlan } from "../../src/modules/timers/durable";
 import { timerRoutes } from "../../src/modules/timers/routes";
 import { insertChannel } from "./fixtures";
 import { createReadInterleavingDatabase, TestD1Database } from "./test-d1";
@@ -57,16 +59,63 @@ const appFor = (database: D1Database, variables: readonly ModuleRegisteredTempla
   return app;
 };
 
-const environmentFor = (database: D1Database, scheduled: ScheduledAlarm[]): Env => ({
+const environmentFor = (database: D1Database, scheduled: ScheduledAlarm[], failScheduler = false): Env => ({
   DB: database,
   CHANNEL: {
     idFromName: () => "channel-object",
     get: () => ({
-      scheduleModuleAlarm: (moduleId: string, handlerKey: string, alarmKey: string, deadline: number) => {
-        scheduled.push({ moduleId, handlerKey, alarmKey, deadline });
-        return Promise.resolve();
+      upsertTimerConfig: async (config: DurableTimerConfig) => {
+        if (failScheduler) throw new Error("Channel Durable Object is unavailable.");
+        const now = Date.now();
+        const [stream, channel] = await Promise.all([
+          database.prepare("SELECT state, stream_id, started_at, transition_generation FROM channel_stream_state WHERE channel_id = ?")
+            .bind("timers-route-channel").first<{
+              state: "online" | "offline" | "unknown";
+              stream_id: string | null;
+              started_at: string | null;
+              transition_generation: number;
+            }>(),
+          database.prepare("SELECT time_zone FROM channels WHERE channel_id = ?")
+            .bind("timers-route-channel").first<{ time_zone: string }>(),
+        ]);
+        const inputs = { now, timeZone: channel?.time_zone ?? "Europe/Berlin", eventTimes: [] };
+        const plan = makeTimerPlan(config, {
+          state: stream?.state ?? "unknown",
+          streamId: stream?.stream_id ?? null,
+          startedAt: stream?.started_at ?? null,
+          generation: stream?.transition_generation ?? 0,
+        }, null, inputs);
+        const mirrorSequence = await database.prepare(
+          "SELECT schedule_mirror_sequence FROM timers WHERE channel_id = ? AND timer_id = ?",
+        ).bind("timers-route-channel", config.id).first<{ schedule_mirror_sequence: number }>();
+        const nextSequence = (mirrorSequence?.schedule_mirror_sequence ?? 0) + 1;
+        await database.prepare(
+          `UPDATE timers SET next_run_at = ?, next_run_state = ?, schedule_mirror_sequence = ?
+            WHERE channel_id = ? AND timer_id = ? AND revision = ?`,
+        ).bind(
+          plan.identity === null ? null : new Date(plan.identity.deadline).toISOString(),
+          plan.identity?.state === "live" || plan.identity?.state === "offline" ? plan.identity.state : null,
+          nextSequence,
+          "timers-route-channel",
+          config.id,
+          config.revision,
+        ).run();
+        if (plan.identity !== null) {
+          scheduled.push({ moduleId: "timers", handlerKey: "run", alarmKey: `timer:${config.id}`, deadline: plan.identity.deadline });
+        }
+        if (plan.refreshAt !== null) {
+          scheduled.push({
+            moduleId: "timers", handlerKey: "run", alarmKey: `timer:${config.id}:refresh:${String(plan.refreshAt)}`,
+            deadline: plan.refreshAt,
+          });
+        }
       },
-      clearModuleAlarm: () => Promise.resolve(),
+      deleteTimerConfig: () => failScheduler
+        ? Promise.reject(new Error("Channel Durable Object is unavailable."))
+        : Promise.resolve(),
+      reconcileTimerSchedules: () => failScheduler
+        ? Promise.reject(new Error("Channel Durable Object is unavailable."))
+        : Promise.resolve(),
     }),
   },
 } as unknown as Env);
@@ -119,6 +168,29 @@ describe("timer scheduling and validation routes", () => {
     expect(response.status).toBe(400);
     await expect(database.prepare("SELECT COUNT(*) AS count FROM timers WHERE channel_id = ?")
       .bind(CHANNEL_ID).first()).resolves.toEqual({ count: 0 });
+  });
+
+  it("keeps a committed timer mutation in the D1 reconciliation outbox when the DO and fallback both fail", async () => {
+    const database = await createDatabase();
+    const response = await appFor(database as unknown as D1Database).fetch(
+      new Request(`https://brobot.example/channels/${CHANNEL_ID}/timers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Recoverable timer",
+          messageText: "Hello!",
+          trigger: { type: "interval", live: { minutes: 10 } },
+        }),
+      }),
+      environmentFor(database as unknown as D1Database, [], true),
+    );
+
+    expect(response.status).toBe(201);
+    const pendingRepair = await database.prepare(
+      "SELECT channel_id, mutation_id FROM timer_schedule_reconciliation WHERE channel_id = ?",
+    ).bind(CHANNEL_ID).first<{ channel_id: string; mutation_id: string }>();
+    expect(pendingRepair?.channel_id).toBe(CHANNEL_ID);
+    expect(typeof pendingRepair?.mutation_id).toBe("string");
   });
 
   it("accepts the host viewers token when raid also declares an unavailable local viewers variable", async () => {
@@ -204,35 +276,29 @@ describe("timer scheduling and validation routes", () => {
   });
 });
 
-describe("timer edit keeps the stream id in sync with next_run_at", () => {
-  it("clears next_run_stream_id in the same write that clears next_run_at, even if the follow-up schedule write is skipped", async () => {
+describe("timer edits hand revisioned config to the Durable Object scheduler", () => {
+  it("keeps the D1 schedule mirror owned by the Durable Object after a revision-guarded edit", async () => {
     const realDatabase = await createDatabase();
+    await realDatabase.prepare(
+      `INSERT INTO channel_stream_state
+        (channel_id, state, changed_at, source, started_at, stream_id, transition_generation)
+       VALUES (?, 'online', ?, 'eventsub', ?, 'stream-1', 1)`,
+    ).bind(CHANNEL_ID, "2026-09-27T12:00:00.000Z", "2026-09-27T11:00:00.000Z").run();
     await realDatabase.prepare(
       `INSERT INTO timers
         (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, revision,
-         next_run_at, next_run_stream_id, last_run_at, created_at, updated_at)
-       VALUES (?, ?, ?, 1, ?, ?, ?, 1, ?, ?, NULL, ?, ?)`,
+         next_run_at, next_run_state, schedule_mirror_sequence, last_run_at, created_at, updated_at)
+       VALUES (?, ?, ?, 1, ?, ?, ?, 1, ?, 'live', 4, NULL, ?, ?)`,
     ).bind(
       "timer-1", CHANNEL_ID, "Reminder", "Welcome back!", "interval", JSON.stringify({ type: "interval", live: { minutes: 10 } }),
-      new Date("2026-09-27T12:10:00.000Z").toISOString(), "stream-1",
+      new Date("2026-09-27T12:10:00.000Z").toISOString(),
       "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z",
     ).run();
-
-    // Makes setScheduledAlarm's own reconciling write (which would otherwise
-    // also null both columns together) a no-op, so only the edit mutation's
-    // own clearing of `next_run_at` can be responsible for whatever
-    // `next_run_stream_id` ends up holding.
-    const skippingDatabase = {
-      prepare: (sql: string) => {
-        if (sql.includes("SET next_run_at = ?, next_run_stream_id = ?, next_run_state = ?")) {
-          return { bind: () => ({ run: () => Promise.resolve({ results: [], success: true, meta: { changes: 0, rows_written: 0 } }) }) };
-        }
-        return realDatabase.prepare(sql);
-      },
-      batch: (statements: Parameters<typeof realDatabase.batch>[0]) => realDatabase.batch(statements),
-    } as unknown as D1Database;
-    const app = appFor(skippingDatabase);
-    const environment = environmentFor(skippingDatabase, []);
+    const scheduled: ScheduledAlarm[] = [];
+    const app = appFor(realDatabase as unknown as D1Database);
+    const environment = environmentFor(realDatabase as unknown as D1Database, scheduled);
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-09-27T12:00:00.000Z"));
 
     const response = await app.fetch(
       new Request(`https://brobot.example/channels/${CHANNEL_ID}/timers/timer-1`, {
@@ -249,7 +315,32 @@ describe("timer edit keeps the stream id in sync with next_run_at", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await realDatabase.prepare("SELECT next_run_at, next_run_stream_id FROM timers WHERE timer_id = ?")
-      .bind("timer-1").first()).toEqual({ next_run_at: null, next_run_stream_id: null });
+    const body = await response.json<{
+      timer: {
+        revision: number;
+        nextRunAt: string | null;
+        nextRunState: string | null;
+        trigger: { type: string; live?: { minutes: number }; minutes?: number };
+      };
+    }>();
+    expect(body.timer).toMatchObject({
+      revision: 2,
+      nextRunAt: new Date("2026-09-27T12:10:00.000Z").toISOString(),
+      nextRunState: "live",
+    });
+    expect(body.timer.trigger).toMatchObject({
+      type: "interval",
+      live: { minutes: 10 },
+      minutes: 10,
+    });
+    expect(scheduled).toHaveLength(1);
+    await expect(realDatabase.prepare(
+      "SELECT revision, next_run_at, next_run_state, schedule_mirror_sequence FROM timers WHERE timer_id = ?",
+    ).bind("timer-1").first()).resolves.toEqual({
+      revision: 2,
+      next_run_at: new Date("2026-09-27T12:10:00.000Z").toISOString(),
+      next_run_state: "live",
+      schedule_mirror_sequence: 5,
+    });
   });
 });

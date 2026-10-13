@@ -36,6 +36,7 @@ import { createModuleExternalFetchBudget } from "./external-fetch-budget";
 import { moduleBallots } from "./module-ballots";
 import { createModuleSecretReadAccess } from "./module-secrets";
 import { recordChannelGameHistory } from "./db/game-search-cache";
+import { notifyModuleScheduleInputsChanged } from "./module-schedules";
 
 export interface DispatchEnvironment {
   DB: D1Database;
@@ -681,6 +682,24 @@ export const dispatchEventSubNotification = async (
       streamId,
     );
     streamStateTransitionGeneration = stateWrite.transitionGeneration ?? undefined;
+    if (stateWrite.result === "written" && stateWrite.transitionGeneration !== null) {
+      const channelNamespace = environment.CHANNEL as NonNullable<typeof environment.CHANNEL>;
+      try {
+        await channelNamespace.get(channelNamespace.idFromName(event.channelId)).transitionTimerStream({
+          state: isOnline ? "online" : "offline",
+          streamId,
+          startedAt,
+          generation: stateWrite.transitionGeneration,
+        });
+      } catch (error: unknown) {
+        console.warn("Timer stream state could not be updated.", error);
+        try {
+          await notifyModuleScheduleInputsChanged(environment.CHANNEL, event.channelId, "stream_state");
+        } catch (retryError: unknown) {
+          console.warn("Timer stream state repair could not be queued.", retryError);
+        }
+      }
+    }
     if (stateWrite.result === "written" &&
         (streamBefore?.state !== (isOnline ? "online" : "offline") ||
           streamBefore.startedAt !== startedAt || streamBefore.streamId !== streamId)) {

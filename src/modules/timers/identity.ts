@@ -1,22 +1,4 @@
 import type { ModuleAlarmIdentity } from "../contract";
-import type { Timer } from "./contracts";
-
-export const timerAlarmIdentity = (
-  timer: Timer,
-  deadline: number,
-  state: Timer["nextRunState"],
-  streamId: string | null,
-  generation: number | null,
-): ModuleAlarmIdentity => ({
-  timerId: timer.id,
-  revision: timer.revision,
-  triggerType: timer.trigger.type,
-  state,
-  streamId,
-  generation,
-  deadline,
-});
-
 export const sameTimerAlarmIdentity = (
   left: ModuleAlarmIdentity | null | undefined,
   right: ModuleAlarmIdentity | null | undefined,

@@ -94,5 +94,10 @@ describe("stream transition generations", () => {
     await expect(readChannelStreamState(db, "generation-channel")).resolves.toMatchObject({
       state: "online", streamId: "stream-2", transitionGeneration: 3,
     });
+    const pendingTimerRepair = await db.prepare(
+      "SELECT channel_id, mutation_id FROM timer_schedule_reconciliation WHERE channel_id = ?",
+    ).bind("generation-channel").first<{ channel_id: string; mutation_id: string }>();
+    expect(pendingTimerRepair?.channel_id).toBe("generation-channel");
+    expect(typeof pendingTimerRepair?.mutation_id).toBe("string");
   });
 });

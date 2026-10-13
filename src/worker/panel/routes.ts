@@ -51,6 +51,7 @@ import { fetchTwitchUserByLogin, sendShoutout, type ShoutoutSendResult } from ".
 import { writeModuleAudit } from "../module-audit";
 import { publishOverlayHostEvent } from "../realtime";
 import { notifyModuleScheduleInputsChanged } from "../module-schedules";
+import { clearTimerScheduleReconciliation, timerScheduleReconciliationMutation } from "../../modules/contracts/timer-schedule-reconciliation";
 import { writeModuleDiagnostics } from "../event-log";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { isChannelControlInput, setChannelControl, type ChannelControlKind } from "../db/channel-controls";
@@ -323,9 +324,19 @@ panelRouter.patch("/api/channels/:channelId/settings", requireChannelAuthorizati
     ...bindActorGuard(context.get("actor"), channelId, changedAt));
   const audit = prepareAudit(context.env.DB, context.get("actor").userId, changedAt, channelId, null,
     "channel.time_zone.updated", { timeZone: previous.time_zone }, { timeZone });
-  const result = await context.env.DB.batch([mutation, audit]);
+  const mutationId = crypto.randomUUID();
+  const result = await context.env.DB.batch([
+    mutation,
+    timerScheduleReconciliationMutation(context.env.DB, channelId, mutationId, changedAt, true, "channel_time_zone"),
+    audit,
+  ]);
   if ((result[0]?.meta.changes ?? 0) === 0) return context.json({ error: "channel_settings_conflict" }, 409);
-  await notifyModuleScheduleInputsChanged(context.env.CHANNEL, channelId, "channel_time_zone");
+  try {
+    await notifyModuleScheduleInputsChanged(context.env.CHANNEL, channelId, "channel_time_zone");
+    await clearTimerScheduleReconciliation(context.env.DB, channelId, mutationId, "channel_time_zone");
+  } catch (error: unknown) {
+    console.warn("Timer schedule reconciliation remains pending after channel timezone change.", channelId, error);
+  }
   await publishOverlayHostEvent(context.env.CHANNEL, context.env.DB, channelId, "template.data.changed");
   return context.json({ ok: true, timeZone, revision: nextRevision, defaultTimeZone: DEFAULT_CHANNEL_TIME_ZONE });
 });

@@ -94,7 +94,7 @@ describe("Timers panel", () => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/timers")) return Promise.resolve(jsonResponse({ timers: [{
         id: "timer-1", name: "Greeting timer", enabled: true, messageText: "Hello there!", chatTarget: "source_only",
-        trigger: { type: "interval", live: { minutes: 30 } }, revision: 1, nextRunAt: null, nextRunStreamId: null, nextRunState: null,
+        trigger: { type: "interval", live: { minutes: 30 } }, revision: 1, nextRunAt: null, nextRunState: null,
         lastRunAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
       }] }));
       if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({
@@ -142,7 +142,7 @@ describe("Timers panel", () => {
         refreshFails = true;
         return Promise.resolve(jsonResponse({ timer: {
           id: "timer-1", name: "Greeting timer", enabled, messageText: "Hello there!", chatTarget: "source_only",
-          trigger: { type: "interval", live: { minutes: 30 } }, revision, nextRunAt: null, nextRunStreamId: null, nextRunState: null,
+          trigger: { type: "interval", live: { minutes: 30 } }, revision, nextRunAt: null, nextRunState: null,
           lastRunAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
         } }));
       }
@@ -151,7 +151,7 @@ describe("Timers panel", () => {
         if (timerReads > 1 && refreshFails) return Promise.resolve(jsonResponse({ error: "temporarily unavailable" }, 503));
         return Promise.resolve(jsonResponse({ timers: [{
           id: "timer-1", name: "Greeting timer", enabled, messageText: "Hello there!", chatTarget: "source_only",
-          trigger: { type: "interval", live: { minutes: 30 } }, revision, nextRunAt: null, nextRunStreamId: null, nextRunState: null,
+          trigger: { type: "interval", live: { minutes: 30 } }, revision, nextRunAt: null, nextRunState: null,
           lastRunAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
         }] }));
       }

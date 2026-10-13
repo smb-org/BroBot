@@ -8,6 +8,7 @@ import { blockReferencesInText, validTextBlock } from "./domain";
 import { createTextBlockRepository } from "./adapters/d1";
 import type { TextBlockInput } from "./repository";
 import { createTextLibraryService } from "./service";
+import { clearTimerScheduleReconciliation } from "../contracts/timer-schedule-reconciliation";
 import { TEXT_BLOCK_OVERLAY_ELEMENT_KIND } from "./overlay/element";
 import { MODULE_TEMPLATE_MINIMUM_TIERS, SYSTEM_TEMPLATE_VARIABLE_LIST, type ModuleRouteEnvironment, type ModuleTextBlockConditionDefinition } from "../contract";
 import { templateTextLength } from "../../contracts/template-text-length";
@@ -224,13 +225,24 @@ textLibraryRoutes.patch("/blocks/:name", async (context) => {
     expectedRevision: parsed.expectedRevision,
     expectedGraphRevision: snapshot.settings.graphRevision,
     ...(expectedLibraryRevision === undefined ? {} : { expectedLibraryRevision }),
+    ...(parsed.name === oldName ? {} : { scheduleMutationId: crypto.randomUUID() }),
     now: nowIso(),
   };
   const result = parsed.name === oldName
     ? await service.change(input, context.get("actor"), snapshot)
     : await service.rename(input, oldName, context.get("actor"), snapshot);
   if (result.ok) {
-    if (parsed.name !== oldName) context.get("afterTextBlockRename")(channelId);
+    if (parsed.name !== oldName) {
+      context.get("afterTextBlockRename")(channelId);
+      try {
+        await context.get("reconcileTimerSchedules")(channelId);
+        if (input.scheduleMutationId !== undefined) {
+          await clearTimerScheduleReconciliation(context.env.DB, channelId, input.scheduleMutationId, "activation");
+        }
+      } catch (error: unknown) {
+        console.warn("Timer schedule reconciliation remains pending after text block rename.", channelId, error);
+      }
+    }
     const blocks = "updatedOverlays" in result
       ? (await service.list(channelId)).blocks
       : snapshot.blocks.map((block) => block.name === result.block.name ? result.block : block);
