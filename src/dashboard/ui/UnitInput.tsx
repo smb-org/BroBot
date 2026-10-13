@@ -37,10 +37,20 @@ export function UnitInput({ id: suppliedId, label, ariaLabel, unit, value, onCha
     if (clamped !== value) onChange(clamped);
   };
 
+  // Native step validation is anchored at min (min=1, step=100 rejects 1000), so the input
+  // uses step="any" and the intended increment is applied to the arrow keys here.
+  const onKeyDownWithStep = (event: KeyboardEvent<HTMLInputElement>): void => {
+    onKeyDown?.(event);
+    if (event.defaultPrevented || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
+    event.preventDefault();
+    const base = typeof value === "number" ? value : 0;
+    onChange(clampValue(base + (event.key === "ArrowUp" ? step : -step), min, max));
+  };
+
   return <div data-ui="" className="unit-input">
     <label className="ui-field__label" htmlFor={id}>{label}</label>
     <div className="unit-input__control">
-      <Input id={id} type="number" inputMode="decimal" aria-label={ariaLabel} aria-describedby={describedBy} aria-invalid={error === undefined ? undefined : true} value={value} min={min} max={max} step={step} disabled={disabled} required={required} name={name} onBlur={onBlur} onKeyDown={onKeyDown} onChange={(event) => {
+      <Input id={id} type="number" inputMode="decimal" aria-label={ariaLabel} aria-describedby={describedBy} aria-invalid={error === undefined ? undefined : true} value={value} min={min} max={max} step="any" disabled={disabled} required={required} name={name} onBlur={onBlur} onKeyDown={onKeyDownWithStep} onChange={(event) => {
         const next = event.currentTarget.value;
         onChange(next.length === 0 ? "" : Number(next));
       }} className="unit-input__input" />

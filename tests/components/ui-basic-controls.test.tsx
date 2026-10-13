@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useState, type ReactNode } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { useState, type ReactNode, type SyntheticEvent } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ActionMenu } from "../../src/dashboard/ui/ActionMenu";
 import { ChipsInput } from "../../src/dashboard/ui/ChipsInput";
@@ -18,6 +18,15 @@ afterEach(cleanup);
 const renderUi = (node: ReactNode) => render(<UiProvider>{node}</UiProvider>);
 
 describe("basic UI controls", () => {
+  it("does not let native step validation reject values anchored away from min", () => {
+    const onSubmit = vi.fn((event: SyntheticEvent) => { event.preventDefault(); });
+    renderUi(<form aria-label="f" onSubmit={onSubmit}><UnitInput label="Bitrate" value={1000} onChange={() => {}} min={1} step={100} /><button type="submit">Save</button></form>);
+    const input = screen.getByLabelText<HTMLInputElement>("Bitrate");
+    expect(input.checkValidity()).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
   it("shows the selected option label in a non-searchable select", () => {
     renderUi(<Select
       label="Time zone"
