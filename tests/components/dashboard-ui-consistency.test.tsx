@@ -11,8 +11,40 @@ describe("shared dashboard consistency components", () => {
 
     expect(screen.getByRole("heading", { level: 1, name: "Audit log" })).toBeInTheDocument();
     expect(screen.getByText("12 entries")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Export" }).parentElement).toHaveClass("page-header__actions");
+    expect(screen.getByRole("button", { name: "Export" }).parentElement).toHaveClass("page-header__page-actions");
     expect(container.querySelector(".page-header__icon svg")).toBeInTheDocument();
+  });
+
+  it("keeps the page header child order from title through overflow actions", () => {
+    const { container } = render(<PageHeader
+      title="Text commands"
+      moduleSwitch={<span data-testid="module-switch">Enabled</span>}
+      badge={<span data-testid="badge">Ready</span>}
+      saveStatus={<span data-testid="save-status">Saved</span>}
+      pageActions={<button type="button">Help</button>}
+      overflow={<button type="button">Delete</button>}
+    />);
+    const header = container.querySelector(".page-header");
+    const titleRow = header?.querySelector(".page-header__title-row");
+    const right = header?.querySelector(".page-header__right");
+
+    expect(Array.from(titleRow?.children ?? []).map((element) => element.tagName === "H1"
+      ? "title"
+      : element.classList.contains("page-header__module-switch") ? "module-switch" : "badges")).toEqual([
+      "title",
+      "module-switch",
+      "badges",
+    ]);
+    const save = right?.querySelector('[data-testid="save-status"]');
+    const actions = right?.querySelector(".page-header__page-actions");
+    const overflow = right?.querySelector(".page-header__overflow-trigger");
+    expect(save).not.toBeNull();
+    expect(actions).not.toBeNull();
+    expect(overflow).not.toBeNull();
+    expect(save !== null && save !== undefined && actions !== null && actions !== undefined
+      && Boolean(save.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(actions !== null && actions !== undefined && overflow !== null && overflow !== undefined
+      && Boolean(actions.compareDocumentPosition(overflow) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   });
 
   it("keeps filter controls on one labeled row and active-filter summary below it", () => {

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { ActionMenu, Button, ConfirmDialog, Field, InspectorSection, UnitInput, SaveBar, SegmentChoice, SubInspector, SwitchSection, registerDashboardNavigationGuard, useDraft, useDraftGuard } from "../../../dashboard/ui";
+import { ActionMenu, Button, ConfirmDialog, Field, InspectorSection, UnitInput, SaveStatus, SegmentChoice, SubInspector, SwitchSection, registerDashboardNavigationGuard, useDraft, useDraftGuard } from "../../../dashboard/ui";
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient } from "../../../dashboard/data";
 import type { ChatVoteTemplate, ChatVoteTemplateDraft } from "../contracts";
 import { CHAT_VOTE_TEMPLATE_MAXIMUM, CHAT_VOTING_TITLE_MAX_LENGTH } from "../contracts";
@@ -453,7 +453,7 @@ export function ChatVoteTemplateInspector({
             {starting ? labels.saving : labels.startAction}
           </Button>
         </div>
-        <SaveBar
+        <SaveStatus
           dirty={dirty}
           pending={saving}
           saved={saved || (!dirty && !isNew)}

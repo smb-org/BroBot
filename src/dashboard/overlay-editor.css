@@ -117,13 +117,15 @@
 .overlay-editor .ui-save-bar--persistent { position: sticky; z-index: 2; bottom: 0; padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--r-panel); }
 
 @media (max-width: 1120px) {
-  .overlay-editor__preview-panel { position: static; }
+  .overlay-editor__preview-panel { position: sticky; top: calc(var(--app-shell-header-height, 56px) + var(--s3)); z-index: 1; }
   .overlay-editor__workspace { grid-template-columns: minmax(150px, .7fr) minmax(300px, 1.5fr); grid-template-areas: "elements preview" "properties properties"; }
 }
 
 @media (max-width: 760px) {
   .overlay-editor__header { align-items: start; }
   .overlay-editor__workspace { grid-template-columns: minmax(0, 1fr); grid-template-areas: "preview" "properties" "elements"; }
+  .overlay-editor__preview-viewport { max-height: 120px; }
+  .overlay-editor__properties :where(input, textarea, select, button, [tabindex]) { scroll-margin-bottom: 88px; }
   .overlay-editor__elements { min-height: 0; }
 }
 

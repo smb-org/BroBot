@@ -198,7 +198,7 @@ describe("Module panel loader", () => {
     expect(activeLoader).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the chat command section mounted while module data loads", async () => {
+  it("keeps declared chat command help in the module header while module data loads", async () => {
     const common = {
       channelId: "kanal-a",
       moduleId: "aktiv",
@@ -209,14 +209,17 @@ describe("Module panel loader", () => {
     };
     const { rerender } = render(<ModulePage {...common} activeModules={[]} />);
 
-    const commands = screen.getByRole("region", { name: /Chatbefehle|Chat commands/ });
+    const commandButton = screen.getByRole("button", { name: /Chatbefehle · 1|Chat commands · 1/ });
+    fireEvent.click(commandButton);
+    const commands = screen.getByRole("dialog", { name: /Chatbefehle|Chat commands/ });
     expect(commands).toHaveTextContent("!sample @user");
     expect(commands).toHaveTextContent(/Twitch-Login\.|Twitch login\./);
 
     rerender(<ModulePage {...common} activeModules={[{ moduleId: "aktiv", settings: "{}" }]} />);
 
     expect(await screen.findByText("Panel geladen")).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: /Chatbefehle|Chat commands/ })).toBe(commands);
+    expect(screen.getByRole("button", { name: /Chatbefehle · 1|Chat commands · 1/ })).toBe(commandButton);
+    expect(screen.getByRole("dialog", { name: /Chatbefehle|Chat commands/ })).toBe(commands);
   });
 
   it("places a long module panel after its settings editor", async () => {

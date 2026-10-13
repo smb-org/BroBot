@@ -937,7 +937,7 @@ describe("EditorShell and declaration renderer", () => {
     expect(details).not.toHaveAttribute("data-editor-error");
   });
 
-  it("keeps the persistent save bar visible across clean, dirty, warning, saved, error, pending, and conflict states", () => {
+  it("keeps SaveStatus visible across clean, dirty, warning, saved, error, pending, and conflict states", () => {
     const { rerender } = renderUi(<EditorShell {...baseProps} />);
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Discard" })).toBeDisabled();
@@ -979,7 +979,7 @@ describe("EditorShell and declaration renderer", () => {
     expect(onReload).toHaveBeenCalledOnce();
   });
 
-  it("renders read-only content as properties without a form, editable field, or save bar", () => {
+  it("renders read-only content as properties without a form, editable field, or SaveStatus", () => {
     renderUi(<EditorShell {...baseProps} readOnly={{ reason: "Only managers can edit this command.", content: <dl className="properties"><div><dt>Name</dt><dd>hello</dd></div></dl> }} />);
     expect(screen.getAllByText("Only managers can edit this command.")).toHaveLength(1);
     expect(screen.getByRole("definition")).toHaveTextContent("hello");
@@ -994,7 +994,7 @@ describe("EditorShell and declaration renderer", () => {
     expect(buttons).toEqual(["Keep editing", "Save and switch", "Discard and switch"]);
   });
 
-  it("keeps the persistent save bar after the form body as the editor's final child", () => {
+  it("keeps persistent SaveStatus after the form body as the editor's final child", () => {
     renderUi(<EditorShell {...baseProps} />);
     const editor = document.querySelector(".ui-editor-shell");
     expect(editor?.lastElementChild).toHaveClass("ui-save-bar");

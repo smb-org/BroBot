@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, t
 import { useQueryClient } from "@tanstack/react-query";
 import type { PanelEventEntry, PanelEventFilters, PanelEventsResponse, PanelModuleState } from "../../panel-contract";
 import { EVENT_TONES, type EventTone } from "../../contracts/values";
-import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, formatClockTime, formatNumber, formatTimestamp } from "../locale";
+import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, formatNumber, formatTimestamp } from "../locale";
 import { moduleName } from "../module-labels";
 import { ModuleCount, ModuleHeading } from "../module-panels";
 import { useRealtimeEventFeed, type RealtimeFeedState, type RealtimeFeedStatus as RealtimeFeedStatusValue } from "../realtime";
+import { useChannelSettings } from "../data/channel-settings";
+import { browserTimeZone } from "../ui/format-relative-time";
 import { Icon } from "../ui/Icon";
-import { ChipGroup, EmptyState, InspectorSection, ListDetail, ListToolbar, LoadState as UiLoadState, LoadStateLines, notify, Popover, Select as UiSelect, StatusLed, SubInspector, useInspectorSelection, type QueryError, type SelectOption, type StatusLedState } from "../ui";
+import { ChipGroup, DataTable, EmptyState, InspectorSection, ListDetail, ListToolbar, LoadState as UiLoadState, LoadStateLines, notify, Popover, Select as UiSelect, StatusLed, SubInspector, useInspectorSelection, type QueryError, type SelectOption, type StatusLedState } from "../ui";
 import { PanelApiError } from "../api";
 import { refreshQuery } from "../data/refresh";
 import { dashboardDataKeys } from "../data/keys";
@@ -284,6 +286,9 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
   onFiltersChange: (filters: PanelEventFilters) => void;
 }): ReactElement => {
   const query = useEventsQuery(channelId, filters);
+  const settingsQuery = useChannelSettings(channelId);
+  const timeZoneFallback = settingsQuery.isError;
+  const channelTimeZone = timeZoneFallback ? browserTimeZone() : settingsQuery.data?.timeZone ?? null;
   const queryClient = useQueryClient();
   const queryKey = useMemo(() => dashboardDataKeys.events(channelId, filters), [channelId, filters]);
   const identityKey = JSON.stringify(queryKey);
@@ -312,6 +317,8 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
   return <EventsPageContent
     identityKey={identityKey}
     channelId={channelId}
+    channelTimeZone={channelTimeZone}
+    timeZoneFallback={timeZoneFallback}
     filters={filters}
     moduleOptions={moduleOptions}
     onFiltersChange={onFiltersChange}
@@ -332,6 +339,8 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
 interface EventsPageContentProperties {
   identityKey: string;
   channelId: string;
+  channelTimeZone: string | null;
+  timeZoneFallback: boolean;
   entries: readonly PanelEventEntry[];
   pages: readonly PanelEventsResponse[];
   nextCursor: string | null;
@@ -391,6 +400,8 @@ const EventsPageContent = (properties: EventsPageContentProperties): ReactElemen
 
 const EventsPageFilterState = ({
   identityKey,
+  channelTimeZone,
+  timeZoneFallback,
   entries,
   pages,
   readerAtTop,
@@ -499,11 +510,6 @@ const EventsPageFilterState = ({
             <div className="realtime-feed__notice-slot" data-pending={pendingCount > 0}>
               {pendingCount === 0 ? null : <button className="button button--with-icon realtime-feed__notice" type="button" onClick={realtime.jumpToBeginning} aria-live="polite"><Icon name="jumpToTop" size={16} />{texts.events.realtimeNew(formatNumber(pendingCount))}</button>}
             </div>
-            <div className="events-page__pagination-slot">
-              {loading || eventEntries.length === 0 ? null : nextCursor === null
-                ? <p className="empty-state">{texts.events.feedEnd}</p>
-                : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage || fetching}>{loadingNextPage ? texts.events.loadingOlder : texts.events.loadOlder}</button>}
-            </div>
             <UiLoadState
               variant="panel-420"
               status={loading && eventEntries.length === 0
@@ -530,59 +536,84 @@ const EventsPageFilterState = ({
               <>
               <div ref={feedRef} className="event-feed">
                 <div key={identityKey} className={fetching && followsQuery ? "stale" : undefined} aria-busy={fetching && followsQuery}>
-                  {dayGroups.map((day, dayIndex) => (
-                    <section key={`${day.key}:${String(dayIndex)}`} className="event-day">
-                      <h3 className="event-day__heading">{day.label}</h3>
-                      <table className="table event-table">
-                        <colgroup>
-                          <col className="event-table__column--event" />
-                          <col className="event-table__column--module" />
-                          <col className="event-table__column--actor" />
-                          <col className="event-table__column--time" />
-                        </colgroup>
-                        <thead><tr><th scope="col">{texts.events.event}</th><th scope="col">{texts.events.module}</th><th scope="col">{texts.events.who}</th><th scope="col">{texts.events.time}</th></tr></thead>
-                        <tbody>{day.groups.map((group) => {
+                  <DataTable
+                    ariaLabel={texts.events.log}
+                    className="event-table"
+                    rows={groups.map((group) => ({
+                      ...group,
+                      id: group.key,
+                      at: group.representative.createdAt,
+                      moduleGroup: group.representative.moduleId,
+                    }))}
+                    timeZone={channelTimeZone}
+                    {...(timeZoneFallback ? { timeZoneFallbackLabel: texts.streamManager.browserTimeZoneFallback } : {})}
+                    emptyLabel={texts.events.none}
+                    selectedId={selectedGroupKey}
+                    onSelect={selectGroup}
+                    rowRef={groupRowRef}
+                    columns={[
+                      {
+                        key: "event",
+                        label: texts.events.event,
+                        render: (group) => {
                           const entry = group.representative;
                           const eventLabel = eventText(entry.code, eventDetail(entry.detail, entry.code));
                           const cause = eventCause(entry);
-                          return <tr key={group.key} ref={groupRowRef(group.key)} tabIndex={0} aria-selected={selectedGroupKey === group.key} onClick={() => { selectGroup(group.key); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectGroup(group.key); } }}>
-                            <td>
-                              <span className="event-label event-table__primary">
-                                <EventChipPair code={entry.code} detail={eventDetail(entry.detail, entry.code)} texts={texts} />
-                                <span className={`event-table__text${eventMetadata(entry.code) === null ? " mono" : ""}`} title={eventLabel}>{eventLabel}</span>
-                                {cause === null ? null : (
-                                  <Popover triggerLabel={texts.events.showCause(eventLabel)} icon="cause">
-                                    <span className="event-cause">
-                                      <span>{cause.text}</span>
-                                      {cause.message === null ? null : (
-                                        <span className="event-cause__message">
-                                          {cause.messageIsFromTwitch ? texts.events.causeTwitchMessage(cause.message) : texts.events.causeDetailMessage(cause.message)}
-                                        </span>
-                                      )}
-                                    </span>
-                                  </Popover>
-                                )}
-                              </span>
-                              <span className="event-table__mobile-meta muted">
-                                <span className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined} title={moduleLabel(entry)}>{moduleLabel(entry)}</span>
-                                <span aria-hidden="true">·</span>
-                                <span title={actorLabel(entry, texts)}>{actorCell(entry, texts)}</span>
-                                <span aria-hidden="true">·</span>
-                                <time className="mono" dateTime={entry.createdAt} title={entry.createdAt}>{formatClockTime(entry.createdAt)}</time>
-                              </span>
-                            </td>
-                            <td className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined} title={moduleLabel(entry)}>{moduleLabel(entry)}</td>
-                            <td title={actorLabel(entry, texts)}>{actorCell(entry, texts)}</td>
-                            <td className="mono" title={entry.createdAt}>
-                              <time dateTime={entry.createdAt} title={entry.createdAt}>{formatClockTime(entry.createdAt)}</time>
-                            </td>
-                          </tr>;
-                        })}</tbody>
-                      </table>
-                    </section>
-                  ))}
+                          return <>
+                            <span className="event-label event-table__primary">
+                              <EventChipPair code={entry.code} detail={eventDetail(entry.detail, entry.code)} texts={texts} />
+                              <span className={`event-table__text${eventMetadata(entry.code) === null ? " mono" : ""}`} title={eventLabel}>{eventLabel}</span>
+                              {cause === null ? null : (
+                                <Popover triggerLabel={texts.events.showCause(eventLabel)} icon="cause">
+                                  <span className="event-cause">
+                                    <span>{cause.text}</span>
+                                    {cause.message === null ? null : (
+                                      <span className="event-cause__message">
+                                        {cause.messageIsFromTwitch ? texts.events.causeTwitchMessage(cause.message) : texts.events.causeDetailMessage(cause.message)}
+                                      </span>
+                                    )}
+                                  </span>
+                                </Popover>
+                              )}
+                            </span>
+                            <span className="event-table__mobile-meta muted">
+                              <span className="data-table__module-group" data-module-group={entry.moduleId} aria-hidden="true" />
+                              <span className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined} title={moduleLabel(entry)}>{moduleLabel(entry)}</span>
+                              <span aria-hidden="true">·</span>
+                              <span title={actorLabel(entry, texts)}>{actorCell(entry, texts)}</span>
+                            </span>
+                          </>;
+                        },
+                      },
+                      {
+                        key: "module",
+                        label: texts.events.module,
+                        moduleGroup: true,
+                        hideOnMobile: true,
+                        render: (group) => {
+                          const entry = group.representative;
+                          const label = moduleLabel(entry);
+                          return <span className={label === entry.moduleId ? "mono" : undefined} title={label}>{label}</span>;
+                        },
+                      },
+                      {
+                        key: "actor",
+                        label: texts.events.who,
+                        hideOnMobile: true,
+                        render: (group) => {
+                          const entry = group.representative;
+                          return <span title={actorLabel(entry, texts)}>{actorCell(entry, texts)}</span>;
+                        },
+                      },
+                    ]}
+                  />
                 </div>
                 <EventFeedEnd nextCursor={nextCursor} loadingNextPage={loadingNextPage || fetching} onNextPage={onNextPage} />
+              </div>
+              <div className="events-page__pagination-slot">
+                {loading || eventEntries.length === 0 ? null : nextCursor === null
+                  ? <p className="empty-state">{texts.events.feedEnd}</p>
+                  : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage || fetching}>{loadingNextPage ? texts.events.loadingOlder : texts.events.loadOlder}</button>}
               </div>
               </>
             </UiLoadState>

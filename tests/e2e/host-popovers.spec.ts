@@ -32,7 +32,7 @@ test("error summaries and clipped field text stay complete at mobile and inspect
     await expect(status).toContainText("3 Felder fehlerhaft");
     const statusBox = await status.boundingBox();
     const actionsBox = await editor.locator(".ui-save-bar__actions").boundingBox();
-    if (statusBox === null || actionsBox === null) throw new Error("SaveBar status and actions should have layout boxes.");
+    if (statusBox === null || actionsBox === null) throw new Error("SaveStatus status and actions should have layout boxes.");
     expect(statusBox.x + statusBox.width).toBeLessThanOrEqual(actionsBox.x);
 
     const errorTrigger = status.getByRole("button", { name: "Fehlerhafte Felder anzeigen" });
@@ -147,17 +147,17 @@ test("Escape with the error summary open keeps the inspector; closed, it closes 
   await expect(page.locator(".list-detail__inspector")).toHaveCount(0);
 });
 
-test("conflict recovery label stays fully visible in the mobile SaveBar slot", async ({ page }) => {
+test("conflict recovery label stays fully visible in the mobile SaveStatus slot", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/tests/e2e/host-popovers-fixture.html?conflict");
 
   const editor = page.locator(".host-popovers-fixture__editor");
-  const saveBar = editor.locator(".ui-save-bar");
-  const actions = saveBar.locator(".ui-save-bar__actions");
+  const saveStatus = editor.locator(".ui-save-bar");
+  const actions = saveStatus.locator(".ui-save-bar__actions");
   const reload = actions.getByRole("button", { name: "Serverstand laden" });
 
   await expect(editor).toBeVisible();
-  expect((await saveBar.boundingBox())?.height).toBe(64);
+  expect((await saveStatus.boundingBox())?.height).toBe(64);
   await expect(actions.getByRole("button")).toHaveCount(1);
   await expect(reload).toBeVisible();
   await expect(reload).toHaveText("Serverstand laden");

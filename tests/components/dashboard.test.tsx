@@ -361,6 +361,7 @@ describe("Dashboard skeleton", () => {
   it("shows events with module, code, detail and actor", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     stubDashboardFetch((url) => {
+      if (url.pathname === "/api/channels/kanal-a/settings") return jsonResponse({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 1, defaultChatTarget: "source_only", defaultChatTargetRevision: 1 });
       if (url.pathname.endsWith("/events")) return jsonResponse({
         entries: [{
           eventId: "event-1",
@@ -414,12 +415,12 @@ describe("Dashboard skeleton", () => {
     const eventRow = screen.getByText("Shoutout unterdrückt").closest("tr");
     const unknownEvent = screen.getByText("plugin.anderes", { selector: ".event-table__text" });
     const unknownRow = unknownEvent.closest("tr");
-    expect(eventRow?.querySelector("td:nth-child(2)")).toHaveTextContent("Shoutout");
-    expect(eventRow?.querySelector("td:nth-child(3)")).toHaveTextContent("Automatisch");
+    expect(eventRow?.querySelector("td:nth-child(3)")).toHaveTextContent("Shoutout");
+    expect(eventRow?.querySelector("td:nth-child(4)")).toHaveTextContent("Automatisch");
     expect(unknownEvent).toHaveClass("mono");
-    expect(unknownRow?.querySelector("td:nth-child(2)")).toHaveClass("mono");
-    expect(unknownRow?.querySelector("td:nth-child(3)")).toHaveTextContent("user-2");
     expect(unknownRow?.querySelector("td:nth-child(3) .mono")).toBeInTheDocument();
+    expect(unknownRow?.querySelector("td:nth-child(4)")).toHaveTextContent("user-2");
+    expect(unknownRow?.querySelector("td:nth-child(4) .mono")).toBeInTheDocument();
     const sentRow = screen.getByText("Chat-Nachricht gesendet").closest("tr");
     const failedRow = screen.getByText("Aktion fehlgeschlagen").closest("tr");
     expect(sentRow?.querySelector(".event-chip[data-tone='info']")).toHaveTextContent("Info");
@@ -438,12 +439,12 @@ describe("Dashboard skeleton", () => {
     expect(unknownEventRow).toHaveAttribute("aria-selected", "false");
     expect(screen.getByText("shoutout.suppressed")).toBeInTheDocument();
     expect(screen.getByText(/"grund": "raid_erkannt"/)).toBeInTheDocument();
-    const displayedTime = eventRow?.querySelector("td:last-child time");
-    expect(displayedTime).toHaveTextContent(/^04:00$/);
-    expect(displayedTime).toHaveAttribute("title", "2026-09-18T04:00:00.000Z");
+    const displayedTime = eventRow?.querySelector("td:first-child time");
+    expect(displayedTime).toHaveTextContent("06:00");
+    expect(displayedTime).toHaveAttribute("title", "18.09.2026, 06:00:00 GMT+2");
   });
 
-  it("groups rows by day, newest day first, each with its own table", async () => {
+  it("renders one table with sticky day rows, newest day first", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     stubDashboardFetch((url) => {
       if (url.pathname.endsWith("/events")) return jsonResponse({
@@ -458,14 +459,16 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    const headings = (await screen.findAllByRole("heading", { level: 3 })).map((heading) => heading.textContent);
-    expect(headings).toEqual(["18.09.2026", "17.09.2026"]);
-    expect(screen.getAllByRole("table")).toHaveLength(2);
+    await waitFor(() => expect(document.querySelectorAll(".data-table__day-row th")).toHaveLength(2));
+    const dayRows = Array.from(document.querySelectorAll(".data-table__day-row th"), (row) => row.textContent);
+    expect(dayRows).toEqual(["18.09.2026", "17.09.2026"]);
+    expect(screen.getAllByRole("table")).toHaveLength(1);
   });
 
   it("shows the event chip pair with family, tier, number and time tooltip", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     stubDashboardFetch((url) => {
+      if (url.pathname === "/api/channels/kanal-a/settings") return jsonResponse({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 1, defaultChatTarget: "source_only", defaultChatTargetRevision: 1 });
       if (url.pathname.endsWith("/events")) return jsonResponse({
         entries: [
           { eventId: "gift", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.chat.community_gift", detail: '{"count":5}', actorUserId: null },
@@ -499,9 +502,9 @@ describe("Dashboard skeleton", () => {
     expect(sentRow.querySelector(".event-chip[data-tier='full']")).toBeNull();
     expect(unknownRow.querySelector(".event-chip")).toHaveTextContent("Unbekannt");
     expect(unknownRow.querySelector(".event-label > .mono")).toHaveTextContent("plugin.anderes");
-    const timeCell = giftRow.querySelector("td:last-child");
+    const timeCell = giftRow.querySelector("td:first-child time");
     if (timeCell === null) throw new Error("Zeitspalte fehlt");
-    expect(timeCell.getAttribute("title")).toBe("2026-09-18T04:00:00.000Z");
+    expect(timeCell.getAttribute("title")).toBe("18.09.2026, 06:00:00 GMT+2");
   });
 
   it("shows subscription tiers in the number chip as T1/T2/T3/Prime instead of raw, unknown values without a chip", async () => {
@@ -704,7 +707,7 @@ describe("Dashboard skeleton", () => {
     await new Promise((resolve) => { setTimeout(resolve, 400); });
     expect(screen.queryByText("Raid von unbekannt mit 8 Zuschauern")).not.toBeInTheDocument();
     expect(eventRequests).toBe(3);
-    expect(screen.getAllByRole("row")).toHaveLength(2);
+    expect(document.querySelectorAll(".event-table tbody tr:not(.data-table__day-row)")).toHaveLength(1);
 
     Object.defineProperty(feed, "getBoundingClientRect", { configurable: true, value: () => ({ top: 0 }) });
     Object.defineProperty(window, "scrollY", { configurable: true, value: 0 });
@@ -990,7 +993,7 @@ describe("Dashboard skeleton", () => {
     expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeInTheDocument();
     expect(screen.getByText("Shoutout unterdrückt")).toBeInTheDocument();
     expect(screen.queryByText("Chat-Nachricht gesendet")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("row")).toHaveLength(4);
+    expect(document.querySelectorAll(".event-table tbody tr:not(.data-table__day-row)")).toHaveLength(3);
 
     const groupRow = screen.getByText("Befehl !wiki ausgeführt").closest("tr");
     expect(groupRow).not.toBeNull();
@@ -1509,12 +1512,14 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    const row = await screen.findByRole("button", { name: /Alice aktivierte das Modul Werbung/ });
-    expect(await screen.findByRole("button", { name: /gelöscht deaktivierte das Modul Werbung/ })).toBeInTheDocument();
+    const sentence = await screen.findByText("Alice aktivierte das Modul Werbung", { selector: ".audit-sentence" });
+    const row = sentence.closest("tr");
+    if (row === null) throw new Error("Audit row is missing.");
+    expect(await screen.findByText("gelöscht deaktivierte das Modul Werbung", { selector: ".audit-sentence" })).toBeInTheDocument();
     expect(row.querySelector("time")).toBeInTheDocument();
-    expect(row).toHaveAttribute("aria-pressed", "false");
+    expect(row).toHaveAttribute("aria-selected", "false");
     fireEvent.click(row);
-    expect(row).toHaveAttribute("aria-pressed", "true");
+    expect(row).toHaveAttribute("aria-selected", "true");
     const inspector = await screen.findByRole("region", { name: "Änderungsdaten" });
     // #181 item 2: the inspector shows the display name like the table, the
     // raw id only as a tooltip -- not "user-1" as visible text.
@@ -1528,10 +1533,12 @@ describe("Dashboard skeleton", () => {
     fireEvent.click(within(inspector).getByText("Technische Details"));
     const rawBlocks = inspector.querySelectorAll("pre");
     expect(Array.from(rawBlocks).map((pre) => pre.textContent.trim())).toEqual(['{\n  "enabled": false\n}', '{\n  "enabled": true\n}']);
-    const secondRow = screen.getByRole("button", { name: /deaktivierte das Modul Werbung/ });
+    const secondSentence = screen.getByText("gelöscht deaktivierte das Modul Werbung", { selector: ".audit-sentence" });
+    const secondRow = secondSentence.closest("tr");
+    if (secondRow === null) throw new Error("Second audit row is missing.");
     fireEvent.click(secondRow);
-    expect(secondRow).toHaveAttribute("aria-pressed", "true");
-    expect(row).toHaveAttribute("aria-pressed", "false");
+    expect(secondRow).toHaveAttribute("aria-selected", "true");
+    expect(row).toHaveAttribute("aria-selected", "false");
   });
 
   it("labels a module.enabled entry's settings diff with the module's own field catalogue, not the raw key", async () => {
@@ -1561,7 +1568,9 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    const row = await screen.findByRole("button", { name: /Alice aktivierte das Modul Werbung/ });
+    const sentence = await screen.findByText(/Alice aktivierte das Modul Werbung/, { selector: ".audit-sentence" });
+    const row = sentence.closest("tr");
+    if (row === null) throw new Error("Audit row is missing.");
     fireEvent.click(row);
     const inspector = await screen.findByRole("region", { name: "Änderungsdaten" });
     expect(await within(inspector).findByText("Vorlaufzeit")).toBeInTheDocument();
@@ -4498,7 +4507,7 @@ describe("Dashboard skeleton", () => {
       window.history.pushState({}, "", "/channels/kanal-b/audit");
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
-    const unknownRow = await screen.findByRole("button", { name: /nicht erkannte Aktion|unrecognized action/i });
+    const unknownRow = await screen.findByText(/nicht erkannte Aktion|unrecognized action/i, { selector: ".audit-sentence" });
 
     await act(async () => {
       resolveAlphaAudit?.(jsonResponse({
@@ -4726,9 +4735,9 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    expect(await screen.findByRole("button", { name: /Kanal B änderte die Einstellungen von Werbung/ })).toBeInTheDocument();
-    const variableRow = await screen.findByRole("button", { name: /Kanal B legte die Kanalvariable \{var\.support_goal\} an/ });
-    const overlayRow = await screen.findByRole("button", { name: /Esembe erstellte das Overlay Stream Studio/ });
+    expect(await screen.findByText(/Kanal B änderte die Einstellungen von Werbung/, { selector: ".audit-sentence" })).toBeInTheDocument();
+    const variableRow = await screen.findByText(/Kanal B legte die Kanalvariable \{var\.support_goal\} an/, { selector: ".audit-sentence" });
+    const overlayRow = await screen.findByText(/Esembe erstellte das Overlay Stream Studio/, { selector: ".audit-sentence" });
     expect(variableRow).not.toHaveTextContent("Name");
     expect(overlayRow).not.toHaveTextContent("Name");
   });
@@ -4760,7 +4769,9 @@ describe("Dashboard skeleton", () => {
     const list = await screen.findByRole("region", { name: "Audit-Log" });
     expect(screen.queryByRole("region", { name: "Änderungsdaten" })).not.toBeInTheDocument();
 
-    const row = await screen.findByRole("button", { name: /Alice aktivierte das Modul Werbung/ });
+    const sentence = await screen.findByText(/Alice aktivierte das Modul Werbung/, { selector: ".audit-sentence" });
+    const row = sentence.closest("tr");
+    if (row === null) throw new Error("Audit row is missing.");
     fireEvent.click(row);
 
     expect(list).toBeInTheDocument();
@@ -4797,7 +4808,9 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    const row = await screen.findByRole("button", { name: /Alice aktivierte das Modul Werbung/ });
+    const sentence = await screen.findByText(/Alice aktivierte das Modul Werbung/, { selector: ".audit-sentence" });
+    const row = sentence.closest("tr");
+    if (row === null) throw new Error("Audit row is missing.");
     fireEvent.click(row);
     expect(await screen.findByRole("region", { name: "Änderungsdaten" })).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("link", { name: "System" }));
@@ -4807,9 +4820,10 @@ describe("Dashboard skeleton", () => {
     await waitFor(() => expect(auditRequests).toBe(2));
     resolveReload?.(jsonResponse({ entries: [entry], nextCursor: null }));
 
-    const restoredRow = (await screen.findAllByRole("button", { name: /Alice aktivierte das Modul Werbung/ }))[0];
-    expect(restoredRow).toBeDefined();
-    expect(restoredRow).toHaveAttribute("aria-pressed", "false");
+    const restoredSentence = await screen.findByText(/Alice aktivierte das Modul Werbung/, { selector: ".audit-sentence" });
+    const restoredRow = restoredSentence.closest("tr");
+    if (restoredRow === null) throw new Error("Restored audit row is missing.");
+    expect(restoredRow).toHaveAttribute("aria-selected", "false");
     expect(screen.queryByRole("region", { name: "Änderungsdaten" })).not.toBeInTheDocument();
   });
 
@@ -4993,7 +5007,9 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    const row = await screen.findByRole("button", { name: /Alice aktivierte das Modul Werbung/ });
+    const sentence = await screen.findByText("Alice aktivierte das Modul Werbung", { selector: ".audit-sentence" });
+    const row = sentence.closest("tr");
+    if (row === null) throw new Error("Audit row is missing.");
     row.focus();
     fireEvent.click(row);
     expect(row).toHaveFocus();

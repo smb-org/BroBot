@@ -1335,7 +1335,7 @@ describe("Overlay composition editor", () => {
     await waitFor(() => expect(document.activeElement).toHaveClass("overlay-editor__add-trigger"));
   });
 
-  it("shows the unsaved-changes status only once on the save bar", async () => {
+  it("shows the unsaved-changes status only once in SaveStatus", async () => {
     Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = requestUrl(input);
@@ -1350,12 +1350,12 @@ describe("Overlay composition editor", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
-    const saveBar = document.querySelector<HTMLElement>(".ui-save-bar");
-    if (saveBar === null) throw new Error("Save bar is missing.");
-    expect(within(saveBar).queryByText("Unsaved changes")).not.toBeInTheDocument();
+    const saveStatus = document.querySelector<HTMLElement>(".ui-save-bar");
+    if (saveStatus === null) throw new Error("SaveStatus is missing.");
+    expect(within(saveStatus).queryByText("Unsaved changes")).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByRole("textbox", { name: "Element label" }), { target: { value: "Score label" } });
 
-    expect(within(saveBar).getAllByText("Unsaved changes")).toHaveLength(1);
+    expect(within(saveStatus).getAllByText("Unsaved changes")).toHaveLength(1);
   });
 });

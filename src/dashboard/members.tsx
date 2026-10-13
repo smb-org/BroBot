@@ -146,7 +146,7 @@ const MemberListLoading = (): ReactElement => <><LoadStateLines rows={MEMBERS_PA
 
 /**
  * The member editor (15b): a role `ChoiceCards` as the only draft field,
- * "Zugang entziehen" left in the save bar behind its own `ConfirmDialog`.
+ * "Zugang entziehen" left in the save status behind its own `ConfirmDialog`.
  * `role`/`dirty`/`onRoleChange` are controlled by `MembersPage` so its
  * `useDraftGuard` (row switch, grant editor, close) can see the same draft.
  */

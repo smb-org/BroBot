@@ -11,11 +11,10 @@ import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, u
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber, serverFieldErrorText, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
 import { templateTextLength } from "../template";
-import { ChatCommands } from "./chat-commands";
 import { modulePermissionsAreMissing } from "./channel-health";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { effectivePanelTemplateVariables, panelTemplateOptions, type PanelChannelVariable } from "./ui/template-variable-options";
-import { ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, StatusLed, LockedReason, mapServerFieldErrors, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
+import { ChatCommandsHelp, ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, SettingsPage, StatusLed, LockedReason, mapServerFieldErrors, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
 import { Switch as SwitchPrimitive } from "./ui/primitives/switch";
 import { worstCaseTemplateLength } from "../template";
 import type { TemplateVariable } from "../template";
@@ -129,22 +128,6 @@ export const ModuleNavigation = ({ channelId, activeModules, onNavigate }: {
       return <a className="nav-link" href={dashboardRoutePath(route)} key={moduleId} onClick={(event) => { event.preventDefault(); onNavigate(route); }}>{moduleName(moduleId)}</a>;
     })}
   </nav>
-);
-
-const ModuleSwitch = ({ moduleId, enabled, disabled, busy, onToggle }: {
-  moduleId: string;
-  enabled: boolean;
-  disabled: boolean;
-  busy: boolean;
-  onToggle: () => void;
-}): ReactElement => (
-  <SwitchPrimitive
-    aria-label={`${moduleDetails(moduleId).name}: ${statusWord(enabled)}`}
-    checked={enabled}
-    onCheckedChange={() => { onToggle(); }}
-    disabled={disabled || busy}
-    aria-busy={busy}
-  />
 );
 
 interface ModulePanelMountProperties {
@@ -750,8 +733,12 @@ export const ModuleWorkspace = ({ channelId, ownRole, modules, loading = false, 
   return (
     <section className="module-workspace" aria-label={dashboardTexts().navigation.module}>
       <div className="module-workspace__main">
-        <PageHeader kind="modules" title={dashboardTexts().navigation.module} subtitle={loading ? dashboardTexts().module.load : dashboardTexts().module.available} />
-        <ModuleToggleList key={channelId} channelId={channelId} ownRole={ownRole} modules={modules} onNavigate={onNavigate} onChanged={onChanged} />
+        <SettingsPage
+          kind="modules"
+          title={dashboardTexts().navigation.module}
+          subtitle={loading ? dashboardTexts().module.load : dashboardTexts().module.available}
+          columns={[<ModuleToggleList key={channelId} channelId={channelId} ownRole={ownRole} modules={modules} onNavigate={onNavigate} onChanged={onChanged} />]}
+        />
       </div>
     </section>
   );
@@ -836,18 +823,19 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
             : <NavigationIcon kind={navigationPage.iconKind} className="module-heading-glyph module-glyph" />}
           title={details.name}
           subtitle={details.description}
+          {...(navigationPage?.showMainSwitch === false ? {} : {
+            active: effectiveEnabled,
+            onToggle: (nextEnabled: boolean) => { if (nextEnabled !== effectiveEnabled) onToggle(); },
+            switchTitle: `${details.name}: ${statusWord(effectiveEnabled)}`,
+            switchDisabled: !manageable || switchDisabled || busy || mandatory,
+            switchBusy: busy,
+            ...(mandatory ? { moduleSwitch: <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} /> } : {}),
+            ...(disabledReason === null ? {} : { lockHint: disabledReason }),
+          })}
+          {...(registered?.chatCommands === undefined || registered.chatCommands.length === 0 ? {} : {
+            pageActions: <ChatCommandsHelp commands={registered.chatCommands} language={dashboardLanguage()} />,
+          })}
         />
-        {registered?.chatCommands === undefined ? null : <ChatCommands commands={registered.chatCommands} />}
-        {navigationPage?.showMainSwitch === false ? null : <section className="module-detail__switch inspector-section--switch" aria-label={labels.status}>
-          <div>
-            <strong>{labels.mainSwitch}</strong>
-            {mandatory
-              ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} />
-              : <StatusLed state={effectiveEnabled ? "ok" : "off"} label={statusWord(effectiveEnabled)} />}
-          </div>
-          {mandatory ? null : <ModuleSwitch moduleId={moduleId} enabled={effectiveEnabled} disabled={!manageable || switchDisabled} busy={busy} onToggle={onToggle} />}
-            {disabledReason === null ? null : <p className="lock-reason lock-reason--with-icon"><Icon name="lock" size={16} />{disabledReason}</p>}
-        </section>}
         {!permissionsMissing ? null : <section className="module-detail__authorization" aria-label={texts.module.scopeList}>
           <div className="section-heading"><h2>{texts.module.scopeList}</h2></div>
           <div className="state-list module-scope-list">

@@ -201,8 +201,6 @@ export const statusWord = (enabled: boolean, language: DashboardLanguage = dashb
 };
 
 export interface ModuleWorkspaceTexts {
-  status: string;
-  mainSwitch: string;
   content: string;
   unknown: (name: string) => string;
   switchedOff: (name: string) => string;
@@ -214,8 +212,6 @@ export interface ModuleWorkspaceTexts {
 
 const workspaceCatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
   de: {
-    status: "Modulstatus",
-    mainSwitch: "Hauptschalter",
     content: "Modulinhalt",
     unknown: (name) => `Das Modul „${name}“ ist nicht bekannt.`,
     switchedOff: (name) => `Das Modul „${name}“ ist ausgeschaltet.`,
@@ -225,8 +221,6 @@ const workspaceCatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
     noDescription: "Keine Beschreibung für dieses Modul.",
   },
   en: {
-    status: "Module status",
-    mainSwitch: "Main switch",
     content: "Module content",
     unknown: (name) => `The module “${name}” is unknown.`,
     switchedOff: (name) => `The module “${name}” is switched off.`,

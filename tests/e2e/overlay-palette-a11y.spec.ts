@@ -59,8 +59,9 @@ test("resizing from desktop to mobile with the palette open does not crash", asy
   await page.getByRole("button", { name: "Add element" }).click();
   await expect(page.getByRole("combobox", { name: "Search elements" })).toBeFocused();
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByRole("dialog", { name: "Add element" })).toBeVisible();
-  await page.getByRole("combobox", { name: "Search elements" }).press("Enter");
+  const drawer = page.locator(".ui-grouped-picker__drawer-content");
+  await expect(drawer).toBeVisible();
+  await drawer.getByRole("combobox", { name: "Search elements" }).press("Enter");
   await expect(page.locator(".overlay-editor__element-select")).toHaveCount(1);
   expect(errors).toEqual([]);
 });

@@ -3,7 +3,6 @@ import type { PanelAuditEntry, PanelAuditFilters } from "../../panel-contract";
 import { auditAreaForAction } from "./areas";
 import { auditActionLabel, roleLabel } from "../labels";
 import { auditObjectFallback, auditSentenceForAction, auditSettingsChangedSentence, dashboardTexts, memberAsWord, type AuditSentenceParts, type DashboardLanguage } from "../locale";
-import { dayKey } from "../events/model";
 import { moduleName } from "../module-labels";
 import { MODULES } from "../../modules/registry";
 import type { IconName } from "../ui/Icon";
@@ -315,24 +314,6 @@ export const auditSentenceText = (entry: PanelAuditEntry, language: DashboardLan
     ...(entry.action === "votekick.timeout_lift_attempted" ? { outcome: recordText(after, "outcome") } : {}),
   };
   return auditSentenceForAction(entry.action, parts, language);
-};
-
-export interface AuditDayGroup {
-  key: string;
-  label: string;
-  entries: readonly PanelAuditEntry[];
-}
-
-/** Day groups, newest day first, matching the event log's grouping (`dashboard/events/model.ts`'s `eventDayGroups`). */
-export const auditDayGroups = (entries: readonly PanelAuditEntry[], formatDay: (createdAt: string) => string): AuditDayGroup[] => {
-  const days = new Map<string, PanelAuditEntry[]>();
-  for (const entry of entries) {
-    const key = dayKey(entry.createdAt);
-    const existing = days.get(key);
-    if (existing === undefined) days.set(key, [entry]);
-    else existing.push(entry);
-  }
-  return Array.from(days, ([key, dayEntries]) => ({ key, label: formatDay(dayEntries[0]?.createdAt ?? key), entries: dayEntries }));
 };
 
 /** Renders the "who"/actor cell and inspector field from the identity, or names automated maintenance explicitly. */

@@ -8,7 +8,7 @@ import { TruncatedText } from "./TruncatedText";
 import { notify } from "./toast-store";
 import { colors } from "./theme";
 
-export interface SaveBarProps {
+export interface SaveStatusProps {
   dirty: boolean;
   pending?: boolean;
   error?: string;
@@ -34,7 +34,7 @@ export interface SaveBarProps {
   saveTitle?: string;
 }
 
-export function SaveBar({
+export function SaveStatus({
   dirty,
   pending = false,
   error,
@@ -58,7 +58,7 @@ export function SaveBar({
   pendingLabel,
   saveDescribedBy,
   saveTitle,
-}: SaveBarProps) {
+}: SaveStatusProps) {
   const lastToastedMessage = useRef<string | null>(null);
   const longError = conflict?.message ?? error;
   const visible = persistent || dirty || saved;
