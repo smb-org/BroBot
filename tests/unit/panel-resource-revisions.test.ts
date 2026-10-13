@@ -1600,6 +1600,7 @@ describe("panel resource revisions", () => {
         "panel_resource_revisions",
         "pending_realtime_user_revocations",
         "text_command_user_cooldowns",
+        "timer_schedule_reconciliation",
         "twitch_app_access_token",
         "twitch_game_search_cache",
       ]);

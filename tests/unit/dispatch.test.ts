@@ -348,6 +348,42 @@ describe("dispatch and execution", () => {
     }
   });
 
+  it("excludes bot echoes and Shared Chat messages from other broadcasters from timer activity", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      const runtime = environment(database);
+      const send = async (triggerId: string, chatterId: string, sourceBroadcaster: string | undefined): Promise<void> => {
+        await dispatchEventSubNotification(runtime, {
+          channelId: "kanal-a",
+          subscriptionType: CHAT_TYPE,
+          triggerId,
+          payload: {
+            message: { text: "hello" },
+            chatter_user_id: chatterId,
+            chatter_user_login: "viewer",
+            ...(sourceBroadcaster === undefined ? {} : { source_broadcaster_user_id: sourceBroadcaster }),
+          },
+          receivedAt: NOW,
+        }, vi.fn<typeof fetch>(), []);
+      };
+
+      await send("bot-echo", "bot-1", undefined);
+      await send("shared-partner", "viewer-1", "partner-channel");
+      await send("shared-local", "viewer-2", "kanal-a");
+      await send("regular-message", "viewer-3", undefined);
+
+      const object = runtime.CHANNEL.get(runtime.CHANNEL.idFromName("kanal-a")) as unknown as {
+        recordChatActivity: ReturnType<typeof vi.fn>;
+      };
+      expect(object.recordChatActivity).toHaveBeenCalledTimes(2);
+      expect(object.recordChatActivity).toHaveBeenNthCalledWith(1, "viewer-2", false);
+      expect(object.recordChatActivity).toHaveBeenNthCalledWith(2, "viewer-3", false);
+    } finally {
+      database.close();
+    }
+  });
+
   it("exposes active chatter counts and timestamps through the declaring module context", async () => {
     const database = new TestD1Database();
     try {

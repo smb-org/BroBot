@@ -4,6 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { UiProvider } from "../../src/dashboard/ui";
 import { moduleQueryKey } from "../../src/dashboard/data";
 import TimersPanel from "../../src/modules/timers/panel";
+import { nextRunLabel, triggerDetail } from "../../src/modules/timers/panel/summary";
+import type { Timer } from "../../src/modules/timers/contracts";
+import { timersTexts } from "../../src/modules/timers/panel/locale";
+import type { TimersPanelData } from "../../src/modules/timers/panel/service";
+import { inputFromDraft } from "../../src/modules/timers/panel/draft";
 import { renderWithQuery } from "../query-test-utils";
 import { jsonResponse } from "../unit/fixtures";
 
@@ -13,6 +18,47 @@ afterEach(() => {
 });
 
 describe("Timers panel", () => {
+  it("keeps live and offline interval rows visible with an explicit save action", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>((input) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/timers")) return Promise.resolve(jsonResponse({ timers: [] }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({
+        timeZone: "UTC", revision: 1, location: null, locationRevision: 1,
+        defaultChatTarget: "source_only", defaultChatTargetRevision: 1,
+      }));
+      if (url.pathname.endsWith("/event-time-sources")) return Promise.resolve(jsonResponse({ sources: [] }));
+      if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+
+    renderWithQuery(<UiProvider><TimersPanel channelId="channel-a" language="en" /></UiProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Create timer" }));
+
+    expect(screen.getByRole("switch", { name: "Live" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Offline" })).not.toBeChecked();
+    expect(screen.getByText("Offline off")).toBeInTheDocument();
+    expect(screen.getAllByRole("spinbutton", { name: "Minutes" })).toHaveLength(1);
+    expect(screen.getAllByRole("spinbutton", { name: "Minimum chat messages" })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("switch", { name: "Offline" }));
+    expect(screen.queryByText("Offline off")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("spinbutton", { name: "Minutes" })).toHaveLength(2);
+    expect(screen.getAllByRole("spinbutton", { name: "Minimum chat messages" })).toHaveLength(2);
+  });
+
+  it("saves valid interval parts after a hidden trigger's minutes field was cleared", () => {
+    const input = inputFromDraft({
+      name: "Reminder", messageText: "Hello", chatTarget: null, type: "interval",
+      live: { minutes: 30, minimumMessages: "" }, offline: { minutes: 30, minimumMessages: "" },
+      minutes: "", time: "12:00", weekdays: [], alsoOffline: false, sourceId: "",
+    });
+
+    expect(input?.trigger).toEqual({
+      type: "interval", live: { minutes: 30 }, offline: { minutes: 30 },
+    });
+  });
+
   it("offers the channel-default inheritance option when creating a timer", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>((input) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
@@ -52,7 +98,7 @@ describe("Timers panel", () => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/timers")) return Promise.resolve(jsonResponse({ timers: [{
         id: "timer-1", name: "Greeting timer", enabled: true, messageText: "Hello there!", chatTarget: "source_only",
-        trigger: { type: "interval", minutes: 30 }, revision: 1, nextRunAt: null, nextRunStreamId: null,
+        trigger: { type: "interval", live: { minutes: 30 } }, revision: 1, nextRunAt: null, nextRunState: null,
         lastRunAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
       }] }));
       if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({
@@ -100,7 +146,7 @@ describe("Timers panel", () => {
         refreshFails = true;
         return Promise.resolve(jsonResponse({ timer: {
           id: "timer-1", name: "Greeting timer", enabled, messageText: "Hello there!", chatTarget: "source_only",
-          trigger: { type: "interval", minutes: 30 }, revision, nextRunAt: null, nextRunStreamId: null,
+          trigger: { type: "interval", live: { minutes: 30 } }, revision, nextRunAt: null, nextRunState: null,
           lastRunAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
         } }));
       }
@@ -109,7 +155,7 @@ describe("Timers panel", () => {
         if (timerReads > 1 && refreshFails) return Promise.resolve(jsonResponse({ error: "temporarily unavailable" }, 503));
         return Promise.resolve(jsonResponse({ timers: [{
           id: "timer-1", name: "Greeting timer", enabled, messageText: "Hello there!", chatTarget: "source_only",
-          trigger: { type: "interval", minutes: 30 }, revision, nextRunAt: null, nextRunStreamId: null,
+          trigger: { type: "interval", live: { minutes: 30 } }, revision, nextRunAt: null, nextRunState: null,
           lastRunAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
         }] }));
       }
@@ -150,5 +196,24 @@ describe("Timers panel", () => {
 
     expect(screen.getByRole("button", { name: "Create timer" })).toBeDisabled();
     expect(screen.getByText("Only broadcasters and managers can edit timers.")).toBeInTheDocument();
+  });
+
+  it("summarises interval parts and the next run state per language", () => {
+    const timer = {
+      trigger: { type: "interval", live: { minutes: 20, minimumMessages: 10 }, offline: { minutes: 60, minimumMessages: 5 } },
+    } as unknown as Timer;
+    const data = { sources: [] } as unknown as TimersPanelData;
+    const de = timersTexts("de");
+    const en = timersTexts("en");
+    expect(triggerDetail(timer, data, de, "de")).toBe("Live alle 20 Min. · ab 10 Nachrichten · Offline alle 60 Min. · ab 5 Nachrichten");
+    expect(triggerDetail(timer, data, en, "en")).toBe("Live every 20 min · after 10 messages · Offline every 60 min · after 5 messages");
+    const liveOnly = { trigger: { type: "interval", live: { minutes: 20 } } } as unknown as Timer;
+    expect(triggerDetail(liveOnly, data, de, "de")).toBe("Live alle 20 Min. · Offline aus");
+    expect(triggerDetail(liveOnly, data, en, "en")).toBe("Live every 20 min · Offline off");
+    expect(nextRunLabel({ nextRunState: "live" }, de)).toBe("Nächster Lauf (live)");
+    expect(nextRunLabel({ nextRunState: "offline" }, de)).toBe("Nächster Lauf (offline)");
+    expect(nextRunLabel({ nextRunState: "live" }, en)).toBe("Next run (live)");
+    expect(nextRunLabel({ nextRunState: "offline" }, en)).toBe("Next run (offline)");
+    expect(nextRunLabel({ nextRunState: null }, en)).toBe("Next run");
   });
 });

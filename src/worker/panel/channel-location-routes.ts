@@ -9,6 +9,7 @@ import { prepareAudit } from "../db/audit";
 import { readChannelLocation } from "../db/channel-settings";
 import { publishOverlayHostEvent } from "../realtime";
 import { notifyModuleScheduleInputsChanged } from "../module-schedules";
+import { clearTimerScheduleReconciliation, timerScheduleReconciliationMutation } from "../../modules/contracts/timer-schedule-reconciliation";
 
 interface ChannelLocationEnvironment {
   Bindings: Env;
@@ -134,9 +135,19 @@ channelLocationRouter.patch("/api/channels/:channelId/settings/location", async 
   );
   const audit = prepareAudit(context.env.DB, context.get("actor").userId, changedAt, channelId, null,
     "channel.location.updated", locationSnapshot(previous), locationSnapshot(location));
-  const result = await context.env.DB.batch([mutation, audit]);
+  const mutationId = crypto.randomUUID();
+  const result = await context.env.DB.batch([
+    mutation,
+    timerScheduleReconciliationMutation(context.env.DB, channelId, mutationId, changedAt, true, "channel_time_zone"),
+    audit,
+  ]);
   if ((result[0]?.meta.changes ?? 0) === 0) return context.json({ error: "channel_location_conflict" }, 409);
-  await notifyModuleScheduleInputsChanged(context.env.CHANNEL, channelId, "event_times");
+  try {
+    await notifyModuleScheduleInputsChanged(context.env.CHANNEL, channelId, "channel_time_zone");
+    await clearTimerScheduleReconciliation(context.env.DB, channelId, "", 0, mutationId, "channel_time_zone");
+  } catch (error: unknown) {
+    console.warn("Timer schedule reconciliation remains pending after channel location change.", channelId, error);
+  }
   await publishOverlayHostEvent(context.env.CHANNEL, context.env.DB, channelId, "template.data.changed");
   return context.json({ ok: true, location, locationRevision: nextRevision });
 });

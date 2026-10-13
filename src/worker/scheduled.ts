@@ -13,6 +13,7 @@ import { maintainStreamStates } from "./stream-state-lookup";
 import { purgeRevokedOverlayAccesses } from "./auth/overlay-access-repository";
 import { MODULES } from "../modules/registry";
 import { schedulePanelResourceBackgroundWork } from "./panel-resources";
+import { maintainTimerSchedules } from "./timer-schedule-maintenance";
 
 export const scheduled: NonNullable<ExportedHandler<Env>["scheduled"]> = async (
   _controller,
@@ -32,6 +33,7 @@ export const scheduled: NonNullable<ExportedHandler<Env>["scheduled"]> = async (
     maintainAppAccessToken(env, now),
     maintainEventSubSubscriptions(env, now),
     maintainStreamStates(env, now),
+    maintainTimerSchedules(env),
     ...MODULES.flatMap((module) => module.scheduledMaintenance === undefined
       ? []
       : [module.scheduledMaintenance(env.DB, now)]),

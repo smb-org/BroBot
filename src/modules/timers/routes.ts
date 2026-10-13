@@ -1,24 +1,54 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { canManage } from "../../contracts/values";
 import type { AuditAction } from "../../contracts/values";
-import type { ModuleRouteEnvironment, ModuleRouteVariables } from "../contract";
-import {
-  alarmKeyFor,
-  eventTimeRefreshKeyFor,
-  eventTimeWindowEnd,
-  nextDailyTimerAt,
-  nextStreamStartAt,
-  nextTimerAt,
-  triggerDelayMs,
-} from "./domain";
+import type { ModuleRouteEnvironment } from "../contract";
 import { TIMER_MAXIMUM_COUNT } from "./contracts";
 import type { Timer } from "./contracts";
-import { mapTimerRow, timerMutationInput, validateTimerText, type TimerRow } from "./service";
+import {
+  mapTimerRow,
+  preserveOfflineIntervalForLegacyMutation,
+  timerForApiResponse,
+  timerMutationInput,
+  timerTriggerJson,
+  validateTimerText,
+  type TimerRow,
+} from "./service";
 import { readTextBlockGraphRevision, textBlockGraphRevisionChanged, textBlockWriteGuard } from "../contracts/text-block-write-guard";
+import type { DurableTimerConfig } from "./durable";
+import { clearTimerScheduleReconciliation, timerScheduleReconciliationMutation } from "../contracts/timer-schedule-reconciliation";
 
 const MODULE_ID = "timers";
-const ALARM_HANDLER = "run";
 const nowIso = (): string => new Date().toISOString();
+
+const retryTimerSchedulerMutation = async (
+  db: D1Database,
+  channelId: string,
+  mutationId: string,
+  timerId: string,
+  revision: number,
+  operation: () => Promise<void>,
+  reconcile: () => Promise<void>,
+): Promise<boolean> => {
+  try {
+    await operation();
+    await clearTimerScheduleReconciliation(db, channelId, timerId, revision, mutationId, "activation");
+    return true;
+  } catch {
+    try {
+      await operation();
+      await clearTimerScheduleReconciliation(db, channelId, timerId, revision, mutationId, "activation");
+      return true;
+    } catch {
+      try {
+        await reconcile();
+        await clearTimerScheduleReconciliation(db, channelId, timerId, revision, mutationId, "activation");
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  }
+};
 
 const readBody = async (request: Request): Promise<unknown> => request.json().catch(() => null);
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -26,84 +56,24 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const manageDenied = (context: { json: (body: { error: string }, status: 403) => Response }): Response =>
   context.json({ error: "timer_management_denied" }, 403);
 
-type ResolveEventTimes = ModuleRouteVariables["resolveEventTimes"];
-type TimerRouteContext = Context<ModuleRouteEnvironment>;
+const durableConfig = (timer: Timer): DurableTimerConfig => ({
+  id: timer.id,
+  name: timer.name,
+  enabled: timer.enabled,
+  messageText: timer.messageText,
+  chatTarget: timer.chatTarget,
+  trigger: timer.trigger,
+  revision: timer.revision,
+});
 
 const readTimer = async (db: D1Database, channelId: string, timerId: string): Promise<Timer | null> => {
   const row = await db.prepare(
     `SELECT timer_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, use_channel_default_target, revision,
-            next_run_at, next_run_stream_id, last_run_at, created_at, updated_at
+            next_run_at, next_run_state,
+            last_run_at, created_at, updated_at
        FROM timers WHERE channel_id = ? AND timer_id = ?`,
   ).bind(channelId, timerId).first<TimerRow>();
   return row === null ? null : mapTimerRow(row);
-};
-
-/** `streamId` is only meaningful alongside a non-null `at` -- callers must not persist it otherwise. */
-const nextRunFor = async (
-  db: D1Database,
-  resolveEventTimes: ResolveEventTimes,
-  channelId: string,
-  trigger: Timer["trigger"],
-  now: number,
-): Promise<{ at: number | null; streamId: string | null }> => {
-  if (trigger.type === "interval") {
-    const stream = await db.prepare("SELECT state, stream_id FROM channel_stream_state WHERE channel_id = ?")
-      .bind(channelId).first<{ state: string; stream_id: string | null }>();
-    return stream?.state === "online"
-      ? { at: now + trigger.minutes * 60_000, streamId: stream.stream_id }
-      : { at: null, streamId: null };
-  }
-  if (trigger.type === "stream_start") {
-    const stream = await db.prepare("SELECT state, started_at, stream_id FROM channel_stream_state WHERE channel_id = ?")
-      .bind(channelId).first<{ state: string; started_at: string | null; stream_id: string | null }>();
-    if (stream?.state !== "online" || stream.stream_id === null) return { at: null, streamId: null };
-    const at = nextStreamStartAt(stream.started_at, now, triggerDelayMs(trigger));
-    return { at, streamId: at === null ? null : stream.stream_id };
-  }
-  const row = await db.prepare("SELECT time_zone FROM channels WHERE channel_id = ?")
-    .bind(channelId).first<{ time_zone: string }>();
-  const timeZone = row?.time_zone ?? "Europe/Berlin";
-  if (trigger.type === "time_of_day") return { at: nextDailyTimerAt(trigger, now, timeZone), streamId: null };
-  return {
-    at: nextTimerAt(trigger, {
-      now,
-      timeZone,
-      eventTimes: await resolveEventTimes(channelId, now),
-    }),
-    streamId: null,
-  };
-};
-
-const setScheduledAlarm = async (
-  context: TimerRouteContext,
-  channelId: string,
-  timerId: string,
-  trigger: Timer["trigger"],
-  enabled: boolean,
-  now: number,
-  revision: number,
-): Promise<void> => {
-  const key = alarmKeyFor(timerId);
-  const { at: deadline, streamId } = enabled
-    ? await nextRunFor(context.env.DB, context.get("resolveEventTimes"), channelId, trigger, now)
-    : { at: null, streamId: null };
-  const result = await context.env.DB.prepare(
-    "UPDATE timers SET next_run_at = ?, next_run_stream_id = ? WHERE channel_id = ? AND timer_id = ? AND revision = ? AND enabled = ?",
-  ).bind(deadline === null ? null : new Date(deadline).toISOString(), deadline === null ? null : streamId,
-    channelId, timerId, revision, enabled ? 1 : 0).run();
-  if (result.meta.changes === 0) return;
-  const stub = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
-  if (deadline === null) await stub.clearModuleAlarm(MODULE_ID, key, revision);
-  else await stub.scheduleModuleAlarm(MODULE_ID, ALARM_HANDLER, key, deadline, revision);
-  // A before_event timer whose source reports no occurrence within its own
-  // horizon must not go dormant (e.g. a sunrise timer created during polar
-  // night): schedule the same horizon-replan check the alarm handler's own
-  // replan path uses (scheduleNextRun in ./index), so create, edit and
-  // enable keep looking instead of leaving the timer without any alarm.
-  if (enabled && deadline === null && trigger.type === "before_event") {
-    const horizon = eventTimeWindowEnd(now);
-    await stub.scheduleModuleAlarm(MODULE_ID, ALARM_HANDLER, eventTimeRefreshKeyFor(timerId, horizon), horizon);
-  }
 };
 
 const textValidationError = (reason: "missing" | "input_dependent"): string =>
@@ -115,10 +85,11 @@ timerRoutes.get("/timers", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
   const result = await context.env.DB.prepare(
     `SELECT timer_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, use_channel_default_target, revision,
-            next_run_at, next_run_stream_id, last_run_at, created_at, updated_at
+            next_run_at, next_run_state,
+            last_run_at, created_at, updated_at
        FROM timers WHERE channel_id = ? ORDER BY created_at, timer_id`,
   ).bind(channelId).all<TimerRow>();
-  return context.json({ timers: result.results.map(mapTimerRow) });
+  return context.json({ timers: result.results.map((row) => timerForApiResponse(mapTimerRow(row))) });
 });
 
 timerRoutes.get("/event-time-sources", (context) =>
@@ -146,21 +117,18 @@ timerRoutes.post("/timers", async (context) => {
 
   const timerId = crypto.randomUUID();
   const now = nowIso();
-  const triggerJson = JSON.stringify(input.trigger);
+  const mutationId = crypto.randomUUID();
+  const triggerJson = timerTriggerJson(input.trigger);
   const actor = context.get("actor");
   const authorization = context.get("authorizeManagementMutation")(channelId, actor, now);
-  const stub = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
-  let activityCount: number | null = null;
-  try { activityCount = await stub.getChatActivityCount(); } catch { /* A missing baseline is initialized on first run. */ }
   const mutation = context.env.DB.prepare(
     `INSERT INTO timers
       (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, use_channel_default_target, revision,
-       next_run_at, last_run_at, last_chat_activity_count, created_at, updated_at)
-     SELECT ?, ?, ?, 1, ?, ?, ?, ?, ?, 1, NULL, NULL, ?, ?, ?
+       next_run_at, next_run_state, schedule_mirror_sequence, last_run_at, created_at, updated_at)
+     SELECT ?, ?, ?, 1, ?, ?, ?, ?, ?, 1, NULL, NULL, 0, NULL, ?, ?
        WHERE (SELECT COUNT(*) FROM timers WHERE channel_id = ?) < ? ${blockGuard.sql} ${authorization.sql}`,
   ).bind(timerId, channelId, input.name, input.messageText, input.trigger.type, triggerJson, input.chatTarget ?? "source_only",
-    input.chatTarget === null ? 1 : 0,
-    activityCount, now, now, channelId, TIMER_MAXIMUM_COUNT, ...blockGuard.values, ...authorization.values);
+    input.chatTarget === null ? 1 : 0, now, now, channelId, TIMER_MAXIMUM_COUNT, ...blockGuard.values, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
     channelId,
     moduleId: MODULE_ID,
@@ -168,7 +136,11 @@ timerRoutes.post("/timers", async (context) => {
     before: null,
     after: { timerId, name: input.name, messageText: input.messageText, triggerType: input.trigger.type, chatTarget: input.chatTarget },
   }, now);
-  const results = await context.env.DB.batch([mutation, audit]);
+  const results = await context.env.DB.batch([
+    mutation,
+    timerScheduleReconciliationMutation(context.env.DB, channelId, mutationId, now, true, "activation", { timerId, revision: 1 }),
+    audit,
+  ]);
   if (results[0]?.meta.changes === 0) {
     if (await textBlockGraphRevisionChanged(context.env.DB, channelId, graphRevision)) {
       return context.json({ error: "timer_conflict" }, 409);
@@ -179,9 +151,27 @@ timerRoutes.post("/timers", async (context) => {
       ? context.json({ error: "timer_limit_reached" }, 409)
       : context.json({ error: "timer_management_denied" }, 403);
   }
-  await setScheduledAlarm(context, channelId, timerId, input.trigger, true, Date.parse(now), 1);
+  const config = {
+    id: timerId,
+    name: input.name,
+    enabled: true,
+    messageText: input.messageText,
+    chatTarget: input.chatTarget,
+    trigger: input.trigger,
+    revision: 1,
+  } satisfies DurableTimerConfig;
+  const stub = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
+  await retryTimerSchedulerMutation(
+    context.env.DB,
+    channelId,
+    mutationId,
+    timerId,
+    config.revision,
+    () => stub.upsertTimerConfig(config),
+    () => stub.reconcileTimerSchedules("activation"),
+  );
   const timer = await readTimer(context.env.DB, channelId, timerId);
-  return context.json({ timer }, 201);
+  return context.json({ timer: timer === null ? null : timerForApiResponse(timer) }, 201);
 });
 
 timerRoutes.patch("/timers/:timerId", async (context) => {
@@ -195,8 +185,13 @@ timerRoutes.patch("/timers/:timerId", async (context) => {
   if (!Number.isSafeInteger(revision) || (revision as number) < 1) return context.json({ error: "timer_invalid" }, 400);
   const input = timerMutationInput(body);
   if (input === null) return context.json({ error: "timer_invalid" }, 400);
+  const trigger = preserveOfflineIntervalForLegacyMutation(
+    input.trigger,
+    existing.trigger,
+    isRecord(body) ? body.trigger : undefined,
+  );
   const graphRevision = await readTextBlockGraphRevision(context.env.DB, channelId);
-  const eventSourceId = input.trigger.type === "before_event" ? input.trigger.sourceId : null;
+  const eventSourceId = trigger.type === "before_event" ? trigger.sourceId : null;
   if (eventSourceId !== null && !context.get("listEventTimeSources")().some((source) => source.id === eventSourceId)) {
     return context.json({ error: "timer_event_source_missing" }, 400);
   }
@@ -205,13 +200,14 @@ timerRoutes.patch("/timers/:timerId", async (context) => {
   if (!validation.ok) return context.json({ error: textValidationError(validation.reason) }, 400);
   const blockGuard = textBlockWriteGuard(channelId, graphRevision, [input.messageText]);
   const now = nowIso();
+  const mutationId = crypto.randomUUID();
   const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
     `UPDATE timers
         SET name = ?, message_text = ?, trigger_type = ?, trigger_json = ?, chat_target = ?, use_channel_default_target = ?,
-            next_run_at = NULL, next_run_stream_id = NULL, revision = revision + 1, updated_at = ?
+            revision = revision + 1, updated_at = ?
       WHERE channel_id = ? AND timer_id = ? AND revision = ? ${blockGuard.sql} ${authorization.sql}`,
-  ).bind(input.name, input.messageText, input.trigger.type, JSON.stringify(input.trigger), input.chatTarget ?? "source_only",
+  ).bind(input.name, input.messageText, trigger.type, timerTriggerJson(trigger), input.chatTarget ?? "source_only",
     input.chatTarget === null ? 1 : 0, now,
     channelId, timerId, revision, ...blockGuard.values, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
@@ -219,16 +215,41 @@ timerRoutes.patch("/timers/:timerId", async (context) => {
     moduleId: MODULE_ID,
     action: "timers.timer.updated" satisfies AuditAction,
     before: { timerId, name: existing.name, messageText: existing.messageText, triggerType: existing.trigger.type, chatTarget: existing.chatTarget },
-    after: { timerId, name: input.name, messageText: input.messageText, triggerType: input.trigger.type, chatTarget: input.chatTarget },
+    after: { timerId, name: input.name, messageText: input.messageText, triggerType: trigger.type, chatTarget: input.chatTarget },
   }, now);
-  const results = await context.env.DB.batch([mutation, audit]);
+  const results = await context.env.DB.batch([
+    mutation,
+    timerScheduleReconciliationMutation(context.env.DB, channelId, mutationId, now, true, "activation", {
+      timerId,
+      revision: existing.revision + 1,
+    }),
+    audit,
+  ]);
   if (results[0]?.meta.changes === 0) {
     const current = await readTimer(context.env.DB, channelId, timerId);
-    return context.json({ error: current === null ? "timer_not_found" : "timer_conflict", ...(current === null ? {} : { timer: current }) }, 409);
+    return context.json({ error: current === null ? "timer_not_found" : "timer_conflict", ...(current === null ? {} : { timer: timerForApiResponse(current) }) }, 409);
   }
-  await setScheduledAlarm(context, channelId, timerId, input.trigger, existing.enabled, Date.parse(now), existing.revision + 1);
+  const config = {
+    id: timerId,
+    name: input.name,
+    enabled: existing.enabled,
+    messageText: input.messageText,
+    chatTarget: input.chatTarget,
+    trigger,
+    revision: existing.revision + 1,
+  } satisfies DurableTimerConfig;
+  const stub = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
+  await retryTimerSchedulerMutation(
+    context.env.DB,
+    channelId,
+    mutationId,
+    timerId,
+    config.revision,
+    () => stub.upsertTimerConfig(config),
+    () => stub.reconcileTimerSchedules("activation"),
+  );
   const timer = await readTimer(context.env.DB, channelId, timerId);
-  return context.json({ timer });
+  return context.json({ timer: timer === null ? null : timerForApiResponse(timer) });
 });
 
 timerRoutes.patch("/timers/:timerId/enabled", async (context) => {
@@ -244,9 +265,10 @@ timerRoutes.patch("/timers/:timerId/enabled", async (context) => {
   const enabled = body.enabled;
   const revision = body.revision as number;
   const now = nowIso();
+  const mutationId = crypto.randomUUID();
   const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
-    `UPDATE timers SET enabled = ?, next_run_at = NULL, next_run_stream_id = NULL, revision = revision + 1, updated_at = ?
+    `UPDATE timers SET enabled = ?, revision = revision + 1, updated_at = ?
       WHERE channel_id = ? AND timer_id = ? AND revision = ? AND enabled <> ? ${authorization.sql}`,
   ).bind(enabled ? 1 : 0, now, channelId, timerId, revision, enabled ? 1 : 0, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
@@ -256,16 +278,37 @@ timerRoutes.patch("/timers/:timerId/enabled", async (context) => {
     before: { timerId, name: existing.name, enabled: existing.enabled },
     after: { timerId, name: existing.name, enabled },
   }, now);
-  const results = await context.env.DB.batch([mutation, audit]);
+  const results = await context.env.DB.batch([
+    mutation,
+    timerScheduleReconciliationMutation(context.env.DB, channelId, mutationId, now, true, "activation", {
+      timerId,
+      revision: existing.revision + 1,
+    }),
+    audit,
+  ]);
   if (results[0]?.meta.changes === 0) {
     const current = await readTimer(context.env.DB, channelId, timerId);
     return current === null
       ? context.json({ error: "timer_not_found" }, 404)
-      : current.revision !== revision ? context.json({ error: "timer_conflict", timer: current }, 409) : context.json({ timer: current });
+      : current.revision !== revision ? context.json({ error: "timer_conflict", timer: timerForApiResponse(current) }, 409) : context.json({ timer: timerForApiResponse(current) });
   }
-  await setScheduledAlarm(context, channelId, timerId, existing.trigger, enabled, Date.parse(now), existing.revision + 1);
+  const config = {
+    ...durableConfig(existing),
+    enabled,
+    revision: existing.revision + 1,
+  } satisfies DurableTimerConfig;
+  const stub = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
+  await retryTimerSchedulerMutation(
+    context.env.DB,
+    channelId,
+    mutationId,
+    timerId,
+    config.revision,
+    () => stub.upsertTimerConfig(config),
+    () => stub.reconcileTimerSchedules("activation"),
+  );
   const timer = await readTimer(context.env.DB, channelId, timerId);
-  return context.json({ timer });
+  return context.json({ timer: timer === null ? null : timerForApiResponse(timer) });
 });
 
 timerRoutes.delete("/timers/:timerId", async (context) => {
@@ -277,6 +320,7 @@ timerRoutes.delete("/timers/:timerId", async (context) => {
   const revision = Number(context.req.query("revision"));
   if (!Number.isSafeInteger(revision) || revision < 1) return context.json({ error: "timer_invalid" }, 400);
   const now = nowIso();
+  const mutationId = crypto.randomUUID();
   const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
     `DELETE FROM timers WHERE channel_id = ? AND timer_id = ? AND revision = ? ${authorization.sql}`,
@@ -288,9 +332,24 @@ timerRoutes.delete("/timers/:timerId", async (context) => {
     before: { timerId, name: existing.name, messageText: existing.messageText, triggerType: existing.trigger.type, chatTarget: existing.chatTarget },
     after: null,
   }, now);
-  const results = await context.env.DB.batch([mutation, audit]);
+  const results = await context.env.DB.batch([
+    mutation,
+    timerScheduleReconciliationMutation(context.env.DB, channelId, mutationId, now, true, "activation", {
+      timerId,
+      revision: revision + 1,
+    }),
+    audit,
+  ]);
   if (results[0]?.meta.changes === 0) return context.json({ error: "timer_conflict" }, 409);
   const stub = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
-  await stub.clearModuleAlarm(MODULE_ID, alarmKeyFor(timerId), revision + 1);
+  await retryTimerSchedulerMutation(
+    context.env.DB,
+    channelId,
+    mutationId,
+    timerId,
+    revision + 1,
+    () => stub.deleteTimerConfig(timerId, revision),
+    () => stub.reconcileTimerSchedules("activation"),
+  );
   return context.body(null, 204);
 });

@@ -1,5 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
-import { e2eWorkerEnvironment, e2eWorkerPort } from "./tests/e2e/worker-fixtures";
+import { e2eWorkerEnvironment, e2eWorkerPersist, e2eWorkerPort } from "./tests/e2e/worker-fixtures";
 
 const playwrightPort = process.env.PLAYWRIGHT_PORT ?? "5174";
 const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
@@ -30,14 +30,14 @@ export default defineConfig({
       // Run from the built output so Wrangler serves index.js and resolves
       // assets and migrations relative to dist/brobot_local. A build is
       // required; `pretest:e2e` supplies it for pnpm run test:e2e.
-      command: `./node_modules/.bin/wrangler --cwd dist/brobot_local --config wrangler.json dev --local --ip 127.0.0.1 --port ${e2eWorkerPort} --persist-to ../../.wrangler/e2e-worker --show-interactive-dev-session=false ${workerBindings}`,
+      command: `./node_modules/.bin/wrangler --cwd dist/brobot_local --config wrangler.json dev --local --ip 127.0.0.1 --port ${e2eWorkerPort} --persist-to ${shellQuote(e2eWorkerPersist)} --show-interactive-dev-session=false ${workerBindings}`,
       // Port statt Adresse: /healthz meldet bewusst 503, solange Secrets oder
       // Schema fehlen. Playwright wartet auf 2xx und liefe sonst in die
       // Zeitüberschreitung, obwohl der Worker längst antwortet.
       port: Number(e2eWorkerPort),
       reuseExistingServer: false,
       timeout: 120_000,
-      env: e2eWorkerEnvironment,
+      env: { ...e2eWorkerEnvironment, E2E_WORKER_PERSIST: e2eWorkerPersist },
     },
   ],
   projects: [{ name: "chromium-desktop", use: { ...devices["Desktop Chrome"] } }],

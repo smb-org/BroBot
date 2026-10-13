@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { writeEventSubStreamState } from "../../src/worker/db/stream-state";
+import { readChannelStreamState, writeEventSubStreamState, writeEventSubStreamStateWithGeneration } from "../../src/worker/db/stream-state";
 import { insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -63,5 +63,41 @@ describe("timestampOrder fraction handling", () => {
     );
 
     expect(result).toBe("invalid_timestamp");
+  });
+});
+
+describe("stream transition generations", () => {
+  it("increments only for accepted state or stream transitions and returns the committed value", async () => {
+    const database = new TestD1Database();
+    await insertChannel(database, "generation-channel");
+    const db = database as unknown as D1Database;
+
+    const first = await writeEventSubStreamStateWithGeneration(
+      db, "generation-channel", "online", "2026-09-23T12:00:00.000Z", "2026-09-23T11:55:00.000Z", "stream-1",
+    );
+    expect(first).toEqual({ result: "written", transitionGeneration: 1 });
+
+    const repeated = await writeEventSubStreamStateWithGeneration(
+      db, "generation-channel", "online", "2026-09-23T12:01:00.000Z", "2026-09-23T11:55:00.000Z", "stream-1",
+    );
+    expect(repeated).toEqual({ result: "written", transitionGeneration: 1 });
+
+    const offline = await writeEventSubStreamStateWithGeneration(
+      db, "generation-channel", "offline", "2026-09-23T12:05:00.000Z", null,
+    );
+    expect(offline).toEqual({ result: "written", transitionGeneration: 2 });
+
+    const nextStream = await writeEventSubStreamStateWithGeneration(
+      db, "generation-channel", "online", "2026-09-23T12:10:00.000Z", "2026-09-23T12:10:00.000Z", "stream-2",
+    );
+    expect(nextStream).toEqual({ result: "written", transitionGeneration: 3 });
+    await expect(readChannelStreamState(db, "generation-channel")).resolves.toMatchObject({
+      state: "online", streamId: "stream-2", transitionGeneration: 3,
+    });
+    const pendingTimerRepair = await db.prepare(
+      "SELECT channel_id, mutation_id FROM timer_schedule_reconciliation WHERE channel_id = ?",
+    ).bind("generation-channel").first<{ channel_id: string; mutation_id: string }>();
+    expect(pendingTimerRepair?.channel_id).toBe("generation-channel");
+    expect(typeof pendingTimerRepair?.mutation_id).toBe("string");
   });
 });

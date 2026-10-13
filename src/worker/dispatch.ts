@@ -19,7 +19,7 @@ import { readChannelBlockedTerms } from "./twitch/blocked-terms";
 import {
   isOlderOnlineEventThanHelixOfflineObservation,
   readChannelStreamState,
-  writeEventSubStreamState,
+  writeEventSubStreamStateWithGeneration,
 } from "./db/stream-state";
 import { lookupAndRefreshStreamState } from "./stream-state-lookup";
 import { moduleEnabledForChannel, readChannelControls, readDispatchChannelState } from "./db/channel-controls";
@@ -36,6 +36,7 @@ import { createModuleExternalFetchBudget } from "./external-fetch-budget";
 import { moduleBallots } from "./module-ballots";
 import { createModuleSecretReadAccess } from "./module-secrets";
 import { recordChannelGameHistory } from "./db/game-search-cache";
+import { notifyModuleScheduleInputsChanged } from "./module-schedules";
 
 export interface DispatchEnvironment {
   DB: D1Database;
@@ -644,6 +645,7 @@ export const dispatchEventSubNotification = async (
   const changedVariables = new Map<string, number>();
   const overlayIdsByVariable = new Map<string, readonly string[]>();
   let streamStateChanged: RealtimeMessage | null = null;
+  let streamStateTransitionGeneration: number | undefined;
   const endingStreamDispatchState = event.subscriptionType === "stream.offline"
     ? await readDispatchChannelState(environment.DB, event.channelId, event.receivedAt)
     : null;
@@ -671,7 +673,7 @@ export const dispatchEventSubNotification = async (
         { forceRefresh: true },
       );
     }
-    const stateWrite = await writeEventSubStreamState(
+    const stateWrite = await writeEventSubStreamStateWithGeneration(
       environment.DB,
       event.channelId,
       event.subscriptionType === "stream.online" ? "online" : "offline",
@@ -679,7 +681,26 @@ export const dispatchEventSubNotification = async (
       startedAt,
       streamId,
     );
-    if (stateWrite === "written" &&
+    streamStateTransitionGeneration = stateWrite.transitionGeneration ?? undefined;
+    if (stateWrite.result === "written" && stateWrite.transitionGeneration !== null) {
+      const channelNamespace = environment.CHANNEL as NonNullable<typeof environment.CHANNEL>;
+      try {
+        await channelNamespace.get(channelNamespace.idFromName(event.channelId)).transitionTimerStream({
+          state: isOnline ? "online" : "offline",
+          streamId,
+          startedAt,
+          generation: stateWrite.transitionGeneration,
+        });
+      } catch (error: unknown) {
+        console.warn("Timer stream state could not be updated.", error);
+        try {
+          await notifyModuleScheduleInputsChanged(environment.CHANNEL, event.channelId, "stream_state");
+        } catch (retryError: unknown) {
+          console.warn("Timer stream state repair could not be queued.", retryError);
+        }
+      }
+    }
+    if (stateWrite.result === "written" &&
         (streamBefore?.state !== (isOnline ? "online" : "offline") ||
           streamBefore.startedAt !== startedAt || streamBefore.streamId !== streamId)) {
       const controls = await readChannelControls(environment.DB, event.channelId, event.receivedAt);
@@ -697,7 +718,7 @@ export const dispatchEventSubNotification = async (
         },
       };
     }
-    if (event.subscriptionType === "stream.offline" && stateWrite === "ambiguous_offline") {
+    if (event.subscriptionType === "stream.offline" && stateWrite.result === "ambiguous_offline") {
       // A start-less live row or an event exactly on the session boundary
       // cannot safely determine whether this session ended. Ask Helix even
       // when the cached state is otherwise fresh.
@@ -709,7 +730,7 @@ export const dispatchEventSubNotification = async (
         { forceRefresh: true },
       );
     }
-    if (isOnline && stateWrite === "written" && startedAt !== null) {
+    if (isOnline && stateWrite.result === "written" && startedAt !== null) {
       const reset = await prepareResetChannelVariablesForStream(
         environment.DB,
         event.channelId,
@@ -730,7 +751,14 @@ export const dispatchEventSubNotification = async (
     const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
     if (event.subscriptionType === "channel.chat.message") {
       try {
-        await object.recordChatActivity(textValue(event.payload.chatter_user_id), trackActiveChatters);
+        const sourceBroadcasterId = event.payload.source_broadcaster_user_id;
+        const belongsToChannel = sourceBroadcasterId === undefined || sourceBroadcasterId === null ||
+          sourceBroadcasterId === event.channelId;
+        const chatterUserId = textValue(event.payload.chatter_user_id);
+        const isBotMessage = chatterUserId !== null && chatterUserId === await getCachedBotUserId(environment.DB);
+        if (belongsToChannel && !isBotMessage) {
+          await object.recordChatActivity(chatterUserId, trackActiveChatters);
+        }
       } catch (error: unknown) {
         console.warn("Channel chat activity could not be counted.", error);
       }
@@ -983,6 +1011,9 @@ export const dispatchEventSubNotification = async (
             isRecentBotMessage,
             streamState,
             streamStateTransitionAccepted,
+            ...(streamStateTransitionAccepted && streamStateTransitionGeneration !== undefined
+              ? { streamStateTransitionGeneration }
+              : {}),
             ...(streamStateTransitionAccepted && event.subscriptionType === "stream.offline" && endingStreamDispatchState !== null
               ? { streamSession: { streamId: endingStreamDispatchState.streamId, startedAt: endingStreamDispatchState.streamStartedAt } }
               : {}),
@@ -1012,25 +1043,35 @@ export const dispatchEventSubNotification = async (
             secureRandomInteger,
             channelLanguage,
             channelTimeZone,
-            scheduleAlarm: async (handlerKey, alarmKey, deadline, ownerRevision) => {
+            scheduleAlarm: async (handlerKey, alarmKey, deadline, ownerRevision, streamGeneration, identity, planSequence) => {
               if (environment.CHANNEL === undefined) return;
               const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
-              if (ownerRevision === undefined) {
+              if (ownerRevision === undefined && streamGeneration === undefined && identity === undefined && planSequence === undefined) {
                 await object.scheduleModuleAlarm(module.id, handlerKey, alarmKey, deadline);
               } else {
-                await object.scheduleModuleAlarm(module.id, handlerKey, alarmKey, deadline, ownerRevision);
+                await object.scheduleModuleAlarm(module.id, handlerKey, alarmKey, deadline,
+                  ownerRevision, streamGeneration, identity, planSequence);
               }
             },
-            clearAlarm: async (alarmKey, ownerRevision) => {
+            clearAlarm: async (alarmKey, ownerRevision, streamGeneration, expectedIdentity, planSequence) => {
               if (environment.CHANNEL === undefined) return;
               const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
-              if (ownerRevision === undefined) await object.clearModuleAlarm(module.id, alarmKey);
-              else await object.clearModuleAlarm(module.id, alarmKey, ownerRevision);
+              if (ownerRevision === undefined && streamGeneration === undefined && expectedIdentity === undefined && planSequence === undefined) {
+                await object.clearModuleAlarm(module.id, alarmKey);
+              } else {
+                await object.clearModuleAlarm(module.id, alarmKey, ownerRevision, streamGeneration,
+                  expectedIdentity, planSequence);
+              }
             },
             getAlarmDeadline: async (alarmKey) => {
               if (environment.CHANNEL === undefined) return null;
               const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
               return await object.getModuleAlarmDeadline(module.id, alarmKey);
+            },
+            getAlarmPlan: async (alarmKey) => {
+              if (environment.CHANNEL === undefined) return null;
+              const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
+              return await object.getModuleAlarmPlan(module.id, alarmKey);
             },
           });
     } catch (error: unknown) {

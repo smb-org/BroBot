@@ -1,17 +1,10 @@
 import type { TestD1Database } from "./test-d1";
-import type { ModuleSecretAccess, ModuleSecretReadAccess } from "../../src/modules/contract";
+import type { ModuleSecretReadAccess } from "../../src/modules/contract";
 
 export const unusedModuleSecretReadAccess: ModuleSecretReadAccess = {
   status: () => Promise.resolve({ configured: false, updatedAt: null }),
   read: () => Promise.resolve(null),
   readWithVersion: () => Promise.resolve(null),
-};
-
-export const unusedModuleSecretAccess: ModuleSecretAccess = {
-  ...unusedModuleSecretReadAccess,
-  readWithVersion: () => Promise.resolve(null),
-  prepareWrite: () => Promise.reject(new Error("Unused module secret write.")),
-  prepareDelete: () => { throw new Error("Unused module secret delete."); },
 };
 
 export const testKey = (byte: number): string => btoa(String.fromCharCode(...new Uint8Array(32).fill(byte)))

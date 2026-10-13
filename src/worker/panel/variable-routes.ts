@@ -21,6 +21,8 @@ import {
   type ChannelVariableRecord,
 } from "../db/channel-variables";
 import { measureServerTiming } from "../server-timing";
+import { reconcileChannelTimerSchedules } from "../module-schedules";
+import { clearTimerScheduleReconciliation, timerScheduleReconciliationMutation } from "../../modules/contracts/timer-schedule-reconciliation";
 
 interface VariableRouteEnvironment {
   Bindings: Env;
@@ -214,8 +216,13 @@ variableRouter.patch("/api/channels/:channelId/variables/:name", async (context)
     createdAt: before.createdAt,
     updatedAt: now,
   };
-  const referenceUpdates = referenceModules.flatMap((module) =>
-    module.variableReferences?.rename(context.env.DB, channelId, name, newName, renameGuard) ?? []);
+  const timerMutationId = newName === name ? null : crypto.randomUUID();
+  const referenceUpdates = referenceModules.flatMap((module) => {
+    const updates = module.variableReferences?.rename(context.env.DB, channelId, name, newName, renameGuard) ?? [];
+    return module.id === "timers" && timerMutationId !== null
+      ? [...updates, timerScheduleReconciliationMutation(context.env.DB, channelId, timerMutationId, now, true)]
+      : updates;
+  });
   const results = await context.env.DB.batch([references, mutation, audit, ...overlayRevisionUpdates, ...referenceUpdates]);
   if ((results[1]?.meta.changes ?? 0) === 0) {
     if (await findChannelVariable(context.env.DB, channelId, newName) !== null) {
@@ -232,6 +239,14 @@ variableRouter.patch("/api/channels/:channelId/variables/:name", async (context)
   }
   for (const module of referenceModules) {
     module.variableReferences?.afterRename?.(context.env.DB, channelId, name, newName);
+  }
+  if (timerMutationId !== null) {
+    try {
+      await reconcileChannelTimerSchedules(context.env.CHANNEL, channelId);
+      await clearTimerScheduleReconciliation(context.env.DB, channelId, "", 0, timerMutationId, "activation");
+    } catch (error: unknown) {
+      console.warn("Timer schedule reconciliation remains pending after channel variable rename.", channelId, error);
+    }
   }
   const variable = await findChannelVariable(context.env.DB, channelId, newName);
   const overlayRows = newName === name ? [] : (results[3]?.results ?? []) as Array<{ overlay_id: string; revision: number }>;

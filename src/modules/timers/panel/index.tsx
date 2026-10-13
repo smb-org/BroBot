@@ -1,13 +1,14 @@
 import { useMemo, useState, type ReactElement } from "react";
 
 import { runModuleQueryWrite, useChannelSettings, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
-import { templateTextLength } from "../../../contracts/template-text-length";
 import { formatTimestamp } from "../../../dashboard/locale";
-import { Button, ChatTargetField, ChatPreview, ConfirmDialog, Dialog, Field, FormDialog, InspectorSection, LoadState, LoadStateLines, Select, SwitchRow, SwitchSection, TemplateTextField, UnitInput, notify } from "../../../dashboard/ui";
+import { Button, ChatTargetField, ChatPreview, ConfirmDialog, Dialog, Field, FormDialog, InspectorSection, LoadState, LoadStateLines, Section, Select, SwitchRow, SwitchSection, TemplateTextField, UnitInput, notify } from "../../../dashboard/ui";
 import { Switch as SwitchPrimitive } from "../../../dashboard/ui/primitives/switch";
 import type { ModulePanelProperties } from "../../contract";
-import type { Timer, TimerMutationInput, TimerTrigger } from "../contracts";
+import type { Timer, TimerTrigger } from "../contracts";
+import { inputFromDraft, type TimerDraft } from "./draft";
 import { timersTexts } from "./locale";
+import { nextRunLabel, triggerDetail } from "./summary";
 import {
   createTimer,
   deleteTimer,
@@ -21,28 +22,21 @@ import {
 
 type TriggerType = TimerTrigger["type"];
 
-interface TimerDraft {
-  name: string;
-  messageText: string;
-  chatTarget: Timer["chatTarget"];
-  type: TriggerType;
+interface TimerIntervalDraft {
   minutes: number | "";
   minimumMessages: number | "";
-  useMinimumMessages: boolean;
-  time: string;
-  weekdays: number[];
-  alsoOffline: boolean;
-  sourceId: string;
 }
+
+const emptyIntervalDraft = (): TimerIntervalDraft => ({ minutes: 30, minimumMessages: "" });
 
 const emptyDraft = (sources: TimersPanelData["sources"]): TimerDraft => ({
   name: "",
   messageText: "",
   chatTarget: null,
   type: "interval",
+  live: emptyIntervalDraft(),
+  offline: null,
   minutes: 30,
-  minimumMessages: 10,
-  useMinimumMessages: false,
   time: "12:00",
   weekdays: [],
   alsoOffline: false,
@@ -53,8 +47,8 @@ const draftFromTimer = (timer: Timer): TimerDraft => {
   const trigger = timer.trigger;
   if (trigger.type === "interval") return {
     ...emptyDraft([]), name: timer.name, messageText: timer.messageText, chatTarget: timer.chatTarget, type: trigger.type,
-    minutes: trigger.minutes, useMinimumMessages: trigger.minimumMessages !== undefined,
-    minimumMessages: trigger.minimumMessages ?? 10,
+    live: trigger.live === undefined ? null : { minutes: trigger.live.minutes, minimumMessages: trigger.live.minimumMessages ?? "" },
+    offline: trigger.offline === undefined ? null : { minutes: trigger.offline.minutes, minimumMessages: trigger.offline.minimumMessages ?? "" },
   };
   if (trigger.type === "stream_start") return {
     ...emptyDraft([]), name: timer.name, messageText: timer.messageText, chatTarget: timer.chatTarget, type: trigger.type, minutes: trigger.minutes,
@@ -67,27 +61,6 @@ const draftFromTimer = (timer: Timer): TimerDraft => {
     ...emptyDraft([]), name: timer.name, messageText: timer.messageText, chatTarget: timer.chatTarget, type: trigger.type,
     minutes: trigger.minutes, sourceId: trigger.sourceId,
   };
-};
-
-const inputFromDraft = (draft: TimerDraft): TimerMutationInput | null => {
-  if (typeof draft.minutes !== "number" && draft.type !== "time_of_day") return null;
-  if (draft.name.trim().length === 0 || draft.messageText.trim().length === 0 || templateTextLength(draft.messageText) > 500) return null;
-  let trigger: TimerTrigger;
-  if (draft.type === "interval") {
-    trigger = {
-      type: "interval",
-      minutes: draft.minutes as number,
-      ...(draft.useMinimumMessages ? { minimumMessages: draft.minimumMessages as number } : {}),
-    };
-  } else if (draft.type === "stream_start") {
-    trigger = { type: "stream_start", minutes: draft.minutes as number };
-  } else if (draft.type === "time_of_day") {
-    trigger = { type: "time_of_day", time: draft.time, weekdays: draft.weekdays, alsoOffline: draft.alsoOffline };
-  } else {
-    if (draft.sourceId.length === 0) return null;
-    trigger = { type: "before_event", sourceId: draft.sourceId, minutes: draft.minutes as number };
-  }
-  return { name: draft.name.trim(), messageText: draft.messageText, chatTarget: draft.chatTarget, trigger };
 };
 
 const timersPanelDataFrom = (value: unknown): TimersPanelData => {
@@ -122,21 +95,6 @@ const triggerTitle = (type: TriggerType, labels: ReturnType<typeof timersTexts>)
   if (type === "stream_start") return labels.streamStart;
   if (type === "time_of_day") return labels.timeOfDay;
   return labels.beforeEvent;
-};
-
-const triggerDetail = (timer: Timer, data: TimersPanelData, labels: ReturnType<typeof timersTexts>, language: "de" | "en"): string => {
-  const trigger = timer.trigger;
-  if (trigger.type === "interval") {
-    const threshold = trigger.minimumMessages === undefined ? "" : ` · ${String(trigger.minimumMessages)} ${labels.messageCount.toLowerCase()}`;
-    return `${String(trigger.minutes)} ${labels.minutes.toLowerCase()}${threshold}`;
-  }
-  if (trigger.type === "stream_start") return `${String(trigger.minutes)} ${labels.minutes.toLowerCase()}`;
-  if (trigger.type === "time_of_day") {
-    const selectedDays = trigger.weekdays.length === 0 ? labels.everyDay : trigger.weekdays.map((day) => labels.weekdaysNames[day]).join(", ");
-    return `${trigger.time} · ${selectedDays}${trigger.alsoOffline ? ` · ${labels.alsoOffline}` : ""}`;
-  }
-  const label = data.sources.find((source) => source.id === trigger.sourceId)?.label[language] ?? trigger.sourceId;
-  return `${String(trigger.minutes)} ${labels.minutes.toLowerCase()} ${labels.beforeEvent.toLowerCase()} · ${label}`;
 };
 
 export default function TimersPanel(properties: ModulePanelProperties): ReactElement {
@@ -267,7 +225,7 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
                 <span>{triggerDetail(timer, data as TimersPanelData, labels, language ?? "de")}</span>
                 <span>{labels.message} · {timer.messageText}</span>
                 <span>{labels.chatTarget} · {timer.chatTarget === null ? labels.chatTargetDefault : labels.chatTargetLabels[timer.chatTarget]}</span>
-                <span>{labels.nextRun} · {timer.nextRunAt === null ? labels.noNextRun : formatTimestamp(timer.nextRunAt)}</span>
+                <span>{nextRunLabel(timer, labels)} ·{timer.nextRunAt === null ? labels.noNextRun : formatTimestamp(timer.nextRunAt)}</span>
               </div>
               <div className="timer-row__actions">
                 <SwitchPrimitive
@@ -328,25 +286,59 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
             options={triggerOptions}
           />
 
-          {draft.type === "interval" || draft.type === "stream_start" ? <UnitInput
+          {draft.type === "interval" ? <Section title={labels.interval}>
+            <div className="module-stack">
+              <SwitchSection title={labels.live} hint={labels.liveOff} checked={draft.live !== null} onChange={(enabled) => patchDraft({ live: enabled ? emptyIntervalDraft() : null })} pending={pending}>
+                <div className="module-stack">
+                  <UnitInput
+                    label={labels.minutes}
+                    value={draft.live?.minutes ?? ""}
+                    onChange={(minutes) => patchDraft({ live: draft.live === null ? null : { ...draft.live, minutes } })}
+                    min={1}
+                    max={1_440}
+                    unit={labels.minutesUnit}
+                    required
+                  />
+                  <UnitInput
+                    label={labels.messageCount}
+                    value={draft.live?.minimumMessages ?? ""}
+                    onChange={(minimumMessages) => patchDraft({ live: draft.live === null ? null : { ...draft.live, minimumMessages } })}
+                    min={1}
+                    max={100_000}
+                  />
+                </div>
+              </SwitchSection>
+              <SwitchSection title={labels.offline} hint={labels.offlineOff} checked={draft.offline !== null} onChange={(enabled) => patchDraft({ offline: enabled ? emptyIntervalDraft() : null })} pending={pending}>
+                <div className="module-stack">
+                  <UnitInput
+                    label={labels.minutes}
+                    value={draft.offline?.minutes ?? ""}
+                    onChange={(minutes) => patchDraft({ offline: draft.offline === null ? null : { ...draft.offline, minutes } })}
+                    min={1}
+                    max={1_440}
+                    unit={labels.minutesUnit}
+                    required
+                  />
+                  <UnitInput
+                    label={labels.messageCount}
+                    value={draft.offline?.minimumMessages ?? ""}
+                    onChange={(minimumMessages) => patchDraft({ offline: draft.offline === null ? null : { ...draft.offline, minimumMessages } })}
+                    min={1}
+                    max={100_000}
+                  />
+                </div>
+              </SwitchSection>
+            </div>
+          </Section> : null}
+          {draft.type === "stream_start" ? <UnitInput
             label={labels.minutes}
             value={draft.minutes}
             onChange={(minutes) => patchDraft({ minutes })}
             min={1}
             max={1_440}
-            unit="min"
+            unit={labels.minutesUnit}
             required
           /> : null}
-          {draft.type === "interval" ? <SwitchSection title={labels.minimumMessages} hint={labels.minimumMessagesHint} checked={draft.useMinimumMessages} onChange={(useMinimumMessages) => patchDraft({ useMinimumMessages })}>
-            <UnitInput
-              label={labels.messageCount}
-              value={draft.minimumMessages}
-              onChange={(minimumMessages) => patchDraft({ minimumMessages })}
-              min={1}
-              max={100_000}
-              required
-            />
-          </SwitchSection> : null}
           {draft.type === "time_of_day" ? <>
             <Field label={labels.time} value={draft.time} onChange={(time) => patchDraft({ time })} placeholder="HH:MM" required />
             <div className="timer-weekdays" role="group" aria-label={labels.weekdays}>
@@ -367,7 +359,7 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
           </> : null}
           {draft.type === "before_event" ? <>
             <Select label={labels.eventSource} value={draft.sourceId || null} onChange={(sourceId) => patchDraft({ sourceId: sourceId ?? "" })} options={sourceOptions} required />
-            <UnitInput label={labels.before} value={draft.minutes} onChange={(minutes) => patchDraft({ minutes })} min={1} max={1_440} unit="min" required />
+            <UnitInput label={labels.before} value={draft.minutes} onChange={(minutes) => patchDraft({ minutes })} min={1} max={1_440} unit={labels.minutesUnit} required />
           </> : null}
 
           <div className="inspector-actions">

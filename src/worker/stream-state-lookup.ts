@@ -11,6 +11,7 @@ import { listChannelIdsNeedingStreamStateRefresh } from "./db/channels";
 import { prepareResetChannelVariablesForStream } from "./db/channel-variables";
 import { logMaintenanceError } from "./bot-maintenance";
 import { publishStreamStateChanged, publishVariablesChanged } from "./realtime";
+import { notifyModuleScheduleInputsChanged } from "./module-schedules";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -114,6 +115,7 @@ export const lookupAndRefreshStreamState = async (
         startedAt: fromHelix.startedAt,
         streamId: fromHelix.streamId,
         checkedAt: now,
+        transitionGeneration: 1,
       };
     } else {
       refreshedStored = await readChannelStreamState(env.DB, channelId);
@@ -130,6 +132,19 @@ export const lookupAndRefreshStreamState = async (
       }
     }
     refreshedStored = await readChannelStreamState(env.DB, channelId);
+  }
+  if (refreshedStored !== null && stored?.transitionGeneration !== refreshedStored.transitionGeneration) {
+    try {
+      await env.CHANNEL.get(env.CHANNEL.idFromName(channelId)).transitionTimerStream({
+        state: refreshedStored.state,
+        streamId: refreshedStored.streamId,
+        startedAt: refreshedStored.startedAt,
+        generation: refreshedStored.transitionGeneration,
+      });
+    } catch (error: unknown) {
+      console.warn("Timer stream state could not be updated after Helix refresh.", error);
+    }
+    await notifyModuleScheduleInputsChanged(env.CHANNEL, channelId, "stream_state");
   }
   if (refreshedStored !== null &&
       (stored?.state !== refreshedStored.state || stored.startedAt !== refreshedStored.startedAt ||

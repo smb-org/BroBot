@@ -1,5 +1,8 @@
 import { createCipheriv, createHmac, randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 interface TestKeyRing {
   active: { id: string; key: string };
@@ -15,9 +18,16 @@ const keyRing = (id: string, byte: number): string => JSON.stringify({
 /** Port of the e2e wrangler worker; override with WORKER_PORT to run checks in parallel. */
 export const e2eWorkerPort = process.env.WORKER_PORT ?? "8787";
 export const e2eWorkerOrigin = `http://127.0.0.1:${e2eWorkerPort}`;
+export const e2eWorkerPersist = process.env.E2E_WORKER_PERSIST ??
+  mkdtempSync(join(tmpdir(), "brobot-e2e-worker-"));
+process.env.E2E_WORKER_PERSIST = e2eWorkerPersist;
 export const e2eOverlayToken = testKey(7);
 export const e2eChannelId = "channel-e2e";
 const e2eOverlayId = "overlay-e2e";
+const e2eMigrationCount = readdirSync(new URL("../../migrations/", import.meta.url))
+  .filter((fileName) => fileName.endsWith(".sql")).length;
+const e2eMigrationRunLimit = e2eMigrationCount + 1;
+const e2eMigrationOutputLimit = Math.max(8 * 1024 * 1024, e2eMigrationCount ** 2 * 1024);
 export const e2eWorkerEnvironment: Record<string, string> = {
   TWITCH_CLIENT_ID: "e2e-twitch-client-id",
   TWITCH_CLIENT_SECRET: "e2e-twitch-client-secret",
@@ -110,6 +120,30 @@ export const seedE2EOverlay = (): void => {
       throw new Error(`Wrangler e2e database setup failed.\n${result.stdout}\n${result.stderr}`);
     }
   };
-  wrangler(["--cwd", "dist/brobot_local", "--config", "wrangler.json", "d1", "migrations", "apply", "DB", "--local", "--persist-to", "../../.wrangler/e2e-worker"]);
-  wrangler(["--cwd", "dist/brobot_local", "--config", "wrangler.json", "d1", "execute", "DB", "--local", "--yes", "--persist-to", "../../.wrangler/e2e-worker", "--command", sql]);
+  const applyMigrations = (): void => {
+    let lastOutput = "";
+    for (let run = 1; run <= e2eMigrationRunLimit; run += 1) {
+      const result = spawnSync("./node_modules/.bin/wrangler", [
+        "--cwd", "dist/brobot_local", "--config", "wrangler.json", "d1", "migrations", "apply", "DB", "--local",
+        "--persist-to", e2eWorkerPersist,
+      ], {
+        encoding: "utf8",
+        maxBuffer: e2eMigrationOutputLimit,
+        env: { ...process.env, CI: "1", FORCE_COLOR: "0", NO_COLOR: "1", ...e2eWorkerEnvironment },
+      });
+      const output = `${result.stdout}\n${result.stderr}`;
+      if (result.error || result.status !== 0) {
+        const failure = result.error?.message ?? `Wrangler exited with status ${String(result.status)}`;
+        throw new Error(`Wrangler e2e database migrations failed on run ${String(run)}/${String(e2eMigrationRunLimit)}: ${failure}.\n${output.slice(-4000)}`);
+      }
+      if (output.includes("No migrations to apply!")) return;
+      if (!output.includes("Migrations to be applied:")) {
+        throw new Error(`Wrangler e2e database migrations returned success without reporting pending or completed migrations on run ${String(run)}/${String(e2eMigrationRunLimit)}.\n${output.slice(-4000)}`);
+      }
+      lastOutput = output;
+    }
+    throw new Error(`Wrangler e2e database migrations did not report "No migrations to apply!" after ${String(e2eMigrationRunLimit)} runs for ${String(e2eMigrationCount)} migration files.\n${lastOutput.slice(-4000)}`);
+  };
+  applyMigrations();
+  wrangler(["--cwd", "dist/brobot_local", "--config", "wrangler.json", "d1", "execute", "DB", "--local", "--yes", "--persist-to", e2eWorkerPersist, "--command", sql]);
 };

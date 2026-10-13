@@ -559,7 +559,25 @@ interface ModuleTwitchUser {
   displayName: string;
 }
 
+/** Stable identity for one scheduled timer occurrence. */
+export interface ModuleAlarmIdentity {
+  timerId: string;
+  revision: number;
+  triggerType: string;
+  state: string | null;
+  streamId: string | null;
+  generation: number | null;
+  deadline: number;
+}
+
+/** Identity and write sequence stored alongside one Durable Object alarm. */
+export interface ModuleAlarmPlan {
+  identity: ModuleAlarmIdentity | null;
+  planSequence: number | null;
+}
+
 /** Infrastructure the host gives a module for its own adapter. */
+
 export interface ModuleExecutionContext {
   DB: D1Database;
   authorizeMutation: AuthorizeModuleMutation;
@@ -615,17 +633,49 @@ export interface ModuleExecutionContext {
   channelLanguage: () => Promise<ModuleLanguage>;
   /** Lazily reads the channel's configured time zone for date/time and module conditions. */
   channelTimeZone: () => Promise<string>;
-  /** Schedules or clears an alarm registered by this module. */
-  scheduleAlarm: (handlerKey: string, alarmKey: string, deadline: number, ownerRevision?: number) => Promise<void>;
-  clearAlarm: (alarmKey: string, ownerRevision?: number) => Promise<void>;
+  /** Null streamGeneration marks a stream-independent timer alarm; undefined keeps legacy version guards. */
+  scheduleAlarm: (
+    handlerKey: string,
+    alarmKey: string,
+    deadline: number,
+    ownerRevision?: number,
+    streamGeneration?: number | null,
+    identity?: ModuleAlarmIdentity,
+    planSequence?: number,
+  ) => Promise<void>;
+  clearAlarm: (
+    alarmKey: string,
+    ownerRevision?: number,
+    streamGeneration?: number | null,
+    expectedIdentity?: ModuleAlarmIdentity | null,
+    planSequence?: number,
+  ) => Promise<void>;
+  /** Generation captured atomically by an accepted stream-state write. */
+  streamStateTransitionGeneration?: number;
   /** Reads the current execution time for a module-owned alarm key, if one is scheduled. */
   getAlarmDeadline?: (alarmKey: string) => Promise<number | null>;
+  /** Reads the identity and plan sequence for a module-owned alarm key, if scheduled. */
+  getAlarmPlan?: (alarmKey: string) => Promise<ModuleAlarmPlan | null>;
 }
 
 /** Durable storage and alarm access given to a module alarm handler. */
 export interface ModuleAlarmContext {
   DB: D1Database;
   channelId: string;
+  /** Full identity and D1 plan sequence for the alarm currently being handled. */
+  alarmIdentity?: ModuleAlarmIdentity | null;
+  alarmPlanSequence?: number;
+  /** Runs a timer occurrence in the channel object's durable scheduler. */
+  runTimerOccurrence?: (
+    key: string,
+    deadline: number,
+    ownerRevision?: number,
+    identity?: ModuleAlarmIdentity | null,
+    planSequence?: number,
+    context?: ModuleAlarmContext,
+  ) => Promise<"retain" | undefined>;
+  /** Reconciles timer config and trigger inputs inside the channel object. */
+  reconcileTimerSchedules?: (reason: ModuleScheduleInputChangeReason) => Promise<void>;
   /** Shared per-dispatch allowance for external provider requests. */
   externalFetchBudget?: ModuleExternalFetchBudget;
   /** Secret access bound to this alarm's channel and module. */
@@ -642,11 +692,28 @@ export interface ModuleAlarmContext {
     put(key: string, value: unknown): Promise<void>;
     delete(key: string): Promise<boolean>;
   };
-  /** Schedule or clear another key owned by this module and handled by this registration. */
-  schedule: (key: string, deadline: number, ownerRevision?: number) => Promise<void>;
-  clear: (key: string, ownerRevision?: number) => Promise<void>;
+  /** Null streamGeneration marks a stream-independent timer alarm; undefined keeps legacy version guards. */
+  schedule: (
+    key: string,
+    deadline: number,
+    ownerRevision?: number,
+    streamGeneration?: number | null,
+    identity?: ModuleAlarmIdentity,
+    planSequence?: number,
+  ) => Promise<void>;
+  clear: (
+    key: string,
+    ownerRevision?: number,
+    streamGeneration?: number | null,
+    expectedIdentity?: ModuleAlarmIdentity | null,
+    planSequence?: number,
+  ) => Promise<void>;
+  /** Stream generation attached to this alarm entry, when it is stream-scoped. */
+  streamGeneration?: number;
   /** Reads the current execution time for a module-owned alarm key, if one is scheduled. */
   getAlarmDeadline?: (key: string) => Promise<number | null>;
+  /** Reads the identity and plan sequence for a module-owned alarm key, if scheduled. */
+  getAlarmPlan?: (key: string) => Promise<ModuleAlarmPlan | null>;
   /** Renders a host template in the channel's event context. */
   renderTemplate: (
     text: string,
@@ -729,7 +796,7 @@ export interface ModuleAlarmDefinition {
  * `selectModulesForEvent`), so a `stream.online` notification received
  * while either was off never reaches the module at all.
  */
-export type ModuleScheduleInputChangeReason = "event_times" | "channel_time_zone" | "activation";
+export type ModuleScheduleInputChangeReason = "event_times" | "channel_time_zone" | "activation" | "stream_state";
 
 export interface ModuleTemplateContentCandidate {
   name: string;
@@ -1338,6 +1405,8 @@ export interface ModuleRouteVariables {
   listEventTimeSources: () => readonly { id: string; label: Readonly<Record<ModuleLanguage, string>> }[];
   resolveEventTimes: (channelId: string, now: number) => Promise<readonly ResolvedModuleEventTime[]>;
   notifyScheduleInputsChanged: (channelId: string, reason: ModuleScheduleInputChangeReason) => Promise<void>;
+  /** Refreshes timer config snapshots after host-managed template rewrites. */
+  reconcileTimerSchedules: (channelId: string) => Promise<void>;
   validateTemplateContentMutation: (
     channelId: string,
     candidate: ModuleTemplateContentCandidate,

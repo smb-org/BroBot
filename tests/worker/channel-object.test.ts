@@ -43,9 +43,16 @@ import type {
   BotModule,
   ModuleAlarmContext,
   ModuleAlarmDefinition,
+  ModuleAlarmIdentity,
   ModuleExecutionContext,
   ModuleExternalFetchBudget,
 } from "../../src/modules/contract";
+import {
+  emptyDurableTimerState,
+  TIMER_DURABLE_STATE_KEY,
+  type DurableTimerConfig,
+  type DurableTimerState,
+} from "../../src/modules/timers/durable";
 import { belaboxModule } from "../../src/modules/belabox";
 import { BELABOX_DEFAULT_SETTINGS, BELABOX_STATS_URL_SECRET } from "../../src/modules/belabox/contracts";
 import { getBelaboxStatus } from "../../src/modules/belabox/adapters/d1";
@@ -396,6 +403,7 @@ const objectFor = (
   (object as unknown as { adScheduleRefreshGeneration: number }).adScheduleRefreshGeneration = 0;
   (object as unknown as { adScheduleOperationQueue: Promise<void> }).adScheduleOperationQueue = Promise.resolve();
   (object as unknown as { belaboxPollQueue: Promise<void> }).belaboxPollQueue = Promise.resolve();
+  (object as unknown as { alarmScheduleQueue: Promise<void> }).alarmScheduleQueue = Promise.resolve();
   (object as unknown as { recentlyBoundOverlayTokenIds: Set<string> }).recentlyBoundOverlayTokenIds = new Set();
   return object;
 };
@@ -1365,32 +1373,15 @@ describe("ChannelObject realtime path", () => {
     expect(panel.send.mock.calls).toHaveLength(0);
   });
 
-  it("does not count chat messages while the channel is offline", async () => {
-    let streamState = "offline";
-    const statement = {
-      bind: vi.fn(() => statement),
-      first: vi.fn(() => Promise.resolve({
-        state: streamState,
-        source: "eventsub",
-        changed_at: "2026-09-27T12:00:00.000Z",
-        started_at: null,
-        stream_id: null,
-        checked_at: null,
-      })),
-    };
-    const database = { prepare: vi.fn(() => statement) } as unknown as D1Database;
-    const object = objectFor([], database);
+  it("counts accepted chat messages in both stream states", async () => {
+    const object = objectFor([]);
 
-    await object.recordChatActivity();
-    expect(await object.getChatActivityCount()).toBe(0);
-
-    streamState = "online";
     await object.recordChatActivity();
     expect(await object.getChatActivityCount()).toBe(1);
 
-    streamState = "offline";
     await object.recordChatActivity();
-    expect(await object.getChatActivityCount()).toBe(1);
+    await object.recordChatActivity();
+    expect(await object.getChatActivityCount()).toBe(3);
   });
 
   it("tracks unique chatters in a rolling window without storing their ids", async () => {
@@ -1662,6 +1653,120 @@ describe("ChannelObject realtime path", () => {
     await object.clearModuleAlarm("timers", "timer:timer-a", 4);
     await object.scheduleModuleAlarm("timers", "run", "timer:timer-a", 10_000, 3);
     expect(storageOf(object).values.get(alarmTableKey) ?? {}).not.toHaveProperty(alarmKey);
+  });
+
+  it("rejects timer alarm writes and clears from an older stream transition", async () => {
+    const object = objectFor([]);
+    const alarmKey = "module:timers:timer:timer-generation";
+    const alarmTableKey = "channel:alarm_schedule";
+
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-generation", 30_000, 1, 8);
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-generation", 40_000, 1, 9);
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-generation", 20_000, 1, 8);
+    await object.clearModuleAlarm("timers", "timer:timer-generation", 1, 8);
+
+    expect(storageOf(object).values.get(alarmTableKey)).toMatchObject({
+      [alarmKey]: { deadline: 40_000, ownerRevision: 1, streamGeneration: 9 },
+    });
+  });
+
+  it("keeps a newer stream_start alarm when an old post-D1 clear arrives later", async () => {
+    const object = objectFor([]);
+    const alarmKey = "module:timers:timer:timer-stream-start-race";
+    const alarmTableKey = "channel:alarm_schedule";
+    const oldIdentity: ModuleAlarmIdentity = {
+      timerId: "timer-stream-start-race",
+      revision: 1,
+      triggerType: "stream_start",
+      state: null,
+      streamId: "stream-old",
+      generation: 8,
+      deadline: 30_000,
+    };
+    const newIdentity: ModuleAlarmIdentity = {
+      ...oldIdentity,
+      streamId: "stream-new",
+      generation: 10,
+      deadline: 40_000,
+    };
+
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-stream-start-race",
+      oldIdentity.deadline, oldIdentity.revision, oldIdentity.generation, oldIdentity, 1);
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-stream-start-race",
+      newIdentity.deadline, newIdentity.revision, newIdentity.generation, newIdentity, 3);
+    await object.clearModuleAlarm("timers", "timer:timer-stream-start-race",
+      oldIdentity.revision, null, oldIdentity, 2);
+
+    expect(storageOf(object).values.get(alarmTableKey)).toMatchObject({
+      [alarmKey]: { deadline: newIdentity.deadline, identity: newIdentity, planSequence: 3 },
+    });
+  });
+
+  it("retains a clear sequence after deleting an alarm so a delayed set cannot restore it", async () => {
+    const object = objectFor([]);
+    const alarmKey = "module:timers:timer:timer-clear-fence";
+    const alarmTableKey = "channel:alarm_schedule";
+    const identity: ModuleAlarmIdentity = {
+      timerId: "timer-clear-fence",
+      revision: 2,
+      triggerType: "time_of_day",
+      state: null,
+      streamId: null,
+      generation: null,
+      deadline: 30_000,
+    };
+
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-clear-fence",
+      identity.deadline, identity.revision, null, identity, 4);
+    await object.clearModuleAlarm("timers", "timer:timer-clear-fence",
+      identity.revision, null, identity, 5);
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-clear-fence",
+      identity.deadline, identity.revision, null, identity, 4);
+
+    expect(storageOf(object).values.get(alarmTableKey) ?? {}).not.toHaveProperty(alarmKey);
+  });
+
+  it("rejects identity-less timer writes and clears after a complete plan has been stored", async () => {
+    const object = objectFor([]);
+    const alarmKey = "module:timers:timer:timer-legacy-fence";
+    const alarmTableKey = "channel:alarm_schedule";
+    const identity: ModuleAlarmIdentity = {
+      timerId: "timer-legacy-fence",
+      revision: 4,
+      triggerType: "stream_start",
+      state: null,
+      streamId: "stream-new",
+      generation: 10,
+      deadline: 40_000,
+    };
+
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-legacy-fence",
+      identity.deadline, identity.revision, identity.generation, identity, 6);
+    await object.clearModuleAlarm("timers", "timer:timer-legacy-fence", identity.revision, null);
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-legacy-fence",
+      30_000, identity.revision, 8);
+
+    expect(storageOf(object).values.get(alarmTableKey)).toMatchObject({
+      [alarmKey]: { deadline: identity.deadline, identity, planSequence: 6 },
+    });
+  });
+
+  it("accepts stream-independent timer alarms without weakening newer generation guards", async () => {
+    const object = objectFor([]);
+    const alarmKey = "module:timers:timer:timer-independent";
+    const alarmTableKey = "channel:alarm_schedule";
+
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-independent", 30_000, 1, 9);
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-independent", 40_000, 2, null);
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-independent", 20_000, 2, 8);
+
+    const alarms = storageOf(object).values.get(alarmTableKey) as Record<string, Record<string, unknown>>;
+    expect(alarms[alarmKey]).toEqual({
+      deadline: 40_000,
+      handler: "module:timers:run",
+      revision: 2,
+      ownerRevision: 2,
+    });
   });
 
   it("preserves an online ensure that arrives while a claimed poll decides to stop", async () => {
@@ -3523,5 +3628,304 @@ describe("ChannelObject realtime path", () => {
     expect([...storage.values.entries()]
       .filter(([key]) => key !== "channel:alarm_schedule")
       .map(([, value]) => value)).toEqual([jetzt + 60_000]);
+  });
+
+  describe("timer scheduling interleavings (channel Durable Object)", () => {
+    afterEach(() => vi.useRealTimers());
+
+    const scheduleValuesByDatabase = new WeakMap<D1Database, Map<string, unknown>>();
+
+    const mirrorDatabase = (): {
+      database: D1Database;
+      mirrors: Map<string, { nextRunAt: string | null; nextRunState: string | null; sequence: number }>;
+    } => {
+      let query = "";
+      let bindings: unknown[] = [];
+      const mirrors = new Map<string, { nextRunAt: string | null; nextRunState: string | null; sequence: number }>();
+      const statement = {
+        bind: vi.fn((...values: unknown[]) => { bindings = values; return statement; }),
+        all: vi.fn(() => Promise.resolve({ results: [] })),
+        first: vi.fn(() => {
+          const values = scheduleValuesByDatabase.get(database);
+          const schedule = values?.get(TIMER_DURABLE_STATE_KEY) as DurableTimerState | undefined;
+          if (/FROM channel_stream_state/iu.test(query)) {
+            const stream = schedule?.stream;
+            return Promise.resolve(stream === undefined ? null : {
+              state: stream.state,
+              stream_id: stream.streamId,
+              started_at: stream.startedAt,
+              transition_generation: stream.generation,
+            });
+          }
+          if (/FROM channels/iu.test(query)) return Promise.resolve({ time_zone: "Europe/Berlin" });
+          const timerId = bindings[1];
+          const config = typeof timerId === "string" ? schedule?.timers[timerId]?.config : undefined;
+          return Promise.resolve(config === undefined ? null : {
+            timer_id: config.id,
+            name: config.name,
+            enabled: config.enabled ? 1 : 0,
+            message_text: config.messageText,
+            trigger_type: config.trigger.type,
+            trigger_json: JSON.stringify(config.trigger),
+            chat_target: config.chatTarget ?? "source_only",
+            use_channel_default_target: config.chatTarget === null ? 1 : 0,
+            revision: config.revision,
+            created_at: "2026-01-01T00:00:00.000Z",
+            updated_at: "2026-01-01T00:00:00.000Z",
+          });
+        }),
+        run: vi.fn(() => {
+          if (/UPDATE timers\s+SET next_run_at/iu.test(query)) {
+            const [nextRunAt, nextRunState, , sequence, , timerId] = bindings as [string | null, string | null, string | null, number, string, string];
+            const current = mirrors.get(timerId);
+            if (current === undefined || current.sequence < sequence) {
+              mirrors.set(timerId, { nextRunAt, nextRunState, sequence });
+            }
+          }
+          return Promise.resolve({ success: true, meta: { changes: 1 } });
+        }),
+      };
+      const database = {
+        prepare: vi.fn((sql: string) => { query = sql; return statement; }),
+        batch: vi.fn(() => Promise.resolve([])),
+      } as unknown as D1Database;
+      return { database, mirrors };
+    };
+
+    const initializedTimerObject = (
+      database: D1Database,
+      stream: DurableTimerState["stream"],
+      values = new Map<string, unknown>(),
+    ): ChannelObject => {
+      scheduleValuesByDatabase.set(database, values);
+      const object = objectFor([], database, values);
+      const state = emptyDurableTimerState();
+      state.initialized = true;
+      state.stream = stream;
+      values.set(TIMER_DURABLE_STATE_KEY, state);
+      return object;
+    };
+
+    const timerConfig = (
+      id: string,
+      trigger: DurableTimerConfig["trigger"],
+      revision = 1,
+    ): DurableTimerConfig => ({
+      id,
+      name: id,
+      enabled: true,
+      messageText: "Scheduled reminder",
+      chatTarget: "all_chats",
+      trigger,
+      revision,
+    });
+
+    const timerStateOf = (object: ChannelObject): DurableTimerState =>
+      storageOf(object).values.get(TIMER_DURABLE_STATE_KEY) as DurableTimerState;
+
+    const timerAlarmContext = (sendChat: ModuleAlarmContext["sendChat"]): ModuleAlarmContext => ({
+      renderTemplate: (text: string) => Promise.resolve({ text }),
+      sendChat,
+    } as unknown as ModuleAlarmContext);
+
+    const deferred = (): { promise: Promise<void>; resolve: () => void } => {
+      let resolve!: () => void;
+      const promise = new Promise<void>((complete) => { resolve = complete; });
+      return { promise, resolve };
+    };
+
+    const dueOccurrence = (object: ChannelObject, timerId: string) => {
+      const occurrence = timerStateOf(object).timers[timerId]?.plannedOccurrence;
+      if (occurrence === null || occurrence === undefined) throw new Error(`Timer ${timerId} has no planned occurrence.`);
+      return occurrence;
+    };
+
+    const plannedOccurrences = (object: ChannelObject): number =>
+      Object.values(timerStateOf(object).timers).filter((entry) => entry.plannedOccurrence !== null).length;
+
+    it("keeps a newer stream_start plan when the stale send handler resumes", async () => {
+      vi.useFakeTimers();
+      const now = Date.parse("2026-10-12T12:00:00.000Z");
+      vi.setSystemTime(now);
+      const { database, mirrors } = mirrorDatabase();
+      const object = initializedTimerObject(database, {
+        state: "online",
+        streamId: "stream-1",
+        startedAt: new Date(now - 59_999).toISOString(),
+        generation: 1,
+      });
+      const config = timerConfig("stale-stream-start", { type: "stream_start", minutes: 1 });
+      await object.upsertTimerConfig(config);
+      const first = dueOccurrence(object, config.id);
+      vi.setSystemTime(first.identity.deadline);
+      const sendEntered = deferred();
+      const releaseSend = deferred();
+      const acceptedPosts: string[] = [];
+      const context = timerAlarmContext(async (_text, key, _attributions, stillValid) => {
+        sendEntered.resolve();
+        await releaseSend.promise;
+        const valid = await (stillValid?.() ?? Promise.resolve(true));
+        if (valid) acceptedPosts.push(key);
+        return { sent: valid, reason: valid ? null : "stale_before_send", retryable: false };
+      });
+      const firing = object.runTimerOccurrence(context, `timer:${config.id}`, first.identity.deadline,
+        config.revision, first.identity, first.sequence);
+
+      await sendEntered.promise;
+      await object.transitionTimerStream({ state: "offline", streamId: null, startedAt: null, generation: 2 });
+      await object.transitionTimerStream({
+        state: "online",
+        streamId: "stream-2",
+        startedAt: new Date(Date.now()).toISOString(),
+        generation: 3,
+      });
+      const current = dueOccurrence(object, config.id);
+      releaseSend.resolve();
+      await firing;
+
+      expect(acceptedPosts).toEqual([]);
+      expect(dueOccurrence(object, config.id)).toEqual(current);
+      expect(plannedOccurrences(object)).toBe(1);
+      expect(mirrors.get(config.id)).toEqual({
+        nextRunAt: new Date(current.identity.deadline).toISOString(),
+        nextRunState: null,
+        sequence: timerStateOf(object).timers[config.id]?.mirrorSequence,
+      });
+    });
+
+    it("does not restart interval cadence when a claimed alarm resumes after a generation change", async () => {
+      vi.useFakeTimers();
+      const now = Date.parse("2026-10-12T12:00:00.000Z");
+      vi.setSystemTime(now);
+      const { database, mirrors } = mirrorDatabase();
+      const object = initializedTimerObject(database, {
+        state: "online",
+        streamId: "stream-1",
+        startedAt: new Date(now - 60_000).toISOString(),
+        generation: 1,
+      });
+      const config = timerConfig("stale-interval", { type: "interval", live: { minutes: 10 } });
+      await object.upsertTimerConfig(config);
+      const first = dueOccurrence(object, config.id);
+      vi.setSystemTime(first.identity.deadline);
+      const sendEntered = deferred();
+      const releaseSend = deferred();
+      const acceptedPosts: string[] = [];
+      const context = timerAlarmContext(async (_text, key, _attributions, stillValid) => {
+        sendEntered.resolve();
+        await releaseSend.promise;
+        const valid = await (stillValid?.() ?? Promise.resolve(true));
+        if (valid) acceptedPosts.push(key);
+        return { sent: valid, reason: valid ? null : "stale_before_send", retryable: false };
+      });
+      const firing = object.runTimerOccurrence(context, `timer:${config.id}`, first.identity.deadline,
+        config.revision, first.identity, first.sequence);
+
+      await sendEntered.promise;
+      await object.transitionTimerStream({ state: "offline", streamId: null, startedAt: null, generation: 2 });
+      await object.transitionTimerStream({
+        state: "online",
+        streamId: "stream-2",
+        startedAt: new Date(Date.now()).toISOString(),
+        generation: 3,
+      });
+      const current = dueOccurrence(object, config.id);
+      releaseSend.resolve();
+      await firing;
+
+      expect(acceptedPosts).toEqual([]);
+      expect(dueOccurrence(object, config.id)).toEqual(current);
+      expect(current.identity.deadline).toBe(Date.now() + 10 * 60_000);
+      expect(plannedOccurrences(object)).toBe(1);
+      expect(mirrors.get(config.id)).toEqual({
+        nextRunAt: new Date(current.identity.deadline).toISOString(),
+        nextRunState: "live",
+        sequence: timerStateOf(object).timers[config.id]?.mirrorSequence,
+      });
+    });
+
+    it("preserves time-of-day and before-event plans across stream transitions", async () => {
+      vi.useFakeTimers();
+      const now = Date.parse("2026-10-12T12:00:00.000Z");
+      vi.setSystemTime(now);
+      const { database } = mirrorDatabase();
+      const object = initializedTimerObject(database, {
+        state: "online",
+        streamId: "stream-1",
+        startedAt: new Date(now - 60_000).toISOString(),
+        generation: 1,
+      });
+      await object.upsertTimerConfig(timerConfig("daily-plan", {
+        type: "time_of_day", time: "14:00", weekdays: [], alsoOffline: true,
+      }));
+      const daily = dueOccurrence(object, "daily-plan");
+      const eventConfig = timerConfig("event-plan", {
+        type: "before_event", sourceId: "schedule.release", minutes: 10,
+      });
+      const eventOccurrence = {
+        identity: {
+          timerId: eventConfig.id,
+          revision: eventConfig.revision,
+          triggerType: "before_event",
+          state: null,
+          streamId: null,
+          generation: null,
+          deadline: now + 60 * 60_000,
+        },
+        sequence: 1,
+      };
+      const state = timerStateOf(object);
+      state.timers[eventConfig.id] = {
+        config: eventConfig,
+        plannedOccurrence: eventOccurrence,
+        inFlightClaim: null,
+        planSequence: 1,
+        mirrorSequence: 1,
+        activityBaselines: { ...state.activityCounts },
+        lastRunAt: null,
+        refreshAt: null,
+      };
+
+      await object.transitionTimerStream({ state: "offline", streamId: null, startedAt: null, generation: 2 });
+
+      expect(dueOccurrence(object, "daily-plan")).toEqual(daily);
+      expect(dueOccurrence(object, "event-plan")).toEqual(eventOccurrence);
+      expect(plannedOccurrences(object)).toBe(2);
+    });
+
+    it("does not count offline chat toward a live interval's activity threshold", async () => {
+      vi.useFakeTimers();
+      const now = Date.parse("2026-10-12T12:00:00.000Z");
+      vi.setSystemTime(now);
+      const { database } = mirrorDatabase();
+      const object = initializedTimerObject(database, {
+        state: "offline",
+        streamId: null,
+        startedAt: null,
+        generation: 1,
+      });
+      await object.recordChatActivity();
+      const config = timerConfig("live-threshold", {
+        type: "interval", live: { minutes: 1, minimumMessages: 1 },
+      });
+      await object.upsertTimerConfig(config);
+      await object.transitionTimerStream({
+        state: "online", streamId: "stream-1", startedAt: new Date(now).toISOString(), generation: 2,
+      });
+      const occurrence = dueOccurrence(object, config.id);
+      vi.setSystemTime(occurrence.identity.deadline);
+      const sends: string[] = [];
+      const context = timerAlarmContext((_text, key) => {
+        sends.push(key);
+        return Promise.resolve({ sent: true, reason: null, retryable: false });
+      });
+
+      await object.runTimerOccurrence(context, `timer:${config.id}`, occurrence.identity.deadline,
+        config.revision, occurrence.identity, occurrence.sequence);
+
+      expect(sends).toEqual([]);
+      expect(timerStateOf(object).timers[config.id]?.lastRunAt).toBeNull();
+      expect(timerStateOf(object).timers[config.id]?.plannedOccurrence).not.toBeNull();
+    });
   });
 });

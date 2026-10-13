@@ -15,9 +15,16 @@ export interface TimersTexts {
   streamStart: string;
   timeOfDay: string;
   beforeEvent: string;
+  live: string;
+  offline: string;
+  liveOff: string;
+  offlineOff: string;
   minutes: string;
-  minimumMessages: string;
-  minimumMessagesHint: string;
+  minutesUnit: string;
+  liveEvery: (minutes: number) => string;
+  offlineEvery: (minutes: number) => string;
+  afterMessages: (count: number) => string;
+  minutesBeforeEvent: (minutes: number) => string;
   messageCount: string;
   time: string;
   weekdays: string;
@@ -26,6 +33,8 @@ export interface TimersTexts {
   eventSource: string;
   before: string;
   nextRun: string;
+  nextRunLive: string;
+  nextRunOffline: string;
   disabled: string;
   enabled: string;
   create: string;
@@ -66,9 +75,16 @@ const catalog: LocaleCatalog<TimersTexts> = {
     streamStart: "Nach Streamstart",
     timeOfDay: "Uhrzeit",
     beforeEvent: "Vor einem Ereignis",
+    live: "Live",
+    offline: "Offline",
+    liveOff: "Live aus",
+    offlineOff: "Offline aus",
     minutes: "Minuten",
-    minimumMessages: "Nur senden, wenn genug Chatnachrichten eingegangen sind",
-    minimumMessagesHint: "Lege eine Mindestanzahl fest, bevor der Timer eine Nachricht sendet.",
+    minutesUnit: "Min.",
+    liveEvery: (minutes) => `Live alle ${String(minutes)} Min.`,
+    offlineEvery: (minutes) => `Offline alle ${String(minutes)} Min.`,
+    afterMessages: (count) => `ab ${String(count)} Nachrichten`,
+    minutesBeforeEvent: (minutes) => `${String(minutes)} Min. vor einem Ereignis`,
     messageCount: "Mindestanzahl Chatnachrichten",
     time: "Uhrzeit im Kanal",
     weekdays: "Wochentage",
@@ -77,6 +93,8 @@ const catalog: LocaleCatalog<TimersTexts> = {
     eventSource: "Ereigniszeit",
     before: "Vorlauf",
     nextRun: "Nächster Lauf",
+    nextRunLive: "Nächster Lauf (live)",
+    nextRunOffline: "Nächster Lauf (offline)",
     disabled: "Deaktiviert",
     enabled: "Aktiviert",
     create: "Anlegen",
@@ -128,9 +146,16 @@ const catalog: LocaleCatalog<TimersTexts> = {
     streamStart: "After stream start",
     timeOfDay: "Time of day",
     beforeEvent: "Before an event",
+    live: "Live",
+    offline: "Offline",
+    liveOff: "Live off",
+    offlineOff: "Offline off",
     minutes: "Minutes",
-    minimumMessages: "Only send after enough chat messages have arrived",
-    minimumMessagesHint: "Set a minimum count before the timer sends a message.",
+    minutesUnit: "min",
+    liveEvery: (minutes) => `Live every ${String(minutes)} min`,
+    offlineEvery: (minutes) => `Offline every ${String(minutes)} min`,
+    afterMessages: (count) => `after ${String(count)} messages`,
+    minutesBeforeEvent: (minutes) => `${String(minutes)} min before an event`,
     messageCount: "Minimum chat messages",
     time: "Time in channel time zone",
     weekdays: "Weekdays",
@@ -139,6 +164,8 @@ const catalog: LocaleCatalog<TimersTexts> = {
     eventSource: "Event time",
     before: "Lead time",
     nextRun: "Next run",
+    nextRunLive: "Next run (live)",
+    nextRunOffline: "Next run (offline)",
     disabled: "Disabled",
     enabled: "Enabled",
     create: "Create",

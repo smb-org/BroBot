@@ -36,7 +36,7 @@ import { readChannelLocation } from "../db/channel-settings";
 import { readCachedGameList, readRecentChannelGames, writeCachedGameList, type TwitchGameCategory } from "../db/game-search-cache";
 import { createTemplateRenderer, type TemplateValueProvider } from "../template-resolver";
 import { moduleEventTimeOptions, resolveModuleEventTimes } from "../module-event-times";
-import { notifyModuleScheduleInputsChanged } from "../module-schedules";
+import { notifyModuleScheduleInputsChanged, reconcileChannelTimerSchedules } from "../module-schedules";
 import { createModuleExternalFetchBudget } from "../external-fetch-budget";
 import { moduleBallots } from "../module-ballots";
 import { createModuleSecretAccess, createModuleSecretReadAccess } from "../module-secrets";
@@ -57,7 +57,7 @@ interface ModuleRouteEnvironment {
     | "runModuleAlarm"
     | "listTextBlockConditions"
     | "listEventTimeSources" | "resolveEventTimes"
-    | "notifyScheduleInputsChanged" | "validateTemplateContentMutation"
+    | "notifyScheduleInputsChanged" | "reconcileTimerSchedules" | "validateTemplateContentMutation"
     | "afterTextBlockRename"
     | "resolveTextBlockConditions"
     | "publishModuleOverlayMessage"
@@ -329,6 +329,8 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
   context.set("resolveEventTimes", (channelId, now) => resolveModuleEventTimes(context.env.DB, channelId, now));
   context.set("notifyScheduleInputsChanged", (channelId, reason) =>
     notifyModuleScheduleInputsChanged(context.env.CHANNEL, channelId, reason));
+  context.set("reconcileTimerSchedules", (channelId) =>
+    reconcileChannelTimerSchedules(context.env.CHANNEL, channelId));
   context.set("validateTemplateContentMutation", async (channelId, candidate) => {
     const registeredVariables = await registeredTemplateVariablesForChannel(context.env.DB, channelId);
     const validationContext = { DB: context.env.DB, channelId, candidate, registeredVariables };

@@ -19,8 +19,8 @@ const REQUIRED_SECRET_NAMES = [
 // update it and /healthz reports a freshly set-up database as broken (503)
 // even though everything is fine. `tests/unit/schema-baseline.test.ts`
 // therefore pins it to the last file in `migrations/`.
-export const LATEST_SCHEMA_MIGRATION = "0060_api_source_namespace.sql";
-export const LATEST_SCHEMA_TABLE = "api_sources";
+export const LATEST_SCHEMA_MIGRATION = "0062_timer_schedule_reconciliation_per_timer.sql";
+export const LATEST_SCHEMA_TABLE = "timer_schedule_reconciliation";
 
 const REQUIRED_BINDING_NAMES = ["DB", "CHANNEL", "ASSETS", "CF_VERSION_METADATA"] as const;
 

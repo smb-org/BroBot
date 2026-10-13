@@ -459,8 +459,8 @@ describe("API source deletion guard", () => {
     await database.prepare(
       `INSERT INTO timers
         (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, chat_target,
-         revision, next_run_at, next_run_stream_id, last_run_at, created_at, updated_at)
-       VALUES (?, ?, ?, 1, ?, 'interval', ?, 'source_only', 1, NULL, NULL, NULL, ?, ?)`,
+         revision, next_run_at, last_run_at, created_at, updated_at)
+       VALUES (?, ?, ?, 1, ?, 'interval', ?, 'source_only', 1, NULL, NULL, ?, ?)`,
     ).bind("timer-sunset", CHANNEL_ID, "Evening timer", "Timer says {api.sunset}", JSON.stringify({ type: "interval", minutes: 10 }), now, now).run();
     await database.prepare(
       `INSERT INTO faq_entries
@@ -522,8 +522,8 @@ describe("API source deletion guard", () => {
     await database.prepare(
       `INSERT INTO timers
         (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, chat_target,
-         revision, next_run_at, next_run_stream_id, last_run_at, created_at, updated_at)
-       VALUES (?, ?, ?, 1, '', 'interval', ?, 'source_only', 1, NULL, NULL, NULL, ?, ?)`,
+         revision, next_run_at, last_run_at, created_at, updated_at)
+       VALUES (?, ?, ?, 1, '', 'interval', ?, 'source_only', 1, NULL, NULL, ?, ?)`,
     ).bind("timer-sunset", CHANNEL_ID, "Evening timer", JSON.stringify({ type: "interval", minutes: 10 }), now, now).run();
 
     const interleavedDatabase = createReadInterleavingDatabase(
