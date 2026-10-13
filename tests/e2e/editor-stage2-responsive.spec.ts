@@ -201,7 +201,7 @@ test("editor stage 2 pages fit at 1280px and 390px and produce review screenshot
 
   await page.goto(`/channels/${channel.channelId}`);
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-  await page.keyboard.press("Meta+K");
+  await page.keyboard.press("ControlOrMeta+K");
   await expect(page.getByRole("dialog")).toBeVisible();
   await capture(page, testInfo, "14-command-palette");
 });

@@ -4650,10 +4650,8 @@ describe("Dashboard skeleton", () => {
     await screen.findByRole("heading", { name: "Alpha", level: 1 });
     clickLogout();
 
-    await waitFor(() => {
-      fireEvent.click(screen.getByRole("button", { name: "Konto" }));
-      expect(screen.getByRole("menuitem", { name: "Abmelden" })).toBeEnabled();
-    });
+    fireEvent.click(screen.getByRole("button", { name: "Konto" }));
+    expect(await screen.findByRole("menuitem", { name: "Abmelden" })).toBeEnabled();
     expect(screen.queryByRole("heading", { name: "Anmeldung erforderlich", level: 1 }))
       .not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Alpha", level: 1 })).toBeInTheDocument();
