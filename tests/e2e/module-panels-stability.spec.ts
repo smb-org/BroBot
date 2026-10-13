@@ -1607,9 +1607,17 @@ test("text-library game filter keeps the list position when games are selected a
     const filtersBox = await filters.boundingBox();
     const createBox = await create.boundingBox();
     expect(pickerBox?.height).toBeLessThanOrEqual(44);
-    expect(pickerBox?.y ?? 0).toBeGreaterThanOrEqual(filtersBox?.y ?? 0);
-    expect((pickerBox?.y ?? 0) + (pickerBox?.height ?? 0)).toBeLessThanOrEqual((filtersBox?.y ?? 0) + (filtersBox?.height ?? 0) + 0.5);
-    expect(createBox?.x ?? 0).toBeGreaterThanOrEqual((filtersBox?.x ?? 0) + (filtersBox?.width ?? 0) - 0.5);
+    if (width === 390) {
+      // Narrow toolbars give the game filter its own full-width row below category and create.
+      const toolbarBox = await toolbar.boundingBox();
+      expect(pickerBox?.y ?? 0).toBeGreaterThanOrEqual((createBox?.y ?? 0) + (createBox?.height ?? 0) - 0.5);
+      expect(pickerBox?.width ?? 0).toBeGreaterThanOrEqual((toolbarBox?.width ?? 0) - 1);
+    }
+    else {
+      expect(pickerBox?.y ?? 0).toBeGreaterThanOrEqual(filtersBox?.y ?? 0);
+      expect((pickerBox?.y ?? 0) + (pickerBox?.height ?? 0)).toBeLessThanOrEqual((filtersBox?.y ?? 0) + (filtersBox?.height ?? 0) + 0.5);
+      expect(createBox?.x ?? 0).toBeGreaterThanOrEqual((filtersBox?.x ?? 0) + (filtersBox?.width ?? 0) - 0.5);
+    }
     if (width === 700) {
       const filterOverflow = await filters.evaluate((element) => element.scrollWidth > element.clientWidth);
       expect(filterOverflow).toBe(true);

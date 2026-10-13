@@ -572,9 +572,8 @@ form.content-section { display: grid; gap: var(--s4); }
 .ui-game-multi-select__footer > span:last-child { flex: none; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .ui-game-multi-select--compact .ui-game-multi-select__search > input { box-sizing: border-box; height: 44px; min-width: 0; text-overflow: ellipsis; }
 .ui-game-multi-select--compact .ui-game-multi-select__selected { position: absolute; z-index: 1; top: 4px; left: 4px; display: flex; width: calc(50% - 8px); height: 36px; flex-wrap: nowrap; gap: 2px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
-.ui-game-multi-select--compact .ui-game-multi-select__chip { display: flex; box-sizing: border-box; min-width: 0; min-height: 26px; max-width: 100%; flex: 0 1 auto; padding: 1px 2px 1px 3px; gap: 3px; font-size: 11px; }
+.ui-game-multi-select--compact .ui-game-multi-select__chip { display: flex; box-sizing: border-box; min-width: 52px; min-height: 26px; max-width: 100%; flex: 0 1 auto; padding: 1px 2px 1px 3px; gap: 3px; font-size: 11px; }
 .ui-game-multi-select--compact .ui-game-multi-select__chip-name { flex: 1 1 auto; }
-.ui-game-multi-select--compact .ui-game-multi-select__chip .ui-game-multi-select__cover, .ui-game-multi-select--compact .ui-game-multi-select__chip .ui-game-multi-select__cover-placeholder { display: none; }
 .ui-game-multi-select--compact .ui-game-multi-select__chip button { width: 20px; height: 22px; }
 .ui-game-multi-select--compact:has(.ui-game-multi-select__chip) .ui-game-multi-select__search > input { padding-left: calc(50% + var(--s2)); }
 .ui-token-chip { display: inline-flex; max-width: 100%; min-height: 28px; align-items: center; gap: var(--s1); padding: 2px var(--s2); border: 1px solid var(--line); border-radius: var(--r-control); color: var(--text-2); background: var(--surface-well); cursor: pointer; vertical-align: middle; }
@@ -1713,6 +1712,9 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
   .text-library__list-toolbar .ui-game-multi-select { flex: 1 1 0; min-width: 0; }
   .text-library__list-toolbar .ui-game-multi-select--compact .ui-game-multi-select__search > input { padding-right: var(--s2); }
   .list-toolbar__create { grid-column: 2; }
+  /* Below 640px the side-by-side game filter leaves its chips under ~60px (cover + x alone need ~45px), so it gets a full-width row. */
+  .text-library__list-toolbar .list-toolbar__filters { display: contents; }
+  .text-library__list-toolbar .ui-game-multi-select { grid-column: 1 / -1; grid-row: 3; flex: none; }
 }
 .event-feed__end { position: absolute; right: 0; bottom: 0; width: 1px; height: 1px; pointer-events: none; }
 .events-page__pagination-slot { display: flex; height: 60px; min-height: 60px; align-items: flex-start; }

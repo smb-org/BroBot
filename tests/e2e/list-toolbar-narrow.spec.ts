@@ -101,17 +101,20 @@ test("compact game chips shrink without clipping their remove button", async ({ 
     const selected = element.parentElement;
     const name = element.querySelector<HTMLElement>(".ui-game-multi-select__chip-name");
     const remove = element.querySelector<HTMLElement>("button");
-    if (selected === null || name === null || remove === null) throw new Error("Compact game chip parts are missing.");
+    const cover = element.querySelector<HTMLElement>(".ui-game-multi-select__cover, .ui-game-multi-select__cover-placeholder");
+    if (selected === null || name === null || remove === null || cover === null) throw new Error("Compact game chip parts are missing.");
     const selectedBounds = selected.getBoundingClientRect();
     const chipBounds = element.getBoundingClientRect();
     const removeBounds = remove.getBoundingClientRect();
+    const coverBounds = cover.getBoundingClientRect();
     return {
       chipWithinSelected: chipBounds.left >= selectedBounds.left - 1 && chipBounds.right <= selectedBounds.right + 1,
       removeWithinChip: removeBounds.left >= chipBounds.left - 1 && removeBounds.right <= chipBounds.right + 1,
+      coverVisibleWithinChip: coverBounds.width > 0 && coverBounds.height > 0 && coverBounds.left >= chipBounds.left - 1 && coverBounds.right <= chipBounds.right + 1,
       nameHasEllipsis: name.scrollWidth > name.clientWidth && getComputedStyle(name).textOverflow === "ellipsis",
     };
   });
-  expect(geometry).toEqual({ chipWithinSelected: true, removeWithinChip: true, nameHasEllipsis: true });
+  expect(geometry).toEqual({ chipWithinSelected: true, removeWithinChip: true, coverVisibleWithinChip: true, nameHasEllipsis: true });
   await chip.getByRole("button", { name: "Remove A Game Name That Is Much Longer Than the Compact Filter Can Display" }).click();
   await expect(page.locator(".text-library__list-toolbar .ui-game-multi-select__chip")).toHaveCount(0);
 });
