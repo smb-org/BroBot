@@ -265,6 +265,7 @@ export function GameMultiSelect({ searchGames, lookupGames, value, onChange, mes
               }
               setResultsOpen(true);
             }}
+            onClick={() => setResultsOpen(true)}
             onKeyDown={handleInputKeyDown}
             onChange={(event) => { setQuery(event.currentTarget.value); setActiveIndex(0); setResultsOpen(true); }}
           />

@@ -115,6 +115,21 @@ describe("Part B shared UI", () => {
     expect(screen.getByText("10 von 10")).toBeInTheDocument();
   });
 
+  it("reopens game results when the focused input is clicked after Escape", async () => {
+    const searchGames = vi.fn().mockResolvedValue([{ id: "1", name: "Game One" }]);
+    renderUi(<GameMultiSelect searchGames={searchGames} value={[]} onChange={() => undefined} messages={messages} />);
+    const search = screen.getByRole("searchbox", { name: "Spiele" });
+    fireEvent.click(search);
+    fireEvent.focus(search);
+    expect(await screen.findByRole("option", { name: "Game One" })).toBeInTheDocument();
+
+    fireEvent.keyDown(search, { key: "Escape" });
+    await waitFor(() => { expect(screen.queryByRole("option", { name: "Game One" })).not.toBeInTheDocument(); });
+
+    fireEvent.click(search);
+    expect(await screen.findByRole("option", { name: "Game One" })).toBeInTheDocument();
+  });
+
   it("copies a token to the clipboard and announces success", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
