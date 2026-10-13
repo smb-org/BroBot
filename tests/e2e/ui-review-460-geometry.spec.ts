@@ -205,3 +205,55 @@ test("sidebar FAQ label stays single-line with a title and consistent row height
   expect(labelGeometry.overflow).toBe("hidden");
   expect(labelGeometry.scrollWidth).toBeGreaterThan(labelGeometry.clientWidth);
 });
+
+for (const [width, height] of [[1920, 1080], [1280, 800], [390, 844]] as const) {
+  test(`time zone hint wraps without ellipsis at ${String(width)}`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    await mockDashboard(page);
+    await page.goto(`/channels/${channelId}`);
+    const timezoneRow = page.locator(".channel-overview-settings__row--timezone");
+    const control = timezoneRow.locator(".ui-select__search-input");
+    const hint = timezoneRow.locator(".ui-select__description .ui-truncated-text");
+    await expect(hint).toBeVisible();
+    const style = await hint.evaluate((element) => {
+      const pseudo = getComputedStyle(element, "::before");
+      return { overflow: pseudo.overflow, textOverflow: pseudo.textOverflow, whiteSpace: pseudo.whiteSpace };
+    });
+    expect(style.whiteSpace).toBe("normal");
+    expect(style.textOverflow).not.toBe("ellipsis");
+    expect(style.overflow).toBe("visible");
+    // The hint sits below the control and spans at least the control width.
+    const controlBounds = await box(control);
+    const hintBounds = await box(hint);
+    expect(hintBounds.y).toBeGreaterThanOrEqual(controlBounds.y + controlBounds.height);
+    expect(hintBounds.width).toBeGreaterThanOrEqual(controlBounds.width - 1);
+  });
+}
+
+test("timer dialog stacks the chat target label above its trigger like other fields", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.route("**/api/**", async (route) => {
+    const { pathname } = new URL(route.request().url());
+    if (pathname === "/api/csrf") return route.fulfill(json({ token: "csrf-460" }));
+    if (pathname === "/api/channels/channel-a/settings") {
+      return route.fulfill(json({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 1, defaultChatTarget: "source_only", defaultChatTargetRevision: 1 }));
+    }
+    if (pathname.endsWith("/modules/timers/timers")) return route.fulfill(json({ timers: [] }));
+    if (pathname.endsWith("/modules/timers/event-time-sources")) return route.fulfill(json({ sources: [] }));
+    return route.fulfill(json({}));
+  });
+  await page.goto("/tests/e2e/module-panels-stability-fixture.html?panel=timers&lang=de");
+  await page.getByRole("button", { name: "Timer anlegen", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+
+  const triggerLabel = dialog.locator("label", { hasText: "Auslöser" }).first();
+  const chatLabel = dialog.locator(".inspector-field-row__label > span", { hasText: "Chat-Ziel" }).first();
+  const chatTrigger = dialog.locator(".ui-chat-target-field__trigger");
+  const triggerLabelBounds = await box(triggerLabel);
+  const chatLabelBounds = await box(chatLabel);
+  const chatTriggerBounds = await box(chatTrigger);
+  expect(Math.abs(chatLabelBounds.x - triggerLabelBounds.x)).toBeLessThanOrEqual(1);
+  expect(chatLabelBounds.y + chatLabelBounds.height).toBeLessThanOrEqual(chatTriggerBounds.y);
+  expect(Math.abs(chatTriggerBounds.x - triggerLabelBounds.x)).toBeLessThanOrEqual(1);
+});

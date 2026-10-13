@@ -1216,6 +1216,7 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
             label={settingsTexts.defaultChatTarget}
             value={defaultChatTargetDraft}
             allowed={["all_chats", "source_only", "where_asked"]}
+            inline
             onChange={changeDefaultChatTargetDraft}
             disabled={settingsBusy || channelSettings === null || !canManage(overview.role)}
           />
