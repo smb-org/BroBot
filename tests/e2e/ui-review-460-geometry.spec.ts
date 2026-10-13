@@ -257,3 +257,31 @@ test("timer dialog stacks the chat target label above its trigger like other fie
   expect(chatLabelBounds.y + chatLabelBounds.height).toBeLessThanOrEqual(chatTriggerBounds.y);
   expect(Math.abs(chatTriggerBounds.x - triggerLabelBounds.x)).toBeLessThanOrEqual(1);
 });
+
+test("overview settings rows stack control, hint, save button at 390", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockDashboard(page);
+  await page.goto(`/channels/${channelId}`);
+
+  const timezoneRow = page.locator(".channel-overview-settings__row--timezone");
+  const chatRow = page.locator(".channel-overview-settings__row").last();
+  const rows = [
+    { control: timezoneRow.locator(".ui-select__search-input"), hint: timezoneRow.locator(".ui-select__description"), save: timezoneRow.getByRole("button", { name: "Zeitzone speichern", exact: true }) },
+    { control: chatRow.locator(".ui-chat-target-field__trigger"), hint: chatRow.locator(".channel-overview-settings__hint"), save: chatRow.getByRole("button", { name: "Standard-Chat-Ziel speichern", exact: true }) },
+  ];
+  for (const { control, hint, save } of rows) {
+    const controlBounds = await box(control);
+    const hintBounds = await box(hint);
+    const saveBounds = await box(save);
+    expect(hintBounds.y).toBeGreaterThanOrEqual(controlBounds.y + controlBounds.height - 1);
+    expect(hintBounds.y + hintBounds.height).toBeLessThanOrEqual(saveBounds.y + 1);
+  }
+
+  const label = chatRow.locator(".inspector-field-row__label");
+  const labelText = label.locator(":scope > span").first();
+  const labelBounds = await box(labelText);
+  const triggerBounds = await box(chatRow.locator(".ui-chat-target-field__trigger"));
+  expect(labelBounds.y + labelBounds.height).toBeLessThanOrEqual(triggerBounds.y + 1);
+  const lineHeight = await labelText.evaluate((element) => Number.parseFloat(getComputedStyle(element).lineHeight));
+  expect(labelBounds.height).toBeLessThanOrEqual(lineHeight * 1.5);
+});

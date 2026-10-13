@@ -2017,6 +2017,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .inspector-field-row--stacked .inspector-field-row__info { width: 20px; height: 20px; min-height: 20px; }
 .channel-overview-settings__row { display: grid; grid-template-columns: minmax(0, 28rem) auto; align-items: start; column-gap: var(--s2); }
 .channel-overview-settings__row > .inspector-field-row { width: 100%; max-width: 28rem; }
+.channel-overview-settings__row > .channel-overview-settings__hint { grid-column: 1 / -1; grid-row: 2; margin: var(--s1) 0 0; }
 .channel-overview-settings__row > .ui-button { height: var(--control-height-touch); min-height: var(--control-height-touch); align-self: start; justify-self: start; white-space: nowrap; }
 /* The select dissolves into the row grid: label and control sit in column 1, the button beside the control, the hint spans the full row below. */
 .channel-overview-settings__row--timezone { grid-template-columns: minmax(0, 28rem) auto minmax(0, 1fr); row-gap: 0; }
@@ -2029,10 +2030,12 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .channel-overview-settings__row--timezone > .ui-button, .channel-overview-settings__row--timezone > .muted { grid-column: 2; grid-row: 2; margin-top: 0; }
 @media (max-width: 640px) {
   .channel-overview-settings__row, .channel-overview-settings__row--timezone { grid-template-columns: minmax(0, 1fr); }
-  .channel-overview-settings__row--timezone > .ui-button, .channel-overview-settings__row--timezone > .muted { grid-column: 1; grid-row: 3; margin-top: var(--s2); }
-  .channel-overview-settings__row--timezone .ui-select > .ui-select__description { grid-row: 4; }
-  .channel-overview-settings__row--timezone .ui-select > .ui-select__error { grid-row: 5; }
-  .channel-overview-settings__row > .inspector-field-row { max-width: none; }
+  .channel-overview-settings__row--timezone > .ui-button, .channel-overview-settings__row--timezone > .muted { grid-column: 1; grid-row: 5; margin-top: var(--s2); }
+  .channel-overview-settings__row--timezone .ui-select > .ui-select__description { grid-row: 3; }
+  .channel-overview-settings__row--timezone .ui-select > .ui-select__error { grid-row: 4; }
+  .channel-overview-settings__row > .inspector-field-row { max-width: none; grid-template-columns: minmax(0, 1fr); gap: var(--s1); }
+  .channel-overview-settings__row > .channel-overview-settings__hint { grid-column: 1; grid-row: 2; }
+  .channel-overview-settings__row > .channel-overview-settings__hint ~ .ui-button { grid-row: 3; margin-top: var(--s2); }
   .channel-overview-settings__row > .ui-button { width: 100%; margin-top: 0; margin-bottom: 0; }
 }
 .inspector-field-row--align-start { align-items: start; }

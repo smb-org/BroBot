@@ -1223,8 +1223,8 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
           {canManage(overview.role)
             ? <Button disabled={settingsBusy || channelSettings === null || defaultChatTargetDraft === savedDefaultChatTarget} onClick={() => { void saveDefaultChatTarget(); }}>{settingsTexts.defaultChatTargetSave}</Button>
             : <p className="muted">{settingsTexts.readOnly}</p>}
+          <p className="muted channel-overview-settings__hint">{settingsTexts.defaultChatTargetHint}</p>
         </div>
-        <p className="muted">{settingsTexts.defaultChatTargetHint}</p>
       </section>
       <WarningsAndErrorsFeed channelId={overview.channelId} onNavigate={onNavigate} />
       <ChannelStateChecks entries={entries}>
