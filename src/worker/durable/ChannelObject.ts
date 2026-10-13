@@ -553,7 +553,8 @@ export class ChannelObject extends DurableObject<Env> {
         else ctx.storage.kv.delete(LEGACY_ACTIVE_CHATTER_STREAM_KEY);
       });
     }
-    void ctx.blockConcurrencyWhile(async () => {
+    // Cloudflare-documented Durable Object init: the input gate blocks all events until this completes.
+    void ctx.blockConcurrencyWhile(async () => { // NOSONAR
       await this.ensureTimerSchedulesInitialized();
     });
   }
