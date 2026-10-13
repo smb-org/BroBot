@@ -19,10 +19,10 @@ export const OVERLAY_STREAM_DETAILS_CACHE_TTL_MS = 60_000;
 export const PROVIDER_JSON_MAX_BYTES = 256 * 1024;
 
 /** Reads a provider JSON response while enforcing a decoded body size limit. */
-export const readBoundedJsonResponse = async <Value = unknown>(
+export const readBoundedJsonResponseWithBytes = async (
   response: Response,
   maximumBytes = PROVIDER_JSON_MAX_BYTES,
-): Promise<Value> => {
+): Promise<{ value: unknown; bytes: number }> => {
   if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) {
     throw new RangeError("The JSON response size limit must be a positive safe integer.");
   }
@@ -65,8 +65,13 @@ export const readBoundedJsonResponse = async <Value = unknown>(
     offset += chunk.byteLength;
   }
   const payload: unknown = JSON.parse(new TextDecoder().decode(bytes));
-  return payload as Value;
+  return { value: payload, bytes: byteLength };
 };
+
+export const readBoundedJsonResponse = async <Value = unknown>(
+  response: Response,
+  maximumBytes = PROVIDER_JSON_MAX_BYTES,
+): Promise<Value> => (await readBoundedJsonResponseWithBytes(response, maximumBytes)).value as Value;
 
 export const validChannelTimeZone = (timeZone: string): boolean => {
   try {

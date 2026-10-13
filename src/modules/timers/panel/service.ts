@@ -49,8 +49,8 @@ export const loadTimersPanel = async (channelId: string, signal?: AbortSignal): 
       sample: variable.sample ?? "",
       ...(variable.group === undefined ? {} : { group: variable.group }),
       ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
-      ...(variable.parameters === "choices" || variable.parameters === "currency_pair" || variable.parameters === "api_source_name"
-        ? { parameter: { value: variable.parameterDefault ?? (variable.parameters === "choices" ? "a|b|c" : variable.parameters === "currency_pair" ? "USD EUR" : "sunset") } }
+      ...(variable.parameters === "choices" || variable.parameters === "currency_pair"
+        ? { parameter: { value: variable.parameterDefault ?? (variable.parameters === "choices" ? "a|b|c" : "USD EUR") } }
         : {}),
       kind: "module",
       ...(variable.isTextBlock === true ? { isTextBlock: true } : {}),

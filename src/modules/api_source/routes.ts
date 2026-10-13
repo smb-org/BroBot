@@ -7,6 +7,7 @@ import { API_SOURCE_MAXIMUMS, API_SOURCE_NAME_PATTERN } from "./contracts";
 import { getApiSource, listApiSources } from "./adapters/d1";
 import { inspectApiSourceExpression } from "./domain";
 import { isValidApiSourceUrl } from "./domain/url";
+import { testApiSource } from "./test-source";
 
 const createSchema = z.object({
   name: z.string().regex(API_SOURCE_NAME_PATTERN),
@@ -16,6 +17,10 @@ const createSchema = z.object({
 
 const updateSchema = createSchema.omit({ name: true }).extend({ revision: z.number().int().min(1) });
 const deleteSchema = z.object({ revision: z.number().int().min(1) });
+const testSchema = z.object({
+  url: z.string().min(1).max(API_SOURCE_MAXIMUMS.urlLength),
+  expression: z.string().max(API_SOURCE_MAXIMUMS.expressionLength),
+});
 
 const channelIdOf = (context: { req: { param: (name: string) => string | undefined } }): string =>
   context.req.param("channelId") ?? "";
@@ -28,6 +33,25 @@ export const apiSourceRoutes = new Hono<ModuleRouteEnvironment>();
 
 apiSourceRoutes.get("/sources", async (context) => {
   return context.json({ sources: await listApiSources(context.env.DB, channelIdOf(context)) });
+});
+
+apiSourceRoutes.get("/sources/:name", async (context) => {
+  const source = await getApiSource(context.env.DB, channelIdOf(context), context.req.param("name"));
+  return source === null
+    ? context.json({ error: "api_source_not_found" }, 404)
+    : context.json({ source });
+});
+
+apiSourceRoutes.post("/sources/test", async (context) => {
+  if (!canManage(context.get("channelRole"))) return context.json({ error: "api_source_management_denied" }, 403);
+  const parsed = testSchema.safeParse(await context.req.json().catch(() => null));
+  if (!parsed.success) return context.json({ error: "api_source_invalid" }, 400);
+  return context.json(await testApiSource(
+    parsed.data.url,
+    parsed.data.expression,
+    context.env.PUBLIC_ORIGIN,
+    Date.now(),
+  ));
 });
 
 apiSourceRoutes.post("/sources", async (context) => {
@@ -89,7 +113,9 @@ apiSourceRoutes.patch("/sources/:name", async (context) => {
   const now = new Date().toISOString();
   const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
-    `UPDATE api_sources SET url = ?, expression = ?, revision = revision + 1, updated_at = ?
+    `UPDATE api_sources
+        SET url = ?, expression = ?, revision = revision + 1, updated_at = ?,
+            last_fetched_at = NULL, last_status = NULL, last_error = NULL
       WHERE channel_id = ? AND source_name = ? AND revision = ? ${authorization.sql}`,
   ).bind(parsed.data.url, parsed.data.expression, now, channelId, name, before.revision, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({

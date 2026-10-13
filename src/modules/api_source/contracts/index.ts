@@ -1,6 +1,20 @@
 import type { ModuleLanguage, TemplateVariable } from "../../contract";
 
 export const API_SOURCE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
+export type ApiSourceFailureReason =
+  | "unreachable"
+  | "timeout"
+  | "http_error"
+  | "invalid_json"
+  | "invalid_expression"
+  | "unsupported_expression"
+  | "missing_value"
+  | "invalid_url"
+  | "response_too_large"
+  | "redirect_error"
+  | "quota_exceeded";
+export type ApiSourceLastStatus = "ok" | "error";
+
 export const API_SOURCE_MAXIMUMS = {
   sourcesPerChannel: 20,
   urlLength: 2_048,
@@ -15,21 +29,31 @@ export interface ApiSource {
   expression: string;
   revision: number;
   updatedAt: string;
+  lastFetchedAt: string | null;
+  lastStatus: ApiSourceLastStatus | null;
+  lastError: ApiSourceFailureReason | null;
 }
 
-export const API_SOURCE_VALUE_VARIABLE = {
-  name: "api_source.value",
+export type ApiSourceTestResult =
+  | { status: "ok"; httpStatus: number; bytes: number; json: unknown; value: string }
+  | {
+    status: "error";
+    reason: ApiSourceFailureReason;
+    httpStatus?: number;
+    constructName?: string;
+  };
+
+export const apiSourceTemplateVariable = (name: string): TemplateVariable => ({
+  name: `api.${name}`,
   group: "channel",
   maxLength: API_SOURCE_MAXIMUMS.outputLength,
   sample: "18:42",
-  parameters: "api_source_name",
-  parameterDefault: "sunset",
   external: true,
   picker: {
-    de: { label: "API-Quelle", description: "Gibt den Wert einer benannten API-Quelle aus. Beispiel: {api_source.value sunset}" },
-    en: { label: "API source", description: "Outputs the value of a named API source. Example: {api_source.value sunset}" },
+    de: { label: `API-Quelle: ${name}`, description: `Gibt den Beispielwert der API-Quelle ${name} aus. Beispiel: {api.${name}}`, sample: "18:42" },
+    en: { label: `API source: ${name}`, description: `Outputs the example value from API source ${name}. Example: {api.${name}}`, sample: "18:42" },
   },
-} as const satisfies TemplateVariable;
+});
 
 export const apiSourceModuleCatalog: Readonly<Record<ModuleLanguage, {
   label: string;

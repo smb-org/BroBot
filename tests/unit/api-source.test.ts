@@ -3,9 +3,9 @@ import { performance } from "node:perf_hooks";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleEvent, ModuleRouteEnvironment } from "../../src/modules/contract";
-import { API_SOURCE_VALUE_VARIABLE, apiSourceModule } from "../../src/modules/api_source";
+import { apiSourceModule } from "../../src/modules/api_source";
 import { fetchCachedApiSourceJson } from "../../src/modules/api_source/adapters/fetch-json";
-import { claimApiSourceQuota } from "../../src/modules/api_source/adapters/d1";
+import { claimApiSourceQuota, getApiSource, listApiSources, recordApiSourceStatus } from "../../src/modules/api_source/adapters/d1";
 import {
   ALLOWED_FUNCTIONS,
   evaluateApiSourceExpression,
@@ -18,6 +18,7 @@ import {
 import { isValidApiSourceUrl, validateApiSourceUrl } from "../../src/modules/api_source/domain/url";
 import { apiSourcePanelTexts } from "../../src/modules/api_source/panel/locale";
 import { apiSourceRoutes } from "../../src/modules/api_source/routes";
+import { testApiSource } from "../../src/modules/api_source/test-source";
 import { textLibraryModule } from "../../src/modules/text_library";
 import { createTemplateRenderer, type TemplateResolverSources } from "../../src/worker/template-resolver";
 import { createTextBlockTemplateValueProvider } from "../../src/modules/text_library/adapters/template-expander";
@@ -272,6 +273,154 @@ describe("API source outbound fetch", () => {
     expect(await claimApiSourceQuota(db, CHANNEL_ID, NOW + 1_000, 2)).toBe(true);
     expect(await claimApiSourceQuota(db, CHANNEL_ID, NOW + 2_000, 2)).toBe(false);
     expect(await claimApiSourceQuota(db, "another-channel", NOW, 2)).toBe(true);
+  });
+});
+
+describe("API source test request", () => {
+  it("tests an unsaved source without writing cache or quota data", async () => {
+    const database = await createDatabase();
+    const json = { sunset: "18:42" };
+    const body = JSON.stringify(json);
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(json));
+
+    const result = await testApiSource(
+      "https://api.sample-provider.net/unsaved",
+      "$.sunset",
+      undefined,
+      NOW,
+      fetcher,
+    );
+
+    expect(result).toEqual({
+      status: "ok",
+      httpStatus: 200,
+      bytes: new TextEncoder().encode(body).byteLength,
+      json,
+      value: "18:42",
+    });
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher).toHaveBeenCalledWith("https://api.sample-provider.net/unsaved", expect.objectContaining({
+      method: "GET",
+      redirect: "manual",
+      credentials: "omit",
+    }));
+    expect(fetcher.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM api_source_cache").first())
+      .resolves.toEqual({ count: 0 });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM api_source_quota").first())
+      .resolves.toEqual({ count: 0 });
+  });
+
+  it.each([
+    ["network failure", () => Promise.reject(new TypeError("network details must not reach the dashboard")), "unreachable"],
+    ["timeout", () => Promise.reject(Object.assign(new Error("timeout"), { name: "TimeoutError" })), "timeout"],
+    ["HTTP failure", () => Promise.resolve(new Response(null, { status: 503 })), "http_error"],
+    ["invalid JSON", () => Promise.resolve(new Response("not json", { status: 200, headers: { "Content-Type": "application/json" } })), "invalid_json"],
+  ] as const)("returns a typed %s reason", async (_label, response, reason) => {
+    const fetcher = vi.fn<typeof fetch>(response);
+
+    await expect(testApiSource(
+      "https://api.sample-provider.net/failure",
+      "$.value",
+      undefined,
+      NOW,
+      fetcher,
+    )).resolves.toMatchObject({ status: "error", reason });
+  });
+
+  it("distinguishes invalid syntax, unsupported constructs, and missing values before returning a result", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ value: "present" }));
+
+    await expect(testApiSource("https://api.sample-provider.net/data", "$(", undefined, NOW, fetcher))
+      .resolves.toEqual({ status: "error", reason: "invalid_expression" });
+    await expect(testApiSource("https://api.sample-provider.net/data", "$value ~> $uppercase()", undefined, NOW, fetcher))
+      .resolves.toMatchObject({ status: "error", reason: "unsupported_expression", constructName: "function chaining (~>)" });
+    await expect(testApiSource("https://api.sample-provider.net/data", "$.missing", undefined, NOW, fetcher))
+      .resolves.toMatchObject({ status: "error", reason: "missing_value", httpStatus: 200 });
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it("uses the same SSRF rejection for an unsaved test URL", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+
+    await expect(testApiSource("https://127.0.0.1/internal", "$.value", undefined, NOW, fetcher))
+      .resolves.toEqual({ status: "error", reason: "invalid_url" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("authorizes endpoint tests like source edits and returns the typed result without storing it", async () => {
+    const database = await createDatabase();
+    const app = new Hono<ModuleRouteEnvironment>();
+    let role: "manager" | "operator" = "manager";
+    app.use("*", async (context, next) => {
+      context.set("channelRole", role);
+      await next();
+    });
+    app.route("/channels/:channelId", apiSourceRoutes);
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ value: 42 }));
+    vi.stubGlobal("fetch", fetcher);
+    const request = () => app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/sources/test`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: "https://api.sample-provider.net/unsaved", expression: "$.value" }),
+    }), { DB: database as unknown as D1Database, PUBLIC_ORIGIN: "https://brobot.example" });
+
+    const response = await request();
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ status: "ok", httpStatus: 200, json: { value: 42 }, value: "42" });
+    expect(fetcher).toHaveBeenCalledOnce();
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM api_sources").first())
+      .resolves.toEqual({ count: 0 });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM api_source_cache").first())
+      .resolves.toEqual({ count: 0 });
+
+    role = "operator";
+    const denied = await request();
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toEqual({ error: "api_source_management_denied" });
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+});
+
+describe("API source status", () => {
+  it("exposes the last status through list and detail reads", async () => {
+    const database = await createDatabase();
+    await insertSource(database, "sunset", "$.sunset");
+    const lastFetchedAt = new Date(NOW).toISOString();
+
+    await recordApiSourceStatus(
+      database as unknown as D1Database,
+      CHANNEL_ID,
+      "sunset",
+      "https://api.sample-provider.net/data",
+      lastFetchedAt,
+      "error",
+      "timeout",
+    );
+
+    expect(await listApiSources(database as unknown as D1Database, CHANNEL_ID)).toMatchObject([{
+      name: "sunset",
+      lastFetchedAt,
+      lastStatus: "error",
+      lastError: "timeout",
+    }]);
+    await expect(getApiSource(database as unknown as D1Database, CHANNEL_ID, "sunset")).resolves.toMatchObject({
+      lastFetchedAt,
+      lastStatus: "error",
+      lastError: "timeout",
+    });
+
+    const app = new Hono<ModuleRouteEnvironment>();
+    app.use("*", async (context, next) => {
+      context.set("channelRole", "operator");
+      await next();
+    });
+    app.route("/channels/:channelId", apiSourceRoutes);
+    const environment = { DB: database as unknown as D1Database } as Env;
+    const listResponse = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/sources`), environment);
+    await expect(listResponse.json()).resolves.toMatchObject({ sources: [{ lastFetchedAt, lastStatus: "error", lastError: "timeout" }] });
+    const detailResponse = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/sources/sunset`), environment);
+    await expect(detailResponse.json()).resolves.toMatchObject({ source: { lastFetchedAt, lastStatus: "error", lastError: "timeout" } });
   });
 });
 
@@ -559,7 +708,7 @@ describe("API source Node-side template CPU measurement", () => {
        VALUES (?, 'info', 'info', NULL, ?, ?)`,
     ).bind(CHANNEL_ID, new Date(NOW).toISOString(), new Date(NOW).toISOString()).run();
     const blockNames = ["root", "level_one", "level_two"] as const;
-    const blockTexts = ["{text.level_one}", "{text.level_two}", "{api_source.value sunset}"] as const;
+    const blockTexts = ["{text.level_one}", "{text.level_two}", "{api.sunset}"] as const;
     for (const [index, name] of blockNames.entries()) {
       await database.prepare(
         `INSERT INTO text_blocks (channel_id, block_name, category_id, games_json, revision, created_at, updated_at)
@@ -596,6 +745,7 @@ describe("API source Node-side template CPU measurement", () => {
       chatStatus: ["viewer"],
     };
     const conditions = await apiSourceModule.textBlockConditionsForChannel?.(db, CHANNEL_ID) ?? [];
+    const apiVariables = await apiSourceModule.templateVariables?.(db, CHANNEL_ID) ?? [];
     const budget = sharedBudget();
     const templateValueProviders: NonNullable<TemplateResolverSources["templateValueProviders"]> = [
       {
@@ -606,10 +756,10 @@ describe("API source Node-side template CPU measurement", () => {
       },
       {
         moduleId: apiSourceModule.id,
-        variables: [API_SOURCE_VALUE_VARIABLE],
+        variables: apiVariables,
         textBlockConditions: conditions,
         templateUnavailableText: { de: "nicht verfügbar", en: "unavailable" },
-        resolveTemplateParameter: (name, parameter, context) => apiSourceModule.resolveTemplateParameter?.(name, parameter, context) ?? Promise.resolve(null),
+        resolveTemplateValues: (names, context) => apiSourceModule.resolveTemplateValues?.(names, context) ?? Promise.resolve({}),
         resolveTemplateConditions: (ids, context) => apiSourceModule.resolveTemplateConditions?.(ids, context) ?? Promise.resolve({}),
       },
     ];
@@ -622,7 +772,7 @@ describe("API source Node-side template CPU measurement", () => {
       channelTimeZone: () => Promise.resolve("Europe/Berlin"),
       channelLocation: () => Promise.resolve(null),
       templateValueProviders,
-      registeredTemplateVariables: [API_SOURCE_VALUE_VARIABLE],
+      registeredTemplateVariables: apiVariables,
       streamState: () => Promise.resolve("offline"),
       channelDetails: () => Promise.resolve(null),
       streamDetails: () => Promise.resolve(null),
@@ -646,6 +796,11 @@ describe("API source Node-side template CPU measurement", () => {
       elapsedMeasurementsMs.push(performance.now() - startedAt);
       expect(result.text).toBe("18:42");
     }
+    await expect(getApiSource(db, CHANNEL_ID, "sunset")).resolves.toMatchObject({
+      lastFetchedAt: new Date(NOW).toISOString(),
+      lastStatus: "ok",
+      lastError: null,
+    });
     const maximumCpuMs = Math.max(...cpuMeasurementsMs);
     const maximumElapsedMs = Math.max(...elapsedMeasurementsMs);
     console.info(`Node-side API source template CPU measurement (not a Workers guarantee): max=${maximumCpuMs.toFixed(3)} ms; elapsed=${maximumElapsedMs.toFixed(3)} ms across ${String(cpuMeasurementsMs.length)} runs`);
@@ -673,6 +828,7 @@ describe("API source Node-side template CPU measurement", () => {
       chatStatus: ["viewer"],
     };
     const budget = sharedBudget();
+    const apiVariables = await apiSourceModule.templateVariables?.(db, CHANNEL_ID) ?? [];
     const sources: TemplateResolverSources = {
       DB: db,
       publicOrigin: "https://brobot.esembe.app",
@@ -683,12 +839,12 @@ describe("API source Node-side template CPU measurement", () => {
       channelLocation: () => Promise.resolve(null),
       templateValueProviders: [{
         moduleId: apiSourceModule.id,
-        variables: [API_SOURCE_VALUE_VARIABLE],
+        variables: apiVariables,
         templateUnavailableText: { de: "nicht verfügbar", en: "unavailable" },
-        resolveTemplateParameter: (name, parameter, context) =>
-          apiSourceModule.resolveTemplateParameter?.(name, parameter, context) ?? Promise.resolve(null),
+        resolveTemplateValues: (names, context) =>
+          apiSourceModule.resolveTemplateValues?.(names, context) ?? Promise.resolve({}),
       }],
-      registeredTemplateVariables: [API_SOURCE_VALUE_VARIABLE],
+      registeredTemplateVariables: apiVariables,
       streamState: () => Promise.resolve("offline"),
       channelDetails: () => Promise.resolve(null),
       streamDetails: () => Promise.resolve(null),
@@ -701,8 +857,8 @@ describe("API source Node-side template CPU measurement", () => {
       now: () => NOW,
     };
     const placeholders = [
-      ...Array.from({ length: 11 }, () => "{api_source.value source_0}"),
-      ...Array.from({ length: 10 }, (_, index) => `{api_source.value source_${String(index + 1)}}`),
+      ...Array.from({ length: 11 }, () => "{api.source_0}"),
+      ...Array.from({ length: 10 }, (_, index) => `{api.source_${String(index + 1)}}`),
     ];
 
     const result = await createTemplateRenderer(event, "event", [], sources)(placeholders.join("|"), {}, undefined, "preview");

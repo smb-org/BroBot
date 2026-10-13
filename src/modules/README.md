@@ -741,7 +741,7 @@ Broadcaster und Manager eines Kanals können höchstens 20 Quellen anlegen. Der
 Name besteht aus Kleinbuchstaben, Ziffern und Unterstrichen und beginnt mit
 einem Buchstaben. Eine Quelle enthält eine HTTPS-URL und optional einen
 JSONata-Ausdruck. In Texten und Textblöcken wird sie als
-`{api_source.value sunset}` verwendet. Eine nichtleere JSONata-Quelle lässt
+`{api.sunset}` verwendet. Eine nichtleere JSONata-Quelle lässt
 sich außerdem als boolesche Bedingung für Textblockvarianten auswählen.
 
 Beispiele ohne JavaScript:

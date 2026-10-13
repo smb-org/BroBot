@@ -1,4 +1,4 @@
-import type { ApiSource } from "../contracts";
+import type { ApiSource, ApiSourceFailureReason, ApiSourceLastStatus } from "../contracts";
 
 interface ApiSourceRow {
   source_name: string;
@@ -6,6 +6,9 @@ interface ApiSourceRow {
   expression: string;
   revision: number;
   updated_at: string;
+  last_fetched_at: string | null;
+  last_status: ApiSourceLastStatus | null;
+  last_error: ApiSourceFailureReason | null;
 }
 
 const mapSource = (row: ApiSourceRow): ApiSource => ({
@@ -14,11 +17,14 @@ const mapSource = (row: ApiSourceRow): ApiSource => ({
   expression: row.expression,
   revision: row.revision,
   updatedAt: row.updated_at,
+  lastFetchedAt: row.last_fetched_at,
+  lastStatus: row.last_status,
+  lastError: row.last_error,
 });
 
 export const listApiSources = async (db: D1Database, channelId: string): Promise<readonly ApiSource[]> => {
   const result = await db.prepare(
-    `SELECT source_name, url, expression, revision, updated_at
+    `SELECT source_name, url, expression, revision, updated_at, last_fetched_at, last_status, last_error
        FROM api_sources WHERE channel_id = ? ORDER BY source_name`,
   ).bind(channelId).all<ApiSourceRow>();
   return result.results.map(mapSource);
@@ -26,10 +32,26 @@ export const listApiSources = async (db: D1Database, channelId: string): Promise
 
 export const getApiSource = async (db: D1Database, channelId: string, name: string): Promise<ApiSource | null> => {
   const row = await db.prepare(
-    `SELECT source_name, url, expression, revision, updated_at
+    `SELECT source_name, url, expression, revision, updated_at, last_fetched_at, last_status, last_error
        FROM api_sources WHERE channel_id = ? AND source_name = ?`,
   ).bind(channelId, name).first<ApiSourceRow>();
   return row === null ? null : mapSource(row);
+};
+
+export const recordApiSourceStatus = async (
+  db: D1Database,
+  channelId: string,
+  name: string,
+  url: string,
+  lastFetchedAt: string,
+  lastStatus: ApiSourceLastStatus,
+  lastError: ApiSourceFailureReason | null,
+): Promise<void> => {
+  await db.prepare(
+    `UPDATE api_sources
+        SET last_fetched_at = ?, last_status = ?, last_error = ?
+      WHERE channel_id = ? AND source_name = ? AND url = ?`,
+  ).bind(lastFetchedAt, lastStatus, lastError, channelId, name, url).run();
 };
 
 export const readCachedApiPayload = async (

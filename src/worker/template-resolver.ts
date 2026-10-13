@@ -458,7 +458,7 @@ export const createTemplateRenderer = (
     );
     if (provider?.resolveTemplateParameter === undefined) continue;
     const declared = provider.variables.find((variable) => variable.name === name && (variable.contexts?.includes(context) ?? true));
-    if (declared?.parameters !== "currency_pair" && declared?.parameters !== "api_source_name") continue;
+    if (declared?.parameters !== "currency_pair") continue;
     try {
       const resolvedParameter = parameter ?? "";
       const value = await provider.resolveTemplateParameter(name, resolvedParameter, providerContextFor(provider.moduleId));
@@ -472,7 +472,7 @@ export const createTemplateRenderer = (
   for (const provider of sources.templateValueProviders ?? []) {
     for (const variable of provider.variables) {
       if (!(variable.contexts?.includes(context) ?? true)) continue;
-      if ((variable.parameters !== "currency_pair" && variable.parameters !== "api_source_name") || provider.resolveTemplateParameter === undefined) continue;
+      if (variable.parameters !== "currency_pair" || provider.resolveTemplateParameter === undefined) continue;
       parameterValues[variable.name] = (parameter) => parameterValuesByToken.get(`${variable.name}\u0000${parameter}`) ?? `{${variable.name} ${parameter}}`;
     }
   }
