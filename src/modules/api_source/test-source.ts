@@ -1,9 +1,13 @@
 import type { ApiSourceFailureReason, ApiSourceTestResult } from "./contracts";
+import type { ModuleExternalFetchBudget } from "../contract";
 import { fetchUncachedApiSourceJson, ApiSourceFetchError } from "./adapters/fetch-json";
 import { evaluateApiSourceExpression, formatApiSourceValue, inspectApiSourceExpression } from "./domain";
 import { isValidApiSourceUrl } from "./domain/url";
 
 export const testApiSource = async (
+  db: D1Database,
+  channelId: string,
+  externalFetchBudget: ModuleExternalFetchBudget,
   url: string,
   expression: string,
   ownOrigin: string | undefined,
@@ -19,13 +23,14 @@ export const testApiSource = async (
 
   let response: Awaited<ReturnType<typeof fetchUncachedApiSourceJson>>;
   try {
-    response = await fetchUncachedApiSourceJson(url, ownOrigin, now, fetcher);
+    response = await fetchUncachedApiSourceJson(db, channelId, url, ownOrigin, now, externalFetchBudget, fetcher);
   } catch (failure: unknown) {
     if (failure instanceof ApiSourceFetchError) {
       return {
         status: "error",
         reason: failure.reason,
         ...(failure.httpStatus === undefined ? {} : { httpStatus: failure.httpStatus }),
+        ...(failure.retryAfter === undefined ? {} : { retryAfter: failure.retryAfter }),
       };
     }
     return { status: "error", reason: "unreachable" };

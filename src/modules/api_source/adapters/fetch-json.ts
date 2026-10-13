@@ -17,18 +17,21 @@ export class ApiSourceFetchError extends Error {
   readonly reason: ApiSourceFailureReason;
   readonly fetchedAt: string | null;
   readonly httpStatus?: number;
+  readonly retryAfter?: number | null;
 
   constructor(
     reason: ApiSourceFailureReason,
     message: string,
     fetchedAt: string | null,
     httpStatus?: number,
+    retryAfter?: number | null,
   ) {
     super(message);
     this.name = "ApiSourceFetchError";
     this.reason = reason;
     this.fetchedAt = fetchedAt;
     if (httpStatus !== undefined) this.httpStatus = httpStatus;
+    if (retryAfter !== undefined) this.retryAfter = retryAfter;
   }
 }
 
@@ -72,6 +75,7 @@ const requestJson = async (
   externalFetchBudget: ModuleExternalFetchBudget | undefined,
   fetcher: typeof fetch,
   enforceQuota: boolean,
+  disableEdgeCache = false,
 ): Promise<ApiSourceJsonResponse> => {
   const url = validateApiSourceUrl(inputUrl, ownOrigin);
   let current = url;
@@ -80,12 +84,27 @@ const requestJson = async (
   for (;;) {
     validateApiSourceUrl(current.href, ownOrigin);
     if (externalFetchBudget !== undefined && !externalFetchBudget.claim()) {
-      throw new Error("API source invocation request limit reached.");
+      throw new ApiSourceFetchError(
+        "rate_limited",
+        "API source invocation request limit reached.",
+        new Date(now).toISOString(),
+        undefined,
+        null,
+      );
     }
     if (enforceQuota) {
       if (db === null) throw new Error("API source database is unavailable.");
       const withinQuota = await claimApiSourceQuota(db, channelId, now, API_SOURCE_MAXIMUMS.requestsPerChannelPerHour);
-      if (!withinQuota) throw new ApiSourceFetchError("quota_exceeded", "API source channel quota reached.", new Date(now).toISOString());
+      if (!withinQuota) {
+        const retryAfter = (Math.floor(now / 3_600_000) + 1) * 3_600_000;
+        throw new ApiSourceFetchError(
+          "rate_limited",
+          "API source channel quota reached.",
+          new Date(now).toISOString(),
+          undefined,
+          retryAfter,
+        );
+      }
     }
     let response: Response;
     try {
@@ -99,6 +118,7 @@ const requestJson = async (
         credentials: "omit",
         referrerPolicy: "no-referrer",
         signal,
+        ...(disableEdgeCache ? { cache: "no-store", cf: { cacheTtl: 0, cacheEverything: false } } : {}),
       });
     } catch (failure: unknown) {
       const timedOut = failure instanceof Error && (failure.name === "TimeoutError" || failure.name === "AbortError");
@@ -199,11 +219,14 @@ export const fetchCachedApiSourceJson = async (
 ): Promise<unknown> => (await fetchCachedApiSourceResult(db, channelId, url, ownOrigin, now, externalFetchBudget, fetcher)).payload;
 
 export const fetchUncachedApiSourceJson = async (
+  db: D1Database,
+  channelId: string,
   url: string,
   ownOrigin: string | undefined,
   now: number,
+  externalFetchBudget: ModuleExternalFetchBudget,
   fetcher: typeof fetch = fetch,
-): Promise<ApiSourceJsonResponse> => requestJson(null, "", url, ownOrigin, now, undefined, fetcher, false);
+): Promise<ApiSourceJsonResponse> => requestJson(db, channelId, url, ownOrigin, now, externalFetchBudget, fetcher, true, true);
 
 export const readCachedApiSourceJson = async (
   db: D1Database,

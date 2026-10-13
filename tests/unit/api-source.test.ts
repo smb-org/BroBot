@@ -3,6 +3,7 @@ import { performance } from "node:perf_hooks";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleEvent, ModuleRouteEnvironment } from "../../src/modules/contract";
+import { apiSourceFailureText } from "../../src/dashboard/locale";
 import { apiSourceModule } from "../../src/modules/api_source";
 import { fetchCachedApiSourceJson } from "../../src/modules/api_source/adapters/fetch-json";
 import { claimApiSourceQuota, getApiSource, listApiSources, recordApiSourceStatus } from "../../src/modules/api_source/adapters/d1";
@@ -133,6 +134,8 @@ describe("API source outbound fetch", () => {
     expect(new Headers(request?.headers).get("User-Agent")).toBe("BroBot/0.1.0 (+https://github.com/smb-org/BroBot)");
     expect([...new Headers(request?.headers).keys()].sort((a, b) => a.localeCompare(b))).toEqual(["accept", "user-agent"]);
     expect(request).toMatchObject({ method: "GET", redirect: "manual", credentials: "omit", referrerPolicy: "no-referrer" });
+    expect(request).not.toHaveProperty("cache");
+    expect(request).not.toHaveProperty("cf");
     expect(budget.count()).toBe(1);
     const cachedOwner = await db.prepare("SELECT channel_id FROM api_source_cache").first<{ channel_id: string }>();
     expect(cachedOwner?.channel_id).toBe(CHANNEL_ID);
@@ -259,7 +262,7 @@ describe("API source outbound fetch", () => {
       NOW,
       budget,
       fetcher,
-    )).rejects.toThrow("API source invocation request limit reached");
+    )).rejects.toMatchObject({ reason: "rate_limited", retryAfter: null });
     expect(fetcher).toHaveBeenCalledTimes(3);
     expect(budget.count()).toBe(3);
   });
@@ -277,13 +280,16 @@ describe("API source outbound fetch", () => {
 });
 
 describe("API source test request", () => {
-  it("tests an unsaved source without writing cache or quota data", async () => {
+  it("tests an unsaved source without D1 caching and disables edge caching", async () => {
     const database = await createDatabase();
     const json = { sunset: "18:42" };
     const body = JSON.stringify(json);
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(json));
 
     const result = await testApiSource(
+      database as unknown as D1Database,
+      CHANNEL_ID,
+      sharedBudget(),
       "https://api.sample-provider.net/unsaved",
       "$.sunset",
       undefined,
@@ -303,12 +309,65 @@ describe("API source test request", () => {
       method: "GET",
       redirect: "manual",
       credentials: "omit",
+      cache: "no-store",
+      cf: { cacheTtl: 0, cacheEverything: false },
     }));
     expect(fetcher.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
     await expect(database.prepare("SELECT COUNT(*) AS count FROM api_source_cache").first())
       .resolves.toEqual({ count: 0 });
     await expect(database.prepare("SELECT COUNT(*) AS count FROM api_source_quota").first())
-      .resolves.toEqual({ count: 0 });
+      .resolves.toEqual({ count: 1 });
+  });
+
+  it("applies the shared per-invocation request budget to redirects in a source test", async () => {
+    const database = await createDatabase();
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, {
+      status: 302,
+      headers: { Location: "/next" },
+    }));
+
+    await expect(testApiSource(
+      database as unknown as D1Database,
+      CHANNEL_ID,
+      sharedBudget(),
+      "https://api.sample-provider.net/start",
+      "$.value",
+      undefined,
+      NOW,
+      fetcher,
+    )).resolves.toEqual({ status: "error", reason: "rate_limited", retryAfter: null });
+
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    await expect(database.prepare("SELECT request_count FROM api_source_quota WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).resolves.toEqual({ request_count: 3 });
+    expect(apiSourceFailureText("rate_limited", "de", null)).toContain("Starte einen neuen Abruf");
+    expect(apiSourceFailureText("rate_limited", "en", null)).toContain("Try again in a new request");
+  });
+
+  it("counts every endpoint test against the channel quota and returns retry information when full", async () => {
+    const database = await createDatabase();
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({ value: "ok" })));
+    const results = [];
+
+    for (let attempt = 0; attempt < 101; attempt += 1) {
+      results.push(await testApiSource(
+        database as unknown as D1Database,
+        CHANNEL_ID,
+        sharedBudget(),
+        `https://api.sample-provider.net/test-${String(attempt)}`,
+        "$.value",
+        undefined,
+        NOW,
+        fetcher,
+      ));
+    }
+
+    const retryAfter = (Math.floor(NOW / 3_600_000) + 1) * 3_600_000;
+    expect(results[99]?.status).toBe("ok");
+    expect(results[100]).toEqual({ status: "error", reason: "rate_limited", retryAfter });
+    expect(fetcher).toHaveBeenCalledTimes(100);
+    await expect(database.prepare("SELECT request_count FROM api_source_quota WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).resolves.toEqual({ request_count: 100 });
   });
 
   it.each([
@@ -317,9 +376,13 @@ describe("API source test request", () => {
     ["HTTP failure", () => Promise.resolve(new Response(null, { status: 503 })), "http_error"],
     ["invalid JSON", () => Promise.resolve(new Response("not json", { status: 200, headers: { "Content-Type": "application/json" } })), "invalid_json"],
   ] as const)("returns a typed %s reason", async (_label, response, reason) => {
+    const database = await createDatabase();
     const fetcher = vi.fn<typeof fetch>(response);
 
     await expect(testApiSource(
+      database as unknown as D1Database,
+      CHANNEL_ID,
+      sharedBudget(),
       "https://api.sample-provider.net/failure",
       "$.value",
       undefined,
@@ -329,21 +392,23 @@ describe("API source test request", () => {
   });
 
   it("distinguishes invalid syntax, unsupported constructs, and missing values before returning a result", async () => {
+    const database = await createDatabase();
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ value: "present" }));
 
-    await expect(testApiSource("https://api.sample-provider.net/data", "$(", undefined, NOW, fetcher))
+    await expect(testApiSource(database as unknown as D1Database, CHANNEL_ID, sharedBudget(), "https://api.sample-provider.net/data", "$(", undefined, NOW, fetcher))
       .resolves.toEqual({ status: "error", reason: "invalid_expression" });
-    await expect(testApiSource("https://api.sample-provider.net/data", "$value ~> $uppercase()", undefined, NOW, fetcher))
+    await expect(testApiSource(database as unknown as D1Database, CHANNEL_ID, sharedBudget(), "https://api.sample-provider.net/data", "$value ~> $uppercase()", undefined, NOW, fetcher))
       .resolves.toMatchObject({ status: "error", reason: "unsupported_expression", constructName: "function chaining (~>)" });
-    await expect(testApiSource("https://api.sample-provider.net/data", "$.missing", undefined, NOW, fetcher))
+    await expect(testApiSource(database as unknown as D1Database, CHANNEL_ID, sharedBudget(), "https://api.sample-provider.net/data", "$.missing", undefined, NOW, fetcher))
       .resolves.toMatchObject({ status: "error", reason: "missing_value", httpStatus: 200 });
     expect(fetcher).toHaveBeenCalledOnce();
   });
 
   it("uses the same SSRF rejection for an unsaved test URL", async () => {
+    const database = await createDatabase();
     const fetcher = vi.fn<typeof fetch>();
 
-    await expect(testApiSource("https://127.0.0.1/internal", "$.value", undefined, NOW, fetcher))
+    await expect(testApiSource(database as unknown as D1Database, CHANNEL_ID, sharedBudget(), "https://127.0.0.1/internal", "$.value", undefined, NOW, fetcher))
       .resolves.toEqual({ status: "error", reason: "invalid_url" });
     expect(fetcher).not.toHaveBeenCalled();
   });
@@ -354,6 +419,7 @@ describe("API source test request", () => {
     let role: "manager" | "operator" = "manager";
     app.use("*", async (context, next) => {
       context.set("channelRole", role);
+      context.set("externalFetchBudget", sharedBudget());
       await next();
     });
     app.route("/channels/:channelId", apiSourceRoutes);
@@ -373,6 +439,8 @@ describe("API source test request", () => {
       .resolves.toEqual({ count: 0 });
     await expect(database.prepare("SELECT COUNT(*) AS count FROM api_source_cache").first())
       .resolves.toEqual({ count: 0 });
+    await expect(database.prepare("SELECT request_count FROM api_source_quota WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).resolves.toEqual({ request_count: 1 });
 
     role = "operator";
     const denied = await request();
@@ -393,6 +461,7 @@ describe("API source status", () => {
       CHANNEL_ID,
       "sunset",
       "https://api.sample-provider.net/data",
+      1,
       lastFetchedAt,
       "error",
       "timeout",
@@ -421,6 +490,28 @@ describe("API source status", () => {
     await expect(listResponse.json()).resolves.toMatchObject({ sources: [{ lastFetchedAt, lastStatus: "error", lastError: "timeout" }] });
     const detailResponse = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/sources/sunset`), environment);
     await expect(detailResponse.json()).resolves.toMatchObject({ source: { lastFetchedAt, lastStatus: "error", lastError: "timeout" } });
+  });
+
+  it("ignores an older result and a result from a previous saved revision", async () => {
+    const database = await createDatabase();
+    await insertSource(database, "sunset", "$.sunset");
+    const db = database as unknown as D1Database;
+    const newerFetch = new Date(NOW + 2_000).toISOString();
+
+    await recordApiSourceStatus(db, CHANNEL_ID, "sunset", "https://api.sample-provider.net/data", 1, newerFetch, "ok", null);
+    await recordApiSourceStatus(db, CHANNEL_ID, "sunset", "https://api.sample-provider.net/data", 1, new Date(NOW + 1_000).toISOString(), "error", "timeout");
+
+    await database.prepare("UPDATE api_sources SET expression = ?, revision = revision + 1 WHERE channel_id = ? AND source_name = ?")
+      .bind("$.new_sunset", CHANNEL_ID, "sunset").run();
+    await recordApiSourceStatus(db, CHANNEL_ID, "sunset", "https://api.sample-provider.net/data", 1, new Date(NOW + 3_000).toISOString(), "error", "invalid_expression");
+
+    await expect(getApiSource(db, CHANNEL_ID, "sunset")).resolves.toMatchObject({
+      revision: 2,
+      expression: "$.new_sunset",
+      lastFetchedAt: newerFetch,
+      lastStatus: "ok",
+      lastError: null,
+    });
   });
 });
 

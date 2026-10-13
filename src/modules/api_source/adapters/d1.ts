@@ -43,6 +43,7 @@ export const recordApiSourceStatus = async (
   channelId: string,
   name: string,
   url: string,
+  revision: number,
   lastFetchedAt: string,
   lastStatus: ApiSourceLastStatus,
   lastError: ApiSourceFailureReason | null,
@@ -50,8 +51,9 @@ export const recordApiSourceStatus = async (
   await db.prepare(
     `UPDATE api_sources
         SET last_fetched_at = ?, last_status = ?, last_error = ?
-      WHERE channel_id = ? AND source_name = ? AND url = ?`,
-  ).bind(lastFetchedAt, lastStatus, lastError, channelId, name, url).run();
+      WHERE channel_id = ? AND source_name = ? AND url = ? AND revision = ?
+        AND (last_fetched_at IS NULL OR last_fetched_at <= ?)`,
+  ).bind(lastFetchedAt, lastStatus, lastError, channelId, name, url, revision, lastFetchedAt).run();
 };
 
 export const readCachedApiPayload = async (

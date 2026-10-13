@@ -31,7 +31,7 @@ const recordFailure = async (
   lastFetchedAt = new Date(context.now).toISOString(),
 ): Promise<void> => {
   if ("readOnly" in context && context.readOnly) return;
-  await recordApiSourceStatus(context.DB, context.channelId, source.name, source.url, lastFetchedAt, "error", reason);
+  await recordApiSourceStatus(context.DB, context.channelId, source.name, source.url, source.revision, lastFetchedAt, "error", reason);
 };
 
 const sourcePayload = (
@@ -65,7 +65,7 @@ const sourcePayload = (
     try {
       const result = await pending;
       if (result.fetchedAt !== null) {
-        await recordApiSourceStatus(context.DB, context.channelId, source.name, source.url, result.fetchedAt, "ok", null);
+        await recordApiSourceStatus(context.DB, context.channelId, source.name, source.url, source.revision, result.fetchedAt, "ok", null);
       }
       return result.payload;
     } catch (failure: unknown) {

@@ -30,6 +30,9 @@ describe("API source token migration", () => {
         INSERT INTO timers (timer_id, channel_id, name, message_text, trigger_type, trigger_json, created_at, updated_at)
         VALUES ('timer-1', 'token-channel', 'Sunset', '{api_source.value sunset}', 'interval', '{}',
           '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z');
+        INSERT INTO timers (timer_id, channel_id, name, message_text, trigger_type, trigger_json, created_at, updated_at)
+        VALUES ('timer-2', 'token-channel', 'Deleted source', '{api_source.value removed_source}', 'interval', '{}',
+          '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z');
         INSERT INTO faq_entries (faq_id, channel_id, name, matcher_json, answer_text, created_at, updated_at)
         VALUES ('faq-1', 'token-channel', 'Sunset', '{}', '{api_source.value sunset}',
           '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z');
@@ -55,6 +58,7 @@ describe("API source token migration", () => {
       expect(database.prepare("SELECT response_text, template_fields_json, timeout_fallback_text, timeout_reason FROM text_commands WHERE channel_id = 'token-channel'").get())
         .toEqual({ response_text: "{api.sunset}", template_fields_json: '{"usageText":"{api.sunset}"}', timeout_fallback_text: "{api.sunset}", timeout_reason: "{api.sunset}" });
       expect(database.prepare("SELECT message_text FROM timers WHERE timer_id = 'timer-1'").get()).toEqual({ message_text: "{api.sunset}" });
+      expect(database.prepare("SELECT message_text FROM timers WHERE timer_id = 'timer-2'").get()).toEqual({ message_text: "{api.removed_source}" });
       expect(database.prepare("SELECT answer_text FROM faq_entries WHERE faq_id = 'faq-1'").get()).toEqual({ answer_text: "{api.sunset}" });
       expect(database.prepare("SELECT texts_json FROM text_block_variants WHERE block_name = 'sunset_block'").get())
         .toEqual({ texts_json: '["{api.sunset}"]' });

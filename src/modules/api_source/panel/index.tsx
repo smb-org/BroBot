@@ -253,7 +253,7 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
         <div data-testid="api-source-test-result" aria-live="polite" style={{ height: "calc(var(--s10) * 5)", overflowY: "auto", boxSizing: "border-box", margin: 0 }}>
           {testRequestError === undefined ? null : <p role="alert">{testRequestError}</p>}
           {testResult?.status === "error" ? <p role="alert">
-            {apiSourceFailureText(testResult.reason, language ?? "de")}
+            {apiSourceFailureText(testResult.reason, language ?? "de", testResult.retryAfter)}
             {testResult.constructName === undefined ? "" : ` · ${testResult.constructName}`}
             {testResult.httpStatus === undefined ? "" : ` · HTTP ${String(testResult.httpStatus)}`}
           </p> : null}

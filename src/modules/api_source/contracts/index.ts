@@ -12,7 +12,7 @@ export type ApiSourceFailureReason =
   | "invalid_url"
   | "response_too_large"
   | "redirect_error"
-  | "quota_exceeded";
+  | "rate_limited";
 export type ApiSourceLastStatus = "ok" | "error";
 
 export const API_SOURCE_MAXIMUMS = {
@@ -41,6 +41,7 @@ export type ApiSourceTestResult =
     reason: ApiSourceFailureReason;
     httpStatus?: number;
     constructName?: string;
+    retryAfter?: number | null;
   };
 
 export const apiSourceTemplateVariable = (name: string): TemplateVariable => ({

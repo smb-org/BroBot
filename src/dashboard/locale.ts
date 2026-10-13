@@ -203,7 +203,7 @@ export const serverFieldErrorText = (
   ? serverFieldErrorCatalog[language][reasonCode as ServerFieldErrorReasonCode]
   : undefined;
 
-const apiSourceFailureCatalog: LocaleCatalog<Record<ApiSourceFailureReason, string>> = {
+const apiSourceFailureCatalog: Readonly<Record<DashboardLanguage, Record<ApiSourceFailureReason, string | ((retryAfter?: number | null) => string)>>> = {
   de: {
     unreachable: "Der Endpunkt ist nicht erreichbar.",
     timeout: "Der Endpunkt hat nicht rechtzeitig geantwortet.",
@@ -215,7 +215,9 @@ const apiSourceFailureCatalog: LocaleCatalog<Record<ApiSourceFailureReason, stri
     invalid_url: "Die HTTPS-URL ist ungültig oder nicht erlaubt.",
     response_too_large: "Die Antwort überschreitet das Größenlimit.",
     redirect_error: "Die Weiterleitung ist ungültig oder nicht erlaubt.",
-    quota_exceeded: "Das Abruflimit für diesen Kanal ist erreicht.",
+    rate_limited: (retryAfter) => retryAfter === null || retryAfter === undefined
+      ? "Das Abruflimit für diese Anfrage ist erreicht. Starte einen neuen Abruf."
+      : `Das Abruflimit für diesen Kanal ist erreicht. Erneut möglich ab ${new Date(retryAfter).toLocaleTimeString("de-DE")}.`,
   },
   en: {
     unreachable: "The endpoint could not be reached.",
@@ -228,14 +230,20 @@ const apiSourceFailureCatalog: LocaleCatalog<Record<ApiSourceFailureReason, stri
     invalid_url: "The HTTPS URL is invalid or not allowed.",
     response_too_large: "The response exceeds the size limit.",
     redirect_error: "The redirect is invalid or not allowed.",
-    quota_exceeded: "This channel has reached its fetch limit.",
+    rate_limited: (retryAfter) => retryAfter === null || retryAfter === undefined
+      ? "This request has reached its fetch limit. Try again in a new request."
+      : `This channel has reached its fetch limit. Try again after ${new Date(retryAfter).toLocaleTimeString("en-GB")}.`,
   },
 };
 
 export const apiSourceFailureText = (
   reason: ApiSourceFailureReason,
   language: DashboardLanguage = dashboardLanguage(),
-): string => apiSourceFailureCatalog[language][reason];
+  retryAfter?: number | null,
+): string => {
+  const text = apiSourceFailureCatalog[language][reason];
+  return typeof text === "string" ? text : text(retryAfter);
+};
 
 interface SystemTemplateVariableLocale {
   label: string;

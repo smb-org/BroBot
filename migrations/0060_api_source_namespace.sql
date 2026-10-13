@@ -4,7 +4,7 @@ ALTER TABLE api_sources ADD COLUMN last_error TEXT CHECK (
   last_error IS NULL OR last_error IN (
     'unreachable', 'timeout', 'http_error', 'invalid_json', 'invalid_expression',
     'unsupported_expression', 'missing_value', 'invalid_url', 'response_too_large',
-    'redirect_error', 'quota_exceeded'
+    'redirect_error', 'rate_limited'
   )
 );
 
@@ -16,8 +16,59 @@ CREATE TABLE api_source_token_migration_names (
 ) WITHOUT ROWID;
 
 INSERT INTO api_source_token_migration_names (channel_id, position, source_name)
+WITH RECURSIVE stored_content(channel_id, content) AS (
+  SELECT channel_id, content
+    FROM (
+      SELECT channel_id, message_text AS content FROM timers
+      UNION ALL
+      SELECT channel_id, answer_text AS content FROM faq_entries
+      UNION ALL
+      SELECT channel_id, json_array(response_text, template_fields_json, timeout_fallback_text, timeout_reason) AS content
+        FROM text_commands
+    )
+  UNION ALL
+  SELECT channel_id, content
+    FROM (
+      SELECT channel_id, texts_json AS content FROM text_block_variants
+      UNION ALL
+      SELECT channel_id, settings AS content FROM channel_modules
+    )
+  UNION ALL
+  SELECT channel_id, content
+    FROM (
+      SELECT channel_id, text AS content FROM overlay_elements
+      UNION ALL
+      SELECT channel_id, json_array(title, labels) AS content FROM chat_vote_templates
+    )
+), tokens(channel_id, remaining, source_name) AS (
+  SELECT channel_id,
+         content,
+         substr(substr(content, instr(content, '{api_source.value ') + length('{api_source.value ')),
+                1,
+                instr(substr(content, instr(content, '{api_source.value ') + length('{api_source.value ')), '}') - 1)
+    FROM stored_content
+   WHERE instr(content, '{api_source.value ') > 0
+     AND instr(substr(content, instr(content, '{api_source.value ') + length('{api_source.value ')), '}') > 0
+  UNION ALL
+  SELECT channel_id,
+         substr(remaining,
+                instr(remaining, '{api_source.value ') + length('{api_source.value ') +
+                  instr(substr(remaining, instr(remaining, '{api_source.value ') + length('{api_source.value ')), '}')),
+         substr(substr(remaining, instr(remaining, '{api_source.value ') + length('{api_source.value ')),
+                1,
+                instr(substr(remaining, instr(remaining, '{api_source.value ') + length('{api_source.value ')), '}') - 1)
+    FROM tokens
+   WHERE instr(remaining, '{api_source.value ') > 0
+     AND instr(substr(remaining, instr(remaining, '{api_source.value ') + length('{api_source.value ')), '}') > 0
+), valid_names AS (
+  SELECT DISTINCT channel_id, source_name
+    FROM tokens
+   WHERE length(source_name) BETWEEN 1 AND 32
+     AND substr(source_name, 1, 1) GLOB '[a-z]'
+     AND source_name NOT GLOB '*[^a-z0-9_]*'
+)
 SELECT channel_id, row_number() OVER (PARTITION BY channel_id ORDER BY source_name) - 1, source_name
-  FROM api_sources;
+  FROM valid_names;
 
 CREATE TABLE api_source_token_migration_timers AS
 WITH RECURSIVE rewritten(row_id, content, position) AS (

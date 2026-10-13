@@ -47,6 +47,9 @@ apiSourceRoutes.post("/sources/test", async (context) => {
   const parsed = testSchema.safeParse(await context.req.json().catch(() => null));
   if (!parsed.success) return context.json({ error: "api_source_invalid" }, 400);
   return context.json(await testApiSource(
+    context.env.DB,
+    channelIdOf(context),
+    context.get("externalFetchBudget"),
     parsed.data.url,
     parsed.data.expression,
     context.env.PUBLIC_ORIGIN,
