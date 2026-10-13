@@ -633,7 +633,7 @@ const DashboardHeader = ({ route, mode, channels, activeChannel, loadedAt, palet
               value={activeChannel.channelId}
               onChange={(channelId) => { if (channelId !== null) onNavigate(routeForSelectedChannel(route, channelId)); }}
               options={channels.map((channel) => ({ value: channel.channelId, label: `${channel.displayName} — ${channel.channelId}`, selectedLabel: channel.displayName }))}
-              ariaLabel={texts.navigation.selectChannel}
+              ariaLabel={`${activeChannel.displayName} — ${texts.navigation.selectChannel}`}
               id="dashboard-channel-select"
             />
         </div>

@@ -27,11 +27,11 @@ const fulfillJson = async (route: Route, value: unknown): Promise<void> => {
   await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(value) });
 };
 
-const installDashboardFixture = async (page: Page): Promise<void> => {
-  const modules = [
-    { id: "chat_voting", enabled: true, settings: "{}" },
-    { id: "timers", enabled: false, settings: "{}" },
-  ];
+const installDashboardFixture = async (page: Page, withScrollableSidebar = false): Promise<void> => {
+  const moduleIds = withScrollableSidebar
+    ? ["chat_voting", "text_commands", "votekick", "channel_events", "raid", "clips", "faq", "weather", "timers", "ads", "belabox", "currency", "sun", "moon", "text_library", "api_source"]
+    : ["chat_voting", "timers"];
+  const modules = moduleIds.map((id) => ({ id, enabled: withScrollableSidebar || id === "chat_voting", settings: "{}" }));
   const channel = {
     channelId,
     login: "shell-e2e",
@@ -211,6 +211,92 @@ test("the shell header fits narrow widths and keeps the live status at medium wi
   }
   await page.setViewportSize({ width: 1280, height: 900 });
   await expect(page.locator(".dashboard-header__stream")).toBeVisible();
+});
+
+test("narrow header controls keep token gaps and the sidebar scroll stays above its search footer", async ({ page }) => {
+  await installDashboardFixture(page, true);
+  await page.goto(`/channels/${channelId}/modules/chat_voting`);
+
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expect(page.locator("#dashboard-channel-select")).toHaveAccessibleName(/Shell Channel/u);
+    await expect(page.locator("#dashboard-channel-select .ui-select__value")).toBeHidden();
+
+    const layout = await page.evaluate(() => {
+      const selectors = [
+        ".dashboard-shell__burger",
+        ".dashboard-header__brand",
+        ".dashboard-header__channel",
+        ".dashboard-header__mode",
+        ".dashboard-header__palette-trigger",
+        ".dashboard-header__account-trigger",
+      ];
+      const header = document.querySelector<HTMLElement>(".dashboard-shell__header");
+      if (header === null) return null;
+      const headerBox = header.getBoundingClientRect();
+      const items = selectors.flatMap((selector) => {
+        const element = document.querySelector<HTMLElement>(selector);
+        if (element === null || getComputedStyle(element).display === "none") return [];
+        const box = element.getBoundingClientRect();
+        return [{ selector, left: box.left, right: box.right, center: box.top + box.height / 2 }];
+      }).sort((first, second) => first.left - second.left);
+      return {
+        items,
+        tokenGap: Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--s1")),
+        center: headerBox.top + headerBox.height / 2,
+        viewportWidth: window.innerWidth,
+      };
+    });
+
+    expect(layout, `header layout at ${String(width)}px`).not.toBeNull();
+    expect(layout?.items).toHaveLength(6);
+    for (const item of layout?.items ?? []) {
+      expect(item.left, `${item.selector} stays inside the viewport at ${String(width)}px`).toBeGreaterThanOrEqual(0);
+      expect(item.right, `${item.selector} stays inside the viewport at ${String(width)}px`).toBeLessThanOrEqual(layout?.viewportWidth ?? 0);
+      expect(Math.abs(item.center - (layout?.center ?? 0)), `${item.selector} shares the header center line at ${String(width)}px`).toBeLessThanOrEqual(1);
+    }
+    const items = layout?.items ?? [];
+    const gaps = items.slice(1).map((current, index) => ({
+      selector: current.selector,
+      gap: current.left - (items[index]?.right ?? current.left),
+    }));
+    for (const gap of gaps) {
+      expect(gap.gap, `gap before ${gap.selector} at ${String(width)}px`).toBeGreaterThanOrEqual(layout?.tokenGap ?? Number.POSITIVE_INFINITY);
+    }
+  }
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Open sidebar" }).click();
+  await expect(page.locator(".sidebar__palette-shortcut")).toBeHidden();
+
+  for (const [width, height] of [[390, 844], [1280, 800]] as const) {
+    await page.setViewportSize({ width, height });
+    const scroll = page.locator(".sidebar__scroll");
+    const lastLink = scroll.locator(".sidebar-nav-link").last();
+    const geometry = await page.evaluate(() => {
+      const scrollElement = document.querySelector<HTMLElement>(".sidebar__scroll");
+      const footerElement = document.querySelector<HTMLElement>(".sidebar__footer");
+      if (scrollElement === null || footerElement === null) return null;
+      return {
+        scrollHeight: scrollElement.scrollHeight,
+        clientHeight: scrollElement.clientHeight,
+        scrollBottom: scrollElement.getBoundingClientRect().bottom,
+        footerTop: footerElement.getBoundingClientRect().top,
+      };
+    });
+    expect(geometry).not.toBeNull();
+    expect(geometry?.scrollHeight ?? 0).toBeGreaterThan(geometry?.clientHeight ?? Number.POSITIVE_INFINITY);
+    expect(geometry?.scrollBottom ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(geometry?.footerTop ?? 0);
+    await scroll.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+    await expect(lastLink).toBeInViewport();
+    const lastLinkClearsFooter = await page.evaluate(() => {
+      const lastLinkElement = document.querySelector<HTMLElement>(".sidebar__scroll .sidebar-nav-link:last-child");
+      const footerElement = document.querySelector<HTMLElement>(".sidebar__footer");
+      if (lastLinkElement === null || footerElement === null) return false;
+      return lastLinkElement.getBoundingClientRect().bottom <= footerElement.getBoundingClientRect().top;
+    });
+    expect(lastLinkClearsFooter).toBe(true);
+  }
 });
 
 test("palette, sidebar, and theme match the shell contract", async ({ page }) => {

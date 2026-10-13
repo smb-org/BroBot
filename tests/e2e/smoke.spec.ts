@@ -162,7 +162,7 @@ test("setup navigation stays reachable across desktop and mobile widths", async 
   // The fixed 64px topbar keeps its controls on one row at tablet widths.
   await page.setViewportSize({ width: 600, height: 900 });
   const topbarBox = await page.locator(".dashboard-shell__header").boundingBox();
-  const channelSelectBox = await page.getByRole("combobox", { name: "Kanal auswählen" }).boundingBox();
+  const channelSelectBox = await page.getByRole("combobox", { name: /Kanal auswählen/u }).boundingBox();
   expect(topbarBox).not.toBeNull();
   expect(channelSelectBox).not.toBeNull();
   expect(channelSelectBox?.y ?? 0).toBeGreaterThanOrEqual(topbarBox?.y ?? 0);

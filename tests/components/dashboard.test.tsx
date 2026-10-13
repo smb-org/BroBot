@@ -101,7 +101,7 @@ const render = (
 };
 
 const openSetupNavigation = async (): Promise<HTMLElement> => {
-  await screen.findByRole("combobox", { name: "Kanal auswählen" });
+  await screen.findByRole("combobox", { name: /Kanal auswählen/u });
   const setupButton = screen.getByRole("button", { name: "Einrichten" });
   if (setupButton.getAttribute("aria-pressed") !== "true") fireEvent.click(setupButton);
   await waitFor(() => expect(document.querySelector(".dashboard-shell")).toHaveAttribute("data-mode", "setup"));
@@ -169,7 +169,7 @@ const showChannelOverview = async (channel: ReturnType<typeof healthyChannel>): 
   }, [channel]);
   window.history.replaceState({}, "", `/channels/${channel.channelId}`);
   render(<DashboardApp />);
-  await screen.findByRole("combobox", { name: "Kanal auswählen" });
+  await screen.findByRole("combobox", { name: /Kanal auswählen/u });
 };
 
 const broadcaster = (userId: string, login: string, displayName: string) => ({
@@ -2242,7 +2242,7 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Textbefehle", level: 1 })).toBeInTheDocument();
-    const channelSelect = screen.getByRole("combobox", { name: "Kanal auswählen" });
+    const channelSelect = screen.getByRole("combobox", { name: /Kanal auswählen/u });
     expect(channelSelect).toHaveTextContent("Esembe");
     fireEvent.click(channelSelect);
     // jsdom does no real layout, so Floating UI's `hide` middleware always
@@ -2302,7 +2302,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
     try {
-      await waitFor(() => expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toHaveTextContent("Alpha"));
+      await waitFor(() => expect(screen.getByRole("combobox", { name: /Kanal auswählen/u })).toHaveTextContent("Alpha"));
       await screen.findByRole("switch");
       const alphaSwitch = document.querySelector(".module-detail__switch [role='switch']");
       expect(alphaSwitch).not.toBeNull();
@@ -2310,7 +2310,7 @@ describe("Dashboard skeleton", () => {
       await waitFor(() => expect(toggleRequests.get("kanal-a")).toBe(1));
 
       navigateToPath("/channels/kanal-b/modules/ads");
-      await waitFor(() => expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toHaveTextContent("Beta"));
+      await waitFor(() => expect(screen.getByRole("combobox", { name: /Kanal auswählen/u })).toHaveTextContent("Beta"));
       await waitFor(() => expect(overviewRequests.get("kanal-b")).toBeGreaterThan(0));
       await screen.findByRole("switch");
       const betaSwitch = document.querySelector(".module-detail__switch [role='switch']");
@@ -2319,7 +2319,7 @@ describe("Dashboard skeleton", () => {
       await waitFor(() => expect(toggleRequests.get("kanal-b")).toBe(1));
 
       navigateToPath("/channels/kanal-a/modules/ads");
-      await waitFor(() => expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toHaveTextContent("Alpha"));
+      await waitFor(() => expect(screen.getByRole("combobox", { name: /Kanal auswählen/u })).toHaveTextContent("Alpha"));
       await screen.findByRole("switch");
       const returningAlphaSwitch = document.querySelector(".module-detail__switch [role='switch']");
       expect(returningAlphaSwitch).toBeDisabled();
@@ -2635,7 +2635,7 @@ describe("Dashboard skeleton", () => {
     await flushQueryUpdates();
     expect(channelCalls).toBe(1);
     expect(overviewCalls).toBe(1);
-    expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /Kanal auswählen/u })).toBeInTheDocument();
 
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(screen.getAllByText("wird aktualisiert").length).toBeGreaterThanOrEqual(1);
@@ -3527,7 +3527,7 @@ describe("Dashboard skeleton", () => {
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
-    expect(await screen.findByRole("combobox", { name: "Kanal auswählen" })).toHaveTextContent("Alpha");
+    expect(await screen.findByRole("combobox", { name: /Kanal auswählen/u })).toHaveTextContent("Alpha");
     await waitFor(() => expect(TestWebSocket.instances).toHaveLength(1));
     TestWebSocket.instances[0]?.open();
     await waitFor(() => expect(overviewCalls).toBe(1));
@@ -3704,7 +3704,7 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     await screen.findByRole("heading", { name: "Alpha", level: 1 });
-    const select = screen.getByRole("combobox", { name: "Kanal auswählen" });
+    const select = screen.getByRole("combobox", { name: /Kanal auswählen/u });
     expect(select).toHaveTextContent("Alpha");
 
     fireEvent.click(select);
@@ -3876,7 +3876,7 @@ describe("Dashboard skeleton", () => {
     fireEvent.click(await screen.findByText("{var.counter}"));
     await waitFor(() => expect(alphaVariableRequests).toBe(2));
 
-    const channelSelect = screen.getByRole("combobox", { name: "Kanal auswählen" });
+    const channelSelect = screen.getByRole("combobox", { name: /Kanal auswählen/u });
     fireEvent.click(channelSelect);
     clickSelectOption(screen.getByRole("option", { name: "Beta — kanal-b", hidden: true }));
     await waitFor(() => expect(window.location.pathname).toBe("/channels/kanal-b/variables"));
@@ -5008,7 +5008,7 @@ describe("Dashboard skeleton", () => {
 
     fireEvent.click(row);
     expect(await screen.findByRole("region", { name: "Abo-Details" })).toBeInTheDocument();
-    const channelSelect = screen.getByRole("combobox", { name: "Kanal auswählen" });
+    const channelSelect = screen.getByRole("combobox", { name: /Kanal auswählen/u });
     fireEvent.click(channelSelect);
     expect(screen.getByRole("option", { name: "Alpha — kanal-a", hidden: true })).toBeInTheDocument();
     fireEvent.keyDown(channelSelect, { key: "Escape" });

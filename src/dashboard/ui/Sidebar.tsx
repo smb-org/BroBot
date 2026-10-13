@@ -68,10 +68,10 @@ export function Sidebar({ groups, onOpenCommandPalette, onEntryNavigate, setupHe
   return (
     <div className="sidebar" data-ui="">
       <div className="sidebar__main">
-        <div className="sidebar__intro">
+        <header className="sidebar__intro">
           <h1 className="sidebar__title">{setupHeading}</h1>
           <p className="sidebar__description">{setupDescription}</p>
-        </div>
+        </header>
         <div className="sidebar__scroll">
           {groups.map((group) => (
             <section aria-labelledby={`sidebar-heading-${group.id}`} className="sidebar__group" data-category={group.category} key={group.id}>
@@ -83,11 +83,13 @@ export function Sidebar({ groups, onOpenCommandPalette, onEntryNavigate, setupHe
             </section>
           ))}
         </div>
-        <button aria-label={paletteLabel} className="sidebar__palette-trigger" onClick={() => { onEntryNavigate(); onOpenCommandPalette(); }} type="button">
-          <Icon name="search" size={16} className="sidebar__palette-icon" />
-          <span className="sidebar__palette-label">{paletteLabel}</span>
-          <kbd className="sidebar__palette-shortcut">{paletteShortcut}</kbd>
-        </button>
+        <footer className="sidebar__footer">
+          <button aria-label={paletteLabel} className="sidebar__palette-trigger" onClick={() => { onEntryNavigate(); onOpenCommandPalette(); }} type="button">
+            <Icon name="search" size={16} className="sidebar__palette-icon" />
+            <span className="sidebar__palette-label">{paletteLabel}</span>
+            <kbd className="sidebar__palette-shortcut">{paletteShortcut}</kbd>
+          </button>
+        </footer>
       </div>
     </div>
   );
