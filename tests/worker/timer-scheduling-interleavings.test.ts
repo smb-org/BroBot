@@ -464,20 +464,22 @@ describe("timer scheduling interleavings through the channel Durable Object", ()
   });
 
   describe("legacy stream_start claims are honoured after rollout", () => {
-    const run = async (withLegacyAlarm: boolean) => {
+    // legacyOffsetMs: the legacy worker saw a start time this many ms later than Helix reports now.
+    const run = async (withLegacyAlarm: boolean, legacyOffsetMs = 0, suffixed = false) => {
       vi.useFakeTimers();
       const start = Date.parse("2026-10-12T12:00:00.000Z");
       vi.setSystemTime(start + 2 * 60_000);
       const stream = onlineStream("stream-1", 4, start);
       const harness = channelObjectFor(stream);
       const config = timerConfig("legacy-stream-start", { type: "stream_start", minutes: 1 });
-      const deadline = start + 60_000;
+      const deadline = start + legacyOffsetMs + 60_000;
       harness.setDatabaseConfig(config);
       const state = stateOf(harness.values);
       state.initialized = false;
       harness.values.set(TIMER_DURABLE_STATE_KEY, state);
       harness.values.set("module_alarm:send_claims", {
-        [timerOccurrenceKey(config.id, deadline)]: { status: "sent", at: start + 61_000 },
+        [timerOccurrenceKey(config.id, deadline, suffixed ? "stream-1" : undefined)]:
+          { status: "sent", at: start + 61_000 },
       });
       if (withLegacyAlarm) {
         harness.values.set(alarmTableKey, {
@@ -510,6 +512,14 @@ describe("timer scheduling interleavings through the channel Durable Object", ()
     it("does not post again after the legacy send completed", async () => {
       expect(await run(false)).toEqual([]);
     });
+
+    for (const suffixed of [false, true]) {
+      for (const withAlarm of [false, true]) {
+        it(`matches a legacy claim across timestamp precision (suffixed=${String(suffixed)}, alarm=${String(withAlarm)})`, async () => {
+          expect(await run(withAlarm, 400, suffixed)).toEqual([]);
+        });
+      }
+    }
   });
 
   it("dispatches the single-prefixed timer alarm through the channel alarm multiplexer", async () => {

@@ -805,7 +805,7 @@ export class ChannelObject extends DurableObject<Env> {
       }
       case "stream_start": {
         if (stream.state !== "online" || stream.streamId === null || stream.startedAt === null ||
-            Date.parse(stream.startedAt) + triggerDelayMs(trigger) !== deadline) return null;
+            !sameStreamStartedAt(new Date(deadline - triggerDelayMs(trigger)).toISOString(), stream.startedAt)) return null;
         streamId = stream.streamId;
         generation = stream.generation;
         break;
@@ -851,7 +851,19 @@ export class ChannelObject extends DurableObject<Env> {
     if (!isRecord(saved)) return null;
     const existing = saved[targetKey];
     if (isRecord(existing) && (existing.status === "sending" || existing.status === "sent")) return existing.status;
-    for (const sourceKey of [timerOccurrenceKey(timerId, deadline), timerOccurrenceKey(timerId, deadline, streamId)]) {
+    const sourceKeys = [timerOccurrenceKey(timerId, deadline), timerOccurrenceKey(timerId, deadline, streamId)];
+    if (triggerType === "stream_start") {
+      // Helix may report the same stream's start with different sub-second digits than the
+      // legacy worker saw, so match by stream suffix or by a deadline within one second.
+      const prefix = `${timerId}:`;
+      const suffix = encodeURIComponent(streamId);
+      for (const key of Object.keys(saved)) {
+        const match = key.startsWith(prefix) ? /^(\d+)(?::(.*))?$/.exec(key.slice(prefix.length)) : null;
+        if (match === null || sourceKeys.includes(key)) continue;
+        if (match[2] === undefined ? Math.abs(Number(match[1]) - deadline) < 1000 : match[2] === suffix) sourceKeys.push(key);
+      }
+    }
+    for (const sourceKey of sourceKeys) {
       if (sourceKey === targetKey) continue;
       const claim = saved[sourceKey];
       if (!isRecord(claim) || (claim.status !== "sending" && claim.status !== "sent") ||
