@@ -2819,13 +2819,13 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
     const targetField = await screen.findByRole("combobox", { name: "Standard-Chat-Ziel" });
-    await waitFor(() => expect(targetField).toHaveValue("Nur unser Chat"));
+    await waitFor(() => expect(targetField).toHaveTextContent("Nur unser Chat"));
     fireEvent.click(targetField);
-    await waitFor(() => expect(document.querySelector('[data-combobox-option="true"][value="all_chats"]')).not.toBeNull());
-    fireEvent.click(document.querySelector('[data-combobox-option="true"][value="all_chats"]') as Element);
+    const allChatsOption = await screen.findByRole("option", { name: /Alle Chats/u });
+    clickSelectOption(allChatsOption);
 
     expect(targetPatchCount).toBe(0);
-    expect(targetField).toHaveValue("Alle Chats");
+    expect(targetField).toHaveTextContent("Alle Chats");
     fireEvent.click(screen.getByRole("button", { name: "Standard-Chat-Ziel speichern" }));
 
     await waitFor(() => expect(targetPatchCount).toBe(1));
