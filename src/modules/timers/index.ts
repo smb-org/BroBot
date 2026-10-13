@@ -67,6 +67,28 @@ const streamTransitionGeneration = async (db: D1Database, channelId: string): Pr
   return row?.transition_generation ?? 0;
 };
 
+const streamStateSnapshot = async (
+  db: D1Database,
+  channelId: string,
+): Promise<{
+  state: "online" | "offline" | "unknown";
+  streamId: string | null;
+  generation: number;
+}> => {
+  const row = await db.prepare(
+    "SELECT state, stream_id, transition_generation FROM channel_stream_state WHERE channel_id = ?",
+  ).bind(channelId).first<{
+    state: "online" | "offline" | "unknown";
+    stream_id: string | null;
+    transition_generation: number;
+  }>();
+  return {
+    state: row?.state ?? "unknown",
+    streamId: row?.stream_id ?? null,
+    generation: row?.transition_generation ?? 0,
+  };
+};
+
 const persistAndSchedule = async (
   timer: Timer,
   context: TimerAlarmContext,
@@ -94,18 +116,22 @@ const nextDeadlineFor = async (
   context: TimerAlarmContext,
   now: number,
   previousDeadline = now,
-): Promise<{ at: number | null; streamId: string | null; state: TimerIntervalState | null }> => {
+): Promise<{
+  at: number | null;
+  streamId: string | null;
+  state: TimerIntervalState | null;
+  streamGeneration?: number;
+}> => {
   if (timer.trigger.type === "interval") {
-    const streamState = await context.streamState();
-    const state: TimerIntervalState | null = streamState === "online" ? "live" : streamState === "offline" ? "offline" : null;
-    if (state === null) return { at: null, streamId: null, state: null };
+    const stream = await streamStateSnapshot(context.DB, context.channelId);
+    const state: TimerIntervalState | null = stream.state === "online" ? "live" : stream.state === "offline" ? "offline" : null;
+    if (state === null) return { at: null, streamId: null, state: null, streamGeneration: stream.generation };
     const part = intervalPartFor(timer.trigger, state);
-    if (part === undefined) return { at: null, streamId: null, state: null };
-    const stream = state === "live" ? await context.streamStartedAt() : null;
+    if (part === undefined) return { at: null, streamId: null, state: null, streamGeneration: stream.generation };
     const deadline = timer.nextRunState === state
       ? nextIntervalAt(previousDeadline, now, part.minutes)
       : now + part.minutes * 60_000;
-    return { at: deadline, streamId: stream?.streamId ?? null, state };
+    return { at: deadline, streamId: state === "live" ? stream.streamId : null, state, streamGeneration: stream.generation };
   }
   if (timer.trigger.type === "stream_start") return { at: null, streamId: null, state: null };
   const timeZone = await timeZoneFor(context);
@@ -127,8 +153,8 @@ const scheduleNextRun = async (
   now: number,
   previousDeadline = now,
 ): Promise<boolean> => {
-  const { at: deadline, streamId, state } = await nextDeadlineFor(timer, context, now, previousDeadline);
-  const scheduled = await persistAndSchedule(timer, context, deadline, streamId, state);
+  const { at: deadline, streamId, state, streamGeneration } = await nextDeadlineFor(timer, context, now, previousDeadline);
+  const scheduled = await persistAndSchedule(timer, context, deadline, streamId, state, streamGeneration);
   if (scheduled && deadline === null && timer.trigger.type === "before_event") {
     const horizon = eventTimeWindowEnd(now);
     await context.schedule(eventTimeRefreshKeyFor(timer.id, horizon), horizon);
@@ -350,12 +376,12 @@ const handleTimerAlarmWithStaleRetry = async (
   if (timer.trigger.type === "interval") {
     const state = await context.streamState();
     if (state === "offline" && timer.nextRunState !== "offline") {
-      await rearmIntervalTimer(timer, context, Date.now(), "offline", null);
+      await rearmIntervalTimer(timer, context, Date.now(), "offline", null, scheduledStreamGeneration);
       return;
     }
     if (state === "online" && timer.nextRunState !== "live") {
       const stream = await context.streamStartedAt();
-      await rearmIntervalTimer(timer, context, Date.now(), "live", stream.streamId);
+      await rearmIntervalTimer(timer, context, Date.now(), "live", stream.streamId, scheduledStreamGeneration);
       return;
     }
     if (state === "unknown") {
@@ -438,7 +464,8 @@ const handleTimerAlarmWithStaleRetry = async (
         const stillScheduled = current?.enabled === 1 && current.revision === timer.revision &&
           current.next_run_at !== null && Date.parse(current.next_run_at) === deadline &&
           (intervalState === null || current.next_run_state === intervalState) &&
-          await streamTransitionGeneration(context.DB, context.channelId) === scheduledStreamGeneration &&
+          (timer.trigger.type !== "interval" ||
+            await streamTransitionGeneration(context.DB, context.channelId) === scheduledStreamGeneration) &&
           Date.now() <= graceEndsAt;
         return stillScheduled && await isStreamStillCurrentFor(timer, context, occurrence.streamId);
       }, timer.chatTarget ?? undefined);
