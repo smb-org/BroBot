@@ -1,5 +1,6 @@
 import { ADS_SKIPPED_REASONS, COMMERCIAL_FAILURE_REASONS, EVENTSUB_NEUTRAL_REASON_CODES, RAID_INVALID_REASONS, SHOUTOUT_FAILURE_REASONS, type AdsSkippedReason, type ApiErrorCode, type AuditAction, type AuditArea, type ChannelRole, type CommercialFailureReason, type EventCode, type EventSubNeutralReasonCode, type EventTone, type ImmediateActionUnavailableReason, type ModerationFailureReason, type RaidInvalidReason, type ShoutoutFailureReason, type ShoutoutSuppressedReason } from "../contracts/values";
 import { browserModuleLanguage, type ModuleChatCommandThreshold, type ModuleChatStatus, type ModuleLanguage, type ModuleNavigationCategory } from "../modules/contract";
+import type { ApiSourceFailureReason } from "../modules/api_source/contracts";
 import type { SystemVariableName } from "../template-variables";
 
 export type DashboardLanguage = ModuleLanguage;
@@ -201,6 +202,48 @@ export const serverFieldErrorText = (
 ): string | undefined => Object.hasOwn(serverFieldErrorCatalog[language], reasonCode)
   ? serverFieldErrorCatalog[language][reasonCode as ServerFieldErrorReasonCode]
   : undefined;
+
+const apiSourceFailureCatalog: Readonly<Record<DashboardLanguage, Record<ApiSourceFailureReason, string | ((retryAfter?: number | null) => string)>>> = {
+  de: {
+    unreachable: "Der Endpunkt ist nicht erreichbar.",
+    timeout: "Der Endpunkt hat nicht rechtzeitig geantwortet.",
+    http_error: "Der Endpunkt hat einen HTTP-Fehler zurückgegeben.",
+    invalid_json: "Die Antwort ist kein gültiges JSON.",
+    invalid_expression: "Der JSONata-Ausdruck ist ungültig.",
+    unsupported_expression: "Der JSONata-Ausdruck enthält ein nicht unterstütztes Konstrukt.",
+    missing_value: "Der Ausdruck hat keinen Wert zurückgegeben.",
+    invalid_url: "Die HTTPS-URL ist ungültig oder nicht erlaubt.",
+    response_too_large: "Die Antwort überschreitet das Größenlimit.",
+    redirect_error: "Die Weiterleitung ist ungültig oder nicht erlaubt.",
+    rate_limited: (retryAfter) => retryAfter === null || retryAfter === undefined
+      ? "Das Abruflimit für diese Anfrage ist erreicht. Starte einen neuen Abruf."
+      : `Das Abruflimit für diesen Kanal ist erreicht. Erneut möglich ab ${new Date(retryAfter).toLocaleTimeString("de-DE")}.`,
+  },
+  en: {
+    unreachable: "The endpoint could not be reached.",
+    timeout: "The endpoint did not respond in time.",
+    http_error: "The endpoint returned an HTTP error.",
+    invalid_json: "The response is not valid JSON.",
+    invalid_expression: "The JSONata expression is invalid.",
+    unsupported_expression: "The JSONata expression contains an unsupported construct.",
+    missing_value: "The expression returned no value.",
+    invalid_url: "The HTTPS URL is invalid or not allowed.",
+    response_too_large: "The response exceeds the size limit.",
+    redirect_error: "The redirect is invalid or not allowed.",
+    rate_limited: (retryAfter) => retryAfter === null || retryAfter === undefined
+      ? "This request has reached its fetch limit. Try again in a new request."
+      : `This channel has reached its fetch limit. Try again after ${new Date(retryAfter).toLocaleTimeString("en-GB")}.`,
+  },
+};
+
+export const apiSourceFailureText = (
+  reason: ApiSourceFailureReason,
+  language: DashboardLanguage = dashboardLanguage(),
+  retryAfter?: number | null,
+): string => {
+  const text = apiSourceFailureCatalog[language][reason];
+  return typeof text === "string" ? text : text(retryAfter);
+};
 
 interface SystemTemplateVariableLocale {
   label: string;

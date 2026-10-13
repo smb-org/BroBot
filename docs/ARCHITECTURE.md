@@ -168,7 +168,7 @@ Modul-Contract und die Registry eingebunden.
 
 Das Modul `src/modules/api_source/` lässt Broadcaster und Manager je Kanal bis
 zu 20 benannte HTTPS-JSON-Quellen mit optionalem JSONata-Ausdruck pflegen.
-`{api_source.value sunset}` gibt den ausgewerteten Wert aus; derselbe Ausdruck
+`{api.sunset}` gibt den ausgewerteten Wert aus; derselbe Ausdruck
 kann als boolesche Textblockbedingung gewählt werden. Die API-Beispiele und
 Sicherheitsgrenzen stehen in `src/modules/README.md` und Entscheidung 0013.
 Die URL-Sicherheitsprüfung liegt im Modul, HTTP-Aufrufe laufen manuell über

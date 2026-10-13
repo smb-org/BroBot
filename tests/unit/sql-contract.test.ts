@@ -26,6 +26,7 @@ import {
 import { overlayElementIdCollisionGuard, referencedVariablesGuard } from "../../src/worker/db/overlays";
 import { platformRolesSql } from "../../src/worker/platform/repository";
 import { channelStateQuery } from "../../src/worker/panel/repository";
+import { apiSourceReferenceQuery } from "../../src/modules/api_source/routes";
 import { textCommandSelectColumns } from "../../src/modules/text_commands/adapters/d1";
 import { blockUsageExistsSql, textBlockCategorySelectColumns, textBlockSelectColumns } from "../../src/modules/text_library/adapters/d1";
 import { chatVoteSelectColumns, chatVoteTemplateSelectColumns } from "../../src/modules/chat_voting/repository";
@@ -100,6 +101,7 @@ const sourceFiles = (directory: string): string[] => readdirSync(directory, { wi
 // Only `placeholders` is built at runtime and has no production literal.
 const sqlGetFixtures = new Map<string, string>([
   ["authorization.sql", authorizeModuleMutation("channel-id", actor, now).sql],
+  ["referenceQuery.sql", apiSourceReferenceQuery("channel-id", "sunset").sql],
   ["sessionGuard.sql", belaboxStreamSessionGuard("channel-id", {
     state: "online",
     changedAt: now,

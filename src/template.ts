@@ -22,7 +22,7 @@ export interface TemplateVariable {
   readonly group?: TemplateVariableGroup;
   readonly maxLength: number;
   readonly fallbackWhenAbsent?: number;
-  readonly parameters?: "range" | "choices" | "currency_pair" | "api_source_name";
+  readonly parameters?: "range" | "choices" | "currency_pair";
   /** Suggested parameter inserted by the picker for provider-defined formats. */
   readonly parameterDefault?: string;
   readonly sample: string;
@@ -104,7 +104,6 @@ const parameterIsValid = (variable: TemplateVariable, parameter: string | undefi
   if (parameter === undefined) return variable.parameters === undefined || variable.name === "random" && variable.parameters === "range";
   if (variable.parameters === "range") return parseTemplateRange(parameter) !== null;
   if (variable.parameters === "currency_pair") return /^[A-Za-z]{3} [A-Za-z]{3}$/u.test(parameter);
-  if (variable.parameters === "api_source_name") return /^[a-z][a-z0-9_]{0,31}$/u.test(parameter);
   if (variable.parameters === "choices") {
     const options = parameter.split("|");
     return options.length >= 2 && options.length <= 20 && options.every((option) => option.trim().length > 0);

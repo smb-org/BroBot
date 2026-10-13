@@ -267,6 +267,7 @@ export const createOverlayElementContext = async (
           if (normalized.length > 0 && normalized.length <= 100) moduleAttributions.add(normalized);
         },
         addTemplateConditionNextChangeAt: (at) => { moduleNextChangeAt = at; },
+        reportTemplateLookupFailure: () => { lookupFailure = true; },
       };
       try {
         const resolved = await module.resolveTemplateConditions(moduleIds, moduleContext);

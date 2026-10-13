@@ -3,9 +3,10 @@ import { performance } from "node:perf_hooks";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleEvent, ModuleRouteEnvironment } from "../../src/modules/contract";
-import { API_SOURCE_VALUE_VARIABLE, apiSourceModule } from "../../src/modules/api_source";
+import { apiSourceFailureText } from "../../src/dashboard/locale";
+import { apiSourceModule } from "../../src/modules/api_source";
 import { fetchCachedApiSourceJson } from "../../src/modules/api_source/adapters/fetch-json";
-import { claimApiSourceQuota } from "../../src/modules/api_source/adapters/d1";
+import { claimApiSourceQuota, getApiSource, listApiSources, recordApiSourceStatus } from "../../src/modules/api_source/adapters/d1";
 import {
   ALLOWED_FUNCTIONS,
   evaluateApiSourceExpression,
@@ -18,12 +19,14 @@ import {
 import { isValidApiSourceUrl, validateApiSourceUrl } from "../../src/modules/api_source/domain/url";
 import { apiSourcePanelTexts } from "../../src/modules/api_source/panel/locale";
 import { apiSourceRoutes } from "../../src/modules/api_source/routes";
+import { testApiSource } from "../../src/modules/api_source/test-source";
 import { textLibraryModule } from "../../src/modules/text_library";
 import { createTemplateRenderer, type TemplateResolverSources } from "../../src/worker/template-resolver";
 import { createTextBlockTemplateValueProvider } from "../../src/modules/text_library/adapters/template-expander";
 import { readPanelResourceRevisions } from "../../src/worker/panel-resources";
+import { prepareModuleAudit } from "../../src/worker/module-audit";
 import { insertChannel } from "./fixtures";
-import { TestD1Database } from "./test-d1";
+import { createReadInterleavingDatabase, TestD1Database } from "./test-d1";
 
 const CHANNEL_ID = "api-source-test-channel";
 const NOW = Date.parse("2026-09-28T12:00:00.000Z");
@@ -132,6 +135,8 @@ describe("API source outbound fetch", () => {
     expect(new Headers(request?.headers).get("User-Agent")).toBe("BroBot/0.1.0 (+https://github.com/smb-org/BroBot)");
     expect([...new Headers(request?.headers).keys()].sort((a, b) => a.localeCompare(b))).toEqual(["accept", "user-agent"]);
     expect(request).toMatchObject({ method: "GET", redirect: "manual", credentials: "omit", referrerPolicy: "no-referrer" });
+    expect(request).not.toHaveProperty("cache");
+    expect(request).not.toHaveProperty("cf");
     expect(budget.count()).toBe(1);
     const cachedOwner = await db.prepare("SELECT channel_id FROM api_source_cache").first<{ channel_id: string }>();
     expect(cachedOwner?.channel_id).toBe(CHANNEL_ID);
@@ -258,7 +263,7 @@ describe("API source outbound fetch", () => {
       NOW,
       budget,
       fetcher,
-    )).rejects.toThrow("API source invocation request limit reached");
+    )).rejects.toMatchObject({ reason: "rate_limited", retryAfter: null });
     expect(fetcher).toHaveBeenCalledTimes(3);
     expect(budget.count()).toBe(3);
   });
@@ -272,6 +277,353 @@ describe("API source outbound fetch", () => {
     expect(await claimApiSourceQuota(db, CHANNEL_ID, NOW + 1_000, 2)).toBe(true);
     expect(await claimApiSourceQuota(db, CHANNEL_ID, NOW + 2_000, 2)).toBe(false);
     expect(await claimApiSourceQuota(db, "another-channel", NOW, 2)).toBe(true);
+  });
+});
+
+describe("API source test request", () => {
+  it("tests an unsaved source without D1 caching and disables edge caching", async () => {
+    const database = await createDatabase();
+    const json = { sunset: "18:42" };
+    const body = JSON.stringify(json);
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(json));
+
+    const result = await testApiSource(
+      database as unknown as D1Database,
+      CHANNEL_ID,
+      sharedBudget(),
+      "https://api.sample-provider.net/unsaved",
+      "$.sunset",
+      undefined,
+      NOW,
+      fetcher,
+    );
+
+    expect(result).toEqual({
+      status: "ok",
+      httpStatus: 200,
+      bytes: new TextEncoder().encode(body).byteLength,
+      json,
+      value: "18:42",
+    });
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher).toHaveBeenCalledWith("https://api.sample-provider.net/unsaved", expect.objectContaining({
+      method: "GET",
+      redirect: "manual",
+      credentials: "omit",
+      cache: "no-store",
+      cf: { cacheTtl: 0, cacheEverything: false },
+    }));
+    expect(fetcher.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM api_source_cache").first())
+      .resolves.toEqual({ count: 0 });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM api_source_quota").first())
+      .resolves.toEqual({ count: 1 });
+  });
+
+  it("applies the shared per-invocation request budget to redirects in a source test", async () => {
+    const database = await createDatabase();
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, {
+      status: 302,
+      headers: { Location: "/next" },
+    }));
+
+    await expect(testApiSource(
+      database as unknown as D1Database,
+      CHANNEL_ID,
+      sharedBudget(),
+      "https://api.sample-provider.net/start",
+      "$.value",
+      undefined,
+      NOW,
+      fetcher,
+    )).resolves.toEqual({ status: "error", reason: "rate_limited", retryAfter: null });
+
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    await expect(database.prepare("SELECT request_count FROM api_source_quota WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).resolves.toEqual({ request_count: 3 });
+    expect(apiSourceFailureText("rate_limited", "de", null)).toContain("Starte einen neuen Abruf");
+    expect(apiSourceFailureText("rate_limited", "en", null)).toContain("Try again in a new request");
+  });
+
+  it("counts every endpoint test against the channel quota and returns retry information when full", async () => {
+    const database = await createDatabase();
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({ value: "ok" })));
+    const results = [];
+
+    for (let attempt = 0; attempt < 101; attempt += 1) {
+      results.push(await testApiSource(
+        database as unknown as D1Database,
+        CHANNEL_ID,
+        sharedBudget(),
+        `https://api.sample-provider.net/test-${String(attempt)}`,
+        "$.value",
+        undefined,
+        NOW,
+        fetcher,
+      ));
+    }
+
+    const retryAfter = (Math.floor(NOW / 3_600_000) + 1) * 3_600_000;
+    expect(results[99]?.status).toBe("ok");
+    expect(results[100]).toEqual({ status: "error", reason: "rate_limited", retryAfter });
+    expect(fetcher).toHaveBeenCalledTimes(100);
+    await expect(database.prepare("SELECT request_count FROM api_source_quota WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).resolves.toEqual({ request_count: 100 });
+  });
+
+  it.each([
+    ["network failure", () => Promise.reject(new TypeError("network details must not reach the dashboard")), "unreachable"],
+    ["timeout", () => Promise.reject(Object.assign(new Error("timeout"), { name: "TimeoutError" })), "timeout"],
+    ["HTTP failure", () => Promise.resolve(new Response(null, { status: 503 })), "http_error"],
+    ["invalid JSON", () => Promise.resolve(new Response("not json", { status: 200, headers: { "Content-Type": "application/json" } })), "invalid_json"],
+  ] as const)("returns a typed %s reason", async (_label, response, reason) => {
+    const database = await createDatabase();
+    const fetcher = vi.fn<typeof fetch>(response);
+
+    await expect(testApiSource(
+      database as unknown as D1Database,
+      CHANNEL_ID,
+      sharedBudget(),
+      "https://api.sample-provider.net/failure",
+      "$.value",
+      undefined,
+      NOW,
+      fetcher,
+    )).resolves.toMatchObject({ status: "error", reason });
+  });
+
+  it("distinguishes invalid syntax, unsupported constructs, and missing values before returning a result", async () => {
+    const database = await createDatabase();
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ value: "present" }));
+
+    await expect(testApiSource(database as unknown as D1Database, CHANNEL_ID, sharedBudget(), "https://api.sample-provider.net/data", "$(", undefined, NOW, fetcher))
+      .resolves.toEqual({ status: "error", reason: "invalid_expression" });
+    await expect(testApiSource(database as unknown as D1Database, CHANNEL_ID, sharedBudget(), "https://api.sample-provider.net/data", "$value ~> $uppercase()", undefined, NOW, fetcher))
+      .resolves.toMatchObject({ status: "error", reason: "unsupported_expression", constructName: "function chaining (~>)" });
+    await expect(testApiSource(database as unknown as D1Database, CHANNEL_ID, sharedBudget(), "https://api.sample-provider.net/data", "$.missing", undefined, NOW, fetcher))
+      .resolves.toMatchObject({ status: "error", reason: "missing_value", httpStatus: 200 });
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it("uses the same SSRF rejection for an unsaved test URL", async () => {
+    const database = await createDatabase();
+    const fetcher = vi.fn<typeof fetch>();
+
+    await expect(testApiSource(database as unknown as D1Database, CHANNEL_ID, sharedBudget(), "https://127.0.0.1/internal", "$.value", undefined, NOW, fetcher))
+      .resolves.toEqual({ status: "error", reason: "invalid_url" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("authorizes endpoint tests like source edits and returns the typed result without storing it", async () => {
+    const database = await createDatabase();
+    const app = new Hono<ModuleRouteEnvironment>();
+    let role: "manager" | "operator" = "manager";
+    app.use("*", async (context, next) => {
+      context.set("channelRole", role);
+      context.set("externalFetchBudget", sharedBudget());
+      await next();
+    });
+    app.route("/channels/:channelId", apiSourceRoutes);
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ value: 42 }));
+    vi.stubGlobal("fetch", fetcher);
+    const request = () => app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/sources/test`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: "https://api.sample-provider.net/unsaved", expression: "$.value" }),
+    }), { DB: database as unknown as D1Database, PUBLIC_ORIGIN: "https://brobot.example" });
+
+    const response = await request();
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ status: "ok", httpStatus: 200, json: { value: 42 }, value: "42" });
+    expect(fetcher).toHaveBeenCalledOnce();
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM api_sources").first())
+      .resolves.toEqual({ count: 0 });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM api_source_cache").first())
+      .resolves.toEqual({ count: 0 });
+    await expect(database.prepare("SELECT request_count FROM api_source_quota WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).resolves.toEqual({ request_count: 1 });
+
+    role = "operator";
+    const denied = await request();
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toEqual({ error: "api_source_management_denied" });
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+});
+
+describe("API source deletion guard", () => {
+  it("blocks deletion while saved templates, text, or conditions reference the source", async () => {
+    const database = await createDatabase();
+    await insertSource(database, "sunset", "$.sunset");
+    const now = new Date(NOW).toISOString();
+    await database.prepare(
+      `INSERT INTO timers
+        (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, chat_target,
+         revision, next_run_at, next_run_stream_id, last_run_at, created_at, updated_at)
+       VALUES (?, ?, ?, 1, ?, 'interval', ?, 'source_only', 1, NULL, NULL, NULL, ?, ?)`,
+    ).bind("timer-sunset", CHANNEL_ID, "Evening timer", "Timer says {api.sunset}", JSON.stringify({ type: "interval", minutes: 10 }), now, now).run();
+    await database.prepare(
+      `INSERT INTO faq_entries
+        (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds,
+         games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at)
+       VALUES (?, ?, ?, 1, 'keywords', ?, ?, 30, '[]', 'source_only', 0, 1, NULL, ?, ?)`,
+    ).bind("faq-sunset", CHANNEL_ID, "Sunset FAQ", JSON.stringify({ type: "keywords", patterns: ["sunset"] }), "FAQ says {api.sunset}", now, now).run();
+    await database.prepare(
+      `INSERT INTO text_library_categories (channel_id, category_id, catalog_key, custom_name, created_at, updated_at)
+       VALUES (?, 'info', 'info', NULL, ?, ?)`,
+    ).bind(CHANNEL_ID, now, now).run();
+    await database.prepare(
+      `INSERT INTO text_blocks (channel_id, block_name, category_id, games_json, revision, created_at, updated_at)
+       VALUES (?, 'sunset_info', 'info', '[]', 1, ?, ?)`,
+    ).bind(CHANNEL_ID, now, now).run();
+    await database.prepare(
+      `INSERT INTO text_block_variants (channel_id, block_name, variant_id, position, conditions_json, texts_json)
+       VALUES (?, 'sunset_info', 'default', 0, ?, ?)`,
+    ).bind(CHANNEL_ID, JSON.stringify({ data: { "api_source.sunset": "true" } }), JSON.stringify(["Sunset: {api.sunset}"])).run();
+
+    const app = new Hono<ModuleRouteEnvironment>();
+    const actorId = "api-source-manager";
+    app.use("*", async (context, next) => {
+      context.set("channelRole", "manager");
+      context.set("actor", { userId: actorId, sessionId: "api-source-session" });
+      context.set("authorizeManagementMutation", () => ({ sql: "AND 1 = 1", values: [] }));
+      context.set("prepareModuleAudit", (entry, changedAt) =>
+        prepareModuleAudit(database as unknown as D1Database, actorId, changedAt, entry));
+      context.set("publishOverlayHostEvent", () => Promise.resolve());
+      await next();
+    });
+    app.route("/channels/:channelId", apiSourceRoutes);
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/sources/sunset`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ revision: 1 }),
+    }), { DB: database as unknown as D1Database });
+
+    expect(response.status).toBe(409);
+    const responseBody: unknown = await response.json();
+    if (typeof responseBody !== "object" || responseBody === null || Array.isArray(responseBody)) {
+      throw new Error("API source deletion response is invalid.");
+    }
+    expect(Reflect.get(responseBody, "error")).toBe("api_source_in_use");
+    expect(Reflect.get(responseBody, "usages")).toEqual([
+        { kind: "timer", label: "Evening timer" },
+        { kind: "faq", label: "Sunset FAQ" },
+        { kind: "text_block", label: "sunset_info" },
+        { kind: "text_block_condition", label: "sunset_info" },
+    ]);
+    await expect(getApiSource(database as unknown as D1Database, CHANNEL_ID, "sunset")).resolves.not.toBeNull();
+  });
+
+  it("rejects a timer reference saved after the scan but before the atomic delete", async () => {
+    const database = await createDatabase();
+    await insertSource(database, "sunset", "$.sunset");
+    const now = new Date(NOW).toISOString();
+    await database.prepare(
+      `INSERT INTO timers
+        (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, chat_target,
+         revision, next_run_at, next_run_stream_id, last_run_at, created_at, updated_at)
+       VALUES (?, ?, ?, 1, '', 'interval', ?, 'source_only', 1, NULL, NULL, NULL, ?, ?)`,
+    ).bind("timer-sunset", CHANNEL_ID, "Evening timer", JSON.stringify({ type: "interval", minutes: 10 }), now, now).run();
+
+    const interleavedDatabase = createReadInterleavingDatabase(
+      database,
+      (sql) => sql.includes("api_source_references") && sql.includes("FROM timers"),
+      async () => {
+        await database.prepare("UPDATE timers SET message_text = ? WHERE channel_id = ? AND timer_id = ?")
+          .bind("Timer says {api.sunset}", CHANNEL_ID, "timer-sunset").run();
+      },
+    );
+    const actorId = "api-source-manager";
+    const app = new Hono<ModuleRouteEnvironment>();
+    app.use("*", async (context, next) => {
+      context.set("channelRole", "manager");
+      context.set("actor", { userId: actorId, sessionId: "api-source-session" });
+      context.set("authorizeManagementMutation", () => ({ sql: "AND 1 = 1", values: [] }));
+      context.set("prepareModuleAudit", (entry, changedAt) =>
+        prepareModuleAudit(database as unknown as D1Database, actorId, changedAt, entry));
+      context.set("publishOverlayHostEvent", () => Promise.resolve());
+      await next();
+    });
+    app.route("/channels/:channelId", apiSourceRoutes);
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/sources/sunset`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ revision: 1 }),
+    }), { DB: interleavedDatabase });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "api_source_in_use",
+      usages: [{ kind: "timer", label: "Evening timer" }],
+    });
+    await expect(getApiSource(database as unknown as D1Database, CHANNEL_ID, "sunset")).resolves.not.toBeNull();
+  });
+});
+
+describe("API source status", () => {
+  it("exposes the last status through list and detail reads", async () => {
+    const database = await createDatabase();
+    await insertSource(database, "sunset", "$.sunset");
+    const lastFetchedAt = new Date(NOW).toISOString();
+
+    await recordApiSourceStatus(
+      database as unknown as D1Database,
+      CHANNEL_ID,
+      "sunset",
+      "https://api.sample-provider.net/data",
+      1,
+      lastFetchedAt,
+      "error",
+      "timeout",
+    );
+
+    expect(await listApiSources(database as unknown as D1Database, CHANNEL_ID)).toMatchObject([{
+      name: "sunset",
+      lastFetchedAt,
+      lastStatus: "error",
+      lastError: "timeout",
+    }]);
+    await expect(getApiSource(database as unknown as D1Database, CHANNEL_ID, "sunset")).resolves.toMatchObject({
+      lastFetchedAt,
+      lastStatus: "error",
+      lastError: "timeout",
+    });
+
+    const app = new Hono<ModuleRouteEnvironment>();
+    app.use("*", async (context, next) => {
+      context.set("channelRole", "operator");
+      await next();
+    });
+    app.route("/channels/:channelId", apiSourceRoutes);
+    const environment = { DB: database as unknown as D1Database } as Env;
+    const listResponse = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/sources`), environment);
+    await expect(listResponse.json()).resolves.toMatchObject({ sources: [{ lastFetchedAt, lastStatus: "error", lastError: "timeout" }] });
+    const detailResponse = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/sources/sunset`), environment);
+    await expect(detailResponse.json()).resolves.toMatchObject({ source: { lastFetchedAt, lastStatus: "error", lastError: "timeout" } });
+  });
+
+  it("ignores an older result and a result from a previous saved revision", async () => {
+    const database = await createDatabase();
+    await insertSource(database, "sunset", "$.sunset");
+    const db = database as unknown as D1Database;
+    const newerFetch = new Date(NOW + 2_000).toISOString();
+
+    await recordApiSourceStatus(db, CHANNEL_ID, "sunset", "https://api.sample-provider.net/data", 1, newerFetch, "ok", null);
+    await recordApiSourceStatus(db, CHANNEL_ID, "sunset", "https://api.sample-provider.net/data", 1, new Date(NOW + 1_000).toISOString(), "error", "timeout");
+
+    await database.prepare("UPDATE api_sources SET expression = ?, revision = revision + 1 WHERE channel_id = ? AND source_name = ?")
+      .bind("$.new_sunset", CHANNEL_ID, "sunset").run();
+    await recordApiSourceStatus(db, CHANNEL_ID, "sunset", "https://api.sample-provider.net/data", 1, new Date(NOW + 3_000).toISOString(), "error", "invalid_expression");
+
+    await expect(getApiSource(db, CHANNEL_ID, "sunset")).resolves.toMatchObject({
+      revision: 2,
+      expression: "$.new_sunset",
+      lastFetchedAt: newerFetch,
+      lastStatus: "ok",
+      lastError: null,
+    });
   });
 });
 
@@ -547,6 +899,117 @@ describe("API source JSONata", () => {
   });
 });
 
+describe("API source template dispatch", () => {
+  it.each([
+    { consumer: "timer", templateContext: "event" as const, mode: "chat" as const },
+    { consumer: "FAQ", templateContext: "event" as const, mode: "chat" as const },
+    { consumer: "overlay", templateContext: "system" as const, mode: "overlay" as const },
+  ])("uses the unavailable fallback for a missing source in $consumer rendering", async ({ consumer, templateContext, mode }) => {
+    const database = await createDatabase();
+    const db = database as unknown as D1Database;
+    const event: ModuleEvent = {
+      channelId: CHANNEL_ID,
+      subscriptionType: "channel.chat.message",
+      triggerId: `missing-api-source-${consumer}`,
+      payload: {},
+      settings: {},
+      receivedAt: new Date(NOW).toISOString(),
+      actor: null,
+      chatStatus: null,
+    };
+    const variables = await apiSourceModule.templateVariables?.(db, CHANNEL_ID) ?? [];
+    const unavailableText = apiSourceModule.templateUnavailableText;
+    if (unavailableText === undefined) throw new Error("API source unavailable text is missing.");
+    const sources: TemplateResolverSources = {
+      DB: db,
+      publicOrigin: "https://brobot.esembe.app",
+      channelInfo: () => Promise.resolve(null),
+      channelGameId: () => Promise.resolve(null),
+      channelTimeZone: () => Promise.resolve("Europe/Berlin"),
+      channelLocation: () => Promise.resolve(null),
+      templateValueProviders: [{
+        moduleId: apiSourceModule.id,
+        templateVariableNamespace: "api_sources",
+        variables,
+        templateUnavailableText: unavailableText,
+        resolveTemplateValues: (names, context) =>
+          apiSourceModule.resolveTemplateValues?.(names, context) ?? Promise.resolve({}),
+      }],
+      registeredTemplateVariables: variables,
+      streamState: () => Promise.resolve("offline"),
+      channelDetails: () => Promise.resolve(null),
+      streamDetails: () => Promise.resolve(null),
+      followedAt: () => Promise.resolve("unavailable"),
+      followerTotal: () => Promise.resolve(null),
+      chattersTotal: () => Promise.resolve(null),
+      userCreatedAt: () => Promise.resolve(null),
+      channelLanguage: () => Promise.resolve("en"),
+      readChannelVariables: () => Promise.resolve({}),
+      now: () => NOW,
+    };
+
+    const rendered = await createTemplateRenderer(event, templateContext, [], sources)(
+      `Sunset: {api.deleted_source} (${consumer})`, {}, undefined, mode,
+    );
+
+    expect(rendered.text).toBe(`Sunset: ${unavailableText.en} (${consumer})`);
+  });
+});
+
+describe("API source condition isolation", () => {
+  it("keeps a healthy condition when a sibling source returns no value", async () => {
+    const database = await createDatabase();
+    const db = database as unknown as D1Database;
+    await insertSource(database, "online", "$.online", "https://api.sample-provider.net/online");
+    await insertSource(database, "optional", "$.optional", "https://api.sample-provider.net/optional");
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({ online: true }))));
+
+    const resolved = await apiSourceModule.resolveTemplateConditions?.(
+      ["api_source.online", "api_source.optional"],
+      {
+        DB: db,
+        channelId: CHANNEL_ID,
+        channelTimeZone: () => Promise.resolve("Europe/Berlin"),
+        channelLocation: () => Promise.resolve(null),
+        externalFetchBudget: sharedBudget(),
+        now: NOW,
+      },
+    );
+
+    expect(resolved).toEqual({ "api_source.online": "true" });
+  });
+
+  it.each([
+    ["a sibling fails transiently", true],
+    ["all sources succeed", false],
+  ])("reports a lookup failure only when %s", async (_label, fails) => {
+    const database = await createDatabase();
+    const db = database as unknown as D1Database;
+    await insertSource(database, "online", "$.online", "https://api.sample-provider.net/online");
+    await insertSource(database, "flaky", "$.online", "https://api.sample-provider.net/flaky");
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => Promise.resolve(
+      fails && (input instanceof Request ? input.url : String(input)).includes("flaky") ? new Response(null, { status: 503 }) : jsonResponse({ online: true }),
+    )));
+    const reportTemplateLookupFailure = vi.fn();
+
+    const resolved = await apiSourceModule.resolveTemplateConditions?.(
+      ["api_source.online", "api_source.flaky"],
+      {
+        DB: db,
+        channelId: CHANNEL_ID,
+        channelTimeZone: () => Promise.resolve("Europe/Berlin"),
+        channelLocation: () => Promise.resolve(null),
+        externalFetchBudget: sharedBudget(),
+        now: NOW,
+        reportTemplateLookupFailure,
+      },
+    );
+
+    expect(resolved?.["api_source.online"]).toBe("true");
+    expect(reportTemplateLookupFailure).toHaveBeenCalledTimes(fails ? 1 : 0);
+  });
+});
+
 describe("API source Node-side template CPU measurement", () => {
   it("measures nested blocks, two data conditions, and three JSONata expressions in Node", async () => {
     const database = await createDatabase();
@@ -559,7 +1022,7 @@ describe("API source Node-side template CPU measurement", () => {
        VALUES (?, 'info', 'info', NULL, ?, ?)`,
     ).bind(CHANNEL_ID, new Date(NOW).toISOString(), new Date(NOW).toISOString()).run();
     const blockNames = ["root", "level_one", "level_two"] as const;
-    const blockTexts = ["{text.level_one}", "{text.level_two}", "{api_source.value sunset}"] as const;
+    const blockTexts = ["{text.level_one}", "{text.level_two}", "{api.sunset}"] as const;
     for (const [index, name] of blockNames.entries()) {
       await database.prepare(
         `INSERT INTO text_blocks (channel_id, block_name, category_id, games_json, revision, created_at, updated_at)
@@ -596,6 +1059,7 @@ describe("API source Node-side template CPU measurement", () => {
       chatStatus: ["viewer"],
     };
     const conditions = await apiSourceModule.textBlockConditionsForChannel?.(db, CHANNEL_ID) ?? [];
+    const apiVariables = await apiSourceModule.templateVariables?.(db, CHANNEL_ID) ?? [];
     const budget = sharedBudget();
     const templateValueProviders: NonNullable<TemplateResolverSources["templateValueProviders"]> = [
       {
@@ -606,10 +1070,11 @@ describe("API source Node-side template CPU measurement", () => {
       },
       {
         moduleId: apiSourceModule.id,
-        variables: [API_SOURCE_VALUE_VARIABLE],
+        templateVariableNamespace: "api_sources",
+        variables: apiVariables,
         textBlockConditions: conditions,
         templateUnavailableText: { de: "nicht verfügbar", en: "unavailable" },
-        resolveTemplateParameter: (name, parameter, context) => apiSourceModule.resolveTemplateParameter?.(name, parameter, context) ?? Promise.resolve(null),
+        resolveTemplateValues: (names, context) => apiSourceModule.resolveTemplateValues?.(names, context) ?? Promise.resolve({}),
         resolveTemplateConditions: (ids, context) => apiSourceModule.resolveTemplateConditions?.(ids, context) ?? Promise.resolve({}),
       },
     ];
@@ -622,7 +1087,7 @@ describe("API source Node-side template CPU measurement", () => {
       channelTimeZone: () => Promise.resolve("Europe/Berlin"),
       channelLocation: () => Promise.resolve(null),
       templateValueProviders,
-      registeredTemplateVariables: [API_SOURCE_VALUE_VARIABLE],
+      registeredTemplateVariables: apiVariables,
       streamState: () => Promise.resolve("offline"),
       channelDetails: () => Promise.resolve(null),
       streamDetails: () => Promise.resolve(null),
@@ -646,6 +1111,11 @@ describe("API source Node-side template CPU measurement", () => {
       elapsedMeasurementsMs.push(performance.now() - startedAt);
       expect(result.text).toBe("18:42");
     }
+    await expect(getApiSource(db, CHANNEL_ID, "sunset")).resolves.toMatchObject({
+      lastFetchedAt: new Date(NOW).toISOString(),
+      lastStatus: "ok",
+      lastError: null,
+    });
     const maximumCpuMs = Math.max(...cpuMeasurementsMs);
     const maximumElapsedMs = Math.max(...elapsedMeasurementsMs);
     console.info(`Node-side API source template CPU measurement (not a Workers guarantee): max=${maximumCpuMs.toFixed(3)} ms; elapsed=${maximumElapsedMs.toFixed(3)} ms across ${String(cpuMeasurementsMs.length)} runs`);
@@ -673,6 +1143,7 @@ describe("API source Node-side template CPU measurement", () => {
       chatStatus: ["viewer"],
     };
     const budget = sharedBudget();
+    const apiVariables = await apiSourceModule.templateVariables?.(db, CHANNEL_ID) ?? [];
     const sources: TemplateResolverSources = {
       DB: db,
       publicOrigin: "https://brobot.esembe.app",
@@ -683,12 +1154,13 @@ describe("API source Node-side template CPU measurement", () => {
       channelLocation: () => Promise.resolve(null),
       templateValueProviders: [{
         moduleId: apiSourceModule.id,
-        variables: [API_SOURCE_VALUE_VARIABLE],
+        templateVariableNamespace: "api_sources",
+        variables: apiVariables,
         templateUnavailableText: { de: "nicht verfügbar", en: "unavailable" },
-        resolveTemplateParameter: (name, parameter, context) =>
-          apiSourceModule.resolveTemplateParameter?.(name, parameter, context) ?? Promise.resolve(null),
+        resolveTemplateValues: (names, context) =>
+          apiSourceModule.resolveTemplateValues?.(names, context) ?? Promise.resolve({}),
       }],
-      registeredTemplateVariables: [API_SOURCE_VALUE_VARIABLE],
+      registeredTemplateVariables: apiVariables,
       streamState: () => Promise.resolve("offline"),
       channelDetails: () => Promise.resolve(null),
       streamDetails: () => Promise.resolve(null),
@@ -701,8 +1173,8 @@ describe("API source Node-side template CPU measurement", () => {
       now: () => NOW,
     };
     const placeholders = [
-      ...Array.from({ length: 11 }, () => "{api_source.value source_0}"),
-      ...Array.from({ length: 10 }, (_, index) => `{api_source.value source_${String(index + 1)}}`),
+      ...Array.from({ length: 11 }, () => "{api.source_0}"),
+      ...Array.from({ length: 10 }, (_, index) => `{api.source_${String(index + 1)}}`),
     ];
 
     const result = await createTemplateRenderer(event, "event", [], sources)(placeholders.join("|"), {}, undefined, "preview");

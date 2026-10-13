@@ -1,10 +1,10 @@
 import { z } from "zod";
 
 import type { BotModule, ModuleExternalFetchBudget, ModuleTextBlockConditionDefinition, ModuleTemplateConditionContext, ModuleTemplateValueContext } from "../contract";
-import { API_SOURCE_VALUE_VARIABLE, apiSourceModuleCatalog } from "./contracts";
+import { apiSourceTemplateVariable, apiSourceModuleCatalog } from "./contracts";
 import type { ApiSource } from "./contracts";
-import { getApiSource, listApiSources } from "./adapters/d1";
-import { fetchCachedApiSourceJson, readCachedApiSourceJson } from "./adapters/fetch-json";
+import { getApiSource, listApiSources, recordApiSourceStatus } from "./adapters/d1";
+import { ApiSourceFetchError, fetchCachedApiSourceResult, readCachedApiSourceJson } from "./adapters/fetch-json";
 import { evaluateApiSourceExpression, formatApiSourceValue, parseApiSourceName } from "./domain";
 import { apiSourceRoutes } from "./routes";
 
@@ -16,8 +16,23 @@ const unavailableText = {
 } as const;
 const OVERLAY_REFRESH_MS = 60_000;
 const MAXIMUM_EVALUATIONS_PER_RENDER = 10;
-const payloadCacheByInvocation = new WeakMap<ModuleExternalFetchBudget, Map<string, Promise<unknown>>>();
+const payloadCacheByInvocation = new WeakMap<ModuleExternalFetchBudget, Map<string, ReturnType<typeof fetchCachedApiSourceResult>>>();
 const evaluationCacheByInvocation = new WeakMap<ModuleExternalFetchBudget, Map<string, Promise<unknown>>>();
+
+const apiSourceNameForVariable = (name: string): string | null => {
+  const match = /^api\.([a-z][a-z0-9_]{0,31})$/u.exec(name);
+  return match?.[1] ?? null;
+};
+
+const recordFailure = async (
+  source: ApiSource,
+  context: ModuleTemplateValueContext | ModuleTemplateConditionContext,
+  reason: "invalid_expression" | "missing_value" | ApiSourceFetchError["reason"],
+  lastFetchedAt = new Date(context.now).toISOString(),
+): Promise<void> => {
+  if ("readOnly" in context && context.readOnly) return;
+  await recordApiSourceStatus(context.DB, context.channelId, source.name, source.url, source.revision, lastFetchedAt, "error", reason);
+};
 
 const sourcePayload = (
   source: ApiSource,
@@ -31,20 +46,35 @@ const sourcePayload = (
       });
   }
   const budget = context.externalFetchBudget;
-  if (budget === undefined) {
-    return fetchCachedApiSourceJson(context.DB, context.channelId, source.url, context.publicOrigin, context.now, budget);
-  }
-  let payloads = payloadCacheByInvocation.get(budget);
-  if (payloads === undefined) {
-    payloads = new Map();
-    payloadCacheByInvocation.set(budget, payloads);
-  }
-  const cacheKey = `${context.channelId}\u0000${source.url}`;
-  const cached = payloads.get(cacheKey);
-  if (cached !== undefined) return cached;
-  const pending = fetchCachedApiSourceJson(context.DB, context.channelId, source.url, context.publicOrigin, context.now, budget);
-  payloads.set(cacheKey, pending);
-  return pending;
+  return (async () => {
+    let pending: ReturnType<typeof fetchCachedApiSourceResult>;
+    if (budget === undefined) {
+      pending = fetchCachedApiSourceResult(context.DB, context.channelId, source.url, context.publicOrigin, context.now, budget);
+    } else {
+      let payloads = payloadCacheByInvocation.get(budget);
+      if (payloads === undefined) {
+        payloads = new Map();
+        payloadCacheByInvocation.set(budget, payloads);
+      }
+      const cacheKey = `${context.channelId}\u0000${source.url}`;
+      pending = payloads.get(cacheKey) ?? fetchCachedApiSourceResult(
+        context.DB, context.channelId, source.url, context.publicOrigin, context.now, budget,
+      );
+      payloads.set(cacheKey, pending);
+    }
+    try {
+      const result = await pending;
+      if (result.fetchedAt !== null) {
+        await recordApiSourceStatus(context.DB, context.channelId, source.name, source.url, source.revision, result.fetchedAt, "ok", null);
+      }
+      return result.payload;
+    } catch (failure: unknown) {
+      if (failure instanceof ApiSourceFetchError && failure.fetchedAt !== null) {
+        await recordFailure(source, context, failure.reason, failure.fetchedAt);
+      }
+      throw failure;
+    }
+  })();
 };
 
 const evaluateSource = (
@@ -92,7 +122,24 @@ const outputFor = async (
   const source = await getApiSource(context.DB, context.channelId, name);
   if (source === null) throw new Error("API source was not found.");
   const payload = await sourcePayload(source, context);
-  return await evaluateSource(source, payload, context);
+  let value: unknown;
+  try {
+    value = await evaluateSource(source, payload, context);
+  } catch (failure: unknown) {
+    await recordFailure(source, context, "invalid_expression");
+    throw failure;
+  }
+  if (value === undefined || value === null) {
+    await recordFailure(source, context, "missing_value");
+    throw new Error("API source expression returned no value.");
+  }
+  try {
+    formatApiSourceValue(value);
+  } catch (failure: unknown) {
+    await recordFailure(source, context, "invalid_expression");
+    throw failure;
+  }
+  return value;
 };
 
 const resolveConditionValues = async (
@@ -103,7 +150,14 @@ const resolveConditionValues = async (
   const values = await Promise.all(ids.map(async (id) => {
     const name = parseApiSourceName(id);
     if (name === null) return [id, null] as const;
-    const value = await outputFor(name, context);
+    let value: unknown;
+    try {
+      value = await outputFor(name, context);
+    } catch {
+      // A failing source only makes its own condition unavailable; healthy ones still resolve.
+      context.reportTemplateLookupFailure?.();
+      return [id, null] as const;
+    }
     context.addTemplateConditionNextChangeAt?.(new Date(context.now + OVERLAY_REFRESH_MS).toISOString());
     return [id, typeof value === "boolean" ? String(value) : null] as const;
   }));
@@ -112,13 +166,11 @@ const resolveConditionValues = async (
 };
 
 const resolveOverlayValues: NonNullable<BotModule<typeof settingsSchema>["resolveOverlayTemplateValues"]> = (names, context) => {
-  if (!names.includes(API_SOURCE_VALUE_VARIABLE.name)) return Promise.resolve({});
-  return Promise.resolve({
-    [API_SOURCE_VALUE_VARIABLE.name]: {
+  const values = Object.fromEntries(names.flatMap((name) => apiSourceNameForVariable(name) === null ? [] : [[name, {
       available: true,
       nextChangeAt: new Date(context.now + OVERLAY_REFRESH_MS).toISOString(),
-    },
-  });
+    }]]));
+  return Promise.resolve(values);
 };
 
 export const apiSourceModule: BotModule<typeof settingsSchema> = {
@@ -138,23 +190,26 @@ export const apiSourceModule: BotModule<typeof settingsSchema> = {
     icon: apiSourceIcon,
     order: 35,
   },
-  templateVariableCatalog: [API_SOURCE_VALUE_VARIABLE],
+  templateVariableNamespace: "api_sources",
+  templateVariableCatalog: [],
   resolveOverlayTemplateValues: resolveOverlayValues,
   templateUnavailableText: unavailableText,
-  templateVariables: () => Promise.resolve([]),
+  templateVariables: async (db, channelId) => (await listApiSources(db, channelId)).map(({ name }) => apiSourceTemplateVariable(name)),
   textBlockConditionsForChannel: sourceConditions,
-  resolveTemplateParameter: async (name, parameter, context) => {
-    if (name !== API_SOURCE_VALUE_VARIABLE.name || !/^[a-z][a-z0-9_]{0,31}$/u.test(parameter)) return null;
-    try {
-      const value = await outputFor(parameter, context);
-      return formatApiSourceValue(value);
-    } catch {
-      return unavailableText[await context.channelLanguage()];
-    }
+  resolveTemplateValues: async (names, context) => {
+    const resolved = await Promise.all(names.map(async (name) => {
+      const sourceName = apiSourceNameForVariable(name);
+      if (sourceName === null) return [name, null] as const;
+      try {
+        const value = await outputFor(sourceName, context);
+        return [name, formatApiSourceValue(value)] as const;
+      } catch {
+        return [name, unavailableText[await context.channelLanguage()]] as const;
+      }
+    }));
+    return Object.fromEntries(resolved.filter((entry): entry is readonly [string, string] => entry[1] !== null));
   },
   resolveTemplateConditions: resolveConditionValues,
   routes: apiSourceRoutes,
   panel: () => import("./panel/index"),
 };
-
-export { API_SOURCE_VALUE_VARIABLE } from "./contracts";

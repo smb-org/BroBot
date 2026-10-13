@@ -19,7 +19,7 @@ export type TemplateStreamDetails = Pick<ModuleChannelInfo, "startedAt" | "viewe
 
 export interface TemplateValueProvider {
   moduleId: string;
-  templateVariableNamespace?: "text_blocks";
+  templateVariableNamespace?: "text_blocks" | "api_sources";
   variables: readonly TemplateVariable[];
   textBlockConditions?: readonly ModuleTextBlockConditionDefinition[];
   templateUnavailableText?: Readonly<Record<ModuleLanguage, string>>;
@@ -67,6 +67,19 @@ export interface TemplateResolverSources {
 const valueFrom = (value: unknown): string | null => typeof value === "string" && value.length > 0 ? value : null;
 const recordFrom = (value: unknown): Readonly<Record<string, unknown>> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : null;
+const apiSourceTemplateVariablePattern = /^api\.[a-z][a-z0-9_]{0,31}$/u;
+
+const namespacedRequestName = (name: string, namespace: NonNullable<TemplateValueProvider["templateVariableNamespace"]>): string | null => {
+  if (namespace === "text_blocks") {
+    return name.startsWith("text.") && TEMPLATE_BARE_VARIABLE_NAME_PATTERN.test(name.slice("text.".length))
+      ? name.slice("text.".length)
+      : null;
+  }
+  return apiSourceTemplateVariablePattern.test(name) ? name : null;
+};
+
+const namespacedTokenName = (name: string, namespace: NonNullable<TemplateValueProvider["templateVariableNamespace"]>): string =>
+  namespace === "text_blocks" ? `text.${name}` : name;
 
 const unavailableModuleSecrets: ModuleSecretReadAccess = {
   status: () => Promise.resolve({ configured: false, updatedAt: null }),
@@ -415,14 +428,18 @@ export const createTemplateRenderer = (
     secrets: sources.moduleSecrets?.(moduleId) ?? unavailableModuleSecrets,
   });
   for (const provider of sources.templateValueProviders ?? []) {
+    const namespace = provider.templateVariableNamespace;
     const declaredNames = new Set(provider.variables
       .filter((variable) => variable.contexts?.includes(context) ?? true)
       .map((variable) => variable.name));
-    const requestedNames = provider.templateVariableNamespace === "text_blocks"
-      ? renderNames.flatMap((name) => name.startsWith("text.") && TEMPLATE_BARE_VARIABLE_NAME_PATTERN.test(name.slice("text.".length))
-        ? [name.slice("text.".length)]
-        : []).filter((name) => !Object.hasOwn(moduleValues, `text.${name}`))
-      : renderNames.filter((name) => declaredNames.has(name) && !Object.hasOwn(moduleValues, name));
+    const requestedNames = namespace === undefined
+      ? renderNames.filter((name) => declaredNames.has(name) && !Object.hasOwn(moduleValues, name))
+      : renderNames.flatMap((name) => {
+        const requestName = namespacedRequestName(name, namespace);
+        return requestName !== null && !Object.hasOwn(moduleValues, namespacedTokenName(requestName, namespace))
+          ? [requestName]
+          : [];
+      });
     if (requestedNames.length === 0) continue;
     if (provider.resolveTemplateValues === undefined) continue;
     let resolved: Readonly<Record<string, string>>;
@@ -441,7 +458,7 @@ export const createTemplateRenderer = (
     }
     for (const name of requestedNames) {
       const value: unknown = resolved[name];
-      const tokenName = provider.templateVariableNamespace === "text_blocks" ? `text.${name}` : name;
+      const tokenName = namespace === undefined ? name : namespacedTokenName(name, namespace);
       if (typeof value === "string") values[tokenName] = value;
       else if (mode === "overlay") addDiagnostic({ code: "template.lookup_unavailable", detail: { name: tokenName } });
     }
@@ -458,7 +475,7 @@ export const createTemplateRenderer = (
     );
     if (provider?.resolveTemplateParameter === undefined) continue;
     const declared = provider.variables.find((variable) => variable.name === name && (variable.contexts?.includes(context) ?? true));
-    if (declared?.parameters !== "currency_pair" && declared?.parameters !== "api_source_name") continue;
+    if (declared?.parameters !== "currency_pair") continue;
     try {
       const resolvedParameter = parameter ?? "";
       const value = await provider.resolveTemplateParameter(name, resolvedParameter, providerContextFor(provider.moduleId));
@@ -472,7 +489,7 @@ export const createTemplateRenderer = (
   for (const provider of sources.templateValueProviders ?? []) {
     for (const variable of provider.variables) {
       if (!(variable.contexts?.includes(context) ?? true)) continue;
-      if ((variable.parameters !== "currency_pair" && variable.parameters !== "api_source_name") || provider.resolveTemplateParameter === undefined) continue;
+      if (variable.parameters !== "currency_pair" || provider.resolveTemplateParameter === undefined) continue;
       parameterValues[variable.name] = (parameter) => parameterValuesByToken.get(`${variable.name}\u0000${parameter}`) ?? `{${variable.name} ${parameter}}`;
     }
   }

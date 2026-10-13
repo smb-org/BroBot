@@ -1,5 +1,5 @@
 import { PanelApiError } from "../../../contracts/panel-error";
-import type { ApiSource } from "../contracts";
+import type { ApiSource, ApiSourceTestResult } from "../contracts";
 
 const modulePath = (channelId: string): string =>
   `/api/channels/${encodeURIComponent(channelId)}/modules/api_source`;
@@ -15,6 +15,11 @@ const readJson = async <T,>(response: Response): Promise<T> => {
 
 export const loadApiSources = async (channelId: string, signal?: AbortSignal): Promise<readonly ApiSource[]> =>
   (await readJson<{ sources: ApiSource[] }>(await fetch(`${modulePath(channelId)}/sources`, signal === undefined ? undefined : { signal }))).sources;
+
+export const testApiSource = async (
+  channelId: string,
+  input: Pick<ApiSource, "url" | "expression">,
+): Promise<ApiSourceTestResult> => mutate<ApiSourceTestResult>(channelId, "/sources/test", "POST", input);
 
 const csrfToken = async (): Promise<string> =>
   (await readJson<{ token: string }>(await fetch("/api/csrf"))).token;

@@ -531,12 +531,12 @@ describe("template field", () => {
 
   it.each([
     ["currency.convert", "{currency.c", "{currency.convert USD EUR}"],
-    ["api_source.value", "{api_source.v", "{api_source.value sunset}"],
+    ["api.sunset", "{api.sun", "{api.sunset}"],
     ["pick", "{pi", "{pick first|second}"],
-  ])("keeps the supplied parameter default when completing %s inline", async (name, initialValue, expectedValue) => {
+  ])("completes %s inline", async (name, initialValue, expectedValue) => {
     const variables: readonly TemplateTextFieldVariable[] = [
       { name: "currency.convert", description: "Convert currency", sample: "11,50 €", parameters: "currency_pair", parameter: { value: "USD EUR" } },
-      { name: "api_source.value", description: "API source", sample: "18:42", parameters: "api_source_name", parameter: { value: "sunset" } },
+      { name: "api.sunset", description: "API source sunset", sample: "18:42" },
       { name: "pick", description: "Choose an option", sample: "First", parameters: "choices", parameter: { value: "first|second" } },
     ];
     function Harness() {

@@ -1,13 +1,14 @@
 import { useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
+import { apiSourceFailureText } from "../../../dashboard/locale";
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { Button, ConfirmDialog, Field, FormDialog, InspectorFieldRow, InspectorSection, LoadState, LoadStateLines, notify } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
-import type { ApiSource } from "../contracts";
+import type { ApiSource, ApiSourceTestResult } from "../contracts";
 import { apiSourcePanelTexts } from "./locale";
 import { ExpressionField } from "./ExpressionField";
-import { createApiSource, deleteApiSource, loadApiSources, updateApiSource } from "./service";
+import { createApiSource, deleteApiSource, loadApiSources, testApiSource, updateApiSource } from "./service";
 
 interface SourceDraft {
   name: string;
@@ -40,6 +41,9 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
   const [draft, setDraft] = useState<SourceDraft | null>(null);
   const [draftBaselineRevision, setDraftBaselineRevision] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<ApiSourceTestResult>();
+  const [testRequestError, setTestRequestError] = useState<string>();
   const [formError, setFormError] = useState<string | undefined>();
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | undefined>();
@@ -51,6 +55,8 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
     setFormError(undefined);
     setConfirmDeleteOpen(false);
     setDeleteError(undefined);
+    setTestResult(undefined);
+    setTestRequestError(undefined);
   };
 
   const startCreate = (): void => {
@@ -58,6 +64,8 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
     setDraftBaselineRevision(null);
     setDraft(emptyDraft());
     setFormError(undefined);
+    setTestResult(undefined);
+    setTestRequestError(undefined);
   };
 
   const startEdit = (source: ApiSource): void => {
@@ -65,6 +73,25 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
     setDraftBaselineRevision(source.revision);
     setDraft({ name: source.name, url: source.url, expression: source.expression });
     setFormError(undefined);
+    setTestResult(undefined);
+    setTestRequestError(undefined);
+  };
+
+  const testDraft = async (): Promise<void> => {
+    if (draft === null || !canEdit || busy || testing) return;
+    setTesting(true);
+    setTestResult(undefined);
+    setTestRequestError(undefined);
+    try {
+      setTestResult(await testApiSource(channelId, {
+        url: draft.url.trim(),
+        expression: draft.expression.trim(),
+      }));
+    } catch (failure: unknown) {
+      setTestRequestError(apiErrorCode(failure) === "api_source_management_denied" ? labels.denied : labels.testRequestFailed);
+    } finally {
+      setTesting(false);
+    }
   };
 
   const save = async (): Promise<void> => {
@@ -140,7 +167,9 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
       closeEditor();
       notify({ tone: "success", message: labels.deleted });
     } catch (failure: unknown) {
-      setDeleteError(apiErrorCode(failure) === "api_source_management_denied" ? labels.denied : labels.saveFailed);
+      const code = apiErrorCode(failure);
+      setDeleteError(code === "api_source_in_use" ? labels.inUse
+        : code === "api_source_management_denied" ? labels.denied : labels.saveFailed);
     } finally {
       setBusy(false);
     }
@@ -162,12 +191,25 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
         refreshError={query.isRefetchError}
       >
         <ul className="api-source-panel__list" style={{ height: "calc(var(--s10) * 5)", overflowY: "auto", margin: 0, padding: 0, listStyle: "none" }}>
-          {sources.map((source) => <li key={source.name}>
-            <Button size="compact" variant={editingName === source.name ? "secondary" : "neutral"} onClick={() => startEdit(source)}>
-              <code>{source.name}</code>
-            </Button>
-            <span className="muted">{new URL(source.url).hostname}</span>
-          </li>)}
+          {sources.map((source) => {
+            const failed = source.lastStatus === "error";
+            const statusText = source.lastStatus === null
+              ? labels.notTested
+              : failed
+                ? apiSourceFailureText(source.lastError ?? "unreachable", language ?? "de")
+                : labels.statusOk;
+            const status = source.lastStatus === null ? "off" : failed ? "error" : "ok";
+            return <li key={source.name} style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto", alignItems: "center", gap: "var(--s2)" }}>
+              <Button size="compact" variant={editingName === source.name ? "secondary" : "neutral"} onClick={() => startEdit(source)}>
+                <code>{source.name}</code>
+              </Button>
+              <span className="muted" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{new URL(source.url).hostname}</span>
+              <span className="status-led" data-status={status} title={source.lastFetchedAt ?? undefined}>
+                <span className="status-led__dot" aria-hidden="true" />
+                <span className="status-led__label">{statusText}</span>
+              </span>
+            </li>;
+          })}
         </ul>
       </LoadState>
       </div>
@@ -186,26 +228,43 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
       {...(canEdit ? {} : { description: labels.readOnlyReason })}
       onConfirm={() => { void save(); }}
       onCancel={closeEditor}
-      pending={busy}
-      confirmDisabled={!canEdit || draft === null || draft.name.trim().length === 0 || draft.url.trim().length === 0}
+      pending={busy || testing}
+      confirmDisabled={!canEdit || draft === null || draft.name.trim().length === 0 || draft.url.trim().length === 0 || testing}
       {...(formError === undefined ? {} : { error: formError })}
     >
       {draft === null ? null : <div className="module-stack">
         <InspectorFieldRow label={labels.name} help={labels.nameHint}>
-          <Field label={labels.name} value={draft.name} onChange={(name) => setDraft({ ...draft, name: name.toLowerCase().replace(/[^a-z0-9_]/gu, "").slice(0, 32) })} disabled={busy || !canEdit || editingName !== null} readOnly={editingName !== null} />
+          <Field label={labels.name} value={draft.name} onChange={(name) => { setDraft({ ...draft, name: name.toLowerCase().replace(/[^a-z0-9_]/gu, "").slice(0, 32) }); setTestResult(undefined); }} disabled={busy || testing || !canEdit || editingName !== null} readOnly={editingName !== null} />
         </InspectorFieldRow>
         <InspectorFieldRow label={labels.url} help={labels.urlHint}>
-          <Field label={labels.url} value={draft.url} onChange={(url) => setDraft({ ...draft, url })} disabled={busy || !canEdit} mono />
+          <Field label={labels.url} value={draft.url} onChange={(url) => { setDraft({ ...draft, url }); setTestResult(undefined); setTestRequestError(undefined); }} disabled={busy || testing || !canEdit} mono />
         </InspectorFieldRow>
         <InspectorFieldRow label={labels.expression} help={labels.expressionHint}>
-          <ExpressionField id="api-source-expression" label={labels.expression} value={draft.expression} onChange={(expression) => setDraft({ ...draft, expression })} maxLength={512} language={language ?? "de"} messages={labels.expressionPicker} disabled={busy || !canEdit} />
+          <ExpressionField id="api-source-expression" label={labels.expression} value={draft.expression} onChange={(expression) => { setDraft({ ...draft, expression }); setTestResult(undefined); setTestRequestError(undefined); }} maxLength={512} language={language ?? "de"} messages={labels.expressionPicker} disabled={busy || testing || !canEdit} />
         </InspectorFieldRow>
         <p className="muted" title={draft.expression.trim().length === 0 ? labels.noExpression : undefined}
           style={{ height: "var(--s6)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", margin: 0 }} aria-live="polite">
           {draft.expression.trim().length === 0 ? labels.noExpression : ""}
         </p>
         <div className="form-actions">
-          {editingName === null ? null : <Button type="button" danger="subtle" disabled={!canEdit || busy} onClick={() => { setDeleteError(undefined); setConfirmDeleteOpen(true); }}>{labels.delete}</Button>}
+          <Button type="button" disabled={!canEdit || busy || testing || draft.url.trim().length === 0} onClick={() => { void testDraft(); }}>
+            {testing ? labels.testing : labels.test}
+          </Button>
+          {editingName === null ? null : <Button type="button" danger="subtle" disabled={!canEdit || busy || testing} onClick={() => { setDeleteError(undefined); setConfirmDeleteOpen(true); }}>{labels.delete}</Button>}
+        </div>
+        <div data-testid="api-source-test-result" aria-live="polite" style={{ height: "calc(var(--s10) * 5)", overflowY: "auto", boxSizing: "border-box", margin: 0 }}>
+          {testRequestError === undefined ? null : <p role="alert">{testRequestError}</p>}
+          {testResult?.status === "error" ? <p role="alert">
+            {apiSourceFailureText(testResult.reason, language ?? "de", testResult.retryAfter)}
+            {testResult.constructName === undefined ? "" : ` · ${testResult.constructName}`}
+            {testResult.httpStatus === undefined ? "" : ` · HTTP ${String(testResult.httpStatus)}`}
+          </p> : null}
+          {testResult?.status === "ok" ? <>
+            <p role="status">{labels.testSucceeded(testResult.httpStatus, testResult.bytes)}</p>
+            <pre style={{ margin: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+              {JSON.stringify({ json: testResult.json, value: testResult.value }, null, 2)}
+            </pre>
+          </> : null}
         </div>
       </div>}
     </FormDialog>

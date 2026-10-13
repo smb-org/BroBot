@@ -15,11 +15,18 @@ export interface ApiSourcePanelTexts {
   expression: string;
   expressionHint: string;
   expressionPicker: ExpressionFieldMessages;
+  test: string;
+  testing: string;
+  testSucceeded: (httpStatus: number, bytes: number) => string;
+  testRequestFailed: string;
+  notTested: string;
+  statusOk: string;
   save: string;
   cancel: string;
   delete: string;
   deleteTitle: string;
   deleteConsequence: string;
+  inUse: string;
   deleted: string;
   saved: string;
   created: string;
@@ -38,7 +45,7 @@ export interface ApiSourcePanelTexts {
 const texts: Readonly<Record<ModuleLanguage, ApiSourcePanelTexts>> = {
   de: {
     title: "Benannte API-Quellen",
-    explanation: "Nur öffentlich erreichbare HTTPS-JSON-Endpunkte. Werte stehen als {api_source.value name} bereit; ein boolescher JSONata-Ausdruck kann zusätzlich als Textblock-Bedingung dienen.",
+    explanation: "Nur öffentlich erreichbare HTTPS-JSON-Endpunkte. Werte stehen als {api.<name>} bereit; ein boolescher JSONata-Ausdruck kann zusätzlich als Textblock-Bedingung dienen.",
     sourceList: "Quellen",
     addSource: "Quelle hinzufügen",
     editSource: "Quelle bearbeiten",
@@ -55,11 +62,18 @@ const texts: Readonly<Record<ModuleLanguage, ApiSourcePanelTexts>> = {
       signatureLabel: "Funktionssignatur",
       insertionLimit: "Einfügen würde das Zeichenlimit überschreiten.",
     },
+    test: "Testen",
+    testing: "Wird getestet …",
+    testSucceeded: (httpStatus, bytes) => `Erfolgreich · HTTP ${String(httpStatus)} · ${String(bytes)} Bytes`,
+    testRequestFailed: "Der Test konnte nicht ausgeführt werden.",
+    notTested: "Noch nicht abgerufen",
+    statusOk: "Erfolgreich",
     save: "Speichern",
     cancel: "Abbrechen",
     delete: "Quelle löschen",
     deleteTitle: "API-Quelle löschen?",
     deleteConsequence: "Die Quelle steht danach nicht mehr für Vorlagen und Bedingungen bereit.",
+    inUse: "Diese Quelle wird noch in gespeicherten Vorlagen oder Textbaustein-Bedingungen verwendet.",
     deleted: "Die API-Quelle wurde gelöscht.",
     saved: "Die API-Quelle wurde gespeichert.",
     created: "Die API-Quelle wurde angelegt.",
@@ -76,7 +90,7 @@ const texts: Readonly<Record<ModuleLanguage, ApiSourcePanelTexts>> = {
   },
   en: {
     title: "Named API sources",
-    explanation: "Only publicly reachable HTTPS JSON endpoints. Values are available as {api_source.value name}; a boolean JSONata expression can also be used as a text-block condition.",
+    explanation: "Only publicly reachable HTTPS JSON endpoints. Values are available as {api.<name>}; a boolean JSONata expression can also be used as a text-block condition.",
     sourceList: "Sources",
     addSource: "Add source",
     editSource: "Edit source",
@@ -93,11 +107,18 @@ const texts: Readonly<Record<ModuleLanguage, ApiSourcePanelTexts>> = {
       signatureLabel: "Function signature",
       insertionLimit: "This insertion would exceed the character limit.",
     },
+    test: "Test",
+    testing: "Testing …",
+    testSucceeded: (httpStatus, bytes) => `Success · HTTP ${String(httpStatus)} · ${String(bytes)} bytes`,
+    testRequestFailed: "The test request could not be completed.",
+    notTested: "Not fetched yet",
+    statusOk: "Success",
     save: "Save",
     cancel: "Cancel",
     delete: "Delete source",
     deleteTitle: "Delete API source?",
     deleteConsequence: "The source will no longer be available to templates or conditions.",
+    inUse: "This source is still used by saved templates or text block conditions.",
     deleted: "The API source was deleted.",
     saved: "The API source was saved.",
     created: "The API source was created.",

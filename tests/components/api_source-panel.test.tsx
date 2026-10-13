@@ -15,6 +15,9 @@ const makeSource = (overrides: Partial<ApiSource> = {}): ApiSource => ({
   expression: "$.original",
   revision: 1,
   updatedAt: "2026-10-01T12:00:00.000Z",
+  lastFetchedAt: null,
+  lastStatus: null,
+  lastError: null,
   ...overrides,
 });
 
@@ -128,5 +131,54 @@ describe("API source panel query lifecycle", () => {
     expect(screen.getByRole("textbox", { name: "JSONata expression (optional)" })).toHaveValue("$.recreated");
     expect(view.queryClient.getQueryData<ApiSource[]>(moduleQueryKey("kanal-a", "api_source", "sources"))?.[0])
       .toMatchObject({ revision: 1, expression: "$.recreated" });
+  });
+
+  it("tests the unsaved editor draft and keeps a reserved result area", async () => {
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      const method = init?.method ?? "GET";
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+      if (url.pathname.endsWith("/sources") && method === "GET") return Promise.resolve(jsonResponse({ sources: [] }));
+      if (url.pathname.endsWith("/sources/test") && method === "POST") return Promise.resolve(jsonResponse({
+        status: "ok",
+        httpStatus: 200,
+        bytes: 15,
+        json: { temperature: 21 },
+        value: "21",
+      }));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    renderPanel(fetcher);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add source" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "HTTPS URL" }), {
+      target: { value: "https://api.example.test/weather" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "JSONata expression (optional)" }), {
+      target: { value: "$.temperature" },
+    });
+    const resultArea = screen.getByTestId("api-source-test-result");
+    const reservedHeight = getComputedStyle(resultArea).height;
+
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+
+    expect(await screen.findByText(/21/u)).toBeInTheDocument();
+    expect(fetcher).toHaveBeenCalledWith("/api/channels/kanal-a/modules/api_source/sources/test", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ url: "https://api.example.test/weather", expression: "$.temperature" }),
+    }));
+    expect(getComputedStyle(resultArea).height).toBe(reservedHeight);
+  });
+
+  it("marks a source with its localized last failure reason", async () => {
+    const fetcher = sourceFetch(() => [makeSource({
+      lastFetchedAt: "2026-10-12T08:30:00.000Z",
+      lastStatus: "error",
+      lastError: "invalid_json",
+    })]);
+    renderPanel(fetcher);
+
+    expect(await screen.findByText("The response is not valid JSON.")).toBeInTheDocument();
+    expect(document.querySelector(".status-led[data-status=error]")).toBeInTheDocument();
   });
 });
