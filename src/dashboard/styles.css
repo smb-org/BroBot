@@ -1467,8 +1467,8 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 
 @media (max-width: 419px) {
   .ui-save-bar--persistent { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
-  .ui-save-bar--persistent .ui-save-bar__status { grid-column: 1; }
-  .ui-save-bar--persistent .ui-save-bar__actions { grid-row: 1; grid-column: 2; justify-content: flex-end; }
+  :where(.ui-save-bar--persistent) .ui-save-bar__status { grid-column: 1; }
+  :where(.ui-save-bar--persistent) .ui-save-bar__actions { grid-row: 1; grid-column: 2; justify-content: flex-end; }
   .ui-save-bar--error.ui-save-bar--persistent { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; gap: 4px; height: 88px; min-height: 88px; padding: 8px 0 calc(8px + env(safe-area-inset-bottom)); }
   .ui-save-bar--error.ui-save-bar--persistent .ui-save-bar__status { grid-row: 1; grid-column: 1; align-items: flex-start; }
   .ui-save-bar--error .ui-save-bar__message { overflow: visible; white-space: normal; }
