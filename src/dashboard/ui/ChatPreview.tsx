@@ -1,7 +1,7 @@
 import type { ReactElement, ReactNode } from "react";
 
 export interface ChatPreviewProps {
-  /** e.g. "Preview" */
+  /** e.g. "Vorschau" or "Preview" */
   label: string;
   /** e.g. "Bot" */
   speaker: string;
@@ -10,16 +10,16 @@ export interface ChatPreviewProps {
   countLabel: ReactNode;
 }
 
-/** The "Preview · Bot · …" chat-message row shared by every response preview
- *  (template text and the command-list preview alike). */
+/** Fixed-height display of a two-line chat message with its preview label. */
 export function ChatPreview({ label, speaker, text, countLabel }: ChatPreviewProps): ReactElement {
   return (
     <div data-ui="" className="ui-chat-preview">
-      <div className="ui-chat-preview__heading">
-        <span className="ui-chat-preview__label">{label}</span>
+      <span className="ui-chat-preview__label">{label}</span>
+      <p className="ui-chat-preview__message" title={`${speaker}: ${text}`}>
         <span className="ui-chat-preview__speaker">{speaker}</span>
-      </div>
-      <span className="ui-chat-preview__text" title={text}>{text}</span>
+        <span className="ui-chat-preview__colon" aria-hidden="true">:</span>{" "}
+        <span className="ui-chat-preview__text" title={text}>{text}</span>
+      </p>
       <span className="ui-chat-preview__count">{countLabel}</span>
     </div>
   );

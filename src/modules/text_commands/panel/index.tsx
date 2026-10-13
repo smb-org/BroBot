@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, 
 
 import { dashboardCommonTexts, dashboardLanguage, type DashboardLanguage } from "../../../dashboard/locale";
 import {
-  Badge, Button, ChatOutputTargetControl, ChatPreview, ConfirmDialog, EditorShell, EmptyCellValue, Field, FieldPair, ListDetail, ListToolbar, UnitInput, Select,
-  GamePicker, InspectorFieldRow, InspectorSection, LoadState, LoadStateLines, TimeoutDurationRangeFields,
+  Badge, Button, ChatTargetField, ChatPreview, ConfirmDialog, EditorShell, EmptyCellValue, Field, FieldPair, ListDetail, ListToolbar, UnitInput, Select,
+  GameMultiSelect, InspectorFieldRow, InspectorSection, LoadState, LoadStateLines, TimeoutDurationRangeFields,
   registerDashboardNavigationGuard, SegmentChoice, ChipsInput, TemplateText, TemplateTextField, useDraft, useDraftGuard, useInspectorSelection, notify,
   RoleThreshold, RuleNote, SwitchSection,
   type EditorInvalidField,
@@ -542,11 +542,10 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     disabled={!canManageContent || pending}
     onChange={(value) => { setDraftField("responseType", value); }}
   />;
-  const chatTargetEditor = <ChatOutputTargetControl
+  const chatTargetEditor = <ChatTargetField
     label={labels.chatTarget}
     value={draft.chatTarget}
-    includeWhereAsked
-    allowChannelDefault
+    allowed={["all_chats", "source_only", "channel_default", "where_asked"]}
     disabled={!canManageContent || pending}
     onChange={(chatTarget) => { setDraftField("chatTarget", chatTarget); }}
   />;
@@ -940,12 +939,12 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
             />
           </InspectorFieldRow>
           <InspectorFieldRow label={labels.gameFilter} help={labels.gameFilterHint}>
-            <GamePicker
+            <GameMultiSelect
               searchGames={searchGames}
               lookupGames={lookupGames}
               value={draft.games}
               onChange={(games) => { setDraftField("games", games); }}
-              messages={{ ...labels.gamePicker, label: labels.gameFilter, hint: labels.gameFilterHint }}
+              messages={{ ...labels.gameMultiSelect, label: labels.gameFilter, hint: labels.gameFilterHint }}
               disabled={!canManageContent || pending}
             />
           </InspectorFieldRow>

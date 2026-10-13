@@ -1,8 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { useState } from "react";
 
-import { ChipsInput, Field, FormDialog, GamePicker, SaveBar, Select, TemplateTextField, UiProvider, UnitInput, type GamePickerGame } from "../../src/dashboard/ui";
-import type { TemplateTextFieldMessages } from "../../src/dashboard/ui";
+import { ChipsInput, Field, FormDialog, GameMultiSelect, SaveBar, Select, TemplateTextField, UiProvider, UnitInput, type GameMultiSelectGame, type TemplateTextFieldMessages } from "../../src/dashboard/ui";
 import "../../src/dashboard/ui/tokens.css";
 
 const templateMessages: TemplateTextFieldMessages = {
@@ -22,7 +21,7 @@ const templateMessages: TemplateTextFieldMessages = {
   },
 };
 
-const gamePickerMessages = {
+const gameMultiSelectMessages = {
   label: "Games",
   hint: "Add one or more games.",
   search: "Search games",
@@ -30,14 +29,17 @@ const gamePickerMessages = {
   loading: "Searching games …",
   empty: "No games found.",
   error: "Games could not be loaded.",
+  suggestions: "Suggestions",
+  allGames: "All games",
+  selectedCount: (count: number, maximum: number) => `${String(count)} of ${String(maximum)}`,
   remove: (name: string) => `Remove ${name}`,
 };
 
-const fixtureGames: GamePickerGame[] = [
+const fixtureGames: GameMultiSelectGame[] = [
   { id: "game-one", name: "Game One" },
 ];
 
-const searchFixtureGames = (): Promise<readonly GamePickerGame[]> => Promise.resolve(fixtureGames);
+const searchFixtureGames = (): Promise<readonly GameMultiSelectGame[]> => Promise.resolve(fixtureGames);
 
 export function LayoutFixture() {
   const [showIssues, setShowIssues] = useState(false);
@@ -46,7 +48,7 @@ export function LayoutFixture() {
   const [dialogError, setDialogError] = useState(false);
   const [savePending, setSavePending] = useState(false);
   const [tags, setTags] = useState<string[]>([]);
-  const [games, setGames] = useState<GamePickerGame[]>([]);
+  const [games, setGames] = useState<GameMultiSelectGame[]>([]);
   const [number, setNumber] = useState<number | "">(4);
   const longError = new URLSearchParams(window.location.search).has("longError");
   const errorProps = showIssues ? { error: longError ? "A server error that is long enough to need several lines on a narrow screen and must stay fully readable." : "A validation error." } : {};
@@ -59,7 +61,7 @@ export function LayoutFixture() {
         <button id="toggle-save-pending" type="button" onClick={() => { setSavePending((current) => !current); }}>Toggle save pending</button>
         <button id="open-dialog" type="button" onClick={() => { setDialogOpen(true); }}>Open dialog</button>
         <div className="layout-fixture__game-picker">
-          <GamePicker searchGames={searchFixtureGames} value={games} onChange={setGames} messages={gamePickerMessages} />
+          <GameMultiSelect searchGames={searchFixtureGames} value={games} onChange={setGames} messages={gameMultiSelectMessages} />
           <button id="game-picker-outside-control" type="button">Check message</button>
         </div>
         <div className="layout-fixture__compact-header" style={{ display: "flex", alignItems: "center", width: 320, height: 44 }}>

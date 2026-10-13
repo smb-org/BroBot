@@ -1,7 +1,7 @@
 import { useCallback, useState, type ReactElement } from "react";
 
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
-import { Button, ChatOutputTargetControl, ConfirmDialog, Field, FormDialog, GamePicker, InspectorSection, LoadState, LoadStateLines, UnitInput, Select, TemplateTextField, mapServerFieldErrors, notify } from "../../../dashboard/ui";
+import { Button, ChatTargetField, ConfirmDialog, Field, FormDialog, GameMultiSelect, InspectorSection, LoadState, LoadStateLines, UnitInput, Select, TemplateTextField, mapServerFieldErrors, notify } from "../../../dashboard/ui";
 import { Switch as SwitchPrimitive } from "../../../dashboard/ui/primitives/switch";
 import type { ModulePanelProperties } from "../../contract";
 import type { FaqEntry, FaqGame } from "../contracts";
@@ -246,12 +246,12 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
       <InspectorSection title={labels.testHeading}>
         <div className="module-stack">
           <Field label={labels.testMessage} value={testMessage} onChange={setTestMessage} maxLength={500} countLabel={(count, max) => `${String(count)}/${String(max)}`} />
-          <GamePicker
+          <GameMultiSelect
             searchGames={searchGames}
             lookupGames={lookupGames}
             value={testGame === null ? [] : [testGame]}
             onChange={(games) => setTestGame(games.at(-1) ?? null)}
-            messages={labels.testGamePickerMessages}
+            messages={labels.testGameMultiSelectMessages}
           />
           <Button variant="neutral" disabled={testBusy || loading} onClick={() => { void runTest(); }}>{labels.testButton}</Button>
           <div data-testid="faq-test-result-slot" style={{ height: "calc(var(--s10) * 5)", overflowY: "auto" }} aria-live="polite">
@@ -333,20 +333,19 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
             unit="s"
             disabled={pending}
           />
-          <GamePicker
+          <GameMultiSelect
             searchGames={searchGames}
             lookupGames={lookupGames}
             value={draft.games}
             onChange={(games) => patchDraft({ games })}
             disabled={pending}
-            messages={labels.gamePickerMessages}
+            messages={labels.gameMultiSelectMessages}
           />
-          <ChatOutputTargetControl
+          <ChatTargetField
             label={labels.chatTarget}
             value={draft.chatTarget}
             onChange={(chatTarget) => patchDraft({ chatTarget })}
-            includeWhereAsked
-            allowChannelDefault
+            allowed={["all_chats", "source_only", "channel_default", "where_asked"]}
             disabled={pending}
           />
         </div>}

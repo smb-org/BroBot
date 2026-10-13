@@ -1477,8 +1477,8 @@ test("text-library game filter keeps the list position when games are selected a
     const toolbar = page.locator(".text-library__list-toolbar");
     const filters = toolbar.locator(".list-toolbar__filters");
     const create = toolbar.getByRole("button", { name: "Add text block" });
-    const picker = filters.locator(".ui-game-picker--compact");
-    const slot = picker.locator(".ui-game-picker__selected");
+    const picker = filters.locator(".ui-game-multi-select--compact");
+    const slot = picker.locator(".ui-game-multi-select__selected");
     const pickerBox = await picker.boundingBox();
     const filtersBox = await filters.boundingBox();
     const createBox = await create.boundingBox();
@@ -1491,7 +1491,7 @@ test("text-library game filter keeps the list position when games are selected a
       expect(filterOverflow).toBe(true);
     }
     const before = { list: await box(list), slot: await box(slot) };
-    const search = page.getByPlaceholder("Search games");
+    const search = picker.getByRole("searchbox");
     for (const name of ["Just Chatting", "Software and Game Development", "Retro Adventure Collection Deluxe"]) {
       await search.fill("ga");
       await page.getByRole("option", { name }).click();
@@ -1503,9 +1503,16 @@ test("text-library game filter keeps the list position when games are selected a
       await expect(activeFilters).toContainText("Just Chatting");
       await expect(activeFilters).toContainText("Software and Game Development");
       await expect(activeFilters).toContainText("Retro Adventure Collection Deluxe");
+      await search.press("Escape");
       await page.getByRole("button", { name: "Reset" }).click();
     }
-    else await page.getByRole("button", { name: "Clear game filter (3 selected)" }).click();
+    else {
+      for (let selected = 3; selected > 0; selected -= 1) {
+        await picker.locator(".ui-game-multi-select__chip button").first().click();
+        expect(await box(list)).toEqual(before.list);
+        expect(await box(slot)).toEqual(before.slot);
+      }
+    }
     expect(await box(list)).toEqual(before.list);
     expect(await box(slot)).toEqual(before.slot);
   }

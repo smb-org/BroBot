@@ -2818,11 +2818,11 @@ describe("Dashboard skeleton", () => {
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
-    const targetField = await screen.findByRole("combobox", { name: "Standard-Chat-Ziel" });
+    const targetField = await screen.findByRole("button", { name: "Standard-Chat-Ziel" });
     await waitFor(() => expect(targetField).toHaveTextContent("Nur unser Chat"));
     fireEvent.click(targetField);
-    const allChatsOption = await screen.findByRole("option", { name: /Alle Chats/u });
-    clickSelectOption(allChatsOption);
+    const allChatsOption = await screen.findByRole("radio", { name: /Alle Chats/u, hidden: true });
+    fireEvent.click(allChatsOption);
 
     expect(targetPatchCount).toBe(0);
     expect(targetField).toHaveTextContent("Alle Chats");

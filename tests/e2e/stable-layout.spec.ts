@@ -301,7 +301,7 @@ test("game search results close on outside click, focus exit, and Escape at 390p
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/tests/e2e/layout-fixture.html");
   const search = page.getByRole("searchbox", { name: "Games" });
-  const results = page.locator(".ui-game-picker__results-slot");
+  const results = page.locator(".ui-game-multi-select__popup");
 
   await search.fill("ga");
   await expect(results).toBeVisible();

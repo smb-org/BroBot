@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { useState, type ReactNode, type SyntheticEvent } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Button, ChipsInput, ConfirmDialog, EditorShell, Field, FieldPair, GamePicker, SegmentChoice, SettingsEditor, SwitchRow, SwitchSection, TemplateText, TemplateTextField, UiProvider, UnitInput, type GamePickerGame, type GamePickerMessages, type SettingsEditorSpec, type TemplateTextFieldMessages, type TemplateTextFieldVariable } from "../../src/dashboard/ui";
+import { Button, ChipsInput, ConfirmDialog, EditorShell, Field, FieldPair, GameMultiSelect, SegmentChoice, SettingsEditor, SwitchRow, SwitchSection, TemplateText, TemplateTextField, UiProvider, UnitInput, type GameMultiSelectGame, type GameMultiSelectMessages, type SettingsEditorSpec, type TemplateTextFieldMessages, type TemplateTextFieldVariable } from "../../src/dashboard/ui";
 import { ChoiceCards } from "../../src/dashboard/ui/ChoiceCards";
 
 const renderUi = (node: ReactNode): ReturnType<typeof render> => render(<UiProvider>{node}</UiProvider>);
@@ -63,12 +63,12 @@ afterEach(() => {
 
 describe("editor field seam", () => {
   it("shows lazy Twitch box art beside a selected game", async () => {
-    const game: GamePickerGame = {
+    const game: GameMultiSelectGame = {
       id: "123",
       name: "Example Game",
       boxArtUrlTemplate: "https://static-cdn.jtvnw.net/ttv-boxart/123-{width}x{height}.jpg",
     };
-    const messages: GamePickerMessages = {
+    const messages: GameMultiSelectMessages = {
       label: "Games",
       hint: "Filter this text by game.",
       search: "Search Twitch games",
@@ -76,17 +76,20 @@ describe("editor field seam", () => {
       loading: "Searching…",
       empty: "No games found.",
       error: "Search failed.",
+      suggestions: "Suggestions",
+      allGames: "All games",
+      selectedCount: (count, maximum) => `${String(count)} of ${String(maximum)}`,
       remove: (name) => `Remove ${name}`,
     };
     const searchGames = vi.fn().mockResolvedValue([game]);
     function Harness() {
-      const [value, setValue] = useState<GamePickerGame[]>([]);
-      return <GamePicker searchGames={searchGames} value={value} onChange={setValue} messages={messages} />;
+      const [value, setValue] = useState<GameMultiSelectGame[]>([]);
+      return <GameMultiSelect searchGames={searchGames} value={value} onChange={setValue} messages={messages} />;
     }
 
     renderUi(<Harness />);
     fireEvent.change(screen.getByRole("searchbox", { name: "Games" }), { target: { value: "Example" } });
-    const option = await screen.findByRole("option", { name: /Example Game/u });
+    const option = await screen.findByRole("option", { name: /Example Game/u, hidden: true });
     const optionImage = option.querySelector("img");
     expect(optionImage).toHaveAttribute("loading", "lazy");
     expect(optionImage).toHaveAttribute("alt", "");
@@ -94,62 +97,64 @@ describe("editor field seam", () => {
     expect(optionImage).toHaveAttribute("height", "38");
 
     fireEvent.click(option);
-    const selectedImage = document.querySelector(".ui-game-picker__chip img");
+    const selectedImage = document.querySelector(".ui-game-multi-select__chip img");
     expect(selectedImage).toHaveAttribute("src", "https://static-cdn.jtvnw.net/ttv-boxart/123-20x27.jpg");
     expect(selectedImage).toHaveAttribute("width", "20");
     expect(selectedImage).toHaveAttribute("height", "27");
   });
 
   it("loads empty-query suggestions and hydrates older selected games with box art", async () => {
-    const storedGame: GamePickerGame = { id: "42", name: "Zelda: Ocarina of Time" };
-    const gameWithArt: GamePickerGame = {
+    const storedGame: GameMultiSelectGame = { id: "42", name: "Zelda: Ocarina of Time" };
+    const gameWithArt: GameMultiSelectGame = {
       ...storedGame,
       boxArtUrlTemplate: "https://static-cdn.jtvnw.net/ttv-boxart/42-{width}x{height}.jpg",
     };
-    const messages: GamePickerMessages = {
+    const messages: GameMultiSelectMessages = {
       label: "Games", hint: "Filter by game.", search: "Search games", searchHint: "Search for a game.",
-      loading: "Searching…", empty: "No games found.", error: "Search failed.", remove: (name) => `Remove ${name}`,
+      loading: "Searching…", empty: "No games found.", error: "Search failed.", suggestions: "Suggestions", allGames: "All games",
+      selectedCount: (count, maximum) => `${String(count)} of ${String(maximum)}`, remove: (name) => `Remove ${name}`,
     };
     const searchGames = vi.fn().mockResolvedValue([gameWithArt]);
     const lookupGames = vi.fn().mockResolvedValue([gameWithArt]);
     const onChange = vi.fn();
 
-    renderUi(<GamePicker searchGames={searchGames} lookupGames={lookupGames} value={[storedGame]} onChange={onChange} messages={messages} />);
+    renderUi(<GameMultiSelect searchGames={searchGames} lookupGames={lookupGames} value={[storedGame]} onChange={onChange} messages={messages} />);
     await waitFor(() => expect(lookupGames).toHaveBeenCalledWith(["42"]));
-    await waitFor(() => expect(document.querySelector(".ui-game-picker__chip img")).toHaveAttribute(
+    await waitFor(() => expect(document.querySelector(".ui-game-multi-select__chip img")).toHaveAttribute(
       "src",
       "https://static-cdn.jtvnw.net/ttv-boxart/42-20x27.jpg",
     ));
     expect(onChange).not.toHaveBeenCalled();
 
     fireEvent.focus(screen.getByRole("searchbox", { name: "Games" }));
-    expect(await screen.findByRole("option", { name: /Zelda: Ocarina of Time/u })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: /Zelda: Ocarina of Time/u, hidden: true })).toBeInTheDocument();
     expect(searchGames).toHaveBeenCalledWith("");
   });
 
   it("retries failed artwork lookups without changing the selected game draft", async () => {
     vi.useFakeTimers();
-    const storedGame: GamePickerGame = { id: "42", name: "Zelda: Ocarina of Time" };
-    const gameWithArt: GamePickerGame = {
+    const storedGame: GameMultiSelectGame = { id: "42", name: "Zelda: Ocarina of Time" };
+    const gameWithArt: GameMultiSelectGame = {
       ...storedGame,
       boxArtUrlTemplate: "https://static-cdn.jtvnw.net/ttv-boxart/42-{width}x{height}.jpg",
     };
-    const messages: GamePickerMessages = {
+    const messages: GameMultiSelectMessages = {
       label: "Games", hint: "Filter by game.", search: "Search games", searchHint: "Search for a game.",
-      loading: "Searching…", empty: "No games found.", error: "Search failed.", remove: (name) => `Remove ${name}`,
+      loading: "Searching…", empty: "No games found.", error: "Search failed.", suggestions: "Suggestions", allGames: "All games",
+      selectedCount: (count, maximum) => `${String(count)} of ${String(maximum)}`, remove: (name) => `Remove ${name}`,
     };
     const searchGames = vi.fn().mockResolvedValue([]);
     const lookupGames = vi.fn().mockRejectedValueOnce(new Error("Twitch unavailable")).mockResolvedValueOnce([gameWithArt]);
     const onChange = vi.fn();
 
-    renderUi(<GamePicker searchGames={searchGames} lookupGames={lookupGames} value={[storedGame]} onChange={onChange} messages={messages} />);
+    renderUi(<GameMultiSelect searchGames={searchGames} lookupGames={lookupGames} value={[storedGame]} onChange={onChange} messages={messages} />);
     await act(async () => { await Promise.resolve(); });
     expect(lookupGames).toHaveBeenCalledTimes(1);
 
     await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
 
     expect(lookupGames).toHaveBeenCalledTimes(2);
-    expect(document.querySelector(".ui-game-picker__chip img")).toHaveAttribute(
+    expect(document.querySelector(".ui-game-multi-select__chip img")).toHaveAttribute(
       "src",
       "https://static-cdn.jtvnw.net/ttv-boxart/42-20x27.jpg",
     );
@@ -157,33 +162,35 @@ describe("editor field seam", () => {
   });
 
   it("keeps the same cover footprint for suggestions and selected games without box art", async () => {
-    const messages: GamePickerMessages = {
+    const messages: GameMultiSelectMessages = {
       label: "Games", hint: "Filter by game.", search: "Search games", searchHint: "Search for a game.",
-      loading: "Searching…", empty: "No games found.", error: "Search failed.", remove: (name) => `Remove ${name}`,
+      loading: "Searching…", empty: "No games found.", error: "Search failed.", suggestions: "Suggestions", allGames: "All games",
+      selectedCount: (count, maximum) => `${String(count)} of ${String(maximum)}`, remove: (name) => `Remove ${name}`,
     };
-    const game: GamePickerGame = { id: "99", name: "Unlisted Game" };
+    const game: GameMultiSelectGame = { id: "99", name: "Unlisted Game" };
     const searchGames = vi.fn().mockResolvedValue([game]);
-    renderUi(<GamePicker searchGames={searchGames} value={[game]} onChange={() => {}} messages={messages} />);
+    renderUi(<GameMultiSelect searchGames={searchGames} value={[game]} onChange={() => {}} messages={messages} />);
 
     fireEvent.focus(screen.getByRole("searchbox", { name: "Games" }));
     fireEvent.change(screen.getByRole("searchbox", { name: "Games" }), { target: { value: "Unlisted" } });
-    const option = await screen.findByRole("option", { name: /Unlisted Game/u });
-    const selectedPlaceholder = document.querySelector<HTMLElement>(".ui-game-picker__chip .ui-game-picker__cover-placeholder");
-    const suggestionPlaceholder = option.querySelector<HTMLElement>(".ui-game-picker__cover-placeholder");
+    const option = await screen.findByRole("option", { name: /Unlisted Game/u, hidden: true });
+    const selectedPlaceholder = document.querySelector<HTMLElement>(".ui-game-multi-select__chip .ui-game-multi-select__cover-placeholder");
+    const suggestionPlaceholder = option.querySelector<HTMLElement>(".ui-game-multi-select__cover-placeholder");
 
     expect(selectedPlaceholder).toHaveStyle({ width: "20px", height: "27px" });
     expect(suggestionPlaceholder).toHaveStyle({ width: "28px", height: "38px" });
   });
 
   it("closes game results on Escape from the input or an option and when focus leaves the picker", async () => {
-    const messages: GamePickerMessages = {
+    const messages: GameMultiSelectMessages = {
       label: "Games", hint: "h", search: "s", searchHint: "sh", loading: "l", empty: "e", error: "x",
+      suggestions: "Suggestions", allGames: "All games", selectedCount: (count, maximum) => `${String(count)} of ${String(maximum)}`,
       remove: (name) => `Remove ${name}`,
     };
     const searchGames = vi.fn().mockResolvedValue([{ id: "1", name: "Example Game" }]);
     renderUi(
       <div>
-        <GamePicker searchGames={searchGames} value={[]} onChange={() => {}} messages={messages} />
+        <GameMultiSelect searchGames={searchGames} value={[]} onChange={() => {}} messages={messages} />
         <button type="button">outside</button>
       </div>,
     );
@@ -191,21 +198,21 @@ describe("editor field seam", () => {
     const open = async () => {
       fireEvent.focus(input);
       fireEvent.change(input, { target: { value: "Example" } });
-      return screen.findByRole("option", { name: /Example Game/u });
+      return screen.findByRole("option", { name: /Example Game/u, hidden: true });
     };
 
     fireEvent.keyDown(await open(), { key: "Escape" });
-    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { hidden: true })).not.toBeInTheDocument();
 
     await open();
     fireEvent.keyDown(input, { key: "Escape" });
-    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { hidden: true })).not.toBeInTheDocument();
 
     const option = await open();
     fireEvent.focusOut(option, { relatedTarget: input });
-    expect(screen.getByRole("option")).toBeInTheDocument();
+    expect(screen.getByRole("option", { hidden: true })).toBeInTheDocument();
     fireEvent.focusOut(option, { relatedTarget: screen.getByRole("button", { name: "outside" }) });
-    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { hidden: true })).not.toBeInTheDocument();
   });
 
   it("keeps a visual prefix out of the value, normalizes input, and gives icon fields only their label", () => {

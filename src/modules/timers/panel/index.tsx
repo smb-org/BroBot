@@ -3,7 +3,7 @@ import { useMemo, useState, type ReactElement } from "react";
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { templateTextLength } from "../../../contracts/template-text-length";
 import { formatTimestamp } from "../../../dashboard/locale";
-import { Button, ChatOutputTargetControl, ChatPreview, ConfirmDialog, Dialog, Field, FormDialog, InspectorSection, LoadState, LoadStateLines, Select, SwitchRow, SwitchSection, TemplateTextField, UnitInput, notify } from "../../../dashboard/ui";
+import { Button, ChatTargetField, ChatPreview, ConfirmDialog, Dialog, Field, FormDialog, InspectorSection, LoadState, LoadStateLines, Select, SwitchRow, SwitchSection, TemplateTextField, UnitInput, notify } from "../../../dashboard/ui";
 import { Switch as SwitchPrimitive } from "../../../dashboard/ui/primitives/switch";
 import type { ModulePanelProperties } from "../../contract";
 import type { Timer, TimerMutationInput, TimerTrigger } from "../contracts";
@@ -312,12 +312,12 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
             disabled={pending}
             required
           />
-          <ChatOutputTargetControl
+          <ChatTargetField
             label={labels.chatTarget}
             value={draft.chatTarget}
+            allowed={["all_chats", "source_only"]}
             disabled={pending}
             onChange={(chatTarget) => { if (chatTarget !== "where_asked") patchDraft({ chatTarget }); }}
-            allowChannelDefault
           />
           <Select
             label={labels.trigger}
