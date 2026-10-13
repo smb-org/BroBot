@@ -26,7 +26,7 @@ export interface Timer {
   name: string;
   enabled: boolean;
   messageText: string;
-  chatTarget: Exclude<ChatOutputTarget, "where_asked">;
+  chatTarget: Exclude<ChatOutputTarget, "where_asked"> | null;
   trigger: TimerTrigger;
   revision: number;
   nextRunAt: string | null;
@@ -40,6 +40,6 @@ export interface Timer {
 export interface TimerMutationInput {
   name: string;
   messageText: string;
-  chatTarget: Exclude<ChatOutputTarget, "where_asked">;
+  chatTarget: Exclude<ChatOutputTarget, "where_asked"> | null;
   trigger: TimerTrigger;
 }

@@ -16,7 +16,8 @@ export interface TimerRow {
   message_text: string;
   trigger_type: string;
   trigger_json: string;
-  chat_target?: Timer["chatTarget"];
+  chat_target?: Exclude<Timer["chatTarget"], null>;
+  use_channel_default_target?: number;
   revision: number;
   next_run_at: string | null;
   next_run_stream_id: string | null;
@@ -35,7 +36,7 @@ export const mapTimerRow = (row: TimerRow): Timer => {
     name: row.name,
     enabled: row.enabled === 1,
     messageText: row.message_text,
-    chatTarget: row.chat_target ?? "source_only",
+    chatTarget: row.use_channel_default_target === 1 ? null : row.chat_target ?? "source_only",
     trigger: parsed.data,
     revision: row.revision,
     nextRunAt: row.next_run_at,
@@ -63,7 +64,7 @@ export const timerMutationInput = (value: unknown): TimerMutationInput | null =>
       templateTextLength(record.messageText) > TIMER_MESSAGE_MAX_LENGTH) return null;
   const parsed = timerTriggerSchema.safeParse(record.trigger);
   if (!parsed.success) return null;
-  const chatTarget = record.chatTarget === undefined ? "source_only" : record.chatTarget;
-  if (chatTarget !== "all_chats" && chatTarget !== "source_only") return null;
+  const chatTarget = record.chatTarget === undefined || record.chatTarget === null ? null : record.chatTarget;
+  if (chatTarget !== null && chatTarget !== "all_chats" && chatTarget !== "source_only") return null;
   return { name: record.name.trim(), messageText: record.messageText, chatTarget, trigger: parsed.data };
 };

@@ -501,11 +501,11 @@ describe("Text commands D1 adapter", () => {
     const audit = await database.prepare("SELECT before_json, after_json FROM audit_log").first<{ before_json: string; after_json: string }>();
     expect(JSON.parse(audit?.before_json ?? "null") as unknown).toEqual({
       name: "chat", kind: "text", enabled: true, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5,
-      aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say", chatTarget: "source_only",
+      aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say", chatTarget: null,
     });
     expect(JSON.parse(audit?.after_json ?? "null") as unknown).toEqual({
       name: "chat", kind: "text", enabled: false, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5,
-      aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say", chatTarget: "source_only",
+      aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say", chatTarget: null,
     });
   });
 
@@ -531,7 +531,7 @@ describe("Text commands D1 adapter", () => {
 
     const audit = await database.prepare("SELECT before_json, after_json FROM audit_log WHERE action = 'text_commands.command.updated'")
       .first<{ before_json: string; after_json: string }>();
-    expect(JSON.parse(audit?.before_json ?? "null") as { chatTarget?: string }).toMatchObject({ chatTarget: "source_only" });
+    expect(JSON.parse(audit?.before_json ?? "null") as { chatTarget?: string | null }).toMatchObject({ chatTarget: null });
     expect(JSON.parse(audit?.after_json ?? "null") as { chatTarget?: string }).toMatchObject({ chatTarget: "all_chats" });
   });
 

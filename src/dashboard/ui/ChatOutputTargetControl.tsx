@@ -6,9 +6,10 @@ import { chatOutputTargetTexts } from "../chat-output-target-locale";
 
 export interface ChatOutputTargetControlProps {
   label: string;
-  value: ChatOutputTarget;
-  onChange: (value: ChatOutputTarget) => void;
+  value: ChatOutputTarget | null;
+  onChange: (value: ChatOutputTarget | null) => void;
   includeWhereAsked?: boolean;
+  allowChannelDefault?: boolean;
   disabled?: boolean;
 }
 
@@ -18,12 +19,14 @@ export function ChatOutputTargetControl({
   value,
   onChange,
   includeWhereAsked = false,
+  allowChannelDefault = false,
   disabled = false,
 }: ChatOutputTargetControlProps) {
   const texts = chatOutputTargetTexts[dashboardLanguage()];
   const options = [
     { value: "all_chats", label: texts.allChats, description: texts.allChatsDescription },
     { value: "source_only", label: texts.onlyOurChat, description: texts.onlyOurChatDescription },
+    ...(allowChannelDefault ? [{ value: "channel_default", label: texts.channelDefault }] : []),
     ...(includeWhereAsked
       ? [{ value: "where_asked", label: texts.automatic, description: texts.automaticDescription }]
       : []),
@@ -32,8 +35,11 @@ export function ChatOutputTargetControl({
     <InspectorFieldRow label={label} help={texts.sharedChatInfo}>
       <Select
         ariaLabel={label}
-        value={value}
-        onChange={(next) => { if (next !== null) onChange(next as ChatOutputTarget); }}
+        value={value ?? (allowChannelDefault ? "channel_default" : "source_only")}
+        onChange={(next) => {
+          if (next === "channel_default") onChange(null);
+          else if (next !== null) onChange(next as ChatOutputTarget);
+        }}
         options={options}
         disabled={disabled}
       />

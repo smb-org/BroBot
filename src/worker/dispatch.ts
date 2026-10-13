@@ -1,5 +1,5 @@
 import type { EventCode } from "../contracts/values";
-import type { BotModule, ModuleAction, ModuleActor, ModuleChannelInfo, ModuleChatDelivery, ModuleChatStatus, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleResult, ModuleStreamState, ModuleTextBlockConditionDefinition } from "../modules/contract";
+import type { BotModule, ChatOutputTarget, ModuleAction, ModuleActor, ModuleChannelInfo, ModuleChatDelivery, ModuleChatStatus, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleResult, ModuleStreamState, ModuleTextBlockConditionDefinition } from "../modules/contract";
 import type { RealtimeMessage } from "../realtime-contract";
 import { MODULES, validateModuleTemplateVariable, variablesForModuleTemplateContext } from "../modules/registry";
 import {
@@ -23,7 +23,7 @@ import {
 } from "./db/stream-state";
 import { lookupAndRefreshStreamState } from "./stream-state-lookup";
 import { moduleEnabledForChannel, readChannelControls, readDispatchChannelState } from "./db/channel-controls";
-import { readChannelLocation } from "./db/channel-settings";
+import { readChannelDefaultChatTarget, readChannelLocation } from "./db/channel-settings";
 import { getBotIdentity, getCachedBotUserId } from "./db/bot-identity";
 import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
 import { readChannelVariables, prepareChannelVariableChange, prepareResetChannelVariablesForStream } from "./db/channel-variables";
@@ -343,6 +343,8 @@ const runActions = async (
   const diagnostics: ModuleDiagnostic[] = [];
   const pendingActions = [...actions];
   const moderationFollowUps = new WeakSet<ModuleAction>();
+  const targetFor = async (target: ChatOutputTarget | undefined): Promise<ChatOutputTarget> =>
+    target ?? await readChannelDefaultChatTarget(environment.DB, channelId);
   // Order is preserved: a reply after an announcement reads as a different
   // conversation than the reverse.
   for (let index = 0; index < pendingActions.length; index += 1) {
@@ -409,7 +411,7 @@ const runActions = async (
           claimBeforePost,
           attributions,
           undefined,
-          action.target ?? "source_only",
+          await targetFor(action.target),
           sourceBroadcasterUserId,
         );
         await reportDelivery(result.delivery);
@@ -424,7 +426,7 @@ const runActions = async (
         continue;
       }
       if (action.kind === "announcement") {
-        const target = action.target ?? "source_only";
+        const target = await targetFor(action.target);
         let outputClaimed = false;
         const claimBeforePost = action.automated === false ? undefined : async (): Promise<boolean> => {
           if (outputClaimed) return true;

@@ -307,7 +307,9 @@ im Quellchat erscheinen.
 
 **Einsatz:** `chat` und `announcement` setzen `target: "all_chats"` oder
 `"source_only"`; Antworten (`replyToMessageId`) dürfen zusätzlich
-`"where_asked"`. Ohne Angabe gilt `source_only`. In Panels bietet
+`"where_asked"`. Für neue Einträge ohne eigenes Ziel verwendet der Host das
+kanalweite Standard-Chat-Ziel; vorhandene Ziele bleiben erhalten. Ohne
+Kanalvorgabe gilt `source_only`. In Panels bietet
 `ChatOutputTargetControl` das Zielmenü (zweisprachig, mit Infoknopf); in
 `SettingsEditorSpec` gibt es dafür ein eigenes Bauteil.
 
@@ -829,9 +831,11 @@ Personen-Abkühlzeiten sind pro Kanal gespeichert und werden nach einem Tag
 entfernt.
 
 FAQ-Einträge wählen Schlüsselwörter oder einen RE2-Ausdruck, eine optionale
-Spielauswahl, beide Abkühlzeiten und eines der drei gemeinsamen Chat-Ziele.
-`source_only` bleibt der Standard. Antwortbausteine werden beim Speichern sowie über den generischen
-`validateTemplateContent`-Contract bei späteren Textbibliotheksänderungen auf
+Spielauswahl, beide Abkühlzeiten und ein eigenes gemeinsames Chat-Ziel oder das
+kanalweite Standard-Chat-Ziel. Migration `0059_channel_default_chat_target.sql`
+bewahrt vorhandene Ziele; neue Einträge ohne eigenes Ziel folgen der
+Kanaleinstellung. `source_only` bleibt deren Standard. Antwortbausteine
+werden beim Speichern sowie über den generischen `validateTemplateContent`-Contract bei späteren Textbibliotheksänderungen auf
 Befehls-Eingabevariablen geprüft. Panel-Test, Aktivierung und Reihenfolge sind
 kanalgebundene Modulrouten; Änderungen werden mit Audit-Einträgen gespeichert.
 

@@ -1,5 +1,18 @@
 import type { ModuleChannelLocation } from "../../modules/contract";
 import { validChannelTimeZone } from "../../modules/contract";
+import type { ChatOutputTarget } from "../../contracts/values";
+
+export const readChannelDefaultChatTarget = async (
+  db: D1Database,
+  channelId: string,
+): Promise<ChatOutputTarget> => {
+  const row = await db.prepare(
+    "SELECT default_chat_target FROM channels WHERE channel_id = ?",
+  ).bind(channelId).first<{ default_chat_target: string }>();
+  return row?.default_chat_target === "all_chats" || row?.default_chat_target === "where_asked"
+    ? row.default_chat_target
+    : "source_only";
+};
 
 interface ChannelLocationRow {
   location_name: string | null;

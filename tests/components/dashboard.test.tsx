@@ -2395,6 +2395,14 @@ describe("Dashboard skeleton", () => {
       if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [pausedChannel], bot: pausedChannel.bot }));
       if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (url.pathname === "/api/channels/kanal-a/settings") return Promise.resolve(jsonResponse({
+        timeZone: "UTC",
+        revision: 1,
+        location: null,
+        locationRevision: 1,
+        defaultChatTarget: "source_only",
+        defaultChatTargetRevision: 1,
+      }));
       if (url.pathname === "/api/channels/kanal-a/controls/pause" && init?.method === "POST") {
         return Promise.resolve(jsonResponse({ controls: resumedControls }));
       }
@@ -2775,6 +2783,53 @@ describe("Dashboard skeleton", () => {
     await act(async () => { await laterStaleRead; });
     expect(rendered.queryClient.getQueryData<typeof oldSettings>(settingsKey)).toMatchObject({ timeZone: "Europe/Vienna", revision: 2 });
     expect(timeZoneField).toHaveValue("Europe/Vienna");
+  });
+
+  it("saves the channel default chat target only after an explicit save", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    let targetPatchCount = 0;
+    let savedTargetBody: Record<string, unknown> | null = null;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse(overview(channel)));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (url.pathname === "/api/channels/kanal-a/settings" && init?.method === "PATCH") {
+        if (typeof init.body !== "string") throw new Error("Channel settings mutation body must be JSON.");
+        targetPatchCount += 1;
+        savedTargetBody = JSON.parse(init.body) as Record<string, unknown>;
+        return Promise.resolve(jsonResponse({
+          ok: true,
+          defaultChatTarget: "all_chats",
+          defaultChatTargetRevision: 2,
+        }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/settings") return Promise.resolve(jsonResponse({
+        timeZone: "Europe/Berlin",
+        revision: 1,
+        location: null,
+        locationRevision: 1,
+        defaultChatTarget: "source_only",
+        defaultChatTargetRevision: 1,
+      }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+    const targetField = await screen.findByRole("combobox", { name: "Standard-Chat-Ziel" });
+    await waitFor(() => expect(targetField).toHaveValue("Nur unser Chat"));
+    fireEvent.click(targetField);
+    await waitFor(() => expect(document.querySelector('[data-combobox-option="true"][value="all_chats"]')).not.toBeNull());
+    fireEvent.click(document.querySelector('[data-combobox-option="true"][value="all_chats"]') as Element);
+
+    expect(targetPatchCount).toBe(0);
+    expect(targetField).toHaveValue("Alle Chats");
+    fireEvent.click(screen.getByRole("button", { name: "Standard-Chat-Ziel speichern" }));
+
+    await waitFor(() => expect(targetPatchCount).toBe(1));
+    expect(savedTargetBody).toEqual({ defaultChatTarget: "all_chats", defaultChatTargetRevision: 1 });
   });
 
   it("resets ad settings when a warm module route changes channel", async () => {

@@ -56,7 +56,7 @@ export const processFaqMessage = async (
     actions: [{
       kind: "chat",
       text: rendered.text,
-      target: match.entry.chatTarget,
+      ...(match.entry.chatTarget === null ? {} : { target: match.entry.chatTarget }),
       automated: true,
       onDelivery: async (delivery) => {
         if (delivery === "rejected" || delivery === "not_attempted") {

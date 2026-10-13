@@ -245,7 +245,7 @@ panelRouter.route("/", channelLocationRouter);
 panelRouter.get("/api/channels/:channelId/settings", requireChannelAuthorization(), async (context) => {
   const row = await context.env.DB.prepare(
     `SELECT time_zone, time_zone_revision, location_name, location_latitude, location_longitude,
-            location_time_zone, location_revision
+            location_time_zone, location_revision, default_chat_target, default_chat_target_revision
        FROM channels WHERE channel_id = ?`,
   ).bind(context.req.param("channelId")).first<{
     time_zone: string;
@@ -255,6 +255,8 @@ panelRouter.get("/api/channels/:channelId/settings", requireChannelAuthorization
     location_longitude: number | null;
     location_time_zone: string | null;
     location_revision: number;
+    default_chat_target: "all_chats" | "source_only" | "where_asked";
+    default_chat_target_revision: number;
   }>();
   if (row === null) return context.json({ error: "channel_not_found" }, 404);
   const location = row.location_name !== null && row.location_latitude !== null && row.location_longitude !== null && row.location_time_zone !== null
@@ -265,6 +267,8 @@ panelRouter.get("/api/channels/:channelId/settings", requireChannelAuthorization
     revision: row.time_zone_revision,
     location,
     locationRevision: row.location_revision,
+    defaultChatTarget: row.default_chat_target,
+    defaultChatTargetRevision: row.default_chat_target_revision,
   });
 });
 
@@ -273,6 +277,31 @@ panelRouter.patch("/api/channels/:channelId/settings", requireChannelAuthorizati
   const body: unknown = await context.req.json().catch(() => null);
   if (body === null || typeof body !== "object" || Array.isArray(body)) {
     return context.json({ error: "channel_settings_invalid" }, 400);
+  }
+  if (Reflect.has(body, "defaultChatTarget") || Reflect.has(body, "defaultChatTargetRevision")) {
+    const defaultChatTarget: unknown = Reflect.get(body, "defaultChatTarget");
+    const defaultChatTargetRevision: unknown = Reflect.get(body, "defaultChatTargetRevision");
+    if ((defaultChatTarget !== "all_chats" && defaultChatTarget !== "source_only" && defaultChatTarget !== "where_asked") ||
+        !Number.isSafeInteger(defaultChatTargetRevision) || (defaultChatTargetRevision as number) < 1) {
+      return context.json({ error: "channel_default_chat_target_invalid" }, 400);
+    }
+    const channelId = context.req.param("channelId");
+    const previous = await context.env.DB.prepare(
+      "SELECT default_chat_target FROM channels WHERE channel_id = ? AND default_chat_target_revision = ?",
+    ).bind(channelId, defaultChatTargetRevision).first<{ default_chat_target: string }>();
+    if (previous === null) return context.json({ error: "channel_settings_conflict" }, 409);
+    const changedAt = nowIso();
+    const nextRevision = (defaultChatTargetRevision as number) + 1;
+    const mutation = context.env.DB.prepare(
+      `UPDATE channels SET default_chat_target = ?, default_chat_target_revision = ?, updated_at = ?
+        WHERE channel_id = ? AND default_chat_target_revision = ? ${actorGuard(MANAGING_ROLES)}`,
+    ).bind(defaultChatTarget, nextRevision, changedAt, channelId, defaultChatTargetRevision,
+      ...bindActorGuard(context.get("actor"), channelId, changedAt));
+    const audit = prepareAudit(context.env.DB, context.get("actor").userId, changedAt, channelId, null,
+      "channel.default_chat_target.updated", { defaultChatTarget: previous.default_chat_target }, { defaultChatTarget });
+    const result = await context.env.DB.batch([mutation, audit]);
+    if ((result[0]?.meta.changes ?? 0) === 0) return context.json({ error: "channel_settings_conflict" }, 409);
+    return context.json({ ok: true, defaultChatTarget, defaultChatTargetRevision: nextRevision });
   }
   const timeZone: unknown = Reflect.get(body, "timeZone");
   const revision: unknown = Reflect.get(body, "revision");

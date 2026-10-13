@@ -30,6 +30,7 @@ import {
   refreshModeratorStatus,
   setChannelControl,
   saveChannelTimeZone,
+  saveChannelDefaultChatTarget,
   setChannelModuleEnabled,
   type PanelChannelSettings,
 } from "./api";
@@ -43,13 +44,13 @@ import { MembersPage } from "./members";
 import { PlatformPage } from "./platform";
 import { channelPanelTexts, roleLabel } from "./labels";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatTimestamp as formatTimestampBase, formatNumber, maintenanceReasonText } from "./locale";
-import { CHANNEL_CONTROL_DURATIONS, canManage, type ChannelControlDuration, type ChannelRole } from "../contracts/values";
+import { CHANNEL_CONTROL_DURATIONS, canManage, type ChannelControlDuration, type ChannelRole, type ChatOutputTarget } from "../contracts/values";
 import { MODULES } from "../modules/registry";
 import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, dashboardRouteRequiresBot, replaceDashboardRoute, useDashboardRoute, type DashboardRoute } from "./router";
 import { dashboardNavEntries, enabledModuleNavigationGroups, moduleCategoryHeading, navPageGroupHeading, visibleModuleNavigationIds } from "./nav-pages";
 import { truncateTo200Chars } from "../text";
-import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, LoadStateLines, notify, Select as UiSelect, Shell, Sidebar, StatusLed, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type StatusLedState } from "./ui";
+import { BlockingState, Button, ChannelLocationMenu, ChatOutputTargetControl, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, LoadStateLines, notify, Select as UiSelect, Shell, Sidebar, StatusLed, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type StatusLedState } from "./ui";
 import { readPalette, writePalette } from "./ui/palette";
 import { EventsPage } from "./events/EventsPage";
 import { emptyEventFilter, eventFilterIsActive } from "./events/model";
@@ -220,6 +221,10 @@ const mergeChannelSettings = (
   revision: Math.max(current?.revision ?? -1, incoming.revision),
   location: current !== undefined && current.locationRevision > incoming.locationRevision ? current.location : incoming.location,
   locationRevision: Math.max(current?.locationRevision ?? -1, incoming.locationRevision),
+  defaultChatTarget: current !== undefined && current.defaultChatTargetRevision > incoming.defaultChatTargetRevision
+    ? current.defaultChatTarget
+    : incoming.defaultChatTarget,
+  defaultChatTargetRevision: Math.max(current?.defaultChatTargetRevision ?? -1, incoming.defaultChatTargetRevision),
 });
 
 const formatTimestamp = (value: string): string => formatTimestampBase(value);
@@ -1019,6 +1024,17 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
     : timeZoneDraftState?.channelId === overview.channelId && timeZoneDraftState.revision === channelSettings.revision
       ? timeZoneDraftState.value
       : channelSettings.timeZone;
+  const [defaultChatTargetDraftState, setDefaultChatTargetDraftState] = useState<{
+    channelId: string;
+    revision: number;
+    value: ChatOutputTarget;
+  } | null>(null);
+  const savedDefaultChatTarget = channelSettings?.defaultChatTarget ?? "source_only";
+  const defaultChatTargetRevision = channelSettings?.defaultChatTargetRevision ?? 1;
+  const defaultChatTargetDraft = defaultChatTargetDraftState?.channelId === overview.channelId &&
+      defaultChatTargetDraftState.revision === defaultChatTargetRevision
+    ? defaultChatTargetDraftState.value
+    : savedDefaultChatTarget;
   const [settingsBusy, setSettingsBusy] = useState(false);
   const commitSettingsUpdate = async (update: Partial<PanelChannelSettings>): Promise<void> => {
     await queryClient.cancelQueries({ queryKey: settingsQueryKey, exact: true });
@@ -1033,6 +1049,14 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
     if (channelSettings === null) return;
     setTimeZoneDraftState({ channelId: overview.channelId, revision: channelSettings.revision, value });
   };
+  const changeDefaultChatTargetDraft = (value: ChatOutputTarget | null): void => {
+    if (channelSettings === null || value === null) return;
+    setDefaultChatTargetDraftState({
+      channelId: overview.channelId,
+      revision: defaultChatTargetRevision,
+      value,
+    });
+  };
   const saveTimeZone = async (): Promise<void> => {
     if (channelSettings === null || timeZoneDraft.trim().length === 0 || !canManage(overview.role)) {
       notify({ tone: "error", message: settingsTexts.invalid });
@@ -1045,6 +1069,30 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
       setTimeZoneDraftState({ channelId: overview.channelId, revision: saved.revision, value: saved.timeZone });
     } catch {
       notify({ tone: "error", message: settingsTexts.saveError });
+    } finally {
+      setSettingsBusy(false);
+    }
+  };
+  const saveDefaultChatTarget = async (): Promise<void> => {
+    if (channelSettings === null || !canManage(overview.role)) return;
+    setSettingsBusy(true);
+    try {
+      const saved = await saveChannelDefaultChatTarget(
+        overview.channelId,
+        defaultChatTargetRevision,
+        defaultChatTargetDraft,
+      );
+      await commitSettingsUpdate({
+        defaultChatTarget: saved.defaultChatTarget,
+        defaultChatTargetRevision: saved.defaultChatTargetRevision,
+      });
+      setDefaultChatTargetDraftState({
+        channelId: overview.channelId,
+        revision: saved.defaultChatTargetRevision,
+        value: saved.defaultChatTarget,
+      });
+    } catch {
+      notify({ tone: "error", message: settingsTexts.defaultChatTargetSaveError });
     } finally {
       setSettingsBusy(false);
     }
@@ -1120,6 +1168,21 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
         />
       </section>
       <ImmediateActions channelId={overview.channelId} streamState={overview.streamState} canManage={canManage(overview.role)} modules={modules} modulesLoaded={modulesLoaded} />
+      <section className="content-section channel-overview-settings" aria-label={settingsTexts.defaultChatTarget}>
+        <div className="form-actions">
+          <ChatOutputTargetControl
+            label={settingsTexts.defaultChatTarget}
+            value={defaultChatTargetDraft}
+            onChange={changeDefaultChatTargetDraft}
+            includeWhereAsked
+            disabled={settingsBusy || channelSettings === null || !canManage(overview.role)}
+          />
+          {canManage(overview.role)
+            ? <Button disabled={settingsBusy || channelSettings === null || defaultChatTargetDraft === savedDefaultChatTarget} onClick={() => { void saveDefaultChatTarget(); }}>{settingsTexts.defaultChatTargetSave}</Button>
+            : <p className="muted">{settingsTexts.readOnly}</p>}
+        </div>
+        <p className="muted">{settingsTexts.defaultChatTargetHint}</p>
+      </section>
       <WarningsAndErrorsFeed channelId={overview.channelId} onNavigate={onNavigate} />
       <ChannelStateChecks entries={entries}>
         <BotPermissionsInspector permissions={overview.botPermissions} />

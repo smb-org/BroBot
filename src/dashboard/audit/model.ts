@@ -254,6 +254,9 @@ const sentencePartValue = (action: string, before: Record<string, unknown> | nul
   if (action === "text_library.settings.updated" || action === "channel.time_zone.updated") {
     return { from: recordText(before, "timeZone"), to: recordText(after, "timeZone") };
   }
+  if (action === "channel.default_chat_target.updated") {
+    return { from: recordText(before, "defaultChatTarget"), to: recordText(after, "defaultChatTarget") };
+  }
   if (action === "channel.location.updated") {
     return { from: recordText(before, "locationName"), to: recordText(after, "locationName") };
   }

@@ -23,15 +23,15 @@ const insertTimer = async (input: {
   messageText?: string;
   trigger: unknown;
   triggerType: "interval" | "stream_start" | "time_of_day" | "before_event";
-  chatTarget?: "all_chats" | "source_only";
+  chatTarget?: "all_chats" | "source_only" | null;
   nextRunAt?: number | null;
   activityCount?: number | null;
 }): Promise<void> => {
   await database.prepare(
     `INSERT INTO timers
-      (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, revision,
+      (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, use_channel_default_target, revision,
        next_run_at, last_run_at, last_chat_activity_count, created_at, updated_at)
-     VALUES (?, ?, ?, 1, ?, ?, ?, ?, 1, ?, NULL, ?, ?, ?)`,
+     VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, 1, ?, NULL, ?, ?, ?)`,
   ).bind(
     input.id ?? timerId,
     channelId,
@@ -40,6 +40,7 @@ const insertTimer = async (input: {
     input.triggerType,
     JSON.stringify(input.trigger),
     input.chatTarget ?? "source_only",
+    input.chatTarget === null ? 1 : 0,
     input.nextRunAt === undefined || input.nextRunAt === null ? null : new Date(input.nextRunAt).toISOString(),
     input.activityCount ?? 10,
     "2026-01-01T00:00:00.000Z",
@@ -144,6 +145,29 @@ describe("timer alarm execution", () => {
     await handleTimerAlarm(context, `timer:${timerId}`, firstDueAt);
 
     expect(targets).toEqual(["all_chats"]);
+  });
+
+  it("passes no target for a timer that inherits the channel default", async () => {
+    await insertChannel();
+    await insertTimer({
+      triggerType: "interval",
+      trigger: { type: "interval", minutes: 10 },
+      chatTarget: null,
+      nextRunAt: firstDueAt,
+    });
+    const targets: Array<string | undefined> = [];
+    const context = contextFor(() => 13, [], [], {
+      sendChat: (_text, _key, _attributions, _stillValid, target) => {
+        targets.push(target);
+        return Promise.resolve({ sent: true, reason: null, retryable: false });
+      },
+    });
+    vi.useFakeTimers();
+    vi.setSystemTime(firstDueAt);
+
+    await handleTimerAlarm(context, `timer:${timerId}`, firstDueAt);
+
+    expect(targets).toEqual([undefined]);
   });
 
   it("uses the renamed template when a scheduled alarm carries the previous revision", async () => {
