@@ -1254,6 +1254,29 @@ export class ChannelObject extends DurableObject<Env> {
     return row?.timer_is_current === 1;
   }
 
+  /** Final send fence: D1 may have recorded a stream transition the DO has not applied yet. */
+  private async timerOccurrenceMatchesCommittedStream(occurrence: TimerOccurrence): Promise<boolean> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return false;
+    const { identity } = occurrence;
+    const live = identity.triggerType === "interval" ? identity.state === "live" : identity.triggerType === "stream_start";
+    const offlineInterval = identity.triggerType === "interval" && identity.state === "offline";
+    const liveOnlyDaily = this.timerConfigAlsoOfflineIsFalseDaily(identity);
+    if (!live && !offlineInterval && !liveOnlyDaily) return true;
+    const stored = await readChannelStreamState(this.env.DB, channelId);
+    if (stored === null) return false;
+    if (offlineInterval) return stored.state === "offline";
+    if (stored.state !== "online") return false;
+    return !(live && identity.triggerType !== "time_of_day") || stored.streamId === null ||
+      identity.streamId === null || stored.streamId === identity.streamId;
+  }
+
+  private timerConfigAlsoOfflineIsFalseDaily(identity: TimerOccurrence["identity"]): boolean {
+    if (identity.triggerType !== "time_of_day") return false;
+    const config = this.timerScheduleStateSync().timers[identity.timerId]?.config;
+    return config?.trigger.type === "time_of_day" && !config.trigger.alsoOffline;
+  }
+
   private timerStreamMatchesOccurrence(stream: DurableTimerStream, occurrence: TimerOccurrence): boolean {
     const { identity } = occurrence;
     if (identity.triggerType === "interval") {
@@ -1397,7 +1420,8 @@ export class ChannelObject extends DurableObject<Env> {
               trigger.type === "time_of_day" && !trigger.alsoOffline && this.timerScheduleStateSync().stream.state !== "online") {
             return false;
           }
-          const databaseCurrent = await this.timerConfigIsEnabledAtRevision(timerId, claimed.config.revision);
+          const databaseCurrent = await this.timerConfigIsEnabledAtRevision(timerId, claimed.config.revision) &&
+            await this.timerOccurrenceMatchesCommittedStream(claimed.occurrence);
           return databaseCurrent && this.timerClaimIsCurrentSync(timerId, claimed.token, claimed.occurrence) &&
             Date.now() <= graceEndsAt &&
             (trigger.type !== "time_of_day" || trigger.alsoOffline || this.timerScheduleStateSync().stream.state === "online");

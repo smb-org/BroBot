@@ -36,6 +36,7 @@ const channelObjectFor = (stream: DurableTimerState["stream"]): {
     nextRunStreamId?: string | null,
   ) => void;
   setTimeZone: (timeZone: string) => void;
+  setCommittedStream: (stream: DurableTimerState["stream"]) => void;
   pauseNextTimeZoneRead: () => { started: Promise<void>; release: () => void };
   pauseTimerConfigRead: () => { started: Promise<void>; release: () => void };
   pauseDispatchStateRead: (skipReads?: number) => { started: Promise<void>; release: () => void };
@@ -49,6 +50,7 @@ const channelObjectFor = (stream: DurableTimerState["stream"]): {
   let nextAdAt: string | null = null;
   let mirrorWriteFailures = 0;
   let timeZone = "Europe/Berlin";
+  let committedStream: DurableTimerState["stream"] | null = null;
   let timerConfigReadGate: { wait: Promise<void>; markStarted: () => void } | null = null;
   let timeZoneReadGate: { wait: Promise<void>; markStarted: () => void } | null = null;
   let dispatchStateReadGate: { wait: Promise<void>; markStarted: () => void; skipReads: number } | null = null;
@@ -206,7 +208,7 @@ const channelObjectFor = (stream: DurableTimerState["stream"]): {
     },
     first: () => {
       if (/FROM channel_stream_state/iu.test(query)) {
-        const stream = stateOf(values).stream;
+        const stream = committedStream ?? stateOf(values).stream;
         return Promise.resolve({
           state: stream.state,
           stream_id: stream.streamId,
@@ -265,6 +267,7 @@ const channelObjectFor = (stream: DurableTimerState["stream"]): {
       legacyActivityBaselines.set(timerId, { count, streamId, nextRunStreamId });
     },
     setTimeZone: (nextTimeZone) => { timeZone = nextTimeZone; },
+    setCommittedStream: (stream) => { committedStream = stream; },
     pauseNextTimeZoneRead: () => {
       let releaseRead!: () => void;
       let markStarted!: () => void;
@@ -801,6 +804,44 @@ describe("timer scheduling interleavings through the channel Durable Object", ()
       nextRunState: "live",
       sequence: stateOf(values).timers[config.id]?.mirrorSequence,
     });
+  });
+
+  it.each([
+    ["live interval", { type: "interval", live: { minutes: 10 } } satisfies DurableTimerConfig["trigger"], onlineStream("stream-1", 1, 0),
+      { state: "offline", streamId: null, startedAt: null, generation: 2 } as const],
+    ["stream_start", { type: "stream_start", minutes: 1 } satisfies DurableTimerConfig["trigger"], onlineStream("stream-1", 1, 0),
+      onlineStream("stream-2", 2, 1)],
+    ["live-only daily", { type: "time_of_day", time: "14:00", weekdays: [], alsoOffline: false } satisfies DurableTimerConfig["trigger"],
+      onlineStream("stream-1", 1, 0), { state: "offline", streamId: null, startedAt: null, generation: 2 } as const],
+  ])("refuses a %s send when D1 already committed a different stream state", async (_name, trigger, stream, committed) => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-10-12T11:59:00.000Z");
+    vi.setSystemTime(now);
+    const { object, values, setCommittedStream, setDatabaseConfig } = channelObjectFor({ ...stream, startedAt: new Date(now).toISOString() });
+    const config = timerConfig("fenced", trigger);
+    setDatabaseConfig(config);
+    await object.upsertTimerConfig(config);
+    const occurrence = dueOccurrence(values, config.id);
+    vi.setSystemTime(occurrence.identity.deadline);
+    const posts: string[] = [];
+    let reached = false;
+    await object.runTimerOccurrence(
+      timerAlarmContext(async (_text, key, _attributions, stillValid) => {
+        setCommittedStream(committed);
+        reached = true;
+        const valid = await (stillValid?.() ?? Promise.resolve(true));
+        if (valid) posts.push(key);
+        return { sent: valid, reason: valid ? null : "stale_before_send", retryable: false };
+      }),
+      `timer:${config.id}`,
+      occurrence.identity.deadline,
+      config.revision,
+      occurrence.identity,
+      occurrence.sequence,
+    );
+    expect(reached).toBe(true);
+    expect(posts).toEqual([]);
+    expect(dueOccurrence(values, config.id).identity.deadline).toBe(occurrence.identity.deadline);
   });
 
   it("does not lose time_of_day or before_event plans when stream state changes", async () => {
