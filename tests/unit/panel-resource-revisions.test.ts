@@ -1586,6 +1586,7 @@ describe("panel resource revisions", () => {
         "api_source_quota",
         "auth_sessions",
         "bot_channel_status_check_locks",
+        "channel_game_history",
         "channel_variable_stream_resets",
         "currency_rate_cache",
         "eventsub_maintenance_locks",
@@ -1600,6 +1601,7 @@ describe("panel resource revisions", () => {
         "pending_realtime_user_revocations",
         "text_command_user_cooldowns",
         "twitch_app_access_token",
+        "twitch_game_search_cache",
       ]);
       const tables = database.sqlite.prepare(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",

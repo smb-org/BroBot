@@ -56,8 +56,9 @@ interface GameSearchState {
   results: GamePickerGame[];
 }
 
-export function GamePicker({ searchGames, value, onChange, messages, disabled = false, visuallyHiddenLabel = false, compact = false }: {
+export function GamePicker({ searchGames, lookupGames, value, onChange, messages, disabled = false, visuallyHiddenLabel = false, compact = false }: {
   searchGames: (query: string) => Promise<readonly GamePickerGame[]>;
+  lookupGames?: (ids: readonly string[]) => Promise<readonly GamePickerGame[]>;
   value: readonly GamePickerGame[];
   onChange: (games: GamePickerGame[]) => void;
   messages: GamePickerMessages;
@@ -71,26 +72,60 @@ export function GamePicker({ searchGames, value, onChange, messages, disabled = 
   const [searchState, setSearchState] = useState<GameSearchState | null>(null);
   const [resultsOpen, setResultsOpen] = useState(false);
 
+  const onChangeRef = useRef(onChange);
+  const lookedUpIds = useRef(new Set<string>());
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  useEffect(() => {
+    if (lookupGames === undefined) return;
+    const ids = value.flatMap((game) => game.boxArtUrlTemplate === undefined && !lookedUpIds.current.has(game.id)
+      ? [game.id]
+      : []);
+    if (ids.length === 0) return;
+    ids.forEach((gameId) => lookedUpIds.current.add(gameId));
+    let active = true;
+    lookupGames(ids)
+      .then((games) => {
+        if (!active) return;
+        const artworkById = new Map(games.flatMap((game) => game.boxArtUrlTemplate === undefined
+          ? []
+          : [[game.id, game.boxArtUrlTemplate] as const]));
+        const enriched = value.map((game) => {
+          const boxArtUrlTemplate = artworkById.get(game.id);
+          if (game.boxArtUrlTemplate !== undefined || boxArtUrlTemplate === undefined) return game;
+          return { ...game, boxArtUrlTemplate };
+        });
+        if (enriched.some((game, index) => game !== value[index])) onChangeRef.current(enriched);
+      })
+      .catch(() => {
+        ids.forEach((gameId) => lookedUpIds.current.delete(gameId));
+      });
+    return () => { active = false; };
+  }, [value, lookupGames]);
+
   useEffect(() => {
     const search = query.trim();
-    if (search.length < 2) return;
+    if (!resultsOpen || (search.length > 0 && search.length < 2)) return;
     let active = true;
     const timer = window.setTimeout(() => {
       setSearchState({ query: search, status: "loading", results: [] });
       searchGames(search)
         .then((games) => { if (active) setSearchState({ query: search, status: "ready", results: [...games] }); })
         .catch(() => { if (active) setSearchState({ query: search, status: "error", results: [] }); });
-    }, 250);
+    }, search.length === 0 ? 0 : 250);
     return () => {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [query, searchGames]);
+  }, [query, resultsOpen, searchGames]);
 
   const search = query.trim();
-  const showResults = search.length >= 2 && resultsOpen;
+  const showResults = resultsOpen && (search.length === 0 || search.length >= 2);
   const currentSearch = searchState?.query === search ? searchState : null;
-  const searchStatus = search.length < 2 ? "empty" : currentSearch?.status === "error" ? "error"
+  const searchStatus = search.length === 1 ? "empty" : currentSearch?.status === "error" ? "error"
     : currentSearch?.status === "ready" ? currentSearch.results.length === 0 ? "empty" : "success"
       : "loading";
 
@@ -114,7 +149,10 @@ export function GamePicker({ searchGames, value, onChange, messages, disabled = 
   }, []);
 
   const closeOnEscape = (event: KeyboardEvent<HTMLElement>): void => {
-    if (event.key === "Escape") setResultsOpen(false);
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setResultsOpen(false);
+    }
   };
   const add = (game: GamePickerGame): void => {
     if (value.some((entry) => entry.id === game.id)) return;

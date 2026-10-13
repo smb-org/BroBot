@@ -54,6 +54,11 @@ export const searchTextGames = async (channelId: string, query: string): Promise
   return (await json<{ games: TwitchGame[] }>(response)).games;
 };
 
+export const lookupTextGames = async (channelId: string, ids: readonly string[]): Promise<readonly TwitchGame[]> => {
+  const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/games?ids=${encodeURIComponent(ids.join(","))}`);
+  return (await json<{ games: TwitchGame[] }>(response)).games;
+};
+
 const mutation = async <Result,>(
   channelId: string,
   method: "POST" | "PATCH" | "DELETE",

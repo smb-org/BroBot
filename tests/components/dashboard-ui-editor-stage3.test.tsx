@@ -96,6 +96,54 @@ describe("editor field seam", () => {
     expect(selectedImage).toHaveAttribute("height", "27");
   });
 
+  it("loads empty-query suggestions and hydrates older selected games with box art", async () => {
+    const storedGame: GamePickerGame = { id: "42", name: "Zelda: Ocarina of Time" };
+    const gameWithArt: GamePickerGame = {
+      ...storedGame,
+      boxArtUrlTemplate: "https://static-cdn.jtvnw.net/ttv-boxart/42-{width}x{height}.jpg",
+    };
+    const messages: GamePickerMessages = {
+      label: "Games", hint: "Filter by game.", search: "Search games", searchHint: "Search for a game.",
+      loading: "Searching…", empty: "No games found.", error: "Search failed.", remove: (name) => `Remove ${name}`,
+    };
+    const searchGames = vi.fn().mockResolvedValue([gameWithArt]);
+    const lookupGames = vi.fn().mockResolvedValue([gameWithArt]);
+    function Harness() {
+      const [value, setValue] = useState<GamePickerGame[]>([storedGame]);
+      return <GamePicker searchGames={searchGames} lookupGames={lookupGames} value={value} onChange={setValue} messages={messages} />;
+    }
+
+    renderUi(<Harness />);
+    await waitFor(() => expect(lookupGames).toHaveBeenCalledWith(["42"]));
+    await waitFor(() => expect(document.querySelector(".ui-game-picker__chip img")).toHaveAttribute(
+      "src",
+      "https://static-cdn.jtvnw.net/ttv-boxart/42-20x27.jpg",
+    ));
+
+    fireEvent.focus(screen.getByRole("searchbox", { name: "Games" }));
+    expect(await screen.findByRole("option", { name: /Zelda: Ocarina of Time/u })).toBeInTheDocument();
+    expect(searchGames).toHaveBeenCalledWith("");
+  });
+
+  it("keeps the same cover footprint for suggestions and selected games without box art", async () => {
+    const messages: GamePickerMessages = {
+      label: "Games", hint: "Filter by game.", search: "Search games", searchHint: "Search for a game.",
+      loading: "Searching…", empty: "No games found.", error: "Search failed.", remove: (name) => `Remove ${name}`,
+    };
+    const game: GamePickerGame = { id: "99", name: "Unlisted Game" };
+    const searchGames = vi.fn().mockResolvedValue([game]);
+    renderUi(<GamePicker searchGames={searchGames} value={[game]} onChange={() => {}} messages={messages} />);
+
+    fireEvent.focus(screen.getByRole("searchbox", { name: "Games" }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Games" }), { target: { value: "Unlisted" } });
+    const option = await screen.findByRole("option", { name: /Unlisted Game/u });
+    const selectedPlaceholder = document.querySelector<HTMLElement>(".ui-game-picker__chip .ui-game-picker__cover-placeholder");
+    const suggestionPlaceholder = option.querySelector<HTMLElement>(".ui-game-picker__cover-placeholder");
+
+    expect(selectedPlaceholder).toHaveStyle({ width: "20px", height: "27px" });
+    expect(suggestionPlaceholder).toHaveStyle({ width: "28px", height: "38px" });
+  });
+
   it("closes game results on Escape from the input or an option and when focus leaves the picker", async () => {
     const messages: GamePickerMessages = {
       label: "Games", hint: "h", search: "s", searchHint: "sh", loading: "l", empty: "e", error: "x",

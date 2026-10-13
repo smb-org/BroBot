@@ -35,6 +35,7 @@ import { chatOutputSuppressionReason } from "./chat-output-gate";
 import { createModuleExternalFetchBudget } from "./external-fetch-budget";
 import { moduleBallots } from "./module-ballots";
 import { createModuleSecretReadAccess } from "./module-secrets";
+import { recordChannelGameHistory } from "./db/game-search-cache";
 
 export interface DispatchEnvironment {
   DB: D1Database;
@@ -617,12 +618,23 @@ export const dispatchEventSubNotification = async (
   // `channel.update` already carries the new category, so the shared game-id
   // cache (FAQ and text-command game filters) can be corrected immediately
   // instead of serving the old game until its TTL expires.
-  if (event.subscriptionType === "channel.update" && environment.CHANNEL !== undefined) {
-    try {
-      const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
-      await object.updateCachedChannelGameId(textValue(event.payload.category_id), Date.now());
-    } catch (error: unknown) {
-      console.warn("Channel game cache could not be updated.", error);
+  if (event.subscriptionType === "channel.update") {
+    if (environment.CHANNEL !== undefined) {
+      try {
+        const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
+        await object.updateCachedChannelGameId(textValue(event.payload.category_id), Date.now());
+      } catch (error: unknown) {
+        console.warn("Channel game cache could not be updated.", error);
+      }
+    }
+    const gameId = textValue(event.payload.category_id);
+    const gameName = textValue(event.payload.category_name);
+    if (gameId !== null && gameName !== null) {
+      try {
+        await recordChannelGameHistory(environment.DB, event.channelId, gameId, gameName, event.receivedAt);
+      } catch (error: unknown) {
+        console.warn("Channel game history could not be recorded.", error);
+      }
     }
   }
   // The ending stream remains current while its offline event is dispatched.

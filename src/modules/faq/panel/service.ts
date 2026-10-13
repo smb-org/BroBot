@@ -63,6 +63,11 @@ export const searchFaqGames = async (channelId: string, query: string): Promise<
   return (await readJson<{ games: FaqGame[] }>(response)).games;
 };
 
+export const lookupFaqGames = async (channelId: string, ids: readonly string[]): Promise<readonly FaqGame[]> => {
+  const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/games?ids=${encodeURIComponent(ids.join(","))}`);
+  return (await readJson<{ games: FaqGame[] }>(response)).games;
+};
+
 const mutate = async <Value,>(channelId: string, path: string, method: "POST" | "PATCH" | "DELETE", body?: unknown): Promise<Value> => {
   const token = await csrf();
   const response = await fetch(`${basePath(channelId)}${path}`, {

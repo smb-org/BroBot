@@ -56,6 +56,11 @@ export const searchTextLibraryGames = async (channelId: string, query: string): 
   return (await readJson<{ games: TwitchGame[] }>(response)).games;
 };
 
+export const lookupTextLibraryGames = async (channelId: string, ids: readonly string[]): Promise<readonly TwitchGame[]> => {
+  const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/games?ids=${encodeURIComponent(ids.join(","))}`);
+  return (await readJson<{ games: TwitchGame[] }>(response)).games;
+};
+
 let previewCsrfToken: Promise<string> | null = null;
 
 const readPreviewCsrfToken = (): Promise<string> => {
