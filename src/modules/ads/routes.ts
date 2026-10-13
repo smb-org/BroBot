@@ -17,7 +17,7 @@ const nowIso = (): string => new Date().toISOString();
 
 const statusFor = (reason: string | null): 403 | 429 | 502 | 503 => {
   if (reason === "scope_missing" || reason === "unauthorized" || reason === "management_unauthorized") return 403;
-  if (reason === "rate_limited") return 429;
+  if (reason === "rate_limited" || reason === "snoozes_exhausted") return 429;
   if (reason === "network_error" || reason === "app_token_unavailable") return 503;
   return 502;
 };
@@ -78,15 +78,53 @@ const commercialOutcome = (result: CommercialResult): AdDetail => ({
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const previousCommercialCooldownUntil = async (
+  db: D1Database,
+  channelId: string,
+  now: string,
+): Promise<number | null> => {
+  const row = await db.prepare(
+    `SELECT created_at, after_json
+       FROM audit_log
+      WHERE channel_id = ?
+        AND module_id = 'ads'
+        AND action = 'ads.commercial_started'
+      ORDER BY created_at DESC
+      LIMIT 1`,
+  ).bind(channelId).first<{ created_at: string; after_json: string }>();
+  if (row === null) return null;
+
+  const startedAt = Date.parse(row.created_at);
+  if (!Number.isFinite(startedAt)) return null;
+  let after: unknown;
+  try {
+    after = JSON.parse(row.after_json) as unknown;
+  } catch {
+    return null;
+  }
+  const retryAfter = isRecord(after) ? after.retryAfter : null;
+  if (typeof retryAfter !== "number" || !Number.isFinite(retryAfter) || retryAfter <= 0) return null;
+
+  const until = startedAt + retryAfter * 1000;
+  return until > Date.parse(now) ? until : null;
+};
+
 const isCommercialLength = (value: unknown): value is CommercialLength =>
   typeof value === "number" && (COMMERCIAL_LENGTHS as readonly number[]).includes(value);
 
-const commercialStatusFor = (reason: CommercialResult["reason"]): 400 | 403 | 429 | 502 | 503 => {
+const commercialStatusFor = (reason: CommercialResult["reason"] | "commercial_cooldown"): 400 | 401 | 403 | 429 | 502 | 503 => {
   if (reason === "stream_offline") return 400;
+  if (reason === "commercial_cooldown") return 400;
   if (reason === "scope_missing") return 403;
+  if (reason === "token_invalid") return 401;
   if (reason === "rate_limited") return 429;
   if (reason === "network_error" || reason === "app_token_unavailable") return 503;
   return 502;
+};
+
+const isCommercialCooldownMessage = (detail: CommercialResult["detail"]): boolean => {
+  const message = detail.twitchMessage;
+  return typeof message === "string" && /(?:commercial|ad break).{0,100}cooldown|cooldown.{0,100}(?:commercial|ad break)/i.test(message);
 };
 
 export const adsRoutes = new Hono<ModuleRouteEnvironment>();
@@ -218,16 +256,35 @@ adsRoutes.post("/commercial", async (context) => {
       length: null,
       message: null,
       retryAfter: null,
+      rateLimitRemaining: null,
     };
 
   if (!result.started) {
     if (result.reason === "unauthorized") return context.json({ error: "commercial_start_denied" }, 403);
     await log(context, channelId, triggerId, "ads.commercial.failed", commercialOutcome(result));
+    const cooldownMessage = isCommercialCooldownMessage(result.detail);
+    const cooldownStatus = result.detail.status === 400 || result.detail.status === 429;
+    const canHaveCommercialCooldown = cooldownStatus && (cooldownMessage ||
+      (result.detail.status === 429 && result.rateLimitRemaining !== null && result.rateLimitRemaining > 0));
+    const previousCooldownUntil = canHaveCommercialCooldown
+      ? await previousCommercialCooldownUntil(context.env.DB, channelId, now)
+      : null;
+    const commercialCooldown = cooldownMessage && cooldownStatus || result.detail.status === 429 &&
+      result.rateLimitRemaining !== null && result.rateLimitRemaining > 0 && previousCooldownUntil !== null;
+    const cooldownUntil = commercialCooldown ? previousCooldownUntil : null;
+    const reason = commercialCooldown ? "commercial_cooldown" : result.reason;
+    const detail: Record<string, string | number | boolean | null> = { ...apiErrorDetail(result.detail) };
+    if (commercialCooldown) delete detail.retryAfter;
     return context.json({
-      error: result.reason === "stream_offline" ? "commercial_stream_offline" : "commercial_start_failed",
-      reason: result.reason,
-      detail: apiErrorDetail(result.detail),
-    }, commercialStatusFor(result.reason));
+      error: reason === "stream_offline" ? "commercial_stream_offline" : "commercial_start_failed",
+      reason,
+      detail: {
+        ...detail,
+        ...(cooldownUntil === null ? {} : { commercialCooldownUntil: cooldownUntil }),
+      },
+    }, reason === "commercial_cooldown" && result.detail.status === 429
+      ? 429
+      : commercialStatusFor(reason));
   }
 
   await context.get("writeModuleAudit")({
@@ -236,7 +293,7 @@ adsRoutes.post("/commercial", async (context) => {
     action: "ads.commercial_started",
     before: null,
     after: { length: result.length ?? length, retryAfter: result.retryAfter },
-  }, now);
+  }, nowIso());
 
   return context.json({ length: result.length, message: result.message, retryAfter: result.retryAfter });
 });

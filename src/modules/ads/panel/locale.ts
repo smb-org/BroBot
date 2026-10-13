@@ -11,6 +11,7 @@ export interface AdsPanelTexts {
   snoozeSection: string;
   snoozeButton: (count: string, refresh: string) => string;
   snoozeScopeMissing: string;
+  rateLimited: (seconds: number) => string;
   snoozeReadOnly: string;
   snoozeNone: string;
   snoozeUnknown: string;
@@ -32,6 +33,11 @@ export interface AdsPanelTexts {
   immediateStarted: (length: string) => string;
   immediateOffline: string;
   immediateFailed: string;
+  immediateScopeMissing: string;
+  immediateScopeMissingShort: string;
+  immediateTokenInvalid: string;
+  immediateTokenInvalidShort: string;
+  immediateCooldownWait: (seconds: number) => string;
   immediateReadOnly: string;
 }
 
@@ -45,7 +51,8 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     duration: "Dauer",
     snoozeSection: "Werbung verschieben",
     snoozeButton: (count, refresh) => `Snooze · ${count} verfügbar · Aufladung ${refresh}`,
-    snoozeScopeMissing: "Snooze ist deaktiviert: channel:manage:ads fehlt.",
+    snoozeScopeMissing: "Snooze braucht die Berechtigung channel:manage:ads. Autorisiere Ads für diesen Kanal erneut und erteile diese Berechtigung.",
+    rateLimited: (seconds) => `Twitch begrenzt die Anfragen gerade. Versuche es in ${String(seconds)} Sekunden erneut.`,
     snoozeReadOnly: "Nur Broadcaster und Verwalter dürfen Werbepausen verschieben.",
     snoozeNone: "Snooze ist deaktiviert: keine Verschiebung mehr verfügbar.",
     snoozeUnknown: "Snooze ist deaktiviert: der Twitch-Zähler ist nicht verfügbar.",
@@ -67,6 +74,11 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     immediateStarted: (length) => `Werbung gestartet (${length}s)`,
     immediateOffline: "Der Stream ist offline.",
     immediateFailed: "Die Werbeeinblendung konnte nicht gestartet werden.",
+    immediateScopeMissing: "Zum Starten einer Werbepause braucht Ads die Berechtigung channel:edit:commercial. Autorisiere Ads für diesen Kanal erneut und erteile diese Berechtigung.",
+    immediateScopeMissingShort: "Ads-Berechtigung fehlt.",
+    immediateTokenInvalid: "Twitch hat das Ads-App-Token auch nach der automatischen Erneuerung abgelehnt. Lass die Twitch-App-Verbindung prüfen.",
+    immediateTokenInvalidShort: "Ads-Verbindung prüfen.",
+    immediateCooldownWait: (seconds) => `Die Werbe-Abklingzeit läuft noch. Versuche es in ${String(seconds)} Sekunden erneut.`,
     immediateReadOnly: "Nur Broadcaster und Verwalter dürfen Werbung starten.",
   },
   en: {
@@ -78,7 +90,8 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     duration: "Duration",
     snoozeSection: "Postpone an ad break",
     snoozeButton: (count, refresh) => `Snooze · ${count} available · refresh ${refresh}`,
-    snoozeScopeMissing: "Snooze is disabled: channel:manage:ads is missing.",
+    snoozeScopeMissing: "Snooze needs the channel:manage:ads permission. Reauthorize Ads for this channel and grant this permission.",
+    rateLimited: (seconds) => `Twitch is rate limiting requests. Try again in ${String(seconds)} seconds.`,
     snoozeReadOnly: "Only broadcasters and managers may snooze ad breaks.",
     snoozeNone: "Snooze is disabled: no postponements remain.",
     snoozeUnknown: "Snooze is disabled: Twitch did not provide a counter.",
@@ -100,6 +113,11 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     immediateStarted: (length) => `Ad started (${length}s)`,
     immediateOffline: "The stream is offline.",
     immediateFailed: "The commercial could not be started.",
+    immediateScopeMissing: "Starting an ad break requires Ads to have the channel:edit:commercial permission. Reauthorize Ads for this channel and grant this permission.",
+    immediateScopeMissingShort: "Ads permission is missing.",
+    immediateTokenInvalid: "Twitch rejected the Ads app token even after automatic renewal. Have the Twitch app connection checked.",
+    immediateTokenInvalidShort: "Check the Ads connection.",
+    immediateCooldownWait: (seconds) => `The commercial cooldown is active. Try again in ${String(seconds)} seconds.`,
     immediateReadOnly: "Only broadcasters and managers may start ads.",
   },
 };

@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type { EventSubSubscriptionType } from "../../contracts/values";
 import type { BotModule } from "../contract";
+import { channelEventsModuleCatalog } from "./catalog";
 import { processChannelEvent } from "./service";
 
 const settingsSchema = z.object({});
@@ -23,6 +24,10 @@ export const channelEventsModule: BotModule<typeof settingsSchema> = {
   navigationCategory: "twitch",
   panelIcon: { paths: ["M5 12h3l2-5 4 10 2-5h3", "M5 19h14"] },
   mandatory: true,
+  mandatoryReason: {
+    de: channelEventsModuleCatalog.de.mandatoryReason,
+    en: channelEventsModuleCatalog.en.mandatoryReason,
+  },
   settingsSchema,
   defaultSettings: {},
   eventSubTypes,

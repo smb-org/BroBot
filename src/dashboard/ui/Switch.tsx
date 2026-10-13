@@ -15,19 +15,23 @@ export interface SwitchProps {
   layout?: "stacked" | "inline" | "card";
   hint?: string;
   description?: string;
+  error?: string;
+  reserveError?: boolean;
   children?: ReactNode;
 }
 
-export function Switch({ id: suppliedId, label, ariaLabel, checked, onChange, disabled, pending, lockedReason, layout = "stacked", hint, description, children }: SwitchProps) {
+export function Switch({ id: suppliedId, label, ariaLabel, checked, onChange, disabled, pending, lockedReason, layout = "stacked", hint, description, error, reserveError = false, children }: SwitchProps) {
   const generatedId = useId();
   const id = suppliedId ?? generatedId;
   const hasChildren = children !== undefined && children !== null;
   const reasonId = lockedReason === undefined ? undefined : `switch-reason-${id}`;
   const hintId = hint === undefined ? undefined : `switch-hint-${id}`;
   const descriptionId = description === undefined ? undefined : `switch-description-${id}`;
+  const errorId = `switch-error-${id}`;
   const labelId = label === undefined ? undefined : `switch-label-${id}`;
   const isDisabled = disabled === true || pending === true || (layout !== "card" && lockedReason !== undefined);
-  const describedBy = [hintId, descriptionId, layout === "card" && checked ? undefined : reasonId].filter((part): part is string => part !== undefined).join(" ") || undefined;
+  const hasError = error !== undefined && error.length > 0;
+  const describedBy = [hintId, descriptionId, layout === "card" && checked ? undefined : reasonId, hasError ? errorId : undefined].filter((part): part is string => part !== undefined).join(" ") || undefined;
   const visual = <SwitchPrimitive
     id={id}
     className="switch__track"
@@ -37,12 +41,14 @@ export function Switch({ id: suppliedId, label, ariaLabel, checked, onChange, di
     aria-label={label === undefined ? ariaLabel : undefined}
     aria-labelledby={labelId}
     aria-describedby={describedBy}
+    aria-invalid={hasError ? true : undefined}
     aria-busy={pending}
     aria-disabled={isDisabled ? true : undefined}
     onClick={(event) => { event.stopPropagation(); }}
   />;
   const hintLine = hint === undefined ? null : <span id={hintId} className="ui-switch__hint">{hint}</span>;
   const reasonLine = lockedReason === undefined ? null : <span id={reasonId} className="switch-locked-reason" role="note">{lockedReason}</span>;
+  const errorLine = reserveError || error !== undefined ? <span id={errorId} className="ui-field__error" aria-live="polite">{!hasError ? <span aria-hidden="true">&nbsp;</span> : <><span aria-hidden="true">× </span>{error}</>}</span> : null;
 
   if (layout === "inline") {
     return <div data-ui="" className="ui-switch-field" aria-busy={pending}>
@@ -50,7 +56,7 @@ export function Switch({ id: suppliedId, label, ariaLabel, checked, onChange, di
         {visual}
         {label === undefined ? null : <label className="ui-switch-field__label" id={labelId} htmlFor={id}>{label}</label>}
       </div>
-      {hintLine}{reasonLine}
+      {hintLine}{reasonLine}{errorLine}
     </div>;
   }
 
@@ -75,13 +81,13 @@ export function Switch({ id: suppliedId, label, ariaLabel, checked, onChange, di
         </div>}
         {hintLine}
       </div>
-      {!hasChildren || !checked ? reasonLine : null}
+      {!hasChildren || !checked ? reasonLine : null}{errorLine}
     </>;
   }
 
   return <div data-ui="" className="ui-switch" aria-busy={pending}>
     {label === undefined ? null : <span className="ui-switch__label" id={labelId}>{label}</span>}
     <span className="ui-switch__control">{visual}</span>
-    {hintLine}{reasonLine}
+    {hintLine}{reasonLine}{errorLine}
   </div>;
 }

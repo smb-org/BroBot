@@ -83,6 +83,7 @@ vi.mock("../../src/modules/registry", () => ({
       id: "channel-page-fixture",
       navigationCategory: "chat",
       mandatory: true,
+      mandatoryReason: { de: "Diese Kanalansicht ist erforderlich.", en: "This channel view is required." },
       settingsSchema: {},
       defaultSettings: {},
       navigationEntries: [{
@@ -118,7 +119,7 @@ vi.mock("../../src/modules/registry", () => ({
       settingsEditorPlacement: "before-panel",
       settingsEditorRelatedParts: ["panel"],
     },
-    { id: "channel_events", mandatory: true, settingsSchema: {}, defaultSettings: {} },
+    { id: "channel_events", mandatory: true, mandatoryReason: { de: "Ereignisdaten sind immer verfügbar.", en: "Event data is always available." }, settingsSchema: {}, defaultSettings: {} },
   ],
 }));
 
@@ -295,10 +296,11 @@ describe("Module panel loader", () => {
     renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} onChanged={vi.fn(() => Promise.resolve())} />);
 
     expect(screen.queryByRole("switch", { name: "Kanalereignisse" })).not.toBeInTheDocument();
-    const status = screen.getByText("Läuft · immer aktiv");
-    expect(status.closest(".module-locked-status")).toHaveAttribute("title", "Kanalereignisse sind immer aktiv.");
-    expect(status.closest(".module-locked-status")).toHaveAttribute("aria-description", "Kanalereignisse sind immer aktiv.");
-    expect(status.closest(".module-locked-status")).toHaveAttribute("aria-label", "Läuft · immer aktiv: Kanalereignisse sind immer aktiv.");
+    const row = screen.getByText("Kanalereignisse").closest(".list-row");
+    const status = within(row as HTMLElement).getByText("Läuft · immer aktiv");
+    expect(status.closest(".module-locked-status")).toHaveAttribute("title", "Ereignisdaten sind immer verfügbar.");
+    expect(status.closest(".module-locked-status")).toHaveAttribute("aria-description", "Ereignisdaten sind immer verfügbar.");
+    expect(status.closest(".module-locked-status")).toHaveAttribute("aria-label", "Läuft · immer aktiv: Ereignisdaten sind immer verfügbar.");
   });
 
   it("shows the mandatory module detail as always active without a switch", () => {
@@ -314,10 +316,10 @@ describe("Module panel loader", () => {
 
     expect(screen.queryByRole("switch", { name: "Kanalereignisse: Läuft" })).not.toBeInTheDocument();
     const status = screen.getByText("Läuft · immer aktiv");
-    expect(status.closest(".module-locked-status")).toHaveAttribute("title", "Kanalereignisse sind immer aktiv.");
-    expect(status.closest(".module-locked-status")).toHaveAttribute("aria-description", "Kanalereignisse sind immer aktiv.");
-    expect(status.closest(".module-locked-status")).toHaveAttribute("aria-label", "Läuft · immer aktiv: Kanalereignisse sind immer aktiv.");
-    expect(screen.getByText("Kanalereignisse sind immer aktiv.")).toBeVisible();
+    expect(status.closest(".module-locked-status")).toHaveAttribute("title", "Ereignisdaten sind immer verfügbar.");
+    expect(status.closest(".module-locked-status")).toHaveAttribute("aria-description", "Ereignisdaten sind immer verfügbar.");
+    expect(status.closest(".module-locked-status")).toHaveAttribute("aria-label", "Läuft · immer aktiv: Ereignisdaten sind immer verfügbar.");
+    expect(screen.getByText("Ereignisdaten sind immer verfügbar.")).toBeVisible();
     expect(screen.queryByText("Module werden geladen …")).not.toBeInTheDocument();
   });
 
@@ -449,6 +451,53 @@ describe("Module panel loader", () => {
     expect(screen.getByText("Mindestens ein Stück.")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Fixture speichern" }));
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
+  });
+
+  it("shows the server reason beside a settings field and keeps its error row reserved", async () => {
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      if (path.endsWith("/modules/editor-fixture/settings") && init?.method === "PATCH") {
+        return Promise.resolve(Response.json({ error: "module_settings_invalid", path: "settings.handle", reason: "Choose a supported account name." }, { status: 400 }));
+      }
+      return Promise.resolve(path.endsWith("/modules/editor-fixture/settings")
+        ? Response.json({ settings: editorFixtureSettings, revision: 1, variables: [] })
+        : Response.json({}));
+    });
+    renderSettingsFixture(fetcher);
+
+    const handle = await screen.findByRole("textbox", { name: "Konto" });
+    fireEvent.change(handle, { target: { value: "changed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Fixture speichern" }));
+
+    expect(await screen.findByText("Choose a supported account name.")).toBeVisible();
+    expect(handle).toHaveAttribute("aria-invalid", "true");
+    expect(handle.closest(".ui-field")?.querySelector(".ui-field__error")).toBeInTheDocument();
+  });
+
+  it("localizes a known server field reason and keeps the raw reason as a fallback only", async () => {
+    const rawReason = "This text cannot be sent by the chat bot.";
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      if (path.endsWith("/modules/editor-fixture/settings") && init?.method === "PATCH") {
+        return Promise.resolve(Response.json({
+          error: "module_settings_invalid",
+          path: "settings.message",
+          reasonCode: "template_text_invalid",
+          reason: rawReason,
+        }, { status: 400 }));
+      }
+      return Promise.resolve(path.endsWith("/modules/editor-fixture/settings")
+        ? Response.json({ settings: editorFixtureSettings, revision: 1, variables: [] })
+        : Response.json({}));
+    });
+    renderSettingsFixture(fetcher);
+
+    const message = await screen.findByRole("textbox", { name: "Nachricht" });
+    fireEvent.change(message, { target: { value: "Changed {viewer}" } });
+    fireEvent.click(screen.getByRole("button", { name: "Fixture speichern" }));
+
+    expect(await screen.findByText("Der Chattext kann nicht gesendet werden.")).toBeVisible();
+    expect(screen.queryByText(rawReason)).not.toBeInTheDocument();
   });
 
   it("focuses an enabled switch when a disabled child still blocks saving", async () => {

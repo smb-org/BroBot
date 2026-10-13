@@ -6,7 +6,7 @@ import { adsTemplateVariableCatalog } from "./template-variable-catalog";
 import { templateTextLength } from "../../../contracts/template-text-length";
 
 /** Consent for control actions during a live stream; does not block the subscription. */
-export const ADS_OPTIONAL_BROADCASTER_SCOPES = ["channel:manage:ads"] as const;
+export const ADS_OPTIONAL_BROADCASTER_SCOPES = ["channel:manage:ads", "channel:edit:commercial"] as const;
 
 export const adsSettingsSchema = z.object({
   automatic: z.string().trim().min(1).refine((text) => templateTextLength(text) <= 500),

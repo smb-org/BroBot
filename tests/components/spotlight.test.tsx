@@ -248,7 +248,7 @@ describe("Channel Spotlight", () => {
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "kanalereignisse" } });
 
     expect(await screen.findByText("Kanalereignisse")).toBeInTheDocument();
-    expect(screen.getByText(/Kanalereignisse sind immer aktiv\./)).toBeInTheDocument();
+    expect(screen.getByText(/Kanalereignisse werden für den Betrieb der Module benötigt\./)).toBeInTheDocument();
   });
 
   it("closes on Escape", async () => {

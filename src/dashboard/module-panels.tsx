@@ -8,14 +8,14 @@ import { canManage, type ChannelRole } from "../contracts/values";
 import type { PanelActiveModule, PanelModuleState, PanelTemplateWarning } from "../panel-contract";
 import { PanelApiError, getChannelModuleSettings, saveChannelModuleSettings, setChannelModuleEnabled } from "./api";
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "./data";
-import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber, type DashboardLanguage } from "./locale";
+import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber, serverFieldErrorText, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
 import { templateTextLength } from "../template";
 import { ChatCommands } from "./chat-commands";
 import { modulePermissionsAreMissing } from "./channel-health";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { effectivePanelTemplateVariables, panelTemplateOptions, type PanelChannelVariable } from "./ui/template-variable-options";
-import { ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, StatusLed, Switch, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
+import { ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, StatusLed, Switch, mapServerFieldErrors, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
 import { worstCaseTemplateLength } from "../template";
 import type { TemplateVariable } from "../template";
 
@@ -222,6 +222,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       module={module}
       channelId={channelId}
       canManageContent={canManageContent}
+      language={language}
       definition={loaded.definition}
       copy={copy}
       retryLabel={dashboardCommonTexts(language).retry}
@@ -241,10 +242,11 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
   </LoadState>;
 };
 
-const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, definition, copy, retryLabel, channelVariables, initial, initialRevision, onReload }: {
+const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, language, definition, copy, retryLabel, channelVariables, initial, initialRevision, onReload }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
+  language: DashboardLanguage;
   definition: SettingsEditorDefinition<Record<string, unknown>>;
   copy: SettingsEditorDefinition<Record<string, unknown>>["locales"]["de"];
   retryLabel: string;
@@ -262,6 +264,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
   const [saved, setSaved] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const [serverFieldErrors, setServerFieldErrors] = useState<Readonly<Record<string, string>>>({});
   const [conflict, setConflict] = useState(false);
   const [touchedFields, setTouchedFields] = useState<ReadonlySet<string>>(() => new Set());
   const [validationAttempted, setValidationAttempted] = useState(false);
@@ -308,6 +311,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
         setValue({ ...currentValue, [key]: next });
         setTouchedFields((current) => new Set(current).add(key));
         setDirty(true); setSaved(false); setConflict(false); setError(undefined);
+        setServerFieldErrors((current) => Object.fromEntries(Object.entries(current).filter(([field]) => field !== key)));
       }}
       texts={copy}
       variables={templateVariableOptions}
@@ -354,7 +358,11 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
     collect(spec.sections.flatMap((section) => section.fields));
     return errors;
   };
-  const fieldErrors = collectErrors(validationAttempted);
+  const fieldPathMap = Object.fromEntries(Object.keys(copy.fields).flatMap((field) => [
+    [field, field],
+    [`settings.${field}`, field],
+  ]));
+  const fieldErrors = { ...collectErrors(validationAttempted), ...serverFieldErrors };
   const invalid = Object.keys(fieldErrors).length > 0;
   const warnings = [
     ...serverWarnings.map(copy.warningLabel),
@@ -414,7 +422,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
       return copy.invalidMessage;
     }
     if (pending || conflict || !canManageContent) return copy.saveError;
-    setPending(true); setError(undefined); setSaved(false);
+    setPending(true); setError(undefined); setSaved(false); setServerFieldErrors({});
     try {
       const response = await runModuleQueryWrite(
         queryClient,
@@ -446,13 +454,14 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
         return copy.conflictMessage;
       }
       const message = caught instanceof PanelApiError ? apiErrorText(caught.code, copy.saveError) : copy.saveError;
+      setServerFieldErrors(mapServerFieldErrors(caught, fieldPathMap, (reasonCode) => serverFieldErrorText(reasonCode, language)));
       setError(message);
       return message;
     } finally { setPending(false); }
   };
   const discard = (): void => {
     setValue(currentBaseline.settings); setBaseline(currentBaseline); setTouchedFields(new Set()); setValidationAttempted(false);
-    setDirty(false); setSaved(false); setConflict(false); setError(undefined); setServerWarnings([]); setLocalIssues({});
+    setDirty(false); setSaved(false); setConflict(false); setError(undefined); setServerWarnings([]); setLocalIssues({}); setServerFieldErrors({});
   };
   const navigationGuard = useDraftGuard(dirty, save, discard);
   useEffect(() => registerDashboardNavigationGuard(navigationGuard.guardSwitch), [navigationGuard.guardSwitch]);
@@ -633,12 +642,14 @@ const ModuleWorkspaceRow = ({
   const labels = workspaceTexts();
   const texts = dashboardTexts();
   const details = moduleDetails(moduleId);
-  const mandatory = moduleId === "channel_events";
+  const definition = MODULES.find((module) => module.id === moduleId);
+  const mandatory = definition?.mandatory === true;
+  const mandatoryReason = definition?.mandatoryReason?.[dashboardLanguage()] ?? labels.mandatoryReason;
   const permissionsMissing = modulePermissionsAreMissing({ missingBroadcasterScopes: missingScopes });
   const effectiveEnabled = (rawEnabled || mandatory) && !permissionsMissing;
   const state = permissionsMissing ? labels.disabled : statusWord(effectiveEnabled);
   const route: DashboardRoute = { kind: "module", channelId, moduleId };
-  const lockedReason = mandatory ? labels.mandatoryReason : manageable ? undefined : texts.module.managementLocked;
+  const lockedReason = mandatory ? mandatoryReason : manageable ? undefined : texts.module.managementLocked;
 
   return (
     <ListRow
@@ -648,7 +659,7 @@ const ModuleWorkspaceRow = ({
       title={details.name}
       description={details.description}
       status={mandatory
-        ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={labels.mandatoryReason} />
+        ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} />
         : <StatusLed state={permissionsMissing ? "warn" : effectiveEnabled ? "ok" : "off"} label={state} />}
       action={mandatory ? null : <Switch
         checked={rawEnabled}
@@ -713,7 +724,7 @@ const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onChanged }
       <div className="state-list">
         {MODULES.map((module) => {
           const state = modules.find((candidate) => candidate.id === module.id);
-          const mandatory = state?.mandatory === true || module.id === "channel_events";
+          const mandatory = state?.mandatory === true || module.mandatory === true;
           const rawEnabled = mandatory || (pendingEnabled[module.id] ?? state?.enabled === true);
           return (
             <ModuleWorkspaceRow
@@ -791,10 +802,11 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   const navigationPage = registered?.navigationEntries?.find((entry) => entry.showMainSwitch === false);
   const moduleState = modules.find((candidate) => candidate.id === moduleId);
   const activeModule = activeModules.find((candidate) => candidate.moduleId === moduleId);
-  const mandatory = moduleState?.mandatory === true || moduleId === "channel_events";
+  const mandatory = moduleState?.mandatory === true || registered?.mandatory === true;
+  const mandatoryReason = registered?.mandatoryReason?.[dashboardLanguage()] ?? labels.mandatoryReason;
   const enabled = mandatory || moduleState?.enabled === true;
   const manageable = canManageModules(ownRole);
-  const disabledReason = mandatory ? labels.mandatoryReason : manageable ? null : texts.module.managementLocked;
+  const disabledReason = mandatory ? mandatoryReason : manageable ? null : texts.module.managementLocked;
   const switchDisabled = mandatory || registered === undefined || moduleState === undefined;
   const missingScopes = moduleState?.missingBroadcasterScopes ?? [];
   const permissionsMissing = modulePermissionsAreMissing(moduleState);
@@ -833,7 +845,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
           <div>
             <strong>{labels.mainSwitch}</strong>
             {mandatory
-              ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={labels.mandatoryReason} />
+              ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} />
               : <StatusLed state={effectiveEnabled ? "ok" : "off"} label={statusWord(effectiveEnabled)} />}
           </div>
           {mandatory ? null : <ModuleSwitch moduleId={moduleId} enabled={effectiveEnabled} disabled={!manageable || switchDisabled} busy={busy} onToggle={onToggle} />}

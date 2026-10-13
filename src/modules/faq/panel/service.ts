@@ -103,9 +103,3 @@ export const testFaqMessage = async (channelId: string, message: string, gameId?
   mutate<FaqTestResult>(channelId, "/test", "POST", { message, ...(gameId === undefined ? {} : { gameId }) });
 
 export const faqErrorCode = (error: unknown): string | null => error instanceof PanelApiError ? error.code : null;
-
-export const faqMatcherErrorReason = (error: unknown): string | null => {
-  if (!(error instanceof PanelApiError) || typeof error.details !== "object" || error.details === null || Array.isArray(error.details)) return null;
-  const details = error.details as Record<string, unknown>;
-  return details.path === "matcher.pattern" && typeof details.reason === "string" ? details.reason : null;
-};

@@ -482,6 +482,8 @@ form.content-section { display: grid; gap: var(--s4); }
   }
   .chat-voting-template-inspector .ui-save-bar__status { grid-column: 1; grid-row: 1; }
   .chat-voting-template-inspector .ui-save-bar__message { flex: 1 1 auto; }
+  .chat-voting-template-inspector .chat-voting-editor__footer:has(.ui-save-bar--error) { height: auto; }
+  .chat-voting-template-inspector .chat-voting-editor__footer .ui-save-bar--error { height: auto; grid-template-rows: auto 44px; }
   .chat-voting-template-inspector .ui-save-bar__actions { grid-column: 1; grid-row: 2; width: 100%; justify-content: flex-end; }
 }
 .chat-voting-editor__start-reason { display: block; box-sizing: border-box; min-width: 0; min-height: 16px; max-height: 16px; margin: 0; overflow: hidden; color: var(--text-3); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
@@ -1201,6 +1203,9 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-select__error { color: var(--error-text); }
 .chips-input__warning { color: var(--warn); }
 .ui-field__error > span, .unit-input__error > span, .ui-select__error > span { flex: none; }
+.ui-field__error:has(> .ui-truncated-text), .ui-select__error:has(> .ui-truncated-text) { height: auto; overflow: visible; }
+.ui-field__error > .ui-truncated-text, .ui-select__error > .ui-truncated-text { flex: 1 1 auto; overflow: visible; }
+.ui-field__error > .ui-truncated-text::before, .ui-select__error > .ui-truncated-text::before { overflow: visible; line-height: 18px; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
 .ui-field__prefix { display: inline-flex; box-sizing: border-box; width: 100%; align-items: center; justify-content: center; height: 100%; padding: 0; color: var(--text-3); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 14px; }
 .unit-input { width: min(14rem, 100%); }
 .unit-input__control { position: relative; min-width: 0; }
@@ -1220,6 +1225,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .segment-choice-field { display: grid; gap: 6px; min-width: 0; }
 .segment-choice-field__label { color: var(--text-2); font-size: 13px; font-weight: 500; }
 .segment-choice-field__hint { color: var(--text-3); font-size: 12px; line-height: 1.4; }
+.segment-choice-field__error { display: flex; min-width: 0; min-height: 18px; height: 18px; overflow: hidden; color: var(--error-text); font-size: 12px; line-height: 18px; white-space: nowrap; }
 .segment-choice { display: flex; min-height: 32px; gap: 2px; padding: 2px; border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--surface-well); }
 .segment-choice-field--compact .segment-choice { min-height: 32px; }
 .segment-choice__option { display: grid; flex: 1 1 0; min-width: 0; min-height: 26px; align-content: center; padding: 0 8px; border: 1px solid transparent; border-radius: var(--r-control); color: var(--text-2); background: transparent; font: inherit; font-size: 13px; cursor: pointer; }
@@ -1231,6 +1237,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .segment-choice__description { color: var(--text-3); font-size: 11px; font-weight: 400; }
 
 .ui-choice-cards .mantine-InputWrapper-description { margin-top: 4px; color: var(--text-3); font-size: 12px; }
+.ui-choice-cards__field { width: 100%; min-width: 0; }
 .ui-choice-cards__options { margin-top: 8px; }
 .ui-choice-cards__option { min-height: 52px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: var(--r-control); background: transparent; }
 .ui-choice-cards__option:hover { border-color: var(--line-light); }
@@ -1265,6 +1272,11 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-template-text-field .mantine-InputWrapper-description { position: relative; z-index: 3; box-sizing: border-box; min-height: 18px; overflow: visible; }
 .ui-template-text-field .mantine-InputWrapper-error { position: absolute; z-index: 2; right: 0; bottom: 0; left: 0; box-sizing: border-box; min-height: 18px; max-height: 18px; overflow: visible; margin: 0; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
 .ui-template-text-field .mantine-InputWrapper-error > span { display: flex; align-items: center; gap: 2px; min-width: 0; max-width: 100%; overflow: hidden; white-space: nowrap; }
+.ui-template-text-field.mantine-InputWrapper-root:has(> .mantine-InputWrapper-error) { padding-bottom: 0; }
+.ui-template-text-field > .mantine-InputWrapper-error { position: static; max-height: none; white-space: normal; }
+.ui-template-text-field > .mantine-InputWrapper-error > span { align-items: flex-start; overflow: visible; white-space: normal; }
+.ui-template-text-field > .mantine-InputWrapper-error .ui-truncated-text { flex: 1 1 auto; overflow: visible; }
+.ui-template-text-field > .mantine-InputWrapper-error .ui-truncated-text::before { overflow: visible; line-height: 18px; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
 
 .ui-switch__control { position: relative; display: grid; place-items: center; width: 44px; height: 44px; }
 .ui-switch { display: grid; justify-items: end; gap: 4px; min-width: 44px; }
@@ -1465,8 +1477,13 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 
 @media (max-width: 419px) {
   .ui-save-bar--persistent { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
-  .ui-save-bar__status { grid-column: 1; }
-  .ui-save-bar__actions { grid-row: 1; grid-column: 2; justify-content: flex-end; }
+  :where(.ui-save-bar--persistent) .ui-save-bar__status { grid-column: 1; }
+  :where(.ui-save-bar--persistent) .ui-save-bar__actions { grid-row: 1; grid-column: 2; justify-content: flex-end; }
+  .ui-save-bar--error.ui-save-bar--persistent { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; gap: 4px; height: 88px; min-height: 88px; padding: 8px 0 calc(8px + env(safe-area-inset-bottom)); }
+  .ui-save-bar--error.ui-save-bar--persistent .ui-save-bar__status { grid-row: 1; grid-column: 1; align-items: flex-start; }
+  .ui-save-bar--error .ui-save-bar__message { overflow: visible; white-space: normal; }
+  .ui-save-bar--error .ui-save-bar__message-copy::before { overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
+  .ui-save-bar--error.ui-save-bar--persistent .ui-save-bar__actions { grid-row: 2; grid-column: 1; justify-content: flex-end; }
 }
 
 @media (pointer: coarse) {

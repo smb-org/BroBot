@@ -329,7 +329,7 @@ test("FAQ pattern error renders in its reserved slot without moving the Answer f
   await routeJson(page, "/api/channels/channel-a/modules/faq/entries", { entries: [entry] });
   await page.route("**/api/channels/channel-a/modules/faq/entries/faq-regex*", async (route) => {
     if (route.request().method() === "GET") return route.fallback();
-    await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "faq_matcher_invalid", path: "matcher.pattern", reason: "missing closing ): `(foo`" }) });
+    await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "faq_matcher_invalid", path: "matcher.pattern", reasonCode: "faq_regex_invalid", reason: "missing closing ): `(foo`" }) });
   });
   await gotoPanel(page, "faq");
   await page.getByRole("button", { name: /edit/i }).first().click();
@@ -340,7 +340,7 @@ test("FAQ pattern error renders in its reserved slot without moving the Answer f
   const gap = async (): Promise<number> => (await box(answer)).y - (await box(pattern)).y;
   const before = await gap();
   await dialog.getByRole("button", { name: "Save" }).click();
-  await expect(dialog.getByText("Invalid RE2 pattern")).toBeVisible();
+  await expect(dialog.getByText("The RE2 pattern is invalid or uses unsupported syntax.")).toBeVisible();
   // Sub-pixel settling is tolerated; the pre-fix shift was ~40px.
   expect(Math.abs(await gap() - before)).toBeLessThan(2);
 });
@@ -693,6 +693,51 @@ test("a server shortcut conflict stays on its field and preserves the rest of th
   await expect(shortcutField.locator(".ui-field__error")).toContainText("This shortcut is already in use.");
   await expect(question).toHaveValue("Keep this question");
   await expect(page.getByRole("textbox", { name: "Answer 1" })).toHaveValue("First");
+});
+
+test("a wrapped save error stays above the voting Save row at 320px and field errors wrap in full", async ({ page }) => {
+  const timestamp = "2030-01-01T12:00:00.000Z";
+  const template: ChatVoteTemplate = {
+    id: "template-narrow-error", channelId: "channel-a", shortcut: "first", title: "Original",
+    labels: ["First", "Second"], freeTextMode: null, durationSeconds: 60, revision: 1,
+    legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
+  };
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/current", {
+    vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 60,
+  });
+  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates: [template], count: 1, maximum: 100 });
+  await page.route("**/api/channels/channel-a/modules/chat_voting/templates/template-narrow-error", async (route) => {
+    if (route.request().method() === "PATCH") {
+      await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "chat_vote_template_shortcut_conflict" }) });
+      return;
+    }
+    await route.fallback();
+  });
+
+  await page.setViewportSize({ width: 320, height: 700 });
+  await gotoPanel(page, "chat_voting", "en");
+  await page.locator(".chat-voting-template-list .list-row").first().click();
+  await page.getByRole("textbox", { name: "Shortcut" }).fill("taken");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+
+  const bar = page.locator(".chat-voting-template-inspector .ui-save-bar--error");
+  await expect(bar).toBeVisible();
+  // Larger text forces the error to wrap, as a longer translation or user font scaling would.
+  await page.addStyleTag({ content: ".ui-save-bar__message-copy::before { font-size: 20px; }" });
+  await expect.poll(async () => (await box(bar.locator(".ui-save-bar__message"))).height).toBeGreaterThan(40);
+  const messageBottom = await bar.locator(".ui-save-bar__message").evaluate((element) => element.getBoundingClientRect().bottom);
+  const buttonsTop = await bar.locator(".ui-save-bar__actions").evaluate((element) => element.getBoundingClientRect().top);
+  expect(messageBottom).toBeLessThanOrEqual(buttonsTop);
+
+  const shortcutField = page.locator(".chat-voting-template-inspector .ui-field").filter({ has: page.getByRole("textbox", { name: "Shortcut" }) });
+  const fieldError = shortcutField.locator(".ui-field__error > .ui-truncated-text");
+  await expect(fieldError).toBeVisible();
+  const fits = await fieldError.evaluate((element) => {
+    const style = getComputedStyle(element, "::before");
+    return { whiteSpace: style.whiteSpace, textOverflow: style.textOverflow, fits: element.scrollWidth <= element.clientWidth };
+  });
+  expect(fits).toEqual({ whiteSpace: "normal", textOverflow: "clip", fits: true });
 });
 
 test("new saved votes remain local until Save", async ({ page }) => {

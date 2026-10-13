@@ -245,6 +245,7 @@ describe("FAQ routes", () => {
     expect(invalidBody).toMatchObject({
       error: "faq_matcher_invalid",
       path: "matcher.pattern",
+      reasonCode: "faq_regex_invalid",
     });
     if (typeof invalidBody !== "object" || invalidBody === null || Array.isArray(invalidBody)) {
       throw new Error("The invalid matcher response must be an object.");

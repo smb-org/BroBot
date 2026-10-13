@@ -11,13 +11,17 @@ export interface SegmentChoiceProps<T extends string = string> {
   size?: "form" | "compact";
   disabled?: boolean;
   warning?: string;
+  error?: string;
+  reserveError?: boolean;
 }
 
-export function SegmentChoice<T extends string>({ label, hint, value, onChange, options, size = "form", disabled = false, warning }: SegmentChoiceProps<T>) {
+export function SegmentChoice<T extends string>({ label, hint, value, onChange, options, size = "form", disabled = false, warning, error, reserveError = false }: SegmentChoiceProps<T>) {
   const id = useId();
   const hintId = `${id}-hint`;
   const warningId = `${id}-warning`;
-  const describedBy = [hint === undefined ? null : hintId, warning === undefined ? null : warningId].filter((part): part is string => part !== null).join(" ") || undefined;
+  const errorId = `${id}-error`;
+  const hasError = error !== undefined && error.length > 0;
+  const describedBy = [hint === undefined ? null : hintId, warning === undefined ? null : warningId, hasError ? errorId : null].filter((part): part is string => part !== null).join(" ") || undefined;
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     const delta = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
     if (delta === 0 || disabled || options.length < 2) return;
@@ -34,7 +38,7 @@ export function SegmentChoice<T extends string>({ label, hint, value, onChange, 
 
   return <div data-ui="" className={`segment-choice-field segment-choice-field--${size}`}>
     <span className="segment-choice-field__label" id={`${id}-label`}>{label}</span>
-    <div data-ui="" className="segment-choice" role="group" aria-labelledby={`${id}-label`} aria-describedby={describedBy} onKeyDown={handleKeyDown}>
+    <div data-ui="" className="segment-choice" role="group" aria-labelledby={`${id}-label`} aria-describedby={describedBy} aria-invalid={hasError ? true : undefined} onKeyDown={handleKeyDown}>
       {options.map((option) => <button
         key={option.value}
         type="button"
@@ -50,5 +54,6 @@ export function SegmentChoice<T extends string>({ label, hint, value, onChange, 
     </div>
     {hint === undefined ? <span className="segment-choice-field__hint" aria-hidden="true">&nbsp;</span> : <span id={hintId} className="segment-choice-field__hint">{hint}</span>}
     {warning === undefined ? <span className="segment-choice-field__warning" aria-hidden="true">&nbsp;</span> : <span id={warningId} className="segment-choice-field__warning"><Icon name="warning" size={16} />{warning}</span>}
+    {reserveError || error !== undefined ? <span id={errorId} className="segment-choice-field__error" aria-live="polite">{!hasError ? <span aria-hidden="true">&nbsp;</span> : <><span aria-hidden="true">× </span>{error}</>}</span> : null}
   </div>;
 }

@@ -135,10 +135,11 @@ export const getAppAccessToken = async (
   env: Env,
   now: string,
   fetcher: typeof fetch = fetch,
+  forceRefresh = false,
 ): Promise<string> => {
   const encryptionKeys = getTokenEncryptionKeys(env);
   const stored = await getStoredAppAccessToken(env.DB);
-  if (stored !== null) {
+  if (stored !== null && !forceRefresh) {
     const token = await decryptAppAccessToken(stored.accessTokenCiphertext, encryptionKeys);
     if (token !== null && !shouldRefreshAppAccessToken(stored.expiresAt, now)) return token;
   }

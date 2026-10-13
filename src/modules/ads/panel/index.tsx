@@ -6,6 +6,7 @@ import type { AdsScheduleResponse } from "../contracts";
 import { Button, EmptyCellValue, Icon, LoadState, LoadStateLines, notify } from "../../../dashboard/ui";
 import { loadAdsSchedule, refreshAdsSchedule, snoozeAds } from "./service";
 import { adsPanelTexts } from "./locale";
+import { adFailureReason, rateLimitWaitMessage } from "./errors";
 import { moduleQueryKey, runModuleQueryWrite, useDashboardQueryError, useModuleQuery } from "../../../dashboard/data";
 import { useDashboardQueryClient } from "../../../dashboard/data";
 import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
@@ -22,10 +23,10 @@ const formatTimestamp = (value: string | null, language: DashboardLanguage): str
 
 const AdsPanel = ({ channelId, language = "de", canManage = false }: { channelId: string; language?: DashboardLanguage; canManage?: boolean }): ReactElement => {
   const labels = adsPanelTexts(language);
-  const loadError = labels.loadError;
   const realtimeStatus = useDashboardRealtimeStatus(channelId);
   const queryClient = useDashboardQueryClient();
   const scheduleError = useDashboardQueryError(moduleQueryKey(channelId, "ads", "schedule"));
+  const loadError = rateLimitWaitMessage(scheduleError, labels) ?? labels.loadError;
   const loadErrorNotified = useRef(false);
   const readSchedule = async (signal: AbortSignal): Promise<AdsScheduleResponse> => {
     try {
@@ -35,7 +36,7 @@ const AdsPanel = ({ channelId, language = "de", canManage = false }: { channelId
     } catch (failure: unknown) {
       if (!loadErrorNotified.current) {
         loadErrorNotified.current = true;
-        notify({ tone: "error", message: loadError });
+        notify({ tone: "error", message: rateLimitWaitMessage(failure, labels) ?? labels.loadError });
       }
       throw failure;
     }
@@ -79,7 +80,11 @@ const AdsPanel = ({ channelId, language = "de", canManage = false }: { channelId
         tone: "error",
         message: error instanceof PanelApiError && error.code === "ad_snooze_denied"
           ? labels.snoozeReadOnly
-          : labels.snoozeError,
+          : adFailureReason(error) === "scope_missing"
+            ? labels.snoozeScopeMissing
+            : adFailureReason(error) === "snoozes_exhausted"
+              ? labels.snoozeNone
+            : rateLimitWaitMessage(error, labels) ?? labels.snoozeError,
       });
     } finally {
       setSnoozeBusy(false);

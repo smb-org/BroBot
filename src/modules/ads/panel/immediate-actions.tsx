@@ -4,6 +4,7 @@ import { PanelApiError } from "../../../contracts/panel-error";
 import { Button, Icon, SegmentChoice, notify } from "../../../dashboard/ui";
 import type { ModuleImmediateActionProperties } from "../contract";
 import { adsPanelTexts } from "./locale";
+import { adFailureReason, commercialCooldownWaitMessage, rateLimitWaitMessage } from "./errors";
 import { startCommercialNow } from "./service";
 
 const AD_LENGTHS = ["30", "60", "90", "120", "150", "180"];
@@ -12,7 +13,7 @@ const AdNowAction = ({ channelId, canManage = false, availabilityReason }: Modul
   const labels = adsPanelTexts(typeof navigator === "undefined" || !navigator.language.toLowerCase().startsWith("en") ? "de" : "en");
   const [length, setLength] = useState<string | null>("60");
   const [pending, setPending] = useState(false);
-  const [resultMessage, setResultMessage] = useState("");
+  const [resultMessage, setResultMessage] = useState<{ full: string; short?: string } | null>(null);
   const availabilityReasonId = "stream-manager-ads-availability-reason";
   const actionReason = canManage ? availabilityReason : labels.immediateReadOnly;
   const unavailable = actionReason !== null;
@@ -20,24 +21,36 @@ const AdNowAction = ({ channelId, canManage = false, availabilityReason }: Modul
   const run = async (): Promise<void> => {
     if (pending || length === null || actionReason !== null) return;
     setPending(true);
-    setResultMessage("");
+    setResultMessage(null);
     try {
       const result = await startCommercialNow(channelId, Number(length));
       const message = labels.immediateStarted(String(result.length ?? length));
-      setResultMessage(message);
+      setResultMessage({ full: message });
       notify({ tone: "success", message });
     } catch (error: unknown) {
+      const reason = adFailureReason(error);
       const message = error instanceof PanelApiError && error.code === "commercial_start_denied"
         ? labels.immediateReadOnly
         : error instanceof PanelApiError && error.code === "commercial_stream_offline"
           ? labels.immediateOffline
-        : labels.immediateFailed;
-      setResultMessage(message);
+          : reason === "scope_missing"
+            ? labels.immediateScopeMissing
+            : reason === "token_invalid"
+              ? labels.immediateTokenInvalid
+              : reason === "commercial_cooldown"
+                ? commercialCooldownWaitMessage(error, labels) ?? labels.immediateFailed
+                : rateLimitWaitMessage(error, labels) ?? labels.immediateFailed;
+      const short = reason === "scope_missing" ? labels.immediateScopeMissingShort
+        : reason === "token_invalid" ? labels.immediateTokenInvalidShort
+          : undefined;
+      setResultMessage({ full: message, ...(short === undefined ? {} : { short }) });
       notify({ tone: "error", message });
     } finally {
       setPending(false);
     }
   };
+  const fullResultMessage = actionReason ?? resultMessage?.full ?? "";
+  const visibleResultMessage = actionReason ?? resultMessage?.short ?? resultMessage?.full ?? "";
 
   return (
     <div className="stream-manager-action">
@@ -58,8 +71,9 @@ const AdNowAction = ({ channelId, canManage = false, availabilityReason }: Modul
       </Button>
       <p className="lock-reason stream-manager-action__result" id={availabilityReasonId} data-testid="immediate-action-result-slot"
         aria-live="polite"
-        title={actionReason ?? resultMessage}>
-        {actionReason ?? resultMessage}
+        aria-label={fullResultMessage}
+        title={fullResultMessage}>
+        {visibleResultMessage}
       </p>
     </div>
   );

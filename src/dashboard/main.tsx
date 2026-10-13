@@ -1540,7 +1540,8 @@ export const DashboardApp = (): ReactElement => {
     const targetModuleId = route.moduleId;
     const targetKey = `${route.channelId}:${targetModuleId}`;
     const state = (selectedChannel?.modules ?? modules.data?.modules ?? []).find((module) => module.id === targetModuleId);
-    if (state === undefined || state.mandatory === true || targetModuleId === "channel_events" ||
+    const module = MODULES.find((candidate) => candidate.id === targetModuleId);
+    if (state === undefined || state.mandatory === true || module?.mandatory === true ||
         (selectedChannel !== null && !canManage(selectedChannel.role)) || headerModuleBusyKeys.has(targetKey)) return;
     setHeaderModuleBusyKeys((current) => new Set(current).add(targetKey));
     try {

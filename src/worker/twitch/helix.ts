@@ -23,6 +23,25 @@ const readJson = async (response: Response): Promise<unknown> => {
 const messageOf = (body: unknown): string | null =>
   isRecord(body) && typeof body.message === "string" && body.message.length > 0 ? body.message : null;
 
+const retryAfterTimestamp = (response: Response, now = Date.now()): number | null => {
+  const retryAfter = response.headers.get("Retry-After");
+  if (retryAfter !== null) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) return now + seconds * 1000;
+    const date = Date.parse(retryAfter);
+    if (Number.isFinite(date)) return date;
+  }
+  const resetSeconds = Number(response.headers.get("Ratelimit-Reset"));
+  return Number.isFinite(resetSeconds) && resetSeconds > 0 ? resetSeconds * 1000 : null;
+};
+
+const rateLimitRemaining = (response: Response): number | null => {
+  const remaining = response.headers.get("Ratelimit-Remaining");
+  if (remaining === null) return null;
+  const parsed = Number(remaining);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+};
+
 /**
  * Thin transport over `api.twitch.tv/helix` (issue #163): headers, a
  * timeout, tolerant JSON reading and base error classification. It does not
@@ -82,7 +101,15 @@ export const helixRequest: HelixRequest = async <Data = unknown>(
   const body = isRecord(rawBody) ? rawBody : {};
   if (!response.ok) {
     const reason: HelixErrorReason = response.status === 429 ? "rate_limited" : `http_${String(response.status)}`;
-    return { ok: false, status: response.status, reason, message: messageOf(body), body };
+    return {
+      ok: false,
+      status: response.status,
+      reason,
+      message: messageOf(body),
+      body,
+      retryAfter: retryAfterTimestamp(response),
+      ...(response.status === 429 ? { rateLimitRemaining: rateLimitRemaining(response) } : {}),
+    };
   }
 
   if (options.schema === undefined) {

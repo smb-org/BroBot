@@ -11,6 +11,7 @@ export interface ChatOutputTargetControlProps {
   includeWhereAsked?: boolean;
   allowChannelDefault?: boolean;
   disabled?: boolean;
+  error?: string;
   /** Label above the select instead of beside it. */
   stacked?: boolean;
 }
@@ -23,6 +24,7 @@ export function ChatOutputTargetControl({
   includeWhereAsked = false,
   allowChannelDefault = false,
   disabled = false,
+  error,
   stacked = false,
 }: ChatOutputTargetControlProps) {
   const texts = chatOutputTargetTexts[dashboardLanguage()];
@@ -45,6 +47,7 @@ export function ChatOutputTargetControl({
         }}
         options={options}
         disabled={disabled}
+        {...(error === undefined ? {} : { error })}
       />
     </InspectorFieldRow>
   );

@@ -97,6 +97,7 @@ export const COMMERCIAL_FAILURE_REASONS = [
   "rate_limited",
   "scope_missing",
   "stream_offline",
+  "token_invalid",
   "timeout",
   "twitch_error",
 ] as const;

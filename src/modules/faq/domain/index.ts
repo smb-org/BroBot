@@ -30,8 +30,16 @@ type PreparedFaqPattern =
 
 export interface FaqMatcherValidationError {
   path: "matcher.pattern" | "matcher.patterns";
+  reasonCode: FaqMatcherValidationReasonCode;
   reason: string;
 }
+
+export type FaqMatcherValidationReasonCode =
+  | "faq_matcher_required"
+  | "faq_regex_required"
+  | "faq_regex_too_long"
+  | "faq_regex_invalid"
+  | "faq_keywords_invalid";
 
 const combiningMarks = /\p{M}/gu;
 const wordCharacter = /^[\p{L}\p{N}_]$/u;
@@ -150,15 +158,15 @@ export const selectFaqMatch = (
 
 export const faqMatcherValidationError = (value: unknown): FaqMatcherValidationError | null => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return { path: "matcher.patterns", reason: "A matcher is required." };
+    return { path: "matcher.patterns", reasonCode: "faq_matcher_required", reason: "A matcher is required." };
   }
   const record = value as Record<string, unknown>;
   if (record.type === "regex") {
     if (typeof record.pattern !== "string" || record.pattern.trim().length === 0) {
-      return { path: "matcher.pattern", reason: "A regular expression is required." };
+      return { path: "matcher.pattern", reasonCode: "faq_regex_required", reason: "A regular expression is required." };
     }
     if (record.pattern.length > FAQ_PATTERN_MAX_LENGTH) {
-      return { path: "matcher.pattern", reason: `Regular expressions can be at most ${String(FAQ_PATTERN_MAX_LENGTH)} characters.` };
+      return { path: "matcher.pattern", reasonCode: "faq_regex_too_long", reason: `Regular expressions can be at most ${String(FAQ_PATTERN_MAX_LENGTH)} characters.` };
     }
     try {
       RE2JS.compile(record.pattern);
@@ -166,6 +174,7 @@ export const faqMatcherValidationError = (value: unknown): FaqMatcherValidationE
     } catch (error: unknown) {
       return {
         path: "matcher.pattern",
+        reasonCode: "faq_regex_invalid",
         reason: error instanceof Error ? error.message : "The regular expression uses unsupported RE2 syntax.",
       };
     }
@@ -173,7 +182,7 @@ export const faqMatcherValidationError = (value: unknown): FaqMatcherValidationE
   if (record.type !== "keywords" || !Array.isArray(record.patterns) ||
       record.patterns.length < 1 || record.patterns.length > FAQ_PATTERN_MAXIMUM_COUNT ||
       !record.patterns.every((pattern) => typeof pattern === "string" && pattern.trim().length > 0 && pattern.trim().length <= FAQ_PATTERN_MAX_LENGTH)) {
-    return { path: "matcher.patterns", reason: "Add between 1 and 20 valid keyword patterns." };
+    return { path: "matcher.patterns", reasonCode: "faq_keywords_invalid", reason: "Add between 1 and 20 valid keyword patterns." };
   }
   return null;
 };

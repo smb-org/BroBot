@@ -14,6 +14,7 @@ export interface CommercialResult {
   length: number | null;
   message: string | null;
   retryAfter: number | null;
+  rateLimitRemaining: number | null;
 }
 
 type GetAppAccessToken = ModuleRouteVariables["getAppAccessToken"];
@@ -30,12 +31,23 @@ const numberOrNull = (value: unknown): number | null =>
 const failure = (
   reason: CommercialFailureReason | "unauthorized",
   detail: Readonly<Record<string, string | number | boolean | null>> = {},
-): CommercialResult => ({ started: false, reason, detail, length: null, message: null, retryAfter: null });
+  rateLimitRemaining: number | null = null,
+): CommercialResult => ({ started: false, reason, detail, length: null, message: null, retryAfter: null, rateLimitRemaining });
+
+const missingScopeMessage = (message: string | null): boolean =>
+  message !== null && /(missing|lacks?|does not have).*(scope|permission)|(scope|permission).*(missing|required)/i.test(message);
+
+const invalidTokenMessage = (message: string | null): boolean =>
+  message !== null && /(?:invalid|expired|revoked).{0,30}(?:oauth )?token|(?:oauth )?token.{0,30}(?:invalid|expired|revoked|not valid)/i.test(message);
 
 /** The status-to-reason mapping is this endpoint's own business meaning, not `helixRequest`'s. */
 const commercialReasonFor = (status: number, message: string | null): CommercialFailureReason => {
   if (status === 429) return "rate_limited";
-  if (status === 401) return "scope_missing";
+  if (status === 401) {
+    if (missingScopeMessage(message)) return "scope_missing";
+    if (invalidTokenMessage(message)) return "token_invalid";
+    return "twitch_error";
+  }
   if (status === 400 && message !== null && /offline|not live|must be live/i.test(message)) return "stream_offline";
   return "twitch_error";
 };
@@ -60,19 +72,33 @@ export const startCommercial = async (
 
   if (!await isManagementAuthorized()) return failure("unauthorized", { status: null, message: null });
 
-  const result = await helixRequest<Record<string, unknown>>({
+  const request = (token: string) => helixRequest<Record<string, unknown>>({
     method: "POST",
     url: START_COMMERCIAL_URL,
     body: { broadcaster_id: channelId, length },
-    accessToken,
+    accessToken: token,
     clientId: environment.TWITCH_CLIENT_ID,
     fetcher,
   });
+  let result = await request(accessToken);
+  if (!result.ok && result.status === 401 && !missingScopeMessage(result.message)) {
+    try {
+      accessToken = await getAppAccessToken(environment, now, fetcher, true);
+    } catch (error: unknown) {
+      return failure("app_token_unavailable", { message: error instanceof Error ? error.message : String(error) });
+    }
+    if (!await isManagementAuthorized()) return failure("unauthorized", { status: null, message: null });
+    result = await request(accessToken);
+  }
   if (!result.ok) {
     if (result.reason === "timeout" || result.reason === "network_error") {
       return failure(result.reason, { status: null, twitchMessage: result.message });
     }
-    return failure(commercialReasonFor(result.status ?? 0, result.message), { status: result.status, twitchMessage: result.message });
+    return failure(commercialReasonFor(result.status ?? 0, result.message), {
+      status: result.status,
+      twitchMessage: result.message,
+      ...(result.status === 429 && result.rateLimitRemaining === 0 && result.retryAfter != null ? { retryAfter: result.retryAfter } : {}),
+    }, result.status === 429 ? result.rateLimitRemaining ?? null : null);
   }
 
   const body = isRecord(result.data) ? result.data : {};
@@ -84,5 +110,6 @@ export const startCommercial = async (
     length: numberOrNull(first.length),
     message: textOrNull(first.message),
     retryAfter: numberOrNull(first.retry_after),
+    rateLimitRemaining: null,
   };
 };

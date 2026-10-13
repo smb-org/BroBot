@@ -132,6 +132,6 @@ describe("broadcaster scopes", () => {
 
   it("flags channel:manage:ads on the ads module as an optional scope", () => {
     database = new TestD1Database();
-    expect(moduleOptionalBroadcasterScopes(adsModule)).toEqual(["channel:manage:ads"]);
+    expect(moduleOptionalBroadcasterScopes(adsModule)).toEqual(["channel:manage:ads", "channel:edit:commercial"]);
   });
 });

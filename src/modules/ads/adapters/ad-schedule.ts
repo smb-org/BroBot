@@ -157,12 +157,17 @@ export const snoozeNextAd = async (
       return snoozeFailure(result.reason, { status: null, twitchMessage: result.message });
     }
     const status = result.status ?? 0;
+    const bucketExhausted = status === 429 && result.rateLimitRemaining === 0;
     const reason = status === 429
-      ? "rate_limited"
+      ? bucketExhausted ? "rate_limited" : "snoozes_exhausted"
       : status === 401 && missingScopeMessage(result.message)
         ? "scope_missing"
         : status === 401 ? "unauthorized" : `http_${String(status)}`;
-    return snoozeFailure(reason, { status: result.status, twitchMessage: result.message });
+    return snoozeFailure(reason, {
+      status: result.status,
+      twitchMessage: result.message,
+      ...(bucketExhausted && result.retryAfter != null ? { retryAfter: result.retryAfter } : {}),
+    });
   }
 
   const body = isRecord(result.data) ? result.data : {};

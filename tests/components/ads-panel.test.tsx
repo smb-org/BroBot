@@ -145,7 +145,38 @@ describe("Ad settings editor declaration", () => {
     renderAds(fetcher);
 
     expect(await screen.findByRole("button", { name: /Snooze · 0 verfügbar/ })).toBeDisabled();
-    expect(screen.getByText(/channel:manage:ads fehlt/)).toBeInTheDocument();
+    expect(screen.getByText(/autorisiere ads für diesen kanal erneut und erteile diese berechtigung/i)).toBeInTheDocument();
+  });
+
+  it("shows the remaining Twitch wait when snooze returns a rate-limit reset", async () => {
+    const retryAfter = Date.now() + 8_000;
+    const fetcher = adsFetch(undefined, schedule, () => jsonResponse({
+      error: "ad_snooze_failed",
+      reason: "rate_limited",
+      detail: { retryAfter },
+    }, 429));
+    renderAds(fetcher);
+    fireEvent.click(await screen.findByRole("button", { name: /Snooze · 2 verfügbar/ }));
+
+    await waitFor(() => expect(toastsSnapshot().some((toast) =>
+      toast.tone === "error" && /Versuche es in \d+ Sekunden erneut/u.test(toast.message))).toBe(true));
+  });
+
+  it("shows the remaining Twitch rate limit wait when the schedule request includes retryAfter", async () => {
+    const retryAfter = Date.now() + 8_000;
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      if (path.endsWith("/schedule")) return Promise.resolve(jsonResponse({
+        error: "ad_schedule_read_failed",
+        reason: "rate_limited",
+        detail: { retryAfter },
+      }, 429));
+      if (path.endsWith("/settings")) return Promise.resolve(jsonResponse({ settings, revision: 1, variables: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    renderAds(fetcher);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/versuche es in \d+ sekunden erneut/i);
   });
 
   it("preserves the cached schedule and limits load notifications to one per outage", async () => {
