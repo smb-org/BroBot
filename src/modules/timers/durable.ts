@@ -10,6 +10,9 @@ import {
 } from "./domain";
 import { sameTimerAlarmIdentity } from "./identity";
 
+/** How long after its deadline a timer occurrence may still be sent. */
+export const TIMER_OCCURRENCE_GRACE_MS = 10 * 60_000;
+
 export interface DurableTimerConfig {
   id: string;
   name: string;
@@ -133,7 +136,7 @@ export const makeTimerPlan = (
         previous.identity.generation === stream.generation;
       if (previousMatches && mode === "after_occurrence") deadline = null;
       else if (previousMatches && mode === "preserve_cadence") deadline = previous.identity.deadline;
-      else if (Number.isFinite(dueAt) && (dueAt > now || previousMatches && mode === "after_occurrence")) deadline = dueAt;
+      else if (Number.isFinite(dueAt) && dueAt + TIMER_OCCURRENCE_GRACE_MS >= now) deadline = Math.max(dueAt, now);
       streamId = stream.streamId;
       generation = stream.generation;
     }

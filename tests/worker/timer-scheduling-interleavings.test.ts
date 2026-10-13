@@ -578,6 +578,38 @@ describe("timer scheduling interleavings through the channel Durable Object", ()
     expect(stateOf(values).tombstones[config.id]?.revision).toBe(config.revision + 1);
   });
 
+  it("posts a stream_start occurrence whose online transition arrives after its deadline, within grace", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-10-12T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const { object, values } = channelObjectFor({ state: "offline", streamId: null, startedAt: null, generation: 0 });
+    const config = timerConfig("late-stream-start", { type: "stream_start", minutes: 1 });
+    await object.upsertTimerConfig(config);
+    await object.transitionTimerStream(onlineStream("stream-1", 1, now - 90_000));
+    const first = dueOccurrence(values, config.id);
+    expect(first.identity.deadline).toBe(now);
+    const posts: string[] = [];
+    const context = timerAlarmContext((_text, key) => {
+      posts.push(key);
+      return Promise.resolve({ sent: true, reason: null, retryable: false });
+    });
+    await object.runTimerOccurrence(context, `timer:${config.id}`, first.identity.deadline,
+      config.revision, first.identity, first.sequence);
+    expect(posts).toHaveLength(1);
+    expect(plannedCount(values)).toBe(0);
+  });
+
+  it("skips a stream_start occurrence whose online transition arrives beyond the grace window", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-10-12T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const { object, values } = channelObjectFor({ state: "offline", streamId: null, startedAt: null, generation: 0 });
+    const config = timerConfig("too-late-stream-start", { type: "stream_start", minutes: 1 });
+    await object.upsertTimerConfig(config);
+    await object.transitionTimerStream(onlineStream("stream-1", 1, now - 12 * 60_000));
+    expect(plannedCount(values)).toBe(0);
+  });
+
   it("stale stream_start handler cannot clear a newer plan after its awaited send check", async () => {
     vi.useFakeTimers();
     const now = Date.parse("2026-10-12T12:00:00.000Z");

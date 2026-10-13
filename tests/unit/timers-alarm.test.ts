@@ -67,6 +67,20 @@ describe("Durable Object timer alarm planning", () => {
       .identity?.streamId).toBe("stream-2");
   });
 
+  it("keeps a late stream-start occurrence within the grace window and drops it beyond", () => {
+    const timer = config({ type: "stream_start", minutes: 1 });
+    const startedAt = new Date(now - 90_000).toISOString();
+    const late: DurableTimerStream = { ...online, startedAt };
+    const plan = makeTimerPlan(timer, late, null, inputs);
+    expect(plan.identity).toMatchObject({ streamId: "stream-1", deadline: now });
+    // A replayed transition keeps the same single occurrence; once consumed it is not re-armed.
+    expect(makeTimerPlan(timer, late, occurrence(identityOf(plan)), inputs).identity?.streamId).toBe("stream-1");
+    expect(makeTimerPlan(timer, late, occurrence(identityOf(plan)), inputs, "after_occurrence").identity).toBeNull();
+
+    const tooLate = { ...online, startedAt: new Date(now - 11 * 60_000 - 60_000).toISOString() };
+    expect(makeTimerPlan(timer, tooLate, null, inputs).identity).toBeNull();
+  });
+
   it("plans daily and before-event occurrences with the trigger's calendar inputs", () => {
     const daily = makeTimerPlan(config({
       type: "time_of_day", time: "14:00", weekdays: [], alsoOffline: false,

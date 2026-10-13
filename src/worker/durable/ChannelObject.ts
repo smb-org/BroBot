@@ -39,6 +39,7 @@ import {
   type TimerOccurrence,
   type TimerPlan,
   type TimerScheduleInputs,
+  TIMER_OCCURRENCE_GRACE_MS,
 } from "../../modules/timers/durable";
 import { sameTimerAlarmIdentity } from "../../modules/timers/identity";
 import { acceptsTimerAlarmClear, acceptsTimerAlarmSet } from "../../modules/timers/identity";
@@ -155,7 +156,6 @@ const ALARM_TABLE_KEY = "channel:alarm_schedule";
 const PANEL_DURABLE_REVISIONS_KEY = "channel:panel_resource_revisions";
 const CHAT_ACTIVITY_COUNT_KEY = "channel:chat_activity_count";
 const TIMER_MIRROR_RETRY_DELAY_MS = 5_000;
-const TIMER_OCCURRENCE_GRACE_MS = 10 * 60_000;
 const TIMER_TOMBSTONE_RETENTION_MS = 24 * 60 * 60_000;
 const MODULE_ALARM_SEND_CLAIMS_KEY = "module_alarm:send_claims";
 const LEGACY_ACTIVE_CHATTER_STREAM_KEY = "chatter:stream";
