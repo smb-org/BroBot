@@ -143,6 +143,13 @@ const auditCount = async (database: TestD1Database): Promise<number> => {
   return row?.count ?? 0;
 };
 
+const urlForFetchInput = (input: RequestInfo | URL | undefined): URL => {
+  if (typeof input === "string") return new URL(input);
+  if (input instanceof URL) return input;
+  if (input instanceof Request) return new URL(input.url);
+  throw new Error("Expected a URL in the Twitch fetch mock.");
+};
+
 const insertBotAndAppToken = async (database: TestD1Database): Promise<void> => {
   await database.prepare(
     `INSERT INTO bot_identity
@@ -212,6 +219,7 @@ describe("Module management in the panel", () => {
   afterEach(() => {
     database.close();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("returns the registry modules with default settings in the empty state", async () => {
@@ -233,6 +241,215 @@ describe("Module management in the panel", () => {
       // exactly like any other module. Only a real row makes it enabled.
       { id: "clips", enabled: false, settings: "{}", mandatory: false },
     ]);
+  });
+
+  it("caches category searches by normalized query for 24 hours", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertBotAndAppToken(database);
+    const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(new Response(JSON.stringify({
+      data: [{ id: "42", name: "Zelda: Ocarina of Time", box_art_url: "https://static-cdn.jtvnw.net/ttv-boxart/42-{width}x{height}.jpg" }],
+    }), { status: 200 })));
+    vi.stubGlobal("fetch", fetcher);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-01T00:00:00.000Z"));
+
+    const search = async (query: string): Promise<Response> => panelRouter.fetch(
+      await requestFor("user-1", `/api/channels/kanal-a/games?q=${encodeURIComponent(query)}`),
+      environment,
+    );
+
+    try {
+      const first = await search(" Zelda:   Ocarina of Time ");
+      const second = await search("ZELDA:\tOcarina of Time");
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      await expect(second.json()).resolves.toEqual({ games: [{
+        id: "42",
+        name: "Zelda: Ocarina of Time",
+        boxArtUrlTemplate: "https://static-cdn.jtvnw.net/ttv-boxart/42-{width}x{height}.jpg",
+      }] });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      const firstUrl = urlForFetchInput(fetcher.mock.calls[0]?.[0]);
+      expect(firstUrl.pathname).toBe("/helix/search/categories");
+      expect(firstUrl.searchParams.get("query")).toBe("zelda: ocarina of time");
+      expect(firstUrl.searchParams.get("first")).toBe("20");
+
+      vi.setSystemTime(new Date("2026-10-02T00:00:00.000Z"));
+      await search("zelda: ocarina of time");
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("looks up selected game IDs through Helix games and caches their box art", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertBotAndAppToken(database);
+    const fetcher = vi.fn((input: RequestInfo | URL) => {
+      const id = urlForFetchInput(input).searchParams.get("id");
+      const game = id === "42"
+        ? { id: "42", name: "Zelda: Ocarina of Time", box_art_url: "https://static-cdn.jtvnw.net/ttv-boxart/42-{width}x{height}.jpg" }
+        : { id: "77", name: "Elden Ring", box_art_url: "https://static-cdn.jtvnw.net/ttv-boxart/77-{width}x{height}.jpg" };
+      return Promise.resolve(new Response(JSON.stringify({ data: [game] }), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const lookup = async (): Promise<Response> => panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/games?ids=42,77"),
+      environment,
+    );
+
+    const first = await lookup();
+    const second = await lookup();
+    const expected = { games: [
+      { id: "42", name: "Zelda: Ocarina of Time", boxArtUrlTemplate: "https://static-cdn.jtvnw.net/ttv-boxart/42-{width}x{height}.jpg" },
+      { id: "77", name: "Elden Ring", boxArtUrlTemplate: "https://static-cdn.jtvnw.net/ttv-boxart/77-{width}x{height}.jpg" },
+    ] };
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    await expect(first.json()).resolves.toEqual(expected);
+    await expect(second.json()).resolves.toEqual(expected);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls.map(([input]) => urlForFetchInput(input).pathname)).toEqual([
+      "/helix/games",
+      "/helix/games",
+    ]);
+    expect(fetcher.mock.calls.map(([input]) => urlForFetchInput(input).searchParams.get("id"))).toEqual(["42", "77"]);
+  });
+
+  it("propagates Twitch ID lookup failures and retries instead of caching them", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertBotAndAppToken(database);
+    let attempt = 0;
+    const fetcher = vi.fn(() => {
+      attempt += 1;
+      return Promise.resolve(attempt === 1
+        ? new Response(JSON.stringify({ message: "rate limited" }), { status: 429 })
+        : new Response(JSON.stringify({ data: [{
+          id: "42",
+          name: "Zelda: Ocarina of Time",
+          box_art_url: "https://static-cdn.jtvnw.net/ttv-boxart/42-{width}x{height}.jpg",
+        }] }), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const lookup = async (): Promise<Response> => panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/games?ids=42"),
+      environment,
+    );
+
+    const failed = await lookup();
+    const retried = await lookup();
+
+    expect(failed.status).toBe(503);
+    await expect(failed.json()).resolves.toEqual({ error: "games_unavailable" });
+    expect(retried.status).toBe(200);
+    await expect(retried.json()).resolves.toEqual({ games: [{
+      id: "42",
+      name: "Zelda: Ocarina of Time",
+      boxArtUrlTemplate: "https://static-cdn.jtvnw.net/ttv-boxart/42-{width}x{height}.jpg",
+    }] });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns the current category as an empty-query game suggestion", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertBotAndAppToken(database);
+    const fetcher = vi.fn((input: RequestInfo | URL) => {
+      const url = urlForFetchInput(input);
+      const data = url.pathname === "/helix/channels"
+        ? [{ game_id: "42", game_name: "Zelda: Ocarina of Time" }]
+        : [{ id: "42", name: "Zelda: Ocarina of Time", box_art_url: "https://static-cdn.jtvnw.net/ttv-boxart/42-{width}x{height}.jpg" }];
+      return Promise.resolve(new Response(JSON.stringify({ data }), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/games?q="),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ games: [{
+      id: "42",
+      name: "Zelda: Ocarina of Time",
+      boxArtUrlTemplate: "https://static-cdn.jtvnw.net/ttv-boxart/42-{width}x{height}.jpg",
+    }] });
+    const channelUrl = urlForFetchInput(fetcher.mock.calls[0]?.[0]);
+    expect(channelUrl.pathname).toBe("/helix/channels");
+    expect(channelUrl.searchParams.get("broadcaster_id")).toBe("kanal-a");
+  });
+
+  it("keeps empty-query suggestions when Twitch cannot hydrate their artwork", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertBotAndAppToken(database);
+    const fetcher = vi.fn((input: RequestInfo | URL) => {
+      const url = urlForFetchInput(input);
+      return Promise.resolve(url.pathname === "/helix/channels"
+        ? new Response(JSON.stringify({ data: [{ game_id: "42", game_name: "Zelda: Ocarina of Time" }] }), { status: 200 })
+        : new Response(JSON.stringify({ message: "rate limited" }), { status: 429 }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/games?q="),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ games: [{ id: "42", name: "Zelda: Ocarina of Time" }] });
+  });
+
+  it("combines a channel's current and recent categories without leaking another channel's history", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertChannel(database, "kanal-b");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertBotAndAppToken(database);
+    await database.prepare(
+      `INSERT INTO channel_game_history (channel_id, game_id, game_name, last_seen_at_ms)
+       VALUES ('kanal-a', '77', 'Elden Ring', 1790726400000),
+              ('kanal-a', '99', 'Stardew Valley', 1790640000000),
+              ('kanal-b', '88', 'Another Channel Game', 1790812800000)`,
+    ).run();
+    const fetcher = vi.fn((input: RequestInfo | URL) => {
+      const url = urlForFetchInput(input);
+      const gameId = url.searchParams.get("id") ?? "";
+      const body = url.pathname === "/helix/channels"
+        ? { data: [{ game_id: "42", game_name: "Zelda: Ocarina of Time" }] }
+        : {
+          data: [{
+            id: gameId,
+            name: gameId === "42" ? "Zelda: Ocarina of Time"
+              : gameId === "77" ? "Elden Ring" : "Stardew Valley",
+            box_art_url: `https://static-cdn.jtvnw.net/ttv-boxart/${gameId}-{width}x{height}.jpg`,
+          }],
+        };
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/games?q="),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ games: [
+      { id: "42", name: "Zelda: Ocarina of Time", boxArtUrlTemplate: "https://static-cdn.jtvnw.net/ttv-boxart/42-{width}x{height}.jpg" },
+      { id: "77", name: "Elden Ring", boxArtUrlTemplate: "https://static-cdn.jtvnw.net/ttv-boxart/77-{width}x{height}.jpg" },
+      { id: "99", name: "Stardew Valley", boxArtUrlTemplate: "https://static-cdn.jtvnw.net/ttv-boxart/99-{width}x{height}.jpg" },
+    ] });
   });
 
   it("keeps an event-resolvable host declaration when a module shadows its name without a resolver", async () => {

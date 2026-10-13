@@ -23,6 +23,12 @@ describe("mandatory EventSub targets", () => {
       });
       expect(targets).toContainEqual({
         channelId: "kanal-a",
+        subscriptionType: "channel.update",
+        variant: "",
+        version: "2",
+      });
+      expect(targets).toContainEqual({
+        channelId: "kanal-a",
         subscriptionType: "channel.shoutout.create",
         variant: "",
         version: "1",

@@ -6,6 +6,7 @@ import {
   purgeOldEventSubMessages,
 } from "./db/eventsub-state";
 import { purgeOldTextCommandUserCooldowns } from "./db/text-command-user-cooldowns";
+import { purgeExpiredGameSearchCache } from "./db/game-search-cache";
 import { maintainEventSubSubscriptions } from "./eventsub-subscriptions";
 import { eventSubMessageCutoff } from "./eventsub";
 import { maintainStreamStates } from "./stream-state-lookup";
@@ -22,6 +23,7 @@ export const scheduled: NonNullable<ExportedHandler<Env>["scheduled"]> = async (
   const eventSubCutoff = eventSubMessageCutoff(now);
   const userCooldownCutoff = new Date(Date.parse(now) - 24 * 60 * 60 * 1000).toISOString();
   const tasks = [
+    purgeExpiredGameSearchCache(env.DB, Date.parse(now)),
     purgeOldEventLogEntries(env.DB, now),
     purgeOldEventSubMessages(env.DB, eventSubCutoff),
     purgeOldTextCommandUserCooldowns(env.DB, userCooldownCutoff),

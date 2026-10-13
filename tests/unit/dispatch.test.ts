@@ -1718,6 +1718,9 @@ describe("dispatch and execution", () => {
       }, vi.fn(), []);
 
       expect(updateCachedChannelGameId).toHaveBeenCalledWith("509658", expect.any(Number));
+      await expect(database.prepare(
+        "SELECT game_id, game_name FROM channel_game_history WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ game_id: "509658", game_name: "Just Chatting" });
     } finally {
       database.close();
     }

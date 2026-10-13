@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState, type ReactNode, type SyntheticEvent } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -53,6 +53,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.useRealTimers();
   if (originalRangeBounds === undefined) delete (Range.prototype as unknown as { getBoundingClientRect?: () => DOMRect }).getBoundingClientRect;
   else Object.defineProperty(Range.prototype, "getBoundingClientRect", originalRangeBounds);
 });
@@ -94,6 +95,81 @@ describe("editor field seam", () => {
     expect(selectedImage).toHaveAttribute("src", "https://static-cdn.jtvnw.net/ttv-boxart/123-20x27.jpg");
     expect(selectedImage).toHaveAttribute("width", "20");
     expect(selectedImage).toHaveAttribute("height", "27");
+  });
+
+  it("loads empty-query suggestions and hydrates older selected games with box art", async () => {
+    const storedGame: GamePickerGame = { id: "42", name: "Zelda: Ocarina of Time" };
+    const gameWithArt: GamePickerGame = {
+      ...storedGame,
+      boxArtUrlTemplate: "https://static-cdn.jtvnw.net/ttv-boxart/42-{width}x{height}.jpg",
+    };
+    const messages: GamePickerMessages = {
+      label: "Games", hint: "Filter by game.", search: "Search games", searchHint: "Search for a game.",
+      loading: "Searching…", empty: "No games found.", error: "Search failed.", remove: (name) => `Remove ${name}`,
+    };
+    const searchGames = vi.fn().mockResolvedValue([gameWithArt]);
+    const lookupGames = vi.fn().mockResolvedValue([gameWithArt]);
+    const onChange = vi.fn();
+
+    renderUi(<GamePicker searchGames={searchGames} lookupGames={lookupGames} value={[storedGame]} onChange={onChange} messages={messages} />);
+    await waitFor(() => expect(lookupGames).toHaveBeenCalledWith(["42"]));
+    await waitFor(() => expect(document.querySelector(".ui-game-picker__chip img")).toHaveAttribute(
+      "src",
+      "https://static-cdn.jtvnw.net/ttv-boxart/42-20x27.jpg",
+    ));
+    expect(onChange).not.toHaveBeenCalled();
+
+    fireEvent.focus(screen.getByRole("searchbox", { name: "Games" }));
+    expect(await screen.findByRole("option", { name: /Zelda: Ocarina of Time/u })).toBeInTheDocument();
+    expect(searchGames).toHaveBeenCalledWith("");
+  });
+
+  it("retries failed artwork lookups without changing the selected game draft", async () => {
+    vi.useFakeTimers();
+    const storedGame: GamePickerGame = { id: "42", name: "Zelda: Ocarina of Time" };
+    const gameWithArt: GamePickerGame = {
+      ...storedGame,
+      boxArtUrlTemplate: "https://static-cdn.jtvnw.net/ttv-boxart/42-{width}x{height}.jpg",
+    };
+    const messages: GamePickerMessages = {
+      label: "Games", hint: "Filter by game.", search: "Search games", searchHint: "Search for a game.",
+      loading: "Searching…", empty: "No games found.", error: "Search failed.", remove: (name) => `Remove ${name}`,
+    };
+    const searchGames = vi.fn().mockResolvedValue([]);
+    const lookupGames = vi.fn().mockRejectedValueOnce(new Error("Twitch unavailable")).mockResolvedValueOnce([gameWithArt]);
+    const onChange = vi.fn();
+
+    renderUi(<GamePicker searchGames={searchGames} lookupGames={lookupGames} value={[storedGame]} onChange={onChange} messages={messages} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(lookupGames).toHaveBeenCalledTimes(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+
+    expect(lookupGames).toHaveBeenCalledTimes(2);
+    expect(document.querySelector(".ui-game-picker__chip img")).toHaveAttribute(
+      "src",
+      "https://static-cdn.jtvnw.net/ttv-boxart/42-20x27.jpg",
+    );
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("keeps the same cover footprint for suggestions and selected games without box art", async () => {
+    const messages: GamePickerMessages = {
+      label: "Games", hint: "Filter by game.", search: "Search games", searchHint: "Search for a game.",
+      loading: "Searching…", empty: "No games found.", error: "Search failed.", remove: (name) => `Remove ${name}`,
+    };
+    const game: GamePickerGame = { id: "99", name: "Unlisted Game" };
+    const searchGames = vi.fn().mockResolvedValue([game]);
+    renderUi(<GamePicker searchGames={searchGames} value={[game]} onChange={() => {}} messages={messages} />);
+
+    fireEvent.focus(screen.getByRole("searchbox", { name: "Games" }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Games" }), { target: { value: "Unlisted" } });
+    const option = await screen.findByRole("option", { name: /Unlisted Game/u });
+    const selectedPlaceholder = document.querySelector<HTMLElement>(".ui-game-picker__chip .ui-game-picker__cover-placeholder");
+    const suggestionPlaceholder = option.querySelector<HTMLElement>(".ui-game-picker__cover-placeholder");
+
+    expect(selectedPlaceholder).toHaveStyle({ width: "20px", height: "27px" });
+    expect(suggestionPlaceholder).toHaveStyle({ width: "28px", height: "38px" });
   });
 
   it("closes game results on Escape from the input or an option and when focus leaves the picker", async () => {

@@ -19,6 +19,7 @@ import {
   deleteTextBlock,
   deleteTextCategory,
   loadTextLibrary,
+  lookupTextLibraryGames,
   renderTextLibraryPreview,
   renameTextCategory,
   searchTextLibraryGames,
@@ -134,6 +135,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
   const resolvedLanguage = language === "en" ? "en" : "de";
   const common = dashboardCommonTexts(resolvedLanguage);
   const searchGames = useCallback((query: string) => searchTextLibraryGames(channelId, query), [channelId]);
+  const lookupGames = useCallback((ids: readonly string[]) => lookupTextLibraryGames(channelId, ids), [channelId]);
   const queryClient = useDashboardQueryClient();
   const libraryQuery = useModuleQuery(channelId, "text_library", "library", (signal) => loadTextLibrary(channelId, signal));
   const data = libraryQuery.data ?? null;
@@ -460,7 +462,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
         filters={<>
           <Select label={labels.categoryFilter} value="" onChange={() => undefined}
             options={[{ value: "", label: labels.allCategories }]} disabled />
-          <GamePicker searchGames={searchGames} value={gameFilter} onChange={setGameFilter}
+          <GamePicker searchGames={searchGames} lookupGames={lookupGames} value={gameFilter} onChange={setGameFilter}
             messages={{ ...labels.gamePicker, label: labels.gameFilter }} visuallyHiddenLabel compact disabled />
         </>}
         create={{ label: labels.addBlock, onClick: openCreate, disabled: true, ...(!canManage ? { reason: labels.managementLocked } : {}) }}
@@ -518,7 +520,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
             filtersLabel={labels.library}
             filters={<>
               <Select label={labels.categoryFilter} value={categoryFilter} onChange={(value) => setCategoryFilter(value ?? "")} options={[{ value: "", label: labels.allCategories }, ...categories]} />
-              <GamePicker searchGames={searchGames} value={gameFilter} onChange={setGameFilter}
+              <GamePicker searchGames={searchGames} lookupGames={lookupGames} value={gameFilter} onChange={setGameFilter}
                 messages={{ ...labels.gamePicker, label: labels.gameFilter }} visuallyHiddenLabel compact />
             </>}
             create={{ label: labels.addBlock, onClick: openCreate, disabled: pending || createReason !== undefined, ...(createReason === undefined ? {} : { reason: createReason }) }}
@@ -566,7 +568,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
                   <Select label={labels.category} value={draft.categoryId} onChange={(value) => value !== null && setDraft({ ...draft, categoryId: value })} disabled={pending} options={categories} />
                 </InspectorFieldRow>
                 <InspectorFieldRow label={labels.gameBound} help={labels.gamePicker.hint}>
-                  <GamePicker searchGames={searchGames} value={draft.games} onChange={(games) => setDraft({ ...draft, games })} messages={{ ...labels.gamePicker, label: labels.gameBound }} disabled={pending} />
+                  <GamePicker searchGames={searchGames} lookupGames={lookupGames} value={draft.games} onChange={(games) => setDraft({ ...draft, games })} messages={{ ...labels.gamePicker, label: labels.gameBound }} disabled={pending} />
                 </InspectorFieldRow>
               </InspectorSection>
 
@@ -604,6 +606,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
                             </div>
                             {variant.conditions.game === undefined ? null : <GamePicker
                               searchGames={searchGames}
+                              lookupGames={lookupGames}
                               value={variant.conditions.game.game.id.length === 0 ? [] : [variant.conditions.game.game]}
                               onChange={(games) => updateCondition(variant.id, (conditions) => games[0] === undefined ? withoutCondition(conditions, "game") : { ...conditions, game: { mode: conditions.game?.mode ?? "is", game: games[0] } })}
                               messages={{ ...labels.gamePicker, label: labels.gameCondition }}
@@ -706,7 +709,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
                   <Select label={labels.simulateStream} value={simulatedStream} onChange={(value) => value !== null && setSimulatedStream(value as "online" | "offline")} options={[{ value: "online", label: labels.online }, { value: "offline", label: labels.offline }]} />
                   <Select label={labels.simulateContext} value={simulatedContext} onChange={(value) => value !== null && setSimulatedContext(value as "command" | "event")} options={[{ value: "command", label: labels.commandContext }, { value: "event", label: labels.eventContext }]} />
                   {simulatedContext === "command" ? <Select label={labels.minimumTier} value={simulatedTier} onChange={(value) => value !== null && setSimulatedTier(value)} options={Object.entries(labels.tierLabels).map(([value, label]) => ({ value, label }))} /> : null}
-                  <GamePicker searchGames={searchGames} value={simulatedGame} onChange={(games) => setSimulatedGame(games.slice(0, 1))} messages={{ ...labels.gamePicker, label: labels.gameCondition }} />
+                  <GamePicker searchGames={searchGames} lookupGames={lookupGames} value={simulatedGame} onChange={(games) => setSimulatedGame(games.slice(0, 1))} messages={{ ...labels.gamePicker, label: labels.gameCondition }} />
                 </div>
                 <div data-testid="text-library-preview-slot" style={{ height: "calc(var(--s10) * 9)", overflow: "hidden" }}>
                   {matchingVariant === null ? <p className="muted">{blockUnavailableForGame ? labels.blockUnavailableForGame : labels.noMatchingVariant}</p> : <>

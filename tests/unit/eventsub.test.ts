@@ -265,6 +265,31 @@ describe("EventSub inbound", () => {
     await expect(database.prepare("SELECT COUNT(*) AS count FROM eventsub_messages").first()).resolves.toEqual({ count: 1 });
   });
 
+  it("accepts a signed channel.update notification and records its category for the subscribed channel", async () => {
+    await insertChannel(database, "channel-game-history");
+    await insertChannel(database, "channel-other");
+    const body = JSON.stringify({
+      subscription: {
+        type: "channel.update",
+        version: "2",
+        condition: { broadcaster_user_id: "channel-game-history" },
+      },
+      event: { category_id: "509658", category_name: "Just Chatting" },
+    });
+
+    const response = await eventSubRouter.fetch(
+      signedRequest(secret, "notification", body, "channel-update-history"),
+      environment(),
+    );
+
+    expect(response.status).toBe(204);
+    await expect(database.prepare(
+      "SELECT channel_id, game_id, game_name FROM channel_game_history",
+    ).all()).resolves.toMatchObject({
+      results: [{ channel_id: "channel-game-history", game_id: "509658", game_name: "Just Chatting" }],
+    });
+  });
+
   it("keeps newer online state and stream-end brakes when a delayed offline reaches the HTTP handler", async () => {
     const channelId = "channel-stream-order";
     await insertChannel(database, channelId);

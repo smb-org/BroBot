@@ -13,6 +13,7 @@ import {
   faqErrorCode,
   faqMatcherErrorReason,
   loadFaqPanel,
+  lookupFaqGames,
   moveFaqEntry,
   searchFaqGames,
   setFaqEntryEnabled,
@@ -97,6 +98,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
   const [testBusy, setTestBusy] = useState(false);
   const [testError, setTestError] = useState<string | null>(null);
   const searchGames = useCallback((query: string) => searchFaqGames(channelId, query), [channelId]);
+  const lookupGames = useCallback((ids: readonly string[]) => lookupFaqGames(channelId, ids), [channelId]);
 
   const openCreate = (): void => { setEditing(null); setDraft(emptyDraft()); setError(null); setMatcherError(null); };
   const openEdit = (entry: FaqEntry): void => { setEditing(entry); setDraft(draftFromEntry(entry)); setError(null); setMatcherError(null); };
@@ -242,6 +244,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
           <Field label={labels.testMessage} value={testMessage} onChange={setTestMessage} maxLength={500} countLabel={(count, max) => `${String(count)}/${String(max)}`} />
           <GamePicker
             searchGames={searchGames}
+            lookupGames={lookupGames}
             value={testGame === null ? [] : [testGame]}
             onChange={(games) => setTestGame(games.at(-1) ?? null)}
             messages={labels.testGamePickerMessages}
@@ -328,6 +331,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
           />
           <GamePicker
             searchGames={searchGames}
+            lookupGames={lookupGames}
             value={draft.games}
             onChange={(games) => patchDraft({ games })}
             disabled={pending}
