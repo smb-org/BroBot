@@ -61,6 +61,11 @@ const templateMessages: LocaleCatalog<TemplateTextFieldMessages> = {
     unknownVariable: (name, suggestion) => suggestion === null ? `Unbekannte Variable {${name}}.` : `Unbekannte Variable {${name}} – meintest du {${suggestion}}?`,
     insertSuggestionLabel: (name) => `{${name}} einsetzen`,
     worstCaseLength: (length, maximum) => `${String(length)} Zeichen, höchstens ${String(maximum)}.`,
+    picker: {
+      title: "Variable auswählen", noResults: "Keine Variablen gefunden.", externalHelp: "Fragt Twitch live ab, wenn die Vorlage ausgeführt wird",
+      groupLabels: { module: "Dieses Modul", channel: "Kanal", own: "Eigene Variablen", text_blocks: "Textbausteine" },
+      keyHints: { navigate: "auswählen", insert: "einfügen", close: "schließen" },
+    },
   },
   en: {
     countLabel: (count, max) => `${String(count)}/${String(max)}`,

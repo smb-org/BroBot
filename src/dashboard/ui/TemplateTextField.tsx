@@ -2,7 +2,7 @@ import { Combobox, Input, useCombobox } from "@mantine/core";
 import { RichTextarea, type CaretPosition, type RichTextareaHandle } from "rich-textarea";
 import { useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ReactElement, type ReactNode, type SyntheticEvent } from "react";
 
-import { closestTemplateVariable, templateTextLength, tokenizeTemplate, unknownTemplateVariables, type TemplateVariable } from "../../template";
+import { closestTemplateVariable, templateTextLength, tokenizeTemplate, unknownTemplateVariables, type TemplateToken, type TemplateVariable } from "../../template";
 import type { TemplateVariableGroup } from "../../contracts/values";
 import { Button } from "./Button";
 import { ChatPreview } from "./ChatPreview";
@@ -41,7 +41,7 @@ export interface TemplateTextFieldMessages {
   unknownVariable: (name: string, suggestion: string | null) => ReactNode;
   insertSuggestionLabel: (name: string) => string;
   worstCaseLength: (length: number, maxLength: number) => ReactNode;
-  picker?: TemplateTextFieldPickerMessages;
+  picker: TemplateTextFieldPickerMessages;
 }
 
 interface TemplateTextFieldProps {
@@ -101,16 +101,6 @@ const getSuggestionQuery = (value: string, caret: number): SuggestionQuery | nul
   return { fragment: match[1] ?? "", start: match.index + 1, end: caret + (suffixMatch?.[0].length ?? 0) };
 };
 
-const fallbackPickerMessages: TemplateTextFieldPickerMessages = {
-  title: "Choose a variable",
-  noResults: "No variables found.",
-  externalHelp: "Looks up live data from Twitch when the template runs",
-  groupLabels: {
-    module: "This module", channel: "Channel", own: "Own variables", text_blocks: "Text blocks",
-  },
-  keyHints: { navigate: "select", insert: "insert", close: "close" },
-};
-
 const findOpenBrace = (value: string): number | null => {
   const opening = value.lastIndexOf("{");
   return opening > value.lastIndexOf("}") ? opening : null;
@@ -150,6 +140,14 @@ const TemplateTextFieldKeyboardHints = ({ messages }: { messages: TemplateTextFi
 );
 
 const isLegacyCompositionKey = (event: object): boolean => Reflect.get(event, "keyCode") === 229;
+
+const scrollOptionIntoView = (id: string | undefined): void => {
+  if (id === undefined) return;
+  const option = document.getElementById(id);
+  if (option === null) return;
+  const scrollIntoView = Reflect.get(option, "scrollIntoView");
+  if (typeof scrollIntoView === "function") Reflect.apply(scrollIntoView, option, [{ block: "nearest" }]);
+};
 
 export function TemplateTextField({
   label,
@@ -209,17 +207,18 @@ export function TemplateTextField({
   const previewCount = previewText?.length ?? 0;
   const suggestionGroups = useMemo(() => {
     if (query === null || variables === undefined) return [];
-    const pickerMessages = messages.picker ?? fallbackPickerMessages;
+    const pickerMessages = messages.picker;
     const options = variables.map(optionForPicker);
     const filtered = filterTemplateTextFieldOptions(options, query.fragment);
     return reindexGroupedTemplateTextFieldOptions(prioritizeTemplateTextFieldNamespace(
-      groupTemplateTextFieldOptions(filtered, pickerMessages),
+      groupTemplateTextFieldOptions(filtered, pickerMessages, query.fragment),
       query.fragment,
     ));
   }, [messages.picker, query, variables]);
   const suggestions = suggestionGroups.flatMap(({ options }) => options.map(({ option }) => option));
   const suggestionOpen = !disabled && !readOnly && !composing && variables !== undefined && query !== null;
   const activeSuggestion = suggestions[activeIndex] ?? suggestions[0];
+  const activeSuggestionId = activeSuggestion === undefined ? undefined : `${listboxId}-${activeSuggestion.name}`;
   const unknownAdvice = useMemo(() => unknownVariables.map((tokenName) => ({
     tokenName,
     suggestion: closestTemplateVariable(tokenName, declarations),
@@ -293,6 +292,12 @@ export function TemplateTextField({
     insertText(`{${variableName}${parameter === undefined ? "" : ` ${parameter.value}`}}`, currentQuery.start - 1, currentQuery.end);
   };
 
+  const insertUnknownSuggestion = (token: TemplateToken, suggestion: string): void => {
+    const name = token.name;
+    if (name === undefined) return;
+    insertText(suggestion, token.start + 1, token.start + 1 + name.length);
+  };
+
   const onCompositionEnd = (event: SyntheticEvent<HTMLTextAreaElement>): void => {
     composingRef.current = false;
     setComposing(false);
@@ -340,6 +345,11 @@ export function TemplateTextField({
   }, [combobox, suggestionOpen]);
 
   useEffect(() => {
+    if (!suggestionOpen || activeSuggestionId === undefined) return;
+    scrollOptionIntoView(activeSuggestionId);
+  }, [activeSuggestionId, suggestionOpen]);
+
+  useEffect(() => {
     const pendingSelection = selectionAfterValue.current;
     if (pendingSelection === null || pendingSelection.value !== value) return;
     selectionAfterValue.current = null;
@@ -374,7 +384,7 @@ export function TemplateTextField({
                 <Icon name="warning" size={16} />
                 <span>{messages.unknownVariable(tokenName, suggestion)}</span>
                 {suggestion === null || token === undefined ? null : (
-                  <Button size="compact" variant="subtle" type="button" disabled={disabled || readOnly} onClick={() => insertText(`{${suggestion}}`, token.start, token.start + token.text.length)}>
+                  <Button size="compact" variant="subtle" type="button" disabled={disabled || readOnly} onClick={() => insertUnknownSuggestion(token, suggestion)}>
                     {messages.insertSuggestionLabel(suggestion)}
                   </Button>
                 )}
@@ -473,7 +483,7 @@ export function TemplateTextField({
       </Input.Wrapper>
       {suggestionOpen ? (
         <Combobox.Dropdown data-ui="" className="ui-template-text-field__suggestions-dropdown">
-          <Combobox.Options id={listboxId} className="ui-template-text-field__suggestions" role="listbox" aria-label={(messages.picker ?? fallbackPickerMessages).title}>
+          <Combobox.Options id={listboxId} className="ui-template-text-field__suggestions" role="listbox" aria-label={messages.picker.title}>
             {suggestionGroups.map(({ group, options: groupOptions }) => (
               <Combobox.Group key={group.id} label={<TemplateTextFieldGroupHeading group={group} />}>
                 {groupOptions.map(({ option: variable, index }) => (
@@ -495,7 +505,7 @@ export function TemplateTextField({
                       {variable.sample}
                     </span>
                     {variable.external ? (
-                      <span className="ui-template-text-field__suggestion-external" role="img" title={(messages.picker ?? fallbackPickerMessages).externalHelp} aria-label={(messages.picker ?? fallbackPickerMessages).externalHelp}>
+                      <span className="ui-template-text-field__suggestion-external" role="img" title={messages.picker.externalHelp} aria-label={messages.picker.externalHelp}>
                         <Icon name="cause" size={16} />
                       </span>
                     ) : null}
@@ -503,9 +513,9 @@ export function TemplateTextField({
                 ))}
               </Combobox.Group>
             ))}
-            {suggestions.length === 0 ? <Combobox.Empty className="ui-template-text-field__no-results">{(messages.picker ?? fallbackPickerMessages).noResults}</Combobox.Empty> : null}
+            {suggestions.length === 0 ? <Combobox.Empty className="ui-template-text-field__no-results">{messages.picker.noResults}</Combobox.Empty> : null}
           </Combobox.Options>
-          <TemplateTextFieldKeyboardHints messages={messages.picker ?? fallbackPickerMessages} />
+          <TemplateTextFieldKeyboardHints messages={messages.picker} />
         </Combobox.Dropdown>
       ) : null}
     </Combobox>

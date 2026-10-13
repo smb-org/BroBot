@@ -12,6 +12,13 @@ const templateMessages: TemplateTextFieldMessages = {
   unknownVariable: (name) => `Unknown variable {${name}}.`,
   insertSuggestionLabel: (name) => `Insert {${name}}`,
   worstCaseLength: (length, max) => `${String(length)} exceeds ${String(max)} characters.`,
+  picker: {
+    title: "Choose a variable",
+    noResults: "No variables found.",
+    externalHelp: "Looks up live data from Twitch when the template runs",
+    groupLabels: { module: "This module", channel: "Channel", own: "Own variables", text_blocks: "Text blocks" },
+    keyHints: { navigate: "select", insert: "insert", close: "close" },
+  },
 };
 
 const gamePickerMessages = {

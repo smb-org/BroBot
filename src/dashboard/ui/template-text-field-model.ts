@@ -63,6 +63,24 @@ const normalizeSearch = (value: string): string => value
   .replace(/[\u0300-\u036f]/gu, "")
   .toLowerCase();
 
+const optionGroupOrder = (option: TemplateTextFieldOption): number => option.isTextBlock
+  ? hostGroupOrder.text_blocks
+  : option.kind === "channel" ? hostGroupOrder.own : option.kind === "system" ? hostGroupOrder.channel : hostGroupOrder.module;
+
+const optionMatchRank = (option: TemplateTextFieldOption, query: string): number => {
+  const name = normalizeSearch(option.name);
+  if (name === query) return 0;
+  if (name.startsWith(query)) return 1;
+  if (name.includes(query)) return 2;
+
+  const label = normalizeSearch(option.label ?? "");
+  if (label.startsWith(query)) return 3;
+  if (label.includes(query)) return 4;
+  if (normalizeSearch(option.description).includes(query)) return 5;
+  if (normalizeSearch(option.sourceGroup?.label ?? "").includes(query)) return 6;
+  return -1;
+};
+
 const uniqueTemplateTextFieldOptions = (options: readonly TemplateTextFieldOption[]): TemplateTextFieldOption[] => {
   const seen = new Set<string>();
   return options.filter((option) => {
@@ -81,24 +99,10 @@ export const filterTemplateTextFieldOptions = (
   if (normalizedQuery.length === 0) return uniqueOptions;
   return uniqueOptions
     .map((option, index) => {
-      const name = normalizeSearch(option.name);
-      const label = normalizeSearch(option.label ?? option.name);
-      const description = normalizeSearch(option.description);
-      const groupLabel = normalizeSearch(option.sourceGroup?.label ?? "");
-      const nameOrLabel = [name, label];
-      const isNameOrLabelPrefix = nameOrLabel.some((value) => value.startsWith(normalizedQuery));
-      const matchesNameOrLabel = nameOrLabel.some((value) => value.includes(normalizedQuery));
-      const rank = isNameOrLabelPrefix
-        ? 0
-        : matchesNameOrLabel
-          ? 1
-          : description.includes(normalizedQuery)
-            ? 2
-            : groupLabel.includes(normalizedQuery) ? 3 : -1;
-      return { option, index, rank };
+      return { option, index, rank: optionMatchRank(option, normalizedQuery) };
     })
     .filter(({ rank }) => rank >= 0)
-    .sort((left, right) => left.rank - right.rank || left.index - right.index)
+    .sort((left, right) => left.rank - right.rank || optionGroupOrder(left.option) - optionGroupOrder(right.option) || left.index - right.index)
     .map(({ option }) => option);
 };
 
@@ -120,6 +124,7 @@ const resolveTemplateTextFieldGroup = (
 export const groupTemplateTextFieldOptions = (
   options: readonly TemplateTextFieldOption[],
   messages: Pick<TemplateTextFieldPickerMessages, "groupLabels">,
+  query?: string,
 ): GroupedTemplateTextFieldOptions[] => {
   const grouped = new Map<string, { group: TemplateTextFieldGroupPresentation; options: { option: TemplateTextFieldOption; index: number }[] }>();
   const uniqueOptions = uniqueTemplateTextFieldOptions(options);
@@ -132,7 +137,13 @@ export const groupTemplateTextFieldOptions = (
     if (existing === undefined) grouped.set(group.id, { group, options: [{ option, index }] });
     else existing.options.push({ option, index });
   });
-  return [...grouped.values()].sort((left, right) => left.group.order - right.group.order);
+  const normalizedQuery = query === undefined ? "" : normalizeSearch(query.trim());
+  return [...grouped.values()].sort((left, right) => {
+    if (normalizedQuery.length === 0) return left.group.order - right.group.order;
+    const leftRank = Math.min(...left.options.map(({ option }) => optionMatchRank(option, normalizedQuery)));
+    const rightRank = Math.min(...right.options.map(({ option }) => optionMatchRank(option, normalizedQuery)));
+    return leftRank - rightRank || left.group.order - right.group.order;
+  });
 };
 
 export const reindexGroupedTemplateTextFieldOptions = (

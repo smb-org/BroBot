@@ -40,6 +40,7 @@ const templateTextFieldMessages: TemplateTextFieldMessages = {
 };
 
 const originalRangeBounds = Object.getOwnPropertyDescriptor(Range.prototype, "getBoundingClientRect");
+const originalScrollIntoView = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollIntoView");
 
 beforeEach(() => {
   if (originalRangeBounds === undefined) {
@@ -56,6 +57,8 @@ afterEach(() => {
   vi.useRealTimers();
   if (originalRangeBounds === undefined) delete (Range.prototype as unknown as { getBoundingClientRect?: () => DOMRect }).getBoundingClientRect;
   else Object.defineProperty(Range.prototype, "getBoundingClientRect", originalRangeBounds);
+  if (originalScrollIntoView === undefined) delete (HTMLElement.prototype as unknown as { scrollIntoView?: (options?: ScrollIntoViewOptions) => void }).scrollIntoView;
+  else Object.defineProperty(HTMLElement.prototype, "scrollIntoView", originalScrollIntoView);
 });
 
 describe("editor field seam", () => {
@@ -459,6 +462,44 @@ describe("template field", () => {
     expect(input).toHaveValue("Hello {user} {viewers}");
   });
 
+  it("chooses an exact variable name before an earlier group description match", async () => {
+    const variables: readonly TemplateTextFieldVariable[] = [
+      { name: "currency.convert", description: "Converts the target amount", sample: "11,50 €", kind: "module", parameter: { value: "USD EUR" } },
+      { name: "target", description: "The selected target", sample: "streamerin", kind: "system" },
+    ];
+    function Harness() {
+      const [value, setValue] = useState("Hello {target");
+      return <TemplateTextField label="Reply" hint="What the bot writes." value={value} variables={variables} onChange={setValue} messages={templateTextFieldMessages} />;
+    }
+
+    renderUi(<Harness />);
+    const input = screen.getByRole("textbox", { name: "Reply" });
+    if (!(input instanceof HTMLTextAreaElement)) throw new TypeError("Expected a template textarea.");
+    input.setSelectionRange(input.value.length, input.value.length);
+    fireEvent.select(input);
+    await waitFor(() => expect(input).toHaveAttribute("aria-expanded", "true"));
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input).toHaveValue("Hello {target}");
+  });
+
+  it("scrolls the active suggestion into view after each arrow navigation step", async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scrollIntoView });
+    function Harness() {
+      const [value, setValue] = useState("");
+      return <TemplateTextField label="Reply" hint="What the bot writes." value={value} variables={templateOptions} onChange={setValue} messages={templateTextFieldMessages} />;
+    }
+
+    renderUi(<Harness />);
+    const input = screen.getByRole("textbox", { name: "Reply" });
+    fireEvent.change(input, { target: { value: "{", selectionStart: 1, selectionEnd: 1 } });
+    await waitFor(() => expect(screen.getAllByRole("option", { hidden: true })).toHaveLength(2));
+    scrollIntoView.mockClear();
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" }));
+    expect(scrollIntoView).toHaveBeenCalledOnce();
+  });
+
   it("suggests dotted module variables after a namespace prefix and replaces the whole token", async () => {
     const variables: readonly TemplateTextFieldVariable[] = [
       { name: "sun.set", description: "Sunset", sample: "20:30" },
@@ -680,6 +721,20 @@ describe("template field", () => {
     expect(screen.getByRole("textbox", { name: "Reply" })).not.toHaveAttribute("aria-invalid", "true");
     fireEvent.click(screen.getByRole("button", { name: "{viewers} einsetzen" }));
     expect(screen.getByRole("textbox", { name: "Reply" })).toHaveValue("Hi {viewers}");
+  });
+
+  it("repairs an unknown variable name without dropping its arguments", () => {
+    const variables: readonly TemplateTextFieldVariable[] = [
+      { name: "currency.convert", description: "Converts an amount", sample: "11,50 €", parameters: "currency_pair", parameter: { value: "USD EUR" } },
+    ];
+    function Harness() {
+      const [value, setValue] = useState("Hello {currency.conver GBP EUR}");
+      return <TemplateTextField label="Reply" hint="What the bot writes." value={value} variables={variables} onChange={setValue} messages={templateTextFieldMessages} />;
+    }
+
+    renderUi(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "{currency.convert} einsetzen" }));
+    expect(screen.getByRole("textbox", { name: "Reply" })).toHaveValue("Hello {currency.convert GBP EUR}");
   });
 
   it("renders reading templates with the same known and unknown token treatment", () => {

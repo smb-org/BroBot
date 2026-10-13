@@ -89,6 +89,22 @@ describe("template text field catalogs", () => {
     expect(filterTemplateTextFieldOptions(options, "viewer").map(({ name }) => name)).toEqual(["viewer_total", "raid_audience"]);
   });
 
+  it("ranks exact names, prefixes, and substrings before description matches across groups", () => {
+    const options: TemplateTextFieldOption[] = [
+      { name: "currency.convert", description: "Converts the target amount", sample: "11,50 €", kind: "module" },
+      { name: "viewer_target", description: "Target viewer", sample: "viewer", kind: "module" },
+      { name: "target_name", description: "Target name", sample: "viewer", kind: "channel" },
+      { name: "target", description: "Target viewer", sample: "viewer", kind: "system" },
+    ];
+
+    expect(filterTemplateTextFieldOptions(options, "target").map(({ name }) => name)).toEqual([
+      "target", "target_name", "viewer_target", "currency.convert",
+    ]);
+    expect(groupTemplateTextFieldOptions(options, { groupLabels }, "target").map(({ group }) => group.id)).toEqual([
+      "channel", "own", "module",
+    ]);
+  });
+
   it("shows a duplicate name once across grouped options", () => {
     const options: TemplateTextFieldOption[] = [
       { name: "user", description: "First declaration", sample: "first", kind: "system" },
