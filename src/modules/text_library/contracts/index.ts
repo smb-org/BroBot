@@ -96,6 +96,7 @@ export interface TextLibraryData {
 export type TextBlockMutationError =
   | "already_exists"
   | "in_use"
+  | "template_too_long"
   | "not_found"
   | "conflict"
   | "category_not_found"

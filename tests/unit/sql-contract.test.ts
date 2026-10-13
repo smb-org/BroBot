@@ -168,6 +168,10 @@ const sqlGetFixtures = new Map<string, string>([
   ["authorization.sql", authorizeModuleMutation("channel-id", actor, now).sql],
   ["blockGuard.sql", textBlockWriteGuard("channel-id", 1, ["{text.welcome}"]).sql],
   ["textBlockGuard?.sql ?? \"\"", textBlockWriteGuard("channel-id", 1, ["{text.welcome}"]).sql],
+  ["renamedBlockGuard", `EXISTS (
+        SELECT 1 FROM text_blocks
+         WHERE channel_id = ? AND block_name = ? AND revision = ?
+      )`],
 ]);
 
 // Wrangler manages this table itself and doesn't create it via our migrations.

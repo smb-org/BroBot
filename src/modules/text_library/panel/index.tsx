@@ -309,15 +309,25 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
         ...draft,
         variants: draft.variants.map((variant, index) => index === draft.variants.length - 1 ? { ...variant, conditions: {} } : variant),
       };
+      const originalName = selectedName;
       const saved = await write(revision, (baselineRevision) => baselineRevision === null
         ? createTextBlock(channelId, payload)
-        : saveTextBlock(channelId, { ...payload, revision: baselineRevision }), (current, result) => updateLibraryCache(current, (library) => {
-          const existing = library.blocks.find((block) => block.name === result.name);
+        : originalName === null
+          ? Promise.reject(new Error("A text block name is required for an update."))
+          : saveTextBlock(channelId, originalName, { ...payload, revision: baselineRevision }), (current, result) => updateLibraryCache(current, (library) => {
+          const usages = { ...library.usages };
+          if (originalName !== null && originalName !== result.name) {
+            const previousUsages = usages[originalName];
+            Reflect.deleteProperty(usages, originalName);
+            if (previousUsages !== undefined) usages[result.name] = previousUsages;
+          }
           return {
             ...library,
-            blocks: existing === undefined
-              ? [...library.blocks, result]
-              : library.blocks.map((block) => block.name === result.name ? result : block),
+            blocks: [
+              ...library.blocks.filter((block) => block.name !== result.name && block.name !== originalName),
+              result,
+            ],
+            usages,
           };
         }, data));
       if (editorSwitch.current !== startedSwitch) return null;
@@ -547,7 +557,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
                     hint={labels.nameHint}
                     value={draft.name}
                     onChange={(name) => setDraft({ ...draft, name: name.toLowerCase().replace(/[^a-z0-9_]/gu, "_").slice(0, 32) })}
-                    disabled={!isCreate || pending}
+                    disabled={pending}
                     {...(draft.name.length > 0 && nameInvalid ? { error: labels.nameInvalid } : nameTaken ? { error: labels.nameExists } : nameReserved ? { error: labels.nameReserved } : {})}
                     mono
                   />

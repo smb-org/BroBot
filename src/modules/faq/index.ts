@@ -47,6 +47,9 @@ export const faqModule: BotModule<typeof settingsSchema> = {
   templateUsageSources,
   variableReferences: faqVariableReferences,
   validateTemplateContent: validateFaqTemplateMutation,
+  afterTextBlockRename(db, channelId) {
+    createFaqRepository(db).invalidate(channelId);
+  },
   navigationEntries: [{
     id: "faq",
     label: { de: "FAQ & Auto-Antworten", en: "FAQ & Auto replies" },

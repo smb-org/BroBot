@@ -729,6 +729,8 @@ export type ModuleScheduleInputChangeReason = "event_times" | "channel_time_zone
 export interface ModuleTemplateContentCandidate {
   name: string;
   texts: readonly string[];
+  /** Existing consumer references are rewritten to this candidate during a text-block rename. */
+  renamedFrom?: string;
 }
 
 /** A generic reason a module consumer rejects a proposed template-content edit. */
@@ -1329,6 +1331,8 @@ export interface ModuleRouteVariables {
     channelId: string,
     candidate: ModuleTemplateContentCandidate,
   ) => Promise<readonly ModuleTemplateContentIssue[]>;
+  /** Notifies modules after a text block rename rewrites their stored templates. */
+  afterTextBlockRename: (channelId: string) => void;
   resolveTextBlockConditions: (
     channelId: string,
     ids: readonly string[],
@@ -1482,6 +1486,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   validateTemplateContent?: (
     context: ModuleTemplateContentValidationContext,
   ) => Promise<readonly ModuleTemplateContentIssue[]>;
+  /** Clears module-owned caches after a shared text block rename updates stored templates. */
+  afterTextBlockRename?: (db: D1Database, channelId: string) => void;
   /** Optional references to channel variables stored in module-owned data. */
   variableReferences?: ModuleVariableReferences;
   /** Broadcaster consent the host verifies before the EventSub subscription. */

@@ -57,6 +57,7 @@ interface ModuleRouteEnvironment {
     | "listTextBlockConditions"
     | "listEventTimeSources" | "resolveEventTimes"
     | "notifyScheduleInputsChanged" | "validateTemplateContentMutation"
+    | "afterTextBlockRename"
     | "resolveTextBlockConditions"
     | "publishModuleOverlayMessage"
     | "publishOverlayHostEvent"
@@ -257,6 +258,9 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
       module.validateTemplateContent?.(validationContext) ?? Promise.resolve([]),
     ));
     return issues.flat();
+  });
+  context.set("afterTextBlockRename", (channelId) => {
+    for (const module of MODULES) module.afterTextBlockRename?.(context.env.DB, channelId);
   });
   context.set("resolveTextBlockConditions", async (channelId, ids, now, options) => {
     const requested = new Set(ids);

@@ -101,8 +101,8 @@ const mutate = async <T,>(channelId: string, path: string, method: "POST" | "PAT
 export const createTextBlock = async (channelId: string, block: TextBlockMutationInput): Promise<TextBlock> =>
   (await mutate<{ block: TextBlock }>(channelId, "/blocks", "POST", block)).block;
 
-export const saveTextBlock = async (channelId: string, block: TextBlockSaveInput): Promise<TextBlock> =>
-  (await mutate<{ block: TextBlock }>(channelId, `/blocks/${encodeURIComponent(block.name)}`, "PATCH", block)).block;
+export const saveTextBlock = async (channelId: string, fromName: string, block: TextBlockSaveInput): Promise<TextBlock> =>
+  (await mutate<{ block: TextBlock }>(channelId, `/blocks/${encodeURIComponent(fromName)}`, "PATCH", block)).block;
 
 export const deleteTextBlock = async (channelId: string, name: string, revision: number): Promise<void> => {
   await mutate<{ ok: boolean }>(channelId, `/blocks/${encodeURIComponent(name)}?revision=${String(revision)}`, "DELETE");

@@ -6,7 +6,7 @@ import type {
 } from "../contract";
 import { templateVariableNames, SYSTEM_TEMPLATE_VARIABLE_LIST } from "../contract";
 import { isEventTemplateVariableAvailable } from "../../contracts/event-template-variables";
-import { blockReferencesInText } from "./text-block-references";
+import { blockReferencesInText, rewriteTextBlockReference } from "./text-block-references";
 
 export type EventTextBlockValidation = { ok: true } | { ok: false; reason: "missing" | "input_dependent" };
 
@@ -42,13 +42,15 @@ const validateEventTextBlock = async (
 ): Promise<EventTextBlockValidation> => {
   if (!/^[a-z0-9_]{1,32}$/u.test(blockName)) return { ok: false, reason: "missing" };
   const inputVariables = inputVariablesForEvent(registeredVariables);
+  const renamedFrom = candidate?.renamedFrom;
   const visited = new Set<string>();
   const visit = async (name: string, depth: number): Promise<EventTextBlockValidation> => {
-    if (visited.has(name)) return { ok: true };
+    const resolvedName = renamedFrom === name ? candidate?.name ?? name : name;
+    if (visited.has(resolvedName)) return { ok: true };
     if (depth > 3) return { ok: false, reason: "missing" };
-    visited.add(name);
+    visited.add(resolvedName);
     let texts: readonly string[];
-    if (candidate?.name === name) {
+    if (candidate?.name === resolvedName) {
       texts = candidate.texts;
     } else {
       const block = await db.prepare(
@@ -56,7 +58,7 @@ const validateEventTextBlock = async (
            FROM text_block_variants AS variant
           WHERE variant.channel_id = ? AND variant.block_name = ?
           ORDER BY variant.position`,
-      ).bind(channelId, name).all<{ texts_json: string }>();
+      ).bind(channelId, resolvedName).all<{ texts_json: string }>();
       if (block.results.length === 0) return { ok: false, reason: "missing" };
       texts = block.results.flatMap(({ texts_json }) => {
         try {
@@ -65,7 +67,10 @@ const validateEventTextBlock = async (
         } catch { return []; }
       });
     }
-    for (const text of texts) {
+    const resolvedTexts = renamedFrom === undefined || candidate === undefined
+      ? texts
+      : texts.map((text) => rewriteTextBlockReference(text, renamedFrom, candidate.name));
+    for (const text of resolvedTexts) {
       if (templateVariableNames(text).some((variable) => inputVariables.has(variable))) {
         return { ok: false, reason: "input_dependent" };
       }
@@ -104,13 +109,23 @@ export const validateEventTemplateContentMutation = async (
   consumers: readonly { name: string; text: string }[],
 ): Promise<readonly ModuleTemplateContentIssue[]> => {
   const issues: ModuleTemplateContentIssue[] = [];
+  const renamedFrom = context.candidate.renamedFrom;
+  const candidate = renamedFrom === undefined
+    ? context.candidate
+    : {
+      ...context.candidate,
+      texts: context.candidate.texts.map((text) =>
+        rewriteTextBlockReference(text, renamedFrom, context.candidate.name)),
+    };
   for (const consumer of consumers) {
     const validation = await validateEventTemplateText(
       context.DB,
       context.channelId,
-      consumer.text,
+      renamedFrom === undefined
+        ? consumer.text
+        : rewriteTextBlockReference(consumer.text, renamedFrom, context.candidate.name),
       context.registeredVariables,
-      context.candidate,
+      candidate,
     );
     if (!validation.ok && validation.reason === "input_dependent") {
       issues.push({ reason: "input_dependent", consumerName: consumer.name });

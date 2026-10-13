@@ -7,6 +7,7 @@ import type { ModuleEvent } from "../../src/modules/contract";
 import { textLibraryModule } from "../../src/modules/text_library";
 import { adsModule } from "../../src/modules/ads";
 import { raidModule } from "../../src/modules/raid";
+import { createFaqRepository } from "../../src/modules/faq/adapters/d1";
 import { createTextCommandRepository } from "../../src/modules/text_commands/adapters/d1";
 import { processTextCommandMessage } from "../../src/modules/text_commands/service";
 import type { TextBlockConditions, TextBlockVariant, TwitchGame } from "../../src/modules/text_library/contracts";
@@ -19,12 +20,13 @@ import { firstMatchingTextBlockVariant, textBlockConditionsMatch } from "../../s
 import { runDashboardNavigationGuards } from "../../src/dashboard/ui/navigation-guard";
 import TextLibraryPanel from "../../src/modules/text_library/panel/index";
 import { textLibraryTexts } from "../../src/modules/text_library/panel/locale";
+import { templateTextLength } from "../../src/contracts/template-text-length";
 import { createTemplateRenderer, type TemplateResolverSources, type TemplateValueProvider } from "../../src/worker/template-resolver";
 import { truncateChatText } from "../../src/worker/chat";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../../src/modules/contract";
 import { renderWithQuery } from "../query-test-utils";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, jsonResponse, testKey } from "./fixtures";
-import { TestD1Database } from "./test-d1";
+import { createReadInterleavingDatabase, TestD1Database } from "./test-d1";
 
 const CHANNEL_ID = "esembe";
 const NOW = Date.parse("2026-09-26T12:00:00.000Z");
@@ -528,6 +530,29 @@ describe("text library", () => {
     });
   });
 
+  it("rejects a rename that creates a cycle after references are rewritten", async () => {
+    const welcome = await createBlock("welcome", [variant("default", "Welcome")]);
+    if (!welcome.ok) throw new Error("Could not create the rename cycle test block.");
+    await expect(createBlock("parent", [variant("default", "Nested {text.welcome}")]))
+      .resolves.toMatchObject({ ok: true });
+    const snapshot = await service.list(CHANNEL_ID);
+
+    const result = await service.rename({
+      channelId: CHANNEL_ID,
+      name: "greeting",
+      categoryId: welcome.block.categoryId,
+      games: [],
+      variants: [variant("default", "Nested {text.parent}")],
+      expectedRevision: welcome.block.revision,
+      expectedGraphRevision: snapshot.settings.graphRevision,
+      now: new Date(NOW).toISOString(),
+    }, "welcome", ACTOR, snapshot);
+
+    expect(result).toMatchObject({ ok: false, reason: "reference_cycle" });
+    await expect(service.find(CHANNEL_ID, "welcome")).resolves.toMatchObject({ name: "welcome" });
+    await expect(service.find(CHANNEL_ID, "greeting")).resolves.toBeNull();
+  });
+
   it("reports direct and nested uses supplied by generic module contracts", async () => {
     await expect(createBlock("answer", [variant("default", "{text.detail}")])).resolves.toMatchObject({ ok: true });
     await expect(createBlock("detail", [variant("default", "A reusable detail")])).resolves.toMatchObject({ ok: true });
@@ -815,7 +840,7 @@ describe("text library", () => {
     expect(result.text.endsWith("…")).toBe(true);
   });
 
-  it("saves an edited panel block through the PATCH route using revision", async () => {
+  it("saves a text block rename through the PATCH route using revision", async () => {
     const created = await createBlock("welcome", [variant("default", "Hello")]);
     if (!created.ok) throw new Error("Could not create the panel test block.");
     await insertLoginIdentityAndSession(database, "manager-1");
@@ -855,11 +880,16 @@ describe("text library", () => {
 
     renderTextLibraryPanel();
     fireEvent.click(await screen.findByRole("button", { name: /\{text\.welcome\}/u }));
+    const nameField = within(screen.getByRole("region", { name: "Name" })).getByRole("textbox", { name: "Name" });
+    expect(nameField).toBeEnabled();
+    fireEvent.change(nameField, { target: { value: "greeting" } });
     fireEvent.click(within(screen.getByRole("region", { name: "Name" })).getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(patchStatus).toBe(200));
-    expect(patchBody).toMatchObject({ name: "welcome", revision: created.block.revision });
+    expect(patchBody).toMatchObject({ name: "greeting", revision: created.block.revision });
     expect(patchBody).not.toHaveProperty("expectedRevision");
+    expect(await database.prepare("SELECT block_name FROM text_blocks WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).toEqual({ block_name: "greeting" });
 
     const reserved = await fetch(`/api/channels/${CHANNEL_ID}/modules/text_library/blocks`, {
       method: "POST",
@@ -873,6 +903,566 @@ describe("text library", () => {
     });
     expect(reserved.status).toBe(400);
     await expect(reserved.json()).resolves.toEqual({ error: "text_library_block_reserved_name" });
+  });
+
+  it("renames a block explicitly and rewrites exact references across its consumers", async () => {
+    const created = await createBlock("welcome", [variant("default", "Hello")]);
+    if (!created.ok) throw new Error("Could not create the rename test block.");
+    await createBlock("parent", [variant("default", "Nested {text.welcome}; keep {text.welcomer}")]);
+    await insertLoginIdentityAndSession(database, "manager-rename");
+    await insertMember(database, CHANNEL_ID, "manager-rename", "manager");
+    const sessionCookie = await createSessionCookie(
+      { sessionId: "session-manager-rename" },
+      TEST_SESSION_KEYS,
+      TEST_ENCRYPTION_KEYS,
+    );
+    const csrf = await createCsrfToken("session-manager-rename", TEST_SESSION_KEYS, new Date().toISOString());
+    const now = new Date(NOW).toISOString();
+    database.sqlite.exec(`
+      INSERT INTO text_commands (channel_id, command_name, response_text, template_fields_json, timeout_fallback_text, timeout_reason, created_at, updated_at)
+      VALUES ('${CHANNEL_ID}', 'welcome', 'Command {text.welcome}', '{"label":"{text.welcome}"}', 'Try {text.welcome}', 'Reason {text.welcome}', '${now}', '${now}');
+      INSERT INTO timers (timer_id, channel_id, name, enabled, trigger_type, trigger_json, message_text, created_at, updated_at)
+      VALUES ('timer-rename', '${CHANNEL_ID}', 'Reminder', 1, 'interval', '{}', 'Timer {text.welcome}', '${now}', '${now}');
+      INSERT INTO faq_entries (faq_id, channel_id, name, matcher_json, answer_text, created_at, updated_at)
+      VALUES ('faq-rename', '${CHANNEL_ID}', 'Greeting', '{"patterns":["hello"]}', 'FAQ {text.welcome}', '${now}', '${now}');
+      INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+      VALUES ('${CHANNEL_ID}', 'ads', 1, '{"automatic":"Ad {text.welcome}"}');
+      INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+      VALUES ('overlay-rename', '${CHANNEL_ID}', 'Welcome', '${now}', '${now}');
+      INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, text, config_json)
+      VALUES ('element-rename', '${CHANNEL_ID}', 'overlay-rename', 'text', 'Overlay {text.welcome}', '{"content":"{text.welcome}"}');
+      INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, config_json)
+      VALUES ('element-block-rename', '${CHANNEL_ID}', 'overlay-rename', 'text_library.block', '{"blockName":"welcome"}');
+    `);
+    const faqRepository = createFaqRepository(database as unknown as D1Database);
+    const cachedFaqMatchers = await faqRepository.matchers(CHANNEL_ID, NOW);
+    expect(cachedFaqMatchers[0]?.entry.revision).toBe(1);
+    const environment = {
+      DB: database as unknown as D1Database,
+      TWITCH_CLIENT_ID: "client-id",
+      SESSION_COOKIE_KEYS: TEST_SESSION_KEYS,
+      SESSION_ENCRYPTION_KEYS: TEST_ENCRYPTION_KEYS,
+    } as unknown as Env;
+
+    const response = await panelRouter.fetch(new Request(
+      `https://brobot.example/api/channels/${CHANNEL_ID}/modules/text_library/blocks/welcome`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrf,
+          Cookie: `__Host-brobot_session=${sessionCookie}; __Host-brobot_csrf=${csrf}`,
+        },
+        body: JSON.stringify({
+          name: "greeting",
+          categoryId: "social",
+          games: [],
+          variants: [{ id: "default", conditions: {}, texts: ["Hello again"] }],
+          revision: created.block.revision,
+        }),
+      },
+    ), environment);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ block: { name: "greeting", revision: created.block.revision + 1 } });
+    expect(await database.prepare("SELECT block_name FROM text_block_variants WHERE channel_id = ? AND block_name = ?")
+      .bind(CHANNEL_ID, "greeting").all()).toMatchObject({ results: [{ block_name: "greeting" }] });
+    expect(await database.prepare("SELECT texts_json FROM text_block_variants WHERE channel_id = ? AND block_name = ?")
+      .bind(CHANNEL_ID, "parent").first()).toEqual({ texts_json: '["Nested {text.greeting}; keep {text.welcomer}"]' });
+    expect(await database.prepare("SELECT response_text, template_fields_json, timeout_fallback_text, timeout_reason, revision FROM text_commands WHERE channel_id = ? AND command_name = ?")
+      .bind(CHANNEL_ID, "welcome").first()).toMatchObject({
+      response_text: "Command {text.greeting}",
+      template_fields_json: '{"label":"{text.greeting}"}',
+      timeout_fallback_text: "Try {text.greeting}",
+      timeout_reason: "Reason {text.greeting}",
+      revision: 2,
+    });
+    expect(await database.prepare("SELECT message_text, revision FROM timers WHERE timer_id = ?")
+      .bind("timer-rename").first()).toMatchObject({ message_text: "Timer {text.greeting}", revision: 2 });
+    expect(await database.prepare("SELECT answer_text, revision FROM faq_entries WHERE faq_id = ?")
+      .bind("faq-rename").first()).toMatchObject({ answer_text: "FAQ {text.greeting}", revision: 2 });
+    const refreshedFaqMatchers = await faqRepository.matchers(CHANNEL_ID, NOW + 1);
+    expect(refreshedFaqMatchers[0]?.entry.revision).toBe(2);
+    expect(await database.prepare("SELECT settings, revision FROM channel_modules WHERE channel_id = ? AND module_id = ?")
+      .bind(CHANNEL_ID, "ads").first()).toMatchObject({ settings: '{"automatic":"Ad {text.greeting}"}', revision: 2 });
+    expect(await database.prepare("SELECT text, config_json FROM overlay_elements WHERE element_id = ?")
+      .bind("element-rename").first()).toEqual({ text: "Overlay {text.greeting}", config_json: '{"content":"{text.greeting}"}' });
+    expect(await database.prepare("SELECT config_json FROM overlay_elements WHERE element_id = ?")
+      .bind("element-block-rename").first()).toEqual({ config_json: '{"blockName":"greeting"}' });
+    expect(await database.prepare("SELECT revision FROM overlays WHERE overlay_id = ?")
+      .bind("overlay-rename").first()).toEqual({ revision: 2 });
+    const audit = await database.prepare("SELECT action, before_json, after_json FROM audit_log WHERE channel_id = ? AND module_id = ? ORDER BY created_at DESC LIMIT 1")
+      .bind(CHANNEL_ID, "text_library").first<{ action: string; before_json: string; after_json: string }>();
+    expect(audit?.action).toBe("text_library.block.renamed");
+    expect(audit?.before_json).toContain("welcome");
+    expect(audit?.after_json).toContain("greeting");
+  });
+
+  it("rejects a rename when a timer is committed after consumer compatibility validation", async () => {
+    const created = await createBlock("welcome", [variant("default", "Hello")]);
+    if (!created.ok) throw new Error("Could not create the concurrent consumer test block.");
+    await insertLoginIdentityAndSession(database, "manager-concurrent-consumer");
+    await insertMember(database, CHANNEL_ID, "manager-concurrent-consumer", "manager");
+    const sessionCookie = await createSessionCookie(
+      { sessionId: "session-manager-concurrent-consumer" },
+      TEST_SESSION_KEYS,
+      TEST_ENCRYPTION_KEYS,
+    );
+    const csrf = await createCsrfToken("session-manager-concurrent-consumer", TEST_SESSION_KEYS, new Date().toISOString());
+    const now = new Date(NOW).toISOString();
+    const interleavedDatabase = createReadInterleavingDatabase(
+      database,
+      (sql) => sql.includes("SELECT timer_id, name, message_text FROM timers WHERE channel_id = ?"),
+      async () => {
+        await database.prepare(
+          `INSERT INTO timers
+            (timer_id, channel_id, name, enabled, trigger_type, trigger_json, message_text, created_at, updated_at)
+           VALUES (?, ?, ?, 1, 'interval', '{}', ?, ?, ?)`,
+        ).bind("timer-concurrent-consumer", CHANNEL_ID, "Reminder", "Timer {text.welcome}", now, now).run();
+      },
+    );
+    const environment = {
+      DB: interleavedDatabase,
+      TWITCH_CLIENT_ID: "client-id",
+      SESSION_COOKIE_KEYS: TEST_SESSION_KEYS,
+      SESSION_ENCRYPTION_KEYS: TEST_ENCRYPTION_KEYS,
+    } as unknown as Env;
+
+    const response = await panelRouter.fetch(new Request(
+      `https://brobot.example/api/channels/${CHANNEL_ID}/modules/text_library/blocks/welcome`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrf,
+          Cookie: `__Host-brobot_session=${sessionCookie}; __Host-brobot_csrf=${csrf}`,
+        },
+        body: JSON.stringify({
+          name: "greeting",
+          categoryId: "social",
+          games: [],
+          variants: [{ id: "default", conditions: {}, texts: ["{args}"] }],
+          revision: created.block.revision,
+        }),
+      },
+    ), environment);
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "text_library_block_conflict" });
+    await expect(database.prepare("SELECT block_name FROM text_blocks WHERE channel_id = ? ORDER BY block_name")
+      .bind(CHANNEL_ID).all()).resolves.toMatchObject({ results: [{ block_name: "welcome" }] });
+    await expect(database.prepare("SELECT message_text, revision FROM timers WHERE timer_id = ?")
+      .bind("timer-concurrent-consumer").first()).resolves.toMatchObject({ message_text: "Timer {text.welcome}", revision: 1 });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log WHERE channel_id = ? AND action = ?")
+      .bind(CHANNEL_ID, "text_library.block.renamed").first()).resolves.toEqual({ count: 0 });
+  });
+
+  it("keeps text block rename concurrency-safe and rejects a stale revision", async () => {
+    const created = await createBlock("welcome", [variant("default", "Hello")]);
+    if (!created.ok) throw new Error("Could not create the concurrency test block.");
+    await insertLoginIdentityAndSession(database, "manager-stale-rename");
+    await insertMember(database, CHANNEL_ID, "manager-stale-rename", "manager");
+    const sessionCookie = await createSessionCookie(
+      { sessionId: "session-manager-stale-rename" },
+      TEST_SESSION_KEYS,
+      TEST_ENCRYPTION_KEYS,
+    );
+    const csrf = await createCsrfToken("session-manager-stale-rename", TEST_SESSION_KEYS, new Date().toISOString());
+    const environment = {
+      DB: database as unknown as D1Database,
+      TWITCH_CLIENT_ID: "client-id",
+      SESSION_COOKIE_KEYS: TEST_SESSION_KEYS,
+      SESSION_ENCRYPTION_KEYS: TEST_ENCRYPTION_KEYS,
+    } as unknown as Env;
+    const rename = (name: string, revision: number) => panelRouter.fetch(new Request(
+      `https://brobot.example/api/channels/${CHANNEL_ID}/modules/text_library/blocks/welcome`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrf,
+          Cookie: `__Host-brobot_session=${sessionCookie}; __Host-brobot_csrf=${csrf}`,
+        },
+        body: JSON.stringify({
+          name,
+          categoryId: "social",
+          games: [],
+          variants: [{ id: "default", conditions: {}, texts: ["Hello"] }],
+          revision,
+        }),
+      },
+    ), environment);
+
+    const current = await rename("welcome", created.block.revision);
+    expect(current.status).toBe(200);
+    const stale = await rename("greeting", created.block.revision);
+    expect(stale.status).toBe(409);
+    await expect(stale.json()).resolves.toMatchObject({ error: "text_library_block_conflict" });
+    const renamed = await rename("greeting", created.block.revision + 1);
+    expect(renamed.status).toBe(200);
+    const staleAfterRename = await rename("salutation", created.block.revision + 1);
+    expect(staleAfterRename.status).toBe(404);
+    expect(await database.prepare("SELECT block_name FROM text_blocks WHERE channel_id = ? ORDER BY block_name")
+      .bind(CHANNEL_ID).all()).toMatchObject({ results: [{ block_name: "greeting" }] });
+    expect(await database.prepare("SELECT COUNT(*) AS count FROM audit_log WHERE channel_id = ? AND action = ?")
+      .bind(CHANNEL_ID, "text_library.block.renamed").first()).toEqual({ count: 1 });
+  });
+
+  it("persists edited, added, and removed variants when a block is renamed", async () => {
+    const created = await createBlock("welcome", [
+      { id: "weekday", conditions: { stream: "offline" }, texts: ["Welcome"] },
+      { id: "weekend", conditions: { weekdays: [0, 6] }, texts: ["Weekend welcome"] },
+      { id: "default", conditions: {}, texts: ["Fallback welcome"] },
+    ]);
+    if (!created.ok) throw new Error("Could not create the rename variant test block.");
+    await insertLoginIdentityAndSession(database, "manager-variant-rename");
+    await insertMember(database, CHANNEL_ID, "manager-variant-rename", "manager");
+    const sessionCookie = await createSessionCookie(
+      { sessionId: "session-manager-variant-rename" },
+      TEST_SESSION_KEYS,
+      TEST_ENCRYPTION_KEYS,
+    );
+    const csrf = await createCsrfToken("session-manager-variant-rename", TEST_SESSION_KEYS, new Date().toISOString());
+    const environment = {
+      DB: database as unknown as D1Database,
+      TWITCH_CLIENT_ID: "client-id",
+      SESSION_COOKIE_KEYS: TEST_SESSION_KEYS,
+      SESSION_ENCRYPTION_KEYS: TEST_ENCRYPTION_KEYS,
+    } as unknown as Env;
+    const response = await panelRouter.fetch(new Request(
+      `https://brobot.example/api/channels/${CHANNEL_ID}/modules/text_library/blocks/welcome`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrf,
+          Cookie: `__Host-brobot_session=${sessionCookie}; __Host-brobot_csrf=${csrf}`,
+        },
+        body: JSON.stringify({
+          name: "greeting",
+          categoryId: "social",
+          games: [],
+          variants: [
+            { id: "weekday", conditions: { stream: "online", weekdays: [1] }, texts: ["Edited greeting"] },
+            { id: "evening", conditions: { weekdays: [5] }, texts: ["New evening greeting"] },
+            { id: "default", conditions: {}, texts: ["Fallback greeting"] },
+          ],
+          revision: created.block.revision,
+        }),
+      },
+    ), environment);
+
+    expect(response.status, await response.clone().text()).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      block: {
+        name: "greeting",
+        variants: [
+          { id: "weekday", conditions: { stream: "online", weekdays: [1] }, texts: ["Edited greeting"] },
+          { id: "evening", conditions: { weekdays: [5] }, texts: ["New evening greeting"] },
+          { id: "default", conditions: {}, texts: ["Fallback greeting"] },
+        ],
+      },
+    });
+    await expect(database.prepare(
+      "SELECT variant_id, position, conditions_json, texts_json FROM text_block_variants WHERE channel_id = ? AND block_name = ? ORDER BY position",
+    ).bind(CHANNEL_ID, "greeting").all()).resolves.toMatchObject({
+      results: [
+        { variant_id: "weekday", position: 0, conditions_json: '{"stream":"online","weekdays":[1]}', texts_json: '["Edited greeting"]' },
+        { variant_id: "evening", position: 1, conditions_json: '{"weekdays":[5]}', texts_json: '["New evening greeting"]' },
+        { variant_id: "default", position: 2, conditions_json: "{}", texts_json: '["Fallback greeting"]' },
+      ],
+    });
+  });
+
+  it("leaves every consumer unchanged when different sources race for one rename target", async () => {
+    const created = await createBlock("welcome", [variant("default", "Original")]);
+    if (!created.ok) throw new Error("Could not create the overlapping rename test block.");
+    const other = await createBlock("other", [variant("default", "Other original")]);
+    if (!other.ok) throw new Error("Could not create the competing rename source.");
+    const parent = await createBlock("parent", [variant("default", "Parent uses {text.other}")]);
+    if (!parent.ok) throw new Error("Could not create the rename consumer block.");
+    const snapshot = await service.list(CHANNEL_ID);
+    const now = new Date(NOW).toISOString();
+    database.sqlite.exec(`
+      INSERT INTO text_commands (channel_id, command_name, response_text, template_fields_json, timeout_fallback_text, timeout_reason, created_at, updated_at)
+      VALUES ('${CHANNEL_ID}', 'other-command', 'Command {text.other}', '{"label":"{text.other}"}', 'Try {text.other}', 'Reason {text.other}', '${now}', '${now}');
+      INSERT INTO timers (timer_id, channel_id, name, enabled, trigger_type, trigger_json, message_text, created_at, updated_at)
+      VALUES ('timer-other-rename', '${CHANNEL_ID}', 'Other reminder', 1, 'interval', '{}', 'Timer {text.other}', '${now}', '${now}');
+      INSERT INTO faq_entries (faq_id, channel_id, name, matcher_json, answer_text, created_at, updated_at)
+      VALUES ('faq-other-rename', '${CHANNEL_ID}', 'Other answer', '{"patterns":["other"]}', 'FAQ {text.other}', '${now}', '${now}');
+      INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+      VALUES ('${CHANNEL_ID}', 'ads', 1, '{"automatic":"Ad {text.other}"}');
+      INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+      VALUES ('overlay-other-rename', '${CHANNEL_ID}', 'Other', '${now}', '${now}');
+      INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, text, config_json)
+      VALUES ('element-other-rename', '${CHANNEL_ID}', 'overlay-other-rename', 'text', 'Overlay {text.other}', '{"content":"{text.other}"}');
+    `);
+    let resolveFirstAtBatch!: () => void;
+    let resolveSecondAtBatch!: () => void;
+    let resolveFirstBatchFinished!: () => void;
+    const firstAtBatch = new Promise<void>((resolve) => { resolveFirstAtBatch = resolve; });
+    const secondAtBatch = new Promise<void>((resolve) => { resolveSecondAtBatch = resolve; });
+    const firstBatchFinished = new Promise<void>((resolve) => { resolveFirstBatchFinished = resolve; });
+    let batchCount = 0;
+    const interleavedDatabase = {
+      prepare: (sql: string) => database.prepare(sql),
+      batch: async (statements: Parameters<TestD1Database["batch"]>[0]) => {
+        batchCount += 1;
+        if (batchCount === 1) {
+          resolveFirstAtBatch();
+          await secondAtBatch;
+          const result = await database.batch(statements);
+          resolveFirstBatchFinished();
+          return result;
+        }
+        resolveSecondAtBatch();
+        await firstBatchFinished;
+        return database.batch(statements);
+      },
+    } as unknown as D1Database;
+    const interleavedRepository = createTextBlockRepository(interleavedDatabase, authorize);
+    const rename = (fromName: string, expectedRevision: number, text: string) => interleavedRepository.rename({
+      channelId: CHANNEL_ID,
+      name: "greeting",
+      categoryId: created.block.categoryId,
+      games: [],
+      variants: [variant("default", text)],
+      expectedRevision,
+      expectedGraphRevision: snapshot.settings.graphRevision,
+      now,
+    }, fromName, ACTOR);
+
+    const winnerPromise = rename("welcome", created.block.revision, "Winning variant");
+    await firstAtBatch;
+    const loserPromise = rename("other", other.block.revision, "Losing variant");
+    const [winner, loser] = await Promise.all([winnerPromise, loserPromise]);
+
+    expect(winner).toMatchObject({ ok: true, block: { name: "greeting" } });
+    expect(loser).toMatchObject({ ok: false, reason: "already_exists" });
+    await expect(database.prepare(
+      "SELECT texts_json FROM text_block_variants WHERE channel_id = ? AND block_name = ? AND variant_id = ?",
+    ).bind(CHANNEL_ID, "greeting", "default").first()).resolves.toEqual({ texts_json: '["Winning variant"]' });
+    await expect(database.prepare(
+      "SELECT revision FROM text_blocks WHERE channel_id = ? AND block_name = ?",
+    ).bind(CHANNEL_ID, "greeting").first()).resolves.toEqual({ revision: created.block.revision + 1 });
+    await expect(database.prepare(
+      "SELECT block_name, revision FROM text_blocks WHERE channel_id = ? AND block_name IN (?, ?) ORDER BY block_name",
+    ).bind(CHANNEL_ID, "other", "parent").all()).resolves.toMatchObject({
+      results: [
+        { block_name: "other", revision: other.block.revision },
+        { block_name: "parent", revision: parent.block.revision },
+      ],
+    });
+    await expect(database.prepare(
+      "SELECT block_name, texts_json FROM text_block_variants WHERE channel_id = ? AND block_name IN (?, ?) ORDER BY block_name",
+    ).bind(CHANNEL_ID, "other", "parent").all()).resolves.toMatchObject({
+      results: [
+        { block_name: "other", texts_json: '["Other original"]' },
+        { block_name: "parent", texts_json: '["Parent uses {text.other}"]' },
+      ],
+    });
+    await expect(database.prepare(
+      "SELECT response_text, template_fields_json, timeout_fallback_text, timeout_reason, revision FROM text_commands WHERE channel_id = ? AND command_name = ?",
+    ).bind(CHANNEL_ID, "other-command").first()).resolves.toMatchObject({
+      response_text: "Command {text.other}",
+      template_fields_json: '{"label":"{text.other}"}',
+      timeout_fallback_text: "Try {text.other}",
+      timeout_reason: "Reason {text.other}",
+      revision: 1,
+    });
+    await expect(database.prepare(
+      "SELECT message_text, revision FROM timers WHERE timer_id = ?",
+    ).bind("timer-other-rename").first()).resolves.toEqual({ message_text: "Timer {text.other}", revision: 1 });
+    await expect(database.prepare(
+      "SELECT answer_text, revision FROM faq_entries WHERE faq_id = ?",
+    ).bind("faq-other-rename").first()).resolves.toEqual({ answer_text: "FAQ {text.other}", revision: 1 });
+    await expect(database.prepare(
+      "SELECT settings, revision FROM channel_modules WHERE channel_id = ? AND module_id = ?",
+    ).bind(CHANNEL_ID, "ads").first()).resolves.toEqual({ settings: '{"automatic":"Ad {text.other}"}', revision: 1 });
+    await expect(database.prepare(
+      "SELECT revision FROM overlays WHERE overlay_id = ?",
+    ).bind("overlay-other-rename").first()).resolves.toEqual({ revision: 1 });
+    await expect(database.prepare(
+      "SELECT text, config_json FROM overlay_elements WHERE element_id = ?",
+    ).bind("element-other-rename").first()).resolves.toEqual({ text: "Overlay {text.other}", config_json: '{"content":"{text.other}"}' });
+  });
+
+  it("validates timer compatibility against renamed block content", async () => {
+    const created = await createBlock("welcome", [variant("default", "Welcome")]);
+    if (!created.ok) throw new Error("Could not create the template compatibility test block.");
+    await createBlock("parent", [variant("default", "Nested {text.welcome}")]);
+    await database.prepare(`INSERT INTO timers
+      (timer_id, channel_id, name, enabled, trigger_type, trigger_json, message_text, created_at, updated_at)
+      VALUES (?, ?, ?, 1, 'interval', '{}', ?, ?, ?)`)
+      .bind("timer-rename-compatibility", CHANNEL_ID, "Reminder", "Use {text.parent}", new Date(NOW).toISOString(), new Date(NOW).toISOString()).run();
+    await insertLoginIdentityAndSession(database, "manager-rename-compatibility");
+    await insertMember(database, CHANNEL_ID, "manager-rename-compatibility", "manager");
+    const sessionCookie = await createSessionCookie(
+      { sessionId: "session-manager-rename-compatibility" },
+      TEST_SESSION_KEYS,
+      TEST_ENCRYPTION_KEYS,
+    );
+    const csrf = await createCsrfToken("session-manager-rename-compatibility", TEST_SESSION_KEYS, new Date().toISOString());
+    const environment = {
+      DB: database as unknown as D1Database,
+      TWITCH_CLIENT_ID: "client-id",
+      SESSION_COOKIE_KEYS: TEST_SESSION_KEYS,
+      SESSION_ENCRYPTION_KEYS: TEST_ENCRYPTION_KEYS,
+    } as unknown as Env;
+
+    const response = await panelRouter.fetch(new Request(
+      `https://brobot.example/api/channels/${CHANNEL_ID}/modules/text_library/blocks/welcome`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrf,
+          Cookie: `__Host-brobot_session=${sessionCookie}; __Host-brobot_csrf=${csrf}`,
+        },
+        body: JSON.stringify({
+          name: "greeting",
+          categoryId: "social",
+          games: [],
+          variants: [variant("default", "{args}")],
+          revision: created.block.revision,
+        }),
+      },
+    ), environment);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "text_library_template_usage_invalid",
+      issues: [{ reason: "input_dependent", consumerName: "Reminder" }],
+    });
+    await expect(service.find(CHANNEL_ID, "welcome")).resolves.toMatchObject({ name: "welcome" });
+    await expect(service.find(CHANNEL_ID, "greeting")).resolves.toBeNull();
+  });
+
+  it("rolls back a rename if saving its submitted variants fails", async () => {
+    const created = await createBlock("welcome", [variant("default", "Welcome")]);
+    if (!created.ok) throw new Error("Could not create the atomic rename test block.");
+    const snapshot = await service.list(CHANNEL_ID);
+    database.sqlite.exec(`
+      CREATE TRIGGER reject_block_variant_insert
+      BEFORE INSERT ON text_block_variants
+      WHEN NEW.variant_id = 'blocked'
+      BEGIN
+        SELECT RAISE(ABORT, 'blocked variant');
+      END;
+    `);
+
+    await expect(repository.rename({
+      channelId: CHANNEL_ID,
+      name: "greeting",
+      categoryId: created.block.categoryId,
+      games: [],
+      variants: [variant("blocked", "Edited welcome")],
+      expectedRevision: created.block.revision,
+      expectedGraphRevision: snapshot.settings.graphRevision,
+      now: new Date(NOW).toISOString(),
+    }, "welcome", ACTOR)).rejects.toThrow();
+
+    await expect(service.find(CHANNEL_ID, "welcome")).resolves.toMatchObject({
+      name: "welcome",
+      variants: [variant("default", "Welcome")],
+    });
+    await expect(service.find(CHANNEL_ID, "greeting")).resolves.toBeNull();
+    await expect(database.prepare("SELECT graph_revision FROM text_library_settings WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).resolves.toEqual({ graph_revision: snapshot.settings.graphRevision });
+  });
+
+  it("rejects a rename that would exceed a consumer template length", async () => {
+    const created = await createBlock("welcome", [variant("default", "Hello")]);
+    if (!created.ok) throw new Error("Could not create the template length test block.");
+    await database.prepare(`INSERT INTO timers (timer_id, channel_id, name, enabled, trigger_type, trigger_json, message_text, created_at, updated_at)
+      VALUES (?, ?, ?, 1, 'interval', '{}', ?, ?, ?)`)
+      .bind("timer-length", CHANNEL_ID, "Long reminder", `${"x".repeat(491)}{text.welcome}`, new Date(NOW).toISOString(), new Date(NOW).toISOString()).run();
+    const snapshot = await service.list(CHANNEL_ID);
+
+    const result = await repository.rename({
+      channelId: CHANNEL_ID,
+      name: "greeting",
+      categoryId: created.block.categoryId,
+      games: [],
+      variants: [variant("default", "Hello")],
+      expectedRevision: created.block.revision,
+      expectedGraphRevision: snapshot.settings.graphRevision,
+      now: new Date(NOW).toISOString(),
+    }, "welcome", ACTOR);
+
+    expect(result).toMatchObject({ ok: false, reason: "template_too_long" });
+    expect(await database.prepare("SELECT block_name FROM text_blocks WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).toEqual({ block_name: "welcome" });
+    expect(await database.prepare("SELECT message_text FROM timers WHERE timer_id = ?")
+      .bind("timer-length").first()).toEqual({ message_text: `${"x".repeat(491)}{text.welcome}` });
+  });
+
+  it("allows a renamed overlay token whose semantic length remains within the limit", async () => {
+    const created = await createBlock("welcome", [variant("default", "Hello")]);
+    if (!created.ok) throw new Error("Could not create the overlay length test block.");
+    const originalText = `${"x".repeat(86)}{text.welcome}`;
+    const renamedText = originalText.replaceAll("{text.welcome}", "{text.greeting}");
+    expect(originalText.length).toBe(100);
+    expect(renamedText.length).toBeGreaterThan(100);
+    expect(templateTextLength(renamedText)).toBeLessThanOrEqual(100);
+    const now = new Date(NOW).toISOString();
+    await database.prepare("INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+      .bind("overlay-length", CHANNEL_ID, "Length", now, now).run();
+    await database.prepare("INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, text, config_json) VALUES (?, ?, ?, 'text', ?, '{}')")
+      .bind("element-length", CHANNEL_ID, "overlay-length", originalText).run();
+    const snapshot = await service.list(CHANNEL_ID);
+
+    const result = await repository.rename({
+      channelId: CHANNEL_ID,
+      name: "greeting",
+      categoryId: created.block.categoryId,
+      games: [],
+      variants: [variant("default", "Hello")],
+      expectedRevision: created.block.revision,
+      expectedGraphRevision: snapshot.settings.graphRevision,
+      now,
+    }, "welcome", ACTOR);
+
+    expect(result).toMatchObject({ ok: true, block: { name: "greeting" } });
+    await expect(database.prepare("SELECT text FROM overlay_elements WHERE element_id = ?")
+      .bind("element-length").first()).resolves.toEqual({ text: renamedText });
+  });
+
+  it("rejects a rename when a consumer changes after validation starts", async () => {
+    const created = await createBlock("welcome", [variant("default", "Hello")]);
+    if (!created.ok) throw new Error("Could not create the concurrent consumer test block.");
+    const snapshot = await service.list(CHANNEL_ID);
+    let inserted = false;
+    const interleavedDatabase = {
+      prepare: (sql: string) => database.prepare(sql),
+      batch: async (statements: Parameters<TestD1Database["batch"]>[0]) => {
+        if (!inserted) {
+          inserted = true;
+          await database.prepare(`INSERT INTO text_commands (channel_id, command_name, response_text, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)`)
+            .bind(CHANNEL_ID, "concurrent", "Use {text.welcome}", new Date(NOW).toISOString(), new Date(NOW).toISOString()).run();
+        }
+        return database.batch(statements);
+      },
+    } as unknown as D1Database;
+    const interleavedRepository = createTextBlockRepository(interleavedDatabase, authorize);
+
+    const result = await interleavedRepository.rename({
+      channelId: CHANNEL_ID,
+      name: "greeting",
+      categoryId: created.block.categoryId,
+      games: [],
+      variants: [variant("default", "Hello")],
+      expectedRevision: created.block.revision,
+      expectedGraphRevision: snapshot.settings.graphRevision,
+      now: new Date(NOW).toISOString(),
+    }, "welcome", ACTOR);
+
+    expect(result).toMatchObject({ ok: false, reason: "conflict" });
+    expect(await database.prepare("SELECT block_name FROM text_blocks WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).toEqual({ block_name: "welcome" });
+    expect(await database.prepare("SELECT response_text FROM text_commands WHERE channel_id = ? AND command_name = ?")
+      .bind(CHANNEL_ID, "concurrent").first()).toEqual({ response_text: "Use {text.welcome}" });
   });
 
   it("invalidates edited overlay blocks and refuses to delete a block used by an overlay", async () => {

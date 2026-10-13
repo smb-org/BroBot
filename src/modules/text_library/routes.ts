@@ -196,7 +196,7 @@ textLibraryRoutes.patch("/blocks/:name", async (context) => {
   const parsed = parseBlock(raw, dataConditions);
   const channelId = param(context, "channelId");
   const oldName = param(context, "name");
-  if (parsed === null || parsed.name !== oldName || parsed.expectedRevision === undefined) {
+  if (parsed === null || parsed.expectedRevision === undefined) {
     return context.json({ error: "text_library_block_invalid" }, 400);
   }
   const reservedNames = new Set([
@@ -206,20 +206,53 @@ textLibraryRoutes.patch("/blocks/:name", async (context) => {
       .map(({ name }) => name),
   ]);
   if (reservedNames.has(parsed.name)) return context.json({ error: "text_library_block_reserved_name" }, 400);
+  const service = createTextLibraryService(createTextBlockRepository(context.env.DB, context.get("authorizeManagementMutation"), context.get("prepareModuleAudit")));
+  const expectedLibraryRevision = parsed.name === oldName ? undefined : await service.libraryRevision(channelId);
+  const snapshot = await service.list(channelId);
   const templateIssues = await context.get("validateTemplateContentMutation")(channelId, {
     name: parsed.name,
     texts: parsed.variants.flatMap((variant) => variant.texts),
+    ...(parsed.name === oldName ? {} : { renamedFrom: oldName }),
   });
+  if (expectedLibraryRevision !== undefined && await service.libraryRevision(channelId) !== expectedLibraryRevision) {
+    return context.json({ error: "text_library_block_conflict" }, 409);
+  }
   if (templateIssues.length > 0) return context.json({ error: "text_library_template_usage_invalid", issues: templateIssues }, 400);
-  const service = createTextLibraryService(createTextBlockRepository(context.env.DB, context.get("authorizeManagementMutation"), context.get("prepareModuleAudit")));
-  const snapshot = await service.list(channelId);
-  const result = await service.change({ channelId, ...parsed, expectedGraphRevision: snapshot.settings.graphRevision, now: nowIso() }, context.get("actor"), snapshot);
+  const input = {
+    channelId,
+    ...parsed,
+    expectedRevision: parsed.expectedRevision,
+    expectedGraphRevision: snapshot.settings.graphRevision,
+    ...(expectedLibraryRevision === undefined ? {} : { expectedLibraryRevision }),
+    now: nowIso(),
+  };
+  const result = parsed.name === oldName
+    ? await service.change(input, context.get("actor"), snapshot)
+    : await service.rename(input, oldName, context.get("actor"), snapshot);
   if (result.ok) {
-    await publishBlockInvalidations(context.get("publishModuleOverlayMessage"), channelId,
-      snapshot.blocks.map((block) => block.name === result.block.name ? result.block : block), result.block.name);
+    if (parsed.name !== oldName) context.get("afterTextBlockRename")(channelId);
+    const blocks = "updatedOverlays" in result
+      ? (await service.list(channelId)).blocks
+      : snapshot.blocks.map((block) => block.name === result.block.name ? result.block : block);
+    await publishBlockInvalidations(context.get("publishModuleOverlayMessage"), channelId, blocks, result.block.name);
+    if ("updatedOverlays" in result) {
+      const { publishOverlayChanged } = await import("../../worker/realtime");
+      await publishOverlayChanged(context.env.CHANNEL, channelId,
+        result.updatedOverlays as readonly { overlayId: string; revision: number }[]);
+    }
     return context.json({ block: result.block });
   }
-  return context.json({ error: `text_library_${result.reason}`, ...(result.current === undefined ? {} : { current: result.current }), ...(result.path === undefined ? {} : { path: result.path }) }, result.reason === "conflict" ? 409 : result.reason === "not_authorized" ? 403 : 400);
+  const status = result.reason === "already_exists" || result.reason === "conflict" ? 409
+    : result.reason === "not_found" ? 404
+      : result.reason === "not_authorized" ? 403 : 400;
+  return context.json({
+    error: result.reason === "already_exists" ? "text_library_block_exists"
+      : result.reason === "conflict" ? "text_library_block_conflict"
+        : result.reason === "template_too_long" ? "text_library_block_rename_too_long"
+        : `text_library_${result.reason}`,
+    ...(result.current === undefined ? {} : { current: result.current }),
+    ...(result.path === undefined ? {} : { path: result.path }),
+  }, status);
 });
 
 textLibraryRoutes.delete("/blocks/:name", async (context) => {
