@@ -308,7 +308,7 @@ test("FAQ game search opens on its first click and narrow chat controls stay rea
   expect(targetText.whiteSpace).toBe("normal");
   expect(targetText.scrollWidth).toBeLessThanOrEqual(targetText.clientWidth);
 
-  const helper = page.locator(".ui-textarea__helper-row .ui-truncated-text").first();
+  const helper = page.locator(".ui-template-text-field__helper-row .ui-truncated-text").first();
   const helperStyle = await helper.evaluate((element) => {
     const style = getComputedStyle(element, "::before");
     return { whiteSpace: style.whiteSpace, lineClamp: style.webkitLineClamp };
