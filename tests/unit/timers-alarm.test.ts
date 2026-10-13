@@ -178,6 +178,65 @@ describe("timer alarm execution", () => {
     },
   );
 
+  it("keeps a daily timer armed when the stream changes immediately before its next-run write", async () => {
+    await insertChannel();
+    await insertTimer({
+      triggerType: "time_of_day",
+      trigger: { type: "time_of_day", time: "14:10", weekdays: [], alsoOffline: true },
+      nextRunAt: firstDueAt,
+      activityCount: null,
+    });
+    await database.prepare(
+      `INSERT INTO channel_stream_state
+        (channel_id, state, changed_at, source, stream_id, transition_generation)
+       VALUES (?, 'online', ?, 'eventsub', 'stream-1', 1)`,
+    ).bind(channelId, new Date(firstDueAt - 60_000).toISOString()).run();
+    let transitioned = false;
+    const racingDatabase = {
+      prepare: (sql: string) => {
+        const statement = database.prepare(sql);
+        if (!sql.includes("UPDATE timers") || !sql.includes("SET next_run_at")) return statement;
+        return {
+          bind: (...values: Parameters<typeof statement.bind>) => {
+            statement.bind(...values);
+            return {
+              run: async () => {
+                if (!transitioned) {
+                  transitioned = true;
+                  await database.prepare(
+                    "UPDATE channel_stream_state SET transition_generation = transition_generation + 1 WHERE channel_id = ?",
+                  ).bind(channelId).run();
+                }
+                return await statement.run();
+              },
+            };
+          },
+        } as unknown as D1PreparedStatement;
+      },
+    } as unknown as D1Database;
+    const deadlines: number[] = [];
+    const scheduleGenerations: Array<number | null | undefined> = [];
+    const context = contextFor(() => 0, [], deadlines, {
+      DB: racingDatabase,
+      schedule: (_key, deadline, _revision, generation) => {
+        deadlines.push(deadline);
+        scheduleGenerations.push(generation);
+        return Promise.resolve();
+      },
+    });
+    vi.useFakeTimers();
+    vi.setSystemTime(firstDueAt);
+
+    await handleTimerAlarm(context, `timer:${timerId}`, firstDueAt);
+
+    const nextRun = await database.prepare("SELECT next_run_at FROM timers WHERE timer_id = ?")
+      .bind(timerId).first<{ next_run_at: string | null }>();
+    expect(transitioned).toBe(true);
+    expect(nextRun?.next_run_at).not.toBe(new Date(firstDueAt).toISOString());
+    expect(deadlines).toHaveLength(1);
+    expect(scheduleGenerations).toEqual([null]);
+  });
+
   it("reschedules an interval from the same stream snapshot used for its generation fence", async () => {
     await insertChannel();
     await insertTimer({
@@ -261,6 +320,62 @@ describe("timer alarm execution", () => {
       next_run_state: "offline",
     });
     expect(deadlines).toEqual([]);
+  });
+
+  it("resets the interval baseline when a stale alarm wins the offline replan race", async () => {
+    await insertChannel();
+    await insertTimer({
+      id: "offline-replan-race",
+      triggerType: "interval",
+      trigger: {
+        type: "interval",
+        live: { minutes: 10, minimumMessages: 1 },
+        offline: { minutes: 5, minimumMessages: 3 },
+      },
+      nextRunAt: firstDueAt,
+      activityCount: 10,
+    });
+    await database.prepare(
+      `UPDATE timers SET next_run_stream_id = 'stream-1', chat_baseline_stream_id = 'stream-1'
+        WHERE timer_id = ?`,
+    ).bind("offline-replan-race").run();
+    await database.prepare(
+      `INSERT INTO channel_stream_state
+        (channel_id, state, changed_at, source, stream_id, transition_generation)
+       VALUES (?, 'offline', ?, 'helix', NULL, 2)`,
+    ).bind(channelId, new Date(firstDueAt).toISOString()).run();
+    const sends: string[] = [];
+    const deadlines: number[] = [];
+    let activityReads = 0;
+    const context = contextFor(() => {
+      activityReads += 1;
+      return 20;
+    }, sends, deadlines, {
+      streamGeneration: 1,
+      streamState: () => Promise.resolve("offline"),
+    });
+    vi.useFakeTimers();
+    vi.setSystemTime(firstDueAt);
+
+    await handleTimerAlarm(context, "timer:offline-replan-race", firstDueAt, 1);
+    const offlineDeadline = firstDueAt + 5 * 60_000;
+    const onInputsChanged = timersModule.alarms?.[0]?.onScheduleInputsChanged;
+    if (onInputsChanged === undefined) throw new Error("Timer replan handler is missing.");
+    await onInputsChanged(context, "stream_state" satisfies ModuleScheduleInputChangeReason);
+
+    expect(await database.prepare(
+      "SELECT next_run_state, last_chat_activity_count, chat_baseline_stream_id FROM timers WHERE timer_id = ?",
+    ).bind("offline-replan-race").first()).toEqual({
+      next_run_state: "offline",
+      last_chat_activity_count: 20,
+      chat_baseline_stream_id: null,
+    });
+    expect(activityReads).toBe(1);
+
+    vi.setSystemTime(offlineDeadline);
+    await handleTimerAlarm({ ...context, streamGeneration: 2 }, "timer:offline-replan-race", offlineDeadline, 1);
+
+    expect(sends).toEqual([]);
   });
 
   it("passes a configured chat target through the generic alarm output contract", async () => {
@@ -628,6 +743,50 @@ describe("timer alarm execution", () => {
     await handleTimerAlarm(context, "timer:stream-start-recheck", firstDueAt);
 
     expect(sends).toEqual([]);
+  });
+
+  it("keeps the current stream-start alarm when an older generation alarm arrives late", async () => {
+    await insertChannel();
+    const streamStartedAt = new Date(firstDueAt - 10 * 60_000).toISOString();
+    await insertTimer({
+      id: "stream-start-generation-race",
+      triggerType: "stream_start",
+      trigger: { type: "stream_start", minutes: 10 },
+      nextRunAt: firstDueAt,
+      activityCount: null,
+    });
+    await database.prepare(
+      `UPDATE timers SET next_run_stream_id = 'stream-2' WHERE timer_id = ?`,
+    ).bind("stream-start-generation-race").run();
+    await database.prepare(
+      `INSERT INTO channel_stream_state
+        (channel_id, state, changed_at, source, stream_id, started_at, transition_generation)
+       VALUES (?, 'online', ?, 'helix', 'stream-2', ?, 2)`,
+    ).bind(channelId, streamStartedAt, streamStartedAt).run();
+    const sends: string[] = [];
+    const deadlines: number[] = [];
+    const context = contextFor(() => 0, sends, deadlines, {
+      streamGeneration: 1,
+      streamState: () => Promise.resolve("online"),
+      streamStartedAt: () => Promise.resolve({ streamId: "stream-2", startedAt: streamStartedAt }),
+    });
+    vi.useFakeTimers();
+    vi.setSystemTime(firstDueAt);
+
+    await handleTimerAlarm(context, "timer:stream-start-generation-race", firstDueAt, 1);
+
+    expect(await database.prepare(
+      "SELECT next_run_at, next_run_stream_id FROM timers WHERE timer_id = ?",
+    ).bind("stream-start-generation-race").first()).toEqual({
+      next_run_at: new Date(firstDueAt).toISOString(),
+      next_run_stream_id: "stream-2",
+    });
+    expect(deadlines).toEqual([]);
+
+    await handleTimerAlarm({ ...context, streamGeneration: 2 },
+      "timer:stream-start-generation-race", firstDueAt, 1);
+
+    expect(sends).toHaveLength(1);
   });
 
   it("retries a known failed post without advancing the occurrence", async () => {

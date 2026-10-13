@@ -1127,7 +1127,7 @@ export class ChannelObject extends DurableObject<Env> {
     deadline: number,
     suppressedBy?: string,
     ownerRevision?: number,
-    streamGeneration?: number,
+    streamGeneration?: number | null,
   ): Promise<void> {
     if (!Number.isFinite(deadline)) {
       await this.clearAlarmEntry(key, ownerRevision, streamGeneration);
@@ -1142,7 +1142,7 @@ export class ChannelObject extends DurableObject<Env> {
         handler,
         revision: (current?.revision ?? 0) + 1,
         ...(ownerRevision === undefined ? {} : { ownerRevision }),
-        ...(streamGeneration === undefined ? {} : { streamGeneration }),
+        ...(typeof streamGeneration === "number" ? { streamGeneration } : {}),
         ...(suppressedBy === undefined ? {} : { suppressedBy }),
       };
       if (LEGACY_ALARM_DEFINITIONS.some((definition) => definition.key === key)) {
@@ -1155,8 +1155,12 @@ export class ChannelObject extends DurableObject<Env> {
   private async acceptAlarmStreamGeneration(
     storage: AlarmStorageAccess,
     key: string,
-    streamGeneration: number | undefined,
+    streamGeneration: number | null | undefined,
   ): Promise<boolean> {
+    // Stream-independent timer schedules still carry owner revisions, so
+    // they can replace their own prior alarm without weakening generation
+    // checks for interval alarms.
+    if (streamGeneration === null) return true;
     const storedValue = await storage.get(MODULE_ALARM_STREAM_GENERATIONS_KEY);
     const stored = isRecord(storedValue) ? storedValue as Record<string, number> : {};
     const current = stored[key];
@@ -1194,7 +1198,7 @@ export class ChannelObject extends DurableObject<Env> {
   private async clearAlarmEntry(
     key: string,
     ownerRevision?: number,
-    streamGeneration?: number,
+    streamGeneration?: number | null,
   ): Promise<void> {
     await this.mutateAlarmSchedule(async (table, storage) => {
       if (!await this.acceptAlarmStreamGeneration(storage, key, streamGeneration)) return;
@@ -2211,7 +2215,7 @@ export class ChannelObject extends DurableObject<Env> {
     alarmKey: string,
     deadline: number,
     ownerRevision?: number,
-    streamGeneration?: number,
+    streamGeneration?: number | null,
   ): Promise<void> {
     const registration = MODULES.find((module) => module.id === moduleId)?.alarms?.find((alarm) => alarm.key === handlerKey);
     if (registration === undefined || alarmKey.length === 0) {
@@ -2242,7 +2246,7 @@ export class ChannelObject extends DurableObject<Env> {
     moduleId: string,
     alarmKey: string,
     ownerRevision?: number,
-    streamGeneration?: number,
+    streamGeneration?: number | null,
   ): Promise<void> {
     if (!MODULES.some((module) => module.id === moduleId) || alarmKey.length === 0) {
       throw new Error(`Unknown module alarm key ${moduleId}.${alarmKey}.`);

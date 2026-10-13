@@ -615,9 +615,9 @@ export interface ModuleExecutionContext {
   channelLanguage: () => Promise<ModuleLanguage>;
   /** Lazily reads the channel's configured time zone for date/time and module conditions. */
   channelTimeZone: () => Promise<string>;
-  /** Schedules or clears an alarm registered by this module. */
-  scheduleAlarm: (handlerKey: string, alarmKey: string, deadline: number, ownerRevision?: number, streamGeneration?: number) => Promise<void>;
-  clearAlarm: (alarmKey: string, ownerRevision?: number, streamGeneration?: number) => Promise<void>;
+  /** Null streamGeneration marks a stream-independent timer alarm; undefined keeps legacy version guards. */
+  scheduleAlarm: (handlerKey: string, alarmKey: string, deadline: number, ownerRevision?: number, streamGeneration?: number | null) => Promise<void>;
+  clearAlarm: (alarmKey: string, ownerRevision?: number, streamGeneration?: number | null) => Promise<void>;
   /** Generation captured atomically by an accepted stream-state write. */
   streamStateTransitionGeneration?: number;
   /** Reads the current execution time for a module-owned alarm key, if one is scheduled. */
@@ -644,9 +644,9 @@ export interface ModuleAlarmContext {
     put(key: string, value: unknown): Promise<void>;
     delete(key: string): Promise<boolean>;
   };
-  /** Schedule or clear another key owned by this module and handled by this registration. */
-  schedule: (key: string, deadline: number, ownerRevision?: number, streamGeneration?: number) => Promise<void>;
-  clear: (key: string, ownerRevision?: number, streamGeneration?: number) => Promise<void>;
+  /** Null streamGeneration marks a stream-independent timer alarm; undefined keeps legacy version guards. */
+  schedule: (key: string, deadline: number, ownerRevision?: number, streamGeneration?: number | null) => Promise<void>;
+  clear: (key: string, ownerRevision?: number, streamGeneration?: number | null) => Promise<void>;
   /** Stream generation attached to this alarm entry, when it is stream-scoped. */
   streamGeneration?: number;
   /** Reads the current execution time for a module-owned alarm key, if one is scheduled. */

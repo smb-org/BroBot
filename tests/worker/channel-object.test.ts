@@ -1662,6 +1662,24 @@ describe("ChannelObject realtime path", () => {
     });
   });
 
+  it("accepts stream-independent timer alarms without weakening newer generation guards", async () => {
+    const object = objectFor([]);
+    const alarmKey = "module:timers:timer:timer-independent";
+    const alarmTableKey = "channel:alarm_schedule";
+
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-independent", 30_000, 1, 9);
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-independent", 40_000, 2, null);
+    await object.scheduleModuleAlarm("timers", "run", "timer:timer-independent", 20_000, 2, 8);
+
+    const alarms = storageOf(object).values.get(alarmTableKey) as Record<string, Record<string, unknown>>;
+    expect(alarms[alarmKey]).toEqual({
+      deadline: 40_000,
+      handler: "module:timers:run",
+      revision: 2,
+      ownerRevision: 2,
+    });
+  });
+
   it("preserves an online ensure that arrives while a claimed poll decides to stop", async () => {
     vi.useFakeTimers();
     const now = Date.parse("2026-10-05T12:00:00.000Z");
