@@ -49,6 +49,8 @@ export interface DurableTimerEntry {
   mirrorSequence: number;
   activityBaselines: Record<TimerIntervalState, number>;
   lastRunAt: string | null;
+  /** Stream id whose stream_start occurrence is done (sent or skipped); never planned again. Absent in old state. */
+  completedStreamId?: string | null;
   refreshAt: number | null;
 }
 
@@ -96,6 +98,7 @@ export const makeTimerPlan = (
   previous: TimerOccurrence | null,
   inputs: TimerScheduleInputs,
   mode: "reset" | "preserve_cadence" | "after_occurrence" = "reset",
+  completedStreamId: string | null = null,
 ): TimerPlan => {
   const { now, timeZone, eventTimes } = inputs;
   if (!config.enabled) return { identity: null, refreshAt: null };
@@ -128,7 +131,8 @@ export const makeTimerPlan = (
       }
     }
   } else if (config.trigger.type === "stream_start") {
-    if (stream.state === "online" && stream.streamId !== null && stream.startedAt !== null) {
+    if (stream.state === "online" && stream.streamId !== null && stream.startedAt !== null &&
+        stream.streamId !== completedStreamId) {
       const dueAt = Date.parse(stream.startedAt) + triggerDelayMs(config.trigger);
       const previousMatches = previous !== null &&
         (mode === "preserve_cadence" || previous.identity.revision === config.revision) &&
@@ -164,4 +168,13 @@ export const makeTimerPlan = (
     },
     refreshAt,
   };
+};
+
+/** Compares stream start times at second precision (Helix and EventSub differ in sub-second digits). */
+export const sameStreamStartedAt = (left: string | null, right: string | null): boolean => {
+  if (left === right) return true;
+  if (left === null || right === null) return false;
+  const a = Date.parse(left);
+  const b = Date.parse(right);
+  return Number.isFinite(a) && Number.isFinite(b) && Math.floor(a / 1000) === Math.floor(b / 1000);
 };

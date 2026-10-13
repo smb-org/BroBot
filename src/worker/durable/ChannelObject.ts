@@ -27,6 +27,7 @@ import {
 import {
   emptyDurableTimerState,
   makeTimerPlan,
+  sameStreamStartedAt,
   sameTimerOccurrence,
   TIMER_ALARM_PREFIX,
   TIMER_ACTIVITY_COUNTS_KEY,
@@ -1028,7 +1029,7 @@ export class ChannelObject extends DurableObject<Env> {
         entry.activityBaselines = { ...state.activityCounts };
       }
       this.setTimerPlanSync(entry, makeTimerPlan(config, state.stream, current?.plannedOccurrence ?? null, inputs,
-        triggerChanged ? "reset" : "preserve_cadence"));
+        triggerChanged ? "reset" : "preserve_cadence", entry.completedStreamId));
       this.persistTimerScheduleSync(state, config.id, entry);
       return true;
     });
@@ -1064,7 +1065,7 @@ export class ChannelObject extends DurableObject<Env> {
       const state = this.timerScheduleStateSync();
       if (stream.generation < state.stream.generation) return;
       const streamChanged = stream.generation > state.stream.generation || stream.state !== state.stream.state ||
-        stream.streamId !== state.stream.streamId || stream.startedAt !== state.stream.startedAt;
+        stream.streamId !== state.stream.streamId || !sameStreamStartedAt(stream.startedAt, state.stream.startedAt);
       if (!streamChanged) return;
       state.stream = stream;
       if (stream.state === "online") state.activityCounts.live = 0;
@@ -1073,7 +1074,8 @@ export class ChannelObject extends DurableObject<Env> {
       for (const [timerId, entry] of Object.entries(state.timers)) {
         if (entry.config.trigger.type !== "interval" && entry.config.trigger.type !== "stream_start") continue;
         if (entry.config.trigger.type === "interval") entry.activityBaselines = { ...state.activityCounts };
-        this.setTimerPlanSync(entry, makeTimerPlan(entry.config, state.stream, entry.plannedOccurrence, inputs));
+        this.setTimerPlanSync(entry, makeTimerPlan(entry.config, state.stream, entry.plannedOccurrence, inputs, "reset",
+          entry.completedStreamId));
         this.writeTimerAlarmEntriesSync(timerId, entry);
         changedTimerIds.push(timerId);
       }
@@ -1116,7 +1118,7 @@ export class ChannelObject extends DurableObject<Env> {
       if (databaseStream.generation >= state.stream.generation) {
         streamChanged = databaseStream.generation > state.stream.generation ||
           databaseStream.state !== state.stream.state || databaseStream.streamId !== state.stream.streamId ||
-          databaseStream.startedAt !== state.stream.startedAt;
+          !sameStreamStartedAt(databaseStream.startedAt, state.stream.startedAt);
         state.stream = databaseStream;
         if (streamChanged && databaseStream.state === "online") state.activityCounts.live = 0;
         if (streamChanged && databaseStream.state === "offline") state.activityCounts.offline = 0;
@@ -1129,7 +1131,7 @@ export class ChannelObject extends DurableObject<Env> {
             now: inputs.now,
             timeZone: inputs.timeZone,
             eventTimes: [],
-          }));
+          }, "reset", entry.completedStreamId));
           this.persistTimerScheduleSync(state, timerId, entry);
           changedTimerIds.push(timerId);
         }
@@ -1151,7 +1153,7 @@ export class ChannelObject extends DurableObject<Env> {
           entry.activityBaselines = { ...state.activityCounts };
         }
         const plan = makeTimerPlan(config, state.stream, entry.plannedOccurrence, inputs,
-          triggerChanged || relevantInputChanged ? "reset" : "preserve_cadence");
+          triggerChanged || relevantInputChanged ? "reset" : "preserve_cadence", entry.completedStreamId);
         const sameIdentity = plan.identity === null
           ? entry.plannedOccurrence === null
           : sameTimerAlarmIdentity(entry.plannedOccurrence?.identity, plan.identity);
@@ -1304,7 +1306,8 @@ export class ChannelObject extends DurableObject<Env> {
       const state = this.timerScheduleStateSync();
       const entry = state.timers[timerId];
       if (entry === undefined || entry.refreshAt !== deadline || entry.config.revision !== current.config.revision) return false;
-      const plan = makeTimerPlan(entry.config, state.stream, entry.plannedOccurrence, inputs, "preserve_cadence");
+      const plan = makeTimerPlan(entry.config, state.stream, entry.plannedOccurrence, inputs, "preserve_cadence",
+        entry.completedStreamId);
       const sameIdentity = plan.identity === null
         ? entry.plannedOccurrence === null
         : sameTimerAlarmIdentity(entry.plannedOccurrence?.identity, plan.identity);
@@ -1410,7 +1413,10 @@ export class ChannelObject extends DurableObject<Env> {
       const rendered = await context.renderTemplate(claimed.config.messageText, now);
       if (!this.timerClaimIsCurrentSync(timerId, claimed.token, claimed.occurrence)) return;
       const streamId = claimed.occurrence.identity.streamId ?? undefined;
-      const idempotencyKey = timerOccurrenceKey(timerId, deadline, streamId);
+      // A stream_start post is identified by (timer, stream), never by its deadline.
+      const idempotencyKey = trigger.type === "stream_start" && streamId !== undefined
+        ? `${timerId}:stream_start:${encodeURIComponent(streamId)}`
+        : timerOccurrenceKey(timerId, deadline, streamId);
       const result = await context.sendChat(
         rendered.text,
         idempotencyKey,
@@ -1469,8 +1475,9 @@ export class ChannelObject extends DurableObject<Env> {
       }
       if (sent) entry.lastRunAt = new Date(now).toISOString();
       const nextInputs = { ...inputs, now };
+      if (trigger.type === "stream_start") entry.completedStreamId = claim.occurrence.identity.streamId;
       const plan = makeTimerPlan(entry.config, state.stream, entry.plannedOccurrence, nextInputs,
-        trigger.type === "stream_start" ? "after_occurrence" : "after_occurrence");
+        "after_occurrence", entry.completedStreamId);
       this.setTimerPlanSync(entry, plan);
       this.persistTimerScheduleSync(state, timerId, entry);
       return true;

@@ -599,6 +599,65 @@ describe("timer scheduling interleavings through the channel Durable Object", ()
     expect(plannedCount(values)).toBe(0);
   });
 
+  describe("stream_start identity is (timer, stream)", () => {
+    const setup = async () => {
+      vi.useFakeTimers();
+      const now = Date.parse("2026-10-12T12:00:00.000Z");
+      vi.setSystemTime(now);
+      const harness = channelObjectFor({ state: "offline", streamId: null, startedAt: null, generation: 0 });
+      const config = timerConfig("once-per-stream", { type: "stream_start", minutes: 1 });
+      await harness.object.upsertTimerConfig(config);
+      const posts: string[] = [];
+      const context = timerAlarmContext((_text, key) => {
+        posts.push(key);
+        return Promise.resolve({ sent: true, reason: null, retryable: false });
+      });
+      const post = async () => {
+        const due = dueOccurrence(harness.values, config.id);
+        await harness.object.runTimerOccurrence(context, `timer:${config.id}`, due.identity.deadline,
+          config.revision, due.identity, due.sequence);
+      };
+      const startedAt = now - 90_000;
+      return { ...harness, config, posts, post, now, startedAt };
+    };
+
+    it("posts once when the same stream is re-notified with different startedAt precision", async () => {
+      const { object, values, config, posts, post, startedAt } = await setup();
+      await object.transitionTimerStream(onlineStream("stream-1", 1, startedAt));
+      await post();
+      expect(posts).toHaveLength(1);
+      // EventSub-style notification: same second, different sub-second digits and a newer generation.
+      await object.transitionTimerStream({
+        state: "online", streamId: "stream-1", generation: 2,
+        startedAt: new Date(startedAt + 400).toISOString(),
+      });
+      expect(plannedCount(values)).toBe(0);
+      expect(stateOf(values).timers[config.id]?.completedStreamId).toBe("stream-1");
+      expect(posts).toHaveLength(1);
+    });
+
+    it("does not plan a second post after a metadata-only rename", async () => {
+      const { object, values, config, posts, post, startedAt } = await setup();
+      await object.transitionTimerStream(onlineStream("stream-1", 1, startedAt));
+      await post();
+      await object.upsertTimerConfig({ ...config, name: "renamed", revision: config.revision + 1 });
+      expect(plannedCount(values)).toBe(0);
+      expect(posts).toHaveLength(1);
+    });
+
+    it("posts again for a new stream id", async () => {
+      const { object, values, posts, post, now } = await setup();
+      await object.transitionTimerStream(onlineStream("stream-1", 1, now - 90_000));
+      await post();
+      await object.transitionTimerStream({ state: "offline", streamId: null, startedAt: null, generation: 2 });
+      await object.transitionTimerStream(onlineStream("stream-2", 3, now - 90_000));
+      expect(plannedCount(values)).toBe(1);
+      await post();
+      expect(posts).toHaveLength(2);
+      expect(posts[0]).not.toBe(posts[1]);
+    });
+  });
+
   it("skips a stream_start occurrence whose online transition arrives beyond the grace window", async () => {
     vi.useFakeTimers();
     const now = Date.parse("2026-10-12T12:00:00.000Z");
