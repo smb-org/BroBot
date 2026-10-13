@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
-test.use({ locale: "en-US" });
+// Pinned: day grouping depends on the browser zone, and the fixtures below are built in local time.
+test.use({ locale: "en-US", timezoneId: "Europe/Berlin" });
 
 const channelId = "stable-host-layout";
 let panelRevisions: Record<string, number> = {};

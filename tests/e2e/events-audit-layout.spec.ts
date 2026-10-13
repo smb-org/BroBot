@@ -216,7 +216,9 @@ test("day headers stay below the dashboard header on desktop and mobile", async 
 
 test("relative-time and day-label clock ticks keep event row geometry stable", async ({ page }) => {
   const start = new Date("2026-10-13T21:59:45.000Z");
-  await page.clock.install({ time: start });
+  // Install slightly earlier and pause at `start`, so the real runner speed cannot advance the page clock.
+  await page.clock.install({ time: new Date(start.getTime() - 1000) });
+  await page.clock.pauseAt(start);
   await mockApi(page, {
     eventEntries: [{ ...events[0], createdAt: start.toISOString() }],
   });
@@ -226,7 +228,11 @@ test("relative-time and day-label clock ticks keep event row geometry stable", a
   const table = page.locator(".event-table");
   const row = table.locator("tbody tr:not(.data-table__day-row)").first();
   const time = row.locator("time");
-  await expect(row).toBeVisible();
+  // The paused clock also holds app timers; nudge it with tiny steps until the row renders.
+  await expect(async () => {
+    await page.clock.runFor(10);
+    await expect(row).toBeVisible({ timeout: 200 });
+  }).toPass();
   await expect(time).toHaveText("jetzt");
   await expect(table.locator(".data-table__day-row")).toHaveText("Heute");
   const initial = await box(row);
