@@ -1,4 +1,4 @@
-import { fireEvent, render } from "@testing-library/react";
+import { fireEvent, render, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { isCommandPaletteShortcut } from "../../src/dashboard/command-palette-shortcut";
@@ -30,5 +30,24 @@ describe("dashboard shell shortcuts", () => {
     expect(onCommandPaletteOpenChange).not.toHaveBeenCalled();
     fireEvent.keyDown(draft, { key: "k", metaKey: true });
     expect(onCommandPaletteOpenChange).toHaveBeenCalledWith(true);
+  });
+
+  it("leaves nothing inert when the route returns to live with the drawer open", () => {
+    const props = {
+      header: () => null,
+      navbar: () => null,
+      navLabel: "Navigation",
+      openSidebarLabel: "Open sidebar",
+      closeSidebarLabel: "Close sidebar",
+      commandPaletteOpen: false,
+      onCommandPaletteOpenChange: vi.fn(),
+    };
+    const { rerender, container } = render(<Shell {...props} mode="setup"><p>page</p></Shell>);
+    fireEvent.click(within(container).getByRole("button", { name: "Open sidebar" }));
+    expect(container.querySelectorAll("[inert]").length).toBeGreaterThan(0);
+    rerender(<Shell {...props} mode="live"><p>page</p></Shell>);
+    expect(container.querySelectorAll("[inert]")).toHaveLength(0);
+    rerender(<Shell {...props} mode="setup"><p>page</p></Shell>);
+    expect(container.querySelectorAll("[inert]")).toHaveLength(0);
   });
 });

@@ -32,12 +32,20 @@ export function Shell({
   onCommandPaletteOpenChange,
   children,
 }: ShellProps) {
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [navRequested, setMobileNavOpen] = useState(false);
   const [returnFocusOnClose, setReturnFocusOnClose] = useState(false);
   const mobileBurgerRef = useRef<HTMLButtonElement>(null);
   const mobileDrawerRef = useRef<HTMLElement>(null);
   const wasMobileNavOpenRef = useRef(false);
   const isSetup = mode === "setup";
+  // Derived: the drawer only exists in setup mode, so `inert` can never outlive it.
+  const mobileNavOpen = isSetup && navRequested;
+  // A route change (e.g. browser Back) closes the drawer instead of leaving stale state behind.
+  const [seenMode, setSeenMode] = useState(mode);
+  if (seenMode !== mode) {
+    setSeenMode(mode);
+    setMobileNavOpen(false);
+  }
   const closeMobileNav = useCallback((): void => {
     setReturnFocusOnClose(true);
     setMobileNavOpen(false);
