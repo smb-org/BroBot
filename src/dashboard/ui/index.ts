@@ -51,6 +51,7 @@ export { ChatPreview } from "./ChatPreview";
 export { EditorShell } from "./EditorShell";
 export type { EditorInvalidField, EditorSection } from "./EditorShell";
 export { SettingsEditor } from "./SettingsEditor";
+export { mapServerFieldErrors } from "./server-field-errors";
 export { UnitInput } from "./UnitInput";
 export { textFieldLength } from "./text-length";
 export type {

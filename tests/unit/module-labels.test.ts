@@ -31,6 +31,14 @@ describe("Module labels", () => {
     }
   });
 
+  it.each(MODULES.filter((module) => module.mandatory).map((module) => module.id))("has a localized lock reason in both languages for mandatory module %s", (moduleId) => {
+    const module = MODULES.find((candidate) => candidate.id === moduleId);
+    expect(module?.mandatoryReason).toBeDefined();
+    for (const language of ["de", "en"] as const) {
+      expect(module?.mandatoryReason?.[language].trim().length).toBeGreaterThan(0);
+    }
+  });
+
   it("returns the id and no description for an unknown module", () => {
     expect(moduleName("gibtesnicht", "de")).toBe("gibtesnicht");
     expect(moduleDescription("gibtesnicht", "de")).toBeNull();

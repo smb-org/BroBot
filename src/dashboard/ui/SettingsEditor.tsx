@@ -137,6 +137,7 @@ export function SettingsEditor<Settings extends object>({
           onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
           {...(field.includeWhereAsked === undefined ? {} : { includeWhereAsked: field.includeWhereAsked })}
           disabled={disabled}
+          {...(error === undefined ? {} : { error })}
         />
       );
     }
@@ -148,6 +149,7 @@ export function SettingsEditor<Settings extends object>({
             id={id}
             label={copy.label}
             hint={copy.hint}
+            {...(error === undefined ? {} : { error })}
             value={typeof fieldValue === "string" ? fieldValue : null}
             onChange={(next) => { if (next !== null) onChange(field.key, next as Settings[typeof field.key]); }}
             options={options}
@@ -261,6 +263,8 @@ export function SettingsEditor<Settings extends object>({
               }}
               options={options}
               disabled={disabled}
+              reserveError
+              {...(error === undefined ? {} : { error })}
             />
           </InspectorFieldRow>
         );
@@ -279,6 +283,8 @@ export function SettingsEditor<Settings extends object>({
             onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
             options={options}
             disabled={disabled}
+            reserveError
+            {...(error === undefined ? {} : { error })}
           />
         </InspectorFieldRow>
       );
@@ -295,6 +301,8 @@ export function SettingsEditor<Settings extends object>({
           onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
           disabled={disabled}
           {...(lockedReason === undefined ? {} : { lockedReason })}
+          reserveError
+          {...(error === undefined ? {} : { error })}
         >
           {field.children === undefined ? undefined : children as ReactElement[]}
         </Switch>

@@ -641,9 +641,10 @@ describe("start commercial", () => {
 
   it("reports Twitch's rate limit as its own outcome", async () => {
     const environment = await setup("manager");
+    const retryAfterSeconds = 45;
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(
       JSON.stringify({ message: "slow down" }),
-      { status: 429 },
+      { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } },
     )));
 
     const response = await panelRouter.fetch(
@@ -659,6 +660,8 @@ describe("start commercial", () => {
     expect(body).toMatchObject({ error: "commercial_start_failed", reason: "rate_limited" });
     expect(body.detail.message).toBe("slow down");
     expect(body.detail.twitchMessage).toBeUndefined();
+    expect(body.detail.retryAfter).toBeGreaterThan(Date.now());
+    expect(body.detail.retryAfter).toBeLessThanOrEqual(Date.now() + retryAfterSeconds * 1000);
   });
 
   it("maps Twitch's offline rejection to a closed error and diagnostic reason", async () => {

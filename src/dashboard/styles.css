@@ -1220,6 +1220,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .segment-choice-field { display: grid; gap: 6px; min-width: 0; }
 .segment-choice-field__label { color: var(--text-2); font-size: 13px; font-weight: 500; }
 .segment-choice-field__hint { color: var(--text-3); font-size: 12px; line-height: 1.4; }
+.segment-choice-field__error { display: flex; min-width: 0; min-height: 18px; height: 18px; overflow: hidden; color: var(--error-text); font-size: 12px; line-height: 18px; white-space: nowrap; }
 .segment-choice { display: flex; min-height: 32px; gap: 2px; padding: 2px; border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--surface-well); }
 .segment-choice-field--compact .segment-choice { min-height: 32px; }
 .segment-choice__option { display: grid; flex: 1 1 0; min-width: 0; min-height: 26px; align-content: center; padding: 0 8px; border: 1px solid transparent; border-radius: var(--r-control); color: var(--text-2); background: transparent; font: inherit; font-size: 13px; cursor: pointer; }
@@ -1231,6 +1232,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .segment-choice__description { color: var(--text-3); font-size: 11px; font-weight: 400; }
 
 .ui-choice-cards .mantine-InputWrapper-description { margin-top: 4px; color: var(--text-3); font-size: 12px; }
+.ui-choice-cards__field { width: 100%; min-width: 0; }
 .ui-choice-cards__options { margin-top: 8px; }
 .ui-choice-cards__option { min-height: 52px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: var(--r-control); background: transparent; }
 .ui-choice-cards__option:hover { border-color: var(--line-light); }

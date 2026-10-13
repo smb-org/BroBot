@@ -1,7 +1,7 @@
 import { useCallback, useState, type ReactElement } from "react";
 
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
-import { Button, ChatOutputTargetControl, ConfirmDialog, Field, FormDialog, GamePicker, InspectorSection, LoadState, LoadStateLines, UnitInput, Select, Switch, TemplateTextField, notify } from "../../../dashboard/ui";
+import { Button, ChatOutputTargetControl, ConfirmDialog, Field, FormDialog, GamePicker, InspectorSection, LoadState, LoadStateLines, UnitInput, Select, Switch, TemplateTextField, mapServerFieldErrors, notify } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { FaqEntry, FaqGame } from "../contracts";
 import { FAQ_ANSWER_MAX_LENGTH, FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH, FAQ_USER_COOLDOWN_MAXIMUM_SECONDS } from "../contracts";
@@ -11,7 +11,6 @@ import {
   createFaqEntry,
   deleteFaqEntry,
   faqErrorCode,
-  faqMatcherErrorReason,
   loadFaqPanel,
   lookupFaqGames,
   moveFaqEntry,
@@ -129,8 +128,12 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
       setEditing(null);
     } catch (failure: unknown) {
       const code = faqErrorCode(failure);
-      const matcherReason = faqMatcherErrorReason(failure);
-      if (matcherReason !== null) {
+      const fieldErrors = mapServerFieldErrors(failure, {
+        "matcher.pattern": "patterns",
+        "matcher.patterns": "patterns",
+      });
+      const matcherReason = fieldErrors.patterns;
+      if (matcherReason !== undefined) {
         setMatcherError(labels.regexError(matcherReason));
         setError(null);
       } else setError(code === "faq_cooldown_too_short" ? labels.cooldownMinError

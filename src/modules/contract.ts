@@ -1292,6 +1292,8 @@ export type HelixResult<Data = unknown> =
     message: string | null;
     /** Twitch's parsed error body, tolerant of a missing or non-JSON response. */
     body: Readonly<Record<string, unknown>>;
+    /** Absolute Unix timestamp in milliseconds from Twitch's rate-limit headers. */
+    retryAfter?: number | null;
   };
 
 export type HelixRequest = <Data = unknown>(options: HelixRequestOptions<Data>) => Promise<HelixResult<Data>>;

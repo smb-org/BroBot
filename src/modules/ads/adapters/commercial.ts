@@ -72,7 +72,11 @@ export const startCommercial = async (
     if (result.reason === "timeout" || result.reason === "network_error") {
       return failure(result.reason, { status: null, twitchMessage: result.message });
     }
-    return failure(commercialReasonFor(result.status ?? 0, result.message), { status: result.status, twitchMessage: result.message });
+    return failure(commercialReasonFor(result.status ?? 0, result.message), {
+      status: result.status,
+      twitchMessage: result.message,
+      ...(result.retryAfter == null ? {} : { retryAfter: result.retryAfter }),
+    });
   }
 
   const body = isRecord(result.data) ? result.data : {};

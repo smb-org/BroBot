@@ -4,6 +4,7 @@ import { PanelApiError } from "../../../contracts/panel-error";
 import { Button, Icon, SegmentChoice, notify } from "../../../dashboard/ui";
 import type { ModuleImmediateActionProperties } from "../contract";
 import { adsPanelTexts } from "./locale";
+import { adFailureReason, rateLimitWaitMessage } from "./errors";
 import { startCommercialNow } from "./service";
 
 const AD_LENGTHS = ["30", "60", "90", "120", "150", "180"];
@@ -31,7 +32,9 @@ const AdNowAction = ({ channelId, canManage = false, availabilityReason }: Modul
         ? labels.immediateReadOnly
         : error instanceof PanelApiError && error.code === "commercial_stream_offline"
           ? labels.immediateOffline
-        : labels.immediateFailed;
+          : adFailureReason(error) === "scope_missing"
+            ? labels.immediateScopeMissing
+            : rateLimitWaitMessage(error, labels) ?? labels.immediateFailed;
       setResultMessage(message);
       notify({ tone: "error", message });
     } finally {

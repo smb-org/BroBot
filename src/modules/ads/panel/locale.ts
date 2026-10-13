@@ -11,6 +11,7 @@ export interface AdsPanelTexts {
   snoozeSection: string;
   snoozeButton: (count: string, refresh: string) => string;
   snoozeScopeMissing: string;
+  rateLimited: (seconds: number) => string;
   snoozeReadOnly: string;
   snoozeNone: string;
   snoozeUnknown: string;
@@ -32,6 +33,7 @@ export interface AdsPanelTexts {
   immediateStarted: (length: string) => string;
   immediateOffline: string;
   immediateFailed: string;
+  immediateScopeMissing: string;
   immediateReadOnly: string;
 }
 
@@ -45,7 +47,8 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     duration: "Dauer",
     snoozeSection: "Werbung verschieben",
     snoozeButton: (count, refresh) => `Snooze · ${count} verfügbar · Aufladung ${refresh}`,
-    snoozeScopeMissing: "Snooze ist deaktiviert: channel:manage:ads fehlt.",
+    snoozeScopeMissing: "Snooze braucht die Berechtigung channel:manage:ads. Autorisiere den Bot erneut und erteile diese Berechtigung.",
+    rateLimited: (seconds) => `Twitch begrenzt die Anfragen gerade. Versuche es in ${String(seconds)} Sekunden erneut.`,
     snoozeReadOnly: "Nur Broadcaster und Verwalter dürfen Werbepausen verschieben.",
     snoozeNone: "Snooze ist deaktiviert: keine Verschiebung mehr verfügbar.",
     snoozeUnknown: "Snooze ist deaktiviert: der Twitch-Zähler ist nicht verfügbar.",
@@ -67,6 +70,7 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     immediateStarted: (length) => `Werbung gestartet (${length}s)`,
     immediateOffline: "Der Stream ist offline.",
     immediateFailed: "Die Werbeeinblendung konnte nicht gestartet werden.",
+    immediateScopeMissing: "Zum Starten einer Werbepause braucht der Bot die Berechtigung channel:edit:commercial. Autorisiere den Bot erneut und erteile diese Berechtigung.",
     immediateReadOnly: "Nur Broadcaster und Verwalter dürfen Werbung starten.",
   },
   en: {
@@ -78,7 +82,8 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     duration: "Duration",
     snoozeSection: "Postpone an ad break",
     snoozeButton: (count, refresh) => `Snooze · ${count} available · refresh ${refresh}`,
-    snoozeScopeMissing: "Snooze is disabled: channel:manage:ads is missing.",
+    snoozeScopeMissing: "Snooze needs the channel:manage:ads permission. Reauthorize the bot and grant this permission.",
+    rateLimited: (seconds) => `Twitch is rate limiting requests. Try again in ${String(seconds)} seconds.`,
     snoozeReadOnly: "Only broadcasters and managers may snooze ad breaks.",
     snoozeNone: "Snooze is disabled: no postponements remain.",
     snoozeUnknown: "Snooze is disabled: Twitch did not provide a counter.",
@@ -100,6 +105,7 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     immediateStarted: (length) => `Ad started (${length}s)`,
     immediateOffline: "The stream is offline.",
     immediateFailed: "The commercial could not be started.",
+    immediateScopeMissing: "Starting an ad break requires the bot to have the channel:edit:commercial permission. Reauthorize the bot and grant this permission.",
     immediateReadOnly: "Only broadcasters and managers may start ads.",
   },
 };

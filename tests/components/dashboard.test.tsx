@@ -3970,7 +3970,7 @@ describe("Dashboard skeleton", () => {
     expect(screen.queryByRole("switch", { name: "Kanalereignisse · Läuft" })).not.toBeInTheDocument();
     expect(screen.queryByRole("switch", { name: "Kanalereignisse: Läuft" })).not.toBeInTheDocument();
     const status = await screen.findByText("Läuft · immer aktiv");
-    expect(status.closest(".module-locked-status")).toHaveAttribute("title", "Kanalereignisse sind immer aktiv.");
+    expect(status.closest(".module-locked-status")).toHaveAttribute("title", "Kanalereignisse werden für den Betrieb der Module benötigt.");
     expect(screen.queryByText("channel_events", { exact: true })).not.toBeInTheDocument();
     expect(screen.queryByText("Module werden geladen …")).not.toBeInTheDocument();
   });

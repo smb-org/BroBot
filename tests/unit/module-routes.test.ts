@@ -879,6 +879,35 @@ describe("Module management in the panel", () => {
     expect(enableHookCallCount).toBe(1);
   });
 
+  it("returns the failing settings path and reason from the module schema", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+
+    const enabled = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/test-modul", "PATCH", { enabled: true }),
+      environment,
+    );
+    expect(enabled.status).toBe(200);
+    const loaded = await (await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/test-modul/settings"),
+      environment,
+    )).json<{ revision: number }>();
+
+    const invalid = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/test-modul/settings", "PATCH", {
+        revision: loaded.revision,
+        settings: { betrag: "not a number" },
+      }),
+      environment,
+    );
+    const body = await invalid.json<{ error: string; path: string; reason: string }>();
+
+    expect(invalid.status).toBe(400);
+    expect(body).toMatchObject({ error: "module_settings_invalid", path: "settings.betrag" });
+    expect(body.reason.length).toBeGreaterThan(0);
+  });
+
   it("rejects re-enabling when settings change after the handler reads the module", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
