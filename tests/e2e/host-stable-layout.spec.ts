@@ -545,11 +545,11 @@ test("setting an event filter leaves the list top fixed at desktop and 390px", a
     await installChannelMocks(page, {}, { events: fullEventPage });
 
     await page.goto(`/channels/${channelId}/events`);
-    await expect(page.locator(".event-table tbody tr")).toHaveCount(50);
+    await expect(page.locator(".event-table tbody tr:not(.data-table__day-row)")).toHaveCount(50);
     const listTop = await measureDocumentBox(page, ".ui-load-state--panel");
     await page.getByRole("textbox", { name: "Person" }).fill("Operator");
     await expect(page.locator(".event-filter .list-toolbar__active-filters")).toContainText("Operator");
-    await expect(page.locator(".event-table tbody tr")).toHaveCount(50);
+    await expect(page.locator(".event-table tbody tr:not(.data-table__day-row)")).toHaveCount(50);
     expect(await measureDocumentBox(page, ".ui-load-state--panel")).toEqual(listTop);
     await page.unrouteAll();
   }
@@ -724,9 +724,9 @@ test("the new-events notice stays visible while reading older events", async ({ 
   const events = { entries: [...fullEventPage.entries], nextCursor: fullEventPage.nextCursor };
   await installChannelMocks(page, {}, { events });
   await page.goto(`/channels/${channelId}/events`);
-  await expect(page.locator(".event-table tbody tr")).toHaveCount(50);
+  await expect(page.locator(".event-table tbody tr:not(.data-table__day-row)")).toHaveCount(50);
   await expect.poll(() => page.evaluate(() => (window as Window & { __layoutEventSockets?: Array<{ open: () => void }> }).__layoutEventSockets?.length ?? 0)).toBeGreaterThan(0);
-  const displayedRows = await page.locator(".event-table tbody tr").allTextContents();
+  const displayedRows = await page.locator(".event-table tbody tr:not(.data-table__day-row)").allTextContents();
   await page.evaluate(async () => {
     window.scrollTo(0, 1200);
     await new Promise<void>((resolve) => { requestAnimationFrame(() => { requestAnimationFrame(() => { resolve(); }); }); });
@@ -745,15 +745,15 @@ test("the new-events notice stays visible while reading older events", async ({ 
   const notice = page.locator(".realtime-feed__notice");
   await expect(notice).toBeVisible();
   await expect(notice).toBeInViewport();
-  expect(await page.locator(".event-table tbody tr").allTextContents()).toEqual(displayedRows);
+  expect(await page.locator(".event-table tbody tr:not(.data-table__day-row)").allTextContents()).toEqual(displayedRows);
   const noticeBox = await notice.boundingBox();
   expect(noticeBox?.y).toBeGreaterThanOrEqual(0);
   expect(noticeBox?.y).toBeLessThan(120);
 });
 
 test("event rows keep their cell geometry after loading older events at desktop and mobile widths", async ({ page }) => {
-  const widths = [1280, 390, 320];
-  const longActor = "A Very Long Actor Display Name That Used To Expand Its Table Column";
+  const widths = [390, 1280, 1920, 2560, 320];
+  const longActor = "Rindfleischetikettierungsüberwachungsaufgabenübertragungsgesetz".repeat(3);
   const firstPage = {
     entries: fullEventPage.entries.map((entry, index) => ({
       ...entry,
@@ -781,8 +781,8 @@ test("event rows keep their cell geometry after loading older events at desktop 
     await page.setViewportSize({ width, height: 900 });
     await installChannelMocks(page, {}, { events: firstPage, eventsNext: olderPage });
     await page.goto(`/channels/${channelId}/events`);
-    await expect(page.locator(".event-table tbody tr")).toHaveCount(50);
-    const existingRow = page.locator(".event-table tbody tr").first();
+    await expect(page.locator(".event-table tbody tr:not(.data-table__day-row)")).toHaveCount(50);
+    const existingRow = page.locator(".event-table tbody tr:not(.data-table__day-row)").first();
     const measureRow = async (): Promise<number[][]> => existingRow.evaluate((row) => [row, ...Array.from(row.children)].map((element) => {
       const rect = element.getBoundingClientRect();
       const round = (value: number): number => Math.round(value * 100) / 100;
@@ -792,11 +792,15 @@ test("event rows keep their cell geometry after loading older events at desktop 
     const before = await measureRow();
 
     await page.getByRole("button", { name: "Load older events" }).click();
-    await expect(page.locator(".event-table tbody tr")).toHaveCount(51);
+    await expect(page.locator(".event-table tbody tr:not(.data-table__day-row)")).toHaveCount(51);
     const after = await measureRow();
     expect(after).toEqual(before);
-    const olderActorCell = page.locator(".event-table tbody tr").last().locator("td").nth(2);
-    await expect(olderActorCell).toHaveAttribute("title", longActor);
+    const olderRow = page.locator(".event-table tbody tr:not(.data-table__day-row)").last();
+    const olderActorCell = width < 720
+      ? olderRow.locator(".event-table__mobile-meta > span:nth-child(3)")
+      : olderRow.locator("td").nth(3).locator(".data-table__cell-value");
+    const olderActorLabel = width < 720 ? olderActorCell : olderActorCell.locator("[title]");
+    await expect(olderActorLabel).toHaveAttribute("title", longActor);
     await expect(olderActorCell).toHaveCSS("text-overflow", "ellipsis");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   }
@@ -866,7 +870,7 @@ test("loading an older day does not move frozen rows across day sections", async
   const olderRequestStarted = new Promise<void>((resolve) => { markOlderStarted = resolve; });
   await installChannelMocks(page, { eventsNext: olderResponseGate }, { events: firstPage, eventsNext: olderPage });
   await page.goto(`/channels/${channelId}/events`);
-  await expect(page.locator(".event-table tbody tr")).toHaveCount(50);
+  await expect(page.locator(".event-table tbody tr:not(.data-table__day-row)")).toHaveCount(50);
   const todayRow = page.getByRole("row", { name: /today-sub/u });
   await expect(todayRow).toBeVisible();
   const feedStart = await page.locator(".event-feed").evaluate((feed) => feed.getBoundingClientRect().top + window.scrollY);
@@ -875,12 +879,12 @@ test("loading an older day does not move frozen rows across day sections", async
   await page.evaluate((start) => { window.scrollTo(0, start + 20); }, feedStart);
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(feedStart + 8);
   await expect(todayRow).toBeInViewport();
-  const before = await measureBox(page, ".event-table tbody tr:has-text('today-sub')");
+  const before = await measureBox(page, ".event-table tbody tr:not(.data-table__day-row):has-text('today-sub')");
 
   releaseOlderResponse();
-  await expect(page.locator(".event-table tbody tr")).toHaveCount(51);
-  expect(await measureBox(page, ".event-table tbody tr:has-text('today-sub')")).toEqual(before);
-  expect(await page.locator(".event-table tbody tr").allTextContents()).toContainEqual(expect.stringContaining("olderday"));
+  await expect(page.locator(".event-table tbody tr:not(.data-table__day-row)")).toHaveCount(51);
+  expect(await measureBox(page, ".event-table tbody tr:not(.data-table__day-row):has-text('today-sub')")).toEqual(before);
+  expect(await page.locator(".event-table tbody tr:not(.data-table__day-row)").allTextContents()).toContainEqual(expect.stringContaining("olderday"));
 });
 
 test("a keyboard-focused immediate-action control scrolls fully into view at 390px", async ({ page }) => {

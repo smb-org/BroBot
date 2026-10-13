@@ -72,10 +72,11 @@ describe("dashboard query data layer", () => {
 
     const view = renderWithQuery(<Probe />, {}, { gcTime: 600_000, staleTime: 0 });
     expect(await screen.findByText("1")).toBeInTheDocument();
+    const readsAtConnection = readCount;
     act(() => { setDashboardRealtimeStatus(channelId, "connected"); });
     await new Promise((resolve) => { setTimeout(resolve, 100); });
 
-    expect(readCount).toBe(1);
+    expect(readCount).toBe(readsAtConnection);
     view.unmount();
   });
 

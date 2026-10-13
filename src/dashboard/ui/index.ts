@@ -97,3 +97,6 @@ export { ListPaginationFooter } from "./ListPaginationFooter";
 export { ListRow } from "./ListRow";
 export { Spotlight } from "./Spotlight";
 export type { SpotlightItem } from "./Spotlight";
+export { DataTable } from "./DataTable";
+export { formatRelativeTime } from "./format-relative-time";
+export { StepDialog } from "./StepDialog";

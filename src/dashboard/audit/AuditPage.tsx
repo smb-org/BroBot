@@ -2,18 +2,19 @@ import { useCallback, useEffect, useState, type ReactElement } from "react";
 
 import type { PanelAuditEntry, PanelAuditFilters } from "../../panel-contract";
 import { AUDIT_AREAS } from "../../contracts/values";
-import { apiErrorText, auditFieldLabel, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatClockTime, formatDate, formatNumber } from "../locale";
+import { apiErrorText, auditFieldLabel, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber } from "../locale";
+import { DEFAULT_CHANNEL_TIME_ZONE } from "../../modules/contract";
+import { useChannelSettings } from "../data/channel-settings";
 import { ModuleHeading } from "../module-panels";
 import { loadModuleSettingsEditor } from "../module-panel-loaders";
 import { formatEventDetail } from "../events/model";
-import { AuditSentence, Badge, ChipGroup, EmptyState, Field, FilterBar, InspectorSection, ListDetail, ListPaginationFooter, LoadState as UiLoadState, LoadStateLines, notify, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
+import { AuditSentence, Badge, ChipGroup, DataTable, EmptyState, Field, FilterBar, InspectorSection, ListDetail, ListPaginationFooter, LoadState as UiLoadState, LoadStateLines, notify, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
 import { PanelApiError } from "../api";
 import { dashboardDataKeys } from "../data/keys";
 import { useAuditQuery } from "../data/lists";
 import {
   auditActorLabel,
   auditAreaForAction,
-  auditDayGroups,
   auditDiffRows,
   auditDiffValueText,
   auditFilterIsActive,
@@ -150,6 +151,8 @@ interface AuditPageProperties {
 
 export const AuditPage = ({ channelId, filters, onFiltersChange }: AuditPageProperties): ReactElement => {
   const query = useAuditQuery(channelId, filters);
+  const settingsQuery = useChannelSettings(channelId);
+  const channelTimeZone = settingsQuery.data?.timeZone ?? DEFAULT_CHANNEL_TIME_ZONE;
   const queryKey = dashboardDataKeys.audit(channelId, filters);
   const identityKey = JSON.stringify(queryKey);
   useEffect(() => {
@@ -166,6 +169,7 @@ export const AuditPage = ({ channelId, filters, onFiltersChange }: AuditPageProp
     : query.isError ? dashboardTexts().errors.dataLoadFailed : null;
   return <AuditPageContent
     identityKey={identityKey}
+    channelTimeZone={channelTimeZone}
     entries={entries}
     nextCursor={query.isPlaceholderData ? null : nextCursor}
     filters={filters}
@@ -179,8 +183,9 @@ export const AuditPage = ({ channelId, filters, onFiltersChange }: AuditPageProp
   />;
 };
 
-const AuditPageContent = ({ identityKey, entries, nextCursor, filters, onFiltersChange, loading, fetching, error, onNextPage, onRetry, loadingNextPage }: {
+const AuditPageContent = ({ identityKey, channelTimeZone, entries, nextCursor, filters, onFiltersChange, loading, fetching, error, onNextPage, onRetry, loadingNextPage }: {
   identityKey: string;
+  channelTimeZone: string;
   entries: readonly PanelAuditEntry[];
   nextCursor: string | null;
   filters: PanelAuditFilters;
@@ -197,7 +202,6 @@ const AuditPageContent = ({ identityKey, entries, nextCursor, filters, onFilters
   const selectedAudit = entries.find((entry) => entry.auditId === selectedAuditId) ?? null;
   const moduleCatalog = useModuleFieldCatalog(selectedAudit);
   const selectedDiffRows = selectedAudit === null ? [] : auditDiffRows(selectedAudit.before, selectedAudit.after);
-  const dayGroups = auditDayGroups(entries, formatDate);
   const filterActive = auditFilterIsActive(filters);
   return (
     <>
@@ -236,38 +240,39 @@ const AuditPageContent = ({ identityKey, entries, nextCursor, filters, onFilters
             >
               {entries.length > 0 ? <>
               <div key={identityKey} className={fetching ? "stale" : undefined} aria-busy={fetching}>
-                {dayGroups.map((day) => (
-                  <section key={day.key} className="event-day">
-                    <h3 className="event-day__heading">{day.label}</h3>
-                    <div className="audit-sentence-list">
-                      {day.entries.map((entry) => {
+                <DataTable
+                  ariaLabel={texts.audit.title}
+                  className="audit-sentence-list"
+                  rows={entries.map((entry) => ({
+                    ...entry,
+                    id: entry.auditId,
+                    at: entry.createdAt,
+                    moduleGroup: entry.moduleId ?? auditAreaForAction(entry.action),
+                  }))}
+                  timeZone={channelTimeZone}
+                  emptyLabel={texts.audit.empty}
+                  selectedId={selectedAuditId}
+                  onSelect={selectAudit}
+                  rowRef={auditRowRef}
+                  columns={[
+                    {
+                      key: "change",
+                      label: texts.audit.changeData,
+                      render: (entry) => {
                         const sentence = auditSentenceText(entry, dashboardLanguage());
-                        const area = texts.audit.areaLabels[auditAreaForAction(entry.action)];
-                        const time = formatClockTime(entry.createdAt);
-                        const accessibleName = [
-                          sentence,
-                          area,
-                          time,
-                        ].join(" ");
-                        return <button
-                          key={entry.auditId}
-                          type="button"
-                          className="audit-sentence-row"
-                          ref={auditRowRef(entry.auditId)}
-                          aria-pressed={selectedAuditId === entry.auditId}
-                          aria-label={accessibleName}
-                          onClick={() => { selectAudit(entry.auditId); }}
-                        >
-                          <span className="audit-sentence-row__sentence"><AuditSentence sentence={sentence} /></span>
-                          <span className="audit-sentence-row__meta">
-                            <Badge>{area}</Badge>
-                            <time className="mono" dateTime={entry.createdAt} title={entry.createdAt}>{time}</time>
-                          </span>
-                        </button>;
-                      })}
-                    </div>
-                  </section>
-                ))}
+                        return <span className="audit-sentence-row__sentence">
+                          <AuditSentence sentence={sentence} />
+                        </span>;
+                      },
+                    },
+                    {
+                      key: "area",
+                      label: texts.audit.area,
+                      moduleGroup: true,
+                      render: (entry) => <Badge>{texts.audit.areaLabels[auditAreaForAction(entry.action)]}</Badge>,
+                    },
+                  ]}
+                />
               </div>
             </> : null}
             </UiLoadState>

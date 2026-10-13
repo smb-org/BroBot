@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { useState } from "react";
+import { useState, type ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
@@ -7,7 +7,20 @@ import { AuditPage } from "../../src/dashboard/audit/AuditPage";
 import { emptyAuditFilter } from "../../src/dashboard/audit/model";
 import type { PanelAuditEntry, PanelAuditResponse } from "../../src/panel-contract";
 import { dashboardDataKeys } from "../../src/dashboard/data/keys";
-import { renderWithQuery } from "../query-test-utils";
+import { renderWithQuery as renderWithQueryBase, type DashboardQueryTestOptions } from "../query-test-utils";
+import type { RenderOptions } from "@testing-library/react";
+
+const renderWithQuery = (
+  ui: ReactElement,
+  options?: Omit<RenderOptions, "wrapper">,
+  queryOptions: DashboardQueryTestOptions = {},
+): ReturnType<typeof renderWithQueryBase> => renderWithQueryBase(ui, options, {
+  ...queryOptions,
+  initialData: [
+    ...(queryOptions.initialData ?? []),
+    { queryKey: ["channel", "channel-a", "settings"], data: { timeZone: "Europe/Berlin", revision: 1 } },
+  ],
+});
 
 const entry = (overrides: Partial<PanelAuditEntry>): PanelAuditEntry => ({
   auditId: "audit-1",
@@ -53,7 +66,10 @@ describe("AuditPage diff list", () => {
   it("localizes a member's role values in the expanded diff, not just the feed sentence (#254 review)", async () => {
     renderPage([entry({})]);
 
-    fireEvent.click(await screen.findByRole("button", { name: /Verwalter zu Bediener/u }));
+    const sentence = await screen.findByText(/Verwalter zu Bediener/u, { selector: ".audit-sentence" });
+    const row = sentence.closest("tr");
+    if (row === null) throw new Error("Audit row is missing.");
+    fireEvent.click(row);
 
     const diffRow = screen.getByText("Rolle").closest(".audit-diff__row");
     expect(diffRow).not.toBeNull();
@@ -89,7 +105,7 @@ describe("AuditPage diff list", () => {
 
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1), { timeout: 2_000 });
     expect(document.activeElement).toBe(personSearch);
-    expect(screen.getByRole("button", { name: /Alice.*Bob/u })).toBeVisible();
+    expect(screen.getByText(/Alice.*Bob/u, { selector: ".audit-sentence" })).toBeVisible();
     expect(document.querySelector(".audit-sentence-list")?.closest("[aria-busy]")).toHaveAttribute("aria-busy", "true");
     releaseFilteredResponse?.(new Response(JSON.stringify({ entries: [], nextCursor: null }), {
       status: 200,
@@ -124,13 +140,13 @@ describe("AuditPage diff list", () => {
         initialData: [{ queryKey: dashboardDataKeys.audit("channel-a", emptyAuditFilter), data: { pages: [initialResponse], pageParams: [null] } }],
       },
     );
-    expect(screen.getByRole("button", { name: /Alice.*Bob/u })).toBeVisible();
+    expect(screen.getByText(/Alice.*Bob/u, { selector: ".audit-sentence" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Toggle member filter" }));
-    expect(await screen.findByRole("button", { name: /Bea.*Cara/u })).toBeVisible();
+    expect(await screen.findByText(/Bea.*Cara/u, { selector: ".audit-sentence" })).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "Toggle member filter" }));
 
-    expect(screen.getByRole("button", { name: /Alice.*Bob/u })).toBeVisible();
+    expect(screen.getByText(/Alice.*Bob/u, { selector: ".audit-sentence" })).toBeVisible();
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
@@ -181,19 +197,19 @@ describe("AuditPage diff list", () => {
       },
     );
 
-    expect(screen.getByRole("button", { name: /Alice.*Bob/u })).toBeVisible();
+    expect(screen.getByText(/Alice.*Bob/u, { selector: ".audit-sentence" })).toBeVisible();
     await act(async () => {
       await rendered.queryClient.invalidateQueries({ queryKey: dashboardDataKeys.audit("channel-a", emptyAuditFilter), exact: true });
     });
 
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(rendered.queryClient.getQueryState(dashboardDataKeys.audit("channel-a", emptyAuditFilter))?.status).toBe("error");
-    expect(screen.getByRole("button", { name: /Alice.*Bob/u })).toBeVisible();
+    expect(screen.getByText(/Alice.*Bob/u, { selector: ".audit-sentence" })).toBeVisible();
     await waitFor(() => expect(rendered.container.querySelector(".ui-load-state--status-row .ui-load-state__inline-message")).not.toBeNull());
     expect(screen.getByRole("button", { name: "Erneut versuchen" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Erneut versuchen" }));
 
-    expect(await screen.findByRole("button", { name: /Bea.*Cara/u })).toBeVisible();
+    expect(await screen.findByText(/Bea.*Cara/u, { selector: ".audit-sentence" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Erneut versuchen" })).not.toBeInTheDocument();
     expect(fetcher).toHaveBeenCalledTimes(2);
   });

@@ -137,7 +137,7 @@ export interface EventDayGroup {
 }
 
 /** The viewer's local calendar day, matching `formatTimestamp`'s zone. Exported for reuse by the audit log's own day grouping (`dashboard/audit/model.ts`). */
-export const dayKey = (createdAt: string): string => {
+const dayKey = (createdAt: string): string => {
   const date = new Date(createdAt);
   if (Number.isNaN(date.getTime())) return createdAt;
   return `${String(date.getFullYear())}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;

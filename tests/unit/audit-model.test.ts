@@ -8,7 +8,6 @@ import {
   auditActorLabel,
   auditAreaForAction,
   auditAreaIcon,
-  auditDayGroups,
   auditDiffRows,
   auditDiffValueText,
   auditFilterIsActive,
@@ -467,25 +466,6 @@ describe("auditActorLabel", () => {
   it("labels automated maintenance without a user id", () => {
     expect(auditActorLabel({ actorUserId: null, actorLogin: null, actorDisplayName: null, actorKind: "system" }))
       .toBe(dashboardTexts().audit.systemActor);
-  });
-});
-
-describe("auditDayGroups", () => {
-  const formatDay = (createdAt: string): string => createdAt.slice(0, 10);
-
-  it("groups entries by calendar day, preserving order", () => {
-    const entries = [
-      baseEntry({ auditId: "a", createdAt: "2026-09-18T04:00:00.000Z" }),
-      baseEntry({ auditId: "b", createdAt: "2026-09-18T02:00:00.000Z" }),
-      baseEntry({ auditId: "c", createdAt: "2026-09-17T10:00:00.000Z" }),
-    ];
-    const groups = auditDayGroups(entries, formatDay);
-    expect(groups.map((group) => group.entries.map((entry) => entry.auditId))).toEqual([["a", "b"], ["c"]]);
-    expect(groups.map((group) => group.label)).toEqual(["2026-09-18", "2026-09-17"]);
-  });
-
-  it("returns no groups for an empty list", () => {
-    expect(auditDayGroups([], formatDay)).toEqual([]);
   });
 });
 

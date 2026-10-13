@@ -7,7 +7,7 @@ import { UiProvider } from "../../src/dashboard/ui";
 import { EventsPage } from "../../src/dashboard/events/EventsPage";
 import { emptyEventFilter } from "../../src/dashboard/events/model";
 import type { PanelEventEntry, PanelEventsResponse } from "../../src/panel-contract";
-import { dashboardDataKeys } from "../../src/dashboard/data/keys";
+import { dashboardDataKeys, queryKeys } from "../../src/dashboard/data/keys";
 import { dashboardAuthenticationRequiredEvent } from "../../src/dashboard/data/events";
 import { renderWithQuery as renderWithQueryBase, type DashboardQueryTestOptions } from "../query-test-utils";
 import { useRealtimePanelMessages } from "../../src/dashboard/realtime";
@@ -27,6 +27,10 @@ const renderWithQuery = (
   activePanelRevisions = { ...(queryOptions.panelRevisions ?? {}) };
   const rendered = renderWithQueryBase(<RealtimeShell>{ui}</RealtimeShell>, options, {
     ...queryOptions,
+    initialData: [
+      ...(queryOptions.initialData ?? []),
+      { queryKey: queryKeys.channel("kanal-a", "settings"), data: { timeZone: "Europe/Berlin", revision: 1 } },
+    ],
     panelRevisions: activePanelRevisions,
   });
   const previousFetch = globalThis.fetch;
@@ -283,7 +287,7 @@ describe("EventsPage failure cause icon", () => {
 
     const view = renderWithQuery(<UiProvider><Harness /></UiProvider>, undefined, { gcTime: 600_000 });
     expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
-    const firstRow = view.container.querySelector(".event-table tbody tr");
+    const firstRow = view.container.querySelector(".event-table tbody tr:not(.data-table__day-row)");
     if (!(firstRow instanceof HTMLTableRowElement)) throw new Error("Initial event row is missing.");
     fireEvent.click(firstRow);
     expect(screen.getByRole("region", { name: "Detail" })).toBeVisible();
@@ -291,7 +295,7 @@ describe("EventsPage failure cause icon", () => {
     expect(screen.queryByRole("region", { name: "Detail" })).not.toBeInTheDocument();
 
     expect(screen.queryByText("Chat-Nachricht fehlgeschlagen")).not.toBeInTheDocument();
-    expect(view.container.querySelectorAll(".event-table tbody tr")).toHaveLength(0);
+    expect(view.container.querySelectorAll(".event-table tbody tr:not(.data-table__day-row)")).toHaveLength(0);
 
     releaseFilteredResponse(new Response(JSON.stringify({ entries: [filteredEntry], nextCursor: null }), {
       status: 200,
@@ -632,7 +636,13 @@ describe("EventsPage failure cause icon", () => {
       });
       let serverEntries: readonly PanelEventEntry[] = [oldEntry];
       let rejectNextRequest = false;
-      const fetcher = vi.fn((): Promise<Response> => {
+      const fetcher = vi.fn((input: RequestInfo | URL): Promise<Response> => {
+        if (requestUrl(input).pathname.endsWith("/settings")) {
+          return Promise.resolve(new Response(JSON.stringify({ timeZone: "Europe/Berlin", revision: 1 }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }));
+        }
         if (rejectNextRequest) {
           rejectNextRequest = false;
           return Promise.reject(new Error("temporary network failure"));
@@ -659,10 +669,11 @@ describe("EventsPage failure cause icon", () => {
       socket.open();
       serverEntries = [newEntry, additionalEntry, oldEntry];
       fetcher.mockClear();
+      const eventRequestCount = (): number => fetcher.mock.calls.filter(([input]) => requestUrl(input).pathname.endsWith("/events")).length;
 
       if (cause === "hint") {
         emitEventHint(socket, "frozen-hint", newEntry);
-        await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+        await waitFor(() => expect(eventRequestCount()).toBe(1));
       } else if (cause === "retry") {
         const query = rendered.queryClient.getQueryCache().find({ queryKey });
         if (query === undefined) throw new Error("Events query was not created.");
@@ -672,7 +683,7 @@ describe("EventsPage failure cause icon", () => {
       } else if (cause === "reconnect") {
         socket.close();
         socket.open();
-        await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+        await waitFor(() => expect(eventRequestCount()).toBe(1));
       } else {
         await act(async () => { await rendered.queryClient.invalidateQueries({ queryKey, exact: true }); });
       }
@@ -786,7 +797,7 @@ describe("EventsPage failure cause icon", () => {
     await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
     const position = positionEventReader(rendered.container);
     act(() => { position.away(); });
-    const rowsBefore = Array.from(rendered.container.querySelectorAll(".event-table tbody tr"), (row) => row.textContent);
+    const rowsBefore = Array.from(rendered.container.querySelectorAll(".event-table tbody tr:not(.data-table__day-row)"), (row) => row.textContent);
     serverEntries = [late, newest, oldest];
     const socket = TestEventsWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime socket was not created.");
@@ -798,7 +809,7 @@ describe("EventsPage failure cause icon", () => {
       expect(data?.pages.flatMap((page) => page.entries).some((candidate) => candidate.eventId === late.eventId)).toBe(true);
     });
 
-    expect(Array.from(rendered.container.querySelectorAll(".event-table tbody tr"), (row) => row.textContent)).toEqual(rowsBefore);
+    expect(Array.from(rendered.container.querySelectorAll(".event-table tbody tr:not(.data-table__day-row)"), (row) => row.textContent)).toEqual(rowsBefore);
     expect(screen.queryByText(new RegExp(lateEventId, "u"))).not.toBeInTheDocument();
     const notice = screen.getByRole("button", { name: /1 neue Ereignisse/u });
     expect(notice).toBeVisible();
@@ -856,11 +867,11 @@ describe("EventsPage failure cause icon", () => {
     await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
     const position = positionEventReader(rendered.container);
     act(() => { position.away(); });
-    const before = Array.from(rendered.container.querySelectorAll(".event-table tbody tr"), (row) => row.textContent);
+    const before = Array.from(rendered.container.querySelectorAll(".event-table tbody tr:not(.data-table__day-row)"), (row) => row.textContent);
 
     fireEvent.click(screen.getByRole("button", { name: "Ältere Ereignisse laden" }));
     expect(await screen.findByText(/Raid von oldestpage/u)).toBeInTheDocument();
-    const after = Array.from(rendered.container.querySelectorAll(".event-table tbody tr"), (row) => row.textContent);
+    const after = Array.from(rendered.container.querySelectorAll(".event-table tbody tr:not(.data-table__day-row)"), (row) => row.textContent);
     expect(after.slice(0, before.length)).toEqual(before);
     expect(after).toHaveLength(before.length + 1);
     expect(rendered.container.querySelector(".realtime-feed__notice-slot")).toHaveAttribute("data-pending", "false");

@@ -1040,6 +1040,7 @@ export interface DashboardTexts {
     feedTitle: string;
     feedEmpty: string;
     feedAll: string;
+    today: string;
     yesterday: string;
   };
   channelControls: {
@@ -1363,6 +1364,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       feedTitle: "Warnungen und Fehler",
       feedEmpty: "Keine Warnungen oder Fehler.",
       feedAll: "Alle im Ereignisprotokoll",
+      today: "Heute",
       yesterday: "Gestern",
     },
     channelControls: {
@@ -1670,6 +1672,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       feedTitle: "Warnings and errors",
       feedEmpty: "No warnings or errors.",
       feedAll: "View all in the event log",
+      today: "Today",
       yesterday: "Yesterday",
     },
     channelControls: {
@@ -3147,7 +3150,7 @@ export const formatDate = (value: string): string =>
 export const formatTimestamp = (value: string): string =>
   formatDashboardDate(value, { dateStyle: "medium", timeStyle: "short" });
 
-export const formatClockTime = (value: string): string =>
+const formatClockTime = (value: string): string =>
   formatDashboardDate(value, { hour: "2-digit", minute: "2-digit" });
 
 const localDayKey = (date: Date): string =>
