@@ -167,7 +167,9 @@ export function CommandPalette({
                       item.onTrigger();
                       onOpenChange(false);
                     }}
-                    value={`${item.label} ${item.description ?? ""} ${item.group ?? ""} ${item.stateLabel ?? ""} ${(item.keywords ?? []).join(" ")}`}
+                    // The value is the stable id: labels and state flip while the item is highlighted.
+                    keywords={[...(item.keywords ?? [])]}
+                    value={item.id}
                   >
                     {itemIcon === undefined ? null : <span className="command-palette__item-icon">{itemIcon}</span>}
                     <span className="command-palette__item-copy">

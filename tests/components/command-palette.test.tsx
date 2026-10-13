@@ -3,16 +3,27 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { setChannelControl } from "../../src/dashboard/api";
+import type { PanelChannelControl, PanelChannelControls } from "../../src/panel-contract";
 import { dashboardTexts } from "../../src/dashboard/locale";
 import { ChannelCommandPalette } from "../../src/dashboard/command-palette";
 import { CommandPalette } from "../../src/dashboard/ui/CommandPalette";
 import { UiProvider, type CommandPaletteItem } from "../../src/dashboard/ui";
 import type { DashboardRoute } from "../../src/dashboard/router";
 
+vi.mock("../../src/dashboard/api", async (importOriginal) => ({
+  ...await importOriginal<Record<string, unknown>>(),
+  setChannelControl: vi.fn(),
+}));
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
+
+const off: PanelChannelControl = { active: false, until: null, mode: null };
+const idleControls: PanelChannelControls = { mute: off, pause: off };
+const pausedControls: PanelChannelControls = { mute: off, pause: { active: true, until: null, mode: "unlimited" } };
 
 const texts = dashboardTexts("en").commandPalette;
 
@@ -100,5 +111,37 @@ describe("cmdk command palette", () => {
     fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onNavigate).toHaveBeenCalledWith({ kind: "module", channelId: "kanal-a", moduleId: "timers" });
+  });
+
+  it("keeps the highlighted pause item selected when its label flips to resume", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    vi.mocked(setChannelControl).mockResolvedValue({ controls: pausedControls });
+    const palette = (channelControls: PanelChannelControls) => (
+      <QueryClientProvider client={client}><UiProvider><ChannelCommandPalette
+        open
+        onOpenChange={vi.fn()}
+        channelId="kanal-a"
+        ownRole="manager"
+        modules={[]}
+        channelControls={channelControls}
+        onRefreshChannelState={() => Promise.resolve()}
+        onNavigate={vi.fn()}
+        onOpenCommand={vi.fn()}
+        onOpenVariable={vi.fn()}
+      /></UiProvider></QueryClientProvider>
+    );
+    const view = render(palette(idleControls));
+
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "pause" } });
+    const pauseItem = (): HTMLElement | null => document.querySelector<HTMLElement>("[data-value='action:channel-pause']");
+    await waitFor(() => expect(pauseItem()).toHaveAttribute("aria-selected", "true"));
+    const labelBefore = pauseItem()?.textContent;
+
+    view.rerender(palette(pausedControls));
+    await waitFor(() => expect(pauseItem()?.textContent).not.toBe(labelBefore));
+    expect(pauseItem()).toHaveAttribute("aria-selected", "true");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(setChannelControl).toHaveBeenCalledWith("kanal-a", "pause", null);
   });
 });
