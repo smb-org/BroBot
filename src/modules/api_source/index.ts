@@ -150,7 +150,13 @@ const resolveConditionValues = async (
   const values = await Promise.all(ids.map(async (id) => {
     const name = parseApiSourceName(id);
     if (name === null) return [id, null] as const;
-    const value = await outputFor(name, context);
+    let value: unknown;
+    try {
+      value = await outputFor(name, context);
+    } catch {
+      // A failing source only makes its own condition unavailable; healthy ones still resolve.
+      return [id, null] as const;
+    }
     context.addTemplateConditionNextChangeAt?.(new Date(context.now + OVERLAY_REFRESH_MS).toISOString());
     return [id, typeof value === "boolean" ? String(value) : null] as const;
   }));

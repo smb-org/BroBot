@@ -956,6 +956,30 @@ describe("API source template dispatch", () => {
   });
 });
 
+describe("API source condition isolation", () => {
+  it("keeps a healthy condition when a sibling source returns no value", async () => {
+    const database = await createDatabase();
+    const db = database as unknown as D1Database;
+    await insertSource(database, "online", "$.online", "https://api.sample-provider.net/online");
+    await insertSource(database, "optional", "$.optional", "https://api.sample-provider.net/optional");
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({ online: true }))));
+
+    const resolved = await apiSourceModule.resolveTemplateConditions?.(
+      ["api_source.online", "api_source.optional"],
+      {
+        DB: db,
+        channelId: CHANNEL_ID,
+        channelTimeZone: () => Promise.resolve("Europe/Berlin"),
+        channelLocation: () => Promise.resolve(null),
+        externalFetchBudget: sharedBudget(),
+        now: NOW,
+      },
+    );
+
+    expect(resolved).toEqual({ "api_source.online": "true" });
+  });
+});
+
 describe("API source Node-side template CPU measurement", () => {
   it("measures nested blocks, two data conditions, and three JSONata expressions in Node", async () => {
     const database = await createDatabase();
