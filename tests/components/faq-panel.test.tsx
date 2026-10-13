@@ -73,7 +73,7 @@ describe("FAQ panel", () => {
 
     expect(await screen.findByText("Invalid RE2 pattern: invalid Perl operator: (?=")).toBeInTheDocument();
     expect(patternField).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByRole("spinbutton", { name: "Per-person cooldown" })).toHaveValue("60");
+    expect(screen.getByRole("spinbutton", { name: "Per-person cooldown" })).toHaveValue(60);
   });
 
   it("keeps the existing-entry switch available to operators", async () => {

@@ -17,13 +17,9 @@ const mantineBoundaryPattern = {
   group: ["@mantine/*"],
   message: "Mantine nur in src/dashboard/ui/. Panels importieren aus der Naht.",
 };
-const tablerBoundaryPattern = {
-  group: ["@tabler/icons-react"],
-  message: "Import Tabler icons only from src/dashboard/ui/Icon.tsx.",
-};
-const tablerBoundaryPath = {
-  name: "@tabler/icons-react",
-  message: "Tabler icons may only be imported from src/dashboard/ui/Icon.tsx.",
+const primitivePackageBoundaryPattern = {
+  group: ["@base-ui/react", "@base-ui/react/*", "cmdk", "lucide-react"],
+  message: "Import UI primitive packages only from src/dashboard/ui/.",
 };
 const richTextareaBoundaryPattern = {
   group: ["rich-textarea", "rich-textarea/*"],
@@ -66,7 +62,7 @@ const moduleIsolationPatterns = [
     message: "Module dürfen kein anderes Modul importieren.",
   },
   mantineBoundaryPattern,
-  tablerBoundaryPattern,
+  primitivePackageBoundaryPattern,
   richTextareaBoundaryPattern,
   tanstackBoundaryPattern,
 ];
@@ -97,7 +93,7 @@ const overlayBoundaryPatterns = [
     message: "Overlay-Ansichten dürfen Zod nicht importieren.",
   },
   mantineBoundaryPattern,
-  tablerBoundaryPattern,
+  primitivePackageBoundaryPattern,
   richTextareaBoundaryPattern,
   tanstackBoundaryPattern,
 ];
@@ -105,7 +101,7 @@ const overlayBoundaryPatterns = [
 const overlayRestrictedImportPatterns = [
   ...moduleOverlayIsolationPatterns,
   ...overlayBoundaryPatterns.filter((pattern) =>
-    pattern !== mantineBoundaryPattern && pattern !== tablerBoundaryPattern &&
+    pattern !== mantineBoundaryPattern && pattern !== primitivePackageBoundaryPattern &&
     pattern !== richTextareaBoundaryPattern && pattern !== tanstackBoundaryPattern),
 ];
 
@@ -120,13 +116,13 @@ const panelBoundaryPatterns = [
   },
   overlayViewBoundaryPattern,
   mantineBoundaryPattern,
-  tablerBoundaryPattern,
+  primitivePackageBoundaryPattern,
   richTextareaBoundaryPattern,
 ];
 
 const panelRestrictedImportPatterns = [
   ...moduleIsolationPatterns,
-  ...panelBoundaryPatterns.filter((pattern) => pattern !== mantineBoundaryPattern && pattern !== tablerBoundaryPattern && pattern !== richTextareaBoundaryPattern),
+  ...panelBoundaryPatterns.filter((pattern) => pattern !== mantineBoundaryPattern && pattern !== primitivePackageBoundaryPattern && pattern !== richTextareaBoundaryPattern),
 ];
 
 export default defineConfig(
@@ -154,9 +150,9 @@ export default defineConfig(
   reactRefresh.configs.vite,
   {
     files: ["**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}"],
-    ignores: ["src/dashboard/ui/Icon.tsx"],
+    ignores: ["src/dashboard/ui/**"],
     rules: {
-      "no-restricted-imports": ["error", { paths: [tablerBoundaryPath], patterns: [richTextareaBoundaryPattern] }],
+      "no-restricted-imports": ["error", { patterns: [richTextareaBoundaryPattern, primitivePackageBoundaryPattern] }],
     },
   },
   {
@@ -216,7 +212,7 @@ export default defineConfig(
     // und für auszulösende Anwendungsfälle den Service verwenden. Repository-
     // und Adapterzugriff bleiben trotzdem hinter dem Service verborgen.
     files: ["src/dashboard/**/*.{ts,tsx}"],
-    ignores: ["src/dashboard/ui/Icon.tsx"],
+    ignores: ["src/dashboard/ui/**"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -253,7 +249,6 @@ export default defineConfig(
                 group: ["**/modules/**", "**/worker/**"],
                 message: "ui/ ist Darstellung: keine Module, kein Worker.",
               },
-              tablerBoundaryPattern,
             ],
         },
       ],
@@ -278,10 +273,10 @@ export default defineConfig(
           paths: [
             { name: "react", message: "Der Worker darf React nicht importieren." },
             { name: "react-dom", message: "Der Worker darf react-dom nicht importieren." },
-            tablerBoundaryPath,
           ],
           patterns: [
             richTextareaBoundaryPattern,
+            primitivePackageBoundaryPattern,
             {
               regex: "^react(?:/|$)",
               message: "Der Worker darf React nicht importieren.",
@@ -313,8 +308,8 @@ export default defineConfig(
   },
   {
     // Raw-field guard (editor-konzept 15.5): a raw <input>/<select>/<textarea>
-    // belongs only behind the seam (Field, NumberField, TextArea, TagInput,
-    // SegmentedControl, ChoiceCards, Switch).
+    // belongs only behind the seam (Field, UnitInput, TextArea, ChipsInput,
+    // SegmentChoice, ChoiceCards, Switch).
     files: ["src/dashboard/**/*.tsx", "src/modules/*/panel/**/*.tsx"],
     ignores: ["src/dashboard/ui/**"],
     rules: {
@@ -322,7 +317,7 @@ export default defineConfig(
         "error",
         {
           selector: "JSXOpeningElement[name.name=/^(input|select|textarea)$/]",
-          message: "Raw form fields only in src/dashboard/ui/ -- use Field, NumberField, TextArea, TagInput, SegmentedControl, ChoiceCards, or Switch (editor-konzept 15).",
+          message: "Raw form fields only in src/dashboard/ui/ -- use Field, UnitInput, TextArea, ChipsInput, SegmentChoice, ChoiceCards, or Switch (editor-konzept 15).",
         },
       ],
     },

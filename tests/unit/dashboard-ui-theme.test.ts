@@ -206,7 +206,7 @@ describe("form density size step", () => {
     });
   });
 
-  it("keeps button text at 13px by default and sets 14px on buttons inside FormDensity", () => {
+  it("keeps button text at 13px by default and marks buttons inside FormDensity", () => {
     const { container } = render(
       createElement(
         UiProvider,
@@ -218,9 +218,8 @@ describe("form density size step", () => {
     );
     const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>("button"));
 
-    expect(componentValues.Button?.vars?.(theme, { size: "md" }, {}).root?.["--button-fz"]).toBe("13px");
-    expect(buttons[0]?.style.getPropertyValue("--button-fz")).toBe("13px");
-    expect(screen.getByRole("button", { name: "Primary" }).style.getPropertyValue("--button-color")).toBe(colors.onBrand);
-    expect(screen.getByRole("button", { name: "Inside" }).style.getPropertyValue("--button-fz")).toBe("14px");
+    expect(buttons[0]).toHaveClass("text-[13px]");
+    expect(screen.getByRole("button", { name: "Primary" })).toHaveAttribute("data-variant", "primary");
+    expect(screen.getByRole("button", { name: "Inside" })).toHaveClass("ui-button--form-density");
   });
 });

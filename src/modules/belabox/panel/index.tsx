@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Button, ConfirmDialog, Field, InspectorActions, InspectorFieldRow, InspectorSection, LoadState, notify, Skeleton } from "../../../dashboard/ui";
+import { Button, ConfirmDialog, Field, InspectorActions, InspectorFieldRow, InspectorSection, LoadState, LoadStateLines, notify } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { BelaboxHistoryPoint, BelaboxStatusResponse, BelaboxStreamSummary } from "../contracts";
 import { belaboxReasonText, belaboxPanelTexts } from "./locale";
@@ -225,7 +225,7 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
   return <section className="module-stack" aria-label={labels.title}>
     <InspectorSection title={labels.connection}>
       <LoadState variant="panel-320" status={connectionStatus}
-        loading={<Skeleton rows={5} height={34} />}
+        loading={<LoadStateLines rows={5} height={34} />}
         empty={<p className="muted">{labels.notConfigured}</p>}
         error={<p className="muted">{labels.refreshFailed}</p>}>
         <p className="muted">{status?.configured ? labels.configured : labels.notConfigured}</p>

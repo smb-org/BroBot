@@ -3,7 +3,7 @@ import { useEffect, useState, type ReactElement } from "react";
 import type { ModulePanelProperties } from "../../contract";
 import { MOON_ERROR_TEXT_MAX_LENGTH, type MoonSettings } from "../contracts";
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
-import { Button, Field, InspectorFieldRow, LoadState, notify, Skeleton } from "../../../dashboard/ui";
+import { Button, Field, InspectorFieldRow, LoadState, LoadStateLines, notify } from "../../../dashboard/ui";
 import { moonSettingsTexts } from "./locale";
 import { fetchMoonSettings, saveMoonSettings } from "./service";
 
@@ -59,7 +59,7 @@ function MoonSettingsPanelContent({ channelId, language, canManage }: ModulePane
     <LoadState
       variant="panel-480"
       status={settings === null ? settingsQuery.isError ? "error" : "loading" : "success"}
-      loading={<Skeleton rows={3} height={34} />}
+      loading={<LoadStateLines rows={3} height={34} />}
       empty={<div />}
       error={<p>{labels.loadFailed}</p>}
       queryError={{ message: labels.loadFailed, onRetry: () => { void settingsQuery.refetch(); } }}

@@ -284,12 +284,12 @@ describe("Ad settings editor declaration", () => {
     fireEvent.click(screen.getByRole("switch", { name: /Vorwarnung vor der Werbung/ }));
     const field = screen.getByRole("spinbutton", { name: "Vorlaufzeit" });
     fireEvent.change(field, { target: { value: "" } });
-    expect(field).toHaveValue("");
+    expect(field).toHaveValue(null);
     fireEvent.click(screen.getByRole("button", { name: "Ansagen speichern" }));
 
     expect(await screen.findByText(/Zahl eingeben/u)).toBeInTheDocument();
     expect(field).toHaveAttribute("aria-invalid", "true");
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
-    expect(field).toHaveValue("");
+    expect(field).toHaveValue(null);
   });
 });

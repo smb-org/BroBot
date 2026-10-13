@@ -291,7 +291,7 @@ describe("saved chat voting panel", () => {
       getRecent: (signal) => read("recent", signal, []),
     }));
     await screen.findByRole("textbox", { name: "Question" });
-    fireEvent.click(screen.getByRole("radio", { name: "Recent" }));
+    fireEvent.click(screen.getByRole("button", { name: "Recent" }));
     await waitFor(() => expect(reads.recent).toBe(2));
 
     phase = "cancel";
@@ -381,7 +381,7 @@ describe("saved chat voting panel", () => {
     </UiProvider>);
 
     expect(await screen.findByText("No saved votes yet")).toBeInTheDocument();
-    const recentMode = screen.getAllByRole("radio", { name: "Recent" })[0];
+    const recentMode = screen.getAllByRole("button", { name: "Recent" })[0];
     if (recentMode === undefined) throw new Error("The Recent view control is missing.");
     fireEvent.click(recentMode);
     expect(await screen.findByText("No vote has run yet")).toBeInTheDocument();
@@ -812,8 +812,8 @@ describe("saved chat voting panel", () => {
     fireEvent.click(screen.getByRole("link", { name: /Updated by another moderator/u }));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Question" })).toHaveValue(refreshed.title));
     expect(screen.getByRole("textbox", { name: "Answer 1" })).toHaveValue("Fresh yes");
-    expect(screen.getByRole("spinbutton", { name: "Seconds" })).toHaveValue("300");
-    expect(screen.getByRole("radio", { name: "5 min" })).toBeChecked();
+    expect(screen.getByRole("spinbutton", { name: "Seconds" })).toHaveValue(300);
+    expect(screen.getByRole("button", { name: "5 min" })).toHaveAttribute("aria-pressed", "true");
     const start = screen.getByRole("button", { name: "Start vote" });
     expect(start).toBeEnabled();
     fireEvent.click(start);
@@ -825,15 +825,15 @@ describe("saved chat voting panel", () => {
     mount(fetchHarness({ templates: [template({ durationSeconds: 120 })] }));
     const seconds = await screen.findByRole("spinbutton", { name: "Seconds" });
     expect(seconds).toBeDisabled();
-    fireEvent.click(screen.getByRole("radio", { name: "Custom" }));
+    fireEvent.click(screen.getByRole("button", { name: "Custom" }));
     expect(seconds).toBeEnabled();
     fireEvent.change(seconds, { target: { value: "150" } });
     fireEvent.change(seconds, { target: { value: "120" } });
     expect(seconds).toBeEnabled();
-    expect(screen.getByRole("radio", { name: "Custom" })).toBeChecked();
-    fireEvent.click(screen.getByRole("radio", { name: "2 min" }));
+    expect(screen.getByRole("button", { name: "Custom" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "2 min" }));
     expect(seconds).toBeDisabled();
-    fireEvent.click(screen.getByRole("radio", { name: "Custom" }));
+    fireEvent.click(screen.getByRole("button", { name: "Custom" }));
     expect(seconds).toBeEnabled();
   });
 
@@ -846,12 +846,12 @@ describe("saved chat voting panel", () => {
       onPatch: () => jsonResponse({ error: "chat_vote_template_conflict" }, 409),
     }));
     const seconds = await screen.findByRole("spinbutton", { name: "Seconds" });
-    fireEvent.click(screen.getByRole("radio", { name: "Custom" }));
+    fireEvent.click(screen.getByRole("button", { name: "Custom" }));
     fireEvent.change(seconds, { target: { value: "150" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     fireEvent.click(await screen.findByRole("button", { name: "Reload" }));
-    await waitFor(() => expect(screen.getByRole("radio", { name: "5 min" })).toBeChecked());
-    expect(seconds).toHaveValue("300");
+    await waitFor(() => expect(screen.getByRole("button", { name: "5 min" })).toHaveAttribute("aria-pressed", "true"));
+    expect(seconds).toHaveValue(300);
     expect(seconds).toBeDisabled();
   });
 
@@ -907,7 +907,7 @@ describe("saved chat voting panel", () => {
       voterCount: 4,
     };
     mount(fetchHarness({ recent: [recentVote] }));
-    fireEvent.click(await screen.findByRole("radio", { name: "Recent" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Recent" }));
     expect(await screen.findByRole("button", { name: "Again" })).toBeInTheDocument();
     expect(screen.getByText("Pizza", { selector: ".chat-voting-results__label" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Again" })).toBeEnabled();
@@ -1014,16 +1014,16 @@ describe("saved chat voting panel", () => {
       getRecent: () => { recentRequests += 1; return current.vote?.status === "closed" ? [completedVote] : []; },
       onClose: () => { current = currentState({ vote: completedVote }); },
     }));
-    fireEvent.click(await screen.findByRole("radio", { name: "Recent" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Recent" }));
     expect(await screen.findByText("No vote has run yet")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("radio", { name: "Saved" }));
+    fireEvent.click(screen.getByRole("button", { name: "Saved" }));
     current = currentState({ vote: runningVote });
     revisions = { "module:chat_voting:panel": 1 };
     await act(async () => { await reconcileDashboardPanelResourceRevisions(view.queryClient, "fictional-channel"); });
     await screen.findByRole("button", { name: "End vote" });
     fireEvent.click(await screen.findByRole("button", { name: "End vote" }));
     await waitFor(() => expect(current.vote?.status).toBe("closed"));
-    fireEvent.click(screen.getByRole("radio", { name: "Recent" }));
+    fireEvent.click(screen.getByRole("button", { name: "Recent" }));
     await waitFor(() => expect(recentRequests).toBeGreaterThanOrEqual(2));
     expect(await screen.findByText("Dinner", { selector: ".list-row__title" })).toBeInTheDocument();
     expect(recentRequests).toBeGreaterThanOrEqual(2);
@@ -1044,7 +1044,7 @@ describe("saved chat voting panel", () => {
         return current.vote?.id === newlyClosedVote.id ? [newlyClosedVote, previousClosedVote] : [previousClosedVote];
       },
     }));
-    fireEvent.click(await screen.findByRole("radio", { name: "Recent" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Recent" }));
     await waitFor(() => expect(recentRequests).toBeGreaterThan(0));
     expect(await screen.findByText("Dinner", { selector: ".list-row__title" })).toBeInTheDocument();
     const previousRequestCount = recentRequests;
@@ -1073,7 +1073,7 @@ describe("saved chat voting panel", () => {
       },
     }));
     await waitFor(() => expect(document.querySelector(".chat-voting-live")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("radio", { name: "Recent" }));
+    fireEvent.click(screen.getByRole("button", { name: "Recent" }));
     await waitFor(() => expect(recentRequests).toBe(1));
     current = currentState({ vote: latestVote });
     revisions = { "module:chat_voting:panel": 1, "module:chat_voting:recent": 1 };

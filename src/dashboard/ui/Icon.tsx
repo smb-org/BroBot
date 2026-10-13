@@ -1,37 +1,35 @@
 import {
-  IconAd2, IconAdjustmentsHorizontal, IconAlertTriangle, IconArrowUp, IconBackground, IconBellRinging, IconBorderAll, IconCheck, IconChevronLeft, IconCopy,
-  IconDiamond, IconExternalLink, IconInfoCircle, IconKey, IconLock, IconMinus, IconMovie, IconPlus, IconRefresh,
-  IconMessage, IconSearch, IconSettings, IconShadow, IconSpeakerphone, IconStar, IconSword, IconTrash, IconTypography, IconUser, IconUserMinus,
-  IconUserPlus, IconUsers, IconVideo, IconX, IconBroadcast, IconBroadcastOff, IconClockHour4,
-  IconPlayerPause, IconPlayerPlay, IconVolume3, IconVolumeOff, IconBraces, IconPencil, IconDotsVertical,
-} from "@tabler/icons-react";
-import type { TablerIcon } from "@tabler/icons-react";
+  AlertTriangle, ArrowUp, BellRing, Braces, Check, ChevronLeft, Clock, Copy, Diamond, ExternalLink, Film, Image, Info, KeyRound, Layers,
+  Lock, Megaphone, MessageSquareText, Minus, MoreVertical, Pause, Pencil, Play, Plus, Radio, RadioTower, RefreshCw, Search, Settings,
+  SlidersHorizontal, Square, Star, Sword, Trash2, Type, User, UserMinus, UserPlus, Users, Video, Volume2, VolumeX, X,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import type { ReactElement } from "react";
 
 const glyphs = {
-  ad: IconAd2, shoutout: IconSpeakerphone, clip: IconMovie,
-  add: IconPlus, remove: IconTrash, close: IconX, copy: IconCopy, copied: IconCheck,
-  reload: IconRefresh, search: IconSearch, lock: IconLock, external: IconExternalLink,
-  warning: IconAlertTriangle, jumpToTop: IconArrowUp, collapse: IconChevronLeft,
-  minus: IconMinus, plus: IconPlus, member: IconUser, memberAdd: IconUserPlus, memberRemove: IconUserMinus,
-  tierEveryone: IconUsers, tierSubscriber: IconStar, tierVip: IconDiamond,
-  tierModerator: IconSword, tierBroadcaster: IconVideo,
-  tabSettings: IconSettings, tabAdvanced: IconAdjustmentsHorizontal, tabCode: IconBraces,
-  styleFont: IconTypography, styleOutline: IconBorderAll, styleShadow: IconShadow, styleBackground: IconBackground,
-  tabMessages: IconMessage, tabPrewarning: IconBellRinging,
-  broadcast: IconBroadcast, "broadcast-off": IconBroadcastOff, "volume-3": IconVolume3,
-  "volume-off": IconVolumeOff, "player-pause": IconPlayerPause, "player-play": IconPlayerPlay,
-  "clock-hour-4": IconClockHour4,
-  cause: IconInfoCircle,
-  edit: IconPencil,
-  more: IconDotsVertical,
-  token: IconKey, variable: IconBraces,
-} as const satisfies Record<string, TablerIcon>;
+  ad: Megaphone, shoutout: Megaphone, clip: Film,
+  add: Plus, remove: Trash2, close: X, copy: Copy, copied: Check,
+  reload: RefreshCw, search: Search, lock: Lock, external: ExternalLink,
+  warning: AlertTriangle, jumpToTop: ArrowUp, collapse: ChevronLeft,
+  minus: Minus, plus: Plus, member: User, memberAdd: UserPlus, memberRemove: UserMinus,
+  tierEveryone: Users, tierSubscriber: Star, tierVip: Diamond,
+  tierModerator: Sword, tierBroadcaster: Video,
+  tabSettings: Settings, tabAdvanced: SlidersHorizontal, tabCode: Braces,
+  styleFont: Type, styleOutline: Square, styleShadow: Layers, styleBackground: Image,
+  tabMessages: MessageSquareText, tabPrewarning: BellRing,
+  broadcast: RadioTower, "broadcast-off": Radio, "volume-3": Volume2,
+  "volume-off": VolumeX, "player-pause": Pause, "player-play": Play,
+  "clock-hour-4": Clock,
+  cause: Info,
+  edit: Pencil,
+  more: MoreVertical,
+  token: KeyRound, variable: Braces,
+} as const satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof glyphs;
 type IconSize = 16 | 20 | 25 | 28;
 
 export function Icon({ name, size = 16, className }: { name: IconName; size?: IconSize; className?: string }): ReactElement {
   const Glyph = glyphs[name];
-  return <Glyph data-ui="" size={size} stroke={1.5} aria-hidden="true" focusable="false" className={className === undefined ? "ui-icon" : `ui-icon ${className}`} />;
+  return <Glyph data-ui="" size={size} strokeWidth={1.5} aria-hidden="true" focusable="false" className={className === undefined ? "ui-icon" : `ui-icon ${className}`} />;
 }

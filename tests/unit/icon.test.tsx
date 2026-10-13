@@ -55,7 +55,7 @@ const iconNames: Readonly<Record<IconName, true>> = {
 afterEach(cleanup);
 
 describe("Icon", () => {
-  it("renders every project icon as a hidden Tabler svg with the requested size and stroke", () => {
+  it("renders every project icon as a hidden lucide svg with the requested size and stroke", () => {
     for (const name of Object.keys(iconNames) as IconName[]) {
       const { container, unmount } = render(<Icon name={name} size={20} />);
       const svg = container.querySelector("svg");

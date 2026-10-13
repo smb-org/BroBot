@@ -3,7 +3,7 @@ import { useMemo, useState, type ReactElement } from "react";
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { templateTextLength } from "../../../contracts/template-text-length";
 import { formatTimestamp } from "../../../dashboard/locale";
-import { Button, ChatOutputTargetControl, ChatPreview, ConfirmDialog, Dialog, Field, FormDialog, InspectorSection, LoadState, NumberField, Select, Skeleton, Switch, TextArea, notify } from "../../../dashboard/ui";
+import { Button, ChatOutputTargetControl, ChatPreview, ConfirmDialog, Dialog, Field, FormDialog, InspectorSection, LoadState, LoadStateLines, Select, Switch, TextArea, UnitInput, notify } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { Timer, TimerMutationInput, TimerTrigger } from "../contracts";
 import { timersTexts } from "./locale";
@@ -250,7 +250,7 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
         {canManage ? null : <p className="lock-reason">{labels.roleLocked}</p>}
         <div data-testid="timers-list-slot" style={{ height: "calc(var(--s10) * 19)", overflow: "hidden" }}>
         <LoadState variant="panel-720" status={listStatus}
-          loading={<Skeleton rows={7} height={34} />}
+          loading={<LoadStateLines rows={7} height={34} />}
           empty={<p className="muted">{labels.empty}</p>}
           error={<p className="muted">{labels.loadError}</p>}
           queryError={{ message: labels.loadError, onRetry: () => { void query.refetch(); } }}
@@ -324,7 +324,7 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
             options={triggerOptions}
           />
 
-          {draft.type === "interval" || draft.type === "stream_start" ? <NumberField
+          {draft.type === "interval" || draft.type === "stream_start" ? <UnitInput
             label={labels.minutes}
             value={draft.minutes}
             onChange={(minutes) => patchDraft({ minutes })}
@@ -335,7 +335,7 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
           /> : null}
           {draft.type === "interval" ? <>
             <Switch label={labels.minimumMessages} checked={draft.useMinimumMessages} onChange={(useMinimumMessages) => patchDraft({ useMinimumMessages })} />
-            {draft.useMinimumMessages ? <NumberField
+            {draft.useMinimumMessages ? <UnitInput
               label={labels.messageCount}
               value={draft.minimumMessages}
               onChange={(minimumMessages) => patchDraft({ minimumMessages })}
@@ -361,7 +361,7 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
           </> : null}
           {draft.type === "before_event" ? <>
             <Select label={labels.eventSource} value={draft.sourceId || null} onChange={(sourceId) => patchDraft({ sourceId: sourceId ?? "" })} options={sourceOptions} required />
-            <NumberField label={labels.before} value={draft.minutes} onChange={(minutes) => patchDraft({ minutes })} min={1} max={1_440} unit="min" required />
+            <UnitInput label={labels.before} value={draft.minutes} onChange={(minutes) => patchDraft({ minutes })} min={1} max={1_440} unit="min" required />
           </> : null}
 
           <div className="inspector-actions">

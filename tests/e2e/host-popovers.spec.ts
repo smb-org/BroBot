@@ -64,15 +64,15 @@ test("error summaries and clipped field text stay complete at mobile and inspect
 
     const gamma = editor.locator(".ui-field").filter({ has: page.getByRole("textbox", { name: "Gamma" }) });
     const hint = "This complete hint stays readable when it is longer than the reserved field row and the editor clips its scrolling body. ".repeat(2);
-    const hintText = gamma.locator(".ui-field__hint.ui-truncated-text");
-    const fieldError = gamma.locator(".mantine-InputWrapper-error .ui-truncated-text");
+    const hintText = gamma.locator(".ui-field__description > .ui-field__hint.ui-truncated-text");
+    const fieldError = gamma.locator(".ui-field__error > .ui-truncated-text");
     await expect(hintText).toHaveAttribute("title", hint);
     await expect(gamma.locator(".ui-field__description .sr-only")).toHaveText(hint);
     await expect(fieldError).toHaveAttribute("title", "This complete error explains how to correct the value without leaving the editor.");
-    await expect(gamma.locator(".mantine-InputWrapper-error .sr-only")).toHaveText("This complete error explains how to correct the value without leaving the editor.");
+    await expect(gamma.locator(".ui-field__error > .sr-only")).toHaveText("This complete error explains how to correct the value without leaving the editor.");
     const gammaInput = gamma.getByRole("textbox", { name: "Gamma" });
     const gammaDescribedBy = (await gammaInput.getAttribute("aria-describedby"))?.split(" ") ?? [];
-    expect(gammaDescribedBy).toContain("field-gamma-description");
+    expect(gammaDescribedBy).toContain("field-gamma-hint");
     expect(gammaDescribedBy).toContain("field-gamma-error");
 
     await editor.getByRole("button", { name: "Close inspector" }).click();
@@ -155,12 +155,11 @@ test("conflict recovery label stays fully visible in the mobile SaveBar slot", a
   const saveBar = editor.locator(".ui-save-bar");
   const actions = saveBar.locator(".ui-save-bar__actions");
   const reload = actions.getByRole("button", { name: "Serverstand laden" });
-  const label = reload.locator(".mantine-Button-label");
 
   await expect(editor).toBeVisible();
   expect((await saveBar.boundingBox())?.height).toBe(64);
   await expect(actions.getByRole("button")).toHaveCount(1);
   await expect(reload).toBeVisible();
-  await expect(label).toHaveText("Serverstand laden");
-  await expect.poll(async () => label.evaluate((element) => element.scrollWidth > 0 && element.scrollWidth <= element.clientWidth)).toBe(true);
+  await expect(reload).toHaveText("Serverstand laden");
+  await expect.poll(async () => reload.evaluate((element) => element.scrollWidth > 0 && element.scrollWidth <= element.clientWidth)).toBe(true);
 });

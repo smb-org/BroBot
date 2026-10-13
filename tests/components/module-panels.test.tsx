@@ -32,13 +32,13 @@ const editorFixture = vi.hoisted(() => {
     warningLabel: () => language === "de" ? "Eine Vorlage enthält einen unbekannten Platzhalter." : "A template contains an unknown variable.",
     sections: { general: language === "de" ? "Allgemein" : "General", extra: language === "de" ? "Weitere" : "Extra" },
     fields: {
-      amount: { label: language === "de" ? "Menge" : "Amount", hint: language === "de" ? "Eine ganze Zahl." : "A whole number.", invalidError: language === "de" ? "Mindestens ein Stück." : "Use at least one item.", unit: "Stück", increaseLabel: "Increase amount", decreaseLabel: "Decrease amount" },
+      amount: { label: language === "de" ? "Menge" : "Amount", hint: language === "de" ? "Eine ganze Zahl." : "A whole number.", invalidError: language === "de" ? "Mindestens ein Stück." : "Use at least one item.", unit: "Stück" },
       handle: { label: language === "de" ? "Konto" : "Handle", hint: language === "de" ? "Twitch-Name." : "Twitch name." },
       labels: { label: language === "de" ? "Abstimmungslabels" : "Vote labels", hint: language === "de" ? "Leer lassen für Standardwerte." : "Leave blank to use defaults.", placeholder: "Yes|No", invalidError: language === "de" ? "Gib zwei gültige Labels ein." : "Enter two valid labels." },
       message: { label: language === "de" ? "Nachricht" : "Message", hint: language === "de" ? "Vorlage für die Nachricht." : "Message template.", previewLabel: "Preview", previewSpeaker: "Bot", variables: [{ name: "viewer", description: "Viewer name.", sample: "Ada" }] },
       mode: { label: language === "de" ? "Modus" : "Mode", hint: language === "de" ? "Wähle einen Modus." : "Choose a mode.", options: { automatic: { label: language === "de" ? "Automatisch" : "Automatic", description: "Runs automatically." }, manual: { label: language === "de" ? "Von Hand" : "Manual", description: "Runs by hand." } } },
       enabled: { label: language === "de" ? "Zusatzaktion" : "Extra action", hint: language === "de" ? "Schaltet die Zusatzaktion ein." : "Turns on the extra action.", description: language === "de" ? "Zusätzliche Aktion ausführen." : "Run an extra action." },
-      threshold: { label: language === "de" ? "Schwelle" : "Threshold", hint: language === "de" ? "Mindestmenge." : "Minimum amount.", unit: "Stück", disabledReason: language === "de" ? "Zusatzaktion ist ausgeschaltet." : "Extra action is off.", increaseLabel: "Increase threshold", decreaseLabel: "Decrease threshold" },
+      threshold: { label: language === "de" ? "Schwelle" : "Threshold", hint: language === "de" ? "Mindestmenge." : "Minimum amount.", unit: "Stück", disabledReason: language === "de" ? "Zusatzaktion ist ausgeschaltet." : "Extra action is off." },
     },
   });
   const definition = {
@@ -546,7 +546,7 @@ describe("Module panel loader", () => {
     />);
 
     const toggle = screen.getByRole("switch", { name: /aktiv/i });
-    expect(toggle).toBeDisabled();
+    expect(toggle).toHaveAttribute("aria-disabled", "true");
     const reason = screen.getByText("Nur Broadcaster und Verwalter dürfen Module ändern.");
     expect(reason).toBeInTheDocument();
     expect(reason.querySelector("svg[aria-hidden='true']")).not.toBeNull();
@@ -615,16 +615,18 @@ describe("Module panel loader", () => {
     const view = renderSettingsFixture(fetcher, "manager", {}, moduleId);
 
     expect(view.container.querySelector('.ui-load-state[data-status="loading"]')).not.toBeNull();
-    expect(view.container.querySelectorAll(".mantine-Skeleton-root").length).toBeGreaterThan(0);
+    expect(view.container.querySelectorAll(".ui-load-state__reserved-lines > span").length).toBeGreaterThan(0);
     expect(editorFixture.loader).toHaveBeenCalledOnce();
     resolveSettings?.(Response.json({ settings: editorFixtureSettings, revision: 1, variables: [] }));
 
     await screen.findByRole("spinbutton", { name: "Menge" });
     const handle = screen.getByRole("textbox", { name: "Konto" });
     const message = screen.getByRole("textbox", { name: "Nachricht" });
-    const mode = screen.getByRole("radiogroup", { name: "Modus" });
+    const mode = screen.getByRole("group", { name: "Modus" });
     const extraAction = screen.getByRole("switch", { name: /Zusatzaktion/ });
     const threshold = screen.getByRole("spinbutton", { name: "Schwelle" });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Menge" }), { target: { value: "3" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Menge" }), { target: { value: "3" } });
     expect(document.querySelector(".ui-field__prefix")).toHaveTextContent("@");
     expect(screen.getByText("Hello Ada")).toBeInTheDocument();
     const fieldHelp: readonly (readonly [string, string])[] = [
@@ -637,14 +639,13 @@ describe("Module panel loader", () => {
     ];
     for (const [label, help] of fieldHelp) expect(screen.getByRole("button", { name: `${label}: ${help}` })).toHaveAttribute("title", help);
 
-    fireEvent.click(screen.getByRole("button", { name: "Increase amount" }));
     fireEvent.change(handle, { target: { value: "@Ada" } });
     expect(handle).toHaveValue("Ada");
     fireEvent.change(message, { target: { value: "Willkommen {viewer}!" } });
-    fireEvent.click(within(mode).getByRole("radio", { name: /Von Hand/ }));
+    fireEvent.click(within(mode).getByRole("button", { name: /Von Hand/ }));
     fireEvent.click(extraAction);
     expect(threshold).toBeDisabled();
-    expect(screen.getAllByText("Zusatzaktion ist ausgeschaltet.")).toHaveLength(2);
+    expect(screen.getAllByText("Zusatzaktion ist ausgeschaltet.")).toHaveLength(1);
     fireEvent.click(extraAction);
     expect(threshold).toBeEnabled();
 
@@ -873,10 +874,10 @@ describe("Module panel loader", () => {
     });
     renderSettingsFixture(fetcher);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Increase amount" }));
+    fireEvent.change(await screen.findByRole("spinbutton", { name: "Menge" }), { target: { value: "5" } });
     fireEvent.click(screen.getByRole("button", { name: "Fixture speichern" }));
     const switchCard = await screen.findByRole("switch", { name: /Zusatzaktion/ });
-    expect(switchCard).toBeDisabled();
+    expect(switchCard).toHaveAttribute("aria-disabled", "true");
     resolvePatch?.(Response.json({ settings: editorFixtureSettings, revision: 2, warnings: [] }));
   });
 

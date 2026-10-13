@@ -1,7 +1,7 @@
 import { useCallback, useState, type ReactElement } from "react";
 
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
-import { Button, ChatOutputTargetControl, ConfirmDialog, Field, FormDialog, GamePicker, InspectorSection, LoadState, NumberField, Select, Skeleton, Switch, TextArea, notify } from "../../../dashboard/ui";
+import { Button, ChatOutputTargetControl, ConfirmDialog, Field, FormDialog, GamePicker, InspectorSection, LoadState, LoadStateLines, UnitInput, Select, Switch, TextArea, notify } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { FaqEntry, FaqGame } from "../contracts";
 import { FAQ_ANSWER_MAX_LENGTH, FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH, FAQ_USER_COOLDOWN_MAXIMUM_SECONDS } from "../contracts";
@@ -201,7 +201,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
         <Button variant="primary" disabled={!canManage} onClick={openCreate}>{labels.add}</Button>
         {canManage ? null : <p className="lock-reason">{labels.roleLocked}</p>}
         <LoadState variant="panel-720" status={listStatus}
-          loading={<Skeleton rows={7} height={34} />}
+          loading={<LoadStateLines rows={7} height={34} />}
           empty={<p className="muted">{labels.noEntries}</p>}
           error={<p className="muted">{labels.loadError}</p>}
           queryError={{ message: labels.loadError, onRetry: () => { void query.refetch(); } }}
@@ -305,7 +305,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
             disabled={pending}
             required
           />
-          <NumberField
+          <UnitInput
             label={labels.cooldown}
             hint={labels.cooldownHint}
             value={draft.cooldownSeconds}
@@ -316,7 +316,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
             disabled={pending}
             required
           />
-          <NumberField
+          <UnitInput
             label={labels.userCooldown}
             hint={labels.userCooldownHint}
             value={draft.userCooldownSeconds}

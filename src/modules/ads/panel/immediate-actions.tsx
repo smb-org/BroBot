@@ -1,7 +1,7 @@
 import { useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Button, Icon, SegmentedControl, notify } from "../../../dashboard/ui";
+import { Button, Icon, SegmentChoice, notify } from "../../../dashboard/ui";
 import type { ModuleImmediateActionProperties } from "../contract";
 import { adsPanelTexts } from "./locale";
 import { startCommercialNow } from "./service";
@@ -43,7 +43,7 @@ const AdNowAction = ({ channelId, canManage = false, availabilityReason }: Modul
     <div className="stream-manager-action">
       <div className="stream-manager-action__header"><Icon name="ad" size={20} /><h3>{labels.immediateTitle}</h3></div>
       <div className="stream-manager-action__body">
-        <SegmentedControl
+        <SegmentChoice
           label={labels.immediateLength}
           hint={labels.immediateLengthHint}
           value={length ?? ""}

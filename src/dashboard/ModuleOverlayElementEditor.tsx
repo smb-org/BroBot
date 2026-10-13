@@ -4,7 +4,7 @@ import { MODULE_OVERLAY_ELEMENTS } from "../modules/overlay-element-registry";
 import type { JsonObject, OverlayElementEditorProps } from "../modules/contract";
 import { loadModuleOverlayElementEditor, retryModuleChunkLoad } from "./module-panel-loaders";
 import { RetryableLazy } from "./RetryableLazy";
-import { Button, Skeleton } from "./ui";
+import { Button, LoadStateLines } from "./ui";
 import { dashboardCommonTexts, dashboardTexts } from "./locale";
 
 type EditorJsonValue = string | number | boolean | null | readonly EditorJsonValue[] | { readonly [key: string]: EditorJsonValue };
@@ -55,7 +55,7 @@ export const ModuleOverlayElementEditor = ({ kind, config, channelId, language, 
         readOnly,
         ...(readOnlyReason === undefined ? {} : { readOnlyReason }),
       }}
-      loadingFallback={<div data-module-editor-fallback="true" aria-hidden="true"><Skeleton rows={1} height={34} /></div>}
+      loadingFallback={<div data-module-editor-fallback="true" aria-hidden="true"><LoadStateLines rows={1} height={34} /></div>}
       renderError={(retry) => <div className="module-overlay-element-editor--error" role="alert">
         <p>{dashboardTexts().module.componentLoadError}</p>
         <Button size="compact" variant="neutral" onClick={retry}>{dashboardCommonTexts(language).retry}</Button>

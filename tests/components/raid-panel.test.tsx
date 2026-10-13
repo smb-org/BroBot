@@ -47,7 +47,7 @@ describe("Raid settings editor declaration", () => {
     if (initialLanguage !== undefined) Object.defineProperty(window.navigator, "language", initialLanguage);
   });
 
-  it("shows the two icon tabs, stepper, switch-card threshold, and renderRaidText preview", async () => {
+  it("shows the two icon tabs, numeric threshold, switch-card state, and renderRaidText preview", async () => {
     const fetcher = settingsFetch();
     renderRaid(fetcher);
 
@@ -55,10 +55,10 @@ describe("Raid settings editor declaration", () => {
     const shoutoutTab = screen.getByRole("tab", { name: "Shoutout" });
     expect(messagesTab.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     expect(shoutoutTab.querySelector("svg[aria-hidden='true']")).not.toBeNull();
-    expect(screen.getByRole("spinbutton", { name: "Text-Schwelle" })).toHaveValue("3");
+    expect(screen.getByRole("spinbutton", { name: "Text-Schwelle" })).toHaveValue(3);
     expect(screen.getByText("Voll beispielkanal 42")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Text-Schwelle erhöhen" }));
-    expect(screen.getByRole("spinbutton", { name: "Text-Schwelle" })).toHaveValue("4");
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Text-Schwelle" }), { target: { value: "4" } });
+    expect(screen.getByRole("spinbutton", { name: "Text-Schwelle" })).toHaveValue(4);
     fireEvent.click(screen.getByRole("button", { name: "Raid-Einstellungen speichern" }));
     expect(await screen.findByRole("status")).toHaveTextContent("Raid-Einstellungen gespeichert.");
 
@@ -67,7 +67,7 @@ describe("Raid settings editor declaration", () => {
     const threshold = screen.getByRole("spinbutton", { name: "Shoutout-Schwelle" });
     expect(shoutout).not.toBeChecked();
     expect(threshold).toBeDisabled();
-    expect(screen.getAllByText("Shoutout ist ausgeschaltet.")).toHaveLength(2);
+    expect(screen.getAllByText("Shoutout ist ausgeschaltet.")).toHaveLength(1);
     fireEvent.click(shoutout);
     expect(shoutout).toBeChecked();
     expect(threshold).toBeEnabled();
@@ -120,11 +120,11 @@ describe("Raid settings editor declaration", () => {
 
     const number = screen.getByRole("spinbutton", { name: "Text-Schwelle" });
     fireEvent.change(number, { target: { value: "" } });
-    expect(number).toHaveValue("");
+    expect(number).toHaveValue(null);
     fireEvent.click(screen.getByRole("button", { name: "Raid-Einstellungen speichern" }));
     expect(await screen.findByText(/Zahl eingeben\./u)).toBeInTheDocument();
     expect(number).toHaveAttribute("aria-invalid", "true");
     expect(fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1);
-    expect(number).toHaveValue("");
+    expect(number).toHaveValue(null);
   });
 });

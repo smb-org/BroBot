@@ -63,6 +63,8 @@ interface ChannelMockData {
   moduleStatus?: number;
   moduleToggleStatus?: number;
   locationSearchStatus?: number;
+  locationSaveStatus?: number;
+  locationResults?: readonly Record<string, unknown>[];
   shoutoutStatus?: number;
 }
 
@@ -107,7 +109,12 @@ const installChannelMocks = async (page: Page, gates: ChannelGates = {}, data: C
       return;
     }
     if (pathname === `/api/channels/${channelId}/settings/location/geocode`) {
-      await route.fulfill({ status: data.locationSearchStatus ?? 200, contentType: "application/json", body: JSON.stringify(data.locationSearchStatus === undefined ? { results: [] } : { error: "location_search_failed" }) });
+      await route.fulfill({ status: data.locationSearchStatus ?? 200, contentType: "application/json", body: JSON.stringify(data.locationSearchStatus === undefined ? { results: data.locationResults ?? [] } : { error: "location_search_failed" }) });
+      return;
+    }
+    if (pathname === `/api/channels/${channelId}/settings/location` && route.request().method() === "PATCH") {
+      const status = data.locationSaveStatus ?? 200;
+      await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(status === 200 ? { ok: true, location: null, locationRevision: 2 } : { error: "location_save_failed" }) });
       return;
     }
     if (pathname === `/api/channels/${channelId}/overlays`) {
@@ -433,11 +440,15 @@ test("platform audit keeps its footer in place as rows arrive", async ({ page })
   const grantEditor = page.locator('.platform-inspector-section[aria-label="Add member"]');
   await expect(grantEditor).toBeVisible();
   const grantBefore = await measureBox(page, '.platform-inspector-section[aria-label="Add member"]');
-  expect(grantBefore[1] + grantBefore[3]).toBeLessThanOrEqual((await measureBox(page, ".platform-members-table"))[1]);
+  const membersSection = page.locator(".inspector-content-section").filter({ has: page.getByRole("heading", { name: "Members" }) });
+  const membersBefore = await membersSection.boundingBox();
+  if (membersBefore === null) throw new Error("The members list section should have a layout box while loading.");
+  expect(grantBefore[1] + grantBefore[3]).toBeLessThanOrEqual(membersBefore.y + 0.5);
   releaseMembers();
   await expect(page.locator(".platform-members-table tbody tr")).toHaveCount(100);
   expect(await measureBox(page, '.platform-inspector-section[aria-label="Add member"]')).toEqual(grantBefore);
-  expect(grantBefore[1] + grantBefore[3]).toBeLessThanOrEqual((await measureBox(page, ".platform-members-table"))[1]);
+  expect((await membersSection.boundingBox())?.y).toBe(membersBefore.y);
+  expect(grantBefore[1] + grantBefore[3]).toBeLessThanOrEqual(((await membersSection.boundingBox())?.y ?? Number.POSITIVE_INFINITY) + 0.5);
 });
 
 test("platform tabs isolate populated channel and audit lists at desktop and mobile widths", async ({ page }) => {
@@ -987,10 +998,10 @@ test("window visibility changes do not broadly refresh populated overview cards"
 test("module toggle and workspace failures use toasts without inserting error rows", async ({ page }) => {
   await installChannelMocks(page, {}, { modules: [{ id: "ads", enabled: false, settings: "{}" }], moduleToggleStatus: 500 });
   await page.goto(`/channels/${channelId}/modules`);
-  const switches = page.locator(".module-workspace input[role='switch']");
+  const switches = page.locator(".module-workspace [role='switch']");
   await expect(switches.first()).toBeVisible();
   const before = await measureBox(page, ".module-workspace .state-list");
-  await switches.first().check();
+  await switches.first().click();
   await expect(page.locator(".ui-toast--error")).toBeVisible();
   expect(await measureBox(page, ".module-workspace .state-list")).toEqual(before);
   await expect(page.locator(".module-workspace .form-error")).toHaveCount(0);
@@ -1101,7 +1112,7 @@ test("the collapsed legacy overlay list stays below primary content while loadin
   }
 });
 
-test("a location-search error toast can be dismissed above its dialog backdrop", async ({ page }) => {
+test("a location-search error stays inside its dialog", async ({ page }) => {
   await installChannelMocks(page, {}, { locationSearchStatus: 503 });
   await page.goto(`/channels/${channelId}/overview`);
   await page.getByRole("button", { name: "Change location" }).click();
@@ -1110,17 +1121,35 @@ test("a location-search error toast can be dismissed above its dialog backdrop",
   await page.getByRole("textbox", { name: "Search for a place" }).fill("Reykjavik");
   await page.getByRole("button", { name: "Search", exact: true }).click();
 
-  const toast = page.locator(".ui-toast--error");
-  await expect(toast).toBeVisible();
-  const toastHost = page.locator(".ui-toast-host");
-  const [toastZIndex, modalBaseZIndex] = await Promise.all([
-    toastHost.evaluate((element) => Number.parseInt(getComputedStyle(element).zIndex, 10)),
-    toastHost.evaluate((element) => Number.parseInt(getComputedStyle(element).getPropertyValue("--mantine-z-index-modal"), 10)),
-  ]);
-  expect(toastZIndex).toBeGreaterThan(modalBaseZIndex);
-  await toast.getByRole("button", { name: "Dismiss notification" }).click();
-  await expect(toast).toHaveCount(0);
+  await expect(dialog.getByRole("alert")).toContainText("Locations could not be searched.");
+  await expect(page.locator(".ui-toast--error")).toHaveCount(0);
   await expect(dialog).toBeVisible();
+});
+
+test("a failed location save keeps its dialog and attribution in place", async ({ page }) => {
+  await installChannelMocks(page, {}, {
+    locationSaveStatus: 500,
+    locationResults: [{ name: "Sample Cove", admin1: "Example District", country: "Example State", latitude: 12.3456, longitude: 45.6789, timeZone: "UTC" }],
+  });
+  await page.goto(`/channels/${channelId}/overview`);
+  await page.getByRole("button", { name: "Change location" }).click();
+  const dialog = page.getByRole("dialog", { name: "Change location" });
+  await page.getByRole("textbox", { name: "Search for a place" }).fill("Sample Cove");
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  const location = dialog.getByRole("option", { name: /Sample Cove/ });
+  await expect(location).toBeVisible();
+
+  const dialogBefore = await dialog.boundingBox();
+  const attribution = dialog.locator('a[href="https://open-meteo.com/"]');
+  const attributionBefore = await attribution.boundingBox();
+  const errorSlotBefore = await dialog.locator(".channel-location-field__save-error-slot").boundingBox();
+  await location.click();
+  await expect(dialog.getByRole("alert")).toContainText("Location could not be saved.");
+
+  expect(await dialog.boundingBox()).toEqual(dialogBefore);
+  expect(await attribution.boundingBox()).toEqual(attributionBefore);
+  expect(await dialog.locator(".channel-location-field__save-error-slot").boundingBox()).toEqual(errorSlotBefore);
+  await page.unrouteAll();
 });
 
 test("a channel control error appears as a toast without changing header boxes", async ({ page }) => {

@@ -1,7 +1,7 @@
-import { Textarea as MantineTextarea } from "@mantine/core";
 import type { ReactElement } from "react";
 
 import { describedHelper, useDisabledFieldReason } from "./DisabledFieldReason";
+import { Textarea } from "./primitives/textarea";
 
 export interface CodeFieldProps {
   id: string;
@@ -15,9 +15,10 @@ export interface CodeFieldProps {
 
 export function CodeField({ id, label, value, onChange, maxLength, disabled = false, className }: CodeFieldProps): ReactElement {
   const disabledReason = useDisabledFieldReason();
-  return <MantineTextarea data-ui="" id={id} className={className} label={label} value={value} maxLength={maxLength}
-    disabled={disabled} onChange={(event) => { onChange(event.currentTarget.value); }}
-    aria-describedby={disabledReason === null ? undefined : `${disabledReason.id}-code-${id}`}
-    description={disabledReason === null ? undefined : describedHelper(null, disabledReason, `code-${id}`)}
-    inputWrapperOrder={["label", "input", "description", "error"]} autosize={false} minRows={14} />;
+  const describedBy = disabledReason === null ? undefined : `${disabledReason.id}-code-${id}`;
+  return <div data-ui="" className={`ui-code-field${className === undefined ? "" : ` ${className}`}`}>
+    <label className="ui-field__label" htmlFor={id}>{label}</label>
+    <Textarea id={id} className="ui-code-field__input" value={value} maxLength={maxLength} rows={14} disabled={disabled} aria-describedby={describedBy} onChange={(event) => { onChange(event.currentTarget.value); }} />
+    {disabledReason === null ? null : <span data-ui="" className="ui-field__description">{describedHelper(null, disabledReason, `code-${id}`)}</span>}
+  </div>;
 }

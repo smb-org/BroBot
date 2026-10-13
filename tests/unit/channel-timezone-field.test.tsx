@@ -57,6 +57,28 @@ describe("channel time zone field", () => {
     expect(await screen.findAllByRole("option", { name: "UTC" })).toHaveLength(1);
   });
 
+  it("keeps an empty search open instead of restoring the saved UTC value", async () => {
+    const onChange = vi.fn();
+    render(<MantineProvider><ChannelTimeZoneField
+      label="Channel time zone"
+      hint="Used for date and time values."
+      value="UTC"
+      onChange={onChange}
+      canEdit
+      disabled={false}
+    /></MantineProvider>);
+
+    const field = screen.getByRole("combobox", { name: "Channel time zone" });
+    fireEvent.click(field);
+    expect(field).toHaveValue("UTC");
+    fireEvent.change(field, { target: { value: "" } });
+
+    expect(field).toHaveValue("");
+    expect(await screen.findByRole("listbox")).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "UTC" })).toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it("lets managers enter a custom zone identifier the server accepts but supportedValuesOf omits", async () => {
     const onChange = vi.fn();
     render(<MantineProvider><ChannelTimeZoneField

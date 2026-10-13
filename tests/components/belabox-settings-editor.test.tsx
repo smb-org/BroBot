@@ -28,8 +28,8 @@ describe("BELABOX settings editor", () => {
     };
     render(<Harness />);
 
-    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Mode" })).getByRole("radio", { name: "On demand" }));
-    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Interval" })).getByRole("radio", { name: "30 s" }));
+    fireEvent.click(within(screen.getByRole("group", { name: "Mode" })).getByRole("button", { name: "On demand" }));
+    fireEvent.click(within(screen.getByRole("group", { name: "Interval" })).getByRole("button", { name: "30 s" }));
 
     expect(latest).toMatchObject({ mode: "on_demand", intervalSeconds: 30 });
   });

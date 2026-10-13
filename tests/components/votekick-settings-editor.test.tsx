@@ -33,10 +33,12 @@ describe("votekick starter role setting", () => {
 
     render(<Harness />);
     const select = screen.getByRole("combobox", { name: label });
-    expect(select).toHaveValue(language === "de" ? "VIP und höher" : "VIP and higher");
+    expect(select).toHaveTextContent(language === "de" ? "VIP und höher" : "VIP and higher");
     fireEvent.click(select);
-    fireEvent.click(await screen.findByRole("option", { name: option }));
+    const optionElement = await screen.findByRole("option", { name: option });
+    fireEvent.pointerDown(optionElement, { pointerId: 1, pointerType: "mouse", button: 0 });
+    fireEvent.click(optionElement);
     expect(screen.getByTestId("starter-role-value")).toHaveTextContent(value);
-    expect(select).toHaveValue(option);
+    expect(select).toHaveTextContent(option);
   });
 });

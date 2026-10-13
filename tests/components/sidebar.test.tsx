@@ -13,7 +13,7 @@ describe("Sidebar", () => {
       href: `/modules/${String(index + 1)}`,
       active: false,
       onNavigate: vi.fn(),
-      led: { status: "green", word: "Running" },
+      led: { status: "ok", word: "Running" },
     }));
     const { container } = render(
       <UiProvider><Sidebar
@@ -35,6 +35,7 @@ describe("Sidebar", () => {
     expect(within(scrollRegion as HTMLElement).getAllByRole("link")).toHaveLength(16);
     expect(within(scrollRegion as HTMLElement).getAllByRole("link", { name: /^Module /u })).toHaveLength(15);
     expect(within(container).getByRole("heading", { name: "Chat", level: 2 })).toBeInTheDocument();
+    expect(within(container).queryByText("Running")).toBeNull();
     expect(within(container).getByRole("group", { name: "Chat" })).toContainElement(within(scrollRegion as HTMLElement).getByRole("link", { name: "Module 1 · Running" }));
 
     const toggle = screen.getByRole("button", { name: "Collapse sidebar" });

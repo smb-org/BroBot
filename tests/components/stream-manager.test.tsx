@@ -117,7 +117,7 @@ describe("Stream Manager immediate actions", () => {
     const adButton = await screen.findByRole("button", { name: /Werbung jetzt/ });
     const shoutoutButton = await screen.findByRole("button", { name: "Shoutout senden" });
     const adCard = adButton.closest(".stream-manager-action");
-    const adLength = within(adCard as HTMLElement).getByRole("radiogroup");
+    const adLength = within(adCard as HTMLElement).getByRole("group", { name: "Werbedauer" });
     expect(adCard).toContainElement(adLength);
     expect(adButton.nextElementSibling).toHaveAttribute("data-testid", "immediate-action-result-slot");
 
@@ -157,11 +157,11 @@ describe("Stream Manager immediate actions", () => {
     renderWithMantine(<ImmediateActions channelId="kanal-a" streamState="online" canManage modules={ADS_ENABLED} />);
 
     await screen.findByRole("heading", { name: "Werbung", level: 3 });
-    const group = screen.getByRole("radiogroup", { name: "Werbedauer" });
+    const group = screen.getByRole("group", { name: "Werbedauer" });
     for (const seconds of ["30", "60", "90", "120", "150", "180"]) {
-      expect(within(group).getByRole("radio", { name: `${seconds}s` })).toBeInTheDocument();
+      expect(within(group).getByRole("button", { name: `${seconds}s` })).toBeInTheDocument();
     }
-    fireEvent.click(within(group).getByRole("radio", { name: "180s" }));
+    fireEvent.click(within(group).getByRole("button", { name: "180s" }));
     fireEvent.click(await screen.findByRole("button", { name: "Werbung jetzt (180s)" }));
 
     await expectActionResult("Werbung gestartet (180s)", "success");
@@ -243,7 +243,7 @@ describe("Stream Manager immediate actions", () => {
     expect(screen.getByText("Der Streamstatus ist derzeit nicht verfügbar.")).toBeInTheDocument();
   });
 
-  it("shows the matching aria-hidden Tabler icon without changing each action's accessible name", async () => {
+  it("shows the matching aria-hidden lucide icon without changing each action's accessible name", async () => {
     renderWithMantine(<ImmediateActions channelId="kanal-a" streamState="online" modules={ALL_ACTIONS_ENABLED} />);
     await screen.findByRole("button", { name: /Werbung jetzt \(60s\)/u });
 

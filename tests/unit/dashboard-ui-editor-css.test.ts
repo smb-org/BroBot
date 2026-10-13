@@ -26,12 +26,13 @@ describe("editor seam styles", () => {
     expect(unknown).not.toMatch(/padding|border|letter-spacing|font(?:-family|-size|-weight)?\s*:/u);
   });
 
-  it("keeps stepped number fields in one row and confirmation actions readable at narrow widths", () => {
-    expect(styles).toContain(".ui-number-field__stepper { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; grid-template-rows: auto 44px auto 18px;");
-    expect(styles).toContain(".ui-number-field__stepper .mantine-NumberInput-input { padding-right: var(--input-padding); text-align: left;");
-    expect(styles).toContain(".ui-number-field__stepper .ui-number-field--has-unit .mantine-NumberInput-input { padding-right: calc(var(--input-right-section-width) + var(--input-padding)); }");
-    expect(styles).toContain(".ui-number-field__stepper .mantine-InputWrapper-description { grid-column: 1 / -1; grid-row: 3;");
-    expect(styles).toContain(".ui-field--prefixed input.mantine-Input-input.mantine-TextInput-input { padding-left: calc(var(--input-left-section-width) + var(--input-padding)); }");
+  it("keeps unit inputs and confirmation actions readable at narrow widths", () => {
+    expect(styles).toContain(".unit-input__control { position: relative; min-width: 0; }");
+    expect(styles).toContain(".unit-input__input { padding-right: 4rem; font-family: \"IBM Plex Mono\", ui-monospace, monospace; }");
+    expect(styles).toContain(".unit-input__unit { position: absolute; top: 0; right: 10px;");
+    expect(styles).toContain(".ui-field__input--with-leading:not(.ui-field__input--with-prefix) { padding-left: 34px; }");
+    expect(styles).toContain(".ui-field__leading--prefix { position: static; display: flex; flex: 0 0 auto; width: auto; padding: 0 8px; }");
+    expect(styles).toContain(".ui-field__input--with-prefix { flex: 1 1 0%; width: auto; min-width: 0; padding-left: 0; }");
     expect(styles).toContain(".ui-confirm-dialog__actions { display: flex; flex-wrap: wrap;");
     expect(styles).toContain("@media (max-width: 600px)");
     expect(styles).toContain(".ui-confirm-dialog__actions { flex-direction: column; align-items: stretch; }");

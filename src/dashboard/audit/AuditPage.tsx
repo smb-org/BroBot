@@ -6,7 +6,7 @@ import { apiErrorText, auditFieldLabel, dashboardCommonTexts, dashboardLanguage,
 import { ModuleHeading } from "../module-panels";
 import { loadModuleSettingsEditor } from "../module-panel-loaders";
 import { formatEventDetail } from "../events/model";
-import { AuditSentence, Badge, ChipGroup, EmptyState, Field, FilterBar, InspectorSection, ListDetail, ListPaginationFooter, LoadState as UiLoadState, notify, Skeleton, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
+import { AuditSentence, Badge, ChipGroup, EmptyState, Field, FilterBar, InspectorSection, ListDetail, ListPaginationFooter, LoadState as UiLoadState, LoadStateLines, notify, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
 import { PanelApiError } from "../api";
 import { dashboardDataKeys } from "../data/keys";
 import { useAuditQuery } from "../data/lists";
@@ -227,7 +227,7 @@ const AuditPageContent = ({ identityKey, entries, nextCursor, filters, onFilters
                 ? "loading"
                 : error !== null && entries.length === 0 ? "error"
                 : entries.length === 0 ? "empty" : "success"}
-              loading={<Skeleton rows={50} height={44} />}
+              loading={<LoadStateLines rows={50} height={44} />}
               empty={filterActive
                 ? <EmptyState title={texts.audit.noMatches} description={texts.audit.activeFilters} action={{ label: texts.audit.resetFilters, onClick: () => { onFiltersChange(emptyAuditFilter); } }} />
                 : <p className="empty-state">{texts.audit.empty}</p>}

@@ -8,7 +8,7 @@ import { apiErrorText, dashboardCommonTexts, dashboardTexts, formatDate } from "
 import { ModuleHeading } from "./module-panels";
 import { MemberAvatar } from "./member-avatar";
 import { MemberGrantEditor } from "./member-grant-editor";
-import { Button, ChoiceCards, ConfirmDialog, EditorShell, Icon, ListDetail, ListPaginationFooter, ListToolbar, LoadState, notify, useDraftGuard, useInspectorSelection } from "./ui";
+import { Button, ChoiceCards, ConfirmDialog, EditorShell, Icon, ListDetail, ListPaginationFooter, ListToolbar, LoadState, LoadStateLines, notify, useDraftGuard, useInspectorSelection } from "./ui";
 import { dashboardDataKeys } from "./data/keys";
 import { useMembersQuery } from "./data/lists";
 import {
@@ -142,24 +142,7 @@ const MemberList = ({
   );
 };
 
-const MemberListSkeleton = (): ReactElement => (
-  <div className="table-wrap members-page__skeleton">
-    <table className="table members-table" aria-hidden="true">
-      <thead className="sr-only"><tr><th scope="col" /></tr></thead>
-      <tbody>{Array.from({ length: MEMBERS_PAGE_SIZE }, (_, index) => (
-        <tr key={index}>
-          <th scope="row"><div className="avatar-row">
-            <span className="members-page__skeleton-avatar" />
-            <div><span className="members-page__skeleton-line members-page__skeleton-line--name" /><span className="members-page__skeleton-line members-page__skeleton-line--login" /></div>
-          </div></th>
-          <td><span className="members-page__skeleton-line members-page__skeleton-line--role" /></td>
-          <td><span className="members-page__skeleton-line members-page__skeleton-line--date" /></td>
-        </tr>
-      ))}</tbody>
-    </table>
-    <span className="sr-only">{membersTexts().load}</span>
-  </div>
-);
+const MemberListLoading = (): ReactElement => <><LoadStateLines rows={MEMBERS_PAGE_SIZE} height={58} /><span className="sr-only">{membersTexts().load}</span></>;
 
 /**
  * The member editor (15b): a role `ChoiceCards` as the only draft field,
@@ -427,7 +410,7 @@ const MembersPageContent = ({
               <LoadState
                 variant="panel-320"
                 status={members.length > 0 ? visibleMembers.length === 0 ? "empty" : "success" : error !== null ? "error" : loading ? "loading" : "empty"}
-                loading={<MemberListSkeleton />}
+                loading={<MemberListLoading />}
                 empty={members.length > 0 ? <p className="empty-state">{dashboardCommonTexts().noMatches}</p> : <MemberList members={members} broadcasterCount={broadcasterCount} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}
                 error={<p role="alert">{error ?? texts.load}</p>}
                 queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: error ?? texts.load, onRetry: () => { void membersQuery.refetch(); } }}

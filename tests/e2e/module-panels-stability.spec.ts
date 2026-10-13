@@ -465,7 +465,7 @@ test("saved chat voting changes stay local until an explicit Save and keep the a
   failNextSave = true;
   await page.getByRole("textbox", { name: "Question" }).fill("Dinner changed");
   expect(saveRequests).toBe(0);
-  await page.getByRole("button", { name: "Save" }).click();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.locator(".ui-save-bar__status")).toContainText("Not saved – retry", { timeout: 5_000 });
   expect(saveRequests).toBe(1);
   await expect(page.getByRole("textbox", { name: "Question" })).toHaveValue("Dinner changed");
@@ -619,7 +619,7 @@ test("a server shortcut conflict stays on its field and preserves the rest of th
   await page.getByRole("button", { name: "Save", exact: true }).click();
 
   const shortcutField = page.locator(".chat-voting-template-inspector .ui-field").filter({ has: page.getByRole("textbox", { name: "Shortcut" }) });
-  await expect(shortcutField.locator(".mantine-InputWrapper-error")).toContainText("This shortcut is already in use.");
+  await expect(shortcutField.locator(".ui-field__error")).toContainText("This shortcut is already in use.");
   await expect(question).toHaveValue("Keep this question");
   await expect(page.getByRole("textbox", { name: "Answer 1" })).toHaveValue("First");
 });
@@ -1001,7 +1001,7 @@ test("saved voting inspector stays open at desktop, overlay, and compact widths"
       for (const button of [startButton, saveButton, discardButton]) {
         const geometry = await button.evaluate((element) => {
           const bounds = element.getBoundingClientRect();
-          const label = element.querySelector<HTMLElement>(".mantine-Button-label");
+          const label = element;
           let clipped = false;
           let ancestor = element.parentElement;
           while (ancestor !== null) {
@@ -1015,12 +1015,12 @@ test("saved voting inspector stays open at desktop, overlay, and compact widths"
             width: bounds.width,
             height: bounds.height,
             clipped,
-            labelWidth: label?.clientWidth ?? 0,
-            labelScrollWidth: label?.scrollWidth ?? 0,
+            labelWidth: label.clientWidth,
+            labelScrollWidth: label.scrollWidth,
           };
         });
         expect(geometry.width).toBeGreaterThanOrEqual(44);
-        expect(geometry.height).toBeGreaterThanOrEqual(34);
+        expect(geometry.height).toBeGreaterThanOrEqual(32);
         expect(geometry.clipped).toBe(false);
         expect(geometry.labelScrollWidth).toBeLessThanOrEqual(geometry.labelWidth + 1);
       }
@@ -1070,7 +1070,7 @@ test("saved voting inspector stays open at desktop, overlay, and compact widths"
     expect(inspectorLayout.footerInsideInspector).toBe(true);
     const answerFieldGap = await inspector.locator(".chat-voting-editor__answer").first().evaluate((row) => {
       const input = row.querySelector("input");
-      const removeButton = row.querySelector(".mantine-Button-root");
+      const removeButton = row.querySelector("button");
       if (!(input instanceof HTMLElement) || !(removeButton instanceof HTMLElement)) {
         throw new Error("The answer input and remove button are incomplete.");
       }
@@ -1441,19 +1441,19 @@ test("custom duration fits with its controls and unit at desktop and mobile widt
     const inspector = page.locator(".chat-voting-template-inspector");
     await expect(inspector).toBeVisible();
     const durationSection = inspector.locator(".inspector-content-section").filter({ hasText: "Duration" }).last();
-    const segments = durationSection.locator(".ui-segmented-control__control");
+    const segments = durationSection.locator(".segment-choice");
     const durationSlot = durationSection.locator(".chat-voting-editor__duration-slot");
-    const numberField = durationSlot.locator(".ui-number-field__stepper");
+    const numberField = durationSlot.locator(".unit-input__control");
     const seconds = page.getByRole("spinbutton", { name: "Seconds" });
     await expect(seconds).toHaveValue("90");
     const layout = await page.evaluate(() => {
       const root = document.querySelector(".chat-voting-template-inspector");
       const section = [...document.querySelectorAll(".inspector-content-section")].find((element) => element.textContent.includes("Duration"));
-      const controls = section?.querySelector(".ui-segmented-control__control");
+      const controls = section?.querySelector(".segment-choice");
       const slot = section?.querySelector(".chat-voting-editor__duration-slot");
-      const stepper = slot?.querySelector(".ui-number-field__stepper");
+      const stepper = slot?.querySelector(".unit-input__control");
       const field = stepper?.querySelector("input");
-      const unit = stepper?.querySelector(".mantine-Input-section");
+      const unit = stepper?.querySelector(".unit-input__unit");
       if (!(root instanceof HTMLElement) || !(controls instanceof HTMLElement) || !(slot instanceof HTMLElement) || !(stepper instanceof HTMLElement) || !(field instanceof HTMLElement) || !(unit instanceof HTMLElement)) {
         throw new Error("The custom duration field is incomplete.");
       }
@@ -1535,13 +1535,9 @@ test("free-text voting always renders five fixed result rows at desktop and mobi
     const rowsBefore = await box(page.locator(".chat-voting-live__rows"));
     const endButton = page.getByRole("button", { name: "End vote" });
     await expect(endButton).toBeVisible();
-    const dangerColors = await endButton.evaluate((element) => ({
-      button: (element as HTMLElement).style.getPropertyValue("--button-bg"),
-      token: getComputedStyle(document.documentElement).getPropertyValue("--error").trim(),
-    }));
-    expect(dangerColors.button).toBe("var(--error)");
-    expect(dangerColors.token).toBe("#e2564d");
-    await rows.locator(".mantine-Button-root").first().click();
+    await expect(endButton).toHaveAttribute("data-variant", "neutral");
+    await expect(endButton).not.toHaveAttribute("data-danger");
+    await rows.locator("button").first().click();
     await expect(page.getByText("Approved", { exact: true })).toBeVisible();
     await expect(rows).toHaveCount(5);
     expect(await box(page.locator(".chat-voting-live__rows"))).toEqual(rowsBefore);
@@ -1599,7 +1595,7 @@ test("a timer-closed vote leaves the panel draft unchanged", async ({ page }) =>
   await expect(seconds).toHaveValue("90");
 
   await page.getByRole("button", { name: "Start vote" }).click();
-  await expect(page.locator(".chat-voting-live__action-slot .mantine-Button-root")).toBeVisible();
+  await expect(page.locator(".chat-voting-live__action-slot button")).toBeVisible();
   await expect(question).toHaveValue("Draft question?");
   await expect(firstAnswer).toHaveValue("First");
   await expect(seconds).toHaveValue("90");

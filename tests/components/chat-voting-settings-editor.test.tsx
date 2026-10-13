@@ -28,11 +28,11 @@ describe("chat voting settings editor", () => {
 
     expect(screen.queryByRole("textbox", { name: /labels|beschriftungen/iu })).not.toBeInTheDocument();
     const timer = screen.getByRole("spinbutton", { name: "Default duration" });
-    expect(timer).toHaveValue("0");
+    expect(timer).toHaveValue(0);
     expect(timer.parentElement).toHaveTextContent("Off");
     expect(timer.parentElement).not.toHaveTextContent("s");
-    fireEvent.click(screen.getByRole("button", { name: "Increase close time" }));
-    expect(timer).toHaveValue("30");
+    fireEvent.change(timer, { target: { value: "30" } });
+    expect(timer).toHaveValue(30);
   });
 
   it.each([["en", "Start text"], ["de", "Starttext"]] as const)(

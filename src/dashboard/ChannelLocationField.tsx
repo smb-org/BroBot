@@ -7,7 +7,7 @@ import {
   type PanelChannelLocationResult,
 } from "./api";
 import { channelSettingsTexts } from "./channel-settings-locale";
-import { Button, ConfirmDialog, Dialog, Field, LoadState, notify, Skeleton } from "./ui";
+import { Button, ConfirmDialog, Dialog, Field, LoadState, LoadStateLines, notify } from "./ui";
 
 interface ChannelLocationFieldProperties {
   channelId: string;
@@ -38,6 +38,7 @@ export const ChannelLocationField = ({
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<readonly PanelChannelLocationResult[]>([]);
   const [searchFailed, setSearchFailed] = useState(false);
+  const [locationSaveFailed, setLocationSaveFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [searching, setSearching] = useState(false);
   const [confirmError, setConfirmError] = useState<string | undefined>(undefined);
@@ -47,12 +48,12 @@ export const ChannelLocationField = ({
     if (!canEdit || normalizedQuery.length < 2) return;
     setSearching(true);
     setSearchFailed(false);
+    setLocationSaveFailed(false);
     try {
       setResults(await searchChannelLocations(channelId, normalizedQuery, language));
     } catch {
       setResults([]);
       setSearchFailed(true);
-      notify({ tone: "error", message: labels.locationSearchFailed });
     } finally {
       setSearching(false);
     }
@@ -62,6 +63,7 @@ export const ChannelLocationField = ({
     if (!canEdit || busy) return;
     setBusy(true);
     setConfirmError(undefined);
+    setLocationSaveFailed(false);
     try {
       const saved = await saveChannelLocation(channelId, revision, location);
       await onSaved(saved.location, saved.locationRevision);
@@ -72,7 +74,7 @@ export const ChannelLocationField = ({
       setResults([]);
     } catch {
       if (location === null) setConfirmError(labels.locationSaveFailed);
-      else notify({ tone: "error", message: labels.locationSaveFailed });
+      else setLocationSaveFailed(true);
     } finally {
       setBusy(false);
     }
@@ -143,7 +145,7 @@ export const ChannelLocationField = ({
 
       <Dialog
         opened={opened}
-        onClose={() => { if (!busy) setOpened(false); }}
+        onClose={() => { if (!busy) { setOpened(false); setLocationSaveFailed(false); } }}
         title={labels.locationChange}
         pending={busy}
       >
@@ -169,9 +171,9 @@ export const ChannelLocationField = ({
           <LoadState
             variant="panel-178"
             status={resultsStatus}
-            loading={<Skeleton rows={3} height={54} />}
+            loading={<LoadStateLines rows={3} height={54} />}
             empty={query.trim().length >= 2 && !searchFailed ? <p className="muted">{labels.locationNoResults}</p> : <span aria-hidden="true" />}
-            error={<Skeleton rows={3} height={54} />}
+            error={<p role="alert" className="channel-location-field__error">{labels.locationSearchFailed}</p>}
           >
             <div className="channel-location-field__results" role="listbox" aria-label={labels.locationResults}>
               {results.map((result) => {
@@ -191,6 +193,9 @@ export const ChannelLocationField = ({
               })}
             </div>
           </LoadState>
+          <div className="channel-location-field__save-error-slot" aria-live="polite">
+            {locationSaveFailed ? <p role="alert" className="channel-location-field__error">{labels.locationSaveFailed}</p> : null}
+          </div>
           <a className="muted" href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">{labels.locationAttribution}</a>
         </div>
       </Dialog>

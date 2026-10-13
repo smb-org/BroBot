@@ -13,7 +13,7 @@ import { UiProvider as BaseUiProvider } from "../../src/dashboard/ui";
 import { ToastHost } from "../../src/dashboard/ui/Toast";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import { jsonResponse } from "../unit/fixtures";
-import { renderWithQuery as render } from "../query-test-utils";
+import { clickSelectOption, renderWithQuery as render } from "../query-test-utils";
 
 const UiProvider = ({ children }: { children: ReactNode }) => <BaseUiProvider><ToastHost />{children}</BaseUiProvider>;
 
@@ -236,11 +236,11 @@ describe("Overlays page", () => {
     expect(within(accessRow).getByRole("button", { name: "Link kopieren: OBS Main PC" })).toBeDisabled();
     const menu = await openAccessMenu(accessRow);
     expect(within(menu).getByRole("menuitem", { name: "Einrichten", hidden: true })).toBeEnabled();
-    expect(within(menu).getByRole("menuitem", { name: "Link anzeigen", hidden: true })).toBeDisabled();
-    expect(within(menu).getByRole("menuitem", { name: "Ersetzen …", hidden: true })).toBeDisabled();
-    expect(within(menu).getByRole("menuitem", { name: "Widerrufen …", hidden: true })).toBeDisabled();
+    expect(within(menu).getByRole("menuitem", { name: "Link anzeigen", hidden: true })).toHaveAttribute("aria-disabled", "true");
+    expect(within(menu).getByRole("menuitem", { name: "Ersetzen …", hidden: true })).toHaveAttribute("aria-disabled", "true");
+    expect(within(menu).getByRole("menuitem", { name: "Widerrufen …", hidden: true })).toHaveAttribute("aria-disabled", "true");
     expect(within(accessRow).getByText(/^Zuletzt benutzt:/u)).toHaveTextContent("Zuletzt benutzt: 24.09.2026");
-    expect(within(accessRow).getByText("Aktiv").parentElement).toHaveClass("led");
+    expect(within(accessRow).getByText("Aktiv").parentElement).toHaveClass("status-led");
     const fullInspector = document.querySelector(".list-detail__inspector");
     if (!(fullInspector instanceof HTMLElement)) throw new Error("Overlay inspector is missing.");
     expect(within(fullInspector).getByRole("button", { name: "Overlay löschen" })).toBeDisabled();
@@ -291,7 +291,7 @@ describe("Overlays page", () => {
     expect(within(row).getByText("Nur Broadcaster und Verwalter dürfen Overlays oder Zugänge ändern.", { selector: "[role=note]" })).toBeInTheDocument();
     const menu = await openAccessMenu(row);
     expect(within(menu).getAllByRole("menuitem", { hidden: true })).toHaveLength(1);
-    expect(within(menu).getByRole("menuitem", { name: "Entfernen", hidden: true })).toBeDisabled();
+    expect(within(menu).getByRole("menuitem", { name: "Entfernen", hidden: true })).toHaveAttribute("aria-disabled", "true");
   });
 
   it("parses a legacy link locally and sends only its token, variable, and text", async () => {
@@ -337,7 +337,7 @@ describe("Overlays page", () => {
     if (!(accessRow instanceof HTMLElement)) throw new Error("Access list row is missing.");
     expect(accessRow.querySelector(".overlay-access-list__last-used")).toHaveTextContent(lastUsed);
     expect(within(accessRow).getByText(noValue)).toHaveClass("sr-only");
-    expect(within(accessRow).getByText(status).parentElement).toHaveClass("led");
+    expect(within(accessRow).getByText(status).parentElement).toHaveClass("status-led");
 
     const actions = within(accessRow).getAllByRole("button");
     expect(actions).toHaveLength(2);
@@ -381,7 +381,7 @@ describe("Overlays page", () => {
     const accessRow = within(inspector).getByText("OBS Main PC", { selector: "strong" }).closest("li");
     if (!(accessRow instanceof HTMLElement)) throw new Error("Access list row is missing.");
     const menu = await openActionMenu(accessRow, language === "en-US" ? "Actions for OBS Main PC" : "Aktionen für OBS Main PC");
-    expect(within(menu).getByRole("menuitem", { name: show, hidden: true })).toBeDisabled();
+    expect(within(menu).getByRole("menuitem", { name: show, hidden: true })).toHaveAttribute("aria-disabled", "true");
     expect(within(menu).getByRole("menuitem", { name: replace, hidden: true })).toBeEnabled();
     expect(within(accessRow).getByText(hint)).toBeInTheDocument();
   });
@@ -410,7 +410,7 @@ describe("Overlays page", () => {
     expect(within(accessRow).getByText(status)).toBeInTheDocument();
     expect(within(accessRow).getByRole("button", { name: copy })).toBeDisabled();
     const menu = await openActionMenu(accessRow, trigger);
-    expect(within(menu).getByRole("menuitem", { name: show, hidden: true })).toBeDisabled();
+    expect(within(menu).getByRole("menuitem", { name: show, hidden: true })).toHaveAttribute("aria-disabled", "true");
     expect(within(menu).getByRole("menuitem", { name: replace, hidden: true })).toBeEnabled();
     expect(within(menu).getByRole("menuitem", { name: revoke, hidden: true })).toBeEnabled();
     fireEvent.click(within(menu).getByRole("menuitem", { name: revoke, hidden: true }));
@@ -629,7 +629,7 @@ describe("Overlays page", () => {
     const assistant = within(inspector).getByRole("region", { name: "Einrichtungsassistent" });
     const output = within(assistant).getByRole("combobox", { name: "Ausgabe" });
     fireEvent.click(output);
-    fireEvent.click(await screen.findByRole("option", { name: "Einzelnes Element: Score" }));
+    clickSelectOption(await screen.findByRole("option", { name: "Einzelnes Element: Score" }));
     expect(assistant).toHaveTextContent("Breite ≈ Elementbreite × Skalierung; Höhe nach Inhalt.");
     expect(assistant).toHaveTextContent("#token=••••••&element=element-a");
 
@@ -667,7 +667,7 @@ describe("Overlays page", () => {
     const assistant = within(inspector).getByRole("region", { name: "Einrichtungsassistent" });
     const output = within(assistant).getByRole("combobox", { name: "Ausgabe" });
     fireEvent.click(output);
-    fireEvent.click(await screen.findByRole("option", { name: "Einzelnes Element: Score" }));
+    clickSelectOption(await screen.findByRole("option", { name: "Einzelnes Element: Score" }));
 
     const accessRow = within(inspector).getByText("OBS Main PC", { selector: "strong" }).closest("li");
     if (!(accessRow instanceof HTMLElement)) throw new Error("Access list row is missing.");
@@ -677,7 +677,7 @@ describe("Overlays page", () => {
     await vi.waitFor(() => { expect(fetcher.mock.calls.some(([input]) => requestPath(input).endsWith("/access-a/replace"))).toBe(true); });
     const refreshedAssistant = within(inspector).getByRole("region", { name: "Einrichtungsassistent" });
     const refreshedOutput = within(refreshedAssistant).getByRole("combobox", { name: "Ausgabe" });
-    await vi.waitFor(() => { expect(refreshedOutput).toHaveValue("Ganzes Overlay"); });
+    await vi.waitFor(() => { expect(refreshedOutput).toHaveTextContent("Ganzes Overlay"); });
     expect(refreshedAssistant).toHaveTextContent("Breite und Höhe: 1920 × 1080 px");
 
     fireEvent.click(within(refreshedAssistant).getByRole("button", { name: "Overlay-Link kopieren" }));
@@ -718,7 +718,7 @@ describe("Overlays page", () => {
     const menu = await openAccessMenu(accessRow);
     expect(within(menu).getByRole("menuitem", { name: "Einrichten", hidden: true })).toBeEnabled();
     for (const action of ["Link anzeigen", "Ersetzen …", "Widerrufen …"]) {
-      expect(within(menu).getByRole("menuitem", { name: action, hidden: true })).toBeDisabled();
+      expect(within(menu).getByRole("menuitem", { name: action, hidden: true })).toHaveAttribute("aria-disabled", "true");
     }
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Einrichten", hidden: true }));
     const assistant = within(inspector).getByRole("region", { name: "Einrichtungsassistent" });

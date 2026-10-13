@@ -9,7 +9,7 @@ import { dashboardDataKeys } from "../../src/dashboard/data/keys";
 import { createDashboardQueryClient } from "../../src/dashboard/data/client";
 import { UiProvider } from "../../src/dashboard/ui";
 import { jsonResponse } from "../unit/fixtures";
-import { renderWithQuery as render } from "../query-test-utils";
+import { clickSelectOption, renderWithQuery as render } from "../query-test-utils";
 
 const channel = {
   channelId: "kanal-a", login: "kanal-a", displayName: "Alpha", language: "en", role: "manager",
@@ -115,18 +115,18 @@ describe("Overlay composition editor", () => {
 
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
     const position = await screen.findByRole("spinbutton", { name: "X (px)" });
-    expect(position).toHaveValue("42");
+    expect(position).toHaveValue(42);
     fireEvent.change(position, { target: { value: "50" } });
     await act(async () => {
       await Promise.resolve();
       client.setQueryData(overlayKey, { overlay: { ...freshOverlay, revision: 3, elements: [{ ...baseElement, x: 99 }] } });
     });
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("50");
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(50);
 
     await act(async () => {
       await client.refetchQueries({ queryKey: overlayKey, exact: true });
     });
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("50");
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(50);
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(savedBody).toMatchObject({ baseRevision: 2, elements: [{ x: 50 }] }));
@@ -164,7 +164,7 @@ describe("Overlay composition editor", () => {
     });
 
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("24");
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(24);
   });
 
   it("creates the editor session after an initial variables read recovers", async () => {
@@ -198,7 +198,7 @@ describe("Overlay composition editor", () => {
     });
 
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("24");
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(24);
   });
 
   it("initializes once when variables update continuously during a slow module read", async () => {
@@ -281,7 +281,7 @@ describe("Overlay composition editor", () => {
     const variableEntry = await screen.findByRole("option", { name: /score/u, hidden: true });
     expect(variableEntry).toHaveTextContent("No description");
     expect(variableEntry.querySelector(".overlay-element-palette__value")).toHaveTextContent("123,456,789");
-    fireEvent.click(await screen.findByRole("option", { name: /Ad countdown/u, hidden: true }));
+    clickSelectOption(await screen.findByRole("option", { name: /Ad countdown/u, hidden: true }));
     const snoozeInfo = await screen.findByRole("checkbox", { name: "Show snooze info" });
     expect(snoozeInfo).not.toBeChecked();
     const previewFrame = document.querySelector<HTMLIFrameElement>('[data-testid="overlay-editor-renderer"]');
@@ -375,12 +375,12 @@ describe("Overlay composition editor", () => {
     fireEvent.pointerDown(element, { pointerId: 1, button: 0, clientX: 24, clientY: 32 });
     fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 29, clientY: 39 });
     fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 29, clientY: 39 });
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("29");
-    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("39");
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(29);
+    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue(39);
     fireEvent.keyDown(canvas, { key: "ArrowRight" });
     fireEvent.keyDown(canvas, { key: "ArrowDown", shiftKey: true });
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("30");
-    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("49");
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(30);
+    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue(49);
 
     const elementAfterKeyboard = previewDocument?.querySelector<HTMLElement>('[data-element="element-a"]');
     if (elementAfterKeyboard === null || elementAfterKeyboard === undefined) throw new Error("Updated overlay preview element is missing.");
@@ -390,8 +390,8 @@ describe("Overlay composition editor", () => {
     fireEvent.pointerDown(elementAfterKeyboard, { pointerId: 2, pointerType: "touch", button: 0, clientX: 30, clientY: 49 });
     fireEvent.pointerMove(canvas, { pointerId: 2, pointerType: "touch", clientX: 2000, clientY: 2000 });
     fireEvent.pointerUp(canvas, { pointerId: 2, pointerType: "touch" });
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("980");
-    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("620");
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(980);
+    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue(620);
     const elementAfterTouch = previewDocument?.querySelector<HTMLElement>('[data-element="element-a"]');
     if (elementAfterTouch === null || elementAfterTouch === undefined) throw new Error("Touched overlay preview element is missing.");
     vi.spyOn(elementAfterTouch, "getBoundingClientRect").mockReturnValue({
@@ -404,8 +404,8 @@ describe("Overlay composition editor", () => {
       x: 30, y: 620, left: 30, top: 620, right: 330, bottom: 720, width: 300, height: 100, toJSON: () => ({}),
     });
     fireEvent.change(screen.getByRole("spinbutton", { name: "Y (px)" }), { target: { value: "49" } });
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("30");
-    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("49");
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(30);
+    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue(49);
     expect(fetcher).toHaveBeenCalledTimes(fetchCount);
 
     const firstDraftElement = savedOverlay.elements[0];
@@ -527,12 +527,12 @@ describe("Overlay composition editor", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Style editor" }));
     const target = screen.getByRole("combobox", { name: "Apply style to" });
     fireEvent.click(target);
-    fireEvent.click(await screen.findByRole("option", { name: "Element: Score", hidden: true }));
+    clickSelectOption(await screen.findByRole("option", { name: "Element: Score", hidden: true }));
     const fontSize = screen.getByRole("spinbutton", { name: "Font size" });
-    expect(fontSize).toHaveValue("28");
+    expect(fontSize).toHaveValue(28);
     fireEvent.change(fontSize, { target: { value: "" } });
 
-    expect(fontSize).toHaveValue("");
+    expect(fontSize).toHaveValue(null);
     fireEvent.click(screen.getByRole("tab", { name: "CSS code" }));
     const cssField = document.querySelector<HTMLTextAreaElement>("#overlay-editor-css-code");
     if (cssField === null) throw new Error("CSS editor field is missing.");
@@ -588,8 +588,8 @@ describe("Overlay composition editor", () => {
     fireEvent.pointerDown(element, { pointerId: 1, button: 0, clientX: 1, clientY: 0 });
     fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 2000, clientY: 2000 });
     fireEvent.pointerUp(canvas, { pointerId: 1 });
-    expect(xField).toHaveValue(String(maxX));
-    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("680");
+    expect(xField).toHaveValue(maxX);
+    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue(680);
   });
 
   it("clamps keyboard nudges and numeric X/Y edits to whole canvas coordinates", async () => {
@@ -616,13 +616,13 @@ describe("Overlay composition editor", () => {
 
     fireEvent.keyDown(canvas, { key: "ArrowLeft" });
     fireEvent.keyDown(canvas, { key: "ArrowUp" });
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("0");
-    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("0");
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(0);
+    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue(0);
 
     fireEvent.change(screen.getByRole("spinbutton", { name: "X (px)" }), { target: { value: "30.4" } });
     fireEvent.change(screen.getByRole("spinbutton", { name: "Y (px)" }), { target: { value: "900.6" } });
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("30");
-    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("680");
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(30);
+    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue(680);
   });
 
   it("scales the unscaled default size for unmeasured elements when the user changes scale", async () => {
@@ -659,8 +659,8 @@ describe("Overlay composition editor", () => {
     fireEvent.change(screen.getByRole("spinbutton", { name: "Scale (%)" }), { target: { value: "50" } });
 
     // 360 x 96 at 50% is 180 x 48 (not 720 x 192 from scaling the 100% size by 50/25).
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("1740");
-    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("1032");
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(1740);
+    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue(1032);
   });
 
   it("keeps saved X when long temporary text is replaced by short loaded content", async () => {
@@ -711,8 +711,8 @@ describe("Overlay composition editor", () => {
     expect(rendered.textContent).toContain(longBlockName);
     expect(rendered.getBoundingClientRect().width).toBe(1400);
     expect(rendered.style.transform).toContain("scale(0.25)");
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("1850");
-    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("1040");
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(1850);
+    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue(1040);
 
     await act(async () => {
       resolvePreview?.(jsonResponse({ block: { variants: [{ conditions: {}, texts: ["Hi"] }] } }));
@@ -721,8 +721,8 @@ describe("Overlay composition editor", () => {
     await waitFor(() => expect(rendered.textContent).toContain("Hi"));
     expect(rendered.getBoundingClientRect().width).toBe(50);
 
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("1850");
-    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("1040");
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(1850);
+    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue(1040);
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
@@ -759,7 +759,7 @@ describe("Overlay composition editor", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Display text" }), { target: { value: `${"A".repeat(80)}{value}` } });
 
     expect(previewFrameWindow().document.querySelector<HTMLElement>(`[data-element="${edgeElement.id}"]`)?.getBoundingClientRect().width).toBe(1400);
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("900");
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(900);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(savedX).toBe(900));
   });
@@ -790,7 +790,7 @@ describe("Overlay composition editor", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("24");
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(24);
     stubMeasuredElementSize(previewFrameWindow(), nearEdgeElement.id, (element) => {
       const block = element.ownerDocument.querySelector("style[data-brobot-overlay-css]")?.textContent ?? "";
       return { width: block.includes("font-size: 500px;") ? 500 : 300, height: 40 };
@@ -1110,11 +1110,11 @@ describe("Overlay composition editor", () => {
     const styleTarget = screen.getByRole("combobox", { name: "Stil anwenden auf" });
     expect(styleTarget).toBeEnabled();
     fireEvent.click(styleTarget);
-    fireEvent.click(await screen.findByRole("option", { name: "Element: Score", hidden: true }));
-    expect(screen.getByRole("spinbutton", { name: "Schriftgröße" })).toHaveValue("28");
+    clickSelectOption(await screen.findByRole("option", { name: "Element: Score", hidden: true }));
+    expect(screen.getByRole("spinbutton", { name: "Schriftgröße" })).toHaveValue(28);
     expect(screen.getByLabelText("Textfarbe")).toHaveValue("#123456");
     const outlineWidth = screen.getByRole("spinbutton", { name: "Konturstärke" });
-    expect(outlineWidth).toHaveValue("2");
+    expect(outlineWidth).toHaveValue(2);
     expect(outlineWidth).toBeDisabled();
     const shadowDisclosure = screen.getByRole("button", { name: /^Schatten/ });
     expect(shadowDisclosure).toHaveAttribute("aria-expanded", "false");
@@ -1123,12 +1123,13 @@ describe("Overlay composition editor", () => {
     expect(shadowX).toBeDisabled();
     const shadowReasonId = shadowX.getAttribute("aria-describedby");
     expect(shadowReasonId).not.toBeNull();
-    expect(document.getElementById(shadowReasonId ?? "")).toHaveTextContent("Bediener dürfen den Overlay-Stil ansehen, aber nicht ändern.");
+    expect(shadowReasonId?.split(" ")).toContain("overlay-style-disabled-reason");
+    expect(document.getElementById("overlay-style-disabled-reason")).toHaveTextContent("Bediener dürfen den Overlay-Stil ansehen, aber nicht ändern.");
     const systemFont = screen.getByRole("combobox", { name: "Systemschrift auswählen" });
     expect(systemFont).toBeDisabled();
     const styleReasonId = systemFont.getAttribute("aria-describedby");
-    expect(styleReasonId).toBe(`overlay-style-disabled-reason-select-${systemFont.id}`);
-    expect(styleReasonId === null ? null : document.getElementById(styleReasonId)).toHaveTextContent("Bediener dürfen den Overlay-Stil ansehen, aber nicht ändern.");
+    expect(styleReasonId?.split(" ")).toContain("overlay-style-disabled-reason");
+    expect(document.getElementById("overlay-style-disabled-reason")).toHaveTextContent("Bediener dürfen den Overlay-Stil ansehen, aber nicht ändern.");
     fireEvent.click(screen.getByRole("tab", { name: "CSS-Code" }));
     expect(screen.getByText("Bediener können das Overlay-CSS kopieren, aber nicht ändern.", { selector: "p" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "CSS-Code" })).toBeDisabled();
@@ -1156,8 +1157,8 @@ describe("Overlay composition editor", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("1270");
-    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("700");
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(1270);
+    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue(700);
     stubMeasuredElementSize(previewFrameWindow(), "element-hidden", () => ({ width: 300, height: 40 }));
 
     const toggleRow = screen.getByText("In der Komposition anzeigen").closest(".ui-switch-field__row");
@@ -1165,8 +1166,8 @@ describe("Overlay composition editor", () => {
     if (toggle === null || toggle === undefined) throw new Error("Composition toggle is missing.");
     fireEvent.click(toggle);
 
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("1270");
-    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("700");
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(1270);
+    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue(700);
   });
 
   it("moves an element back inside the canvas when the user raises its scale", async () => {
@@ -1188,7 +1189,7 @@ describe("Overlay composition editor", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("900");
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(900);
     // The rendered box grows with `scalePercent`, mirroring the `transform: scale(...)` OverlayCanvas applies.
     stubMeasuredElementSize(previewFrameWindow(), "element-near-edge", (element) => {
       const factor = Number(/scale\(([\d.]+)\)/.exec(element.style.transform)?.[1] ?? "1");
@@ -1198,7 +1199,7 @@ describe("Overlay composition editor", () => {
     fireEvent.change(screen.getByRole("spinbutton", { name: "Skalierung (%)" }), { target: { value: "200" } });
 
     // 200% of 300 px is 600 px wide; the 1280 px canvas leaves room for x = 680.
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("680");
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(680);
   });
 
   it("keeps a changed draft when a revision conflict is resolved", async () => {

@@ -2,7 +2,7 @@ import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from ".
 import type { ModuleChatStatus } from "../contract";
 import type { ChatOutputTarget } from "../../contract";
 import type { TextCommandKind, TextCommandMinimumTier, TextCommandResponseType, TextCommandStreamCondition } from "../contracts";
-import type { TagInputMessages, TextAreaMessages } from "../../../dashboard/ui";
+import type { ChipsInputMessages, TextAreaMessages } from "../../../dashboard/ui";
 import type { PanelTemplateWarning } from "../contract";
 import type { GamePickerMessages } from "../../../dashboard/ui";
 
@@ -148,7 +148,7 @@ export interface TextCommandsTexts {
   actionResponse: (name: string, operation: "add" | "subtract" | "set" | "set_argument", amount: number | null) => string;
   externalCooldownWarning: string;
   argsEveryoneWarning: string;
-  tagInputMessages: TagInputMessages;
+  chipsInputMessages: ChipsInputMessages;
   warningLabel: (warning: PanelTemplateWarning) => string;
   columns: { name: string; kind: string; response: string; minimumTier: string; active: string };
 }
@@ -267,7 +267,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     previewLabel: "Vorschau", previewSpeaker: "Bot",
     streamAny: "immer", streamOnline: "nur online", streamOffline: "nur offline", cooldownOff: "aus",
     textAreaMessages: templateMessages.de,
-    tagInputMessages: { countLabel: (count, max) => `${String(count)} von ${String(max)}`, atLimitHint: "Höchstens 10 Aliase.", duplicateWarning: (alias) => `${alias} steht schon in der Liste.` },
+    chipsInputMessages: { countLabel: (count, max) => `${String(count)} von ${String(max)}`, atLimitHint: "Höchstens 10 Aliase.", duplicateWarning: (alias) => `${alias} steht schon in der Liste.` },
     warningLabel: (warning) => warning.code === "unknown_template_variables"
       ? `Unbekannte Variable${warning.unknownVariables.length === 1 ? "" : "n"}: ${warning.unknownVariables.map((name) => `{${name}}`).join(", ")}`
       : warning.code === "template_parameters_invalid"
@@ -368,7 +368,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     previewLabel: "Preview", previewSpeaker: "Bot",
     streamAny: "always", streamOnline: "online only", streamOffline: "offline only", cooldownOff: "off",
     textAreaMessages: templateMessages.en,
-    tagInputMessages: { countLabel: (count, max) => `${String(count)} of ${String(max)}`, atLimitHint: "Up to 10 aliases.", duplicateWarning: (alias) => `${alias} is already in the list.` },
+    chipsInputMessages: { countLabel: (count, max) => `${String(count)} of ${String(max)}`, atLimitHint: "Up to 10 aliases.", duplicateWarning: (alias) => `${alias} is already in the list.` },
     warningLabel: (warning) => warning.code === "unknown_template_variables"
       ? `Unknown variable${warning.unknownVariables.length === 1 ? "" : "s"}: ${warning.unknownVariables.map((name) => `{${name}}`).join(", ")}`
       : warning.code === "template_parameters_invalid"

@@ -2,7 +2,7 @@ import { useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
-import { Button, CodeField, ConfirmDialog, Field, FormDialog, InspectorFieldRow, InspectorSection, LoadState, Skeleton, notify } from "../../../dashboard/ui";
+import { Button, CodeField, ConfirmDialog, Field, FormDialog, InspectorFieldRow, InspectorSection, LoadState, LoadStateLines, notify } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { ApiSource } from "../contracts";
 import { apiSourcePanelTexts } from "./locale";
@@ -154,7 +154,7 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
       <LoadState
         variant="panel-200"
         status={loadStatus}
-        loading={<Skeleton rows={4} height={34} />}
+        loading={<LoadStateLines rows={4} height={34} />}
         empty={<p className="muted">{labels.empty}</p>}
         error={<p className="muted">{labels.loadFailed}</p>}
         queryError={{ message: labels.loadFailed, onRetry: () => { void query.refetch(); } }}

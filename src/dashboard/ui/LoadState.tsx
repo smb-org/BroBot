@@ -4,6 +4,12 @@ import { dashboardCommonTexts } from "../locale";
 import { ErrorPanel } from "./ErrorPanel";
 
 type LoadStateKind = "loading" | "empty" | "error" | "success";
+
+interface LoadStateLinesProps {
+  rows?: number;
+  height: number;
+  gap?: number;
+}
 type LoadStateVariant =
   | "status-row"
   | "compact-64"
@@ -58,7 +64,7 @@ interface LoadStateVariantDefinition {
 const loadStateVariants = {
   "status-row": { minHeight: "var(--s5)", presentation: "compact", reservesRefreshRow: false, showsRefreshErrorInContent: false },
   "compact-64": { minHeight: "calc(var(--s6) + var(--s10))", presentation: "compact", reservesRefreshRow: false, showsRefreshErrorInContent: true },
-  "feed-132": { minHeight: "calc(var(--s10) * 3 + var(--s3))", presentation: "compact", reservesRefreshRow: true, showsRefreshErrorInContent: false },
+  "feed-132": { minHeight: "148px", presentation: "compact", reservesRefreshRow: true, showsRefreshErrorInContent: false },
   "panel-178": { minHeight: "178px", presentation: "panel", reservesRefreshRow: true, showsRefreshErrorInContent: false },
   "panel-200": { minHeight: "200px", presentation: "panel", reservesRefreshRow: true, showsRefreshErrorInContent: false },
   "panel-220": { minHeight: "220px", presentation: "panel", reservesRefreshRow: true, showsRefreshErrorInContent: false },
@@ -114,4 +120,10 @@ export function LoadState({ variant, status, loading, empty, error, children, qu
       </div>}
     </div>
   );
+}
+
+export function LoadStateLines({ rows = 1, height, gap = 8 }: LoadStateLinesProps) {
+  return <div data-ui="" className="ui-load-state__reserved-lines" aria-hidden="true" style={{ display: "grid", gap, gridAutoRows: `${String(height)}px` }}>
+    {Array.from({ length: rows }, (_, index) => <span key={index} />)}
+  </div>;
 }

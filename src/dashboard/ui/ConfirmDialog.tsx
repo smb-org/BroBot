@@ -1,15 +1,6 @@
-import { Modal, Text } from "@mantine/core";
-
 import { Button } from "./Button";
+import { Dialog } from "./Dialog";
 
-/**
- * "Confirmation modal (`ConfirmDialog`)" in docs/input/DESIGN-neu.md: takes
- * a title, a description and two actions, never children -- the seam
- * enforces that this is only ever used for confirmations, never a form or
- * an editor. Cancel is `subtle` and starts focused; the action is `danger`
- * or `filled`. Modal chrome (radius, shadow, surface, 720px width, the
- * 60%-opacity backdrop) comes from the theme's `Modal` override.
- */
 export interface ConfirmDialogProps {
   opened: boolean;
   title: string;
@@ -19,43 +10,19 @@ export interface ConfirmDialogProps {
   onConfirm: () => void;
   onCancel: () => void;
   alternative?: { label: string; onClick: () => void };
-  /** "Deleting actions carry it permanently" -- deleting actions render
-   *  the confirm button as `danger` instead of `filled`. */
   danger?: boolean;
   pending?: boolean;
-  /** A failed confirmed action (e.g. `useDraftGuard`'s `saveAndSwitch`) --
-   *  keeps the dialog open and shows why. */
   error?: string;
 }
 
-export function ConfirmDialog({
-  opened,
-  title,
-  description,
-  confirmLabel,
-  cancelLabel,
-  onConfirm,
-  onCancel,
-  alternative,
-  danger = false,
-  pending = false,
-  error,
-}: ConfirmDialogProps) {
-  return (
-    <Modal data-ui="" opened={opened} onClose={pending ? () => undefined : onCancel} title={title} size={720} centered closeOnEscape={!pending} trapFocus returnFocus>
-      <Text size="sm" c="dimmed">
-        {description}
-      </Text>
-      <div className="ui-dialog__error-slot">{error === undefined ? null : <p className="form-error" role="alert" title={error}><span aria-hidden="true">× </span>{error}</p>}</div>
-      <div className="ui-confirm-dialog__actions">
-        <Button variant="subtle" onClick={onCancel} autoFocus disabled={pending}>
-          {cancelLabel}
-        </Button>
-        {alternative === undefined ? null : <Button variant="neutral" onClick={alternative.onClick} disabled={pending}>{alternative.label}</Button>}
-        <Button variant="primary" danger={danger} onClick={onConfirm} disabled={pending}>
-          {confirmLabel}
-        </Button>
-      </div>
-    </Modal>
-  );
+export function ConfirmDialog({ opened, title, description, confirmLabel, cancelLabel, onConfirm, onCancel, alternative, danger = false, pending = false, error }: ConfirmDialogProps) {
+  return <Dialog opened={opened} title={title} onClose={onCancel} pending={pending}>
+    <p className="ui-dialog__description">{description}</p>
+    <div className="ui-dialog__error-slot">{error === undefined ? null : <p className="form-error" role="alert" title={error}><span aria-hidden="true">× </span>{error}</p>}</div>
+    <div className="ui-confirm-dialog__actions">
+      <Button variant="subtle" onClick={onCancel} autoFocus disabled={pending}>{cancelLabel}</Button>
+      {alternative === undefined ? null : <Button variant="neutral" onClick={alternative.onClick} disabled={pending}>{alternative.label}</Button>}
+      <Button variant={danger ? "neutral" : "primary"} {...(danger ? { danger: true } : {})} onClick={onConfirm} disabled={pending}>{confirmLabel}</Button>
+    </div>
+  </Dialog>;
 }

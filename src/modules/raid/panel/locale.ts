@@ -59,7 +59,7 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
         : `Vorlage kann ${String(warning.worstCaseLength)} Zeichen lang sein.`,
     sections: { messages: "Nachrichten", shoutout: "Shoutout" },
     fields: {
-      textThreshold: { label: "Text-Schwelle", hint: "Ab dieser Zahl wird der volle Text gesendet, darunter der kurze.", unit: "Zuschauer", increaseLabel: "Text-Schwelle erhöhen", decreaseLabel: "Text-Schwelle verringern" },
+      textThreshold: { label: "Text-Schwelle", hint: "Ab dieser Zahl wird der volle Text gesendet, darunter der kurze.", unit: "Zuschauer" },
       textLong: {
         label: "Voller Raid-Text", hint: "Geht raus ab der Text-Schwelle.", previewLabel: "Vorschau", previewSpeaker: "Bot",
         variables: [{ name: "channel", description: "Anzeigename des raidenden Kanals", sample: "beispielkanal" }, { name: "viewers", description: "Zahl der Zuschauer im Raid", sample: "42" }],
@@ -71,7 +71,7 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
       },
       textShortTarget: { label: "Ziel für kurzen Dankestext", hint: "Wirkt nur während eines Shared Chats.", options: { all_chats: { label: "Alle Chats" }, source_only: { label: "Nur unser Chat" } } },
       shoutoutEnabled: { label: "Helix-Shoutout automatisch senden", hint: "Twitch zeigt den raidenden Kanal als Empfehlung im Chat.", description: "Twitch zeigt den raidenden Kanal als Empfehlung im Chat." },
-      shoutoutThreshold: { label: "Shoutout-Schwelle", hint: "Ab dieser Zahl sendet der Bot den Shoutout.", unit: "Zuschauer", disabledReason: "Shoutout ist ausgeschaltet.", increaseLabel: "Shoutout-Schwelle erhöhen", decreaseLabel: "Shoutout-Schwelle verringern" },
+      shoutoutThreshold: { label: "Shoutout-Schwelle", hint: "Ab dieser Zahl sendet der Bot den Shoutout.", unit: "Zuschauer", disabledReason: "Shoutout ist ausgeschaltet." },
     },
   },
   en: {
@@ -98,7 +98,7 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
         : `Template can be ${String(warning.worstCaseLength)} characters long.`,
     sections: { messages: "Messages", shoutout: "Shoutout" },
     fields: {
-      textThreshold: { label: "Text threshold", hint: "At this number the full text is sent; smaller raids use the short one.", unit: "viewers", increaseLabel: "Increase text threshold", decreaseLabel: "Decrease text threshold" },
+      textThreshold: { label: "Text threshold", hint: "At this number the full text is sent; smaller raids use the short one.", unit: "viewers" },
       textLong: {
         label: "Full raid text", hint: "Sent at or above the text threshold.", previewLabel: "Preview", previewSpeaker: "Bot",
         variables: [{ name: "channel", description: "Display name of the raiding channel", sample: "samplechannel" }, { name: "viewers", description: "Number of viewers in the raid", sample: "42" }],
@@ -110,7 +110,7 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
       },
       textShortTarget: { label: "Short thank-you target", hint: "Only affects output during Shared Chat.", options: { all_chats: { label: "All chats" }, source_only: { label: "Only our chat" } } },
       shoutoutEnabled: { label: "Send automatic Helix shoutouts", hint: "Twitch shows the raiding channel as a recommendation in chat.", description: "Twitch shows the raiding channel as a recommendation in chat." },
-      shoutoutThreshold: { label: "Shoutout threshold", hint: "The bot sends the shoutout at or above this number.", unit: "viewers", disabledReason: "Shoutouts are turned off.", increaseLabel: "Increase shoutout threshold", decreaseLabel: "Decrease shoutout threshold" },
+      shoutoutThreshold: { label: "Shoutout threshold", hint: "The bot sends the shoutout at or above this number.", unit: "viewers", disabledReason: "Shoutouts are turned off." },
     },
   },
 };

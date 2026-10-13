@@ -22,7 +22,7 @@ import {
   type PanelOverlayToken,
 } from "./api";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, formatTimestamp, overlaysTexts } from "./locale";
-import { ActionMenu, Button, ConfirmDialog, EmptyCellValue, Field, FormDialog, InspectorActions, InspectorSection, Led, ListDetail, ListPaginationFooter, ListToolbar, LoadState, notify, NumberField, PageHeader, Select, Skeleton, SubInspector } from "./ui";
+import { ActionMenu, Button, ConfirmDialog, EmptyCellValue, Field, FormDialog, InspectorActions, InspectorSection, StatusLed, ListDetail, ListPaginationFooter, ListToolbar, LoadState, LoadStateLines, notify, UnitInput, PageHeader, Select, SubInspector } from "./ui";
 import { useLegacyOverlayTokensQuery, useOverlayAccessesQuery, useOverlayQuery, useOverlaysQuery } from "./data/lists";
 import { dashboardDataKeys } from "./data/keys";
 import { templateTextLength } from "../template";
@@ -692,9 +692,9 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     <LoadState
       variant="panel-360"
       status={loading && overlays.length === 0 ? "loading" : loadFailed && overlays.length === 0 ? "error" : visibleOverlays.length === 0 ? "empty" : "success"}
-      loading={<Skeleton rows={6} height={34} />}
+      loading={<LoadStateLines rows={6} height={34} />}
       empty={<p className="empty-state">{overlays.length === 0 ? labels.empty : dashboardCommonTexts().noMatches}</p>}
-      error={<Skeleton rows={6} height={34} />}
+      error={<LoadStateLines rows={6} height={34} />}
       queryError={{ message: overlaysLoadError, onRetry: () => { void overlaysQuery.refetch({ throwOnError: true }).catch(() => undefined); } }}
     >
       <div className={`table-wrap overlays-table-wrap${selectedId !== null || creating ? " overlays-table-wrap--inspector-open" : ""}`}>
@@ -726,9 +726,9 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
         <LoadState
           variant="panel-260"
           status={legacyTokensQuery.isPending && legacyTokens.length === 0 ? "loading" : legacyTokensQuery.isError && legacyTokens.length === 0 ? "error" : legacyTokens.length === 0 ? "empty" : "success"}
-          loading={<Skeleton rows={4} height={58} />}
+          loading={<LoadStateLines rows={4} height={58} />}
           empty={<p className="empty-state">{labels.legacyEmpty}</p>}
-          error={<Skeleton rows={4} height={58} />}
+          error={<LoadStateLines rows={4} height={58} />}
         >
           <ul className="overlay-access-list">{legacyTokens.map((token) => <li key={token.id} className="overlay-access-list__item overlay-access-list__item--legacy">
             <div className="overlay-access-list__summary">
@@ -763,8 +763,8 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
           else if (value === "1280x720") { setDraftWidth(1280); setDraftHeight(720); }
         }} />
       {draftSize === "custom" ? <div className="overlay-custom-size">
-        <NumberField id="overlay-width" label={labels.width} value={draftWidth} min={64} max={3840} step={1} increaseLabel={`${labels.width} +1`} decreaseLabel={`${labels.width} −1`} disabled={pending} onChange={setDraftWidth} />
-        <NumberField id="overlay-height" label={labels.height} value={draftHeight} min={64} max={2160} step={1} increaseLabel={`${labels.height} +1`} decreaseLabel={`${labels.height} −1`} disabled={pending} onChange={setDraftHeight} />
+        <UnitInput id="overlay-width" label={labels.width} value={draftWidth} min={64} max={3840} step={1} disabled={pending} onChange={setDraftWidth} />
+        <UnitInput id="overlay-height" label={labels.height} value={draftHeight} min={64} max={2160} step={1} disabled={pending} onChange={setDraftHeight} />
       </div> : null}
       {manageReason === undefined ? null : <p className="muted" role="note">{manageReason}</p>}
       <InspectorActions><Button variant="primary" disabled={!canManage || pending || draftName.trim().length === 0} onClick={() => { void create(); }}>{labels.createSubmit}</Button>
@@ -775,7 +775,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     <LoadState
       variant="panel-1000"
       status={selectedOverlay === null ? selectedOverlayQuery.isPending ? "loading" : selectedOverlayLoadFailed ? "error" : "loading" : "success"}
-      loading={<div aria-label={labels.loading}><Skeleton rows={6} height={34} /></div>}
+      loading={<div aria-label={labels.loading}><LoadStateLines rows={6} height={34} /></div>}
       empty={<div />}
       error={<p role="alert">{labels.loadError}</p>}
       queryError={{ message: selectedOverlayLoadError, onRetry: () => { void selectedOverlayQuery.refetch({ throwOnError: true }).catch(() => undefined); } }}
@@ -807,7 +807,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
                 <div className="overlay-access-list__row">
                   <div className="overlay-access-list__summary">
                     <strong>{access.label}</strong>
-                    <Led status={active ? "green" : "off"} word={status} />
+                    <StatusLed state={active ? "ok" : "off"} label={status} />
                     <span className="overlay-access-list__last-used mono">{labels.lastUsedAt}: {access.lastUsedAt === null ? <EmptyCellValue language={language} /> : formatTimestamp(access.lastUsedAt)}</span>
                   </div>
                 <div className="overlay-access-list__actions">

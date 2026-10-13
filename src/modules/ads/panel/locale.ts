@@ -169,7 +169,7 @@ const editorCatalog: LocaleCatalog<SettingsEditorCatalog> = {
       },
       manualTarget: { label: "Ziel der manuell gestarteten Werbepause", hint: "Wirkt nur während eines Shared Chats.", options: { all_chats: { label: "Alle Chats" }, source_only: { label: "Nur unser Chat" } } },
       prewarning: { label: "Vorwarnung vor der Werbung", hint: "Kündigt die nächste Werbung vorher im Chat an.", description: "Kündigt die nächste Werbung vorher im Chat an." },
-      leadSeconds: { label: "Vorlaufzeit", hint: "So lange vor der Werbung. 30 bis 300.", unit: "s", disabledReason: "Vorwarnung ist ausgeschaltet.", increaseLabel: "Vorlaufzeit erhöhen", decreaseLabel: "Vorlaufzeit verringern" },
+      leadSeconds: { label: "Vorlaufzeit", hint: "So lange vor der Werbung. 30 bis 300.", unit: "s", disabledReason: "Vorwarnung ist ausgeschaltet." },
       prewarningText: {
         label: "Vorwarnungstext", hint: "Was der Bot vor der Werbung schreibt.", requiredError: "Text eingeben",
         previewLabel: "Vorschau", previewSpeaker: "Bot",
@@ -207,7 +207,7 @@ const editorCatalog: LocaleCatalog<SettingsEditorCatalog> = {
       },
       manualTarget: { label: "Manually started ad break target", hint: "Only affects output during Shared Chat.", options: { all_chats: { label: "All chats" }, source_only: { label: "Only our chat" } } },
       prewarning: { label: "Warn before an ad break", hint: "Announces the next ad break in chat beforehand.", description: "Announces the next ad break in chat beforehand." },
-      leadSeconds: { label: "Lead time", hint: "How long before the ad break. 30 to 300.", unit: "s", disabledReason: "Prewarning is turned off.", increaseLabel: "Increase lead time", decreaseLabel: "Decrease lead time" },
+      leadSeconds: { label: "Lead time", hint: "How long before the ad break. 30 to 300.", unit: "s", disabledReason: "Prewarning is turned off." },
       prewarningText: {
         label: "Prewarning text", hint: "What the bot says before the ad break.", requiredError: "Enter text",
         previewLabel: "Preview", previewSpeaker: "Bot",

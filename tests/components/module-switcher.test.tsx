@@ -67,8 +67,8 @@ describe("Module navigation in the sidebar", () => {
     const textCommandsLink = await within(nav).findByRole("link", { name: "Textbefehle · Läuft" });
     expect(textCommandsLink.querySelector("svg")).toBeInTheDocument();
     expect(textCommandsLink).toHaveAttribute("title", "Textbefehle · Läuft");
-    expect(textCommandsLink.querySelector(".led--dot-only")).toBeInTheDocument();
-    expect(within(textCommandsLink).queryByText("Läuft", { exact: true })).not.toBeInTheDocument();
+    expect(textCommandsLink.querySelector(".status-led")).toBeInTheDocument();
+    expect(within(textCommandsLink).queryByText("Läuft", { exact: true })).toBeNull();
     expect(within(nav).getByRole("link", { name: "Werbung · Läuft" })).toBeInTheDocument();
     expect(within(nav).queryByRole("link", { name: /Kanalereignisse/ })).not.toBeInTheDocument();
   });

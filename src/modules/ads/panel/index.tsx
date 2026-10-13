@@ -3,7 +3,7 @@ import { useRef, useState, type ReactElement } from "react";
 import type { DashboardLanguage } from "../../../dashboard/locale";
 import { PanelApiError } from "../../../contracts/panel-error";
 import type { AdsScheduleResponse } from "../contracts";
-import { Button, EmptyCellValue, Icon, LoadState, Skeleton, notify } from "../../../dashboard/ui";
+import { Button, EmptyCellValue, Icon, LoadState, LoadStateLines, notify } from "../../../dashboard/ui";
 import { loadAdsSchedule, refreshAdsSchedule, snoozeAds } from "./service";
 import { adsPanelTexts } from "./locale";
 import { moduleQueryKey, runModuleQueryWrite, useDashboardQueryError, useModuleQuery } from "../../../dashboard/data";
@@ -114,9 +114,9 @@ const AdsPanel = ({ channelId, language = "de", canManage = false }: { channelId
       </p>
       <LoadState variant="panel-960" status={loadStatus}
         loading={<div className="module-stack" aria-label={labels.loading}>
-          <Skeleton rows={4} height={34} />
-          <Skeleton rows={3} height={34} />
-          <Skeleton rows={4} height={34} />
+          <LoadStateLines rows={4} height={34} />
+          <LoadStateLines rows={3} height={34} />
+          <LoadStateLines rows={4} height={34} />
         </div>}
         empty={<div style={{ minHeight: "calc(var(--s10) * 24)" }} />}
         error={<p role="alert">{loadError}</p>}

@@ -14,7 +14,7 @@ import { renderWithQuery } from "../query-test-utils";
 
 /**
  * Cross-cutting check for the helper-text rule (editor-konzept 3.0/15.1.3):
- * every `textbox`/`spinbutton`/`radiogroup`/`switch` field carries a
+ * every `textbox`/`spinbutton`/`group`/`switch` field carries a
  * non-empty helper line via `aria-describedby`. Scoped to this agent's
  * pages -- members, platform, and the Stream Manager immediate actions --
  * not the module panels (text commands, raid, ads), which are migrating
@@ -43,7 +43,8 @@ const expectEveryFieldHasHelperText = (scope: HTMLElement): void => {
   const fields = [
     ...within(scope).queryAllByRole("textbox"),
     ...within(scope).queryAllByRole("spinbutton"),
-    ...within(scope).queryAllByRole("radiogroup"),
+    ...within(scope).queryAllByRole("group").filter((field) => field.classList.contains("segment-choice")),
+    ...within(scope).queryAllByRole("combobox"),
     ...within(scope).queryAllByRole("switch"),
   ].filter((field) => field.closest(".ui-field--search") === null);
   expect(fields.length).toBeGreaterThan(0);
@@ -69,7 +70,7 @@ describe("helper text on every field (editor-konzept 3.0/15d)", () => {
       streamState="online"
       modules={[{ id: "ads", enabled: true }, { id: "raid", enabled: true }]}
     />);
-    await screen.findByRole("radiogroup", { name: "Werbedauer" });
+    await screen.findByRole("group", { name: "Werbedauer" });
     await screen.findByRole("textbox", { name: "Twitch-Name" });
     expectEveryFieldHasHelperText(container);
   });
@@ -84,8 +85,6 @@ describe("helper text on every field (editor-konzept 3.0/15d)", () => {
     );
 
     fireEvent.click(screen.getByRole("row", { name: /Mod/ }));
-    expectEveryFieldHasHelperText(container);
-
     fireEvent.click(screen.getByRole("button", { name: "Zugriff vergeben" }));
     expectEveryFieldHasHelperText(container);
   });

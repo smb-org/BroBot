@@ -128,7 +128,7 @@ describe("Platform level", () => {
 
     fireEvent.click(await screen.findByRole("row", { name: /Helfer/ }));
     const role = await screen.findByRole("combobox", { name: "Rolle: Helfer" });
-    expect(role).toHaveClass("mantine-Select-input");
+    expect(role).toHaveClass("ui-select__trigger");
     expect(role).not.toBeInstanceOf(HTMLSelectElement);
     expect(role).not.toBeDisabled();
   });
@@ -182,7 +182,7 @@ describe("Platform level", () => {
     expect(link).toHaveValue("http://localhost:3000/auth/login?channel=alpha_login");
   });
 
-  it("marks the member-search field with an @ prefix and puts a hidden Tabler icon on the copy action", async () => {
+  it("marks the member-search field with an @ prefix and puts a hidden lucide icon on the copy action", async () => {
     setUpPlatform(true);
     window.history.replaceState({}, "", "/betreiber");
 
@@ -192,7 +192,7 @@ describe("Platform level", () => {
     const inspector = await screen.findByRole("region", { name: "Kanal bearbeiten: Alpha" });
     const search = within(inspector).getByRole("textbox", { name: "Twitch-Login" });
     expect(search).toHaveAccessibleName("Twitch-Login");
-    expect(search.closest(".mantine-Input-wrapper")?.querySelector(".ui-field__prefix")).toHaveTextContent("@");
+    expect(search.closest(".ui-field")?.querySelector(".ui-field__prefix")).toHaveTextContent("@");
 
     const copy = within(inspector).getByRole("button", { name: "Link kopieren" });
     expect(copy).toHaveAccessibleName("Link kopieren");
@@ -314,6 +314,9 @@ describe("Platform level", () => {
     fireEvent.click(plus);
     const freigabe = await screen.findByRole("dialog", { name: "Kanal freigeben" });
     expect(bereich.children[0]).not.toHaveClass("list-detail--open");
+
+    fireEvent.click(within(freigabe).getByRole("button", { name: "Abbrechen" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Kanal freigeben" })).not.toBeInTheDocument());
 
     const row = await screen.findByRole("row", { name: /alpha_login/ });
     row.focus();
@@ -437,7 +440,7 @@ describe("Platform level", () => {
       fireEvent.click(within(audit).getByRole("button", { name: "Erneut versuchen" }));
       await waitFor(() => expect(box().dataset.status).toBe("loading"));
       expect(box().style.minHeight).toBe("280px");
-      expect(box().querySelectorAll(".mantine-Skeleton-root").length).toBeLessThanOrEqual(6);
+      expect(box().querySelectorAll(".ui-load-state__reserved-lines > span").length).toBeLessThanOrEqual(6);
 
       view.unmount();
       release();

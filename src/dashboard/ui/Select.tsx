@@ -1,38 +1,20 @@
-import { Select as MantineSelect } from "@mantine/core";
-import type { ComboboxData, ComboboxItem, ComboboxLikeRenderOptionInput } from "@mantine/core";
-import type { ReactNode } from "react";
+import { Combobox } from "@base-ui/react/combobox";
+import { Check, ChevronDown } from "lucide-react";
+import { useId, useState, type ReactNode } from "react";
 
 import { useDisabledFieldReason } from "./DisabledFieldReason";
 import { TruncatedText } from "./TruncatedText";
-import { colors } from "./theme";
+import { SelectContent, SelectGroup, SelectItem, SelectLabel, SelectPrimitive, SelectTrigger, SelectValue } from "./primitives/select";
 
 export interface SelectOption {
   value: string;
   label: string;
-  /** One-line explanation rendered under the label in the dropdown. */
   description?: string;
-  /** Options with the same group are presented under a shared heading. */
   group?: string;
 }
 
-/** Renders `label` alone, or `label` + a one-line `description` underneath
- *  when the option carries one (see `ChoiceCards` for the same shape). */
-const renderOption = ({ option }: ComboboxLikeRenderOptionInput<ComboboxItem>): ReactNode => {
-  const description = (option as SelectOption).description;
-  if (description === undefined) return <span>{option.label}</span>;
-  return (
-    <span className="ui-select__option">
-      <span className="ui-select__option-label">{option.label}</span>
-      <span className="ui-select__option-description">{description}</span>
-    </span>
-  );
-};
-
 export interface SelectProps {
   label?: string;
-  /** Accessible name when the field carries no visible caption above it --
-   *  e.g. the header's channel select, which sits in a 56px row with no
-   *  room for one. Ignored once `label` is set. */
   ariaLabel?: string;
   hint?: string;
   error?: string;
@@ -41,12 +23,9 @@ export interface SelectProps {
   options: SelectOption[];
   placeholder?: string;
   disabled?: boolean;
-  /** Omits reserved hint/error rows for controls inside fixed-height chrome. */
   compact?: boolean;
   busy?: boolean;
   searchable?: boolean;
-  /** Controlled search text; pairs with `onSearchChange` for callers that
-   *  need to inspect what the user typed (e.g. to offer a custom entry). */
   searchValue?: string;
   onSearchChange?: (value: string) => void;
   required?: boolean;
@@ -56,89 +35,104 @@ export interface SelectProps {
   describedBy?: string;
 }
 
-/**
- * "Popover, Menu, Combobox: surface, strong border, radius sm,
- * shadow xs" (docs/input/DESIGN-neu.md, "Component defaults"). The dropdown
- * override lives here rather than in the global theme because `Select` is
- * the only place in this seam step that opens a Combobox.
- */
-export function Select({
-  label,
-  ariaLabel,
-  hint,
-  error,
-  value,
-  onChange,
-  options,
-  placeholder,
-  disabled = false,
-  compact = false,
-  busy = false,
-  searchable = false,
-  searchValue,
-  onSearchChange,
-  required = false,
-  name,
-  id,
-  title,
-  describedBy,
-}: SelectProps) {
+const optionContents = (option: SelectOption): ReactNode => (
+  <span className="ui-select__option">
+    <span className="ui-select__option-label">{option.label}</span>
+    {option.description === undefined ? null : <span className="ui-select__option-description">{option.description}</span>}
+  </span>
+);
+
+export function Select({ label, ariaLabel, hint, error, value, onChange, options, placeholder, disabled = false, compact = false, busy = false, searchable = false, searchValue, onSearchChange, required = false, name, id, title, describedBy }: SelectProps) {
+  const generatedId = useId();
+  const controlId = id ?? generatedId;
+  const [internalSearch, setInternalSearch] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchInputActive, setSearchInputActive] = useState(false);
   const disabledReason = useDisabledFieldReason();
-  const groupedOptions = options.some((option) => option.group !== undefined);
-  const groupNames = [...new Set(options.flatMap((option) => option.group === undefined ? [] : [option.group]))];
-  const toComboboxOption = ({ value: optionValue, label, description }: SelectOption): SelectOption =>
-    description === undefined ? { value: optionValue, label } : { value: optionValue, label, description };
-  const data: ComboboxData = groupedOptions ? [
-    ...options.filter((option) => option.group === undefined).map(toComboboxOption),
-    ...groupNames.map((group) => ({
-      group,
-      items: options.filter((option) => option.group === group).map(toComboboxOption),
-    })),
-  ] : options;
-  const contextualDescriptionId = describedBy !== undefined && disabledReason !== null && id !== undefined
-    ? `${describedBy}-select-${id}`
-    : undefined;
-  const description: ReactNode = (
-    <span className="ui-select__description">
-      {hint === undefined ? null : <TruncatedText text={hint} />}
-      {contextualDescriptionId === undefined || disabledReason === null ? null : <span className="sr-only">{disabledReason.reason}</span>}
-    </span>
-  );
-  return (
-    <MantineSelect
+  const activeSearch = searchValue ?? internalSearch;
+  const filteredOptions = options.filter((option) => `${option.label} ${option.value}`.toLocaleLowerCase().includes(activeSearch.trim().toLocaleLowerCase()));
+  const selectedLabel = options.find((option) => option.value === value)?.label ?? value ?? "";
+  const selectItems = Object.fromEntries(options.map((option) => [option.value, option.label]));
+  const displaySearch = activeSearch.length > 0 || searchInputActive ? activeSearch : selectedLabel;
+  const updateSearch = (next: string): void => {
+    setInternalSearch(next);
+    onSearchChange?.(next);
+  };
+  const clearSearch = (): void => updateSearch("");
+  const descriptionId = `${controlId}-description`;
+  const errorId = `${controlId}-error`;
+  const describedByIds = [describedBy, hint === undefined ? null : descriptionId, error === undefined ? null : errorId, disabledReason?.id].filter((part): part is string => part !== null && part !== undefined).join(" ") || undefined;
+  const groups = [...new Set(options.flatMap((option) => option.group === undefined ? [] : [option.group]))];
+  const group = (groupName: string): ReactNode => {
+    const groupOptions = filteredOptions.filter((option) => option.group === groupName);
+    return groupOptions.length === 0 ? null : <SelectGroup key={groupName}>
+      <SelectLabel>{groupName}</SelectLabel>
+      {groupOptions.map((option) => <SelectItem key={option.value} value={option.value}>{optionContents(option)}</SelectItem>)}
+    </SelectGroup>;
+  };
+
+  return <div data-ui="" className={`ui-select${compact ? " ui-select--compact" : ""}`}>
+    {label === undefined ? null : <label className="ui-field__label" htmlFor={controlId}>{label}</label>}
+    {searchable ? <Combobox.Root
+      autoHighlight
       data-ui=""
-      className={`ui-select${compact ? " ui-select--compact" : ""}`}
-      label={label}
-      aria-label={ariaLabel}
-      description={compact ? undefined : description}
-      {...(contextualDescriptionId === undefined ? {} : {
-        descriptionProps: {
-          id: contextualDescriptionId,
-        },
-      })}
-      inputWrapperOrder={compact ? ["input"] : ["label", "input", "description", "error"]}
-      error={compact || !error ? undefined : <span><span aria-hidden="true">× </span><TruncatedText text={error} /></span>}
-      value={value}
-      onChange={onChange}
-      data={data}
-      placeholder={placeholder}
-      disabled={disabled}
-      searchable={searchable}
-      {...(searchValue === undefined ? {} : { searchValue })}
-      {...(onSearchChange === undefined ? {} : { onSearchChange })}
-      aria-busy={busy}
-      required={required}
-      name={name}
-      id={id}
-      title={title}
-      aria-describedby={describedBy}
-      allowDeselect={false}
-      comboboxProps={{ shadow: "xs", width: "max-content" }}
-      renderOption={renderOption}
-      styles={{
-        dropdown: { backgroundColor: colors.surface, borderColor: colors.hairlineStrong, maxWidth: "min(90vw, 320px)" },
-        option: { fontSize: "13px" },
+      open={searchOpen}
+      onOpenChange={(next) => {
+        setSearchOpen(next);
+        if (!next) {
+          setSearchInputActive(false);
+          clearSearch();
+        }
       }}
-    />
-  );
+      items={options.map((option) => option.value)}
+      itemToStringLabel={(optionValue) => options.find((option) => option.value === optionValue)?.label ?? optionValue}
+      filteredItems={filteredOptions.map((option) => option.value)}
+      filter={null}
+      value={value ?? ""}
+      onValueChange={(next) => {
+        onChange(next === null || next.length === 0 ? null : next);
+        setSearchOpen(false);
+        setSearchInputActive(false);
+        clearSearch();
+      }}
+      inputValue={displaySearch}
+      onInputValueChange={(next) => {
+        updateSearch(next);
+        setSearchInputActive(true);
+        setSearchOpen(true);
+      }}
+      disabled={disabled}
+      name={name}
+      required={required}
+    >
+      <div className="ui-select__search-control">
+        <Combobox.Input id={controlId} aria-label={ariaLabel ?? label} aria-describedby={describedByIds} aria-busy={busy} title={title} placeholder={placeholder} disabled={disabled} onClick={() => { if (!disabled) setSearchOpen(true); }} className="ui-select__search-input" />
+        <Combobox.Trigger aria-label={ariaLabel ?? label} className="ui-select__trigger"><ChevronDown aria-hidden="true" size={16} /></Combobox.Trigger>
+      </div>
+      <Combobox.Portal>
+        <Combobox.Positioner align="start" sideOffset={4} className="z-[var(--layer-popover)]" style={{ zIndex: "var(--layer-popover)" }}>
+          <Combobox.Popup data-ui="" className="ui-select__dropdown">
+            <Combobox.List className="ui-select__options" aria-label={label ?? ariaLabel}>
+              {filteredOptions.filter((option) => option.group === undefined).map((option) => <Combobox.Item key={option.value} value={option.value} className="ui-select__combobox-option">{optionContents(option)}<Combobox.ItemIndicator className="ui-select__check"><Check aria-hidden="true" size={14} /></Combobox.ItemIndicator></Combobox.Item>)}
+              {groups.filter((groupName) => filteredOptions.some((option) => option.group === groupName)).map((groupName) => <div role="group" aria-label={groupName} key={groupName}>
+                <div className="ui-select__group-label">{groupName}</div>
+                {filteredOptions.filter((option) => option.group === groupName).map((option) => <Combobox.Item key={option.value} value={option.value} className="ui-select__combobox-option">{optionContents(option)}<Combobox.ItemIndicator className="ui-select__check"><Check aria-hidden="true" size={14} /></Combobox.ItemIndicator></Combobox.Item>)}
+              </div>)}
+              {filteredOptions.length === 0 ? <div className="ui-select__empty" role="status">{placeholder}</div> : null}
+            </Combobox.List>
+          </Combobox.Popup>
+        </Combobox.Positioner>
+      </Combobox.Portal>
+    </Combobox.Root> : <SelectPrimitive.Root items={selectItems} value={value} onValueChange={(next) => onChange(next)} disabled={disabled} name={name} required={required}>
+      <SelectTrigger id={controlId} aria-label={label === undefined ? ariaLabel : undefined} aria-describedby={describedByIds} aria-busy={busy} title={title} className="ui-select__trigger">
+        <SelectValue placeholder={placeholder} className="ui-select__value" />
+      </SelectTrigger>
+      <SelectContent className="ui-select__dropdown">
+        {options.filter((option) => option.group === undefined).map((option) => <SelectItem key={option.value} value={option.value}>{optionContents(option)}</SelectItem>)}
+        {groups.map(group)}
+      </SelectContent>
+    </SelectPrimitive.Root>}
+    {compact ? null : <span data-ui="" id={descriptionId} className="ui-select__description">{hint === undefined ? null : <TruncatedText text={hint} />}{disabledReason === null ? null : <span className="sr-only">{disabledReason.reason}</span>}</span>}
+    {compact ? null : <span data-ui="" id={errorId} className="ui-select__error" aria-live="polite" role={error === undefined || error.length === 0 ? undefined : "alert"}>{error === undefined || error.length === 0 ? <span aria-hidden="true">&nbsp;</span> : <><span aria-hidden="true">× </span><TruncatedText text={error} /></>}</span>}
+  </div>;
 }

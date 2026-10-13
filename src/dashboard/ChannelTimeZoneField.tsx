@@ -46,7 +46,10 @@ export const ChannelTimeZoneField = ({ label, hint, value, onChange, canEdit, di
     label={label}
     hint={hint}
     value={value.length > 0 ? value : null}
-    onChange={(next) => { if (next !== null) onChange(next); }}
+    onChange={(next) => {
+      setSearch("");
+      if (next !== null) onChange(next);
+    }}
     options={options}
     searchable
     searchValue={search}

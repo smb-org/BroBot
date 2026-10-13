@@ -16,10 +16,10 @@ describe("truncated field copy", () => {
 
     const input = screen.getByRole("textbox", { name: "Name" });
     const describedIds = input.getAttribute("aria-describedby")?.split(" ") ?? [];
-    const description = document.getElementById("long-copy-description");
+    const description = document.getElementById("long-copy-hint");
     const errorDescription = document.getElementById("long-copy-error");
 
-    expect(describedIds).toContain("long-copy-description");
+    expect(describedIds).toContain("long-copy-hint");
     expect(describedIds).toContain("long-copy-error");
     expect(description?.querySelector(".ui-truncated-text")).toHaveAttribute("title", hint);
     expect(description?.querySelector(".sr-only")).toHaveTextContent(hint);
