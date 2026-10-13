@@ -164,7 +164,7 @@ test("editor stage 2 pages fit at 1280px and 390px and produce review screenshot
     const wrapper = document.querySelector(".command-panel .table-wrap");
     const table = wrapper?.querySelector("table");
     const activeCell = table?.querySelector("tbody tr td:last-child");
-    const switchTrack = activeCell?.querySelector(".switch__track");
+    const switchTrack = activeCell?.querySelector('[data-slot="switch"]');
     if (!wrapper || !table || !activeCell || !switchTrack) {
       throw new Error("The active command column is missing from the table.");
     }

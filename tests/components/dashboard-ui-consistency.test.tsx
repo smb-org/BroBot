@@ -39,14 +39,14 @@ describe("shared dashboard consistency components", () => {
       <InspectorActions destructive={<button type="button">Delete</button>}><button type="button">Save</button></InspectorActions>
     </>);
 
-    expect(screen.getByRole("heading", { name: "General" })).toHaveClass("inspector-content-section__heading");
+    expect(screen.getByRole("heading", { name: "General" }).closest(".ui-section__heading")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Name: Use a short name." })).toHaveAttribute("title", "Use a short name.");
     expect(container.querySelector(".inspector-field-row__control")).toContainElement(screen.getByRole("textbox", { name: "Name" }));
     const saveButtons = screen.getAllByRole("button", { name: "Save" });
     const firstSaveButton = saveButtons.at(0);
     if (firstSaveButton === undefined) throw new Error("The primary inspector Save button is missing.");
     expect(container.querySelector(".inspector-actions")).toContainElement(firstSaveButton);
-    expect(container.querySelector(".inspector-content-section--danger")).toBeNull();
+    expect(container.querySelector(".ui-section--danger")).toBeNull();
     expect(container.querySelector(".inspector-actions__destructive")).toContainElement(screen.getByRole("button", { name: "Delete" }));
   });
 

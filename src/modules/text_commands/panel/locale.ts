@@ -4,7 +4,7 @@ import type { ChatOutputTarget } from "../../contract";
 import type { TextCommandKind, TextCommandMinimumTier, TextCommandResponseType, TextCommandStreamCondition } from "../contracts";
 import type { ChipsInputMessages, TemplateTextFieldMessages } from "../../../dashboard/ui";
 import type { PanelTemplateWarning } from "../contract";
-import type { GamePickerMessages } from "../../../dashboard/ui";
+import type { GameMultiSelectMessages } from "../../../dashboard/ui";
 
 export interface TextCommandsTexts {
   title: string;
@@ -62,7 +62,7 @@ export interface TextCommandsTexts {
   gameFilter: string;
   gameFilterHint: string;
   availability: string;
-  gamePicker: GamePickerMessages;
+  gameMultiSelect: GameMultiSelectMessages;
   libraryText: string;
   libraryTextPlaceholder: string;
   insertLibraryText: string;
@@ -240,7 +240,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     gameFilter: "Twitch-Spiele",
     gameFilterHint: "Der Befehl antwortet nur, wenn gerade eines dieser Spiele läuft.",
     availability: "Verfügbarkeit",
-    gamePicker: { label: "Twitch-Spiele", hint: "Spiele über Twitch-Kategorien suchen und auswählen.", search: "Spiel suchen", searchHint: "Mindestens zwei Zeichen eingeben.", loading: "Spiele werden gesucht …", empty: "Keine Spiele gefunden.", error: "Die Twitch-Spiele konnten nicht geladen werden.", remove: (name) => `${name} entfernen` },
+    gameMultiSelect: { label: "Twitch-Spiele", hint: "Spiele über Twitch-Kategorien suchen und auswählen.", search: "Spiel suchen", searchHint: "Mindestens zwei Zeichen eingeben.", loading: "Spiele werden gesucht …", empty: "Keine Spiele gefunden.", error: "Die Twitch-Spiele konnten nicht geladen werden.", suggestions: "Vorschläge", allGames: "Alle Spiele", limitReached: "10er-Limit erreicht; entferne eins zum Austauschen.", selectedCount: (count, maximum) => `${String(count)} von ${String(maximum)}`, remove: (name) => `${name} entfernen` },
     libraryText: "Text aus Bibliothek",
     libraryTextPlaceholder: "Textbaustein auswählen",
     insertLibraryText: "Text einsetzen",
@@ -341,7 +341,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     gameFilter: "Twitch games",
     gameFilterHint: "The command only replies while one of these games is current.",
     availability: "Availability",
-    gamePicker: { label: "Twitch games", hint: "Search and select games from Twitch categories.", search: "Search games", searchHint: "Enter at least two characters.", loading: "Searching games …", empty: "No games found.", error: "Twitch games could not be loaded.", remove: (name) => `Remove ${name}` },
+    gameMultiSelect: { label: "Twitch games", hint: "Search and select games from Twitch categories.", search: "Search games", searchHint: "Enter at least two characters.", loading: "Searching games …", empty: "No games found.", error: "Twitch games could not be loaded.", suggestions: "Suggestions", allGames: "All games", limitReached: "10-game limit reached; remove one to add another.", selectedCount: (count, maximum) => `${String(count)} of ${String(maximum)}`, remove: (name) => `Remove ${name}` },
     libraryText: "Text from library",
     libraryTextPlaceholder: "Choose a text block",
     insertLibraryText: "Insert text",

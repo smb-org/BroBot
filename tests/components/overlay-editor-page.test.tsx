@@ -1161,9 +1161,7 @@ describe("Overlay composition editor", () => {
     expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue(700);
     stubMeasuredElementSize(previewFrameWindow(), "element-hidden", () => ({ width: 300, height: 40 }));
 
-    const toggleRow = screen.getByText("In der Komposition anzeigen").closest(".ui-switch-field__row");
-    const toggle = toggleRow?.querySelector<HTMLInputElement>('input[type="checkbox"]');
-    if (toggle === null || toggle === undefined) throw new Error("Composition toggle is missing.");
+    const toggle = screen.getByRole("switch", { name: "In der Komposition anzeigen" });
     fireEvent.click(toggle);
 
     expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(1270);

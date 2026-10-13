@@ -17,6 +17,7 @@ export interface TimersTexts {
   beforeEvent: string;
   minutes: string;
   minimumMessages: string;
+  minimumMessagesHint: string;
   messageCount: string;
   time: string;
   weekdays: string;
@@ -67,6 +68,7 @@ const catalog: LocaleCatalog<TimersTexts> = {
     beforeEvent: "Vor einem Ereignis",
     minutes: "Minuten",
     minimumMessages: "Nur senden, wenn genug Chatnachrichten eingegangen sind",
+    minimumMessagesHint: "Lege eine Mindestanzahl fest, bevor der Timer eine Nachricht sendet.",
     messageCount: "Mindestanzahl Chatnachrichten",
     time: "Uhrzeit im Kanal",
     weekdays: "Wochentage",
@@ -128,6 +130,7 @@ const catalog: LocaleCatalog<TimersTexts> = {
     beforeEvent: "Before an event",
     minutes: "Minutes",
     minimumMessages: "Only send after enough chat messages have arrived",
+    minimumMessagesHint: "Set a minimum count before the timer sends a message.",
     messageCount: "Minimum chat messages",
     time: "Time in channel time zone",
     weekdays: "Weekdays",

@@ -67,7 +67,7 @@ describe("Ad settings editor declaration", () => {
     if (initialLanguage !== undefined) Object.defineProperty(window.navigator, "language", initialLanguage);
   });
 
-  it("previews the duration fallback, counts its 15 characters, and disables prewarning fields when off", async () => {
+  it("previews the duration fallback, counts its 15 characters, and hides prewarning fields when off", async () => {
     renderAds(adsFetch());
 
     const announcementsTab = await screen.findByRole("tab", { name: "Ansagen" });
@@ -85,9 +85,9 @@ describe("Ad settings editor declaration", () => {
 
     fireEvent.click(prewarningTab);
     expect(screen.getByRole("switch", { name: /Vorwarnung vor der Werbung/ })).not.toBeChecked();
-    expect(screen.getByRole("spinbutton", { name: "Vorlaufzeit" })).toBeDisabled();
-    expect(screen.getByRole("textbox", { name: "Vorwarnungstext" })).toBeDisabled();
-    expect(screen.getAllByText("Vorwarnung ist ausgeschaltet.")).toHaveLength(3);
+    expect(screen.queryByRole("spinbutton", { name: "Vorlaufzeit" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Vorwarnungstext" })).not.toBeInTheDocument();
+    expect(screen.getByText("Kündigt die nächste Werbung vorher im Chat an.")).toBeInTheDocument();
   });
 
   it("keeps the announcement draft after a 409 and lists settings for operators", async () => {

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { ActionMenu, Button, ConfirmDialog, Field, InspectorSection, UnitInput, SaveBar, SegmentChoice, SubInspector, Switch, registerDashboardNavigationGuard, useDraft, useDraftGuard } from "../../../dashboard/ui";
+import { ActionMenu, Button, ConfirmDialog, Field, InspectorSection, UnitInput, SaveBar, SegmentChoice, SubInspector, SwitchSection, registerDashboardNavigationGuard, useDraft, useDraftGuard } from "../../../dashboard/ui";
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient } from "../../../dashboard/data";
 import type { ChatVoteTemplate, ChatVoteTemplateDraft } from "../contracts";
 import { CHAT_VOTE_TEMPLATE_MAXIMUM, CHAT_VOTING_TITLE_MAX_LENGTH } from "../contracts";
@@ -374,11 +374,10 @@ export function ChatVoteTemplateInspector({
         </div>
       </InspectorSection>
 
-      <section className="chat-voting-editor__switch-section" aria-label={labels.freeText}>
-        <Switch
-          label={labels.freeText}
-          description={labels.freeTextHint}
-          layout="card"
+      <SwitchSection
+          className="chat-voting-editor__switch-section"
+          title={labels.freeText}
+          hint={labels.freeTextHint}
           checked={draft.value.freeTextMode !== null}
           onChange={(checked) => { updateDraft({ freeTextMode: checked ? "first_word" : null }); }}
         >
@@ -389,8 +388,7 @@ export function ChatVoteTemplateInspector({
             options={[{ value: "first_word", label: labels.firstWord }, { value: "whole_message", label: labels.wholeMessage }]}
             size="compact"
           />
-        </Switch>
-      </section>
+      </SwitchSection>
 
       <InspectorSection title={labels.duration}>
         <div className="chat-voting-editor__duration-control">

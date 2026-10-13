@@ -1228,9 +1228,9 @@ describe("Dashboard skeleton", () => {
     expect(document.querySelector(".member-avatar-placeholder")).toHaveTextContent("E");
 
     // The role choice offers no value that would be rejected.
-    const rollen = screen.getByRole("radiogroup", { name: "Rolle für esembe" });
-    expect(within(rollen).getAllByRole("radio")).toHaveLength(1);
-    expect(within(rollen).getByRole("radio", { name: /Broadcaster/ })).toBeDisabled();
+    const rollen = screen.getByRole("group", { name: "Rolle für esembe" });
+    expect(within(rollen).getAllByRole("button")).toHaveLength(1);
+    expect(within(rollen).getByRole("button", { name: /Broadcaster/ })).toBeDisabled();
   });
 
   it("allows revocation once a second broadcaster remains", async () => {
@@ -1375,7 +1375,7 @@ describe("Dashboard skeleton", () => {
     fireEvent.click(await screen.findByRole("row", { name: /Moderation/ }));
     const editor = await screen.findByRole("region", { name: "Mitglied bearbeiten: Moderation" });
     expect(within(editor).getByText(reason)).toBeInTheDocument();
-    expect(within(editor).queryByRole("radiogroup")).not.toBeInTheDocument();
+    expect(within(editor).queryByRole("group")).not.toBeInTheDocument();
     expect(within(editor).queryByRole("combobox")).not.toBeInTheDocument();
     expect(within(editor).queryByRole("button", { name: "Entziehen" })).not.toBeInTheDocument();
     expect(within(editor).getAllByText("Moderation").length).toBeGreaterThan(0);
@@ -1432,9 +1432,9 @@ describe("Dashboard skeleton", () => {
 
     await screen.findByRole("heading", { name: "Textbefehle", level: 1 });
     const reason = "Nur Broadcaster und Verwalter dürfen Module ändern.";
-    const schalter = await screen.findAllByRole("switch", { name: /Textbefehle/i });
+    const schalter = await screen.findAllByRole("switch", { name: /Textbefehle:/i });
     expect(schalter).toHaveLength(1);
-    schalter.forEach((element) => { expect(element).toHaveAttribute("aria-disabled", "true"); });
+    schalter.forEach((element) => { expect(element).toBeDisabled(); });
     expect(screen.getAllByText(reason)).toHaveLength(1);
   });
 
@@ -1827,8 +1827,8 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
     await screen.findByText("Alpha-Mitglied");
     fireEvent.click(screen.getByRole("row", { name: /Alpha-Mitglied/ }));
-    const roleGroup = screen.getByRole("radiogroup", { name: "Rolle für Alpha-Mitglied" });
-    fireEvent.click(within(roleGroup).getByRole("radio", { name: /Verwalter/ }));
+    const roleGroup = screen.getByRole("group", { name: "Rolle für Alpha-Mitglied" });
+    fireEvent.click(within(roleGroup).getByRole("button", { name: /Verwalter/ }));
     fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
     await waitFor(() => expect(resolveAlphaReload).toBeTypeOf("function"));
 
@@ -1928,8 +1928,8 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
     await screen.findByText("Erster Stand");
     fireEvent.click(screen.getByRole("row", { name: /Erster Stand/ }));
-    const roleGroup = screen.getByRole("radiogroup", { name: "Rolle für Erster Stand" });
-    fireEvent.click(within(roleGroup).getByRole("radio", { name: /Verwalter/ }));
+    const roleGroup = screen.getByRole("group", { name: "Rolle für Erster Stand" });
+    fireEvent.click(within(roleGroup).getByRole("button", { name: /Verwalter/ }));
     fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
     await waitFor(() => {
       expect(memberRequestCount).toBe(2);
@@ -1987,8 +1987,8 @@ describe("Dashboard skeleton", () => {
     });
 
     fireEvent.click(screen.getByRole("row", { name: /Erster Stand/ }));
-    const roleGroup = screen.getByRole("radiogroup", { name: "Rolle für Erster Stand" });
-    fireEvent.click(within(roleGroup).getByRole("radio", { name: /Verwalter/ }));
+    const roleGroup = screen.getByRole("group", { name: "Rolle für Erster Stand" });
+    fireEvent.click(within(roleGroup).getByRole("button", { name: /Verwalter/ }));
     fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
     await waitFor(() => {
       expect(memberRequestCount).toBe(2);
@@ -2052,8 +2052,8 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    expect(await screen.findByRole("switch", { name: "Textbefehle" })).not.toBeChecked();
-    await waitFor(() => { expect(screen.getByRole("switch", { name: "Clips" })).toBeChecked(); });
+    expect(await screen.findByRole("switch", { name: /Textbefehle:/i })).not.toBeChecked();
+    await waitFor(() => { expect(screen.getByRole("switch", { name: /Clips:/i })).toBeChecked(); });
     expect(screen.queryByText("Keine Module aktiv.")).not.toBeInTheDocument();
   });
 
@@ -2289,14 +2289,14 @@ describe("Dashboard skeleton", () => {
       await waitFor(() => expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toHaveTextContent("Alpha — kanal-a"));
       await screen.findByRole("switch");
       const returningAlphaSwitch = document.querySelector(".module-detail__switch [role='switch']");
-      expect(returningAlphaSwitch).toHaveAttribute("aria-disabled", "true");
+      expect(returningAlphaSwitch).toBeDisabled();
       expect(toggleRequests.get("kanal-a")).toBe(1);
 
       settleToggle("kanal-a");
-      await waitFor(() => expect(document.querySelector(".module-detail__switch [role='switch']")).not.toHaveAttribute("aria-disabled", "true"));
+      await waitFor(() => expect(document.querySelector(".module-detail__switch [role='switch']")).toBeEnabled());
       navigateToPath("/channels/kanal-b/modules/ads");
       await screen.findByRole("switch");
-      await waitFor(() => expect(document.querySelector(".module-detail__switch [role='switch']")).toHaveAttribute("aria-disabled", "true"));
+      await waitFor(() => expect(document.querySelector(".module-detail__switch [role='switch']")).toBeDisabled());
     } finally {
       settleToggle("kanal-a");
       settleToggle("kanal-b");
@@ -2818,11 +2818,11 @@ describe("Dashboard skeleton", () => {
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
-    const targetField = await screen.findByRole("combobox", { name: "Standard-Chat-Ziel" });
+    const targetField = await screen.findByRole("button", { name: "Standard-Chat-Ziel" });
     await waitFor(() => expect(targetField).toHaveTextContent("Nur unser Chat"));
     fireEvent.click(targetField);
-    const allChatsOption = await screen.findByRole("option", { name: /Alle Chats/u });
-    clickSelectOption(allChatsOption);
+    const allChatsOption = await screen.findByRole("radio", { name: /Alle Chats/u, hidden: true });
+    fireEvent.click(allChatsOption);
 
     expect(targetPatchCount).toBe(0);
     expect(targetField).toHaveTextContent("Alle Chats");
@@ -2914,11 +2914,11 @@ describe("Dashboard skeleton", () => {
     expect(moduleToggle).not.toBeNull();
     fireEvent.click(moduleToggle as HTMLElement);
     await waitFor(() => expect(toggleRequests).toBe(1));
-    expect(moduleToggle).toHaveAttribute("aria-disabled", "true");
+    expect(moduleToggle).toBeDisabled();
     navigateToPath("/channels/kanal-a/modules/ads");
     await waitFor(() => {
       const currentToggle = document.querySelector(".module-detail__switch [role='switch']");
-      expect(currentToggle).not.toHaveAttribute("aria-disabled", "true");
+      expect(currentToggle).toBeEnabled();
     });
 
     await act(async () => {
@@ -2993,10 +2993,10 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />, undefined, { gcTime: 600_000 });
     await screen.findByRole("heading", { name: "Alpha", level: 1 });
     navigateToPath("/channels/kanal-a/modules");
-    const listSwitch = await screen.findByRole("switch", { name: "Textbefehle" });
+    const listSwitch = await screen.findByRole("switch", { name: /Textbefehle:/i });
     fireEvent.click(listSwitch);
-    await waitFor(() => expect(screen.getByRole("switch", { name: "Textbefehle" })).toBeChecked());
-    await waitFor(() => expect(screen.getByRole("switch", { name: "Textbefehle" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("switch", { name: /Textbefehle:/i })).toBeChecked());
+    await waitFor(() => expect(screen.getByRole("switch", { name: /Textbefehle:/i })).toBeEnabled());
 
     navigateToPath("/channels/kanal-a/modules/text_commands");
     expect(await screen.findByRole("button", { name: "Befehl anlegen" })).toBeInTheDocument();
@@ -3032,9 +3032,9 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />, undefined, { gcTime: 600_000 });
     await waitFor(() => expect(overviewCalls).toBe(1));
     navigateToPath("/channels/kanal-a/modules");
-    fireEvent.click(await screen.findByRole("switch", { name: "Textbefehle" }));
-    await waitFor(() => expect(screen.getByRole("switch", { name: "Textbefehle" })).toBeChecked());
-    await waitFor(() => expect(screen.getByRole("switch", { name: "Textbefehle" })).toBeEnabled());
+    fireEvent.click(await screen.findByRole("switch", { name: /Textbefehle:/i }));
+    await waitFor(() => expect(screen.getByRole("switch", { name: /Textbefehle:/i })).toBeChecked());
+    await waitFor(() => expect(screen.getByRole("switch", { name: /Textbefehle:/i })).toBeEnabled());
     // The pre-toggle response (module still off) arrives only now.
     releaseStale();
     await new Promise((resolve) => { window.setTimeout(resolve, 20); });
@@ -3080,10 +3080,10 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    fireEvent.click(await screen.findByRole("switch", { name: "Textbefehle" }));
-    fireEvent.click(await screen.findByRole("switch", { name: "Shoutout" }));
+    fireEvent.click(await screen.findByRole("switch", { name: /Textbefehle:/i }));
+    fireEvent.click(await screen.findByRole("switch", { name: /Shoutout:/i }));
     await waitFor(() => { expect(modulesCalls).toBe(3); });
-    expect(await screen.findByRole("switch", { name: "Shoutout" })).toBeChecked();
+    expect(await screen.findByRole("switch", { name: /Shoutout:/i })).toBeChecked();
 
     // The held-back first reload arrives last, describing an older state.
     resolveFirstReload?.(jsonResponse({
@@ -3096,7 +3096,7 @@ describe("Dashboard skeleton", () => {
     // Give the stale response a chance to apply before asserting it didn't.
     await Promise.resolve();
     await Promise.resolve();
-    expect(screen.getByRole("switch", { name: "Shoutout" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: /Shoutout:/i })).toBeChecked();
   });
 
   it("retries a token-expiry reconciliation after a transient shell refresh failure", async () => {
@@ -3177,7 +3177,7 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     // The overview offers no module list; module management has its own page.
-    expect(screen.queryByRole("switch", { name: "Textbefehle" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: /Textbefehle:/i })).not.toBeInTheDocument();
 
     // Immediate actions section is present and reachable. Each button comes
     // from its own module's `lazy(() => import(...))` behind a `Suspense`

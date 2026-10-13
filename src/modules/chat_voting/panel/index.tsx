@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Button, EmptyState, ListDetail, ListRow, ListToolbar, LoadState, SegmentChoice, SubInspector, notify } from "../../../dashboard/ui";
+import { Button, EmptyState, ListDetail, ListRow, ListToolbar, LoadState, SegmentChoice, Section, SubInspector, notify } from "../../../dashboard/ui";
 import { dashboardTexts } from "../../../dashboard/locale";
 import type { ModulePanelProperties } from "../../contract";
 import { CHAT_VOTE_TEMPLATE_MAXIMUM, type ChatVote, type ChatVoteTemplate } from "../contracts";
@@ -613,7 +613,7 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
 };
 
 const InspectorSectionView = ({ title, children }: { title: string; children: ReactNode }): ReactElement =>
-  <section className="inspector-content-section"><h3 className="inspector-content-section__heading">{title}</h3><div className="inspector-content-section__body">{children}</div></section>;
+  <Section title={title} headingLevel="h3" variant="inspector">{children}</Section>;
 
 const ResultBar = ({ label, count, percent, leader }: { label: string; count: number; percent: number; leader: boolean }): ReactElement =>
   <div className="chat-voting-results__row" data-leading={leader || undefined} role="group" aria-label={label + ": " + String(count) + ", " + String(percent) + "%"}>

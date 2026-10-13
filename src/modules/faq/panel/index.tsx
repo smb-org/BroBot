@@ -1,7 +1,8 @@
 import { useCallback, useState, type ReactElement } from "react";
 
-import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
-import { Button, ChatOutputTargetControl, ConfirmDialog, Field, FormDialog, GamePicker, InspectorSection, LoadState, LoadStateLines, UnitInput, Select, Switch, TemplateTextField, mapServerFieldErrors, notify } from "../../../dashboard/ui";
+import { runModuleQueryWrite, useChannelSettings, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { Button, ChatTargetField, ConfirmDialog, Field, FormDialog, GameMultiSelect, InspectorSection, LoadState, LoadStateLines, UnitInput, Select, TemplateTextField, mapServerFieldErrors, notify } from "../../../dashboard/ui";
+import { Switch as SwitchPrimitive } from "../../../dashboard/ui/primitives/switch";
 import type { ModulePanelProperties } from "../../contract";
 import type { FaqEntry, FaqGame } from "../contracts";
 import { FAQ_ANSWER_MAX_LENGTH, FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH, FAQ_USER_COOLDOWN_MAXIMUM_SECONDS } from "../contracts";
@@ -79,6 +80,7 @@ export default function FaqPanel(properties: ModulePanelProperties): ReactElemen
 
 function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelProperties): ReactElement {
   const labels = faqTexts(language);
+  const channelSettings = useChannelSettings(channelId);
   const queryClient = useDashboardQueryClient();
   const query = useModuleQuery(channelId, "faq", "panel", (signal) => loadFaqPanel(channelId, signal));
   const data = query.data;
@@ -224,12 +226,12 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
                 {entry.games.length === 0 ? null : <span>{labels.games} · {entry.games.map((game) => game.name).join(", ")}</span>}
               </div>
               <div className="timer-row__actions">
-                <Switch
-                  ariaLabel={`${entry.name}: ${entry.enabled ? labels.enabled : labels.disabled}`}
+                <SwitchPrimitive
+                  aria-label={`${entry.name}: ${entry.enabled ? labels.enabled : labels.disabled}`}
                   checked={entry.enabled}
-                  disabled={busyEntryId !== null && busyEntryId !== entry.id}
-                  pending={busyEntryId === entry.id}
-                  onChange={(enabled) => { void toggle(entry, enabled); }}
+                  aria-busy={busyEntryId === entry.id}
+                  disabled={busyEntryId !== null && busyEntryId !== entry.id || busyEntryId === entry.id}
+                  onCheckedChange={(enabled) => { void toggle(entry, enabled); }}
                 />
                 <Button variant="subtle" ariaLabel={labels.moveUp} disabled={!canManage || index === 0 || busyEntryId !== null} onClick={() => { void move(entry, "up"); }}>↑</Button>
                 <Button variant="subtle" ariaLabel={labels.moveDown} disabled={!canManage || index === orderedEntries.length - 1 || busyEntryId !== null} onClick={() => { void move(entry, "down"); }}>↓</Button>
@@ -245,12 +247,12 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
       <InspectorSection title={labels.testHeading}>
         <div className="module-stack">
           <Field label={labels.testMessage} value={testMessage} onChange={setTestMessage} maxLength={500} countLabel={(count, max) => `${String(count)}/${String(max)}`} />
-          <GamePicker
+          <GameMultiSelect
             searchGames={searchGames}
             lookupGames={lookupGames}
             value={testGame === null ? [] : [testGame]}
             onChange={(games) => setTestGame(games.at(-1) ?? null)}
-            messages={labels.testGamePickerMessages}
+            messages={labels.testGameMultiSelectMessages}
           />
           <Button variant="neutral" disabled={testBusy || loading} onClick={() => { void runTest(); }}>{labels.testButton}</Button>
           <div data-testid="faq-test-result-slot" style={{ height: "calc(var(--s10) * 5)", overflowY: "auto" }} aria-live="polite">
@@ -332,20 +334,20 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
             unit="s"
             disabled={pending}
           />
-          <GamePicker
+          <GameMultiSelect
             searchGames={searchGames}
             lookupGames={lookupGames}
             value={draft.games}
             onChange={(games) => patchDraft({ games })}
             disabled={pending}
-            messages={labels.gamePickerMessages}
+            messages={labels.gameMultiSelectMessages}
           />
-          <ChatOutputTargetControl
+          <ChatTargetField
             label={labels.chatTarget}
             value={draft.chatTarget}
+            {...(channelSettings.data === undefined ? {} : { effectiveDefault: channelSettings.data.defaultChatTarget })}
             onChange={(chatTarget) => patchDraft({ chatTarget })}
-            includeWhereAsked
-            allowChannelDefault
+            allowed={["all_chats", "source_only", "channel_default", "where_asked"]}
             disabled={pending}
           />
         </div>}

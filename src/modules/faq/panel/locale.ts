@@ -1,5 +1,5 @@
 import type { DashboardLanguage, LocaleCatalog } from "../../../dashboard/locale";
-import type { GamePickerMessages, TemplateTextFieldMessages } from "../../../dashboard/ui";
+import type { GameMultiSelectMessages, TemplateTextFieldMessages } from "../../../dashboard/ui";
 import type { FaqMatcherValidationReasonCode } from "../domain";
 
 export interface FaqTexts {
@@ -50,8 +50,8 @@ export interface FaqTexts {
   roleLocked: string;
   testEmpty: string;
   templateMessages: TemplateTextFieldMessages;
-  gamePickerMessages: GamePickerMessages;
-  testGamePickerMessages: GamePickerMessages;
+  gameMultiSelectMessages: GameMultiSelectMessages;
+  testGameMultiSelectMessages: GameMultiSelectMessages;
 }
 
 const templateMessages: LocaleCatalog<TemplateTextFieldMessages> = {
@@ -112,15 +112,19 @@ const catalog: LocaleCatalog<FaqTexts> = {
     inputDependentText: "FAQ-Antworten können keine Eingaben aus einem Chatbefehl verwenden.",
     entryLimit: "Ein Kanal kann höchstens 100 FAQ-Einträge haben.", roleLocked: "Nur Broadcaster und Verwalter dürfen FAQ-Einträge bearbeiten.",
     testEmpty: "Gib eine Nachricht ein, um den Treffer zu prüfen.", templateMessages: templateMessages.de,
-    gamePickerMessages: {
+    gameMultiSelectMessages: {
       label: "Spiele", hint: "Ohne Auswahl gilt der Eintrag für jedes Spiel.", search: "Spiele suchen",
       searchHint: "Mindestens 2 Zeichen eingeben", loading: "Spiele werden geladen …", empty: "Keine Spiele gefunden.",
-      error: "Spiele konnten nicht geladen werden.", remove: (name) => `${name} entfernen`,
+      error: "Spiele konnten nicht geladen werden.", suggestions: "Vorschläge", allGames: "Alle Spiele",
+      limitReached: "10er-Limit erreicht; entferne eins zum Austauschen.",
+      selectedCount: (count, maximum) => `${String(count)} von ${String(maximum)}`, remove: (name) => `${name} entfernen`,
     },
-    testGamePickerMessages: {
+    testGameMultiSelectMessages: {
       label: "Spiel simulieren", hint: "Ohne Auswahl wird das aktuelle Spiel des Kanals verwendet.", search: "Spiele suchen",
       searchHint: "Mindestens 2 Zeichen eingeben", loading: "Spiele werden geladen …", empty: "Keine Spiele gefunden.",
-      error: "Spiele konnten nicht geladen werden.", remove: (name) => `${name} entfernen`,
+      error: "Spiele konnten nicht geladen werden.", suggestions: "Vorschläge", allGames: "Alle Spiele",
+      limitReached: "10er-Limit erreicht; entferne eins zum Austauschen.",
+      selectedCount: (count, maximum) => `${String(count)} von ${String(maximum)}`, remove: (name) => `${name} entfernen`,
     },
   },
   en: {
@@ -148,15 +152,19 @@ const catalog: LocaleCatalog<FaqTexts> = {
     inputDependentText: "FAQ answers cannot use input from a chat command.",
     entryLimit: "A channel can have up to 100 FAQ entries.", roleLocked: "Only broadcasters and managers can edit FAQ entries.",
     testEmpty: "Enter a message to check for a match.", templateMessages: templateMessages.en,
-    gamePickerMessages: {
+    gameMultiSelectMessages: {
       label: "Games", hint: "Leave empty to use this entry for every game.", search: "Search games",
       searchHint: "Enter at least 2 characters", loading: "Loading games…", empty: "No games found.",
-      error: "Games could not be loaded.", remove: (name) => `Remove ${name}`,
+      error: "Games could not be loaded.", suggestions: "Suggestions", allGames: "All games",
+      limitReached: "10-game limit reached; remove one to add another.",
+      selectedCount: (count, maximum) => `${String(count)} of ${String(maximum)}`, remove: (name) => `Remove ${name}`,
     },
-    testGamePickerMessages: {
+    testGameMultiSelectMessages: {
       label: "Simulate game", hint: "Leave empty to use the channel's current game.", search: "Search games",
       searchHint: "Enter at least 2 characters", loading: "Loading games…", empty: "No games found.",
-      error: "Games could not be loaded.", remove: (name) => `Remove ${name}`,
+      error: "Games could not be loaded.", suggestions: "Suggestions", allGames: "All games",
+      limitReached: "10-game limit reached; remove one to add another.",
+      selectedCount: (count, maximum) => `${String(count)} of ${String(maximum)}`, remove: (name) => `Remove ${name}`,
     },
   },
 };

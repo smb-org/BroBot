@@ -2,6 +2,7 @@ import { useId, useState, type ClipboardEvent, type KeyboardEvent, type ReactNod
 
 import { Icon } from "./Icon";
 import { describedHelper, useDisabledFieldReason } from "./DisabledFieldReason";
+import { FieldError } from "./FieldError";
 
 export interface ChipsInputMessages {
   countLabel: (count: number, max: number) => ReactNode;
@@ -130,7 +131,7 @@ export function ChipsInput({ id: suppliedId, label, values, onChange, placeholde
       <input data-ui="" id={id} className="chips-input__input" value={draft} placeholder={placeholder} disabled={disabled} readOnly={atLimit} aria-describedby={describedBy} onChange={(event) => { handleDraftChange(event.currentTarget.value); }} onPaste={handlePaste} onKeyDown={handleKeyDown} onBlur={add} />
     </div>
     <span data-ui="" id={descriptionId} className="chips-input__description"><span>{currentHint ?? ""}</span>{max === undefined ? null : <span className="chips-input__count">{messages.countLabel(values.length, max)}</span>}{describedHelper(null, disabledReason, `chips-${id}`)}</span>
-    <span data-ui="" id={errorId} className="ui-field__error" aria-live="polite">{effectiveError === undefined ? <span aria-hidden="true">&nbsp;</span> : <><span aria-hidden="true">× </span>{effectiveError}</>}</span>
+    <FieldError id={errorId} className="ui-field__error" message={effectiveError} />
     <span data-ui="" id={warningId} className="chips-input__warning" aria-hidden={effectiveWarning === undefined || undefined}><span>{effectiveWarning ?? ""}</span></span>
   </div>;
 }

@@ -15,7 +15,8 @@ import { ChatCommands } from "./chat-commands";
 import { modulePermissionsAreMissing } from "./channel-health";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { effectivePanelTemplateVariables, panelTemplateOptions, type PanelChannelVariable } from "./ui/template-variable-options";
-import { ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, StatusLed, Switch, mapServerFieldErrors, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
+import { ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, StatusLed, LockedReason, mapServerFieldErrors, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
+import { Switch as SwitchPrimitive } from "./ui/primitives/switch";
 import { worstCaseTemplateLength } from "../template";
 import type { TemplateVariable } from "../template";
 
@@ -137,12 +138,12 @@ const ModuleSwitch = ({ moduleId, enabled, disabled, busy, onToggle }: {
   busy: boolean;
   onToggle: () => void;
 }): ReactElement => (
-  <Switch
-    ariaLabel={`${moduleDetails(moduleId).name}: ${statusWord(enabled)}`}
+  <SwitchPrimitive
+    aria-label={`${moduleDetails(moduleId).name}: ${statusWord(enabled)}`}
     checked={enabled}
-    onChange={onToggle}
-    disabled={disabled}
-    pending={busy}
+    onCheckedChange={() => { onToggle(); }}
+    disabled={disabled || busy}
+    aria-busy={busy}
   />
 );
 
@@ -661,14 +662,10 @@ const ModuleWorkspaceRow = ({
       status={mandatory
         ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} />
         : <StatusLed state={permissionsMissing ? "warn" : effectiveEnabled ? "ok" : "off"} label={state} />}
-      action={mandatory ? null : <Switch
-        checked={rawEnabled}
-        ariaLabel={details.name}
-        pending={busy}
-        disabled={!manageable}
-        onChange={onToggle}
-        {...(lockedReason === undefined ? {} : { lockedReason })}
-      />}
+      action={mandatory ? null : <div className="module-switch-control">
+        <SwitchPrimitive aria-label={`${details.name}: ${statusWord(rawEnabled)}`} aria-describedby={lockedReason === undefined ? undefined : `module-lock-${moduleId}`} aria-busy={busy} checked={rawEnabled} disabled={!manageable || busy} onCheckedChange={onToggle} />
+        <LockedReason id={`module-lock-${moduleId}`} {...(lockedReason === undefined ? {} : { reason: lockedReason })} />
+      </div>}
     />
   );
 };

@@ -271,6 +271,130 @@ test("votekick loading sections reserve their populated structure", async ({ pag
   expect(await box(content)).toEqual(mobileBefore);
 });
 
+test("FAQ game search opens on its first click and narrow chat controls stay readable", async ({ page }) => {
+  await routeJson(page, "/api/channels/channel-a/modules/faq/entries", { entries: [{
+    id: "faq-416", name: "Example", enabled: true, matcher: { type: "keywords", patterns: ["hello"] }, answerText: "Hello",
+    cooldownSeconds: 30, userCooldownSeconds: 0, games: [], chatTarget: null, order: 0, revision: 1,
+    lastUsedAt: null, createdAt: "2030-01-01T12:00:00.000Z", updatedAt: "2030-01-01T12:00:00.000Z",
+  }] });
+  await routeJson(page, "/api/channels/channel-a/settings", {
+    timeZone: "UTC", revision: 1, location: null, locationRevision: 1,
+    defaultChatTarget: "source_only", defaultChatTargetRevision: 1,
+  });
+  await routeJson(page, "/api/channels/channel-a/template-variables", { variables: [] });
+  await page.route("**/api/channels/channel-a/games*", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ games: [{ id: "g1", name: "A Long Game Name" }] }) });
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await gotoPanel(page, "faq", "en");
+  await page.getByRole("button", { name: /edit/i }).first().click();
+
+  const gameSearch = page.getByRole("searchbox", { name: "Games" });
+  await gameSearch.click();
+  await expect(page.locator(".ui-game-multi-select__popup")).toBeVisible();
+  await expect(gameSearch).toHaveAttribute("aria-expanded", "true");
+
+  const target = page.getByRole("button", { name: "Chat target", exact: true });
+  const value = target.locator(".ui-chat-target-field__value");
+  await expect(target).toBeVisible();
+  await expect(value).toHaveText("Use channel default (Only our chat)");
+  const targetText = await value.evaluate((element) => ({
+    text: element.textContent,
+    whiteSpace: getComputedStyle(element).whiteSpace,
+    scrollWidth: element.scrollWidth,
+    clientWidth: element.clientWidth,
+  }));
+  expect(targetText.text).toBe("Use channel default (Only our chat)");
+  expect(targetText.whiteSpace).toBe("normal");
+  expect(targetText.scrollWidth).toBeLessThanOrEqual(targetText.clientWidth);
+
+  const helper = page.locator(".ui-template-text-field__helper-row .ui-truncated-text").first();
+  const helperStyle = await helper.evaluate((element) => {
+    const style = getComputedStyle(element, "::before");
+    return { whiteSpace: style.whiteSpace, lineClamp: style.webkitLineClamp };
+  });
+  expect(helperStyle.whiteSpace).toBe("normal");
+  expect(helperStyle.lineClamp).toBe("2");
+
+  await target.click();
+  const selectedTarget = page.locator(".ui-chat-target-field__options .ui-chat-target-field__option").nth(1);
+  await selectedTarget.focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(value).toHaveText("Use channel default (Only our chat)");
+});
+
+test("FAQ game limit explains the cap without shifting the fields below it", async ({ page }) => {
+  const games = Array.from({ length: 9 }, (_, index) => ({ id: `game-${String(index + 1)}`, name: `Game ${String(index + 1)}` }));
+  await routeJson(page, "/api/channels/channel-a/modules/faq/entries", { entries: [{
+    id: "faq-limit-416", name: "Full game list", enabled: true, matcher: { type: "keywords", patterns: ["hello"] }, answerText: "Hello",
+    cooldownSeconds: 30, userCooldownSeconds: 0, games, chatTarget: "source_only", order: 0, revision: 1,
+    lastUsedAt: null, createdAt: "2030-01-01T12:00:00.000Z", updatedAt: "2030-01-01T12:00:00.000Z",
+  }] });
+  await routeJson(page, "/api/channels/channel-a/template-variables", { variables: [] });
+  await page.route("**/api/channels/channel-a/games*", async (route) => {
+    const url = new URL(route.request().url());
+    const results = url.searchParams.has("ids") ? [] : [{ id: "game-10", name: "Game Ten" }];
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ games: results }) });
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await gotoPanel(page, "faq", "en");
+  await page.getByRole("button", { name: /edit/i }).first().click();
+
+  const dialog = page.getByRole("dialog").last();
+  const limitMessage = dialog.locator(".ui-game-multi-select__limit-message");
+  const target = dialog.getByRole("button", { name: "Chat target", exact: true });
+  const messageBefore = await limitMessage.boundingBox();
+  const targetOffset = async (): Promise<number> => target.evaluate((element) => {
+    let offset = element.getBoundingClientRect().top + window.scrollY;
+    let ancestor = element.parentElement;
+    while (ancestor !== null) {
+      offset += ancestor.scrollTop;
+      ancestor = ancestor.parentElement;
+    }
+    return offset;
+  });
+  const targetBefore = await targetOffset();
+  await page.getByRole("searchbox", { name: "Games" }).click();
+  await page.getByRole("option", { name: "Game Ten" }).click();
+  await expect(page.getByText("10-game limit reached; remove one to add another.")).toBeVisible();
+
+  const messageAfter = await limitMessage.boundingBox();
+  const targetAfter = await targetOffset();
+  expect(messageBefore?.height).toBeGreaterThan(0);
+  expect(messageAfter?.height).toBe(messageBefore?.height);
+  expect(targetAfter).toBe(targetBefore);
+});
+
+test("text command switch and role inclusion fit their narrow and desktop layouts", async ({ page }) => {
+  await routeJson(page, "/api/channels/channel-a/modules/text_commands/commands", {
+    commands: [], variables: [{ name: "score", value: 1, description: "Points" }],
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await gotoPanel(page, "text_commands", "en");
+  await page.getByRole("button", { name: "Add command" }).click();
+  await page.getByRole("textbox", { name: "Response" }).waitFor();
+  const targetSwitch = page.getByRole("switch", { name: "Change channel variable" });
+  await targetSwitch.scrollIntoViewIfNeeded();
+  const switchFits = await targetSwitch.evaluate((element) => {
+    const heading = element.closest(".ui-switch-section__heading");
+    if (heading === null) throw new Error("Switch section heading is missing.");
+    return element.getBoundingClientRect().right <= heading.getBoundingClientRect().right - 3;
+  });
+  expect(switchFits).toBe(true);
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.getByRole("tab", { name: "Advanced" }).click();
+  const inclusion = page.locator(".ui-role-threshold .ui-select__description .ui-truncated-text").first();
+  await expect(inclusion).toBeVisible();
+  const inclusionStyle = await inclusion.evaluate((element) => {
+    const style = getComputedStyle(element, "::before");
+    return { whiteSpace: style.whiteSpace, lineClamp: style.webkitLineClamp };
+  });
+  expect(inclusionStyle.whiteSpace).toBe("normal");
+  expect(inclusionStyle.lineClamp).toBe("2");
+  await expect(page.locator(".ui-role-threshold > .ui-locked-reason--reserved")).toHaveCount(0);
+});
+
 test("timer and FAQ dialogs submit from Enter", async ({ page }) => {
   const variables = { variables: [{ name: "text.greeting", moduleId: "text_library", isTextBlock: true }] };
   await routeJson(page, "/api/csrf", { token: "csrf" });
@@ -1429,7 +1553,7 @@ test("the immediate-action card merges refreshed template configuration and memb
   await expect(rows.nth(2)).toContainText("!vote d");
 });
 
-test("text command slash help and variable action keep editor boxes stable", async ({ page }) => {
+test("text command slash help stays stable and optional variable fields mount only when enabled", async ({ page }) => {
   await routeJson(page, "/api/channels/channel-a/modules/text_commands/commands", {
     commands: [], variables: [{ name: "score", value: 1, description: "Points" }],
   });
@@ -1449,15 +1573,15 @@ test("text command slash help and variable action keep editor boxes stable", asy
   expect(await box(editor)).toEqual(editorBeforeSlash);
 
   const actionSlot = page.getByTestId("command-variable-action-slot");
-  const actionBefore = await box(actionSlot);
-  const editorBeforeAction = await box(editor);
+  const actionSection = page.locator(".ui-switch-section").filter({ has: page.getByRole("switch", { name: "Change channel variable" }) });
+  await expect(actionSection).toContainText("Applied atomically with the command.");
+  await expect(actionSlot).toHaveCount(0);
   await page.getByRole("switch", { name: "Change channel variable" }).click();
   await expect(actionSlot.locator("#command-variable-name")).toBeVisible();
-  expect(await box(actionSlot)).toEqual(actionBefore);
-  expect(await box(editor)).toEqual(editorBeforeAction);
+  await expect(actionSection.locator(".ui-switch-section__content")).toBeVisible();
 });
 
-test("text-library game filter keeps the list position when games are selected and removed at desktop and 390px", async ({ page }) => {
+test("text-library filter keeps desktop geometry and tracks wrapped mobile chip growth", async ({ page }) => {
   await routeJson(page, "/api/channels/channel-a/modules/text_library/library", {
     blocks: [], categories: [], settings: { revision: 1, graphRevision: 1, updatedAt: "2026-09-20T08:00:00.000Z" }, usages: {},
   });
@@ -1477,35 +1601,62 @@ test("text-library game filter keeps the list position when games are selected a
     const toolbar = page.locator(".text-library__list-toolbar");
     const filters = toolbar.locator(".list-toolbar__filters");
     const create = toolbar.getByRole("button", { name: "Add text block" });
-    const picker = filters.locator(".ui-game-picker--compact");
-    const slot = picker.locator(".ui-game-picker__selected");
+    const picker = filters.locator(".ui-game-multi-select--compact");
+    const slot = picker.locator(".ui-game-multi-select__selected");
     const pickerBox = await picker.boundingBox();
     const filtersBox = await filters.boundingBox();
     const createBox = await create.boundingBox();
     expect(pickerBox?.height).toBeLessThanOrEqual(44);
-    expect(pickerBox?.y ?? 0).toBeGreaterThanOrEqual(filtersBox?.y ?? 0);
-    expect((pickerBox?.y ?? 0) + (pickerBox?.height ?? 0)).toBeLessThanOrEqual((filtersBox?.y ?? 0) + (filtersBox?.height ?? 0) + 0.5);
-    expect(createBox?.x ?? 0).toBeGreaterThanOrEqual((filtersBox?.x ?? 0) + (filtersBox?.width ?? 0) - 0.5);
+    if (width === 390) {
+      // Narrow toolbars give the game filter its own full-width row below category and create.
+      const toolbarBox = await toolbar.boundingBox();
+      expect(pickerBox?.y ?? 0).toBeGreaterThanOrEqual((createBox?.y ?? 0) + (createBox?.height ?? 0) - 0.5);
+      expect(pickerBox?.width ?? 0).toBeGreaterThanOrEqual((toolbarBox?.width ?? 0) - 1);
+    }
+    else {
+      expect(pickerBox?.y ?? 0).toBeGreaterThanOrEqual(filtersBox?.y ?? 0);
+      expect((pickerBox?.y ?? 0) + (pickerBox?.height ?? 0)).toBeLessThanOrEqual((filtersBox?.y ?? 0) + (filtersBox?.height ?? 0) + 0.5);
+      expect(createBox?.x ?? 0).toBeGreaterThanOrEqual((filtersBox?.x ?? 0) + (filtersBox?.width ?? 0) - 0.5);
+    }
     if (width === 700) {
       const filterOverflow = await filters.evaluate((element) => element.scrollWidth > element.clientWidth);
       expect(filterOverflow).toBe(true);
     }
     const before = { list: await box(list), slot: await box(slot) };
-    const search = page.getByPlaceholder("Search games");
+    let previous = before;
+    const search = picker.getByRole("searchbox");
     for (const name of ["Just Chatting", "Software and Game Development", "Retro Adventure Collection Deluxe"]) {
       await search.fill("ga");
       await page.getByRole("option", { name }).click();
-      expect(await box(list)).toEqual(before.list);
-      expect(await box(slot)).toEqual(before.slot);
+      const current = { list: await box(list), slot: await box(slot) };
+      if (width === 390) {
+        const chipRowGrowth = current.slot.height - previous.slot.height;
+        const listGrowth = current.list.y - previous.list.y;
+        expect(chipRowGrowth).toBeGreaterThanOrEqual(0);
+        expect(listGrowth).toBeGreaterThanOrEqual(chipRowGrowth - 0.5);
+        expect(listGrowth).toBeLessThanOrEqual(chipRowGrowth + 4.5);
+      }
+      else {
+        expect(current.list).toEqual(before.list);
+        expect(current.slot).toEqual(before.slot);
+      }
+      previous = current;
     }
     if (width === 390) {
       const activeFilters = toolbar.locator(".list-toolbar__active-filters");
       await expect(activeFilters).toContainText("Just Chatting");
       await expect(activeFilters).toContainText("Software and Game Development");
       await expect(activeFilters).toContainText("Retro Adventure Collection Deluxe");
+      await search.press("Escape");
       await page.getByRole("button", { name: "Reset" }).click();
     }
-    else await page.getByRole("button", { name: "Clear game filter (3 selected)" }).click();
+    else {
+      for (let selected = 3; selected > 0; selected -= 1) {
+        await picker.locator(".ui-game-multi-select__chip button").first().click();
+        expect(await box(list)).toEqual(before.list);
+        expect(await box(slot)).toEqual(before.slot);
+      }
+    }
     expect(await box(list)).toEqual(before.list);
     expect(await box(slot)).toEqual(before.slot);
   }
@@ -1556,7 +1707,7 @@ test("custom duration fits with its controls and unit at desktop and mobile widt
     await page.locator(".chat-voting-template-list .list-row__link").first().click();
     const inspector = page.locator(".chat-voting-template-inspector");
     await expect(inspector).toBeVisible();
-    const durationSection = inspector.locator(".inspector-content-section").filter({ hasText: "Duration" }).last();
+    const durationSection = inspector.locator(".ui-section--inspector").filter({ hasText: "Duration" }).last();
     const segments = durationSection.locator(".segment-choice");
     const durationSlot = durationSection.locator(".chat-voting-editor__duration-slot");
     const numberField = durationSlot.locator(".unit-input__control");
@@ -1564,7 +1715,7 @@ test("custom duration fits with its controls and unit at desktop and mobile widt
     await expect(seconds).toHaveValue("90");
     const layout = await page.evaluate(() => {
       const root = document.querySelector(".chat-voting-template-inspector");
-      const section = [...document.querySelectorAll(".inspector-content-section")].find((element) => element.textContent.includes("Duration"));
+      const section = [...document.querySelectorAll(".ui-section--inspector")].find((element) => element.textContent.includes("Duration"));
       const controls = section?.querySelector(".segment-choice");
       const slot = section?.querySelector(".chat-voting-editor__duration-slot");
       const stepper = slot?.querySelector(".unit-input__control");

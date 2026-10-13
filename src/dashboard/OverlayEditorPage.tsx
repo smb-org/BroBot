@@ -23,6 +23,7 @@ import {
   type OverlayStyleDocument,
 } from "./overlay-style-model";
 import { DisabledFieldReasonContext } from "./ui/DisabledFieldReason";
+import { Switch as SwitchPrimitive } from "./ui/primitives/switch";
 import {
   createOverlay,
   fetchModules,
@@ -38,7 +39,7 @@ import { moduleName } from "./module-labels";
 import { OverlayElementPalette, type OverlayElementPaletteOption } from "./OverlayElementPalette";
 import { useChannelVariablesQuery, useOverlayQuery } from "./data/lists";
 import { queryKeys } from "./data/keys";
-import { Button, CodeField, ColorField, ConfirmDialog, Field, Icon, LoadState, UnitInput, PageHeader, SaveBar, Select, Switch, notify, type IconName, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
+import { Button, CodeField, ColorField, ConfirmDialog, Field, Icon, LoadState, UnitInput, PageHeader, SaveBar, Select, notify, type IconName, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
 import "./overlay-editor.css";
 
 interface OverlayEditorPageProperties {
@@ -1222,8 +1223,11 @@ function OverlayEditorWorkspace({
             <Button variant="neutral" disabled={!canEdit || orderedElements[0]?.id === selectedElement.id} onClick={() => { moveLayer(1); }}>{labels.editorMoveForward}</Button>
             <Button variant="neutral" disabled={!canEdit || orderedElements.at(-1)?.id === selectedElement.id} onClick={() => { moveLayer(-1); }}>{labels.editorMoveBackward}</Button>
           </div>
-          <Switch layout="inline" label={labels.editorInComposition} checked={selectedElement.inComposition} disabled={!canEdit}
-            onChange={(inComposition) => { updateElement(selectedElement.id, { inComposition }); }} />
+          <div className="overlay-editor__in-composition">
+            <span>{labels.editorInComposition}</span>
+            <SwitchPrimitive aria-label={labels.editorInComposition} checked={selectedElement.inComposition} disabled={!canEdit}
+              onCheckedChange={(inComposition) => { updateElement(selectedElement.id, { inComposition }); }} />
+          </div>
         </div>}
         </div>
         <div role="tabpanel" id="overlay-editor-panel-style" aria-labelledby="overlay-editor-tab-style" hidden={editorTab !== "style"}>

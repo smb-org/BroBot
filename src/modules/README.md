@@ -309,8 +309,8 @@ im Quellchat erscheinen.
 `"source_only"`; Antworten (`replyToMessageId`) dürfen zusätzlich
 `"where_asked"`. Für neue Einträge ohne eigenes Ziel verwendet der Host das
 kanalweite Standard-Chat-Ziel; vorhandene Ziele bleiben erhalten. Ohne
-Kanalvorgabe gilt `source_only`. In Panels bietet
-`ChatOutputTargetControl` das Zielmenü (zweisprachig, mit Infoknopf); in
+Kanalvorgabe gilt `source_only`. In Panels bietet `ChatTargetField` das
+Zielmenü (zweisprachig, mit Infoknopf); in
 `SettingsEditorSpec` gibt es dafür ein eigenes Bauteil.
 
 ```ts

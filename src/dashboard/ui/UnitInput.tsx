@@ -2,6 +2,7 @@ import { useId, type KeyboardEvent } from "react";
 
 import { useDisabledFieldReason } from "./DisabledFieldReason";
 import { Input } from "./primitives/input";
+import { FieldError } from "./FieldError";
 
 export interface UnitInputProps {
   id?: string;
@@ -60,6 +61,6 @@ export function UnitInput({ id: suppliedId, label, ariaLabel, unit, value, onCha
       {suggestions.map((suggestion) => <button key={suggestion} type="button" disabled={disabled} className="unit-input__suggestion" aria-pressed={value === suggestion} onClick={() => { onChange(suggestion); }}>{suggestion}{unit === undefined ? "" : ` ${unit}`}</button>)}
     </div>}
     <span data-ui="" id={descriptionId} className="unit-input__description">{hint}</span>
-    <span data-ui="" id={errorId} className="unit-input__error" aria-live="polite">{error === undefined ? <span aria-hidden="true">&nbsp;</span> : <><span aria-hidden="true">× </span>{error}</>}</span>
+    <FieldError id={errorId} className="unit-input__error" message={error} />
   </div>;
 }

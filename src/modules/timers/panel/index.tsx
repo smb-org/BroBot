@@ -1,9 +1,10 @@
 import { useMemo, useState, type ReactElement } from "react";
 
-import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { runModuleQueryWrite, useChannelSettings, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { templateTextLength } from "../../../contracts/template-text-length";
 import { formatTimestamp } from "../../../dashboard/locale";
-import { Button, ChatOutputTargetControl, ChatPreview, ConfirmDialog, Dialog, Field, FormDialog, InspectorSection, LoadState, LoadStateLines, Select, Switch, TemplateTextField, UnitInput, notify } from "../../../dashboard/ui";
+import { Button, ChatTargetField, ChatPreview, ConfirmDialog, Dialog, Field, FormDialog, InspectorSection, LoadState, LoadStateLines, Select, SwitchRow, SwitchSection, TemplateTextField, UnitInput, notify } from "../../../dashboard/ui";
+import { Switch as SwitchPrimitive } from "../../../dashboard/ui/primitives/switch";
 import type { ModulePanelProperties } from "../../contract";
 import type { Timer, TimerMutationInput, TimerTrigger } from "../contracts";
 import { timersTexts } from "./locale";
@@ -144,6 +145,7 @@ export default function TimersPanel(properties: ModulePanelProperties): ReactEle
 
 function TimersPanelContent({ channelId, language, canManage = true, canOperate = true }: ModulePanelProperties): ReactElement {
   const labels = timersTexts(language);
+  const channelSettings = useChannelSettings(channelId);
   const queryClient = useDashboardQueryClient();
   const query = useModuleQuery(channelId, "timers", "panel", (signal) => loadTimersPanel(channelId, signal));
   const data = query.data;
@@ -268,12 +270,12 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
                 <span>{labels.nextRun} · {timer.nextRunAt === null ? labels.noNextRun : formatTimestamp(timer.nextRunAt)}</span>
               </div>
               <div className="timer-row__actions">
-                <Switch
-                  ariaLabel={`${timer.name}: ${timer.enabled ? labels.enabled : labels.disabled}`}
+                <SwitchPrimitive
+                  aria-label={`${timer.name}: ${timer.enabled ? labels.enabled : labels.disabled}`}
                   checked={timer.enabled}
-                  disabled={!canOperate}
-                  pending={busyTimerId === timer.id}
-                  onChange={(enabled) => { void toggle(timer, enabled); }}
+                  aria-busy={busyTimerId === timer.id}
+                  disabled={!canOperate || busyTimerId === timer.id}
+                  onCheckedChange={(enabled) => { void toggle(timer, enabled); }}
                 />
                 <Button variant="subtle" onClick={() => { void preview(timer.messageText); }} disabled={timer.messageText.trim().length === 0}>{labels.preview}</Button>
                 <Button variant="neutral" disabled={!canManage} onClick={() => { openEdit(timer); }}>{labels.edit}</Button>
@@ -311,12 +313,13 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
             disabled={pending}
             required
           />
-          <ChatOutputTargetControl
+          <ChatTargetField
             label={labels.chatTarget}
             value={draft.chatTarget}
+            {...(channelSettings.data === undefined ? {} : { effectiveDefault: channelSettings.data.defaultChatTarget })}
+            allowed={["all_chats", "source_only", "channel_default"]}
             disabled={pending}
             onChange={(chatTarget) => { if (chatTarget !== "where_asked") patchDraft({ chatTarget }); }}
-            allowChannelDefault
           />
           <Select
             label={labels.trigger}
@@ -334,31 +337,33 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
             unit="min"
             required
           /> : null}
-          {draft.type === "interval" ? <>
-            <Switch label={labels.minimumMessages} checked={draft.useMinimumMessages} onChange={(useMinimumMessages) => patchDraft({ useMinimumMessages })} />
-            {draft.useMinimumMessages ? <UnitInput
+          {draft.type === "interval" ? <SwitchSection title={labels.minimumMessages} hint={labels.minimumMessagesHint} checked={draft.useMinimumMessages} onChange={(useMinimumMessages) => patchDraft({ useMinimumMessages })}>
+            <UnitInput
               label={labels.messageCount}
               value={draft.minimumMessages}
               onChange={(minimumMessages) => patchDraft({ minimumMessages })}
               min={1}
               max={100_000}
               required
-            /> : null}
-          </> : null}
+            />
+          </SwitchSection> : null}
           {draft.type === "time_of_day" ? <>
             <Field label={labels.time} value={draft.time} onChange={(time) => patchDraft({ time })} placeholder="HH:MM" required />
             <div className="timer-weekdays" role="group" aria-label={labels.weekdays}>
               {labels.weekdaysNames.map((day, index) => {
                 const allDays = draft.weekdays.length === 0;
                 const checked = allDays || draft.weekdays.includes(index);
-                return <Switch key={day} label={day} checked={checked} onChange={() => {
+                return <div className="timer-weekday" key={day}>
+                  <SwitchPrimitive aria-label={day} checked={checked} onCheckedChange={() => {
                   const days = allDays ? labels.weekdaysNames.map((_, dayIndex) => dayIndex).filter((dayIndex) => dayIndex !== index)
                     : checked ? draft.weekdays.filter((selected) => selected !== index) : [...draft.weekdays, index].sort((left, right) => left - right);
                   patchDraft({ weekdays: days.length === 7 ? [] : days });
-                }} />;
+                  }} />
+                  <span>{day}</span>
+                </div>;
               })}
             </div>
-            <Switch label={labels.alsoOffline} checked={draft.alsoOffline} onChange={(alsoOffline) => patchDraft({ alsoOffline })} />
+            <SwitchRow label={labels.alsoOffline} checked={draft.alsoOffline} onChange={(alsoOffline) => patchDraft({ alsoOffline })} />
           </> : null}
           {draft.type === "before_event" ? <>
             <Select label={labels.eventSource} value={draft.sourceId || null} onChange={(sourceId) => patchDraft({ sourceId: sourceId ?? "" })} options={sourceOptions} required />

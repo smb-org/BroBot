@@ -5,13 +5,15 @@ import type { PanelTemplateWarning } from "../../panel-contract";
 import type { IconName } from "./Icon";
 import type { ChatOutputTarget } from "../../contracts/values";
 import { ChoiceCards } from "./ChoiceCards";
-import { ChatOutputTargetControl } from "./ChatOutputTargetControl";
+import { ChatTargetField } from "./ChatTargetField";
 import { Field } from "./Field";
+import { FieldError } from "./FieldError";
 import { InspectorFieldRow, InspectorSection } from "./InspectorParts";
 import { UnitInput } from "./UnitInput";
 import { Select } from "./Select";
 import { SegmentChoice } from "./SegmentChoice";
-import { Switch } from "./Switch";
+import { SwitchRow } from "./SwitchRow";
+import { SwitchSection } from "./SwitchSection";
 import { TemplateText } from "./TemplateText";
 import { textFieldLength } from "./text-length";
 import { TemplateTextField, type TemplateTextFieldVariable, type TemplateTextFieldMessages } from "./TemplateTextField";
@@ -22,7 +24,7 @@ export type SettingsFieldSpec<Settings> =
   | { kind: "timeoutDurationRange"; key: keyof Settings & string; min: number; max: number }
   | { kind: "text"; key: keyof Settings & string; prefix?: string; maxLength?: number; lengthUnit?: "utf16" | "codePoints"; optional?: boolean; validate?: (value: string) => boolean }
   | { kind: "template"; key: keyof Settings & string; minRows?: number; optional?: boolean; preview: (template: string, samples: Readonly<Record<string, string>>) => string }
-  | { kind: "chatTarget"; key: keyof Settings & string; includeWhereAsked?: boolean }
+  | { kind: "chatTarget"; key: keyof Settings & string; allowed?: readonly (ChatOutputTarget | "channel_default")[] }
   | { kind: "select"; key: keyof Settings & string; options: readonly { value: string }[] }
   | { kind: "segment"; key: keyof Settings & string; options: readonly { value: string | number }[] }
   | { kind: "choice"; key: keyof Settings & string; options: readonly { value: string; icon?: IconName }[] }
@@ -130,13 +132,14 @@ export function SettingsEditor<Settings extends object>({
     const error = fieldErrors[field.key];
     if (field.kind === "chatTarget") {
       return (
-        <ChatOutputTargetControl
+        <ChatTargetField
           key={field.key}
           label={copy.label}
-          value={String(fieldValue ?? "source_only") as ChatOutputTarget}
+          value={fieldValue === null || fieldValue === undefined ? null : String(fieldValue) as ChatOutputTarget}
           onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
-          {...(field.includeWhereAsked === undefined ? {} : { includeWhereAsked: field.includeWhereAsked })}
+          allowed={field.allowed ?? ["all_chats", "source_only"]}
           disabled={disabled}
+          reserveError
           {...(error === undefined ? {} : { error })}
         />
       );
@@ -290,24 +293,33 @@ export function SettingsEditor<Settings extends object>({
       );
     }
     const children = field.children?.map(renderField) ?? [];
-    const lockedReason = copy.disabledReason ?? field.children?.map((child) => texts.fields[child.key]?.disabledReason).find((reason) => reason !== undefined);
-    return (
-      <InspectorFieldRow key={field.key} label={copy.label} help={copy.description ?? copy.hint}>
-        <Switch
-          id={id}
-          layout="card"
-          ariaLabel={copy.label}
-          checked={fieldValue === true}
-          onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
-          disabled={disabled}
-          {...(lockedReason === undefined ? {} : { lockedReason })}
-          reserveError
-          {...(error === undefined ? {} : { error })}
-        >
-          {field.children === undefined ? undefined : children as ReactElement[]}
-        </Switch>
-      </InspectorFieldRow>
-    );
+    const lockedReason = field.children === undefined ? copy.disabledReason : undefined;
+    const checked = fieldValue === true;
+    const onToggle = (next: boolean): void => { onChange(field.key, next as Settings[typeof field.key]); };
+    const fieldError = <FieldError className="ui-field__error" message={error} />;
+    if (field.children === undefined) return <div key={field.key}>
+      <SwitchRow
+        label={copy.label}
+        description={copy.description ?? copy.hint}
+        checked={checked}
+        onChange={onToggle}
+        disabled={disabled}
+        {...(lockedReason === undefined ? {} : { lockedReason })}
+      />
+      {fieldError}
+    </div>;
+    return <div key={field.key}>
+      <SwitchSection
+        id={id}
+        title={copy.label}
+        hint={copy.description ?? copy.hint}
+        checked={checked}
+        onChange={onToggle}
+        disabled={disabled}
+        {...(lockedReason === undefined ? {} : { lockedReason })}
+      >{children as ReactElement[]}</SwitchSection>
+      {fieldError}
+    </div>;
   };
 
   if (readOnly) {

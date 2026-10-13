@@ -50,7 +50,7 @@ import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, dashboardRouteRequiresBot, replaceDashboardRoute, useDashboardRoute, type DashboardRoute } from "./router";
 import { dashboardNavEntries, enabledModuleNavigationGroups, moduleCategoryHeading, navPageGroupHeading, visibleModuleNavigationIds } from "./nav-pages";
 import { truncateTo200Chars } from "../text";
-import { BlockingState, Button, ChannelLocationMenu, ChatOutputTargetControl, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, LoadStateLines, notify, Select as UiSelect, Shell, Sidebar, StatusLed, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type StatusLedState } from "./ui";
+import { BlockingState, Button, ChannelLocationMenu, ChatTargetField, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, LoadStateLines, notify, Select as UiSelect, Shell, Sidebar, StatusLed, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type StatusLedState } from "./ui";
 import { readPalette, writePalette } from "./ui/palette";
 import { EventsPage } from "./events/EventsPage";
 import { emptyEventFilter, eventFilterIsActive } from "./events/model";
@@ -1171,12 +1171,11 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
       <section className="content-section channel-overview-settings" aria-label={settingsTexts.defaultChatTargetSection}>
         <div className="section-heading"><h2>{settingsTexts.defaultChatTargetSection}</h2></div>
         <div className="form-actions channel-overview-settings__row">
-          <ChatOutputTargetControl
-            stacked
+          <ChatTargetField
             label={settingsTexts.defaultChatTarget}
             value={defaultChatTargetDraft}
+            allowed={["all_chats", "source_only", "where_asked"]}
             onChange={changeDefaultChatTargetDraft}
-            includeWhereAsked
             disabled={settingsBusy || channelSettings === null || !canManage(overview.role)}
           />
           {canManage(overview.role)

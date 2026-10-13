@@ -286,7 +286,7 @@ describe("Module panel loader", () => {
     expect(within(row).getAllByText("Läuft", { exact: true })).toHaveLength(1);
     expect(within(row).queryByRole("checkbox")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("switch", { name: "aktiv" }));
+    fireEvent.click(screen.getByRole("switch", { name: /^aktiv:/i }));
     await waitFor(() => { expect(onChanged).toHaveBeenCalledTimes(1); });
     expect(onNavigate).toHaveBeenCalledTimes(2);
     expect(fetcher.mock.calls.some(([, requestInit]) => requestInit?.method === "PATCH")).toBe(true);
@@ -304,7 +304,7 @@ describe("Module panel loader", () => {
   });
 
   it("shows the mandatory module detail as always active without a switch", () => {
-    renderWithMantine(<ModulePage
+    render(<ModulePage
       channelId="kanal-a"
       moduleId="channel_events"
       ownRole="manager"
@@ -514,8 +514,8 @@ describe("Module panel loader", () => {
     const switchCard = screen.getByRole("switch", { name: "Zusatzaktion" });
     fireEvent.click(switchCard);
 
-    expect(threshold).toBeDisabled();
-    expect(screen.getByText(/Zahl eingeben\./u)).toBeVisible();
+    expect(screen.queryByRole("spinbutton", { name: "Schwelle" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Fehlerhafte Felder anzeigen" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Fehlerhafte Felder anzeigen" }));
     const invalidFieldLink = within(await screen.findByRole("dialog", { name: "Fehlerhafte Felder" })).getByRole("button", { name: "Schwelle: Zahl eingeben." });
     fireEvent.click(invalidFieldLink);
@@ -585,7 +585,7 @@ describe("Module panel loader", () => {
   });
 
   it("shows the operator the disabled detail switch with a reason", () => {
-    render(<ModulePage
+    renderWithMantine(<ModulePage
       channelId="kanal-a"
       moduleId="aktiv"
       ownRole="operator"
@@ -596,7 +596,7 @@ describe("Module panel loader", () => {
     />);
 
     const toggle = screen.getByRole("switch", { name: /aktiv/i });
-    expect(toggle).toHaveAttribute("aria-disabled", "true");
+    expect(toggle).toBeDisabled();
     const reason = screen.getByText("Nur Broadcaster und Verwalter dürfen Module ändern.");
     expect(reason).toBeInTheDocument();
     expect(reason.querySelector("svg[aria-hidden='true']")).not.toBeNull();
@@ -604,7 +604,7 @@ describe("Module panel loader", () => {
   });
 
   it("shows the module icon in the detail header; the breadcrumb lives in the top bar", () => {
-    render(<ModulePage
+    renderWithMantine(<ModulePage
       channelId="kanal-a"
       moduleId="aktiv"
       ownRole="manager"
@@ -674,7 +674,6 @@ describe("Module panel loader", () => {
     const message = screen.getByRole("textbox", { name: "Nachricht" });
     const mode = screen.getByRole("group", { name: "Modus" });
     const extraAction = screen.getByRole("switch", { name: /Zusatzaktion/ });
-    const threshold = screen.getByRole("spinbutton", { name: "Schwelle" });
     fireEvent.change(screen.getByRole("spinbutton", { name: "Menge" }), { target: { value: "3" } });
     fireEvent.change(screen.getByRole("spinbutton", { name: "Menge" }), { target: { value: "3" } });
     expect(document.querySelector(".ui-field__prefix")).toHaveTextContent("@");
@@ -684,20 +683,21 @@ describe("Module panel loader", () => {
       ["Konto", "Twitch-Name."],
       ["Nachricht", "Vorlage für die Nachricht."],
       ["Modus", "Runs automatically."],
-      ["Zusatzaktion", "Zusätzliche Aktion ausführen."],
       ["Schwelle", "Mindestmenge."],
     ];
     for (const [label, help] of fieldHelp) expect(screen.getByRole("button", { name: `${label}: ${help}` })).toHaveAttribute("title", help);
+    expect(screen.queryByText("Zusätzliche Aktion ausführen.")).not.toBeInTheDocument();
 
     fireEvent.change(handle, { target: { value: "@Ada" } });
     expect(handle).toHaveValue("Ada");
     fireEvent.change(message, { target: { value: "Willkommen {viewer}!" } });
     fireEvent.click(within(mode).getByRole("button", { name: /Von Hand/ }));
     fireEvent.click(extraAction);
-    expect(threshold).toBeDisabled();
-    expect(screen.getAllByText("Zusatzaktion ist ausgeschaltet.")).toHaveLength(1);
+    expect(screen.queryByRole("spinbutton", { name: "Schwelle" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Zusatzaktion ist ausgeschaltet.")).not.toBeInTheDocument();
+    expect(screen.getByText("Zusätzliche Aktion ausführen.")).toBeInTheDocument();
     fireEvent.click(extraAction);
-    expect(threshold).toBeEnabled();
+    expect(screen.getByRole("spinbutton", { name: "Schwelle" })).toBeEnabled();
 
     fireEvent.click(screen.getByRole("button", { name: "Fixture speichern" }));
     await waitFor(() => expect(patchBody).toEqual({
@@ -927,7 +927,7 @@ describe("Module panel loader", () => {
     fireEvent.change(await screen.findByRole("spinbutton", { name: "Menge" }), { target: { value: "5" } });
     fireEvent.click(screen.getByRole("button", { name: "Fixture speichern" }));
     const switchCard = await screen.findByRole("switch", { name: /Zusatzaktion/ });
-    expect(switchCard).toHaveAttribute("aria-disabled", "true");
+    expect(switchCard).toBeDisabled();
     resolvePatch?.(Response.json({ settings: editorFixtureSettings, revision: 2, warnings: [] }));
   });
 

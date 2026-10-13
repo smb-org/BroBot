@@ -9,7 +9,7 @@ import { DisabledFieldReasonContext } from "../../src/dashboard/ui/DisabledField
 import { SegmentChoice } from "../../src/dashboard/ui/SegmentChoice";
 import { Select } from "../../src/dashboard/ui/Select";
 import { StatusLed } from "../../src/dashboard/ui/StatusLed";
-import { Switch } from "../../src/dashboard/ui/Switch";
+import { SwitchSection } from "../../src/dashboard/ui/SwitchSection";
 import { UnitInput } from "../../src/dashboard/ui/UnitInput";
 import { UiProvider } from "../../src/dashboard/ui/Provider";
 
@@ -114,11 +114,11 @@ describe("basic UI controls", () => {
     expect(input).not.toHaveAttribute("readonly");
   });
 
-  it("toggles a card switch only once when its label is clicked", () => {
+  it("toggles a SwitchSection from its title control", () => {
     const changes: boolean[] = [];
-    renderUi(<Switch layout="card" label="Card switch" checked={false} onChange={(checked) => { changes.push(checked); }} />);
+    renderUi(<SwitchSection title="Card switch" hint="Optional settings are off." checked={false} onChange={(checked) => { changes.push(checked); }} />);
 
-    fireEvent.click(screen.getByText("Card switch"));
+    fireEvent.click(screen.getByRole("switch", { name: "Card switch" }));
 
     expect(changes).toEqual([true]);
   });

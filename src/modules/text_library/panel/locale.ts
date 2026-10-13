@@ -1,6 +1,6 @@
 import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "../../../dashboard/locale";
 import type { TextBlockUsage } from "../contracts";
-import type { GamePickerMessages, TemplateTextFieldPickerMessages } from "../../../dashboard/ui";
+import type { GameMultiSelectMessages, TemplateTextFieldPickerMessages } from "../../../dashboard/ui";
 
 export interface TextLibraryTexts {
   library: string;
@@ -108,7 +108,7 @@ export interface TextLibraryTexts {
   inputContextWarning: string;
   filterAny: string;
   variantsCount: (count: number) => string;
-  gamePicker: GamePickerMessages;
+  gameMultiSelect: GameMultiSelectMessages;
   categoryLabels: Record<"social" | "info" | "faq" | "game" | "fun", string>;
   weekdaysLabels: readonly string[];
   errors: Record<string, string>;
@@ -229,7 +229,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     inputContextWarning: "Diese Vorlage enthält Eingabevariablen aus einem Chatbefehl. Außerhalb von Befehlen erscheint deren Nutzungs- oder Fehlertext.",
     filterAny: "Alle Spiele",
     variantsCount: (count) => `${String(count)} ${count === 1 ? "Variante" : "Varianten"}`,
-    gamePicker: {
+    gameMultiSelect: {
       label: "Twitch-Spiele",
       hint: "Spiele über Twitch-Kategorien suchen und auswählen.",
       search: "Spiel suchen",
@@ -237,9 +237,11 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
       loading: "Spiele werden gesucht …",
       empty: "Keine Spiele gefunden.",
       error: "Die Twitch-Spiele konnten nicht geladen werden.",
+      suggestions: "Vorschläge",
+      allGames: "Alle Spiele",
+      limitReached: "10er-Limit erreicht; entferne eins zum Austauschen.",
+      selectedCount: (count, maximum) => `${String(count)} von ${String(maximum)}`,
       remove: (name) => `${name} entfernen`,
-      selectedCount: (count) => `${String(count)} ausgewählt`,
-      clearSelection: "Spielefilter leeren",
     },
     categoryLabels: { social: "Soziales", info: "Info", faq: "FAQ", game: "Spiel", fun: "Spaß" },
     weekdaysLabels: ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"],
@@ -373,7 +375,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     inputContextWarning: "This template uses chat command input. Outside commands, the variable's usage or error text appears.",
     filterAny: "All games",
     variantsCount: (count) => `${String(count)} ${count === 1 ? "variant" : "variants"}`,
-    gamePicker: {
+    gameMultiSelect: {
       label: "Twitch games",
       hint: "Search and select games from Twitch categories.",
       search: "Search games",
@@ -381,9 +383,11 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
       loading: "Searching games …",
       empty: "No games found.",
       error: "Twitch games could not be loaded.",
+      suggestions: "Suggestions",
+      allGames: "All games",
+      limitReached: "10-game limit reached; remove one to add another.",
+      selectedCount: (count, maximum) => `${String(count)} of ${String(maximum)}`,
       remove: (name) => `Remove ${name}`,
-      selectedCount: (count) => `${String(count)} selected`,
-      clearSelection: "Clear game filter",
     },
     categoryLabels: { social: "Social", info: "Info", faq: "FAQ", game: "Game", fun: "Fun" },
     weekdaysLabels: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],

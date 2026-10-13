@@ -3,7 +3,7 @@ import { useEffect, useState, type ReactElement } from "react";
 import type { ModulePanelProperties } from "../../contract";
 import { WEATHER_ERROR_TEXT_MAX_LENGTH, type WeatherSettings } from "../contracts";
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
-import { Button, Field, InspectorFieldRow, InspectorSection, LoadState, LoadStateLines, Select, Switch, notify } from "../../../dashboard/ui";
+import { Button, Field, InspectorFieldRow, InspectorSection, LoadState, LoadStateLines, Select, SwitchRow, notify } from "../../../dashboard/ui";
 import { weatherModuleCatalog } from "../contracts/catalog";
 import { weatherSettingsTexts } from "./locale";
 import { fetchWeatherSettings, saveWeatherSettings } from "./service";
@@ -83,8 +83,7 @@ function WeatherSettingsPanelContent({ channelId, language, canManage }: ModuleP
           onChange={(value) => { if (value === "met_norway" || value === "open_meteo") updateSettings({ provider: value }); }}
         />
       </InspectorFieldRow>
-      <Switch
-        layout="inline"
+      <SwitchRow
         label={labels.fahrenheit}
         hint={labels.fahrenheitHint}
         checked={settings?.showFahrenheit ?? false}
