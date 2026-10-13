@@ -36,6 +36,8 @@ describe("text block rename migration", () => {
       expect(database.prepare("SELECT block_name, last_chosen_index FROM text_block_variants WHERE channel_id = 'channel-a'").all())
         .toEqual([{ block_name: "greeting", last_chosen_index: 2 }]);
       expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+      expect(database.prepare("SELECT rename_token FROM text_blocks WHERE channel_id = 'channel-a'").all())
+        .toEqual([{ rename_token: null }]);
     } finally {
       database.close();
     }

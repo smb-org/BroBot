@@ -38,3 +38,5 @@ CREATE TRIGGER panel_rev_text_block_variants_delete AFTER DELETE ON text_block_v
   SELECT OLD.channel_id, resource, 1 FROM panel_resource_dependencies WHERE source_table = 'text_block_variants'
   ON CONFLICT(channel_id, resource) DO UPDATE SET revision = revision + 1;
 END;
+
+ALTER TABLE text_blocks ADD COLUMN rename_token TEXT;
