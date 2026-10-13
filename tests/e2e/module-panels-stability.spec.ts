@@ -1581,7 +1581,7 @@ test("text command slash help stays stable and optional variable fields mount on
   await expect(actionSection.locator(".ui-switch-section__content")).toBeVisible();
 });
 
-test("text-library game filter keeps the list position when games are selected and removed at desktop and 390px", async ({ page }) => {
+test("text-library filter keeps desktop geometry and tracks wrapped mobile chip growth", async ({ page }) => {
   await routeJson(page, "/api/channels/channel-a/modules/text_library/library", {
     blocks: [], categories: [], settings: { revision: 1, graphRevision: 1, updatedAt: "2026-09-20T08:00:00.000Z" }, usages: {},
   });
@@ -1623,12 +1623,24 @@ test("text-library game filter keeps the list position when games are selected a
       expect(filterOverflow).toBe(true);
     }
     const before = { list: await box(list), slot: await box(slot) };
+    let previous = before;
     const search = picker.getByRole("searchbox");
     for (const name of ["Just Chatting", "Software and Game Development", "Retro Adventure Collection Deluxe"]) {
       await search.fill("ga");
       await page.getByRole("option", { name }).click();
-      expect(await box(list)).toEqual(before.list);
-      expect(await box(slot)).toEqual(before.slot);
+      const current = { list: await box(list), slot: await box(slot) };
+      if (width === 390) {
+        const chipRowGrowth = current.slot.height - previous.slot.height;
+        const listGrowth = current.list.y - previous.list.y;
+        expect(chipRowGrowth).toBeGreaterThanOrEqual(0);
+        expect(listGrowth).toBeGreaterThanOrEqual(chipRowGrowth - 0.5);
+        expect(listGrowth).toBeLessThanOrEqual(chipRowGrowth + 4.5);
+      }
+      else {
+        expect(current.list).toEqual(before.list);
+        expect(current.slot).toEqual(before.slot);
+      }
+      previous = current;
     }
     if (width === 390) {
       const activeFilters = toolbar.locator(".list-toolbar__active-filters");

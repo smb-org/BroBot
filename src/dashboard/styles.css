@@ -1715,6 +1715,11 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
   /* Below 640px the side-by-side game filter leaves its chips under ~60px (cover + x alone need ~45px), so it gets a full-width row. */
   .text-library__list-toolbar .list-toolbar__filters { display: contents; }
   .text-library__list-toolbar .ui-game-multi-select { grid-column: 1 / -1; grid-row: 3; flex: none; }
+  .text-library__list-toolbar .ui-game-multi-select--compact { display: grid; gap: var(--s1); }
+  .text-library__list-toolbar .ui-game-multi-select--compact .ui-game-multi-select__selected { position: static; top: auto; left: auto; width: 100%; height: auto; flex-wrap: wrap; overflow: visible; }
+  .text-library__list-toolbar .ui-game-multi-select--compact .ui-game-multi-select__selected:empty { display: none; }
+  .text-library__list-toolbar .ui-game-multi-select--compact .ui-game-multi-select__chip-name { min-width: 6ch; }
+  .text-library__list-toolbar .ui-game-multi-select--compact:has(.ui-game-multi-select__chip) .ui-game-multi-select__search > input { padding-left: var(--s3); }
 }
 .event-feed__end { position: absolute; right: 0; bottom: 0; width: 1px; height: 1px; pointer-events: none; }
 .events-page__pagination-slot { display: flex; height: 60px; min-height: 60px; align-items: flex-start; }
