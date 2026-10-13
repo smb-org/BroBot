@@ -318,3 +318,21 @@ test("game search results close on outside click, focus exit, and Escape at 390p
   await search.press("Escape");
   await expect(results).toHaveCount(0);
 });
+
+test("a long field error wraps in full instead of truncating at 390px", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/tests/e2e/layout-fixture.html?longError=1");
+  await expect(page.getByRole("textbox", { name: "Name" })).toBeVisible();
+  await page.getByRole("button", { name: "Toggle issues" }).click();
+  for (const selector of [".ui-field > .ui-field__error > .ui-truncated-text", ".ui-template-text-field .mantine-InputWrapper-error .ui-truncated-text"]) {
+    const copy = page.locator(selector).first();
+    await expect(copy).toBeVisible();
+    const state = await copy.evaluate((element) => {
+      const style = getComputedStyle(element, "::before");
+      const lineHeight = Number.parseFloat(style.lineHeight);
+      return { textOverflow: style.textOverflow, whiteSpace: style.whiteSpace, fits: element.scrollWidth <= element.clientWidth, lines: element.getBoundingClientRect().height / lineHeight };
+    });
+    expect(state).toMatchObject({ textOverflow: "clip", whiteSpace: "normal", fits: true });
+    expect(state.lines).toBeGreaterThan(1.5);
+  }
+});

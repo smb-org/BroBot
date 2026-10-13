@@ -482,6 +482,8 @@ form.content-section { display: grid; gap: var(--s4); }
   }
   .chat-voting-template-inspector .ui-save-bar__status { grid-column: 1; grid-row: 1; }
   .chat-voting-template-inspector .ui-save-bar__message { flex: 1 1 auto; }
+  .chat-voting-template-inspector .chat-voting-editor__footer:has(.ui-save-bar--error) { height: auto; }
+  .chat-voting-template-inspector .chat-voting-editor__footer .ui-save-bar--error { height: auto; grid-template-rows: auto 44px; }
   .chat-voting-template-inspector .ui-save-bar__actions { grid-column: 1; grid-row: 2; width: 100%; justify-content: flex-end; }
 }
 .chat-voting-editor__start-reason { display: block; box-sizing: border-box; min-width: 0; min-height: 16px; max-height: 16px; margin: 0; overflow: hidden; color: var(--text-3); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
@@ -1201,6 +1203,9 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-select__error { color: var(--error-text); }
 .chips-input__warning { color: var(--warn); }
 .ui-field__error > span, .unit-input__error > span, .ui-select__error > span { flex: none; }
+.ui-field__error:has(> .ui-truncated-text), .ui-select__error:has(> .ui-truncated-text) { height: auto; overflow: visible; }
+.ui-field__error > .ui-truncated-text, .ui-select__error > .ui-truncated-text { flex: 1 1 auto; overflow: visible; }
+.ui-field__error > .ui-truncated-text::before, .ui-select__error > .ui-truncated-text::before { overflow: visible; line-height: 18px; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
 .ui-field__prefix { display: inline-flex; box-sizing: border-box; width: 100%; align-items: center; justify-content: center; height: 100%; padding: 0; color: var(--text-3); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 14px; }
 .unit-input { width: min(14rem, 100%); }
 .unit-input__control { position: relative; min-width: 0; }
@@ -1267,6 +1272,11 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-template-text-field .mantine-InputWrapper-description { position: relative; z-index: 3; box-sizing: border-box; min-height: 18px; overflow: visible; }
 .ui-template-text-field .mantine-InputWrapper-error { position: absolute; z-index: 2; right: 0; bottom: 0; left: 0; box-sizing: border-box; min-height: 18px; max-height: 18px; overflow: visible; margin: 0; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
 .ui-template-text-field .mantine-InputWrapper-error > span { display: flex; align-items: center; gap: 2px; min-width: 0; max-width: 100%; overflow: hidden; white-space: nowrap; }
+.ui-template-text-field.mantine-InputWrapper-root:has(> .mantine-InputWrapper-error) { padding-bottom: 0; }
+.ui-template-text-field > .mantine-InputWrapper-error { position: static; max-height: none; white-space: normal; }
+.ui-template-text-field > .mantine-InputWrapper-error > span { align-items: flex-start; overflow: visible; white-space: normal; }
+.ui-template-text-field > .mantine-InputWrapper-error .ui-truncated-text { flex: 1 1 auto; overflow: visible; }
+.ui-template-text-field > .mantine-InputWrapper-error .ui-truncated-text::before { overflow: visible; line-height: 18px; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
 
 .ui-switch__control { position: relative; display: grid; place-items: center; width: 44px; height: 44px; }
 .ui-switch { display: grid; justify-items: end; gap: 4px; min-width: 44px; }

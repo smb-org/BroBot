@@ -48,7 +48,8 @@ export function LayoutFixture() {
   const [tags, setTags] = useState<string[]>([]);
   const [games, setGames] = useState<GamePickerGame[]>([]);
   const [number, setNumber] = useState<number | "">(4);
-  const errorProps = showIssues ? { error: "A validation error." } : {};
+  const longError = new URLSearchParams(window.location.search).has("longError");
+  const errorProps = showIssues ? { error: longError ? "A server error that is long enough to need several lines on a narrow screen and must stay fully readable." : "A validation error." } : {};
 
   return (
     <UiProvider>
