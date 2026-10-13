@@ -1655,6 +1655,10 @@ export const DashboardApp = (): ReactElement => {
   const paletteStreamState = overviewForHeader !== null && overviewForHeader.channelId === paletteChannel?.channelId
     ? overviewForHeader.streamState
     : paletteChannel?.streamState;
+  // Same source as the account menu: the fresh overview wins over the cached channel list.
+  const paletteControls = overviewForHeader !== null && overviewForHeader.channelId === paletteChannel?.channelId
+    ? overviewForHeader.controls
+    : paletteChannel?.controls;
   const dashboardMode = dashboardModeForRoute(route);
   const selectPalette = (nextPalette: Palette): void => {
     setPalette(nextPalette);
@@ -1876,7 +1880,7 @@ export const DashboardApp = (): ReactElement => {
           isPlatformAdmin={isPlatform}
           {...(channels.status === "success" ? { botSignedIn } : {})}
           streamState={paletteStreamState}
-          {...(paletteChannel?.controls === undefined ? {} : { channelControls: paletteChannel.controls })}
+          {...(paletteControls === undefined ? {} : { channelControls: paletteControls })}
           onRefreshChannelState={refreshChannelState}
           modules={paletteModules}
           onNavigate={navigate}

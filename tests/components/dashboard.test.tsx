@@ -3292,6 +3292,39 @@ describe("Dashboard skeleton", () => {
     });
   });
 
+  it("resumes from the command palette using the fresh overview pause state", async () => {
+    // The cached channel list predates an external pause; the overview is fresher.
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const pausedOverview = {
+      ...overview(channel),
+      controls: { ...channel.controls, pause: { active: true, until: null, mode: "unlimited" as const } },
+    };
+    let pauseBody: unknown;
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse(pausedOverview));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (url.pathname === "/api/channels/kanal-a/controls/pause" && init?.method === "POST") {
+        pauseBody = JSON.parse(init.body as string);
+        return Promise.resolve(jsonResponse({ controls: channel.controls }));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    await screen.findByRole("button", { name: "Automatische Aktionen fortsetzen" });
+    fireEvent.keyDown(document.body, platformPaletteShortcut());
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(await within(dialog).findByText("Automatische Aktionen fortsetzen"));
+
+    await waitFor(() => { expect(pauseBody).toEqual({ duration: null }); });
+  });
+
   it("offers a Retry action after the initial System query fails", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     let systemRequests = 0;
