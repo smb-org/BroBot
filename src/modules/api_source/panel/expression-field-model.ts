@@ -54,13 +54,15 @@ const isInsideProtectedExpressionRegion = (value: string, end: number): boolean 
   let backtick = false;
   let comment = false;
   let escaped = false;
-  for (let index = 0; index < end; index += 1) {
+  let index = 0;
+  while (index < end) {
     const character = value[index];
+    index += 1;
     if (character === undefined) continue;
     if (comment) {
-      if (character === "*" && value[index + 1] === "/") {
+      if (character === "*" && value[index] === "/") {
         comment = false;
-        index += 1;
+        index += 1; // also consume the closing slash
       }
       continue;
     }
@@ -80,9 +82,9 @@ const isInsideProtectedExpressionRegion = (value: string, end: number): boolean 
       if (character === quote) quote = null;
       continue;
     }
-    if (character === "/" && value[index + 1] === "*") {
+    if (character === "/" && value[index] === "*") {
       comment = true;
-      index += 1;
+      index += 1; // also consume the opening asterisk
       continue;
     }
     if (character === "`") {
@@ -115,13 +117,16 @@ export const apiSourceFunctionAtCaret = (
   let comment = false;
   let escaped = false;
 
-  for (let index = 0; index < caret; index += 1) {
+  let index = 0;
+  while (index < caret) {
+    const start = index;
     const character = value[index];
+    index += 1;
     if (character === undefined) continue;
     if (comment) {
-      if (character === "*" && value[index + 1] === "/") {
+      if (character === "*" && value[index] === "/") {
         comment = false;
-        index += 1;
+        index += 1; // also consume the closing slash
       }
       continue;
     }
@@ -141,9 +146,9 @@ export const apiSourceFunctionAtCaret = (
       if (character === quote) quote = null;
       continue;
     }
-    if (character === "/" && value[index + 1] === "*") {
+    if (character === "/" && value[index] === "*") {
       comment = true;
-      index += 1;
+      index += 1; // also consume the opening asterisk
       continue;
     }
     if (character === "`") {
@@ -155,13 +160,13 @@ export const apiSourceFunctionAtCaret = (
       continue;
     }
     if (character === "$") {
-      const match = /^\$([A-Za-z][A-Za-z0-9_]*)/u.exec(value.slice(index));
+      const match = /^\$([A-Za-z][A-Za-z0-9_]*)/u.exec(value.slice(start));
       const entry = match === null ? undefined : byName.get(match[1] ?? "");
       if (match !== null) {
-        const openParenthesis = skipExpressionTrivia(value, index + match[0].length);
+        const openParenthesis = skipExpressionTrivia(value, start + match[0].length);
         if (value[openParenthesis] === "(" && openParenthesis < caret) {
           calls.push(entry ?? null);
-          index = openParenthesis;
+          index = openParenthesis + 1;
         }
       }
     } else if (character === "(") {
