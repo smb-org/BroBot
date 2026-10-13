@@ -13,6 +13,35 @@ afterEach(() => {
 });
 
 describe("Timers panel", () => {
+  it("keeps live and offline interval rows visible with an explicit save action", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>((input) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/timers")) return Promise.resolve(jsonResponse({ timers: [] }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({
+        timeZone: "UTC", revision: 1, location: null, locationRevision: 1,
+        defaultChatTarget: "source_only", defaultChatTargetRevision: 1,
+      }));
+      if (url.pathname.endsWith("/event-time-sources")) return Promise.resolve(jsonResponse({ sources: [] }));
+      if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+
+    renderWithQuery(<UiProvider><TimersPanel channelId="channel-a" language="en" /></UiProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Create timer" }));
+
+    expect(screen.getByRole("switch", { name: "Live" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Offline" })).not.toBeChecked();
+    expect(screen.getByText("offline off")).toBeInTheDocument();
+    expect(screen.getAllByRole("spinbutton", { name: "Minutes" })).toHaveLength(1);
+    expect(screen.getAllByRole("spinbutton", { name: "Minimum chat messages" })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("switch", { name: "Offline" }));
+    expect(screen.queryByText("offline off")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("spinbutton", { name: "Minutes" })).toHaveLength(2);
+    expect(screen.getAllByRole("spinbutton", { name: "Minimum chat messages" })).toHaveLength(2);
+  });
+
   it("offers the channel-default inheritance option when creating a timer", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>((input) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
@@ -52,7 +81,7 @@ describe("Timers panel", () => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/timers")) return Promise.resolve(jsonResponse({ timers: [{
         id: "timer-1", name: "Greeting timer", enabled: true, messageText: "Hello there!", chatTarget: "source_only",
-        trigger: { type: "interval", minutes: 30 }, revision: 1, nextRunAt: null, nextRunStreamId: null,
+        trigger: { type: "interval", live: { minutes: 30 } }, revision: 1, nextRunAt: null, nextRunStreamId: null, nextRunState: null,
         lastRunAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
       }] }));
       if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({
@@ -100,7 +129,7 @@ describe("Timers panel", () => {
         refreshFails = true;
         return Promise.resolve(jsonResponse({ timer: {
           id: "timer-1", name: "Greeting timer", enabled, messageText: "Hello there!", chatTarget: "source_only",
-          trigger: { type: "interval", minutes: 30 }, revision, nextRunAt: null, nextRunStreamId: null,
+          trigger: { type: "interval", live: { minutes: 30 } }, revision, nextRunAt: null, nextRunStreamId: null, nextRunState: null,
           lastRunAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
         } }));
       }
@@ -109,7 +138,7 @@ describe("Timers panel", () => {
         if (timerReads > 1 && refreshFails) return Promise.resolve(jsonResponse({ error: "temporarily unavailable" }, 503));
         return Promise.resolve(jsonResponse({ timers: [{
           id: "timer-1", name: "Greeting timer", enabled, messageText: "Hello there!", chatTarget: "source_only",
-          trigger: { type: "interval", minutes: 30 }, revision, nextRunAt: null, nextRunStreamId: null,
+          trigger: { type: "interval", live: { minutes: 30 } }, revision, nextRunAt: null, nextRunStreamId: null, nextRunState: null,
           lastRunAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
         }] }));
       }

@@ -21,6 +21,7 @@ export interface TimerRow {
   revision: number;
   next_run_at: string | null;
   next_run_stream_id: string | null;
+  next_run_state: "live" | "offline" | null;
   last_run_at: string | null;
   created_at: string;
   updated_at: string;
@@ -41,6 +42,7 @@ export const mapTimerRow = (row: TimerRow): Timer => {
     revision: row.revision,
     nextRunAt: row.next_run_at,
     nextRunStreamId: row.next_run_stream_id,
+    nextRunState: row.next_run_state,
     lastRunAt: row.last_run_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

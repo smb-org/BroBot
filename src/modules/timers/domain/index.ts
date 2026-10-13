@@ -1,5 +1,5 @@
 import type { ResolvedModuleEventTime } from "../../contract";
-import type { TimerTrigger } from "../contracts";
+import type { TimerIntervalState, TimerTrigger } from "../contracts";
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
@@ -127,7 +127,12 @@ export const nextTimerAt = (
 export const timerOccurrenceKey = (timerId: string, dueAt: number, streamId?: string): string =>
   `${timerId}:${String(Math.trunc(dueAt))}${streamId === undefined ? "" : `:${encodeURIComponent(streamId)}`}`;
 
-export const triggerDelayMs = (trigger: Extract<TimerTrigger, { type: "interval" | "stream_start" }>): number =>
+export const intervalPartFor = (
+  trigger: Extract<TimerTrigger, { type: "interval" }>,
+  state: TimerIntervalState,
+) => trigger[state];
+
+export const triggerDelayMs = (trigger: Extract<TimerTrigger, { type: "stream_start" }>): number =>
   trigger.minutes * 60_000;
 
 export const nextStreamStartAt = (startedAt: string | null, now: number, delayMs: number): number | null => {

@@ -12,6 +12,7 @@ import { TestD1Database } from "./test-d1";
 vi.mock("../../src/modules/registry", () => ({
   MODULES: [
     { id: "chat", eventSubTypes: ["channel.chat.message"] },
+    { id: "timers", eventSubTypes: ["channel.chat.message", "stream.online", "stream.offline"] },
     { id: "channel_events", mandatory: true, eventSubTypes: ["channel.shoutout.create"] },
     { id: "moderation", eventSubTypes: ["channel.moderate"] },
     { id: "aus", eventSubTypes: ["channel.follow"] },
@@ -60,6 +61,23 @@ describe("EventSub reconciliation", () => {
   afterEach(() => {
     database.close();
     vi.unstubAllGlobals();
+  });
+
+  it("keeps chat activity subscribed when timers are the only enabled chat consumer", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-a', 'timers', 1, '{}')",
+    ).run();
+
+    const targets = await listDesiredEventSubTargets(asD1(database), "kanal-a");
+
+    expect(targets).toContainEqual({
+      channelId: "kanal-a",
+      subscriptionType: "channel.chat.message",
+      variant: "",
+      version: "1",
+    });
   });
 
   it("includes only enabled modules with channel:bot consent in the target state", async () => {

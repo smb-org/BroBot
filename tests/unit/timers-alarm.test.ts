@@ -30,8 +30,8 @@ const insertTimer = async (input: {
   await database.prepare(
     `INSERT INTO timers
       (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, use_channel_default_target, revision,
-       next_run_at, last_run_at, last_chat_activity_count, created_at, updated_at)
-     VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, 1, ?, NULL, ?, ?, ?)`,
+       next_run_at, next_run_state, last_run_at, last_chat_activity_count, created_at, updated_at)
+     VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, 1, ?, ?, NULL, ?, ?, ?)`,
   ).bind(
     input.id ?? timerId,
     channelId,
@@ -42,6 +42,7 @@ const insertTimer = async (input: {
     input.chatTarget ?? "source_only",
     input.chatTarget === null ? 1 : 0,
     input.nextRunAt === undefined || input.nextRunAt === null ? null : new Date(input.nextRunAt).toISOString(),
+    input.triggerType === "interval" && input.nextRunAt !== undefined && input.nextRunAt !== null ? "live" : null,
     input.activityCount ?? 10,
     "2026-01-01T00:00:00.000Z",
     "2026-01-01T00:00:00.000Z",
@@ -52,7 +53,7 @@ const prepareDatabase = async (chatTarget: "all_chats" | "source_only" = "source
   await insertChannel();
   await insertTimer({
     triggerType: "interval",
-    trigger: { type: "interval", minutes: 10, minimumMessages: 3 },
+    trigger: { type: "interval", live: { minutes: 10, minimumMessages: 3 } },
     chatTarget,
     nextRunAt: firstDueAt,
     activityCount: 10,
@@ -151,7 +152,7 @@ describe("timer alarm execution", () => {
     await insertChannel();
     await insertTimer({
       triggerType: "interval",
-      trigger: { type: "interval", minutes: 10 },
+      trigger: { type: "interval", live: { minutes: 10 } },
       chatTarget: null,
       nextRunAt: firstDueAt,
     });
@@ -231,7 +232,7 @@ describe("timer alarm execution", () => {
     await insertTimer({
       id: "interval-recheck",
       triggerType: "interval",
-      trigger: { type: "interval", minutes: 10 },
+      trigger: { type: "interval", live: { minutes: 10 } },
       nextRunAt: firstDueAt,
       activityCount: null,
     });
@@ -257,6 +258,112 @@ describe("timer alarm execution", () => {
     await handleTimerAlarm(context, "timer:interval-recheck", firstDueAt);
 
     expect(sends).toEqual([]);
+  });
+
+  it("rearms live and offline intervals across both switches without posting at a boundary", async () => {
+    await insertChannel();
+    await insertTimer({
+      triggerType: "interval",
+      trigger: {
+        type: "interval",
+        live: { minutes: 3, minimumMessages: 2 },
+        offline: { minutes: 5, minimumMessages: 2 },
+      },
+      nextRunAt: firstDueAt,
+      activityCount: 10,
+    });
+    await database.prepare("UPDATE timers SET next_run_stream_id = ? WHERE timer_id = ?").bind("stream-1", timerId).run();
+    await database.prepare(
+      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, started_at, stream_id)
+       VALUES (?, 'online', ?, 'eventsub', ?, 'stream-1')`,
+    ).bind(channelId, new Date(firstDueAt - 30 * 60_000).toISOString(), new Date(firstDueAt - 30 * 60_000).toISOString()).run();
+
+    let state: "online" | "offline" = "online";
+    let streamId: string | null = "stream-1";
+    let activityCount = 10;
+    const sends: string[] = [];
+    const deadlines: number[] = [];
+    const alarmContext = contextFor(() => activityCount, sends, deadlines, {
+      streamState: () => Promise.resolve(state),
+      streamStartedAt: () => Promise.resolve({ streamId, startedAt: state === "online" ? new Date(firstDueAt - 30 * 60_000).toISOString() : null }),
+    });
+    const transition = async (
+      subscriptionType: "stream.online" | "stream.offline",
+      payload: Readonly<Record<string, unknown>>,
+    ): Promise<number[]> => {
+      const scheduled: number[] = [];
+      const event: ModuleEvent<Record<string, never>> = {
+        channelId,
+        subscriptionType,
+        triggerId: `${subscriptionType}-${String(Date.now())}`,
+        payload,
+        settings: {},
+        receivedAt: new Date().toISOString(),
+        actor: null,
+        chatStatus: null,
+      };
+      await timersModule.handleEvent?.(event, {
+        DB: database as unknown as D1Database,
+        streamStateTransitionAccepted: true,
+        chatActivityCount: () => Promise.resolve(activityCount),
+        scheduleAlarm: (_handlerKey: string, _alarmKey: string, deadline: number) => { scheduled.push(deadline); return Promise.resolve(); },
+        clearAlarm: () => Promise.resolve(),
+      } as unknown as ModuleExecutionContext);
+      return scheduled;
+    };
+
+    vi.useFakeTimers();
+    vi.setSystemTime(firstDueAt);
+
+    state = "offline";
+    streamId = null;
+    activityCount = 10;
+    await database.prepare("UPDATE channel_stream_state SET state = 'offline', changed_at = ?, started_at = NULL, stream_id = NULL WHERE channel_id = ?")
+      .bind(new Date(firstDueAt).toISOString(), channelId).run();
+    const offlineSchedule = await transition("stream.offline", {});
+    const offlineDueAt = firstDueAt + 5 * 60_000;
+    expect(offlineSchedule).toEqual([offlineDueAt]);
+
+    await handleTimerAlarm(alarmContext, `timer:${timerId}`, firstDueAt);
+    expect(sends).toEqual([]);
+
+    activityCount = 11;
+    vi.setSystemTime(offlineDueAt);
+    await handleTimerAlarm(alarmContext, `timer:${timerId}`, offlineDueAt);
+    expect(sends).toEqual([]);
+
+    const secondOfflineDueAt = offlineDueAt + 5 * 60_000;
+    activityCount = 12;
+    vi.setSystemTime(secondOfflineDueAt);
+    await handleTimerAlarm(alarmContext, `timer:${timerId}`, secondOfflineDueAt);
+    expect(sends).toEqual([`${timerId}:${String(secondOfflineDueAt)}`]);
+
+    const liveSwitchedAt = secondOfflineDueAt + 30_000;
+    vi.setSystemTime(liveSwitchedAt);
+    state = "online";
+    streamId = "stream-2";
+    activityCount = 100;
+    await database.prepare("UPDATE channel_stream_state SET state = 'online', changed_at = ?, started_at = ?, stream_id = ? WHERE channel_id = ?")
+      .bind(new Date(liveSwitchedAt).toISOString(), new Date(liveSwitchedAt).toISOString(), streamId, channelId).run();
+    const liveSchedule = await transition("stream.online", { id: streamId, started_at: new Date(liveSwitchedAt).toISOString() });
+    const liveDueAt = liveSwitchedAt + 3 * 60_000;
+    expect(liveSchedule).toEqual([liveDueAt]);
+
+    await handleTimerAlarm(alarmContext, `timer:${timerId}`, secondOfflineDueAt + 5 * 60_000);
+    expect(sends).toHaveLength(1);
+
+    activityCount = 101;
+    vi.setSystemTime(liveDueAt);
+    await handleTimerAlarm(alarmContext, `timer:${timerId}`, liveDueAt);
+    expect(sends).toHaveLength(1);
+
+    activityCount = 102;
+    vi.setSystemTime(liveDueAt + 3 * 60_000);
+    await handleTimerAlarm(alarmContext, `timer:${timerId}`, liveDueAt + 3 * 60_000);
+    expect(sends).toEqual([
+      `${timerId}:${String(secondOfflineDueAt)}`,
+      `${timerId}:${String(liveDueAt + 3 * 60_000)}`,
+    ]);
   });
 
   it("does not send a stream-start post if the stream rolls over to a new one between the due-occurrence check and the send", async () => {
@@ -626,7 +733,7 @@ describe("timer alarm execution", () => {
       await insertTimer({
         id: "interval-legacy",
         triggerType: "interval",
-        trigger: { type: "interval", minutes: 10 },
+        trigger: { type: "interval", live: { minutes: 10 } },
         nextRunAt: firstDueAt,
         activityCount: 5,
       });
@@ -694,7 +801,7 @@ describe("timer alarm execution", () => {
       await insertTimer({
         id: "interval-timer",
         triggerType: "interval",
-        trigger: { type: "interval", minutes: 15 },
+        trigger: { type: "interval", live: { minutes: 15 } },
         nextRunAt: null,
         activityCount: null,
       });
@@ -730,7 +837,7 @@ describe("timer alarm execution", () => {
       await insertTimer({
         id: "interval-timer",
         triggerType: "interval",
-        trigger: { type: "interval", minutes: 15 },
+        trigger: { type: "interval", live: { minutes: 15 } },
         nextRunAt: armedAt,
         activityCount: null,
       });
@@ -753,7 +860,7 @@ describe("timer alarm execution", () => {
       await insertTimer({
         id: "interval-timer",
         triggerType: "interval",
-        trigger: { type: "interval", minutes: 15 },
+        trigger: { type: "interval", live: { minutes: 15 } },
         nextRunAt: null,
         activityCount: null,
       });
@@ -785,7 +892,7 @@ describe("timer alarm execution", () => {
       await insertTimer({
         id: "interval-timer",
         triggerType: "interval",
-        trigger: { type: "interval", minutes: 15, minimumMessages: 3 },
+        trigger: { type: "interval", live: { minutes: 15, minimumMessages: 3 } },
         nextRunAt: staleDeadline,
         activityCount: 50,
       });
@@ -814,7 +921,7 @@ describe("timer alarm execution", () => {
       await insertTimer({
         id: "interval-timer",
         triggerType: "interval",
-        trigger: { type: "interval", minutes: 15, minimumMessages: 3 },
+        trigger: { type: "interval", live: { minutes: 15, minimumMessages: 3 } },
         nextRunAt: staleDeadline,
         activityCount: 50,
       });
@@ -926,7 +1033,7 @@ describe("timer alarm execution", () => {
       await insertTimer({
         id: "interval-timer",
         triggerType: "interval",
-        trigger: { type: "interval", minutes: 15 },
+        trigger: { type: "interval", live: { minutes: 15 } },
         nextRunAt: null,
         activityCount: null,
       });
@@ -940,6 +1047,33 @@ describe("timer alarm execution", () => {
       expect(deadlines).toEqual([]);
       expect(await database.prepare("SELECT next_run_at FROM timers WHERE timer_id = ?").bind("interval-timer").first())
         .toEqual({ next_run_at: null });
+    });
+
+    it("arms an offline interval when the module is activated during an offline stream state", async () => {
+      await insertChannel();
+      await insertTimer({
+        id: "offline-interval-timer",
+        triggerType: "interval",
+        trigger: { type: "interval", offline: { minutes: 7, minimumMessages: 2 } },
+        nextRunAt: null,
+        activityCount: null,
+      });
+      const deadlines: number[] = [];
+      const context = contextFor(() => 23, [], deadlines, { streamState: () => Promise.resolve("offline") });
+      vi.useFakeTimers();
+      vi.setSystemTime(now);
+
+      await onInputsChangedOf()(context, "activation" satisfies ModuleScheduleInputChangeReason);
+
+      expect(deadlines).toEqual([now + 7 * 60_000]);
+      expect(await database.prepare(
+        "SELECT next_run_at, next_run_stream_id, next_run_state, last_chat_activity_count FROM timers WHERE timer_id = ?",
+      ).bind("offline-interval-timer").first()).toEqual({
+        next_run_at: new Date(now + 7 * 60_000).toISOString(),
+        next_run_stream_id: null,
+        next_run_state: "offline",
+        last_chat_activity_count: 23,
+      });
     });
   });
 });

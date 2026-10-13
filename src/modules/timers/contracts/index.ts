@@ -6,9 +6,19 @@ const TIMER_MINUTES_MAXIMUM = 24 * 60;
 export const TIMER_MESSAGE_MAX_LENGTH = 500;
 
 const minutes = z.number().int().min(1).max(TIMER_MINUTES_MAXIMUM);
+const intervalPart = z.object({
+  minutes,
+  minimumMessages: z.number().int().min(1).max(100_000).optional(),
+});
+
+export type TimerIntervalState = "live" | "offline";
 
 export const timerTriggerSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("interval"), minutes, minimumMessages: z.number().int().min(1).max(100_000).optional() }),
+  z.object({
+    type: z.literal("interval"),
+    live: intervalPart.optional(),
+    offline: intervalPart.optional(),
+  }).refine((trigger) => trigger.live !== undefined || trigger.offline !== undefined),
   z.object({ type: z.literal("stream_start"), minutes }),
   z.object({
     type: z.literal("time_of_day"),
@@ -30,8 +40,10 @@ export interface Timer {
   trigger: TimerTrigger;
   revision: number;
   nextRunAt: string | null;
-  /** Twitch stream id `nextRunAt` was armed for, when the trigger is stream-scoped (interval, stream_start). */
+  /** Twitch stream id `nextRunAt` was armed for, when the trigger is stream-scoped. */
   nextRunStreamId: string | null;
+  /** Stream state `nextRunAt` was armed for when the trigger is an interval. */
+  nextRunState: TimerIntervalState | null;
   lastRunAt: string | null;
   createdAt: string;
   updatedAt: string;

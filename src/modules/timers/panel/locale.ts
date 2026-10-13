@@ -15,9 +15,11 @@ export interface TimersTexts {
   streamStart: string;
   timeOfDay: string;
   beforeEvent: string;
+  live: string;
+  offline: string;
+  liveOff: string;
+  offlineOff: string;
   minutes: string;
-  minimumMessages: string;
-  minimumMessagesHint: string;
   messageCount: string;
   time: string;
   weekdays: string;
@@ -66,9 +68,11 @@ const catalog: LocaleCatalog<TimersTexts> = {
     streamStart: "Nach Streamstart",
     timeOfDay: "Uhrzeit",
     beforeEvent: "Vor einem Ereignis",
+    live: "Live",
+    offline: "Offline",
+    liveOff: "Live aus",
+    offlineOff: "Offline aus",
     minutes: "Minuten",
-    minimumMessages: "Nur senden, wenn genug Chatnachrichten eingegangen sind",
-    minimumMessagesHint: "Lege eine Mindestanzahl fest, bevor der Timer eine Nachricht sendet.",
     messageCount: "Mindestanzahl Chatnachrichten",
     time: "Uhrzeit im Kanal",
     weekdays: "Wochentage",
@@ -128,9 +132,11 @@ const catalog: LocaleCatalog<TimersTexts> = {
     streamStart: "After stream start",
     timeOfDay: "Time of day",
     beforeEvent: "Before an event",
+    live: "Live",
+    offline: "Offline",
+    liveOff: "Live off",
+    offlineOff: "offline off",
     minutes: "Minutes",
-    minimumMessages: "Only send after enough chat messages have arrived",
-    minimumMessagesHint: "Set a minimum count before the timer sends a message.",
     messageCount: "Minimum chat messages",
     time: "Time in channel time zone",
     weekdays: "Weekdays",

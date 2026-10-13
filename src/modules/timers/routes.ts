@@ -11,7 +11,7 @@ import {
   nextTimerAt,
   triggerDelayMs,
 } from "./domain";
-import { TIMER_MAXIMUM_COUNT } from "./contracts";
+import { TIMER_MAXIMUM_COUNT, type TimerIntervalState } from "./contracts";
 import type { Timer } from "./contracts";
 import { mapTimerRow, timerMutationInput, validateTimerText, type TimerRow } from "./service";
 import { readTextBlockGraphRevision, textBlockGraphRevisionChanged, textBlockWriteGuard } from "../contracts/text-block-write-guard";
@@ -32,7 +32,7 @@ type TimerRouteContext = Context<ModuleRouteEnvironment>;
 const readTimer = async (db: D1Database, channelId: string, timerId: string): Promise<Timer | null> => {
   const row = await db.prepare(
     `SELECT timer_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, use_channel_default_target, revision,
-            next_run_at, next_run_stream_id, last_run_at, created_at, updated_at
+            next_run_at, next_run_stream_id, next_run_state, last_run_at, created_at, updated_at
        FROM timers WHERE channel_id = ? AND timer_id = ?`,
   ).bind(channelId, timerId).first<TimerRow>();
   return row === null ? null : mapTimerRow(row);
@@ -45,25 +45,27 @@ const nextRunFor = async (
   channelId: string,
   trigger: Timer["trigger"],
   now: number,
-): Promise<{ at: number | null; streamId: string | null }> => {
+): Promise<{ at: number | null; streamId: string | null; state: TimerIntervalState | null }> => {
   if (trigger.type === "interval") {
     const stream = await db.prepare("SELECT state, stream_id FROM channel_stream_state WHERE channel_id = ?")
       .bind(channelId).first<{ state: string; stream_id: string | null }>();
-    return stream?.state === "online"
-      ? { at: now + trigger.minutes * 60_000, streamId: stream.stream_id }
-      : { at: null, streamId: null };
+    const state: TimerIntervalState | null = stream?.state === "online" ? "live" : stream?.state === "offline" ? "offline" : null;
+    const part = state === null ? undefined : trigger[state];
+    return part === undefined || state === null
+      ? { at: null, streamId: null, state: null }
+      : { at: now + part.minutes * 60_000, streamId: state === "live" ? stream?.stream_id ?? null : null, state };
   }
   if (trigger.type === "stream_start") {
     const stream = await db.prepare("SELECT state, started_at, stream_id FROM channel_stream_state WHERE channel_id = ?")
       .bind(channelId).first<{ state: string; started_at: string | null; stream_id: string | null }>();
-    if (stream?.state !== "online" || stream.stream_id === null) return { at: null, streamId: null };
+    if (stream?.state !== "online" || stream.stream_id === null) return { at: null, streamId: null, state: null };
     const at = nextStreamStartAt(stream.started_at, now, triggerDelayMs(trigger));
-    return { at, streamId: at === null ? null : stream.stream_id };
+    return { at, streamId: at === null ? null : stream.stream_id, state: null };
   }
   const row = await db.prepare("SELECT time_zone FROM channels WHERE channel_id = ?")
     .bind(channelId).first<{ time_zone: string }>();
   const timeZone = row?.time_zone ?? "Europe/Berlin";
-  if (trigger.type === "time_of_day") return { at: nextDailyTimerAt(trigger, now, timeZone), streamId: null };
+  if (trigger.type === "time_of_day") return { at: nextDailyTimerAt(trigger, now, timeZone), streamId: null, state: null };
   return {
     at: nextTimerAt(trigger, {
       now,
@@ -71,6 +73,7 @@ const nextRunFor = async (
       eventTimes: await resolveEventTimes(channelId, now),
     }),
     streamId: null,
+    state: null,
   };
 };
 
@@ -82,17 +85,30 @@ const setScheduledAlarm = async (
   enabled: boolean,
   now: number,
   revision: number,
+  resetActivityBaseline = false,
 ): Promise<void> => {
   const key = alarmKeyFor(timerId);
-  const { at: deadline, streamId } = enabled
+  const { at: deadline, streamId, state } = enabled
     ? await nextRunFor(context.env.DB, context.get("resolveEventTimes"), channelId, trigger, now)
-    : { at: null, streamId: null };
-  const result = await context.env.DB.prepare(
-    "UPDATE timers SET next_run_at = ?, next_run_stream_id = ? WHERE channel_id = ? AND timer_id = ? AND revision = ? AND enabled = ?",
-  ).bind(deadline === null ? null : new Date(deadline).toISOString(), deadline === null ? null : streamId,
-    channelId, timerId, revision, enabled ? 1 : 0).run();
-  if (result.meta.changes === 0) return;
+    : { at: null, streamId: null, state: null };
   const stub = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
+  let activityCount: number | null | undefined;
+  if (resetActivityBaseline && trigger.type === "interval") {
+    try { activityCount = await stub.getChatActivityCount(); } catch { activityCount = null; }
+  }
+  const result = resetActivityBaseline && trigger.type === "interval"
+    ? await context.env.DB.prepare(
+      `UPDATE timers SET next_run_at = ?, next_run_stream_id = ?, next_run_state = ?, last_chat_activity_count = ?
+        WHERE channel_id = ? AND timer_id = ? AND revision = ? AND enabled = ?`,
+    ).bind(deadline === null ? null : new Date(deadline).toISOString(), deadline === null ? null : streamId,
+      deadline === null ? null : state, activityCount ?? null,
+      channelId, timerId, revision, enabled ? 1 : 0).run()
+    : await context.env.DB.prepare(
+      `UPDATE timers SET next_run_at = ?, next_run_stream_id = ?, next_run_state = ?
+        WHERE channel_id = ? AND timer_id = ? AND revision = ? AND enabled = ?`,
+    ).bind(deadline === null ? null : new Date(deadline).toISOString(), deadline === null ? null : streamId,
+      deadline === null ? null : state, channelId, timerId, revision, enabled ? 1 : 0).run();
+  if (result.meta.changes === 0) return;
   if (deadline === null) await stub.clearModuleAlarm(MODULE_ID, key, revision);
   else await stub.scheduleModuleAlarm(MODULE_ID, ALARM_HANDLER, key, deadline, revision);
   // A before_event timer whose source reports no occurrence within its own
@@ -115,7 +131,7 @@ timerRoutes.get("/timers", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
   const result = await context.env.DB.prepare(
     `SELECT timer_id, name, enabled, message_text, trigger_type, trigger_json, chat_target, use_channel_default_target, revision,
-            next_run_at, next_run_stream_id, last_run_at, created_at, updated_at
+            next_run_at, next_run_stream_id, next_run_state, last_run_at, created_at, updated_at
        FROM timers WHERE channel_id = ? ORDER BY created_at, timer_id`,
   ).bind(channelId).all<TimerRow>();
   return context.json({ timers: result.results.map(mapTimerRow) });
@@ -179,7 +195,7 @@ timerRoutes.post("/timers", async (context) => {
       ? context.json({ error: "timer_limit_reached" }, 409)
       : context.json({ error: "timer_management_denied" }, 403);
   }
-  await setScheduledAlarm(context, channelId, timerId, input.trigger, true, Date.parse(now), 1);
+  await setScheduledAlarm(context, channelId, timerId, input.trigger, true, Date.parse(now), 1, true);
   const timer = await readTimer(context.env.DB, channelId, timerId);
   return context.json({ timer }, 201);
 });
@@ -209,7 +225,7 @@ timerRoutes.patch("/timers/:timerId", async (context) => {
   const mutation = context.env.DB.prepare(
     `UPDATE timers
         SET name = ?, message_text = ?, trigger_type = ?, trigger_json = ?, chat_target = ?, use_channel_default_target = ?,
-            next_run_at = NULL, next_run_stream_id = NULL, revision = revision + 1, updated_at = ?
+            next_run_at = NULL, next_run_stream_id = NULL, next_run_state = NULL, revision = revision + 1, updated_at = ?
       WHERE channel_id = ? AND timer_id = ? AND revision = ? ${blockGuard.sql} ${authorization.sql}`,
   ).bind(input.name, input.messageText, input.trigger.type, JSON.stringify(input.trigger), input.chatTarget ?? "source_only",
     input.chatTarget === null ? 1 : 0, now,
@@ -226,7 +242,7 @@ timerRoutes.patch("/timers/:timerId", async (context) => {
     const current = await readTimer(context.env.DB, channelId, timerId);
     return context.json({ error: current === null ? "timer_not_found" : "timer_conflict", ...(current === null ? {} : { timer: current }) }, 409);
   }
-  await setScheduledAlarm(context, channelId, timerId, input.trigger, existing.enabled, Date.parse(now), existing.revision + 1);
+  await setScheduledAlarm(context, channelId, timerId, input.trigger, existing.enabled, Date.parse(now), existing.revision + 1, true);
   const timer = await readTimer(context.env.DB, channelId, timerId);
   return context.json({ timer });
 });
@@ -246,7 +262,7 @@ timerRoutes.patch("/timers/:timerId/enabled", async (context) => {
   const now = nowIso();
   const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
-    `UPDATE timers SET enabled = ?, next_run_at = NULL, next_run_stream_id = NULL, revision = revision + 1, updated_at = ?
+    `UPDATE timers SET enabled = ?, next_run_at = NULL, next_run_stream_id = NULL, next_run_state = NULL, revision = revision + 1, updated_at = ?
       WHERE channel_id = ? AND timer_id = ? AND revision = ? AND enabled <> ? ${authorization.sql}`,
   ).bind(enabled ? 1 : 0, now, channelId, timerId, revision, enabled ? 1 : 0, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
@@ -263,7 +279,7 @@ timerRoutes.patch("/timers/:timerId/enabled", async (context) => {
       ? context.json({ error: "timer_not_found" }, 404)
       : current.revision !== revision ? context.json({ error: "timer_conflict", timer: current }, 409) : context.json({ timer: current });
   }
-  await setScheduledAlarm(context, channelId, timerId, existing.trigger, enabled, Date.parse(now), existing.revision + 1);
+  await setScheduledAlarm(context, channelId, timerId, existing.trigger, enabled, Date.parse(now), existing.revision + 1, true);
   const timer = await readTimer(context.env.DB, channelId, timerId);
   return context.json({ timer });
 });

@@ -1434,20 +1434,17 @@ export class ChannelObject extends DurableObject<Env> {
     };
   }
 
+  /** Counts accepted chat in either stream state; timer baselines separate each interval state. */
   public async recordChatActivity(
     chatterUserId: string | null = null,
     needsActiveChatters = false,
   ): Promise<number> {
-    const stream = await readChannelStreamState(this.env.DB, this.ownChannelId() ?? "");
     const now = Date.now();
     const nowIso = new Date(now).toISOString();
     const userIdForTracking = needsActiveChatters && typeof chatterUserId === "string" && chatterUserId.length > 0
       ? chatterUserId
       : null;
-    const online = stream?.state === "online";
-
     if (userIdForTracking === null) {
-      if (!online) return await this.getChatActivityCount();
       return this.ctx.storage.transactionSync(() => this.incrementChatActivityCountSync());
     }
 
@@ -1470,7 +1467,7 @@ export class ChannelObject extends DurableObject<Env> {
       try {
         await this.ensurePlatformActiveChatterAlarm(preflightDeadline);
       } catch (error: unknown) {
-        if (online) this.ctx.storage.transactionSync(() => this.incrementChatActivityCountSync());
+        this.ctx.storage.transactionSync(() => this.incrementChatActivityCountSync());
         throw error;
       }
       return this.ctx.storage.transactionSync(() => {
@@ -1491,7 +1488,7 @@ export class ChannelObject extends DurableObject<Env> {
         const nextSweep = this.activeChatterNextSweepSync(keyCreatedAt);
         if (nextSweep === null) this.clearActiveChatterExpiryEntrySync();
         else this.writeActiveChatterExpiryEntrySync(nextSweep);
-        return online ? this.incrementChatActivityCountSync() : this.currentChatActivityCountSync();
+        return this.incrementChatActivityCountSync();
       });
     });
   }

@@ -143,7 +143,7 @@ describe("Channel variable routes", () => {
         (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, chat_target,
          revision, next_run_at, next_run_stream_id, last_run_at, created_at, updated_at)
        VALUES ('timer-score', 'channel-a', 'Score reminder', 1, 'Score: {var.score}', 'interval',
-               '{"type":"interval","minutes":10}', 'source_only', 1, '2026-09-24T00:10:00.000Z', 'stream-1', NULL,
+               '{"type":"interval","live":{"minutes":10}}', 'source_only', 1, '2026-09-24T00:10:00.000Z', 'stream-1', NULL,
                '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z')`,
     ).run();
     const faqRepository = createFaqRepository(database as unknown as D1Database);
@@ -211,7 +211,7 @@ describe("Channel variable routes", () => {
         (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, chat_target,
          revision, next_run_at, created_at, updated_at)
        VALUES ('timer-race', 'channel-a', 'Score reminder', 1, 'Score: {var.score}', 'interval',
-               '{"type":"interval","minutes":10}', 'source_only', 1, NULL,
+               '{"type":"interval","live":{"minutes":10}}', 'source_only', 1, NULL,
                '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z')`,
     ).run();
 
@@ -286,7 +286,7 @@ describe("Channel variable routes", () => {
         (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, chat_target,
          revision, next_run_at, created_at, updated_at)
        VALUES ('timer-long', 'channel-a', 'Long timer', 1, ?, 'interval',
-               '{"type":"interval","minutes":10}', 'source_only', 1, NULL,
+               '{"type":"interval","live":{"minutes":10}}', 'source_only', 1, NULL,
                '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z')`,
     ).bind(longTemplate).run();
 

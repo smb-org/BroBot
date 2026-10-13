@@ -1365,32 +1365,15 @@ describe("ChannelObject realtime path", () => {
     expect(panel.send.mock.calls).toHaveLength(0);
   });
 
-  it("does not count chat messages while the channel is offline", async () => {
-    let streamState = "offline";
-    const statement = {
-      bind: vi.fn(() => statement),
-      first: vi.fn(() => Promise.resolve({
-        state: streamState,
-        source: "eventsub",
-        changed_at: "2026-09-27T12:00:00.000Z",
-        started_at: null,
-        stream_id: null,
-        checked_at: null,
-      })),
-    };
-    const database = { prepare: vi.fn(() => statement) } as unknown as D1Database;
-    const object = objectFor([], database);
+  it("counts accepted chat messages in both stream states", async () => {
+    const object = objectFor([]);
 
-    await object.recordChatActivity();
-    expect(await object.getChatActivityCount()).toBe(0);
-
-    streamState = "online";
     await object.recordChatActivity();
     expect(await object.getChatActivityCount()).toBe(1);
 
-    streamState = "offline";
     await object.recordChatActivity();
-    expect(await object.getChatActivityCount()).toBe(1);
+    await object.recordChatActivity();
+    expect(await object.getChatActivityCount()).toBe(3);
   });
 
   it("tracks unique chatters in a rolling window without storing their ids", async () => {

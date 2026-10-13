@@ -2,12 +2,20 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { ModuleRegisteredTemplateVariable } from "../../src/modules/contract";
 import { isDailyTimerDeadlineCurrent, nextDailyTimerAt, nextBeforeEventAt, nextIntervalAt, nextStreamStartAt, timerOccurrenceKey } from "../../src/modules/timers/domain";
+import { timerTriggerSchema } from "../../src/modules/timers/contracts";
 import { validateTimerText, validateTimerTemplateMutation } from "../../src/modules/timers/service";
 import { TestD1Database } from "./test-d1";
 
 const berlin = "Europe/Berlin";
 
 describe("timer scheduling", () => {
+  it("requires at least one valid live or offline interval part", () => {
+    expect(timerTriggerSchema.safeParse({ type: "interval" }).success).toBe(false);
+    expect(timerTriggerSchema.safeParse({ type: "interval", offline: { minutes: 5 } }).success).toBe(true);
+    expect(timerTriggerSchema.safeParse({ type: "interval", live: { minutes: 10 }, offline: { minutes: 30, minimumMessages: 4 } }).success).toBe(true);
+    expect(timerTriggerSchema.safeParse({ type: "interval", live: {} }).success).toBe(false);
+  });
+
   it("keeps interval deadlines on cadence after a late alarm", () => {
     expect(nextIntervalAt(1_000, 1_000 + 31 * 60_000, 15)).toBe(1_000 + 45 * 60_000);
   });
@@ -150,7 +158,7 @@ describe("scheduled text validation", () => {
       `INSERT INTO timers
         (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, revision, created_at, updated_at)
        VALUES ('timer-1', 'channel-1', 'Community reminder', 1, '{text.welcome}', 'interval', ?, 1, ?, ?)`,
-    ).bind(JSON.stringify({ type: "interval", minutes: 10 }), "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z").run();
+    ).bind(JSON.stringify({ type: "interval", live: { minutes: 10 } }), "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z").run();
 
     await expect(validateTimerTemplateMutation({
       DB: database as unknown as D1Database,

@@ -301,7 +301,7 @@ describe("text library", () => {
     const snapshot = await service.list(CHANNEL_ID);
     await database.prepare(
       `INSERT INTO timers (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, revision, created_at, updated_at)
-       VALUES ('timer-race', ?, 'Racing timer', 1, '{text.timed_text}', 'interval', '{"type":"interval","minutes":10}', 1, ?, ?)`,
+       VALUES ('timer-race', ?, 'Racing timer', 1, '{text.timed_text}', 'interval', '{"type":"interval","live":{"minutes":10}}', 1, ?, ?)`,
     ).bind(CHANNEL_ID, new Date(NOW).toISOString(), new Date(NOW).toISOString()).run();
 
     const result = await service.delete(CHANNEL_ID, "timed_text", created.block.revision, snapshot.settings.graphRevision, ACTOR, new Date(NOW).toISOString());

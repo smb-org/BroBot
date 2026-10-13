@@ -77,6 +77,50 @@ afterEach(() => {
 });
 
 describe("timer scheduling and validation routes", () => {
+  it("arms an offline interval when the timer is saved while the channel is offline", async () => {
+    const database = await createDatabase();
+    await database.prepare(
+      "INSERT INTO channel_stream_state (channel_id, state, changed_at, source) VALUES (?, 'offline', ?, 'eventsub')",
+    ).bind(CHANNEL_ID, "2026-10-13T12:00:00.000Z").run();
+    const scheduled: ScheduledAlarm[] = [];
+    const app = appFor(database as unknown as D1Database);
+    const now = Date.parse("2026-10-13T12:00:00.000Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/timers`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Offline reminder",
+        messageText: "See you in chat!",
+        trigger: { type: "interval", offline: { minutes: 5, minimumMessages: 2 } },
+      }),
+    }), environmentFor(database as unknown as D1Database, scheduled));
+    const body = await response.json<{ timer: { id: string; trigger: unknown; nextRunAt: string | null; nextRunState: string | null } }>();
+
+    expect(response.status).toBe(201);
+    expect(body.timer.trigger).toEqual({ type: "interval", offline: { minutes: 5, minimumMessages: 2 } });
+    expect(body.timer.nextRunAt).toBe(new Date(now + 5 * 60_000).toISOString());
+    expect(body.timer.nextRunState).toBe("offline");
+    expect(scheduled).toEqual([expect.objectContaining({ deadline: now + 5 * 60_000 })]);
+    await expect(database.prepare("SELECT next_run_state FROM timers WHERE timer_id = ?")
+      .bind(body.timer.id).first()).resolves.toEqual({ next_run_state: "offline" });
+  });
+
+  it("rejects an interval with neither a live nor offline part", async () => {
+    const database = await createDatabase();
+    const response = await appFor(database as unknown as D1Database).fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/timers`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Empty interval", messageText: "Hello!", trigger: { type: "interval" } }),
+    }), environmentFor(database as unknown as D1Database, []));
+
+    expect(response.status).toBe(400);
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM timers WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).resolves.toEqual({ count: 0 });
+  });
+
   it("accepts the host viewers token when raid also declares an unavailable local viewers variable", async () => {
     const database = await createDatabase();
     const app = appFor(database as unknown as D1Database, [raidViewersVariable]);
@@ -87,7 +131,7 @@ describe("timer scheduling and validation routes", () => {
         body: JSON.stringify({
           name: "Viewer reminder",
           messageText: "We have {viewers} viewers",
-          trigger: { type: "interval", minutes: 10 },
+          trigger: { type: "interval", live: { minutes: 10 } },
         }),
       }),
       environmentFor(database as unknown as D1Database, []),
@@ -148,7 +192,7 @@ describe("timer scheduling and validation routes", () => {
       new Request(`https://brobot.example/channels/${CHANNEL_ID}/timers`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "Reminder", messageText: "{text.welcome}", trigger: { type: "interval", minutes: 10 } }),
+        body: JSON.stringify({ name: "Reminder", messageText: "{text.welcome}", trigger: { type: "interval", live: { minutes: 10 } } }),
       }),
       environmentFor(interleavedDatabase, []),
     );
@@ -169,7 +213,7 @@ describe("timer edit keeps the stream id in sync with next_run_at", () => {
          next_run_at, next_run_stream_id, last_run_at, created_at, updated_at)
        VALUES (?, ?, ?, 1, ?, ?, ?, 1, ?, ?, NULL, ?, ?)`,
     ).bind(
-      "timer-1", CHANNEL_ID, "Reminder", "Welcome back!", "interval", JSON.stringify({ type: "interval", minutes: 10 }),
+      "timer-1", CHANNEL_ID, "Reminder", "Welcome back!", "interval", JSON.stringify({ type: "interval", live: { minutes: 10 } }),
       new Date("2026-09-27T12:10:00.000Z").toISOString(), "stream-1",
       "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z",
     ).run();
@@ -180,7 +224,7 @@ describe("timer edit keeps the stream id in sync with next_run_at", () => {
     // `next_run_stream_id` ends up holding.
     const skippingDatabase = {
       prepare: (sql: string) => {
-        if (sql.includes("SET next_run_at = ?, next_run_stream_id = ?")) {
+        if (sql.includes("SET next_run_at = ?, next_run_stream_id = ?, next_run_state = ?")) {
           return { bind: () => ({ run: () => Promise.resolve({ results: [], success: true, meta: { changes: 0, rows_written: 0 } }) }) };
         }
         return realDatabase.prepare(sql);
@@ -197,7 +241,7 @@ describe("timer edit keeps the stream id in sync with next_run_at", () => {
         body: JSON.stringify({
           name: "Reminder (edited)",
           messageText: "New free text",
-          trigger: { type: "interval", minutes: 10 },
+          trigger: { type: "interval", live: { minutes: 10 } },
           revision: 1,
         }),
       }),

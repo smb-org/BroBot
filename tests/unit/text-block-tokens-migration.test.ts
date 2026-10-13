@@ -119,6 +119,7 @@ describe("text block token migration", () => {
       expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
 
       database.exec(readMigration("0059_channel_default_chat_target.sql"));
+      database.exec(readMigration("0061_timer_live_offline_intervals.sql"));
       const d1Database = {
         prepare: (sql: string) => new TestPreparedStatement(database, database.prepare(sql), sql),
       } as unknown as D1Database;
