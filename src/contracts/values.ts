@@ -139,6 +139,7 @@ export const EVENTSUB_SUBSCRIPTION_TYPES = [
   "channel.shoutout.receive",
   "channel.suspicious_user.message",
   "channel.suspicious_user.update",
+  "channel.update",
   "stream.offline",
   "stream.online",
 ] as const;

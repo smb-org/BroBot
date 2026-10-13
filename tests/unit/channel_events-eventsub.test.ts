@@ -32,6 +32,7 @@ describe("channel events EventSub targets", () => {
         ["automod.message.hold", { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-1" }],
         ["channel.suspicious_user.message", { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-1" }],
         ["channel.suspicious_user.update", { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-1" }],
+        ["channel.update", { broadcaster_user_id: "kanal-a" }],
         ["stream.online", { broadcaster_user_id: "kanal-a" }],
         ["stream.offline", { broadcaster_user_id: "kanal-a" }],
         ["channel.ad_break.begin", { broadcaster_user_id: "kanal-a" }],
@@ -66,6 +67,10 @@ describe("channel events EventSub targets", () => {
 
     const streamOnline = EVENTSUB_SUBSCRIPTION_DEFINITIONS.find((definition) => definition.subscriptionType === "stream.online");
     expect(streamOnline?.consentingIdentityFromCondition({ broadcaster_user_id: "200" })).toBeNull();
+
+    const channelUpdate = EVENTSUB_SUBSCRIPTION_DEFINITIONS.find((definition) => definition.subscriptionType === "channel.update");
+    expect(channelUpdate?.version).toBe("2");
+    expect(channelUpdate?.consentingIdentityFromCondition({ broadcaster_user_id: "200" })).toBeNull();
 
     const raid = EVENTSUB_SUBSCRIPTION_DEFINITIONS.find((definition) => definition.subscriptionType === "channel.raid");
     expect(raid?.consentingIdentityFromCondition({ to_broadcaster_user_id: "200" })).toBeNull();
@@ -114,6 +119,7 @@ describe("channel events EventSub targets", () => {
         { channelId: "kanal-a", subscriptionType: "channel.suspicious_user.update", variant: "", version: "1", deferredReason: "moderator_required" },
         { channelId: "kanal-a", subscriptionType: "stream.online", variant: "", version: "1" },
         { channelId: "kanal-a", subscriptionType: "stream.offline", variant: "", version: "1" },
+        { channelId: "kanal-a", subscriptionType: "channel.update", variant: "", version: "2" },
       ]);
     } finally {
       database.close();
