@@ -456,9 +456,10 @@ const ChannelControlExpiryWatcher = ({ controls, onRefresh }: {
   return null;
 };
 
-const ChannelControlStatus = ({ control, kind }: {
+const ChannelControlStatus = ({ control, kind, compact = false }: {
   control: PanelChannelControl;
   kind: "mute" | "pause";
+  compact?: boolean;
 }): ReactElement => {
   const texts = dashboardTexts();
   const labels = texts.channelControls;
@@ -473,16 +474,19 @@ const ChannelControlStatus = ({ control, kind }: {
   } else if (control.active && control.mode === "until_stream_end") {
     label = `${kind === "mute" ? labels.muteActive : labels.pauseActive} · ${labels.untilStreamEnd}`;
   } else if (control.active) label = kind === "mute" ? labels.muteActive : labels.pauseActive;
+  else if (compact) label = labels.inactive;
   const timed = control.active && control.mode === "timed" && control.until !== null && Date.parse(control.until) > now;
+  if (compact) return <span className="dashboard-header__account-control-state" title={label ?? labels.inactive}>{label}</span>;
   return <span className="dashboard-header__control-state-slot">
     {configured && label !== null ? <span className="dashboard-header__control-state" title={label}>{timed ? <Icon name="clock-hour-4" size={16} /> : null}<span>{label}</span></span> : null}
   </span>;
 };
 
-const ChannelControlActions = ({ channelId, controls, onRefresh }: {
-  channelId: string;
+const ChannelControlActions = ({ channelId, controls, onRefresh, children }: {
+  channelId: string | undefined;
   controls: PanelChannelControls | undefined;
   onRefresh: () => Promise<void>;
+  children: (slots: { desktopControls: ReactNode; accountMenuItems: ReactNode }) => ReactNode;
 }): ReactElement => {
   const texts = dashboardTexts();
   const labels = texts.channelControls;
@@ -496,7 +500,7 @@ const ChannelControlActions = ({ channelId, controls, onRefresh }: {
   const activeChannelControls = controls ?? { mute: CONTROL_OFF, pause: CONTROL_OFF };
 
   const apply = async (kind: "mute" | "pause", next: ChannelControlDuration | null): Promise<void> => {
-    if (busy !== null) return;
+    if (busy !== null || channelId === undefined) return;
     setBusy(kind);
     try {
       await setChannelControl(channelId, kind, next);
@@ -532,7 +536,7 @@ const ChannelControlActions = ({ channelId, controls, onRefresh }: {
           : labels.durationUnlimitedDescription,
   }));
 
-  return (
+  const desktopControls = channelId === undefined ? null : (
     <div className="dashboard-header__controls" aria-label={texts.navigation.channel}>
       <div className="dashboard-header__control-buttons">
         <Button
@@ -554,6 +558,25 @@ const ChannelControlActions = ({ channelId, controls, onRefresh }: {
         />
         <ChannelControlStatus control={pause} kind="pause" />
       </div>
+    </div>
+  );
+  const accountMenuItems = channelId === undefined ? null : (
+    <>
+      <div className="dashboard-header__account-menu-heading">{labels.controlsHeading}</div>
+      <button className="dashboard-header__account-control" onClick={() => { if (muteConfigured) void apply("mute", null); else setDialogControl("mute"); }} role="menuitem" type="button">
+        <span>{muteConfigured ? labels.muteDisable : labels.muteEnable}</span>
+        <ChannelControlStatus compact control={mute} kind="mute" />
+      </button>
+      <button className="dashboard-header__account-control" onClick={() => { if (pauseConfigured) void apply("pause", null); else setDialogControl("pause"); }} role="menuitem" type="button">
+        <span>{pauseConfigured ? labels.pauseDisable : labels.pauseEnable}</span>
+        <ChannelControlStatus compact control={pause} kind="pause" />
+      </button>
+    </>
+  );
+
+  return (
+    <>
+      {children({ desktopControls, accountMenuItems })}
       <ChannelControlExpiryWatcher controls={activeChannelControls} onRefresh={onRefresh} />
       <ControlDurationDialog
         opened={dialogControl !== null}
@@ -570,7 +593,7 @@ const ChannelControlActions = ({ channelId, controls, onRefresh }: {
         onConfirm={() => { if (dialogControl !== null) void apply(dialogControl, duration); }}
         onCancel={() => { if (busy === null) setDialogControl(null); }}
       />
-    </div>
+    </>
   );
 };
 
@@ -642,39 +665,44 @@ const DashboardHeader = ({ route, mode, channels, activeChannel, loadedAt, palet
       )}
       </div>
       <div aria-label={texts.navigation.setup} className="dashboard-header__mode" role="group">
-        <button aria-pressed={mode === "live"} onClick={() => { onSwitchMode("live"); }} type="button"><Icon name="broadcast" size={16} />{texts.navigation.live}</button>
-        <button aria-pressed={mode === "setup"} onClick={() => { onSwitchMode("setup"); }} type="button"><Icon name="tabSettings" size={16} />{texts.navigation.setup}</button>
+        <button aria-label={texts.navigation.live} aria-pressed={mode === "live"} onClick={() => { onSwitchMode("live"); }} type="button"><Icon name="broadcast" size={16} /><span className="dashboard-header__mode-label">{texts.navigation.live}</span></button>
+        <button aria-label={texts.navigation.setup} aria-pressed={mode === "setup"} onClick={() => { onSwitchMode("setup"); }} type="button"><Icon name="tabSettings" size={16} /><span className="dashboard-header__mode-label">{texts.navigation.setup}</span></button>
       </div>
-      <div className="dashboard-header__end">
-      <div className="dashboard-header__status">
-        {activeChannel === undefined ? null : <DashboardStreamClock channel={activeChannel} />}
-        {activeChannel === undefined ? null : <DashboardConnectionClock channel={activeChannel} {...(loadedAt === undefined ? {} : { loadedAt })} />}
-        {loadedAt === undefined ? null : <DataAge since={loadedAt} />}
-      </div>
-      {activeChannel === undefined ? null : <ChannelControlActions channelId={activeChannel.channelId} controls={activeChannel.controls} onRefresh={onRefreshState} />}
-      <button aria-label={texts.commandPalette.placeholder} className="dashboard-header__palette-trigger" onClick={onOpenCommandPalette} type="button">
-        <Icon name="search" size={16} /><span>{texts.commandPalette.placeholder}</span><kbd>{navigator.userAgent.includes("Mac") ? "⌘ K" : "Ctrl K"}</kbd>
-      </button>
-      <div className="dashboard-header__account-wrap" ref={accountMenuRef}>
-        <button aria-expanded={accountOpen} aria-haspopup="menu" aria-label={texts.navigation.accountMenu} className="dashboard-header__account-trigger" onClick={() => { setAccountOpen((open) => !open); }} type="button">
-          <span aria-hidden="true" className="dashboard-header__account-avatar">B</span><span className="dashboard-header__account-name">{texts.navigation.accountMenu}</span><span aria-hidden="true">⌄</span>
-        </button>
-        {accountOpen ? (
-          <div aria-label={texts.navigation.accountMenu} className="dashboard-header__account-menu" role="menu">
-            <div className="dashboard-header__account-menu-heading">{texts.navigation.appearance}</div>
-            <button aria-checked={palette === "nachtschicht"} onClick={() => { onPaletteChange("nachtschicht"); setAccountOpen(false); }} role="menuitemradio" type="button">
-              <span>{texts.navigation.appearanceNightShift}</span>{palette === "nachtschicht" ? <span aria-hidden="true">✓</span> : null}
+      <ChannelControlActions channelId={activeChannel?.channelId} controls={activeChannel?.controls} onRefresh={onRefreshState}>
+        {({ desktopControls, accountMenuItems }) => (
+          <div className="dashboard-header__end">
+            <div className="dashboard-header__status">
+              {activeChannel === undefined ? null : <DashboardStreamClock channel={activeChannel} />}
+              {activeChannel === undefined ? null : <DashboardConnectionClock channel={activeChannel} {...(loadedAt === undefined ? {} : { loadedAt })} />}
+              {loadedAt === undefined ? null : <DataAge since={loadedAt} />}
+            </div>
+            {desktopControls}
+            <button aria-label={texts.commandPalette.placeholder} className="dashboard-header__palette-trigger" onClick={onOpenCommandPalette} type="button">
+              <Icon name="search" size={16} /><span>{texts.commandPalette.placeholder}</span><kbd>{navigator.userAgent.includes("Mac") ? "⌘ K" : "Ctrl K"}</kbd>
             </button>
-            <button aria-checked={palette === "indigo-nacht"} onClick={() => { onPaletteChange("indigo-nacht"); setAccountOpen(false); }} role="menuitemradio" type="button">
-              <span>{texts.navigation.appearanceIndigoNight}</span>{palette === "indigo-nacht" ? <span aria-hidden="true">✓</span> : null}
-            </button>
-            <button className="dashboard-header__account-signout" disabled={loggingOut} onClick={() => { setAccountOpen(false); onLogout(); }} role="menuitem" type="button">
-              {loggingOut ? texts.navigation.signingOut : texts.navigation.signOut}
-            </button>
+            <div className="dashboard-header__account-wrap" ref={accountMenuRef}>
+              <button aria-expanded={accountOpen} aria-haspopup="menu" aria-label={texts.navigation.accountMenu} className="dashboard-header__account-trigger" onClick={() => { setAccountOpen((open) => !open); }} type="button">
+                <span aria-hidden="true" className="dashboard-header__account-avatar">B</span><span className="dashboard-header__account-name">{texts.navigation.accountMenu}</span><span aria-hidden="true">⌄</span>
+              </button>
+              {accountOpen ? (
+                <div aria-label={texts.navigation.accountMenu} className="dashboard-header__account-menu" role="menu">
+                  <div className="dashboard-header__account-menu-heading">{texts.navigation.appearance}</div>
+                  <button aria-checked={palette === "nachtschicht"} onClick={() => { onPaletteChange("nachtschicht"); setAccountOpen(false); }} role="menuitemradio" type="button">
+                    <span>{texts.navigation.appearanceNightShift}</span>{palette === "nachtschicht" ? <span aria-hidden="true">✓</span> : null}
+                  </button>
+                  <button aria-checked={palette === "indigo-nacht"} onClick={() => { onPaletteChange("indigo-nacht"); setAccountOpen(false); }} role="menuitemradio" type="button">
+                    <span>{texts.navigation.appearanceIndigoNight}</span>{palette === "indigo-nacht" ? <span aria-hidden="true">✓</span> : null}
+                  </button>
+                  {accountMenuItems}
+                  <button className="dashboard-header__account-signout" disabled={loggingOut} onClick={() => { setAccountOpen(false); onLogout(); }} role="menuitem" type="button">
+                    {loggingOut ? texts.navigation.signingOut : texts.navigation.signOut}
+                  </button>
+                </div>
+              ) : null}
+            </div>
           </div>
-        ) : null}
-      </div>
-      </div>
+        )}
+      </ChannelControlActions>
     </div>
   );
 };
@@ -1848,6 +1876,8 @@ export const DashboardApp = (): ReactElement => {
           isPlatformAdmin={isPlatform}
           {...(channels.status === "success" ? { botSignedIn } : {})}
           streamState={paletteStreamState}
+          {...(paletteChannel?.controls === undefined ? {} : { channelControls: paletteChannel.controls })}
+          onRefreshChannelState={refreshChannelState}
           modules={paletteModules}
           onNavigate={navigate}
           onOpenCommand={(name) => {

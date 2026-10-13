@@ -5,10 +5,11 @@ import { MODULES } from "../modules/registry";
 import type { TextCommand } from "../modules/text_commands/contracts";
 import { loadTextCommands } from "../modules/text_commands/panel/service";
 import { canManage, type ChannelRole } from "../contracts/values";
-import type { PanelModuleState } from "../panel-contract";
-import { PanelApiError, createClip, fetchChannelVariables, sendManualShoutout, setChannelModuleEnabled, startCommercial, type PanelChannelVariable } from "./api";
+import type { PanelChannelControls, PanelModuleState } from "../panel-contract";
+import { PanelApiError, createClip, fetchChannelVariables, sendManualShoutout, setChannelControl, setChannelModuleEnabled, startCommercial, type PanelChannelVariable } from "./api";
 import { dispatchDashboardAuthenticationRequired } from "./data/events";
 import { refreshAfterModuleToggle } from "./data/module-toggle";
+import { queryKeys } from "./data/keys";
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
 import { apiErrorText, channelVariablesTexts, dashboardLanguage, dashboardTexts, immediateActionUnavailableReasonText } from "./locale";
 import { moduleDescription, moduleName, moduleWorkspaceTexts } from "./module-labels";
@@ -57,6 +58,8 @@ interface ChannelCommandPaletteProperties {
   /** Whether the installation bot is signed in; undefined while its status is unknown. */
   botSignedIn?: boolean;
   streamState?: "online" | "offline" | null | undefined;
+  channelControls?: PanelChannelControls;
+  onRefreshChannelState?: () => Promise<void>;
   modules: PanelModuleState[];
   onNavigate: (route: DashboardRoute, onNavigated?: () => void) => void;
   /** Set after navigation succeeds, so its panel can pre-select the command. */
@@ -80,7 +83,7 @@ const recentTargetPathForRoute = (route: DashboardRoute, channelId: string | nul
 };
 
 /** Cmd/Ctrl+K finds navigation, text commands, variables, and channel actions. */
-export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, viewerUserId = null, route, isPlatformAdmin = false, botSignedIn, streamState, modules, onNavigate, onOpenCommand, onOpenVariable }: ChannelCommandPaletteProperties): ReactElement => {
+export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, viewerUserId = null, route, isPlatformAdmin = false, botSignedIn, streamState, channelControls, onRefreshChannelState, modules, onNavigate, onOpenCommand, onOpenVariable }: ChannelCommandPaletteProperties): ReactElement => {
   const texts = dashboardTexts();
   const manageable = ownRole !== null && canManage(ownRole);
   const [commands, setCommands] = useState<TextCommand[]>([]);
@@ -177,6 +180,28 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
     : "";
 
   const queryClient = useQueryClient();
+  const toggleChannelControl = useCallback(async (kind: "mute" | "pause"): Promise<void> => {
+    if (channelId === null) return;
+    const control = channelControls?.[kind];
+    const configured = control?.active === true || control?.pending === true;
+    const labels = dashboardTexts().channelControls;
+    try {
+      await setChannelControl(channelId, kind, configured ? null : "unlimited");
+    } catch (error: unknown) {
+      notify({ tone: "error", message: error instanceof PanelApiError ? apiErrorText(error.code, labels.failure) : labels.failure });
+      if (error instanceof PanelApiError && error.status === 401) dispatchDashboardAuthenticationRequired();
+      return;
+    }
+    try {
+      if (onRefreshChannelState !== undefined) await onRefreshChannelState();
+      else await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.channels(), exact: true }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.channel(channelId, "overview"), exact: true }),
+      ]);
+    } catch {
+      notify({ tone: "error", message: labels.refreshFailure });
+    }
+  }, [channelControls, channelId, onRefreshChannelState, queryClient]);
   const toggleAds = useCallback(async (enabled: boolean): Promise<void> => {
     if (channelId === null) return;
     try {
@@ -201,6 +226,32 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
     const clip = moduleImmediateActionAvailability("clips", modules, streamState);
     const shoutout = moduleImmediateActionAvailability("raid", modules, streamState);
     const items: CommandPaletteItem[] = [];
+    const channelControlLabels = texts.channelControls;
+    for (const kind of ["mute", "pause"] as const) {
+      const control = channelControls?.[kind];
+      const configured = control?.active === true || control?.pending === true;
+      const isMute = kind === "mute";
+      const actionLabel = isMute
+        ? configured ? channelControlLabels.muteDisable : channelControlLabels.muteEnable
+        : configured ? channelControlLabels.pauseDisable : channelControlLabels.pauseEnable;
+      const stateLabel = control?.pending === true
+        ? channelControlLabels.pendingUntilStreamStart
+        : configured
+          ? isMute ? channelControlLabels.muteActive : channelControlLabels.pauseActive
+          : channelControlLabels.inactive;
+      items.push({
+        id: `action:channel-${kind}`,
+        label: actionLabel,
+        ...(configured ? {} : { description: channelControlLabels.durationUnlimitedDescription }),
+        group: texts.commandPalette.groupActions,
+        keywords: isMute
+          ? ["mute", "unmute", "stumm", "stummschalten"]
+          : ["pause", "resume", "paused", "automatische aktionen", "fortsetzen"],
+        stateLabel,
+        icon: isMute ? (configured ? "volume-off" : "volume-3") : (configured ? "player-play" : "player-pause"),
+        onTrigger: () => { void toggleChannelControl(kind); },
+      });
+    }
     if (adNow.offered) {
       const adNowDisabledReason = !manageable ? texts.module.managementLocked : adNow.disabledReason;
       items.push({
@@ -264,7 +315,7 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
       });
     }
     return items;
-  }, [texts, manageable, adsEnabled, channelId, shoutoutLogin, streamState, modules, toggleAds]);
+  }, [texts, manageable, adsEnabled, channelId, channelControls, shoutoutLogin, streamState, modules, toggleAds, toggleChannelControl]);
 
   const targetItems = navigationItems;
   const recentItems = recentTargetPaths.flatMap((path, index) => {

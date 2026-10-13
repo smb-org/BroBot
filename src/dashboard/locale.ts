@@ -1074,6 +1074,8 @@ export interface DashboardTexts {
     browserTimeZoneFallback: string;
   };
   channelControls: {
+    controlsHeading: string;
+    inactive: string;
     muteName: string;
     pauseName: string;
     muteEnable: string;
@@ -1404,6 +1406,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       browserTimeZoneFallback: "Browser-Zeitzone wird verwendet",
     },
     channelControls: {
+      controlsHeading: "Kanalsteuerung",
+      inactive: "Inaktiv",
       muteName: "Stummschaltung",
       pauseName: "Pause",
       muteEnable: "Kanal stummschalten",
@@ -1721,6 +1725,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       browserTimeZoneFallback: "Using browser time zone",
     },
     channelControls: {
+      controlsHeading: "Channel controls",
+      inactive: "Inactive",
       muteName: "Mute",
       pauseName: "Pause",
       muteEnable: "Mute channel",
