@@ -26,6 +26,7 @@ export interface ApiSourcePanelTexts {
   delete: string;
   deleteTitle: string;
   deleteConsequence: string;
+  inUse: string;
   deleted: string;
   saved: string;
   created: string;
@@ -72,6 +73,7 @@ const texts: Readonly<Record<ModuleLanguage, ApiSourcePanelTexts>> = {
     delete: "Quelle löschen",
     deleteTitle: "API-Quelle löschen?",
     deleteConsequence: "Die Quelle steht danach nicht mehr für Vorlagen und Bedingungen bereit.",
+    inUse: "Diese Quelle wird noch in gespeicherten Vorlagen oder Textbaustein-Bedingungen verwendet.",
     deleted: "Die API-Quelle wurde gelöscht.",
     saved: "Die API-Quelle wurde gespeichert.",
     created: "Die API-Quelle wurde angelegt.",
@@ -116,6 +118,7 @@ const texts: Readonly<Record<ModuleLanguage, ApiSourcePanelTexts>> = {
     delete: "Delete source",
     deleteTitle: "Delete API source?",
     deleteConsequence: "The source will no longer be available to templates or conditions.",
+    inUse: "This source is still used by saved templates or text block conditions.",
     deleted: "The API source was deleted.",
     saved: "The API source was saved.",
     created: "The API source was created.",

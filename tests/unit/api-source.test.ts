@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { performance } from "node:perf_hooks";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ModuleEvent, ModuleRouteEnvironment } from "../../src/modules/contract";
+import type { ModuleEvent, ModuleRouteEnvironment, ModuleTemplateUsageSource } from "../../src/modules/contract";
 import { apiSourceFailureText } from "../../src/dashboard/locale";
 import { apiSourceModule } from "../../src/modules/api_source";
 import { fetchCachedApiSourceJson } from "../../src/modules/api_source/adapters/fetch-json";
@@ -24,6 +24,7 @@ import { textLibraryModule } from "../../src/modules/text_library";
 import { createTemplateRenderer, type TemplateResolverSources } from "../../src/worker/template-resolver";
 import { createTextBlockTemplateValueProvider } from "../../src/modules/text_library/adapters/template-expander";
 import { readPanelResourceRevisions } from "../../src/worker/panel-resources";
+import { prepareModuleAudit } from "../../src/worker/module-audit";
 import { insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -450,6 +451,64 @@ describe("API source test request", () => {
   });
 });
 
+describe("API source deletion guard", () => {
+  it("blocks deletion while saved templates, text, or conditions reference the source", async () => {
+    const database = await createDatabase();
+    await insertSource(database, "sunset", "$.sunset");
+    const now = new Date(NOW).toISOString();
+    await database.prepare(
+      `INSERT INTO text_library_categories (channel_id, category_id, catalog_key, custom_name, created_at, updated_at)
+       VALUES (?, 'info', 'info', NULL, ?, ?)`,
+    ).bind(CHANNEL_ID, now, now).run();
+    await database.prepare(
+      `INSERT INTO text_blocks (channel_id, block_name, category_id, games_json, revision, created_at, updated_at)
+       VALUES (?, 'sunset_info', 'info', '[]', 1, ?, ?)`,
+    ).bind(CHANNEL_ID, now, now).run();
+    await database.prepare(
+      `INSERT INTO text_block_variants (channel_id, block_name, variant_id, position, conditions_json, texts_json)
+       VALUES (?, 'sunset_info', 'default', 0, ?, ?)`,
+    ).bind(CHANNEL_ID, JSON.stringify({ data: { "api_source.sunset": "true" } }), JSON.stringify(["Sunset: {api.sunset}"])).run();
+
+    const app = new Hono<ModuleRouteEnvironment>();
+    const actorId = "api-source-manager";
+    const templateSources: readonly ModuleTemplateUsageSource[] = [
+      { text: "Timer says {api.sunset}", kind: "timer", label: "Evening timer" },
+      { text: "FAQ says {api.sunset}", kind: "faq", label: "Sunset FAQ" },
+    ];
+    app.use("*", async (context, next) => {
+      context.set("channelRole", "manager");
+      context.set("actor", { userId: actorId, sessionId: "api-source-session" });
+      context.set("authorizeManagementMutation", () => ({ sql: "AND 1 = 1", values: [] }));
+      context.set("prepareModuleAudit", (entry, changedAt) =>
+        prepareModuleAudit(database as unknown as D1Database, actorId, changedAt, entry));
+      context.set("publishOverlayHostEvent", () => Promise.resolve());
+      context.set("templateUsageSources", () => Promise.resolve(templateSources));
+      await next();
+    });
+    app.route("/channels/:channelId", apiSourceRoutes);
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/sources/sunset`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ revision: 1 }),
+    }), { DB: database as unknown as D1Database });
+
+    expect(response.status).toBe(409);
+    const responseBody: unknown = await response.json();
+    if (typeof responseBody !== "object" || responseBody === null || Array.isArray(responseBody)) {
+      throw new Error("API source deletion response is invalid.");
+    }
+    expect(Reflect.get(responseBody, "error")).toBe("api_source_in_use");
+    expect(Reflect.get(responseBody, "usages")).toEqual([
+        { kind: "timer", label: "Evening timer" },
+        { kind: "faq", label: "Sunset FAQ" },
+        { kind: "text_block", label: "sunset_info" },
+        { kind: "text_block_condition", label: "sunset_info" },
+    ]);
+    await expect(getApiSource(database as unknown as D1Database, CHANNEL_ID, "sunset")).resolves.not.toBeNull();
+  });
+});
+
 describe("API source status", () => {
   it("exposes the last status through list and detail reads", async () => {
     const database = await createDatabase();
@@ -787,6 +846,63 @@ describe("API source JSONata", () => {
   });
 });
 
+describe("API source template dispatch", () => {
+  it.each([
+    { consumer: "timer", templateContext: "event" as const, mode: "chat" as const },
+    { consumer: "FAQ", templateContext: "event" as const, mode: "chat" as const },
+    { consumer: "overlay", templateContext: "system" as const, mode: "overlay" as const },
+  ])("uses the unavailable fallback for a missing source in $consumer rendering", async ({ consumer, templateContext, mode }) => {
+    const database = await createDatabase();
+    const db = database as unknown as D1Database;
+    const event: ModuleEvent = {
+      channelId: CHANNEL_ID,
+      subscriptionType: "channel.chat.message",
+      triggerId: `missing-api-source-${consumer}`,
+      payload: {},
+      settings: {},
+      receivedAt: new Date(NOW).toISOString(),
+      actor: null,
+      chatStatus: null,
+    };
+    const variables = await apiSourceModule.templateVariables?.(db, CHANNEL_ID) ?? [];
+    const unavailableText = apiSourceModule.templateUnavailableText;
+    if (unavailableText === undefined) throw new Error("API source unavailable text is missing.");
+    const sources: TemplateResolverSources = {
+      DB: db,
+      publicOrigin: "https://brobot.esembe.app",
+      channelInfo: () => Promise.resolve(null),
+      channelGameId: () => Promise.resolve(null),
+      channelTimeZone: () => Promise.resolve("Europe/Berlin"),
+      channelLocation: () => Promise.resolve(null),
+      templateValueProviders: [{
+        moduleId: apiSourceModule.id,
+        templateVariableNamespace: "api_sources",
+        variables,
+        templateUnavailableText: unavailableText,
+        resolveTemplateValues: (names, context) =>
+          apiSourceModule.resolveTemplateValues?.(names, context) ?? Promise.resolve({}),
+      }],
+      registeredTemplateVariables: variables,
+      streamState: () => Promise.resolve("offline"),
+      channelDetails: () => Promise.resolve(null),
+      streamDetails: () => Promise.resolve(null),
+      followedAt: () => Promise.resolve("unavailable"),
+      followerTotal: () => Promise.resolve(null),
+      chattersTotal: () => Promise.resolve(null),
+      userCreatedAt: () => Promise.resolve(null),
+      channelLanguage: () => Promise.resolve("en"),
+      readChannelVariables: () => Promise.resolve({}),
+      now: () => NOW,
+    };
+
+    const rendered = await createTemplateRenderer(event, templateContext, [], sources)(
+      `Sunset: {api.deleted_source} (${consumer})`, {}, undefined, mode,
+    );
+
+    expect(rendered.text).toBe(`Sunset: ${unavailableText.en} (${consumer})`);
+  });
+});
+
 describe("API source Node-side template CPU measurement", () => {
   it("measures nested blocks, two data conditions, and three JSONata expressions in Node", async () => {
     const database = await createDatabase();
@@ -847,6 +963,7 @@ describe("API source Node-side template CPU measurement", () => {
       },
       {
         moduleId: apiSourceModule.id,
+        templateVariableNamespace: "api_sources",
         variables: apiVariables,
         textBlockConditions: conditions,
         templateUnavailableText: { de: "nicht verfügbar", en: "unavailable" },
@@ -930,6 +1047,7 @@ describe("API source Node-side template CPU measurement", () => {
       channelLocation: () => Promise.resolve(null),
       templateValueProviders: [{
         moduleId: apiSourceModule.id,
+        templateVariableNamespace: "api_sources",
         variables: apiVariables,
         templateUnavailableText: { de: "nicht verfügbar", en: "unavailable" },
         resolveTemplateValues: (names, context) =>

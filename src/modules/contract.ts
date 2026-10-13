@@ -1438,8 +1438,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   templateVariables?: (db: D1Database, channelId: string) => Promise<readonly TemplateVariable[]>;
   /** Which host catalog groups are available in this module's templates. */
   templateContext?: TemplateContext;
-  /** Allows this designated provider to register bare text-block names. */
-  templateVariableNamespace?: "text_blocks";
+  /** Requests syntactically valid names even when they are absent from this provider's declarations. */
+  templateVariableNamespace?: "text_blocks" | "api_sources";
   /** Resolves only the declared names requested from the original template fragment. */
   resolveTemplateValues?: (
     names: readonly string[],

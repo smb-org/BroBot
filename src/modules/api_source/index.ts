@@ -183,6 +183,7 @@ export const apiSourceModule: BotModule<typeof settingsSchema> = {
     icon: apiSourceIcon,
     order: 35,
   },
+  templateVariableNamespace: "api_sources",
   templateVariableCatalog: [],
   resolveOverlayTemplateValues: resolveOverlayValues,
   templateUnavailableText: unavailableText,

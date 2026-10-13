@@ -167,7 +167,9 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
       closeEditor();
       notify({ tone: "success", message: labels.deleted });
     } catch (failure: unknown) {
-      setDeleteError(apiErrorCode(failure) === "api_source_management_denied" ? labels.denied : labels.saveFailed);
+      const code = apiErrorCode(failure);
+      setDeleteError(code === "api_source_in_use" ? labels.inUse
+        : code === "api_source_management_denied" ? labels.denied : labels.saveFailed);
     } finally {
       setBusy(false);
     }

@@ -2,7 +2,8 @@ import { Hono } from "hono";
 import { z } from "zod";
 
 import { canManage } from "../../contracts/values";
-import type { ModuleRouteEnvironment } from "../contract";
+import { templateVariableNames } from "../contract";
+import type { ModuleRouteEnvironment, ModuleTemplateUsageSource } from "../contract";
 import { API_SOURCE_MAXIMUMS, API_SOURCE_NAME_PATTERN } from "./contracts";
 import { getApiSource, listApiSources } from "./adapters/d1";
 import { inspectApiSourceExpression } from "./domain";
@@ -27,6 +28,83 @@ const channelIdOf = (context: { req: { param: (name: string) => string | undefin
 
 const safeHost = (url: string): string | null => {
   try { return new URL(url).hostname; } catch { return null; }
+};
+
+type ApiSourceUsage = {
+  kind: ModuleTemplateUsageSource["kind"] | "text_block" | "text_block_condition";
+  label: string;
+};
+
+const stringArrayFromJson = (serialized: string): string[] => {
+  try {
+    const parsed: unknown = JSON.parse(serialized);
+    return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : [];
+  } catch {
+    return [];
+  }
+};
+
+const hasConditionReference = (serialized: string, conditionId: string): boolean => {
+  try {
+    const parsed: unknown = JSON.parse(serialized);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return false;
+    const data: unknown = Reflect.get(parsed, "data");
+    return typeof data === "object" && data !== null && !Array.isArray(data) && Object.hasOwn(data, conditionId);
+  } catch {
+    return false;
+  }
+};
+
+const apiSourceUsages = async (
+  db: D1Database,
+  channelId: string,
+  name: string,
+  templateSources: readonly ModuleTemplateUsageSource[],
+): Promise<readonly ApiSourceUsage[]> => {
+  const variableName = `api.${name}`;
+  const conditionId = `api_source.${name}`;
+  const usages = new Map<string, ApiSourceUsage>();
+  const addUsage = (usage: ApiSourceUsage): void => {
+    usages.set(`${usage.kind}\u0000${usage.label}`, usage);
+  };
+  for (const source of templateSources) {
+    if (templateVariableNames(source.text).includes(variableName)) {
+      addUsage({ kind: source.kind, label: source.label });
+    }
+  }
+
+  const variants = await db.prepare(
+    `SELECT block_name, conditions_json, texts_json
+       FROM text_block_variants
+      WHERE channel_id = ? ORDER BY block_name, position`,
+  ).bind(channelId).all<{ block_name: string; conditions_json: string; texts_json: string }>();
+  for (const variant of variants.results) {
+    const label = variant.block_name;
+    if (stringArrayFromJson(variant.texts_json).some((text) => templateVariableNames(text).includes(variableName))) {
+      addUsage({ kind: "text_block", label });
+    }
+    if (hasConditionReference(variant.conditions_json, conditionId)) {
+      addUsage({ kind: "text_block_condition", label });
+    }
+  }
+
+  const [moduleSettings, chatVoteTemplates] = await Promise.all([
+    db.prepare("SELECT module_id, settings FROM channel_modules WHERE channel_id = ? ORDER BY module_id")
+      .bind(channelId).all<{ module_id: string; settings: string }>(),
+    db.prepare("SELECT id, title, labels FROM chat_vote_templates WHERE channel_id = ? ORDER BY id")
+      .bind(channelId).all<{ id: string; title: string; labels: string }>(),
+  ]);
+  for (const module of moduleSettings.results) {
+    if (templateVariableNames(module.settings).includes(variableName)) {
+      addUsage({ kind: "event", label: module.module_id });
+    }
+  }
+  for (const template of chatVoteTemplates.results) {
+    if (templateVariableNames(`${template.title} ${template.labels}`).includes(variableName)) {
+      addUsage({ kind: "event", label: `chat_vote_templates.${template.id}` });
+    }
+  }
+  return [...usages.values()];
 };
 
 export const apiSourceRoutes = new Hono<ModuleRouteEnvironment>();
@@ -143,6 +221,13 @@ apiSourceRoutes.delete("/sources/:name", async (context) => {
   const before = await getApiSource(context.env.DB, channelId, name);
   if (before === null) return context.json({ error: "api_source_not_found" }, 404);
   if (parsed.data.revision !== before.revision) return context.json({ error: "api_source_conflict" }, 409);
+  const usages = await apiSourceUsages(
+    context.env.DB,
+    channelId,
+    name,
+    await context.get("templateUsageSources")(channelId),
+  );
+  if (usages.length > 0) return context.json({ error: "api_source_in_use", usages }, 409);
   const now = new Date().toISOString();
   const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
