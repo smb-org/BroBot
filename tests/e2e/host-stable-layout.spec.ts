@@ -358,29 +358,27 @@ test("the overview location region is present and keeps its box while settings l
   expect(before).toEqual(after);
 });
 
-test("event controls stay above growing lists as channel responses arrive", async ({ page }) => {
-  for (const [section, gateName, controlSelector] of [
-    ["events", "events", ".events-page__pagination-slot"],
-  ] as const) {
-    let releaseResponse!: () => void;
-    let markResponseStarted!: () => void;
-    const responseGate = new Promise<void>((resolve) => { releaseResponse = resolve; });
-    const responseStarted = new Promise<void>((resolve) => { markResponseStarted = resolve; });
-    const responseData: ChannelMockData = { events: fullEventPage };
-    await installChannelMocks(page, { [gateName]: { wait: responseGate, started: markResponseStarted } }, responseData);
-    await page.goto(`/channels/${channelId}/${section}`);
-    await responseStarted;
-    const loadState = page.locator(".ui-load-state--panel");
-    await expect(loadState).toHaveAttribute("data-status", "loading");
-    const beforeControl = await measureBox(page, controlSelector);
-    releaseResponse();
-    await expect(loadState).not.toHaveAttribute("data-status", "loading");
-    const afterControl = await measureBox(page, controlSelector);
-    expect(afterControl).toEqual(beforeControl);
-    const listBox = await measureBox(page, ".ui-load-state--panel");
-    expect(beforeControl[1] + beforeControl[3]).toBeLessThanOrEqual(listBox[1]);
-    await page.unrouteAll();
-  }
+test("event pagination keeps a fixed footer below the loaded rows", async ({ page }) => {
+  let releaseResponse!: () => void;
+  let markResponseStarted!: () => void;
+  const responseGate = new Promise<void>((resolve) => { releaseResponse = resolve; });
+  const responseStarted = new Promise<void>((resolve) => { markResponseStarted = resolve; });
+  await installChannelMocks(page, { events: { wait: responseGate, started: markResponseStarted } }, { events: fullEventPage });
+  await page.goto(`/channels/${channelId}/events`);
+  await responseStarted;
+
+  await expect(page.locator(".ui-load-state--panel")).toHaveAttribute("data-status", "loading");
+  releaseResponse();
+  await expect(page.locator(".event-table tbody tr:not(.data-table__day-row)")).toHaveCount(fullEventPage.entries.length);
+
+  const footer = page.locator(".events-page__pagination-slot");
+  await expect(footer).toBeVisible();
+  const footerBox = await measureBox(page, ".events-page__pagination-slot");
+  const lastRow = await measureDocumentBox(page, ".event-table tbody:last-of-type tr:not(.data-table__day-row):last-child");
+  expect(footerBox[3]).toBe(60);
+  expect(footerBox[1]).toBeGreaterThanOrEqual(lastRow[1] + lastRow[3] - 1);
+  await expect(footer.getByRole("button", { name: "Load older events" })).toBeVisible();
+  await page.unrouteAll();
 });
 
 test("channel audit pagination stays in a sticky 44px footer and the list top fixed at desktop and 390px", async ({ page }) => {
@@ -783,6 +781,7 @@ test("event rows keep their cell geometry after loading older events at desktop 
     await page.goto(`/channels/${channelId}/events`);
     await expect(page.locator(".event-table tbody tr:not(.data-table__day-row)")).toHaveCount(50);
     const existingRow = page.locator(".event-table tbody tr:not(.data-table__day-row)").first();
+    await expect(existingRow).toBeVisible();
     const measureRow = async (): Promise<number[][]> => existingRow.evaluate((row) => [row, ...Array.from(row.children)].map((element) => {
       const rect = element.getBoundingClientRect();
       const round = (value: number): number => Math.round(value * 100) / 100;
@@ -797,7 +796,7 @@ test("event rows keep their cell geometry after loading older events at desktop 
     expect(after).toEqual(before);
     const olderRow = page.locator(".event-table tbody tr:not(.data-table__day-row)").last();
     const olderActorCell = width < 720
-      ? olderRow.locator(".event-table__mobile-meta > span:nth-child(3)")
+      ? olderRow.locator(".event-table__mobile-meta > span:last-child")
       : olderRow.locator("td").nth(3).locator(".data-table__cell-value");
     const olderActorLabel = width < 720 ? olderActorCell : olderActorCell.locator("[title]");
     await expect(olderActorLabel).toHaveAttribute("title", longActor);

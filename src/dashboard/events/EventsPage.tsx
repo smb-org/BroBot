@@ -506,11 +506,6 @@ const EventsPageFilterState = ({
             <div className="realtime-feed__notice-slot" data-pending={pendingCount > 0}>
               {pendingCount === 0 ? null : <button className="button button--with-icon realtime-feed__notice" type="button" onClick={realtime.jumpToBeginning} aria-live="polite"><Icon name="jumpToTop" size={16} />{texts.events.realtimeNew(formatNumber(pendingCount))}</button>}
             </div>
-            <div className="events-page__pagination-slot">
-              {loading || eventEntries.length === 0 ? null : nextCursor === null
-                ? <p className="empty-state">{texts.events.feedEnd}</p>
-                : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage || fetching}>{loadingNextPage ? texts.events.loadingOlder : texts.events.loadOlder}</button>}
-            </div>
             <UiLoadState
               variant="panel-420"
               status={loading && eventEntries.length === 0
@@ -577,6 +572,7 @@ const EventsPageFilterState = ({
                               )}
                             </span>
                             <span className="event-table__mobile-meta muted">
+                              <span className="data-table__module-group" data-module-group={entry.moduleId} aria-hidden="true" />
                               <span className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined} title={moduleLabel(entry)}>{moduleLabel(entry)}</span>
                               <span aria-hidden="true">·</span>
                               <span title={actorLabel(entry, texts)}>{actorCell(entry, texts)}</span>
@@ -610,6 +606,11 @@ const EventsPageFilterState = ({
                   />
                 </div>
                 <EventFeedEnd nextCursor={nextCursor} loadingNextPage={loadingNextPage || fetching} onNextPage={onNextPage} />
+              </div>
+              <div className="events-page__pagination-slot">
+                {loading || eventEntries.length === 0 ? null : nextCursor === null
+                  ? <p className="empty-state">{texts.events.feedEnd}</p>
+                  : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage || fetching}>{loadingNextPage ? texts.events.loadingOlder : texts.events.loadOlder}</button>}
               </div>
               </>
             </UiLoadState>

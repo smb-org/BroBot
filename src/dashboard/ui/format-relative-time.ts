@@ -90,9 +90,10 @@ export const formatRelativeTime = (
     timeZone: effectiveTimeZone,
   }).format(date);
   const dayOffset = calendarDayOffset(date, current, effectiveTimeZone);
+  if (dayOffset === 0) return { label: clock, exact };
   const day = dayOffset === null
     ? new Intl.DateTimeFormat(language, { dateStyle: "medium", timeZone: effectiveTimeZone }).format(date)
-    : new Intl.RelativeTimeFormat(language, { numeric: "auto" }).format(dayOffset, "day");
-  return { label: `${day} · ${clock}`, exact };
+    : new Intl.DateTimeFormat(language, { weekday: "short", timeZone: effectiveTimeZone }).format(date);
+  return { label: `${day} ${clock}`, exact };
 };
 
