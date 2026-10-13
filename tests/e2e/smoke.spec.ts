@@ -149,6 +149,16 @@ test("setup navigation stays reachable across desktop and mobile widths", async 
   await expect(lastEntry).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
+  // At desktop widths the mode switch is centred in the topbar itself.
+  for (const width of [1920, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    const bar = await page.locator(".dashboard-shell__header").boundingBox();
+    const mode = await page.locator(".dashboard-header__mode").boundingBox();
+    expect(bar).not.toBeNull();
+    expect(mode).not.toBeNull();
+    expect(Math.abs((mode?.x ?? 0) + (mode?.width ?? 0) / 2 - ((bar?.x ?? 0) + (bar?.width ?? 0) / 2))).toBeLessThanOrEqual(2);
+  }
+
   // The fixed 64px topbar keeps its controls on one row at tablet widths.
   await page.setViewportSize({ width: 600, height: 900 });
   const topbarBox = await page.locator(".dashboard-shell__header").boundingBox();

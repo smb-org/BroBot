@@ -622,6 +622,7 @@ const DashboardHeader = ({ route, mode, channels, activeChannel, loadedAt, palet
   }, [accountOpen]);
   return (
     <div className="dashboard-header">
+      <div className="dashboard-header__start">
       <a aria-current={dashboardModeForRoute(route) === "live" ? "page" : undefined} className="brand-mark dashboard-header__brand" href="/" onClick={(event) => { event.preventDefault(); onNavigate({ kind: "overview" }); }}><span className="brand-mark__dot" /><span className="brand-mark__word">BroBot</span></a>
       {activeChannel === undefined ? null : (
       <div className="dashboard-header__channel">
@@ -639,10 +640,12 @@ const DashboardHeader = ({ route, mode, channels, activeChannel, loadedAt, palet
         {activeChannel.location == null ? null : <ChannelLocationMenu location={activeChannel.location} messages={texts.header.locationMenu} />}
         </div>
       )}
+      </div>
       <div aria-label={texts.navigation.setup} className="dashboard-header__mode" role="group">
         <button aria-pressed={mode === "live"} onClick={() => { onSwitchMode("live"); }} type="button"><Icon name="broadcast" size={16} />{texts.navigation.live}</button>
         <button aria-pressed={mode === "setup"} onClick={() => { onSwitchMode("setup"); }} type="button"><Icon name="tabSettings" size={16} />{texts.navigation.setup}</button>
       </div>
+      <div className="dashboard-header__end">
       <div className="dashboard-header__status">
         {activeChannel === undefined ? null : <DashboardStreamClock channel={activeChannel} />}
         {activeChannel === undefined ? null : <DashboardConnectionClock channel={activeChannel} {...(loadedAt === undefined ? {} : { loadedAt })} />}
@@ -670,6 +673,7 @@ const DashboardHeader = ({ route, mode, channels, activeChannel, loadedAt, palet
             </button>
           </div>
         ) : null}
+      </div>
       </div>
     </div>
   );
