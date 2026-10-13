@@ -82,6 +82,7 @@ interface EventDisplaySnapshot {
   days: readonly EventDayGroup[];
   pageCount: number;
   paginationIds: ReadonlySet<string>;
+  timeZone: string;
 }
 
 const actorCell = (entry: PanelEventEntry, texts: ReturnType<typeof dashboardTexts>): ReactNode =>
@@ -424,11 +425,13 @@ const EventsPageFilterState = ({
   realtime: RealtimeFeedState;
 }): ReactElement => {
   const texts = dashboardTexts();
+  const groupingTimeZone = channelTimeZone ?? "UTC";
   const [snapshot, setSnapshot] = useState<EventDisplaySnapshot>(() => ({
     entries,
-    days: eventDayGroups(eventGroups(entries)),
+    days: eventDayGroups(eventGroups(entries), groupingTimeZone),
     pageCount: pages.length,
     paginationIds: new Set(),
+    timeZone: groupingTimeZone,
   }));
   const [followIdentityQuery, setFollowIdentityQuery] = useState(fetching || queryStale);
   const [wasReaderAtTop, setWasReaderAtTop] = useState(readerAtTop);
@@ -442,10 +445,12 @@ const EventsPageFilterState = ({
   }
   const followsQuery = readerAtTop || followsIdentityQuery;
   if (followsQuery) {
-    if (snapshot.entries !== entries || snapshot.pageCount !== pages.length) {
-      setSnapshot({ entries, days: eventDayGroups(eventGroups(entries)), pageCount: pages.length, paginationIds: new Set() });
+    if (snapshot.entries !== entries || snapshot.pageCount !== pages.length || snapshot.timeZone !== groupingTimeZone) {
+      setSnapshot({ entries, days: eventDayGroups(eventGroups(entries), groupingTimeZone), pageCount: pages.length, paginationIds: new Set(), timeZone: groupingTimeZone });
     }
     if (followIdentityQuery && !fetching) setFollowIdentityQuery(false);
+  } else if (snapshot.timeZone !== groupingTimeZone) {
+    setSnapshot({ ...snapshot, days: eventDayGroups(eventGroups(snapshot.entries), groupingTimeZone), timeZone: groupingTimeZone });
   } else if (pages.length < snapshot.pageCount) {
     setSnapshot({ ...snapshot, pageCount: pages.length });
   } else if (pages.length > snapshot.pageCount) {
@@ -454,7 +459,7 @@ const EventsPageFilterState = ({
     const entriesWithOlderPage = appendOlderEntries(snapshot.entries, loadedOlderEntries);
     const existingIds = new Set(snapshot.entries.map((entry) => entry.eventId));
     const newlyAddedEntries = entriesWithOlderPage.filter((entry) => !existingIds.has(entry.eventId));
-    const olderDays = eventDayGroups(eventGroups(newlyAddedEntries));
+    const olderDays = eventDayGroups(eventGroups(newlyAddedEntries), groupingTimeZone);
     const paginationIds = new Set(snapshot.paginationIds);
     for (const entry of loadedOlderEntries) paginationIds.add(entry.eventId);
     setSnapshot({
@@ -462,6 +467,7 @@ const EventsPageFilterState = ({
       days: appendOlderDayGroups(snapshot.days, olderDays),
       pageCount: pages.length,
       paginationIds,
+      timeZone: groupingTimeZone,
     });
   }
   const displayedEntries = followsQuery ? entries : snapshot.entries;
@@ -470,7 +476,7 @@ const EventsPageFilterState = ({
     !displayedIds.has(entry.eventId) && !snapshot.paginationIds.has(entry.eventId),
   ).length;
   const { selectedKey: selectedGroupKey, select: selectGroup, rowRef: groupRowRef, close: closeGroup } = useInspectorSelection<string>(identityKey);
-  const dayGroups = followsQuery ? eventDayGroups(eventGroups(displayedEntries)) : snapshot.days;
+  const dayGroups = followsQuery ? eventDayGroups(eventGroups(displayedEntries), groupingTimeZone) : snapshot.days;
   const groups = followsQuery ? eventGroups(displayedEntries) : dayGroups.flatMap((day) => day.groups);
   const selectedGroup = groups.find((group) => group.key === selectedGroupKey) ?? null;
   const selectedHistory = selectedGroup === null ? [] : [...selectedGroup.entries].sort(chronological);
@@ -542,7 +548,7 @@ const EventsPageFilterState = ({
                     rows={groups.map((group) => ({
                       ...group,
                       id: group.key,
-                      at: group.representative.createdAt,
+                      at: group.newestEntry.createdAt,
                       moduleGroup: group.representative.moduleId,
                     }))}
                     timeZone={channelTimeZone}

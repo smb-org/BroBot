@@ -808,17 +808,28 @@ test("event rows keep their cell geometry after loading older events at desktop 
   }
 });
 
-test("loading an older day does not move frozen rows across day sections", async ({ page }) => {
-  const timestamps = await page.evaluate(() => {
-    const local = (day: number, hour: number, minute: number): string => new Date(2026, 8, day, hour, minute).toISOString();
-    return {
-      previousDayError: local(21, 23, 55),
-      todayInfo: local(22, 0, 5),
-      todayOther: local(22, 0, 3),
-      filler: local(22, 0, 1),
-      older: local(21, 22, 0),
-    };
-  });
+const calendarKey = (value: string, timeZone: string): string => {
+  const parts = new Map(new Intl.DateTimeFormat("en", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(value)).map(({ type, value: part }) => [type, part]));
+  const year = parts.get("year");
+  const month = parts.get("month");
+  const day = parts.get("day");
+  if (year === undefined || month === undefined || day === undefined) throw new Error("The date formatter should provide year, month, and day parts.");
+  return `${year}-${month}-${day}`;
+};
+
+const verifyFrozenEventDaySections = async (
+  page: Page,
+  channelTimeZone: string,
+  timestamps: { previousDayError: string; todayInfo: string; todayOther: string; filler: string; older: string },
+): Promise<void> => {
+  const clockStart = new Date("2026-09-22T12:00:00.000Z");
+  await page.clock.install({ time: new Date(clockStart.getTime() - 1000) });
+  await page.clock.pauseAt(clockStart);
   const crossMidnightInfo = {
     eventId: "cross-midnight-info",
     triggerId: "cross-midnight-trigger",
@@ -835,6 +846,7 @@ test("loading an older day does not move frozen rows across day sections", async
     moduleId: "host",
     code: "host.chat.failed",
     detail: "{}",
+    actorDisplayName: "cross-midnight-group",
   };
   const todayEntry = {
     ...crossMidnightInfo,
@@ -870,23 +882,118 @@ test("loading an older day does not move frozen rows across day sections", async
     started: () => { markOlderStarted(); },
   };
   const olderRequestStarted = new Promise<void>((resolve) => { markOlderStarted = resolve; });
-  await installChannelMocks(page, { eventsNext: olderResponseGate }, { events: firstPage, eventsNext: olderPage });
+  await installChannelMocks(page, { eventsNext: olderResponseGate }, {
+    settings: { timeZone: channelTimeZone, revision: 1, location: null, locationRevision: 1 },
+    events: firstPage,
+    eventsNext: olderPage,
+  });
   await page.goto(`/channels/${channelId}/events`);
-  await expect(page.locator(".event-table tbody tr:not(.data-table__day-row)")).toHaveCount(50);
+  const table = page.locator(".event-table");
+  const rows = table.locator("tbody tr:not(.data-table__day-row)");
+  await expect(async () => {
+    await page.clock.runFor(10);
+    await expect(rows).toHaveCount(50, { timeout: 200 });
+  }).toPass();
   const todayRow = page.getByRole("row", { name: /today-sub/u });
   await expect(todayRow).toBeVisible();
+  const crossMidnightRow = rows.filter({ hasText: "cross-midnight-group" });
+  await expect(crossMidnightRow).toHaveCount(1);
+  await expect(crossMidnightRow.locator("time")).toHaveAttribute("datetime", timestamps.todayInfo);
+
+  const readSectionDates = async (): Promise<string[]> => table.locator("tbody").evaluateAll((bodies, timeZone) => bodies.map((body) => {
+    const dayKeys = new Set(Array.from(body.querySelectorAll("tr:not(.data-table__day-row) time[datetime]"), (time) => {
+      const parts = new Map(new Intl.DateTimeFormat("en", {
+        timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).formatToParts(new Date((time as HTMLTimeElement).dateTime)).map(({ type, value }) => [type, value]));
+      const year = parts.get("year");
+      const month = parts.get("month");
+      const day = parts.get("day");
+      if (year === undefined || month === undefined || day === undefined) throw new Error("The date formatter should provide year, month, and day parts.");
+      return `${year}-${month}-${day}`;
+    }));
+    if (dayKeys.size !== 1) throw new Error("Each event section should contain rows from one channel-local date.");
+    return dayKeys.values().next().value as string;
+  }), channelTimeZone);
+  expect(await readSectionDates()).toEqual([calendarKey(timestamps.todayInfo, channelTimeZone)]);
+  expect(await crossMidnightRow.evaluate((row, timeZone) => {
+    const body = row.closest("tbody");
+    const timestamp = body?.querySelector<HTMLTimeElement>("tr:not(.data-table__day-row) time[datetime]")?.dateTime;
+    if (timestamp === undefined) throw new Error("The cross-midnight group should have a timestamp.");
+    const parts = new Map(new Intl.DateTimeFormat("en", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date(timestamp)).map(({ type, value }) => [type, value]));
+    const year = parts.get("year");
+    const month = parts.get("month");
+    const day = parts.get("day");
+    if (year === undefined || month === undefined || day === undefined) throw new Error("The date formatter should provide year, month, and day parts.");
+    return `${year}-${month}-${day}`;
+  }, channelTimeZone)).toBe(calendarKey(timestamps.todayInfo, channelTimeZone));
+
   const feedStart = await page.locator(".event-feed").evaluate((feed) => feed.getBoundingClientRect().top + window.scrollY);
   await page.evaluate(() => { window.scrollTo(0, document.documentElement.scrollHeight); });
   await olderRequestStarted;
   await page.evaluate((start) => { window.scrollTo(0, start + 20); }, feedStart);
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(feedStart + 8);
   await expect(todayRow).toBeInViewport();
-  const before = await measureBox(page, ".event-table tbody tr:not(.data-table__day-row):has-text('today-sub')");
+  const frozenRows = await rows.evaluateAll((items) => items.map((row) => {
+    const rect = row.getBoundingClientRect();
+    return [row.textContent, rect.x, rect.y, rect.width, rect.height];
+  }));
 
   releaseOlderResponse();
-  await expect(page.locator(".event-table tbody tr:not(.data-table__day-row)")).toHaveCount(51);
-  expect(await measureBox(page, ".event-table tbody tr:not(.data-table__day-row):has-text('today-sub')")).toEqual(before);
-  expect(await page.locator(".event-table tbody tr:not(.data-table__day-row)").allTextContents()).toContainEqual(expect.stringContaining("olderday"));
+  await expect(async () => {
+    await page.clock.runFor(10);
+    await expect(rows).toHaveCount(51, { timeout: 200 });
+  }).toPass();
+  expect(await rows.evaluateAll((items) => items.slice(0, 50).map((row) => {
+    const rect = row.getBoundingClientRect();
+    return [row.textContent, rect.x, rect.y, rect.width, rect.height];
+  }))).toEqual(frozenRows);
+  const olderRow = rows.filter({ hasText: "olderday" });
+  await expect(olderRow).toHaveCount(1);
+  const previousFrozenBottom = await rows.nth(49).evaluate((row) => row.getBoundingClientRect().bottom + window.scrollY);
+  const olderRowTop = await olderRow.evaluate((row) => row.getBoundingClientRect().top + window.scrollY);
+  expect(olderRowTop).toBeGreaterThan(previousFrozenBottom);
+  const sectionDates = await readSectionDates();
+  expect(sectionDates).toEqual([
+    calendarKey(timestamps.todayInfo, channelTimeZone),
+    calendarKey(timestamps.older, channelTimeZone),
+  ]);
+  expect(new Set(sectionDates).size).toBe(sectionDates.length);
+};
+
+test.describe("frozen event sections with a UTC browser", () => {
+  test.use({ timezoneId: "UTC" });
+
+  test("keep rows frozen and sections in channel-time order when older events load", async ({ page }) => {
+    await verifyFrozenEventDaySections(page, "Europe/Berlin", {
+      previousDayError: "2026-09-21T21:55:00.000Z",
+      todayInfo: "2026-09-21T22:05:00.000Z",
+      todayOther: "2026-09-22T12:00:00.000Z",
+      filler: "2026-09-22T10:00:00.000Z",
+      older: "2026-09-21T20:00:00.000Z",
+    });
+  });
+});
+
+test.describe("frozen event sections with a Europe/Berlin browser", () => {
+  test.use({ timezoneId: "Europe/Berlin" });
+
+  test("keep rows frozen and sections in channel-time order when older events load", async ({ page }) => {
+    await verifyFrozenEventDaySections(page, "UTC", {
+      previousDayError: "2026-09-21T23:55:00.000Z",
+      todayInfo: "2026-09-22T00:05:00.000Z",
+      todayOther: "2026-09-22T12:00:00.000Z",
+      filler: "2026-09-22T11:00:00.000Z",
+      older: "2026-09-21T22:00:00.000Z",
+    });
+  });
 });
 
 test("a keyboard-focused immediate-action control scrolls fully into view at 390px", async ({ page }) => {
