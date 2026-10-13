@@ -15,6 +15,33 @@ interface RecentChannelGameRow {
 }
 
 const GAME_SEARCH_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const GAME_SEARCH_CACHE_MAX_ENTRIES = 2_000;
+const GAME_SEARCH_CACHE_CLEANUP_BATCH_SIZE = 250;
+
+const gameSearchCacheCleanupStatements = (database: D1Database, now: number): D1PreparedStatement[] => [
+  database.prepare(
+    `DELETE FROM twitch_game_search_cache
+      WHERE cache_key IN (
+        SELECT cache_key FROM twitch_game_search_cache
+         WHERE expires_at_ms <= ? ORDER BY expires_at_ms, cache_key LIMIT ?
+      )`,
+  ).bind(now, GAME_SEARCH_CACHE_CLEANUP_BATCH_SIZE),
+  database.prepare(
+    `DELETE FROM twitch_game_search_cache
+      WHERE cache_key IN (
+        SELECT cache_key FROM twitch_game_search_cache
+         WHERE expires_at_ms > ? ORDER BY expires_at_ms, cache_key
+         LIMIT MIN(?, MAX(
+           (SELECT COUNT(*) FROM twitch_game_search_cache WHERE expires_at_ms > ?) - ?,
+           0
+         ))
+      )`,
+  ).bind(now, GAME_SEARCH_CACHE_CLEANUP_BATCH_SIZE, now, GAME_SEARCH_CACHE_MAX_ENTRIES),
+];
+
+export const purgeExpiredGameSearchCache = async (database: D1Database, now: number): Promise<void> => {
+  await database.batch(gameSearchCacheCleanupStatements(database, now));
+};
 
 const parseCachedGames = (value: string): TwitchGameCategory[] | null => {
   try {
@@ -54,14 +81,17 @@ export const writeCachedGameList = async (
   games: readonly TwitchGameCategory[],
   now: number,
 ): Promise<void> => {
-  await database.prepare(
-    `INSERT INTO twitch_game_search_cache (cache_key, games_json, expires_at_ms, updated_at_ms)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT (cache_key) DO UPDATE SET
-       games_json = excluded.games_json,
-       expires_at_ms = excluded.expires_at_ms,
-       updated_at_ms = excluded.updated_at_ms`,
-  ).bind(cacheKey, JSON.stringify(games), now + GAME_SEARCH_CACHE_TTL_MS, now).run();
+  await database.batch([
+    database.prepare(
+      `INSERT INTO twitch_game_search_cache (cache_key, games_json, expires_at_ms, updated_at_ms)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT (cache_key) DO UPDATE SET
+         games_json = excluded.games_json,
+         expires_at_ms = excluded.expires_at_ms,
+         updated_at_ms = excluded.updated_at_ms`,
+    ).bind(cacheKey, JSON.stringify(games), now + GAME_SEARCH_CACHE_TTL_MS, now),
+    ...gameSearchCacheCleanupStatements(database, now),
+  ]);
 };
 
 export const recordChannelGameHistory = async (

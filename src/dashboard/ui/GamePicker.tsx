@@ -22,6 +22,8 @@ export interface GamePickerMessages {
   clearSelection?: string;
 }
 
+const GAME_LOOKUP_RETRY_DELAY_MS = 30_000;
+
 const coverUrl = (game: GamePickerGame, width: number, height: number): string | null => {
   if (game.boxArtUrlTemplate === undefined) return null;
   const url = game.boxArtUrlTemplate.replaceAll("{width}", String(width)).replaceAll("{height}", String(height));
@@ -71,40 +73,55 @@ export function GamePicker({ searchGames, lookupGames, value, onChange, messages
   const [query, setQuery] = useState("");
   const [searchState, setSearchState] = useState<GameSearchState | null>(null);
   const [resultsOpen, setResultsOpen] = useState(false);
+  const [artworkById, setArtworkById] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const [lookupRetryNonce, setLookupRetryNonce] = useState(0);
 
-  const onChangeRef = useRef(onChange);
   const lookedUpIds = useRef(new Set<string>());
 
   useEffect(() => {
-    onChangeRef.current = onChange;
-  }, [onChange]);
-
-  useEffect(() => {
+    const lookedUpIdsForEffect = lookedUpIds.current;
     if (lookupGames === undefined) return;
-    const ids = value.flatMap((game) => game.boxArtUrlTemplate === undefined && !lookedUpIds.current.has(game.id)
+    const ids = value.flatMap((game) => game.boxArtUrlTemplate === undefined && !lookedUpIdsForEffect.has(game.id)
       ? [game.id]
       : []);
     if (ids.length === 0) return;
-    ids.forEach((gameId) => lookedUpIds.current.add(gameId));
+    ids.forEach((gameId) => lookedUpIdsForEffect.add(gameId));
     let active = true;
+    let settled = false;
+    let retryTimer: number | undefined;
     lookupGames(ids)
       .then((games) => {
+        settled = true;
         if (!active) return;
-        const artworkById = new Map(games.flatMap((game) => game.boxArtUrlTemplate === undefined
+        const fetchedArtwork = new Map(games.flatMap((game) => game.boxArtUrlTemplate === undefined
           ? []
           : [[game.id, game.boxArtUrlTemplate] as const]));
-        const enriched = value.map((game) => {
-          const boxArtUrlTemplate = artworkById.get(game.id);
-          if (game.boxArtUrlTemplate !== undefined || boxArtUrlTemplate === undefined) return game;
-          return { ...game, boxArtUrlTemplate };
+        if (fetchedArtwork.size === 0) return;
+        setArtworkById((current) => {
+          let changed = false;
+          const next = new Map(current);
+          for (const [gameId, boxArtUrlTemplate] of fetchedArtwork) {
+            if (next.get(gameId) === boxArtUrlTemplate) continue;
+            changed = true;
+            next.set(gameId, boxArtUrlTemplate);
+          }
+          return changed ? next : current;
         });
-        if (enriched.some((game, index) => game !== value[index])) onChangeRef.current(enriched);
       })
       .catch(() => {
-        ids.forEach((gameId) => lookedUpIds.current.delete(gameId));
+        settled = true;
+        if (!active) return;
+        ids.forEach((gameId) => lookedUpIdsForEffect.delete(gameId));
+        retryTimer = window.setTimeout(() => {
+          if (active) setLookupRetryNonce((nonce) => nonce + 1);
+        }, GAME_LOOKUP_RETRY_DELAY_MS);
       });
-    return () => { active = false; };
-  }, [value, lookupGames]);
+    return () => {
+      active = false;
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+      if (!settled) ids.forEach((gameId) => lookedUpIdsForEffect.delete(gameId));
+    };
+  }, [value, lookupGames, lookupRetryNonce]);
 
   useEffect(() => {
     const search = query.trim();
@@ -160,6 +177,12 @@ export function GamePicker({ searchGames, lookupGames, value, onChange, messages
     setQuery("");
     setResultsOpen(false);
   };
+  const displayedGame = (game: GamePickerGame): GamePickerGame => {
+    const boxArtUrlTemplate = artworkById.get(game.id);
+    return game.boxArtUrlTemplate === undefined && boxArtUrlTemplate !== undefined
+      ? { ...game, boxArtUrlTemplate }
+      : game;
+  };
   const selectionSummary = messages.selectedCount?.(value.length) ?? `${String(value.length)} selected`;
 
   return (
@@ -174,13 +197,16 @@ export function GamePicker({ searchGames, lookupGames, value, onChange, messages
             <span className="mono">{String(value.length)}</span>
             <span className="sr-only">{selectionSummary}</span>
           </button>
-          : value.map((game) => (
-          <span className="ui-game-picker__chip" key={game.id}>
-            <GameCover game={game} width={20} height={27} />
-            <span>{game.name}</span>
-            <button type="button" disabled={disabled} aria-label={messages.remove(game.name)} onClick={() => onChange(value.filter((entry) => entry.id !== game.id))}>×</button>
-          </span>
-          ))}
+          : value.map((game) => {
+            const gameForDisplay = displayedGame(game);
+            return (
+              <span className="ui-game-picker__chip" key={game.id}>
+                <GameCover game={gameForDisplay} width={20} height={27} />
+                <span>{game.name}</span>
+                <button type="button" disabled={disabled} aria-label={messages.remove(game.name)} onClick={() => onChange(value.filter((entry) => entry.id !== game.id))}>×</button>
+              </span>
+            );
+          })}
       </div>
       <div className="ui-game-picker__search">
         <input

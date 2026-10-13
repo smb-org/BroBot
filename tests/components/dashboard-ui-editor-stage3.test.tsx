@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState, type ReactNode, type SyntheticEvent } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -53,6 +53,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.useRealTimers();
   if (originalRangeBounds === undefined) delete (Range.prototype as unknown as { getBoundingClientRect?: () => DOMRect }).getBoundingClientRect;
   else Object.defineProperty(Range.prototype, "getBoundingClientRect", originalRangeBounds);
 });
@@ -108,21 +109,48 @@ describe("editor field seam", () => {
     };
     const searchGames = vi.fn().mockResolvedValue([gameWithArt]);
     const lookupGames = vi.fn().mockResolvedValue([gameWithArt]);
-    function Harness() {
-      const [value, setValue] = useState<GamePickerGame[]>([storedGame]);
-      return <GamePicker searchGames={searchGames} lookupGames={lookupGames} value={value} onChange={setValue} messages={messages} />;
-    }
+    const onChange = vi.fn();
 
-    renderUi(<Harness />);
+    renderUi(<GamePicker searchGames={searchGames} lookupGames={lookupGames} value={[storedGame]} onChange={onChange} messages={messages} />);
     await waitFor(() => expect(lookupGames).toHaveBeenCalledWith(["42"]));
     await waitFor(() => expect(document.querySelector(".ui-game-picker__chip img")).toHaveAttribute(
       "src",
       "https://static-cdn.jtvnw.net/ttv-boxart/42-20x27.jpg",
     ));
+    expect(onChange).not.toHaveBeenCalled();
 
     fireEvent.focus(screen.getByRole("searchbox", { name: "Games" }));
     expect(await screen.findByRole("option", { name: /Zelda: Ocarina of Time/u })).toBeInTheDocument();
     expect(searchGames).toHaveBeenCalledWith("");
+  });
+
+  it("retries failed artwork lookups without changing the selected game draft", async () => {
+    vi.useFakeTimers();
+    const storedGame: GamePickerGame = { id: "42", name: "Zelda: Ocarina of Time" };
+    const gameWithArt: GamePickerGame = {
+      ...storedGame,
+      boxArtUrlTemplate: "https://static-cdn.jtvnw.net/ttv-boxart/42-{width}x{height}.jpg",
+    };
+    const messages: GamePickerMessages = {
+      label: "Games", hint: "Filter by game.", search: "Search games", searchHint: "Search for a game.",
+      loading: "Searching…", empty: "No games found.", error: "Search failed.", remove: (name) => `Remove ${name}`,
+    };
+    const searchGames = vi.fn().mockResolvedValue([]);
+    const lookupGames = vi.fn().mockRejectedValueOnce(new Error("Twitch unavailable")).mockResolvedValueOnce([gameWithArt]);
+    const onChange = vi.fn();
+
+    renderUi(<GamePicker searchGames={searchGames} lookupGames={lookupGames} value={[storedGame]} onChange={onChange} messages={messages} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(lookupGames).toHaveBeenCalledTimes(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+
+    expect(lookupGames).toHaveBeenCalledTimes(2);
+    expect(document.querySelector(".ui-game-picker__chip img")).toHaveAttribute(
+      "src",
+      "https://static-cdn.jtvnw.net/ttv-boxart/42-20x27.jpg",
+    );
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it("keeps the same cover footprint for suggestions and selected games without box art", async () => {

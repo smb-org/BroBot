@@ -115,33 +115,29 @@ const fetchGamesById = async (
   });
   const missingIds = uniqueIds.filter((id) => !cachedById.has(id));
   if (missingIds.length > 0) {
-    try {
-      const token = await context.get("measureServerTiming")("helix", () =>
-        context.get("getAppAccessToken")(context.env, new Date(now).toISOString()),
-      );
-      const responses = await Promise.all(missingIds.map(async (id) => {
-        const result = await context.get("measureServerTiming")("helix", () => context.get("helixRequest")<{ data?: unknown }>({
-          url: "https://api.twitch.tv/helix/games",
-          query: { id },
-          accessToken: token,
-          clientId: context.env.TWITCH_CLIENT_ID,
-        }));
-        if (!result.ok) return null;
-        const game = parseTwitchGames(result.data.data).find((entry) => entry.id === id) ?? null;
-        if (game !== null) {
-          await context.get("measureServerTiming")("d1", () =>
-            writeCachedGameList(context.env.DB, `id:${id}`, [game], now),
-          );
-        }
-        return game;
+    const token = await context.get("measureServerTiming")("helix", () =>
+      context.get("getAppAccessToken")(context.env, new Date(now).toISOString()),
+    );
+    const responses = await Promise.all(missingIds.map(async (id) => {
+      const result = await context.get("measureServerTiming")("helix", () => context.get("helixRequest")<{ data?: unknown }>({
+        url: "https://api.twitch.tv/helix/games",
+        query: { id },
+        accessToken: token,
+        clientId: context.env.TWITCH_CLIENT_ID,
       }));
-      missingIds.forEach((id, index) => {
-        const game = responses[index];
-        if (game !== null && game !== undefined) cachedById.set(id, game);
-      });
-    } catch {
-      // Preserve available names from channel history when Twitch is unavailable.
-    }
+      if (!result.ok || !Array.isArray(result.data.data)) throw new Error("Twitch game ID lookup failed.");
+      const game = parseTwitchGames(result.data.data).find((entry) => entry.id === id) ?? null;
+      if (game !== null) {
+        await context.get("measureServerTiming")("d1", () =>
+          writeCachedGameList(context.env.DB, `id:${id}`, [game], now),
+        );
+      }
+      return game;
+    }));
+    missingIds.forEach((id, index) => {
+      const game = responses[index];
+      if (game !== null && game !== undefined) cachedById.set(id, game);
+    });
   }
   return uniqueIds.flatMap((id) => {
     const game = cachedById.get(id);
@@ -479,7 +475,13 @@ moduleRouter.get("/api/channels/:channelId/games", async (context) => {
         ...(currentGame === null ? [] : [currentGame]),
         ...recentGames.filter((game) => game.id !== currentGame?.id),
       ];
-      const gamesById = new Map((await fetchGamesById(context, suggestions.map(({ id }) => id), now)).map((game) => [game.id, game]));
+      let gamesById = new Map<string, TwitchGameCategory>();
+      try {
+        gamesById = new Map((await fetchGamesById(context, suggestions.map(({ id }) => id), now))
+          .map((game) => [game.id, game]));
+      } catch {
+        // Keep the channel and history names available while artwork is unavailable.
+      }
       return context.json({ games: suggestions.map((game) => ({ ...game, ...gamesById.get(game.id) })) });
     } catch {
       return context.json({ error: "games_unavailable" }, 503);
