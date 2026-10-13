@@ -159,6 +159,9 @@ const CHAT_ACTIVITY_COUNT_KEY = "channel:chat_activity_count";
 const TIMER_MIRROR_RETRY_DELAY_MS = 5_000;
 const TIMER_TOMBSTONE_RETENTION_MS = 24 * 60 * 60_000;
 const MODULE_ALARM_SEND_CLAIMS_KEY = "module_alarm:send_claims";
+
+const streamStartIdempotencyKey = (timerId: string, streamId: string): string =>
+  `${timerId}:stream_start:${encodeURIComponent(streamId)}`;
 const LEGACY_ACTIVE_CHATTER_STREAM_KEY = "chatter:stream";
 const ACTIVE_CHATTER_TABLE = "active_chatters";
 const ACTIVE_CHATTER_KEY_TABLE = "active_chatter_key";
@@ -815,7 +818,7 @@ export class ChannelObject extends DurableObject<Env> {
             Date.parse(event.at) - trigger.minutes * 60_000 === deadline)) return null;
         break;
     }
-    if (streamId !== null) this.importLegacyTimerSendClaim(config.id, deadline, streamId);
+    if (streamId !== null) this.importLegacyTimerSendClaim(config.id, deadline, streamId, trigger.type);
     return {
       identity: {
         timerId: config.id,
@@ -830,16 +833,33 @@ export class ChannelObject extends DurableObject<Env> {
     };
   }
 
-  private importLegacyTimerSendClaim(timerId: string, deadline: number, streamId: string): void {
-    const legacyKey = timerOccurrenceKey(timerId, deadline);
-    const qualifiedKey = timerOccurrenceKey(timerId, deadline, streamId);
-    if (legacyKey === qualifiedKey) return;
+  /**
+   * Copies a persisted legacy send claim (deadline-based key, with or without stream suffix) to
+   * the key the current code uses. stream_start posts are keyed by (timer, stream) alone.
+   * Returns the claim status that now guards the occurrence, or null when none exists.
+   */
+  private importLegacyTimerSendClaim(
+    timerId: string,
+    deadline: number,
+    streamId: string,
+    triggerType?: string,
+  ): "sending" | "sent" | null {
+    const targetKey = triggerType === "stream_start"
+      ? streamStartIdempotencyKey(timerId, streamId)
+      : timerOccurrenceKey(timerId, deadline, streamId);
     const saved = this.ctx.storage.kv.get(MODULE_ALARM_SEND_CLAIMS_KEY);
-    if (!isRecord(saved) || Object.hasOwn(saved, qualifiedKey)) return;
-    const claim = saved[legacyKey];
-    if (!isRecord(claim) || (claim.status !== "sending" && claim.status !== "sent") ||
-        typeof claim.at !== "number") return;
-    this.ctx.storage.kv.put(MODULE_ALARM_SEND_CLAIMS_KEY, { ...saved, [qualifiedKey]: claim });
+    if (!isRecord(saved)) return null;
+    const existing = saved[targetKey];
+    if (isRecord(existing) && (existing.status === "sending" || existing.status === "sent")) return existing.status;
+    for (const sourceKey of [timerOccurrenceKey(timerId, deadline), timerOccurrenceKey(timerId, deadline, streamId)]) {
+      if (sourceKey === targetKey) continue;
+      const claim = saved[sourceKey];
+      if (!isRecord(claim) || (claim.status !== "sending" && claim.status !== "sent") ||
+          typeof claim.at !== "number") continue;
+      this.ctx.storage.kv.put(MODULE_ALARM_SEND_CLAIMS_KEY, { ...saved, [targetKey]: claim });
+      return claim.status;
+    }
+    return null;
   }
 
   private async readTimerConfigsFromDatabase(): Promise<DurableTimerConfig[]> {
@@ -988,12 +1008,19 @@ export class ChannelObject extends DurableObject<Env> {
             legacyBaseline?.streamId === state.stream.streamId && legacyBaseline.count !== null) {
           entry.activityBaselines.live = Math.min(state.activityCounts.live, legacyBaseline.count);
         }
+        if (config.trigger.type === "stream_start" && state.stream.state === "online" &&
+            state.stream.streamId !== null && state.stream.startedAt !== null &&
+            this.importLegacyTimerSendClaim(config.id,
+              Date.parse(state.stream.startedAt) + triggerDelayMs(config.trigger),
+              state.stream.streamId, "stream_start") === "sent") {
+          entry.completedStreamId = state.stream.streamId;
+        }
         const existingOccurrence = existing?.plannedOccurrence;
         const persistedOccurrence = existingOccurrence?.identity.revision === config.revision
           ? existingOccurrence
           : this.previousTimerOccurrenceFromAlarm(config, state.stream, inputs, legacyBaseline?.nextRunStreamId);
         if (persistedOccurrence === null) {
-          this.setTimerPlanSync(entry, makeTimerPlan(config, state.stream, null, inputs));
+          this.setTimerPlanSync(entry, makeTimerPlan(config, state.stream, null, inputs, "reset", entry.completedStreamId));
         } else {
           entry.plannedOccurrence = persistedOccurrence;
           entry.planSequence = persistedOccurrence.sequence;
@@ -1415,8 +1442,12 @@ export class ChannelObject extends DurableObject<Env> {
       const streamId = claimed.occurrence.identity.streamId ?? undefined;
       // A stream_start post is identified by (timer, stream), never by its deadline.
       const idempotencyKey = trigger.type === "stream_start" && streamId !== undefined
-        ? `${timerId}:stream_start:${encodeURIComponent(streamId)}`
+        ? streamStartIdempotencyKey(timerId, streamId)
         : timerOccurrenceKey(timerId, deadline, streamId);
+      // A legacy worker may already have posted this stream's announcement under its deadline key.
+      if (trigger.type === "stream_start" && streamId !== undefined) {
+        this.importLegacyTimerSendClaim(timerId, deadline, streamId, trigger.type);
+      }
       const result = await context.sendChat(
         rendered.text,
         idempotencyKey,

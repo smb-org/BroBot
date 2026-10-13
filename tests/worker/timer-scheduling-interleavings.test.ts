@@ -463,6 +463,55 @@ describe("timer scheduling interleavings through the channel Durable Object", ()
     expect(posts).toEqual([]);
   });
 
+  describe("legacy stream_start claims are honoured after rollout", () => {
+    const run = async (withLegacyAlarm: boolean) => {
+      vi.useFakeTimers();
+      const start = Date.parse("2026-10-12T12:00:00.000Z");
+      vi.setSystemTime(start + 2 * 60_000);
+      const stream = onlineStream("stream-1", 4, start);
+      const harness = channelObjectFor(stream);
+      const config = timerConfig("legacy-stream-start", { type: "stream_start", minutes: 1 });
+      const deadline = start + 60_000;
+      harness.setDatabaseConfig(config);
+      const state = stateOf(harness.values);
+      state.initialized = false;
+      harness.values.set(TIMER_DURABLE_STATE_KEY, state);
+      harness.values.set("module_alarm:send_claims", {
+        [timerOccurrenceKey(config.id, deadline)]: { status: "sent", at: start + 61_000 },
+      });
+      if (withLegacyAlarm) {
+        harness.values.set(alarmTableKey, {
+          [`${TIMER_ALARM_PREFIX}timer:${config.id}`]: {
+            deadline, handler: "module:timers:run", ownerRevision: config.revision, revision: 1,
+          },
+        });
+      }
+      await harness.object.reconcileTimerSchedules("activation");
+      const storage = (harness.object as unknown as { ctx: { storage: ClaimStorage } }).ctx.storage;
+      const posts: string[] = [];
+      const context = timerAlarmContext(async (_text, key) => {
+        const claimed = await claimModuleAlarmSend(storage, key, Date.now());
+        if (claimed === true) posts.push(key);
+        return { sent: claimed === true, reason: claimed === true ? null : "already_attempted", retryable: false };
+      });
+      // A completed legacy send plans nothing; a pending legacy alarm plans one that must dedupe.
+      const due = stateOf(harness.values).timers[config.id]?.plannedOccurrence;
+      if (due !== null && due !== undefined) {
+        await harness.object.runTimerOccurrence(context, `timer:${config.id}`, due.identity.deadline,
+          config.revision, due.identity, due.sequence);
+      }
+      return posts;
+    };
+
+    it("does not post again while the legacy alarm is still pending", async () => {
+      expect(await run(true)).toEqual([]);
+    });
+
+    it("does not post again after the legacy send completed", async () => {
+      expect(await run(false)).toEqual([]);
+    });
+  });
+
   it("dispatches the single-prefixed timer alarm through the channel alarm multiplexer", async () => {
     vi.useFakeTimers();
     const start = Date.parse("2026-10-12T12:00:00.000Z");
