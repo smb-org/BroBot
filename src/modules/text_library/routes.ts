@@ -237,7 +237,7 @@ textLibraryRoutes.patch("/blocks/:name", async (context) => {
       try {
         await context.get("reconcileTimerSchedules")(channelId);
         if (input.scheduleMutationId !== undefined) {
-          await clearTimerScheduleReconciliation(context.env.DB, channelId, input.scheduleMutationId, "activation");
+          await clearTimerScheduleReconciliation(context.env.DB, channelId, "", 0, input.scheduleMutationId, "activation");
         }
       } catch (error: unknown) {
         console.warn("Timer schedule reconciliation remains pending after text block rename.", channelId, error);

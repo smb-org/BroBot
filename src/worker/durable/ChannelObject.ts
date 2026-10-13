@@ -157,6 +157,7 @@ const CHAT_ACTIVITY_COUNT_KEY = "channel:chat_activity_count";
 const TIMER_MIRROR_RETRY_DELAY_MS = 5_000;
 const TIMER_OCCURRENCE_GRACE_MS = 10 * 60_000;
 const TIMER_TOMBSTONE_RETENTION_MS = 24 * 60 * 60_000;
+const MODULE_ALARM_SEND_CLAIMS_KEY = "module_alarm:send_claims";
 const LEGACY_ACTIVE_CHATTER_STREAM_KEY = "chatter:stream";
 const ACTIVE_CHATTER_TABLE = "active_chatters";
 const ACTIVE_CHATTER_KEY_TABLE = "active_chatter_key";
@@ -310,9 +311,6 @@ type RealtimeSocketAttachment = RealtimePrincipal;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
-
-const timerSchedulesNeedCalendarRefresh = (reason: ModuleScheduleInputChangeReason): boolean =>
-  reason === "channel_time_zone" || reason === "event_times";
 
 const activeChatterKey = async (secretHex: string, channelId: string, userId: string): Promise<string> => {
   const encoder = new TextEncoder();
@@ -816,6 +814,7 @@ export class ChannelObject extends DurableObject<Env> {
             Date.parse(event.at) - trigger.minutes * 60_000 === deadline)) return null;
         break;
     }
+    if (streamId !== null) this.importLegacyTimerSendClaim(config.id, deadline, streamId);
     return {
       identity: {
         timerId: config.id,
@@ -828,6 +827,18 @@ export class ChannelObject extends DurableObject<Env> {
       },
       sequence: sequence ?? 0,
     };
+  }
+
+  private importLegacyTimerSendClaim(timerId: string, deadline: number, streamId: string): void {
+    const legacyKey = timerOccurrenceKey(timerId, deadline);
+    const qualifiedKey = timerOccurrenceKey(timerId, deadline, streamId);
+    if (legacyKey === qualifiedKey) return;
+    const saved = this.ctx.storage.kv.get(MODULE_ALARM_SEND_CLAIMS_KEY);
+    if (!isRecord(saved) || Object.hasOwn(saved, qualifiedKey)) return;
+    const claim = saved[legacyKey];
+    if (!isRecord(claim) || (claim.status !== "sending" && claim.status !== "sent") ||
+        typeof claim.at !== "number") return;
+    this.ctx.storage.kv.put(MODULE_ALARM_SEND_CLAIMS_KEY, { ...saved, [qualifiedKey]: claim });
   }
 
   private async readTimerConfigsFromDatabase(): Promise<DurableTimerConfig[]> {
@@ -1010,9 +1021,12 @@ export class ChannelObject extends DurableObject<Env> {
       const current = state.timers[config.id];
       if (current !== undefined && current.config.revision >= config.revision) return false;
       const entry = current ?? this.newDurableTimerEntry(config, state);
+      const previousTriggerType = current?.config.trigger.type;
       const triggerChanged = current === undefined || JSON.stringify(current.config.trigger) !== JSON.stringify(config.trigger);
       entry.config = config;
-      entry.activityBaselines = { ...state.activityCounts };
+      if (triggerChanged && (previousTriggerType === "interval" || config.trigger.type === "interval")) {
+        entry.activityBaselines = { ...state.activityCounts };
+      }
       this.setTimerPlanSync(entry, makeTimerPlan(config, state.stream, current?.plannedOccurrence ?? null, inputs,
         triggerChanged ? "reset" : "preserve_cadence"));
       this.persistTimerScheduleSync(state, config.id, entry);
@@ -1058,7 +1072,7 @@ export class ChannelObject extends DurableObject<Env> {
       const inputs: TimerScheduleInputs = { now, timeZone: "Europe/Berlin", eventTimes: [] };
       for (const [timerId, entry] of Object.entries(state.timers)) {
         if (entry.config.trigger.type !== "interval" && entry.config.trigger.type !== "stream_start") continue;
-        entry.activityBaselines = { ...state.activityCounts };
+        if (entry.config.trigger.type === "interval") entry.activityBaselines = { ...state.activityCounts };
         this.setTimerPlanSync(entry, makeTimerPlan(entry.config, state.stream, entry.plannedOccurrence, inputs));
         this.writeTimerAlarmEntriesSync(timerId, entry);
         changedTimerIds.push(timerId);
@@ -1110,7 +1124,7 @@ export class ChannelObject extends DurableObject<Env> {
       if (streamChanged) {
         for (const [timerId, entry] of Object.entries(state.timers)) {
           if (entry.config.trigger.type !== "interval" && entry.config.trigger.type !== "stream_start") continue;
-          entry.activityBaselines = { ...state.activityCounts };
+          if (entry.config.trigger.type === "interval") entry.activityBaselines = { ...state.activityCounts };
           this.setTimerPlanSync(entry, makeTimerPlan(entry.config, state.stream, entry.plannedOccurrence, {
             now: inputs.now,
             timeZone: inputs.timeZone,
@@ -1126,14 +1140,18 @@ export class ChannelObject extends DurableObject<Env> {
         if (current !== undefined && current.config.revision > config.revision) continue;
         const configChanged = current === undefined || current.config.revision < config.revision;
         const entry = current ?? this.newDurableTimerEntry(config, state);
+        const previousTriggerType = current?.config.trigger.type;
         const triggerChanged = current === undefined || JSON.stringify(current.config.trigger) !== JSON.stringify(config.trigger);
         entry.config = config;
-        const relevantInputChanged = timerSchedulesNeedCalendarRefresh(reason) &&
-          (reason !== "event_times" || config.trigger.type === "before_event");
+        const relevantInputChanged = (reason === "channel_time_zone" &&
+          (config.trigger.type === "time_of_day" || config.trigger.type === "before_event")) ||
+          (reason === "event_times" && config.trigger.type === "before_event");
         if (!configChanged && !relevantInputChanged) continue;
-        if (configChanged) entry.activityBaselines = { ...state.activityCounts };
+        if (configChanged && triggerChanged && (previousTriggerType === "interval" || config.trigger.type === "interval")) {
+          entry.activityBaselines = { ...state.activityCounts };
+        }
         const plan = makeTimerPlan(config, state.stream, entry.plannedOccurrence, inputs,
-          triggerChanged ? "reset" : "preserve_cadence");
+          triggerChanged || relevantInputChanged ? "reset" : "preserve_cadence");
         const sameIdentity = plan.identity === null
           ? entry.plannedOccurrence === null
           : sameTimerAlarmIdentity(entry.plannedOccurrence?.identity, plan.identity);
@@ -1156,7 +1174,8 @@ export class ChannelObject extends DurableObject<Env> {
       state.initialized = true;
       this.writeTimerDurableStateSync(state);
     });
-    await Promise.all(changedTimerIds.map((timerId) =>
+    const timerIdsToMirror = new Set([...changedTimerIds, ...Object.keys(this.timerScheduleStateSync().timers)]);
+    await Promise.all([...timerIdsToMirror].map((timerId) =>
       this.timerScheduleStateSync().timers[timerId] === undefined
         ? this.clearTimerMirrorRetryAlarms(timerId)
         : this.writeTimerMirror(timerId)));
@@ -1223,6 +1242,16 @@ export class ChannelObject extends DurableObject<Env> {
     return entry !== undefined && entry.config.enabled && entry.inFlightClaim?.token === token &&
       sameTimerOccurrence(entry.inFlightClaim.occurrence, occurrence) &&
       sameTimerOccurrence(entry.plannedOccurrence, occurrence);
+  }
+
+  private async timerConfigIsEnabledAtRevision(timerId: string, revision: number): Promise<boolean> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return false;
+    const row = await this.env.DB.prepare(
+      `SELECT 1 AS timer_is_current FROM timers
+        WHERE channel_id = ? AND timer_id = ? AND enabled = 1 AND revision = ?`,
+    ).bind(channelId, timerId, revision).first<{ timer_is_current: number }>();
+    return row?.timer_is_current === 1;
   }
 
   private timerStreamMatchesOccurrence(stream: DurableTimerStream, occurrence: TimerOccurrence): boolean {
@@ -1363,8 +1392,16 @@ export class ChannelObject extends DurableObject<Env> {
         rendered.text,
         idempotencyKey,
         rendered.attributions,
-        () => Promise.resolve(this.timerClaimIsCurrentSync(timerId, claimed.token, claimed.occurrence) && Date.now() <= graceEndsAt &&
-          (trigger.type !== "time_of_day" || trigger.alsoOffline || this.timerScheduleStateSync().stream.state === "online")),
+        async () => {
+          if (!this.timerClaimIsCurrentSync(timerId, claimed.token, claimed.occurrence) || Date.now() > graceEndsAt ||
+              trigger.type === "time_of_day" && !trigger.alsoOffline && this.timerScheduleStateSync().stream.state !== "online") {
+            return false;
+          }
+          const databaseCurrent = await this.timerConfigIsEnabledAtRevision(timerId, claimed.config.revision);
+          return databaseCurrent && this.timerClaimIsCurrentSync(timerId, claimed.token, claimed.occurrence) &&
+            Date.now() <= graceEndsAt &&
+            (trigger.type !== "time_of_day" || trigger.alsoOffline || this.timerScheduleStateSync().stream.state === "online");
+        },
         claimed.config.chatTarget ?? undefined,
       );
       sent = result.sent;

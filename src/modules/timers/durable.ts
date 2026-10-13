@@ -101,6 +101,8 @@ export const makeTimerPlan = (
   let streamId: string | null = null;
   let generation: number | null = null;
   let refreshAt: number | null = null;
+  const previousMatchesTrigger = previous !== null && previous.identity.timerId === config.id &&
+    previous.identity.triggerType === config.trigger.type;
 
   if (config.trigger.type === "interval") {
     state = stream.state === "online" ? "live" : stream.state === "offline" ? "offline" : null;
@@ -136,9 +138,13 @@ export const makeTimerPlan = (
       generation = stream.generation;
     }
   } else if (config.trigger.type === "time_of_day") {
-    deadline = nextDailyTimerAt(config.trigger, now, timeZone);
+    deadline = mode === "preserve_cadence" && previousMatchesTrigger
+      ? previous.identity.deadline
+      : nextDailyTimerAt(config.trigger, now, timeZone);
   } else {
-    deadline = nextTimerAt(config.trigger, { now, timeZone, eventTimes });
+    deadline = mode === "preserve_cadence" && previousMatchesTrigger
+      ? previous.identity.deadline
+      : nextTimerAt(config.trigger, { now, timeZone, eventTimes });
     if (deadline === null) refreshAt = eventTimeWindowEnd(now);
   }
 

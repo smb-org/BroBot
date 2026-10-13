@@ -243,7 +243,7 @@ variableRouter.patch("/api/channels/:channelId/variables/:name", async (context)
   if (timerMutationId !== null) {
     try {
       await reconcileChannelTimerSchedules(context.env.CHANNEL, channelId);
-      await clearTimerScheduleReconciliation(context.env.DB, channelId, timerMutationId, "activation");
+      await clearTimerScheduleReconciliation(context.env.DB, channelId, "", 0, timerMutationId, "activation");
     } catch (error: unknown) {
       console.warn("Timer schedule reconciliation remains pending after channel variable rename.", channelId, error);
     }

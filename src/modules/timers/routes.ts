@@ -24,22 +24,24 @@ const retryTimerSchedulerMutation = async (
   db: D1Database,
   channelId: string,
   mutationId: string,
+  timerId: string,
+  revision: number,
   operation: () => Promise<void>,
   reconcile: () => Promise<void>,
 ): Promise<boolean> => {
   try {
     await operation();
-    await clearTimerScheduleReconciliation(db, channelId, mutationId, "activation");
+    await clearTimerScheduleReconciliation(db, channelId, timerId, revision, mutationId, "activation");
     return true;
   } catch {
     try {
       await operation();
-      await clearTimerScheduleReconciliation(db, channelId, mutationId, "activation");
+      await clearTimerScheduleReconciliation(db, channelId, timerId, revision, mutationId, "activation");
       return true;
     } catch {
       try {
         await reconcile();
-        await clearTimerScheduleReconciliation(db, channelId, mutationId, "activation");
+        await clearTimerScheduleReconciliation(db, channelId, timerId, revision, mutationId, "activation");
         return true;
       } catch {
         return false;
@@ -136,7 +138,7 @@ timerRoutes.post("/timers", async (context) => {
   }, now);
   const results = await context.env.DB.batch([
     mutation,
-    timerScheduleReconciliationMutation(context.env.DB, channelId, mutationId, now, true),
+    timerScheduleReconciliationMutation(context.env.DB, channelId, mutationId, now, true, "activation", { timerId, revision: 1 }),
     audit,
   ]);
   if (results[0]?.meta.changes === 0) {
@@ -163,6 +165,8 @@ timerRoutes.post("/timers", async (context) => {
     context.env.DB,
     channelId,
     mutationId,
+    timerId,
+    config.revision,
     () => stub.upsertTimerConfig(config),
     () => stub.reconcileTimerSchedules("activation"),
   );
@@ -215,7 +219,10 @@ timerRoutes.patch("/timers/:timerId", async (context) => {
   }, now);
   const results = await context.env.DB.batch([
     mutation,
-    timerScheduleReconciliationMutation(context.env.DB, channelId, mutationId, now, true),
+    timerScheduleReconciliationMutation(context.env.DB, channelId, mutationId, now, true, "activation", {
+      timerId,
+      revision: existing.revision + 1,
+    }),
     audit,
   ]);
   if (results[0]?.meta.changes === 0) {
@@ -236,6 +243,8 @@ timerRoutes.patch("/timers/:timerId", async (context) => {
     context.env.DB,
     channelId,
     mutationId,
+    timerId,
+    config.revision,
     () => stub.upsertTimerConfig(config),
     () => stub.reconcileTimerSchedules("activation"),
   );
@@ -271,7 +280,10 @@ timerRoutes.patch("/timers/:timerId/enabled", async (context) => {
   }, now);
   const results = await context.env.DB.batch([
     mutation,
-    timerScheduleReconciliationMutation(context.env.DB, channelId, mutationId, now, true),
+    timerScheduleReconciliationMutation(context.env.DB, channelId, mutationId, now, true, "activation", {
+      timerId,
+      revision: existing.revision + 1,
+    }),
     audit,
   ]);
   if (results[0]?.meta.changes === 0) {
@@ -290,6 +302,8 @@ timerRoutes.patch("/timers/:timerId/enabled", async (context) => {
     context.env.DB,
     channelId,
     mutationId,
+    timerId,
+    config.revision,
     () => stub.upsertTimerConfig(config),
     () => stub.reconcileTimerSchedules("activation"),
   );
@@ -320,7 +334,10 @@ timerRoutes.delete("/timers/:timerId", async (context) => {
   }, now);
   const results = await context.env.DB.batch([
     mutation,
-    timerScheduleReconciliationMutation(context.env.DB, channelId, mutationId, now, true),
+    timerScheduleReconciliationMutation(context.env.DB, channelId, mutationId, now, true, "activation", {
+      timerId,
+      revision: revision + 1,
+    }),
     audit,
   ]);
   if (results[0]?.meta.changes === 0) return context.json({ error: "timer_conflict" }, 409);
@@ -329,6 +346,8 @@ timerRoutes.delete("/timers/:timerId", async (context) => {
     context.env.DB,
     channelId,
     mutationId,
+    timerId,
+    revision + 1,
     () => stub.deleteTimerConfig(timerId, revision),
     () => stub.reconcileTimerSchedules("activation"),
   );

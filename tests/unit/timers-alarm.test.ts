@@ -95,6 +95,36 @@ describe("Durable Object timer alarm planning", () => {
     expect(horizon.refreshAt).toBe(now + 14 * 24 * 60 * 60_000);
   });
 
+  it("preserves a due daily occurrence across a content-only revision", () => {
+    const original = config({ type: "time_of_day", time: "14:00", weekdays: [], alsoOffline: false });
+    const first = makeTimerPlan(original, online, null, inputs);
+    const dueAt = identityOf(first).deadline;
+    const edited = { ...original, revision: original.revision + 1, messageText: "Updated reminder" };
+
+    const afterEdit = makeTimerPlan(edited, online, occurrence(identityOf(first)),
+      { ...inputs, now: dueAt + 60_000 }, "preserve_cadence");
+
+    expect(afterEdit.identity?.deadline).toBe(dueAt);
+  });
+
+  it("preserves a due before-event occurrence across a content-only revision", () => {
+    const original = config({ type: "before_event", sourceId: "schedule.release", minutes: 30 });
+    const eventAt = new Date(now + 3 * 60 * 60_000).toISOString();
+    const eventTimes = [{
+      id: "schedule.release",
+      label: { de: "Veröffentlichung", en: "Release" },
+      at: eventAt,
+    }];
+    const first = makeTimerPlan(original, online, null, { ...inputs, eventTimes });
+    const dueAt = identityOf(first).deadline;
+    const edited = { ...original, revision: original.revision + 1, name: "Renamed reminder" };
+
+    const afterEdit = makeTimerPlan(edited, online, occurrence(identityOf(first)),
+      { ...inputs, now: dueAt + 60_000, eventTimes }, "preserve_cadence");
+
+    expect(afterEdit.identity?.deadline).toBe(dueAt);
+  });
+
   it("keeps claims scoped to a full occurrence identity and config revision", () => {
     const plan = makeTimerPlan(config({ type: "interval", live: { minutes: 10 } }), online, null, inputs);
     const claim = occurrence(identityOf(plan));

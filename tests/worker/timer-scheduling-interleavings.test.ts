@@ -27,6 +27,8 @@ const channelObjectFor = (stream: DurableTimerState["stream"]): {
   mirrors: Map<string, { nextRunAt: string | null; nextRunState: string | null; sequence: number }>;
   setNextAdAt: (value: string) => void;
   setDatabaseConfig: (config: DurableTimerConfig) => void;
+  deleteDatabaseConfig: (timerId: string) => void;
+  failNextMirrorWrite: () => void;
   setLegacyTimerActivityBaseline: (
     timerId: string,
     count: number,
@@ -45,6 +47,7 @@ const channelObjectFor = (stream: DurableTimerState["stream"]): {
   let query = "";
   let bindings: unknown[] = [];
   let nextAdAt: string | null = null;
+  let mirrorWriteFailures = 0;
   let timeZone = "Europe/Berlin";
   let timerConfigReadGate: { wait: Promise<void>; markStarted: () => void } | null = null;
   let timeZoneReadGate: { wait: Promise<void>; markStarted: () => void } | null = null;
@@ -149,6 +152,10 @@ const channelObjectFor = (stream: DurableTimerState["stream"]): {
   const statement = {
     bind: (...values: unknown[]) => { bindings = values; return statement; },
     run: () => {
+        if (mirrorWriteFailures > 0) {
+          mirrorWriteFailures -= 1;
+          return Promise.reject(new Error("D1 mirror write interrupted."));
+        }
         const [nextRunAt, nextRunState, , sequence, , timerId] = bindings as [string | null, string | null, string | null, number, string, string];
         const current = mirrors.get(timerId);
         if (current === undefined || current.sequence < sequence) {
@@ -223,6 +230,11 @@ const channelObjectFor = (stream: DurableTimerState["stream"]): {
       });
       const timerId = bindings[1];
       if (typeof timerId !== "string") return Promise.resolve(null);
+      if (/SELECT 1 AS timer_is_current FROM timers/iu.test(query)) {
+        const current = databaseConfigs.get(timerId);
+        const revision = bindings[2];
+        return Promise.resolve(current?.enabled === true && current.revision === revision ? { timer_is_current: 1 } : null);
+      }
       const config = databaseConfigs.get(timerId) ?? stateOf(values).timers[timerId]?.config;
       if (config === undefined) return Promise.resolve(null);
       return Promise.resolve(configRow(config));
@@ -247,6 +259,8 @@ const channelObjectFor = (stream: DurableTimerState["stream"]): {
     mirrors,
     setNextAdAt: (value: string) => { nextAdAt = value; },
     setDatabaseConfig: (config: DurableTimerConfig) => { databaseConfigs.set(config.id, config); },
+    deleteDatabaseConfig: (timerId: string) => { databaseConfigs.delete(timerId); },
+    failNextMirrorWrite: () => { mirrorWriteFailures += 1; },
     setLegacyTimerActivityBaseline: (timerId, count, streamId, nextRunStreamId = streamId) => {
       legacyActivityBaselines.set(timerId, { count, streamId, nextRunStreamId });
     },
@@ -310,8 +324,11 @@ const alarmTableKey = "channel:alarm_schedule";
 const plannedCount = (values: Map<string, unknown>): number =>
   Object.values(stateOf(values).timers).filter((entry) => entry.plannedOccurrence !== null).length;
 
-const timerAlarmContext = (sendChat: ModuleAlarmContext["sendChat"]): ModuleAlarmContext => ({
-  renderTemplate: (text: string) => Promise.resolve({ text }),
+const timerAlarmContext = (
+  sendChat: ModuleAlarmContext["sendChat"],
+  renderTemplate: ModuleAlarmContext["renderTemplate"] = (text) => Promise.resolve({ text: typeof text === "string" ? text : "" }),
+): ModuleAlarmContext => ({
+  renderTemplate,
   sendChat,
 } as unknown as ModuleAlarmContext);
 
@@ -414,7 +431,7 @@ describe("timer scheduling interleavings through the channel Durable Object", ()
     const state = stateOf(harness.values);
     state.initialized = false;
     harness.values.set(TIMER_DURABLE_STATE_KEY, state);
-    const occurrenceKey = timerOccurrenceKey(config.id, legacyPlan.identity.deadline, stream.streamId);
+    const occurrenceKey = timerOccurrenceKey(config.id, legacyPlan.identity.deadline);
     harness.values.set("module_alarm:send_claims", {
       [occurrenceKey]: { status: "sent", at: start },
     });
@@ -597,6 +614,86 @@ describe("timer scheduling interleavings through the channel Durable Object", ()
     });
   });
 
+  it.each(["disabled", "deleted"] as const)(
+    "revalidates D1 before sending after a committed timer %s during rendering",
+    async (change) => {
+      vi.useFakeTimers();
+      const now = Date.parse("2026-10-12T12:00:00.000Z");
+      vi.setSystemTime(now);
+      const harness = channelObjectFor(onlineStream("stream-1", 1, now - 60_000));
+      const { object, values } = harness;
+      const config = timerConfig(`d1-${change}-race`, { type: "interval", live: { minutes: 1 } });
+      harness.setDatabaseConfig(config);
+      await object.upsertTimerConfig(config);
+      const occurrence = dueOccurrence(values, config.id);
+      vi.setSystemTime(occurrence.identity.deadline);
+      const rendering = deferred();
+      const resumeRender = deferred();
+      const posts: string[] = [];
+      const context = timerAlarmContext(async (_text, key, _attributions, stillValid) => {
+        const valid = await (stillValid?.() ?? Promise.resolve(true));
+        if (valid) posts.push(key);
+        return { sent: valid, reason: valid ? null : "stale_before_send", retryable: false };
+      }, async (text) => {
+        rendering.resolve();
+        await resumeRender.promise;
+        return { text };
+      });
+      const firing = object.runTimerOccurrence(context, `timer:${config.id}`, occurrence.identity.deadline,
+        config.revision, occurrence.identity, occurrence.sequence);
+
+      await rendering.promise;
+      if (change === "disabled") harness.setDatabaseConfig({ ...config, enabled: false, revision: config.revision + 1 });
+      else harness.deleteDatabaseConfig(config.id);
+      resumeRender.resolve();
+      await firing;
+
+      expect(posts).toEqual([]);
+    },
+  );
+
+  it("preserves interval activity baselines across a content-only revision", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-10-12T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const harness = channelObjectFor(onlineStream("stream-1", 1, now - 60_000));
+    const { object, values } = harness;
+    const config = timerConfig("content-revision-baseline", {
+      type: "interval", live: { minutes: 10, minimumMessages: 3 },
+    });
+    harness.setDatabaseConfig(config);
+    await object.upsertTimerConfig(config);
+    await object.recordChatActivity();
+
+    const edited = { ...config, revision: config.revision + 1, name: "Renamed", messageText: "New text" };
+    harness.setDatabaseConfig(edited);
+    await object.upsertTimerConfig(edited);
+
+    expect(stateOf(values).timers[config.id]?.activityBaselines.live).toBe(0);
+  });
+
+  it("repairs a stale D1 timer mirror during activation reconciliation", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-10-12T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const harness = channelObjectFor(onlineStream("stream-1", 1, now - 60_000));
+    const { object, values, mirrors } = harness;
+    const config = timerConfig("activation-mirror-repair", { type: "interval", live: { minutes: 10 } });
+    harness.setDatabaseConfig(config);
+    harness.failNextMirrorWrite();
+    await object.upsertTimerConfig(config);
+
+    expect(mirrors.has(config.id)).toBe(false);
+    await object.reconcileTimerSchedules("activation");
+
+    const occurrence = dueOccurrence(values, config.id);
+    expect(mirrors.get(config.id)).toEqual({
+      nextRunAt: new Date(occurrence.identity.deadline).toISOString(),
+      nextRunState: "live",
+      sequence: stateOf(values).timers[config.id]?.mirrorSequence,
+    });
+  });
+
   it("rechecks the timer claim after the real dispatch-state read before claiming a chat send", async () => {
     vi.useFakeTimers();
     const now = Date.parse("2026-10-12T12:00:00.000Z");
@@ -604,6 +701,7 @@ describe("timer scheduling interleavings through the channel Durable Object", ()
     const harness = channelObjectFor(onlineStream("stream-1", 1, now - 59_999));
     const { object, values, pauseDispatchStateRead } = harness;
     const config = timerConfig("dispatch-read-race", { type: "stream_start", minutes: 1 });
+    harness.setDatabaseConfig(config);
     await object.upsertTimerConfig(config);
     const occurrence = dueOccurrence(values, config.id);
     vi.setSystemTime(occurrence.identity.deadline);

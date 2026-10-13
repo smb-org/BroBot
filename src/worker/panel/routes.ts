@@ -333,7 +333,7 @@ panelRouter.patch("/api/channels/:channelId/settings", requireChannelAuthorizati
   if ((result[0]?.meta.changes ?? 0) === 0) return context.json({ error: "channel_settings_conflict" }, 409);
   try {
     await notifyModuleScheduleInputsChanged(context.env.CHANNEL, channelId, "channel_time_zone");
-    await clearTimerScheduleReconciliation(context.env.DB, channelId, mutationId, "channel_time_zone");
+    await clearTimerScheduleReconciliation(context.env.DB, channelId, "", 0, mutationId, "channel_time_zone");
   } catch (error: unknown) {
     console.warn("Timer schedule reconciliation remains pending after channel timezone change.", channelId, error);
   }
