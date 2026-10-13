@@ -6,27 +6,27 @@ const templateMessages: LocaleCatalog<SettingsEditorCatalog["templateMessages"]>
   de: {
     countLabel: (count, maximum) => `${String(count)} von ${String(maximum)} Zeichen`,
     previewCountLabel: (count) => `${String(count)} Zeichen`,
-    unknownVariable: (name) => `Unbekannte Variable {${name}}. Nutze den Variablen-Picker.`,
+    openBrace: "Offene Variable: Schließe die geschweifte Klammer mit } ab.",
+    unknownVariable: (name, suggestion) => suggestion === null ? `Unbekannte Variable {${name}}.` : `Unbekannte Variable {${name}} – meintest du {${suggestion}}?`,
     insertSuggestionLabel: (name) => `{${name}} einsetzen`,
     worstCaseLength: (length, maximum) => `Bis zu ${String(length)} Zeichen; Twitch lehnt Nachrichten über ${String(maximum)} Zeichen ab.`,
-    variablePicker: {
-      triggerLabel: "Variable einfügen", title: "Variable auswählen", searchLabel: "Variablen suchen", closeLabel: "Variablenauswahl schließen",
-      noResults: "Keine Variablen gefunden.", createVariableLabel: "Variable anlegen …", externalHelp: "Fragt Twitch live ab, wenn die Vorlage gerendert wird",
-      groupLabels: { context: "Kontext", stream: "Stream", person: "Person", command: "Befehl", time_random: "Zeit & Zufall", event: "Ereignis", channel: "Kanalvariablen", text_blocks: "Textblöcke" },
-      textBlockSample: "Textblock", keyHints: { navigate: "auswählen", insert: "einfügen", close: "schließen" },
+    picker: {
+      title: "Variable auswählen", noResults: "Keine Variablen gefunden.", externalHelp: "Fragt Twitch live ab, wenn die Vorlage gerendert wird",
+      groupLabels: { module: "Dieses Modul", channel: "Kanal", own: "Eigene Variablen", text_blocks: "Textbausteine" },
+      keyHints: { navigate: "auswählen", insert: "einfügen", close: "schließen" },
     },
   },
   en: {
     countLabel: (count, maximum) => `${String(count)} of ${String(maximum)} characters`,
     previewCountLabel: (count) => `${String(count)} characters`,
-    unknownVariable: (name) => `Unknown variable {${name}}. Use the variable picker.`,
+    openBrace: "Unclosed variable: add a closing brace }.",
+    unknownVariable: (name, suggestion) => suggestion === null ? `Unknown variable {${name}}.` : `Unknown variable {${name}} — did you mean {${suggestion}}?`,
     insertSuggestionLabel: (name) => `Insert {${name}}`,
     worstCaseLength: (length, maximum) => `Up to ${String(length)} characters; Twitch rejects messages over ${String(maximum)} characters.`,
-    variablePicker: {
-      triggerLabel: "Insert variable", title: "Choose a variable", searchLabel: "Search variables", closeLabel: "Close variable picker",
-      noResults: "No variables found.", createVariableLabel: "Create variable …", externalHelp: "Looks up live data from Twitch when the template runs",
-      groupLabels: { context: "Context", stream: "Stream", person: "Person", command: "Command", time_random: "Time and random", event: "Event", channel: "Channel variables", text_blocks: "Text blocks" },
-      textBlockSample: "Text block", keyHints: { navigate: "select", insert: "insert", close: "close" },
+    picker: {
+      title: "Choose a variable", noResults: "No variables found.", externalHelp: "Looks up live data from Twitch when the template runs",
+      groupLabels: { module: "This module", channel: "Channel", own: "Own variables", text_blocks: "Text blocks" },
+      keyHints: { navigate: "select", insert: "insert", close: "close" },
     },
   },
 };

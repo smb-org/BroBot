@@ -4,9 +4,10 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const editorFixture = vi.hoisted(() => {
-  const textAreaMessages = {
+  const templateMessages = {
     countLabel: (count: number, maximum: number) => `${String(count)} / ${String(maximum)}`,
     previewCountLabel: (count: number) => `${String(count)} preview characters`,
+    openBrace: "Unclosed variable: add a closing brace }.",
     unknownVariable: (name: string) => `Unknown variable {${name}}`,
     insertSuggestionLabel: (name: string) => `Insert {${name}}`,
     worstCaseLength: (length: number) => `Worst case: ${String(length)}`,
@@ -28,7 +29,7 @@ const editorFixture = vi.hoisted(() => {
     reloadLabel: language === "de" ? "Serverstand laden" : "Reload server version",
     enabledLabel: language === "de" ? "An" : "On",
     disabledLabel: language === "de" ? "Aus" : "Off",
-    templateMessages: textAreaMessages,
+    templateMessages,
     warningLabel: () => language === "de" ? "Eine Vorlage enthält einen unbekannten Platzhalter." : "A template contains an unknown variable.",
     sections: { general: language === "de" ? "Allgemein" : "General", extra: language === "de" ? "Weitere" : "Extra" },
     fields: {

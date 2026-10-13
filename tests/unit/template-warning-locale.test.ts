@@ -5,7 +5,7 @@ import { raidSettingsEditorCatalog } from "../../src/modules/raid/panel/locale";
 import { textCommandsTexts } from "../../src/modules/text_commands/panel/locale";
 
 const catalogs = [
-  { name: "text commands", messages: (language: "de" | "en") => textCommandsTexts(language).textAreaMessages },
+  { name: "text commands", messages: (language: "de" | "en") => textCommandsTexts(language).templateMessages },
   { name: "raids", messages: (language: "de" | "en") => raidSettingsEditorCatalog(language).templateMessages },
   { name: "ads", messages: (language: "de" | "en") => adsSettingsEditorCatalog(language).templateMessages },
 ];
@@ -17,11 +17,13 @@ describe("template warning messages", () => {
       expect(warning).toContain("{donations}");
       expect(warning).toContain("{var.donations}");
       expect(warning).not.toContain("{user}");
-      expect(warning).toMatch(language === "de" ? /Picker/u : /picker/u);
+      expect(warning).toBe(language === "de"
+        ? "Unbekannte Variable {donations} – meintest du {var.donations}?"
+        : "Unknown variable {donations} — did you mean {var.donations}?");
 
       const noSuggestion = messages(language).unknownVariable("not_a_variable", null) as string;
       expect(noSuggestion).toContain("{not_a_variable}");
-      expect(noSuggestion).toMatch(language === "de" ? /Picker/u : /picker/u);
+      expect(noSuggestion).not.toContain(language === "de" ? "Picker" : "picker");
       expect(noSuggestion).not.toContain("{user}");
       expect(noSuggestion).not.toContain("{var.donations}");
     }

@@ -1,7 +1,7 @@
 import { useCallback, useState, type ReactElement } from "react";
 
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
-import { Button, ChatOutputTargetControl, ConfirmDialog, Field, FormDialog, GamePicker, InspectorSection, LoadState, LoadStateLines, UnitInput, Select, Switch, TextArea, notify } from "../../../dashboard/ui";
+import { Button, ChatOutputTargetControl, ConfirmDialog, Field, FormDialog, GamePicker, InspectorSection, LoadState, LoadStateLines, UnitInput, Select, Switch, TemplateTextField, notify } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { FaqEntry, FaqGame } from "../contracts";
 import { FAQ_ANSWER_MAX_LENGTH, FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH, FAQ_USER_COOLDOWN_MAXIMUM_SECONDS } from "../contracts";
@@ -284,26 +284,26 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
             options={[{ value: "keywords", label: labels.keywordsType }, { value: "regex", label: labels.regexType }]}
             disabled={pending}
           />
-          <TextArea
+          <TemplateTextField
             label={draft.matcherType === "keywords" ? labels.patterns : labels.regexPattern}
             hint={draft.matcherType === "keywords" ? labels.patternsHint : labels.regexPatternHint}
             value={draft.patterns}
             onChange={(patterns) => patchDraft({ patterns })}
             maxLength={draft.matcherType === "keywords" ? FAQ_PATTERN_MAXIMUM_COUNT * (FAQ_PATTERN_MAX_LENGTH + 1) : FAQ_PATTERN_MAX_LENGTH}
             {...(matcherError === null ? {} : { error: matcherError })}
-            messages={labels.textAreaMessages}
+            messages={labels.templateMessages}
             minRows={3}
             disabled={pending}
             required
           />
-          <TextArea
+          <TemplateTextField
             label={labels.answer}
             hint={labels.answerHint}
             value={draft.answerText}
             onChange={(answerText) => patchDraft({ answerText })}
             maxLength={FAQ_ANSWER_MAX_LENGTH}
             variables={data?.variables ?? []}
-            messages={labels.textAreaMessages}
+            messages={labels.templateMessages}
             minRows={2}
             disabled={pending}
             required

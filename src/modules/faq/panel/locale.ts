@@ -1,5 +1,5 @@
 import type { DashboardLanguage, LocaleCatalog } from "../../../dashboard/locale";
-import type { GamePickerMessages, TextAreaMessages } from "../../../dashboard/ui";
+import type { GamePickerMessages, TemplateTextFieldMessages } from "../../../dashboard/ui";
 
 export interface FaqTexts {
   title: string;
@@ -48,17 +48,33 @@ export interface FaqTexts {
   entryLimit: string;
   roleLocked: string;
   testEmpty: string;
-  textAreaMessages: TextAreaMessages;
+  templateMessages: TemplateTextFieldMessages;
   gamePickerMessages: GamePickerMessages;
   testGamePickerMessages: GamePickerMessages;
 }
 
-const countTextAreaMessages: TextAreaMessages = {
-  countLabel: (count, max) => `${String(count)}/${String(max)}`,
-  previewCountLabel: (count) => count,
-  unknownVariable: (name, suggestion) => suggestion === null ? `Unknown template variable: ${name}` : `Unknown template variable: ${name}. Did you mean ${suggestion}?`,
-  insertSuggestionLabel: (name) => `Insert ${name}`,
-  worstCaseLength: (length, maximum) => `${String(length)} characters, maximum ${String(maximum)}.`,
+const templateMessages: LocaleCatalog<TemplateTextFieldMessages> = {
+  de: {
+    countLabel: (count, max) => `${String(count)}/${String(max)}`,
+    previewCountLabel: (count) => `${String(count)} Zeichen`,
+    openBrace: "Offene Variable: Schließe die geschweifte Klammer mit } ab.",
+    unknownVariable: (name, suggestion) => suggestion === null ? `Unbekannte Variable {${name}}.` : `Unbekannte Variable {${name}} – meintest du {${suggestion}}?`,
+    insertSuggestionLabel: (name) => `{${name}} einsetzen`,
+    worstCaseLength: (length, maximum) => `${String(length)} Zeichen, höchstens ${String(maximum)}.`,
+  },
+  en: {
+    countLabel: (count, max) => `${String(count)}/${String(max)}`,
+    previewCountLabel: (count) => `${String(count)} characters`,
+    openBrace: "Unclosed variable: add a closing brace }.",
+    unknownVariable: (name, suggestion) => suggestion === null ? `Unknown variable {${name}}.` : `Unknown variable {${name}} — did you mean {${suggestion}}?`,
+    insertSuggestionLabel: (name) => `Insert {${name}}`,
+    worstCaseLength: (length, maximum) => `${String(length)} characters, maximum ${String(maximum)}.`,
+    picker: {
+      title: "Choose a variable", noResults: "No variables found.", externalHelp: "Looks up live data from Twitch when the template runs",
+      groupLabels: { module: "This module", channel: "Channel", own: "Own variables", text_blocks: "Text blocks" },
+      keyHints: { navigate: "select", insert: "insert", close: "close" },
+    },
+  },
 };
 
 const catalog: LocaleCatalog<FaqTexts> = {
@@ -81,7 +97,7 @@ const catalog: LocaleCatalog<FaqTexts> = {
     deleteError: "Der FAQ-Eintrag konnte nicht entfernt werden.", missingTextBlock: "Ein verwendeter Textbaustein existiert nicht mehr.",
     inputDependentText: "FAQ-Antworten können keine Eingaben aus einem Chatbefehl verwenden.",
     entryLimit: "Ein Kanal kann höchstens 100 FAQ-Einträge haben.", roleLocked: "Nur Broadcaster und Verwalter dürfen FAQ-Einträge bearbeiten.",
-    testEmpty: "Gib eine Nachricht ein, um den Treffer zu prüfen.", textAreaMessages: countTextAreaMessages,
+    testEmpty: "Gib eine Nachricht ein, um den Treffer zu prüfen.", templateMessages: templateMessages.de,
     gamePickerMessages: {
       label: "Spiele", hint: "Ohne Auswahl gilt der Eintrag für jedes Spiel.", search: "Spiele suchen",
       searchHint: "Mindestens 2 Zeichen eingeben", loading: "Spiele werden geladen …", empty: "Keine Spiele gefunden.",
@@ -111,7 +127,7 @@ const catalog: LocaleCatalog<FaqTexts> = {
     missingTextBlock: "A referenced text block no longer exists.",
     inputDependentText: "FAQ answers cannot use input from a chat command.",
     entryLimit: "A channel can have up to 100 FAQ entries.", roleLocked: "Only broadcasters and managers can edit FAQ entries.",
-    testEmpty: "Enter a message to check for a match.", textAreaMessages: countTextAreaMessages,
+    testEmpty: "Enter a message to check for a match.", templateMessages: templateMessages.en,
     gamePickerMessages: {
       label: "Games", hint: "Leave empty to use this entry for every game.", search: "Search games",
       searchHint: "Enter at least 2 characters", loading: "Loading games…", empty: "No games found.",

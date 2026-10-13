@@ -33,15 +33,15 @@ export { SegmentChoice } from "./SegmentChoice";
 export { ChoiceCards } from "./ChoiceCards";
 export { ChipsInput } from "./ChipsInput";
 export type { ChipsInputMessages } from "./ChipsInput";
-export { TextArea } from "./TextArea";
-export type { TemplateVariableOption, TextAreaMessages } from "./TextArea";
+export { TemplateTextField } from "./TemplateTextField";
+export type { TemplateTextFieldMessages, TemplateTextFieldVariable } from "./TemplateTextField";
 
 export {
   effectivePanelTemplateVariables,
   panelTemplateOptions,
-  registeredTemplatePickerGroup,
+  registeredModuleTemplateGroup,
 } from "./template-variable-options";
-export type { TemplateVariablePickerMessages } from "./TemplateVariablePicker";
+export type { TemplateTextFieldPickerMessages } from "./template-text-field-model";
 
 export { TemplateText } from "./TemplateText";
 export { ChatPreview } from "./ChatPreview";

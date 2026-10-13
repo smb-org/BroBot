@@ -4,7 +4,7 @@ import { dashboardCommonTexts, dashboardLanguage, type DashboardLanguage } from 
 import {
   Badge, Button, ChatOutputTargetControl, ChatPreview, ChoiceCards, ConfirmDialog, EditorShell, EmptyCellValue, Field, FieldPair, ListDetail, ListToolbar, UnitInput, Select,
   GamePicker, InspectorFieldRow, InspectorSection, LoadState, LoadStateLines, TimeoutDurationRangeFields,
-  registerDashboardNavigationGuard, SegmentChoice, Switch, ChipsInput, TemplateText, TextArea, useDraft, useDraftGuard, useInspectorSelection, notify,
+  registerDashboardNavigationGuard, SegmentChoice, Switch, ChipsInput, TemplateText, TemplateTextField, useDraft, useDraftGuard, useInspectorSelection, notify,
   type EditorInvalidField,
 } from "../../../dashboard/ui";
 import { PanelApiError } from "../../../contracts/panel-error";
@@ -14,7 +14,7 @@ import { minimumTierAfterVariableOperation } from "./editor-state";
 import { commandListReply, TEXT_COMMAND_DEFAULT_TEXTS, TEXT_COMMAND_DEFAULT_USAGE_TEXT, textCommandDefaultsFor } from "../contracts/chat-defaults";
 import { statusForTier, validCommandName } from "../domain";
 import { invalidTemplateParameters, renderTemplate, templateVariableNames, unknownTemplateVariables, worstCaseTemplateLength, type PanelTemplateWarning, type TemplateVariable } from "../contract";
-import { effectivePanelTemplateVariables, panelTemplateOptions, registeredTemplatePickerGroup } from "../../../dashboard/ui";
+import { effectivePanelTemplateVariables, panelTemplateOptions, registeredModuleTemplateGroup } from "../../../dashboard/ui";
 import { createTextCommand, deleteTextCommand, loadTextCommandData, loadRegisteredTemplateVariables, lookupTextGames, saveTextCommand, searchTextGames, textBlockNamesForPicker, toggleTextCommand, type TextCommandChannelVariable } from "./service";
 import { moduleQueryKey, refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import type { TextCommandPanelData } from "./service";
@@ -264,12 +264,20 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const variableAction = draft.variableAction;
   const templateVariables = (field: CommandTemplateField) => [
     ...panelTemplateOptions("chat_command", [], channelVariables, resolvedLanguage),
-    ...libraryBlocks.map((name) => ({ name, label: name, description: labels.libraryText, sample: "", group: "channel" as const, kind: "module" as const, isTextBlock: true })),
+    ...registeredVariables.filter((variable) => variable.isTextBlock).map((variable) => ({
+      name: variable.name,
+      label: variable.name,
+      description: labels.libraryText,
+      sample: variable.sample,
+      group: variable.group ?? "channel" as const,
+      kind: "module" as const,
+      isTextBlock: true,
+    })),
     ...registeredVariables.filter((variable) => !variable.isTextBlock && variable.name.includes(".") &&
       (draft.timeoutAction !== null && (field === "text" || field === "timeoutFallbackText") || !variable.name.startsWith("timeout.")) &&
       (variable.contexts?.includes("chat_command") ?? true)).map((variable) => {
       const pickerCopy = variable.picker?.[resolvedLanguage];
-      const pickerGroup = registeredTemplatePickerGroup(variable, resolvedLanguage);
+      const sourceGroup = registeredModuleTemplateGroup(variable, resolvedLanguage);
       return {
         name: variable.name,
         label: pickerCopy?.label ?? variable.name,
@@ -278,7 +286,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         ...(pickerCopy?.sample === undefined ? {} : { pickerSample: pickerCopy.sample }),
         group: variable.group ?? "channel" as const,
         kind: "module" as const,
-        ...(pickerGroup === undefined ? {} : { pickerGroup }),
+        ...(sourceGroup === undefined ? {} : { sourceGroup }),
         ...(variable.external === undefined ? {} : { external: variable.external }),
         ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
         ...(variable.parameters === "currency_pair" ? { parameter: { value: variable.parameterDefault ?? "USD EUR" } } : {}),
@@ -726,7 +734,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const templateEditor = (field: CommandTemplateField, label: string, hint = labels.responseHint): ReactElement => {
     const value = templateValue(field);
     return <div className="command-template-editor" key={field}>
-      <TextArea
+      <TemplateTextField
         id={`command-${field}`}
         name={field}
         label={field === "text" ? draft.kind === "timeout" ? labels.responseOptional : labels.response : label}
@@ -739,8 +747,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         previewLabel={labels.previewLabel}
         previewSpeaker={labels.previewSpeaker}
         disabled={!canManageContent || pending}
-        messages={labels.textAreaMessages}
-        createVariableHref={`/channels/${encodeURIComponent(channelId)}/variables`}
+        messages={labels.templateMessages}
         required={field === "text" && draft.kind !== "timeout" && draft.variableAction === null}
         {...(field === "text" && responseFieldError !== undefined ? { error: responseFieldError } : {})}
         {...(field === "timeoutFallbackText" && timeoutFallbackError !== undefined ? { error: timeoutFallbackError } : {})}
@@ -882,7 +889,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
           </div> : null}
         </div>
         {draft.kind === "list"
-          ? <ChatPreview label={labels.previewLabel} speaker={labels.previewSpeaker} text={listPreview} countLabel={labels.textAreaMessages.previewCountLabel(listPreview.length)} />
+          ? <ChatPreview label={labels.previewLabel} speaker={labels.previewSpeaker} text={listPreview} countLabel={labels.templateMessages.previewCountLabel(listPreview.length)} />
           : templateEditor("text", draft.kind === "timeout" ? labels.responseOptional : labels.response)}
         <div data-testid="command-timeout-fallback-slot" style={{ height: "calc(var(--s10) * 6)", overflowY: "auto" }}>
           {draft.kind === "timeout" && draft.timeoutAction !== null ? <div className="command-timeout-action">

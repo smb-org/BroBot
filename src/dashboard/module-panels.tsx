@@ -15,7 +15,7 @@ import { ChatCommands } from "./chat-commands";
 import { modulePermissionsAreMissing } from "./channel-health";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { effectivePanelTemplateVariables, panelTemplateOptions, type PanelChannelVariable } from "./ui/template-variable-options";
-import { ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, StatusLed, Switch, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateVariableOption, type StatusLedState } from "./ui";
+import { ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, StatusLed, Switch, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
 import { worstCaseTemplateLength } from "../template";
 import type { TemplateVariable } from "../template";
 
@@ -296,8 +296,8 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
         ...(variable.fallbackWhenAbsent === undefined ? {} : { fallbackWhenAbsent: variable.fallbackWhenAbsent }),
       }];
     })];
-  })) as Readonly<Partial<Record<string, readonly (TemplateVariableOption & { maxLength: number; fallbackWhenAbsent?: number })[]>>>;
-  const templateVariableOptions: Readonly<Partial<Record<string, readonly TemplateVariableOption[]>>> = templateMetadata;
+  })) as Readonly<Partial<Record<string, readonly (TemplateTextFieldVariable & { maxLength: number; fallbackWhenAbsent?: number })[]>>>;
+  const templateVariableOptions: Readonly<Partial<Record<string, readonly TemplateTextFieldVariable[]>>> = templateMetadata;
   const settingsEditor = (sectionId: string, fieldErrors: Readonly<Record<string, string>>): ReactElement => (
     <SettingsEditor
       spec={spec}
@@ -312,7 +312,6 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
       texts={copy}
       variables={templateVariableOptions}
       templateMetadata={templateMetadata}
-      createVariableHref={`/channels/${encodeURIComponent(channelId)}/variables`}
       templateMessages={copy.templateMessages}
       fieldErrors={fieldErrors}
       disabled={pending}
@@ -457,7 +456,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
   };
   const navigationGuard = useDraftGuard(dirty, save, discard);
   useEffect(() => registerDashboardNavigationGuard(navigationGuard.guardSwitch), [navigationGuard.guardSwitch]);
-  const readOnly = !canManageContent ? { reason: copy.readOnlyReason, content: <SettingsEditor spec={spec} sectionId={spec.sections[0]?.id ?? ""} settings={currentValue} onChange={() => undefined} texts={copy} variables={templateVariableOptions} templateMetadata={templateMetadata} templateMessages={copy.templateMessages} createVariableHref={`/channels/${encodeURIComponent(channelId)}/variables`} readOnly enabledLabel={copy.enabledLabel} disabledLabel={copy.disabledLabel} /> } : undefined;
+  const readOnly = !canManageContent ? { reason: copy.readOnlyReason, content: <SettingsEditor spec={spec} sectionId={spec.sections[0]?.id ?? ""} settings={currentValue} onChange={() => undefined} texts={copy} variables={templateVariableOptions} templateMetadata={templateMetadata} templateMessages={copy.templateMessages} readOnly enabledLabel={copy.enabledLabel} disabledLabel={copy.disabledLabel} /> } : undefined;
   return <>
     <EditorShell
     ariaLabel={copy.ariaLabel}

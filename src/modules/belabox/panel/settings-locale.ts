@@ -1,16 +1,32 @@
 import type { DashboardLanguage, LocaleCatalog } from "../../../dashboard/locale";
 import type { SettingsEditorCatalog } from "../../../dashboard/ui";
 
-const templateMessages = {
-  countLabel: (count: number, maximum: number) => `${String(count)} / ${String(maximum)}`,
-  previewCountLabel: (count: number) => String(count),
-  unknownVariable: (name: string) => name,
-  insertSuggestionLabel: (name: string) => name,
-  worstCaseLength: (length: number) => String(length),
-  variablePicker: {
-    triggerLabel: "", title: "", searchLabel: "", closeLabel: "", noResults: "", createVariableLabel: "",
-    externalHelp: "", groupLabels: { context: "", stream: "", person: "", command: "", time_random: "", event: "", channel: "", text_blocks: "" },
-    textBlockSample: "", keyHints: { navigate: "", insert: "", close: "" },
+const templateMessages: LocaleCatalog<SettingsEditorCatalog["templateMessages"]> = {
+  de: {
+    countLabel: (count, maximum) => `${String(count)} / ${String(maximum)}`,
+    previewCountLabel: (count) => `${String(count)} Zeichen`,
+    openBrace: "Offene Variable: Schließe die geschweifte Klammer mit } ab.",
+    unknownVariable: (name, suggestion) => suggestion === null ? `Unbekannte Variable {${name}}.` : `Unbekannte Variable {${name}} – meintest du {${suggestion}}?`,
+    insertSuggestionLabel: (name) => `{${name}} einsetzen`,
+    worstCaseLength: (length) => String(length),
+    picker: {
+      title: "Variable auswählen", noResults: "Keine Variablen gefunden.", externalHelp: "Fragt Twitch live ab, wenn die Vorlage gerendert wird",
+      groupLabels: { module: "Dieses Modul", channel: "Kanal", own: "Eigene Variablen", text_blocks: "Textbausteine" },
+      keyHints: { navigate: "auswählen", insert: "einfügen", close: "schließen" },
+    },
+  },
+  en: {
+    countLabel: (count, maximum) => `${String(count)} / ${String(maximum)}`,
+    previewCountLabel: (count) => `${String(count)} characters`,
+    openBrace: "Unclosed variable: add a closing brace }.",
+    unknownVariable: (name, suggestion) => suggestion === null ? `Unknown variable {${name}}.` : `Unknown variable {${name}} — did you mean {${suggestion}}?`,
+    insertSuggestionLabel: (name) => `Insert {${name}}`,
+    worstCaseLength: (length) => String(length),
+    picker: {
+      title: "Choose a variable", noResults: "No variables found.", externalHelp: "Looks up live data from Twitch when the template runs",
+      groupLabels: { module: "This module", channel: "Channel", own: "Own variables", text_blocks: "Text blocks" },
+      keyHints: { navigate: "select", insert: "insert", close: "close" },
+    },
   },
 };
 
@@ -18,13 +34,13 @@ const shared = {
   issueLabels: { error: "Error", warning: "Warning" },
   enabledLabel: "On",
   disabledLabel: "Off",
-  templateMessages,
   warningLabel: () => "",
 };
 
 const catalog: LocaleCatalog<SettingsEditorCatalog> = {
   de: {
     ...shared,
+    templateMessages: templateMessages.de,
     issueLabels: { error: "Fehler", warning: "Hinweis" },
     enabledLabel: "An",
     disabledLabel: "Aus",
@@ -61,6 +77,7 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
   },
   en: {
     ...shared,
+    templateMessages: templateMessages.en,
     warningLabel: () => "Warning",
     title: "BELABOX polling", ariaLabel: "BELABOX polling settings",
     readOnlyReason: "Only broadcasters and managers may change these settings.",

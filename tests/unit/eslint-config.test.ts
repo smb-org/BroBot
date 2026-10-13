@@ -89,7 +89,7 @@ describe("effective ESLint module boundaries", () => {
     const dashboardRestrictions = await restrictionsFor("src/dashboard/main.tsx");
     const overlayRestrictions = await restrictionsFor("src/overlay/main.tsx");
     const testRestrictions = await restrictionsFor("tests/example.test.ts");
-    const uiRestrictions = await restrictionsFor("src/dashboard/ui/TextArea.tsx");
+    const uiRestrictions = await restrictionsFor("src/dashboard/ui/TemplateTextField.tsx");
 
     expect(rejects(dashboardRestrictions, "rich-textarea")).toBe(true);
     expect(rejects(dashboardRestrictions, "rich-textarea/lib/types")).toBe(true);

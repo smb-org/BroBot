@@ -6,7 +6,7 @@ import type { TextBlock, TextBlockCategory, TextBlockConditions, TextBlockVarian
 import { firstMatchingTextBlockVariant, validTextBlockConditions, validTextBlockName } from "../domain";
 import { blockReferencesInText } from "../../contracts/text-block-references";
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Badge, Button, ChatPreview, ConfirmDialog, Field, GamePicker, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, ListToolbar, LoadState, LoadStateLines, registeredTemplatePickerGroup, registerDashboardNavigationGuard, Select, SubInspector, TextArea, notify, useDraftGuard } from "../../../dashboard/ui";
+import { Badge, Button, ChatPreview, ConfirmDialog, Field, GamePicker, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, ListToolbar, LoadState, LoadStateLines, registeredModuleTemplateGroup, registerDashboardNavigationGuard, Select, SubInspector, TemplateTextField, notify, useDraftGuard } from "../../../dashboard/ui";
 import { templateVariableNames } from "../../contract";
 import { dashboardCommonTexts, systemTemplateVariableLocale } from "../../../dashboard/locale";
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
@@ -640,14 +640,14 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
                       <div className="text-library__texts">
                         {variant.texts.map((text, textIndex) => (
                           <div className="text-library__text-field" key={`${variant.id}-${String(textIndex)}`}>
-                            <TextArea label={`${labels.text}${variant.texts.length > 1 ? ` ${String(textIndex + 1)}` : ""}`} hint={labels.textHint} value={text} onChange={(value) => setDraft({ ...draft, variants: updateVariant(draft.variants, variant.id, (entry) => ({ ...entry, texts: entry.texts.map((current, currentIndex) => currentIndex === textIndex ? value : current) })) })} maxLength={TEXT_BLOCK_MAXIMUMS.textLength} disabled={pending} variables={[
+                            <TemplateTextField label={`${labels.text}${variant.texts.length > 1 ? ` ${String(textIndex + 1)}` : ""}`} hint={labels.textHint} value={text} onChange={(value) => setDraft({ ...draft, variants: updateVariant(draft.variants, variant.id, (entry) => ({ ...entry, texts: entry.texts.map((current, currentIndex) => currentIndex === textIndex ? value : current) })) })} maxLength={TEXT_BLOCK_MAXIMUMS.textLength} disabled={pending} variables={[
                               ...data.templateVariables.filter((variable) => !variable.isTextBlock).flatMap((variable) => {
                                 if (variable.group === undefined) return [];
                                 const pickerCopy = variable.picker?.[resolvedLanguage];
                                 const systemCopy = variable.source === "system"
                                   ? systemTemplateVariableLocale[resolvedLanguage][variable.name as keyof typeof systemTemplateVariableLocale.de]
                                   : undefined;
-                                const pickerGroup = registeredTemplatePickerGroup(variable, resolvedLanguage);
+                                const sourceGroup = registeredModuleTemplateGroup(variable, resolvedLanguage);
                                 return [{
                                   name: variable.name,
                                   label: pickerCopy?.label ?? systemCopy?.label ?? variable.name,
@@ -656,7 +656,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
                                   ...(pickerCopy?.sample === undefined ? {} : { pickerSample: pickerCopy.sample }),
                                   group: variable.group,
                                   kind: variable.moduleId === "host" ? variable.source === "channel" ? "channel" as const : "system" as const : "module" as const,
-                                  ...(pickerGroup === undefined ? {} : { pickerGroup }),
+                                  ...(sourceGroup === undefined ? {} : { sourceGroup }),
                                   ...(variable.external === undefined ? {} : { external: variable.external }),
                                   ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
                                 }];
@@ -665,10 +665,11 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
                             ]} messages={{
                               countLabel: (count, maximum) => `${String(count)} / ${String(maximum)}`,
                               previewCountLabel: (count) => String(count),
-                              unknownVariable: (name, suggestion) => suggestion === null ? `{${name}}` : `{${name}} → {${suggestion}}`,
+                              openBrace: labels.openBrace,
+                              unknownVariable: labels.unknownVariable,
                               insertSuggestionLabel: labels.insertSuggestionLabel,
                               worstCaseLength: (length, maximum) => `${String(length)} / ${String(maximum)}`,
-                              variablePicker: labels.variablePicker,
+                              picker: labels.picker,
                             }} />
                             {variant.texts.length <= 1 ? null : <Button size="compact" danger="subtle" disabled={pending} onClick={() => setDraft({ ...draft, variants: updateVariant(draft.variants, variant.id, (entry) => ({ ...entry, texts: entry.texts.filter((_entry, entryIndex) => entryIndex !== textIndex) })) })}>{labels.removeText}</Button>}
                           </div>

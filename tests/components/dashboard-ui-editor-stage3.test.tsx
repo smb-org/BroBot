@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { useState, type ReactNode, type SyntheticEvent } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Button, ChipsInput, ConfirmDialog, EditorShell, Field, FieldPair, GamePicker, SegmentChoice, SettingsEditor, TemplateText, TextArea, UiProvider, UnitInput, type GamePickerGame, type GamePickerMessages, type SettingsEditorSpec, type TextAreaMessages, type TemplateVariableOption } from "../../src/dashboard/ui";
+import { Button, ChipsInput, ConfirmDialog, EditorShell, Field, FieldPair, GamePicker, SegmentChoice, SettingsEditor, TemplateText, TemplateTextField, UiProvider, UnitInput, type GamePickerGame, type GamePickerMessages, type SettingsEditorSpec, type TemplateTextFieldMessages, type TemplateTextFieldVariable } from "../../src/dashboard/ui";
 import { ChoiceCards } from "../../src/dashboard/ui/ChoiceCards";
 import { Switch } from "../../src/dashboard/ui/Switch";
 
@@ -17,24 +17,24 @@ const expectHelperAfterField = (field: HTMLElement, expectedText: string): void 
   expect(field.compareDocumentPosition(helper) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
 };
 
-const templateOptions: readonly TemplateVariableOption[] = [
+const templateOptions: readonly TemplateTextFieldVariable[] = [
   { name: "user", description: "The triggering viewer", sample: "streamerin" },
   { name: "viewers", description: "Raid viewer count", sample: "42" },
 ];
 
-const textAreaMessages: TextAreaMessages = {
+const templateTextFieldMessages: TemplateTextFieldMessages = {
   countLabel: (count, max) => `${String(count)} von ${String(max)} Zeichen`,
   previewCountLabel: (count) => `${String(count)} Zeichen`,
+  openBrace: "Offene Variable: Schließe die geschweifte Klammer mit } ab.",
   unknownVariable: (name, suggestion) => suggestion === null
-    ? `Unbekannte Variable {${name}}. Nutze den Variablen-Picker.`
-    : `Unbekannte Variable {${name}} — Meintest du {${suggestion}}? Nutze den Variablen-Picker.`,
+    ? `Unbekannte Variable {${name}}.`
+    : `Unbekannte Variable {${name}} – meintest du {${suggestion}}?`,
   insertSuggestionLabel: (name) => `{${name}} einsetzen`,
   worstCaseLength: (length) => `Mit den längsten Werten bis zu ${String(length)} Zeichen.`,
-  variablePicker: {
-    triggerLabel: "Insert variable", title: "Choose a variable", searchLabel: "Search variables", closeLabel: "Close variable picker",
-    noResults: "No variables found.", createVariableLabel: "Create variable …", externalHelp: "Requests Twitch when the command runs",
-    groupLabels: { context: "Context", stream: "Stream", person: "Person", command: "Command", time_random: "Time & random", event: "Event", channel: "Channel", text_blocks: "Text blocks" },
-    textBlockSample: "Text block",
+  picker: {
+    title: "Choose a variable", noResults: "No variables found.",
+    externalHelp: "Looks up live data from Twitch when the template runs",
+    groupLabels: { module: "This module", channel: "Channel", own: "Own variables", text_blocks: "Text blocks" },
     keyHints: { navigate: "select", insert: "insert", close: "close" },
   },
 };
@@ -252,7 +252,7 @@ describe("editor field seam", () => {
       <SegmentChoice label="Mode" hint="The active mode." value="one" onChange={() => {}} options={[{ value: "one", label: "One" }, { value: "two", label: "Two" }]} />
       <ChoiceCards label="Tier" hint="Who can run it." value="everyone" onChange={() => {}} options={[{ value: "everyone", label: "Everyone", description: "Anyone." }]} />
       <Switch layout="inline" label="Enabled" hint="Takes effect now." checked onChange={() => {}} />
-      <TextArea label="Reply" hint="What the bot says." value="Hello" onChange={() => {}} messages={textAreaMessages} />
+      <TemplateTextField label="Reply" hint="What the bot says." value="Hello" onChange={() => {}} messages={templateTextFieldMessages} />
     </div>);
     expectHelperAfterField(screen.getByRole("textbox", { name: "Name" }), "The command name.");
     expectHelperAfterField(screen.getByRole("spinbutton", { name: "Cooldown" }), "Seconds between uses.");
@@ -388,40 +388,40 @@ describe("template field", () => {
     const onSubmit = vi.fn((event: SyntheticEvent<HTMLFormElement>) => { event.preventDefault(); });
     const { rerender } = renderUi(
       <form onSubmit={onSubmit}>
-        <TextArea label="Reply" hint="What the bot writes." value="123456789" maxLength={10} onChange={() => {}} messages={textAreaMessages} />
+        <TemplateTextField label="Reply" hint="What the bot writes." value="123456789" maxLength={10} onChange={() => {}} messages={templateTextFieldMessages} />
       </form>,
     );
     const input = screen.getByRole("textbox", { name: "Reply" });
-    expect(screen.getByText("9 von 10 Zeichen")).toHaveClass("ui-textarea__count--warning");
+    expect(screen.getByText("9 von 10 Zeichen")).toHaveClass("ui-template-text-field__count--warning");
     expect(input).not.toHaveAttribute("maxlength");
-    rerender(<UiProvider><form onSubmit={onSubmit}><TextArea label="Reply" hint="What the bot writes." value="12345678901" maxLength={10} onChange={() => {}} messages={textAreaMessages} /></form></UiProvider>);
+    rerender(<UiProvider><form onSubmit={onSubmit}><TemplateTextField label="Reply" hint="What the bot writes." value="12345678901" maxLength={10} onChange={() => {}} messages={templateTextFieldMessages} /></form></UiProvider>);
     expect(screen.getByRole("textbox", { name: "Reply" })).toHaveAttribute("aria-invalid", "true");
-    expect(document.querySelector(".ui-textarea .mantine-InputWrapper-error")).toHaveTextContent("× 11 von 10 Zeichen");
+    expect(document.querySelector(".ui-template-text-field .mantine-InputWrapper-error")).toHaveTextContent("× 11 von 10 Zeichen");
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Reply" }), { key: "Enter", ctrlKey: true });
     expect(onSubmit).toHaveBeenCalledOnce();
   });
 
   it("renders known variable tint and unknown variable warning decorations around the same text", () => {
-    const { container } = renderUi(<TextArea label="Reply" hint="What the bot writes." value="Hi {user} {viewer}" variables={templateOptions} onChange={() => {}} messages={textAreaMessages} />);
-    const known = container.querySelectorAll(".template-field__decoration--module");
-    const unknown = container.querySelectorAll(".template-field__decoration--unknown");
+    const { container } = renderUi(<TemplateTextField label="Reply" hint="What the bot writes." value="Hi {user} {viewer}" variables={templateOptions} onChange={() => {}} messages={templateTextFieldMessages} />);
+    const known = container.querySelectorAll(".template-text-field__decoration--module");
+    const unknown = container.querySelectorAll(".template-text-field__decoration--unknown");
     expect(Array.from(known, (part) => part.textContent)).toEqual(["{user}"]);
     expect(Array.from(unknown, (part) => part.textContent)).toEqual(["{viewer}"]);
     expect(known[0]).toHaveAttribute("data-kind", "module");
     expect(unknown[0]).toHaveAttribute("data-kind", "unknown");
     expect(screen.getByRole("textbox", { name: "Reply" })).toHaveValue("Hi {user} {viewer}");
-    expect(screen.getByText(/Unbekannte Variable \{viewer\}.*Variablen-Picker/u)).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Reply" })).toHaveStyle({ paddingRight: "54px" });
+    expect(screen.getByText("Unbekannte Variable {viewer} – meintest du {viewers}?")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Reply" })).not.toHaveStyle({ paddingRight: "54px" });
   });
 
-  it("shows composing text, delays issue checks until composition ends, inserts picker variables at the saved selection, and handles suggestions", async () => {
+  it("shows composing text, delays issue checks until composition ends, inserts variables at the caret, and filters suggestions", async () => {
     const onIssuesChange = vi.fn();
     const parentKeyDown = vi.fn();
     function Harness() {
       const [value, setValue] = useState("Hello world");
       return (
         <div onKeyDown={parentKeyDown}>
-          <TextArea label="Reply" hint="What the bot writes." value={value} variables={templateOptions} onChange={setValue} onIssuesChange={onIssuesChange} messages={textAreaMessages} />
+          <TemplateTextField label="Reply" hint="What the bot writes." value={value} variables={templateOptions} onChange={setValue} onIssuesChange={onIssuesChange} messages={templateTextFieldMessages} />
           <output aria-label="Current value">{value}</output>
         </div>
       );
@@ -431,7 +431,7 @@ describe("template field", () => {
     onIssuesChange.mockClear();
     fireEvent.compositionStart(input);
     fireEvent.change(input, { target: { value: "Hello {viewer}" } });
-    expect(input.closest(".template-field")).toHaveAttribute("data-composing", "true");
+    expect(input.closest(".template-text-field")).toHaveAttribute("data-composing", "true");
     expect(onIssuesChange).not.toHaveBeenCalled();
     fireEvent.compositionEnd(input, { data: "" });
     await waitFor(() => expect(onIssuesChange).toHaveBeenCalledWith({ unknown: ["viewer"], worstCaseExceeded: false }));
@@ -440,28 +440,34 @@ describe("template field", () => {
     if (!(input instanceof HTMLTextAreaElement)) throw new TypeError("Expected a template textarea.");
     input.setSelectionRange(6, 6);
     fireEvent.select(input);
-    fireEvent.click(screen.getByRole("button", { name: "Insert variable" }));
-    fireEvent.click(await screen.findByRole("option", { name: /\{user\}/u, hidden: true }));
+    fireEvent.change(input, { target: { value: "Hello {us}world", selectionStart: 9, selectionEnd: 9 } });
+    input.setSelectionRange(9, 9);
+    fireEvent.select(input);
+    expect(await screen.findByRole("option", { name: /\{user\}/u, hidden: true })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /\{viewers\}/u, hidden: true })).not.toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Enter" });
     expect(screen.getByRole("textbox", { name: "Reply" })).toHaveValue("Hello {user}world");
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Reply" })).toHaveFocus());
 
-    fireEvent.change(input, { target: { value: "{vi" } });
+    fireEvent.change(input, { target: { value: "Hello {user} {viewers", selectionStart: 21, selectionEnd: 21 } });
+    input.setSelectionRange(21, 21);
+    fireEvent.select(input);
     expect(input).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("listbox", { name: "Choose a variable", hidden: true })).toBeInTheDocument();
     fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(input).toHaveValue("{viewers}");
+    expect(input).toHaveValue("Hello {user} {viewers}");
   });
 
   it("suggests dotted module variables after a namespace prefix and replaces the whole token", async () => {
-    const variables: readonly TemplateVariableOption[] = [
+    const variables: readonly TemplateTextFieldVariable[] = [
       { name: "sun.set", description: "Sunset", sample: "20:30" },
       { name: "sun.rise", description: "Sunrise", sample: "06:15" },
       { name: "weather.temp", description: "Temperature", sample: "18" },
     ];
     function Harness() {
       const [value, setValue] = useState("");
-      return <TextArea label="Reply" hint="What the bot writes." value={value} variables={variables} onChange={setValue} messages={textAreaMessages} />;
+      return <TemplateTextField label="Reply" hint="What the bot writes." value={value} variables={variables} onChange={setValue} messages={templateTextFieldMessages} />;
     }
 
     renderUi(<Harness />);
@@ -483,14 +489,14 @@ describe("template field", () => {
     ["api_source.value", "{api_source.v", "{api_source.value sunset}"],
     ["pick", "{pi", "{pick first|second}"],
   ])("keeps the supplied parameter default when completing %s inline", async (name, initialValue, expectedValue) => {
-    const variables: readonly TemplateVariableOption[] = [
+    const variables: readonly TemplateTextFieldVariable[] = [
       { name: "currency.convert", description: "Convert currency", sample: "11,50 €", parameters: "currency_pair", parameter: { value: "USD EUR" } },
       { name: "api_source.value", description: "API source", sample: "18:42", parameters: "api_source_name", parameter: { value: "sunset" } },
       { name: "pick", description: "Choose an option", sample: "First", parameters: "choices", parameter: { value: "first|second" } },
     ];
     function Harness() {
       const [value, setValue] = useState(initialValue);
-      return <TextArea label="Reply" hint="What the bot writes." value={value} variables={variables} onChange={setValue} messages={textAreaMessages} />;
+      return <TemplateTextField label="Reply" hint="What the bot writes." value={value} variables={variables} onChange={setValue} messages={templateTextFieldMessages} />;
     }
 
     renderUi(<Harness />);
@@ -510,12 +516,12 @@ describe("template field", () => {
     ["{sun.s", 6, "{sun.set}"],
     ["{sun.set} rest", 6, "{sun.set} rest"],
   ])("completes a dotted variable around the caret in %s", async (initialValue, caret, expectedValue) => {
-    const variables: readonly TemplateVariableOption[] = [
+    const variables: readonly TemplateTextFieldVariable[] = [
       { name: "sun.set", description: "Sunset", sample: "20:30" },
     ];
     function Harness() {
       const [value, setValue] = useState(initialValue);
-      return <TextArea label="Reply" hint="What the bot writes." value={value} variables={variables} onChange={setValue} messages={textAreaMessages} />;
+      return <TemplateTextField label="Reply" hint="What the bot writes." value={value} variables={variables} onChange={setValue} messages={templateTextFieldMessages} />;
     }
 
     renderUi(<Harness />);
@@ -536,7 +542,7 @@ describe("template field", () => {
     const onSubmit = vi.fn();
     function Harness() {
       const [value, setValue] = useState("");
-      return <form onSubmit={(event) => { event.preventDefault(); onSubmit(); }}><TextArea label="Reply" hint="What the bot writes." value={value} variables={templateOptions} onChange={(next) => { onChange(next); setValue(next); }} messages={textAreaMessages} /></form>;
+      return <form onSubmit={(event) => { event.preventDefault(); onSubmit(); }}><TemplateTextField label="Reply" hint="What the bot writes." value={value} variables={templateOptions} onChange={(next) => { onChange(next); setValue(next); }} messages={templateTextFieldMessages} /></form>;
     }
     renderUi(<Harness />);
     const input = screen.getByRole("textbox", { name: "Reply" });
@@ -554,7 +560,7 @@ describe("template field", () => {
     const parentKeyDown = vi.fn();
     function Harness() {
       const [value, setValue] = useState("");
-      return <div onKeyDown={parentKeyDown}><TextArea label="Reply" hint="What the bot writes." value={value} variables={templateOptions} onChange={setValue} messages={textAreaMessages} /></div>;
+      return <div onKeyDown={parentKeyDown}><TemplateTextField label="Reply" hint="What the bot writes." value={value} variables={templateOptions} onChange={setValue} messages={templateTextFieldMessages} /></div>;
     }
     renderUi(<Harness />);
     const input = screen.getByRole("textbox", { name: "Reply" });
@@ -575,7 +581,7 @@ describe("template field", () => {
     // would have opened.
     function Harness() {
       const [value] = useState("Hallo {user}");
-      return <TextArea label="Reply" hint="What the bot writes." value={value} variables={templateOptions} onChange={() => {}} messages={textAreaMessages} />;
+      return <TemplateTextField label="Reply" hint="What the bot writes." value={value} variables={templateOptions} onChange={() => {}} messages={templateTextFieldMessages} />;
     }
     renderUi(<Harness />);
     const input = screen.getByRole("textbox", { name: "Reply" });
@@ -591,10 +597,54 @@ describe("template field", () => {
     expect(input).toHaveAttribute("aria-expanded", "true");
   });
 
-  it("keeps read-only text selectable and disables the variable picker", () => {
-    renderUi(<TextArea label="Reply" hint="What the bot writes." value="Hi {user}" variables={templateOptions} readOnly onChange={() => {}} messages={textAreaMessages} />);
-    expect(screen.getByRole("textbox", { name: "Reply" })).toHaveAttribute("readonly");
-    expect(screen.getByRole("button", { name: "Insert variable" })).toBeDisabled();
+  it("keeps read-only text selectable and does not open the picker", () => {
+    renderUi(<TemplateTextField label="Reply" hint="What the bot writes." value="Hi {user}" variables={templateOptions} readOnly onChange={() => {}} messages={templateTextFieldMessages} />);
+    const input = screen.getByRole("textbox", { name: "Reply" });
+    expect(input).toHaveAttribute("readonly");
+    expect(input).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("button", { name: "Insert variable" })).not.toBeInTheDocument();
+  });
+
+  it("detects an open brace while keeping its editor text and picker available", () => {
+    function Harness() {
+      const [value, setValue] = useState("");
+      return <TemplateTextField label="Reply" hint="What the bot writes." value={value} variables={templateOptions} onChange={setValue} messages={templateTextFieldMessages} />;
+    }
+
+    renderUi(<Harness />);
+    const input = screen.getByRole("textbox", { name: "Reply" });
+    fireEvent.change(input, { target: { value: "{", selectionStart: 1, selectionEnd: 1 } });
+    if (!(input instanceof HTMLTextAreaElement)) throw new TypeError("Expected a template textarea.");
+    input.setSelectionRange(1, 1);
+    fireEvent.select(input);
+    expect(screen.getByText("Offene Variable: Schließe die geschweifte Klammer mit } ab.")).toBeInTheDocument();
+    expect(input).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("shows the four variable groups with example values", () => {
+    const variables: readonly TemplateTextFieldVariable[] = [
+      { name: "module.value", description: "Module value", sample: "module-example", kind: "module" },
+      { name: "game", description: "Current game", sample: "channel-example", kind: "system" },
+      { name: "var.points", description: "Own points", sample: "own-example", kind: "channel" },
+      { name: "text.welcome", description: "Welcome text", sample: "text-example", kind: "module", isTextBlock: true },
+    ];
+    function Harness() {
+      const [value, setValue] = useState("");
+      return <TemplateTextField label="Reply" hint="What the bot writes." value={value} variables={variables} onChange={setValue} messages={templateTextFieldMessages} />;
+    }
+
+    renderUi(<Harness />);
+    const input = screen.getByRole("textbox", { name: "Reply" });
+    fireEvent.change(input, { target: { value: "{", selectionStart: 1, selectionEnd: 1 } });
+    if (!(input instanceof HTMLTextAreaElement)) throw new TypeError("Expected a template textarea.");
+    input.setSelectionRange(1, 1);
+    fireEvent.select(input);
+    for (const label of ["This module", "Channel", "Own variables", "Text blocks"]) {
+      expect(document.body).toHaveTextContent(label);
+    }
+    for (const sample of ["module-example", "channel-example", "own-example", "text-example"]) {
+      expect(document.body).toHaveTextContent(sample);
+    }
   });
 
   it("suggests replacement for an unknown token, shows worst-case warnings without blocking, and previews sample rendering", () => {
@@ -602,7 +652,7 @@ describe("template field", () => {
     function Harness() {
       const [value, setValue] = useState("Hi {viewer}");
       return (
-        <TextArea
+        <TemplateTextField
           label="Reply"
           hint="What the bot writes."
           value={value}
@@ -614,14 +664,14 @@ describe("template field", () => {
           preview={(template, values) => template.replace("{user}", values.user ?? "").replace("{viewer}", values.viewers ?? "")}
           previewLabel="Preview"
           previewSpeaker="BroBot"
-          messages={textAreaMessages}
+          messages={templateTextFieldMessages}
         />
       );
     }
     renderUi(
       <Harness />,
     );
-    expect(screen.getByText(/Meintest du \{viewers\}/)).toBeInTheDocument();
+    expect(screen.getByText(/meintest du \{viewers\}/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "{viewers} einsetzen" })).toBeInTheDocument();
     expect(screen.getByText(/bis zu 512 Zeichen/)).toBeInTheDocument();
     expect(screen.getByText("Hi {viewer}")).toBeInTheDocument();
@@ -943,7 +993,7 @@ describe("EditorShell and declaration renderer", () => {
       onChange={() => {}}
       texts={texts}
       variables={{ message: templateOptions }}
-      templateMessages={textAreaMessages}
+      templateMessages={templateTextFieldMessages}
     />);
     const fieldHelp: readonly (readonly [string, string])[] = [
       ["Threshold", "Minimum viewer count."],

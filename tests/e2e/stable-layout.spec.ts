@@ -3,9 +3,9 @@ import { expect, test } from "@playwright/test";
 test("field error and warning slots keep their layout boxes stable", async ({ page }) => {
   await page.goto("/tests/e2e/layout-fixture.html");
   await expect(page.getByRole("textbox", { name: "Name" })).toBeVisible();
-  await expect(page.locator(".ui-textarea__warnings")).toBeVisible();
+  await expect(page.locator(".ui-template-text-field__warnings")).toBeVisible();
 
-  const selectors = [".ui-field", ".unit-input", ".ui-select", ".chips-input", ".ui-textarea"];
+  const selectors = [".ui-field", ".unit-input", ".ui-select", ".chips-input", ".ui-template-text-field"];
   const before = await Promise.all(selectors.map(async (selector) => {
     const box = await page.locator(selector).first().boundingBox();
     if (box === null) throw new Error(`Missing layout box for ${selector}.`);
