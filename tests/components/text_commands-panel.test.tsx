@@ -651,6 +651,23 @@ describe("Text command editor", () => {
     expect(minimum).toHaveFocus();
   });
 
+  it("focuses the variable-action switch from the error summary", async () => {
+    renderPanel(panelFetch({ commands: () => [] }));
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "shout" } });
+    const toggle = screen.getByRole("switch", { name: "Kanalvariable ändern" });
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+    await screen.findByRole("tab", { name: "Einstellungen, Fehler" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Fehlerhafte Felder anzeigen" }));
+    const dialog = await screen.findByRole("dialog", { name: "Fehlerhafte Felder" });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Kanalvariable ändern:/u }));
+
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("switch", { name: "Kanalvariable ändern" })));
+    expect(toggle).toHaveAttribute("id", "command-variable-action");
+  });
+
   it("keeps the usage reply editor collapsed by default for text commands", async () => {
     const command = makeCommand({ usageText: "Try !hallo 10" });
     renderPanel(panelFetch({ commands: () => [command] }));

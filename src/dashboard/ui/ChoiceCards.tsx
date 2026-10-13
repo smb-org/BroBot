@@ -49,7 +49,7 @@ export function ChoiceCards({ label, hint, value, onChange, options, disabled = 
         >
           <span className="ui-choice-card__top">
             <span className="ui-choice-card__title">{option.icon === undefined ? null : <Icon name={option.icon} size={16} />}{option.label}</span>
-            <span className="ui-choice-card__check" aria-hidden="true"><Icon name="copied" size={16} /></span>
+            <span className="ui-choice-card__check" aria-hidden="true">{selected ? <Icon name="copied" size={16} /> : null}</span>
           </span>
           <span className="ui-choice-card__description">{option.description}</span>
         </button>;

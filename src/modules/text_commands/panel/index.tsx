@@ -467,6 +467,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
     if (key === "name" || key === "aliases") setFieldError(null);
   };
   const variableActionEditor = draft.kind === "text" || draft.kind === "timeout" ? <SwitchSection
+    id="command-variable-action"
     title={labels.variableAction}
     hint={variableAction === null ? labels.variableSelectHint : labels.variableOperationHelp[variableAction.operation]}
     checked={variableAction !== null}

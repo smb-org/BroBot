@@ -1,4 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -87,6 +89,24 @@ describe("Part A dashboard kit", () => {
     fireEvent.click(block);
     expect(block).toHaveAttribute("aria-pressed", "true");
     expect(text).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("renders the ChoiceCards check icon only for the selected card", () => {
+    const { container } = render(<ChoiceCards label="Response" value="text" onChange={vi.fn()} options={[
+      { value: "text", label: "Text", description: "Write a chat message." },
+      { value: "block", label: "Block", description: "Use a saved text block." },
+    ]} />);
+    const slots = container.querySelectorAll(".ui-choice-card__check");
+
+    expect(slots).toHaveLength(2);
+    expect(slots[0]?.querySelector("svg")).not.toBeNull();
+    expect(slots[1]?.querySelector("svg")).toBeNull();
+  });
+
+  it("caps the module-row lock reason width", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/dashboard/styles.css"), "utf8");
+
+    expect(css).toMatch(/\.module-switch-control \.ui-locked-reason\s*\{[^}]*max-width:\s*16rem/u);
   });
 
   it("reserves the FieldError row and announces a message without replacing the slot", () => {

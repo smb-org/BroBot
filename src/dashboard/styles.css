@@ -1161,6 +1161,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 }
 .timer-weekday { display: flex; min-height: 32px; align-items: center; gap: var(--s2); color: var(--text-2); font-size: 13px; }
 .module-switch-control, .channel-variable-switch-control { display: grid; justify-items: end; gap: 4px; min-width: 44px; }
+.module-switch-control .ui-locked-reason { max-width: 16rem; }
 .channel-variable-switch-control { width: 100%; }
 .command-property-switch { display: inline-grid; place-items: center; min-width: 44px; min-height: 32px; }
 @media (max-width: 760px) {
