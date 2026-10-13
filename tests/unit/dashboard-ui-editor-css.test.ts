@@ -10,18 +10,18 @@ describe("editor seam styles", () => {
     expect(styles).toMatch(/\.ui-field-pair \{\s*display: grid; grid-template-columns: minmax\(0, 1fr\);/u);
   });
 
-  it("keeps rich-textarea geometry and token decoration metrics aligned", () => {
-    const geometry = styles.match(/\.template-field \.template-field__input\s*\{([^}]+)\}/u)?.[1] ?? "";
+  it("keeps template text field geometry and token decoration metrics aligned", () => {
+    const geometry = styles.match(/\.template-text-field \.template-text-field__input\s*\{([^}]+)\}/u)?.[1] ?? "";
     expect(geometry).toContain("font-size: 14px;");
     expect(geometry).toContain("line-height: 1.5;");
     expect(geometry).toContain("padding: 48px 12px 10px;");
-    expect(styles).not.toContain("template-field__mirror");
+    expect(styles).not.toContain("template-text-field__mirror");
     expect(styles).not.toContain("data-highlight-ready");
-    const module = styles.match(/\.template-field__decoration--module\s*\{([^}]+)\}/u)?.[1] ?? "";
+    const module = styles.match(/\.template-text-field__decoration--module\s*\{([^}]+)\}/u)?.[1] ?? "";
     expect(module).toContain("color: var(--brand-text);");
     expect(module).toContain("background: var(--tint-1);");
     expect(module).not.toMatch(/padding|border|letter-spacing|font(?:-family|-size|-weight)?\s*:/u);
-    const unknown = styles.match(/\.template-field__decoration--unknown\s*\{([^}]+)\}/u)?.[1] ?? "";
+    const unknown = styles.match(/\.template-text-field__decoration--unknown\s*\{([^}]+)\}/u)?.[1] ?? "";
     expect(unknown).toContain("text-decoration: underline wavy var(--warn);");
     expect(unknown).not.toMatch(/padding|border|letter-spacing|font(?:-family|-size|-weight)?\s*:/u);
   });

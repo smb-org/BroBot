@@ -3,7 +3,7 @@ import { useMemo, useState, type ReactElement } from "react";
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { templateTextLength } from "../../../contracts/template-text-length";
 import { formatTimestamp } from "../../../dashboard/locale";
-import { Button, ChatOutputTargetControl, ChatPreview, ConfirmDialog, Dialog, Field, FormDialog, InspectorSection, LoadState, LoadStateLines, Select, Switch, TextArea, UnitInput, notify } from "../../../dashboard/ui";
+import { Button, ChatOutputTargetControl, ChatPreview, ConfirmDialog, Dialog, Field, FormDialog, InspectorSection, LoadState, LoadStateLines, Select, Switch, TemplateTextField, UnitInput, notify } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { Timer, TimerMutationInput, TimerTrigger } from "../contracts";
 import { timersTexts } from "./locale";
@@ -299,14 +299,14 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
       >
         {draft === null ? null : <div className="module-stack">
           <Field label={labels.name} value={draft.name} onChange={(name) => patchDraft({ name })} maxLength={60} countLabel={(count, max) => `${String(count)}/${String(max)}`} required />
-          <TextArea
+          <TemplateTextField
             label={labels.message}
             hint={labels.messageHint}
             value={draft.messageText}
             onChange={(messageText) => patchDraft({ messageText })}
             maxLength={500}
             variables={data?.variables ?? []}
-            messages={labels.textAreaMessages}
+            messages={labels.templateMessages}
             minRows={2}
             disabled={pending}
             required

@@ -5,15 +5,14 @@ import { MODULES } from "../../src/modules/registry";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../../src/template-variables";
 import type { TemplateVariable } from "../../src/template";
 import {
-  filterTemplateVariableOptions,
-  groupTemplateVariableOptions,
-  prioritizeTemplateVariableNamespace,
-  type TemplateVariablePickerOption,
-} from "../../src/dashboard/ui/template-variable-picker-model";
+  filterTemplateTextFieldOptions,
+  groupTemplateTextFieldOptions,
+  prioritizeTemplateTextFieldNamespace,
+  type TemplateTextFieldOption,
+} from "../../src/dashboard/ui/template-text-field-model";
 
 const groupLabels = {
-  context: "Context", stream: "Stream", person: "Person", command: "Command",
-  time_random: "Time and random", event: "Event", channel: "Channel variables", text_blocks: "Text blocks",
+  module: "This module", channel: "Channel", own: "Own variables", text_blocks: "Text blocks",
 };
 
 const declaredModuleVariables = (): Array<{ moduleId: string; variable: TemplateVariable }> => MODULES.flatMap((module) => {
@@ -28,7 +27,7 @@ const declaredModuleVariables = (): Array<{ moduleId: string; variable: Template
     .map((variable) => ({ moduleId: module.id, variable }));
 });
 
-describe("template variable picker catalogs", () => {
+describe("template text field catalogs", () => {
   it("provides a localized label and description for every system variable", () => {
     for (const variable of SYSTEM_TEMPLATE_VARIABLE_LIST) {
       for (const language of ["de", "en"] as const) {
@@ -63,28 +62,56 @@ describe("template variable picker catalogs", () => {
   });
 
   it("matches localized labels and moves a typed namespace group to the top", () => {
-    const options: TemplateVariablePickerOption[] = [
+    const options: TemplateTextFieldOption[] = [
       {
         name: "game", label: "Current category", description: "Current stream category", sample: "Minecraft", group: "stream", kind: "system",
       },
       {
         name: "sun.set", label: "Sonnenuntergang", description: "Uhrzeit des Sonnenuntergangs", sample: "18:42", group: "time_random", kind: "module",
-        pickerGroup: { id: "sun", label: "Sonne", iconPaths: ["M12 3v2"], order: 10 },
+        sourceGroup: { id: "sun", label: "Sonne", iconPaths: ["M12 3v2"], order: 10 },
       },
     ];
 
-    expect(filterTemplateVariableOptions(options, "unterg").map(({ name }) => name)).toEqual(["sun.set"]);
-    const groups = groupTemplateVariableOptions(options, { groupLabels });
-    expect(prioritizeTemplateVariableNamespace(groups, "sun.")[0]?.group.id).toBe("sun");
+    expect(filterTemplateTextFieldOptions(options, "unterg").map(({ name }) => name)).toEqual(["sun.set"]);
+    const groups = groupTemplateTextFieldOptions(options, { groupLabels });
+    expect(prioritizeTemplateTextFieldNamespace(groups, "sun.")[0]?.group.id).toBe("module");
+    expect(groups.map(({ group }) => group.id)).toEqual(["module", "channel"]);
+    expect(groups.find(({ group }) => group.id === "module")?.group.label).toBe("This module");
   });
 
   it("matches localized descriptions and ranks name or label prefixes first", () => {
-    const options: TemplateVariablePickerOption[] = [
+    const options: TemplateTextFieldOption[] = [
       { name: "raid_audience", label: "Raid audience", description: "Current viewer count during a raid", sample: "42" },
       { name: "viewer_total", label: "Viewer total", description: "Total viewers", sample: "42" },
     ];
 
-    expect(filterTemplateVariableOptions(options, "current viewer count").map(({ name }) => name)).toEqual(["raid_audience"]);
-    expect(filterTemplateVariableOptions(options, "viewer").map(({ name }) => name)).toEqual(["viewer_total", "raid_audience"]);
+    expect(filterTemplateTextFieldOptions(options, "current viewer count").map(({ name }) => name)).toEqual(["raid_audience"]);
+    expect(filterTemplateTextFieldOptions(options, "viewer").map(({ name }) => name)).toEqual(["viewer_total", "raid_audience"]);
+  });
+
+  it("ranks exact names, prefixes, and substrings before description matches across groups", () => {
+    const options: TemplateTextFieldOption[] = [
+      { name: "currency.convert", description: "Converts the target amount", sample: "11,50 €", kind: "module" },
+      { name: "viewer_target", description: "Target viewer", sample: "viewer", kind: "module" },
+      { name: "target_name", description: "Target name", sample: "viewer", kind: "channel" },
+      { name: "target", description: "Target viewer", sample: "viewer", kind: "system" },
+    ];
+
+    expect(filterTemplateTextFieldOptions(options, "target").map(({ name }) => name)).toEqual([
+      "target", "target_name", "viewer_target", "currency.convert",
+    ]);
+    expect(groupTemplateTextFieldOptions(options, { groupLabels }, "target").map(({ group }) => group.id)).toEqual([
+      "channel", "own", "module",
+    ]);
+  });
+
+  it("shows a duplicate name once across grouped options", () => {
+    const options: TemplateTextFieldOption[] = [
+      { name: "user", description: "First declaration", sample: "first", kind: "system" },
+      { name: "user", description: "Second declaration", sample: "second", kind: "system" },
+    ];
+    const groups = groupTemplateTextFieldOptions(options, { groupLabels });
+    expect(groups.flatMap(({ options: entries }) => entries.map(({ option }) => option.name))).toEqual(["user"]);
+    expect(groups.flatMap(({ options: entries }) => entries.map(({ option }) => option.sample))).toEqual(["first"]);
   });
 });

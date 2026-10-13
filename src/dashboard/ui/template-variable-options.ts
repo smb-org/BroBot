@@ -3,8 +3,8 @@ import type { TemplateVariable, TemplateContext } from "../../template";
 import { effectiveTemplateVariables } from "../../template";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../../template-variables";
 import { channelVariableTemplateDescription, systemTemplateVariableLocale } from "../locale";
-import type { TemplateVariablePickerGroupPresentation } from "./TemplateVariablePicker";
-import type { TemplateVariableOption } from "./TextArea";
+import type { TemplateTextFieldGroupPresentation } from "./template-text-field-model";
+import type { TemplateTextFieldVariable } from "./TemplateTextField";
 
 export interface PanelChannelVariable {
   name: string;
@@ -23,21 +23,21 @@ interface RegisteredModuleTemplateVariable {
   pickerGroup?: ModuleTemplateVariableGroupCopy & { id: string };
 }
 
-const moduleTemplatePickerGroup = (
+const moduleTemplateFieldGroup = (
   id: string,
   group: ModuleTemplateVariableGroupCopy | undefined,
   language: DashboardLanguage,
-): TemplateVariablePickerGroupPresentation | undefined => group === undefined ? undefined : ({
+): TemplateTextFieldGroupPresentation | undefined => group === undefined ? undefined : ({
   id,
   label: group.label[language],
   iconPaths: group.icon.paths,
   order: group.order ?? 500,
 });
 
-export const registeredTemplatePickerGroup = (
+export const registeredModuleTemplateGroup = (
   variable: RegisteredModuleTemplateVariable,
   language: DashboardLanguage,
-): TemplateVariablePickerGroupPresentation | undefined => moduleTemplatePickerGroup(
+): TemplateTextFieldGroupPresentation | undefined => moduleTemplateFieldGroup(
   variable.pickerGroup?.id ?? variable.moduleId,
   variable.pickerGroup,
   language,
@@ -65,9 +65,9 @@ export const panelTemplateOptions = (
   moduleVariables: readonly TemplateVariable[],
   channelVariables: readonly PanelChannelVariable[],
   language: DashboardLanguage,
-  moduleDescriptions: readonly TemplateVariableOption[] = [],
+  moduleDescriptions: readonly TemplateTextFieldVariable[] = [],
   moduleGroup?: { id: string; definition: ModuleTemplateVariableGroupCopy },
-): TemplateVariableOption[] => {
+): TemplateTextFieldVariable[] => {
   const declarations = effectivePanelTemplateVariables(context, moduleVariables, channelVariables);
   const moduleByName = new Map(moduleDescriptions.map((variable) => [variable.name, variable]));
   const channelByName = new Map(channelVariables.map((variable) => [`var.${variable.name}`, variable]));
@@ -102,9 +102,9 @@ export const panelTemplateOptions = (
     }
     const localized = moduleByName.get(variable.name);
     const pickerCopy = variable.picker?.[language];
-    const pickerGroup = moduleGroup === undefined
+    const sourceGroup = moduleGroup === undefined
       ? undefined
-      : moduleTemplatePickerGroup(moduleGroup.id, moduleGroup.definition, language);
+      : moduleTemplateFieldGroup(moduleGroup.id, moduleGroup.definition, language);
     return {
       name: variable.name,
       label: pickerCopy?.label ?? localized?.label ?? variable.name,
@@ -113,7 +113,7 @@ export const panelTemplateOptions = (
       ...(pickerCopy?.sample === undefined ? {} : { pickerSample: pickerCopy.sample }),
       group: variable.group ?? "context",
       kind: "module",
-      ...(pickerGroup === undefined ? {} : { pickerGroup }),
+      ...(sourceGroup === undefined ? {} : { sourceGroup }),
       ...(variable.external === undefined ? {} : { external: variable.external }),
       ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
       ...(variable.parameters === "currency_pair" ? { parameter: { value: variable.parameterDefault ?? "USD EUR" } } : {}),

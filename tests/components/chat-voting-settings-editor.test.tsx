@@ -40,8 +40,7 @@ describe("chat voting settings editor", () => {
     (language, fieldLabel) => {
       const copy = chatVotingSettingsEditorCatalog(language);
       const startTextCopy = copy.fields.startText;
-      const pickerMessages = copy.templateMessages.variablePicker;
-      if (startTextCopy?.variables === undefined || startTextCopy.previewLabel === undefined || pickerMessages === undefined) {
+      if (startTextCopy?.variables === undefined || startTextCopy.previewLabel === undefined) {
         throw new Error("The localized start template editor catalog is incomplete.");
       }
       render(<UiProvider><SettingsEditor
@@ -58,7 +57,7 @@ describe("chat voting settings editor", () => {
       expect(field).not.toBeRequired();
       expect(screen.getByText(copy.templateMessages.countLabel(DEFAULT_CHAT_VOTING_SETTINGS.startText.length, 500))).toBeInTheDocument();
       expect(screen.getByText(startTextCopy.previewLabel)).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: pickerMessages.triggerLabel })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Insert variable" })).not.toBeInTheDocument();
       expect(startTextCopy.variables.map(({ name }) => name)).toEqual(["vote.title", "vote.options", "vote.duration"]);
       expect(startTextCopy.variables[0]?.description).toContain(language === "de" ? "Frage" : "question");
       expect(startTextCopy.variables[2]?.description).toContain(language === "de" ? "zeitbegrenzte" : "time-limited");

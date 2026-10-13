@@ -58,6 +58,7 @@ const ALLOWLIST: Record<string, string> = {
   "src/modules/weather/panel/locale.ts": "Bilingual DE/EN weather-settings text catalogue; only its `de` half is German.",
   "src/modules/currency/contracts/index.ts": "Bilingual DE/EN currency template and module catalogue; only its `de` half is German.",
   "src/modules/api_source/contracts/index.ts": "Bilingual DE/EN API-source template and module catalogue; only its `de` half is German.",
+  "src/modules/api_source/contracts/function-catalog.ts": "Bilingual DE/EN API-source function descriptions; only the `de` descriptions are German.",
   "src/modules/api_source/panel/locale.ts": "Bilingual DE/EN API-source panel text catalogue; only its `de` half is German.",
   "src/modules/belabox/panel/locale.ts": "Bilingual DE/EN BELABOX panel text catalogue; only its `de` half is German.",
   "src/modules/belabox/panel/settings-locale.ts": "Bilingual DE/EN BELABOX settings-editor text catalogue; only its `de` half is German.",

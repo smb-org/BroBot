@@ -1,16 +1,25 @@
 import { createRoot } from "react-dom/client";
 import { useState } from "react";
 
-import { ChipsInput, Field, FormDialog, GamePicker, SaveBar, Select, TextArea, UiProvider, UnitInput, type GamePickerGame } from "../../src/dashboard/ui";
-import type { TextAreaMessages } from "../../src/dashboard/ui";
+import { ChipsInput, Field, FormDialog, GamePicker, SaveBar, Select, TemplateTextField, UiProvider, UnitInput, type GamePickerGame } from "../../src/dashboard/ui";
+import type { TemplateTextFieldMessages } from "../../src/dashboard/ui";
 import "../../src/dashboard/ui/tokens.css";
 
-const textAreaMessages: TextAreaMessages = {
+const templateMessages: TemplateTextFieldMessages = {
   countLabel: (count, max) => `${String(count)}/${String(max)}`,
   previewCountLabel: (count) => `${String(count)} characters`,
+  openBrace: "Unclosed variable: add a closing brace }.",
   unknownVariable: (name) => `Unknown variable {${name}}.`,
   insertSuggestionLabel: (name) => `Insert {${name}}`,
+  insertionLimit: "This insertion would exceed the character limit.",
   worstCaseLength: (length, max) => `${String(length)} exceeds ${String(max)} characters.`,
+  picker: {
+    title: "Choose a variable",
+    noResults: "No variables found.",
+    externalHelp: "Looks up live data from Twitch when the template runs",
+    groupLabels: { module: "This module", channel: "Channel", own: "Own variables", text_blocks: "Text blocks" },
+    keyHints: { navigate: "select", insert: "insert", close: "close" },
+  },
 };
 
 const gamePickerMessages = {
@@ -60,7 +69,7 @@ export function LayoutFixture() {
           <UnitInput id="layout-number" label="Count" hint="A short count." value={number} onChange={setNumber} {...errorProps} />
           <Select id="layout-select" label="Mode" hint="A short mode." value="one" onChange={() => {}} options={[{ value: "one", label: "One" }]} {...errorProps} />
           <ChipsInput id="layout-tags" label="Aliases" hint="A short alias hint." values={tags} onChange={setTags} {...(showIssues ? { error: "A validation error that should remain on one line beside its marker and not cover the warning row." } : {})} {...(showIssues ? { warning: "A duplicate warning that should remain in its own one-line row." } : {})} removeLabel={(entry) => `Remove ${entry}`} listLabel="Alias list" messages={{ countLabel: (count, max) => `${String(count)}/${String(max)}`, atLimitHint: "At limit.", duplicateWarning: (entry) => `${entry} is duplicated.` }} />
-          <TextArea id="layout-template" label="Reply" hint="A short reply hint." value={showIssues ? "Hi {missing}" : "Hi there"} onChange={() => {}} {...errorProps} variables={[]} preview={(text) => previewLong ? `${text} ${"long preview ".repeat(30)}` : text} previewLabel="Preview" previewSpeaker="Bot" messages={textAreaMessages} />
+          <TemplateTextField id="layout-template" label="Reply" hint="A short reply hint." value={showIssues ? "Hi {missing}" : "Hi there"} onChange={() => {}} {...errorProps} variables={[]} preview={(text) => previewLong ? `${text} ${"long preview ".repeat(30)}` : text} previewLabel="Preview" previewSpeaker="Bot" messages={templateMessages} />
         </div>
         <SaveBar dirty={showIssues} pending={savePending} persistent saveLabel="Save" discardLabel="Discard" savedLabel="Saved." pendingLabel="Saving settings …" onSave={() => {}} onDiscard={() => {}} />
       </main>

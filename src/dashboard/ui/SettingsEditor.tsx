@@ -14,7 +14,7 @@ import { SegmentChoice } from "./SegmentChoice";
 import { Switch } from "./Switch";
 import { TemplateText } from "./TemplateText";
 import { textFieldLength } from "./text-length";
-import { TextArea, type TemplateVariableOption, type TextAreaMessages } from "./TextArea";
+import { TemplateTextField, type TemplateTextFieldVariable, type TemplateTextFieldMessages } from "./TemplateTextField";
 import { TimeoutDurationRangeFields, type TimeoutDurationRangeValue } from "./TimeoutDurationRangeFields";
 
 export type SettingsFieldSpec<Settings> =
@@ -48,7 +48,7 @@ interface SettingsFieldText {
   countLabel?: (count: number, maxLength: number) => string;
   previewLabel?: string;
   previewSpeaker?: string;
-  variables?: readonly TemplateVariableOption[];
+  variables?: readonly TemplateTextFieldVariable[];
 }
 
 interface SettingsEditorTexts {
@@ -72,7 +72,7 @@ export interface SettingsEditorCatalog extends SettingsEditorTexts {
   reloadLabel: string;
   enabledLabel: string;
   disabledLabel: string;
-  templateMessages: TextAreaMessages;
+  templateMessages: TemplateTextFieldMessages;
   warningLabel: (warning: PanelTemplateWarning) => string;
 }
 
@@ -87,10 +87,9 @@ export interface SettingsEditorProps<Settings extends object> {
   settings: Settings;
   onChange: <Key extends keyof Settings>(key: Key, value: Settings[Key]) => void;
   texts: SettingsEditorTexts;
-  variables?: Readonly<Partial<Record<keyof Settings & string, readonly TemplateVariableOption[]>>>;
-  templateMetadata?: Readonly<Partial<Record<keyof Settings & string, readonly (TemplateVariableOption & { maxLength: number; fallbackWhenAbsent?: number })[]>>>;
-  templateMessages: TextAreaMessages;
-  createVariableHref?: string;
+  variables?: Readonly<Partial<Record<keyof Settings & string, readonly TemplateTextFieldVariable[]>>>;
+  templateMetadata?: Readonly<Partial<Record<keyof Settings & string, readonly (TemplateTextFieldVariable & { maxLength: number; fallbackWhenAbsent?: number })[]>>>;
+  templateMessages: TemplateTextFieldMessages;
   readOnly?: boolean;
   disabled?: boolean;
   enabledLabel?: string;
@@ -112,7 +111,6 @@ export function SettingsEditor<Settings extends object>({
   variables,
   templateMetadata,
   templateMessages,
-  createVariableHref,
   readOnly = false,
   disabled = false,
   enabledLabel,
@@ -226,7 +224,7 @@ export function SettingsEditor<Settings extends object>({
       const fieldVariables = variables?.[field.key] ?? metadata?.map(({ name, description, sample }) => ({ name, description, sample }));
       return (
         <InspectorFieldRow key={field.key} label={copy.label} help={copy.hint}>
-          <TextArea
+          <TemplateTextField
             id={id}
             name={field.key}
             label={copy.label}
@@ -245,7 +243,6 @@ export function SettingsEditor<Settings extends object>({
             {...(copy.previewSpeaker === undefined ? {} : { previewSpeaker: copy.previewSpeaker })}
             {...(field.minRows === undefined ? {} : { minRows: field.minRows })}
             messages={templateMessages}
-            {...(createVariableHref === undefined ? {} : { createVariableHref })}
           />
         </InspectorFieldRow>
       );

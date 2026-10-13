@@ -62,6 +62,15 @@ const insertRestrictedFaqEntry = async (database: TestD1Database): Promise<void>
   ).run();
 };
 
+it("provides German copy for the template variable picker", () => {
+  expect(faqTexts("de").templateMessages.picker).toEqual(expect.objectContaining({
+    title: "Variable auswählen",
+    noResults: "Keine Variablen gefunden.",
+    groupLabels: { module: "Dieses Modul", channel: "Kanal", own: "Eigene Variablen", text_blocks: "Textbausteine" },
+    keyHints: { navigate: "auswählen", insert: "einfügen", close: "schließen" },
+  }));
+});
+
 describe("FAQ routes", () => {
   let database: TestD1Database;
 

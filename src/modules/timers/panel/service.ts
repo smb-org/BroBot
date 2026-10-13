@@ -1,6 +1,6 @@
 import { PanelApiError } from "../../../contracts/panel-error";
 import { isEventTemplateVariableAvailable } from "../../../contracts/event-template-variables";
-import type { TemplateVariableOption } from "../../../dashboard/ui";
+import type { TemplateTextFieldVariable } from "../../../dashboard/ui";
 import type { ModuleLanguage, TemplateVariable } from "../../contract";
 import type { Timer, TimerMutationInput } from "../contracts";
 
@@ -12,7 +12,7 @@ interface TimerEventTimeSource {
 export interface TimersPanelData {
   timers: Timer[];
   sources: TimerEventTimeSource[];
-  variables: TemplateVariableOption[];
+  variables: TemplateTextFieldVariable[];
 }
 
 const basePath = (channelId: string): string => `/api/channels/${encodeURIComponent(channelId)}/modules/timers`;
@@ -38,7 +38,7 @@ export const loadTimersPanel = async (channelId: string, signal?: AbortSignal): 
   const [timers, sources, variables] = await Promise.all([
     readJson<{ timers: Timer[] }>(timersResponse),
     readJson<{ sources: TimerEventTimeSource[] }>(sourcesResponse),
-    readJson<{ variables: { name: string; isTextBlock?: boolean; availableInEventTemplates?: boolean; description?: string; sample?: string; group?: TemplateVariableOption["group"]; contexts?: TemplateVariable["contexts"]; parameters?: TemplateVariableOption["parameters"]; parameterDefault?: string }[] }>(variablesResponse),
+    readJson<{ variables: { name: string; isTextBlock?: boolean; availableInEventTemplates?: boolean; description?: string; sample?: string; group?: TemplateTextFieldVariable["group"]; contexts?: TemplateVariable["contexts"]; parameters?: TemplateTextFieldVariable["parameters"]; parameterDefault?: string }[] }>(variablesResponse),
   ]);
   return {
     timers: timers.timers,

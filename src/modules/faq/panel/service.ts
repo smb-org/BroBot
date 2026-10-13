@@ -1,12 +1,12 @@
 import { PanelApiError } from "../../../contracts/panel-error";
 import { isEventTemplateVariableAvailable } from "../../../contracts/event-template-variables";
-import type { TemplateVariableOption } from "../../../dashboard/ui";
+import type { TemplateTextFieldVariable } from "../../../dashboard/ui";
 import type { TemplateVariable } from "../../contract";
 import type { FaqEntry, FaqGame, FaqMutationInput } from "../contracts";
 
 export interface FaqPanelData {
   entries: FaqEntry[];
-  variables: TemplateVariableOption[];
+  variables: TemplateTextFieldVariable[];
 }
 
 export interface FaqTestResult {
@@ -39,7 +39,7 @@ export const loadFaqPanel = async (channelId: string, signal?: AbortSignal): Pro
   ]);
   const [entries, variables] = await Promise.all([
     readJson<{ entries: FaqEntry[] }>(entriesResponse),
-    readJson<{ variables: { name: string; isTextBlock?: boolean; availableInEventTemplates?: boolean; description?: string; sample?: string; group?: TemplateVariableOption["group"]; contexts?: TemplateVariable["contexts"]; parameters?: TemplateVariableOption["parameters"]; parameterDefault?: string }[] }>(variablesResponse),
+    readJson<{ variables: { name: string; isTextBlock?: boolean; availableInEventTemplates?: boolean; description?: string; sample?: string; group?: TemplateTextFieldVariable["group"]; contexts?: TemplateVariable["contexts"]; parameters?: TemplateTextFieldVariable["parameters"]; parameterDefault?: string }[] }>(variablesResponse),
   ]);
   return {
     entries: entries.entries,

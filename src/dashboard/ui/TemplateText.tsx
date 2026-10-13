@@ -1,11 +1,11 @@
 import type { ReactElement } from "react";
 
 import { tokenizeTemplate, type TemplateVariable } from "../../template";
-import type { TemplateVariableOption } from "./TextArea";
+import type { TemplateTextFieldVariable } from "./TemplateTextField";
 
 export interface TemplateTextProps {
   value: string;
-  variables: readonly TemplateVariableOption[];
+  variables: readonly TemplateTextFieldVariable[];
   className?: string;
 }
 

@@ -1,5 +1,5 @@
 import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "../../../dashboard/locale";
-import type { TextAreaMessages } from "../../../dashboard/ui";
+import type { TemplateTextFieldMessages } from "../../../dashboard/ui";
 
 export interface TimersTexts {
   title: string;
@@ -44,7 +44,7 @@ export interface TimersTexts {
   missingTextBlock: string;
   inputDependentText: string;
   limitReached: string;
-  textAreaMessages: TextAreaMessages;
+  templateMessages: TemplateTextFieldMessages;
   roleLocked: string;
   noNextRun: string;
   weekdaysNames: readonly string[];
@@ -94,12 +94,19 @@ const catalog: LocaleCatalog<TimersTexts> = {
     missingTextBlock: "Ein verwendeter Textbaustein existiert nicht mehr.",
     inputDependentText: "Geplante Nachrichten können keine Eingaben aus einem Chatbefehl verwenden.",
     limitReached: "Ein Kanal kann höchstens 50 Timer haben.",
-    textAreaMessages: {
+    templateMessages: {
       countLabel: (count, max) => `${String(count)}/${String(max)}`,
       previewCountLabel: (count) => count,
-      unknownVariable: (name, suggestion) => suggestion === null ? `Unbekannte Variable: ${name}` : `Unbekannte Variable: ${name}. Meintest du ${suggestion}?`,
+      openBrace: "Offene Variable: Schließe die geschweifte Klammer mit } ab.",
+      unknownVariable: (name, suggestion) => suggestion === null ? `Unbekannte Variable {${name}}.` : `Unbekannte Variable {${name}} – meintest du {${suggestion}}?`,
       insertSuggestionLabel: (name) => `${name} einfügen`,
+      insertionLimit: "Einfügen würde das Zeichenlimit überschreiten.",
       worstCaseLength: (length, maximum) => `${String(length)} Zeichen, höchstens ${String(maximum)}.`,
+      picker: {
+        title: "Variable auswählen", noResults: "Keine Variablen gefunden.", externalHelp: "Fragt Twitch live ab, wenn die Vorlage gerendert wird",
+        groupLabels: { module: "Dieses Modul", channel: "Kanal", own: "Eigene Variablen", text_blocks: "Textbausteine" },
+        keyHints: { navigate: "auswählen", insert: "einfügen", close: "schließen" },
+      },
     },
     roleLocked: "Nur Broadcaster und Verwalter dürfen Timer bearbeiten.",
     noNextRun: "Kein Lauf geplant",
@@ -148,12 +155,19 @@ const catalog: LocaleCatalog<TimersTexts> = {
     missingTextBlock: "A referenced text block no longer exists.",
     inputDependentText: "Scheduled messages cannot use input from a chat command.",
     limitReached: "A channel can have up to 50 timers.",
-    textAreaMessages: {
+    templateMessages: {
       countLabel: (count, max) => `${String(count)}/${String(max)}`,
       previewCountLabel: (count) => count,
-      unknownVariable: (name, suggestion) => suggestion === null ? `Unknown template variable: ${name}` : `Unknown template variable: ${name}. Did you mean ${suggestion}?`,
+      openBrace: "Unclosed variable: add a closing brace }.",
+      unknownVariable: (name, suggestion) => suggestion === null ? `Unknown variable {${name}}.` : `Unknown variable {${name}} — did you mean {${suggestion}}?`,
       insertSuggestionLabel: (name) => `Insert ${name}`,
+      insertionLimit: "This insertion would exceed the character limit.",
       worstCaseLength: (length, maximum) => `${String(length)} characters, maximum ${String(maximum)}.`,
+      picker: {
+        title: "Choose a variable", noResults: "No variables found.", externalHelp: "Looks up live data from Twitch when the template runs",
+        groupLabels: { module: "This module", channel: "Channel", own: "Own variables", text_blocks: "Text blocks" },
+        keyHints: { navigate: "select", insert: "insert", close: "close" },
+      },
     },
     roleLocked: "Only broadcasters and managers can edit timers.",
     noNextRun: "No run scheduled",

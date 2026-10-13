@@ -1,31 +1,27 @@
-import { Combobox, Input, useCombobox } from "@mantine/core";
+import { Input } from "@mantine/core";
 import { RichTextarea, type CaretPosition, type RichTextareaHandle } from "rich-textarea";
 import { useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ReactElement, type ReactNode, type SyntheticEvent } from "react";
 
-import { closestTemplateVariable, templateTextLength, tokenizeTemplate, unknownTemplateVariables, type TemplateVariable } from "../../template";
+import { closestTemplateVariable, templateTextLength, tokenizeTemplate, unknownTemplateVariables, type TemplateToken, type TemplateVariable } from "../../template";
 import type { TemplateVariableGroup } from "../../contracts/values";
 import { Button } from "./Button";
 import { ChatPreview } from "./ChatPreview";
 import { Icon } from "./Icon";
+import { InlineSuggestionPicker, InlineSuggestionPickerTarget } from "./InlineSuggestionPicker";
 import { TruncatedText } from "./TruncatedText";
 import { describedHelper, useDisabledFieldReason } from "./DisabledFieldReason";
+import { insertTextareaText } from "./textarea-insertion";
 import {
-  TemplateVariableGroupHeading,
-  TemplateVariableKeyboardHints,
-  TemplateVariablePicker,
-  type TemplateVariablePickerGroupPresentation,
-  type TemplateVariablePickerMessages,
-  type TemplateVariablePickerOption,
-  type TemplateVariablePickerRange,
-} from "./TemplateVariablePicker";
-import {
-  filterTemplateVariableOptions,
-  groupTemplateVariableOptions,
-  prioritizeTemplateVariableNamespace,
-  reindexGroupedTemplateVariableOptions,
-} from "./template-variable-picker-model";
+  filterTemplateTextFieldOptions,
+  groupTemplateTextFieldOptions,
+  prioritizeTemplateTextFieldNamespace,
+  reindexGroupedTemplateTextFieldOptions,
+  type TemplateTextFieldGroupPresentation,
+  type TemplateTextFieldOption,
+  type TemplateTextFieldPickerMessages,
+} from "./template-text-field-model";
 
-export interface TemplateVariableOption {
+export interface TemplateTextFieldVariable {
   name: string;
   label?: string;
   description: string;
@@ -33,23 +29,25 @@ export interface TemplateVariableOption {
   pickerSample?: string;
   group?: TemplateVariableGroup;
   kind?: "system" | "module" | "channel";
-  pickerGroup?: TemplateVariablePickerGroupPresentation;
+  sourceGroup?: TemplateTextFieldGroupPresentation;
   isTextBlock?: boolean;
   external?: boolean;
   parameters?: NonNullable<TemplateVariable["parameters"]>;
   parameter?: { value: string };
 }
 
-export interface TextAreaMessages {
+export interface TemplateTextFieldMessages {
   countLabel: (count: number, maxLength: number) => string;
   previewCountLabel: (count: number) => ReactNode;
+  openBrace: string;
   unknownVariable: (name: string, suggestion: string | null) => ReactNode;
   insertSuggestionLabel: (name: string) => string;
+  insertionLimit: string;
   worstCaseLength: (length: number, maxLength: number) => ReactNode;
-  variablePicker?: TemplateVariablePickerMessages;
+  picker: TemplateTextFieldPickerMessages;
 }
 
-export interface TextAreaProps {
+interface TemplateTextFieldProps {
   label: string;
   hint: string;
   error?: string;
@@ -57,7 +55,7 @@ export interface TextAreaProps {
   onChange: (value: string) => void;
   maxLength?: number;
   worstCaseLength?: number;
-  variables?: readonly TemplateVariableOption[];
+  variables?: readonly TemplateTextFieldVariable[];
   preview?: (template: string, values: Readonly<Record<string, string>>) => string;
   previewLabel?: string;
   previewSpeaker?: string;
@@ -68,8 +66,7 @@ export interface TextAreaProps {
   minRows?: number;
   id?: string;
   name?: string;
-  messages: TextAreaMessages;
-  createVariableHref?: string;
+  messages: TemplateTextFieldMessages;
 }
 
 interface SuggestionQuery {
@@ -83,7 +80,12 @@ interface CaretAnchor {
   top: number;
 }
 
-const templateDeclarations = (options: readonly TemplateVariableOption[]): TemplateVariable[] =>
+interface TextRange {
+  start: number;
+  end: number;
+}
+
+const templateDeclarations = (options: readonly TemplateTextFieldVariable[]): TemplateVariable[] =>
   options.map((option) => ({
     name: option.name,
     sample: option.sample,
@@ -102,21 +104,31 @@ const getSuggestionQuery = (value: string, caret: number): SuggestionQuery | nul
   return { fragment: match[1] ?? "", start: match.index + 1, end: caret + (suffixMatch?.[0].length ?? 0) };
 };
 
-const fallbackPickerMessages: TemplateVariablePickerMessages = {
-  triggerLabel: "Insert variable", title: "Choose a variable", searchLabel: "Search variables",
-  closeLabel: "Close variable picker", noResults: "No variables found.", createVariableLabel: "Create variable …",
-  externalHelp: "Looks up live data when the template runs",
-  groupLabels: {
-    context: "Context", stream: "Stream", person: "Person", command: "Command",
-    time_random: "Time and random", event: "Event", channel: "Channel variables", text_blocks: "Text blocks",
-  },
-  textBlockSample: "Text block",
-  keyHints: { navigate: "select", insert: "insert", close: "close" },
+const findOpenBrace = (value: string): number | null => {
+  const opening = value.lastIndexOf("{");
+  return opening > value.lastIndexOf("}") ? opening : null;
 };
+
+const suggestionQueryKey = (query: SuggestionQuery | null): string | null => query === null
+  ? null
+  : `${String(query.start)}:${String(query.end)}:${query.fragment}`;
+
+const optionForPicker = (variable: TemplateTextFieldVariable): TemplateTextFieldOption => ({
+  name: variable.name,
+  label: variable.label ?? variable.name,
+  description: variable.description,
+  sample: variable.pickerSample ?? variable.sample,
+  group: variable.group ?? "context",
+  kind: variable.kind ?? "module",
+  ...(variable.sourceGroup === undefined ? {} : { sourceGroup: variable.sourceGroup }),
+  ...(variable.isTextBlock === undefined ? {} : { isTextBlock: variable.isTextBlock }),
+  ...(variable.external === undefined ? {} : { external: variable.external }),
+  ...(variable.parameter === undefined ? {} : { parameter: variable.parameter }),
+});
 
 const isLegacyCompositionKey = (event: object): boolean => Reflect.get(event, "keyCode") === 229;
 
-export function TextArea({
+export function TemplateTextField({
   label,
   hint,
   error,
@@ -136,8 +148,7 @@ export function TextArea({
   id: suppliedId,
   name,
   messages,
-  createVariableHref,
-}: TextAreaProps): ReactElement {
+}: TemplateTextFieldProps): ReactElement {
   const generatedId = useId();
   const disabledReason = useDisabledFieldReason();
   const id = suppliedId ?? `template-${generatedId}`;
@@ -145,13 +156,14 @@ export function TextArea({
   const textareaRef = useRef<RichTextareaHandle>(null);
   const frameRef = useRef<HTMLDivElement>(null);
   const selection = useRef({ start: 0, end: 0 });
+  const selectionAfterValue = useRef<{ value: string; range: TextRange; focus: boolean } | null>(null);
+  const dismissedQuery = useRef<string | null>(null);
   const programmaticEdit = useRef(false);
   const composingRef = useRef(false);
   const [composing, setComposing] = useState(false);
   const [query, setQuery] = useState<SuggestionQuery | null>(null);
+  const [insertionLimitReached, setInsertionLimitReached] = useState(false);
   const [caretAnchor, setCaretAnchor] = useState<CaretAnchor>({ left: 12, top: 32 });
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [variablePickerOpen, setVariablePickerOpen] = useState(false);
   const declarations = useMemo(() => templateDeclarations(variables ?? []), [variables]);
   const count = variables === undefined ? value.length : templateTextLength(value);
   const overLimit = maxLength !== undefined && count > maxLength;
@@ -159,6 +171,7 @@ export function TextArea({
   const effectiveError = error ?? (overLimit ? messages.countLabel(count, maxLength) : undefined);
   const worstCase = suppliedWorstCaseLength;
   const worstCaseExceeded = maxLength !== undefined && worstCase !== undefined && worstCase > maxLength;
+  const openBrace = variables !== undefined && findOpenBrace(value) !== null;
   const unknownVariables = useMemo(
     () => variables === undefined ? [] : unknownTemplateVariables(value, declarations),
     [declarations, value, variables],
@@ -174,33 +187,19 @@ export function TextArea({
   const previewCount = previewText?.length ?? 0;
   const suggestionGroups = useMemo(() => {
     if (query === null || variables === undefined) return [];
-    const pickerMessages = messages.variablePicker ?? fallbackPickerMessages;
-    const options: TemplateVariablePickerOption[] = variables.map((variable) => ({
-      name: variable.name,
-      label: variable.label ?? variable.name,
-      description: variable.description,
-      sample: variable.pickerSample ?? variable.sample,
-      group: variable.group ?? "context",
-      kind: variable.kind ?? "module",
-      ...(variable.pickerGroup === undefined ? {} : { pickerGroup: variable.pickerGroup }),
-      ...(variable.isTextBlock === undefined ? {} : { isTextBlock: variable.isTextBlock }),
-      ...(variable.external === undefined ? {} : { external: variable.external }),
-      ...(variable.parameter === undefined ? {} : { parameter: variable.parameter }),
-    }));
-    const filtered = filterTemplateVariableOptions(options, query.fragment);
-    return reindexGroupedTemplateVariableOptions(prioritizeTemplateVariableNamespace(
-      groupTemplateVariableOptions(filtered, pickerMessages),
+    const pickerMessages = messages.picker;
+    const options = variables.map(optionForPicker);
+    const filtered = filterTemplateTextFieldOptions(options, query.fragment);
+    return reindexGroupedTemplateTextFieldOptions(prioritizeTemplateTextFieldNamespace(
+      groupTemplateTextFieldOptions(filtered, pickerMessages, query.fragment),
       query.fragment,
     ));
-  }, [messages.variablePicker, query, variables]);
-  const suggestions = suggestionGroups.flatMap(({ options }) => options.map(({ option }) => option));
-  const suggestionOpen = !disabled && !readOnly && !composing && suggestions.length > 0;
-  const activeSuggestion = suggestions[activeIndex] ?? suggestions[0];
+  }, [messages.picker, query, variables]);
+  const suggestionOpen = !disabled && !readOnly && !composing && variables !== undefined && query !== null;
   const unknownAdvice = useMemo(() => unknownVariables.map((tokenName) => ({
     tokenName,
     suggestion: closestTemplateVariable(tokenName, declarations),
   })), [declarations, unknownVariables]);
-  const combobox = useCombobox({ onDropdownClose: () => { setActiveIndex(0); } });
 
   const rememberSelection = (target: HTMLTextAreaElement): void => {
     selection.current = { start: target.selectionStart, end: target.selectionEnd };
@@ -211,16 +210,32 @@ export function TextArea({
       setQuery(null);
       return;
     }
-    setQuery(getSuggestionQuery(next, caret));
-    setActiveIndex(0);
+    const nextQuery = getSuggestionQuery(next, caret);
+    const nextKey = suggestionQueryKey(nextQuery);
+    if (dismissedQuery.current !== null) {
+      if (nextKey === dismissedQuery.current) {
+        setQuery(null);
+        return;
+      }
+      dismissedQuery.current = null;
+    }
+    setQuery(nextQuery);
   };
 
   const handleValueChange = (next: string, target: HTMLTextAreaElement): void => {
-    onChange(next);
+    setInsertionLimitReached(false);
     rememberSelection(target);
     const caret = target.selectionStart === 0 && target.selectionEnd === 0 && next.length > value.length
       ? next.length
       : target.selectionStart;
+    selectionAfterValue.current = {
+      value: next,
+      range: target.selectionStart === 0 && target.selectionEnd === 0 && next.length > value.length
+        ? { start: next.length, end: next.length }
+        : { start: target.selectionStart, end: target.selectionEnd },
+      focus: false,
+    };
+    onChange(next);
     updateSuggestionQuery(next, caret);
   };
 
@@ -240,22 +255,24 @@ export function TextArea({
     }
   };
 
-  const insertText = (insert: string, start: number, end: number, selectionAfter?: TemplateVariablePickerRange): void => {
+  const insertText = (insert: string, start: number, end: number, selectionAfter?: TextRange): void => {
     const textarea = textareaRef.current;
     if (textarea === null || disabled || readOnly) return;
     const nextValue = `${textarea.value.slice(0, start)}${insert}${textarea.value.slice(end)}`;
+    const nextCount = variables === undefined ? nextValue.length : templateTextLength(nextValue);
+    if (maxLength !== undefined && nextCount > maxLength) {
+      setInsertionLimitReached(true);
+      return;
+    }
     programmaticEdit.current = true;
-    textarea.setRangeText(insert, start, end, "end");
+    insertTextareaText(textarea, insert, start, end);
     programmaticEdit.current = false;
-    onChange(nextValue);
+    setInsertionLimitReached(false);
     const targetSelection = selectionAfter ?? { start: start + insert.length, end: start + insert.length };
     selection.current = targetSelection;
+    selectionAfterValue.current = { value: nextValue, range: targetSelection, focus: true };
+    onChange(nextValue);
     setQuery(null);
-    combobox.closeDropdown();
-    window.requestAnimationFrame(() => {
-      textarea.focus();
-      textarea.setSelectionRange(targetSelection.start, targetSelection.end);
-    });
   };
 
   const chooseSuggestion = (variableName: string): void => {
@@ -265,13 +282,23 @@ export function TextArea({
     insertText(`{${variableName}${parameter === undefined ? "" : ` ${parameter.value}`}}`, currentQuery.start - 1, currentQuery.end);
   };
 
+  const insertUnknownSuggestion = (token: TemplateToken, suggestion: string): void => {
+    const name = token.name;
+    if (name === undefined) return;
+    insertText(suggestion, token.start + 1, token.start + 1 + name.length);
+  };
+
   const onCompositionEnd = (event: SyntheticEvent<HTMLTextAreaElement>): void => {
     composingRef.current = false;
     setComposing(false);
     handleValueChange(event.currentTarget.value, event.currentTarget);
   };
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+  const handleKeyDown = (
+    event: React.KeyboardEvent<HTMLTextAreaElement>,
+    handlePickerKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => boolean,
+    closePicker: () => void,
+  ): void => {
     const native = event.nativeEvent;
     const isComposing = composingRef.current || native.isComposing || isLegacyCompositionKey(native);
     if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
@@ -280,31 +307,10 @@ export function TextArea({
       event.currentTarget.form?.requestSubmit();
       return;
     }
-    if ((event.ctrlKey || event.metaKey) && event.code === "Space") {
-      event.preventDefault();
-      setQuery(null);
-      combobox.closeDropdown();
-      setVariablePickerOpen(true);
-      return;
-    }
     if (isComposing) return;
-    if (suggestionOpen && event.key === "ArrowDown") {
-      event.preventDefault();
-      setActiveIndex((index) => (index + 1) % suggestions.length);
-    } else if (suggestionOpen && event.key === "ArrowUp") {
-      event.preventDefault();
-      setActiveIndex((index) => (index - 1 + suggestions.length) % suggestions.length);
-    } else if (suggestionOpen && (event.key === "Enter" || event.key === "Tab") && activeSuggestion !== undefined) {
-      event.preventDefault();
-      chooseSuggestion(activeSuggestion.name);
-    } else if (suggestionOpen && event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      setQuery(null);
-      combobox.closeDropdown();
-    } else if (suggestionOpen && (event.key === "}" || event.key === " ")) {
-      setQuery(null);
-      combobox.closeDropdown();
+    if (handlePickerKeyDown(event)) return;
+    if (suggestionOpen && (event.key === "}" || event.key === " ")) {
+      closePicker();
     }
   };
 
@@ -314,31 +320,44 @@ export function TextArea({
   }, [composing, onIssuesChange, unknownVariables, worstCaseExceeded]);
 
   useEffect(() => {
-    if (suggestionOpen) combobox.openDropdown();
-    else combobox.closeDropdown();
-  }, [combobox, suggestionOpen]);
+    const pendingSelection = selectionAfterValue.current;
+    if (pendingSelection === null || pendingSelection.value !== value) return;
+    selectionAfterValue.current = null;
+    const textarea = textareaRef.current;
+    if (textarea === null) return;
+    if (pendingSelection.focus) textarea.focus();
+    if (textarea.selectionStart !== pendingSelection.range.start || textarea.selectionEnd !== pendingSelection.range.end) {
+      textarea.setSelectionRange(pendingSelection.range.start, pendingSelection.range.end);
+    }
+  }, [value]);
 
   const countNode = maxLength === undefined ? null : (
-    <span className={`ui-textarea__count${nearLimit && !overLimit ? " ui-textarea__count--warning" : ""}${overLimit ? " ui-textarea__count--error" : ""}`} id={`${id}-count`}>
+    <span className={`ui-template-text-field__count${nearLimit && !overLimit ? " ui-template-text-field__count--warning" : ""}${overLimit ? " ui-template-text-field__count--error" : ""}`} id={`${id}-count`}>
       {messages.countLabel(count, maxLength)}
     </span>
   );
 
   const description: ReactNode = (
-    <div className="ui-textarea__description-content">
-      <div className="ui-textarea__helper-row">
-        <span><TruncatedText text={hint} />{describedHelper(null, disabledReason, `textarea-${id}`)}</span>
+    <div className="ui-template-text-field__description-content">
+      <div className="ui-template-text-field__helper-row">
+        <span><TruncatedText text={hint} />{describedHelper(null, disabledReason, `template-text-field-${id}`)}</span>
         {countNode}
       </div>
-      <div className="ui-textarea__warnings" id={`${id}-warnings`}>
+      <div className="ui-template-text-field__warnings" id={`${id}-warnings`} aria-live="polite">
+          {insertionLimitReached ? (
+            <div className="ui-template-text-field__warning" role="status"><Icon name="warning" size={16} /><span>{messages.insertionLimit}</span></div>
+          ) : null}
+          {openBrace ? (
+            <div className="ui-template-text-field__warning"><Icon name="warning" size={16} /><span>{messages.openBrace}</span></div>
+          ) : null}
           {unknownAdvice.map(({ tokenName, suggestion }, index) => {
-            const token = unknownPieces.find((piece) => piece.text === `{${tokenName}}`);
+            const token = unknownPieces.find((piece) => piece.name === tokenName);
             return (
-              <div className="ui-textarea__warning" key={`${tokenName}-${String(index)}`}>
+              <div className="ui-template-text-field__warning" key={`${tokenName}-${String(index)}`}>
                 <Icon name="warning" size={16} />
                 <span>{messages.unknownVariable(tokenName, suggestion)}</span>
                 {suggestion === null || token === undefined ? null : (
-                  <Button size="compact" variant="subtle" type="button" disabled={disabled || readOnly} onClick={() => insertText(`{${suggestion}}`, token.start, token.start + token.text.length)}>
+                  <Button size="compact" variant="subtle" type="button" disabled={disabled || readOnly} onClick={() => insertUnknownSuggestion(token, suggestion)}>
                     {messages.insertSuggestionLabel(suggestion)}
                   </Button>
                 )}
@@ -346,7 +365,7 @@ export function TextArea({
             );
           })}
           {worstCaseExceeded ? (
-            <div className="ui-textarea__warning"><Icon name="warning" size={16} /><span>{messages.worstCaseLength(worstCase, maxLength)}</span></div>
+            <div className="ui-template-text-field__warning"><Icon name="warning" size={16} /><span>{messages.worstCaseLength(worstCase, maxLength)}</span></div>
           ) : null}
       </div>
       {preview === undefined || previewLabel === undefined || previewSpeaker === undefined ? null : (
@@ -360,23 +379,40 @@ export function TextArea({
     : tokenizeTemplate(text, declarations).map((part) => (
       part.kind === "text"
         ? part.text
-        : <span key={`${String(part.start)}-${part.kind}`} data-kind={part.kind} className={`template-field__decoration template-field__decoration--${part.kind}`}>{part.text}</span>
+        : <span key={`${String(part.start)}-${part.kind}`} data-kind={part.kind} className={`template-text-field__decoration template-text-field__decoration--${part.kind}`}>{part.text}</span>
     ));
 
   return (
-    <Combobox
-      store={combobox}
-      onOptionSubmit={chooseSuggestion}
-      withinPortal
-      position="bottom-start"
-      hideDetached={false}
-      middlewares={{ flip: true, shift: true }}
-      shadow="xs"
-      width={400}
+    <InlineSuggestionPicker
+      listboxId={listboxId}
+      open={suggestionOpen}
+      groups={suggestionGroups}
+      messages={messages.picker}
+      onSelect={chooseSuggestion}
+      onClose={() => {
+        dismissedQuery.current = suggestionQueryKey(query);
+        setQuery(null);
+      }}
+      renderOption={(variable, active) => <>
+        <span className="ui-template-text-field__suggestion-copy">
+          <span className="ui-template-text-field__suggestion-name">{variable.label ?? variable.name}</span>
+          <span className="ui-template-text-field__suggestion-token">{`{${variable.name}${variable.parameter === undefined ? "" : ` ${variable.parameter.value}`}}`}</span>
+          {active ? <span className="ui-template-text-field__suggestion-description">{variable.description}</span> : null}
+        </span>
+        <span className={`ui-template-text-field__suggestion-sample${variable.isTextBlock ? " ui-template-text-field__suggestion-sample--tag" : ""}`}>
+          {variable.sample}
+        </span>
+        {variable.external ? (
+          <span className="ui-template-text-field__suggestion-external" role="img" title={messages.picker.externalHelp} aria-label={messages.picker.externalHelp}>
+            <Icon name="cause" size={16} />
+          </span>
+        ) : null}
+      </>}
     >
+      {({ activeOptionId, handleKeyDown: handlePickerKeyDown, close }) => (
       <Input.Wrapper
         data-ui=""
-        className="ui-textarea"
+        className="ui-template-text-field"
         id={id}
         label={label}
         description={description}
@@ -385,11 +421,11 @@ export function TextArea({
         error={effectiveError === undefined ? undefined : <span><span aria-hidden="true">× </span><TruncatedText text={effectiveError} /></span>}
         withAsterisk={required}
       >
-        <div ref={frameRef} className="template-field" data-composing={composing ? "true" : undefined} data-readonly={readOnly ? "true" : undefined}>
+        <div ref={frameRef} className="template-text-field" data-composing={composing ? "true" : undefined} data-readonly={readOnly ? "true" : undefined}>
           <RichTextarea
-            className="template-field__input"
+            className="template-text-field__input"
             ref={textareaRef}
-            style={{ width: "100%", paddingRight: 54 }}
+            style={{ width: "100%" }}
             value={value}
             onChange={(event) => {
               if (programmaticEdit.current) {
@@ -410,7 +446,7 @@ export function TextArea({
               updateSuggestionQuery(event.currentTarget.value, event.currentTarget.selectionStart);
             }}
             onClick={(event) => { rememberSelection(event.currentTarget); }}
-            onKeyDown={handleKeyDown}
+            onKeyDown={(event) => { handleKeyDown(event, handlePickerKeyDown, close); }}
             onCompositionStart={() => { composingRef.current = true; setComposing(true); setQuery(null); }}
             onCompositionEnd={onCompositionEnd}
             onBlur={() => { setQuery(null); }}
@@ -425,78 +461,17 @@ export function TextArea({
             aria-autocomplete="list"
             aria-expanded={suggestionOpen}
             aria-controls={suggestionOpen ? listboxId : undefined}
-            aria-activedescendant={suggestionOpen && activeSuggestion !== undefined ? `${listboxId}-${activeSuggestion.name}` : undefined}
+            aria-activedescendant={suggestionOpen ? activeOptionId : undefined}
             spellCheck
           >
             {renderDecoratedValue}
           </RichTextarea>
-          {variables !== undefined && messages.variablePicker !== undefined ? (
-            <div className="template-field__variable-picker">
-              <TemplateVariablePicker
-                options={variables.map((variable): TemplateVariablePickerOption => ({
-                  name: variable.name,
-                  label: variable.label ?? variable.name,
-                  description: variable.description,
-                  sample: variable.pickerSample ?? variable.sample,
-                  group: variable.group ?? "context",
-                  kind: variable.kind ?? "module",
-                  ...(variable.pickerGroup === undefined ? {} : { pickerGroup: variable.pickerGroup }),
-                  ...(variable.isTextBlock === undefined ? {} : { isTextBlock: variable.isTextBlock }),
-                  ...(variable.external === undefined ? {} : { external: variable.external }),
-                  ...(variable.parameter === undefined ? {} : { parameter: variable.parameter }),
-                }))}
-                messages={messages.variablePicker}
-                opened={variablePickerOpen}
-                onOpenedChange={setVariablePickerOpen}
-                disabled={disabled || readOnly}
-                {...(createVariableHref === undefined ? {} : { createVariableHref })}
-                getSelection={() => selection.current}
-                focusEditor={() => { textareaRef.current?.focus(); }}
-                setEditorSelection={(range) => { selection.current = range; textareaRef.current?.setSelectionRange(range.start, range.end); }}
-                onInsert={({ text: token, replaceRange, selectionRange }) => {
-                  insertText(token, replaceRange.start, replaceRange.end, selectionRange);
-                }}
-              />
-            </div>
-          ) : null}
-          <Combobox.Target withKeyboardNavigation={false} withAriaAttributes={false}>
-            <span aria-hidden="true" className="template-field__caret-anchor" style={{ left: caretAnchor.left, top: caretAnchor.top }} />
-          </Combobox.Target>
+            <InlineSuggestionPickerTarget>
+            <span aria-hidden="true" className="template-text-field__caret-anchor" style={{ left: caretAnchor.left, top: caretAnchor.top }} />
+            </InlineSuggestionPickerTarget>
         </div>
       </Input.Wrapper>
-      {suggestionOpen ? (
-        <Combobox.Dropdown data-ui="" className="ui-textarea__suggestions-dropdown">
-          <Combobox.Options id={listboxId} className="ui-textarea__suggestions" role="listbox">
-            {suggestionGroups.map(({ group, options: groupOptions }) => (
-              <Combobox.Group key={group.id} label={<TemplateVariableGroupHeading group={group} />}>
-                {groupOptions.map(({ option: variable, index }) => (
-                  <Combobox.Option
-                    id={`${listboxId}-${variable.name}`}
-                    key={variable.name}
-                    value={variable.name}
-                    active={index === activeIndex}
-                    className="ui-textarea__suggestion"
-                    aria-selected={index === activeIndex}
-                    onMouseDown={(event) => { event.preventDefault(); }}
-                  >
-                    <span className="ui-textarea__suggestion-copy">
-                      <span className="ui-textarea__suggestion-name">{variable.label ?? variable.name}</span>
-                      <span className="ui-textarea__suggestion-token">{`{${variable.name}}`}</span>
-                      {index === activeIndex ? <span className="ui-textarea__suggestion-description">{variable.description}</span> : null}
-                    </span>
-                    <span className={`ui-textarea__suggestion-sample${variable.isTextBlock ? " ui-textarea__suggestion-sample--tag" : ""}`}>
-                      {variable.isTextBlock
-                        ? (messages.variablePicker ?? fallbackPickerMessages).textBlockSample
-                        : variable.sample}
-                    </span>
-                  </Combobox.Option>
-                ))}
-              </Combobox.Group>
-            ))}
-          </Combobox.Options>
-          {messages.variablePicker === undefined ? null : <TemplateVariableKeyboardHints messages={messages.variablePicker} />}
-        </Combobox.Dropdown>
-      ) : null}
-    </Combobox>
+      )}
+    </InlineSuggestionPicker>
   );
 }

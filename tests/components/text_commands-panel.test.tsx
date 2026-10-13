@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
 import { ToastHost } from "../../src/dashboard/ui/Toast";
@@ -15,6 +15,16 @@ import { jsonResponse } from "../unit/fixtures";
 import { clickSelectOption, renderWithQuery } from "../query-test-utils";
 
 const initialLanguage = Object.getOwnPropertyDescriptor(window.navigator, "language");
+const originalRangeBounds = Object.getOwnPropertyDescriptor(Range.prototype, "getBoundingClientRect");
+
+beforeEach(() => {
+  if (originalRangeBounds === undefined) {
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: () => new DOMRect(0, 0, 0, 0),
+    });
+  }
+});
 
 const makeCommand = (overrides: Partial<TextCommand> = {}): TextCommand => ({
   channelId: "kanal-a",
@@ -51,7 +61,7 @@ const panelFetch = ({ commands = () => [makeCommand()], templateVariables, onMut
     const method = init?.method ?? "GET";
     if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
     if (url.pathname.endsWith("/template-variables") && method === "GET") return Promise.resolve(jsonResponse({ variables: templateVariables ?? [
-      { name: "text.welcome", moduleId: "text_library", isTextBlock: true },
+      { name: "text.welcome", moduleId: "text_library", isTextBlock: true, sample: "Willkommen im Kanal" },
       ...TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES.map((variable) => ({ ...variable, moduleId: "text_commands", isTextBlock: false })),
     ] }));
     if (url.pathname.endsWith("/commands") && method === "GET") return Promise.resolve(jsonResponse({ commands: commands(), variables: [] }));
@@ -115,6 +125,8 @@ describe("Text command editor", () => {
     vi.unstubAllGlobals();
     toastsSnapshot().forEach((toast) => dismissToast(toast.id));
     if (initialLanguage !== undefined) Object.defineProperty(window.navigator, "language", initialLanguage);
+    if (originalRangeBounds === undefined) delete (Range.prototype as unknown as { getBoundingClientRect?: () => DOMRect }).getBoundingClientRect;
+    else Object.defineProperty(Range.prototype, "getBoundingClientRect", originalRangeBounds);
   });
 
   it("shows cached commands immediately when returning to the module", async () => {
@@ -526,28 +538,26 @@ describe("Text command editor", () => {
   it("offers the shared system variable catalog in the response picker", async () => {
     renderPanel(panelFetch({ commands: () => [] }));
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    const trigger = within(templateEditorFor("text")).getByRole("button", { name: "Variable einfügen" });
-    expect(trigger.querySelector("svg")).toHaveClass("lucide-braces");
-    fireEvent.click(trigger);
+    const input = within(templateEditorFor("text")).getByRole("textbox", { name: "Antwort" });
+    fireEvent.change(input, { target: { value: "{", selectionStart: 1, selectionEnd: 1 } });
     const picker = await screen.findByRole("listbox", { name: "Variable auswählen" });
     expect(within(picker).getByRole("option", { name: /\{user\}/u, hidden: true })).toBeInTheDocument();
     expect(within(picker).getByRole("option", { name: /\{uptime\}/u, hidden: true })).toBeInTheDocument();
     expect(within(picker).getByRole("option", { name: /\{random 1-100\}/u, hidden: true })).toBeInTheDocument();
-    expect(within(picker).getByRole("group", { name: "Stream", hidden: true })).toBeInTheDocument();
-    const detail = document.querySelector(".ui-grouped-picker__detail");
-    expect(detail?.textContent ?? "").not.toBe("");
-    const combobox = within(picker.closest(".ui-grouped-picker") as HTMLElement).getByRole("combobox", { hidden: true });
-    expect(combobox.getAttribute("aria-describedby")).toBe(detail?.id);
-    expect(combobox).toHaveAccessibleDescription(detail?.textContent ?? "");
-    expect(picker.querySelector(".ui-variable-picker__sample")).not.toBeNull();
+    const textBlock = await within(picker).findByRole("option", { name: /\{text\.welcome\}/u, hidden: true });
+    expect(textBlock.querySelector(".ui-template-text-field__suggestion-sample--tag")).toHaveTextContent("Willkommen im Kanal");
+    expect(within(picker).getByRole("group", { name: "Textbausteine", hidden: true })).toBeInTheDocument();
+    expect(within(picker).getByRole("group", { name: "Kanal", hidden: true })).toBeInTheDocument();
+    expect(picker.querySelector(".ui-template-text-field__suggestion-sample")).not.toBeNull();
     const liveLookups = within(picker).getAllByRole("img", { name: "Fragt Twitch live ab, wenn der Befehl ausgeführt wird", hidden: true });
     expect(liveLookups.length).toBeGreaterThan(0);
     for (const liveLookup of liveLookups) {
       expect(liveLookup.querySelector("svg")).toHaveClass("lucide-info");
       expect(liveLookup).toHaveAttribute("title", "Fragt Twitch live ab, wenn der Befehl ausgeführt wird");
     }
-    fireEvent.click(within(picker).getByRole("option", { name: /\{uptime\}/u, hidden: true }));
-    expect(within(templateEditorFor("text")).getByRole("textbox", { name: "Antwort" })).toHaveValue("{uptime}");
+    fireEvent.change(input, { target: { value: "{uptime", selectionStart: 7, selectionEnd: 7 } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(input).toHaveValue("{uptime}"));
   });
 
   it("inserts a selected text-library block into a command response", async () => {
@@ -735,7 +745,7 @@ describe("Text command editor", () => {
     expect(cell).toHaveClass("table__answer--placeholder");
   });
 
-  it("renders the picker as a grouped bottom sheet below 600 pixels", async () => {
+  it("opens the anchored variable overlay below 600 pixels", async () => {
     const originalMatchMedia = window.matchMedia.bind(window);
     window.matchMedia = (query: string): MediaQueryList => ({
       matches: query === "(max-width: 599px)", media: query, onchange: null,
@@ -744,12 +754,11 @@ describe("Text command editor", () => {
     try {
       renderPanel(panelFetch({ commands: () => [] }));
       fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-      fireEvent.click(within(templateEditorFor("text")).getByRole("button", { name: "Variable einfügen" }));
+      const input = within(templateEditorFor("text")).getByRole("textbox", { name: "Antwort" });
+      fireEvent.change(input, { target: { value: "{", selectionStart: 1, selectionEnd: 1 } });
       const picker = await screen.findByRole("listbox", { name: "Variable auswählen" });
-      expect(picker.parentElement).toHaveClass("ui-grouped-picker--sheet");
-      expect(picker.parentElement?.querySelector(".ui-grouped-picker__mobile-header")).toBeInTheDocument();
-      expect(picker.parentElement?.querySelector(".ui-grouped-picker__search")).toBeInTheDocument();
-      expect(picker.parentElement?.querySelector(".ui-variable-picker__option-copy")).toBeInTheDocument();
+      expect(picker.parentElement).toHaveClass("ui-template-text-field__suggestions-dropdown");
+      expect(within(picker).getByRole("group", { name: "Kanal", hidden: true })).toBeInTheDocument();
     } finally {
       window.matchMedia = originalMatchMedia;
     }
@@ -778,14 +787,15 @@ describe("Text command editor", () => {
     expect(combobox.compareDocumentPosition(hint as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("labels the response variable chips with their placeholder, not an empty pill", async () => {
+  it("inserts a response variable inline from the keyboard", async () => {
     const fetcher = panelFetch({ commands: () => [] });
     renderPanel(fetcher);
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    fireEvent.click(within(templateEditorFor("text")).getByRole("button", { name: "Variable einfügen" }));
-    const picker = await screen.findByRole("listbox", { name: "Variable auswählen" });
-    expect(within(picker).getByRole("option", { name: /\{user\}/u, hidden: true })).toBeInTheDocument();
-    expect(within(picker).getByRole("option", { name: /\{channel\}/u, hidden: true })).toBeInTheDocument();
+    const input = within(templateEditorFor("text")).getByRole("textbox", { name: "Antwort" });
+    fireEvent.change(input, { target: { value: "{channel", selectionStart: 8, selectionEnd: 8 } });
+    await screen.findByRole("listbox", { name: "Variable auswählen" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(input).toHaveValue("{channel}"));
   });
 
   it("uses the chat preview, not plain text, for a command list's response", async () => {

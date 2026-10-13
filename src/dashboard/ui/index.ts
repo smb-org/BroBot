@@ -25,6 +25,9 @@ export { ChannelLocationMenu } from "./ChannelLocationMenu";
 export { GamePicker, type GamePickerGame, type GamePickerMessages } from "./GamePicker";
 export { ColorField } from "./ColorField";
 export { CodeField } from "./CodeField";
+export { InlineSuggestionPicker, InlineSuggestionPickerTarget } from "./InlineSuggestionPicker";
+export type { InlineSuggestionGroup, InlineSuggestionGroupPresentation, InlineSuggestionPickerMessages } from "./InlineSuggestionPicker";
+export { Textarea } from "./primitives/textarea";
 export { GroupedPicker } from "./GroupedPicker";
 export type { GroupedPickerEntry, GroupedPickerGroup, GroupedPickerMessages } from "./GroupedPicker";
 export { FieldPair } from "./FieldPair";
@@ -33,15 +36,15 @@ export { SegmentChoice } from "./SegmentChoice";
 export { ChoiceCards } from "./ChoiceCards";
 export { ChipsInput } from "./ChipsInput";
 export type { ChipsInputMessages } from "./ChipsInput";
-export { TextArea } from "./TextArea";
-export type { TemplateVariableOption, TextAreaMessages } from "./TextArea";
+export { TemplateTextField } from "./TemplateTextField";
+export type { TemplateTextFieldMessages, TemplateTextFieldVariable } from "./TemplateTextField";
 
 export {
   effectivePanelTemplateVariables,
   panelTemplateOptions,
-  registeredTemplatePickerGroup,
+  registeredModuleTemplateGroup,
 } from "./template-variable-options";
-export type { TemplateVariablePickerMessages } from "./TemplateVariablePicker";
+export type { TemplateTextFieldPickerMessages } from "./template-text-field-model";
 
 export { TemplateText } from "./TemplateText";
 export { ChatPreview } from "./ChatPreview";
