@@ -1147,7 +1147,7 @@ function OverlayEditorWorkspace({
         </ul>}
       </section>
 
-      <section className="overlay-editor__preview-panel" aria-label={labels.editorPreview}>
+      <section className="overlay-editor__preview-panel overlay-editor__preview-panel--flow-on-mobile" aria-label={labels.editorPreview}>
         <div className="overlay-editor__section-heading"><h2>{labels.editorPreview}</h2>
           <div className="overlay-editor__zoom">
             <UnitInput id="overlay-editor-zoom" label={labels.editorZoom} value={previewZoom} min={60} max={200} unit="%"

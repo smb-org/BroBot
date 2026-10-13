@@ -92,13 +92,14 @@ export function SaveStatus({
   const invalidAction = persistent && invalid && dirty && !pending && conflict === undefined;
   const saveDisabled = pending || conflict !== undefined || !dirty;
   const showButtons = dirty || persistent;
+  const footerOnly = statusText === null && footer !== undefined && conflict === undefined;
   return (
     <div data-ui="" className={`ui-save-bar${persistent ? " ui-save-bar--persistent" : ""}${error === undefined ? "" : " ui-save-bar--error"}`} aria-busy={pending}>
-      <div className="ui-save-bar__status" role="status" aria-live="polite">
+      <div className={`ui-save-bar__status${footerOnly ? " ui-save-bar__status--footer-only" : ""}`} role="status" aria-live="polite">
         {warningStatus !== null && statusText === warningStatus || warningStatus !== null && saved && !dirty ? <Icon name="warning" size={16} /> : null}
-        <div className="ui-save-bar__message" style={{ color: conflict !== undefined || error !== undefined || (invalid && dirty) ? colors.errorText : warningStatus !== null ? colors.amber : colors.text3 }}>
+        {statusText === null ? null : <div className="ui-save-bar__message" style={{ color: conflict !== undefined || error !== undefined || (invalid && dirty) ? colors.errorText : warningStatus !== null ? colors.amber : colors.text3 }}>
           {typeof statusText === "string" ? <TruncatedText className="ui-save-bar__message-copy" text={statusText} /> : statusText}
-        </div>
+        </div>}
         {footer === undefined || conflict !== undefined ? null : <div className="ui-save-bar__footer" title={typeof footer === "string" ? footer : undefined}>{footer}</div>}
       </div>
       {showButtons || destructive !== undefined ? (

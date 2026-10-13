@@ -253,8 +253,8 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
           {editingName === null ? null : <Button type="button" danger="subtle" disabled={!canEdit || busy || testing} onClick={() => { setDeleteError(undefined); setConfirmDeleteOpen(true); }}>{labels.delete}</Button>}
         </div>
         <div data-testid="api-source-test-result" aria-live="polite" style={{ height: "calc(var(--s10) * 5)", overflowY: "auto", boxSizing: "border-box", margin: 0 }}>
-          {testRequestError === undefined ? null : <p role="alert">{testRequestError}</p>}
-          {testResult?.status === "error" ? <p role="alert">
+          {testRequestError === undefined ? null : <p className="api-source-test-result__error" role="alert">{testRequestError}</p>}
+          {testResult?.status === "error" ? <p className="api-source-test-result__error" role="alert">
             {apiSourceFailureText(testResult.reason, language ?? "de", testResult.retryAfter)}
             {testResult.constructName === undefined ? "" : ` · ${testResult.constructName}`}
             {testResult.httpStatus === undefined ? "" : ` · HTTP ${String(testResult.httpStatus)}`}

@@ -5,6 +5,7 @@ import { ActionMenu, Button, Dialog, Field, Popover, Select, SegmentChoice, Stat
 import "../../src/dashboard/ui/tokens.css";
 
 export function BasicControlsFixture() {
+  const language = new URLSearchParams(window.location.search).get("lang") === "de" ? "de" : "en";
   const [number, setNumber] = useState<number | "">(4);
   const [mode, setMode] = useState("one");
   const [enabled, setEnabled] = useState(false);
@@ -22,7 +23,9 @@ export function BasicControlsFixture() {
         <Button size="compact" onClick={() => { setShowSelectError((current) => !current); }}>Toggle select error</Button>
         <Field label="Icon input" value="" onChange={() => {}} icon="member" />
         <Field variant="search" label="Members" value="" onChange={() => {}} clearLabel="Clear member search" />
-        <SegmentChoice label="Layout" value={mode} onChange={setMode} options={[{ value: "one", label: "One" }, { value: "two", label: "Two" }]} />
+        <SegmentChoice label="Layout" value={mode} onChange={setMode} options={language === "de"
+          ? [{ value: "one", label: "Gespeicherte Vorlagen", compactLabel: "Ges." }, { value: "two", label: "Zuletzt verwendet", compactLabel: "Neu" }]
+          : [{ value: "one", label: "Saved templates", compactLabel: "Saved" }, { value: "two", label: "Recently used", compactLabel: "Recent" }]} />
         <SwitchRow label="Enabled" checked={enabled} onChange={setEnabled} />
         <Popover triggerLabel="Popover help" icon="warning">A short help message.</Popover>
         <ActionMenu label="More actions" items={[{ label: "Edit settings", onSelect: () => {} }]} />

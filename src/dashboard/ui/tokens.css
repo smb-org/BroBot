@@ -11,6 +11,8 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  --control-height: 32px;
+  --control-height-touch: 40px;
   --layer-inspector-backdrop: 120;
   --layer-inspector: 121;
   --layer-dialog-backdrop: 130;

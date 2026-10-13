@@ -305,8 +305,9 @@ test("FAQ game search opens on its first click and narrow chat controls stay rea
     clientWidth: element.clientWidth,
   }));
   expect(targetText.text).toBe("Use channel default (Only our chat)");
-  expect(targetText.whiteSpace).toBe("normal");
+  expect(targetText.whiteSpace).toBe("nowrap");
   expect(targetText.scrollWidth).toBeLessThanOrEqual(targetText.clientWidth);
+  await expect(value).toHaveCSS("text-overflow", "ellipsis");
 
   const helper = page.locator(".ui-template-text-field__helper-row .ui-truncated-text").first();
   const helperStyle = await helper.evaluate((element) => {

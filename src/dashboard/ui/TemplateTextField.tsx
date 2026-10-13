@@ -423,6 +423,7 @@ export function TemplateTextField({
       >
         <div ref={frameRef} className="template-text-field" data-composing={composing ? "true" : undefined} data-readonly={readOnly ? "true" : undefined}>
           <RichTextarea
+            data-ui=""
             className="template-text-field__input"
             ref={textareaRef}
             style={{ width: "100%" }}

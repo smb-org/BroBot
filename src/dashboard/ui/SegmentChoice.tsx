@@ -7,7 +7,7 @@ export interface SegmentChoiceProps<T extends string = string> {
   hint?: string;
   value: T;
   onChange: (value: T) => void;
-  options: readonly ({ value: T; label: string; description?: string })[];
+  options: readonly ({ value: T; label: string; compactLabel?: string; description?: string })[];
   size?: "form" | "compact";
   disabled?: boolean;
   warning?: string;
@@ -44,11 +44,15 @@ export function SegmentChoice<T extends string>({ label, hint, value, onChange, 
         type="button"
         data-value={option.value}
         className={`segment-choice__option${value === option.value ? " is-selected" : ""}`}
+        aria-label={option.label}
         aria-pressed={value === option.value}
         disabled={disabled}
         onClick={() => { onChange(option.value); }}
       >
-        <span className="segment-choice__label">{option.label}</span>
+        <span className="segment-choice__label">
+          <span className="segment-choice__label-full">{option.label}</span>
+          {option.compactLabel === undefined ? null : <span className="segment-choice__label-compact" aria-hidden="true">{option.compactLabel}</span>}
+        </span>
         {option.description === undefined ? null : <span className="segment-choice__description">{option.description}</span>}
       </button>)}
     </div>
