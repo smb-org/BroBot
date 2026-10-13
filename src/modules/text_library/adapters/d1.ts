@@ -274,6 +274,7 @@ export const createTextBlockRepository = (
       }
       await db.batch(statements);
     },
+    libraryRevision: (channelId) => channelLibraryRevision(db, channelId),
     list,
     find,
     async create(input, actor) {
@@ -377,12 +378,14 @@ export const createTextBlockRepository = (
       }
       if (before.revision !== input.expectedRevision) return { ok: false, reason: "conflict", current: before };
       if (await find(input.channelId, input.name) !== null) return { ok: false, reason: "already_exists" };
-      const startLibraryRevision = await channelLibraryRevision(db, input.channelId);
+      const startLibraryRevision = input.expectedLibraryRevision ?? await channelLibraryRevision(db, input.channelId);
       if (await textBlockRenameWouldOverflow(db, input.channelId, fromName, input.name)) {
         return { ok: false, reason: "template_too_long" };
       }
-      const expectedLibraryRevision = await channelLibraryRevision(db, input.channelId);
-      if (startLibraryRevision !== expectedLibraryRevision) return { ok: false, reason: "conflict", current: before };
+      if (startLibraryRevision !== await channelLibraryRevision(db, input.channelId)) {
+        return { ok: false, reason: "conflict", current: before };
+      }
+      const expectedLibraryRevision = startLibraryRevision;
       const authorization = authorizeMutation(input.channelId, actor, input.now);
       const nextRevision = before.revision + 1;
       const renameToken = crypto.randomUUID();

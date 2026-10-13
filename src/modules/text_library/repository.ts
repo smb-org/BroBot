@@ -12,6 +12,7 @@ export interface TextBlockInput extends TextBlockMutationInput {
 
 export interface TextBlockRenameInput extends TextBlockInput {
   expectedRevision: number;
+  expectedLibraryRevision?: number;
 }
 
 interface TextBlockOverlayRevision {
@@ -36,6 +37,7 @@ export interface TextLibrarySnapshot {
 
 export interface TextBlockRepository {
   initialize(channelId: string, actor: TextBlockActor, now: string): Promise<void>;
+  libraryRevision(channelId: string): Promise<number>;
   list(channelId: string, usageSources?: readonly ModuleTemplateUsageSource[]): Promise<TextLibrarySnapshot>;
   find(channelId: string, name: string): Promise<TextBlock | null>;
   create(input: TextBlockInput, actor: TextBlockActor): Promise<TextBlockMutationResult>;

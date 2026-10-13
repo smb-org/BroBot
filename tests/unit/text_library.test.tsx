@@ -7,6 +7,7 @@ import type { ModuleEvent } from "../../src/modules/contract";
 import { textLibraryModule } from "../../src/modules/text_library";
 import { adsModule } from "../../src/modules/ads";
 import { raidModule } from "../../src/modules/raid";
+import { createFaqRepository } from "../../src/modules/faq/adapters/d1";
 import { createTextCommandRepository } from "../../src/modules/text_commands/adapters/d1";
 import { processTextCommandMessage } from "../../src/modules/text_commands/service";
 import type { TextBlockConditions, TextBlockVariant, TwitchGame } from "../../src/modules/text_library/contracts";
@@ -25,7 +26,7 @@ import { truncateChatText } from "../../src/worker/chat";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../../src/modules/contract";
 import { renderWithQuery } from "../query-test-utils";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, jsonResponse, testKey } from "./fixtures";
-import { TestD1Database } from "./test-d1";
+import { createReadInterleavingDatabase, TestD1Database } from "./test-d1";
 
 const CHANNEL_ID = "esembe";
 const NOW = Date.parse("2026-09-26T12:00:00.000Z");
@@ -933,6 +934,9 @@ describe("text library", () => {
       INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, config_json)
       VALUES ('element-block-rename', '${CHANNEL_ID}', 'overlay-rename', 'text_library.block', '{"blockName":"welcome"}');
     `);
+    const faqRepository = createFaqRepository(database as unknown as D1Database);
+    const cachedFaqMatchers = await faqRepository.matchers(CHANNEL_ID, NOW);
+    expect(cachedFaqMatchers[0]?.entry.revision).toBe(1);
     const environment = {
       DB: database as unknown as D1Database,
       TWITCH_CLIENT_ID: "client-id",
@@ -977,6 +981,8 @@ describe("text library", () => {
       .bind("timer-rename").first()).toMatchObject({ message_text: "Timer {text.greeting}", revision: 2 });
     expect(await database.prepare("SELECT answer_text, revision FROM faq_entries WHERE faq_id = ?")
       .bind("faq-rename").first()).toMatchObject({ answer_text: "FAQ {text.greeting}", revision: 2 });
+    const refreshedFaqMatchers = await faqRepository.matchers(CHANNEL_ID, NOW + 1);
+    expect(refreshedFaqMatchers[0]?.entry.revision).toBe(2);
     expect(await database.prepare("SELECT settings, revision FROM channel_modules WHERE channel_id = ? AND module_id = ?")
       .bind(CHANNEL_ID, "ads").first()).toMatchObject({ settings: '{"automatic":"Ad {text.greeting}"}', revision: 2 });
     expect(await database.prepare("SELECT text, config_json FROM overlay_elements WHERE element_id = ?")
@@ -990,6 +996,65 @@ describe("text library", () => {
     expect(audit?.action).toBe("text_library.block.renamed");
     expect(audit?.before_json).toContain("welcome");
     expect(audit?.after_json).toContain("greeting");
+  });
+
+  it("rejects a rename when a timer is committed after consumer compatibility validation", async () => {
+    const created = await createBlock("welcome", [variant("default", "Hello")]);
+    if (!created.ok) throw new Error("Could not create the concurrent consumer test block.");
+    await insertLoginIdentityAndSession(database, "manager-concurrent-consumer");
+    await insertMember(database, CHANNEL_ID, "manager-concurrent-consumer", "manager");
+    const sessionCookie = await createSessionCookie(
+      { sessionId: "session-manager-concurrent-consumer" },
+      TEST_SESSION_KEYS,
+      TEST_ENCRYPTION_KEYS,
+    );
+    const csrf = await createCsrfToken("session-manager-concurrent-consumer", TEST_SESSION_KEYS, new Date().toISOString());
+    const now = new Date(NOW).toISOString();
+    const interleavedDatabase = createReadInterleavingDatabase(
+      database,
+      (sql) => sql.includes("SELECT timer_id, name, message_text FROM timers WHERE channel_id = ?"),
+      async () => {
+        await database.prepare(
+          `INSERT INTO timers
+            (timer_id, channel_id, name, enabled, trigger_type, trigger_json, message_text, created_at, updated_at)
+           VALUES (?, ?, ?, 1, 'interval', '{}', ?, ?, ?)`,
+        ).bind("timer-concurrent-consumer", CHANNEL_ID, "Reminder", "Timer {text.welcome}", now, now).run();
+      },
+    );
+    const environment = {
+      DB: interleavedDatabase,
+      TWITCH_CLIENT_ID: "client-id",
+      SESSION_COOKIE_KEYS: TEST_SESSION_KEYS,
+      SESSION_ENCRYPTION_KEYS: TEST_ENCRYPTION_KEYS,
+    } as unknown as Env;
+
+    const response = await panelRouter.fetch(new Request(
+      `https://brobot.example/api/channels/${CHANNEL_ID}/modules/text_library/blocks/welcome`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrf,
+          Cookie: `__Host-brobot_session=${sessionCookie}; __Host-brobot_csrf=${csrf}`,
+        },
+        body: JSON.stringify({
+          name: "greeting",
+          categoryId: "social",
+          games: [],
+          variants: [{ id: "default", conditions: {}, texts: ["{args}"] }],
+          revision: created.block.revision,
+        }),
+      },
+    ), environment);
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "text_library_block_conflict" });
+    await expect(database.prepare("SELECT block_name FROM text_blocks WHERE channel_id = ? ORDER BY block_name")
+      .bind(CHANNEL_ID).all()).resolves.toMatchObject({ results: [{ block_name: "welcome" }] });
+    await expect(database.prepare("SELECT message_text, revision FROM timers WHERE timer_id = ?")
+      .bind("timer-concurrent-consumer").first()).resolves.toMatchObject({ message_text: "Timer {text.welcome}", revision: 1 });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log WHERE channel_id = ? AND action = ?")
+      .bind(CHANNEL_ID, "text_library.block.renamed").first()).resolves.toEqual({ count: 0 });
   });
 
   it("keeps text block rename concurrency-safe and rejects a stale revision", async () => {

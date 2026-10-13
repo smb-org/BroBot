@@ -206,19 +206,31 @@ textLibraryRoutes.patch("/blocks/:name", async (context) => {
       .map(({ name }) => name),
   ]);
   if (reservedNames.has(parsed.name)) return context.json({ error: "text_library_block_reserved_name" }, 400);
+  const service = createTextLibraryService(createTextBlockRepository(context.env.DB, context.get("authorizeManagementMutation"), context.get("prepareModuleAudit")));
+  const expectedLibraryRevision = parsed.name === oldName ? undefined : await service.libraryRevision(channelId);
+  const snapshot = await service.list(channelId);
   const templateIssues = await context.get("validateTemplateContentMutation")(channelId, {
     name: parsed.name,
     texts: parsed.variants.flatMap((variant) => variant.texts),
     ...(parsed.name === oldName ? {} : { renamedFrom: oldName }),
   });
+  if (expectedLibraryRevision !== undefined && await service.libraryRevision(channelId) !== expectedLibraryRevision) {
+    return context.json({ error: "text_library_block_conflict" }, 409);
+  }
   if (templateIssues.length > 0) return context.json({ error: "text_library_template_usage_invalid", issues: templateIssues }, 400);
-  const service = createTextLibraryService(createTextBlockRepository(context.env.DB, context.get("authorizeManagementMutation"), context.get("prepareModuleAudit")));
-  const snapshot = await service.list(channelId);
-  const input = { channelId, ...parsed, expectedRevision: parsed.expectedRevision, expectedGraphRevision: snapshot.settings.graphRevision, now: nowIso() };
+  const input = {
+    channelId,
+    ...parsed,
+    expectedRevision: parsed.expectedRevision,
+    expectedGraphRevision: snapshot.settings.graphRevision,
+    ...(expectedLibraryRevision === undefined ? {} : { expectedLibraryRevision }),
+    now: nowIso(),
+  };
   const result = parsed.name === oldName
     ? await service.change(input, context.get("actor"), snapshot)
     : await service.rename(input, oldName, context.get("actor"), snapshot);
   if (result.ok) {
+    if (parsed.name !== oldName) context.get("afterTextBlockRename")(channelId);
     const blocks = "updatedOverlays" in result
       ? (await service.list(channelId)).blocks
       : snapshot.blocks.map((block) => block.name === result.block.name ? result.block : block);

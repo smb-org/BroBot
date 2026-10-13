@@ -14,6 +14,7 @@ const graphError = (blocks: readonly TextBlock[], candidate: TextBlockInput): Te
 };
 
 export interface TextLibraryService {
+  libraryRevision(channelId: string): Promise<number>;
   list(channelId: string, usageSources?: readonly ModuleTemplateUsageSource[]): Promise<TextLibrarySnapshot>;
   find(channelId: string, name: string): Promise<TextBlock | null>;
   create(input: TextBlockInput, actor: TextBlockActor, snapshot: TextLibrarySnapshot): Promise<TextBlockMutationResult>;
@@ -26,6 +27,7 @@ export interface TextLibraryService {
 }
 
 export const createTextLibraryService = (repository: TextBlockRepository): TextLibraryService => ({
+  libraryRevision: (channelId) => repository.libraryRevision(channelId),
   list: (channelId, usageSources) => repository.list(channelId, usageSources),
   find: (channelId, name) => repository.find(channelId, name),
   async create(input, actor, snapshot) {
