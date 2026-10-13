@@ -1,8 +1,9 @@
 import type { PanelEventEntry, PanelEventFilters } from "../../panel-contract";
 import { EVENT_TONES, type EventTone } from "../../contracts/values";
-import { eventCauseAlreadyShown, eventCauseText, eventToneEntries, formatDate, formatNumber, type dashboardTexts, type EventCode, type EventDetail, type EventNumberKey } from "../locale";
+import { eventCauseAlreadyShown, eventCauseText, eventToneEntries, formatNumber, type dashboardTexts, type EventCode, type EventDetail, type EventNumberKey } from "../locale";
 import { LEGACY_REASON_CODES, LEGACY_REASON_VALUES } from "./legacy-reasons";
 import { moduleName } from "../module-labels";
+import { calendarDayKey } from "../ui/format-relative-time";
 
 export const emptyEventFilter: PanelEventFilters = {
   origin: null,
@@ -75,6 +76,7 @@ export interface EventGroup {
   key: string;
   entries: PanelEventEntry[];
   representative: PanelEventEntry;
+  newestEntry: PanelEventEntry;
 }
 
 export const eventGroupKey = (entry: PanelEventEntry): string =>
@@ -109,7 +111,8 @@ export const eventGroups = (entries: readonly PanelEventEntry[]): EventGroup[] =
         ? candidate
         : current;
     }, groupEntries[0]),
-  }));
+    newestEntry: groupEntries.slice(1).reduce((newest, candidate) => chronological(candidate, newest) > 0 ? candidate : newest, groupEntries[0]),
+  })).sort((left, right) => chronological(right.newestEntry, left.newestEntry));
 };
 
 export const actorLabel = (entry: PanelEventEntry, texts: ReturnType<typeof dashboardTexts>): string =>
@@ -132,31 +135,19 @@ export const moderatorLabel = (detail: EventDetail): string | null => stringDeta
 
 export interface EventDayGroup {
   key: string;
-  label: string;
   groups: readonly EventGroup[];
 }
 
-/** The viewer's local calendar day, matching `formatTimestamp`'s zone. Exported for reuse by the audit log's own day grouping (`dashboard/audit/model.ts`). */
-const dayKey = (createdAt: string): string => {
-  const date = new Date(createdAt);
-  if (Number.isNaN(date.getTime())) return createdAt;
-  return `${String(date.getFullYear())}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-};
-
-/** Groups already-sorted event groups by day, newest day first, preserving order within a day. */
-export const eventDayGroups = (groups: readonly EventGroup[]): EventDayGroup[] => {
+/** Groups event groups by their newest entry's channel-local day, newest day first. */
+export const eventDayGroups = (groups: readonly EventGroup[], timeZone: string): EventDayGroup[] => {
   const days = new Map<string, EventGroup[]>();
-  for (const group of groups) {
-    const key = dayKey(group.representative.createdAt);
+  for (const group of [...groups].sort((left, right) => chronological(right.newestEntry, left.newestEntry))) {
+    const key = calendarDayKey(group.newestEntry.createdAt, timeZone);
     const existing = days.get(key);
     if (existing === undefined) days.set(key, [group]);
     else existing.push(group);
   }
-  return Array.from(days, ([key, dayGroups]) => ({
-    key,
-    label: formatDate(dayGroups[0]?.representative.createdAt ?? key),
-    groups: dayGroups,
-  }));
+  return Array.from(days, ([key, dayGroups]) => ({ key, groups: dayGroups }));
 };
 
 /** `code` scopes the legacy-value rewrite (`LEGACY_REASON_CODES`) to the
