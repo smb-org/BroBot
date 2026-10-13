@@ -593,7 +593,7 @@ const DashboardStreamClock = ({ channel }: { channel: PanelChannelState }): Reac
   const streamLabel = streamState === "online"
     ? texts.header.streamLive(streamDuration(channel.streamStartedAt, now))
     : streamState === "offline" ? texts.header.streamOffline : texts.header.streamUnknown;
-  return <span className="dashboard-header__stream" data-state={streamState === "online" ? "live" : streamState === "offline" ? "offline" : "unknown"}>
+  return <span aria-label={streamLabel} className="dashboard-header__stream" data-state={streamState === "online" ? "live" : streamState === "offline" ? "offline" : "unknown"}>
     <Icon name={streamState === "online" ? "broadcast" : "broadcast-off"} size={20} />
     <span>{streamLabel}</span>
     {channel.streamStateCheckedAt === undefined || channel.streamStateCheckedAt === null ||
