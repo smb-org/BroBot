@@ -8,6 +8,7 @@ import type { ModulePanelProperties } from "../../contract";
 import type { Timer, TimerTrigger } from "../contracts";
 import { inputFromDraft, type TimerDraft } from "./draft";
 import { timersTexts } from "./locale";
+import { nextRunLabel, triggerDetail } from "./summary";
 import {
   createTimer,
   deleteTimer,
@@ -94,25 +95,6 @@ const triggerTitle = (type: TriggerType, labels: ReturnType<typeof timersTexts>)
   if (type === "stream_start") return labels.streamStart;
   if (type === "time_of_day") return labels.timeOfDay;
   return labels.beforeEvent;
-};
-
-const triggerDetail = (timer: Timer, data: TimersPanelData, labels: ReturnType<typeof timersTexts>, language: "de" | "en"): string => {
-  const trigger = timer.trigger;
-  if (trigger.type === "interval") {
-    const describe = (state: "live" | "offline", part: typeof trigger.live): string => {
-      if (part === undefined) return state === "offline" ? labels.offlineOff : labels.liveOff;
-      const threshold = part.minimumMessages === undefined ? "" : ` · ${String(part.minimumMessages)} ${labels.messageCount.toLowerCase()}`;
-      return `${labels[state]} ${String(part.minutes)} ${labels.minutes.toLowerCase()}${threshold}`;
-    };
-    return `${describe("live", trigger.live)} · ${describe("offline", trigger.offline)}`;
-  }
-  if (trigger.type === "stream_start") return `${String(trigger.minutes)} ${labels.minutes.toLowerCase()}`;
-  if (trigger.type === "time_of_day") {
-    const selectedDays = trigger.weekdays.length === 0 ? labels.everyDay : trigger.weekdays.map((day) => labels.weekdaysNames[day]).join(", ");
-    return `${trigger.time} · ${selectedDays}${trigger.alsoOffline ? ` · ${labels.alsoOffline}` : ""}`;
-  }
-  const label = data.sources.find((source) => source.id === trigger.sourceId)?.label[language] ?? trigger.sourceId;
-  return `${String(trigger.minutes)} ${labels.minutes.toLowerCase()} ${labels.beforeEvent.toLowerCase()} · ${label}`;
 };
 
 export default function TimersPanel(properties: ModulePanelProperties): ReactElement {
@@ -243,7 +225,7 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
                 <span>{triggerDetail(timer, data as TimersPanelData, labels, language ?? "de")}</span>
                 <span>{labels.message} · {timer.messageText}</span>
                 <span>{labels.chatTarget} · {timer.chatTarget === null ? labels.chatTargetDefault : labels.chatTargetLabels[timer.chatTarget]}</span>
-                <span>{labels.nextRun} · {timer.nextRunAt === null ? labels.noNextRun : formatTimestamp(timer.nextRunAt)}</span>
+                <span>{nextRunLabel(timer, labels)} ·{timer.nextRunAt === null ? labels.noNextRun : formatTimestamp(timer.nextRunAt)}</span>
               </div>
               <div className="timer-row__actions">
                 <SwitchPrimitive
@@ -314,7 +296,7 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
                     onChange={(minutes) => patchDraft({ live: draft.live === null ? null : { ...draft.live, minutes } })}
                     min={1}
                     max={1_440}
-                    unit="min"
+                    unit={labels.minutesUnit}
                     required
                   />
                   <UnitInput
@@ -334,7 +316,7 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
                     onChange={(minutes) => patchDraft({ offline: draft.offline === null ? null : { ...draft.offline, minutes } })}
                     min={1}
                     max={1_440}
-                    unit="min"
+                    unit={labels.minutesUnit}
                     required
                   />
                   <UnitInput
@@ -354,7 +336,7 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
             onChange={(minutes) => patchDraft({ minutes })}
             min={1}
             max={1_440}
-            unit="min"
+            unit={labels.minutesUnit}
             required
           /> : null}
           {draft.type === "time_of_day" ? <>
@@ -377,7 +359,7 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
           </> : null}
           {draft.type === "before_event" ? <>
             <Select label={labels.eventSource} value={draft.sourceId || null} onChange={(sourceId) => patchDraft({ sourceId: sourceId ?? "" })} options={sourceOptions} required />
-            <UnitInput label={labels.before} value={draft.minutes} onChange={(minutes) => patchDraft({ minutes })} min={1} max={1_440} unit="min" required />
+            <UnitInput label={labels.before} value={draft.minutes} onChange={(minutes) => patchDraft({ minutes })} min={1} max={1_440} unit={labels.minutesUnit} required />
           </> : null}
 
           <div className="inspector-actions">

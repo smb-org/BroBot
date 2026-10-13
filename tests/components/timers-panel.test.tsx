@@ -4,6 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { UiProvider } from "../../src/dashboard/ui";
 import { moduleQueryKey } from "../../src/dashboard/data";
 import TimersPanel from "../../src/modules/timers/panel";
+import { nextRunLabel, triggerDetail } from "../../src/modules/timers/panel/summary";
+import type { Timer } from "../../src/modules/timers/contracts";
+import { timersTexts } from "../../src/modules/timers/panel/locale";
+import type { TimersPanelData } from "../../src/modules/timers/panel/service";
 import { inputFromDraft } from "../../src/modules/timers/panel/draft";
 import { renderWithQuery } from "../query-test-utils";
 import { jsonResponse } from "../unit/fixtures";
@@ -32,13 +36,13 @@ describe("Timers panel", () => {
 
     expect(screen.getByRole("switch", { name: "Live" })).toBeChecked();
     expect(screen.getByRole("switch", { name: "Offline" })).not.toBeChecked();
-    expect(screen.getByText("offline off")).toBeInTheDocument();
+    expect(screen.getByText("Offline off")).toBeInTheDocument();
     expect(screen.getAllByRole("spinbutton", { name: "Minutes" })).toHaveLength(1);
     expect(screen.getAllByRole("spinbutton", { name: "Minimum chat messages" })).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("switch", { name: "Offline" }));
-    expect(screen.queryByText("offline off")).not.toBeInTheDocument();
+    expect(screen.queryByText("Offline off")).not.toBeInTheDocument();
     expect(screen.getAllByRole("spinbutton", { name: "Minutes" })).toHaveLength(2);
     expect(screen.getAllByRole("spinbutton", { name: "Minimum chat messages" })).toHaveLength(2);
   });
@@ -192,5 +196,24 @@ describe("Timers panel", () => {
 
     expect(screen.getByRole("button", { name: "Create timer" })).toBeDisabled();
     expect(screen.getByText("Only broadcasters and managers can edit timers.")).toBeInTheDocument();
+  });
+
+  it("summarises interval parts and the next run state per language", () => {
+    const timer = {
+      trigger: { type: "interval", live: { minutes: 20, minimumMessages: 10 }, offline: { minutes: 60, minimumMessages: 5 } },
+    } as unknown as Timer;
+    const data = { sources: [] } as unknown as TimersPanelData;
+    const de = timersTexts("de");
+    const en = timersTexts("en");
+    expect(triggerDetail(timer, data, de, "de")).toBe("Live alle 20 Min. · ab 10 Nachrichten · Offline alle 60 Min. · ab 5 Nachrichten");
+    expect(triggerDetail(timer, data, en, "en")).toBe("Live every 20 min · after 10 messages · Offline every 60 min · after 5 messages");
+    const liveOnly = { trigger: { type: "interval", live: { minutes: 20 } } } as unknown as Timer;
+    expect(triggerDetail(liveOnly, data, de, "de")).toBe("Live alle 20 Min. · Offline aus");
+    expect(triggerDetail(liveOnly, data, en, "en")).toBe("Live every 20 min · Offline off");
+    expect(nextRunLabel({ nextRunState: "live" }, de)).toBe("Nächster Lauf (live)");
+    expect(nextRunLabel({ nextRunState: "offline" }, de)).toBe("Nächster Lauf (offline)");
+    expect(nextRunLabel({ nextRunState: "live" }, en)).toBe("Next run (live)");
+    expect(nextRunLabel({ nextRunState: "offline" }, en)).toBe("Next run (offline)");
+    expect(nextRunLabel({ nextRunState: null }, en)).toBe("Next run");
   });
 });
