@@ -155,6 +155,7 @@ const resolveConditionValues = async (
       value = await outputFor(name, context);
     } catch {
       // A failing source only makes its own condition unavailable; healthy ones still resolve.
+      context.reportTemplateLookupFailure?.();
       return [id, null] as const;
     }
     context.addTemplateConditionNextChangeAt?.(new Date(context.now + OVERLAY_REFRESH_MS).toISOString());

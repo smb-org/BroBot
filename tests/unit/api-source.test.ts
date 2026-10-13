@@ -978,6 +978,36 @@ describe("API source condition isolation", () => {
 
     expect(resolved).toEqual({ "api_source.online": "true" });
   });
+
+  it.each([
+    ["a sibling fails transiently", true],
+    ["all sources succeed", false],
+  ])("reports a lookup failure only when %s", async (_label, fails) => {
+    const database = await createDatabase();
+    const db = database as unknown as D1Database;
+    await insertSource(database, "online", "$.online", "https://api.sample-provider.net/online");
+    await insertSource(database, "flaky", "$.online", "https://api.sample-provider.net/flaky");
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => Promise.resolve(
+      fails && (input instanceof Request ? input.url : String(input)).includes("flaky") ? new Response(null, { status: 503 }) : jsonResponse({ online: true }),
+    )));
+    const reportTemplateLookupFailure = vi.fn();
+
+    const resolved = await apiSourceModule.resolveTemplateConditions?.(
+      ["api_source.online", "api_source.flaky"],
+      {
+        DB: db,
+        channelId: CHANNEL_ID,
+        channelTimeZone: () => Promise.resolve("Europe/Berlin"),
+        channelLocation: () => Promise.resolve(null),
+        externalFetchBudget: sharedBudget(),
+        now: NOW,
+        reportTemplateLookupFailure,
+      },
+    );
+
+    expect(resolved?.["api_source.online"]).toBe("true");
+    expect(reportTemplateLookupFailure).toHaveBeenCalledTimes(fails ? 1 : 0);
+  });
 });
 
 describe("API source Node-side template CPU measurement", () => {
