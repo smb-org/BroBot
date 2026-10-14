@@ -18,11 +18,12 @@ export interface UseDraftResult<T> {
  * remounting the form with a `key` (as the existing command editor already
  * does), not by teaching this hook to track identity itself.
  */
-export const useDraft = <T,>(initial: T): UseDraftResult<T> => {
+export const useDraft = <T,>(initial: T, initiallyDirty = false): UseDraftResult<T> => {
   const [baseline, setBaseline] = useState(initial);
   const [value, setValue] = useState(initial);
-  const dirty = JSON.stringify(value) !== JSON.stringify(baseline);
-  const reset = (): void => { setValue(baseline); };
-  const accept = (next: T): void => { setBaseline(next); setValue(next); };
+  const [forcedDirty, setForcedDirty] = useState(initiallyDirty);
+  const dirty = forcedDirty || JSON.stringify(value) !== JSON.stringify(baseline);
+  const reset = (): void => { setValue(baseline); setForcedDirty(false); };
+  const accept = (next: T): void => { setBaseline(next); setValue(next); setForcedDirty(false); };
   return { value, setValue, dirty, reset, accept };
 };

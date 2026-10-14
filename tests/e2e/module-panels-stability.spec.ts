@@ -383,7 +383,6 @@ test("text command switch and role inclusion fit their narrow and desktop layout
   expect(switchFits).toBe(true);
 
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.getByRole("tab", { name: "Advanced" }).click();
   const inclusion = page.locator(".ui-role-threshold .ui-select__description .ui-truncated-text").first();
   await expect(inclusion).toBeVisible();
   const inclusionStyle = await inclusion.evaluate((element) => {
@@ -1577,7 +1576,7 @@ test("text command slash help stays stable and optional variable fields mount on
   await routeJson(page, "/api/channels/channel-a/template-variables", { variables: [] });
   await gotoPanel(page, "text_commands");
   await page.getByRole("button", { name: "Add command" }).click();
-  const editor = page.locator(".command-editor-shell");
+  const editor = page.locator(".text-command-editor");
   const response = page.getByRole("textbox", { name: "Response" });
   await expect(response).toBeVisible();
   const slashHelp = page.locator(".command-slash-help");

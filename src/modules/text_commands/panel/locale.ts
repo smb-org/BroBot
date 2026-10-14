@@ -9,14 +9,29 @@ import type { GameMultiSelectMessages } from "../../../dashboard/ui";
 export interface TextCommandsTexts {
   title: string;
   search: string;
+  filters: string;
+  statusFilter: string;
+  filterAll: string;
+  filterActive: string;
+  filterInactive: string;
+  moduleFilter: string;
   activeFilters: string;
   resetFilters: string;
   countSuffix: string;
   filteredSuffix: string;
   tabs: { settings: string; advanced: string };
   list: string;
+  sectionMessage: string;
+  sectionWhen: string;
+  sectionWhere: string;
+  selectionPrompt: string;
+  selectionDescription: string;
+  noResponse: string;
+  aliasCount: (count: number) => string;
+  useCount: (count: number) => string;
   details: (name: string) => string;
   add: string;
+  newCommand: string;
   empty: string;
   loadError: string;
   templateVariablesLoadError: string;
@@ -40,6 +55,8 @@ export interface TextCommandsTexts {
   slashAnnouncementEffect: string;
   slashShoutoutEffect: string;
   response: string;
+  currencyFrom: string;
+  currencyTo: string;
   responseOptional: string;
   responseHint: string;
   responseMissing: string;
@@ -191,7 +208,7 @@ const templateMessages: LocaleCatalog<TemplateTextFieldMessages> = {
 
 const catalog: LocaleCatalog<TextCommandsTexts> = {
   de: {
-    title: "Textbefehle", search: "Befehle suchen", activeFilters: "Aktive Filter:", resetFilters: "Zurücksetzen", countSuffix: "Befehle", filteredSuffix: "Befehle", tabs: { settings: "Einstellungen", advanced: "Erweitert" }, list: "Befehle", details: (name) => `Eigenschaften von !${name}`, add: "Befehl anlegen", empty: "Noch keine Textbefehle angelegt.",
+    title: "Textbefehle", search: "Befehle suchen", filters: "Befehlsfilter", statusFilter: "Status", filterAll: "Alle", filterActive: "Aktiv", filterInactive: "Inaktiv", moduleFilter: "Modul", activeFilters: "Aktive Filter:", resetFilters: "Zurücksetzen", countSuffix: "Befehle", filteredSuffix: "Befehle", tabs: { settings: "Einstellungen", advanced: "Erweitert" }, list: "Befehle", sectionMessage: "Nachricht", sectionWhen: "Wann", sectionWhere: "Wohin", selectionPrompt: "Textbefehl auswählen", selectionDescription: "Wähle links einen Textbefehl aus oder lege einen neuen an.", noResponse: "Kein Antworttext", aliasCount: (count) => `${String(count)} Aliase`, useCount: (count) => `${String(count)} Aufrufe`, details: (name) => `Eigenschaften von !${name}`, add: "Befehl anlegen", newCommand: "Neu", empty: "Noch keine Textbefehle angelegt.",
     loadError: "Die Textbefehle konnten nicht geladen werden.", templateVariablesLoadError: "Vorlagenvariablen konnten nicht geladen werden.",
     saveError: "Der Textbefehl konnte nicht gespeichert werden.", deleteError: "Der Textbefehl konnte nicht gelöscht werden.",
     name: "Name", aliases: "Aliase", templateFieldLabels: { usageText: "Antwort bei fehlenden oder ungültigen Argumenten" }, usageAdvanced: "Erweitert", usageTextHint: "Wird gesendet, wenn erforderliche Argumente fehlen oder ungültig sind.", createVariable: "Variable anlegen",
@@ -217,7 +234,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     slashTimeoutEffect: (minimum, maximum) => `Timeout für den Aufrufer für ${minimum === maximum ? `${String(minimum)} s` : `${String(minimum)}–${String(maximum)} s`}.`,
     slashAnnouncementEffect: "Wird als Twitch-Ankündigung gesendet.",
     slashShoutoutEffect: "Shoutout-Ziel kommt aus dem Befehlsargument.",
-    response: "Antwort", responseOptional: "Antwort (optional)", responseHint: "Was der Bot schreibt. { öffnet die Variablen.", responseMissing: "Antworttext ausfüllen.", fieldTooLong: "Höchstens 500 Zeichen.",
+    response: "Antwort", currencyFrom: "Von", currencyTo: "Nach", responseOptional: "Antwort (optional)", responseHint: "Was der Bot schreibt. { öffnet die Variablen.", responseMissing: "Antworttext ausfüllen.", fieldTooLong: "Höchstens 500 Zeichen.",
     minimumTier: "Wer darf auslösen",
     tierLabels: { everyone: "Alle", subscriber: "Abonnenten", vip: "VIPs", moderator: "Moderatoren", broadcaster: "Broadcaster" },
     tierSubjects: { viewer: "Zuschauer", subscriber: "Abonnenten", vip: "VIPs", moderator: "Moderatoren", broadcaster: "Broadcaster" },
@@ -292,7 +309,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     argsEveryoneWarning: "Mit {args} kann jede Person im Chat Text an den Bot übergeben.",
   },
   en: {
-    title: "Text commands", search: "Search commands", activeFilters: "Active filters:", resetFilters: "Reset", countSuffix: "commands", filteredSuffix: "commands", tabs: { settings: "Settings", advanced: "Advanced" }, list: "Commands", details: (name) => `Properties for !${name}`, add: "Add command", empty: "No text commands yet.",
+    title: "Text commands", search: "Search commands", filters: "Command filters", statusFilter: "Status", filterAll: "All", filterActive: "Active", filterInactive: "Inactive", moduleFilter: "Module", activeFilters: "Active filters:", resetFilters: "Reset", countSuffix: "commands", filteredSuffix: "commands", tabs: { settings: "Settings", advanced: "Advanced" }, list: "Commands", sectionMessage: "Message", sectionWhen: "When", sectionWhere: "Where", selectionPrompt: "Select a text command", selectionDescription: "Select a text command on the left or create a new one.", noResponse: "No response text", aliasCount: (count) => `${String(count)} aliases`, useCount: (count) => `${String(count)} uses`, details: (name) => `Properties for !${name}`, add: "Add command", newCommand: "New", empty: "No text commands yet.",
     loadError: "The text commands could not be loaded.", templateVariablesLoadError: "Template variables could not be loaded.",
     saveError: "The text command could not be saved.", deleteError: "The text command could not be deleted.",
     name: "Name", aliases: "Aliases", templateFieldLabels: { usageText: "Reply when arguments are missing or invalid" }, usageAdvanced: "Advanced", usageTextHint: "Sent when required arguments are missing or invalid.", createVariable: "Create variable",
@@ -318,7 +335,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     slashTimeoutEffect: (minimum, maximum) => `Times out the caller for ${minimum === maximum ? `${String(minimum)} s` : `${String(minimum)}–${String(maximum)} s`}.`,
     slashAnnouncementEffect: "Sent as a Twitch announcement.",
     slashShoutoutEffect: "The shoutout target comes from the command argument.",
-    response: "Response", responseOptional: "Response (optional)", responseHint: "What the bot says. Type { to open variables.", responseMissing: "Enter a response.", fieldTooLong: "Use at most 500 characters.",
+    response: "Response", currencyFrom: "From", currencyTo: "To", responseOptional: "Response (optional)", responseHint: "What the bot says. Type { to open variables.", responseMissing: "Enter a response.", fieldTooLong: "Use at most 500 characters.",
     minimumTier: "Who can use it",
     tierLabels: { everyone: "Everyone", subscriber: "Subscribers", vip: "VIPs", moderator: "Moderators", broadcaster: "Broadcaster" },
     tierSubjects: { viewer: "viewers", subscriber: "subscribers", vip: "VIPs", moderator: "moderators", broadcaster: "broadcasters" },

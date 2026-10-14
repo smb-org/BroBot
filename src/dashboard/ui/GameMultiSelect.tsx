@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactEleme
 import { ImageOff } from "lucide-react";
 
 import { PopoverPrimitive } from "./primitives/popover";
+import { FieldError } from "./FieldError";
 
 export interface GameMultiSelectGame {
   id: string;
@@ -70,10 +71,11 @@ export interface GameMultiSelectProps {
   disabled?: boolean;
   visuallyHiddenLabel?: boolean;
   compact?: boolean;
+  error?: string;
 }
 
 /** Async Twitch game search with channel suggestions and a ten-game cap. */
-export function GameMultiSelect({ searchGames, lookupGames, value, onChange, messages, disabled = false, visuallyHiddenLabel = false, compact = false }: GameMultiSelectProps): ReactElement {
+export function GameMultiSelect({ searchGames, lookupGames, value, onChange, messages, disabled = false, visuallyHiddenLabel = false, compact = false, error }: GameMultiSelectProps): ReactElement {
   const id = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
@@ -254,7 +256,8 @@ export function GameMultiSelect({ searchGames, lookupGames, value, onChange, mes
             autoComplete="off"
             value={query}
             placeholder={atLimit ? messages.selectedCount(value.length, MAX_GAMES) : value.length === 0 ? messages.allGames : messages.search}
-            aria-describedby={`${id}-hint`}
+            aria-describedby={`${id}-hint${error === undefined ? "" : ` ${id}-error`}`}
+            aria-invalid={error === undefined ? undefined : true}
             aria-label={messages.label}
             aria-controls={`${id}-results`}
             aria-expanded={resultsOpen}
@@ -273,6 +276,7 @@ export function GameMultiSelect({ searchGames, lookupGames, value, onChange, mes
           />
         </div>
         <p className="ui-game-multi-select__limit-message" aria-live="polite">{atLimit ? messages.limitReached : ""}</p>
+        {error === undefined ? null : <FieldError id={`${id}-error`} className="ui-game-multi-select__error" message={error} />}
         <span className="ui-game-multi-select__sr-hint sr-only" id={`${id}-hint`}>{messages.searchHint}</span>
         <PopoverPrimitive.Portal>
           <PopoverPrimitive.Positioner anchor={inputRef} side="bottom" align="start" sideOffset={4} className="ui-game-multi-select__positioner" style={{ zIndex: "var(--layer-popover)" }}>

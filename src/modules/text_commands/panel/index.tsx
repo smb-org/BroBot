@@ -1,14 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
-import { dashboardCommonTexts, dashboardLanguage, type DashboardLanguage } from "../../../dashboard/locale";
+import { dashboardCommonTexts, dashboardLanguage, serverFieldErrorText, type DashboardLanguage } from "../../../dashboard/locale";
 import {
-  Badge, Button, ChatTargetField, ChatPreview, ConfirmDialog, EditorShell, EmptyCellValue, Field, FieldPair, ListDetail, ListToolbar, UnitInput, Select,
-  GameMultiSelect, InspectorFieldRow, InspectorSection, LoadState, LoadStateLines, TimeoutDurationRangeFields,
-  registerDashboardNavigationGuard, SegmentChoice, ChipsInput, TemplateText, TemplateTextField, useDraft, useDraftGuard, useInspectorSelection, notify,
-  RoleThreshold, RuleNote, SwitchSection,
-  type EditorInvalidField,
+  Badge, Button, ChatCommandsHelp, ChatTargetField, ChatPreview, ChipGroup, ChipsInput, CollectionPage, ConfirmDialog, EmptyState,
+  Field, FieldPair, GameMultiSelect, InspectorFieldRow, InspectorSection, LoadState, LoadStateLines, ListToolbar, PageHeader,
+  mapServerFieldErrors, registerDashboardNavigationGuard, RoleThreshold, RuleNote, SaveStatus, Section, SegmentChoice, Select,
+  SwitchSection, TemplateTextField, TimeoutDurationRangeFields, UnitInput, useDraft, useDraftGuard, useInspectorSelection, notify,
 } from "../../../dashboard/ui";
-import { Switch as SwitchPrimitive } from "../../../dashboard/ui/primitives/switch";
 import { PanelApiError } from "../../../contracts/panel-error";
 import { TEXT_COMMAND_KINDS, TEXT_COMMAND_MAX_ALIASES, TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_TEMPLATE_FIELDS, TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES, type TextCommand, type TextCommandGame, type TextCommandKind, type TextCommandMinimumTier, type TextCommandResponseType, type TextCommandStreamCondition } from "../contracts";
 import { MODERATION_TIMEOUT_MAX_SECONDS } from "../../contracts/moderation";
@@ -17,13 +15,15 @@ import { commandListReply, TEXT_COMMAND_DEFAULT_TEXTS, TEXT_COMMAND_DEFAULT_USAG
 import { statusForTier, validCommandName } from "../domain";
 import { invalidTemplateParameters, renderTemplate, templateVariableNames, unknownTemplateVariables, worstCaseTemplateLength, type PanelTemplateWarning, type TemplateVariable } from "../contract";
 import { effectivePanelTemplateVariables, panelTemplateOptions, registeredModuleTemplateGroup } from "../../../dashboard/ui";
-import { createTextCommand, deleteTextCommand, loadTextCommandData, loadRegisteredTemplateVariables, lookupTextGames, saveTextCommand, searchTextGames, textBlockNamesForPicker, toggleTextCommand, type TextCommandChannelVariable } from "./service";
+import { createTextCommand, deleteTextCommand, loadTextCommandData, loadRegisteredTemplateVariables, lookupTextGames, saveTextCommand, searchTextGames, textBlockNamesForPicker, type TextCommandChannelVariable } from "./service";
 import { moduleQueryKey, refetchModuleQueryData, runModuleQueryWrite, useChannelSettings, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import type { TextCommandPanelData } from "./service";
 import { textCommandsTexts } from "./locale";
 import { convertLeadingSlashCommand, parseLeadingSlashCommand, SLASH_COMMAND_NAMES } from "./slash-command";
 import { templateTextLength } from "../../../contracts/template-text-length";
 import type { ChatOutputTarget } from "../../../contracts/values";
+import type { ModuleRegisteredTemplateVariable } from "../../contract";
+import { TEXT_COMMAND_CHAT_COMMANDS } from "../contracts/chat-commands";
 
 const normalizeCommandName = (name: string): string => name.trim().replace(/^!/u, "").toLowerCase();
 
@@ -51,6 +51,7 @@ const requireCommandRevision = (revision: number | null): number => {
 
 interface CommandDraft {
   name: string;
+  enabled: boolean;
   text: string;
   usageText: string;
   kind: TextCommandKind;
@@ -73,6 +74,7 @@ const draftTimeoutAction = (timeoutAction: TextCommand["timeoutAction"] | undefi
 
 const draftFromCommand = (command: TextCommand): CommandDraft => ({
   name: command.name,
+  enabled: command.enabled,
   text: command.text,
   usageText: command.usageText ?? (command.kind === "shoutout" ? TEXT_COMMAND_DEFAULT_USAGE_TEXT : ""),
   kind: command.kind,
@@ -94,6 +96,7 @@ const draftFromCommand = (command: TextCommand): CommandDraft => ({
 
 const newCommandDraft = (): CommandDraft => ({
   name: "",
+  enabled: true,
   text: "",
   usageText: "",
   kind: "text",
@@ -135,6 +138,52 @@ const validCommandVariableAction = (
       : variable.amount !== null && variable.amount >= -999999999 && variable.amount <= 999999999
 ));
 
+const commandFieldPaths = {
+  name: "name",
+  aliases: "aliases",
+  kind: "kind",
+  text: "text",
+  usageText: "usageText",
+  minimumTier: "minimumTier",
+  cooldownSeconds: "cooldownSeconds",
+  userCooldownSeconds: "userCooldownSeconds",
+  streamCondition: "streamCondition",
+  games: "games",
+  responseType: "responseType",
+  chatTarget: "chatTarget",
+  variableAction: "variableAction",
+  "variableAction.name": "variableAction",
+  "variableAction.amount": "variableAction",
+  timeoutAction: "timeoutAction",
+  "timeoutAction.minSeconds": "timeoutAction",
+  "timeoutAction.maxSeconds": "timeoutAction",
+  "timeoutAction.fallbackText": "timeoutFallbackText",
+  "timeoutAction.reason": "timeoutReason",
+} as const;
+
+const currencyCodes = ["USD", "EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "CNY"] as const;
+const currencyPairForDraft = (draft: CommandDraft): { from: string; to: string } => {
+  const templates = [draft.text, draft.usageText, draft.timeoutAction?.fallbackText ?? "", draft.timeoutAction?.reason ?? ""];
+  for (const template of templates) {
+    const match = /\{currency\.convert\s+([A-Za-z]{3})\s+([A-Za-z]{3})\}/iu.exec(template);
+    if (match?.[1] !== undefined && match[2] !== undefined) return { from: match[1].toUpperCase(), to: match[2].toUpperCase() };
+  }
+  return { from: "USD", to: "EUR" };
+};
+
+const replaceCurrencyPair = (template: string, from: string, to: string): string => template.replace(
+  /\{currency\.convert(?:\s+[A-Za-z]{3}\s+[A-Za-z]{3})?\}/giu,
+  `{currency.convert ${from} ${to}}`,
+);
+
+const modulesUsedByCommand = (command: TextCommand, variables: readonly ModuleRegisteredTemplateVariable[]): string[] => {
+  const moduleByVariable = new Map(variables.map((variable) => [variable.name, variable.moduleId]));
+  const templateText = [command.text, command.usageText ?? "", command.timeoutAction?.fallbackText ?? "", command.timeoutAction?.reason ?? ""].join(" ");
+  return [...new Set([...templateText.matchAll(/\{([a-z][a-z0-9_.]*)/giu)]
+    .map((match) => moduleByVariable.get(match[1] ?? ""))
+    .filter((moduleId): moduleId is string => moduleId !== undefined))];
+};
+
 const commandDraftIsValid = (draft: CommandDraft, channelVariables: readonly TextCommandChannelVariable[]): boolean => {
   const name = normalizeCommandName(draft.name);
   const timeout = draft.timeoutAction;
@@ -169,55 +218,15 @@ const relativeTime = (value: string | null, labels: ReturnType<typeof textComman
   return labels.hoursAgo(Math.round(minutes / 60));
 };
 
-const formatDate = (value: string, language: DashboardLanguage): string => {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(language === "de" ? "de-DE" : "en-US", { dateStyle: "medium" }).format(date);
-};
-
-const commandRowKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, onSelect: () => void): void => {
-  if (event.key === "Enter" || event.key === " ") {
-    event.preventDefault();
-    onSelect();
-  }
-};
-
-interface TextCommandRowProperties {
-  initial: TextCommand;
-  language?: DashboardLanguage | undefined;
-  selected: boolean;
-  onSelect: () => void;
-  rowRef: (row: HTMLTableRowElement | null) => void;
-  toggleBusy: boolean;
-  onToggle: () => Promise<void>;
-}
-
-const TextCommandRow = ({ initial, language, selected, onSelect, rowRef, toggleBusy, onToggle }: TextCommandRowProperties): ReactElement => {
-  const labels = textCommandsTexts(language);
-  return (
-    <tr ref={rowRef} tabIndex={0} aria-selected={selected} onClick={onSelect} onKeyDown={(event) => { commandRowKeyDown(event, onSelect); }}>
-      <th scope="row" className="mono">!{initial.name}</th>
-      <td>{labels.kindLabels[initial.kind]}</td>
-      <td className={`table__answer${initial.text.length === 0 && initial.variableAction !== null ? " table__answer--placeholder" : ""}`} title={initial.kind === "list" ? undefined : initial.text}>
-        {initial.kind === "list" ? <EmptyCellValue language={language} /> : initial.text.length > 0 ? initial.text : initial.variableAction === null ? <EmptyCellValue language={language} /> : labels.actionResponse(initial.variableAction.name, initial.variableAction.operation, initial.variableAction.amount)}
-      </td>
-      <td><Badge tone={initial.minimumTier === "everyone" ? "neutral" : "brand"}>{labels.tierLabels[initial.minimumTier]}</Badge></td>
-      <td><div onClick={(event) => { event.stopPropagation(); }} onKeyDown={(event) => { event.stopPropagation(); }}>
-        <SwitchPrimitive
-          aria-label={`${labels.active}: !${initial.name} · ${initial.enabled ? labels.enabled : labels.disabled}`}
-          checked={initial.enabled}
-          aria-busy={toggleBusy}
-          disabled={toggleBusy}
-          onCheckedChange={() => { void onToggle(); }}
-        />
-      </div></td>
-    </tr>
-  );
-};
-
 interface TextCommandEditorProperties {
   channelId: string;
   channelDefaultChatTarget?: ChatOutputTarget;
   language?: DashboardLanguage | undefined;
+  registeredVariables: readonly ModuleRegisteredTemplateVariable[];
+  registeredVariablesLoaded: boolean;
+  registeredVariablesPending: boolean;
+  registeredVariablesRefreshError: boolean;
+  onRetryRegisteredVariables: () => void;
   initial: CommandDraft;
   command: TextCommand | null;
   commands: readonly TextCommand[];
@@ -239,19 +248,20 @@ interface TextCommandEditorProperties {
   onDeleted: (token: number) => void;
 }
 
-const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, initial, command, commands, channelVariables, canManageContent, botIsModerator, onClose, onGuardChange, onRefresh, onSaved, generation, onWrite, onDeleted }: TextCommandEditorProperties): ReactElement => {
+const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, registeredVariables, registeredVariablesLoaded, registeredVariablesPending, registeredVariablesRefreshError, onRetryRegisteredVariables, initial, command, commands, channelVariables, canManageContent, botIsModerator, onClose, onGuardChange, onRefresh, onSaved, generation, onWrite, onDeleted }: TextCommandEditorProperties): ReactElement => {
   const labels = useMemo(() => textCommandsTexts(language), [language]);
   const searchGames = useCallback((query: string) => searchTextGames(channelId, query), [channelId]);
   const lookupGames = useCallback((ids: readonly string[]) => lookupTextGames(channelId, ids), [channelId]);
   const resolvedLanguage = language ?? dashboardLanguage();
-  const { value: draft, setValue, dirty, reset, accept } = useDraft<CommandDraft>(initial);
+  const isCreate = command === null;
+  const { value: draft, setValue, dirty, reset, accept } = useDraft<CommandDraft>(initial, isCreate);
   const draftRevision = useRef(command?.revision ?? null);
-  const [active, setActive] = useState(command?.enabled ?? true);
-  const [activePending, setActivePending] = useState(false);
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState(false);
   const [deleteError, setDeleteError] = useState<string | undefined>();
   const [fieldError, setFieldError] = useState<{ field: "name" | "aliases"; message: string; invalidAlias?: string } | null>(null);
+  const [serverFieldErrors, setServerFieldErrors] = useState<Readonly<Record<string, string>>>({});
+  const [saveError, setSaveError] = useState<string | undefined>();
   const [concurrentConflict, setConcurrentConflict] = useState(false);
   const [reloadError, setReloadError] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -259,14 +269,13 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
   const [attemptedSave, setAttemptedSave] = useState(false);
   const [serverWarnings, setServerWarnings] = useState<readonly PanelTemplateWarning[]>([]);
   const [minimumTierExplicit, setMinimumTierExplicit] = useState(false);
-  const registeredVariablesQuery = useModuleQuery(channelId, "text_commands", "template-variables", (signal) => loadRegisteredTemplateVariables(channelId, signal));
-  const registeredVariables = registeredVariablesQuery.data ?? [];
   const libraryBlocks = textBlockNamesForPicker(registeredVariables);
   const [selectedLibraryBlock, setSelectedLibraryBlock] = useState("");
-  const isCreate = command === null;
   const blockVariables: TemplateVariable[] = libraryBlocks.map((name) => ({ name, group: "channel", sample: name, maxLength: 500 }));
   const baseTemplateFields = templateFieldsForKind(draft.kind, channelVariables, draft.timeoutAction !== null);
   const variableAction = draft.variableAction;
+  const currencyPair = currencyPairForDraft(draft);
+  const hasCurrencyToken = [draft.text, draft.usageText, draft.timeoutAction?.fallbackText ?? "", draft.timeoutAction?.reason ?? ""].some((template) => /\{currency\.convert/iu.test(template));
   const templateVariables = (field: CommandTemplateField) => [
     ...panelTemplateOptions("chat_command", [], channelVariables, resolvedLanguage),
     ...registeredVariables.filter((variable) => variable.isTextBlock).map((variable) => ({
@@ -294,7 +303,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
         ...(sourceGroup === undefined ? {} : { sourceGroup }),
         ...(variable.external === undefined ? {} : { external: variable.external }),
         ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
-        ...(variable.parameters === "currency_pair" ? { parameter: { value: variable.parameterDefault ?? "USD EUR" } } : {}),
+        ...(variable.parameters === "currency_pair" ? { parameter: { value: `${currencyPair.from} ${currencyPair.to}` } } : {}),
       };
     }),
   ];
@@ -328,24 +337,24 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
   const normalizedName = normalizeCommandName(draft.name);
   const sameNameAlias = draft.aliases.includes(normalizedName);
   const invalidAlias = draft.aliases.find((alias) => !validCommandName(alias));
-  const nameError = fieldError?.field === "name" ? fieldError.message : attemptedSave && normalizedName.length === 0 ? labels.nameMissing : attemptedSave && !validCommandName(normalizedName) ? labels.nameInvalid : undefined;
-  const aliasesError = fieldError?.field === "aliases" ? fieldError.message : sameNameAlias ? labels.aliasIsName : invalidAlias !== undefined ? labels.aliasInvalid(invalidAlias) : attemptedSave && draft.aliases.length > TEXT_COMMAND_MAX_ALIASES ? labels.chipsInputMessages.atLimitHint : undefined;
+  const nameError = fieldError?.field === "name" ? fieldError.message : serverFieldErrors.name ?? (attemptedSave && normalizedName.length === 0 ? labels.nameMissing : attemptedSave && !validCommandName(normalizedName) ? labels.nameInvalid : undefined);
+  const aliasesError = fieldError?.field === "aliases" ? fieldError.message : serverFieldErrors.aliases ?? (sameNameAlias ? labels.aliasIsName : invalidAlias !== undefined ? labels.aliasInvalid(invalidAlias) : attemptedSave && draft.aliases.length > TEXT_COMMAND_MAX_ALIASES ? labels.chipsInputMessages.atLimitHint : undefined);
   const cooldownInvalid = draft.cooldownSeconds === "" || !Number.isInteger(draft.cooldownSeconds) || draft.cooldownSeconds < 0 || draft.cooldownSeconds > 86400;
   const userCooldownInvalid = draft.userCooldownSeconds === "" || !Number.isInteger(draft.userCooldownSeconds) || draft.userCooldownSeconds < 0 || draft.userCooldownSeconds > 86400;
   const templateFieldNames = Object.keys(templateFields) as CommandTemplateField[];
-  const responseFieldError = slashInput.status === "invalid"
+  const responseFieldError = serverFieldErrors.text ?? (slashInput.status === "invalid"
     ? labels.slashSyntaxError(slashInput.command)
     : templateTextLength(validationDraft.text) > 500
     ? labels.fieldTooLong
     : attemptedSave && validationDraft.kind !== "timeout" && validationDraft.kind !== "list" && validationDraft.variableAction === null && validationDraft.text.trim().length === 0
       ? labels.responseMissing
-      : undefined;
+      : undefined);
   const timeoutRangeInvalid = validationDraft.kind === "timeout" && (validationDraft.timeoutAction === null ||
     typeof validationDraft.timeoutAction.minSeconds !== "number" || !Number.isInteger(validationDraft.timeoutAction.minSeconds) || validationDraft.timeoutAction.minSeconds < 1 ||
     typeof validationDraft.timeoutAction.maxSeconds !== "number" || !Number.isInteger(validationDraft.timeoutAction.maxSeconds) ||
     validationDraft.timeoutAction.minSeconds > validationDraft.timeoutAction.maxSeconds || validationDraft.timeoutAction.maxSeconds > MODERATION_TIMEOUT_MAX_SECONDS);
-  const timeoutReasonError = validationDraft.timeoutAction !== null && templateTextLength(validationDraft.timeoutAction.reason) > 500 ? labels.fieldTooLong : undefined;
-  const timeoutFallbackError = validationDraft.timeoutAction !== null && templateTextLength(validationDraft.timeoutAction.fallbackText) > 500 ? labels.fieldTooLong : undefined;
+  const timeoutReasonError = serverFieldErrors.timeoutReason ?? (validationDraft.timeoutAction !== null && templateTextLength(validationDraft.timeoutAction.reason) > 500 ? labels.fieldTooLong : undefined);
+  const timeoutFallbackError = serverFieldErrors.timeoutFallbackText ?? (validationDraft.timeoutAction !== null && templateTextLength(validationDraft.timeoutAction.fallbackText) > 500 ? labels.fieldTooLong : undefined);
   const variableActionInvalid = !validCommandVariableAction(validationDraft.variableAction, channelVariables);
   const variableActionNameInvalid = validationDraft.variableAction !== null && !channelVariables.some((entry) => entry.name === validationDraft.variableAction?.name);
   const variableActionAmountInvalid = validationDraft.variableAction !== null && (
@@ -356,9 +365,8 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
           ? validationDraft.variableAction.amount < 1 || validationDraft.variableAction.amount > 1000
           : validationDraft.variableAction.amount < -999999999 || validationDraft.variableAction.amount > 999999999)
   );
-  const variableActionError = attemptedSave && variableActionInvalid ? labels.variableActionInvalid : undefined;
-  const aliasesInvalid = draft.aliases.length > TEXT_COMMAND_MAX_ALIASES || sameNameAlias || invalidAlias !== undefined;
-  const valid = slashInput.status !== "invalid" && !validationResponseInvalid &&
+  const variableActionError = serverFieldErrors.variableAction ?? (attemptedSave && variableActionInvalid ? labels.variableActionInvalid : undefined);
+  const valid = slashInput.status !== "invalid" && !validationResponseInvalid && Object.keys(serverFieldErrors).length === 0 && fieldError === null &&
     (validationDraft.variableAction === null || validationDraft.kind === "text" || validationDraft.kind === "timeout") &&
     commandDraftIsValid(validationDraft, channelVariables);
   const localWarnings = templateFieldNames.flatMap((field) => {
@@ -395,78 +403,17 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
     : slashInput.command === "timeout"
       ? labels.slashTimeoutEffect(slashInput.minSeconds ?? 0, slashInput.maxSeconds ?? 0)
       : slashInput.command === "announce" ? labels.slashAnnouncementEffect : labels.slashShoutoutEffect;
-  const advancedIssue = attemptedSave && (cooldownInvalid || userCooldownInvalid)
-    ? "error" as const
-    : undefined;
-  const settingsIssue = nameError !== undefined || aliasesError !== undefined || responseFieldError !== undefined ||
-    timeoutReasonError !== undefined || timeoutFallbackError !== undefined || (validationDraft.kind !== "list" && templateTextLength(validationDraft.usageText) > 500) ||
-    (attemptedSave && (timeoutRangeInvalid || variableActionInvalid))
-    ? "error" as const
-    : announcementWarning !== undefined || localWarnings.length > 0 || serverWarnings.length > 0
-      ? "warning" as const
-      : undefined;
   const listPreview = commandListReply(commands.filter((item) => item.enabled && item.name !== command?.name).map((item) => item.name));
-  const invalidFields: EditorInvalidField[] = [];
-  if ((attemptedSave || fieldError?.field === "name") && nameError !== undefined) {
-    invalidFields.push({ id: "command-name", label: labels.name, message: nameError, sectionId: "settings" });
-  }
-  if ((attemptedSave || fieldError?.field === "aliases" || aliasesInvalid) && aliasesError !== undefined) {
-    const invalidAliasToFocus = fieldError?.field === "aliases"
-      ? fieldError.invalidAlias ?? (sameNameAlias ? normalizedName : invalidAlias ?? draft.aliases[0])
-      : sameNameAlias ? normalizedName : invalidAlias ?? draft.aliases[0];
-    invalidFields.push({
-      id: "command-aliases",
-      ...(invalidAliasToFocus === undefined ? {} : { focusId: `command-aliases-remove-${encodeURIComponent(invalidAliasToFocus)}` }),
-      label: labels.aliases,
-      message: aliasesError,
-      sectionId: "settings",
-    });
-  } else if (attemptedSave && draft.aliases.length > TEXT_COMMAND_MAX_ALIASES) {
-    invalidFields.push({
-      id: "command-aliases",
-      ...(draft.aliases[0] === undefined ? {} : { focusId: `command-aliases-remove-${encodeURIComponent(draft.aliases[0])}` }),
-      label: labels.aliases,
-      message: labels.chipsInputMessages.atLimitHint,
-      sectionId: "settings",
-    });
-  }
-  if (attemptedSave && timeoutRangeInvalid) {
-    invalidFields.push({ id: "command-timeout-minimum", label: labels.timeoutDuration, message: labels.timeoutRangeInvalid, sectionId: "settings" });
-  }
-  if (attemptedSave && timeoutReasonError !== undefined) {
-    invalidFields.push({ id: "command-timeout-reason", label: labels.timeoutReason, message: timeoutReasonError, sectionId: "settings" });
-  }
-  if (attemptedSave && responseFieldError !== undefined) {
-    invalidFields.push({ id: "command-text", label: draft.kind === "timeout" ? labels.responseOptional : labels.response, message: responseFieldError, sectionId: "settings" });
-  }
-  if (attemptedSave && timeoutFallbackError !== undefined) {
-    invalidFields.push({ id: "command-timeoutFallbackText", label: labels.timeoutFallbackTextOptional, message: timeoutFallbackError, sectionId: "settings" });
-  }
-  if (attemptedSave && validationDraft.kind !== "list" && templateTextLength(validationDraft.usageText) > 500) {
-    invalidFields.push({ id: "command-usageText", label: labels.templateFieldLabels.usageText, message: labels.fieldTooLong, sectionId: "settings" });
-  }
-  if (attemptedSave && variableActionNameInvalid) {
-    invalidFields.push({
-      id: channelVariables.length === 0 ? "command-variable-action" : "command-variable-name",
-      label: labels.variableAction,
-      message: labels.variableActionInvalid,
-      sectionId: "settings",
-    });
-  }
-  if (attemptedSave && variableActionAmountInvalid) {
-    invalidFields.push({ id: "command-variable-amount", label: labels.variableAmount, message: labels.variableActionInvalid, sectionId: "settings" });
-  }
-  if (attemptedSave && cooldownInvalid) {
-    invalidFields.push({ id: "command-cooldown", label: labels.cooldown, message: labels.numberMissing, sectionId: "advanced" });
-  }
-  if (attemptedSave && userCooldownInvalid) {
-    invalidFields.push({ id: "command-user-cooldown", label: labels.userCooldown, message: labels.numberMissing, sectionId: "advanced" });
-  }
   const setDraftField = <Key extends keyof CommandDraft>(key: Key, value: CommandDraft[Key]): void => {
     if (key === "minimumTier") setMinimumTierExplicit(true);
     setValue((current) => ({ ...current, [key]: value }));
     setSaved(false); setConcurrentConflict(false); setReloadError(false);
+    setSaveError(undefined);
     if (key === "name" || key === "aliases") setFieldError(null);
+    const fieldsToClear = key === "timeoutAction"
+      ? ["timeoutAction", "timeoutFallbackText", "timeoutReason"]
+      : key === "variableAction" ? ["variableAction"] : [key];
+    setServerFieldErrors((current) => Object.fromEntries(Object.entries(current).filter(([field]) => !fieldsToClear.includes(field))));
   };
   const variableActionEditor = draft.kind === "text" || draft.kind === "timeout" ? <SwitchSection
     id="command-variable-action"
@@ -541,6 +488,8 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
     value={draft.responseType}
     options={( ["say", "reply", "announcement"] as const).map((value) => ({ value, label: labels.responseTypeLabels[value] }))}
     {...(announcementWarning === undefined ? {} : { warning: announcementWarning })}
+    {...(serverFieldErrors.responseType === undefined ? {} : { error: serverFieldErrors.responseType })}
+    reserveError
     disabled={!canManageContent || pending}
     onChange={(value) => { setDraftField("responseType", value); }}
   />;
@@ -549,6 +498,8 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
     value={draft.chatTarget}
     {...(channelDefaultChatTarget === undefined ? {} : { effectiveDefault: channelDefaultChatTarget })}
     allowed={["all_chats", "source_only", "channel_default", "where_asked"]}
+    {...(serverFieldErrors.chatTarget === undefined ? {} : { error: serverFieldErrors.chatTarget })}
+    reserveError
     disabled={!canManageContent || pending}
     onChange={(chatTarget) => { setDraftField("chatTarget", chatTarget); }}
   />;
@@ -569,6 +520,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
     if (!commandDraftIsValid(savedDraft, channelVariables)) return labels.invalid;
     const payload = {
       name: normalizeCommandName(savedDraft.name),
+      enabled: savedDraft.enabled,
       text: savedDraft.kind === "list" ? "" : savedDraft.text,
       kind: savedDraft.kind,
       ...(savedDraft.kind === "list" ? {} : { usageText: savedDraft.usageText }),
@@ -588,7 +540,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
         reason: savedDraft.timeoutAction.reason,
       },
     };
-    setPending(true); setDeleteError(undefined); setFieldError(null); setConcurrentConflict(false); setReloadError(false); setSaved(false);
+    setPending(true); setDeleteError(undefined); setFieldError(null); setServerFieldErrors({}); setSaveError(undefined); setConcurrentConflict(false); setReloadError(false); setSaved(false);
     try {
       const baselineRevision = isCreate ? null : draftRevision.current;
       const token = generation();
@@ -635,10 +587,16 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
           }
         }
       }
+      const mappedErrors = mapServerFieldErrors(caught, commandFieldPaths, (reasonCode) => serverFieldErrorText(reasonCode, resolvedLanguage));
+      if (Object.keys(mappedErrors).length > 0) {
+        setServerFieldErrors(mappedErrors);
+        return labels.invalid;
+      }
+      setSaveError(labels.saveError);
       notify({ tone: "error", message: labels.saveError });
       return labels.saveError;
     } finally { setPending(false); }
-  }, [accept, canManageContent, channelId, channelVariables, command, draft, generation, isCreate, labels, onRefresh, onSaved, onWrite, setAttemptedSave, setConcurrentConflict, setFieldError, setPending, setSaved, setServerWarnings, setValue]);
+  }, [accept, canManageContent, channelId, channelVariables, command, draft, generation, isCreate, labels, onRefresh, onSaved, onWrite, resolvedLanguage, setAttemptedSave, setConcurrentConflict, setFieldError, setPending, setSaved, setServerFieldErrors, setServerWarnings, setValue]);
 
   const guard = useDraftGuard(dirty, saveDraft, reset);
   useEffect(() => { completeSwitchRef.current = guard.completeSwitch; }, [guard.completeSwitch]);
@@ -653,6 +611,18 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
       return;
     }
     setDraftField(field, value);
+  };
+
+  const setCurrencyPair = (from: string, to: string): void => {
+    setDraftField("text", replaceCurrencyPair(draft.text, from, to));
+    setDraftField("usageText", replaceCurrencyPair(draft.usageText, from, to));
+    if (draft.timeoutAction !== null) {
+      setDraftField("timeoutAction", {
+        ...draft.timeoutAction,
+        fallbackText: replaceCurrencyPair(draft.timeoutAction.fallbackText, from, to),
+        reason: replaceCurrencyPair(draft.timeoutAction.reason, from, to),
+      });
+    }
   };
 
   const changeKind = (kind: TextCommandKind): void => {
@@ -673,10 +643,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
       };
     });
     setSaved(false); setConcurrentConflict(false); setReloadError(false);
-  };
-
-  const handleSave = async (): Promise<void> => {
-    await saveDraft();
+    setServerFieldErrors({}); setSaveError(undefined);
   };
 
   const reloadServer = async (): Promise<void> => {
@@ -689,28 +656,10 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
       if (latest === undefined) { onClose(); return; }
       accept(draftFromCommand(latest));
       draftRevision.current = latest.revision;
-      setActive(latest.enabled);
       setConcurrentConflict(false); setFieldError(null); setDeleteError(undefined); setServerWarnings([]);
     } catch {
       setReloadError(true);
     }
-  };
-
-  const toggleActive = async (next: boolean): Promise<void> => {
-    if (command === null) return;
-    setActivePending(true);
-    try {
-      const baselineRevision = draftRevision.current;
-      const result = await onWrite(
-        baselineRevision,
-        (revision) => toggleTextCommand(channelId, command.name, requireCommandRevision(revision), next),
-        (current, mutationResult) => updateCommandCache(current, mutationResult.command),
-      );
-      draftRevision.current = result.command.revision;
-      setActive(result.command.enabled);
-    } catch {
-      notify({ tone: "error", message: labels.saveError });
-    } finally { setActivePending(false); }
   };
 
   const remove = async (): Promise<void> => {
@@ -753,6 +702,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
         messages={labels.templateMessages}
         required={field === "text" && draft.kind !== "timeout" && draft.variableAction === null}
         {...(field === "text" && responseFieldError !== undefined ? { error: responseFieldError } : {})}
+        {...(field === "usageText" && serverFieldErrors.usageText !== undefined ? { error: serverFieldErrors.usageText } : {})}
         {...(field === "timeoutFallbackText" && timeoutFallbackError !== undefined ? { error: timeoutFallbackError } : {})}
       />
       {field === "text" ? <div className="command-slash-help" aria-live="polite" style={{ height: "calc(var(--s10) * 5)", overflowY: "auto" }}>
@@ -805,16 +755,15 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
       id: "settings",
       label: "",
       icon: "tabSettings" as const,
-      ...(settingsIssue === undefined ? {} : { issue: settingsIssue }),
       content: <>
         <LoadState
           variant="compact-64"
-          status={registeredVariablesQuery.data === undefined ? registeredVariablesQuery.isPending ? "loading" : "error" : "success"}
+          status={registeredVariablesLoaded ? "success" : registeredVariablesPending ? "loading" : "error"}
           loading={<div />}
           empty={<div />}
           error={<p className="muted" role="alert" style={{ height: "var(--s6)", overflow: "hidden", margin: 0, whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{labels.templateVariablesLoadError}</p>}
-          queryError={{ message: labels.templateVariablesLoadError, onRetry: () => { void registeredVariablesQuery.refetch(); } }}
-          refreshError={registeredVariablesQuery.isRefetchError}
+          queryError={{ message: labels.templateVariablesLoadError, onRetry: onRetryRegisteredVariables }}
+          refreshError={registeredVariablesRefreshError}
         >{null}</LoadState>
         <Field
           id="command-name"
@@ -850,6 +799,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
         <Select
           label={labels.kind}
           hint={labels.kindHints[draft.kind]}
+          {...(serverFieldErrors.kind === undefined ? {} : { error: serverFieldErrors.kind })}
           value={draft.kind}
           options={kindOptions}
           disabled={!canManageContent || pending}
@@ -870,7 +820,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
                 minimumLabel={labels.timeoutMinSeconds}
                 maximumLabel={labels.timeoutMaxSeconds}
                 hint={labels.timeoutRangeHint}
-                {...(attemptedSave && timeoutRangeInvalid ? { error: labels.timeoutRangeInvalid } : {})}
+                {...(serverFieldErrors.timeoutAction === undefined && !(attemptedSave && timeoutRangeInvalid) ? {} : { error: serverFieldErrors.timeoutAction ?? labels.timeoutRangeInvalid })}
                 disabled={!canManageContent || pending}
               />
             </InspectorSection>
@@ -894,6 +844,24 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
         {draft.kind === "list"
           ? <ChatPreview label={labels.previewLabel} speaker={labels.previewSpeaker} text={listPreview} countLabel={labels.templateMessages.previewCountLabel(listPreview.length)} />
           : templateEditor("text", draft.kind === "timeout" ? labels.responseOptional : labels.response)}
+        <div className="text-command-currency-slot" aria-hidden={!hasCurrencyToken || undefined} style={{ visibility: hasCurrencyToken ? "visible" : "hidden" }}>
+          <FieldPair>
+            <Select
+              label={labels.currencyFrom}
+              value={currencyPair.from}
+              options={currencyCodes.map((code) => ({ value: code, label: code }))}
+              disabled={!hasCurrencyToken || !canManageContent || pending}
+              onChange={(from) => { if (from !== null) setCurrencyPair(from, currencyPair.to); }}
+            />
+            <Select
+              label={labels.currencyTo}
+              value={currencyPair.to}
+              options={currencyCodes.map((code) => ({ value: code, label: code }))}
+              disabled={!hasCurrencyToken || !canManageContent || pending}
+              onChange={(to) => { if (to !== null) setCurrencyPair(currencyPair.from, to); }}
+            />
+          </FieldPair>
+        </div>
         <div data-testid="command-timeout-fallback-slot" style={{ height: "calc(var(--s10) * 6)", overflowY: "auto" }}>
           {draft.kind === "timeout" && draft.timeoutAction !== null ? <div className="command-timeout-action">
             {templateEditor("timeoutFallbackText", labels.timeoutFallbackTextOptional)}
@@ -907,26 +875,23 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
             {draft.kind === "shoutout" ? <p className="muted command-shoutout-hint">{labels.shoutoutCooldownHint}</p> : null}
             {draft.kind === "timeout" ? <>
               {variableActionEditor}
-              {responseTypeEditor}
-              {chatTargetEditor}
             </> : null}
           </div>
         </details> : null}
         {draft.kind === "text" ? variableActionEditor : null}
-        {draft.kind !== "timeout" ? <>{responseTypeEditor}{chatTargetEditor}</> : null}
       </>,
     },
     {
       id: "advanced",
       label: "",
       icon: "tabAdvanced" as const,
-      ...(advancedIssue === undefined ? {} : { issue: advancedIssue }),
       content: <>
         <RoleThreshold
           label={labels.minimumTier}
           value={draft.minimumTier}
           options={tierOptions}
           disabled={!canManageContent || pending}
+          {...(serverFieldErrors.minimumTier === undefined ? {} : { error: serverFieldErrors.minimumTier })}
           onChange={(value) => { setDraftField("minimumTier", value as TextCommandMinimumTier); }}
         />
         <RuleNote>{labels.tierHelp}</RuleNote>
@@ -936,6 +901,8 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
               label={labels.streamCondition}
               hint={labels.streamHints[draft.streamCondition]}
               value={draft.streamCondition}
+              {...(serverFieldErrors.streamCondition === undefined ? {} : { error: serverFieldErrors.streamCondition })}
+              reserveError
               options={(["any", "online", "offline"] as const).map((value) => ({ value, label: labels.streamLabels[value] }))}
               disabled={!canManageContent || pending}
               onChange={(value) => { setDraftField("streamCondition", value); }}
@@ -948,6 +915,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
               value={draft.games}
               onChange={(games) => { setDraftField("games", games); }}
               messages={{ ...labels.gameMultiSelect, label: labels.gameFilter, hint: labels.gameFilterHint }}
+              {...(serverFieldErrors.games === undefined ? {} : { error: serverFieldErrors.games })}
               disabled={!canManageContent || pending}
             />
           </InspectorFieldRow>
@@ -962,7 +930,8 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
             max={86400}
             step={5}
             value={draft.cooldownSeconds}
-            {...(attemptedSave && cooldownInvalid ? { error: labels.numberMissing } : {})}
+            suggestions={[5, 30, 60]}
+            {...(serverFieldErrors.cooldownSeconds === undefined && !(attemptedSave && cooldownInvalid) ? {} : { error: serverFieldErrors.cooldownSeconds ?? labels.numberMissing })}
             disabled={!canManageContent || pending}
             onChange={(value) => { setDraftField("cooldownSeconds", value); }}
           />
@@ -975,7 +944,8 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
             max={86400}
             step={5}
             value={draft.userCooldownSeconds}
-            {...(attemptedSave && userCooldownInvalid ? { error: labels.numberMissing } : {})}
+            suggestions={[0, 60, 300]}
+            {...(serverFieldErrors.userCooldownSeconds === undefined && !(attemptedSave && userCooldownInvalid) ? {} : { error: serverFieldErrors.userCooldownSeconds ?? labels.numberMissing })}
             disabled={!canManageContent || pending}
             onChange={(value) => { setDraftField("userCooldownSeconds", value); }}
           />
@@ -984,86 +954,76 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
     },
   ];
 
-  const props = useMemo(() => ({
-    aliases: draft.aliases,
-    kind: labels.kindLabels[draft.kind],
-    text: draft.text,
-    responseType: labels.responseTypeLabels[draft.responseType],
-    chatTarget: draft.chatTarget === null ? labels.chatTargetDefault : labels.chatTargetLabels[draft.chatTarget],
-    minimumTier: labels.tierLabels[draft.minimumTier],
-    minimumDescription: tierDescription(draft.minimumTier, labels),
-    stream: draft.streamCondition === "any" ? labels.streamAny : draft.streamCondition === "online" ? labels.streamOnline : labels.streamOffline,
-    games: draft.games.map((game) => game.name).join(", ") || labels.streamAny,
-    cooldown: draft.cooldownSeconds === "" ? "—" : `${String(draft.cooldownSeconds)} s`,
-    userCooldown: draft.userCooldownSeconds === 0 ? labels.cooldownOff : draft.userCooldownSeconds === "" ? "—" : `${String(draft.userCooldownSeconds)} s`,
-  }), [draft, labels]);
-  const templateView = (field: CommandTemplateField): ReactElement =>
-    <TemplateText value={templateValue(field)} variables={templateVariables(field)} />;
-
-  const propertyList = <dl className="properties command-properties">
-    <div><dt>{labels.name}</dt><dd className="mono">!{draft.name}</dd></div>
-    <div><dt>{labels.active}</dt><dd><span className="command-property-switch"><SwitchPrimitive aria-label={labels.active} aria-describedby="command-active-immediate" checked={active} disabled={activePending} onCheckedChange={(next) => { void toggleActive(next); }} /><span id="command-active-immediate" className="sr-only">{labels.activeImmediately}</span></span></dd></div>
-    <div><dt>{labels.aliases}</dt><dd className="mono">{props.aliases.length === 0 ? labels.noAliases : props.aliases.map((alias) => `!${alias}`).join(", ")}</dd></div>
-    <div><dt>{labels.kind}</dt><dd>{props.kind}</dd></div>
-    <div><dt>{labels.response}</dt><dd>{draft.kind === "list" ? <TemplateText value={listPreview} variables={[]} /> : templateView("text")}</dd></div>
-    {draft.kind !== "list" && draft.usageText.length > 0 ? <div><dt>{labels.templateFieldLabels.usageText}</dt><dd>{templateView("usageText")}</dd></div> : null}
-    <div><dt>{labels.variableAction}</dt><dd>{variableAction === null ? labels.variableNone : `${variableAction.name} ${labels.variableOperations[variableAction.operation]}${variableAction.operation === "set_argument" ? "" : String(variableAction.amount ?? 0)}`}</dd></div>
-    <div><dt>{labels.timeoutAction}</dt><dd>{draft.timeoutAction === null
-      ? labels.timeoutNone
-      : draft.timeoutAction.minSeconds === draft.timeoutAction.maxSeconds
-        ? `${String(draft.timeoutAction.minSeconds)} s`
-        : `${String(draft.timeoutAction.minSeconds)}–${String(draft.timeoutAction.maxSeconds)} s`}</dd></div>
-    {draft.timeoutAction?.reason ? <div><dt>{labels.timeoutReason}</dt><dd>{draft.timeoutAction.reason}</dd></div> : null}
-    {draft.timeoutAction === null ? null : <div><dt>{labels.timeoutFallbackText}</dt><dd>{templateView("timeoutFallbackText")}</dd></div>}
-    {draft.kind === "shoutout" ? null : <div><dt>{labels.responseType}</dt><dd>{props.responseType}</dd></div>}
-    <div><dt>{labels.chatTarget}</dt><dd>{props.chatTarget}</dd></div>
-    <div><dt>{labels.minimumTier}</dt><dd>{props.minimumTier} · {props.minimumDescription}</dd></div>
-    <div><dt>{labels.streamCondition}</dt><dd>{props.stream}</dd></div>
-    <div><dt>{labels.gameFilter}</dt><dd>{props.games}</dd></div>
-    <div><dt>{labels.cooldown}</dt><dd className="mono">{props.cooldown}</dd></div>
-    <div><dt>{labels.userCooldown}</dt><dd className="mono">{props.userCooldown}</dd></div>
-    {command === null ? null : <>
-      <div><dt>{labels.lastUsed}</dt><dd className="mono">{relativeTime(command.lastUsedAt, labels)}</dd></div>
-      <div><dt>{labels.createdAt}</dt><dd>{formatDate(command.createdAt, resolvedLanguage)}</dd></div>
-      <div><dt>{labels.updatedAt}</dt><dd>{formatDate(command.updatedAt, resolvedLanguage)}</dd></div>
-    </>}
-  </dl>;
-
-  const deleteButton = command === null ? undefined : <Button icon="remove" danger="subtle" disabled={!canManageContent} {...(!canManageContent ? { title: labels.managementLocked } : {})} onClick={() => { setDeleteError(undefined); setConfirmingDelete(true); }}>{labels.delete}</Button>;
-  return <>
-    <EditorShell
-      className="command-editor-shell"
-      ariaLabel={isCreate ? labels.add : labels.details(command.name)}
-      title={isCreate ? labels.add : <span className="mono">!{command.name}</span>}
-      {...(command === null ? {} : { identifier: command.name })}
-      meta={command === null ? undefined : <span className="command-inspector__meta">{labels.lastUsed}: {relativeTime(command.lastUsedAt, labels)}</span>}
-      sections={sections.map((section) => ({ ...section, label: section.id === "settings" ? labels.tabs.settings : labels.tabs.advanced }))}
-      {...(canManageContent ? {} : { readOnly: { reason: labels.managementLocked, content: propertyList } })}
-      dirty={dirty}
-      pending={pending}
-      saved={saved}
-      invalid={!valid}
-      invalidMessage={labels.invalid}
-      invalidFields={invalidFields}
-      onInvalidSave={() => { setAttemptedSave(true); }}
-      warnings={warnings}
-      warningStatusLabel={(items, justSaved) => justSaved ? `✓ ${labels.saved} ${items.join(" ")}` : items.join(" ")}
-      {...(concurrentConflict ? { conflict: {
-        message: reloadError ? `${labels.conflictMessage} ${labels.reloadError}` : labels.conflictMessage,
-        reloadLabel: reloadError ? dashboardCommonTexts(resolvedLanguage).retry : labels.reload,
-        onReload: () => { void reloadServer(); },
-      } } : {})}
-      onSave={() => { void handleSave(); }}
-      onDiscard={() => { reset(); setAttemptedSave(false); setSaved(false); setFieldError(null); setDeleteError(undefined); setServerWarnings([]); }}
-      saveLabel={isCreate ? labels.create : labels.save}
-      discardLabel={labels.discard}
-      savedLabel={labels.saved}
-      pendingLabel={labels.pending}
-      issueLabels={{ error: labels.issueError, warning: labels.issueWarning }}
-      {...(isCreate || deleteButton === undefined ? {} : { destructive: deleteButton })}
-      onClose={onClose}
-      closeLabel={labels.close}
+  const discardDraft = (): void => {
+    reset(); setAttemptedSave(false); setSaved(false); setFieldError(null); setDeleteError(undefined);
+    setServerFieldErrors({}); setSaveError(undefined); setServerWarnings([]);
+  };
+  const deleteButton = command === null ? undefined : <Button
+    icon="remove"
+    danger="subtle"
+    disabled={!canManageContent || pending}
+    {...(!canManageContent ? { title: labels.managementLocked } : {})}
+    onClick={() => guard.guardSwitch(() => { setDeleteError(undefined); setConfirmingDelete(true); })}
+  >{labels.delete}</Button>;
+  const pageMeta = command === null ? undefined : <span>{labels.lastUsed}: {relativeTime(command.lastUsedAt, labels)} · {labels.useCount(command.useCount)}</span>;
+  const pageActions = <ChatCommandsHelp
+    commands={TEXT_COMMAND_CHAT_COMMANDS}
+    language={resolvedLanguage}
+    minimumRole={labels.tierLabels[draft.minimumTier]}
+  />;
+  const saveBar = <SaveStatus
+    persistent
+    dirty={dirty}
+    pending={pending}
+    saved={saved}
+    {...(saveError === undefined ? {} : { error: saveError })}
+    invalid={!valid}
+    invalidMessage={labels.invalid}
+    warnings={warnings}
+    warningStatusLabel={(items, justSaved) => justSaved ? `✓ ${labels.saved} ${items.join(" ")}` : items.join(" ")}
+    {...(concurrentConflict ? { conflict: {
+      message: reloadError ? `${labels.conflictMessage} ${labels.reloadError}` : labels.conflictMessage,
+      reloadLabel: reloadError ? dashboardCommonTexts(resolvedLanguage).retry : labels.reload,
+      onReload: () => { void reloadServer(); },
+    } } : {})}
+    {...(deleteButton === undefined ? {} : { destructive: deleteButton })}
+    onInvalidSave={() => { setAttemptedSave(true); }}
+    onSave={() => { void saveDraft(); }}
+    onDiscard={discardDraft}
+    saveLabel={isCreate ? labels.create : labels.save}
+    discardLabel={labels.discard}
+    savedLabel={labels.saved}
+    pendingLabel={labels.pending}
+  />;
+  return <div className="text-command-editor" role="region" aria-label={isCreate ? labels.add : labels.details(command.name)} onKeyDown={(event) => {
+    if (event.key === "Escape") onClose();
+  }}>
+    <PageHeader
+      kind="module"
+      icon={null}
+      title={labels.title}
+      titleContent={isCreate ? labels.add : <span className="mono">!{command.name}</span>}
+      headingLevel="h2"
+      subtitle={labels.kindLabels[draft.kind]}
+      {...(pageMeta === undefined ? {} : { meta: pageMeta })}
+      active={draft.enabled}
+      switchTitle={labels.active}
+      switchDisabled={!canManageContent || pending}
+      switchBusy={pending}
+      onToggle={(enabled) => { setDraftField("enabled", enabled); }}
+      {...(canManageContent ? {} : { lockHint: labels.managementLocked })}
+      actions={<Button variant="subtle" onClick={onClose}>{labels.close}</Button>}
+      pageActions={pageActions}
     />
+    <div className="text-command-editor__scroll">
+      <Section title={labels.sectionMessage}>{sections[0]?.content}</Section>
+      <Section title={labels.sectionWhen}>{sections[1]?.content}</Section>
+      <Section title={labels.sectionWhere}>
+        {responseTypeEditor}
+        {chatTargetEditor}
+      </Section>
+    </div>
+    {saveBar}
     <ConfirmDialog
       opened={guard.confirmOpen}
       title={labels.draftGuardTitle}
@@ -1089,7 +1049,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
       pending={deleting}
       {...(deleteError === undefined ? {} : { error: deleteError })}
     />
-  </>;
+  </div>;
 };
 
 const TextCommandsPanel = (props: {
@@ -1125,10 +1085,13 @@ const TextCommandsPanelContent = ({
   const refetchCommands = commandsQuery.refetch;
   const commands = useMemo(() => commandsQuery.data?.commands ?? [], [commandsQuery.data]);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  const [moduleFilter, setModuleFilter] = useState<string | null>(null);
   const channelVariables = commandsQuery.data?.variables ?? [];
+  const registeredVariablesQuery = useModuleQuery(channelId, "text_commands", "template-variables", (signal) => loadRegisteredTemplateVariables(channelId, signal));
+  const registeredVariables = useMemo(() => registeredVariablesQuery.data ?? [], [registeredVariablesQuery.data]);
   const { selectedKey: selectedName, select: selectName, rowRef, close: closeSelection } = useInspectorSelection<string>();
   const [createOpen, setCreateOpen] = useState(false);
-  const [toggleBusyName, setToggleBusyName] = useState<string | null>(null);
   const guardRef = useRef<((proceed: () => void, cancel?: () => void) => void) | null>(null);
   const guardSwitch = useCallback((proceed: () => void, cancel?: () => void): void => {
     const guard = guardRef.current;
@@ -1176,10 +1139,12 @@ const TextCommandsPanelContent = ({
   }, [commandsQuery.isError, labels.loadError]);
 
   useEffect(() => {
-    if (commandsQuery.isPending || initialSelectionApplied.current || initialSelection === undefined || !commands.some((command) => command.name === initialSelection)) return;
+    if (commandsQuery.isPending || commandsQuery.data === undefined || initialSelectionApplied.current || createOpen) return;
+    const target = commands.find((command) => command.name === initialSelection) ?? commands[0];
     initialSelectionApplied.current = true;
-    guardSwitch(() => { generationRef.current += 1; selectName(initialSelection); });
-  }, [commands, commandsQuery.isPending, guardSwitch, initialSelection, selectName]);
+    if (target === undefined || selectedName === target.name) return;
+    guardSwitch(() => { generationRef.current += 1; selectName(target.name); });
+  }, [commands, commandsQuery.data, commandsQuery.isPending, createOpen, guardSwitch, initialSelection, selectName, selectedName]);
 
   const selected = useMemo(() => commands.find((command) => command.name === selectedName) ?? null, [commands, selectedName]);
   const closeInspector = useCallback((): void => {
@@ -1203,82 +1168,113 @@ const TextCommandsPanelContent = ({
     setCreateOpen(false);
     selectName(name);
   });
-  const toggle = async (command: TextCommand): Promise<void> => {
-    setToggleBusyName(command.name);
-    try {
-      await write(
-        command.revision,
-        (revision) => toggleTextCommand(channelId, command.name, requireCommandRevision(revision), !command.enabled),
-        (current, result) => updateCommandCache(current, result.command),
-      );
-    }
-    catch { notify({ tone: "error", message: labels.saveError }); }
-    finally { setToggleBusyName(null); }
-  };
   const handleDeleted = (token: number): void => {
     if (token !== generationRef.current) return;
     generationRef.current += 1;
     setCreateOpen(false);
     closeSelection();
+    initialSelectionApplied.current = false;
   };
 
   const query = search.trim().toLocaleLowerCase();
-  const visibleCommands = useMemo(() => query.length === 0 ? commands : commands.filter((command) => [
-    command.name,
-    ...command.aliases,
-    command.text,
-    command.usageText ?? "",
-    labels.kindLabels[command.kind],
-  ].some((value) => value.toLocaleLowerCase().includes(query))), [commands, labels.kindLabels, query]);
+  const visibleCommands = useMemo(() => commands.filter((command) => {
+    const matchesSearch = query.length === 0 || [command.name, ...command.aliases, command.text, command.usageText ?? "", labels.kindLabels[command.kind]]
+      .some((value) => value.toLocaleLowerCase().includes(query));
+    const matchesStatus = statusFilter === "all" || command.enabled === (statusFilter === "active");
+    const matchesModule = moduleFilter === null || modulesUsedByCommand(command, registeredVariables).includes(moduleFilter);
+    return matchesSearch && matchesStatus && matchesModule;
+  }), [commands, labels.kindLabels, moduleFilter, query, registeredVariables, statusFilter]);
+  const moduleIds = useMemo(() => [...new Set(registeredVariables.map(({ moduleId }) => moduleId))].sort((left, right) => left.localeCompare(right)), [registeredVariables]);
+  const moduleLabels = useMemo(() => new Map(registeredVariables.map(({ moduleId, pickerGroup }) => [moduleId, pickerGroup?.label[resolvedLanguage] ?? moduleId])), [registeredVariables, resolvedLanguage]);
+  const anyFilterActive = query.length > 0 || statusFilter !== "all" || moduleFilter !== null;
+  const activeFilters = [
+    ...(query.length === 0 ? [] : [`${labels.search}: ${search.trim()}`]),
+    ...(statusFilter === "all" ? [] : [`${labels.statusFilter}: ${statusFilter === "active" ? labels.enabled : labels.disabled}`]),
+    ...(moduleFilter === null ? [] : [`${labels.moduleFilter}: ${moduleLabels.get(moduleFilter) ?? moduleFilter}`]),
+  ].join(" · ");
   const listStatus = commandsQuery.data === undefined
     ? commandsQuery.isPending ? "loading" : "error"
     : visibleCommands.length === 0 ? "empty" : "success";
   const createReason = canManageContent ? undefined : labels.managementLocked;
-  const list = <section className="command-list config-section" aria-label={labels.list}>
-    <div className="section-heading">
-      <h2>{labels.list}</h2>
-    </div>
-    <ListToolbar
+  const resetFilters = (): void => { setSearch(""); setStatusFilter("all"); setModuleFilter(null); };
+  const toolbar = <ListToolbar
       language={resolvedLanguage}
       searchLabel={labels.search}
       searchPlaceholder={labels.search}
       searchClearLabel={common.clearSearch}
       searchValue={search}
       onSearchChange={setSearch}
-      create={{ label: labels.add, onClick: openCreate, disabled: !canManageContent, ...(createReason === undefined ? {} : { reason: createReason }) }}
+      filters={<>
+        <ChipGroup
+          ariaLabel={labels.statusFilter}
+          value={statusFilter}
+          onChange={(value) => { setStatusFilter((value ?? "all") as "all" | "active" | "inactive"); }}
+          options={[
+            { value: "all", label: labels.filterAll },
+            { value: "active", label: labels.filterActive },
+            { value: "inactive", label: labels.filterInactive },
+          ]}
+        />
+        <Select
+          ariaLabel={labels.moduleFilter}
+          value={moduleFilter}
+          placeholder={labels.moduleFilter}
+          options={moduleIds.map((id) => ({ value: id, label: moduleLabels.get(id) ?? id }))}
+          disabled={moduleIds.length === 0}
+          onChange={setModuleFilter}
+        />
+      </>}
+      filtersLabel={labels.filters}
+      create={{ label: labels.newCommand, ariaLabel: labels.add, onClick: openCreate, disabled: !canManageContent, ...(createReason === undefined ? {} : { reason: createReason }) }}
       usage={{
         count: commands.length,
-        ...(query.length === 0 ? {} : { filteredCount: visibleCommands.length }),
+        ...(!anyFilterActive ? {} : { filteredCount: visibleCommands.length }),
         copy: { countSuffix: labels.countSuffix, filteredInfix: common.of, filteredSuffix: labels.filteredSuffix, limitInfix: common.of, limitSuffix: "", loadedSuffix: common.loaded },
       }}
-      {...(query.length === 0 ? {} : { activeFilters: `${labels.search}: ${search.trim()}`, activeFiltersLabel: labels.activeFilters, resetLabel: labels.resetFilters, onReset: () => { setSearch(""); } })}
-    />
-    <LoadState variant="panel-600" status={listStatus}
+      {...(!anyFilterActive ? {} : { activeFilters, activeFiltersLabel: labels.activeFilters, resetLabel: labels.resetFilters, onReset: resetFilters })}
+      className="text-command-list-toolbar"
+    />;
+  const list = <LoadState variant="panel-600" status={listStatus}
       loading={<LoadStateLines rows={8} height={34} />}
       empty={<p className="empty-state">{commands.length > 0 ? common.noMatches : labels.empty}</p>}
       error={<p className="muted">{labels.loadError}</p>}
       queryError={{ message: labels.loadError, onRetry: () => { void refetchCommands(); } }}
       refreshError={commandsQuery.isRefetchError}>
-      <div className="table-wrap" style={{ maxHeight: "calc(var(--s10) * 15)", overflowY: "auto" }}><table className="table"><thead><tr>
-        <th scope="col">{labels.columns.name}</th><th scope="col">{labels.columns.kind}</th><th scope="col">{labels.columns.response}</th><th scope="col">{labels.columns.minimumTier}</th><th scope="col">{labels.columns.active}</th>
-      </tr></thead><tbody>{visibleCommands.map((command) => <TextCommandRow
-        key={command.name}
-        initial={command}
-        language={resolvedLanguage}
-        selected={selectedName === command.name}
-        onSelect={() => { selectCommand(command.name); }}
-        rowRef={rowRef(command.name)}
-        toggleBusy={toggleBusyName === command.name}
-        onToggle={() => toggle(command)}
-      />)}</tbody></table></div>
+      <div className="text-command-list">{visibleCommands.map((command) => {
+        const response = command.variableAction !== null
+          ? labels.actionResponse(command.variableAction.name, command.variableAction.operation, command.variableAction.amount)
+          : command.text.trim().length > 0 ? command.text : command.kind === "list" ? labels.kindHints.list : labels.noResponse;
+        return <button
+          key={command.name}
+          ref={rowRef(command.name)}
+          type="button"
+          className="text-command-row"
+          aria-selected={selectedName === command.name}
+          onClick={() => { selectCommand(command.name); }}
+        >
+          <span className="text-command-row__top">
+            <strong className="mono">!{command.name}</strong>
+            <Badge tone={command.enabled ? "green" : "neutral"}>{command.enabled ? labels.enabled : labels.disabled}</Badge>
+          </span>
+          <span className="text-command-row__response" title={response}>{response}</span>
+          <span className="text-command-row__meta">
+            <span>{labels.kindLabels[command.kind]}</span>
+            <span>{labels.aliasCount(command.aliases.length)}</span>
+          </span>
+        </button>;
+      })}</div>
     </LoadState>
-  </section>;
 
-  const inspector = selected !== null ? <TextCommandEditor
+  const detail = selected !== null ? <TextCommandEditor
     key={selected.name}
     channelId={channelId}
     {...(channelSettings.data === undefined ? {} : { channelDefaultChatTarget: channelSettings.data.defaultChatTarget })}
     language={language}
+    registeredVariables={registeredVariables}
+    registeredVariablesLoaded={registeredVariablesQuery.data !== undefined}
+    registeredVariablesPending={registeredVariablesQuery.isPending}
+    registeredVariablesRefreshError={registeredVariablesQuery.isRefetchError}
+    onRetryRegisteredVariables={() => { void registeredVariablesQuery.refetch(); }}
     initial={draftFromCommand(selected)}
     command={selected}
     commands={commands}
@@ -1297,6 +1293,11 @@ const TextCommandsPanelContent = ({
     channelId={channelId}
     {...(channelSettings.data === undefined ? {} : { channelDefaultChatTarget: channelSettings.data.defaultChatTarget })}
     language={language}
+    registeredVariables={registeredVariables}
+    registeredVariablesLoaded={registeredVariablesQuery.data !== undefined}
+    registeredVariablesPending={registeredVariablesQuery.isPending}
+    registeredVariablesRefreshError={registeredVariablesQuery.isRefetchError}
+    onRetryRegisteredVariables={() => { void registeredVariablesQuery.refetch(); }}
     initial={newCommandDraft()}
     command={null}
     commands={commands}
@@ -1310,11 +1311,14 @@ const TextCommandsPanelContent = ({
     generation={generation}
     onWrite={write}
     onDeleted={handleDeleted}
-  /> : null;
+  /> : <EmptyState
+    title={labels.selectionPrompt}
+    description={labels.selectionDescription}
+  />;
 
-  return <section className="module-stack command-panel" aria-label={labels.title}>
-    <ListDetail list={list} inspector={inspector} onCloseInspector={closeInspector} />
-  </section>;
+  return <div className="command-panel">
+    <CollectionPage title={labels.list} toolbar={toolbar} list={list} detail={detail} />
+  </div>;
 };
 
 export default TextCommandsPanel;

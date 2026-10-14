@@ -3853,7 +3853,7 @@ describe("Dashboard skeleton", () => {
     window.history.replaceState({}, "", "/channels/kanal-a/modules/text_commands");
 
     render(<DashboardApp />);
-    fireEvent.click(await screen.findByRole("row", { name: /!hallo/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /!hallo/i }));
     const response = await screen.findByRole("textbox", { name: "Antwort" });
     fireEvent.change(response, { target: { value: "Nicht gespeicherter Entwurf" } });
 
@@ -3957,6 +3957,7 @@ describe("Dashboard skeleton", () => {
       if (path === "/api/channels/kanal-a/events") return jsonResponse({ entries: [], nextCursor: null });
       if (path === "/api/channels/kanal-a/settings") return jsonResponse({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 1 });
       if (path === "/api/channels/kanal-a/modules/text_commands/commands") return jsonResponse({ commands: [], variables: [] });
+      if (path === "/api/channels/kanal-a/template-variables") return jsonResponse({ variables: [] });
       unmockedRequests.push(path);
       return jsonResponse({}, 404);
     }));

@@ -99,7 +99,7 @@ test("hover preloads a module and navigation keeps the current view until its pa
   });
 
   await page.goto(`/channels/${channelId}/modules/text_commands`);
-  await expect(page.locator(".module-detail h1")).toHaveText("Text commands");
+  await expect(page.getByRole("heading", { name: "Text commands", level: 1, exact: true })).toBeVisible();
   const target = page.locator(`a[href="/channels/${channelId}/modules/api_source"]`);
   await expect(target).toBeVisible();
   await target.hover();
@@ -107,11 +107,11 @@ test("hover preloads a module and navigation keeps the current view until its pa
 
   await target.click();
   await expect(page).toHaveURL(`/channels/${channelId}/modules/api_source`);
-  await expect(page.locator(".module-detail h1")).toHaveText("Text commands");
+  await expect(page.getByRole("heading", { name: "Text commands", level: 1, exact: true })).toBeVisible();
   await expect(page.getByText("Loading module views …", { exact: true })).toHaveCount(0);
 
   releaseRequest();
-  await expect(page.locator(".module-detail h1")).not.toHaveText("Text commands");
+  await expect(page.getByRole("heading", { name: "API sources", level: 1, exact: true })).toBeVisible();
   await expect(page.getByText("Loading module views …", { exact: true })).toHaveCount(0);
 });
 
@@ -238,7 +238,7 @@ test("cold module navigation keeps the reserved page height and scroll position 
 
   releaseRequest();
   await expect(page.locator(".module-view-fallback")).toHaveCount(0);
-  await expect(page.locator(".module-detail h1")).toHaveText("API sources");
+  await expect(page.getByRole("heading", { name: "API sources", level: 1, exact: true })).toBeVisible();
 
   expect(await reservedPage.evaluate((element) => element.getBoundingClientRect().height)).toBe(heightBefore);
   expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);

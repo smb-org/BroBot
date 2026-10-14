@@ -15,11 +15,12 @@ export interface RoleThresholdProps {
   onChange: (value: string) => void;
   options: readonly RoleThresholdOption[];
   disabled?: boolean;
+  error?: string;
   lockedReason?: string;
   id?: string;
 }
 
-export function RoleThreshold({ label, value, onChange, options, disabled = false, lockedReason, id }: RoleThresholdProps) {
+export function RoleThreshold({ label, value, onChange, options, disabled = false, error, lockedReason, id }: RoleThresholdProps) {
   const generatedId = useId();
   const controlId = id ?? generatedId;
   const reasonId = `${controlId}-locked-reason`;
@@ -29,6 +30,7 @@ export function RoleThreshold({ label, value, onChange, options, disabled = fals
     <Select
       id={controlId}
       label={label}
+      {...(error === undefined ? {} : { error })}
       value={selected?.value ?? value}
       onChange={(next) => { if (next !== null) onChange(next); }}
       options={options.map(({ value: optionValue, label: optionLabel }) => ({ value: optionValue, label: optionLabel }))}
