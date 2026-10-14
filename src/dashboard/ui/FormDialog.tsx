@@ -28,10 +28,12 @@ export function FormDialog({ opened, title, description, children, confirmLabel,
     <form onSubmit={handleSubmit}>
       {description === undefined ? null : <div className="ui-form-dialog__description">{description}</div>}
       {children}
-      <div className="ui-dialog__error-slot">{error === undefined ? null : <p className="form-error" role="alert" title={error}><span aria-hidden="true">× </span>{error}</p>}</div>
-      <div className="ui-confirm-dialog__actions">
-        <Button type="button" variant="subtle" onClick={onCancel} disabled={pending}>{cancelLabel}</Button>
-        <Button type="submit" variant="primary" disabled={pending || confirmDisabled}>{confirmLabel}</Button>
+      <div className="ui-form-dialog__footer">
+        <div className="ui-dialog__error-slot" aria-live="polite">{error === undefined ? null : <p className="form-error" role="alert" title={error}><span aria-hidden="true">× </span>{error}</p>}</div>
+        <div className="ui-confirm-dialog__actions">
+          <Button type="button" variant="subtle" onClick={onCancel} disabled={pending}>{cancelLabel}</Button>
+          <Button type="submit" variant="primary" disabled={pending || confirmDisabled}>{confirmLabel}</Button>
+        </div>
       </div>
     </form>
   </Dialog>;

@@ -472,6 +472,39 @@ test("FAQ dialog Save stays clickable at the bottom of a scrolled long form", as
   await expect.poll(() => saved).toBe(true);
 });
 
+test("FAQ dialog save error stays visible in the footer while scrolled to the top", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 480 });
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await routeJson(page, "/api/channels/channel-a/template-variables", { variables: [] });
+  await page.route("**/api/channels/channel-a/modules/faq/entries", async (route) => {
+    if (route.request().method() !== "POST") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: [] }) });
+    await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "invalid" }) });
+  });
+  await gotoPanel(page, "faq");
+  await page.getByRole("button", { name: "Create FAQ entry" }).click();
+  const dialog = page.getByRole("dialog", { name: "Create entry" });
+  await dialog.getByRole("textbox", { name: "Name" }).fill("Greeting");
+  await dialog.getByRole("textbox", { name: "Keywords and phrases" }).fill("hello");
+  await dialog.getByRole("textbox", { name: "Answer" }).fill("Hello, chat!");
+  const footer = dialog.locator(".ui-form-dialog__footer");
+  const footerBefore = await footer.boundingBox();
+  await dialog.getByRole("button", { name: "Save" }).click();
+  const error = footer.locator(".form-error");
+  await expect(error).toBeVisible();
+  await dialog.locator(".ui-dialog__body").evaluate((body) => { body.scrollTop = 0; });
+  const topmost = await error.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)?.closest(".form-error") === element;
+  });
+  expect(topmost).toBe(true);
+  expect(await footer.boundingBox()).toEqual(footerBefore);
+  const saveClickable = await dialog.getByRole("button", { name: "Save" }).evaluate((button) => {
+    const rect = button.getBoundingClientRect();
+    return document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)?.closest("button") === button;
+  });
+  expect(saveClickable).toBe(true);
+});
+
 test("FAQ pattern error renders in its reserved slot without moving the Answer field", async ({ page }) => {
   const stamp = "2030-01-01T12:00:00.000Z";
   const entry = {
