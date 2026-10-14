@@ -73,7 +73,6 @@ export { SwitchSection } from "./SwitchSection";
 export { RoleThreshold } from "./RoleThreshold";
 export { FieldError } from "./FieldError";
 export { LockedReason } from "./LockedReason";
-export { RuleNote } from "./RuleNote";
 export { Button } from "./Button";
 export { FormDialog } from "./FormDialog";
 export { FormDensity } from "./FormDensity";

@@ -198,7 +198,7 @@ test("compact, panel, toolbar, and module settings retries keep their declared b
     const templateState = page.locator(".text-command-editor .ui-load-state--compact");
     await expect(templateState).toHaveAttribute("data-status", "loading");
     const templateLoadingSize = await size(templateState);
-    expect(templateLoadingSize.height).toBe(64);
+    expect(templateLoadingSize.height).toBe(20);
     releaseTemplateRequest();
     await expect(templateState).toHaveAttribute("data-status", "error");
     expect(await size(templateState)).toEqual(templateLoadingSize);

@@ -127,7 +127,7 @@ test("API source list keeps its final populated row reachable at desktop and mob
   }
 });
 
-test("text-library picker space is reserved until populated variables arrive", async ({ page }) => {
+test("template editor stays in place while registered variables arrive", async ({ page }) => {
   let signalRequest: () => void = () => undefined;
   const requestStarted = new Promise<void>((resolve) => { signalRequest = resolve; });
   let releaseResponse: () => void = () => undefined;
@@ -147,18 +147,18 @@ test("text-library picker space is reserved until populated variables arrive", a
   const response = page.getByRole("textbox", { name: "Response" });
   await expect(response).toBeVisible();
   const editor = page.locator(".command-template-editor").first();
-  const pickerSlot = page.getByTestId("command-library-picker-slot").first();
-  const desktopBefore = { editor: await box(editor), slot: await box(pickerSlot) };
+  const insertVariable = page.getByRole("button", { name: "Insert variable" });
+  const desktopBefore = { editor: await box(editor), insertVariable: await box(insertVariable) };
 
   await page.setViewportSize({ width: 390, height: 844 });
-  const mobileBefore = { editor: await box(editor), slot: await box(pickerSlot) };
+  const mobileBefore = { editor: await box(editor), insertVariable: await box(insertVariable) };
   releaseResponse();
-  await expect(page.getByRole("combobox", { name: "Text from library" }).first()).toBeVisible();
+  await expect(insertVariable).toBeVisible();
 
   await page.setViewportSize({ width: 1280, height: 844 });
-  expect({ editor: await box(editor), slot: await box(pickerSlot) }).toEqual(desktopBefore);
+  expect({ editor: await box(editor), insertVariable: await box(insertVariable) }).toEqual(desktopBefore);
   await page.setViewportSize({ width: 390, height: 844 });
-  expect({ editor: await box(editor), slot: await box(pickerSlot) }).toEqual(mobileBefore);
+  expect({ editor: await box(editor), insertVariable: await box(insertVariable) }).toEqual(mobileBefore);
 });
 
 test("template picker keeps its footer visible and scrolls options within the available height", async ({ page }) => {
@@ -373,6 +373,7 @@ test("text command switch and role inclusion fit their narrow and desktop layout
   await gotoPanel(page, "text_commands", "en");
   await page.getByRole("button", { name: "Add command" }).click();
   await page.getByRole("textbox", { name: "Response" }).waitFor();
+  await page.locator(".command-usage-advanced > summary").click();
   const targetSwitch = page.getByRole("switch", { name: "Change channel variable" });
   await targetSwitch.scrollIntoViewIfNeeded();
   const switchFits = await targetSwitch.evaluate((element) => {
@@ -1580,14 +1581,14 @@ test("text command slash help stays stable and optional variable fields mount on
   const response = page.getByRole("textbox", { name: "Response" });
   await expect(response).toBeVisible();
   const slashHelp = page.locator(".command-slash-help");
-  const slashBefore = await box(slashHelp);
   const editorBeforeSlash = await box(editor);
 
   await response.fill("/t");
   await expect(slashHelp).toContainText("Leading Twitch-style commands");
-  expect(await box(slashHelp)).toEqual(slashBefore);
+  await expect(slashHelp).toHaveCSS("position", "absolute");
   expect(await box(editor)).toEqual(editorBeforeSlash);
 
+  await page.locator(".command-usage-advanced > summary").click();
   const actionSlot = page.getByTestId("command-variable-action-slot");
   const actionSection = page.locator(".ui-switch-section").filter({ has: page.getByRole("switch", { name: "Change channel variable" }) });
   await expect(actionSection).toContainText("Applied atomically with the command.");

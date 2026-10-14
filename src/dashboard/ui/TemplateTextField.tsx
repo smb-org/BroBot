@@ -59,6 +59,7 @@ interface TemplateTextFieldProps {
   preview?: (template: string, values: Readonly<Record<string, string>>) => string;
   previewLabel?: string;
   previewSpeaker?: string;
+  insertVariableLabel?: string;
   onIssuesChange?: (issues: { unknown: readonly string[]; worstCaseExceeded: boolean }) => void;
   disabled?: boolean;
   readOnly?: boolean;
@@ -140,6 +141,7 @@ export function TemplateTextField({
   preview,
   previewLabel,
   previewSpeaker,
+  insertVariableLabel,
   onIssuesChange,
   disabled = false,
   readOnly = false,
@@ -273,6 +275,17 @@ export function TemplateTextField({
     selectionAfterValue.current = { value: nextValue, range: targetSelection, focus: true };
     onChange(nextValue);
     setQuery(null);
+  };
+
+  const openVariablePicker = (): void => {
+    const textarea = textareaRef.current;
+    if (textarea === null || variables === undefined || disabled || readOnly) return;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    insertText("{", start, end);
+    const caret = start + 1;
+    dismissedQuery.current = null;
+    setQuery({ fragment: "", start: caret, end: caret });
   };
 
   const chooseSuggestion = (variableName: string): void => {
@@ -421,6 +434,14 @@ export function TemplateTextField({
         error={effectiveError === undefined ? undefined : <span><span aria-hidden="true">× </span><TruncatedText text={effectiveError} /></span>}
         withAsterisk={required}
       >
+        {insertVariableLabel === undefined ? null : <Button
+          className="ui-template-text-field__insert-variable"
+          size="compact"
+          variant="subtle"
+          type="button"
+          disabled={disabled || readOnly || variables === undefined}
+          onClick={openVariablePicker}
+        >{insertVariableLabel}</Button>}
         <div ref={frameRef} className="template-text-field" data-composing={composing ? "true" : undefined} data-readonly={readOnly ? "true" : undefined}>
           <RichTextarea
             data-ui=""

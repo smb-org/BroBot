@@ -3854,7 +3854,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
     fireEvent.click(await screen.findByRole("button", { name: /!hallo/i }));
-    const response = await screen.findByRole("textbox", { name: "Antwort" });
+    const response = await screen.findByRole("textbox", { name: "Antworttext" });
     fireEvent.change(response, { target: { value: "Nicht gespeicherter Entwurf" } });
 
     fireEvent.keyDown(document.body, platformPaletteShortcut());
@@ -3865,7 +3865,7 @@ describe("Dashboard skeleton", () => {
     const firstGuard = await screen.findByRole("dialog", { name: "Ungespeicherte Änderungen" });
     fireEvent.click(within(firstGuard).getByRole("button", { name: "Weiter bearbeiten" }));
     expect(window.location.pathname).toBe("/channels/kanal-a/modules/text_commands");
-    expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Nicht gespeicherter Entwurf");
+    expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("Nicht gespeicherter Entwurf");
 
     const navigation = await openSetupNavigation();
     fireEvent.click(within(navigation).getByRole("link", { name: "Variablen" }));

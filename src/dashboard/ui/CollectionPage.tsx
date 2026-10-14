@@ -4,17 +4,19 @@ import { dashboardCommonTexts } from "../locale";
 
 export interface CollectionPageProps {
   title: string;
+  headingLevel?: "h1" | "h2" | "h3";
   toolbar: ReactNode;
   list: ReactNode;
   detail: ReactNode;
   empty?: ReactNode;
 }
 
-export function CollectionPage({ title, toolbar, list, detail, empty }: CollectionPageProps): ReactElement {
+export function CollectionPage({ title, headingLevel = "h1", toolbar, list, detail, empty }: CollectionPageProps): ReactElement {
   const texts = dashboardCommonTexts();
+  const Heading = headingLevel;
   return (
     <div data-ui="" className="collection-page">
-      <header className="collection-page__heading"><h1>{title}</h1></header>
+      <header className="collection-page__heading"><Heading>{title}</Heading></header>
       <div className="collection-page__body">
         <aside aria-label={`${title}: ${texts.chooseCollection}`} className="collection-page__list">
           <div className="collection-page__list-toolbar">{toolbar}</div>

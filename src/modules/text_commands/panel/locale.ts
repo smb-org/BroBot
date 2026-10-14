@@ -9,25 +9,17 @@ import type { GameMultiSelectMessages } from "../../../dashboard/ui";
 export interface TextCommandsTexts {
   title: string;
   search: string;
-  filters: string;
   statusFilter: string;
   filterAll: string;
   filterActive: string;
   filterInactive: string;
-  moduleFilter: string;
-  activeFilters: string;
-  resetFilters: string;
-  countSuffix: string;
-  filteredSuffix: string;
-  tabs: { settings: string; advanced: string };
-  list: string;
-  sectionMessage: string;
-  sectionWhen: string;
-  sectionWhere: string;
+  allModules: string;
+  usedModuleVariables: string;
+  entryCount: (count: number) => string;
+  triggerSection: string;
   selectionPrompt: string;
   selectionDescription: string;
   noResponse: string;
-  aliasCount: (count: number) => string;
   useCount: (count: number) => string;
   details: (name: string) => string;
   add: string;
@@ -39,9 +31,11 @@ export interface TextCommandsTexts {
   deleteError: string;
   name: string;
   aliases: string;
+  aliasPlaceholder: string;
   templateFieldLabels: { usageText: string };
   usageAdvanced: string;
   usageTextHint: string;
+  textBlockDescription: string;
   createVariable: string;
   shoutoutCooldownHint: string;
   kind: string;
@@ -55,6 +49,7 @@ export interface TextCommandsTexts {
   slashAnnouncementEffect: string;
   slashShoutoutEffect: string;
   response: string;
+  insertVariable: string;
   currencyFrom: string;
   currencyTo: string;
   responseOptional: string;
@@ -62,6 +57,7 @@ export interface TextCommandsTexts {
   responseMissing: string;
   fieldTooLong: string;
   minimumTier: string;
+  minimumRole: string;
   tierLabels: Record<TextCommandMinimumTier, string>;
   tierSubjects: Record<ModuleChatStatus, string>;
   tierDescription: (tier: TextCommandMinimumTier, subjects: readonly string[]) => string;
@@ -80,10 +76,8 @@ export interface TextCommandsTexts {
   gameFilterHint: string;
   availability: string;
   gameMultiSelect: GameMultiSelectMessages;
-  libraryText: string;
-  libraryTextPlaceholder: string;
-  insertLibraryText: string;
   cooldown: string;
+  cooldownField: string;
   userCooldown: string;
   cooldownHint: string;
   userCooldownHint: string;
@@ -96,7 +90,6 @@ export interface TextCommandsTexts {
   aliasConflict: (trigger: string, command: string) => string;
   aliasInvalid: (trigger: string) => string;
   aliasIsName: string;
-  aliasHint: string;
   aliasRemove: (alias: string) => string;
   aliasList: string;
   delete: string;
@@ -104,12 +97,12 @@ export interface TextCommandsTexts {
   deleteConfirmation: (name: string, aliases: readonly string[]) => string;
   deleteConfirm: (name: string) => string;
   deleteCancel: string;
+  back: string;
   draftGuardTitle: string;
   draftGuardDescription: string;
   continueEditing: string;
   discardAndSwitch: string;
   saveAndSwitch: string;
-  close: string;
   save: string;
   create: string;
   discard: string;
@@ -123,23 +116,15 @@ export interface TextCommandsTexts {
   reload: string;
   managementLocked: string;
   active: string;
-  activeImmediately: string;
-  enabled: string;
-  disabled: string;
-  noAliases: string;
+  ready: string;
+  variableBadge: string;
   never: string;
   secondsAgo: (count: number) => string;
   minutesAgo: (count: number) => string;
   hoursAgo: (count: number) => string;
-  createdAt: string;
-  updatedAt: string;
   lastUsed: string;
   previewLabel: string;
   previewSpeaker: string;
-  streamAny: string;
-  streamOnline: string;
-  streamOffline: string;
-  cooldownOff: string;
   templateMessages: TemplateTextFieldMessages;
   variableAction: string;
   variableSelect: string;
@@ -168,7 +153,6 @@ export interface TextCommandsTexts {
   argsEveryoneWarning: string;
   chipsInputMessages: ChipsInputMessages;
   warningLabel: (warning: PanelTemplateWarning) => string;
-  columns: { name: string; kind: string; response: string; minimumTier: string; active: string };
 }
 
 const templateMessages: LocaleCatalog<TemplateTextFieldMessages> = {
@@ -208,12 +192,12 @@ const templateMessages: LocaleCatalog<TemplateTextFieldMessages> = {
 
 const catalog: LocaleCatalog<TextCommandsTexts> = {
   de: {
-    title: "Textbefehle", search: "Befehle suchen", filters: "Befehlsfilter", statusFilter: "Status", filterAll: "Alle", filterActive: "Aktiv", filterInactive: "Inaktiv", moduleFilter: "Modul", activeFilters: "Aktive Filter:", resetFilters: "Zurücksetzen", countSuffix: "Befehle", filteredSuffix: "Befehle", tabs: { settings: "Einstellungen", advanced: "Erweitert" }, list: "Befehle", sectionMessage: "Nachricht", sectionWhen: "Wann", sectionWhere: "Wohin", selectionPrompt: "Textbefehl auswählen", selectionDescription: "Wähle links einen Textbefehl aus oder lege einen neuen an.", noResponse: "Kein Antworttext", aliasCount: (count) => `${String(count)} Aliase`, useCount: (count) => `${String(count)} Aufrufe`, details: (name) => `Eigenschaften von !${name}`, add: "Befehl anlegen", newCommand: "Neu", empty: "Noch keine Textbefehle angelegt.",
+    title: "Textbefehle", search: "Befehle suchen", statusFilter: "Status", filterAll: "Alle", filterActive: "Aktiv", filterInactive: "Inaktiv", allModules: "Alle Module", usedModuleVariables: "Verwendet Modul-Variablen", entryCount: (count) => `${String(count)} Einträge`, triggerSection: "Auslöser", selectionPrompt: "Textbefehl auswählen", selectionDescription: "Wähle links einen Textbefehl aus oder lege einen neuen an.", noResponse: "Kein Antworttext", useCount: (count) => `${String(count)}× benutzt`, details: (name) => `Eigenschaften von !${name}`, add: "Befehl anlegen", newCommand: "Neu", empty: "Noch keine Textbefehle angelegt.",
     loadError: "Die Textbefehle konnten nicht geladen werden.", templateVariablesLoadError: "Vorlagenvariablen konnten nicht geladen werden.",
     saveError: "Der Textbefehl konnte nicht gespeichert werden.", deleteError: "Der Textbefehl konnte nicht gelöscht werden.",
-    name: "Name", aliases: "Aliase", templateFieldLabels: { usageText: "Antwort bei fehlenden oder ungültigen Argumenten" }, usageAdvanced: "Erweitert", usageTextHint: "Wird gesendet, wenn erforderliche Argumente fehlen oder ungültig sind.", createVariable: "Variable anlegen",
+    name: "Befehlsname", aliases: "Weitere Auslöser", aliasPlaceholder: "Alias eingeben", templateFieldLabels: { usageText: "Antwort bei fehlenden oder ungültigen Argumenten" }, usageAdvanced: "Erweitert", usageTextHint: "Wird gesendet, wenn erforderliche Argumente fehlen oder ungültig sind.", textBlockDescription: "Textbaustein", createVariable: "Variable anlegen",
     shoutoutCooldownHint: "Twitch begrenzt Shoutouts selbst: 2 Minuten pro Kanal und 60 Minuten pro Ziel.",
-    kind: "Art", kindLabels: { text: "Antworttext", list: "Befehlsliste", shoutout: "Shoutout", timeout: "Timeout" },
+    kind: "Art der Antwort", kindLabels: { text: "Antworttext", list: "Befehlsliste", shoutout: "Shoutout", timeout: "Timeout" },
     kindHints: {
       text: "Antwortet mit dem Text unten.", list: "Zählt alle eingeschalteten Befehle auf (ohne Aliase).",
       shoutout: "!so <name> empfiehlt einen Twitch-Kanal im Chat.",
@@ -234,17 +218,18 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     slashTimeoutEffect: (minimum, maximum) => `Timeout für den Aufrufer für ${minimum === maximum ? `${String(minimum)} s` : `${String(minimum)}–${String(maximum)} s`}.`,
     slashAnnouncementEffect: "Wird als Twitch-Ankündigung gesendet.",
     slashShoutoutEffect: "Shoutout-Ziel kommt aus dem Befehlsargument.",
-    response: "Antwort", currencyFrom: "Von", currencyTo: "Nach", responseOptional: "Antwort (optional)", responseHint: "Was der Bot schreibt. { öffnet die Variablen.", responseMissing: "Antworttext ausfüllen.", fieldTooLong: "Höchstens 500 Zeichen.",
-    minimumTier: "Wer darf auslösen",
+    response: "Antworttext", insertVariable: "Variable einfügen", currencyFrom: "Von", currencyTo: "Nach", responseOptional: "Antworttext (optional)", responseHint: "Was der Bot schreibt. { öffnet die Variablen.", responseMissing: "Antworttext ausfüllen.", fieldTooLong: "Höchstens 500 Zeichen.",
+    minimumTier: "Wer darf auslösen", minimumRole: "Mindestrolle",
     tierLabels: { everyone: "Alle", subscriber: "Abonnenten", vip: "VIPs", moderator: "Moderatoren", broadcaster: "Broadcaster" },
     tierSubjects: { viewer: "Zuschauer", subscriber: "Abonnenten", vip: "VIPs", moderator: "Moderatoren", broadcaster: "Broadcaster" },
     tierDescription: (tier, subjects) => {
+      if (tier === "everyone") return "Alle Chatzuschauer*innen dürfen auslösen.";
       const joined = subjects.length < 2 ? subjects[0] ?? "" : `${subjects.slice(0, -1).join(", ")} und ${subjects[subjects.length - 1] ?? ""}`;
       const excluded = tier === "subscriber" ? " VIPs nicht." : tier === "vip" ? " Abonnenten nicht." : "";
       return `${joined}.${excluded}`;
     },
     tierHelp: "Moderatoren und Broadcaster dürfen immer.",
-    responseType: "Antwortart", responseTypeLabels: { say: "Nachricht", reply: "Antwort", announcement: "Ankündigung" },
+    responseType: "Sendeform", responseTypeLabels: { say: "Nachricht", reply: "Antwort", announcement: "Ankündigung" },
     chatTarget: "Chat-Ziel", chatTargetDefault: "Kanaleinstellung", chatTargetLabels: { all_chats: "Alle Chats", source_only: "Nur unser Chat", where_asked: "Automatisch" },
     responseTypeHints: {
       say: "Schreibt eine normale Nachricht in den Chat.",
@@ -252,40 +237,36 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
       announcement: "Hebt die Nachricht als Ankündigung hervor. Der Bot muss Moderator sein.",
     },
     announcementWarning: "Der Bot ist hier kein Moderator — der Text geht als normale Nachricht raus.",
-    streamCondition: "Stream", streamLabels: { any: "Immer", online: "Online", offline: "Offline" },
+    streamCondition: "Nur verfügbar", streamLabels: { any: "Immer", online: "Stream live", offline: "Stream nicht live" },
     streamHints: { any: "Wirkt unabhängig vom Stream.", online: "Wirkt nur, während der Stream läuft.", offline: "Wirkt nur, während der Stream aus ist." },
-    gameFilter: "Twitch-Spiele",
+    gameFilter: "Nur bei Spielen",
     gameFilterHint: "Der Befehl antwortet nur, wenn gerade eines dieser Spiele läuft.",
-    availability: "Verfügbarkeit",
+    availability: "Weitere Einstellungen",
     gameMultiSelect: { label: "Twitch-Spiele", hint: "Spiele über Twitch-Kategorien suchen und auswählen.", search: "Spiel suchen", searchHint: "Mindestens zwei Zeichen eingeben.", loading: "Spiele werden gesucht …", empty: "Keine Spiele gefunden.", error: "Die Twitch-Spiele konnten nicht geladen werden.", suggestions: "Vorschläge", allGames: "Alle Spiele", limitReached: "10er-Limit erreicht; entferne eins zum Austauschen.", selectedCount: (count, maximum) => `${String(count)} von ${String(maximum)}`, remove: (name) => `${name} entfernen` },
-    libraryText: "Text aus Bibliothek",
-    libraryTextPlaceholder: "Textbaustein auswählen",
-    insertLibraryText: "Text einsetzen",
-    cooldown: "Abkühlzeit", userCooldown: "Je Nutzer", cooldownHint: "Für den ganzen Kanal. 0 bis 86 400.", userCooldownHint: "Für jeden Zuschauer einzeln. 0 = aus.", numberMissing: "Zahl eingeben.",
+    cooldown: "Abklingzeit", cooldownField: "Zwischen zwei Aufrufen", userCooldown: "Je Nutzer", cooldownHint: "Für den ganzen Kanal. 0 bis 86 400.", userCooldownHint: "Für jeden Zuschauer einzeln. 0 = aus.", numberMissing: "Zahl eingeben.",
     nameHint: "a–z, 0–9, - und _",
     nameInvalid: "Nur Kleinbuchstaben, Zahlen, Bindestrich und Unterstrich.", nameMissing: "Namen ausfüllen.", nameExists: "Der Befehl existiert bereits.",
     nameAliasConflict: (trigger, command) => `!${trigger} ist schon ein Alias von !${command}.`,
     aliasConflict: (trigger, command) => trigger === command ? `!${trigger} ist schon der Befehl !${command}.` : `!${trigger} ist schon ein Alias von !${command}.`,
     aliasInvalid: (trigger) => `!${trigger} — nur Kleinbuchstaben, Zahlen, - und _.`,
-    aliasIsName: "Das ist schon der Name.", aliasHint: "Weitere Namen für denselben Befehl. Enter, Komma oder Leerzeichen trennt.",
+    aliasIsName: "Das ist schon der Name.",
     aliasRemove: (alias) => `Alias ${alias} entfernen`, aliasList: "Aliase",
     delete: "Befehl löschen", deleteTitle: (name) => `Befehl !${name} löschen?`,
     deleteConfirmation: (name, aliases) => aliases.length === 0
       ? `Der Befehl !${name} wird gelöscht und antwortet danach nicht mehr im Chat.`
       : `Der Befehl !${name} und seine Aliase ${aliases.map((alias) => `!${alias}`).join(", ")} sind danach im Chat nicht mehr verfügbar.`,
-    deleteConfirm: (name) => `Befehl !${name} löschen`, deleteCancel: "Abbrechen",
+    deleteConfirm: (name) => `Befehl !${name} löschen`, deleteCancel: "Abbrechen", back: "Zurück",
     draftGuardTitle: "Ungespeicherte Änderungen",
     draftGuardDescription: "Du hast Änderungen an diesem Befehl. Was möchtest du tun?",
-    continueEditing: "Weiter bearbeiten", discardAndSwitch: "Verwerfen und wechseln", saveAndSwitch: "Speichern und wechseln", close: "Schließen",
-    save: "Änderungen speichern", create: "Anlegen", discard: "Verwerfen", saved: "Gespeichert.",
+    continueEditing: "Weiter bearbeiten", discardAndSwitch: "Verwerfen und wechseln", saveAndSwitch: "Speichern und wechseln",
+    save: "Speichern", create: "Anlegen", discard: "Verwerfen", saved: "Alle Änderungen gespeichert",
     pending: "Wird gespeichert …", invalid: "Bitte korrigiere die markierten Felder.", issueError: "Fehler", issueWarning: "Hinweis",
     conflictMessage: "Inzwischen von jemand anderem geändert.", reloadError: "Der Serverstand konnte nicht geladen werden.", reload: "Serverstand laden",
     managementLocked: "Nur Broadcaster und Verwalter dürfen Befehle anlegen, bearbeiten oder löschen.",
-    active: "Aktiv", activeImmediately: "wirkt sofort", enabled: "eingeschaltet", disabled: "ausgeschaltet", noAliases: "keine",
+    active: "Aktiv", ready: "Bereit", variableBadge: "Variable",
     never: "noch nie", secondsAgo: (count) => `vor ${String(count)} s`, minutesAgo: (count) => `vor ${String(count)} min`, hoursAgo: (count) => `vor ${String(count)} h`,
-    createdAt: "Angelegt", updatedAt: "Geändert", lastUsed: "Zuletzt verwendet",
-    previewLabel: "Vorschau", previewSpeaker: "Bot",
-    streamAny: "immer", streamOnline: "nur online", streamOffline: "nur offline", cooldownOff: "aus",
+    lastUsed: "zuletzt",
+    previewLabel: "Vorschau", previewSpeaker: "BroBot",
     templateMessages: templateMessages.de,
     chipsInputMessages: { countLabel: (count, max) => `${String(count)} von ${String(max)}`, atLimitHint: "Höchstens 10 Aliase.", duplicateWarning: (alias) => `${alias} steht schon in der Liste.` },
     warningLabel: (warning) => warning.code === "unknown_template_variables"
@@ -293,7 +274,6 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
       : warning.code === "template_parameters_invalid"
         ? `Ungültiger Parameter: ${warning.invalidVariables.join(", ")}`
         : `Vorlage kann ${String(warning.worstCaseLength)} Zeichen lang sein.`,
-    columns: { name: "!Name", kind: "Art", response: "Antwort", minimumTier: "Mindeststufe", active: "Aktiv" },
     variableAction: "Kanalvariable ändern", variableSelect: "Variable", variableSelectHint: "Wird atomar mit dem Befehl geändert.", variableNone: "Keine Kanalvariablen angelegt.",
     variableOperations: { add: "+", subtract: "−", set: "=", set_argument: "Argument" },
     variableOperationHelp: { add: "Zählt hoch.", subtract: "Zählt herunter.", set: "Setzt auf den Wert.", set_argument: "Setzt auf das erste Argument. Ungültige Zahlen zeigen den Nutzungshinweis." },
@@ -309,12 +289,12 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     argsEveryoneWarning: "Mit {args} kann jede Person im Chat Text an den Bot übergeben.",
   },
   en: {
-    title: "Text commands", search: "Search commands", filters: "Command filters", statusFilter: "Status", filterAll: "All", filterActive: "Active", filterInactive: "Inactive", moduleFilter: "Module", activeFilters: "Active filters:", resetFilters: "Reset", countSuffix: "commands", filteredSuffix: "commands", tabs: { settings: "Settings", advanced: "Advanced" }, list: "Commands", sectionMessage: "Message", sectionWhen: "When", sectionWhere: "Where", selectionPrompt: "Select a text command", selectionDescription: "Select a text command on the left or create a new one.", noResponse: "No response text", aliasCount: (count) => `${String(count)} aliases`, useCount: (count) => `${String(count)} uses`, details: (name) => `Properties for !${name}`, add: "Add command", newCommand: "New", empty: "No text commands yet.",
+    title: "Text commands", search: "Search commands", statusFilter: "Status", filterAll: "All", filterActive: "Active", filterInactive: "Inactive", allModules: "All modules", usedModuleVariables: "Uses module variables", entryCount: (count) => `${String(count)} entries`, triggerSection: "Triggers", selectionPrompt: "Select a text command", selectionDescription: "Select a text command on the left or create a new one.", noResponse: "No response text", useCount: (count) => `${String(count)}× used`, details: (name) => `Properties for !${name}`, add: "Add command", newCommand: "New", empty: "No text commands yet.",
     loadError: "The text commands could not be loaded.", templateVariablesLoadError: "Template variables could not be loaded.",
     saveError: "The text command could not be saved.", deleteError: "The text command could not be deleted.",
-    name: "Name", aliases: "Aliases", templateFieldLabels: { usageText: "Reply when arguments are missing or invalid" }, usageAdvanced: "Advanced", usageTextHint: "Sent when required arguments are missing or invalid.", createVariable: "Create variable",
+    name: "Command name", aliases: "Other triggers", aliasPlaceholder: "Add alias", templateFieldLabels: { usageText: "Reply when arguments are missing or invalid" }, usageAdvanced: "Advanced", usageTextHint: "Sent when required arguments are missing or invalid.", textBlockDescription: "Text block", createVariable: "Create variable",
     shoutoutCooldownHint: "Twitch enforces shoutout cooldowns: 2 minutes per channel and 60 minutes per target.",
-    kind: "Type", kindLabels: { text: "Response text", list: "Command list", shoutout: "Shoutout", timeout: "Timeout" },
+    kind: "Response type", kindLabels: { text: "Response text", list: "Command list", shoutout: "Shoutout", timeout: "Timeout" },
     kindHints: {
       text: "Replies with the text below.", list: "Lists all enabled commands (without aliases).",
       shoutout: "!so <name> recommends a Twitch channel in chat.",
@@ -335,17 +315,18 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     slashTimeoutEffect: (minimum, maximum) => `Times out the caller for ${minimum === maximum ? `${String(minimum)} s` : `${String(minimum)}–${String(maximum)} s`}.`,
     slashAnnouncementEffect: "Sent as a Twitch announcement.",
     slashShoutoutEffect: "The shoutout target comes from the command argument.",
-    response: "Response", currencyFrom: "From", currencyTo: "To", responseOptional: "Response (optional)", responseHint: "What the bot says. Type { to open variables.", responseMissing: "Enter a response.", fieldTooLong: "Use at most 500 characters.",
-    minimumTier: "Who can use it",
+    response: "Response text", insertVariable: "Insert variable", currencyFrom: "From", currencyTo: "To", responseOptional: "Response text (optional)", responseHint: "What the bot says. Type { to open variables.", responseMissing: "Enter a response.", fieldTooLong: "Use at most 500 characters.",
+    minimumTier: "Who can use it", minimumRole: "Minimum role",
     tierLabels: { everyone: "Everyone", subscriber: "Subscribers", vip: "VIPs", moderator: "Moderators", broadcaster: "Broadcaster" },
     tierSubjects: { viewer: "viewers", subscriber: "subscribers", vip: "VIPs", moderator: "moderators", broadcaster: "broadcasters" },
     tierDescription: (tier, subjects) => {
+      if (tier === "everyone") return "Everyone in chat can trigger this command.";
       const joined = subjects.length < 2 ? subjects[0] ?? "" : `${subjects.slice(0, -1).join(", ")}, and ${subjects[subjects.length - 1] ?? ""}`;
       const excluded = tier === "subscriber" ? " VIPs are excluded." : tier === "vip" ? " Subscribers are excluded." : "";
       return `${joined}.${excluded}`;
     },
     tierHelp: "Moderators and broadcasters can always use it.",
-    responseType: "Response type", responseTypeLabels: { say: "Message", reply: "Reply", announcement: "Announcement" },
+    responseType: "Send as", responseTypeLabels: { say: "Message", reply: "Reply", announcement: "Announcement" },
     chatTarget: "Chat target", chatTargetDefault: "Channel default", chatTargetLabels: { all_chats: "All chats", source_only: "Only our chat", where_asked: "Automatic" },
     responseTypeHints: {
       say: "Sends a normal chat message.",
@@ -353,40 +334,36 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
       announcement: "Highlights the message as an announcement. The bot must be a moderator.",
     },
     announcementWarning: "The bot is not a moderator here — the text will be sent as a normal message.",
-    streamCondition: "Stream", streamLabels: { any: "Always", online: "Online", offline: "Offline" },
+    streamCondition: "Only available", streamLabels: { any: "Always", online: "Stream live", offline: "Stream offline" },
     streamHints: { any: "Works regardless of stream status.", online: "Works only while the stream is live.", offline: "Works only while the stream is offline." },
-    gameFilter: "Twitch games",
+    gameFilter: "Only for games",
     gameFilterHint: "The command only replies while one of these games is current.",
-    availability: "Availability",
+    availability: "More settings",
     gameMultiSelect: { label: "Twitch games", hint: "Search and select games from Twitch categories.", search: "Search games", searchHint: "Enter at least two characters.", loading: "Searching games …", empty: "No games found.", error: "Twitch games could not be loaded.", suggestions: "Suggestions", allGames: "All games", limitReached: "10-game limit reached; remove one to add another.", selectedCount: (count, maximum) => `${String(count)} of ${String(maximum)}`, remove: (name) => `Remove ${name}` },
-    libraryText: "Text from library",
-    libraryTextPlaceholder: "Choose a text block",
-    insertLibraryText: "Insert text",
-    cooldown: "Cooldown", userCooldown: "Per user", cooldownHint: "For the whole channel. 0 to 86,400.", userCooldownHint: "For each viewer separately. 0 = off.", numberMissing: "Enter a number.",
+    cooldown: "Cooldown", cooldownField: "Between uses", userCooldown: "Per user", cooldownHint: "For the whole channel. 0 to 86,400.", userCooldownHint: "For each viewer separately. 0 = off.", numberMissing: "Enter a number.",
     nameHint: "a–z, 0–9, - and _",
     nameInvalid: "Use lowercase letters, numbers, hyphen, and underscore.", nameMissing: "Enter a name.", nameExists: "This command already exists.",
     nameAliasConflict: (trigger, command) => `!${trigger} is already an alias for !${command}.`,
     aliasConflict: (trigger, command) => trigger === command ? `!${trigger} is already the command !${command}.` : `!${trigger} is already an alias for !${command}.`,
     aliasInvalid: (trigger) => `!${trigger} — use lowercase letters, numbers, - and _.`,
-    aliasIsName: "This is already the command name.", aliasHint: "Other names for the same command. Enter, comma, or space separates them.",
+    aliasIsName: "This is already the command name.",
     aliasRemove: (alias) => `Remove alias ${alias}`, aliasList: "Aliases",
     delete: "Delete command", deleteTitle: (name) => `Delete command !${name}?`,
     deleteConfirmation: (name, aliases) => aliases.length === 0
       ? `Command !${name} will be deleted and will no longer reply in chat.`
       : `Command !${name} and its aliases ${aliases.map((alias) => `!${alias}`).join(", ")} will no longer be available in chat.`,
-    deleteConfirm: (name) => `Delete command !${name}`, deleteCancel: "Cancel",
+    deleteConfirm: (name) => `Delete command !${name}`, deleteCancel: "Cancel", back: "Back",
     draftGuardTitle: "Unsaved changes",
     draftGuardDescription: "This command has unsaved changes. What would you like to do?",
-    continueEditing: "Continue editing", discardAndSwitch: "Discard and switch", saveAndSwitch: "Save and switch", close: "Close",
-    save: "Save changes", create: "Create", discard: "Discard", saved: "Saved.",
+    continueEditing: "Continue editing", discardAndSwitch: "Discard and switch", saveAndSwitch: "Save and switch",
+    save: "Save", create: "Create", discard: "Discard", saved: "All changes saved",
     pending: "Saving …", invalid: "Please correct the marked fields.", issueError: "Error", issueWarning: "Warning",
     conflictMessage: "This command was changed by someone else.", reloadError: "The server version could not be loaded.", reload: "Load server version",
     managementLocked: "Only broadcasters and managers may add, edit, or delete commands.",
-    active: "Active", activeImmediately: "takes effect immediately", enabled: "enabled", disabled: "disabled", noAliases: "none",
+    active: "Active", ready: "Ready", variableBadge: "Variable",
     never: "never", secondsAgo: (count) => `${String(count)} s ago`, minutesAgo: (count) => `${String(count)} min ago`, hoursAgo: (count) => `${String(count)} h ago`,
-    createdAt: "Created", updatedAt: "Updated", lastUsed: "Last used",
-    previewLabel: "Preview", previewSpeaker: "Bot",
-    streamAny: "always", streamOnline: "online only", streamOffline: "offline only", cooldownOff: "off",
+    lastUsed: "last used",
+    previewLabel: "Preview", previewSpeaker: "BroBot",
     templateMessages: templateMessages.en,
     chipsInputMessages: { countLabel: (count, max) => `${String(count)} of ${String(max)}`, atLimitHint: "Up to 10 aliases.", duplicateWarning: (alias) => `${alias} is already in the list.` },
     warningLabel: (warning) => warning.code === "unknown_template_variables"
@@ -394,7 +371,6 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
       : warning.code === "template_parameters_invalid"
         ? `Invalid parameter: ${warning.invalidVariables.join(", ")}`
         : `Template can be ${String(warning.worstCaseLength)} characters long.`,
-    columns: { name: "!Name", kind: "Type", response: "Response", minimumTier: "Minimum level", active: "Active" },
     variableAction: "Change channel variable", variableSelect: "Variable", variableSelectHint: "Applied atomically with the command.", variableNone: "No channel variables have been created.",
     variableOperations: { add: "+", subtract: "−", set: "=", set_argument: "Argument" },
     variableOperationHelp: { add: "Increase the value.", subtract: "Decrease the value.", set: "Set the value directly.", set_argument: "Set from the first argument. Invalid numbers show the usage response." },

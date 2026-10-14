@@ -818,11 +818,11 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
       <section className="module-detail" aria-label={details.name}>
         <PageHeader
           kind="modules"
-          icon={navigationPage === undefined
+          icon={moduleId === "text_commands" ? null : navigationPage === undefined
             ? iconFor(moduleId, "module-heading-glyph")
             : <NavigationIcon kind={navigationPage.iconKind} className="module-heading-glyph module-glyph" />}
           title={details.name}
-          subtitle={details.description}
+          subtitle={moduleId === "text_commands" ? "" : details.description}
           {...(navigationPage?.showMainSwitch === false ? {} : {
             active: effectiveEnabled,
             onToggle: (nextEnabled: boolean) => { if (nextEnabled !== effectiveEnabled) onToggle(); },
