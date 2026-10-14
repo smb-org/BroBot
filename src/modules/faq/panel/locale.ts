@@ -44,7 +44,9 @@ export interface FaqTexts {
   keywordChipMessages: ChipsInputMessages;
   removePattern: (pattern: string) => string;
   sampleMessage: string;
+  testSample: string;
   sampleMessageHint: string;
+  sampleMessageInvalid: string;
   sampleMessageEmpty: string;
   sampleMessageCommand: string;
   sampleMessageNoMatch: string;
@@ -119,7 +121,7 @@ const templateMessages: LocaleCatalog<TemplateTextFieldMessages> = {
 
 const catalog: LocaleCatalog<FaqTexts> = {
   de: {
-    title: "FAQ & Auto-Antworten", add: "Neue Antwort", newEntry: "Neue Antwort", noSelection: "Wähle eine Antwort aus oder erstelle eine neue.",
+    title: "FAQ & Auto-Antworten", add: "Neu", newEntry: "Neue Antwort", noSelection: "Wähle eine Antwort aus oder erstelle eine neue.",
     noEntries: "Noch keine FAQ-Antworten.", emptySearch: "Keine Antwort passt zu deiner Suche.", search: "Antwort oder Auslöser suchen", searchPlaceholder: "FAQ durchsuchen", clearSearch: "Suche leeren",
     filterAll: "Alle", filterActive: "Aktiv", filterPaused: "Pausiert", filterLabel: "Status", priorityNote: "Die erste passende Antwort gewinnt. Ziehe Einträge an eine neue Stelle; Alt+↑/↓ verschiebt die Auswahl sofort.",
     keyboardMove: "Position sofort ändern", priorityMeta: (priority) => `Priorität ${String(priority)}`, prioritySaved: "Priorität gespeichert.", undo: "Rückgängig",
@@ -136,7 +138,7 @@ const catalog: LocaleCatalog<FaqTexts> = {
       faq_keywords_invalid: "Gib 1 bis 20 gültige Schlüsselwörter oder Wortgruppen ein.",
     },
     keywordChipMessages: { countLabel: (count, maximum) => `${String(count)}/${String(maximum)}`, atLimitHint: "Maximal 20 Auslöser. Entferne einen zum Austauschen.", duplicateWarning: (entry) => `„${entry}“ ist bereits hinzugefügt.` },
-    removePattern: (pattern) => `${pattern} entfernen`, sampleMessage: "Beispielnachricht testen", sampleMessageHint: "Die Prüfung verwendet genau diesen Eintrag und läuft beim Tippen.",
+    removePattern: (pattern) => `${pattern} entfernen`, sampleMessage: "Beispielnachricht testen", testSample: "Beispiel testen", sampleMessageHint: "Die Prüfung verwendet genau diesen Eintrag und läuft beim Tippen.", sampleMessageInvalid: "Korrigiere den Auslöser, um ihn zu testen.",
     sampleMessageEmpty: "Gib eine Nachricht ein, um den Auslöser zu testen.", sampleMessageCommand: "Nachrichten mit ! am Anfang werden übersprungen.", sampleMessageNoMatch: "Kein Auslöser passt zu dieser Nachricht.",
     sampleMessageMatch: (pattern) => `Treffer durch „${pattern}“.`,
     minimumTier: "Mindestrolle", rolesSectionTitle: "Wer darf auslösen", tierOptions: [
@@ -167,7 +169,7 @@ const catalog: LocaleCatalog<FaqTexts> = {
     },
   },
   en: {
-    title: "FAQ & Auto replies", add: "New answer", newEntry: "New answer", noSelection: "Choose an answer or create a new one.",
+    title: "FAQ & Auto replies", add: "New", newEntry: "New answer", noSelection: "Choose an answer or create a new one.",
     noEntries: "No FAQ answers yet.", emptySearch: "No answer matches your search.", search: "Search answers or triggers", searchPlaceholder: "Search FAQ", clearSearch: "Clear search",
     filterAll: "All", filterActive: "Active", filterPaused: "Paused", filterLabel: "Status", priorityNote: "The first matching answer wins. Drag entries to reorder them; Alt+↑/↓ moves the selection immediately.",
     keyboardMove: "Change position immediately", priorityMeta: (priority) => `Priority ${String(priority)}`, prioritySaved: "Priority saved.", undo: "Undo",
@@ -184,7 +186,7 @@ const catalog: LocaleCatalog<FaqTexts> = {
       faq_keywords_invalid: "Enter 1 to 20 valid keywords or phrases.",
     },
     keywordChipMessages: { countLabel: (count, maximum) => `${String(count)}/${String(maximum)}`, atLimitHint: "Up to 20 triggers. Remove one to replace it.", duplicateWarning: (entry) => `“${entry}” has already been added.` },
-    removePattern: (pattern) => `Remove ${pattern}`, sampleMessage: "Test a sample message", sampleMessageHint: "This checks only this entry and updates as you type.",
+    removePattern: (pattern) => `Remove ${pattern}`, sampleMessage: "Test a sample message", testSample: "Test sample", sampleMessageHint: "This checks only this entry and updates as you type.", sampleMessageInvalid: "Fix the trigger before testing it.",
     sampleMessageEmpty: "Enter a message to test the trigger.", sampleMessageCommand: "Messages starting with ! are skipped.", sampleMessageNoMatch: "No trigger matches this message.",
     sampleMessageMatch: (pattern) => `Matched by “${pattern}”.`,
     minimumTier: "Minimum role", rolesSectionTitle: "Who can trigger it", tierOptions: [

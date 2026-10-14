@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type DragEvent, type Keyboar
 
 import { moduleQueryKey, runModuleQueryWrite, useChannelSettings, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import {
+  Badge,
   Button,
   ChatPreview,
   ChatTargetField,
@@ -27,7 +28,7 @@ import {
   registerDashboardNavigationGuard,
   useDraftGuard,
 } from "../../../dashboard/ui";
-import type { ModulePanelProperties } from "../../contract";
+import { renderTemplate, type ModulePanelProperties } from "../../contract";
 import type { FaqEntry, FaqGame } from "../contracts";
 import { FAQ_ANSWER_MAX_LENGTH, FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_MINIMUM_TIERS, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH, FAQ_USER_COOLDOWN_MAXIMUM_SECONDS } from "../contracts";
 import { faqMatcherValidationError, matchFaqMatcher } from "../domain";
@@ -161,6 +162,10 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
     : faqMatcherValidationReasonText(matcherValidation.reasonCode, labels) ?? matcherValidation.reason;
   const matcherError = matcherServerError ?? matcherLocalError;
   const sampleTest = useMemo(() => matchFaqMatcher(matcherFromDraft(draft), sampleMessage), [draft, sampleMessage]);
+  const answerPreview = useMemo(() => renderTemplate(
+    draft.answerText,
+    Object.fromEntries((data?.variables ?? []).map(({ name, sample }) => [name, sample])),
+  ), [data?.variables, draft.answerText]);
   const searchGames = useCallback((value: string) => searchFaqGames(channelId, value), [channelId]);
   const lookupGames = useCallback((ids: readonly string[]) => lookupFaqGames(channelId, ids), [channelId]);
 
@@ -338,6 +343,10 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
     }
   };
 
+  const openDelete = (): void => {
+    draftGuard.guardSwitch(() => { setDeleteError(undefined); setDeleteOpen(true); });
+  };
+
   const visibleEntries = orderedEntries.filter((entry) => {
     const matchesFilter = filter === "all" || (filter === "active" ? entry.enabled : !entry.enabled);
     const needle = search.trim().toLocaleLowerCase(language === "en" ? "en" : "de");
@@ -347,7 +356,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
   const selectedIndex = orderedEntries.findIndex((entry) => entry.id === selectedId);
   const listStatus = query.isPending ? "loading" : data === undefined ? "error" : orderedEntries.length === 0 ? "empty" : "success";
   const sampleStatus = matcherError !== undefined
-    ? matcherError
+    ? labels.sampleMessageInvalid
     : sampleMessage.trim().length === 0
       ? labels.sampleMessageEmpty
       : sampleTest.reason === "command_prefix"
@@ -355,6 +364,21 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
         : sampleTest.reason === "matched" && sampleTest.matchedPattern !== undefined
           ? labels.sampleMessageMatch(sampleTest.matchedPattern)
           : labels.sampleMessageNoMatch;
+  const saveProps = {
+    dirty,
+    persistent: true,
+    pending: saving,
+    ...(saveError === undefined ? {} : { error: saveError }),
+    invalid: input === null || matcherValidation !== null,
+    invalidMessage: labels.invalid,
+    onSave: () => { void saveDraft(); },
+    onInvalidSave: () => { setAttemptedSave(true); },
+    onDiscard: resetDraft,
+    saveLabel: labels.save,
+    discardLabel: labels.discard,
+    savedLabel: labels.saved,
+    pendingLabel: labels.saving,
+  };
 
   const detail = selectedId === null
     ? <div className="faq-panel__placeholder"><PageHeader title={labels.title} subtitle={labels.noSelection} /></div>
@@ -366,25 +390,15 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
         switchDisabled={!canManage || saving || ordering}
         switchBusy={saving}
         {...(selectedEntry === undefined ? {} : { meta: labels.priorityMeta(selectedIndex + 1) })}
+        badges={<Badge>{draft.matcherType === "regex" ? labels.regexCompact : labels.keywordsCompact}</Badge>}
         {...(canManage ? {} : { lockHint: labels.roleLocked })}
-        {...(selectedEntry === undefined ? {} : { actions: <Button variant="neutral" danger disabled={!canManage || deleting} onClick={() => {
-          draftGuard.guardSwitch(() => { setDeleteError(undefined); setDeleteOpen(true); });
-        }}><Icon name="remove" size={16} />{labels.delete}</Button> })}
-        save={{
-          dirty,
-          persistent: true,
-          pending: saving,
-          ...(saveError === undefined ? {} : { error: saveError }),
-          invalid: input === null || matcherValidation !== null,
-          invalidMessage: labels.invalid,
-          onSave: () => { void saveDraft(); },
-          onInvalidSave: () => { setAttemptedSave(true); },
-          onDiscard: resetDraft,
-          saveLabel: labels.save,
-          discardLabel: labels.discard,
-          savedLabel: labels.saved,
-          pendingLabel: labels.saving,
-        }}
+        pageActions={<Button variant="neutral" onClick={() => { document.getElementById("faq-sample-message")?.focus(); }}>{labels.testSample}</Button>}
+        {...(selectedEntry === undefined ? {} : {
+          overflow: <Button className="faq-panel__delete-action" variant="subtle" danger="subtle" size="compact" disabled={!canManage || deleting} onClick={openDelete}>
+            <Icon name="remove" size={16} />{labels.delete}
+          </Button>,
+        })}
+        save={saveProps}
       />
       <div className="faq-panel__editor">
         {canManage ? null : <RuleNote>{labels.roleLocked}</RuleNote>}
@@ -394,6 +408,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
               <Field
                 label={labels.entryNameLabel}
                 hint={labels.entryNameHint}
+                className="faq-panel__entry-name"
                 value={draft.name}
                 onChange={(name) => { patchDraft({ name }); }}
                 maxLength={FAQ_ENTRY_NAME_MAX_LENGTH}
@@ -410,8 +425,6 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
                   { value: "regex", label: labels.regexType, compactLabel: labels.regexCompact },
                 ]}
                 disabled={!canManage || saving}
-                {...(matcherError === undefined ? {} : { error: matcherError })}
-                reserveError
               />
               {draft.matcherType === "keywords" ? <ChipsInput
                 label={labels.patterns}
@@ -444,6 +457,8 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
                 hint={labels.sampleMessageHint}
                 value={sampleMessage}
                 onChange={setSampleMessage}
+                id="faq-sample-message"
+                className="faq-panel__sample-message"
                 maxLength={500}
                 countLabel={(count, maximum) => `${String(count)}/${String(maximum)}`}
                 disabled={saving}
@@ -468,24 +483,26 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
           </div>
           <div className="faq-panel__column">
             <Section title={labels.answerSection}>
-              <TemplateTextField
-                label={labels.answer}
-                hint={labels.answerHint}
-                value={draft.answerText}
-                onChange={(answerText) => { patchDraft({ answerText }); }}
-                maxLength={FAQ_ANSWER_MAX_LENGTH}
-                variables={data?.variables ?? []}
-                messages={labels.templateMessages}
-                minRows={4}
-                disabled={!canManage || saving}
-                required
-              />
-              <ChatPreview
-                label={labels.previewLabel}
-                speaker={labels.previewSpeaker}
-                text={draft.answerText}
-                countLabel={labels.templateMessages.previewCountLabel(draft.answerText.length)}
-              />
+              <div className="faq-panel__answer-preview">
+                <TemplateTextField
+                  label={labels.answer}
+                  hint={labels.answerHint}
+                  value={draft.answerText}
+                  onChange={(answerText) => { patchDraft({ answerText }); }}
+                  maxLength={FAQ_ANSWER_MAX_LENGTH}
+                  variables={data?.variables ?? []}
+                  messages={labels.templateMessages}
+                  minRows={4}
+                  disabled={!canManage || saving}
+                  required
+                />
+                <ChatPreview
+                  label={labels.previewLabel}
+                  speaker={labels.previewSpeaker}
+                  text={answerPreview}
+                  countLabel={labels.templateMessages.previewCountLabel(answerPreview.length)}
+                />
+              </div>
               <FieldPair>
                 <UnitInput
                   label={labels.cooldown}
