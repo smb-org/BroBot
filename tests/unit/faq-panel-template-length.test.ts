@@ -11,12 +11,15 @@ describe("FAQ panel template length", () => {
     expect(templateTextLength(answerText)).toBe(500);
     expect(inputFromDraft({
       name: "Greeting",
+      enabled: true,
       matcherType: "keywords",
       patterns: "hello",
       answerText,
+      minimumTier: "everyone",
       cooldownSeconds: 30,
       userCooldownSeconds: 0,
       games: [],
+      restrictGames: false,
       chatTarget: "source_only",
     })).toMatchObject({ answerText });
   });

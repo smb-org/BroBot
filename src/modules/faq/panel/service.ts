@@ -6,16 +6,8 @@ import type { FaqEntry, FaqGame, FaqMutationInput } from "../contracts";
 
 export interface FaqPanelData {
   entries: FaqEntry[];
+  orderRevision: number;
   variables: TemplateTextFieldVariable[];
-}
-
-export interface FaqTestResult {
-  matches: boolean;
-  reason: "matched" | "no_match" | "command_prefix";
-  gameId: string | null;
-  entry?: { id: string; name: string };
-  matchedPattern?: string;
-  skippedByGame: readonly { entryId: string; entryName: string; matchedPattern: string; games: readonly string[] }[];
 }
 
 const basePath = (channelId: string): string => `/api/channels/${encodeURIComponent(channelId)}/modules/faq`;
@@ -38,11 +30,12 @@ export const loadFaqPanel = async (channelId: string, signal?: AbortSignal): Pro
     fetch(`/api/channels/${encoded}/template-variables`, signal === undefined ? undefined : { signal }),
   ]);
   const [entries, variables] = await Promise.all([
-    readJson<{ entries: FaqEntry[] }>(entriesResponse),
+    readJson<{ entries: FaqEntry[]; orderRevision: number }>(entriesResponse),
     readJson<{ variables: { name: string; isTextBlock?: boolean; availableInEventTemplates?: boolean; description?: string; sample?: string; group?: TemplateTextFieldVariable["group"]; contexts?: TemplateVariable["contexts"]; parameters?: TemplateTextFieldVariable["parameters"]; parameterDefault?: string }[] }>(variablesResponse),
   ]);
   return {
     entries: entries.entries,
+    orderRevision: entries.orderRevision,
     variables: variables.variables.filter(isEventTemplateVariableAvailable).map((variable) => ({
       name: variable.name,
       description: variable.description ?? variable.name,
@@ -84,11 +77,8 @@ export const createFaqEntry = async (channelId: string, input: FaqMutationInput)
 export const updateFaqEntry = async (channelId: string, entryId: string, input: FaqMutationInput, revision: number): Promise<FaqEntry> =>
   (await mutate<{ entry: FaqEntry }>(channelId, `/entries/${encodeURIComponent(entryId)}`, "PATCH", { ...input, revision })).entry;
 
-export const setFaqEntryEnabled = async (channelId: string, entryId: string, enabled: boolean, revision: number): Promise<FaqEntry> =>
-  (await mutate<{ entry: FaqEntry }>(channelId, `/entries/${encodeURIComponent(entryId)}/enabled`, "PATCH", { enabled, revision })).entry;
-
-export const moveFaqEntry = async (channelId: string, entryId: string, direction: "up" | "down", revision: number): Promise<FaqEntry[]> =>
-  (await mutate<{ entries: FaqEntry[] }>(channelId, `/entries/${encodeURIComponent(entryId)}/move`, "POST", { direction, revision })).entries;
+export const reorderFaqEntries = async (channelId: string, order: readonly string[], revision: number): Promise<{ entries: FaqEntry[]; orderRevision: number }> =>
+  mutate<{ entries: FaqEntry[]; orderRevision: number }>(channelId, "/entries/order", "POST", { order, revision });
 
 export const deleteFaqEntry = async (channelId: string, entryId: string, revision: number): Promise<void> => {
   const token = await csrf();
@@ -98,8 +88,5 @@ export const deleteFaqEntry = async (channelId: string, entryId: string, revisio
   });
   await readJson<unknown>(response);
 };
-
-export const testFaqMessage = async (channelId: string, message: string, gameId?: string | null): Promise<FaqTestResult> =>
-  mutate<FaqTestResult>(channelId, "/test", "POST", { message, ...(gameId === undefined ? {} : { gameId }) });
 
 export const faqErrorCode = (error: unknown): string | null => error instanceof PanelApiError ? error.code : null;

@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import { DashboardDataProvider } from "../../src/dashboard/data/provider";
 import { UiProvider } from "../../src/dashboard/ui";
+import { ToastHost } from "../../src/dashboard/ui/Toast";
 import { useRealtimePanelMessages } from "../../src/dashboard/realtime";
 import { runDashboardNavigationGuards } from "../../src/dashboard/ui/navigation-guard";
 import AdNowAction from "../../src/modules/ads/panel/immediate-actions";
@@ -48,6 +49,7 @@ createRoot(document.getElementById("root") as HTMLElement).render(
       <UiProvider>
         <main className="main-content" style={{ width: "min(1400px, 100%)", padding: "16px" }}>
           {panel}
+          {panelName === "faq" ? <ToastHost /> : null}
           {panelName === "chat_voting" ? <button type="button" onClick={() => {
             runDashboardNavigationGuards(() => { window.location.assign("/tests/e2e/module-panels-stability-fixture.html?panel=api_source"); }, () => undefined);
           }}>{language === "de" ? "Panel verlassen" : "Leave panel"}</button> : null}

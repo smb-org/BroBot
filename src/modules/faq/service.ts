@@ -1,6 +1,5 @@
 import type { ModuleEvent, ModuleExecutionContext, ModuleResult } from "../contract";
 import { hasCommandPrefix, selectFaqMatch } from "./domain";
-import type { FaqSelection } from "./domain";
 import type { FaqRepository } from "./repository";
 
 const messageText = (event: ModuleEvent): string | null => {
@@ -9,13 +8,6 @@ const messageText = (event: ModuleEvent): string | null => {
   const text = (message as Record<string, unknown>).text;
   return typeof text === "string" ? text : null;
 };
-
-export const testFaqMessage = async (
-  repository: FaqRepository,
-  channelId: string,
-  message: string,
-  gameId: string | null,
-): Promise<FaqSelection> => selectFaqMatch(await repository.matchers(channelId), message, gameId);
 
 export const processFaqMessage = async (
   event: ModuleEvent,
@@ -37,7 +29,7 @@ export const processFaqMessage = async (
   // entry needs no Helix lookup at all, and a total miss rules the message out
   // without any I/O. Only a trigger hit against a game-bound entry (recorded in
   // skippedByGame) needs the current game.
-  const withoutGame = selectFaqMatch(prepared, text, null);
+  const withoutGame = selectFaqMatch(prepared, text, null, event.chatStatus);
   // Any game-bound entry skipped before this result was decided (whether it
   // ended in a match or not) might turn eligible once the real game is
   // known, and -- being earlier in order -- would then win over it. Only a
@@ -45,7 +37,7 @@ export const processFaqMessage = async (
   // all) can be trusted without resolving the game.
   const selection = withoutGame.skippedByGame.length === 0
     ? withoutGame
-    : selectFaqMatch(prepared, text, await (context.channelGameId ?? (() => Promise.resolve(null)))());
+    : selectFaqMatch(prepared, text, await (context.channelGameId ?? (() => Promise.resolve(null)))(), event.chatStatus);
   const match = selection.match;
   if (match === null) return { actions: [], diagnostics: [] };
   const rendered = await context.renderTemplate(match.entry.answerText, {});

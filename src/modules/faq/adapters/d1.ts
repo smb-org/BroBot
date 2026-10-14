@@ -1,4 +1,4 @@
-import type { FaqEntry, FaqGame, FaqMatcher } from "../contracts";
+import type { FaqEntry, FaqGame, FaqMatcher, FaqMinimumTier } from "../contracts";
 import type { FaqRepository, FaqClaimResult } from "../repository";
 import { prepareFaqMatchers } from "../domain";
 import type { PreparedFaqMatcher } from "../domain";
@@ -13,6 +13,7 @@ export interface FaqEntryRow {
   matcher_type: string;
   matcher_json: string;
   answer_text: string;
+  minimum_tier: FaqMinimumTier;
   cooldown_seconds: number;
   user_cooldown_seconds: number;
   games_json: string;
@@ -73,6 +74,7 @@ export const mapFaqEntryRow = (row: FaqEntryRow): FaqEntry => ({
   enabled: row.enabled === 1,
   matcher: matcherFrom(row.matcher_type, row.matcher_json),
   answerText: row.answer_text,
+  minimumTier: row.minimum_tier,
   cooldownSeconds: row.cooldown_seconds,
   userCooldownSeconds: row.user_cooldown_seconds,
   games: gamesFrom(row.games_json),
@@ -84,10 +86,11 @@ export const mapFaqEntryRow = (row: FaqEntryRow): FaqEntry => ({
   updatedAt: row.updated_at,
 });
 
-const selectFaqEntries = `SELECT faq_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds, user_cooldown_seconds,
-                                 games_json, chat_target, use_channel_default_target, sort_order, revision, last_used_at, created_at, updated_at
-                            FROM faq_entries
-                           WHERE channel_id = ?`;
+const selectFaqEntries = `SELECT faq.faq_id, faq.name, faq.enabled, faq.matcher_type, faq.matcher_json, faq.answer_text, faq.minimum_tier, faq.cooldown_seconds, faq.user_cooldown_seconds,
+                                 faq.games_json, faq.chat_target, faq.use_channel_default_target, entry_order.sort_order, faq.revision, faq.last_used_at, faq.created_at, faq.updated_at
+                            FROM faq_entries AS faq
+                            JOIN faq_entry_order AS entry_order ON entry_order.channel_id = faq.channel_id AND entry_order.faq_id = faq.faq_id
+                           WHERE faq.channel_id = ?`;
 
 const remainingCooldown = (lastUsedAt: string | null, now: string, cooldownSeconds: number): number => {
   if (lastUsedAt === null) return 0;
@@ -98,9 +101,20 @@ const remainingCooldown = (lastUsedAt: string | null, now: string, cooldownSecon
 
 export const createFaqRepository = (db: D1Database): FaqRepository => ({
   async list(channelId) {
-    const result = await db.prepare(`${selectFaqEntries} ORDER BY sort_order, faq_id`)
+    const result = await db.prepare(`${selectFaqEntries} ORDER BY entry_order.sort_order, faq.faq_id`)
       .bind(channelId).all<FaqEntryRow>();
     return result.results.map(mapFaqEntryRow);
+  },
+  async listWithOrderRevision(channelId) {
+    const [entryResult, orderStateResult] = await db.batch([
+      db.prepare(`${selectFaqEntries} ORDER BY entry_order.sort_order, faq.faq_id`).bind(channelId),
+      db.prepare("SELECT revision FROM faq_order_revision WHERE channel_id = ?").bind(channelId),
+    ]);
+    const orderState = orderStateResult?.results[0] as { revision: number } | undefined;
+    return {
+      entries: (entryResult?.results ?? []).map((row) => mapFaqEntryRow(row as FaqEntryRow)),
+      orderRevision: orderState?.revision ?? 1,
+    };
   },
   async matchers(channelId, now = Date.now()) {
     let channelCache = cacheByDatabase.get(db);
@@ -110,7 +124,7 @@ export const createFaqRepository = (db: D1Database): FaqRepository => ({
     }
     const cached = channelCache.get(channelId);
     if (cached !== undefined && cached.expiresAt > now) return cached.entries;
-    const result = await db.prepare(`${selectFaqEntries} AND enabled = 1 ORDER BY sort_order, faq_id`)
+    const result = await db.prepare(`${selectFaqEntries} AND faq.enabled = 1 ORDER BY entry_order.sort_order, faq.faq_id`)
       .bind(channelId).all<FaqEntryRow>();
     const entries = prepareFaqMatchers(result.results.map(mapFaqEntryRow));
     if (channelCache.size >= FAQ_MATCHER_CACHE_CHANNEL_LIMIT) {

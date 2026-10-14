@@ -8,6 +8,7 @@ export type FaqClaimResult =
 
 export interface FaqRepository {
   list(channelId: string): Promise<FaqEntry[]>;
+  listWithOrderRevision(channelId: string): Promise<{ entries: FaqEntry[]; orderRevision: number }>;
   matchers(channelId: string, now?: number): Promise<readonly PreparedFaqMatcher[]>;
   claim(channelId: string, entry: FaqEntry, userId: string | null, now: string): Promise<FaqClaimResult>;
   releaseClaim(channelId: string, entry: FaqEntry, userId: string | null, claimedAt: string): Promise<void>;
