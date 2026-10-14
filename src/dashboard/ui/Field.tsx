@@ -12,6 +12,7 @@ interface FieldBaseProps {
   labelHidden?: boolean;
   hint?: string;
   error?: string;
+  errorInDescription?: boolean;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
@@ -46,7 +47,7 @@ export type FieldProps = FieldBaseProps & FieldCountProps & (
   | ({ variant?: undefined; clearLabel?: never } & FieldAdornmentProps)
 );
 
-export function Field({ label, ariaLabel, labelHidden = false, hint, error, value, onChange, placeholder, disabled = false, required = false, readOnly = false, type = "text", autoComplete, spellCheck, mono = false, countLength, countWhenNearLimitOnly = false, name, id: suppliedId, icon, prefix, leftLabel, normalize, maxLength, countLabel, className, onKeyDown, variant, clearLabel }: FieldProps) {
+export function Field({ label, ariaLabel, labelHidden = false, hint, error, errorInDescription = false, value, onChange, placeholder, disabled = false, required = false, readOnly = false, type = "text", autoComplete, spellCheck, mono = false, countLength, countWhenNearLimitOnly = false, name, id: suppliedId, icon, prefix, leftLabel, normalize, maxLength, countLabel, className, onKeyDown, variant, clearLabel }: FieldProps) {
   const generatedId = useId();
   const id = suppliedId ?? generatedId;
   const disabledReason = useDisabledFieldReason();
@@ -107,10 +108,12 @@ export function Field({ label, ariaLabel, labelHidden = false, hint, error, valu
       ><Icon name="close" size={16} /></button> : null}
     </div>
     <span data-ui="" id={hintId} className="ui-field__description">
-      {hint === undefined ? null : <TruncatedText className="ui-field__hint" text={hint} />}
+      {errorInDescription && effectiveError !== undefined
+        ? <FieldError id={errorId} className="ui-field__inline-error" message={effectiveError} />
+        : hint === undefined ? null : <TruncatedText className="ui-field__hint" text={hint} />}
       {maxLength === undefined || !showCount ? null : <span className={`ui-field__count${nearLimit && !overLimit ? " ui-field__count--warning" : ""}${overLimit ? " ui-field__count--error" : ""}`}>{countLabel(count, maxLength)}</span>}
       {describedHelper(null, disabledReason, `field-${id}`)}
     </span>
-    <FieldError id={errorId} className="ui-field__error" message={effectiveError} />
+    {errorInDescription ? null : <FieldError id={errorId} className="ui-field__error" message={effectiveError} />}
   </div>;
 }

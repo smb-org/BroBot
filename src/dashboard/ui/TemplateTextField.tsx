@@ -6,6 +6,7 @@ import { closestTemplateVariable, templateTextLength, tokenizeTemplate, unknownT
 import type { TemplateVariableGroup } from "../../contracts/values";
 import { Button } from "./Button";
 import { ChatPreview } from "./ChatPreview";
+import { FieldError } from "./FieldError";
 import { Icon } from "./Icon";
 import { InlineSuggestionPicker, InlineSuggestionPickerTarget } from "./InlineSuggestionPicker";
 import { TruncatedText } from "./TruncatedText";
@@ -353,7 +354,12 @@ export function TemplateTextField({
   const description: ReactNode = (
     <div className="ui-template-text-field__description-content">
       <div className="ui-template-text-field__helper-row">
-        <span><TruncatedText text={hint} />{describedHelper(null, disabledReason, `template-text-field-${id}`)}</span>
+        <span className="ui-template-text-field__helper-copy">
+          {effectiveError === undefined
+            ? <TruncatedText text={hint} />
+            : <FieldError id={`${id}-error`} className="ui-template-text-field__helper-error" message={effectiveError} />}
+          {describedHelper(null, disabledReason, `template-text-field-${id}`)}
+        </span>
         {countNode}
       </div>
       <div className="ui-template-text-field__warnings" id={`${id}-warnings`} aria-live="polite">
@@ -431,7 +437,6 @@ export function TemplateTextField({
         description={description}
         descriptionProps={{ component: "div" }}
         inputWrapperOrder={["label", "input", "description", "error"]}
-        error={effectiveError === undefined ? undefined : <span><span aria-hidden="true">× </span><TruncatedText text={effectiveError} /></span>}
         withAsterisk={required}
       >
         {insertVariableLabel === undefined ? null : <Button

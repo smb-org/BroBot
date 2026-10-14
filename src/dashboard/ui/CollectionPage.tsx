@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactElement, type ReactNode } from "react";
 
 import { dashboardCommonTexts } from "../locale";
 import { Button } from "./Button";
+import { Icon } from "./Icon";
 
 export interface CollectionPageProps {
   title: string;
@@ -81,7 +82,7 @@ export function CollectionPage({
             onCloseDetail();
           }}
         >
-          {onCloseDetail === undefined || backLabel === undefined ? null : <Button className="collection-page__detail-back" variant="subtle" onClick={onCloseDetail}>{backLabel}</Button>}
+          {onCloseDetail === undefined || backLabel === undefined ? null : <Button className="collection-page__detail-back" variant="neutral" onClick={onCloseDetail}><Icon name="collapse" size={16} />{backLabel}</Button>}
           {detail}
         </section>
       </div>

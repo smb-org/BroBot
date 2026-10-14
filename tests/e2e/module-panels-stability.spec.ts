@@ -351,9 +351,9 @@ test("FAQ game limit explains the cap without shifting the fields below it", asy
   const target = page.getByRole("button", { name: "Chat target", exact: true });
   const messageBefore = await limitMessage.boundingBox();
   const targetOffset = async () => target.evaluate((element) => {
-    const detail = element.closest(".collection-page__detail");
-    if (!(detail instanceof HTMLElement)) throw new Error("The FAQ detail scroll region is missing.");
-    return element.getBoundingClientRect().top - detail.getBoundingClientRect().top + detail.scrollTop;
+    const editor = element.closest<HTMLElement>(".faq-panel__editor");
+    if (editor === null) throw new Error("The FAQ editor scroll region is missing.");
+    return element.getBoundingClientRect().top - editor.getBoundingClientRect().top + editor.scrollTop;
   });
   const targetBefore = await targetOffset();
   await page.getByRole("searchbox", { name: "Games" }).click();

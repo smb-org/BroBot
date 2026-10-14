@@ -324,7 +324,7 @@ describe("Text command editor", () => {
     expect(screen.getByRole("heading", { name: "Wer darf auslösen" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Abklingzeit" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Weitere Einstellungen" })).toBeInTheDocument();
-    expect(screen.getByText("5 von 32")).toBeInTheDocument();
+    expect(screen.getByText("5 / 32 Zeichen")).toBeInTheDocument();
     expect(screen.getByText("a–z, 0–9, - und _")).toBeInTheDocument();
     expect(editor().querySelector(".ui-field__prefix")).toHaveTextContent("!");
     expect(screen.getByText(renderCommandText("Hallo {user} aus {channel}", { user: "zuschauerin", channel: "beispielkanal" }))).toBeInTheDocument();
@@ -374,7 +374,7 @@ describe("Text command editor", () => {
     expect(within(suggestions).getByRole("button", { name: /\/shoutout \{target\}/u })).toHaveTextContent("Befehlsargument");
 
     fireEvent.change(response, { target: { value: "/timeout somebody 30" } });
-    expect(screen.getByRole("alert")).toHaveTextContent("Ungültige Syntax: /timeout {user} <seconds|min-max> [reason]");
+    expect(editor().querySelector("#command-text-error")).toHaveTextContent("Ungültige Syntax: /timeout {user} <seconds|min-max> [reason]");
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
     expect(created).toBeUndefined();
 
@@ -779,7 +779,7 @@ describe("Text command editor", () => {
     expect(screen.getByRole("textbox", { name: "Antworttext (optional)" })).toHaveValue("Timeout draft");
     expect(screen.getByRole("textbox", { name: "Ersatztext bei Ablehnung (optional)" })).toHaveValue("Timeout fallback draft");
     expect(screen.getByRole("textbox", { name: "Timeout-Grund" })).toHaveValue("Timeout reason draft");
-    expect(screen.getByRole("spinbutton", { name: "Mindestens" })).toHaveValue(30);
+    expect(await screen.findByRole("spinbutton", { name: "Mindestens" })).toHaveValue(30);
     expect(screen.getByRole("spinbutton", { name: "Höchstens" })).toHaveValue(90);
     fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
 
@@ -1493,10 +1493,14 @@ describe("Text command editor", () => {
 
   it("converts a leading timeout slash command into structured fields before saving", async () => {
     let created: unknown;
+    const commands: TextCommand[] = [];
     const fetcher = panelFetch({
-      commands: () => [],
+      commands: () => commands,
       onMutation: (method, _path, body) => {
-        if (method === "POST") created = body;
+        if (method === "POST" && typeof body === "object" && body !== null) {
+          created = body;
+          commands.push({ ...makeCommand({ name: "roulette" }), ...(body as Partial<TextCommand>) });
+        }
         return jsonResponse({ warnings: [] });
       },
     });
@@ -1510,7 +1514,8 @@ describe("Text command editor", () => {
     expect(screen.queryByRole("switch", { name: "Aufrufer timeouten" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
 
-    expect(screen.getByRole("spinbutton", { name: "Mindestens" })).toHaveValue(30);
+    await waitFor(() => expect(created).toMatchObject({ name: "roulette", kind: "timeout" }));
+    expect(await screen.findByRole("spinbutton", { name: "Mindestens" })).toHaveValue(30);
     expect(screen.getByRole("spinbutton", { name: "Höchstens" })).toHaveValue(60);
     expect(screen.getByRole("textbox", { name: "Antworttext (optional)" })).toHaveValue("Timed out for {timeout.duration}");
     expect(screen.getByRole("textbox", { name: "Timeout-Grund" })).toHaveValue("Raid spamming");

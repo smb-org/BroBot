@@ -34,6 +34,7 @@ import { convertLeadingSlashCommand, parseLeadingSlashCommand, SLASH_COMMAND_NAM
 import { templateTextLength } from "../../../contracts/template-text-length";
 import type { ChatOutputTarget } from "../../../contracts/values";
 import type { ModuleRegisteredTemplateVariable } from "../../contract";
+import { formatCharacterCount } from "../../../dashboard/ui/text-length";
 
 const normalizeCommandName = (name: string): string => name.trim().replace(/^!/u, "").toLowerCase();
 
@@ -545,7 +546,6 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
       : draft;
     const savedDraft = keepOnlyActiveKindDraft(convertedDraft);
     if (!operatorToggle && !commandDraftIsValid(savedDraft, channelVariables)) return labels.invalid;
-    if (savedDraft !== draft) setValue(savedDraft);
     const payload = {
       name: normalizeCommandName(savedDraft.name),
       enabled: savedDraft.enabled,
@@ -583,7 +583,9 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
           const next = updateCommandCache(current, mutationResult.command, command?.name);
           const continueDeleteAfterSave = deleteAfterSaveRef.current;
           const completedSwitch = token === generation() && completeSwitchRef.current();
-          if (!completedSwitch || continueDeleteAfterSave) onSaved(token, mutationResult.command.name, continueDeleteAfterSave);
+          if (!completedSwitch || continueDeleteAfterSave || isCreate) {
+            onSaved(token, mutationResult.command.name, continueDeleteAfterSave);
+          }
           return next;
         },
       );
@@ -627,7 +629,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
       notify({ tone: "error", message: labels.saveError });
       return labels.saveError;
     } finally { setPending(false); }
-  }, [accept, canManageContent, canOperate, channelId, channelVariables, command, draft, generation, isCreate, labels, onRefresh, onSaved, onWrite, pendingAliases, resolvedLanguage, setAttemptedSave, setConcurrentConflict, setFieldError, setPending, setSaved, setServerFieldErrors, setServerWarnings, setValue]);
+  }, [accept, canManageContent, canOperate, channelId, channelVariables, command, draft, generation, isCreate, labels, onRefresh, onSaved, onWrite, pendingAliases, resolvedLanguage, setAttemptedSave, setConcurrentConflict, setFieldError, setPending, setSaved, setServerFieldErrors, setServerWarnings]);
 
   const discardDraft = (): void => {
     reset(); setPendingAliases(""); setAttemptedSave(false); setSaved(false); setFieldError(null); setDeleteError(undefined);
@@ -790,10 +792,11 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
         id="command-name"
         label={labels.name}
         hint={labels.nameHint}
+        errorInDescription
         prefix="!"
         normalize={normalizeCommandName}
         maxLength={32}
-        countLabel={(count, maximum) => `${String(count)} ${language === "en" ? "of" : "von"} ${String(maximum)}`}
+        countLabel={(count, maximum) => formatCharacterCount(count, maximum, resolvedLanguage)}
         value={draft.name}
         {...(nameError === undefined ? {} : { error: nameError })}
         required
@@ -899,7 +902,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
             maxLength={500}
             countLength={templateTextLength}
             {...(timeoutReasonError === undefined ? {} : { error: timeoutReasonError })}
-            countLabel={(count, maximum) => `${String(count)} / ${String(maximum)}`}
+            countLabel={(count, maximum) => formatCharacterCount(count, maximum, resolvedLanguage)}
             disabled={!canManageContent || pending}
             onChange={(reason) => {
               const timeoutAction = draft.timeoutAction;
@@ -1052,7 +1055,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
     />
     <div className="text-command-editor__scroll">
       {canManageContent ? null : <RuleNote>{labels.managementLocked}</RuleNote>}
-      <Section title={labels.triggerSection} headingAction={<div className="text-command-section-rule">
+      <Section title={labels.triggerSection} className="text-command-trigger-section" headingAction={<div className="text-command-section-rule">
         <span className="ui-section__rule" aria-hidden="true" />
         {registeredVariableStatus}
       </div>}>{triggerFields}</Section>
@@ -1319,10 +1322,9 @@ const TextCommandsPanelContent = ({
           : command.text.trim().length > 0 ? command.text : command.kind === "list" ? labels.kindHints.list : labels.noResponse;
         const aliases = command.aliases.map((alias) => `!${alias}`).join(", ");
         const summary = aliases.length > 0 ? aliases : response.split(/\r?\n/u)[0] ?? labels.noResponse;
-        const usedModules = modulesUsedByCommand(command, registeredVariables).filter((moduleId) => !isSystemTemplateModuleId(moduleId));
         const kindBadge = command.variableAction !== null
           ? labels.variableBadge
-          : usedModules.length > 0 ? moduleLabels.get(usedModules[0] ?? "") ?? labels.kindLabels[command.kind] : labels.kindLabels[command.kind];
+          : labels.kindLabels[command.kind];
         return <button
           key={command.name}
           ref={rowRef(command.name)}
@@ -1335,7 +1337,7 @@ const TextCommandsPanelContent = ({
           <span className="text-command-row__copy">
             <span className="text-command-row__top">
               <strong className="mono">!{command.name}</strong>
-              <Badge tone={command.variableAction !== null || usedModules.length > 0 ? "green" : "neutral"}>{kindBadge}</Badge>
+              <Badge tone="neutral">{kindBadge}</Badge>
             </span>
             <span className="text-command-row__response" title={summary}>{summary}</span>
           </span>

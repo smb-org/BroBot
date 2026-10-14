@@ -326,7 +326,7 @@ test("a long field error wraps in full instead of truncating at 390px", async ({
   await page.goto("/tests/e2e/layout-fixture.html?longError=1");
   await expect(page.getByRole("textbox", { name: "Name" })).toBeVisible();
   await page.getByRole("button", { name: "Toggle issues" }).click();
-  for (const selector of [".ui-field > .ui-field__error > .ui-truncated-text", ".ui-template-text-field .mantine-InputWrapper-error .ui-truncated-text"]) {
+  for (const selector of [".ui-field > .ui-field__error > .ui-truncated-text", ".ui-template-text-field__helper-error .ui-truncated-text"]) {
     const copy = page.locator(selector).first();
     await expect(copy).toBeVisible();
     const state = await copy.evaluate((element) => {

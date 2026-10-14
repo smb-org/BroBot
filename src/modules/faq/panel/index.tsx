@@ -32,6 +32,7 @@ import { renderTemplate, type ModulePanelProperties } from "../../contract";
 import type { FaqEntry, FaqGame } from "../contracts";
 import { FAQ_ANSWER_MAX_LENGTH, FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_MINIMUM_TIERS, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH, FAQ_USER_COOLDOWN_MAXIMUM_SECONDS } from "../contracts";
 import { faqMatcherValidationError, matchFaqMatcher } from "../domain";
+import { formatCharacterCount } from "../../../dashboard/ui/text-length";
 import { inputFromDraft, matcherFromDraft, type FaqDraft } from "./draft";
 import { faqMatcherValidationReasonText, faqTexts } from "./locale";
 import {
@@ -122,6 +123,7 @@ export default function FaqPanel(properties: ModulePanelProperties): ReactElemen
 
 function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelProperties): ReactElement {
   const labels = faqTexts(language);
+  const characterCount = (count: number, maximum: number): string => formatCharacterCount(count, maximum, language ?? "de");
   const channelSettings = useChannelSettings(channelId);
   const queryClient = useDashboardQueryClient();
   const query = useModuleQuery(channelId, "faq", "panel", (signal) => loadFaqPanel(channelId, signal));
@@ -425,7 +427,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
                 value={draft.name}
                 onChange={(name) => { patchDraft({ name }); }}
                 maxLength={FAQ_ENTRY_NAME_MAX_LENGTH}
-                countLabel={(count, maximum) => `${String(count)}/${String(maximum)}`}
+                countLabel={characterCount}
                 disabled={!canManage || saving}
                 required
               />
@@ -462,7 +464,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
                 value={draft.patterns}
                 onChange={(patterns) => { patchDraft({ patterns }); }}
                 maxLength={FAQ_PATTERN_MAX_LENGTH}
-                countLabel={(count, maximum) => `${String(count)}/${String(maximum)}`}
+                countLabel={characterCount}
                 {...(matcherError === undefined ? {} : { error: matcherError })}
                 mono
                 disabled={!canManage || saving}
@@ -476,7 +478,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
                 id="faq-sample-message"
                 className="faq-panel__sample-message"
                 maxLength={500}
-                countLabel={(count, maximum) => `${String(count)}/${String(maximum)}`}
+                countLabel={characterCount}
                 disabled={saving}
               />
               <div className="faq-panel__sample-result" data-testid="faq-test-result-slot" aria-live="polite" role={matcherError === undefined ? "status" : "alert"}>

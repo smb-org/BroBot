@@ -5,6 +5,7 @@ import type { TextCommandKind, TextCommandMinimumTier, TextCommandResponseType, 
 import type { ChipsInputMessages, TemplateTextFieldMessages } from "../../../dashboard/ui";
 import type { PanelTemplateWarning } from "../contract";
 import type { GameMultiSelectMessages } from "../../../dashboard/ui";
+import { formatCharacterCount, formatCharacterTotal } from "../../../dashboard/ui/text-length";
 
 export interface TextCommandsTexts {
   title: string;
@@ -159,8 +160,8 @@ export interface TextCommandsTexts {
 
 const templateMessages: LocaleCatalog<TemplateTextFieldMessages> = {
   de: {
-    countLabel: (count, maximum) => `${String(count)} von ${String(maximum)} Zeichen`,
-    previewCountLabel: (count) => `${String(count)} Zeichen`,
+    countLabel: (count, maximum) => formatCharacterCount(count, maximum, "de"),
+    previewCountLabel: (count) => formatCharacterTotal(count, "de"),
     openBrace: "Offene Variable: Schließe die geschweifte Klammer mit } ab.",
     unknownVariable: (name, suggestion) => suggestion === null
       ? `Unbekannte Variable {${name}}.`
@@ -175,8 +176,8 @@ const templateMessages: LocaleCatalog<TemplateTextFieldMessages> = {
     },
   },
   en: {
-    countLabel: (count, maximum) => `${String(count)} of ${String(maximum)} characters`,
-    previewCountLabel: (count) => `${String(count)} characters`,
+    countLabel: (count, maximum) => formatCharacterCount(count, maximum, "en"),
+    previewCountLabel: (count) => formatCharacterTotal(count, "en"),
     openBrace: "Unclosed variable: add a closing brace }.",
     unknownVariable: (name, suggestion) => suggestion === null
       ? `Unknown variable {${name}}.`
