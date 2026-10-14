@@ -28,6 +28,8 @@ export interface ChipsInputProps {
   messages: ChipsInputMessages;
   listLabel: string;
   max?: number;
+  /** Use commas/newlines so entries may contain spaces, as in FAQ phrases. */
+  separator?: "whitespace" | "comma";
 }
 
 const normalizeEntry = (entry: string, stripPrefix: string | undefined, normalize: ((entry: string) => string) | undefined): string => {
@@ -36,7 +38,7 @@ const normalizeEntry = (entry: string, stripPrefix: string | undefined, normaliz
   return next;
 };
 
-export function ChipsInput({ id: suppliedId, label, values, onChange, placeholder, hint, error, warning, invalidValues = [], stripPrefix, normalize, validate, removeLabel, disabled = false, messages, listLabel, max }: ChipsInputProps) {
+export function ChipsInput({ id: suppliedId, label, values, onChange, placeholder, hint, error, warning, invalidValues = [], stripPrefix, normalize, validate, removeLabel, disabled = false, messages, listLabel, max, separator = "whitespace" }: ChipsInputProps) {
   const generatedId = useId();
   const id = suppliedId ?? generatedId;
   const disabledReason = useDisabledFieldReason();
@@ -50,6 +52,8 @@ export function ChipsInput({ id: suppliedId, label, values, onChange, placeholde
   const errorId = `${id}-error`;
   const warningId = `${id}-warning`;
   const prefixed = (entry: string): string => `${stripPrefix ?? ""}${entry}`;
+  const splitEntries = (value: string): string[] => value.split(separator === "comma" ? /[,\n]+/u : /[ ,]+/u);
+  const containsSeparator = (value: string): boolean => separator === "comma" ? /[,\n]/u.test(value) : /[ ,]/u.test(value);
 
   const commitEntries = (entries: readonly string[], remainder = ""): void => {
     const nextValues = [...values];
@@ -79,31 +83,31 @@ export function ChipsInput({ id: suppliedId, label, values, onChange, placeholde
   };
 
   const add = (): void => {
-    commitEntries(draft.split(/[ ,]+/u));
+    commitEntries(splitEntries(draft));
   };
 
   const handleDraftChange = (next: string): void => {
-    const entries = next.split(/[ ,]+/u);
+    const entries = splitEntries(next);
     if (entries.length === 1) {
       setDraft(next);
       setValidationError(null);
       setDuplicateWarning(null);
       return;
     }
-    const trailingSeparator = /[ ,]$/u.test(next);
+    const trailingSeparator = separator === "comma" ? /[,\n]$/u.test(next) : /[ ,]$/u.test(next);
     const remainder = trailingSeparator ? "" : entries.pop() ?? "";
     commitEntries(entries, remainder);
   };
 
   const handlePaste = (event: ClipboardEvent<HTMLInputElement>): void => {
     const pasted = event.clipboardData.getData("text");
-    if (!/[ ,]/u.test(pasted)) return;
+    if (!containsSeparator(pasted)) return;
     event.preventDefault();
     const input = event.currentTarget;
     const start = input.selectionStart ?? draft.length;
     const end = input.selectionEnd ?? start;
     const next = `${draft.slice(0, start)}${pasted}${draft.slice(end)}`;
-    commitEntries(next.split(/[ ,]+/u));
+    commitEntries(splitEntries(next));
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {

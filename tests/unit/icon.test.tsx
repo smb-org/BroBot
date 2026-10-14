@@ -48,6 +48,7 @@ const iconNames: Readonly<Record<IconName, true>> = {
   cause: true,
   edit: true,
   more: true,
+  drag: true,
   token: true,
   variable: true,
 };

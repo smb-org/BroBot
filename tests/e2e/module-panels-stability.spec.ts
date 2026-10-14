@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { ChatVoteTemplate } from "../../src/modules/chat_voting/contracts";
+import type { FaqEntry } from "../../src/modules/faq/contracts";
 
 const routeJson = async (page: Page, path: string, value: unknown, method?: string): Promise<void> => {
   await page.route(`**${path}`, async (route) => {
@@ -273,7 +274,7 @@ test("votekick loading sections reserve their populated structure", async ({ pag
 
 test("FAQ game search opens on its first click and narrow chat controls stay readable", async ({ page }) => {
   await routeJson(page, "/api/channels/channel-a/modules/faq/entries", { entries: [{
-    id: "faq-416", name: "Example", enabled: true, matcher: { type: "keywords", patterns: ["hello"] }, answerText: "Hello",
+    id: "faq-416", name: "Example", enabled: true, matcher: { type: "keywords", patterns: ["hello"] }, answerText: "Hello", minimumTier: "everyone",
     cooldownSeconds: 30, userCooldownSeconds: 0, games: [], chatTarget: null, order: 0, revision: 1,
     lastUsedAt: null, createdAt: "2030-01-01T12:00:00.000Z", updatedAt: "2030-01-01T12:00:00.000Z",
   }] });
@@ -287,7 +288,7 @@ test("FAQ game search opens on its first click and narrow chat controls stay rea
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await gotoPanel(page, "faq", "en");
-  await page.getByRole("button", { name: /edit/i }).first().click();
+  await page.getByRole("switch", { name: "Games" }).click();
 
   const gameSearch = page.getByRole("searchbox", { name: "Games" });
   await gameSearch.click();
@@ -327,11 +328,15 @@ test("FAQ game search opens on its first click and narrow chat controls stay rea
 test("FAQ game limit explains the cap without shifting the fields below it", async ({ page }) => {
   const games = Array.from({ length: 9 }, (_, index) => ({ id: `game-${String(index + 1)}`, name: `Game ${String(index + 1)}` }));
   await routeJson(page, "/api/channels/channel-a/modules/faq/entries", { entries: [{
-    id: "faq-limit-416", name: "Full game list", enabled: true, matcher: { type: "keywords", patterns: ["hello"] }, answerText: "Hello",
+    id: "faq-limit-416", name: "Full game list", enabled: true, matcher: { type: "keywords", patterns: ["hello"] }, answerText: "Hello", minimumTier: "everyone",
     cooldownSeconds: 30, userCooldownSeconds: 0, games, chatTarget: "source_only", order: 0, revision: 1,
     lastUsedAt: null, createdAt: "2030-01-01T12:00:00.000Z", updatedAt: "2030-01-01T12:00:00.000Z",
   }] });
   await routeJson(page, "/api/channels/channel-a/template-variables", { variables: [] });
+  await routeJson(page, "/api/channels/channel-a/settings", {
+    timeZone: "UTC", revision: 1, location: null, locationRevision: 1,
+    defaultChatTarget: "source_only", defaultChatTargetRevision: 1,
+  });
   await page.route("**/api/channels/channel-a/games*", async (route) => {
     const url = new URL(route.request().url());
     const results = url.searchParams.has("ids") ? [] : [{ id: "game-10", name: "Game Ten" }];
@@ -339,20 +344,14 @@ test("FAQ game limit explains the cap without shifting the fields below it", asy
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await gotoPanel(page, "faq", "en");
-  await page.getByRole("button", { name: /edit/i }).first().click();
 
-  const dialog = page.getByRole("dialog").last();
-  const limitMessage = dialog.locator(".ui-game-multi-select__limit-message");
-  const target = dialog.getByRole("button", { name: "Chat target", exact: true });
+  const limitMessage = page.locator(".ui-game-multi-select__limit-message");
+  const target = page.getByRole("button", { name: "Chat target", exact: true });
   const messageBefore = await limitMessage.boundingBox();
-  const targetOffset = async (): Promise<number> => target.evaluate((element) => {
-    let offset = element.getBoundingClientRect().top + window.scrollY;
-    let ancestor = element.parentElement;
-    while (ancestor !== null) {
-      offset += ancestor.scrollTop;
-      ancestor = ancestor.parentElement;
-    }
-    return offset;
+  const targetOffset = async () => target.evaluate((element) => {
+    const detail = element.closest(".collection-page__detail");
+    if (!(detail instanceof HTMLElement)) throw new Error("The FAQ detail scroll region is missing.");
+    return element.getBoundingClientRect().top - detail.getBoundingClientRect().top + detail.scrollTop;
   });
   const targetBefore = await targetOffset();
   await page.getByRole("searchbox", { name: "Games" }).click();
@@ -396,7 +395,7 @@ test("text command switch and role inclusion fit their narrow and desktop layout
   await expect(page.locator(".ui-role-threshold > .ui-locked-reason--reserved")).toHaveCount(0);
 });
 
-test("timer and FAQ dialogs submit from Enter", async ({ page }) => {
+test("timer dialog submits from Enter", async ({ page }) => {
   const variables = { variables: [{ name: "text.greeting", moduleId: "text_library", isTextBlock: true }] };
   await routeJson(page, "/api/csrf", { token: "csrf" });
   await routeJson(page, "/api/channels/channel-a/template-variables", variables);
@@ -420,118 +419,69 @@ test("timer and FAQ dialogs submit from Enter", async ({ page }) => {
   await expect(timerDialog.locator("form")).toBeAttached();
   await timerDialog.getByRole("textbox", { name: "Name" }).press("Enter");
   await expect.poll(() => timerCreated).toBe(true);
-
-  let faqCreated = false;
-  await page.route("**/api/channels/channel-a/modules/faq/entries", async (route) => {
-    if (route.request().method() !== "POST") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: [] }) });
-    faqCreated = true;
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entry: {
-      id: "faq-created", name: "Greeting", enabled: true, matcher: { type: "keywords", patterns: ["hello"] },
-      answerText: "Hello, chat!", cooldownSeconds: 30, userCooldownSeconds: 0, games: [], chatTarget: "source_only", order: 0, revision: 1,
-      lastUsedAt: null, createdAt: "2030-01-01T12:00:00.000Z", updatedAt: "2030-01-01T12:00:00.000Z",
-    } }) });
-  });
-  await gotoPanel(page, "faq");
-  await page.getByRole("button", { name: "Create FAQ entry" }).click();
-  const faqDialog = page.getByRole("dialog", { name: "Create entry" });
-  await faqDialog.getByRole("textbox", { name: "Name" }).fill("Greeting");
-  await faqDialog.getByRole("textbox", { name: "Keywords and phrases" }).fill("hello");
-  await faqDialog.getByRole("textbox", { name: "Answer" }).fill("Hello, chat!");
-  await expect(faqDialog.locator("form")).toBeAttached();
-  await faqDialog.getByRole("textbox", { name: "Name" }).press("Enter");
-  await expect.poll(() => faqCreated).toBe(true);
 });
 
-test("FAQ dialog Save stays clickable at the bottom of a scrolled long form", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 480 });
-  let saved = false;
-  await routeJson(page, "/api/csrf", { token: "csrf" });
-  await routeJson(page, "/api/channels/channel-a/template-variables", { variables: [] });
-  await page.route("**/api/channels/channel-a/modules/faq/entries", async (route) => {
-    if (route.request().method() !== "POST") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: [] }) });
-    saved = true;
-    await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "invalid" }) });
-  });
-  await gotoPanel(page, "faq");
-  await page.getByRole("button", { name: "Create FAQ entry" }).click();
-  const dialog = page.getByRole("dialog", { name: "Create entry" });
-  await dialog.getByRole("textbox", { name: "Name" }).fill("Greeting");
-  await dialog.getByRole("textbox", { name: "Keywords and phrases" }).fill("hello");
-  await dialog.getByRole("textbox", { name: "Answer" }).fill("Hello, chat!");
-  const save = dialog.getByRole("button", { name: "Save" });
-  // Walk the last 60px of scroll: the empty error slot passes behind the sticky footer.
-  for (const offset of [60, 40, 20, 0]) {
-    await dialog.locator(".ui-dialog__body").evaluate((body, back) => { body.scrollTop = body.scrollHeight - body.clientHeight - back; }, offset);
-    const topmostIsSave = await save.evaluate((button) => {
-      const rect = button.getBoundingClientRect();
-      return document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)?.closest("button") === button;
-    });
-    expect(topmostIsSave).toBe(true);
-  }
-  await save.click();
-  await expect.poll(() => saved).toBe(true);
-});
-
-test("FAQ dialog save error stays visible in the footer while scrolled to the top", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 480 });
-  await routeJson(page, "/api/csrf", { token: "csrf" });
-  await routeJson(page, "/api/channels/channel-a/template-variables", { variables: [] });
-  await page.route("**/api/channels/channel-a/modules/faq/entries", async (route) => {
-    if (route.request().method() !== "POST") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: [] }) });
-    await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "invalid" }) });
-  });
-  await gotoPanel(page, "faq");
-  await page.getByRole("button", { name: "Create FAQ entry" }).click();
-  const dialog = page.getByRole("dialog", { name: "Create entry" });
-  await dialog.getByRole("textbox", { name: "Name" }).fill("Greeting");
-  await dialog.getByRole("textbox", { name: "Keywords and phrases" }).fill("hello");
-  await dialog.getByRole("textbox", { name: "Answer" }).fill("Hello, chat!");
-  const footer = dialog.locator(".ui-form-dialog__footer");
-  const footerBefore = await footer.boundingBox();
-  await dialog.getByRole("button", { name: "Save" }).click();
-  const error = footer.locator(".form-error");
-  await expect(error).toBeVisible();
-  await dialog.locator(".ui-dialog__body").evaluate((body) => { body.scrollTop = 0; });
-  const topmost = await error.evaluate((element) => {
-    const rect = element.getBoundingClientRect();
-    return document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)?.closest(".form-error") === element;
-  });
-  expect(topmost).toBe(true);
-  expect(await footer.boundingBox()).toEqual(footerBefore);
-  const saveClickable = await dialog.getByRole("button", { name: "Save" }).evaluate((button) => {
-    const rect = button.getBoundingClientRect();
-    return document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)?.closest("button") === button;
-  });
-  expect(saveClickable).toBe(true);
-});
-
-test("FAQ pattern error renders in its reserved slot without moving the Answer field", async ({ page }) => {
+test("FAQ collection tests the draft, saves explicitly, and undoes an immediate priority move", async ({ page }) => {
   const stamp = "2030-01-01T12:00:00.000Z";
-  const entry = {
-    id: "faq-regex", name: "Schedule", enabled: true, matcher: { type: "regex", pattern: "when" }, answerText: "Mon-Fri",
-    cooldownSeconds: 30, userCooldownSeconds: 0, games: [], chatTarget: "source_only", order: 0, revision: 1,
-    lastUsedAt: null, createdAt: stamp, updatedAt: stamp,
-  };
+  let entries: FaqEntry[] = [
+    {
+      id: "faq-a", name: "Greeting", enabled: true, matcher: { type: "keywords", patterns: ["hello"] }, answerText: "Hello!",
+      minimumTier: "everyone", cooldownSeconds: 30, userCooldownSeconds: 0, games: [], chatTarget: "source_only", order: 0, revision: 1,
+      lastUsedAt: null, createdAt: stamp, updatedAt: stamp,
+    },
+    {
+      id: "faq-b", name: "Support", enabled: true, matcher: { type: "keywords", patterns: ["support"] }, answerText: "Ask a moderator.",
+      minimumTier: "everyone", cooldownSeconds: 30, userCooldownSeconds: 0, games: [], chatTarget: "source_only", order: 1, revision: 1,
+      lastUsedAt: null, createdAt: stamp, updatedAt: stamp,
+    },
+  ];
+  let orderWrites = 0;
   await routeJson(page, "/api/csrf", { token: "csrf" });
-  await routeJson(page, "/api/channels/channel-a/template-variables", { variables: [] });
-  await routeJson(page, "/api/channels/channel-a/modules/faq/entries", { entries: [entry] });
-  await page.route("**/api/channels/channel-a/modules/faq/entries/faq-regex*", async (route) => {
-    if (route.request().method() === "GET") return route.fallback();
-    await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "faq_matcher_invalid", path: "matcher.pattern", reasonCode: "faq_regex_invalid", reason: "missing closing ): `(foo`" }) });
+  await routeJson(page, "/api/channels/channel-a/settings", {
+    timeZone: "UTC", revision: 1, location: null, locationRevision: 1,
+    defaultChatTarget: "source_only", defaultChatTargetRevision: 1,
   });
-  await gotoPanel(page, "faq");
-  await page.getByRole("button", { name: /edit/i }).first().click();
-  const dialog = page.getByRole("dialog", { name: "Edit entry" });
-  const pattern = dialog.getByRole("textbox", { name: "RE2 pattern" });
-  const answer = dialog.getByRole("textbox", { name: "Answer" });
-  await pattern.fill("(foo");
-  const gap = async (): Promise<number> => (await box(answer)).y - (await box(pattern)).y;
-  const before = await gap();
-  const saveButton = dialog.getByRole("button", { name: "Save" });
-  await saveButton.press("Enter");
-  await expect(dialog.getByText("The RE2 pattern is invalid or uses unsupported syntax.")).toBeVisible();
-  // Sub-pixel settling is tolerated; the pre-fix shift was ~40px.
-  expect(Math.abs(await gap() - before)).toBeLessThan(2);
+  await routeJson(page, "/api/channels/channel-a/template-variables", { variables: [] });
+  await page.route("**/api/channels/channel-a/modules/faq/entries", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries }) });
+      return;
+    }
+    await route.fallback();
+  });
+  await page.route("**/api/channels/channel-a/modules/faq/entries/faq-a", async (route) => {
+    if (route.request().method() !== "PATCH") return route.fallback();
+    const body = route.request().postDataJSON() as { answerText: string };
+    entries = entries.map((entry) => entry.id === "faq-a" ? { ...entry, answerText: body.answerText, revision: entry.revision + 1 } : entry);
+    const entry = entries.find((candidate) => candidate.id === "faq-a");
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entry }) });
+  });
+  await page.route("**/api/channels/channel-a/modules/faq/entries/order", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    orderWrites += 1;
+    const body = route.request().postDataJSON() as { order: { id: string; revision: number }[] };
+    entries = body.order.map(({ id }, order) => {
+      const entry = entries.find((candidate) => candidate.id === id);
+      if (entry === undefined) throw new Error(`Missing FAQ fixture entry ${id}.`);
+      return { ...entry, order, revision: entry.revision + (entry.order === order ? 0 : 1) };
+    });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries }) });
+  });
+
+  await gotoPanel(page, "faq", "en");
+  const sample = page.getByRole("textbox", { name: "Test a sample message" });
+  await sample.fill("hello everyone");
+  await expect(page.locator(".faq-panel__sample-result")).toHaveText("Matched by “hello”.");
+  await page.getByRole("textbox", { name: "Answer", exact: true }).fill("Welcome to the channel!");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
+
+  await page.getByRole("button", { name: "Greeting hello", exact: true }).press("Alt+ArrowDown");
+  await expect.poll(() => orderWrites).toBe(1);
+  await expect(page.getByRole("button", { name: "Undo" })).toBeVisible();
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect.poll(() => orderWrites).toBe(2);
+  expect(entries.map(({ id }) => id)).toEqual(["faq-a", "faq-b"]);
 });
 
 test("BELABOX immediate action keeps manual results separate from live notices", async ({ page }) => {

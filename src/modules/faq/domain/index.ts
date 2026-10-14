@@ -6,8 +6,11 @@ import {
   type FaqEntry,
   type FaqMatch,
   type FaqMatchResult,
+  type FaqMatcher,
+  type FaqMinimumTier,
   type FaqMutationMatcher,
 } from "../contracts";
+import type { ModuleChatStatus } from "../../contract";
 
 /** An entry whose pattern matched the text but was excluded by the game filter. */
 interface FaqSkippedMatch {
@@ -27,6 +30,11 @@ export interface PreparedFaqMatcher {
 type PreparedFaqPattern =
   | { type: "keywords"; source: string; normalized: string }
   | { type: "regex"; source: string; compiled: ReturnType<typeof RE2JS.compile> };
+
+export interface FaqPatternTestResult {
+  reason: "matched" | "no_match" | "command_prefix";
+  matchedPattern?: string;
+}
 
 export interface FaqMatcherValidationError {
   path: "matcher.pattern" | "matcher.patterns";
@@ -84,25 +92,24 @@ const hasWholeWordOccurrence = (message: string, pattern: string): boolean => {
   return false;
 };
 
+const preparePatterns = (matcher: FaqMatcher): PreparedFaqPattern[] => matcher.type === "keywords"
+  ? matcher.patterns.flatMap((source): PreparedFaqPattern[] => {
+    const normalized = normalizeFaqText(source);
+    return normalized.length === 0 ? [] : [{ type: "keywords", source, normalized }];
+  })
+  : (() => {
+    if (matcher.pattern.trim().length === 0) return [];
+    try {
+      return [{ type: "regex", source: matcher.pattern, compiled: RE2JS.compile(matcher.pattern) }];
+    } catch {
+      return [];
+    }
+  })();
+
 export const prepareFaqMatchers = (entries: readonly FaqEntry[]): PreparedFaqMatcher[] => entries
   .filter((entry) => entry.enabled)
   .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id))
-  .map((entry) => ({
-    entry,
-    patterns: entry.matcher.type === "keywords"
-      ? entry.matcher.patterns.flatMap((source): PreparedFaqPattern[] => {
-        const normalized = normalizeFaqText(source);
-        return normalized.length === 0 ? [] : [{ type: "keywords", source, normalized }];
-      })
-      : (() => {
-        if (entry.matcher.pattern.trim().length === 0) return [];
-        try {
-          return [{ type: "regex", source: entry.matcher.pattern, compiled: RE2JS.compile(entry.matcher.pattern) }];
-        } catch {
-          return [];
-        }
-      })(),
-  }));
+  .map((entry) => ({ entry, patterns: preparePatterns(entry.matcher) }));
 
 export const hasCommandPrefix = (message: string): boolean => message.trimStart().split(/\s/u)[0]?.startsWith("!") === true;
 
@@ -111,10 +118,31 @@ const patternMatches = (message: string, normalizedMessage: string, pattern: Pre
     ? pattern.compiled.test(message)
     : hasWholeWordOccurrence(normalizedMessage, pattern.normalized);
 
-export const firstFaqMatch = (prepared: readonly PreparedFaqMatcher[], message: string): FaqMatchResult => {
+export const matchFaqMatcher = (matcher: FaqMatcher, message: string): FaqPatternTestResult => {
+  if (hasCommandPrefix(message)) return { reason: "command_prefix" };
+  const normalizedMessage = normalizeFaqText(message);
+  const matchedPattern = preparePatterns(matcher).find((pattern) => patternMatches(message, normalizedMessage, pattern));
+  return matchedPattern === undefined
+    ? { reason: "no_match" }
+    : { reason: "matched", matchedPattern: matchedPattern.source };
+};
+
+const minimumTierStatuses: Readonly<Record<FaqMinimumTier, readonly ModuleChatStatus[]>> = {
+  everyone: ["viewer", "subscriber", "vip", "moderator", "broadcaster"],
+  subscriber: ["subscriber", "moderator", "broadcaster"],
+  vip: ["vip", "moderator", "broadcaster"],
+  moderator: ["moderator", "broadcaster"],
+  broadcaster: ["broadcaster"],
+};
+
+const statusMeetsMinimumTier = (status: readonly ModuleChatStatus[] | null, minimumTier: FaqMinimumTier): boolean =>
+  minimumTier === "everyone" || (status !== null && status.some((value) => minimumTierStatuses[minimumTier].includes(value)));
+
+export const firstFaqMatch = (prepared: readonly PreparedFaqMatcher[], message: string, chatStatus: readonly ModuleChatStatus[] | null = null): FaqMatchResult => {
   if (hasCommandPrefix(message)) return { match: null, reason: "command_prefix" };
   const normalizedMessage = normalizeFaqText(message);
   for (const matcher of prepared) {
+    if (!statusMeetsMinimumTier(chatStatus, matcher.entry.minimumTier)) continue;
     for (const pattern of matcher.patterns) {
       if (patternMatches(message, normalizedMessage, pattern)) {
         const match: FaqMatch = { entry: matcher.entry, matchedPattern: pattern.source };
@@ -128,22 +156,18 @@ export const firstFaqMatch = (prepared: readonly PreparedFaqMatcher[], message: 
 const isEligibleForGame = (entry: FaqEntry, gameId: string | null): boolean =>
   entry.games.length === 0 || (gameId !== null && entry.games.some((game) => game.id === gameId));
 
-/**
- * The one place both live chat (`processFaqMessage`) and the panel tester
- * pick a match, so a restricted entry can never match in the tester and stay
- * silent in chat (or the reverse). Unlike `firstFaqMatch`, an entry whose
- * pattern matched but was excluded by the game filter is recorded rather
- * than silently skipped, so the tester can explain why it didn't win.
- */
+/** Selects the first entry that matches both its role and game restrictions. */
 export const selectFaqMatch = (
   prepared: readonly PreparedFaqMatcher[],
   message: string,
   gameId: string | null,
+  chatStatus: readonly ModuleChatStatus[] | null = null,
 ): FaqSelection => {
   if (hasCommandPrefix(message)) return { match: null, reason: "command_prefix", skippedByGame: [] };
   const normalizedMessage = normalizeFaqText(message);
   const skippedByGame: FaqSkippedMatch[] = [];
   for (const matcher of prepared) {
+    if (!statusMeetsMinimumTier(chatStatus, matcher.entry.minimumTier)) continue;
     for (const pattern of matcher.patterns) {
       if (!patternMatches(message, normalizedMessage, pattern)) continue;
       if (isEligibleForGame(matcher.entry, gameId)) {

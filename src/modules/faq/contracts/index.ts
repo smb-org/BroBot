@@ -10,6 +10,9 @@ export const FAQ_COOLDOWN_MAXIMUM_SECONDS = 86_400;
 export const FAQ_COOLDOWN_MINIMUM_SECONDS = 30;
 export const FAQ_USER_COOLDOWN_MAXIMUM_SECONDS = 86_400;
 export const FAQ_GAME_MAXIMUM_COUNT = 10;
+export const FAQ_MINIMUM_TIERS = ["everyone", "subscriber", "vip", "moderator", "broadcaster"] as const;
+
+export type FaqMinimumTier = typeof FAQ_MINIMUM_TIERS[number];
 
 export type FaqMatcher =
   | { type: "keywords"; patterns: readonly string[] }
@@ -29,6 +32,7 @@ export interface FaqEntry {
   enabled: boolean;
   matcher: FaqMatcher;
   answerText: string;
+  minimumTier: FaqMinimumTier;
   cooldownSeconds: number;
   userCooldownSeconds: number;
   games: readonly FaqGame[];
@@ -42,8 +46,10 @@ export interface FaqEntry {
 
 export interface FaqMutationInput {
   name: string;
+  enabled: boolean;
   matcher: FaqMutationMatcher;
   answerText: string;
+  minimumTier: FaqMinimumTier;
   cooldownSeconds: number;
   userCooldownSeconds: number;
   games: readonly FaqGame[];

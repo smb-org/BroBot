@@ -1,4 +1,4 @@
-import type { FaqEntry, FaqGame, FaqMatcher } from "../contracts";
+import type { FaqEntry, FaqGame, FaqMatcher, FaqMinimumTier } from "../contracts";
 import type { FaqRepository, FaqClaimResult } from "../repository";
 import { prepareFaqMatchers } from "../domain";
 import type { PreparedFaqMatcher } from "../domain";
@@ -13,6 +13,7 @@ export interface FaqEntryRow {
   matcher_type: string;
   matcher_json: string;
   answer_text: string;
+  minimum_tier: FaqMinimumTier;
   cooldown_seconds: number;
   user_cooldown_seconds: number;
   games_json: string;
@@ -73,6 +74,7 @@ export const mapFaqEntryRow = (row: FaqEntryRow): FaqEntry => ({
   enabled: row.enabled === 1,
   matcher: matcherFrom(row.matcher_type, row.matcher_json),
   answerText: row.answer_text,
+  minimumTier: row.minimum_tier,
   cooldownSeconds: row.cooldown_seconds,
   userCooldownSeconds: row.user_cooldown_seconds,
   games: gamesFrom(row.games_json),
@@ -84,7 +86,7 @@ export const mapFaqEntryRow = (row: FaqEntryRow): FaqEntry => ({
   updatedAt: row.updated_at,
 });
 
-const selectFaqEntries = `SELECT faq_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds, user_cooldown_seconds,
+const selectFaqEntries = `SELECT faq_id, name, enabled, matcher_type, matcher_json, answer_text, minimum_tier, cooldown_seconds, user_cooldown_seconds,
                                  games_json, chat_target, use_channel_default_target, sort_order, revision, last_used_at, created_at, updated_at
                             FROM faq_entries
                            WHERE channel_id = ?`;

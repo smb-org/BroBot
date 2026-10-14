@@ -1,23 +1,31 @@
 import { templateTextLength } from "../../../contracts/template-text-length";
-import type { FaqEntry, FaqGame, FaqMatcher, FaqMutationInput } from "../contracts";
+import type { FaqEntry, FaqGame, FaqMatcher, FaqMutationInput, FaqMinimumTier } from "../contracts";
 import { FAQ_ANSWER_MAX_LENGTH, FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH, FAQ_USER_COOLDOWN_MAXIMUM_SECONDS } from "../contracts";
 
 export interface FaqDraft {
   name: string;
+  enabled: boolean;
   matcherType: FaqMatcher["type"];
   patterns: string;
   answerText: string;
+  minimumTier: FaqMinimumTier;
   cooldownSeconds: number | "";
   userCooldownSeconds: number | "";
   games: FaqGame[];
+  restrictGames: boolean;
   chatTarget: FaqEntry["chatTarget"];
 }
 
-export const inputFromDraft = (draft: FaqDraft): FaqMutationInput | null => {
+export const matcherFromDraft = (draft: FaqDraft): FaqMutationInput["matcher"] => {
   const patterns = draft.patterns.split("\n").map((pattern) => pattern.trim()).filter((pattern) => pattern.length > 0);
-  const matcher: FaqMutationInput["matcher"] = draft.matcherType === "keywords"
+  return draft.matcherType === "keywords"
     ? { type: "keywords", patterns }
     : { type: "regex", pattern: draft.patterns };
+};
+
+export const inputFromDraft = (draft: FaqDraft): FaqMutationInput | null => {
+  const matcher = matcherFromDraft(draft);
+  const patterns = draft.patterns.split("\n").map((pattern) => pattern.trim()).filter((pattern) => pattern.length > 0);
   const matcherInvalid = draft.matcherType === "keywords"
     ? patterns.length === 0 || patterns.length > FAQ_PATTERN_MAXIMUM_COUNT || patterns.some((pattern) => pattern.length > FAQ_PATTERN_MAX_LENGTH)
     : draft.patterns.trim().length === 0 || draft.patterns.length > FAQ_PATTERN_MAX_LENGTH;
@@ -25,11 +33,14 @@ export const inputFromDraft = (draft: FaqDraft): FaqMutationInput | null => {
       typeof draft.cooldownSeconds !== "number" || !Number.isInteger(draft.cooldownSeconds) ||
       draft.cooldownSeconds < FAQ_COOLDOWN_MINIMUM_SECONDS || draft.cooldownSeconds > FAQ_COOLDOWN_MAXIMUM_SECONDS ||
       typeof draft.userCooldownSeconds !== "number" || !Number.isInteger(draft.userCooldownSeconds) ||
-      draft.userCooldownSeconds < 0 || draft.userCooldownSeconds > FAQ_USER_COOLDOWN_MAXIMUM_SECONDS) return null;
+      draft.userCooldownSeconds < 0 || draft.userCooldownSeconds > FAQ_USER_COOLDOWN_MAXIMUM_SECONDS ||
+      (draft.restrictGames && draft.games.length === 0)) return null;
   return {
     name: draft.name.trim(),
+    enabled: draft.enabled,
     matcher,
     answerText: draft.answerText,
+    minimumTier: draft.minimumTier,
     cooldownSeconds: draft.cooldownSeconds,
     userCooldownSeconds: draft.userCooldownSeconds,
     games: draft.games,

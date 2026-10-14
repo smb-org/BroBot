@@ -2,7 +2,6 @@ import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
-import { moduleQueryKey } from "../../src/dashboard/data";
 import type { FaqEntry } from "../../src/modules/faq/contracts";
 import FaqPanel from "../../src/modules/faq/panel";
 import { jsonResponse } from "../unit/fixtures";
@@ -14,6 +13,7 @@ const entry: FaqEntry = {
   enabled: true,
   matcher: { type: "keywords", patterns: ["hello"] },
   answerText: "Hello there!",
+  minimumTier: "everyone",
   cooldownSeconds: 30,
   userCooldownSeconds: 0,
   games: [],
@@ -25,166 +25,64 @@ const entry: FaqEntry = {
   updatedAt: "2026-09-19T12:00:00.000Z",
 };
 
+const installPanelFetch = (handler?: (url: URL, method: string, init?: RequestInit) => Response | undefined) => {
+  const fetcher = vi.fn<typeof fetch>((input, init) => {
+    const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+    const method = init?.method ?? (input instanceof Request ? input.method : "GET");
+    const handled = handler?.(url, method, init);
+    if (handled !== undefined) return Promise.resolve(handled);
+    if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({
+      timeZone: "UTC", revision: 1, location: null, locationRevision: 1,
+      defaultChatTarget: "source_only", defaultChatTargetRevision: 1,
+    }));
+    if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
+    if (url.pathname.endsWith("/entries")) return Promise.resolve(jsonResponse({ entries: [entry] }));
+    if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+    return Promise.resolve(jsonResponse({}, 404));
+  });
+  vi.stubGlobal("fetch", fetcher);
+  return fetcher;
+};
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
 
 describe("FAQ panel", () => {
-  it("reserves the result area for FAQ match tests", async () => {
-    vi.stubGlobal("fetch", vi.fn<typeof fetch>((input) => {
-      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({
-        timeZone: "UTC", revision: 1, location: null, locationRevision: 1,
-        defaultChatTarget: "source_only", defaultChatTargetRevision: 1,
-      }));
-      if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
-      if (url.pathname.endsWith("/entries")) return Promise.resolve(jsonResponse({ entries: [] }));
-      return Promise.resolve(jsonResponse({}, 404));
-    }));
+  it("tests only the selected draft matcher and accepts multiword keyword chips", async () => {
+    const fetcher = installPanelFetch();
     renderWithQuery(<UiProvider><FaqPanel channelId="channel-a" language="de" /></UiProvider>);
 
-    expect(await screen.findByTestId("faq-test-result-slot")).toBeInTheDocument();
+    const keywordField = await screen.findByRole("textbox", { name: "Schlüsselwörter und Wortgruppen" });
+    fireEvent.change(keywordField, { target: { value: "hello there" } });
+    fireEvent.keyDown(keywordField, { key: "Enter" });
+    expect(await screen.findByRole("button", { name: "hello there entfernen" })).toBeInTheDocument();
+
+    const sampleField = screen.getByRole("textbox", { name: "Beispielnachricht testen" });
+    fireEvent.change(sampleField, { target: { value: "when do you say hello there?" } });
+    expect(screen.getByTestId("faq-test-result-slot")).toHaveTextContent("Treffer durch");
+    expect(fetcher.mock.calls.some(([input]) => (input instanceof Request ? input.url : input.toString()).includes("/test"))).toBe(false);
   });
 
-  it("sends regex matcher edits and shows server validation beside the pattern field", async () => {
-    const regexEntry: FaqEntry = { ...entry, matcher: { type: "regex", pattern: "hello" }, userCooldownSeconds: 60 };
-    const fetcher = vi.fn<typeof fetch>((input, init) => {
-      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      const method = init?.method ?? "GET";
-      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
-      if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
+  it("saves answer, enabled state, and role threshold together with the entry revision", async () => {
+    let updated: FaqEntry = entry;
+    const fetcher = installPanelFetch((url, method, init) => {
       if (url.pathname.endsWith("/entries/entry-1") && method === "PATCH") {
-        const body = typeof init?.body === "string" ? JSON.parse(init.body) as { matcher: FaqEntry["matcher"]; userCooldownSeconds: number } : null;
-        expect(body).toMatchObject({ matcher: { type: "regex", pattern: "(?=hello)" }, userCooldownSeconds: 60 });
-        return Promise.resolve(jsonResponse({
-          error: "faq_matcher_invalid",
-          path: "matcher.pattern",
-          reasonCode: "faq_regex_invalid",
-          reason: "invalid Perl operator: (?=",
-        }, 400));
+        if (typeof init?.body !== "string") throw new Error("Expected a JSON request body");
+        const body = JSON.parse(init.body) as { answerText: string; enabled: boolean; minimumTier: FaqEntry["minimumTier"]; revision: number };
+        expect(body).toMatchObject({ answerText: "Welcome to the channel!", enabled: true, minimumTier: "everyone", revision: 1 });
+        updated = { ...entry, answerText: body.answerText, revision: 2 };
+        return jsonResponse({ entry: updated });
       }
-      if (url.pathname.endsWith("/entries")) return Promise.resolve(jsonResponse({ entries: [regexEntry] }));
-      return Promise.resolve(jsonResponse({}, 404));
+      return undefined;
     });
-    vi.stubGlobal("fetch", fetcher);
-
     renderWithQuery(<UiProvider><FaqPanel channelId="channel-a" language="en" /></UiProvider>);
-    fireEvent.click(await screen.findByRole("button", { name: /Edit/u }));
-    await screen.findByRole("dialog");
-    const patternField = await screen.findByRole("textbox", { name: "RE2 pattern" });
-    fireEvent.change(patternField, { target: { value: "(?=hello)" } });
+
+    fireEvent.change(await screen.findByRole("textbox", { name: "Answer" }), { target: { value: "Welcome to the channel!" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-
-    expect(await screen.findByText("The RE2 pattern is invalid or uses unsupported syntax.")).toBeInTheDocument();
-    expect(patternField).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByRole("spinbutton", { name: "Per-person cooldown" })).toHaveValue(60);
-  });
-
-  it("keeps the existing-entry switch available to operators", async () => {
-    let enabled = true;
-    const fetcher = vi.fn<typeof fetch>((input, init) => {
-      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      const method = init?.method ?? "GET";
-      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
-      if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
-      if (url.pathname.endsWith("/entries/entry-1/enabled") && method === "PATCH") {
-        const body = typeof init?.body === "string" ? JSON.parse(init.body) as { enabled: boolean } : { enabled };
-        enabled = body.enabled;
-        return Promise.resolve(jsonResponse({ entry: { ...entry, enabled, revision: 2 } }));
-      }
-      if (url.pathname.endsWith("/entries")) return Promise.resolve(jsonResponse({ entries: [{ ...entry, enabled }] }));
-      return Promise.resolve(jsonResponse({}, 404));
-    });
-    vi.stubGlobal("fetch", fetcher);
-
-    renderWithQuery(<UiProvider><FaqPanel channelId="channel-a" language="de" canManage={false} /></UiProvider>);
-    expect(screen.getByRole("button", { name: "FAQ-Eintrag anlegen" })).toBeDisabled();
-    expect(screen.getByText("Nur Broadcaster und Verwalter dürfen FAQ-Einträge bearbeiten.")).toBeInTheDocument();
-    const enabledSwitch = await screen.findByRole("switch", { name: "Greeting: Aktiviert" });
-    expect(enabledSwitch).toBeEnabled();
-
-    fireEvent.click(enabledSwitch);
-    await waitFor(() => expect(fetcher).toHaveBeenCalledWith(
-      "/api/channels/channel-a/modules/faq/entries/entry-1/enabled",
-      expect.objectContaining({ method: "PATCH" }),
-    ));
-    expect(await screen.findByRole("switch", { name: "Greeting: Deaktiviert" })).toBeEnabled();
-  });
-
-  it("reuses warm FAQ data when the panel is mounted again", async () => {
-    const fetcher = vi.fn<typeof fetch>((input) => {
-      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({
-        timeZone: "UTC", revision: 1, location: null, locationRevision: 1,
-        defaultChatTarget: "source_only", defaultChatTargetRevision: 1,
-      }));
-      if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
-      if (url.pathname.endsWith("/entries")) return Promise.resolve(jsonResponse({ entries: [entry] }));
-      return Promise.resolve(jsonResponse({}, 404));
-    });
-    vi.stubGlobal("fetch", fetcher);
-
-    const view = renderWithQuery(
-      <UiProvider><FaqPanel channelId="channel-a" language="en" /></UiProvider>,
-      {},
-      { gcTime: 600_000, staleTime: 600_000 },
-    );
-    expect(await screen.findByText("Greeting")).toBeInTheDocument();
-    expect(fetcher).toHaveBeenCalledTimes(3);
-
-    view.rerender(<UiProvider>{null}</UiProvider>);
-    view.rerender(<UiProvider><FaqPanel channelId="channel-a" language="en" /></UiProvider>);
-
-    expect(await screen.findByText("Greeting")).toBeInTheDocument();
-    expect(fetcher).toHaveBeenCalledTimes(3);
-  });
-
-  it("keeps a committed FAQ revision when the post-save refresh fails and offers retry", async () => {
-    let enabled = true;
-    let revision = 1;
-    let entryReads = 0;
-    let refreshFails = false;
-    const fetcher = vi.fn<typeof fetch>((input, init) => {
-      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      const method = init?.method ?? "GET";
-      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
-      if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
-      if (url.pathname.endsWith("/entries/entry-1/enabled") && method === "PATCH") {
-        if (typeof init?.body !== "string") throw new Error("Expected the FAQ enable request to have a JSON body.");
-        const body = JSON.parse(init.body) as { enabled: boolean; revision: number };
-        expect(body.revision).toBe(1);
-        enabled = body.enabled;
-        revision = 2;
-        refreshFails = true;
-        return Promise.resolve(jsonResponse({ entry: { ...entry, enabled, revision } }));
-      }
-      if (url.pathname.endsWith("/entries")) {
-        entryReads += 1;
-        if (entryReads > 1 && refreshFails) return Promise.resolve(jsonResponse({ error: "temporarily unavailable" }, 503));
-        return Promise.resolve(jsonResponse({ entries: [{ ...entry, enabled, revision }] }));
-      }
-      return Promise.resolve(jsonResponse({}, 404));
-    });
-    vi.stubGlobal("fetch", fetcher);
-
-    const { queryClient } = renderWithQuery(
-      <UiProvider><FaqPanel channelId="channel-a" language="en" /></UiProvider>,
-      {},
-      { gcTime: 600_000, staleTime: 600_000 },
-    );
-    fireEvent.click(await screen.findByRole("switch", { name: "Greeting: Enabled" }));
-
-    expect(await screen.findByRole("switch", { name: "Greeting: Disabled" })).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText("FAQ entries could not be loaded.")).toBeInTheDocument());
-    expect(entryReads).toBeGreaterThan(1);
-    expect(queryClient.getQueryData<{ entries: FaqEntry[] }>(moduleQueryKey("channel-a", "faq", "panel"))?.entries[0])
-      .toMatchObject({ enabled: false, revision: 2 });
-    const retryButton = screen.getByRole("button", { name: /Retry|Erneut versuchen/u });
-    refreshFails = false;
-    fireEvent.click(retryButton);
-    await waitFor(() => expect(screen.queryByText("FAQ entries could not be loaded.")).not.toBeInTheDocument());
-    expect(screen.getByRole("switch", { name: "Greeting: Disabled" })).toBeInTheDocument();
-    expect(entryReads).toBeGreaterThan(2);
+    await waitFor(() => expect(updated.revision).toBe(2));
+    expect(fetcher).toHaveBeenCalledWith("/api/channels/channel-a/modules/faq/entries/entry-1", expect.objectContaining({ method: "PATCH" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeDisabled());
   });
 });

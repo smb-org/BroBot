@@ -1,5 +1,5 @@
 import {
-  AlertTriangle, ArrowUp, BellRing, Braces, Check, ChevronLeft, Clock, Copy, Diamond, ExternalLink, Film, Image, Info, KeyRound, Layers,
+  AlertTriangle, ArrowUp, BellRing, Braces, Check, ChevronLeft, Clock, Copy, Diamond, ExternalLink, Film, GripVertical, Image, Info, KeyRound, Layers,
   Lock, Megaphone, MessageSquareText, Minus, MoreVertical, Pause, Pencil, Play, Plus, Radio, RadioTower, RefreshCw, Search, Settings,
   SlidersHorizontal, Square, Star, Sword, Trash2, Type, User, UserMinus, UserPlus, Users, Video, Volume2, VolumeX, X,
 } from "lucide-react";
@@ -23,6 +23,7 @@ const glyphs = {
   cause: Info,
   edit: Pencil,
   more: MoreVertical,
+  drag: GripVertical,
   token: KeyRound, variable: Braces,
 } as const satisfies Record<string, LucideIcon>;
 

@@ -246,6 +246,8 @@ export function GameMultiSelect({ searchGames, lookupGames, value, onChange, mes
         </div>
         <div className="ui-game-multi-select__search">
           <input
+            data-ui=""
+            className="ui-game-multi-select__input"
             ref={inputRef}
             id={id}
             type="search"

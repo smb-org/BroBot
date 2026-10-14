@@ -1,12 +1,37 @@
-import { useCallback, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useState, type DragEvent, type KeyboardEvent, type ReactElement } from "react";
 
-import { runModuleQueryWrite, useChannelSettings, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
-import { Button, ChatTargetField, ConfirmDialog, Field, FormDialog, GameMultiSelect, InspectorSection, LoadState, LoadStateLines, UnitInput, Select, TemplateTextField, mapServerFieldErrors, notify } from "../../../dashboard/ui";
-import { Switch as SwitchPrimitive } from "../../../dashboard/ui/primitives/switch";
+import { moduleQueryKey, runModuleQueryWrite, useChannelSettings, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import {
+  Button,
+  ChatPreview,
+  ChatTargetField,
+  ChipsInput,
+  CollectionPage,
+  ConfirmDialog,
+  Field,
+  FieldPair,
+  GameMultiSelect,
+  Icon,
+  LoadState,
+  LoadStateLines,
+  PageHeader,
+  RoleThreshold,
+  RuleNote,
+  Section,
+  SegmentChoice,
+  SwitchSection,
+  TemplateTextField,
+  UnitInput,
+  mapServerFieldErrors,
+  notify,
+  registerDashboardNavigationGuard,
+  useDraftGuard,
+} from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { FaqEntry, FaqGame } from "../contracts";
-import { FAQ_ANSWER_MAX_LENGTH, FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH, FAQ_USER_COOLDOWN_MAXIMUM_SECONDS } from "../contracts";
-import { inputFromDraft, type FaqDraft } from "./draft";
+import { FAQ_ANSWER_MAX_LENGTH, FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_MINIMUM_TIERS, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH, FAQ_USER_COOLDOWN_MAXIMUM_SECONDS } from "../contracts";
+import { faqMatcherValidationError, matchFaqMatcher } from "../domain";
+import { inputFromDraft, matcherFromDraft, type FaqDraft } from "./draft";
 import { faqMatcherValidationReasonText, faqTexts } from "./locale";
 import {
   createFaqEntry,
@@ -14,40 +39,53 @@ import {
   faqErrorCode,
   loadFaqPanel,
   lookupFaqGames,
-  moveFaqEntry,
+  reorderFaqEntries,
   searchFaqGames,
-  setFaqEntryEnabled,
-  testFaqMessage,
   updateFaqEntry,
-  type FaqTestResult,
   type FaqPanelData,
 } from "./service";
+import "./panel.css";
 
-const emptyDraft = (): FaqDraft => ({ name: "", matcherType: "keywords", patterns: "", answerText: "", cooldownSeconds: FAQ_COOLDOWN_MINIMUM_SECONDS, userCooldownSeconds: 0, games: [], chatTarget: null });
+const NEW_ENTRY_ID = "__new_faq_entry__";
+
+const emptyDraft = (): FaqDraft => ({
+  name: "",
+  enabled: true,
+  matcherType: "keywords",
+  patterns: "",
+  answerText: "",
+  minimumTier: "everyone",
+  cooldownSeconds: FAQ_COOLDOWN_MINIMUM_SECONDS,
+  userCooldownSeconds: 0,
+  games: [],
+  restrictGames: false,
+  chatTarget: null,
+});
 
 const draftFromEntry = (entry: FaqEntry): FaqDraft => ({
   name: entry.name,
+  enabled: entry.enabled,
   matcherType: entry.matcher.type,
   patterns: entry.matcher.type === "keywords" ? entry.matcher.patterns.join("\n") : entry.matcher.pattern,
   answerText: entry.answerText,
+  minimumTier: entry.minimumTier,
   cooldownSeconds: entry.cooldownSeconds,
   userCooldownSeconds: entry.userCooldownSeconds,
   games: [...entry.games],
+  restrictGames: entry.games.length > 0,
   chatTarget: entry.chatTarget,
 });
 
 const faqPanelDataFrom = (value: unknown): FaqPanelData => {
   if (typeof value === "object" && value !== null && "entries" in value && "variables" in value &&
-      Array.isArray(value.entries) && Array.isArray(value.variables)) {
-    return value as FaqPanelData;
-  }
+      Array.isArray(value.entries) && Array.isArray(value.variables)) return value as FaqPanelData;
   return { entries: [], variables: [] };
 };
 
 const withFaqEntry = (current: unknown, entry: FaqEntry): FaqPanelData => {
   const data = faqPanelDataFrom(current);
-  const found = data.entries.some((candidate) => candidate.id === entry.id);
-  const entries = found
+  const exists = data.entries.some((candidate) => candidate.id === entry.id);
+  const entries = exists
     ? data.entries.map((candidate) => candidate.id === entry.id ? entry : candidate)
     : [...data.entries, entry];
   return { ...data, entries: entries.sort((left, right) => left.order - right.order) };
@@ -63,16 +101,18 @@ const withoutFaqEntry = (current: unknown, entryId: string): FaqPanelData => {
   return { ...data, entries: data.entries.filter((entry) => entry.id !== entryId) };
 };
 
-const requireBaselineRevision = (revision: number | null): number => {
-  if (revision === null) throw new Error("An existing FAQ entry requires its opening revision.");
-  return revision;
+const moveEntry = (entries: readonly FaqEntry[], from: number, to: number): FaqEntry[] => {
+  if (from < 0 || to < 0 || from >= entries.length || to >= entries.length || from === to) return [...entries];
+  const next = [...entries];
+  const [entry] = next.splice(from, 1);
+  if (entry !== undefined) next.splice(to, 0, entry);
+  return next;
 };
 
-const matchCopy = (result: FaqTestResult, labels: ReturnType<typeof faqTexts>): string => {
-  if (result.reason === "command_prefix") return labels.testCommand;
-  if (!result.matches || result.entry === undefined || result.matchedPattern === undefined) return labels.testNoMatch;
-  return labels.testMatch(result.entry.name, result.matchedPattern);
-};
+const entryPatterns = (draft: FaqDraft): string[] => draft.patterns
+  .split("\n")
+  .map((pattern) => pattern.trim())
+  .filter((pattern) => pattern.length > 0);
 
 export default function FaqPanel(properties: ModulePanelProperties): ReactElement {
   return <FaqPanelContent key={properties.channelId} {...properties} />;
@@ -84,287 +124,548 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
   const queryClient = useDashboardQueryClient();
   const query = useModuleQuery(channelId, "faq", "panel", (signal) => loadFaqPanel(channelId, signal));
   const data = query.data;
-  const loading = query.isPending;
-  const [error, setError] = useState<string | null>(null);
-  const [matcherError, setMatcherError] = useState<string | null>(null);
-  const [draft, setDraft] = useState<FaqDraft | null>(null);
-  const [editing, setEditing] = useState<FaqEntry | null>(null);
-  const [pending, setPending] = useState(false);
-  const [busyEntryId, setBusyEntryId] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<FaqEntry | null>(null);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [testMessage, setTestMessage] = useState("");
-  const [testGame, setTestGame] = useState<FaqGame | null>(null);
-  const [testResult, setTestResult] = useState<FaqTestResult | null>(null);
-  const [testBusy, setTestBusy] = useState(false);
-  const [testError, setTestError] = useState<string | null>(null);
-  const searchGames = useCallback((query: string) => searchFaqGames(channelId, query), [channelId]);
+  const orderedEntries = useMemo(() => data?.entries ?? [], [data?.entries]);
+  const queryKey = moduleQueryKey(channelId, "faq", "panel");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [baseline, setBaseline] = useState<FaqDraft>(emptyDraft);
+  const [draft, setDraft] = useState<FaqDraft>(emptyDraft);
+  const [draftRevision, setDraftRevision] = useState<number | null>(null);
+  const [sampleMessage, setSampleMessage] = useState("");
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<"all" | "active" | "paused">("all");
+  const [saving, setSaving] = useState(false);
+  const [ordering, setOrdering] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [attemptedSave, setAttemptedSave] = useState(false);
+  const [saveError, setSaveError] = useState<string | undefined>();
+  const [matcherServerError, setMatcherServerError] = useState<string | undefined>();
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | undefined>();
+
+  if (data !== undefined && selectedId === null) {
+    const firstEntry = data.entries[0];
+    const next = firstEntry === undefined ? emptyDraft() : draftFromEntry(firstEntry);
+    setSelectedId(firstEntry?.id ?? NEW_ENTRY_ID);
+    setDraft(next);
+    setBaseline(next);
+    setDraftRevision(firstEntry?.revision ?? null);
+  }
+
+  const isNew = selectedId === NEW_ENTRY_ID;
+  const selectedEntry = orderedEntries.find((entry) => entry.id === selectedId);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(baseline);
+  const input = inputFromDraft(draft);
+  const matcherValidation = faqMatcherValidationError(matcherFromDraft(draft));
+  const matcherLocalError = matcherValidation === null || (!attemptedSave && draft.patterns.trim().length === 0)
+    ? undefined
+    : faqMatcherValidationReasonText(matcherValidation.reasonCode, labels) ?? matcherValidation.reason;
+  const matcherError = matcherServerError ?? matcherLocalError;
+  const sampleTest = useMemo(() => matchFaqMatcher(matcherFromDraft(draft), sampleMessage), [draft, sampleMessage]);
+  const searchGames = useCallback((value: string) => searchFaqGames(channelId, value), [channelId]);
   const lookupGames = useCallback((ids: readonly string[]) => lookupFaqGames(channelId, ids), [channelId]);
 
-  const openCreate = (): void => { setEditing(null); setDraft(emptyDraft()); setError(null); setMatcherError(null); };
-  const openEdit = (entry: FaqEntry): void => { setEditing(entry); setDraft(draftFromEntry(entry)); setError(null); setMatcherError(null); };
-  const closeDialog = (): void => { if (!pending) { setDraft(null); setEditing(null); setError(null); setMatcherError(null); } };
-  const patchDraft = (change: Partial<FaqDraft>): void => {
-    if ("matcherType" in change || "patterns" in change) setMatcherError(null);
-    setDraft((current) => current === null ? null : { ...current, ...change });
+  const loadSelection = (id: string): void => {
+    if (id === NEW_ENTRY_ID) {
+      const next = emptyDraft();
+      setSelectedId(NEW_ENTRY_ID);
+      setDraft(next);
+      setBaseline(next);
+      setDraftRevision(null);
+    } else {
+      const entry = data?.entries.find((candidate) => candidate.id === id);
+      if (entry === undefined) return;
+      const next = draftFromEntry(entry);
+      setSelectedId(entry.id);
+      setDraft(next);
+      setBaseline(next);
+      setDraftRevision(entry.revision);
+    }
+    setSampleMessage("");
+    setAttemptedSave(false);
+    setSaveError(undefined);
+    setMatcherServerError(undefined);
+    setDeleteError(undefined);
   };
 
-  const save = async (): Promise<void> => {
-    if (draft === null) return;
-    if (typeof draft.cooldownSeconds === "number" && draft.cooldownSeconds < FAQ_COOLDOWN_MINIMUM_SECONDS) {
-      setError(labels.cooldownMinError);
-      return;
+  const patchDraft = (change: Partial<FaqDraft>): void => {
+    setDraft((current) => ({ ...current, ...change }));
+    if ("matcherType" in change || "patterns" in change) setMatcherServerError(undefined);
+    setSaveError(undefined);
+  };
+
+  const resetDraft = (): void => {
+    setDraft(baseline);
+    setSaveError(undefined);
+    setMatcherServerError(undefined);
+    setAttemptedSave(false);
+  };
+
+  const saveDraft = async (): Promise<string | null> => {
+    setAttemptedSave(true);
+    setSaveError(undefined);
+    if (!canManage) {
+      setSaveError(labels.roleLocked);
+      return labels.roleLocked;
     }
-    const input = inputFromDraft(draft);
-    if (input === null) { setError(labels.saveError); return; }
-    setPending(true);
-    setError(null);
-    setMatcherError(null);
+    if (input === null || matcherValidation !== null) {
+      const message = matcherLocalError ?? labels.saveError;
+      setSaveError(message);
+      return message;
+    }
+    setSaving(true);
+    setMatcherServerError(undefined);
     try {
-      await runModuleQueryWrite(queryClient, channelId, "faq", "panel", (revision) =>
-        editing === null ? createFaqEntry(channelId, input) : updateFaqEntry(channelId, editing.id, input, requireBaselineRevision(revision)), {
-        baselineRevision: editing?.revision ?? null,
+      const saved = await runModuleQueryWrite(queryClient, channelId, "faq", "panel", (revision) =>
+        isNew
+          ? createFaqEntry(channelId, input)
+          : updateFaqEntry(channelId, selectedId ?? "", input, revision ?? draftRevision ?? 1), {
+        baselineRevision: isNew ? null : draftRevision,
         updateCache: (current, entry) => withFaqEntry(current, entry),
       });
-      setDraft(null);
-      setEditing(null);
+      const next = draftFromEntry(saved);
+      setSelectedId(saved.id);
+      setDraft(next);
+      setBaseline(next);
+      setDraftRevision(saved.revision);
+      setSaveError(undefined);
+      setMatcherServerError(undefined);
+      setAttemptedSave(false);
+      return null;
     } catch (failure: unknown) {
       const code = faqErrorCode(failure);
       const fieldErrors = mapServerFieldErrors(failure, {
         "matcher.pattern": "patterns",
         "matcher.patterns": "patterns",
       }, (reasonCode) => faqMatcherValidationReasonText(reasonCode, labels));
-      const matcherReason = fieldErrors.patterns;
-      if (matcherReason !== undefined) {
-        setMatcherError(matcherReason);
-        setError(null);
-      } else setError(code === "faq_cooldown_too_short" ? labels.cooldownMinError
+      const patternError = fieldErrors.patterns;
+      if (patternError !== undefined) {
+        setMatcherServerError(patternError);
+        setSaveError(undefined);
+        return patternError;
+      }
+      const message = code === "faq_cooldown_too_short" ? labels.cooldownMinError
         : code === "faq_text_input_dependent" ? labels.inputDependentText
-        : code === "faq_text_block_missing" ? labels.missingTextBlock
-          : code === "faq_entry_limit_reached" ? labels.entryLimit : labels.saveError);
-    } finally { setPending(false); }
-  };
-
-  const toggle = async (entry: FaqEntry, enabled: boolean): Promise<void> => {
-    if (busyEntryId !== null) return;
-    setBusyEntryId(entry.id);
-    try {
-      await runModuleQueryWrite(queryClient, channelId, "faq", "panel", (revision) =>
-        setFaqEntryEnabled(channelId, entry.id, enabled, requireBaselineRevision(revision)), {
-        baselineRevision: entry.revision,
-        updateCache: (current, updated) => withFaqEntry(current, updated),
-      });
+          : code === "faq_text_block_missing" ? labels.missingTextBlock
+            : code === "faq_entry_limit_reached" ? labels.entryLimit : labels.saveError;
+      setSaveError(message);
+      return message;
+    } finally {
+      setSaving(false);
     }
-    catch { notify({ tone: "error", message: labels.saveError }); }
-    finally { setBusyEntryId(null); }
   };
 
-  const move = async (entry: FaqEntry, direction: "up" | "down"): Promise<void> => {
-    if (busyEntryId !== null) return;
-    setBusyEntryId(entry.id);
+  const draftGuard = useDraftGuard(dirty, saveDraft, resetDraft);
+  useEffect(() => registerDashboardNavigationGuard(draftGuard.guardSwitch), [draftGuard.guardSwitch]);
+
+  const requestSwitch = (id: string): void => {
+    if (id === selectedId) return;
+    draftGuard.guardSwitch(() => loadSelection(id));
+  };
+
+  async function persistOrder(
+    snapshot: readonly FaqEntry[],
+    targetIds: readonly string[],
+    undoIds: readonly string[],
+    offerUndo: boolean,
+  ): Promise<void> {
+    if (ordering || !canManage) return;
+    const byId = new Map(snapshot.map((entry) => [entry.id, entry]));
+    const nextOrder = targetIds.map((id) => byId.get(id)).filter((entry): entry is FaqEntry => entry !== undefined);
+    if (nextOrder.length !== snapshot.length || nextOrder.every((entry, index) => snapshot[index]?.id === entry.id)) return;
+    const optimistic = nextOrder.map((entry, order) => ({ ...entry, order }));
+    const cached = queryClient.getQueryData(queryKey);
+    queryClient.setQueryData(queryKey, withFaqEntries(cached ?? data, optimistic));
+    setOrdering(true);
     try {
-      await runModuleQueryWrite(queryClient, channelId, "faq", "panel", (revision) =>
-        moveFaqEntry(channelId, entry.id, direction, requireBaselineRevision(revision)), {
-        baselineRevision: entry.revision,
+      const savedEntries = await runModuleQueryWrite(queryClient, channelId, "faq", "panel", () =>
+        reorderFaqEntries(channelId, nextOrder.map(({ id, revision }) => ({ id, revision }))), {
+        baselineRevision: null,
         updateCache: (current, entries) => withFaqEntries(current, entries),
       });
+      const currentEntry = savedEntries.find((entry) => entry.id === selectedId);
+      if (currentEntry !== undefined) setDraftRevision(currentEntry.revision);
+      if (offerUndo) {
+        notify({
+          tone: "success",
+          message: labels.prioritySaved,
+          action: { label: labels.undo, onClick: () => { void persistOrder(savedEntries, undoIds, targetIds, false); } },
+        });
+      }
+    } catch {
+      queryClient.setQueryData(queryKey, withFaqEntries(queryClient.getQueryData(queryKey) ?? data, [...snapshot]));
+      notify({ tone: "error", message: labels.orderError });
+    } finally {
+      setOrdering(false);
     }
-    catch { notify({ tone: "error", message: labels.saveError }); }
-    finally { setBusyEntryId(null); }
+  }
+
+  const movePriority = (entryId: string, delta: -1 | 1): void => {
+    if (ordering || !canManage) return;
+    const index = orderedEntries.findIndex((entry) => entry.id === entryId);
+    const next = moveEntry(orderedEntries, index, index + delta);
+    if (next.every((entry, position) => orderedEntries[position]?.id === entry.id)) return;
+    void persistOrder(orderedEntries, next.map((entry) => entry.id), orderedEntries.map((entry) => entry.id), true);
+  };
+
+  const reorderOnDrop = (event: DragEvent<HTMLDivElement>, targetId: string): void => {
+    event.preventDefault();
+    const sourceId = event.dataTransfer.getData("text/plain");
+    const sourceIndex = orderedEntries.findIndex((entry) => entry.id === sourceId);
+    const targetIndex = orderedEntries.findIndex((entry) => entry.id === targetId);
+    const next = moveEntry(orderedEntries, sourceIndex, targetIndex);
+    if (next.every((entry, index) => orderedEntries[index]?.id === entry.id)) return;
+    void persistOrder(orderedEntries, next.map((entry) => entry.id), orderedEntries.map((entry) => entry.id), true);
   };
 
   const remove = async (): Promise<void> => {
-    if (deleteTarget === null) return;
-    setPending(true);
-    setDeleteError(null);
+    if (selectedEntry === undefined || !canManage) return;
+    setDeleting(true);
+    setDeleteError(undefined);
     try {
-      const entryId = deleteTarget.id;
       await runModuleQueryWrite(queryClient, channelId, "faq", "panel", (revision) =>
-        deleteFaqEntry(channelId, entryId, requireBaselineRevision(revision)), {
-        baselineRevision: deleteTarget.revision,
-        updateCache: (current) => withoutFaqEntry(current, entryId),
+        deleteFaqEntry(channelId, selectedEntry.id, revision ?? selectedEntry.revision), {
+        baselineRevision: selectedEntry.revision,
+        updateCache: (current) => withoutFaqEntry(current, selectedEntry.id),
       });
-      setDeleteTarget(null);
+      setDeleteOpen(false);
+      const nextEntry = orderedEntries.find((entry) => entry.id !== selectedEntry.id);
+      if (nextEntry === undefined) loadSelection(NEW_ENTRY_ID);
+      else loadSelection(nextEntry.id);
+    } catch {
+      setDeleteError(labels.deleteError);
+    } finally {
+      setDeleting(false);
     }
-    catch { setDeleteError(labels.deleteError); }
-    finally { setPending(false); }
   };
 
-  const runTest = async (): Promise<void> => {
-    if (testMessage.trim().length === 0) { setTestError(labels.testEmpty); setTestResult(null); return; }
-    setTestBusy(true);
-    setTestError(null);
-    try { setTestResult(await testFaqMessage(channelId, testMessage, testGame === null ? undefined : testGame.id)); }
-    catch { setTestError(labels.loadError); }
-    finally { setTestBusy(false); }
-  };
-
-  const orderedEntries = data?.entries ?? [];
+  const visibleEntries = orderedEntries.filter((entry) => {
+    const matchesFilter = filter === "all" || (filter === "active" ? entry.enabled : !entry.enabled);
+    const needle = search.trim().toLocaleLowerCase(language === "en" ? "en" : "de");
+    const patterns = entry.matcher.type === "keywords" ? entry.matcher.patterns.join(" ") : entry.matcher.pattern;
+    return matchesFilter && `${entry.name} ${patterns}`.toLocaleLowerCase(language === "en" ? "en" : "de").includes(needle);
+  });
+  const selectedIndex = orderedEntries.findIndex((entry) => entry.id === selectedId);
   const listStatus = query.isPending ? "loading" : data === undefined ? "error" : orderedEntries.length === 0 ? "empty" : "success";
+  const sampleStatus = matcherError !== undefined
+    ? matcherError
+    : sampleMessage.trim().length === 0
+      ? labels.sampleMessageEmpty
+      : sampleTest.reason === "command_prefix"
+        ? labels.sampleMessageCommand
+        : sampleTest.reason === "matched" && sampleTest.matchedPattern !== undefined
+          ? labels.sampleMessageMatch(sampleTest.matchedPattern)
+          : labels.sampleMessageNoMatch;
 
-  return (
-    <section aria-label={labels.title}>
-      <InspectorSection title={labels.title}>
-        <Button variant="primary" disabled={!canManage} onClick={openCreate}>{labels.add}</Button>
-        {canManage ? null : <p className="lock-reason">{labels.roleLocked}</p>}
-        <LoadState variant="panel-720" status={listStatus}
-          loading={<LoadStateLines rows={7} height={34} />}
-          empty={<p className="muted">{labels.noEntries}</p>}
-          error={<p className="muted">{labels.loadError}</p>}
-          queryError={{ message: labels.loadError, onRetry: () => { void query.refetch(); } }}
-          refreshError={query.isRefetchError}
-        >
-        <div className="state-list" style={{ height: "calc(var(--s10) * 18)", overflowY: "auto" }}>
-          {orderedEntries.map((entry, index) => (
-            <article key={entry.id} className="timer-row">
-              <div className="timer-row__copy">
-                <strong>{entry.name}</strong>
-                <span>{entry.matcher.type === "keywords" ? entry.matcher.patterns.join(" · ") : `${labels.regexType}: ${entry.matcher.pattern}`}</span>
-                <span>{labels.answer} · {entry.answerText}</span>
-                <span>{labels.cooldown} · {String(entry.cooldownSeconds)} s</span>
-                {entry.userCooldownSeconds === 0 ? null : <span>{labels.userCooldown} · {String(entry.userCooldownSeconds)} s</span>}
-                {entry.games.length === 0 ? null : <span>{labels.games} · {entry.games.map((game) => game.name).join(", ")}</span>}
+  const detail = selectedId === null
+    ? <div className="faq-panel__placeholder"><PageHeader title={labels.title} subtitle={labels.noSelection} /></div>
+    : <div className="faq-panel__detail">
+      <PageHeader
+        title={draft.name.trim() || labels.newEntry}
+        active={draft.enabled}
+        onToggle={(enabled) => { patchDraft({ enabled }); }}
+        switchDisabled={!canManage || saving || ordering}
+        switchBusy={saving}
+        {...(selectedEntry === undefined ? {} : { meta: labels.priorityMeta(selectedIndex + 1) })}
+        {...(canManage ? {} : { lockHint: labels.roleLocked })}
+        {...(selectedEntry === undefined ? {} : { actions: <Button variant="neutral" danger disabled={!canManage || deleting} onClick={() => {
+          draftGuard.guardSwitch(() => { setDeleteError(undefined); setDeleteOpen(true); });
+        }}><Icon name="remove" size={16} />{labels.delete}</Button> })}
+        save={{
+          dirty,
+          persistent: true,
+          pending: saving,
+          ...(saveError === undefined ? {} : { error: saveError }),
+          invalid: input === null || matcherValidation !== null,
+          invalidMessage: labels.invalid,
+          onSave: () => { void saveDraft(); },
+          onInvalidSave: () => { setAttemptedSave(true); },
+          onDiscard: resetDraft,
+          saveLabel: labels.save,
+          discardLabel: labels.discard,
+          savedLabel: labels.saved,
+          pendingLabel: labels.saving,
+        }}
+      />
+      <div className="faq-panel__editor">
+        {canManage ? null : <RuleNote>{labels.roleLocked}</RuleNote>}
+        <div className="faq-panel__editor-grid">
+          <div className="faq-panel__column">
+            <Section title={labels.triggerSection}>
+              <Field
+                label={labels.entryNameLabel}
+                hint={labels.entryNameHint}
+                value={draft.name}
+                onChange={(name) => { patchDraft({ name }); }}
+                maxLength={FAQ_ENTRY_NAME_MAX_LENGTH}
+                countLabel={(count, maximum) => `${String(count)}/${String(maximum)}`}
+                disabled={!canManage || saving}
+                required
+              />
+              <SegmentChoice
+                label={labels.matcherType}
+                value={draft.matcherType}
+                onChange={(matcherType) => { patchDraft({ matcherType, patterns: "" }); }}
+                options={[
+                  { value: "keywords", label: labels.keywordsType, compactLabel: labels.keywordsCompact },
+                  { value: "regex", label: labels.regexType, compactLabel: labels.regexCompact },
+                ]}
+                disabled={!canManage || saving}
+                {...(matcherError === undefined ? {} : { error: matcherError })}
+                reserveError
+              />
+              {draft.matcherType === "keywords" ? <ChipsInput
+                label={labels.patterns}
+                values={entryPatterns(draft)}
+                onChange={(patterns) => { patchDraft({ patterns: patterns.join("\n") }); }}
+                placeholder={labels.patternsPlaceholder}
+                hint={labels.patternsHint}
+                {...(matcherError === undefined ? {} : { error: matcherError })}
+                validate={(pattern) => pattern.length > FAQ_PATTERN_MAX_LENGTH ? labels.matcherValidationReasons.faq_keywords_invalid : null}
+                removeLabel={labels.removePattern}
+                listLabel={labels.patterns}
+                max={FAQ_PATTERN_MAXIMUM_COUNT}
+                separator="comma"
+                messages={labels.keywordChipMessages}
+                disabled={!canManage || saving}
+              /> : <Field
+                label={labels.regexPattern}
+                hint={labels.regexPatternHint}
+                value={draft.patterns}
+                onChange={(patterns) => { patchDraft({ patterns }); }}
+                maxLength={FAQ_PATTERN_MAX_LENGTH}
+                countLabel={(count, maximum) => `${String(count)}/${String(maximum)}`}
+                {...(matcherError === undefined ? {} : { error: matcherError })}
+                mono
+                disabled={!canManage || saving}
+                required
+              />}
+              <Field
+                label={labels.sampleMessage}
+                hint={labels.sampleMessageHint}
+                value={sampleMessage}
+                onChange={setSampleMessage}
+                maxLength={500}
+                countLabel={(count, maximum) => `${String(count)}/${String(maximum)}`}
+                disabled={saving}
+              />
+              <div className="faq-panel__sample-result" data-testid="faq-test-result-slot" aria-live="polite" role={matcherError === undefined ? "status" : "alert"}>
+                {sampleStatus}
               </div>
-              <div className="timer-row__actions">
-                <SwitchPrimitive
-                  aria-label={`${entry.name}: ${entry.enabled ? labels.enabled : labels.disabled}`}
-                  checked={entry.enabled}
-                  aria-busy={busyEntryId === entry.id}
-                  disabled={busyEntryId !== null && busyEntryId !== entry.id || busyEntryId === entry.id}
-                  onCheckedChange={(enabled) => { void toggle(entry, enabled); }}
+            </Section>
+            <Section title={labels.rolesSectionTitle}>
+              <RoleThreshold
+                label={labels.minimumTier}
+                value={draft.minimumTier}
+                options={labels.tierOptions}
+                onChange={(minimumTier) => {
+                  const nextTier = FAQ_MINIMUM_TIERS.find((tier) => tier === minimumTier);
+                  if (nextTier !== undefined) patchDraft({ minimumTier: nextTier });
+                }}
+                disabled={!canManage || saving}
+              />
+              <RuleNote>{labels.rolesHint}</RuleNote>
+            </Section>
+          </div>
+          <div className="faq-panel__column">
+            <Section title={labels.answerSection}>
+              <TemplateTextField
+                label={labels.answer}
+                hint={labels.answerHint}
+                value={draft.answerText}
+                onChange={(answerText) => { patchDraft({ answerText }); }}
+                maxLength={FAQ_ANSWER_MAX_LENGTH}
+                variables={data?.variables ?? []}
+                messages={labels.templateMessages}
+                minRows={4}
+                disabled={!canManage || saving}
+                required
+              />
+              <ChatPreview
+                label={labels.previewLabel}
+                speaker={labels.previewSpeaker}
+                text={draft.answerText}
+                countLabel={labels.templateMessages.previewCountLabel(draft.answerText.length)}
+              />
+              <FieldPair>
+                <UnitInput
+                  label={labels.cooldown}
+                  hint={labels.cooldownHint}
+                  value={draft.cooldownSeconds}
+                  onChange={(cooldownSeconds) => { patchDraft({ cooldownSeconds }); }}
+                  min={FAQ_COOLDOWN_MINIMUM_SECONDS}
+                  max={FAQ_COOLDOWN_MAXIMUM_SECONDS}
+                  suggestions={[30, 120, 300, 900]}
+                  unit="s"
+                  disabled={!canManage || saving}
+                  required
                 />
-                <Button variant="subtle" ariaLabel={labels.moveUp} disabled={!canManage || index === 0 || busyEntryId !== null} onClick={() => { void move(entry, "up"); }}>↑</Button>
-                <Button variant="subtle" ariaLabel={labels.moveDown} disabled={!canManage || index === orderedEntries.length - 1 || busyEntryId !== null} onClick={() => { void move(entry, "down"); }}>↓</Button>
-                <Button variant="neutral" disabled={!canManage} onClick={() => { openEdit(entry); }}>{labels.edit}</Button>
-                <Button variant="subtle" danger disabled={!canManage} onClick={() => { setDeleteTarget(entry); setDeleteError(null); }}>{labels.delete}</Button>
-              </div>
-            </article>
-          ))}
-        </div>
-        </LoadState>
-      </InspectorSection>
-
-      <InspectorSection title={labels.testHeading}>
-        <div className="module-stack">
-          <Field label={labels.testMessage} value={testMessage} onChange={setTestMessage} maxLength={500} countLabel={(count, max) => `${String(count)}/${String(max)}`} />
-          <GameMultiSelect
-            searchGames={searchGames}
-            lookupGames={lookupGames}
-            value={testGame === null ? [] : [testGame]}
-            onChange={(games) => setTestGame(games.at(-1) ?? null)}
-            messages={labels.testGameMultiSelectMessages}
-          />
-          <Button variant="neutral" disabled={testBusy || loading} onClick={() => { void runTest(); }}>{labels.testButton}</Button>
-          <div data-testid="faq-test-result-slot" style={{ height: "calc(var(--s10) * 5)", overflowY: "auto" }} aria-live="polite">
-            {testError === null ? null : <p className="form-error" role="alert">{testError}</p>}
-            {testResult === null ? null : <p role="status">{matchCopy(testResult, labels)}</p>}
-            {testResult === null || testResult.skippedByGame.length === 0 ? null : (
-              <ul>
-                {testResult.skippedByGame.map((skipped) => (
-                  <li key={skipped.entryId}>{labels.testSkippedByGame(skipped.entryName, skipped.games.join(", "))}</li>
-                ))}
-              </ul>
-            )}
+                <UnitInput
+                  label={labels.userCooldown}
+                  hint={labels.userCooldownHint}
+                  value={draft.userCooldownSeconds}
+                  onChange={(userCooldownSeconds) => { patchDraft({ userCooldownSeconds }); }}
+                  min={0}
+                  max={FAQ_USER_COOLDOWN_MAXIMUM_SECONDS}
+                  suggestions={[0, 60, 300, 900]}
+                  unit="s"
+                  disabled={!canManage || saving}
+                />
+              </FieldPair>
+              <ChatTargetField
+                label={labels.chatTarget}
+                value={draft.chatTarget}
+                {...(channelSettings.data?.defaultChatTarget === undefined ? {} : { effectiveDefault: channelSettings.data.defaultChatTarget })}
+                onChange={(chatTarget) => { patchDraft({ chatTarget }); }}
+                allowed={["all_chats", "source_only", "channel_default", "where_asked"]}
+                disabled={!canManage || saving}
+              />
+            </Section>
           </div>
         </div>
-      </InspectorSection>
-
-      <FormDialog
-        opened={draft !== null}
-        title={editing === null ? labels.create : labels.edit}
-        confirmLabel={labels.save}
-        cancelLabel={labels.cancel}
-        onConfirm={() => { void save(); }}
-        onCancel={closeDialog}
-        pending={pending}
-        confirmDisabled={draft === null || inputFromDraft(draft) === null}
-        {...(error === null ? {} : { error })}
-      >
-        {draft === null ? null : <div className="module-stack">
-          <Field label={labels.name} value={draft.name} onChange={(name) => patchDraft({ name })} maxLength={FAQ_ENTRY_NAME_MAX_LENGTH} countLabel={(count, max) => `${String(count)}/${String(max)}`} required />
-          <Select
-            label={labels.matcherType}
-            value={draft.matcherType}
-            onChange={(matcherType) => { if (matcherType === "keywords" || matcherType === "regex") patchDraft({ matcherType }); }}
-            options={[{ value: "keywords", label: labels.keywordsType }, { value: "regex", label: labels.regexType }]}
-            disabled={pending}
-          />
-          <TemplateTextField
-            label={draft.matcherType === "keywords" ? labels.patterns : labels.regexPattern}
-            hint={draft.matcherType === "keywords" ? labels.patternsHint : labels.regexPatternHint}
-            value={draft.patterns}
-            onChange={(patterns) => patchDraft({ patterns })}
-            maxLength={draft.matcherType === "keywords" ? FAQ_PATTERN_MAXIMUM_COUNT * (FAQ_PATTERN_MAX_LENGTH + 1) : FAQ_PATTERN_MAX_LENGTH}
-            {...(matcherError === null ? {} : { error: matcherError })}
-            messages={labels.templateMessages}
-            minRows={3}
-            disabled={pending}
-            required
-          />
-          <TemplateTextField
-            label={labels.answer}
-            hint={labels.answerHint}
-            value={draft.answerText}
-            onChange={(answerText) => patchDraft({ answerText })}
-            maxLength={FAQ_ANSWER_MAX_LENGTH}
-            variables={data?.variables ?? []}
-            messages={labels.templateMessages}
-            minRows={2}
-            disabled={pending}
-            required
-          />
-          <UnitInput
-            label={labels.cooldown}
-            hint={labels.cooldownHint}
-            value={draft.cooldownSeconds}
-            onChange={(cooldownSeconds) => patchDraft({ cooldownSeconds })}
-            min={FAQ_COOLDOWN_MINIMUM_SECONDS}
-            max={FAQ_COOLDOWN_MAXIMUM_SECONDS}
-            unit="s"
-            disabled={pending}
-            required
-          />
-          <UnitInput
-            label={labels.userCooldown}
-            hint={labels.userCooldownHint}
-            value={draft.userCooldownSeconds}
-            onChange={(userCooldownSeconds) => patchDraft({ userCooldownSeconds })}
-            min={0}
-            max={FAQ_USER_COOLDOWN_MAXIMUM_SECONDS}
-            unit="s"
-            disabled={pending}
-          />
+        <SwitchSection
+          title={labels.games}
+          checked={draft.restrictGames}
+          hint={labels.gameFilterHint}
+          onChange={(restrictGames) => { patchDraft({ restrictGames, ...(restrictGames ? {} : { games: [] }) }); }}
+          disabled={!canManage || saving}
+        >
           <GameMultiSelect
             searchGames={searchGames}
             lookupGames={lookupGames}
             value={draft.games}
-            onChange={(games) => patchDraft({ games })}
-            disabled={pending}
+            onChange={(games: FaqGame[]) => { patchDraft({ games }); }}
             messages={labels.gameMultiSelectMessages}
+            visuallyHiddenLabel
+            disabled={!canManage || saving}
           />
-          <ChatTargetField
-            label={labels.chatTarget}
-            value={draft.chatTarget}
-            {...(channelSettings.data === undefined ? {} : { effectiveDefault: channelSettings.data.defaultChatTarget })}
-            onChange={(chatTarget) => patchDraft({ chatTarget })}
-            allowed={["all_chats", "source_only", "channel_default", "where_asked"]}
-            disabled={pending}
-          />
-        </div>}
-      </FormDialog>
-
+        </SwitchSection>
+      </div>
       <ConfirmDialog
-        opened={deleteTarget !== null}
-        title={labels.delete}
-        description={labels.deleteConfirm}
+        opened={deleteOpen}
+        title={labels.deleteTitle(selectedEntry?.name ?? labels.newEntry)}
+        description={labels.deleteConfirm(selectedEntry?.name ?? labels.newEntry)}
         confirmLabel={labels.delete}
         cancelLabel={labels.cancel}
         danger
-        pending={pending}
-        {...(deleteError === null ? {} : { error: deleteError })}
+        pending={deleting}
+        {...(deleteError === undefined ? {} : { error: deleteError })}
         onConfirm={() => { void remove(); }}
-        onCancel={() => { if (!pending) setDeleteTarget(null); }}
+        onCancel={() => { if (!deleting) setDeleteOpen(false); }}
       />
-    </section>
-  );
+      <ConfirmDialog
+        opened={draftGuard.confirmOpen}
+        title={labels.guardTitle}
+        description={labels.guardDescription}
+        confirmLabel={labels.save}
+        cancelLabel={labels.continueEditing}
+        alternative={{ label: labels.discard, onClick: draftGuard.discardAndSwitch }}
+        pending={draftGuard.saving}
+        {...(draftGuard.saveError === undefined ? {} : { error: draftGuard.saveError })}
+        onConfirm={() => { void draftGuard.saveAndSwitch(); }}
+        onCancel={draftGuard.continueEditing}
+      />
+    </div>;
+
+  const toolbar = <div className="faq-panel__toolbar">
+    <div className="faq-panel__toolbar-top">
+      <Field
+        label={labels.search}
+        variant="search"
+        placeholder={labels.searchPlaceholder}
+        clearLabel={labels.clearSearch}
+        value={search}
+        onChange={setSearch}
+      />
+      <Button variant="primary" disabled={!canManage} onClick={() => { requestSwitch(NEW_ENTRY_ID); }}>
+        <Icon name="plus" size={16} />{labels.add}
+      </Button>
+    </div>
+    <SegmentChoice
+      label={labels.filterLabel}
+      size="compact"
+      value={filter}
+      onChange={setFilter}
+      options={[
+        { value: "all", label: labels.filterAll },
+        { value: "active", label: labels.filterActive },
+        { value: "paused", label: labels.filterPaused },
+      ]}
+    />
+    <RuleNote>{labels.priorityNote}</RuleNote>
+  </div>;
+
+  const list = <LoadState
+    variant="panel-720"
+    status={listStatus}
+    loading={<LoadStateLines rows={5} height={50} />}
+    empty={<p className="faq-panel__empty">{labels.noEntries}</p>}
+    error={<p className="faq-panel__empty">{labels.loadError}</p>}
+    queryError={{ message: labels.loadError, onRetry: () => { void query.refetch(); } }}
+    refreshError={query.isRefetchError}
+  >
+    <div className="faq-panel__list">
+      {isNew ? <div className="faq-panel__row faq-panel__row--new">
+        <span className="faq-panel__rank">{labels.newEntry}</span>
+        <button type="button" aria-current="true" className="faq-panel__entry faq-panel__entry--selected" onClick={() => { requestSwitch(NEW_ENTRY_ID); }}>
+          <span className="faq-panel__entry-indicator" aria-hidden="true" />
+          <span className="faq-panel__entry-copy"><strong>{draft.name.trim() || labels.newEntry}</strong><small>{labels.unsavedNew}</small></span>
+        </button>
+      </div> : null}
+      {visibleEntries.map((entry) => {
+        const index = orderedEntries.findIndex((candidate) => candidate.id === entry.id);
+        const patternSummary = entry.matcher.type === "keywords"
+          ? entry.matcher.patterns.slice(0, 2).join(" · ") + (entry.matcher.patterns.length > 2 ? ` +${String(entry.matcher.patterns.length - 2)}` : "")
+          : `${labels.regexType}: ${entry.matcher.pattern}`;
+        const onShortcut = (event: KeyboardEvent<HTMLButtonElement>): void => {
+          if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
+          event.preventDefault();
+          movePriority(entry.id, event.key === "ArrowUp" ? -1 : 1);
+        };
+        return <div
+          className="faq-panel__row"
+          key={entry.id}
+          onDragOver={(event) => { event.preventDefault(); }}
+          onDrop={(event) => { reorderOnDrop(event, entry.id); }}
+        >
+          <button
+            type="button"
+            className="faq-panel__drag"
+            aria-label={`${labels.keyboardMove}: ${entry.name}`}
+            draggable={canManage && !ordering}
+            disabled={!canManage || ordering}
+            onDragStart={(event) => {
+              event.dataTransfer.setData("text/plain", entry.id);
+              event.dataTransfer.effectAllowed = "move";
+            }}
+          ><Icon name="drag" size={16} /></button>
+          <span className="faq-panel__rank">{String(index + 1)}</span>
+          <button
+            type="button"
+            className={`faq-panel__entry${selectedId === entry.id ? " faq-panel__entry--selected" : ""}${entry.enabled ? "" : " faq-panel__entry--paused"}`}
+            aria-current={selectedId === entry.id ? "true" : undefined}
+            aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+            onClick={() => { requestSwitch(entry.id); }}
+            onKeyDown={onShortcut}
+          >
+            <span className={`faq-panel__entry-indicator${entry.enabled ? " faq-panel__entry-indicator--on" : ""}`} aria-hidden="true" />
+            <span className="faq-panel__entry-copy">
+              <strong>{entry.name}{entry.enabled ? null : <em>{labels.filterPaused}</em>}</strong>
+              <small>{patternSummary}</small>
+            </span>
+          </button>
+        </div>;
+      })}
+      {visibleEntries.length === 0 && orderedEntries.length > 0 ? <p className="faq-panel__empty">{labels.emptySearch}</p> : null}
+    </div>
+  </LoadState>;
+
+  return <div className="faq-panel">
+    <CollectionPage
+      title={labels.title}
+      toolbar={toolbar}
+      list={list}
+      detail={detail}
+      empty={labels.noEntries}
+    />
+  </div>;
 }

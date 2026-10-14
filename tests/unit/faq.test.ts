@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { BotModule, ModuleEvent, ModuleExecutionContext, ModuleRegisteredTemplateVariable } from "../../src/modules/contract";
 import type { FaqEntry } from "../../src/modules/faq/contracts";
 import { createFaqRepository } from "../../src/modules/faq/adapters/d1";
-import { firstFaqMatch, normalizeFaqText, prepareFaqMatchers, selectFaqMatch } from "../../src/modules/faq/domain";
-import { processFaqMessage, testFaqMessage } from "../../src/modules/faq/service";
+import { firstFaqMatch, matchFaqMatcher, normalizeFaqText, prepareFaqMatchers, selectFaqMatch } from "../../src/modules/faq/domain";
+import { processFaqMessage } from "../../src/modules/faq/service";
 import { faqModule } from "../../src/modules/faq";
 import { textCommandModule } from "../../src/modules/text_commands";
 import { selectModulesForEvent } from "../../src/worker/dispatch";
@@ -19,6 +19,7 @@ const faqEntry = (overrides: Partial<FaqEntry> = {}): FaqEntry => ({
   enabled: true,
   matcher: { type: "keywords", patterns: ["get dark"] },
   answerText: "The sun sets at {sun.set}",
+  minimumTier: "everyone",
   cooldownSeconds: 60,
   userCooldownSeconds: 0,
   games: [],
@@ -152,6 +153,25 @@ describe("FAQ literal matcher", () => {
     ]);
     expect(firstFaqMatch(prepared, "get dark").match?.entry.id).toBe("first");
     expect(firstFaqMatch(prepared, "!help get dark")).toEqual({ match: null, reason: "command_prefix" });
+  });
+
+  it("tests the selected draft with the same keyword and RE2 matcher used by chat", () => {
+    expect(matchFaqMatcher({ type: "keywords", patterns: ["good morning"] }, "Say GOOD MORNING!"))
+      .toEqual({ reason: "matched", matchedPattern: "good morning" });
+    expect(matchFaqMatcher({ type: "regex", pattern: "(?i)\\bhello\\b" }, "Well HELLO there"))
+      .toEqual({ reason: "matched", matchedPattern: "(?i)\\bhello\\b" });
+    expect(matchFaqMatcher({ type: "keywords", patterns: ["hello"] }, "!hello"))
+      .toEqual({ reason: "command_prefix" });
+  });
+
+  it("enforces each FAQ minimum Twitch role before selecting the priority winner", () => {
+    const prepared = prepareFaqMatchers([
+      faqEntry({ id: "subscriber", name: "Subscriber", order: 0, minimumTier: "subscriber" }),
+      faqEntry({ id: "everyone", name: "Everyone", order: 1, minimumTier: "everyone" }),
+    ]);
+    expect(firstFaqMatch(prepared, "get dark", ["viewer"]).match?.entry.id).toBe("everyone");
+    expect(firstFaqMatch(prepared, "get dark", ["subscriber"]).match?.entry.id).toBe("subscriber");
+    expect(firstFaqMatch(prepared, "get dark", ["vip"]).match?.entry.id).toBe("everyone");
   });
 
   it("reports a game-restricted match it skipped, then still finds a later eligible one", () => {
@@ -420,30 +440,6 @@ describe("FAQ literal matcher", () => {
       const result = await processFaqMessage(eventFor("When does it get dark?"), repository, context);
       expect(result.actions).toMatchObject([{ kind: "chat", text: "Boss fight answer" }]);
       expect(context.channelGameId).toHaveBeenCalledTimes(1);
-    } finally {
-      database.close();
-    }
-  });
-
-  it("lets the panel tester see the same game filter and skip reason as live chat", async () => {
-    const database = new TestD1Database();
-    try {
-      await insertChannel(database, "channel-a");
-      await database.prepare(
-        `INSERT INTO faq_entries
-          (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds,
-           games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at)
-         VALUES ('wrong-game', 'channel-a', 'Other game', 1, 'keywords', ?, 'Sun answer', 30, ?, 'source_only', 0, 1, NULL, ?, ?)`,
-      ).bind(JSON.stringify({ type: "keywords", patterns: ["get dark"] }), JSON.stringify([{ id: "77", name: "Other" }]), NOW, NOW).run();
-      const repository = createFaqRepository(database as unknown as D1Database);
-
-      const noGame = await testFaqMessage(repository, "channel-a", "When does it get dark?", null);
-      expect(noGame.match).toBeNull();
-      expect(noGame.skippedByGame).toMatchObject([{ entry: { id: "wrong-game" }, matchedPattern: "get dark" }]);
-
-      const matchingGame = await testFaqMessage(repository, "channel-a", "When does it get dark?", "77");
-      expect(matchingGame.match?.entry.id).toBe("wrong-game");
-      expect(matchingGame.skippedByGame).toEqual([]);
     } finally {
       database.close();
     }
