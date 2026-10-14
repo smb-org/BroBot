@@ -1,5 +1,5 @@
 export const RECENT_TARGET_LIMIT = 5;
-const STORAGE_PREFIX = "brobot-dashboard-spotlight-recent-v1";
+const STORAGE_PREFIX = "brobot-dashboard-command-palette-recent-v1";
 const memoryFallback = new Map<string, string[]>();
 const memoryAuthoritative = new Set<string>();
 

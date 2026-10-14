@@ -1,8 +1,39 @@
+import {
+  BookOpenText, Braces, Clapperboard, CloudSun, Database, Megaphone, MessageCircleQuestion,
+  MessageSquareText, Radio, RadioTower, ScrollText, Settings, Settings2, ShieldAlert, Signal, Timer,
+  ToggleRight, UsersRound, Vote,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import type { ReactElement } from "react";
 
+const iconByKind: Readonly<Record<string, LucideIcon>> = {
+  faq: MessageCircleQuestion,
+  votekick: ShieldAlert,
+  events: Radio,
+  channelEvents: Radio,
+  overlays: Settings2,
+  system: Settings,
+  variable: Braces,
+  audit: ScrollText,
+  texts: BookOpenText,
+  timers: Timer,
+  weather: CloudSun,
+  modules: ToggleRight,
+  members: UsersRound,
+  voting: Vote,
+  clips: Clapperboard,
+  ads: Megaphone,
+  raid: RadioTower,
+  belabox: Signal,
+  data: Database,
+  commands: MessageSquareText,
+};
+
 export function NavigationIcon({ kind, className = "navigation-icon" }: { kind: string; className?: string }): ReactElement {
+  const Glyph = iconByKind[kind];
+  if (Glyph !== undefined) return <Glyph data-ui="" className={className} size={18} strokeWidth={1.5} aria-hidden="true" focusable="false" />;
   return (
-    <svg data-ui="" className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <svg data-ui="" className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
       {kind === "overview" ? <><path d="M4 12a8 8 0 1 1 16 0" /><path d="m12 12 4-3M6 17h12" /><circle cx="12" cy="12" r="1" /></>
         : kind === "channel" ? <><path d="M5 7.5h14M5 12h14M5 16.5h9" /><circle cx="18" cy="16.5" r="1" />
           </>

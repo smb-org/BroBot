@@ -21,6 +21,31 @@ export type DashboardRoute =
   }
   | { kind: "module"; channelId: string; moduleId: string };
 
+export type DashboardMode = "live" | "setup";
+
+export const dashboardModeForRoute = (route: DashboardRoute): DashboardMode =>
+  route.kind === "overview" || (route.kind === "channel" && route.section === "overview") ? "live" : "setup";
+
+export const routeForSelectedChannel = (route: DashboardRoute, channelId: string): DashboardRoute => {
+  if (route.kind === "overview") return { kind: "channel", channelId, section: "overview" };
+  if (route.kind === "module") return { ...route, channelId };
+  if (route.kind === "platform") return { kind: "channel", channelId, section: "system" };
+  if (route.section === "overlays") return { kind: "channel", channelId, section: "overlays" };
+  return { ...route, channelId };
+};
+
+export const routeForDashboardMode = (
+  route: DashboardRoute,
+  mode: DashboardMode,
+  channelId: string | null,
+  isPlatformAdmin = false,
+): DashboardRoute => {
+  if (dashboardModeForRoute(route) === mode) return route;
+  if (mode === "live") return channelId === null ? { kind: "overview" } : { kind: "channel", channelId, section: "overview" };
+  if (channelId === null) return isPlatformAdmin ? { kind: "platform" } : route;
+  return { kind: "channel", channelId, section: "system" };
+};
+
 /** Routes whose page content cannot work until the installation bot is signed in. */
 export const dashboardRouteRequiresBot = (route: DashboardRoute): boolean =>
   route.kind === "overview" || route.kind === "module" || (route.kind === "channel" &&

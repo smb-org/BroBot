@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import { groupOverlayElementPaletteItems, type OverlayElementPaletteItem } from "../../src/dashboard/overlay-element-palette-model";
 
-const categories = { chat: "Chat", interaction: "Interaction", data: "Data", twitch: "Twitch" } as const;
+const categories = { chat: "Chat", participation: "Participation", twitch: "Twitch", data: "Data", stream: "Stream", admin: "Administration" } as const;
 
 const items: readonly OverlayElementPaletteItem[] = [
   { id: "ads", groupId: "twitch", label: "Ad countdown", description: "Time until next ad break.", moduleName: "Ad breaks" },
   { id: "score", groupId: "variables", label: "score", description: "Current score.", variableName: "score", currentValue: "12" },
-  { id: "tally", groupId: "interaction", label: "Voting tally", description: "Live bars for the current vote.", moduleName: "Chat voting" },
+  { id: "tally", groupId: "participation", label: "Voting tally", description: "Live bars for the current vote.", moduleName: "Chat voting" },
   { id: "chat-off", groupId: "chat", label: "Command card", description: "Module is disabled.", moduleName: "Text commands", disabledReason: "Module off" },
   { id: "block", groupId: "chat", label: "Text block", description: "Shows a text library block.", moduleName: "Text library" },
   { id: "weather", groupId: "data", label: "Weather", description: "Current conditions.", moduleName: "Weather" },
@@ -18,9 +18,9 @@ describe("overlay element palette model", () => {
     expect(groupOverlayElementPaletteItems(items, categories, "Channel variables").map(({ id, label }) => [id, label])).toEqual([
       ["variables", "Channel variables"],
       ["chat", "Chat"],
-      ["interaction", "Interaction"],
-      ["data", "Data"],
+      ["participation", "Participation"],
       ["twitch", "Twitch"],
+      ["data", "Data"],
     ]);
     expect(groupOverlayElementPaletteItems(items, categories, "Channel variables")[1]?.items.map(({ id }) => id)).toEqual(["block", "chat-off"]);
   });

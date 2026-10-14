@@ -5,19 +5,19 @@ import { MODULES } from "../modules/registry";
 import type { TextCommand } from "../modules/text_commands/contracts";
 import { loadTextCommands } from "../modules/text_commands/panel/service";
 import { canManage, type ChannelRole } from "../contracts/values";
-import type { PanelModuleState } from "../panel-contract";
-import { PanelApiError, createClip, fetchChannelVariables, sendManualShoutout, setChannelModuleEnabled, startCommercial, type PanelChannelVariable } from "./api";
+import type { PanelChannelControls, PanelModuleState } from "../panel-contract";
+import { PanelApiError, createClip, fetchChannelVariables, sendManualShoutout, setChannelControl, setChannelModuleEnabled, startCommercial, type PanelChannelVariable } from "./api";
 import { dispatchDashboardAuthenticationRequired } from "./data/events";
 import { refreshAfterModuleToggle } from "./data/module-toggle";
+import { queryKeys } from "./data/keys";
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
 import { apiErrorText, channelVariablesTexts, dashboardLanguage, dashboardTexts, immediateActionUnavailableReasonText } from "./locale";
 import { moduleDescription, moduleName, moduleWorkspaceTexts } from "./module-labels";
-import { modulePermissionsAreMissing } from "./channel-health";
 import { ModuleIcon, NavigationIcon } from "./module-panels";
-import { dashboardNavEntries, navPageGroupHeading, registeredModuleNavEntries } from "./nav-pages";
+import { dashboardNavigationGroups } from "./nav-pages";
 import { dashboardRoutePath, dashboardRouteRequiresBot, type DashboardRoute } from "./router";
-import { readRecentTargets, rememberRecentTarget, RECENT_TARGET_LIMIT } from "./spotlight-recents";
-import { notify, Spotlight, type SpotlightItem } from "./ui";
+import { readRecentTargets, rememberRecentTarget, RECENT_TARGET_LIMIT } from "./command-palette-recents";
+import { notify, CommandPalette, type CommandPaletteItem } from "./ui";
 
 const SHOUTOUT_KEYWORD = "shoutout";
 
@@ -27,7 +27,7 @@ const botBlocksRoute = (route: DashboardRoute, botSignedIn: boolean | undefined)
 /**
  * Presence and availability for a module's immediate action, from the exact
  * same source Stream Manager reads (`ImmediateActions` in stream-manager.tsx)
- * -- so Spotlight can't offer an action for a disabled module.
+ * -- so the command palette can't offer an action for a disabled module.
  */
 const moduleImmediateActionAvailability = (
   moduleId: string,
@@ -46,7 +46,9 @@ const moduleImmediateActionAvailability = (
   };
 };
 
-interface ChannelSpotlightProperties {
+interface ChannelCommandPaletteProperties {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   channelId: string | null;
   ownRole: ChannelRole | null;
   viewerUserId?: string | null;
@@ -56,6 +58,8 @@ interface ChannelSpotlightProperties {
   /** Whether the installation bot is signed in; undefined while its status is unknown. */
   botSignedIn?: boolean;
   streamState?: "online" | "offline" | null | undefined;
+  channelControls?: PanelChannelControls;
+  onRefreshChannelState?: () => Promise<void>;
   modules: PanelModuleState[];
   onNavigate: (route: DashboardRoute, onNavigated?: () => void) => void;
   /** Set after navigation succeeds, so its panel can pre-select the command. */
@@ -78,16 +82,8 @@ const recentTargetPathForRoute = (route: DashboardRoute, channelId: string | nul
   return null;
 };
 
-/**
- * ⌘K/Ctrl+K (#164): finds every sidebar page, modules, text commands,
- * channel variables, and runs a small set of registered actions for the
- * current channel. Explicitly not a navigation replacement -- selecting a
- * page, module, or variable still opens it, same as clicking it would.
- * Per-member search was removed in #208: finding individual people wasn't
- * useful here, and the sidebar's "Mitglieder" page (still indexed below)
- * covers it.
- */
-export const ChannelSpotlight = ({ channelId, ownRole, viewerUserId = null, route, isPlatformAdmin = false, botSignedIn, streamState, modules, onNavigate, onOpenCommand, onOpenVariable }: ChannelSpotlightProperties): ReactElement => {
+/** Cmd/Ctrl+K finds navigation, text commands, variables, and channel actions. */
+export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, viewerUserId = null, route, isPlatformAdmin = false, botSignedIn, streamState, channelControls, onRefreshChannelState, modules, onNavigate, onOpenCommand, onOpenVariable }: ChannelCommandPaletteProperties): ReactElement => {
   const texts = dashboardTexts();
   const manageable = ownRole !== null && canManage(ownRole);
   const [commands, setCommands] = useState<TextCommand[]>([]);
@@ -106,7 +102,7 @@ export const ChannelSpotlight = ({ channelId, ownRole, viewerUserId = null, rout
     rememberRecentTarget(viewerUserId, channelId, currentTargetPath);
   }, [channelId, currentTargetPath, viewerUserId]);
 
-  // Loaded on open, not on mount: Spotlight is mounted in the dashboard shell
+  // Loaded on open, not on mount: the command palette stays mounted in the shell
   // so the sidebar trigger and shortcut work from every route, but most page visits
   // never open it -- fetching commands/variables eagerly would be a
   // background request on every navigation for a feature nobody used yet.
@@ -116,100 +112,67 @@ export const ChannelSpotlight = ({ channelId, ownRole, viewerUserId = null, rout
     fetchChannelVariables(channelId).then((data) => { setVariables(data.variables); }).catch(() => { setVariables([]); });
   }, [channelId]);
 
-  const moduleItems = useMemo<SpotlightItem[]>(() => {
-    if (channelId === null) return [];
-    const declarations = registeredModuleNavEntries(MODULES, channelId, dashboardLanguage());
-    return MODULES.flatMap((module) => {
-      const entries = declarations.filter((entry) => entry.moduleId === module.id);
-      if (entries.length > 0) {
-        const state = modules.find((candidate) => candidate.id === module.id);
-        if (state?.enabled !== true || modulePermissionsAreMissing(state)) return [];
-        return entries.map((entry) => {
-        const description = entry.description ?? moduleDescription(module.id) ?? "";
-        const accessibleDescription = module.mandatory === true
-          ? `${description.length === 0 ? "" : `${description} `}${module.mandatoryReason?.[dashboardLanguage()] ?? moduleWorkspaceTexts().mandatoryReason}`
-          : description;
-        const blockedByBot = botBlocksRoute(entry.route, botSignedIn);
-        return {
-          id: `module:${entry.id}`,
-          label: entry.label,
-          recentTargetPath: dashboardRoutePath(entry.route),
-          icon: <NavigationIcon kind={entry.iconKind} className="spotlight-module-icon" />,
-          ...(accessibleDescription.length === 0 ? {} : { description: accessibleDescription }),
-          group: texts.spotlight.groupModules,
-          keywords: [...entry.keywords],
-          ...(blockedByBot ? { disabled: true, disabledReason: texts.blocking.botTitle } : {}),
-          onTrigger: () => { onNavigate(entry.route); },
-        };
-        });
-      }
-      const route: DashboardRoute = { kind: "module", channelId, moduleId: module.id };
-      const description = moduleDescription(module.id);
-      const accessibleDescription = module.mandatory === true
-        ? `${description === null ? "" : `${description} `}${module.mandatoryReason?.[dashboardLanguage()] ?? moduleWorkspaceTexts().mandatoryReason}`
-        : description;
-      const blockedByBot = botBlocksRoute(route, botSignedIn);
-      return [{
-        id: `module:${module.id}`,
-        label: moduleName(module.id),
-        recentTargetPath: dashboardRoutePath(route),
-        icon: <ModuleIcon moduleId={module.id} className="spotlight-module-icon" />,
-        ...(accessibleDescription === null || accessibleDescription.length === 0 ? {} : { description: accessibleDescription }),
-        group: texts.spotlight.groupModules,
-        ...(blockedByBot ? { disabled: true, disabledReason: texts.blocking.botTitle } : {}),
-        onTrigger: () => { onNavigate(route); },
-      }];
-    });
-  }, [botSignedIn, channelId, modules, onNavigate, texts.blocking.botTitle, texts.spotlight.groupModules]);
+  const navigationItems = useMemo<CommandPaletteItem[]>(() => dashboardNavigationGroups(
+    { isPlatformAdmin },
+    channelId ?? "",
+    texts,
+    MODULES,
+    modules,
+    ownRole,
+    dashboardLanguage(),
+    (moduleId) => moduleName(moduleId),
+  ).flatMap((group) => group.entries.map((entry) => {
+    const module = entry.moduleId === undefined ? undefined : MODULES.find((candidate) => candidate.id === entry.moduleId);
+    const description = entry.description ?? (entry.moduleId === undefined ? undefined : moduleDescription(entry.moduleId)) ?? undefined;
+    const accessibleDescription = module?.mandatory === true
+      ? `${description === undefined ? "" : `${description} `}${module.mandatoryReason?.[dashboardLanguage()] ?? moduleWorkspaceTexts().mandatoryReason}`
+      : description;
+    const blockedByBot = botBlocksRoute(entry.route, botSignedIn);
+    const moduleState = entry.moduleId === undefined ? undefined : modules.find((candidate) => candidate.id === entry.moduleId);
+    return {
+      id: entry.id,
+      label: entry.label,
+      recentTargetPath: dashboardRoutePath(entry.route),
+      ...(entry.iconKind === null
+        ? entry.moduleId === undefined ? {} : { icon: <ModuleIcon moduleId={entry.moduleId} className="command-palette-module-icon" /> }
+        : { icon: <NavigationIcon kind={entry.iconKind} className="command-palette-module-icon" /> }),
+      ...(accessibleDescription === undefined || accessibleDescription.length === 0 ? {} : { description: accessibleDescription }),
+      group: group.heading,
+      ...(moduleState?.enabled === false ? { stateLabel: texts.navigation.moduleOff } : {}),
+      keywords: [...entry.keywords],
+      ...(blockedByBot ? { disabled: true, disabledReason: texts.blocking.botTitle } : {}),
+      onTrigger: () => { onNavigate(entry.route); },
+    };
+  })), [botSignedIn, channelId, isPlatformAdmin, modules, onNavigate, ownRole, texts]);
 
-  const commandItems = useMemo<SpotlightItem[]>(() => channelId === null ? [] : commands.map((command) => {
+  const commandItems = useMemo<CommandPaletteItem[]>(() => channelId === null ? [] : commands.map((command) => {
     const route: DashboardRoute = { kind: "module", channelId, moduleId: "text_commands" };
     const blockedByBot = botBlocksRoute(route, botSignedIn);
     return {
       id: `command:${command.name}`,
       label: `!${command.name}`,
-      description: texts.spotlight.openCommand(command.name),
-      icon: <ModuleIcon moduleId="text_commands" className="spotlight-module-icon" />,
-      group: texts.spotlight.groupCommands,
+      description: texts.commandPalette.openCommand(command.name),
+      icon: <ModuleIcon moduleId="text_commands" className="command-palette-module-icon" />,
+      group: texts.commandPalette.groupCommands,
       keywords: [command.name],
       ...(blockedByBot ? { disabled: true, disabledReason: texts.blocking.botTitle } : {}),
       onTrigger: () => {
         onNavigate(route, () => { onOpenCommand(command.name); });
       },
     };
-  }), [botSignedIn, commands, channelId, onNavigate, onOpenCommand, texts.blocking.botTitle, texts.spotlight]);
+  }), [botSignedIn, commands, channelId, onNavigate, onOpenCommand, texts.blocking.botTitle, texts.commandPalette]);
 
-  // Static pages and platform visibility come from the same list as the sidebar.
-  const pageItems = useMemo<SpotlightItem[]>(() => dashboardNavEntries(
-    { isPlatformAdmin },
-    channelId ?? "",
-    texts,
-  ).filter((page) => channelId !== null || page.route.kind !== "channel").map((page) => {
-    const pageRoute = page.route;
-    const blockedByBot = botBlocksRoute(pageRoute, botSignedIn);
-    return {
-      id: `page:${page.id}`,
-      label: page.label,
-      recentTargetPath: dashboardRoutePath(pageRoute),
-      icon: <NavigationIcon kind={page.iconKind} className="spotlight-module-icon" />,
-      group: navPageGroupHeading(page.group, texts),
-      keywords: [...page.keywords],
-      ...(blockedByBot ? { disabled: true, disabledReason: texts.blocking.botTitle } : {}),
-      onTrigger: () => { onNavigate(pageRoute); },
-    };
-  }), [botSignedIn, channelId, isPlatformAdmin, onNavigate, texts]);
-
-  const variableItems = useMemo<SpotlightItem[]>(() => channelId === null ? [] : variables.map((variable) => ({
+  const variableItems = useMemo<CommandPaletteItem[]>(() => channelId === null ? [] : variables.map((variable) => ({
     id: `variable:${variable.name}`,
     label: `{var.${variable.name}}`,
     description: variableDescription(variable),
-    icon: <NavigationIcon kind="variable" className="spotlight-module-icon" />,
-    group: texts.spotlight.groupVariables,
+    icon: <NavigationIcon kind="variable" className="command-palette-module-icon" />,
+    group: texts.commandPalette.groupVariables,
     keywords: [variable.name],
     onTrigger: () => {
       onNavigate({ kind: "channel", channelId, section: "variables" }, () => { onOpenVariable(channelId, variable.name); });
     },
-  })), [variables, channelId, onNavigate, onOpenVariable, texts.spotlight]);
+  })), [variables, channelId, onNavigate, onOpenVariable, texts.commandPalette]);
 
   const adsEnabled = modules.find((candidate) => candidate.id === "ads")?.enabled === true;
   const shoutoutLogin = query.toLowerCase().startsWith(`${SHOUTOUT_KEYWORD} `)
@@ -217,6 +180,28 @@ export const ChannelSpotlight = ({ channelId, ownRole, viewerUserId = null, rout
     : "";
 
   const queryClient = useQueryClient();
+  const toggleChannelControl = useCallback(async (kind: "mute" | "pause"): Promise<void> => {
+    if (channelId === null) return;
+    const control = channelControls?.[kind];
+    const configured = control?.active === true || control?.pending === true;
+    const labels = dashboardTexts().channelControls;
+    try {
+      await setChannelControl(channelId, kind, configured ? null : "unlimited");
+    } catch (error: unknown) {
+      notify({ tone: "error", message: error instanceof PanelApiError ? apiErrorText(error.code, labels.failure) : labels.failure });
+      if (error instanceof PanelApiError && error.status === 401) dispatchDashboardAuthenticationRequired();
+      return;
+    }
+    try {
+      if (onRefreshChannelState !== undefined) await onRefreshChannelState();
+      else await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.channels(), exact: true }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.channel(channelId, "overview"), exact: true }),
+      ]);
+    } catch {
+      notify({ tone: "error", message: labels.refreshFailure });
+    }
+  }, [channelControls, channelId, onRefreshChannelState, queryClient]);
   const toggleAds = useCallback(async (enabled: boolean): Promise<void> => {
     if (channelId === null) return;
     try {
@@ -231,7 +216,7 @@ export const ChannelSpotlight = ({ channelId, ownRole, viewerUserId = null, rout
     }
     await refreshAfterModuleToggle(queryClient, channelId);
   }, [channelId, queryClient]);
-  const actionItems = useMemo<SpotlightItem[]>(() => {
+  const actionItems = useMemo<CommandPaletteItem[]>(() => {
     if (channelId === null) return [];
     const managementLockReason = manageable ? undefined : texts.module.managementLocked;
     // Ad now, clip, and shoutout are the same immediate actions Stream
@@ -240,13 +225,39 @@ export const ChannelSpotlight = ({ channelId, ownRole, viewerUserId = null, rout
     const adNow = moduleImmediateActionAvailability("ads", modules, streamState);
     const clip = moduleImmediateActionAvailability("clips", modules, streamState);
     const shoutout = moduleImmediateActionAvailability("raid", modules, streamState);
-    const items: SpotlightItem[] = [];
+    const items: CommandPaletteItem[] = [];
+    const channelControlLabels = texts.channelControls;
+    for (const kind of ["mute", "pause"] as const) {
+      const control = channelControls?.[kind];
+      const configured = control?.active === true || control?.pending === true;
+      const isMute = kind === "mute";
+      const actionLabel = isMute
+        ? configured ? channelControlLabels.muteDisable : channelControlLabels.muteEnable
+        : configured ? channelControlLabels.pauseDisable : channelControlLabels.pauseEnable;
+      const stateLabel = control?.pending === true
+        ? channelControlLabels.pendingUntilStreamStart
+        : configured
+          ? isMute ? channelControlLabels.muteActive : channelControlLabels.pauseActive
+          : channelControlLabels.inactive;
+      items.push({
+        id: `action:channel-${kind}`,
+        label: actionLabel,
+        ...(configured ? {} : { description: channelControlLabels.durationUnlimitedDescription }),
+        group: texts.commandPalette.groupActions,
+        keywords: isMute
+          ? ["mute", "unmute", "stumm", "stummschalten"]
+          : ["pause", "resume", "paused", "automatische aktionen", "fortsetzen"],
+        stateLabel,
+        icon: isMute ? (configured ? "volume-off" : "volume-3") : (configured ? "player-play" : "player-pause"),
+        onTrigger: () => { void toggleChannelControl(kind); },
+      });
+    }
     if (adNow.offered) {
       const adNowDisabledReason = !manageable ? texts.module.managementLocked : adNow.disabledReason;
       items.push({
         id: "action:ad-now",
         label: texts.streamManager.runAd("60"),
-        group: texts.spotlight.groupActions,
+        group: texts.commandPalette.groupActions,
         keywords: ["ad", "werbung", "commercial"],
         disabled: adNowDisabledReason !== null,
         ...(adNowDisabledReason === null ? {} : { disabledReason: adNowDisabledReason }),
@@ -257,24 +268,24 @@ export const ChannelSpotlight = ({ channelId, ownRole, viewerUserId = null, rout
     items.push(
       {
         id: "action:ads-off",
-        label: texts.spotlight.adOff,
-        group: texts.spotlight.groupActions,
+        label: texts.commandPalette.adOff,
+        group: texts.commandPalette.groupActions,
         // Full phrases, not just "ads": two actions sharing a bare "ads"
         // keyword would both survive a query for either of them.
         keywords: ["ads off", "werbung aus"],
         disabled: !manageable || !adsEnabled,
         ...(managementLockReason === undefined ? {} : { disabledReason: managementLockReason }),
-        icon: <ModuleIcon moduleId="ads" className="spotlight-module-icon" />,
+        icon: <ModuleIcon moduleId="ads" className="command-palette-module-icon" />,
         onTrigger: () => { void toggleAds(false); },
       },
       {
         id: "action:ads-on",
-        label: texts.spotlight.adOn,
-        group: texts.spotlight.groupActions,
+        label: texts.commandPalette.adOn,
+        group: texts.commandPalette.groupActions,
         keywords: ["ads on", "werbung an"],
         disabled: !manageable || adsEnabled,
         ...(managementLockReason === undefined ? {} : { disabledReason: managementLockReason }),
-        icon: <ModuleIcon moduleId="ads" className="spotlight-module-icon" />,
+        icon: <ModuleIcon moduleId="ads" className="command-palette-module-icon" />,
         onTrigger: () => { void toggleAds(true); },
       },
     );
@@ -282,7 +293,7 @@ export const ChannelSpotlight = ({ channelId, ownRole, viewerUserId = null, rout
       items.push({
         id: "action:clip",
         label: texts.streamManager.createClip,
-        group: texts.spotlight.groupActions,
+        group: texts.commandPalette.groupActions,
         keywords: ["clip"],
         icon: "clip",
         disabled: clip.disabledReason !== null,
@@ -294,38 +305,48 @@ export const ChannelSpotlight = ({ channelId, ownRole, viewerUserId = null, rout
       items.push({
         id: "action:shoutout",
         label: texts.streamManager.sendShoutout,
-        description: texts.spotlight.shoutoutHint,
-        group: texts.spotlight.groupActions,
+        description: texts.commandPalette.shoutoutHint,
+        group: texts.commandPalette.groupActions,
         keywords: [SHOUTOUT_KEYWORD],
         icon: "shoutout",
         disabled: shoutout.disabledReason !== null || shoutoutLogin.length === 0,
-        disabledReason: shoutout.disabledReason ?? texts.spotlight.shoutoutMissingLogin,
+        disabledReason: shoutout.disabledReason ?? texts.commandPalette.shoutoutMissingLogin,
         onTrigger: () => { void sendManualShoutout(channelId, shoutoutLogin); },
       });
     }
     return items;
-  }, [texts, manageable, adsEnabled, channelId, shoutoutLogin, streamState, modules, toggleAds]);
+  }, [texts, manageable, adsEnabled, channelId, channelControls, shoutoutLogin, streamState, modules, toggleAds, toggleChannelControl]);
 
-  const targetItems = [...pageItems, ...moduleItems];
+  const targetItems = navigationItems;
   const recentItems = recentTargetPaths.flatMap((path, index) => {
     const target = targetItems.find((item) => item.recentTargetPath === path);
     return target === undefined ? [] : [{
       ...target,
       id: `recent:${String(index)}:${target.id}`,
-      group: texts.spotlight.groupRecentTargets,
+      group: texts.commandPalette.groupRecentTargets,
     }];
   });
-  const items = [...recentItems, ...actionItems, ...pageItems, ...moduleItems, ...commandItems, ...variableItems];
+  const items = [...recentItems, ...actionItems, ...navigationItems, ...commandItems, ...variableItems];
+
+  const setPaletteOpen = (nextOpen: boolean): void => {
+    if (!nextOpen) setQuery("");
+    onOpenChange(nextOpen);
+  };
 
   return (
-    <Spotlight
+    <CommandPalette
       items={items}
-      emptyMessage={texts.spotlight.empty}
-      placeholder={texts.spotlight.placeholder}
+      emptyMessage={texts.commandPalette.empty}
+      title={texts.commandPalette.title}
+      description={texts.commandPalette.description}
+      placeholder={texts.commandPalette.placeholder}
+      navigateHint={texts.commandPalette.navigateHint}
+      openHint={texts.commandPalette.openHint}
+      open={open}
+      onOpenChange={setPaletteOpen}
       query={query}
       onQueryChange={setQuery}
       onOpen={loadResultData}
-      closeOnUnmount
     />
   );
 };

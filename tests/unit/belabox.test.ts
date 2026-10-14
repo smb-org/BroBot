@@ -142,7 +142,7 @@ describe("BELABOX stats URL", () => {
   it("registers interval polling defaults and a settings editor", async () => {
     expect(belaboxModule).toMatchObject({
       id: "belabox",
-      navigationCategory: "data",
+      navigationCategory: "stream",
       mandatory: false,
       defaultEnabled: false,
       defaultSettings: BELABOX_DEFAULT_SETTINGS,

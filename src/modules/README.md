@@ -441,11 +441,12 @@ Chatverarbeitung kann Daten neu anlegen, die der Alarm wieder entfernt.
 Symbole bleiben beim Modul.
 
 **Einsatz:** Jedes Modul deklariert genau eine `navigationCategory`: `chat`,
-`interaction`, `data` oder `twitch`. Der Host gruppiert aktivierte, berechtigte
-Module unter den lokalisierten Kategorieüberschriften (nur diese vier Texte
-übersetzt der Host) und nutzt den Modulnamen als Eintrag. Eigene
+`participation`, `twitch`, `data`, `stream` oder `admin`. Der Host gruppiert
+aktivierte, berechtigte Module unter den lokalisierten Kategorieüberschriften
+(Chat, Teilnahme, Twitch, Daten, Stream und Verwaltung) und nutzt den Modulnamen
+als Eintrag. Eigene
 `navigationEntries` (`id`, zweisprachiges `label` und `description`, `iconKind`,
-`keywords`) ersetzen Namen und Symbol für Seitenleiste und Spotlight; sie wählen
+`keywords`) ersetzen Namen und Symbol für Seitenleiste und Befehlspalette; sie wählen
 keine eigene Kategorie. `panelIcon` liefert Pfaddaten für das Symbol.
 
 **Grenzen:** Die frühere Angabe `group: "channel"` entfällt. `showMainSwitch:

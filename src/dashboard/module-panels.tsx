@@ -137,7 +137,7 @@ interface ModulePanelMountProperties {
   canManage?: boolean;
   canOperate?: boolean;
   botIsModerator?: boolean | null;
-  /** Deep-link target from Spotlight (#164); passed through to the panel unchanged. */
+  /** Deep-link target from the command palette (#164); passed through to the panel unchanged. */
   initialSelection?: string;
 }
 
@@ -772,7 +772,7 @@ interface ModulePageProperties {
   botIsModerator?: boolean | null;
   onNavigate: (route: DashboardRoute) => void;
   onToggle: () => void;
-  /** Deep-link target from Spotlight (#164), e.g. a text command name. */
+  /** Deep-link target from the command palette (#164), e.g. a text command name. */
   initialSelection?: string;
   /** Lets route transitions retain the previous page until the target panel chunk is ready. */
   suspendPanelUntilReady?: boolean;

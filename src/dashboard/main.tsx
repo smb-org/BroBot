@@ -39,7 +39,7 @@ import { preloadModulePanel } from "./module-panel-loaders";
 import { BroadcasterConsentAction, ChannelNotices, ImmediateActions, ModeratorCheckAction, WarningsAndErrorsFeed } from "./stream-manager";
 import { refreshAfterModuleToggle } from "./data/module-toggle";
 import { useSystemQuery } from "./data/lists";
-import { ChannelSpotlight } from "./spotlight";
+import { ChannelCommandPalette } from "./command-palette";
 import { MembersPage } from "./members";
 import { PlatformPage } from "./platform";
 import { channelPanelTexts, roleLabel } from "./labels";
@@ -47,11 +47,11 @@ import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, 
 import { CHANNEL_CONTROL_DURATIONS, canManage, type ChannelControlDuration, type ChannelRole, type ChatOutputTarget } from "../contracts/values";
 import { MODULES } from "../modules/registry";
 import { eventSubName, moduleName, statusWord } from "./module-labels";
-import { dashboardRoutePath, dashboardRouteRequiresBot, replaceDashboardRoute, useDashboardRoute, type DashboardRoute } from "./router";
-import { dashboardNavEntries, enabledModuleNavigationGroups, moduleCategoryHeading, navPageGroupHeading, visibleModuleNavigationIds } from "./nav-pages";
+import { dashboardModeForRoute, dashboardRoutePath, dashboardRouteRequiresBot, routeForDashboardMode, routeForSelectedChannel, replaceDashboardRoute, useDashboardRoute, type DashboardMode, type DashboardRoute } from "./router";
+import { dashboardNavigationGroups, visibleModuleNavigationIds } from "./nav-pages";
 import { truncateTo200Chars } from "../text";
 import { BlockingState, Button, ChannelLocationMenu, ChatTargetField, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, LoadStateLines, notify, Select as UiSelect, Shell, Sidebar, StatusLed, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type StatusLedState } from "./ui";
-import { readPalette, writePalette } from "./ui/palette";
+import { readPalette, writePalette, type Palette } from "./ui/palette";
 import { EventsPage } from "./events/EventsPage";
 import { emptyEventFilter, eventFilterIsActive } from "./events/model";
 import { AuditPage } from "./audit/AuditPage";
@@ -235,17 +235,15 @@ interface PanelSidebarProperties {
   platformAdmin: boolean;
   moduleStates: PanelModuleState[] | null;
   memberRole: ChannelRole | null;
-  collapsed: boolean;
-  onToggleCollapsed: () => void;
   onEntryNavigate: () => void;
+  onOpenCommandPalette: () => void;
   onNavigate: (route: DashboardRoute) => void;
 }
 
 /**
- * "Seitenleiste" (docs/input/DESIGN-neu.md): four groups, built from the
- * seam's `Sidebar`. Replaces `Rail` and the breadcrumb switchers.
+ * Setup navigation groups come from the same registry used by the command palette.
  */
-const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, memberRole, collapsed, onToggleCollapsed, onEntryNavigate, onNavigate }: PanelSidebarProperties): ReactElement => {
+const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, memberRole, onEntryNavigate, onOpenCommandPalette, onNavigate }: PanelSidebarProperties): ReactElement => {
   const texts = dashboardTexts();
   const navigationChannelId = route.kind === "channel" || route.kind === "module"
     ? route.channelId
@@ -282,82 +280,61 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
     };
   }, [memberRole, moduleStates]);
 
-  const pages = dashboardNavEntries({ isPlatformAdmin: platform }, navigationChannelId, texts);
-  const pageEntry = (page: (typeof pages)[number]): SidebarEntry => {
-    const entryRoute = page.route;
-    return {
-      id: page.id,
-      pageId: page.id,
-      label: page.label,
-      icon: <NavigationIcon kind={page.iconKind} className="sidebar-nav-icon" />,
-      href: dashboardRoutePath(entryRoute),
-      active: dashboardRoutePath(entryRoute) === dashboardRoutePath(route),
-      onNavigate: () => { onNavigate(entryRoute); },
-    };
-  };
-  const platformPage = pages.find((page) => page.group === "platform");
-
-  const sidebarPageOrder = ["overview", "overlays", "audit", "system", "members", "variables", "events", "modules"];
-  const sidebarChannelPages = sidebarPageOrder.flatMap((id) => {
-    const page = pages.find((candidate) => candidate.id === id);
-    if (page === undefined) return [];
-    const entry = pageEntry(page);
-    return [id === "modules" ? { ...entry, label: texts.navigation.manageModules } : entry];
-  });
-  const channelGroup: SidebarGroup = {
-    id: "channel",
-    heading: navPageGroupHeading("channel", texts),
-    entries: sidebarChannelPages,
-  };
-
-  const moduleGroups: SidebarGroup[] = enabledModuleNavigationGroups(
+  const navigationGroups = dashboardNavigationGroups(
+    { isPlatformAdmin: platform },
+    navigationChannelId,
+    texts,
     MODULES,
     moduleStates ?? [],
     memberRole,
-    navigationChannelId,
     dashboardLanguage(),
     (moduleId) => moduleName(moduleId),
-  ).map(({ category, entries }) => ({
-    id: `modules-${category}`,
-    heading: moduleCategoryHeading(category, texts),
-    nestedEntries: true,
-    entries: entries.map((entry): SidebarEntry => ({
+  );
+  const groups: SidebarGroup[] = navigationGroups.flatMap(({ category, heading, entries }) => {
+    const sidebarEntries = entries.filter((entry) => entry.area === "setup" && entry.sidebarVisible).map((entry): SidebarEntry => ({
       id: entry.id,
+      ...(entry.pageId === undefined ? {} : { pageId: entry.pageId }),
+      category,
       label: entry.label,
       icon: entry.iconKind === null
-        ? <ModuleIcon moduleId={entry.moduleId} className="sidebar-nav-icon" />
+        ? entry.moduleId === undefined ? <span aria-hidden="true" className="sidebar-nav-icon" /> : <ModuleIcon moduleId={entry.moduleId} className="sidebar-nav-icon" />
         : <NavigationIcon kind={entry.iconKind} className="sidebar-nav-icon" />,
       href: dashboardRoutePath(entry.route),
-      active: route.kind === "module" && route.moduleId === entry.moduleId,
+      active: entry.pageId !== undefined
+        ? dashboardRoutePath(entry.route) === dashboardRoutePath(route)
+        : route.kind === "module" && route.moduleId === entry.moduleId,
       onNavigate: () => { onNavigate(entry.route); },
-      onPreload: () => { void preloadModulePanel(entry.moduleId).catch(() => undefined); },
-      led: { status: "ok" as const, word: statusWord(true) },
-    })),
-  }));
-  const platformGroup: SidebarGroup | undefined = platformPage === undefined ? undefined : {
-    id: "platform",
-    heading: navPageGroupHeading("platform", texts),
-    entries: [pageEntry(platformPage)],
-  };
+      ...(entry.moduleId === undefined ? {} : {
+        onPreload: () => { void preloadModulePanel(entry.moduleId as string).catch(() => undefined); },
+        led: { status: "ok" as const, word: statusWord(true) },
+      }),
+    }));
+    return sidebarEntries.length === 0 ? [] : [{ id: category, category, heading, entries: sidebarEntries }];
+  });
 
   return (
     <Sidebar
-      groups={[channelGroup, ...moduleGroups, ...(platformGroup === undefined ? [] : [platformGroup])]}
-      collapsed={collapsed}
-      onToggleCollapsed={onToggleCollapsed}
+      groups={groups}
+      onOpenCommandPalette={onOpenCommandPalette}
       onEntryNavigate={onEntryNavigate}
-      collapseLabel={texts.navigation.collapseSidebar}
-      expandLabel={texts.navigation.expandSidebar}
-      spotlightLabel={texts.spotlight.placeholder}
+      setupHeading={texts.navigation.sidebarSetupHeading}
+      setupDescription={texts.navigation.sidebarSetupDescription}
+      paletteLabel={texts.navigation.sidebarSearch}
+      paletteShortcut={navigator.userAgent.includes("Mac") ? "⌘ K" : "Ctrl K"}
     />
   );
 };
 
 interface DashboardHeaderProperties {
   route: DashboardRoute;
+  mode: DashboardMode;
   channels: PanelChannelState[];
   activeChannel: PanelChannelState | undefined;
   loadedAt: number | undefined;
+  palette: Palette;
+  onPaletteChange: (palette: Palette) => void;
+  onOpenCommandPalette: () => void;
+  onSwitchMode: (mode: DashboardMode) => void;
   onNavigate: (route: DashboardRoute) => void;
   onLogout: () => void;
   loggingOut: boolean;
@@ -479,9 +456,10 @@ const ChannelControlExpiryWatcher = ({ controls, onRefresh }: {
   return null;
 };
 
-const ChannelControlStatus = ({ control, kind }: {
+const ChannelControlStatus = ({ control, kind, compact = false }: {
   control: PanelChannelControl;
   kind: "mute" | "pause";
+  compact?: boolean;
 }): ReactElement => {
   const texts = dashboardTexts();
   const labels = texts.channelControls;
@@ -496,16 +474,19 @@ const ChannelControlStatus = ({ control, kind }: {
   } else if (control.active && control.mode === "until_stream_end") {
     label = `${kind === "mute" ? labels.muteActive : labels.pauseActive} · ${labels.untilStreamEnd}`;
   } else if (control.active) label = kind === "mute" ? labels.muteActive : labels.pauseActive;
+  else if (compact) label = labels.inactive;
   const timed = control.active && control.mode === "timed" && control.until !== null && Date.parse(control.until) > now;
+  if (compact) return <span className="dashboard-header__account-control-state" title={label ?? labels.inactive}>{label}</span>;
   return <span className="dashboard-header__control-state-slot">
     {configured && label !== null ? <span className="dashboard-header__control-state" title={label}>{timed ? <Icon name="clock-hour-4" size={16} /> : null}<span>{label}</span></span> : null}
   </span>;
 };
 
-const ChannelControlActions = ({ channelId, controls, onRefresh }: {
-  channelId: string;
+const ChannelControlActions = ({ channelId, controls, onRefresh, children }: {
+  channelId: string | undefined;
   controls: PanelChannelControls | undefined;
   onRefresh: () => Promise<void>;
+  children: (slots: { desktopControls: ReactNode; accountMenuItems: ReactNode }) => ReactNode;
 }): ReactElement => {
   const texts = dashboardTexts();
   const labels = texts.channelControls;
@@ -519,7 +500,7 @@ const ChannelControlActions = ({ channelId, controls, onRefresh }: {
   const activeChannelControls = controls ?? { mute: CONTROL_OFF, pause: CONTROL_OFF };
 
   const apply = async (kind: "mute" | "pause", next: ChannelControlDuration | null): Promise<void> => {
-    if (busy !== null) return;
+    if (busy !== null || channelId === undefined) return;
     setBusy(kind);
     try {
       await setChannelControl(channelId, kind, next);
@@ -555,7 +536,7 @@ const ChannelControlActions = ({ channelId, controls, onRefresh }: {
           : labels.durationUnlimitedDescription,
   }));
 
-  return (
+  const desktopControls = channelId === undefined ? null : (
     <div className="dashboard-header__controls" aria-label={texts.navigation.channel}>
       <div className="dashboard-header__control-buttons">
         <Button
@@ -577,6 +558,25 @@ const ChannelControlActions = ({ channelId, controls, onRefresh }: {
         />
         <ChannelControlStatus control={pause} kind="pause" />
       </div>
+    </div>
+  );
+  const accountMenuItems = channelId === undefined ? null : (
+    <>
+      <div className="dashboard-header__account-menu-heading">{labels.controlsHeading}</div>
+      <button className="dashboard-header__account-control" onClick={() => { if (muteConfigured) void apply("mute", null); else setDialogControl("mute"); }} role="menuitem" type="button">
+        <span>{muteConfigured ? labels.muteDisable : labels.muteEnable}</span>
+        <ChannelControlStatus compact control={mute} kind="mute" />
+      </button>
+      <button className="dashboard-header__account-control" onClick={() => { if (pauseConfigured) void apply("pause", null); else setDialogControl("pause"); }} role="menuitem" type="button">
+        <span>{pauseConfigured ? labels.pauseDisable : labels.pauseEnable}</span>
+        <ChannelControlStatus compact control={pause} kind="pause" />
+      </button>
+    </>
+  );
+
+  return (
+    <>
+      {children({ desktopControls, accountMenuItems })}
       <ChannelControlExpiryWatcher controls={activeChannelControls} onRefresh={onRefresh} />
       <ControlDurationDialog
         opened={dialogControl !== null}
@@ -593,22 +593,11 @@ const ChannelControlActions = ({ channelId, controls, onRefresh }: {
         onConfirm={() => { if (dialogControl !== null) void apply(dialogControl, duration); }}
         onCancel={() => { if (busy === null) setDialogControl(null); }}
       />
-    </div>
+    </>
   );
 };
 
-/**
- * "Kopfleiste" (docs/input/DESIGN-neu.md): brand, channel `Select` up to
- * 280px with the Twitch id, connection LED, life-sign, and sign-out.
- *
- * The channel `Select`'s options carry the Twitch id as plain text next to
- * the name rather than in a monospace secondary line: `ui/Select` only
- * renders a flat label per option, and extending it for a two-line,
- * icon-plus-LED option render is a separate, larger seam change.
- * ponytail: functional parity (the id stays visible and searchable), not
- * pixel parity. Upgrade path: a richer `SelectOption` shape in `ui/Select`
- * if the plain label stops being legible enough.
- */
+/** The fixed dashboard topbar owns channel, mode, palette, and account controls. */
 const DashboardConnectionClock = ({ channel, loadedAt }: {
   channel: PanelChannelState;
   loadedAt?: number;
@@ -627,7 +616,7 @@ const DashboardStreamClock = ({ channel }: { channel: PanelChannelState }): Reac
   const streamLabel = streamState === "online"
     ? texts.header.streamLive(streamDuration(channel.streamStartedAt, now))
     : streamState === "offline" ? texts.header.streamOffline : texts.header.streamUnknown;
-  return <span className="dashboard-header__stream" data-state={streamState === "online" ? "live" : streamState === "offline" ? "offline" : "unknown"}>
+  return <span aria-label={streamLabel} className="dashboard-header__stream" data-state={streamState === "online" ? "live" : streamState === "offline" ? "offline" : "unknown"}>
     <Icon name={streamState === "online" ? "broadcast" : "broadcast-off"} size={20} />
     <span>{streamLabel}</span>
     {channel.streamStateCheckedAt === undefined || channel.streamStateCheckedAt === null ||
@@ -637,31 +626,83 @@ const DashboardStreamClock = ({ channel }: { channel: PanelChannelState }): Reac
   </span>;
 };
 
-const DashboardHeader = ({ route, channels, activeChannel, loadedAt, onNavigate, onLogout, loggingOut, onRefreshState }: DashboardHeaderProperties): ReactElement => {
+const DashboardHeader = ({ route, mode, channels, activeChannel, loadedAt, palette, onPaletteChange, onOpenCommandPalette, onSwitchMode, onNavigate, onLogout, loggingOut, onRefreshState }: DashboardHeaderProperties): ReactElement => {
   const texts = dashboardTexts();
+  const [accountOpen, setAccountOpen] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!accountOpen) return;
+    const closeOnOutsideClick = (event: PointerEvent): void => {
+      if (event.target instanceof Node && !accountMenuRef.current?.contains(event.target)) setAccountOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent): void => { if (event.key === "Escape") setAccountOpen(false); };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [accountOpen]);
   return (
     <div className="dashboard-header">
-      <a className="brand-mark dashboard-header__brand" href="/" aria-current={route.kind === "overview" ? "page" : undefined} onClick={(event) => { event.preventDefault(); onNavigate({ kind: "overview" }); }}><span className="brand-mark__dot" /><span className="brand-mark__word">BroBot</span></a>
+      <div className="dashboard-header__start">
+      <a aria-current={dashboardModeForRoute(route) === "live" ? "page" : undefined} className="brand-mark dashboard-header__brand" href="/" onClick={(event) => { event.preventDefault(); onNavigate({ kind: "overview" }); }}><span className="brand-mark__dot" /><span className="brand-mark__word">BroBot</span></a>
       {activeChannel === undefined ? null : (
       <div className="dashboard-header__channel">
-        <div className="dashboard-header__channel-select"><UiSelect
-            compact
-            value={activeChannel.channelId}
-            onChange={(channelId) => { if (channelId !== null) onNavigate({ kind: "channel", channelId, section: "overview" }); }}
-            options={channels.map((channel) => ({ value: channel.channelId, label: `${channel.displayName} — ${channel.channelId}` }))}
-            ariaLabel={texts.navigation.selectChannel}
-            id="dashboard-channel-select"
-          /></div>
+        <div className="dashboard-header__channel-select">
+          <span aria-hidden="true" className="dashboard-header__channel-avatar">{activeChannel.login.slice(0, 1).toUpperCase()}</span>
+          <UiSelect
+              compact
+              value={activeChannel.channelId}
+              onChange={(channelId) => { if (channelId !== null) onNavigate(routeForSelectedChannel(route, channelId)); }}
+              options={channels.map((channel) => ({ value: channel.channelId, label: `${channel.displayName} — ${channel.channelId}`, selectedLabel: channel.displayName }))}
+              ariaLabel={`${activeChannel.displayName} — ${texts.navigation.selectChannel}`}
+              id="dashboard-channel-select"
+            />
+        </div>
         {activeChannel.location == null ? null : <ChannelLocationMenu location={activeChannel.location} messages={texts.header.locationMenu} />}
         </div>
       )}
-      <div className="dashboard-header__status">
-        {activeChannel === undefined ? null : <DashboardStreamClock channel={activeChannel} />}
-        {activeChannel === undefined ? null : <DashboardConnectionClock channel={activeChannel} {...(loadedAt === undefined ? {} : { loadedAt })} />}
-        {loadedAt === undefined ? null : <DataAge since={loadedAt} />}
       </div>
-      {activeChannel === undefined ? null : <ChannelControlActions channelId={activeChannel.channelId} controls={activeChannel.controls} onRefresh={onRefreshState} />}
-      <button className="button button--quiet dashboard-header__logout" type="button" onClick={onLogout} disabled={loggingOut}>{loggingOut ? texts.navigation.signingOut : texts.navigation.signOut}</button>
+      <div aria-label={texts.navigation.setup} className="dashboard-header__mode" role="group">
+        <button aria-label={texts.navigation.live} aria-pressed={mode === "live"} onClick={() => { onSwitchMode("live"); }} type="button"><Icon name="broadcast" size={16} /><span className="dashboard-header__mode-label">{texts.navigation.live}</span></button>
+        <button aria-label={texts.navigation.setup} aria-pressed={mode === "setup"} onClick={() => { onSwitchMode("setup"); }} type="button"><Icon name="tabSettings" size={16} /><span className="dashboard-header__mode-label">{texts.navigation.setup}</span></button>
+      </div>
+      <ChannelControlActions channelId={activeChannel?.channelId} controls={activeChannel?.controls} onRefresh={onRefreshState}>
+        {({ desktopControls, accountMenuItems }) => (
+          <div className="dashboard-header__end">
+            <div className="dashboard-header__status">
+              {activeChannel === undefined ? null : <DashboardStreamClock channel={activeChannel} />}
+              {activeChannel === undefined ? null : <DashboardConnectionClock channel={activeChannel} {...(loadedAt === undefined ? {} : { loadedAt })} />}
+              {loadedAt === undefined ? null : <DataAge since={loadedAt} />}
+            </div>
+            {desktopControls}
+            <button aria-label={texts.commandPalette.placeholder} className="dashboard-header__palette-trigger" onClick={onOpenCommandPalette} type="button">
+              <Icon name="search" size={16} /><span>{texts.commandPalette.placeholder}</span><kbd>{navigator.userAgent.includes("Mac") ? "⌘ K" : "Ctrl K"}</kbd>
+            </button>
+            <div className="dashboard-header__account-wrap" ref={accountMenuRef}>
+              <button aria-expanded={accountOpen} aria-haspopup="menu" aria-label={texts.navigation.accountMenu} className="dashboard-header__account-trigger" onClick={() => { setAccountOpen((open) => !open); }} type="button">
+                <span aria-hidden="true" className="dashboard-header__account-avatar">B</span><span className="dashboard-header__account-name">{texts.navigation.accountMenu}</span><span aria-hidden="true">⌄</span>
+              </button>
+              {accountOpen ? (
+                <div aria-label={texts.navigation.accountMenu} className="dashboard-header__account-menu" role="menu">
+                  <div className="dashboard-header__account-menu-heading">{texts.navigation.appearance}</div>
+                  <button aria-checked={palette === "nachtschicht"} onClick={() => { onPaletteChange("nachtschicht"); setAccountOpen(false); }} role="menuitemradio" type="button">
+                    <span>{texts.navigation.appearanceNightShift}</span>{palette === "nachtschicht" ? <span aria-hidden="true">✓</span> : null}
+                  </button>
+                  <button aria-checked={palette === "indigo-nacht"} onClick={() => { onPaletteChange("indigo-nacht"); setAccountOpen(false); }} role="menuitemradio" type="button">
+                    <span>{texts.navigation.appearanceIndigoNight}</span>{palette === "indigo-nacht" ? <span aria-hidden="true">✓</span> : null}
+                  </button>
+                  {accountMenuItems}
+                  <button className="dashboard-header__account-signout" disabled={loggingOut} onClick={() => { setAccountOpen(false); onLogout(); }} role="menuitem" type="button">
+                    {loggingOut ? texts.navigation.signingOut : texts.navigation.signOut}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        )}
+      </ChannelControlActions>
     </div>
   );
 };
@@ -1320,6 +1361,8 @@ export const DashboardApp = (): ReactElement => {
   }, []);
 
   const [route, navigate] = useDashboardRoute();
+  const [palette, setPalette] = useState<Palette>(() => readPalette());
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const realtimeChannelId = route.kind === "channel" || route.kind === "module" ? route.channelId : null;
   const realtimeStatus = useDashboardRealtimeStatus(realtimeChannelId ?? "");
   const offlineRefetchInterval = realtimeStatus === "connected" ? false : 180_000;
@@ -1393,11 +1436,11 @@ export const DashboardApp = (): ReactElement => {
   const routeKey = dashboardRoutePath(route);
   const [headerModuleBusyKeys, setHeaderModuleBusyKeys] = useState<ReadonlySet<string>>(() => new Set());
   const headerModuleBusy = route.kind === "module" && headerModuleBusyKeys.has(`${route.channelId}:${route.moduleId}`);
-  // Spotlight (#164): set right before navigating to a module so its panel
+  // The command palette sets this before navigating so a module can preselect
   // can pre-select something on mount (e.g. a text command by name). Not
   // part of the route/URL -- see the deep-link discussion in that commit.
   const [pendingModuleSelection, setPendingModuleSelection] = useState<{ channelId: string; moduleId: string; value: string } | null>(null);
-  // Same deep-link pattern, for Spotlight jumping straight to a channel
+  // The same deep-link pattern lets the command palette jump straight to a channel
   // variable's inspector (#208) instead of just opening the variables page.
   const [pendingVariableSelection, setPendingVariableSelection] = useState<{ channelId: string; name: string } | null>(null);
   const notifiedLoadErrors = useRef(new Map<string, string>());
@@ -1563,9 +1606,17 @@ export const DashboardApp = (): ReactElement => {
 
   const selectedChannelIdForModules = selectedChannel?.channelId ?? null;
   const selectedModulesForChannel = selectedChannel?.modules;
-  const spotlightChannel = route.kind === "channel" || route.kind === "module"
+  const paletteChannel = route.kind === "channel" || route.kind === "module"
     ? selectedChannel
     : channels.data?.[0] ?? null;
+  const paletteChannelIdRef = useRef(paletteChannel?.channelId ?? null);
+  useEffect(() => {
+    const nextChannelId = paletteChannel?.channelId ?? null;
+    if (paletteChannelIdRef.current !== null && nextChannelId !== null && paletteChannelIdRef.current !== nextChannelId) {
+      setCommandPaletteOpen(false);
+    }
+    paletteChannelIdRef.current = nextChannelId;
+  }, [paletteChannel?.channelId]);
 
   // Current workers include module state in GET /api/channels. Keep a
   // compatibility fallback for an older worker response that omits it.
@@ -1596,14 +1647,27 @@ export const DashboardApp = (): ReactElement => {
     : null;
   const activeHeaderChannel = overviewForHeader ?? selectedChannel ?? undefined;
   const activeHeaderLoadedAt = overviewForHeader === null ? channels.loadedAt : overview.loadedAt;
-  const spotlightModules = spotlightChannel?.modules ?? (
-    (route.kind === "channel" || route.kind === "module") && spotlightChannel?.channelId === route.channelId
+  const paletteModules = paletteChannel?.modules ?? (
+    (route.kind === "channel" || route.kind === "module") && paletteChannel?.channelId === route.channelId
       ? modules.data?.modules ?? []
       : []
   );
-  const spotlightStreamState = overviewForHeader !== null && overviewForHeader.channelId === spotlightChannel?.channelId
+  const paletteStreamState = overviewForHeader !== null && overviewForHeader.channelId === paletteChannel?.channelId
     ? overviewForHeader.streamState
-    : spotlightChannel?.streamState;
+    : paletteChannel?.streamState;
+  // Same source as the account menu: the fresh overview wins over the cached channel list.
+  const paletteControls = overviewForHeader !== null && overviewForHeader.channelId === paletteChannel?.channelId
+    ? overviewForHeader.controls
+    : paletteChannel?.controls;
+  const dashboardMode = dashboardModeForRoute(route);
+  const selectPalette = (nextPalette: Palette): void => {
+    setPalette(nextPalette);
+    writePalette(nextPalette);
+  };
+  const switchMode = (mode: DashboardMode): void => {
+    const channelId = activeHeaderChannel?.channelId ?? channels.data?.[0]?.channelId ?? null;
+    navigate(routeForDashboardMode(route, mode, channelId, isPlatform));
+  };
 
   const handleLogout = async (): Promise<void> => {
     setLoggingOut(true);
@@ -1705,11 +1769,14 @@ export const DashboardApp = (): ReactElement => {
   return (
     <UiProvider>
         <Shell
-          header={<DashboardHeader route={route} channels={channels.data ?? []} activeChannel={activeHeaderChannel} loadedAt={activeHeaderLoadedAt} onNavigate={navigate} onLogout={() => { void handleLogout(); }} loggingOut={loggingOut} onRefreshState={refreshChannelState} />}
-          navbar={(context) => <PanelSidebar route={route} channels={channels.data ?? []} platformAdmin={isPlatform} moduleStates={sidebarModuleStates} memberRole={selectedChannel?.role ?? null} collapsed={context.collapsed} onToggleCollapsed={context.onToggleCollapsed} onEntryNavigate={context.closeMobileNav} onNavigate={navigate} />}
+          header={(context) => <DashboardHeader route={route} mode={dashboardMode} channels={channels.data ?? []} activeChannel={activeHeaderChannel} loadedAt={activeHeaderLoadedAt} palette={palette} onPaletteChange={selectPalette} onOpenCommandPalette={context.openCommandPalette} onSwitchMode={switchMode} onNavigate={navigate} onLogout={() => { void handleLogout(); }} loggingOut={loggingOut} onRefreshState={refreshChannelState} />}
+          navbar={(context) => <PanelSidebar route={route} channels={channels.data ?? []} platformAdmin={isPlatform} moduleStates={sidebarModuleStates} memberRole={selectedChannel?.role ?? null} onEntryNavigate={context.closeMobileNav} onOpenCommandPalette={context.openCommandPalette} onNavigate={navigate} />}
           navLabel={dashboardTexts().navigation.mainNavigation}
           openSidebarLabel={dashboardTexts().navigation.openSidebar}
           closeSidebarLabel={dashboardTexts().navigation.closeSidebar}
+          mode={dashboardMode}
+          commandPaletteOpen={commandPaletteOpen}
+          onCommandPaletteOpenChange={setCommandPaletteOpen}
         >
           <div className="main-content">
         {!showBotBlocking && route.kind === "overview" ? <OverviewPage channelState={channels} onNavigate={navigate} /> : null}
@@ -1802,19 +1869,23 @@ export const DashboardApp = (): ReactElement => {
         /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "audit" && selectedChannel !== null ? <AuditPage key={route.channelId} channelId={route.channelId} filters={auditFilters} onFiltersChange={updateAuditFilters} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "events" && selectedChannel !== null ? <EventsPage key={route.channelId} channelId={route.channelId} filters={eventFilters} moduleOptions={selectedChannel.modules ?? modules.data?.modules ?? []} onFiltersChange={updateEventFilters} /> : null}
-        <ChannelSpotlight
-          key={`spotlight-${spotlightChannel?.channelId ?? "none"}`}
-          channelId={spotlightChannel?.channelId ?? null}
-          ownRole={spotlightChannel?.role ?? null}
+        <ChannelCommandPalette
+          key={`command-palette-${paletteChannel?.channelId ?? "none"}`}
+          open={commandPaletteOpen}
+          onOpenChange={setCommandPaletteOpen}
+          channelId={paletteChannel?.channelId ?? null}
+          ownRole={paletteChannel?.role ?? null}
           viewerUserId={viewerUserId}
           route={route}
           isPlatformAdmin={isPlatform}
           {...(channels.status === "success" ? { botSignedIn } : {})}
-          streamState={spotlightStreamState}
-          modules={spotlightModules}
+          streamState={paletteStreamState}
+          {...(paletteControls === undefined ? {} : { channelControls: paletteControls })}
+          onRefreshChannelState={refreshChannelState}
+          modules={paletteModules}
           onNavigate={navigate}
           onOpenCommand={(name) => {
-            if (spotlightChannel !== null) setPendingModuleSelection({ channelId: spotlightChannel.channelId, moduleId: "text_commands", value: name });
+            if (paletteChannel !== null) setPendingModuleSelection({ channelId: paletteChannel.channelId, moduleId: "text_commands", value: name });
           }}
           onOpenVariable={(channelId, name) => { setPendingVariableSelection({ channelId, name }); }}
         />

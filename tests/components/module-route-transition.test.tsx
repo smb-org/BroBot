@@ -66,6 +66,16 @@ describe("Module route during client-side navigation", () => {
       if (path === "/api/channels/kanal-a/modules") {
         return response({ modules: [{ id: "aktiv", enabled: true, settings: "{}" }] });
       }
+      if (path === "/api/channels/kanal-a/system") {
+        return response({
+          broadcasterConnection: channel.broadcasterConnection,
+          bot: channel.bot,
+          botPermissions: null,
+          broadcasterPermissions: null,
+          chatSubscription: channel.chatSubscription,
+          tokens: channel.tokens,
+        });
+      }
       if (path === "/api/channels/kanal-a/events") return response({ entries: [], nextCursor: null });
       if (path === "/api/channels/kanal-a/settings") return response({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 1 });
       unmockedRequests.push(path);
@@ -74,8 +84,10 @@ describe("Module route during client-side navigation", () => {
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     const rendered = render(<DashboardApp />, undefined, { panelRevisions: {} });
-    const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
     expect(await screen.findByRole("heading", { name: "Alpha", level: 1 })).toBeInTheDocument();
+    const modeSwitcher = screen.getByRole("group", { name: "Einrichten" });
+    fireEvent.click(within(modeSwitcher).getByRole("button", { name: "Einrichten" }));
+    const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
     const link = await within(nav).findByRole("link", { name: /^aktiv.*Läuft$/ });
     await waitFor(() => expect(rendered.queryClient.getQueryData(queryKeys.channel("kanal-a", "overview"))).toEqual(activeState));
     expect(idleCallbackScheduled).toHaveBeenCalled();

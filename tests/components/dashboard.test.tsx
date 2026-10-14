@@ -18,6 +18,10 @@ const moderator = {
 };
 
 const relativeIso = (milliseconds: number): string => new Date(Date.now() + milliseconds).toISOString();
+const platformPaletteShortcut = (): { key: string; metaKey?: boolean; ctrlKey?: boolean } =>
+  /Mac|iPhone|iPad|iPod/u.test(navigator.platform || navigator.userAgent)
+    ? { key: "k", metaKey: true }
+    : { key: "k", ctrlKey: true };
 
 const healthyChannel = (channelId: string, displayName: string) => ({
   channelId,
@@ -96,6 +100,23 @@ const render = (
   return rendered;
 };
 
+const openSetupNavigation = async (): Promise<HTMLElement> => {
+  await screen.findByRole("combobox", { name: /Kanal auswählen/u });
+  const setupButton = screen.getByRole("button", { name: "Einrichten" });
+  if (setupButton.getAttribute("aria-pressed") !== "true") fireEvent.click(setupButton);
+  await waitFor(() => expect(document.querySelector(".dashboard-shell")).toHaveAttribute("data-mode", "setup"));
+  const drawerButton = document.querySelector<HTMLButtonElement>(".dashboard-shell__burger");
+  if (drawerButton !== null && drawerButton.getAttribute("aria-expanded") !== "true") fireEvent.click(drawerButton);
+  const navigation = document.querySelector('nav[aria-label="Hauptnavigation"]');
+  if (!(navigation instanceof HTMLElement)) throw new Error("Setup navigation is missing.");
+  return navigation;
+};
+
+const clickLogout = (): void => {
+  fireEvent.click(screen.getByRole("button", { name: "Konto" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Abmelden" }));
+};
+
 const stubDashboardFetch = (
   route: DashboardRoute,
   channels: Array<{ bot?: unknown }> = [healthyChannel("kanal-a", "Alpha")],
@@ -148,7 +169,7 @@ const showChannelOverview = async (channel: ReturnType<typeof healthyChannel>): 
   }, [channel]);
   window.history.replaceState({}, "", `/channels/${channel.channelId}`);
   render(<DashboardApp />);
-  await screen.findByRole("combobox", { name: "Kanal auswählen" });
+  await screen.findByRole("combobox", { name: /Kanal auswählen/u });
 };
 
 const broadcaster = (userId: string, login: string, displayName: string) => ({
@@ -579,6 +600,7 @@ describe("Dashboard skeleton", () => {
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
+    await openSetupNavigation();
 
     const eventsLink = await screen.findByRole("link", { name: "Ereignisse" });
     fireEvent.click(eventsLink);
@@ -2079,7 +2101,8 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    expect(await within(screen.getByRole("navigation", { name: "Hauptnavigation" })).findByRole("link", { name: /Textbefehle/ })).toBeInTheDocument();
+    const navigation = await openSetupNavigation();
+    expect(await within(navigation).findByRole("link", { name: /Textbefehle/ })).toBeInTheDocument();
     expect(requested).not.toContain("/api/channels/kanal-a/modules");
   });
 
@@ -2179,7 +2202,8 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    const link = await within(screen.getByRole("navigation", { name: "Hauptnavigation" })).findByRole("link", { name: /Textbefehle/ });
+    const navigation = await openSetupNavigation();
+    const link = await within(navigation).findByRole("link", { name: /Textbefehle/ });
     expect(link).toHaveAttribute("href", "/channels/kanal-a/modules/text_commands");
     expect(screen.queryByRole("heading", { name: "Befehl anlegen" })).not.toBeInTheDocument();
   });
@@ -2218,8 +2242,8 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Textbefehle", level: 1 })).toBeInTheDocument();
-    const channelSelect = screen.getByRole("combobox", { name: "Kanal auswählen" });
-    expect(channelSelect).toHaveTextContent("Esembe — 26876135");
+    const channelSelect = screen.getByRole("combobox", { name: /Kanal auswählen/u });
+    expect(channelSelect).toHaveTextContent("Esembe");
     fireEvent.click(channelSelect);
     // jsdom does no real layout, so Floating UI's `hide` middleware always
     // treats the dropdown's reference as clipped and renders it `display:
@@ -2278,7 +2302,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
     try {
-      await waitFor(() => expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toHaveTextContent("Alpha — kanal-a"));
+      await waitFor(() => expect(screen.getByRole("combobox", { name: /Kanal auswählen/u })).toHaveTextContent("Alpha"));
       await screen.findByRole("switch");
       const alphaSwitch = document.querySelector(".module-detail__switch [role='switch']");
       expect(alphaSwitch).not.toBeNull();
@@ -2286,7 +2310,7 @@ describe("Dashboard skeleton", () => {
       await waitFor(() => expect(toggleRequests.get("kanal-a")).toBe(1));
 
       navigateToPath("/channels/kanal-b/modules/ads");
-      await waitFor(() => expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toHaveTextContent("Beta — kanal-b"));
+      await waitFor(() => expect(screen.getByRole("combobox", { name: /Kanal auswählen/u })).toHaveTextContent("Beta"));
       await waitFor(() => expect(overviewRequests.get("kanal-b")).toBeGreaterThan(0));
       await screen.findByRole("switch");
       const betaSwitch = document.querySelector(".module-detail__switch [role='switch']");
@@ -2295,7 +2319,7 @@ describe("Dashboard skeleton", () => {
       await waitFor(() => expect(toggleRequests.get("kanal-b")).toBe(1));
 
       navigateToPath("/channels/kanal-a/modules/ads");
-      await waitFor(() => expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toHaveTextContent("Alpha — kanal-a"));
+      await waitFor(() => expect(screen.getByRole("combobox", { name: /Kanal auswählen/u })).toHaveTextContent("Alpha"));
       await screen.findByRole("switch");
       const returningAlphaSwitch = document.querySelector(".module-detail__switch [role='switch']");
       expect(returningAlphaSwitch).toBeDisabled();
@@ -2611,7 +2635,7 @@ describe("Dashboard skeleton", () => {
     await flushQueryUpdates();
     expect(channelCalls).toBe(1);
     expect(overviewCalls).toBe(1);
-    expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /Kanal auswählen/u })).toBeInTheDocument();
 
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(screen.getAllByText("wird aktualisiert").length).toBeGreaterThanOrEqual(1);
@@ -3231,7 +3255,7 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByRole("button", { name: "Erneut versuchen" })).toBeInTheDocument();
   });
 
-  it("uses the overview stream state for Spotlight actions", async () => {
+  it("uses the overview stream state for command palette actions", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), streamState: "offline" as const };
     const freshOverview = { ...overview(channel), streamState: "online" as const, streamStartedAt: "2026-09-23T11:30:00.000Z" };
     const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -3257,7 +3281,7 @@ describe("Dashboard skeleton", () => {
     await waitFor(() => {
       expect(container.querySelector(".dashboard-header__stream")).toHaveAttribute("data-state", "live");
     });
-    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    fireEvent.keyDown(document.body, platformPaletteShortcut());
     await screen.findByRole("dialog");
     fireEvent.change(screen.getByPlaceholderText("Suchen oder Aktion ausführen …"), { target: { value: "clip" } });
     fireEvent.click(await within(screen.getByRole("dialog")).findByText("Clip erstellen"));
@@ -3266,6 +3290,39 @@ describe("Dashboard skeleton", () => {
       expect(fetcher.mock.calls.some(([input, init]) =>
         requestUrl(input).pathname === "/api/channels/kanal-a/clips" && init?.method === "POST")).toBe(true);
     });
+  });
+
+  it("resumes from the command palette using the fresh overview pause state", async () => {
+    // The cached channel list predates an external pause; the overview is fresher.
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const pausedOverview = {
+      ...overview(channel),
+      controls: { ...channel.controls, pause: { active: true, until: null, mode: "unlimited" as const } },
+    };
+    let pauseBody: unknown;
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse(pausedOverview));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (url.pathname === "/api/channels/kanal-a/controls/pause" && init?.method === "POST") {
+        pauseBody = JSON.parse(init.body as string);
+        return Promise.resolve(jsonResponse({ controls: channel.controls }));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    await screen.findByRole("button", { name: "Automatische Aktionen fortsetzen" });
+    fireEvent.keyDown(document.body, platformPaletteShortcut());
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(await within(dialog).findByText("Automatische Aktionen fortsetzen"));
+
+    await waitFor(() => { expect(pauseBody).toEqual({ duration: null }); });
   });
 
   it("offers a Retry action after the initial System query fails", async () => {
@@ -3503,7 +3560,7 @@ describe("Dashboard skeleton", () => {
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
-    expect(await screen.findByText("Alpha — kanal-a")).toBeInTheDocument();
+    expect(await screen.findByRole("combobox", { name: /Kanal auswählen/u })).toHaveTextContent("Alpha");
     await waitFor(() => expect(TestWebSocket.instances).toHaveLength(1));
     TestWebSocket.instances[0]?.open();
     await waitFor(() => expect(overviewCalls).toBe(1));
@@ -3616,7 +3673,7 @@ describe("Dashboard skeleton", () => {
     expect(fetcher.mock.calls.filter(([input]) => requestUrl(input).pathname.endsWith("/overview"))).toHaveLength(2);
   });
 
-  it("closes an open Spotlight when the route changes channels, then loads the new channel's results", async () => {
+  it("closes an open command palette when the route changes channels, then loads the new channel's results", async () => {
     const alpha = healthyChannel("kanal-a", "Alpha");
     const beta = healthyChannel("kanal-b", "Beta");
     const command = (channelId: string, name: string) => ({
@@ -3648,7 +3705,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
     await screen.findByRole("heading", { name: "System", level: 1 });
-    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    fireEvent.keyDown(document.body, platformPaletteShortcut());
     await screen.findByRole("dialog");
     expect(await screen.findByText("!alphaonly")).toBeInTheDocument();
 
@@ -3661,7 +3718,7 @@ describe("Dashboard skeleton", () => {
     });
     await waitFor(() => { expect(screen.queryByRole("dialog")).not.toBeInTheDocument(); });
 
-    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    fireEvent.keyDown(document.body, platformPaletteShortcut());
     await screen.findByRole("dialog");
     expect(await screen.findByText("!betaonly")).toBeInTheDocument();
   });
@@ -3680,8 +3737,8 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     await screen.findByRole("heading", { name: "Alpha", level: 1 });
-    const select = screen.getByRole("combobox", { name: "Kanal auswählen" });
-    expect(select).toHaveTextContent("Alpha — kanal-a");
+    const select = screen.getByRole("combobox", { name: /Kanal auswählen/u });
+    expect(select).toHaveTextContent("Alpha");
 
     fireEvent.click(select);
     clickSelectOption(screen.getByRole("option", { name: "Beta — kanal-b", hidden: true }));
@@ -3690,7 +3747,7 @@ describe("Dashboard skeleton", () => {
     expect(await screen.findByRole("heading", { name: "Beta", level: 1 })).toBeInTheDocument();
   });
 
-  it("shows every group's entries and marks the current page's sidebar entry as current on every area and the module detail page", async () => {
+  it("shows setup navigation entries and marks the current page on setup routes", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const secondChannel = healthyChannel("kanal-b", "Beta");
     const activeModuleOverview = { ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
@@ -3711,7 +3768,7 @@ describe("Dashboard skeleton", () => {
       { path: "/channels/kanal-a", heading: "Alpha", currentLink: "Kanal" },
       { path: "/channels/kanal-a/system", heading: "System", currentLink: "System" },
       { path: "/channels/kanal-a/members", heading: "Mitglieder", currentLink: "Mitglieder" },
-      { path: "/channels/kanal-a/audit", heading: "Audit-Log", currentLink: "Audit-Log" },
+      { path: "/channels/kanal-a/audit", heading: "Audit-Log", currentLink: "Protokoll" },
       { path: "/channels/kanal-a/modules", heading: "Module", currentLink: "Module verwalten" },
       { path: "/channels/kanal-a/events", heading: "Ereignisse", currentLink: "Ereignisse" },
       { path: "/channels/kanal-a/modules/text_commands", heading: "Textbefehle", currentLink: "Textbefehle · Läuft" },
@@ -3722,8 +3779,12 @@ describe("Dashboard skeleton", () => {
       window.history.replaceState({}, "", page.path);
       render(<DashboardApp />);
       await screen.findByRole("heading", { name: page.heading, level: 1 });
-      const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
-      for (const label of ["Ereignisse", "Kanal", "System", "Mitglieder", "Audit-Log"]) {
+      if (page.path === "/" || page.path === "/channels/kanal-a") {
+        expect(screen.queryByRole("navigation", { name: "Hauptnavigation" })).not.toBeInTheDocument();
+        continue;
+      }
+      const nav = await openSetupNavigation();
+      for (const label of ["Ereignisse", "System", "Mitglieder", "Protokoll"]) {
         expect(within(nav).getByRole("link", { name: label })).toBeInTheDocument();
       }
       expect(within(nav).getByRole("link", { name: "Module verwalten" })).toBeInTheDocument();
@@ -3741,7 +3802,7 @@ describe("Dashboard skeleton", () => {
     }
   });
 
-  it.each([false, true])("keeps rendered sidebar and Spotlight page ids in sync (platform admin: %s)", async (platformAdmin) => {
+  it.each([false, true])("keeps rendered sidebar and command palette page ids in sync (platform admin: %s)", async (platformAdmin) => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
@@ -3754,22 +3815,23 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
     await screen.findByRole("heading", { name: "System", level: 1 });
-    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    const navigation = await openSetupNavigation();
+    fireEvent.keyDown(document.body, platformPaletteShortcut());
     const dialog = await screen.findByRole("dialog");
 
-    const sidebar = screen.getByRole("navigation", { name: "Hauptnavigation" });
-    const textsLink = within(sidebar).getByRole("link", { name: "Texte · Läuft" });
+    const sidebar = navigation;
+    const textsLink = await within(sidebar).findByRole("link", { name: "Texte · Läuft", hidden: true });
     expect(textsLink.closest(".sidebar__group")?.querySelector(".sidebar__heading")).toHaveTextContent("Chat");
     const sidebarPageIds = Array.from(sidebar.querySelectorAll<HTMLElement>("[data-nav-page-id]"), (entry) => entry.dataset.navPageId)
       .filter((id): id is string => id !== undefined);
-    const spotlightPageIds = Array.from(dialog.querySelectorAll<HTMLElement>("[data-spotlight-item-id^='page:']"), (action) => action.dataset.spotlightItemId?.slice("page:".length))
+    const palettePageIds = Array.from(dialog.querySelectorAll<HTMLElement>("[data-command-palette-item-id^='page:']"), (action) => action.dataset.commandPaletteItemId?.slice("page:".length))
       .filter((id): id is string => id !== undefined);
-    expect([...spotlightPageIds].sort((a, b) => a.localeCompare(b))).toEqual([...sidebarPageIds].sort((a, b) => a.localeCompare(b)));
+    expect(sidebarPageIds.every((id) => palettePageIds.includes(id))).toBe(true);
 
     fireEvent.keyDown(document.body, { key: "Escape" });
   });
 
-  it("does not retain a variable Spotlight selection when guarded navigation is canceled", async () => {
+  it("does not retain a variable command palette selection when guarded navigation is canceled", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const activeModuleOverview = { ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
     const command = {
@@ -3795,7 +3857,7 @@ describe("Dashboard skeleton", () => {
     const response = await screen.findByRole("textbox", { name: "Antwort" });
     fireEvent.change(response, { target: { value: "Nicht gespeicherter Entwurf" } });
 
-    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    fireEvent.keyDown(document.body, platformPaletteShortcut());
     await screen.findByRole("dialog");
     fireEvent.change(screen.getByPlaceholderText("Suchen oder Aktion ausführen …"), { target: { value: "counter" } });
     fireEvent.click(await screen.findByText("{var.counter}"));
@@ -3805,7 +3867,7 @@ describe("Dashboard skeleton", () => {
     expect(window.location.pathname).toBe("/channels/kanal-a/modules/text_commands");
     expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Nicht gespeicherter Entwurf");
 
-    const navigation = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    const navigation = await openSetupNavigation();
     fireEvent.click(within(navigation).getByRole("link", { name: "Variablen" }));
     const secondGuard = await screen.findByRole("dialog", { name: "Ungespeicherte Änderungen" });
     fireEvent.click(within(secondGuard).getByRole("button", { name: "Verwerfen und wechseln" }));
@@ -3815,7 +3877,7 @@ describe("Dashboard skeleton", () => {
     expect(screen.queryByRole("textbox", { name: "Name" })).not.toBeInTheDocument();
   });
 
-  it("keeps a successful Spotlight variable selection scoped to its target channel", async () => {
+  it("keeps a successful command palette variable selection scoped to its target channel", async () => {
     const alpha = healthyChannel("kanal-a", "Alpha");
     const beta = healthyChannel("kanal-b", "Beta");
     const makeVariable = (channelId: string) => ({
@@ -3841,17 +3903,17 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
     await screen.findByRole("heading", { name: "Alpha", level: 1 });
-    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    fireEvent.keyDown(document.body, platformPaletteShortcut());
     await screen.findByRole("dialog");
     fireEvent.change(screen.getByPlaceholderText("Suchen oder Aktion ausführen …"), { target: { value: "counter" } });
     fireEvent.click(await screen.findByText("{var.counter}"));
     await waitFor(() => expect(alphaVariableRequests).toBe(2));
 
-    const channelSelect = screen.getByRole("combobox", { name: "Kanal auswählen" });
+    const channelSelect = screen.getByRole("combobox", { name: /Kanal auswählen/u });
     fireEvent.click(channelSelect);
     clickSelectOption(screen.getByRole("option", { name: "Beta — kanal-b", hidden: true }));
-    await waitFor(() => expect(window.location.pathname).toBe("/channels/kanal-b"));
-    const navigation = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    await waitFor(() => expect(window.location.pathname).toBe("/channels/kanal-b/variables"));
+    const navigation = await openSetupNavigation();
     fireEvent.click(within(navigation).getByRole("link", { name: "Variablen" }));
 
     expect(await screen.findByRole("row", { name: /counter/i })).toBeInTheDocument();
@@ -3890,6 +3952,7 @@ describe("Dashboard skeleton", () => {
         overviewAufrufe += 1;
         return jsonResponse(activeModule);
       }
+      if (path === "/api/channels/kanal-a/system") return jsonResponse(system);
       if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [{ id: "text_commands", enabled: true, settings: "{}" }] });
       if (path === "/api/channels/kanal-a/events") return jsonResponse({ entries: [], nextCursor: null });
       if (path === "/api/channels/kanal-a/settings") return jsonResponse({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 1 });
@@ -3900,7 +3963,8 @@ describe("Dashboard skeleton", () => {
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     const rendered = render(<DashboardApp />);
-    const link = await within(screen.getByRole("navigation", { name: "Hauptnavigation" })).findByRole("link", { name: /Textbefehle/ });
+    const navigation = await openSetupNavigation();
+    const link = await within(navigation).findByRole("link", { name: /Textbefehle/ });
     await waitFor(() => expect(rendered.queryClient.getQueryData(queryKeys.channel("kanal-a", "overview"))).toEqual(activeModule));
     expect(overviewAufrufe).toBe(1);
     fireEvent.click(link);
@@ -3961,6 +4025,7 @@ describe("Dashboard skeleton", () => {
     await screen.findByRole("heading", { name: "Alpha", level: 1 });
     expect(screen.getByRole("article", { name: "Broadcaster-OAuth" })).toHaveAttribute("data-status", "neutral");
 
+    await openSetupNavigation();
     fireEvent.click(screen.getByRole("link", { name: "System" }));
     await screen.findByRole("heading", { name: "System", level: 1 });
     expect(await screen.findByRole("article", { name: "Broadcaster-OAuth" })).toHaveAttribute("data-status", "neutral");
@@ -4534,7 +4599,7 @@ describe("Dashboard skeleton", () => {
     window.history.replaceState({}, "", "/channels/kanal-a");
     render(<DashboardApp />);
     await screen.findByRole("heading", { name: "Alpha", level: 1 });
-    fireEvent.click(screen.getByRole("button", { name: "Abmelden" }));
+    clickLogout();
 
     await screen.findByRole("heading", { name: "Anmeldung erforderlich", level: 1 });
     expect(screen.queryByRole("heading", { name: "Alpha", level: 1 })).not.toBeInTheDocument();
@@ -4591,7 +4656,7 @@ describe("Dashboard skeleton", () => {
     if (socket === undefined) throw new Error("Realtime socket was not created.");
     socket.open();
     fireEvent.change(screen.getByRole("spinbutton", { name: "X (px)" }), { target: { value: "25" } });
-    fireEvent.click(screen.getByRole("button", { name: "Abmelden" }));
+    clickLogout();
 
     await screen.findByRole("heading", { name: "Anmeldung erforderlich", level: 1 });
 
@@ -4616,11 +4681,10 @@ describe("Dashboard skeleton", () => {
     window.history.replaceState({}, "", "/channels/kanal-a");
     render(<DashboardApp />);
     await screen.findByRole("heading", { name: "Alpha", level: 1 });
-    fireEvent.click(screen.getByRole("button", { name: "Abmelden" }));
+    clickLogout();
 
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Abmelden" })).toBeEnabled();
-    });
+    fireEvent.click(screen.getByRole("button", { name: "Konto" }));
+    expect(await screen.findByRole("menuitem", { name: "Abmelden" })).toBeEnabled();
     expect(screen.queryByRole("heading", { name: "Anmeldung erforderlich", level: 1 }))
       .not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Alpha", level: 1 })).toBeInTheDocument();
@@ -4640,7 +4704,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
     await screen.findByRole("heading", { name: "Übersicht", level: 1 });
-    fireEvent.click(screen.getByRole("button", { name: "Abmelden" }));
+    clickLogout();
 
     await waitFor(() => {
       const logoutCall = fetcher.mock.calls.find((call) => requestUrl(call[0]).pathname === "/auth/logout");
@@ -4813,10 +4877,12 @@ describe("Dashboard skeleton", () => {
     if (row === null) throw new Error("Audit row is missing.");
     fireEvent.click(row);
     expect(await screen.findByRole("region", { name: "Änderungsdaten" })).toBeInTheDocument();
-    fireEvent.click(await screen.findByRole("link", { name: "System" }));
+    const firstNavigation = await openSetupNavigation();
+    fireEvent.click(within(firstNavigation).getByRole("link", { name: "System" }));
     await screen.findByRole("heading", { name: "System", level: 1 });
     expect(auditRequests).toBe(1);
-    fireEvent.click(await screen.findByRole("link", { name: "Audit-Log" }));
+    const secondNavigation = await openSetupNavigation();
+    fireEvent.click(within(secondNavigation).getByRole("link", { name: "Protokoll" }));
     await waitFor(() => expect(auditRequests).toBe(2));
     resolveReload?.(jsonResponse({ entries: [entry], nextCursor: null }));
 
@@ -4975,7 +5041,7 @@ describe("Dashboard skeleton", () => {
 
     fireEvent.click(row);
     expect(await screen.findByRole("region", { name: "Abo-Details" })).toBeInTheDocument();
-    const channelSelect = screen.getByRole("combobox", { name: "Kanal auswählen" });
+    const channelSelect = screen.getByRole("combobox", { name: /Kanal auswählen/u });
     fireEvent.click(channelSelect);
     expect(screen.getByRole("option", { name: "Alpha — kanal-a", hidden: true })).toBeInTheDocument();
     fireEvent.keyDown(channelSelect, { key: "Escape" });

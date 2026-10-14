@@ -65,11 +65,10 @@ test("keeps one channel socket open while dashboard navigation changes pages", a
   await expect(page.getByRole("heading", { name: channel.displayName, level: 1 })).toBeVisible();
   await expect.poll(() => opened).toBe(1);
 
-  const sidebar = page.getByRole("navigation", { name: "Main navigation" });
-  await sidebar.getByRole("button", { name: /Search or run action/u }).click();
-  const spotlight = page.getByRole("dialog");
-  await spotlight.getByRole("textbox").fill("Members");
-  await spotlight.locator('[data-spotlight-item-id="page:members"]').click();
+  await page.getByRole("button", { name: /Search or run action/u }).click();
+  const commandPalette = page.getByRole("dialog");
+  await commandPalette.getByRole("combobox").fill("Members");
+  await commandPalette.locator('[data-command-palette-item-id="page:members"]').click();
   await expect(page).toHaveURL(`/channels/${channelId}/members`);
   await expect(page.getByRole("heading", { name: "Members", level: 1 })).toBeVisible();
 

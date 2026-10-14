@@ -37,7 +37,7 @@ const initialVotekickOverlayState = async (db: D1Database, channelId: string): P
 
 export const votekickModule: BotModule<typeof votekickSettingsSchema> = {
   id: VOTEKICK_MODULE_ID,
-  navigationCategory: "interaction",
+  navigationCategory: "participation",
   panelIcon: votekickIcon,
   chatCommands: VOTEKICK_CHAT_COMMANDS,
   templateVariableGroup: { label: { de: votekickCatalog.de.name, en: votekickCatalog.en.name }, icon: votekickIcon, order: 74 },

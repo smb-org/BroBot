@@ -1,6 +1,3 @@
-import { NavLink } from "@mantine/core";
-import { useOs } from "@mantine/hooks";
-import { spotlight } from "@mantine/spotlight";
 import { type MouseEvent, type ReactNode } from "react";
 
 import { StatusLed, type StatusLedState } from "./StatusLed";
@@ -8,8 +5,8 @@ import { Icon } from "./Icon";
 
 export interface SidebarEntry {
   id: string;
-  /** Page id for rendered navigation entries; module entries leave this unset. */
   pageId?: string;
+  category: string;
   label: string;
   icon: ReactNode;
   href: string;
@@ -21,103 +18,79 @@ export interface SidebarEntry {
 
 export interface SidebarGroup {
   id: string;
-  heading?: string;
+  category: string;
+  heading: string;
   entries: SidebarEntry[];
-  nestedEntries?: boolean;
 }
 
 export interface SidebarProps {
   groups: SidebarGroup[];
-  collapsed: boolean;
-  onToggleCollapsed: () => void;
+  onOpenCommandPalette: () => void;
   onEntryNavigate: () => void;
-  collapseLabel: string;
-  expandLabel: string;
-  spotlightLabel: string;
+  setupHeading: string;
+  setupDescription: string;
+  paletteLabel: string;
+  paletteShortcut: string;
 }
 
-const stopAndNavigate = (onNavigate: () => void, onEntryNavigate: () => void) =>
+const stopAndNavigate = (entry: SidebarEntry, onEntryNavigate: () => void) =>
   (event: MouseEvent<HTMLAnchorElement>): void => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
-    onNavigate();
+    entry.onNavigate();
     onEntryNavigate();
   };
 
-/**
- * "Seitenleiste" in docs/input/DESIGN-neu.md: four groups, each with a
- * section heading, entries at 44px. This is a plain `<div>`, not a `<nav>`
- * -- the landmark role lives on `Shell`'s `AppShell.Navbar`, one level up;
- * nesting a second `navigation` landmark inside it would be a duplicate
- * landmark, not a second one.
- *
- * Collapsed (80px) shows icon-only entries with a native tooltip. All
- * navigation groups share one scroll region; the collapse control stays
- * outside it so it remains reachable when the module list is long.
- */
-export function Sidebar({ groups, collapsed, onToggleCollapsed, onEntryNavigate, collapseLabel, expandLabel, spotlightLabel }: SidebarProps) {
-  const os = useOs();
-  const shortcut = os === "macos" ? "⌘K" : "Ctrl+K";
-  const renderEntry = (entry: SidebarEntry, moduleChild = false): ReactNode => {
-    const accessibleName = moduleChild && entry.led !== undefined
-      ? `${entry.label} · ${entry.led.word}`
-      : entry.label;
+export function Sidebar({ groups, onOpenCommandPalette, onEntryNavigate, setupHeading, setupDescription, paletteLabel, paletteShortcut }: SidebarProps) {
+  const renderEntry = (entry: SidebarEntry): ReactNode => {
+    const accessibleName = entry.led === undefined ? entry.label : `${entry.label} · ${entry.led.word}`;
     return (
-      <NavLink
-        key={entry.id}
+      <a
+        aria-label={entry.led === undefined ? undefined : accessibleName}
+        aria-current={entry.active ? "page" : undefined}
+        className={`sidebar-nav-link${entry.active ? " is-active" : ""}`}
+        data-category={entry.category}
         data-nav-page-id={entry.pageId}
         href={entry.href}
-        label={collapsed ? undefined : entry.label}
-        title={moduleChild || collapsed ? accessibleName : undefined}
-        aria-label={moduleChild || collapsed ? accessibleName : undefined}
-        leftSection={entry.icon}
-        rightSection={entry.led === undefined || collapsed ? undefined : <StatusLed state={entry.led.status} label={entry.led.word} dotOnly />}
-        active={entry.active}
-        aria-current={entry.active ? "page" : undefined}
-        className={`sidebar-nav-link${moduleChild ? " sidebar-nav-link--module-child" : ""}`}
-        onMouseEnter={entry.onPreload}
+        key={entry.id}
+        onClick={stopAndNavigate(entry, onEntryNavigate)}
         onFocus={entry.onPreload}
-        onClick={stopAndNavigate(entry.onNavigate, onEntryNavigate)}
-      />
+        onMouseEnter={entry.onPreload}
+        title={entry.led === undefined ? undefined : accessibleName}
+      >
+        <span aria-hidden="true" className="sidebar-nav-link__icon">{entry.icon}</span>
+        <span className="sidebar-nav-link__label">{entry.label}</span>
+        {entry.led === undefined ? null : <StatusLed state={entry.led.status} label={entry.led.word} dotOnly />}
+      </a>
     );
   };
 
   return (
-    <div data-ui="" className="sidebar" data-collapsed={collapsed ? "true" : undefined}>
+    <div className="sidebar" data-ui="">
       <div className="sidebar__main">
-        <button
-          type="button"
-          className="sidebar__spotlight-trigger"
-          aria-label={spotlightLabel}
-          title={collapsed ? `${spotlightLabel} · ${shortcut}` : undefined}
-          onClick={() => { onEntryNavigate(); spotlight.open(); }}
-        >
-          <Icon name="search" size={16} className="sidebar__spotlight-icon" />
-          {collapsed ? null : <>
-            <span className="sidebar__spotlight-label">{spotlightLabel}</span>
-            <kbd className="sidebar__spotlight-shortcut">{shortcut}</kbd>
-          </>}
-        </button>
+        <header className="sidebar__intro">
+          <h1 className="sidebar__title">{setupHeading}</h1>
+          <p className="sidebar__description">{setupDescription}</p>
+        </header>
         <div className="sidebar__scroll">
           {groups.map((group) => (
-            <div
-              className={`sidebar__group${group.id === "platform" ? " sidebar__group--platform" : ""}`}
-              key={group.id}
-              {...(group.heading === undefined ? {} : { role: "group", "aria-labelledby": `sidebar-heading-${group.id}` })}
-            >
-              {group.heading === undefined ? null : <h2 id={`sidebar-heading-${group.id}`} className={`sidebar__heading${collapsed ? " sr-only" : ""}`}>{group.heading}</h2>}
-              {group.entries.map((entry) => renderEntry(entry, group.nestedEntries === true))}
-            </div>
+            <section aria-labelledby={`sidebar-heading-${group.id}`} className="sidebar__group" data-category={group.category} key={group.id}>
+              <h2 className="sidebar__heading" id={`sidebar-heading-${group.id}`}>
+                <span aria-hidden="true" className="sidebar__category-marker" />
+                <span>{group.heading}</span>
+              </h2>
+              <div className="sidebar__items">{group.entries.map(renderEntry)}</div>
+            </section>
           ))}
         </div>
+        <footer className="sidebar__footer">
+          <button aria-label={paletteLabel} className="sidebar__palette-trigger" onClick={() => { onEntryNavigate(); onOpenCommandPalette(); }} type="button">
+            <Icon name="search" size={16} className="sidebar__palette-icon" />
+            <span className="sidebar__palette-label">{paletteLabel}</span>
+            <kbd className="sidebar__palette-shortcut">{paletteShortcut}</kbd>
+          </button>
+        </footer>
       </div>
-      <button
-        type="button"
-        className="sidebar__collapse-toggle"
-        aria-label={collapsed ? expandLabel : collapseLabel}
-        onClick={onToggleCollapsed}
-      >
-        <Icon name="collapse" size={20} className={collapsed ? "sidebar-nav-icon sidebar-nav-icon--reversed" : "sidebar-nav-icon"} />
-      </button>
     </div>
   );
 }

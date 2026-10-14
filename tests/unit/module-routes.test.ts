@@ -25,7 +25,7 @@ testModuleRoutes.get("/ballots/:ballotId", async (context) => {
 });
 const testModule: BotModule<typeof testModuleSchema> = {
   id: "test-modul",
-  navigationCategory: "interaction",
+  navigationCategory: "participation",
   settingsSchema: testModuleSchema,
   defaultSettings: { betrag: 42 },
   routes: testModuleRoutes,

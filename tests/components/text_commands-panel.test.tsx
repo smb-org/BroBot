@@ -1555,7 +1555,7 @@ describe("Text command editor", () => {
     expect(await screen.findByRole("columnheader", { name: "Response" })).toBeInTheDocument();
   });
 
-  it("preselects the command requested by Spotlight after the command list loads", async () => {
+  it("preselects the command requested by the command palette after the command list loads", async () => {
     vi.stubGlobal("fetch", panelFetch({ commands: () => [makeCommand({ name: "clip" }), makeCommand()] }));
     renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" initialSelection="clip" /></UiProvider>);
 

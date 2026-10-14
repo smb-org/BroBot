@@ -134,7 +134,7 @@ const belaboxPanelIcon = { paths: ["M4 7h16v10H4z", "M8 11h3", "M14 11h2", "M8 1
 
 export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
   id: BELABOX_MODULE_ID,
-  navigationCategory: "data",
+  navigationCategory: "stream",
   panelIcon: belaboxPanelIcon,
   mandatory: false,
   defaultEnabled: false,

@@ -10,6 +10,7 @@ import { SelectContent, SelectGroup, SelectItem, SelectLabel, SelectPrimitive, S
 export interface SelectOption {
   value: string;
   label: string;
+  selectedLabel?: string;
   description?: string;
   group?: string;
 }
@@ -52,8 +53,9 @@ export function Select({ label, ariaLabel, hint, error, value, onChange, options
   const disabledReason = useDisabledFieldReason();
   const activeSearch = searchValue ?? internalSearch;
   const filteredOptions = options.filter((option) => `${option.label} ${option.value}`.toLocaleLowerCase().includes(activeSearch.trim().toLocaleLowerCase()));
-  const selectedLabel = options.find((option) => option.value === value)?.label ?? value ?? "";
-  const selectItems = Object.fromEntries(options.map((option) => [option.value, option.label]));
+  const selectedOption = options.find((option) => option.value === value);
+  const selectedLabel = selectedOption?.selectedLabel ?? selectedOption?.label ?? value ?? "";
+  const selectItems = Object.fromEntries(options.map((option) => [option.value, option.selectedLabel ?? option.label]));
   const displaySearch = activeSearch.length > 0 || searchInputActive ? activeSearch : selectedLabel;
   const updateSearch = (next: string): void => {
     setInternalSearch(next);

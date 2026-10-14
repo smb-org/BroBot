@@ -356,7 +356,7 @@ describe("Channel variables page", () => {
     expect(screen.getByRole("row", { name: /score/i })).toBeInTheDocument();
   });
 
-  it("consumes each Spotlight selection, applies later requests on the mounted page, and does not replay one after returning", async () => {
+  it("consumes each command palette selection, applies later requests on the mounted page, and does not replay one after returning", async () => {
     const other = { ...variable, name: "other", description: "" };
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({
       variables: [other, variable], count: 2, maximum: 25,

@@ -110,17 +110,19 @@ describe("Module navigation in the sidebar", () => {
     expect(within(nav).getAllByRole("link", { name: "Module verwalten" })).toHaveLength(1);
   });
 
-  it("keeps the overview route on the collapsed Module icon", async () => {
-    window.sessionStorage.removeItem("brobot-dashboard-sidebar-collapsed");
+  it("derives the navigation visibility from the selected Live or Setup mode", async () => {
     renderModulePage();
 
+    const modeSwitcher = await screen.findByRole("group", { name: "Einrichten" });
+    fireEvent.click(within(modeSwitcher).getByRole("button", { name: "Live" }));
+    expect(await screen.findByRole("heading", { name: "Alpha", level: 1 })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Hauptnavigation" })).not.toBeInTheDocument();
+
+    fireEvent.click(within(modeSwitcher).getByRole("button", { name: "Einrichten" }));
+    expect(window.location.pathname).toBe("/channels/kanal-a/system");
     const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
-    fireEvent.click(within(nav).getByRole("button", { name: "Seitenleiste einklappen" }));
     const moduleLink = within(nav).getByRole("link", { name: "Module verwalten" });
     expect(moduleLink).toHaveAttribute("href", "/channels/kanal-a/modules");
-    expect(moduleLink).toHaveAttribute("title", "Module verwalten");
-    fireEvent.click(moduleLink);
-
-    expect(await screen.findByRole("heading", { name: "Module", level: 1 })).toBeInTheDocument();
+    expect(moduleLink).toBeInTheDocument();
   });
 });
