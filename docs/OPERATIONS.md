@@ -234,8 +234,9 @@ pnpm install
 pnpm run dev
 ```
 
-Das Dashboard ist unter `http://localhost:5173/` und das Overlay lokal unter
-`http://localhost:5173/overlay.html` erreichbar. In der ausgelieferten Umgebung
+Das Dashboard ist unter `http://localhost:5180/` und das Overlay lokal unter
+`http://localhost:5180/overlay.html` erreichbar. Die Twitch-Anwendung braucht dafür
+die Redirect-URL `http://localhost:5180/auth/twitch/callback`. In der ausgelieferten Umgebung
 ist `/overlay` der kanonische Pfad; `/overlay.html` ist dort nur der
 weiterleitende Alias. Lokale Cloudflare-Bindings werden durch Vite/Wrangler
 simuliert. Die Beispielwerte sind absichtlich keine produktiven Secrets.

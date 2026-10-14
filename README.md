@@ -250,8 +250,8 @@ pnpm run dev
 ```
 
 `pnpm run dev` starts Vite with the Cloudflare plugin, simulating Worker
-bindings locally. The dashboard is at `http://localhost:5173/`, the overlay
-at `http://localhost:5173/overlay.html`; sign in with the Twitch account
+bindings locally. The dashboard is at `http://localhost:5180/`, the overlay
+at `http://localhost:5180/overlay.html`; sign in with the Twitch account
 listed in `PLATFORM_USER_IDS` to reach the `/platform` admin pages.
 `/healthz` reports `503` until migrations have been applied.
 
