@@ -13,6 +13,8 @@ export default defineConfig({
     react({ compiler: { sources: ["/src/dashboard/"] } }),
     cloudflare({ inspectorPort: false }),
   ],
+  server: { port: 5180, strictPort: true },
+  preview: { port: 5181, strictPort: true },
   build: {
     assetsDir: "_app",
     manifest: true,
