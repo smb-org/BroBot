@@ -36,7 +36,7 @@ describe("FAQ order migration", () => {
                 ('second', 'existing', 'Second', '{"type":"keywords","patterns":["second"]}', 'second', 1, '2026-10-14', '2026-10-14')`,
       ).run();
 
-      database.exec(migration("0064_faq_order_revision.sql"));
+      database.exec(migration("0063_faq_tier_and_order.sql"));
 
       expect(database.prepare(
         "SELECT faq_id, sort_order FROM faq_entry_order WHERE channel_id = 'existing' ORDER BY sort_order",
