@@ -27,6 +27,7 @@ import { describe, expect, it } from "vitest";
  */
 const ALLOWLIST: Record<string, string> = {
   "src/dashboard/locale.ts": "Bilingual DE/EN dashboard text catalogue; only its `de` half is German.",
+  "src/dashboard/channel-settings-locale.ts": "Bilingual DE/EN channel settings text catalogue; only its `de` half is German.",
   "src/dashboard/labels.ts": "Bilingual DE/EN per-page text catalogue (members, platform, roles); only its `de` half is German.",
   "src/dashboard/chat-target-field-locale.ts": "Bilingual DE/EN chat target field catalogue; only its `de` half is German.",
   "src/dashboard/token-chip-locale.ts": "Bilingual DE/EN token chip catalogue; only its `de` half is German.",

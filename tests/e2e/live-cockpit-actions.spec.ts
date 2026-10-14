@@ -49,7 +49,15 @@ test("vote action keeps its draft while templates load and guards every close pa
       return;
     }
     if (pathname === `/api/channels/${channelId}/settings`) {
-      await route.fulfill(json({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 0 }));
+      await route.fulfill(json({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 0, defaultChatTarget: "source_only", defaultChatTargetRevision: 1 }));
+      return;
+    }
+    if (pathname === `/api/channels/${channelId}/system`) {
+      await route.fulfill(json({
+        broadcasterConnection: "connected", bot: channel.bot, botPermissions: channel.botPermissions,
+        broadcasterPermissions: channel.broadcasterPermissions, chatSubscription: channel.chatSubscription,
+        chatSubscriptionNeeded: false, subscriptions: [], tokens: channel.tokens,
+      }));
       return;
     }
     if (pathname === `/api/channels/${channelId}/events`) {
@@ -102,4 +110,29 @@ test("vote action keeps its draft while templates load and guards every close pa
   await dialog.getByRole("button", { name: "Abbrechen" }).click();
   await page.getByRole("button", { name: "Eingaben verwerfen" }).click();
   await expect(dialog).toBeHidden();
+
+  await page.getByRole("button", { name: "Einrichten" }).click();
+  await expect(page).toHaveURL(`/channels/${channelId}/system`);
+  await page.getByRole("button", { name: "Live" }).click();
+  await expect(page).toHaveURL(`/channels/${channelId}`);
+  await page.getByRole("button", { name: "Abstimmung starten" }).click();
+  const guardedDialog = page.getByRole("dialog", { name: "Abstimmung starten" });
+  const guardedQuestion = guardedDialog.getByRole("textbox", { name: "Frage" });
+  await guardedQuestion.fill("Bleibt der Entwurf beim Wechsel erhalten?");
+  const unloadWasPrevented = await page.evaluate(() => {
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+  expect(unloadWasPrevented).toBe(true);
+
+  await page.goBack();
+  await expect(page.getByRole("dialog", { name: "Eingaben verwerfen?" })).toBeVisible();
+  await page.getByRole("button", { name: "Weiter bearbeiten" }).click();
+  await expect(guardedQuestion).toHaveValue("Bleibt der Entwurf beim Wechsel erhalten?");
+  await page.goBack();
+  await expect(page.getByRole("dialog", { name: "Eingaben verwerfen?" })).toBeVisible();
+  await page.getByRole("button", { name: "Eingaben verwerfen" }).click();
+  await expect(page).toHaveURL(`/channels/${channelId}/system`);
+  await expect(page.getByRole("heading", { name: "System" })).toBeVisible();
 });

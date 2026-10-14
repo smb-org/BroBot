@@ -42,12 +42,14 @@ import { MODULES } from "../modules/registry";
 import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardModeForRoute, dashboardRoutePath, dashboardRouteRequiresBot, routeForDashboardMode, routeForSelectedChannel, replaceDashboardRoute, useDashboardRoute, type DashboardMode, type DashboardRoute } from "./router";
 import { dashboardNavigationGroups, visibleModuleNavigationIds } from "./nav-pages";
-import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, LoadStateLines, notify, Select as UiSelect, Shell, Sidebar, StatusLed, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type StatusLedState } from "./ui";
+import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, LoadStateLines, notify, PageHeader, Select as UiSelect, Shell, Sidebar, StatusLed, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type StatusLedState } from "./ui";
 import { readPalette, writePalette, type Palette } from "./ui/palette";
 import { EventsPage } from "./events/EventsPage";
 import { emptyEventFilter, eventFilterIsActive } from "./events/model";
 import { AuditPage } from "./audit/AuditPage";
 import { ChannelVariablesPage } from "./ChannelVariablesPage";
+import { ChannelDefaultsEditor } from "./ChannelDefaultsEditor";
+import { ChannelLocationPage } from "./ChannelLocationPage";
 import { LiveCockpit } from "./LiveCockpit";
 import { OverlaysPage } from "./OverlaysPage";
 import { OverlayEditorPage } from "./OverlayEditorPage";
@@ -891,23 +893,27 @@ interface ChannelOverviewRouteProperties {
   overview: PanelChannelOverview;
   modules: PanelModuleState[];
   modulesLoaded: boolean;
+  onNavigate: (route: DashboardRoute) => void;
 }
 
-const ChannelOverviewRoute = ({ overview, modules, modulesLoaded }: ChannelOverviewRouteProperties): ReactElement =>
-  <LiveCockpit overview={overview} modules={modules} modulesLoaded={modulesLoaded} />;
+const ChannelOverviewRoute = ({ overview, modules, modulesLoaded, onNavigate }: ChannelOverviewRouteProperties): ReactElement =>
+  <LiveCockpit overview={overview} modules={modules} modulesLoaded={modulesLoaded} onNavigate={onNavigate} />;
 
 interface SystemPageProperties {
+  channelId: string;
+  role: ChannelRole;
   system: PanelSystemResponse | undefined;
   error: string | null;
   loadedAt: number | undefined;
   onRetry: () => void;
 }
 
-const SystemPage = ({ system, error, loadedAt, onRetry }: SystemPageProperties): ReactElement => {
+const SystemPage = ({ channelId, role, system, error, loadedAt, onRetry }: SystemPageProperties): ReactElement => {
   const texts = dashboardTexts();
   return (
     <>
-      <ModuleHeading kind="system" title={texts.system.title} subtitle={texts.system.readOnly} />
+      <PageHeader kind="system" title={texts.system.title} subtitle={texts.system.readOnly} />
+      <ChannelDefaultsEditor channelId={channelId} role={role} />
       <UiLoadState
         variant="status-row"
         status={system !== undefined && error !== null ? "error" : "success"}
@@ -1426,7 +1432,10 @@ export const DashboardApp = (): ReactElement => {
           overview={overview.data}
           modules={selectedChannel.modules ?? overview.data.modules ?? modules.data?.modules ?? []}
           modulesLoaded={overviewModulesLoaded}
+          onNavigate={navigate}
         /> : null}</UiLoadState> : null}
+        {!showChannelNotReleased && route.kind === "channel" && route.section === "location-weather" && selectedChannel !== null
+          ? <ChannelLocationPage key={route.channelId} channelId={route.channelId} role={selectedChannel.role} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "members" && selectedChannel !== null ? <MembersPage key={route.channelId} channelId={route.channelId} ownRole={selectedChannel.role} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "variables" && selectedChannel !== null ? <ChannelVariablesPage key={route.channelId} channelId={route.channelId} canManage={canManage(selectedChannel.role)} onOpenCommand={(name) => { setPendingModuleSelection({ channelId: route.channelId, moduleId: "text_commands", value: name }); navigate({ kind: "module", channelId: route.channelId, moduleId: "text_commands" }); }} onOpenOverlay={(overlayId, initialVariable, initialOverlayName) => { navigate({ kind: "channel", channelId: route.channelId, section: "overlays", editorOverlayId: overlayId, ...(initialVariable === undefined ? {} : { initialVariable }), ...(overlayId === "new" && initialOverlayName !== undefined ? { initialOverlayName } : {}) }); }} onInitialSelectionConsumed={(name) => { setPendingVariableSelection((pending) => pending?.channelId === route.channelId && pending.name === name ? null : pending); }} {...(pendingVariableSelection?.channelId === route.channelId ? { initialSelection: pendingVariableSelection.name } : {})} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "overlays" && selectedChannel !== null
@@ -1451,6 +1460,8 @@ export const DashboardApp = (): ReactElement => {
         </div> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "system" && selectedChannel !== null ? <SystemPage
           key={route.channelId}
+          channelId={route.channelId}
+          role={selectedChannel.role}
           system={systemQuery.data}
           error={systemQuery.isError ? errorMessage(systemQuery.error) : null}
           loadedAt={systemQuery.dataUpdatedAt > 0 ? systemQuery.dataUpdatedAt : undefined}

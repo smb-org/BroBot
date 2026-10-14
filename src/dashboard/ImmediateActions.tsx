@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState, type ComponentType, type ReactElement, ty
 
 import { hasRequiredChannelRole, type ChannelRole, type ChannelStreamState } from "../contracts/values";
 import { MODULES } from "../modules/registry";
-import type { ModuleImmediateActionCondition, ModuleImmediateActionContentProperties, ModuleImmediateActionDefinition } from "../modules/contract";
+import type { ModuleImmediateActionCondition, ModuleImmediateActionContentProperties, ModuleImmediateActionDefinition, ModuleImmediateActionResult } from "../modules/contract";
 import { dashboardCommonTexts, dashboardLanguage, dashboardTexts, immediateActionUnavailableReasonText } from "./locale";
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
+import { immediateActionErrorFeedback } from "./immediate-action-errors";
 import { loadModuleImmediateActionContent, retryModuleChunkLoad } from "./module-panel-loaders";
 import type { PanelModuleState } from "../panel-contract";
-import { Button, ConfirmDialog, Icon, LoadStateLines } from "./ui";
+import { Button, ConfirmDialog, Icon, LoadStateLines, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
 import { DialogContent, DialogPrimitive, DialogTitle } from "./ui/primitives/dialog";
 import { PopoverContent, PopoverPrimitive } from "./ui/primitives/popover";
 
@@ -17,6 +18,14 @@ interface ActionConditionState {
   loading: boolean;
   reason: Readonly<Record<"de" | "en", string>> | null;
   until: number | null;
+  stale: boolean;
+}
+
+interface ActionFeedback {
+  message: string;
+  href?: string;
+  linkLabel?: string;
+  until?: number;
 }
 
 const remainingTime = (until: number, now: number): string => {
@@ -31,12 +40,13 @@ const roleReason = (requiredRole: ChannelRole): string => {
   return texts.operatorOnly;
 };
 
-const ActionButton = ({ action, moduleId, channelId, streamState, role }: {
+const ActionButton = ({ action, moduleId, channelId, streamState, role, onActionResult }: {
   action: ModuleImmediateActionDefinition;
   moduleId: string;
   channelId: string;
   streamState: ChannelStreamState | null | undefined;
   role: ChannelRole;
+  onActionResult?: (moduleId: string, result: ModuleImmediateActionResult) => void;
 }): ReactElement => {
   const language = dashboardLanguage();
   const texts = dashboardTexts();
@@ -51,35 +61,44 @@ const ActionButton = ({ action, moduleId, channelId, streamState, role }: {
     loading: shouldCheckConditions,
     reason: null,
     until: null,
+    stale: false,
   });
   const [now, setNow] = useState(() => Date.now());
+  const [availabilityRetry, setAvailabilityRetry] = useState(0);
 
   useEffect(() => {
     if (!shouldCheckConditions) return;
     let active = true;
+    let inFlight = false;
     let pendingController: AbortController | null = null;
     const check = async (): Promise<void> => {
-      pendingController?.abort();
+      if (inFlight) return;
+      inFlight = true;
       const controller = new AbortController();
       pendingController = controller;
-      setConditionState((current) => ({ ...current, loading: current.reason === null }));
+      const timeout = window.setTimeout(() => {
+        if (!active) return;
+        controller.abort();
+        setConditionState((current) => ({ ...current, loading: false, stale: true }));
+      }, 10_000);
+      setConditionState((current) => ({ ...current, loading: current.reason === null && !current.stale }));
       try {
         for (const condition of customConditions) {
           const result = await condition.check({ channelId, streamState, language, signal: controller.signal });
           if (!active || controller.signal.aborted) return;
           if (result.reason !== null) {
-            setConditionState({ loading: false, reason: result.reason, until: result.until ?? null });
+            setConditionState({ loading: false, reason: result.reason, until: result.until ?? null, stale: false });
             return;
           }
         }
-        if (active) setConditionState({ loading: false, reason: null, until: null });
-      } catch (error: unknown) {
-        if (!active || controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) return;
-        setConditionState({
-          loading: false,
-          reason: { de: texts.streamManager.actionAvailabilityFailed, en: texts.streamManager.actionAvailabilityFailed },
-          until: null,
-        });
+        if (active) setConditionState({ loading: false, reason: null, until: null, stale: false });
+      } catch {
+        if (!active) return;
+        setConditionState((current) => ({ ...current, loading: false, stale: true }));
+      } finally {
+        window.clearTimeout(timeout);
+        if (pendingController === controller) pendingController = null;
+        inFlight = false;
       }
     };
     void check();
@@ -89,7 +108,7 @@ const ActionButton = ({ action, moduleId, channelId, streamState, role }: {
       pendingController?.abort();
       window.clearInterval(interval);
     };
-  }, [channelId, customConditions, language, shouldCheckConditions, streamState, texts.streamManager.actionAvailabilityFailed]);
+  }, [availabilityRetry, channelId, customConditions, language, shouldCheckConditions, streamState]);
 
   useEffect(() => {
     if (conditionState.until === null || conditionState.reason === null || !conditionState.reason[language].includes("{time}")) return;
@@ -110,30 +129,55 @@ const ActionButton = ({ action, moduleId, channelId, streamState, role }: {
             ? conditionState.reason[language]
             : conditionState.reason[language].replace("{time}", remainingTime(conditionState.until, now));
 
-  return <ActionFrame action={action} moduleId={moduleId} channelId={channelId} language={language} disabled={lockReason !== null} reason={lockReason} />;
+  return <ActionFrame action={action} moduleId={moduleId} channelId={channelId} language={language}
+    disabled={lockReason !== null} reason={lockReason} availabilityStale={conditionState.stale}
+    onRetryAvailability={() => { setAvailabilityRetry((retry) => retry + 1); }}
+    {...(onActionResult === undefined ? {} : { onActionResult })} />;
 };
 
-const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason }: {
+const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason, availabilityStale, onRetryAvailability, onActionResult }: {
   action: ModuleImmediateActionDefinition;
   moduleId: string;
   channelId: string;
   language: "de" | "en";
   disabled: boolean;
   reason: string | null;
+  availabilityStale: boolean;
+  onRetryAvailability: () => void;
+  onActionResult?: (moduleId: string, result: ModuleImmediateActionResult) => void;
 }): ReactElement => {
   const texts = dashboardTexts();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [draftDirty, setDraftDirty] = useState(false);
-  const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false);
   const [contentFailed, setContentFailed] = useState(false);
   const [loadedContent, setLoadedContent] = useState<{ actionId: string; component: ComponentType<ModuleImmediateActionContentProperties> } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<string | null>(null);
+  const [error, setError] = useState<ActionFeedback | null>(null);
+  const [result, setResult] = useState<ActionFeedback | null>(null);
+  const [feedbackNow, setFeedbackNow] = useState(() => Date.now());
   const content = loadedContent?.actionId === action.id ? loadedContent.component : null;
   const contentLoading = open && action.content !== undefined && content === null && !contentFailed;
   const Content = content;
   const reasonId = `live-action-reason-${moduleId}-${action.id}`;
+
+  const discardDraft = (): void => {
+    setOpen(false);
+    setDraftDirty(false);
+    setError(null);
+  };
+  const navigationGuard = useDraftGuard(draftDirty, () => Promise.resolve(null), discardDraft);
+
+  useEffect(() => registerDashboardNavigationGuard(navigationGuard.guardSwitch), [navigationGuard.guardSwitch]);
+
+  useEffect(() => {
+    if (error?.until === undefined) return;
+    const interval = window.setInterval(() => { setFeedbackNow(Date.now()); }, 1_000);
+    return () => { window.clearInterval(interval); };
+  }, [error?.until]);
+
+  const feedbackMessage = (feedback: ActionFeedback): string => feedback.until === undefined
+    ? feedback.message
+    : feedback.message.replace("{time}", remainingTime(feedback.until, feedbackNow));
 
   useEffect(() => {
     if (!open || action.content === undefined || content !== null || contentFailed) return;
@@ -160,11 +204,7 @@ const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason }
 
   const close = (): void => {
     if (busy) return;
-    if (draftDirty) {
-      setConfirmDiscardOpen(true);
-      return;
-    }
-    closeNow();
+    navigationGuard.guardSwitch(closeNow);
   };
 
   const run = async (formData: FormData): Promise<void> => {
@@ -173,14 +213,20 @@ const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason }
     setError(null);
     setResult(null);
     try {
-      await action.execute({ channelId, language, formData });
-      setResult(texts.streamManager.actionSucceeded(action.name[language]));
+      const actionResult = await action.execute({ channelId, language, formData });
+      setResult({
+        message: actionResult?.message?.[language] ?? texts.streamManager.actionSucceeded(action.name[language]),
+        ...(actionResult?.link === undefined ? {} : { href: actionResult.link.href, linkLabel: actionResult.link.label[language] }),
+      });
+      if (actionResult !== undefined) onActionResult?.(moduleId, actionResult);
       if (action.content !== undefined) {
         setDraftDirty(false);
         setOpen(false);
       }
-    } catch {
-      setError(action.errorMessage?.[language] ?? texts.streamManager.actionFailed);
+    } catch (caught: unknown) {
+      const feedback = immediateActionErrorFeedback(caught, moduleId,
+        action.errorMessage?.[language] ?? texts.streamManager.actionFailed, language);
+      setError({ message: feedback.message, ...(feedback.until === null ? {} : { until: feedback.until }) });
     } finally {
       setBusy(false);
     }
@@ -191,13 +237,17 @@ const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason }
     void run(new FormData(event.currentTarget));
   };
 
-  const reasonLine = reason ?? result ?? error ?? "\u00a0";
+  const reasonLine = reason ?? "\u00a0";
   const buttonContents = <>
     <span className="live-action__icon"><Icon name={action.icon} size={20} /></span>
     <span className="live-action__name">{action.name[language]}</span>
     <span id={reasonId} className={`live-action__reason${reason !== null ? " is-locked" : error !== null ? " has-error" : ""}`} aria-live="polite">{reasonLine}</span>
   </>;
   const triggerClassName = `live-action__button${reason !== null ? " is-locked" : ""}`;
+  const availabilityFeedback = availabilityStale ? <div className="live-action__feedback" aria-live="polite" role="status">
+    <span className="live-action__stale">{texts.streamManager.actionAvailabilityStale}</span>
+    <Button size="compact" variant="subtle" onClick={onRetryAvailability}>{dashboardCommonTexts().retry}</Button>
+  </div> : null;
   const triggerProps = {
     "aria-label": action.name[language],
     "aria-describedby": reasonId,
@@ -222,7 +272,7 @@ const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason }
         </div>
         : Content === null ? null : <fieldset disabled={busy} className="live-action-frame__fields"><Content channelId={channelId} language={language} onDraftChange={setDraftDirty} /></fieldset>}
     </div>
-    <p className={`live-action-frame__error${error === null ? "" : " has-error"}`} aria-live="polite" role="status">{error ?? "\u00a0"}</p>
+    <p className={`live-action-frame__error${error === null ? "" : " has-error"}`} aria-live="polite" role="status">{error === null ? "\u00a0" : feedbackMessage(error)}</p>
     <footer className="live-action-frame__footer">
       <Button variant="subtle" disabled={busy} onClick={close}>{texts.streamManager.actionCancel}</Button>
       <Button variant="primary" type="submit" disabled={disabled || busy || contentLoading || contentFailed}>
@@ -238,15 +288,16 @@ const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason }
         <PopoverContent align="start" side="bottom" className="live-action-frame-popover">{frameBody}</PopoverContent>
       </PopoverPrimitive.Root>
       <ConfirmDialog
-        opened={confirmDiscardOpen}
+        opened={navigationGuard.confirmOpen}
         title={texts.liveCockpit.actionDraftDiscardTitle}
         description={texts.liveCockpit.actionDraftDiscardDescription}
         confirmLabel={texts.liveCockpit.actionDraftDiscard}
         cancelLabel={texts.liveCockpit.actionDraftContinue}
         danger
-        onCancel={() => { setConfirmDiscardOpen(false); }}
-        onConfirm={() => { setConfirmDiscardOpen(false); closeNow(); }}
+        onCancel={navigationGuard.continueEditing}
+        onConfirm={navigationGuard.discardAndSwitch}
       />
+      {availabilityFeedback}
     </div>;
   }
 
@@ -259,29 +310,37 @@ const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason }
         </DialogContent>
       </DialogPrimitive.Root>
       <ConfirmDialog
-        opened={confirmDiscardOpen}
+        opened={navigationGuard.confirmOpen}
         title={texts.liveCockpit.actionDraftDiscardTitle}
         description={texts.liveCockpit.actionDraftDiscardDescription}
         confirmLabel={texts.liveCockpit.actionDraftDiscard}
         cancelLabel={texts.liveCockpit.actionDraftContinue}
         danger
-        onCancel={() => { setConfirmDiscardOpen(false); }}
-        onConfirm={() => { setConfirmDiscardOpen(false); closeNow(); }}
+        onCancel={navigationGuard.continueEditing}
+        onConfirm={navigationGuard.discardAndSwitch}
       />
+      {availabilityFeedback}
     </div>;
   }
 
   return <div className="live-action">
     <button {...triggerProps} className={triggerClassName} type="button" onClick={() => { void run(new FormData()); }}>{buttonContents}</button>
+    <div className="live-action__feedback" aria-live="polite">
+      {availabilityStale ? <span className="live-action__stale">{texts.streamManager.actionAvailabilityStale}</span> : error !== null
+        ? <span className="live-action__feedback-error">{feedbackMessage(error)}</span>
+        : result === null ? null : <span>{feedbackMessage(result)}{result.href === undefined ? null : <> <a href={result.href} target="_blank" rel="noopener noreferrer">{result.linkLabel}</a></>}</span>}
+      {availabilityStale ? <Button size="compact" variant="subtle" onClick={onRetryAvailability}>{dashboardCommonTexts().retry}</Button> : null}
+    </div>
   </div>;
 };
 
-export const ImmediateActions = ({ channelId, streamState, role, modules = [], modulesLoaded = true }: {
+export const ImmediateActions = ({ channelId, streamState, role, modules = [], modulesLoaded = true, onActionResult }: {
   channelId: string;
   streamState?: ChannelStreamState | null | undefined;
   role: ChannelRole;
   modules?: readonly Pick<PanelModuleState, "id" | "enabled">[];
   modulesLoaded?: boolean;
+  onActionResult?: (moduleId: string, result: ModuleImmediateActionResult) => void;
 }): ReactElement => {
   const texts = dashboardTexts();
   const moduleStates = new Map(modules.map((module) => [module.id, module.enabled]));
@@ -297,7 +356,7 @@ export const ImmediateActions = ({ channelId, streamState, role, modules = [], m
     </header>
     <div className="live-cockpit-actions__grid" role="group" aria-label={texts.streamManager.immediateActions}>
       {modulesLoaded
-        ? actions.map(({ moduleId, action }) => <ActionButton key={`${moduleId}:${action.id}`} action={action} moduleId={moduleId} channelId={channelId} streamState={streamState} role={role} />)
+        ? actions.map(({ moduleId, action }) => <ActionButton key={`${moduleId}:${action.id}`} action={action} moduleId={moduleId} channelId={channelId} streamState={streamState} role={role} {...(onActionResult === undefined ? {} : { onActionResult })} />)
         : <div className="live-cockpit-actions__loading" aria-hidden="true"><LoadStateLines rows={3} height={64} /></div>}
     </div>
   </section>;

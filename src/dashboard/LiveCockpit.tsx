@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 import type { ChannelStreamState } from "../contracts/values";
 import type { PanelChannelOverview, PanelModuleState } from "../panel-contract";
 import type { BelaboxStatusResponse } from "../modules/belabox/contracts";
+import type { ModuleImmediateActionResult } from "../modules/contract";
+import { fetchChannelOverview } from "./api";
+import type { DashboardRoute } from "./router";
 import { dashboardTexts, formatNumber } from "./locale";
 import { useOverlaysQuery } from "./data/lists";
-import { Icon, StatusLed } from "./ui";
+import { queryKeys } from "./data/keys";
+import { Button, Icon, StatusLed } from "./ui";
 import { ImmediateActions } from "./ImmediateActions";
 
 const formatDuration = (startedAt: string | null | undefined, now: number): string => {
@@ -31,21 +36,24 @@ const ReserveTile = ({ title, description, slot }: { title: string; description:
   </section>
 );
 
-export const LiveCockpit = ({ overview, modules, modulesLoaded }: {
+export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
   overview: PanelChannelOverview;
   modules: readonly PanelModuleState[];
   modulesLoaded: boolean;
+  onNavigate: (route: DashboardRoute) => void;
 }): ReactElement => {
   const texts = dashboardTexts();
   const labels = texts.liveCockpit;
   const [now, setNow] = useState(() => Date.now());
+  const queryClient = useQueryClient();
   const [belaboxStatus, setBelaboxStatus] = useState<{ data: BelaboxStatusResponse | null; failed: boolean }>({ data: null, failed: false });
+  const [belaboxActionSample, setBelaboxActionSample] = useState<{ channelId: string; connected: boolean; bitrateKbps: number; sampledAt: number } | null>(null);
   const overlaysQuery = useOverlaysQuery(overview.channelId);
   const moduleState = useMemo(() => new Map(modules.map((module) => [module.id, module.enabled])), [modules]);
   const belaboxEnabled = moduleState.get("belabox") === true;
   const streamState = overview.streamState;
   const streamLabel = streamStateLabel(streamState);
-  const viewerCount = overview.viewerCount;
+  const viewerCount = overview.viewerCount ?? null;
   const overlayCount = overlaysQuery.data?.overlays.length ?? null;
   const botConnected = overview.bot?.status === "connected";
 
@@ -54,6 +62,37 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded }: {
     const timer = window.setInterval(() => { setNow(Date.now()); }, 1_000);
     return () => { window.clearInterval(timer); };
   }, [streamState]);
+
+  useEffect(() => {
+    if (streamState !== "online") return;
+    let active = true;
+    let inFlight = false;
+    let controller: AbortController | null = null;
+    const refresh = async (): Promise<void> => {
+      if (inFlight) return;
+      inFlight = true;
+      controller = new AbortController();
+      try {
+        const freshOverview = await fetchChannelOverview(overview.channelId, controller.signal);
+        if (active) {
+          queryClient.setQueryData<PanelChannelOverview>(queryKeys.channel(overview.channelId, "overview"), (current) =>
+            current === undefined ? current : { ...current, viewerCount: freshOverview.viewerCount ?? null });
+        }
+      } catch (error: unknown) {
+        if (active && !(error instanceof Error && error.name === "AbortError")) {
+          // Keep the last useful viewer count until a later refresh succeeds.
+        }
+      } finally {
+        inFlight = false;
+      }
+    };
+    const interval = window.setInterval(() => { void refresh(); }, 30_000);
+    return () => {
+      active = false;
+      controller?.abort();
+      window.clearInterval(interval);
+    };
+  }, [overview.channelId, queryClient, streamState]);
 
   useEffect(() => {
     if (!belaboxEnabled) return;
@@ -80,6 +119,13 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded }: {
     };
   }, [belaboxEnabled, overview.channelId]);
 
+  const statusSample = belaboxStatus.data?.sample ?? null;
+  const actionSample = belaboxActionSample?.channelId === overview.channelId ? belaboxActionSample : null;
+  const statusSampleAt = statusSample === null ? Number.NEGATIVE_INFINITY : Date.parse(statusSample.at);
+  const freshActionSample = actionSample !== null && actionSample.sampledAt > statusSampleAt ? actionSample : null;
+  const sampleConnected = freshActionSample?.connected ?? statusSample?.connected ?? false;
+  const sampleBitrate = freshActionSample?.bitrateKbps ?? statusSample?.bitrateKbps ?? 0;
+
   return <div className="live-cockpit" data-stream-state={streamState ?? "unknown"}>
     <header className="live-cockpit-header">
       <div className="live-cockpit-header__summary">
@@ -98,17 +144,17 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded }: {
       <div className="live-cockpit-header__indicators" aria-label={labels.statusIndicators}>
         <StatusLed state={botConnected ? "ok" : "off"} label={`${labels.bot} · ${botConnected ? labels.botConnected : labels.botUnavailable}`} />
         <StatusLed
-          state={!belaboxEnabled || belaboxStatus.data?.configured === false ? "off" : belaboxStatus.failed ? "warn" : belaboxStatus.data?.sample?.connected === true ? "ok" : "warn"}
+          state={!belaboxEnabled || belaboxStatus.data?.configured === false ? "off" : belaboxStatus.failed && statusSample === null && freshActionSample === null ? "warn" : sampleConnected ? "ok" : "warn"}
           label={`${labels.belabox} · ${!belaboxEnabled
             ? labels.belaboxDisabled
-            : belaboxStatus.data === null && !belaboxStatus.failed
+            : belaboxStatus.data === null && !belaboxStatus.failed && freshActionSample === null
               ? labels.belaboxChecking
-              : belaboxStatus.failed
+              : belaboxStatus.failed && statusSample === null && freshActionSample === null
                 ? labels.belaboxUnavailable
                 : belaboxStatus.data?.configured === false
                   ? labels.belaboxNotConfigured
-                  : belaboxStatus.data?.sample?.connected === true
-                    ? labels.belaboxConnected(formatNumber(Math.round(belaboxStatus.data.sample.bitrateKbps)))
+                  : sampleConnected
+                    ? labels.belaboxConnected(formatNumber(Math.round(sampleBitrate)))
                     : labels.belaboxDisconnected}`}
         />
         {overlaysQuery.isPending
@@ -118,7 +164,12 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded }: {
             : <StatusLed state={overlayCount > 0 ? "ok" : "off"} label={`${labels.overlays} · ${overlayCount === 0 ? labels.overlaysNotSetUp : labels.overlaysCount(formatNumber(overlayCount))}`} />}
       </div>
     </header>
-    <div className="live-cockpit__warning-slot" data-slot="warning-banner" />
+    <div className="live-cockpit__warning-slot" data-slot="warning-banner">
+      {overview.location == null ? <div className="live-cockpit__location-warning" role="status">
+        <div><strong>{labels.locationMissing}</strong><span>{labels.locationMissingDescription}</span></div>
+        <Button variant="secondary" size="compact" onClick={() => { onNavigate({ kind: "channel", channelId: overview.channelId, section: "location-weather" }); }}>{labels.configureLocation}</Button>
+      </div> : null}
+    </div>
     <div className="live-cockpit__wall">
       <ImmediateActions
         channelId={overview.channelId}
@@ -126,6 +177,11 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded }: {
         role={overview.role}
         modules={modules}
         modulesLoaded={modulesLoaded}
+        onActionResult={(moduleId: string, result: ModuleImmediateActionResult) => {
+          if (moduleId === "belabox" && result.belaboxSample !== undefined) {
+            setBelaboxActionSample({ channelId: overview.channelId, ...result.belaboxSample });
+          }
+        }}
       />
       <div className="live-cockpit__running">
         <ReserveTile slot="running-now" title={labels.runningNow} description={labels.runningNowReserved} />

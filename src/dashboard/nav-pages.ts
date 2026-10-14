@@ -114,6 +114,16 @@ const NAV_PAGES: readonly NavPageDefinition[] = [
     requiresChannel: true,
   },
   {
+    id: "location-weather",
+    category: "data",
+    area: "setup",
+    iconKind: "weather",
+    route: channelRoute("location-weather"),
+    label: (texts) => texts.navigation.locationWeather,
+    keywords: ["location", "standort", "weather", "wetter", "place", "ort"],
+    requiresChannel: true,
+  },
+  {
     id: "modules",
     category: "admin",
     area: "setup",

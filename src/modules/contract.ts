@@ -1314,13 +1314,19 @@ interface ModuleImmediateActionExecutionProperties extends ModuleImmediateAction
   formData: FormData;
 }
 
+export interface ModuleImmediateActionResult {
+  message?: Readonly<Record<ModuleLanguage, string>>;
+  link?: { href: string; label: Readonly<Record<ModuleLanguage, string>> };
+  belaboxSample?: { connected: boolean; bitrateKbps: number; sampledAt: number };
+}
+
 export interface ModuleImmediateActionDefinition {
   id: string;
   name: Readonly<Record<ModuleLanguage, string>>;
   icon: ModuleImmediateActionIcon;
   conditions: readonly ModuleImmediateActionCondition[];
   requiredRole: ChannelRole;
-  execute: (properties: ModuleImmediateActionExecutionProperties) => Promise<void>;
+  execute: (properties: ModuleImmediateActionExecutionProperties) => Promise<ModuleImmediateActionResult> | Promise<void>;
   errorMessage?: Readonly<Record<ModuleLanguage, string>>;
   content?: {
     presentation: "popover" | "dialog";

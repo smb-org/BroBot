@@ -217,6 +217,11 @@ export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
     execute: async ({ channelId }) => {
       const result = await (await import("./panel/service")).testBelaboxConnection(channelId);
       if (!result.ok) throw new Error(result.reason);
+      const sampledAt = Date.now();
+      return {
+        message: belaboxImmediateActionTexts.checked(result.connected, String(result.bitrateKbps)),
+        belaboxSample: { connected: result.connected, bitrateKbps: result.bitrateKbps, sampledAt },
+      };
     },
   }],
   handleEvent: async (event, context) => {

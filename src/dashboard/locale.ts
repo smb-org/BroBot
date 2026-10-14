@@ -795,6 +795,7 @@ export interface DashboardTexts {
     setup: string;
     channel: string;
     system: string;
+    locationWeather: string;
     members: string;
     variables: string;
     overlays: string;
@@ -1043,8 +1044,14 @@ export interface DashboardTexts {
     actionLoading: string;
     actionLoadFailed: string;
     actionAvailabilityFailed: string;
+    actionAvailabilityStale: string;
     actionFailed: string;
     actionSucceeded: (name: string) => string;
+    actionErrorActions: {
+      commercialScopeNextStep: string;
+      commercialCooldown: (remaining: string) => string;
+      clipScopeNextStep: string;
+    };
     operatorOnly: string;
     managerOnly: string;
     broadcasterOnly: string;
@@ -1091,6 +1098,9 @@ export interface DashboardTexts {
     systemStatus: string;
     systemReady: string;
     liveDataCurrent: string;
+    locationMissing: string;
+    locationMissingDescription: string;
+    configureLocation: string;
     actionDraftDiscardTitle: string;
     actionDraftDiscardDescription: string;
     actionDraftDiscard: string;
@@ -1195,7 +1205,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       botPermissionsMissing: (count) => `${count} fehlen`,
     },
     navigation: {
-      mainNavigation: "Hauptnavigation", overview: "Übersicht", live: "Live", setup: "Einrichten", channel: "Kanal", system: "System",
+      mainNavigation: "Hauptnavigation", overview: "Übersicht", live: "Live", setup: "Einrichten", channel: "Kanal", system: "System", locationWeather: "Ort & Wetter",
       members: "Mitglieder", variables: "Variablen", module: "Module", events: "Ereignisse", audit: "Protokoll", selectChannel: "Kanal auswählen",
       accountMenu: "Konto", appearance: "Darstellung", appearanceNightShift: "Nachtschicht", appearanceIndigoNight: "Indigo-Nacht",
       manageModules: "Module verwalten", moduleCategories: { chat: "Chat", participation: "Mitmachen", twitch: "Twitch", data: "Daten", stream: "Stream", admin: "Verwaltung" },
@@ -1244,7 +1254,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       minutesAgo: (count) => `vor ${String(count)} Min.`, hoursAgo: (count) => `vor ${String(count)} Std.`,
     },
     system: {
-      title: "System", readOnly: "nur lesend", loadState: "Systemzustand wird geladen …", properties: "Eigenschaften",
+      title: "System", readOnly: "Kanalvorgaben und technischer Systemzustand", loadState: "Systemzustand wird geladen …", properties: "Eigenschaften",
       botReason: "Bot-Grund", botUpdated: "Bot zuletzt aktualisiert", chatSubscriptionId: "Chat-Abo-ID", chatSubscriptionReason: "Chat-Abo-Grund",
       chatSubscriptionUpdated: "Chat-Abo zuletzt aktualisiert", loginStatus: "Login-Token-Status", loginReason: "Login-Token-Grund",
       loginValidUntil: "Login-Token gültig bis", botValidUntil: "Bot-Token gültig bis",
@@ -1398,8 +1408,14 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       actionLoading: "Aktion wird geladen …",
       actionLoadFailed: "Die Aktion konnte nicht geladen werden.",
       actionAvailabilityFailed: "Die Verfügbarkeit konnte nicht geprüft werden.",
+      actionAvailabilityStale: "Prüfung veraltet; Aktion bleibt verfügbar.",
       actionFailed: "Die Aktion konnte nicht ausgeführt werden.",
       actionSucceeded: (name) => `${name} ausgeführt.`,
+      actionErrorActions: {
+        commercialScopeNextStep: "Erneuere die Twitch-Berechtigung channel:edit:commercial für dieses Kanal-Konto.",
+        commercialCooldown: (remaining) => `Die Werbe-Abklingzeit läuft noch. Erneut versuchen in ${remaining}.`,
+        clipScopeNextStep: "Verbinde das Bot-Konto erneut und erteile die Twitch-Berechtigung clips:edit.",
+      },
       operatorOnly: "Nur Bediener und höhere Rollen dürfen diese Aktion ausführen.",
       managerOnly: "Nur Verwalter und Broadcaster dürfen diese Aktion ausführen.",
       broadcasterOnly: "Nur Broadcaster dürfen diese Aktion ausführen.",
@@ -1448,6 +1464,9 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       systemStatus: "Systemstatus",
       systemReady: "Alles bereit",
       liveDataCurrent: "Live-Daten aktuell",
+      locationMissing: "Standort fehlt",
+      locationMissingDescription: "Wetter, Sonnenzeiten und Mondphase brauchen einen Kanalstandort.",
+      configureLocation: "Standort festlegen",
       actionDraftDiscardTitle: "Eingaben verwerfen?",
       actionDraftDiscardDescription: "Deine Eingaben gehen verloren, wenn du diese Aktion schließt.",
       actionDraftDiscard: "Eingaben verwerfen",
@@ -1547,7 +1566,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       botPermissionsMissing: (count) => `${count} missing`,
     },
     navigation: {
-      mainNavigation: "Main navigation", overview: "Overview", live: "Live", setup: "Setup", channel: "Channel", system: "System",
+      mainNavigation: "Main navigation", overview: "Overview", live: "Live", setup: "Setup", channel: "Channel", system: "System", locationWeather: "Location & weather",
       members: "Members", variables: "Variables", module: "Modules", events: "Events", audit: "Log", selectChannel: "Select channel",
       accountMenu: "Account", appearance: "Appearance", appearanceNightShift: "Night shift", appearanceIndigoNight: "Indigo night",
       manageModules: "Manage modules", moduleCategories: { chat: "Chat", participation: "Participation", twitch: "Twitch", data: "Data", stream: "Stream", admin: "Administration" },
@@ -1591,7 +1610,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       minutesAgo: (count) => `${String(count)} min ago`, hoursAgo: (count) => `${String(count)} hr ago`,
     },
     system: {
-      title: "System", readOnly: "read-only", loadState: "Loading system status …", properties: "Properties",
+      title: "System", readOnly: "Channel defaults and technical system status", loadState: "Loading system status …", properties: "Properties",
       botReason: "Bot reason", botUpdated: "Bot last updated", chatSubscriptionId: "Chat subscription ID", chatSubscriptionReason: "Chat subscription reason",
       chatSubscriptionUpdated: "Chat subscription last updated", loginStatus: "Login token status", loginReason: "Login token reason",
       loginValidUntil: "Login token valid until", botValidUntil: "Bot token valid until",
@@ -1742,8 +1761,14 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       actionLoading: "Loading action …",
       actionLoadFailed: "The action could not be loaded.",
       actionAvailabilityFailed: "The action availability could not be checked.",
+      actionAvailabilityStale: "Availability check is stale; the action remains available.",
       actionFailed: "The action could not be completed.",
       actionSucceeded: (name) => `${name} completed.`,
+      actionErrorActions: {
+        commercialScopeNextStep: "Renew the channel:edit:commercial permission for this channel account.",
+        commercialCooldown: (remaining) => `The commercial cooldown is active. Try again in ${remaining}.`,
+        clipScopeNextStep: "Reconnect the bot account and grant the Twitch clips:edit permission.",
+      },
       operatorOnly: "Operators and higher roles may run this action.",
       managerOnly: "Only managers and broadcasters may run this action.",
       broadcasterOnly: "Only broadcasters may run this action.",
@@ -1792,6 +1817,9 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       systemStatus: "System status",
       systemReady: "All systems ready",
       liveDataCurrent: "Live data up to date",
+      locationMissing: "Location missing",
+      locationMissingDescription: "Weather, sunrise and moon data need a channel location.",
+      configureLocation: "Set location",
       actionDraftDiscardTitle: "Discard your changes?",
       actionDraftDiscardDescription: "Your entries will be lost if you close this action.",
       actionDraftDiscard: "Discard entries",
@@ -2089,7 +2117,7 @@ const commercialFailureTexts: LocaleCatalog<Record<CommercialFailureReason, stri
   },
 };
 
-const commercialFailureReasonText = (reason: unknown, language: DashboardLanguage): string =>
+export const commercialFailureReasonText = (reason: unknown, language: DashboardLanguage): string =>
   typeof reason === "string" && COMMERCIAL_FAILURE_REASONS.includes(reason as CommercialFailureReason)
     ? commercialFailureTexts[language][reason as CommercialFailureReason]
     : commercialFailureTexts[language].twitch_error;
@@ -2120,6 +2148,9 @@ const clipFailureTexts: LocaleCatalog<Record<string, string>> = {
     network_error: "Network error from Twitch",
   },
 };
+
+export const clipFailureReasonText = (reason: unknown, language: DashboardLanguage): string | null =>
+  typeof reason === "string" ? catalogString(clipFailureTexts[language], reason) ?? null : null;
 
 /**
  * `sendChatMessage` (`worker/chat.ts`)'s own reason beyond what the generic

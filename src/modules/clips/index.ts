@@ -17,7 +17,11 @@ export const clipsModule: BotModule<typeof clipsSettingsSchema> = {
     requiredRole: "operator",
     errorMessage: clipsImmediateActionTexts.error,
     execute: async ({ channelId }) => {
-      await (await import("./panel/service")).createClip(channelId);
+      const result = await (await import("./panel/service")).createClip(channelId);
+      return {
+        message: clipsImmediateActionTexts.created,
+        ...(result.editUrl === null ? {} : { link: { href: result.editUrl, label: clipsImmediateActionTexts.open } }),
+      };
     },
   }],
 };

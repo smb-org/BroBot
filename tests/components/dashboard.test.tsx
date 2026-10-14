@@ -3106,7 +3106,9 @@ describe("Dashboard skeleton", () => {
 
     expect(rendered.container.querySelector(".state-list")).toBeInTheDocument();
     expect(rendered.container.querySelector(".ui-load-state--status-row .ui-load-state__inline-message")).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Erneut versuchen" }));
+    const systemRetry = rendered.container.querySelector(".ui-load-state--status-row .ui-load-state__retry");
+    expect(systemRetry).not.toBeNull();
+    fireEvent.click(systemRetry as HTMLButtonElement);
 
     await waitFor(() => {
       expect(rendered.queryClient.getQueryData(dashboardDataKeys.system("kanal-a"))).toMatchObject({

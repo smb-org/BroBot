@@ -129,7 +129,7 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
           return { reason: null };
         } catch (error: unknown) {
           if (error instanceof Error && error.name === "AbortError") throw error;
-          return { reason: chatVotingImmediateActionTexts.liveDataUnavailable };
+          throw error;
         }
       },
     }],
@@ -162,6 +162,30 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
         durationSeconds,
         title: title.trim(),
       });
+    },
+  }, {
+    id: "end-vote",
+    name: chatVotingImmediateActionTexts.endName,
+    icon: "vote",
+    conditions: [{
+      check: async ({ channelId, signal }) => {
+        const service = await import("./panel/service");
+        try {
+          const state = await service.loadChatVotingState(channelId, signal);
+          return state.vote?.status === "open"
+            ? { reason: null }
+            : { reason: chatVotingImmediateActionTexts.notRunning };
+        } catch (error: unknown) {
+          if (error instanceof Error && error.name === "AbortError") throw error;
+          throw error;
+        }
+      },
+    }],
+    requiredRole: "operator",
+    errorMessage: chatVotingImmediateActionTexts.endError,
+    execute: async ({ channelId }) => {
+      await (await import("./panel/service")).closeChatVoting(channelId);
+      return { message: chatVotingImmediateActionTexts.endSucceeded };
     },
   }],
   settingsEditor: () => import("./panel/settings-editor"),
