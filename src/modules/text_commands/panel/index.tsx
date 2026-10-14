@@ -497,7 +497,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
           label={labels.variableAction}
           hint={labels.variableOperationHelp[variableAction.operation]}
           value={variableAction.operation}
-          options={( ["add", "subtract", "set", "set_argument"] as const).map((operation) => ({ value: operation, label: labels.variableOperations[operation] }))}
+          options={(["add", "subtract", "set", "set_argument"] as const).map((operation) => ({ value: operation, label: labels.variableOperations[operation], ...(operation === "set_argument" ? { compactLabel: "Arg." } : {}) }))}
           disabled={!canManageContent || pending}
           onChange={(operation) => {
             const nextOperation = operation;

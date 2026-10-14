@@ -1183,7 +1183,7 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
       />
       <section className="content-section channel-overview-settings" aria-label={settingsTexts.section}>
         <div className="section-heading"><h2>{settingsTexts.section}</h2></div>
-        <div className="form-actions">
+        <div className="form-actions channel-overview-settings__row channel-overview-settings__row--timezone">
           <ChannelTimeZoneField
             label={settingsTexts.timeZone}
             hint={settingsTexts.timeZoneHint}
@@ -1216,14 +1216,15 @@ const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModera
             label={settingsTexts.defaultChatTarget}
             value={defaultChatTargetDraft}
             allowed={["all_chats", "source_only", "where_asked"]}
+            inline
             onChange={changeDefaultChatTargetDraft}
             disabled={settingsBusy || channelSettings === null || !canManage(overview.role)}
           />
           {canManage(overview.role)
             ? <Button disabled={settingsBusy || channelSettings === null || defaultChatTargetDraft === savedDefaultChatTarget} onClick={() => { void saveDefaultChatTarget(); }}>{settingsTexts.defaultChatTargetSave}</Button>
             : <p className="muted">{settingsTexts.readOnly}</p>}
+          <p className="muted channel-overview-settings__hint">{settingsTexts.defaultChatTargetHint}</p>
         </div>
-        <p className="muted">{settingsTexts.defaultChatTargetHint}</p>
       </section>
       <WarningsAndErrorsFeed channelId={overview.channelId} onNavigate={onNavigate} />
       <ChannelStateChecks entries={entries}>

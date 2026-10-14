@@ -22,7 +22,7 @@ const channel = {
   lastError: null,
 };
 
-test("list toolbar keeps its 44px control row and 20px status at desktop and 390px", async ({ page }) => {
+test("list toolbar controls share height and center line at desktop and keep their mobile layout", async ({ page }) => {
   await page.route("**/api/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === "/api/channels") {
@@ -64,6 +64,15 @@ test("list toolbar keeps its 44px control row and 20px status at desktop and 390
   await expect(search).toBeVisible();
   await expect(create).toBeVisible();
   await expect(status).toContainText("2 loaded");
+
+  for (const width of [1920, 1280]) {
+    await page.setViewportSize({ width, height: width === 1920 ? 1080 : 800 });
+    const inputBox = await search.boundingBox();
+    const buttonBox = await create.boundingBox();
+    expect(inputBox?.height).toBe(32);
+    expect(buttonBox?.height).toBe(inputBox?.height);
+    expect(Math.abs((inputBox?.y ?? 0) + (inputBox?.height ?? 0) / 2 - ((buttonBox?.y ?? 0) + (buttonBox?.height ?? 0) / 2))).toBeLessThanOrEqual(1);
+  }
 
   const desktopRow = await toolbar.locator(".list-toolbar__row").boundingBox();
   const desktopStatus = await status.boundingBox();

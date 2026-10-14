@@ -34,7 +34,7 @@ const AdsPanel = ({ channelId, language = "de", canManage = false }: { channelId
       loadErrorNotified.current = false;
       return response;
     } catch (failure: unknown) {
-      if (!loadErrorNotified.current) {
+      if (!signal.aborted && !loadErrorNotified.current) {
         loadErrorNotified.current = true;
         notify({ tone: "error", message: rateLimitWaitMessage(failure, labels) ?? labels.loadError });
       }

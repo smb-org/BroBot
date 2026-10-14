@@ -362,7 +362,7 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
             <UnitInput label={labels.before} value={draft.minutes} onChange={(minutes) => patchDraft({ minutes })} min={1} max={1_440} unit={labels.minutesUnit} required />
           </> : null}
 
-          <div className="inspector-actions">
+          <div className="form-actions">
             <Button type="button" variant="neutral" onClick={() => { void preview(draft.messageText); }} disabled={draft.messageText.trim().length === 0 || previewBusy}>{labels.preview}</Button>
           </div>
         </div>}

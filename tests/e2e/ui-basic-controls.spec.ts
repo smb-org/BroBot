@@ -1,8 +1,8 @@
 import { expect, test, type Locator } from "@playwright/test";
 
-test("primitive controls use 32px desktop dimensions and portals preserve the page layout", async ({ page }) => {
+test("primitive controls use the shared desktop height and portal layout stays stable", async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
-  await page.goto("/tests/e2e/ui-basic-controls-fixture.html");
+  await page.goto("/tests/e2e/ui-basic-controls-fixture.html?lang=de");
   const anchor = page.locator(".e2e-layout-anchor");
   await expect(anchor).toBeVisible();
 
@@ -11,9 +11,15 @@ test("primitive controls use 32px desktop dimensions and portals preserve the pa
     anchor.locator(".unit-input__input"),
     anchor.getByRole("combobox", { name: "Mode", exact: true }),
     anchor.locator(".ui-select__search-control > .ui-select__trigger"),
-    anchor.locator(".segment-choice"),
+    anchor.locator(".segment-choice").first(),
+    anchor.locator(".segment-choice-field--compact .segment-choice"),
   ];
   for (const control of controls) expect((await control.boundingBox())?.height).toBe(32);
+  for (const width of [1280, 1920]) {
+    await page.setViewportSize({ width, height: width === 1920 ? 1080 : 800 });
+    const labels = anchor.locator(".segment-choice__label-full");
+    expect(await labels.evaluateAll((items) => items.every((item) => item.scrollWidth <= item.clientWidth))).toBe(true);
+  }
 
   const anchorHeight = (await anchor.boundingBox())?.height;
   await anchor.getByRole("button", { name: "Popover help" }).focus();
@@ -23,6 +29,18 @@ test("primitive controls use 32px desktop dimensions and portals preserve the pa
   await anchor.getByRole("button", { name: "Open dialog" }).click();
   await expect(page.getByRole("dialog", { name: "Control dialog" })).toBeVisible();
   expect((await anchor.boundingBox())?.height).toBe(anchorHeight);
+});
+
+test("segmented labels fit in German and English at both desktop widths", async ({ page }) => {
+  for (const language of ["de", "en"] as const) {
+    for (const width of [1280, 1920]) {
+      await page.setViewportSize({ width, height: width === 1920 ? 1080 : 800 });
+      await page.goto(`/tests/e2e/ui-basic-controls-fixture.html?lang=${language}`);
+      const labelsFit = await page.locator(".segment-choice__label-full").evaluateAll((labels) =>
+        labels.every((label) => label.scrollWidth <= label.clientWidth));
+      expect(labelsFit).toBe(true);
+    }
+  }
 });
 
 test("control hit areas are at least 40px with a coarse pointer", async ({ browser, baseURL }) => {
@@ -43,6 +61,19 @@ test("control hit areas are at least 40px with a coarse pointer", async ({ brows
     page.locator(".segment-choice__option").first(),
   ];
   for (const control of controls) expect((await control.boundingBox())?.height).toBeGreaterThanOrEqual(40);
+
+  // The compact shell grows with its touch-sized options instead of clipping them.
+  const compact = page.locator(".segment-choice-field--compact .segment-choice");
+  const shell = await compact.boundingBox();
+  if (shell === null) throw new Error("The compact segment control is not visible.");
+  const options = compact.locator(".segment-choice__option");
+  for (let index = 0; index < await options.count(); index += 1) {
+    const option = await options.nth(index).boundingBox();
+    if (option === null) throw new Error("A compact segment option is not visible.");
+    expect(option.height).toBeGreaterThanOrEqual(40);
+    expect(option.y).toBeGreaterThanOrEqual(shell.y);
+    expect(option.y + option.height).toBeLessThanOrEqual(shell.y + shell.height + 0.5);
+  }
   await context.close();
 });
 
@@ -167,6 +198,10 @@ test("inline switches, field adornments, and select errors keep stable layout", 
   expect((await stableSelect.boundingBox())?.height).toBe(originalHeight);
 
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/tests/e2e/ui-basic-controls-fixture.html?lang=de");
+  const segment = page.locator(".segment-choice");
+  await expect(segment.locator(".segment-choice__label-full").first()).toBeHidden();
+  await expect(segment.locator(".segment-choice__label-compact").first()).toBeVisible();
   const switchRow = page.getByRole("switch", { name: "Inline inspector switch" }).locator("xpath=..");
   const rowLayout = await switchRow.evaluate((row) => {
     const track = row.querySelector("[role='switch']");
@@ -175,9 +210,14 @@ test("inline switches, field adornments, and select errors keep stable layout", 
     return {
       display: getComputedStyle(row).display,
       trackRight: track.getBoundingClientRect().right,
+      rowRight: row.getBoundingClientRect().right,
       labelLeft: label.getBoundingClientRect().left,
+      trackCenter: track.getBoundingClientRect().top + track.getBoundingClientRect().height / 2,
+      labelCenter: label.getBoundingClientRect().top + label.getBoundingClientRect().height / 2,
     };
   });
   expect(rowLayout?.display).toBe("grid");
   expect(rowLayout?.trackRight).toBeGreaterThan(rowLayout?.labelLeft ?? 0);
+  expect((rowLayout?.rowRight ?? 0) - (rowLayout?.trackRight ?? 0)).toBeGreaterThanOrEqual(7);
+  expect(Math.abs((rowLayout?.trackCenter ?? 0) - (rowLayout?.labelCenter ?? 0))).toBeLessThanOrEqual(1);
 });

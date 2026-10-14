@@ -13,7 +13,7 @@ function SelectValue({ className, ...props }: ComponentProps<typeof SelectPrimit
 }
 
 function SelectTrigger({ className, children, ...props }: ComponentProps<typeof SelectPrimitive.Trigger>) {
-  return <SelectPrimitive.Trigger data-ui="" data-slot="select-trigger" className={cn("flex h-8 min-w-0 items-center justify-between gap-2 rounded-md border border-[var(--color-border-control)] bg-[var(--color-well)] px-2.5 text-left text-[13px] font-medium text-[var(--color-text)] outline-none focus-visible:border-[var(--color-focus)] focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] disabled:cursor-not-allowed disabled:opacity-55 data-placeholder:text-[var(--color-text-3)]", className)} {...props}>
+  return <SelectPrimitive.Trigger data-ui="" data-slot="select-trigger" className={cn("flex h-[var(--control-height)] min-w-0 items-center justify-between gap-2 rounded-md border border-[var(--color-border-control)] bg-[var(--color-well)] px-2.5 text-left text-[13px] font-medium text-[var(--color-text)] outline-none focus-visible:border-[var(--color-focus)] focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] disabled:cursor-not-allowed disabled:opacity-55 data-placeholder:text-[var(--color-text-3)]", className)} {...props}>
     {children}<SelectPrimitive.Icon render={<ChevronDown aria-hidden="true" className="size-4 shrink-0 text-[var(--color-text-3)]" />} />
   </SelectPrimitive.Trigger>;
 }

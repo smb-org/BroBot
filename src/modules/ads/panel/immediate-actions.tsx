@@ -61,7 +61,7 @@ const AdNowAction = ({ channelId, canManage = false, availabilityReason }: Modul
           hint={labels.immediateLengthHint}
           value={length ?? ""}
           onChange={setLength}
-          options={AD_LENGTHS.map((value) => ({ value, label: `${value}s` }))}
+          options={AD_LENGTHS.map((value) => ({ value, label: `${value}s`, compactLabel: value }))}
           disabled={pending || unavailable}
           size="compact"
         />

@@ -16,9 +16,9 @@ const buttonVariants = cva(
         "danger-outline": "border-[var(--color-error-text)] bg-transparent text-[var(--color-error-text)] hover:bg-[var(--color-error-surface)]",
       },
       size: {
-        md: "min-h-8 gap-1.5 px-2.5",
-        compact: "min-h-8 gap-1 px-2",
-        icon: "size-8 p-0",
+        md: "h-[var(--control-height)] min-h-[var(--control-height)] gap-1.5 px-2.5",
+        compact: "h-[var(--control-height)] min-h-[var(--control-height)] gap-1 px-2",
+        icon: "h-[var(--control-height)] min-h-[var(--control-height)] w-[var(--control-height)] p-0",
       },
     },
     defaultVariants: { variant: "neutral", size: "md" },

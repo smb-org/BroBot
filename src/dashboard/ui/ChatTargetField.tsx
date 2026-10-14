@@ -24,10 +24,12 @@ export interface ChatTargetFieldProps {
   disabled?: boolean;
   error?: string;
   reserveError?: boolean;
+  /** Label left of the trigger; only for rows aligned with a sibling action. */
+  inline?: boolean;
 }
 
 /** Shared portal-backed destination picker for messages sent to chat. */
-export function ChatTargetField({ label, value, onChange, allowed = DEFAULT_ALLOWED, effectiveDefault, disabled = false, error, reserveError = false }: ChatTargetFieldProps): ReactElement {
+export function ChatTargetField({ label, value, onChange, allowed = DEFAULT_ALLOWED, effectiveDefault, disabled = false, error, reserveError = false, inline = false }: ChatTargetFieldProps): ReactElement {
   const id = useId();
   const [open, setOpen] = useState(false);
   const texts = chatTargetFieldTexts[dashboardLanguage()];
@@ -51,7 +53,7 @@ export function ChatTargetField({ label, value, onChange, allowed = DEFAULT_ALLO
     : target === "source_only" ? texts.onlyOurChatDescription : texts.automaticDescription;
 
   return (
-    <InspectorFieldRow label={label} help={texts.sharedChatInfo}>
+    <InspectorFieldRow label={label} help={texts.sharedChatInfo} {...(inline ? {} : { className: "inspector-field-row--stacked" })}>
       <PopoverPrimitive.Root open={open} onOpenChange={setOpen}>
         <div data-ui="" className="ui-chat-target-field">
           <PopoverPrimitive.Trigger

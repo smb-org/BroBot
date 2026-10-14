@@ -14,7 +14,7 @@ describe("editor seam styles", () => {
     const geometry = styles.match(/\.template-text-field \.template-text-field__input\s*\{([^}]+)\}/u)?.[1] ?? "";
     expect(geometry).toContain("font-size: 14px;");
     expect(geometry).toContain("line-height: 1.5;");
-    expect(geometry).toContain("padding: 48px 12px 10px;");
+    expect(geometry).toContain("padding: var(--s3) var(--s3) var(--s2);");
     expect(styles).not.toContain("template-text-field__mirror");
     expect(styles).not.toContain("data-highlight-ready");
     const module = styles.match(/\.template-text-field__decoration--module\s*\{([^}]+)\}/u)?.[1] ?? "";
