@@ -40,11 +40,11 @@ export const ChannelDefaultsEditor = ({ channelId, role }: ChannelDefaultsEditor
   const [saveError, setSaveError] = useState<string | undefined>(undefined);
   const [saved, setSaved] = useState(false);
   const canEdit = canManage(role);
-  const draftMatchesSettings = settings !== undefined && draftState?.channelId === channelId &&
-    draftState.timeZoneRevision === settings.revision &&
-    draftState.chatTargetRevision === settings.defaultChatTargetRevision;
-  const timeZone = settings === undefined ? "" : draftMatchesSettings ? draftState.timeZone : settings.timeZone;
-  const chatTarget = settings === undefined ? "source_only" : draftMatchesSettings ? draftState.chatTarget : settings.defaultChatTarget;
+  const draftForChannel = draftState?.channelId === channelId;
+  const timeZoneDraftMatchesSettings = settings !== undefined && draftForChannel && draftState.timeZoneRevision === settings.revision;
+  const chatTargetDraftMatchesSettings = settings !== undefined && draftForChannel && draftState.chatTargetRevision === settings.defaultChatTargetRevision;
+  const timeZone = settings === undefined ? "" : timeZoneDraftMatchesSettings ? draftState.timeZone : settings.timeZone;
+  const chatTarget = settings === undefined ? "source_only" : chatTargetDraftMatchesSettings ? draftState.chatTarget : settings.defaultChatTarget;
   const dirty = settings !== undefined && (timeZone !== settings.timeZone || chatTarget !== settings.defaultChatTarget);
 
   const writeDraft = (next: Partial<Pick<ChannelDefaultsDraft, "timeZone" | "chatTarget">>): void => {

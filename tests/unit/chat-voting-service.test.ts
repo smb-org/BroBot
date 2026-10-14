@@ -9,7 +9,7 @@ import {
   type ChatVotingSettings,
 } from "../../src/modules/chat_voting/contracts";
 import type { ChatVoteTemplateRepository, ChatVotingRepository } from "../../src/modules/chat_voting/repository";
-import { processChatVotingMessage, requestChatVoteClose, startChatVote } from "../../src/modules/chat_voting/service";
+import { processChatVotingMessage, requestChatVoteClose, requestChatVoteExtension, startChatVote } from "../../src/modules/chat_voting/service";
 
 const openVote: ChatVote = {
   id: "fictional-poll",
@@ -584,7 +584,7 @@ describe("chat voting event service", () => {
     const allowed = await processChatVotingMessage(eventWithText("!vote end", ["moderator"]), repository, context);
     expect(allowed.actions).toEqual([{ kind: "chat", text: "The vote is closing.", automated: false }]);
     expect(requestManualClose).toHaveBeenCalledWith("fictional-channel", "fictional-poll", undefined);
-    expect(context.scheduleAlarm).toHaveBeenCalledWith("close", "fictional-poll", expect.any(Number), 1);
+    expect(context.scheduleAlarm).toHaveBeenCalledWith("close", "fictional-poll", expect.any(Number), expect.any(Number));
   });
 
   it("keeps a manual close request after scheduling fails and retries on the next request", async () => {
@@ -609,7 +609,42 @@ describe("chat voting event service", () => {
     for (const [pollId, deadline, revision] of scheduleClose.mock.calls) {
       expect(pollId).toBe("fictional-poll");
       expect(deadline).toEqual(expect.any(Number));
-      expect(revision).toBe(1);
+      expect(revision).toBeGreaterThan(Date.parse(openVote.closesAt));
     }
+  });
+
+  it("keeps the newest alarm deadline when vote extensions schedule out of order", async () => {
+    let persistedVote: ChatVote = { ...openVote, closesAt: new Date(Date.now() + 60_000).toISOString() };
+    let releaseFirstSchedule = (): void => {};
+    let signalFirstScheduleStarted = (): void => {};
+    const firstScheduleStarted = new Promise<void>((resolve) => { signalFirstScheduleStarted = resolve; });
+    const firstScheduleGate = new Promise<void>((resolve) => { releaseFirstSchedule = resolve; });
+    let scheduleCalls = 0;
+    const alarm: { current: { deadline: number; ownerRevision: number } | null } = { current: null };
+    const scheduleClose = vi.fn(async (_pollId: string, deadline: number, ownerRevision: number): Promise<void> => {
+      scheduleCalls += 1;
+      if (scheduleCalls === 1) {
+        signalFirstScheduleStarted();
+        await firstScheduleGate;
+      }
+      if (alarm.current === null || ownerRevision >= alarm.current.ownerRevision) alarm.current = { deadline, ownerRevision };
+    });
+    const repository = repositoryWith({
+      open: vi.fn<ChatVotingRepository["open"]>(() => Promise.resolve({ ...persistedVote })),
+      extendClose: vi.fn<ChatVotingRepository["extendClose"]>((_channelId, _pollId, expectedClosesAt, closesAt) => {
+        if (persistedVote.closesAt !== expectedClosesAt) return Promise.resolve(false);
+        persistedVote = { ...persistedVote, closesAt };
+        return Promise.resolve(true);
+      }),
+    });
+
+    const firstExtension = requestChatVoteExtension(repository, "fictional-channel", scheduleClose);
+    await firstScheduleStarted;
+    await requestChatVoteExtension(repository, "fictional-channel", scheduleClose);
+    releaseFirstSchedule();
+    await firstExtension;
+
+    expect(scheduleClose).toHaveBeenCalledTimes(2);
+    expect(alarm.current?.deadline).toBe(Date.parse(persistedVote.closesAt));
   });
 });

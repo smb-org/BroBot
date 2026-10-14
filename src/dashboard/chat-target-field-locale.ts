@@ -10,7 +10,6 @@ interface ChatTargetFieldTexts {
   automaticDescription: string;
   channelDefault: (effectiveTarget?: string) => string;
   channelDefaultDescription: (effectiveTarget?: string) => string;
-  change: string;
 }
 
 export const chatTargetFieldTexts: LocaleCatalog<ChatTargetFieldTexts> = {
@@ -26,7 +25,6 @@ export const chatTargetFieldTexts: LocaleCatalog<ChatTargetFieldTexts> = {
     channelDefaultDescription: (effectiveTarget) => effectiveTarget === undefined
       ? "Das kanalweite Standard-Chat-Ziel verwenden."
       : `Das kanalweite Standard-Chat-Ziel verwenden. Aktuell: ${effectiveTarget}.`,
-    change: "ändern",
   },
   en: {
     sharedChatInfo: "This setting only affects output during Shared Chat. Twitch cannot target a single partner chat within a Shared Chat session.",
@@ -40,6 +38,5 @@ export const chatTargetFieldTexts: LocaleCatalog<ChatTargetFieldTexts> = {
     channelDefaultDescription: (effectiveTarget) => effectiveTarget === undefined
       ? "Use the channel-wide default chat target."
       : `Use the channel-wide default chat target. Current value: ${effectiveTarget}.`,
-    change: "change",
   },
 };

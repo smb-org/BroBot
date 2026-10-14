@@ -141,7 +141,7 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 .live-cockpit-header { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(280px, 1fr) minmax(0, .95fr); align-items: center; gap: var(--s4); min-height: 94px; padding: var(--s3) var(--s4); border: 1px solid var(--line); border-radius: var(--r-container); background: var(--surface); }
 .live-cockpit-header__summary { display: flex; align-items: center; gap: var(--s4); min-width: 0; }
 .live-cockpit-header__role { flex: none; color: var(--text-3); font-size: 11px; white-space: nowrap; }
-.live-cockpit-header__title-slot { display: flex; align-items: center; min-width: 0; min-height: 56px; padding: 0 var(--s3); border: 1px solid var(--line); border-radius: var(--r-control); background: var(--surface-raised, var(--surface)); color: var(--text-3); font-size: 12px; }
+.live-cockpit-header__title-slot { display: flex; align-items: center; min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--text-3); font-size: 12px; }
 .live-cockpit-header__indicators { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--s4); min-width: 0; }
 .live-cockpit-header__stream { display: inline-flex; align-items: center; justify-content: center; gap: var(--s2); flex: none; min-height: 36px; padding: 0 var(--s3); border: 1px solid var(--line); border-radius: var(--r-control); font-weight: 600; line-height: 1; }
 .live-cockpit-header__stream-dot { display: block; width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: var(--text-3); }
@@ -180,7 +180,7 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 .live-action__button:disabled { color: var(--text-3); cursor: not-allowed; }
 .live-action__icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 1px solid color-mix(in srgb, var(--brand-text) 54%, var(--line)); border-radius: var(--r-control); background: var(--surface); color: var(--brand-text); }
 .live-action__name { max-width: 100%; color: inherit; font-size: 12px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
-.live-action__reason { display: -webkit-box; align-self: start; width: 100%; min-width: 0; max-height: 24px; overflow: hidden; color: var(--text-3); font-size: 10px; line-height: 12px; text-align: center; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.live-action__reason { display: -webkit-box; align-self: center; width: 100%; min-width: 0; max-height: 24px; overflow: hidden; color: var(--text-3); font-size: 10px; line-height: 12px; text-align: center; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .live-action__reason.is-locked { color: var(--warn); }
 .live-action__reason.has-error { color: var(--error); }
 .live-cockpit__running { display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s3); min-width: 0; min-height: 0; overflow: hidden; }
@@ -611,7 +611,6 @@ form.content-section { display: grid; gap: var(--s4); }
 .ui-chat-target-field__trigger:focus-visible { outline: 2px solid var(--brand-text); outline-offset: 2px; }
 .ui-chat-target-field__trigger:disabled { color: var(--text-3); cursor: not-allowed; }
 .ui-chat-target-field__value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ui-chat-target-field__change { color: var(--brand-text); font-size: 12px; }
 .ui-chat-target-field__chevron { color: var(--text-3); font-size: 17px; line-height: 1; }
 .ui-chat-target-field__popover { box-sizing: border-box; width: min(360px, calc(100vw - 24px)); max-height: var(--available-height, calc(100vh - 24px)); overflow: auto; padding: var(--s2); }
 .ui-chat-target-field__title { padding: var(--s2) var(--s2) var(--s1); color: var(--text-3); font-size: 11px; font-weight: 600; }
@@ -2193,7 +2192,6 @@ p.lock-reason { margin-bottom: 1em; }
   .live-cockpit { grid-template-rows: auto auto minmax(0, 1fr) auto; height: auto; min-height: calc(100dvh - 132px); max-height: none; overflow: visible; }
   .live-cockpit-header { grid-template-columns: minmax(0, 1fr); gap: var(--s3); }
   .live-cockpit-header__summary { flex-wrap: wrap; gap: var(--s2) var(--s3); }
-  .live-cockpit-header__title-slot { min-height: 42px; }
   .live-cockpit-header__indicators { justify-content: flex-start; gap: var(--s2) var(--s3); }
   .live-cockpit__warning-slot { height: 76px; }
   .live-cockpit__location-warning span { max-width: 34ch; }
@@ -2223,7 +2221,6 @@ p.lock-reason { margin-bottom: 1em; }
   .ui-switch-section__heading { box-sizing: border-box; padding-inline-end: var(--s1); }
   .ui-chat-target-field__trigger { grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--s1); padding-inline: var(--s2); }
   .ui-chat-target-field__value { overflow: hidden; overflow-wrap: normal; text-overflow: ellipsis; white-space: nowrap; line-height: normal; }
-  .ui-chat-target-field__change { display: none; }
   .inspector-columns { grid-template-columns: 1fr; }
   .table { min-width: 0; }
   .members-table,
@@ -2324,7 +2321,7 @@ p.lock-reason { margin-bottom: 1em; }
   .live-cockpit-header { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: 118px; }
   .live-cockpit-header__summary { grid-column: 1; grid-row: 1; }
   .live-cockpit-header__indicators { grid-column: 2; grid-row: 1; }
-  .live-cockpit-header__title-slot { grid-column: 1 / -1; grid-row: 2; min-height: 48px; }
+  .live-cockpit-header__title-slot { grid-column: 1 / -1; grid-row: 2; }
   .live-cockpit__wall { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, .92fr); min-height: 480px; overflow: visible; }
   .live-cockpit-actions { min-height: 360px; }
   .live-cockpit-actions__grid { overflow: visible; }

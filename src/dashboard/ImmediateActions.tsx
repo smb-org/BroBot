@@ -246,6 +246,7 @@ const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason, 
   };
 
   const reasonLine = reason ?? (availabilityStale ? texts.streamManager.actionAvailabilityStale : error !== null ? feedbackMessage(error) : result?.message ?? "\u00a0");
+  const popoverTitleId = `${reasonId}-popover-title`;
   const buttonContents = <>
     <span className="live-action__icon"><Icon name={action.icon} size={20} /></span>
     <span className="live-action__name">{action.name[language]}</span>
@@ -266,7 +267,7 @@ const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason, 
     <header className="live-action-frame__header">
       {action.content?.presentation === "dialog"
         ? <DialogTitle className="live-action-frame__dialog-title">{action.name[language]}</DialogTitle>
-        : <h3 className="live-action-frame__popover-title">{action.name[language]}</h3>}
+        : <h3 id={popoverTitleId} className="live-action-frame__popover-title">{action.name[language]}</h3>}
       {action.content?.presentation === "dialog" ? <button className="live-action-frame__close" type="button" aria-label={dashboardCommonTexts().close} disabled={busy} onClick={close}><Icon name="close" /></button> : null}
     </header>
     <div className="live-action-frame__middle" aria-busy={contentLoading || busy}>
@@ -290,7 +291,7 @@ const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason, 
     return <div className="live-action">
       <PopoverPrimitive.Root open={open} onOpenChange={(next) => { if (next) { if (!busy) { setOpen(true); setDraftDirty(false); setError(null); } } else close(); }}>
         <PopoverPrimitive.Trigger {...triggerProps} type="button" className={triggerClassName}>{buttonContents}</PopoverPrimitive.Trigger>
-        <PopoverContent align="start" side="bottom" className="live-action-frame-popover">{frameBody}</PopoverContent>
+        <PopoverContent aria-labelledby={popoverTitleId} align="start" side="bottom" className="live-action-frame-popover">{frameBody}</PopoverContent>
       </PopoverPrimitive.Root>
       {availabilityRetry}
       <ConfirmDialog

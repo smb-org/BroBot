@@ -147,7 +147,10 @@ export const requestChatVoteClose = async (
   if (vote === null || vote.status !== "open") return null;
   const requested = await repository.requestManualClose(channelId, vote.id, authorization);
   if (!requested) return null;
-  await scheduleClose(vote.id, Date.now(), 1);
+  const deadline = Date.now();
+  const voteDeadline = Date.parse(vote.closesAt);
+  const ownerRevision = Math.max(deadline, Number.isFinite(voteDeadline) ? voteDeadline : deadline) + 1;
+  await scheduleClose(vote.id, deadline, ownerRevision);
   return { ...vote, closeReason: "manual" };
 };
 
@@ -168,7 +171,7 @@ export const requestChatVoteExtension = async (
   if (extendedUntil <= closesAt) return null;
   const nextClosesAt = new Date(extendedUntil).toISOString();
   if (!await repository.extendClose(channelId, vote.id, vote.closesAt, nextClosesAt, authorization)) return null;
-  await scheduleClose(vote.id, extendedUntil, 0);
+  await scheduleClose(vote.id, extendedUntil, extendedUntil);
   return { ...vote, closesAt: nextClosesAt };
 };
 

@@ -11,6 +11,7 @@ export interface LiveCockpitMockOptions {
   nextViewerCount?: number | null;
   vote?: Record<string, unknown> | null;
   currentStateError?: boolean;
+  belaboxStatus?: { errorCode?: string | null; fetchFailureNotice?: boolean };
   waitForCurrentState?: () => Promise<void>;
   onVoteClose?: () => void;
 }
@@ -121,7 +122,12 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
     if (pathname === `${channelPrefix}/clips` && method === "POST") return route.fulfill(json({ clipId: "clip-regression", editUrl: "https://clips.twitch.tv/edit/clip-regression" }));
     if (pathname === "/api/csrf") return route.fulfill(json({ token: "csrf-live-regression" }));
     if (pathname === `${channelPrefix}/modules/belabox/status`) {
-      return route.fulfill(json({ configured: true, updatedAt: now, mode: "stats_url", sample: { connected: true, bitrateKbps: 4_000, at: now }, errorCode: null, polling: true, pollingDesired: true, streamId: "stream-a", belaboxStreamId: "stream-a", alertNotice: null, fetchFailureNotice: false, intervalSeconds: 5 }));
+      return route.fulfill(json({
+        configured: true, updatedAt: now, mode: "stats_url", sample: { connected: true, bitrateKbps: 4_000, at: now },
+        errorCode: options.belaboxStatus?.errorCode ?? null, polling: true, pollingDesired: true, streamId: "stream-a",
+        belaboxStreamId: "stream-a", alertNotice: null, fetchFailureNotice: options.belaboxStatus?.fetchFailureNotice ?? false,
+        intervalSeconds: 5,
+      }));
     }
     if (pathname === `${channelPrefix}/modules/belabox/test` && method === "POST") return route.fulfill(json({ ok: true, connected: false, bitrateKbps: 0 }));
     return route.fulfill(json({}));

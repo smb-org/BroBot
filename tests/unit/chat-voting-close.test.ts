@@ -116,7 +116,7 @@ describe("chat voting close service", () => {
     for (const [pollId, deadline, revision] of scheduleClose.mock.calls) {
       expect(pollId).toBe("fictional-poll");
       expect(deadline).toEqual(expect.any(Number));
-      expect(revision).toBe(1);
+      expect(revision).toBeGreaterThan(Date.parse("2026-10-04T14:00:00.000Z"));
     }
     await expect(repository.open("fictional-channel")).resolves.toMatchObject({
       id: "fictional-poll",

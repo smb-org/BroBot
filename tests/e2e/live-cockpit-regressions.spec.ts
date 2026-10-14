@@ -221,6 +221,80 @@ test("a disconnected BELABOX test result replaces the older connected header sam
   await expect(page.locator(".live-cockpit__status-message")).toContainText("Getrennt · 0 kbit/s");
 });
 
+for (const scenario of [
+  { name: "fetch failure notice", status: { fetchFailureNotice: true } },
+  { name: "error code", status: { errorCode: "relay_fetch_failed" } },
+] as const) {
+  test(`BELABOX leaves the healthy state on a retained sample after a ${scenario.name}`, async ({ page }) => {
+    const channelId = `kanal-belabox-${scenario.name.replaceAll(" ", "-")}`;
+    await installLiveCockpitMocks(page, {
+      channelId,
+      modules: [{ id: "belabox", enabled: true, settings: "{}" }],
+      belaboxStatus: scenario.status,
+    });
+
+    await page.goto(`/channels/${channelId}`);
+    await expect(page.getByLabel("BELABOX · nicht erreichbar")).toHaveAttribute("data-status", "warn");
+  });
+}
+
+test("the live title placeholder is read-only and the channel target has one affordance", async ({ page }) => {
+  const channelId = "kanal-live-header-placeholder";
+  await installLiveCockpitMocks(page, { channelId });
+
+  await page.goto(`/channels/${channelId}`);
+  const titleSlot = page.locator('[data-slot="stream-title-category"]');
+  await expect(titleSlot).toContainText("Streamtitel und Kategorie");
+  await expect(titleSlot).toHaveCSS("border-top-width", "0px");
+  await expect(titleSlot.locator("input, button")).toHaveCount(0);
+
+  await page.getByRole("group", { name: "Einrichten" }).getByRole("button", { name: "Einrichten" }).click();
+  const chatTarget = page.getByRole("button", { name: "Standard-Chat-Ziel", exact: true });
+  await expect(chatTarget.locator(".ui-chat-target-field__change")).toHaveCount(0);
+  await expect(chatTarget.locator(".ui-chat-target-field__chevron")).toBeVisible();
+});
+
+test("action tile content stays centered with its reserved reason line", async ({ page }) => {
+  const channelId = "kanal-live-action-centering";
+  await installLiveCockpitMocks(page, {
+    channelId,
+    modules: [{ id: "ads", enabled: true, settings: "{}" }],
+  });
+
+  await page.goto(`/channels/${channelId}`);
+  const action = page.getByRole("button", { name: "Werbung starten" });
+  const [tileBox, iconBox, reasonBox] = await Promise.all([
+    action.boundingBox(),
+    action.locator(".live-action__icon").boundingBox(),
+    action.locator(".live-action__reason").boundingBox(),
+  ]);
+  expect(tileBox).not.toBeNull();
+  expect(iconBox).not.toBeNull();
+  expect(reasonBox).not.toBeNull();
+  const contentCenter = ((iconBox?.y ?? 0) + (reasonBox?.y ?? 0) + (reasonBox?.height ?? 0)) / 2;
+  const tileCenter = (tileBox?.y ?? 0) + (tileBox?.height ?? 0) / 2;
+  expect(Math.abs(contentCenter - tileCenter)).toBeLessThanOrEqual(4);
+  await expect(action.locator(".live-action__reason")).toHaveCSS("align-self", "center");
+});
+
+test("ad and shoutout popovers are named by their linked headings", async ({ page }) => {
+  const channelId = "kanal-live-popover-names";
+  await installLiveCockpitMocks(page, {
+    channelId,
+    modules: [
+      { id: "ads", enabled: true, settings: "{}" },
+      { id: "raid", enabled: true, settings: "{}" },
+    ],
+  });
+
+  await page.goto(`/channels/${channelId}`);
+  await page.getByRole("button", { name: "Werbung starten" }).click();
+  await expect(page.getByRole("dialog", { name: "Werbung starten" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Shoutout senden" }).click();
+  await expect(page.getByRole("dialog", { name: "Shoutout senden" })).toBeVisible();
+});
+
 test("viewer count refreshes while the live cockpit is open", async ({ page }) => {
   const channelId = "kanal-viewer-refresh";
   await page.clock.install({ time: new Date() });

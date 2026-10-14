@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleBallotAccess, ModuleRouteEnvironment } from "../../src/modules/contract";
-import { DEFAULT_CHAT_VOTING_SETTINGS, type ChatVoteDraft, type ChatVoteTemplate } from "../../src/modules/chat_voting/contracts";
+import { CHAT_VOTING_ELEMENT_KIND, DEFAULT_CHAT_VOTING_SETTINGS, type ChatVoteDraft, type ChatVoteTemplate } from "../../src/modules/chat_voting/contracts";
 import { chatVotingRoutes } from "../../src/modules/chat_voting/routes";
 import { createChatVotingRepository } from "../../src/modules/chat_voting/repository";
 import { authorizeModuleMutation } from "../../src/worker/module-authorization";
@@ -322,7 +322,9 @@ describe("chat voting routes", () => {
     await database.prepare("UPDATE chat_votes SET opened_at = ?, closes_at = ? WHERE channel_id = ? AND poll_id = ?")
       .bind(new Date(openedAt).toISOString(), new Date(closesAt).toISOString(), CHANNEL_ID, openTextVote.id).run();
     const writeAudit = vi.fn(() => Promise.resolve());
-    const app = appFor(ballotAccess(), () => Promise.resolve([]), vi.fn(() => Promise.resolve()), authorizeModuleMutation, writeAudit);
+    const publish = vi.fn(() => Promise.resolve());
+    const ballots = ballotAccess({ readSnapshot: vi.fn(() => Promise.resolve({ counts: [], revision: 5, terms: [], more: 0, termFilterReady: true })) });
+    const app = appFor(ballots, () => Promise.resolve([]), publish, authorizeModuleMutation, writeAudit);
     const scheduleModuleAlarm = vi.fn(() => Promise.resolve());
     const namespace = {
       idFromName: vi.fn(() => ({})),
@@ -336,7 +338,13 @@ describe("chat voting routes", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ vote: { id: openTextVote.id, closesAt: new Date(expectedDeadline).toISOString() } });
-    expect(scheduleModuleAlarm).toHaveBeenCalledWith("chat_voting", "close", openTextVote.id, expectedDeadline, 0);
+    expect(scheduleModuleAlarm).toHaveBeenCalledWith("chat_voting", "close", openTextVote.id, expectedDeadline, expectedDeadline);
+    expect(publish).toHaveBeenCalledWith(CHANNEL_ID, "chat_voting", "tally", CHAT_VOTING_ELEMENT_KIND, expect.objectContaining({
+      pollId: openTextVote.id,
+      closesAt: new Date(expectedDeadline).toISOString(),
+      counts: [],
+      revision: 5,
+    }));
     expect(writeAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "chat_voting.extended" }), expect.any(String));
   });
 

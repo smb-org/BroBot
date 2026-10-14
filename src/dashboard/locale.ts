@@ -1073,7 +1073,7 @@ export interface DashboardTexts {
     viewers: string;
     youAre: (role: string) => string;
     roles: Record<ChannelRole, string>;
-    titleCategoryReserved: string;
+    titleCategoryPlaceholder: string;
     bot: string;
     botConnected: string;
     botUnavailable: string;
@@ -1479,7 +1479,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       viewers: "Zuschauer",
       youAre: (role) => `Du bist: ${role}`,
       roles: { broadcaster: "Broadcaster", manager: "Verwalter", operator: "Bediener" },
-      titleCategoryReserved: "Streamtitel und Kategorie",
+      titleCategoryPlaceholder: "Streamtitel und Kategorie",
       bot: "Bot",
       botConnected: "Verbunden",
       botUnavailable: "Nicht verbunden",
@@ -1500,7 +1500,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       noActionRunning: "Noch keine Aktion läuft.",
       voteType: "Abstimmung",
       votekickType: "Votekick",
-      voteEndsIn: (time) => `gleich ${time}`,
+      voteEndsIn: (time) => `noch ${time}`,
       voteTotal: (count) => `${count} Stimmen gesamt`,
       voteOptionCount: (count, percent) => `${count} Stimmen · ${percent} %`,
       voteExtend: "+30 s",
@@ -1872,7 +1872,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       viewers: "Viewers",
       youAre: (role) => `You are: ${role}`,
       roles: { broadcaster: "Broadcaster", manager: "Manager", operator: "Operator" },
-      titleCategoryReserved: "Stream title and category",
+      titleCategoryPlaceholder: "Stream title and category",
       bot: "Bot",
       botConnected: "Connected",
       botUnavailable: "Not connected",
@@ -1893,7 +1893,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       noActionRunning: "No action is running.",
       voteType: "Vote",
       votekickType: "Votekick",
-      voteEndsIn: (time) => `in ${time}`,
+      voteEndsIn: (time) => `${time} left`,
       voteTotal: (count) => `${count} votes total`,
       voteOptionCount: (count, percent) => `${count} votes · ${percent}%`,
       voteExtend: "+30 s",

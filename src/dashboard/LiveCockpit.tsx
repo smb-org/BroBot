@@ -142,6 +142,10 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
   const freshActionSample = actionSample !== null && actionSample.sampledAt > statusSampleAt ? actionSample : null;
   const sampleConnected = freshActionSample?.connected ?? statusSample?.connected ?? false;
   const sampleBitrate = freshActionSample?.bitrateKbps ?? statusSample?.bitrateKbps ?? 0;
+  const belaboxFetchFailed = belaboxStatus.data !== null &&
+    (belaboxStatus.data.fetchFailureNotice || belaboxStatus.data.errorCode !== null);
+  const belaboxUnavailable = belaboxFetchFailed ||
+    belaboxStatus.failed && statusSample === null && freshActionSample === null;
   const belaboxWeak = belaboxEnabled && belaboxStatus.data?.configured === true && statusSample?.phase === "low";
   const warnings = [
     ...(overview.location == null ? [{ key: "location", title: labels.locationMissing, description: labels.locationMissingDescription, action: labels.configureLocation, run: () => onNavigate({ kind: "channel", channelId: overview.channelId, section: "location-weather" }) }] : []),
@@ -163,18 +167,18 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
         <span className="live-cockpit-header__metric"><Icon name="member" size={16} /><span>{labels.viewers}</span><strong className="mono">{viewerCount == null ? "—" : formatNumber(viewerCount)}</strong></span>
         <span className="live-cockpit-header__role">{labels.youAre(labels.roles[overview.role])}</span>
       </div>
-      <div className="live-cockpit-header__title-slot" data-slot="stream-title-category" aria-label={labels.titleCategoryReserved}>
-        <span>{labels.titleCategoryReserved}</span>
+      <div className="live-cockpit-header__title-slot" data-slot="stream-title-category">
+        <span>{labels.titleCategoryPlaceholder}</span>
       </div>
       <div className="live-cockpit-header__indicators" aria-label={labels.statusIndicators}>
         <StatusLed state={botConnected ? "ok" : "off"} label={`${labels.bot} · ${botConnected ? labels.botConnected : labels.botUnavailable}`} />
         <StatusLed
-          state={!belaboxEnabled || belaboxStatus.data?.configured === false ? "off" : belaboxStatus.failed && statusSample === null && freshActionSample === null ? "warn" : statusSample?.phase === "low" ? "warn" : sampleConnected ? "ok" : "warn"}
+          state={!belaboxEnabled || belaboxStatus.data?.configured === false ? "off" : belaboxUnavailable ? "warn" : statusSample?.phase === "low" ? "warn" : sampleConnected ? "ok" : "warn"}
           label={`${labels.belabox} · ${!belaboxEnabled
             ? labels.belaboxDisabled
             : belaboxStatus.data === null && !belaboxStatus.failed && freshActionSample === null
               ? labels.belaboxChecking
-              : belaboxStatus.failed && statusSample === null && freshActionSample === null
+              : belaboxUnavailable
                 ? labels.belaboxUnavailable
                 : belaboxStatus.data?.configured === false
                   ? labels.belaboxNotConfigured

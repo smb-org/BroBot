@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import type { AuditAction } from "../../contracts/values";
 import type { BallotSnapshot, ModuleRouteEnvironment } from "../contract";
 import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, CHAT_VOTE_TEMPLATE_MAXIMUM, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingPresetForKind, chatVotingSettingsSchema, chatVotingStartAnnouncementAlarmKey } from "./contracts";
-import type { ChatVotePreset, ChatVoteTemplateDraft, ChatVotingKind } from "./contracts";
+import type { ChatVote, ChatVotePreset, ChatVoteTemplateDraft, ChatVotingKind } from "./contracts";
 import { createChatVotingRepository } from "./repository";
 import { requestChatVoteClose, requestChatVoteExtension, startChatVote } from "./service";
 import { chatVoteTemplateConfiguration, configuredLabels, isBlockedFreeTextVote, isValidTemplateShortcut, isValidVoteTitle, labelsForVote, normalizeBlockedVoteTerm, normalizeVoteTitle, templateStartProblem, voteLabelLength } from "./domain";
@@ -67,6 +67,25 @@ const channelLanguage = async (db: D1Database, channelId: string): Promise<"de" 
     .bind(channelId).first<{ language: string }>();
   return row?.language === "en" ? "en" : "de";
 };
+
+const chatVoteTallyState = (vote: ChatVote, snapshot: BallotSnapshot) => ({
+  pollId: vote.id,
+  openedAt: vote.openedAt,
+  closesAt: vote.closesAt,
+  requestedDurationSeconds: vote.requestedDurationSeconds,
+  kind: vote.kind,
+  preset: chatVotingPresetForKind(vote.kind),
+  optionCount: vote.optionCount,
+  textMode: vote.textMode ?? null,
+  title: vote.title,
+  status: "open" as const,
+  labels: [...vote.labels],
+  counts: [...snapshot.counts],
+  terms: (snapshot.terms ?? []).map((entry) => ({ ...entry })),
+  more: snapshot.more ?? 0,
+  termFilterReady: snapshot.termFilterReady ?? vote.termFilterReady ?? false,
+  revision: snapshot.revision,
+});
 
 export const chatVotingRoutes = new Hono<ModuleRouteEnvironment>();
 
@@ -364,23 +383,7 @@ chatVotingRoutes.post("/approve-term", async (context) => {
       CHAT_VOTING_MODULE_ID,
       "tally",
       CHAT_VOTING_ELEMENT_KIND,
-      {
-        pollId: vote.id,
-        openedAt: vote.openedAt,
-        closesAt: vote.closesAt,
-        requestedDurationSeconds: vote.requestedDurationSeconds,
-        kind: vote.kind,
-        preset: chatVotingPresetForKind(vote.kind),
-        optionCount: vote.optionCount,
-        textMode: vote.textMode,
-        title: vote.title,
-        labels: [...vote.labels],
-        counts: [...snapshot.counts],
-        terms: (snapshot.terms ?? []).map((entry) => ({ ...entry })),
-        more: snapshot.more ?? 0,
-        termFilterReady: snapshot.termFilterReady ?? false,
-        revision: snapshot.revision,
-      },
+      chatVoteTallyState(vote, snapshot),
     );
   };
 
@@ -473,5 +476,16 @@ chatVotingRoutes.post("/extend", async (context) => {
     before: { pollId: result.id, status: "open" },
     after: { pollId: result.id, closesAt: result.closesAt },
   }, now);
+  const ballots = context.get("ballots")(channelId);
+  const snapshot = await (ballots.readSnapshot?.(result.id) ?? ballots.read(result.id));
+  if (snapshot !== null) {
+    await context.get("publishModuleOverlayMessage")(
+      channelId,
+      CHAT_VOTING_MODULE_ID,
+      "tally",
+      CHAT_VOTING_ELEMENT_KIND,
+      chatVoteTallyState(result, snapshot),
+    );
+  }
   return context.json({ vote: result });
 });
