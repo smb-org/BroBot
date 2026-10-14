@@ -1655,9 +1655,10 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-save-bar__actions > .ui-save-bar__reload { flex: 0 0 auto; min-width: max-content; white-space: nowrap; }
 .ui-save-bar__actions > .ui-save-bar__reload { overflow: visible; text-overflow: clip; white-space: nowrap; }
 .ui-dialog__body > form > .ui-confirm-dialog__actions,
-.ui-dialog__body > .ui-confirm-dialog__actions { position: sticky; z-index: 1; bottom: 0; padding-block: var(--s2); background: var(--color-inspector); }
+.ui-dialog__body > .ui-confirm-dialog__actions { position: sticky; z-index: 3; bottom: 0; padding-block: var(--s2); background: var(--color-inspector); }
 .api-source-test-result__error { margin: 0; padding: var(--s2) var(--s3); border: 1px solid var(--color-error-border); border-radius: var(--radius-control); color: var(--color-error-text); background: var(--color-error-surface); }
 .ui-dialog__error-slot { position: relative; z-index: 2; height: 36px; min-height: 36px; margin-top: 8px; overflow: visible; }
+.ui-dialog__error-slot:empty { pointer-events: none; }
 .ui-dialog__error-slot .form-error { display: -webkit-box; box-sizing: border-box; height: 36px; min-height: 36px; max-height: 36px; overflow: hidden; margin: 0; line-height: 18px; white-space: normal; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .ui-confirm-dialog__actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .ui-confirm-dialog__actions > .ui-button { flex: 0 0 auto; white-space: nowrap; }
@@ -1705,7 +1706,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
   .unit-input__input,
   .ui-code-field__input,
   .ui-expression-field__input { min-height: var(--control-height-touch); }
-  .segment-choice { height: auto; min-height: var(--control-height-touch); }
+  .segment-choice, .segment-choice-field--compact .segment-choice { height: auto; min-height: var(--control-height-touch); }
   .segment-choice__option { height: auto; min-height: var(--control-height-touch); }
   .unit-input__unit { height: var(--control-height-touch); }
   .unit-input__suggestion { min-height: 40px; }

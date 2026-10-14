@@ -442,6 +442,36 @@ test("timer and FAQ dialogs submit from Enter", async ({ page }) => {
   await expect.poll(() => faqCreated).toBe(true);
 });
 
+test("FAQ dialog Save stays clickable at the bottom of a scrolled long form", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 480 });
+  let saved = false;
+  await routeJson(page, "/api/csrf", { token: "csrf" });
+  await routeJson(page, "/api/channels/channel-a/template-variables", { variables: [] });
+  await page.route("**/api/channels/channel-a/modules/faq/entries", async (route) => {
+    if (route.request().method() !== "POST") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: [] }) });
+    saved = true;
+    await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "invalid" }) });
+  });
+  await gotoPanel(page, "faq");
+  await page.getByRole("button", { name: "Create FAQ entry" }).click();
+  const dialog = page.getByRole("dialog", { name: "Create entry" });
+  await dialog.getByRole("textbox", { name: "Name" }).fill("Greeting");
+  await dialog.getByRole("textbox", { name: "Keywords and phrases" }).fill("hello");
+  await dialog.getByRole("textbox", { name: "Answer" }).fill("Hello, chat!");
+  const save = dialog.getByRole("button", { name: "Save" });
+  // Walk the last 60px of scroll: the empty error slot passes behind the sticky footer.
+  for (const offset of [60, 40, 20, 0]) {
+    await dialog.locator(".ui-dialog__body").evaluate((body, back) => { body.scrollTop = body.scrollHeight - body.clientHeight - back; }, offset);
+    const topmostIsSave = await save.evaluate((button) => {
+      const rect = button.getBoundingClientRect();
+      return document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)?.closest("button") === button;
+    });
+    expect(topmostIsSave).toBe(true);
+  }
+  await save.click();
+  await expect.poll(() => saved).toBe(true);
+});
+
 test("FAQ pattern error renders in its reserved slot without moving the Answer field", async ({ page }) => {
   const stamp = "2030-01-01T12:00:00.000Z";
   const entry = {

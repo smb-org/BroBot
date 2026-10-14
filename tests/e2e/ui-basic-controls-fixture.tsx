@@ -26,6 +26,7 @@ export function BasicControlsFixture() {
         <SegmentChoice label="Layout" value={mode} onChange={setMode} options={language === "de"
           ? [{ value: "one", label: "Gespeicherte Vorlagen", compactLabel: "Ges." }, { value: "two", label: "Zuletzt verwendet", compactLabel: "Neu" }]
           : [{ value: "one", label: "Saved templates", compactLabel: "Saved" }, { value: "two", label: "Recently used", compactLabel: "Recent" }]} />
+        <SegmentChoice size="compact" label="Duration" value={mode} onChange={setMode} options={[{ value: "one", label: "30 s" }, { value: "two", label: "60 s" }]} />
         <SwitchRow label="Enabled" checked={enabled} onChange={setEnabled} />
         <Popover triggerLabel="Popover help" icon="warning">A short help message.</Popover>
         <ActionMenu label="More actions" items={[{ label: "Edit settings", onSelect: () => {} }]} />

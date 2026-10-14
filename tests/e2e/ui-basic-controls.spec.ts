@@ -11,7 +11,8 @@ test("primitive controls use the shared desktop height and portal layout stays s
     anchor.locator(".unit-input__input"),
     anchor.getByRole("combobox", { name: "Mode", exact: true }),
     anchor.locator(".ui-select__search-control > .ui-select__trigger"),
-    anchor.locator(".segment-choice"),
+    anchor.locator(".segment-choice").first(),
+    anchor.locator(".segment-choice-field--compact .segment-choice"),
   ];
   for (const control of controls) expect((await control.boundingBox())?.height).toBe(32);
   for (const width of [1280, 1920]) {
@@ -60,6 +61,19 @@ test("control hit areas are at least 40px with a coarse pointer", async ({ brows
     page.locator(".segment-choice__option").first(),
   ];
   for (const control of controls) expect((await control.boundingBox())?.height).toBeGreaterThanOrEqual(40);
+
+  // The compact shell grows with its touch-sized options instead of clipping them.
+  const compact = page.locator(".segment-choice-field--compact .segment-choice");
+  const shell = await compact.boundingBox();
+  if (shell === null) throw new Error("The compact segment control is not visible.");
+  const options = compact.locator(".segment-choice__option");
+  for (let index = 0; index < await options.count(); index += 1) {
+    const option = await options.nth(index).boundingBox();
+    if (option === null) throw new Error("A compact segment option is not visible.");
+    expect(option.height).toBeGreaterThanOrEqual(40);
+    expect(option.y).toBeGreaterThanOrEqual(shell.y);
+    expect(option.y + option.height).toBeLessThanOrEqual(shell.y + shell.height + 0.5);
+  }
   await context.close();
 });
 
