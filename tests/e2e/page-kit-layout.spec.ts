@@ -27,9 +27,15 @@ test("page kit stays within narrow viewports, uses shared collection widths, and
     expect(geometry.documentWidth).toBeLessThanOrEqual(geometry.viewportWidth);
     if (expectedListWidth !== null) expect(geometry.listWidth).toBe(expectedListWidth);
     expect(geometry.detailOverflowY).toBe("auto");
-    expect(geometry.detailScrollHeight).toBeGreaterThan(geometry.detailClientHeight);
-    expect(initialGeometry.pageHeader).not.toBeNull();
-    expect(initialGeometry.detail).not.toBeNull();
+    if (width === 390) {
+      await expect(page.locator(".collection-page__detail")).toBeHidden();
+      expect(initialGeometry.detail).toBeNull();
+      expect(initialGeometry.pageHeader).toBeNull();
+    } else {
+      expect(geometry.detailScrollHeight).toBeGreaterThan(geometry.detailClientHeight);
+      expect(initialGeometry.detail).not.toBeNull();
+      expect(initialGeometry.pageHeader).not.toBeNull();
+    }
     await page.waitForTimeout(250);
     const settledGeometry = {
       pageHeader: await page.locator(".page-header").boundingBox(),

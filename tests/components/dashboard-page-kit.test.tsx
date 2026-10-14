@@ -1,11 +1,17 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { CollectionPage, SettingsPage, ToolPage } from "../../src/dashboard/ui";
+import { CollectionPage, RuleNote, SettingsPage, ToolPage } from "../../src/dashboard/ui";
 
 afterEach(cleanup);
 
 describe("dashboard page layouts", () => {
+  it("exports the shared RuleNote component from the dashboard kit", () => {
+    render(<RuleNote>Shared rule</RuleNote>);
+
+    expect(screen.getByText("Shared rule")).toBeInTheDocument();
+  });
+
   it("keeps the collection list and detail in named slots", () => {
     const { container } = render(<CollectionPage
       title="Commands"

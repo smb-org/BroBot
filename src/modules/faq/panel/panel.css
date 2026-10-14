@@ -362,10 +362,6 @@
     --collection-list-width: 100%;
   }
 
-  .faq-panel .collection-page__body {
-    grid-template-rows: minmax(460px, 54vh) minmax(320px, 1fr);
-  }
-
   .faq-panel__toolbar-top {
     grid-template-columns: minmax(0, 1fr) auto;
   }

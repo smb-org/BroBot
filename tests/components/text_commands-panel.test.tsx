@@ -51,11 +51,12 @@ const makeCommand = (overrides: Partial<TextCommand> = {}): TextCommand => ({
 
 interface FetchOptions {
   commands?: () => TextCommand[];
+  channelVariables?: readonly { name: string; value: number; description: string }[];
   templateVariables?: readonly unknown[];
   onMutation?: (method: string, path: string, body: unknown) => Response | Promise<Response>;
 }
 
-const panelFetch = ({ commands = () => [makeCommand()], templateVariables, onMutation = () => jsonResponse({ warnings: [] }) }: FetchOptions = {}): ReturnType<typeof vi.fn<typeof fetch>> =>
+const panelFetch = ({ commands = () => [makeCommand()], channelVariables = [], templateVariables, onMutation = () => jsonResponse({ warnings: [] }) }: FetchOptions = {}): ReturnType<typeof vi.fn<typeof fetch>> =>
   vi.fn<typeof fetch>((input, init) => {
     const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
     const method = init?.method ?? "GET";
@@ -64,7 +65,7 @@ const panelFetch = ({ commands = () => [makeCommand()], templateVariables, onMut
       { name: "text.welcome", moduleId: "text_library", isTextBlock: true, sample: "Willkommen im Kanal" },
       ...TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES.map((variable) => ({ ...variable, moduleId: "text_commands", isTextBlock: false })),
     ] }));
-    if (url.pathname.endsWith("/commands") && method === "GET") return Promise.resolve(jsonResponse({ commands: commands(), variables: [] }));
+    if (url.pathname.endsWith("/commands") && method === "GET") return Promise.resolve(jsonResponse({ commands: commands(), variables: channelVariables }));
     if (url.pathname.includes("/commands/") || (url.pathname.endsWith("/commands") && method !== "GET")) {
       const body = typeof init?.body === "string" ? JSON.parse(init.body) as unknown : null;
       return Promise.resolve(onMutation(method, url.pathname, body)).then(async (response) => {
@@ -92,7 +93,7 @@ const panelFetch = ({ commands = () => [makeCommand()], templateVariables, onMut
     return Promise.resolve(jsonResponse({}, 404));
   });
 
-const renderPanel = (fetcher: typeof fetch, props: { language?: "de" | "en"; canManage?: boolean; botIsModerator?: boolean | null } = {}) => {
+const renderPanel = (fetcher: typeof fetch, props: { language?: "de" | "en"; canManage?: boolean; canOperate?: boolean; botIsModerator?: boolean | null } = {}) => {
   vi.stubGlobal("fetch", fetcher);
   const { language = "de", ...panelProps } = props;
   return renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language={language} {...panelProps} /></UiProvider>);
@@ -685,6 +686,43 @@ describe("Text command editor", () => {
     expect(cooldown).toHaveAttribute("aria-invalid", "true");
   });
 
+  it("marks a stale variable action field after server validation even when variables are available", async () => {
+    const fetcher = panelFetch({
+      channelVariables: [{ name: "score", value: 5, description: "Points" }],
+      commands: () => [makeCommand({ variableAction: { name: "score", operation: "add", amount: 2 } })],
+      onMutation: () => jsonResponse({ error: "command_data_invalid", path: "variableAction.name", reasonCode: "custom" }, 400),
+    });
+    renderPanel(fetcher);
+    await selectCommand();
+    fireEvent.click(within(editor()).getByText("Erweitert", { selector: "summary" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "Changed response" } });
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+
+    const variable = screen.getByRole("combobox", { name: "Variable" });
+    await waitFor(() => expect(variable).toHaveAttribute("aria-invalid", "true"));
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true);
+  });
+
+  it("keeps rejected alias text dirty, blocks save, and prompts before Escape closes", async () => {
+    const fetcher = panelFetch();
+    renderPanel(fetcher);
+    await selectCommand();
+
+    const aliases = screen.getByRole("textbox", { name: "Weitere Auslöser" });
+    fireEvent.change(aliases, { target: { value: "bad!" } });
+    fireEvent.keyDown(aliases, { key: "Enter" });
+    expect(aliases).toHaveValue("bad!");
+    expect(screen.getByRole("button", { name: "Speichern" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+
+    expect(await screen.findByText("Alias-Eingabe erst bestätigen oder entfernen.")).toBeVisible();
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
+    fireEvent.keyDown(editor(), { key: "Escape" });
+    expect(await screen.findByRole("dialog")).toHaveTextContent("Ungespeicherte Änderungen");
+    fireEvent.click(screen.getByRole("button", { name: "Weiter bearbeiten" }));
+    expect(screen.getByRole("textbox", { name: "Weitere Auslöser" })).toHaveValue("bad!");
+  });
+
   it("keeps the usage reply editor collapsed by default for text commands", async () => {
     const command = makeCommand({ usageText: "Try !hallo 10" });
     renderPanel(panelFetch({ commands: () => [command] }));
@@ -699,6 +737,71 @@ describe("Text command editor", () => {
     fireEvent.click(within(editor()).getByText(labels.usageAdvanced, { selector: "summary" }));
     expect(screen.getByRole("textbox", { name: labels.templateFieldLabels.usageText })).toHaveValue("Try !hallo 10");
     expect(screen.getByText(labels.usageTextHint)).toBeInTheDocument();
+  });
+
+  it("keeps custom Shoutout text when the selected kind is clicked again", async () => {
+    renderPanel(panelFetch({ commands: () => [makeCommand({ kind: "shoutout", text: "Custom shoutout", usageText: "Custom usage" })] }));
+    await selectCommand();
+
+    selectKind("Shoutout");
+
+    expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("Custom shoutout");
+  });
+
+  it("restores per-kind response, usage, variable, and timeout drafts until the active kind is saved", async () => {
+    const onMutation = vi.fn<(method: string, path: string, body: unknown) => Response>(() => jsonResponse({ warnings: [] }));
+    renderPanel(panelFetch({ commands: () => [makeCommand({ text: "Text draft", variableAction: { name: "score", operation: "add", amount: 2 } })], onMutation }));
+    await selectCommand();
+
+    selectKind("Shoutout");
+    fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "Shoutout draft" } });
+    fireEvent.click(within(editor()).getByText("Erweitert", { selector: "summary" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort bei fehlenden oder ungültigen Argumenten" }), { target: { value: "Shoutout usage draft" } });
+    selectKind("Befehlsliste");
+    expect(screen.queryByRole("textbox", { name: "Antworttext" })).not.toBeInTheDocument();
+    selectKind("Shoutout");
+    expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("Shoutout draft");
+    fireEvent.click(within(editor()).getByText("Erweitert", { selector: "summary" }));
+    expect(screen.getByRole("textbox", { name: "Antwort bei fehlenden oder ungültigen Argumenten" })).toHaveValue("Shoutout usage draft");
+
+    selectKind("Timeout");
+    fireEvent.change(screen.getByRole("textbox", { name: "Antworttext (optional)" }), { target: { value: "Timeout draft" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Ersatztext bei Ablehnung (optional)" }), { target: { value: "Timeout fallback draft" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Timeout-Grund" }), { target: { value: "Timeout reason draft" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Mindestens" }), { target: { value: "30" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Höchstens" }), { target: { value: "90" } });
+    selectKind("Antworttext");
+    expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("Text draft");
+    fireEvent.click(within(editor()).getByText("Erweitert", { selector: "summary" }));
+    expect(screen.getByRole("switch", { name: "Kanalvariable ändern" })).toBeChecked();
+
+    selectKind("Timeout");
+    expect(screen.getByRole("textbox", { name: "Antworttext (optional)" })).toHaveValue("Timeout draft");
+    expect(screen.getByRole("textbox", { name: "Ersatztext bei Ablehnung (optional)" })).toHaveValue("Timeout fallback draft");
+    expect(screen.getByRole("textbox", { name: "Timeout-Grund" })).toHaveValue("Timeout reason draft");
+    expect(screen.getByRole("spinbutton", { name: "Mindestens" })).toHaveValue(30);
+    expect(screen.getByRole("spinbutton", { name: "Höchstens" })).toHaveValue(90);
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+
+    await waitFor(() => expect(onMutation).toHaveBeenCalledTimes(1));
+    const payload = onMutation.mock.calls[0]?.[2] as Record<string, unknown>;
+    expect(payload).toMatchObject({ kind: "timeout", text: "Timeout draft", timeoutAction: { minSeconds: 30, maxSeconds: 90, fallbackText: "Timeout fallback draft", reason: "Timeout reason draft" } });
+    expect(payload).toHaveProperty("usageText", "");
+    expect(payload).not.toHaveProperty("kindDrafts");
+  });
+
+  it("edits only the selected currency token", async () => {
+    renderPanel(panelFetch({ commands: () => [makeCommand({ text: "{currency.convert USD EUR} then {currency.convert GBP CAD}" })] }));
+    await selectCommand();
+
+    const target = screen.getByRole("combobox", { name: "Währungsvariable" });
+    fireEvent.click(target);
+    clickSelectOption(await screen.findByRole("option", { name: "Antworttext · 2", hidden: true }));
+    const from = screen.getByRole("combobox", { name: "Von" });
+    fireEvent.click(from);
+    clickSelectOption(await screen.findByRole("option", { name: "JPY", hidden: true }));
+
+    expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("{currency.convert USD EUR} then {currency.convert JPY CAD}");
   });
 
   it("persists edits and explicit clearing of the usage reply", async () => {
@@ -871,6 +974,7 @@ describe("Text command editor", () => {
 
     const aliasGroup = within(panel).getByRole("group", { name: "Aliase" });
     expect(aliasGroup.querySelector(".ui-field__prefix")).toHaveTextContent("!");
+    expect(within(panel).getByRole("textbox", { name: "Befehlsname" }).closest(".ui-field")?.querySelector(".ui-field__prefix")).toHaveTextContent("!");
     fireEvent.click(within(panel).getByText("Erweitert", { selector: "summary" }));
     assertVisibleFieldHelpers();
     const cooldown = screen.getByRole("spinbutton", { name: "Zwischen zwei Aufrufen" });
@@ -1041,10 +1145,11 @@ describe("Text command editor", () => {
     fireEvent.keyDown(editor(), { key: "Escape" });
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Weiter bearbeiten" }));
-    fireEvent.click(within(editor()).getByRole("button", { name: "Zurück", hidden: true }));
+    fireEvent.click(document.querySelector(".collection-page__detail-back") as HTMLElement);
     fireEvent.click(await screen.findByRole("button", { name: "Verwerfen und wechseln" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(document.querySelector(".text-command-editor")).not.toBeInTheDocument();
+    expect(document.querySelector(".collection-page")).toHaveAttribute("data-detail-open", "false");
+    expect(document.querySelector(".text-command-editor")).toBeInTheDocument();
   });
 
   it("blocks route navigation from a dirty command editor", async () => {
@@ -1450,11 +1555,72 @@ describe("Text command editor", () => {
     renderPanel(fetcher, { canManage: false });
     await selectCommand();
     const readonly = editor();
-    expect(within(readonly).getByText("Nur Broadcaster und Verwalter dürfen Befehle anlegen, bearbeiten oder löschen.")).toBeInTheDocument();
+    expect(within(readonly).getByText("Operatoren dürfen Befehle pausieren und fortsetzen. Andere Einstellungen ändern nur Broadcaster und Verwalter.")).toBeInTheDocument();
     expect(within(readonly).getByRole("textbox", { name: "Antworttext" })).toBeDisabled();
     expect(within(readonly).getByRole("switch", { name: "Aktiv" })).toBeDisabled();
     expect(within(readonly).getByRole("button", { name: "Speichern" })).toBeDisabled();
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
+  });
+
+  it("lets operators save only the enabled flag", async () => {
+    const fetcher = panelFetch();
+    renderPanel(fetcher, { canManage: false, canOperate: true });
+    await selectCommand();
+    const readonly = editor();
+    expect(within(readonly).getByRole("textbox", { name: "Antworttext" })).toBeDisabled();
+    expect(within(readonly).getByRole("switch", { name: "Aktiv" })).toBeEnabled();
+
+    fireEvent.click(within(readonly).getByRole("switch", { name: "Aktiv" }));
+    fireEvent.click(within(readonly).getByRole("button", { name: "Speichern" }));
+
+    await waitFor(() => expect(fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1));
+    const patch = fetcher.mock.calls.find(([, init]) => init?.method === "PATCH");
+    expect(patch?.[1]?.body).toBe(JSON.stringify({ revision: 1, enabled: false }));
+  });
+
+  it("continues deletion after saving a renamed command and targets its new name", async () => {
+    let current = makeCommand();
+    const fetcher = panelFetch({
+      commands: () => [current],
+      onMutation: (method, _path, body) => {
+        if (method === "PATCH") {
+          const fields = body as Partial<TextCommand>;
+          current = { ...current, ...fields, name: fields.name ?? current.name, revision: 2 };
+          return jsonResponse({ command: current, warnings: [] });
+        }
+        return jsonResponse({});
+      },
+    });
+    renderPanel(fetcher);
+    await selectCommand();
+    fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: "renamed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Weitere Aktionen", hidden: true }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Befehl löschen" }));
+
+    const guard = await screen.findByRole("dialog");
+    fireEvent.click(within(guard).getByRole("button", { name: "Speichern und wechseln" }));
+    await waitFor(() => expect(guard).not.toBeInTheDocument());
+    const deleteDialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(within(deleteDialog).getByRole("heading")).toHaveTextContent("Befehl !renamed löschen?"));
+    fireEvent.click(within(deleteDialog).getByRole("button", { name: "Befehl !renamed löschen" }));
+
+    await waitFor(() => expect(fetcher.mock.calls.some(([input, init]) => {
+      const url = input instanceof Request ? input.url : input instanceof URL ? input.href : input;
+      return init?.method === "DELETE" && url.includes("/commands/renamed?revision=2");
+    })).toBe(true));
+  });
+
+  it("does not classify host variables as module badges or filters", async () => {
+    renderPanel(panelFetch({
+      commands: () => [makeCommand({ text: "Hello {user}" })],
+      templateVariables: [{ name: "user", moduleId: "host", isTextBlock: false, sample: "viewer" }],
+    }));
+    const row = await screen.findByRole("button", { name: /!hallo/u });
+
+    expect(within(row).getByText("Antworttext")).toBeInTheDocument();
+    const moduleFilter = screen.getByRole("combobox", { name: "Verwendet Modul-Variablen" });
+    expect(moduleFilter).toBeDisabled();
+    expect(screen.queryByRole("option", { name: "host", hidden: true })).not.toBeInTheDocument();
   });
 
   it("restores focus to the selected command when its details close", async () => {
@@ -1468,16 +1634,17 @@ describe("Text command editor", () => {
 
     row.focus();
     fireEvent.click(row);
-    const inspector = await screen.findByRole("region", { name: "Eigenschaften von !hallo" });
-    fireEvent.click(within(inspector).getByRole("button", { name: "Zurück", hidden: true }));
-    expect(row).toHaveFocus();
-    expect(onCloseInspector).toHaveBeenCalledOnce();
+    await screen.findByRole("region", { name: "Eigenschaften von !hallo" });
+    fireEvent.click(document.querySelector(".collection-page__detail-back") as HTMLElement);
+    await waitFor(() => expect(row).toHaveFocus());
+    expect(onCloseInspector).not.toHaveBeenCalled();
 
     fireEvent.click(row);
-    const reopened = await screen.findByRole("region", { name: "Eigenschaften von !hallo" });
-    fireEvent.keyDown(within(reopened).getByRole("button", { name: "Zurück", hidden: true }), { key: "Escape" });
-    expect(screen.queryByRole("region", { name: "Eigenschaften von !hallo" })).not.toBeInTheDocument();
-    expect(onCloseInspector).toHaveBeenCalledTimes(2);
+    await screen.findByRole("region", { name: "Eigenschaften von !hallo" });
+    fireEvent.keyDown(document.querySelector(".collection-page__detail-back") as HTMLElement, { key: "Escape" });
+    await waitFor(() => expect(row).toHaveFocus());
+    expect(document.querySelector(".collection-page")).toHaveAttribute("data-detail-open", "false");
+    expect(onCloseInspector).not.toHaveBeenCalled();
   });
 
   it("edits the minimum tier in the inspector and saves the draft as one change", async () => {

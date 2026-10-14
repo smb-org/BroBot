@@ -288,6 +288,7 @@ test("FAQ game search opens on its first click and narrow chat controls stay rea
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await gotoPanel(page, "faq", "en");
+  await page.getByRole("button", { name: "Example hello", exact: true }).click();
   await page.getByRole("switch", { name: "Games" }).click();
 
   const gameSearch = page.getByRole("searchbox", { name: "Games" });
@@ -344,6 +345,7 @@ test("FAQ game limit explains the cap without shifting the fields below it", asy
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await gotoPanel(page, "faq", "en");
+  await page.getByRole("button", { name: "Full game list hello", exact: true }).click();
 
   const limitMessage = page.locator(".ui-game-multi-select__limit-message");
   const target = page.getByRole("button", { name: "Chat target", exact: true });
@@ -365,6 +367,45 @@ test("FAQ game limit explains the cap without shifting the fields below it", asy
   expect(targetAfter).toBe(targetBefore);
 });
 
+test("FAQ collection uses the shared mobile list, detail, and focus transitions", async ({ page }) => {
+  await routeJson(page, "/api/channels/channel-a/modules/faq/entries", { orderRevision: 1, entries: [{
+    id: "faq-mobile", name: "Greeting", enabled: true, matcher: { type: "keywords", patterns: ["hello"] }, answerText: "Hello!", minimumTier: "everyone",
+    cooldownSeconds: 30, userCooldownSeconds: 0, games: [], chatTarget: "source_only", order: 0, revision: 1,
+    lastUsedAt: null, createdAt: "2030-01-01T12:00:00.000Z", updatedAt: "2030-01-01T12:00:00.000Z",
+  }] });
+  await routeJson(page, "/api/channels/channel-a/settings", {
+    timeZone: "UTC", revision: 1, location: null, locationRevision: 1,
+    defaultChatTarget: "source_only", defaultChatTargetRevision: 1,
+  });
+  await routeJson(page, "/api/channels/channel-a/template-variables", { variables: [] });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await gotoPanel(page, "faq", "en");
+
+  const collection = page.locator(".faq-panel .collection-page");
+  const list = collection.locator(".collection-page__list");
+  const detail = collection.locator(".collection-page__detail");
+  const row = page.getByRole("button", { name: "Greeting hello", exact: true });
+  await expect(list).toBeVisible();
+  await expect(row).toBeVisible();
+  await expect(detail).toBeHidden();
+  expect(await collection.locator(".collection-page__list-content").evaluate((element) => element.clientHeight)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+  await row.click();
+  await expect(detail).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Greeting" })).toBeFocused();
+  await page.getByRole("button", { name: "Back" }).click();
+  await expect(list).toBeVisible();
+  await expect(row).toBeFocused();
+
+  await row.click();
+  await expect(detail).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(list).toBeVisible();
+  await expect(row).toBeFocused();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
 test("text command switch and role inclusion fit their narrow and desktop layouts", async ({ page }) => {
   await routeJson(page, "/api/channels/channel-a/modules/text_commands/commands", {
     commands: [], variables: [{ name: "score", value: 1, description: "Points" }],
@@ -373,6 +414,23 @@ test("text command switch and role inclusion fit their narrow and desktop layout
   await gotoPanel(page, "text_commands", "en");
   await page.getByRole("button", { name: "Add command" }).click();
   await page.getByRole("textbox", { name: "Response" }).waitFor();
+  const prefixGeometry = await page.evaluate(() => {
+    const nameInput = document.querySelector("#command-name");
+    const aliases = document.querySelector(".chips-input__control");
+    const namePrefix = document.querySelector("#command-name")?.parentElement?.querySelector(".ui-field__leading--prefix");
+    const aliasPrefix = aliases?.querySelector(":scope > .ui-field__prefix");
+    if (!(nameInput instanceof HTMLElement) || !(aliases instanceof HTMLElement) || !(namePrefix instanceof HTMLElement) || !(aliasPrefix instanceof HTMLElement)) {
+      throw new Error("Command name or alias prefix groups are missing.");
+    }
+    return {
+      nameBorder: getComputedStyle(nameInput.parentElement as HTMLElement).borderTopWidth,
+      nameInputBorder: getComputedStyle(nameInput).borderTopWidth,
+      nameSeparator: getComputedStyle(namePrefix).borderRightWidth,
+      aliasBorder: getComputedStyle(aliases).borderTopWidth,
+      aliasSeparator: getComputedStyle(aliasPrefix).borderRightWidth,
+    };
+  });
+  expect(prefixGeometry).toEqual({ nameBorder: "1px", nameInputBorder: "0px", nameSeparator: "1px", aliasBorder: "1px", aliasSeparator: "1px" });
   await page.locator(".command-usage-advanced > summary").click();
   const targetSwitch = page.getByRole("switch", { name: "Change channel variable" });
   await targetSwitch.scrollIntoViewIfNeeded();

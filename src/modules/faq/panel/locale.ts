@@ -70,6 +70,7 @@ export interface FaqTexts {
   chatTarget: string;
   save: string;
   cancel: string;
+  back: string;
   discard: string;
   saved: string;
   saving: string;
@@ -153,7 +154,7 @@ const catalog: LocaleCatalog<FaqTexts> = {
     cooldownMinError: "Die Abkühlzeit muss mindestens 30 Sekunden betragen.",
     userCooldown: "Abkühlzeit pro Person", userCooldownHint: "0 deaktiviert diese zusätzliche Abkühlzeit. Höchstens 86.400 Sekunden.",
     games: "Spiele", chatTarget: "Chat-Ziel",
-    save: "Speichern", cancel: "Abbrechen", discard: "Verwerfen", saved: "Gespeichert", saving: "Speichert …", invalid: "Prüfe die markierten Felder.", delete: "Antwort löschen",
+    save: "Speichern", cancel: "Abbrechen", back: "Zurück", discard: "Verwerfen", saved: "Gespeichert", saving: "Speichert …", invalid: "Prüfe die markierten Felder.", delete: "Antwort löschen",
     deleteTitle: (name) => `„${name}“ löschen?`, deleteConfirm: (name) => `Die Antwort „${name}“ wird aus der Prioritätenliste entfernt.`,
     loadError: "FAQ-Einträge konnten nicht geladen werden.", saveError: "Der FAQ-Eintrag konnte nicht gespeichert werden.",
     deleteError: "Der FAQ-Eintrag konnte nicht entfernt werden.", missingTextBlock: "Ein verwendeter Textbaustein existiert nicht mehr.",
@@ -200,7 +201,7 @@ const catalog: LocaleCatalog<FaqTexts> = {
     cooldownHint: "At least 30 seconds; up to 86,400 seconds.", cooldownMinError: "Cooldown must be at least 30 seconds.",
     userCooldown: "Per-person cooldown", userCooldownHint: "0 disables this additional cooldown. Up to 86,400 seconds.",
     games: "Games",
-    chatTarget: "Chat target", save: "Save", cancel: "Cancel", discard: "Discard", saved: "Saved", saving: "Saving …", invalid: "Check the highlighted fields.", delete: "Delete answer",
+    chatTarget: "Chat target", save: "Save", cancel: "Cancel", back: "Back", discard: "Discard", saved: "Saved", saving: "Saving …", invalid: "Check the highlighted fields.", delete: "Delete answer",
     deleteTitle: (name) => `Delete “${name}”?`, deleteConfirm: (name) => `The answer “${name}” will be removed from the priority list.`,
     loadError: "FAQ entries could not be loaded.", saveError: "The FAQ entry could not be saved.", deleteError: "The FAQ entry could not be deleted.",
     missingTextBlock: "A referenced text block no longer exists.",

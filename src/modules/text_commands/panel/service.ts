@@ -130,6 +130,16 @@ export const saveTextCommand = async (
   timeoutAction: command.timeoutAction,
 }, command.oldName);
 
+export const setTextCommandEnabled = async (
+  channelId: string,
+  name: string,
+  revision: number,
+  enabled: boolean,
+): Promise<TextCommandMutationResult> => mutation<TextCommandMutationResult>(channelId, "PATCH", {
+  revision,
+  enabled,
+}, name);
+
 export const deleteTextCommand = async (channelId: string, name: string, revision: number): Promise<void> => {
   await mutation<{ ok: true }>(channelId, "DELETE", undefined, name, `revision=${String(revision)}`);
 };

@@ -128,6 +128,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
   const data = query.data;
   const orderedEntries = useMemo(() => data?.entries ?? [], [data?.entries]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [baseline, setBaseline] = useState<FaqDraft>(emptyDraft);
   const [draft, setDraft] = useState<FaqDraft>(emptyDraft);
   const [draftRevision, setDraftRevision] = useState<number | null>(null);
@@ -273,8 +274,14 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
   useEffect(() => registerDashboardNavigationGuard(draftGuard.guardSwitch), [draftGuard.guardSwitch]);
 
   const requestSwitch = (id: string): void => {
-    if (id === selectedId) return;
-    draftGuard.guardSwitch(() => loadSelection(id));
+    if (id === selectedId) {
+      setMobileDetailOpen(true);
+      return;
+    }
+    draftGuard.guardSwitch(() => {
+      loadSelection(id);
+      setMobileDetailOpen(true);
+    });
   };
 
   async function persistOrder(
@@ -692,6 +699,9 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
       list={list}
       detail={detail}
       empty={labels.noEntries}
+      detailOpen={mobileDetailOpen}
+      backLabel={labels.back}
+      onCloseDetail={() => { draftGuard.guardSwitch(() => { setMobileDetailOpen(false); }); }}
     />
   </div>;
 }

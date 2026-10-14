@@ -263,8 +263,8 @@ test("text command collection keeps list and editor in desktop columns and stack
   const editorBoxNarrow = await editor.boundingBox();
   expect(listBoxNarrow).toBeNull();
   expect(editorBoxNarrow).not.toBeNull();
-  await expect(page.locator(".text-command-editor__back")).toBeVisible();
-  await page.locator(".text-command-editor__back").click();
+  await expect(page.locator(".collection-page__detail-back")).toBeVisible();
+  await page.locator(".collection-page__detail-back").click();
   await expect(list).toBeVisible();
   await expect(editor).toBeHidden();
 });

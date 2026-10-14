@@ -19,6 +19,7 @@ export { AuditSentence } from "./AuditSentence";
 export { Badge } from "./Badge";
 export { InspectorSection, InspectorFieldRow, InspectorActions } from "./InspectorParts";
 export { Section } from "./Section";
+export { RuleNote } from "./RuleNote";
 export { ActionMenu } from "./ActionMenu";
 export { ChatTargetField } from "./ChatTargetField";
 

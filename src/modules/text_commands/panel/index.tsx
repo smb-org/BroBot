@@ -2,20 +2,31 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 
 import { dashboardCommonTexts, dashboardLanguage, serverFieldErrorText, type DashboardLanguage } from "../../../dashboard/locale";
 import {
-  ActionMenu, Badge, Button, ChatTargetField, ChatPreview, ChipGroup, ChipsInput, CollectionPage, ConfirmDialog, EmptyState,
-  Field, FieldPair, GameMultiSelect, LoadState, LoadStateLines, ListToolbar, PageHeader,
+  ActionMenu, Badge, ChatTargetField, ChatPreview, ChipGroup, ChipsInput, CollectionPage, ConfirmDialog, EmptyState,
+  Field, FieldPair, GameMultiSelect, LoadState, LoadStateLines, ListToolbar, PageHeader, RuleNote,
   mapServerFieldErrors, registerDashboardNavigationGuard, RoleThreshold, SaveStatus, Section, SegmentChoice, Select, StatusLed,
   SwitchSection, TemplateTextField, TimeoutDurationRangeFields, UnitInput, useDraft, useDraftGuard, useInspectorSelection, notify,
 } from "../../../dashboard/ui";
 import { PanelApiError } from "../../../contracts/panel-error";
-import { TEXT_COMMAND_KINDS, TEXT_COMMAND_MAX_ALIASES, TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_TEMPLATE_FIELDS, TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES, type TextCommand, type TextCommandGame, type TextCommandKind, type TextCommandMinimumTier, type TextCommandResponseType, type TextCommandStreamCondition } from "../contracts";
+import { TEXT_COMMAND_KINDS, TEXT_COMMAND_MAX_ALIASES, TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_TEMPLATE_FIELDS, TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES, type TextCommand, type TextCommandKind, type TextCommandMinimumTier } from "../contracts";
 import { MODERATION_TIMEOUT_MAX_SECONDS } from "../../contracts/moderation";
-import { minimumTierAfterVariableOperation } from "./editor-state";
-import { commandListReply, TEXT_COMMAND_DEFAULT_TEXTS, TEXT_COMMAND_DEFAULT_USAGE_TEXT, textCommandDefaultsFor } from "../contracts/chat-defaults";
+import {
+  currencyTokenTargets,
+  isSystemTemplateModuleId,
+  keepOnlyActiveKindDraft,
+  minimumTierAfterVariableOperation,
+  modulesUsedByCommand,
+  replaceCurrencyTokenAt,
+  switchTextCommandKind,
+  type CommandDraft,
+  type CurrencyTemplateField,
+  type CurrencyTokenTarget,
+} from "./editor-state";
+import { commandListReply, TEXT_COMMAND_DEFAULT_TEXTS, TEXT_COMMAND_DEFAULT_USAGE_TEXT } from "../contracts/chat-defaults";
 import { statusForTier, validCommandName } from "../domain";
 import { invalidTemplateParameters, renderTemplate, templateVariableNames, unknownTemplateVariables, worstCaseTemplateLength, type PanelTemplateWarning, type TemplateVariable } from "../contract";
 import { effectivePanelTemplateVariables, panelTemplateOptions, registeredModuleTemplateGroup } from "../../../dashboard/ui";
-import { createTextCommand, deleteTextCommand, loadTextCommandData, loadRegisteredTemplateVariables, lookupTextGames, saveTextCommand, searchTextGames, textBlockNamesForPicker, type TextCommandChannelVariable } from "./service";
+import { createTextCommand, deleteTextCommand, loadTextCommandData, loadRegisteredTemplateVariables, lookupTextGames, saveTextCommand, searchTextGames, setTextCommandEnabled, textBlockNamesForPicker, type TextCommandChannelVariable } from "./service";
 import { moduleQueryKey, refetchModuleQueryData, runModuleQueryWrite, useChannelSettings, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import type { TextCommandPanelData } from "./service";
 import { textCommandsTexts } from "./locale";
@@ -48,24 +59,6 @@ const requireCommandRevision = (revision: number | null): number => {
   return revision;
 };
 
-interface CommandDraft {
-  name: string;
-  enabled: boolean;
-  text: string;
-  usageText: string;
-  kind: TextCommandKind;
-  minimumTier: TextCommandMinimumTier;
-  cooldownSeconds: number | "";
-  aliases: string[];
-  userCooldownSeconds: number | "";
-  streamCondition: TextCommandStreamCondition;
-  games: TextCommandGame[];
-  responseType: TextCommandResponseType;
-  chatTarget: TextCommand["chatTarget"];
-  variableAction: TextCommand["variableAction"];
-  timeoutAction: { minSeconds: number | ""; maxSeconds: number | ""; fallbackText: string; reason: string } | null;
-}
-
 const draftTimeoutAction = (timeoutAction: TextCommand["timeoutAction"] | undefined): CommandDraft["timeoutAction"] => {
   if (timeoutAction === null || timeoutAction === undefined) return null;
   return { ...timeoutAction, reason: timeoutAction.reason ?? "" };
@@ -91,6 +84,18 @@ const draftFromCommand = (command: TextCommand): CommandDraft => ({
   timeoutAction: command.kind === "timeout"
     ? draftTimeoutAction(command.timeoutAction) ?? { minSeconds: 120, maxSeconds: 120, fallbackText: "", reason: "" }
     : null,
+  kindDrafts: {
+    [command.kind]: {
+      text: command.text,
+      usageText: command.usageText ?? (command.kind === "shoutout" ? TEXT_COMMAND_DEFAULT_USAGE_TEXT : ""),
+      variableAction: command.kind === "text" || command.kind === "timeout"
+        ? command.variableAction === null ? null : { ...command.variableAction }
+        : null,
+      timeoutAction: command.kind === "timeout"
+        ? draftTimeoutAction(command.timeoutAction) ?? { minSeconds: 120, maxSeconds: 120, fallbackText: "", reason: "" }
+        : null,
+    },
+  },
 });
 
 const newCommandDraft = (): CommandDraft => ({
@@ -109,6 +114,7 @@ const newCommandDraft = (): CommandDraft => ({
   chatTarget: null,
   variableAction: null,
   timeoutAction: null,
+  kindDrafts: { text: { text: "", usageText: "", variableAction: null, timeoutAction: null } },
 });
 
 type CommandTemplateField = "text" | "usageText" | "timeoutFallbackText";
@@ -161,28 +167,6 @@ const commandFieldPaths = {
 } as const;
 
 const currencyCodes = ["USD", "EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "CNY"] as const;
-const currencyPairForDraft = (draft: CommandDraft): { from: string; to: string } => {
-  const templates = [draft.text, draft.usageText, draft.timeoutAction?.fallbackText ?? "", draft.timeoutAction?.reason ?? ""];
-  for (const template of templates) {
-    const match = /\{currency\.convert\s+([A-Za-z]{3})\s+([A-Za-z]{3})\}/iu.exec(template);
-    if (match?.[1] !== undefined && match[2] !== undefined) return { from: match[1].toUpperCase(), to: match[2].toUpperCase() };
-  }
-  return { from: "USD", to: "EUR" };
-};
-
-const replaceCurrencyPair = (template: string, from: string, to: string): string => template.replace(
-  /\{currency\.convert(?:\s+[A-Za-z]{3}\s+[A-Za-z]{3})?\}/giu,
-  `{currency.convert ${from} ${to}}`,
-);
-
-const modulesUsedByCommand = (command: TextCommand, variables: readonly ModuleRegisteredTemplateVariable[]): string[] => {
-  const moduleByVariable = new Map(variables.map((variable) => [variable.name, variable.moduleId]));
-  const templateText = [command.text, command.usageText ?? "", command.timeoutAction?.fallbackText ?? "", command.timeoutAction?.reason ?? ""].join(" ");
-  return [...new Set([...templateText.matchAll(/\{([a-z][a-z0-9_.]*)/giu)]
-    .map((match) => moduleByVariable.get(match[1] ?? ""))
-    .filter((moduleId): moduleId is string => moduleId !== undefined))];
-};
-
 const commandDraftIsValid = (draft: CommandDraft, channelVariables: readonly TextCommandChannelVariable[]): boolean => {
   const name = normalizeCommandName(draft.name);
   const timeout = draft.timeoutAction;
@@ -231,12 +215,13 @@ interface TextCommandEditorProperties {
   commands: readonly TextCommand[];
   channelVariables: readonly TextCommandChannelVariable[];
   canManageContent: boolean;
+  canOperate: boolean;
   botIsModerator: boolean | null;
   onClose: () => void;
   onGuardChange: (guard: ((proceed: () => void, cancel?: () => void) => void) | null) => void;
   onRefresh: (force?: boolean) => Promise<TextCommand[]>;
   /** Called in the same step as the committed cache write; a no-op if the selection moved on since. */
-  onSaved: (token: number, name: string) => void;
+  onSaved: (token: number, name: string, preserveEditor?: boolean) => void;
   /** Current editor generation; capture it before a mutation starts. */
   generation: () => number;
   onWrite: <Value>(
@@ -247,13 +232,15 @@ interface TextCommandEditorProperties {
   onDeleted: (token: number) => void;
 }
 
-const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, registeredVariables, registeredVariablesLoaded, registeredVariablesPending, registeredVariablesRefreshError, onRetryRegisteredVariables, initial, command, commands, channelVariables, canManageContent, botIsModerator, onClose, onGuardChange, onRefresh, onSaved, generation, onWrite, onDeleted }: TextCommandEditorProperties): ReactElement => {
+const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, registeredVariables, registeredVariablesLoaded, registeredVariablesPending, registeredVariablesRefreshError, onRetryRegisteredVariables, initial, command, commands, channelVariables, canManageContent, canOperate, botIsModerator, onClose, onGuardChange, onRefresh, onSaved, generation, onWrite, onDeleted }: TextCommandEditorProperties): ReactElement => {
   const labels = useMemo(() => textCommandsTexts(language), [language]);
   const searchGames = useCallback((query: string) => searchTextGames(channelId, query), [channelId]);
   const lookupGames = useCallback((ids: readonly string[]) => lookupTextGames(channelId, ids), [channelId]);
   const resolvedLanguage = language ?? dashboardLanguage();
   const isCreate = command === null;
-  const { value: draft, setValue, dirty, reset, accept } = useDraft<CommandDraft>(initial, isCreate);
+  const { value: draft, setValue, dirty: draftDirty, reset, accept } = useDraft<CommandDraft>(initial, isCreate);
+  const [pendingAliases, setPendingAliases] = useState("");
+  const [selectedCurrencyTokenId, setSelectedCurrencyTokenId] = useState<string | null>(null);
   const draftRevision = useRef(command?.revision ?? null);
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -264,10 +251,31 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
   const [concurrentConflict, setConcurrentConflict] = useState(false);
   const [reloadError, setReloadError] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleteWhenGuardCloses, setDeleteWhenGuardCloses] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [attemptedSave, setAttemptedSave] = useState(false);
   const [serverWarnings, setServerWarnings] = useState<readonly PanelTemplateWarning[]>([]);
   const [minimumTierExplicit, setMinimumTierExplicit] = useState(false);
+  const dirty = draftDirty || pendingAliases.length > 0;
+  const currencyTemplates: { field: CurrencyTemplateField; value: string }[] = draft.kind === "list"
+    ? []
+    : [
+      { field: "text", value: draft.text },
+      ...(draft.kind === "shoutout" ? [{ field: "usageText" as const, value: draft.usageText }] : []),
+      ...(draft.kind === "timeout" && draft.timeoutAction !== null ? [
+        { field: "timeoutFallbackText" as const, value: draft.timeoutAction.fallbackText },
+        { field: "timeoutReason" as const, value: draft.timeoutAction.reason },
+      ] : []),
+    ];
+  const currencyTargets = currencyTokenTargets(currencyTemplates);
+  const selectedCurrencyTarget = currencyTargets.find(({ id }) => id === selectedCurrencyTokenId) ?? currencyTargets[0];
+  const currencyPairForTemplate = (field: CurrencyTemplateField): { from: string; to: string } => {
+    const target = selectedCurrencyTarget?.field === field
+      ? selectedCurrencyTarget
+      : currencyTargets.find((candidate) => candidate.field === field);
+    return target === undefined ? { from: "USD", to: "EUR" } : { from: target.from, to: target.to };
+  };
+  const hasCurrencyToken = currencyTargets.length > 0;
   const libraryBlocks = textBlockNamesForPicker(registeredVariables);
   const blockVariables: TemplateVariable[] = libraryBlocks.map((name) => ({ name, group: "channel", sample: name, maxLength: 500 }));
   const baseTemplateFields = templateFieldsForKind(draft.kind, channelVariables, draft.timeoutAction !== null);
@@ -276,8 +284,6 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
     (draft.timeoutAction !== null && (field === "text" || field === "timeoutFallbackText") || !variable.name.startsWith("timeout.")) &&
     (variable.contexts?.includes("chat_command") ?? true));
   const variableAction = draft.variableAction;
-  const currencyPair = currencyPairForDraft(draft);
-  const hasCurrencyToken = [draft.text, draft.usageText, draft.timeoutAction?.fallbackText ?? "", draft.timeoutAction?.reason ?? ""].some((template) => /\{currency\.convert/iu.test(template));
   const templateVariables = (field: CommandTemplateField) => [
     ...panelTemplateOptions("chat_command", [], channelVariables, resolvedLanguage),
     ...registeredVariables.filter((variable) => variable.isTextBlock).map((variable) => ({
@@ -305,7 +311,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
         ...(sourceGroup === undefined ? {} : { sourceGroup }),
         ...(variable.external === undefined ? {} : { external: variable.external }),
         ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
-        ...(variable.parameters === "currency_pair" ? { parameter: { value: `${currencyPair.from} ${currencyPair.to}` } } : {}),
+        ...(variable.parameters === "currency_pair" ? { parameter: { value: `${currencyPairForTemplate(field).from} ${currencyPairForTemplate(field).to}` } } : {}),
       };
     }),
   ];
@@ -349,7 +355,8 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
   const sameNameAlias = draft.aliases.includes(normalizedName);
   const invalidAlias = draft.aliases.find((alias) => !validCommandName(alias));
   const nameError = fieldError?.field === "name" ? fieldError.message : serverFieldErrors.name ?? (attemptedSave && normalizedName.length === 0 ? labels.nameMissing : attemptedSave && !validCommandName(normalizedName) ? labels.nameInvalid : undefined);
-  const aliasesError = fieldError?.field === "aliases" ? fieldError.message : serverFieldErrors.aliases ?? (sameNameAlias ? labels.aliasIsName : invalidAlias !== undefined ? labels.aliasInvalid(invalidAlias) : attemptedSave && draft.aliases.length > TEXT_COMMAND_MAX_ALIASES ? labels.chipsInputMessages.atLimitHint : undefined);
+  const pendingAliasError = attemptedSave && pendingAliases.length > 0 ? labels.aliasPendingInvalid : undefined;
+  const aliasesError = fieldError?.field === "aliases" ? fieldError.message : serverFieldErrors.aliases ?? pendingAliasError ?? (sameNameAlias ? labels.aliasIsName : invalidAlias !== undefined ? labels.aliasInvalid(invalidAlias) : attemptedSave && draft.aliases.length > TEXT_COMMAND_MAX_ALIASES ? labels.chipsInputMessages.atLimitHint : undefined);
   const cooldownInvalid = draft.cooldownSeconds === "" || !Number.isInteger(draft.cooldownSeconds) || draft.cooldownSeconds < 0 || draft.cooldownSeconds > 86400;
   const userCooldownInvalid = draft.userCooldownSeconds === "" || !Number.isInteger(draft.userCooldownSeconds) || draft.userCooldownSeconds < 0 || draft.userCooldownSeconds > 86400;
   const templateFieldNames = Object.keys(templateFields) as CommandTemplateField[];
@@ -367,7 +374,6 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
   const timeoutReasonError = serverFieldErrors.timeoutReason ?? (validationDraft.timeoutAction !== null && templateTextLength(validationDraft.timeoutAction.reason) > 500 ? labels.fieldTooLong : undefined);
   const timeoutFallbackError = serverFieldErrors.timeoutFallbackText ?? (validationDraft.timeoutAction !== null && templateTextLength(validationDraft.timeoutAction.fallbackText) > 500 ? labels.fieldTooLong : undefined);
   const variableActionInvalid = !validCommandVariableAction(validationDraft.variableAction, channelVariables);
-  const variableActionNameInvalid = validationDraft.variableAction !== null && !channelVariables.some((entry) => entry.name === validationDraft.variableAction?.name);
   const variableActionAmountInvalid = validationDraft.variableAction !== null && (
     validationDraft.variableAction.operation === "set_argument"
       ? validationDraft.variableAction.amount !== 0
@@ -377,9 +383,11 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
           : validationDraft.variableAction.amount < -999999999 || validationDraft.variableAction.amount > 999999999)
   );
   const variableActionError = serverFieldErrors.variableAction ?? (attemptedSave && variableActionInvalid ? labels.variableActionInvalid : undefined);
-  const valid = slashInput.status !== "invalid" && !validationResponseInvalid && Object.keys(serverFieldErrors).length === 0 && fieldError === null &&
-    (validationDraft.variableAction === null || validationDraft.kind === "text" || validationDraft.kind === "timeout") &&
-    commandDraftIsValid(validationDraft, channelVariables);
+  const valid = canManageContent
+    ? slashInput.status !== "invalid" && !validationResponseInvalid && pendingAliases.length === 0 && Object.keys(serverFieldErrors).length === 0 && fieldError === null &&
+      (validationDraft.variableAction === null || validationDraft.kind === "text" || validationDraft.kind === "timeout") &&
+      commandDraftIsValid(validationDraft, channelVariables)
+    : canOperate && command !== null && pendingAliases.length === 0;
   const localWarnings = templateFieldNames.flatMap((field) => {
     const variables = templateFields[field] ?? [];
     const value = templateValue(field);
@@ -443,7 +451,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
         id="command-variable-name"
         label={labels.variableSelect}
         hint={labels.variableSelectHint}
-        {...(attemptedSave && variableActionNameInvalid ? { error: labels.variableActionInvalid } : {})}
+        {...(variableActionError === undefined ? {} : { error: variableActionError })}
         value={variableAction.name || null}
         placeholder={labels.variableNone}
         options={channelVariables.map((variable) => ({ value: variable.name, label: variable.name, description: `${String(variable.value)}${variable.description.length > 0 ? ` · ${variable.description}` : ""}` }))}
@@ -516,19 +524,28 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
   />;
 
   const completeSwitchRef = useRef<() => boolean>(() => false);
+  const deleteAfterSaveRef = useRef(false);
   const saveDraft = useCallback(async (): Promise<string | null> => {
     setAttemptedSave(true);
-    if (!canManageContent) return labels.invalid;
-    const parsedSlashInput = parseLeadingSlashCommand(draft.text);
+    if (pendingAliases.length > 0) return labels.aliasPendingInvalid;
+    const operatorToggle = !canManageContent;
+    if (operatorToggle) {
+      if (!canOperate || command === null) return labels.managementLocked;
+      const baseline = draftFromCommand(command);
+      if (JSON.stringify({ ...draft, enabled: baseline.enabled }) !== JSON.stringify(baseline)) return labels.managementLocked;
+      if (draft.enabled === baseline.enabled) return null;
+    }
+    const parsedSlashInput = operatorToggle ? { status: "none" as const } : parseLeadingSlashCommand(draft.text);
     if (parsedSlashInput.status === "invalid") return labels.invalid;
-    const savedDraft = parsedSlashInput.status === "valid"
+    const convertedDraft = parsedSlashInput.status === "valid"
       ? convertLeadingSlashCommand(draft, parsedSlashInput, {
         text: TEXT_COMMAND_DEFAULT_TEXTS.shoutout,
         usageText: TEXT_COMMAND_DEFAULT_USAGE_TEXT,
       })
       : draft;
+    const savedDraft = keepOnlyActiveKindDraft(convertedDraft);
+    if (!operatorToggle && !commandDraftIsValid(savedDraft, channelVariables)) return labels.invalid;
     if (savedDraft !== draft) setValue(savedDraft);
-    if (!commandDraftIsValid(savedDraft, channelVariables)) return labels.invalid;
     const payload = {
       name: normalizeCommandName(savedDraft.name),
       enabled: savedDraft.enabled,
@@ -543,8 +560,8 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
       games: savedDraft.games,
       responseType: savedDraft.responseType,
       chatTarget: savedDraft.chatTarget,
-      variableAction: savedDraft.variableAction,
-      timeoutAction: savedDraft.timeoutAction === null ? null : {
+      variableAction: savedDraft.kind === "text" || savedDraft.kind === "timeout" ? savedDraft.variableAction : null,
+      timeoutAction: savedDraft.kind !== "timeout" || savedDraft.timeoutAction === null ? null : {
         minSeconds: typeof savedDraft.timeoutAction.minSeconds === "number" ? savedDraft.timeoutAction.minSeconds : 0,
         maxSeconds: typeof savedDraft.timeoutAction.maxSeconds === "number" ? savedDraft.timeoutAction.maxSeconds : 0,
         fallbackText: savedDraft.timeoutAction.fallbackText,
@@ -559,11 +576,14 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
         baselineRevision,
         (revision) => command === null
           ? createTextCommand(channelId, payload)
-          : saveTextCommand(channelId, { oldName: command.name, revision: requireCommandRevision(revision), ...payload }),
+          : operatorToggle
+            ? setTextCommandEnabled(channelId, command.name, requireCommandRevision(revision), savedDraft.enabled)
+            : saveTextCommand(channelId, { oldName: command.name, revision: requireCommandRevision(revision), ...payload }),
         (current, mutationResult) => {
           const next = updateCommandCache(current, mutationResult.command, command?.name);
-          // A held "save and switch" navigates to its target here; otherwise select the saved command.
-          if (token !== generation() || !completeSwitchRef.current()) onSaved(token, mutationResult.command.name);
+          const continueDeleteAfterSave = deleteAfterSaveRef.current;
+          const completedSwitch = token === generation() && completeSwitchRef.current();
+          if (!completedSwitch || continueDeleteAfterSave) onSaved(token, mutationResult.command.name, continueDeleteAfterSave);
           return next;
         },
       );
@@ -607,10 +627,22 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
       notify({ tone: "error", message: labels.saveError });
       return labels.saveError;
     } finally { setPending(false); }
-  }, [accept, canManageContent, channelId, channelVariables, command, draft, generation, isCreate, labels, onRefresh, onSaved, onWrite, resolvedLanguage, setAttemptedSave, setConcurrentConflict, setFieldError, setPending, setSaved, setServerFieldErrors, setServerWarnings, setValue]);
+  }, [accept, canManageContent, canOperate, channelId, channelVariables, command, draft, generation, isCreate, labels, onRefresh, onSaved, onWrite, pendingAliases, resolvedLanguage, setAttemptedSave, setConcurrentConflict, setFieldError, setPending, setSaved, setServerFieldErrors, setServerWarnings, setValue]);
 
-  const guard = useDraftGuard(dirty, saveDraft, reset);
+  const discardDraft = (): void => {
+    reset(); setPendingAliases(""); setAttemptedSave(false); setSaved(false); setFieldError(null); setDeleteError(undefined);
+    setServerFieldErrors({}); setSaveError(undefined); setServerWarnings([]);
+  };
+  const guard = useDraftGuard(dirty, saveDraft, discardDraft);
   useEffect(() => { completeSwitchRef.current = guard.completeSwitch; }, [guard.completeSwitch]);
+  useEffect(() => {
+    if (!deleteWhenGuardCloses || guard.confirmOpen) return;
+    const frame = window.requestAnimationFrame(() => {
+      setDeleteWhenGuardCloses(false);
+      setConfirmingDelete(true);
+    });
+    return () => { window.cancelAnimationFrame(frame); };
+  }, [deleteWhenGuardCloses, guard.confirmOpen]);
   useEffect(() => {
     onGuardChange(guard.guardSwitch);
     return () => { onGuardChange(null); };
@@ -625,34 +657,21 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
   };
 
   const setCurrencyPair = (from: string, to: string): void => {
-    setDraftField("text", replaceCurrencyPair(draft.text, from, to));
-    setDraftField("usageText", replaceCurrencyPair(draft.usageText, from, to));
-    if (draft.timeoutAction !== null) {
-      setDraftField("timeoutAction", {
-        ...draft.timeoutAction,
-        fallbackText: replaceCurrencyPair(draft.timeoutAction.fallbackText, from, to),
-        reason: replaceCurrencyPair(draft.timeoutAction.reason, from, to),
-      });
-    }
+    const target: CurrencyTokenTarget | undefined = selectedCurrencyTarget;
+    if (target === undefined) return;
+    const replace = (template: string): string => replaceCurrencyTokenAt(template, target.index, from, to);
+    if (target.field === "text") setDraftField("text", replace(draft.text));
+    else if (target.field === "usageText") setDraftField("usageText", replace(draft.usageText));
+    else if (draft.timeoutAction !== null) setDraftField("timeoutAction", {
+      ...draft.timeoutAction,
+      ...(target.field === "timeoutFallbackText" ? { fallbackText: replace(draft.timeoutAction.fallbackText) } : {}),
+      ...(target.field === "timeoutReason" ? { reason: replace(draft.timeoutAction.reason) } : {}),
+    });
   };
 
   const changeKind = (kind: TextCommandKind): void => {
-    setValue((current) => {
-      const defaults = kind === "shoutout" ? textCommandDefaultsFor(kind) : null;
-      return {
-        ...current,
-        kind,
-        text: kind === "list" ? "" : defaults?.text ?? (current.kind === "list" ? "" : current.text),
-        variableAction: kind === "text" || kind === "timeout" ? current.variableAction : null,
-        timeoutAction: kind === "timeout"
-          ? current.timeoutAction ?? { minSeconds: 120, maxSeconds: 120, fallbackText: "", reason: "" }
-          : null,
-        usageText: kind === "list" ? "" : kind === "shoutout"
-          ? current.usageText || defaults?.usageText || TEXT_COMMAND_DEFAULT_USAGE_TEXT
-          : current.kind === "shoutout" ? "" : current.usageText,
-        ...(isCreate && kind === "shoutout" ? { minimumTier: "moderator" as const } : {}),
-      };
-    });
+    if (kind === draft.kind) return;
+    setValue((current) => switchTextCommandKind(current, kind, isCreate));
     setSaved(false); setConcurrentConflict(false); setReloadError(false);
     setServerFieldErrors({}); setSaveError(undefined);
   };
@@ -787,6 +806,8 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
         placeholder={labels.aliasPlaceholder}
         values={draft.aliases}
         onChange={(value) => { setDraftField("aliases", value); }}
+        pending={pendingAliases}
+        onPendingChange={setPendingAliases}
         stripPrefix="!"
         normalize={normalizeCommandName}
         validate={(alias) => !validCommandName(alias) ? labels.aliasInvalid(alias) : alias === normalizedName ? labels.aliasIsName : null}
@@ -837,20 +858,33 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
             />
           </div>}
         {hasCurrencyToken ? <div className="text-command-currency-slot">
+          <Select
+            label={labels.currencyToken}
+            value={selectedCurrencyTarget?.id ?? null}
+            options={currencyTargets.map((target) => {
+              const fieldLabel = target.field === "text" ? labels.response
+                : target.field === "usageText" ? labels.templateFieldLabels.usageText
+                  : target.field === "timeoutFallbackText" ? labels.timeoutFallbackTextOptional : labels.timeoutReason;
+              const occurrence = currencyTargets.filter((candidate) => candidate.field === target.field).findIndex((candidate) => candidate.id === target.id) + 1;
+              return { value: target.id, label: `${fieldLabel} · ${String(occurrence)}` };
+            })}
+            disabled={!canManageContent || pending}
+            onChange={(id) => { setSelectedCurrencyTokenId(id); }}
+          />
           <FieldPair>
             <Select
               label={labels.currencyFrom}
-              value={currencyPair.from}
+              value={selectedCurrencyTarget?.from ?? "USD"}
               options={currencyCodes.map((code) => ({ value: code, label: code }))}
               disabled={!canManageContent || pending}
-              onChange={(from) => { if (from !== null) setCurrencyPair(from, currencyPair.to); }}
+              onChange={(from) => { if (from !== null) setCurrencyPair(from, selectedCurrencyTarget?.to ?? "EUR"); }}
             />
             <Select
               label={labels.currencyTo}
-              value={currencyPair.to}
+              value={selectedCurrencyTarget?.to ?? "EUR"}
               options={currencyCodes.map((code) => ({ value: code, label: code }))}
               disabled={!canManageContent || pending}
-              onChange={(to) => { if (to !== null) setCurrencyPair(currencyPair.from, to); }}
+              onChange={(to) => { if (to !== null) setCurrencyPair(selectedCurrencyTarget?.from ?? "USD", to); }}
             />
           </FieldPair>
         </div> : null}
@@ -957,15 +991,17 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
     },
   ];
 
-  const discardDraft = (): void => {
-    reset(); setAttemptedSave(false); setSaved(false); setFieldError(null); setDeleteError(undefined);
-    setServerFieldErrors({}); setSaveError(undefined); setServerWarnings([]);
+  const requestDelete = (): void => {
+    if (dirty) deleteAfterSaveRef.current = true;
+    guard.guardSwitch(() => {
+      deleteAfterSaveRef.current = false;
+      setDeleteError(undefined);
+      setDeleteWhenGuardCloses(true);
+    }, () => { deleteAfterSaveRef.current = false; });
   };
-  const requestDelete = (): void => guard.guardSwitch(() => { setDeleteError(undefined); setConfirmingDelete(true); });
   const pageMeta = command === null ? undefined : <span>{labels.lastUsed} {relativeTime(command.lastUsedAt, labels)} · {labels.useCount(command.useCount)}</span>;
   const common = dashboardCommonTexts(resolvedLanguage);
   const pageActions = <>
-    <Button className="text-command-editor__back" variant="subtle" onClick={onClose}>{labels.back}</Button>
     {command === null ? null : <ActionMenu
       label={common.moreActions}
       items={[{ label: labels.delete, danger: true, disabled: !canManageContent || pending, onSelect: requestDelete }]}
@@ -996,7 +1032,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
   />;
   const saveStatus = <div className="text-command-editor__save">{saveBar}</div>;
   return <div className="text-command-editor" role="region" aria-label={isCreate ? labels.add : labels.details(command.name)} onKeyDown={(event) => {
-    if (event.key === "Escape") onClose();
+    if (event.key === "Escape") { event.preventDefault(); onClose(); }
   }}>
     <PageHeader
       kind="module"
@@ -1008,14 +1044,14 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
       badge={<StatusLed state="ok" label={labels.ready} />}
       active={draft.enabled}
       switchTitle={labels.active}
-      switchDisabled={!canManageContent || pending}
+      switchDisabled={!(canManageContent || canOperate && command !== null) || pending}
       switchBusy={pending}
       onToggle={(enabled) => { setDraftField("enabled", enabled); }}
-      {...(canManageContent ? {} : { lockHint: labels.managementLocked })}
       saveStatus={saveStatus}
       actions={pageActions}
     />
     <div className="text-command-editor__scroll">
+      {canManageContent ? null : <RuleNote>{labels.managementLocked}</RuleNote>}
       <Section title={labels.triggerSection} headingAction={<div className="text-command-section-rule">
         <span className="ui-section__rule" aria-hidden="true" />
         {registeredVariableStatus}
@@ -1034,19 +1070,19 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
       </Section>
       {sections[1]?.content}
     </div>
-    <ConfirmDialog
-      opened={guard.confirmOpen}
+    {guard.confirmOpen ? <ConfirmDialog
+      opened
       title={labels.draftGuardTitle}
       description={labels.draftGuardDescription}
       cancelLabel={labels.continueEditing}
       confirmLabel={labels.discardAndSwitch}
-      onCancel={guard.continueEditing}
-      onConfirm={guard.discardAndSwitch}
+      onCancel={() => { deleteAfterSaveRef.current = false; guard.continueEditing(); }}
+      onConfirm={() => { guard.discardAndSwitch(); }}
       {...(valid ? { alternative: { label: labels.saveAndSwitch, onClick: () => { void guard.saveAndSwitch(); } } } : {})}
       pending={guard.saving}
       danger
       {...(guard.saveError === undefined ? {} : { error: guard.saveError })}
-    />
+    /> : null}
     <ConfirmDialog
       opened={confirmingDelete}
       title={labels.deleteTitle(command?.name ?? normalizedName)}
@@ -1066,6 +1102,7 @@ const TextCommandsPanel = (props: {
   channelId: string;
   language?: DashboardLanguage | undefined;
   canManage?: boolean;
+  canOperate?: boolean;
   botIsModerator?: boolean | null;
   onCloseInspector?: () => void;
   initialSelection?: string;
@@ -1075,6 +1112,7 @@ const TextCommandsPanelContent = ({
   channelId,
   language,
   canManage: canManageContent = true,
+    canOperate = false,
   botIsModerator = null,
   onCloseInspector,
   initialSelection,
@@ -1082,6 +1120,7 @@ const TextCommandsPanelContent = ({
   channelId: string;
   language?: DashboardLanguage | undefined;
   canManage?: boolean;
+  canOperate?: boolean;
   botIsModerator?: boolean | null;
   onCloseInspector?: () => void;
   initialSelection?: string;
@@ -1097,6 +1136,9 @@ const TextCommandsPanelContent = ({
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
   const [moduleFilter, setModuleFilter] = useState<string | null>(null);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const [selectionVersion, setSelectionVersion] = useState(0);
+  const [preservedRename, setPreservedRename] = useState<{ from: string; to: string } | null>(null);
   const channelVariables = commandsQuery.data?.variables ?? [];
   const registeredVariablesQuery = useModuleQuery(channelId, "text_commands", "template-variables", (signal) => loadRegisteredTemplateVariables(channelId, signal));
   const registeredVariables = useMemo(() => registeredVariablesQuery.data ?? [], [registeredVariablesQuery.data]);
@@ -1124,12 +1166,14 @@ const TextCommandsPanelContent = ({
   // of an obsolete editor (captured token differs) must never change a newer selection or draft.
   const generationRef = useRef(0);
   const generation = useCallback((): number => generationRef.current, []);
-  const onSaved = useCallback((token: number, name: string): void => {
+  const onSaved = useCallback((token: number, name: string, preserveEditor = false): void => {
     if (token !== generationRef.current) return;
     generationRef.current += 1;
     setCreateOpen(false);
+    if (preserveEditor && selectedName !== null && selectedName !== name) setPreservedRename({ from: selectedName, to: name });
     selectName(name);
-  }, [selectName]);
+    if (!preserveEditor && (selectedName !== name || createOpen)) setSelectionVersion((current) => current + 1);
+  }, [createOpen, selectName, selectedName]);
 
   const write = useCallback(<Value,>(
     baselineRevision: number | null,
@@ -1153,36 +1197,65 @@ const TextCommandsPanelContent = ({
     const target = commands.find((command) => command.name === initialSelection) ?? (window.matchMedia("(max-width: 767px)").matches ? undefined : commands[0]);
     initialSelectionApplied.current = true;
     if (target === undefined || selectedName === target.name) return;
-    guardSwitch(() => { generationRef.current += 1; selectName(target.name); });
+    guardSwitch(() => {
+      generationRef.current += 1;
+      setSelectionVersion((current) => current + 1);
+      setMobileDetailOpen(initialSelection !== undefined);
+      selectName(target.name);
+    });
   }, [commands, commandsQuery.data, commandsQuery.isPending, createOpen, guardSwitch, initialSelection, selectName, selectedName]);
 
-  const selected = useMemo(() => commands.find((command) => command.name === selectedName) ?? null, [commands, selectedName]);
+  const selected = useMemo(() => commands.find((command) => command.name === selectedName)
+    ?? (preservedRename?.to === selectedName ? commands.find((command) => command.name === preservedRename.from) ?? null : null), [commands, preservedRename, selectedName]);
   const closeInspector = useCallback((): void => {
+    if (window.matchMedia("(max-width: 768px)").matches) {
+      guardSwitch(() => { setMobileDetailOpen(false); });
+      return;
+    }
     guardSwitch(() => {
       generationRef.current += 1;
       setCreateOpen(false);
       closeSelection();
+      setMobileDetailOpen(false);
+      setSelectionVersion((current) => current + 1);
       onCloseInspector?.();
     });
   }, [closeSelection, guardSwitch, onCloseInspector]);
   const closeCreate = useCallback((): void => {
-    guardSwitch(() => { generationRef.current += 1; setCreateOpen(false); });
+    guardSwitch(() => {
+      generationRef.current += 1;
+      setCreateOpen(false);
+      setMobileDetailOpen(false);
+      setSelectionVersion((current) => current + 1);
+    });
   }, [guardSwitch]);
   const openCreate = (): void => guardSwitch(() => {
     generationRef.current += 1;
     closeSelection();
     setCreateOpen(true);
+    setMobileDetailOpen(true);
+    setSelectionVersion((current) => current + 1);
   });
-  const selectCommand = (name: string): void => guardSwitch(() => {
-    generationRef.current += 1;
-    setCreateOpen(false);
-    selectName(name);
-  });
+  const selectCommand = (name: string): void => {
+    if (selectedName === name && !createOpen) {
+      setMobileDetailOpen(true);
+      return;
+    }
+    guardSwitch(() => {
+      generationRef.current += 1;
+      setCreateOpen(false);
+      selectName(name);
+      setMobileDetailOpen(true);
+      setSelectionVersion((current) => current + 1);
+    });
+  };
   const handleDeleted = (token: number): void => {
     if (token !== generationRef.current) return;
     generationRef.current += 1;
     setCreateOpen(false);
     closeSelection();
+    setMobileDetailOpen(false);
+    setSelectionVersion((current) => current + 1);
     initialSelectionApplied.current = false;
   };
 
@@ -1194,7 +1267,7 @@ const TextCommandsPanelContent = ({
     const matchesModule = moduleFilter === null || modulesUsedByCommand(command, registeredVariables).includes(moduleFilter);
     return matchesSearch && matchesStatus && matchesModule;
   }), [commands, labels.kindLabels, moduleFilter, query, registeredVariables, statusFilter]);
-  const moduleIds = useMemo(() => [...new Set(registeredVariables.map(({ moduleId }) => moduleId).filter((moduleId) => moduleId !== "core"))].sort((left, right) => left.localeCompare(right)), [registeredVariables]);
+  const moduleIds = useMemo(() => [...new Set(registeredVariables.map(({ moduleId }) => moduleId).filter((moduleId) => !isSystemTemplateModuleId(moduleId)))].sort((left, right) => left.localeCompare(right)), [registeredVariables]);
   const moduleLabels = useMemo(() => new Map(registeredVariables.map(({ moduleId, pickerGroup }) => [moduleId, pickerGroup?.label[resolvedLanguage] ?? moduleId])), [registeredVariables, resolvedLanguage]);
   const listStatus = commandsQuery.data === undefined
     ? commandsQuery.isPending ? "loading" : "error"
@@ -1246,7 +1319,7 @@ const TextCommandsPanelContent = ({
           : command.text.trim().length > 0 ? command.text : command.kind === "list" ? labels.kindHints.list : labels.noResponse;
         const aliases = command.aliases.map((alias) => `!${alias}`).join(", ");
         const summary = aliases.length > 0 ? aliases : response.split(/\r?\n/u)[0] ?? labels.noResponse;
-        const usedModules = modulesUsedByCommand(command, registeredVariables).filter((moduleId) => moduleId !== "core");
+        const usedModules = modulesUsedByCommand(command, registeredVariables).filter((moduleId) => !isSystemTemplateModuleId(moduleId));
         const kindBadge = command.variableAction !== null
           ? labels.variableBadge
           : usedModules.length > 0 ? moduleLabels.get(usedModules[0] ?? "") ?? labels.kindLabels[command.kind] : labels.kindLabels[command.kind];
@@ -1272,7 +1345,7 @@ const TextCommandsPanelContent = ({
     </LoadState>
 
   const detail = selected !== null ? <TextCommandEditor
-    key={selected.name}
+    key={`selected-${String(selectionVersion)}`}
     channelId={channelId}
     {...(channelSettings.data === undefined ? {} : { channelDefaultChatTarget: channelSettings.data.defaultChatTarget })}
     language={language}
@@ -1286,6 +1359,7 @@ const TextCommandsPanelContent = ({
     commands={commands}
     channelVariables={channelVariables}
     canManageContent={canManageContent}
+    canOperate={canOperate}
     botIsModerator={botIsModerator}
     onClose={closeInspector}
     onGuardChange={registerGuard}
@@ -1295,7 +1369,7 @@ const TextCommandsPanelContent = ({
     onWrite={write}
     onDeleted={handleDeleted}
   /> : createOpen ? <TextCommandEditor
-    key="create"
+    key={`create-${String(selectionVersion)}`}
     channelId={channelId}
     {...(channelSettings.data === undefined ? {} : { channelDefaultChatTarget: channelSettings.data.defaultChatTarget })}
     language={language}
@@ -1309,6 +1383,7 @@ const TextCommandsPanelContent = ({
     commands={commands}
     channelVariables={channelVariables}
     canManageContent={canManageContent}
+    canOperate={canOperate}
     botIsModerator={botIsModerator}
     onClose={closeCreate}
     onGuardChange={registerGuard}
@@ -1323,7 +1398,16 @@ const TextCommandsPanelContent = ({
   />;
 
   return <div className="command-panel">
-    <CollectionPage headingLevel="h2" title={labels.title} toolbar={toolbar} list={list} detail={detail} />
+    <CollectionPage
+      headingLevel="h2"
+      title={labels.title}
+      toolbar={toolbar}
+      list={list}
+      detail={detail}
+      detailOpen={mobileDetailOpen}
+      backLabel={labels.back}
+      onCloseDetail={closeInspector}
+    />
   </div>;
 };
 

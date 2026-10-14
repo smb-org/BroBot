@@ -52,6 +52,7 @@ export interface TextCommandsTexts {
   insertVariable: string;
   currencyFrom: string;
   currencyTo: string;
+  currencyToken: string;
   responseOptional: string;
   responseHint: string;
   responseMissing: string;
@@ -90,6 +91,7 @@ export interface TextCommandsTexts {
   aliasConflict: (trigger: string, command: string) => string;
   aliasInvalid: (trigger: string) => string;
   aliasIsName: string;
+  aliasPendingInvalid: string;
   aliasRemove: (alias: string) => string;
   aliasList: string;
   delete: string;
@@ -218,7 +220,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     slashTimeoutEffect: (minimum, maximum) => `Timeout für den Aufrufer für ${minimum === maximum ? `${String(minimum)} s` : `${String(minimum)}–${String(maximum)} s`}.`,
     slashAnnouncementEffect: "Wird als Twitch-Ankündigung gesendet.",
     slashShoutoutEffect: "Shoutout-Ziel kommt aus dem Befehlsargument.",
-    response: "Antworttext", insertVariable: "Variable einfügen", currencyFrom: "Von", currencyTo: "Nach", responseOptional: "Antworttext (optional)", responseHint: "Was der Bot schreibt. { öffnet die Variablen.", responseMissing: "Antworttext ausfüllen.", fieldTooLong: "Höchstens 500 Zeichen.",
+    response: "Antworttext", insertVariable: "Variable einfügen", currencyToken: "Währungsvariable", currencyFrom: "Von", currencyTo: "Nach", responseOptional: "Antworttext (optional)", responseHint: "Was der Bot schreibt. { öffnet die Variablen.", responseMissing: "Antworttext ausfüllen.", fieldTooLong: "Höchstens 500 Zeichen.",
     minimumTier: "Wer darf auslösen", minimumRole: "Mindestrolle",
     tierLabels: { everyone: "Alle", subscriber: "Abonnenten", vip: "VIPs", moderator: "Moderatoren", broadcaster: "Broadcaster" },
     tierSubjects: { viewer: "Zuschauer", subscriber: "Abonnenten", vip: "VIPs", moderator: "Moderatoren", broadcaster: "Broadcaster" },
@@ -249,7 +251,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     nameAliasConflict: (trigger, command) => `!${trigger} ist schon ein Alias von !${command}.`,
     aliasConflict: (trigger, command) => trigger === command ? `!${trigger} ist schon der Befehl !${command}.` : `!${trigger} ist schon ein Alias von !${command}.`,
     aliasInvalid: (trigger) => `!${trigger} — nur Kleinbuchstaben, Zahlen, - und _.`,
-    aliasIsName: "Das ist schon der Name.",
+    aliasIsName: "Das ist schon der Name.", aliasPendingInvalid: "Alias-Eingabe erst bestätigen oder entfernen.",
     aliasRemove: (alias) => `Alias ${alias} entfernen`, aliasList: "Aliase",
     delete: "Befehl löschen", deleteTitle: (name) => `Befehl !${name} löschen?`,
     deleteConfirmation: (name, aliases) => aliases.length === 0
@@ -262,7 +264,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     save: "Speichern", create: "Anlegen", discard: "Verwerfen", saved: "Alle Änderungen gespeichert",
     pending: "Wird gespeichert …", invalid: "Bitte korrigiere die markierten Felder.", issueError: "Fehler", issueWarning: "Hinweis",
     conflictMessage: "Inzwischen von jemand anderem geändert.", reloadError: "Der Serverstand konnte nicht geladen werden.", reload: "Serverstand laden",
-    managementLocked: "Nur Broadcaster und Verwalter dürfen Befehle anlegen, bearbeiten oder löschen.",
+    managementLocked: "Operatoren dürfen Befehle pausieren und fortsetzen. Andere Einstellungen ändern nur Broadcaster und Verwalter.",
     active: "Aktiv", ready: "Bereit", variableBadge: "Variable",
     never: "noch nie", secondsAgo: (count) => `vor ${String(count)} s`, minutesAgo: (count) => `vor ${String(count)} min`, hoursAgo: (count) => `vor ${String(count)} h`,
     lastUsed: "zuletzt",
@@ -315,7 +317,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     slashTimeoutEffect: (minimum, maximum) => `Times out the caller for ${minimum === maximum ? `${String(minimum)} s` : `${String(minimum)}–${String(maximum)} s`}.`,
     slashAnnouncementEffect: "Sent as a Twitch announcement.",
     slashShoutoutEffect: "The shoutout target comes from the command argument.",
-    response: "Response text", insertVariable: "Insert variable", currencyFrom: "From", currencyTo: "To", responseOptional: "Response text (optional)", responseHint: "What the bot says. Type { to open variables.", responseMissing: "Enter a response.", fieldTooLong: "Use at most 500 characters.",
+    response: "Response text", insertVariable: "Insert variable", currencyToken: "Currency variable", currencyFrom: "From", currencyTo: "To", responseOptional: "Response text (optional)", responseHint: "What the bot says. Type { to open variables.", responseMissing: "Enter a response.", fieldTooLong: "Use at most 500 characters.",
     minimumTier: "Who can use it", minimumRole: "Minimum role",
     tierLabels: { everyone: "Everyone", subscriber: "Subscribers", vip: "VIPs", moderator: "Moderators", broadcaster: "Broadcaster" },
     tierSubjects: { viewer: "viewers", subscriber: "subscribers", vip: "VIPs", moderator: "moderators", broadcaster: "broadcasters" },
@@ -346,7 +348,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     nameAliasConflict: (trigger, command) => `!${trigger} is already an alias for !${command}.`,
     aliasConflict: (trigger, command) => trigger === command ? `!${trigger} is already the command !${command}.` : `!${trigger} is already an alias for !${command}.`,
     aliasInvalid: (trigger) => `!${trigger} — use lowercase letters, numbers, - and _.`,
-    aliasIsName: "This is already the command name.",
+    aliasIsName: "This is already the command name.", aliasPendingInvalid: "Commit or remove the pending alias first.",
     aliasRemove: (alias) => `Remove alias ${alias}`, aliasList: "Aliases",
     delete: "Delete command", deleteTitle: (name) => `Delete command !${name}?`,
     deleteConfirmation: (name, aliases) => aliases.length === 0
@@ -359,7 +361,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     save: "Save", create: "Create", discard: "Discard", saved: "All changes saved",
     pending: "Saving …", invalid: "Please correct the marked fields.", issueError: "Error", issueWarning: "Warning",
     conflictMessage: "This command was changed by someone else.", reloadError: "The server version could not be loaded.", reload: "Load server version",
-    managementLocked: "Only broadcasters and managers may add, edit, or delete commands.",
+    managementLocked: "Operators can pause and resume commands. Only broadcasters and managers can change other settings.",
     active: "Active", ready: "Ready", variableBadge: "Variable",
     never: "never", secondsAgo: (count) => `${String(count)} s ago`, minutesAgo: (count) => `${String(count)} min ago`, hoursAgo: (count) => `${String(count)} h ago`,
     lastUsed: "last used",
