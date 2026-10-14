@@ -14,6 +14,7 @@ import type {
   PanelChannelState,
   PanelEventFilters,
   PanelEventSubSubscription,
+  PanelModeratorStatus,
   PanelModuleState,
   PanelModulesResponse,
   PanelSystemResponse,
@@ -24,6 +25,7 @@ import {
   fetchChannels,
   logout,
   PanelApiError,
+  refreshModeratorStatus,
   setChannelControl,
   setChannelModuleEnabled,
 } from "./api";
@@ -793,8 +795,35 @@ const broadcasterPermissionsRow = (permissions: PanelBroadcasterPermissions | nu
       label={texts.fullConsentMissing}
       tone="warning"
       word={texts.fullConsentMissing}
-      detail={texts.fullConsentLocked}
       action={login === undefined ? undefined : <BroadcasterConsentAction login={login} needed canRequest={canRequest} />}
+    />,
+  };
+};
+
+const channelBotConsentRow = (
+  channelId: string,
+  consent: PanelChannelState["channelBotConsent"],
+  viewerUserId: string | null,
+): StatusEntry | null => {
+  if (consent !== "missing") return null;
+  const texts = dashboardTexts();
+  const reasonId = `channel-bot-consent-reason-${channelId}`;
+  const requestConsent = viewerUserId === channelId;
+  const action = requestConsent
+    ? <a className="button button--primary" href={`/auth/channels/${encodeURIComponent(channelId)}/channel-bot`}>{texts.statusCard.requestChannelBotConsent}</a>
+    : <div className="header-action">
+      <Button size="compact" variant="neutral" disabled describedBy={reasonId}>{texts.statusCard.requestChannelBotConsent}</Button>
+      <div className="header-action__reason-slot"><span className="lock-reason" id={reasonId}>{texts.statusCard.channelBotConsentLocked}</span></div>
+    </div>;
+  return {
+    key: "channel-bot-consent",
+    tone: "warning",
+    node: <StateRow
+      label={texts.statusCard.chatConsent}
+      tone="warning"
+      word={texts.status.broadcasterConsentMissing}
+      detail={texts.statusCard.channelBotConsentMissing}
+      action={action}
     />,
   };
 };
@@ -901,15 +930,46 @@ const ChannelOverviewRoute = ({ overview, modules, modulesLoaded, onNavigate }: 
 
 interface SystemPageProperties {
   channelId: string;
+  login: string;
   role: ChannelRole;
+  channelBotConsent: PanelChannelState["channelBotConsent"];
+  viewerUserId: string | null;
+  moderator: PanelModeratorStatus | null;
   system: PanelSystemResponse | undefined;
   error: string | null;
   loadedAt: number | undefined;
   onRetry: () => void;
+  onModeratorRecheck: () => Promise<void>;
 }
 
-const SystemPage = ({ channelId, role, system, error, loadedAt, onRetry }: SystemPageProperties): ReactElement => {
+const SystemPage = ({ channelId, login, role, channelBotConsent, viewerUserId, moderator, system, error, loadedAt, onRetry, onModeratorRecheck }: SystemPageProperties): ReactElement => {
   const texts = dashboardTexts();
+  const [recheckingModerator, setRecheckingModerator] = useState(false);
+  const canRecheckModerator = canManage(role);
+  const moderatorReasonId = `moderator-recheck-reason-${channelId}`;
+  const moderatorTone: StateTone = moderator === null ? "neutral" : moderator.isModerator ? "healthy" : "error";
+  const moderatorWord = moderator === null ? texts.status.notChecked : moderator.isModerator ? texts.status.healthy : texts.status.moderatorRoleMissing;
+  const moderatorDetail = moderator === null
+    ? texts.moderation.noCheckForChannel
+    : texts.moderation.lastCheck(formatTimestamp(moderator.checkedAt));
+  const moderatorAction = <div className="header-action">
+    <Button
+      size="compact"
+      variant="neutral"
+      disabled={!canRecheckModerator || recheckingModerator}
+      {...(!canRecheckModerator ? { describedBy: moderatorReasonId } : {})}
+      onClick={() => {
+        setRecheckingModerator(true);
+        void onModeratorRecheck().catch(() => { notify({ tone: "error", message: texts.errors.changeFailed }); }).finally(() => { setRecheckingModerator(false); });
+      }}
+    >{recheckingModerator ? texts.moderation.checkRunning : texts.moderation.checkModeratorStatus}</Button>
+    <div className="header-action__reason-slot">{!canRecheckModerator ? <span className="lock-reason" id={moderatorReasonId}>{texts.moderation.checkLocked}</span> : null}</div>
+  </div>;
+  const moderatorStatusRow: StatusEntry = {
+    key: "moderator-status",
+    tone: moderatorTone,
+    node: <StateRow label={texts.statusCard.moderatorStatus} tone={moderatorTone} word={moderatorWord} detail={moderatorDetail} action={moderatorAction} />,
+  };
   return (
     <>
       <PageHeader kind="system" title={texts.system.title} subtitle={texts.system.readOnly} />
@@ -931,7 +991,7 @@ const SystemPage = ({ channelId, role, system, error, loadedAt, onRetry }: Syste
         queryError={{ title: texts.errors.dataLoadFailed, message: error ?? texts.system.loadState, onRetry }}
       >
         {system === undefined ? null : <>
-          <div className="state-list">{[broadcasterRow(system.broadcasterConnection), chatRow(system.chatSubscription, system.chatSubscriptionNeeded === true), botRow(system.bot), botPermissionsRow(system.botPermissions), broadcasterPermissionsRow(system.broadcasterPermissions), tokenRow(system.tokens, system.bot, loadedAt)].filter((entry): entry is StatusEntry => entry !== null).map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
+          <div className="state-list">{[broadcasterRow(system.broadcasterConnection), chatRow(system.chatSubscription, system.chatSubscriptionNeeded === true), botRow(system.bot), botPermissionsRow(system.botPermissions), channelBotConsentRow(channelId, channelBotConsent, viewerUserId), broadcasterPermissionsRow(system.broadcasterPermissions, login, role === "broadcaster"), moderatorStatusRow, tokenRow(system.tokens, system.bot, loadedAt)].filter((entry): entry is StatusEntry => entry !== null).map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
           <BotPermissionsInspector permissions={system.botPermissions} />
           <BroadcasterPermissionsInspector permissions={system.broadcasterPermissions} />
           <SubscriptionsSection subscriptions={system.subscriptions ?? []} />
@@ -1107,6 +1167,15 @@ export const DashboardApp = (): ReactElement => {
   }, [queryClient, reloadChannels, route, selectedChannel]);
 
   const reloadAfterModuleToggle = async (channelId: string): Promise<void> => refreshAfterModuleToggle(queryClient, channelId);
+
+  const recheckModerator = useCallback(async (channelId: string): Promise<void> => {
+    const { moderator } = await refreshModeratorStatus(channelId);
+    queryClient.setQueryData<PanelChannelsResponse>(queryKeys.channels(), (current) => current === undefined ? current : {
+      ...current,
+      channels: current.channels.map((channel) => channel.channelId === channelId ? { ...channel, moderator } : channel),
+    });
+    queryClient.setQueryData<PanelChannelOverview>(queryKeys.channel(channelId, "overview"), (current) => current === undefined ? current : { ...current, moderator });
+  }, [queryClient]);
 
   const reloadOverview = useCallback(async (): Promise<void> => {
     if (route.kind !== "module" && !(route.kind === "channel" && route.section === "overview")) return;
@@ -1461,11 +1530,16 @@ export const DashboardApp = (): ReactElement => {
         {!showChannelNotReleased && route.kind === "channel" && route.section === "system" && selectedChannel !== null ? <SystemPage
           key={route.channelId}
           channelId={route.channelId}
+          login={selectedChannel.login}
           role={selectedChannel.role}
+          channelBotConsent={selectedChannel.channelBotConsent}
+          viewerUserId={viewerUserId}
+          moderator={selectedChannel.moderator}
           system={systemQuery.data}
           error={systemQuery.isError ? errorMessage(systemQuery.error) : null}
           loadedAt={systemQuery.dataUpdatedAt > 0 ? systemQuery.dataUpdatedAt : undefined}
           onRetry={() => { void systemQuery.refetch(); }}
+          onModeratorRecheck={() => recheckModerator(route.channelId)}
         /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "audit" && selectedChannel !== null ? <AuditPage key={route.channelId} channelId={route.channelId} filters={auditFilters} onFiltersChange={updateAuditFilters} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "events" && selectedChannel !== null ? <EventsPage key={route.channelId} channelId={route.channelId} filters={eventFilters} moduleOptions={selectedChannel.modules ?? modules.data?.modules ?? []} onFiltersChange={updateEventFilters} /> : null}

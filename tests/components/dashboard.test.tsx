@@ -1479,6 +1479,69 @@ describe("Dashboard skeleton", () => {
     expect(fetcher.mock.calls.some(([input]) => requestUrl(input).pathname.endsWith("/audit-log"))).toBe(false);
   });
 
+  it("keeps broadcaster consent and moderator recheck actions in System status rows", async () => {
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "broadcaster", login: "alpha", channelBotConsent: "missing" as const };
+    const checkedModerator = { isModerator: false, checkedAt: "2026-09-18T04:00:00.000Z", reason: "missing_moderator_role" };
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], viewerUserId: "kanal-a", bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/system") return Promise.resolve(jsonResponse({
+        ...system,
+        broadcasterPermissions: { missingScopes: ["channel:manage:broadcast"] },
+      }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (url.pathname === "/api/channels/kanal-a/moderator-status" && init?.method === "POST") {
+        return Promise.resolve(jsonResponse({ moderator: checkedModerator, nextAllowedAt: "2026-09-18T04:05:00.000Z" }));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/system");
+
+    render(<DashboardApp />);
+
+    const consent = await screen.findByRole("link", { name: "Vollzustimmung erteilen" });
+    expect(consent).toHaveAttribute("href", "/auth/login?channel=alpha");
+    const channelBotConsent = await screen.findByRole("link", { name: "channel:bot-Zustimmung erteilen" });
+    expect(channelBotConsent).toHaveAttribute("href", "/auth/channels/kanal-a/channel-bot");
+    fireEvent.click(await screen.findByRole("button", { name: "Moderatorstatus prüfen" }));
+    expect(await screen.findAllByText("Moderatorrolle fehlt")).not.toHaveLength(0);
+    const mutation = fetcher.mock.calls.find(([input, init]) => requestUrl(input).pathname === "/api/channels/kanal-a/moderator-status" && init?.method === "POST");
+    expect(mutation).toBeDefined();
+    expect(mutation?.[1]).toMatchObject({ method: "POST", headers: { "X-CSRF-Token": "csrf-token" } });
+  });
+
+  it("shows the access reason beside locked System status actions for operators", async () => {
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "operator", channelBotConsent: "missing" as const };
+    const fetcher = vi.fn((input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], viewerUserId: "other-user", bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/system") return Promise.resolve(jsonResponse({
+        ...system,
+        broadcasterPermissions: { missingScopes: ["channel:manage:broadcast"] },
+      }));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/system");
+
+    render(<DashboardApp />);
+
+    const moderatorCheck = await screen.findByRole("button", { name: "Moderatorstatus prüfen" });
+    expect(moderatorCheck).toBeDisabled();
+    expect(moderatorCheck).toHaveAttribute("aria-describedby");
+    expect(screen.getByText("Nur Broadcaster und Verwalter dürfen den Moderatorstatus prüfen.")).toBeInTheDocument();
+    const consent = screen.getByRole("button", { name: "Vollzustimmung erteilen" });
+    expect(consent).toBeDisabled();
+    expect(consent).toHaveAttribute("aria-describedby");
+    expect(screen.getAllByText("Nur der Broadcaster kann die Vollzustimmung erteilen.")).toHaveLength(1);
+    const channelBotConsent = screen.getByRole("button", { name: "channel:bot-Zustimmung erteilen" });
+    expect(channelBotConsent).toBeDisabled();
+    expect(channelBotConsent).toHaveAttribute("aria-describedby");
+    expect(screen.getByText("Nur der Twitch-Kanalinhaber kann diese Zustimmung erteilen.")).toBeInTheDocument();
+    expect(fetcher.mock.calls.some(([input]) => requestUrl(input).pathname.endsWith("/moderator-status"))).toBe(false);
+  });
+
   it("loads the standalone audit page", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const fetcher = vi.fn((input: RequestInfo | URL) => {

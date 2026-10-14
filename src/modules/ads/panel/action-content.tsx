@@ -16,7 +16,7 @@ export default function AdActionContent({ language, onDraftChange }: ModuleImmed
       name="length"
       value={length}
       onChange={(value) => { setLength(value); onDraftChange?.(true); }}
-      options={LENGTHS.map((value) => ({ value, label: `${value}s`, compactLabel: value }))}
+      options={LENGTHS.map((value) => ({ value, label: `${value} s` }))}
       size="compact"
     />
   </div>;

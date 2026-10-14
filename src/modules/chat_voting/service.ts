@@ -144,14 +144,19 @@ export const requestChatVoteClose = async (
   const vote = options.pollId === undefined
     ? await repository.open(channelId)
     : await repository.byId(channelId, options.pollId);
-  if (vote === null || vote.status !== "open") return null;
-  const requested = await repository.requestManualClose(channelId, vote.id, authorization);
+  if (vote === null || vote.status === "closed") return null;
+  const requested = await repository.requestManualClose(channelId, vote.id, vote.closesAt, authorization);
   if (!requested) return null;
   const deadline = Date.now();
-  const voteDeadline = Date.parse(vote.closesAt);
-  const ownerRevision = Math.max(deadline, Number.isFinite(voteDeadline) ? voteDeadline : deadline) + 1;
+  const closingVote = await repository.byId(channelId, vote.id) ?? {
+    ...vote,
+    status: "closing" as const,
+    closeReason: "manual" as const,
+    deadlineRevision: (vote.deadlineRevision ?? 0) + 1,
+  };
+  const ownerRevision = closingVote.deadlineRevision ?? Math.max(deadline, Date.parse(vote.closesAt)) + 1;
   await scheduleClose(vote.id, deadline, ownerRevision);
-  return { ...vote, closeReason: "manual" };
+  return closingVote;
 };
 
 export const requestChatVoteExtension = async (
@@ -161,7 +166,7 @@ export const requestChatVoteExtension = async (
   authorization?: ModuleMutationAuthorization,
 ): Promise<ChatVote | null> => {
   const vote = await repository.open(channelId);
-  if (vote === null || vote.closeReason === "manual") return null;
+  if (vote === null || vote.status !== "open" || vote.closeReason === "manual") return null;
   const openedAt = Date.parse(vote.openedAt);
   const closesAt = Date.parse(vote.closesAt);
   if (!Number.isFinite(openedAt) || !Number.isFinite(closesAt)) return null;
@@ -171,8 +176,10 @@ export const requestChatVoteExtension = async (
   if (extendedUntil <= closesAt) return null;
   const nextClosesAt = new Date(extendedUntil).toISOString();
   if (!await repository.extendClose(channelId, vote.id, vote.closesAt, nextClosesAt, authorization)) return null;
-  await scheduleClose(vote.id, extendedUntil, extendedUntil);
-  return { ...vote, closesAt: nextClosesAt };
+  const extendedVote = await repository.byId(channelId, vote.id);
+  if (extendedVote === null || extendedVote.status !== "open") return null;
+  await scheduleClose(vote.id, Date.parse(extendedVote.closesAt), extendedVote.deadlineRevision ?? (vote.deadlineRevision ?? 0) + 1);
+  return extendedVote;
 };
 
 const messageText = (event: ModuleEvent): string | null => {
@@ -353,7 +360,7 @@ export const processChatVotingMessage = async (
   }
 
   const vote = openVote;
-  if (vote === null) return { actions: [], diagnostics: [] };
+  if (vote === null || vote.status !== "open") return { actions: [], diagnostics: [] };
   const closesAt = Date.parse(vote.closesAt);
   if (!Number.isFinite(closesAt) || Date.now() >= closesAt) return { actions: [], diagnostics: [] };
   if (vote.kind === "free_text") {
@@ -385,6 +392,7 @@ export const processChatVotingMessage = async (
           more: result.more ?? 0,
           termFilterReady: result.termFilterReady ?? false,
           revision: result.revision,
+          deadlineRevision: vote.deadlineRevision ?? 0,
         },
       }],
       diagnostics: [],
@@ -414,6 +422,7 @@ export const processChatVotingMessage = async (
         title: vote.title,
         counts: [...result.counts],
         revision: result.revision,
+        deadlineRevision: vote.deadlineRevision ?? 0,
       },
     }],
     diagnostics: [],
@@ -518,7 +527,7 @@ export const closeChatVoteFromAlarm = async (
   repository: ChatVotingRepository,
   pollId: string,
 ): Promise<void> => {
-  const vote = await repository.byId(context.channelId, pollId);
+  let vote = await repository.byId(context.channelId, pollId);
   if (vote === null) {
     await context.ballots.close(pollId);
     await context.ballots.acknowledgeClosed?.(pollId);
@@ -526,10 +535,25 @@ export const closeChatVoteFromAlarm = async (
     return;
   }
 
+  if (vote.status === "open") {
+    const now = Date.now();
+    const closesAt = Date.parse(vote.closesAt);
+    if (vote.closeReason !== "manual" && (!Number.isFinite(closesAt) || now < closesAt)) return;
+    const claimed = await repository.claimAlarmClose(
+      context.channelId,
+      pollId,
+      vote.closesAt,
+      new Date(now).toISOString(),
+    );
+    if (!claimed) return;
+    vote = await repository.byId(context.channelId, pollId);
+    if (vote === null || vote.status === "closed") return;
+  }
+
   const storageKey = voteSnapshotStorageKey(pollId);
   const stored = await context.storage.get(storageKey);
   let snapshot: StoredClosedSnapshot | null = isStoredSnapshot(stored) ? stored : null;
-  if (vote.status === "open") {
+  if (vote.status !== "closed") {
     if (snapshot === null) {
       const observed = await context.ballots.read(pollId);
       if (observed !== null) {
@@ -562,7 +586,7 @@ export const closeChatVoteFromAlarm = async (
     ? { counts: [...(vote.counts ?? [])], revision: 0, terms: [...(vote.textResults ?? [])], more: vote.moreTerms ?? 0 }
     : { counts: [...(vote.counts ?? Array.from({ length: vote.optionCount }, () => 0))], revision: 0 };
 
-  if (vote.status === "open") {
+  if (vote.status !== "closed") {
     await repository.finish(
       context.channelId,
       pollId,
@@ -596,6 +620,7 @@ export const closeChatVoteFromAlarm = async (
     termFilterReady: closedVote.termFilterReady ?? snapshot.termFilterReady ?? false,
     closedAt: closedVote.closedAt ?? new Date().toISOString(),
     closeReason: closedVote.closeReason,
+    deadlineRevision: closedVote.deadlineRevision ?? 0,
   });
 
   const settings = await alarmSettings(context);

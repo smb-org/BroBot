@@ -5,6 +5,7 @@ import type { ChannelRole } from "../contracts/values";
 import { canManage } from "../contracts/values";
 import { PanelApiError, saveChannelTimeZone, type PanelChannelLocation, type PanelChannelSettings } from "./api";
 import { ChannelLocationField } from "./ChannelLocationField";
+import { mergeChannelSettingsResponse } from "./channel-settings-cache";
 import { channelSettingsTexts } from "./channel-settings-locale";
 import { useChannelSettings } from "./data/channel-settings";
 import { queryKeys } from "./data/keys";
@@ -25,7 +26,7 @@ export const ChannelLocationPage = ({ channelId, role }: { channelId: string; ro
 
   const updateSettingsCache = async (update: Partial<PanelChannelSettings>): Promise<void> => {
     await queryClient.cancelQueries({ queryKey, exact: true });
-    queryClient.setQueryData<PanelChannelSettings>(queryKey, (current) => current === undefined ? current : { ...current, ...update });
+    queryClient.setQueryData<PanelChannelSettings>(queryKey, (current) => current === undefined ? current : mergeChannelSettingsResponse(current, update));
   };
   const locationSaved = async (location: PanelChannelLocation | null, revision: number): Promise<void> => {
     await updateSettingsCache({ location, locationRevision: revision });

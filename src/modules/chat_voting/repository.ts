@@ -13,6 +13,8 @@ interface ChatVoteRow {
   status: "open" | "closed";
   opened_at: string;
   closes_at: string;
+  closing_at: string | null;
+  deadline_revision: number;
   requested_duration_seconds: number | null;
   closed_at: string | null;
   close_reason: ChatVoteCloseReason;
@@ -82,9 +84,11 @@ const mapRow = (row: ChatVoteRow): ChatVote => {
     title: row.title,
     textMode: row.text_mode,
     termFilterReady: row.term_filter_ready === null ? null : row.term_filter_ready === 1,
-    status: row.status,
+    status: row.status === "closed" ? "closed" : row.closing_at === null ? "open" : "closing",
     openedAt: row.opened_at,
     closesAt: row.closes_at,
+    closingAt: row.closing_at,
+    deadlineRevision: row.deadline_revision,
     requestedDurationSeconds: row.requested_duration_seconds,
     closedAt: row.closed_at,
     closeReason: row.close_reason,
@@ -133,7 +137,7 @@ export interface ChatVoteTemplateRepository {
 }
 
 export const chatVoteSelectColumns = `channel_id, poll_id, kind, option_count, labels_json, status,
-                                      title, opened_at, closes_at, requested_duration_seconds, closed_at,
+                                      title, opened_at, closes_at, closing_at, deadline_revision, requested_duration_seconds, closed_at,
                                       close_reason, counts_json, voter_count, text_mode, text_results_json, more_terms,
                                       term_filter_ready`;
 
@@ -151,7 +155,8 @@ export interface ChatVotingRepository {
     authorization: ModuleMutationAuthorization,
   ): Promise<{ authorized: boolean; changed: boolean }>;
   insertOpen(vote: ChatVoteDraft, authorization?: ModuleMutationAuthorization): Promise<boolean>;
-  requestManualClose(channelId: string, pollId: string, authorization?: ModuleMutationAuthorization): Promise<boolean>;
+  requestManualClose(channelId: string, pollId: string, expectedClosesAt: string, authorization?: ModuleMutationAuthorization): Promise<boolean>;
+  claimAlarmClose(channelId: string, pollId: string, expectedClosesAt: string, claimedAt: string): Promise<boolean>;
   extendClose(
     channelId: string,
     pollId: string,
@@ -348,23 +353,36 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
     const result = await statement.run();
     return result.meta.changes > 0;
   },
-  async requestManualClose(channelId, pollId, authorization) {
+  async requestManualClose(channelId, pollId, expectedClosesAt, authorization) {
     const guard = authorization?.sql ?? "";
     const statement = db.prepare(
       `UPDATE chat_votes
-          SET close_reason = 'manual'
+          SET close_reason = 'manual',
+              closing_at = COALESCE(closing_at, ?),
+              deadline_revision = deadline_revision + CASE WHEN closing_at IS NULL THEN 1 ELSE 0 END
         WHERE channel_id = ? AND poll_id = ? AND status = 'open'
-          AND close_reason IN ('timer', 'limit', 'manual') ${guard}`,
-    ).bind(channelId, pollId, ...(authorization?.values ?? []));
+          AND closes_at = ? AND close_reason IN ('timer', 'limit', 'manual')
+          AND (closing_at IS NULL OR close_reason = 'manual') ${guard}`,
+    ).bind(new Date().toISOString(), channelId, pollId, expectedClosesAt, ...(authorization?.values ?? []));
     const result = await statement.run();
+    return result.meta.changes > 0;
+  },
+  async claimAlarmClose(channelId, pollId, expectedClosesAt, claimedAt) {
+    const result = await db.prepare(
+      `UPDATE chat_votes
+          SET closing_at = ?
+        WHERE channel_id = ? AND poll_id = ? AND status = 'open' AND closing_at IS NULL
+          AND closes_at = ? AND (closes_at <= ? OR close_reason = 'manual')`,
+    ).bind(claimedAt, channelId, pollId, expectedClosesAt, claimedAt).run();
     return result.meta.changes > 0;
   },
   async extendClose(channelId, pollId, expectedClosesAt, closesAt, authorization) {
     const guard = authorization?.sql ?? "";
     const statement = db.prepare(
       `UPDATE chat_votes
-          SET closes_at = ?
-        WHERE channel_id = ? AND poll_id = ? AND status = 'open' AND close_reason <> 'manual' AND closes_at = ? ${guard}`,
+          SET closes_at = ?, deadline_revision = deadline_revision + 1
+        WHERE channel_id = ? AND poll_id = ? AND status = 'open' AND closing_at IS NULL
+          AND close_reason <> 'manual' AND closes_at = ? ${guard}`,
     ).bind(closesAt, channelId, pollId, expectedClosesAt, ...(authorization?.values ?? []));
     const result = await statement.run();
     return result.meta.changes > 0;

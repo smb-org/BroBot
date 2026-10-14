@@ -338,12 +338,13 @@ describe("chat voting routes", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ vote: { id: openTextVote.id, closesAt: new Date(expectedDeadline).toISOString() } });
-    expect(scheduleModuleAlarm).toHaveBeenCalledWith("chat_voting", "close", openTextVote.id, expectedDeadline, expectedDeadline);
+    expect(scheduleModuleAlarm).toHaveBeenCalledWith("chat_voting", "close", openTextVote.id, expectedDeadline, 1);
     expect(publish).toHaveBeenCalledWith(CHANNEL_ID, "chat_voting", "tally", CHAT_VOTING_ELEMENT_KIND, expect.objectContaining({
       pollId: openTextVote.id,
       closesAt: new Date(expectedDeadline).toISOString(),
       counts: [],
       revision: 5,
+      deadlineRevision: 1,
     }));
     expect(writeAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "chat_voting.extended" }), expect.any(String));
   });

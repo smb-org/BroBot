@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { installLiveCockpitMocks } from "./live-cockpit-regression-fixtures";
+import { installLiveCockpitMocks, type LiveCockpitMockOptions } from "./live-cockpit-regression-fixtures";
 
 test.use({ locale: "de-DE", timezoneId: "Europe/Berlin" });
 
@@ -145,6 +145,32 @@ test("a failed availability check leaves the action usable and exposes retry", a
   await expect.poll(mocks.currentStateRequestCount).toBeGreaterThan(priorRequestCount);
 });
 
+test("a failed refresh clears an obsolete running-vote lock", async ({ page }) => {
+  const channelId = "kanal-expired-vote-lock";
+  const options: LiveCockpitMockOptions = {
+    channelId,
+    modules: [{ id: "chat_voting", enabled: true, settings: "{}" }],
+    vote: {
+      id: "vote-expired", channelId, kind: "yes_no", optionCount: 2, labels: ["Ja", "Nein"], title: "Weiter?",
+      status: "open", openedAt: new Date().toISOString(), closesAt: new Date(Date.now() + 90_000).toISOString(),
+      requestedDurationSeconds: 120, closedAt: null, closeReason: "timer", counts: [3, 1], voterCount: 4,
+    },
+  };
+  const mocks = await installLiveCockpitMocks(page, options);
+
+  await page.goto(`/channels/${channelId}`);
+  const startVote = page.getByRole("button", { name: "Abstimmung starten" });
+  await expect(startVote).toBeDisabled();
+  await expect(startVote.locator(".live-action__reason")).toContainText("Abstimmung läuft noch");
+  const requestCountBeforeRefresh = mocks.currentStateRequestCount();
+  options.vote = null;
+  options.currentStateError = true;
+  await expect.poll(mocks.currentStateRequestCount, { timeout: 6_000 }).toBeGreaterThan(requestCountBeforeRefresh);
+  await expect(startVote).toBeEnabled({ timeout: 6_000 });
+  await expect(page.getByText("Prüfung veraltet; Aktion bleibt verfügbar.").first()).toBeVisible();
+  expect(mocks.currentStateRequestCount()).toBeGreaterThan(2);
+});
+
 test("the location warning opens Ort & Wetter and both channel defaults save from System", async ({ page }) => {
   const channelId = "kanal-settings-moved";
   const mocks = await installLiveCockpitMocks(page, { channelId });
@@ -191,6 +217,61 @@ test("the location warning opens Ort & Wetter and both channel defaults save fro
   await save.click();
   await expect(page.locator(".channel-defaults-editor .ui-save-bar__status")).toHaveText("Gespeichert.");
   expect(mocks.settingsState()).toMatchObject({ timeZone: "UTC", defaultChatTarget: "all_chats" });
+});
+
+test("event shoutouts respect raid-module and live-stream availability", async ({ page }) => {
+  const event = {
+    eventId: "raid-event-availability",
+    createdAt: new Date().toISOString(),
+    moduleId: "channel_events",
+    triggerId: "raid-trigger",
+    code: "channel.raid.incoming",
+    detail: JSON.stringify({ source: "raider" }),
+    actorUserId: "raider-id",
+    actorLogin: "raider",
+    actorDisplayName: "Raider",
+  };
+
+  await installLiveCockpitMocks(page, {
+    channelId: "kanal-raid-module-disabled",
+    modules: [{ id: "raid", enabled: false, settings: "{}" }],
+    events: [event],
+  });
+  await page.goto("/channels/kanal-raid-module-disabled");
+  const disabledModuleAction = page.getByRole("button", { name: "Shoutout senden" }).last();
+  await expect(disabledModuleAction).toBeDisabled();
+  const moduleReason = await disabledModuleAction.getAttribute("aria-describedby");
+  if (moduleReason === null) throw new Error("The disabled raid action must describe its module requirement.");
+  await expect(page.locator(`#${moduleReason}`)).toContainText("Modul ist in diesem Kanal nicht aktiv");
+
+  await installLiveCockpitMocks(page, {
+    channelId: "kanal-raid-stream-offline",
+    modules: [{ id: "raid", enabled: true, settings: "{}" }],
+    streamState: "offline",
+    events: [event],
+  });
+  await page.goto("/channels/kanal-raid-stream-offline");
+  const offlineAction = page.getByRole("button", { name: "Shoutout senden" }).last();
+  await expect(offlineAction).toBeDisabled();
+  const streamReason = await offlineAction.getAttribute("aria-describedby");
+  if (streamReason === null) throw new Error("The offline raid action must describe its stream requirement.");
+  await expect(page.locator(`#${streamReason}`)).toContainText("Stream ist offline");
+});
+
+test("operator sees why the upcoming ad snooze action is disabled", async ({ page }) => {
+  await installLiveCockpitMocks(page, {
+    channelId: "kanal-operator-ad-snooze",
+    role: "operator",
+    modules: [{ id: "ads", enabled: true, settings: "{}" }],
+    upcomingAd: true,
+  });
+
+  await page.goto("/channels/kanal-operator-ad-snooze");
+  const snooze = page.getByRole("button", { name: "Verschieben" });
+  await expect(snooze).toBeDisabled();
+  const describedBy = await snooze.getAttribute("aria-describedby");
+  if (describedBy === null) throw new Error("The disabled snooze action must describe its role requirement.");
+  await expect(page.locator(`#${describedBy}`)).toContainText("Nur Verwalter und Broadcaster dürfen diese Aktion ausführen");
 });
 
 test("clip creation keeps its returned edit URL in the action result", async ({ page }) => {
@@ -254,27 +335,50 @@ test("the live title placeholder is read-only and the channel target has one aff
   await expect(chatTarget.locator(".ui-chat-target-field__chevron")).toBeVisible();
 });
 
-test("action tile content stays centered with its reserved reason line", async ({ page }) => {
+test("action tiles center reasonless content and keep vote labels on one line", async ({ page }) => {
   const channelId = "kanal-live-action-centering";
+  await page.setViewportSize({ width: 1280, height: 800 });
   await installLiveCockpitMocks(page, {
     channelId,
-    modules: [{ id: "ads", enabled: true, settings: "{}" }],
+    role: "operator",
+    modules: [{ id: "chat_voting", enabled: true, settings: "{}" }],
+    vote: {
+      id: "vote-geometry", channelId, kind: "yes_no", optionCount: 2, labels: ["Ja", "Nein"], title: "Weiter?",
+      status: "open", openedAt: new Date().toISOString(), closesAt: new Date(Date.now() + 90_000).toISOString(),
+      requestedDurationSeconds: 120, closedAt: null, closeReason: "manual", counts: [3, 1], voterCount: 4,
+    },
   });
 
   await page.goto(`/channels/${channelId}`);
-  const action = page.getByRole("button", { name: "Werbung starten" });
-  const [tileBox, iconBox, reasonBox] = await Promise.all([
-    action.boundingBox(),
-    action.locator(".live-action__icon").boundingBox(),
-    action.locator(".live-action__reason").boundingBox(),
-  ]);
-  expect(tileBox).not.toBeNull();
-  expect(iconBox).not.toBeNull();
-  expect(reasonBox).not.toBeNull();
-  const contentCenter = ((iconBox?.y ?? 0) + (reasonBox?.y ?? 0) + (reasonBox?.height ?? 0)) / 2;
-  const tileCenter = (tileBox?.y ?? 0) + (tileBox?.height ?? 0) / 2;
-  expect(Math.abs(contentCenter - tileCenter)).toBeLessThanOrEqual(4);
-  await expect(action.locator(".live-action__reason")).toHaveCSS("align-self", "center");
+  const action = page.getByRole("button", { name: "Abstimmung beenden" });
+  await expect(action).toBeVisible();
+  for (const width of [1280, 1920]) {
+    await page.setViewportSize({ width, height: width === 1280 ? 800 : 1080 });
+    const geometry = await action.evaluate((element) => {
+      const icon = element.querySelector(".live-action__icon");
+      const name = element.querySelector<HTMLElement>(".live-action__name");
+      if (icon === null || name === null) return null;
+      const tileBox = element.getBoundingClientRect();
+      const iconBox = icon.getBoundingClientRect();
+      const nameBox = name.getBoundingClientRect();
+      return {
+        centerDiff: Math.abs((iconBox.top + nameBox.bottom) / 2 - (tileBox.top + tileBox.height / 2)),
+        nameHeight: nameBox.height,
+        nameScrollHeight: name.scrollHeight,
+        nameClientHeight: name.clientHeight,
+        nameScrollWidth: name.scrollWidth,
+        nameClientWidth: name.clientWidth,
+        whiteSpace: getComputedStyle(name).whiteSpace,
+      };
+    });
+    expect(geometry).not.toBeNull();
+    if (geometry === null) continue;
+    expect(geometry.centerDiff).toBeLessThanOrEqual(4);
+    expect(geometry.nameHeight).toBeLessThanOrEqual(18);
+    expect(geometry.nameScrollHeight).toBeLessThanOrEqual(geometry.nameClientHeight + 1);
+    expect(geometry.nameScrollWidth).toBeLessThanOrEqual(geometry.nameClientWidth + 1);
+    expect(geometry.whiteSpace).toBe("nowrap");
+  }
 });
 
 test("ad and shoutout popovers are named by their linked headings", async ({ page }) => {
@@ -289,7 +393,20 @@ test("ad and shoutout popovers are named by their linked headings", async ({ pag
 
   await page.goto(`/channels/${channelId}`);
   await page.getByRole("button", { name: "Werbung starten" }).click();
-  await expect(page.getByRole("dialog", { name: "Werbung starten" })).toBeVisible();
+  const adPopover = page.getByRole("dialog", { name: "Werbung starten" });
+  await expect(adPopover).toBeVisible();
+  const duration = adPopover.getByRole("group", { name: "Werbedauer" });
+  for (const seconds of ["30", "60", "90", "120", "150", "180"]) {
+    await expect(duration.getByRole("button", { name: `${seconds} s` })).toBeVisible();
+  }
+  await expect(adPopover.getByText("Startet sofort.", { exact: true })).toBeVisible();
+  const helperToFooterGap = await adPopover.evaluate((dialog) => {
+    const helper = dialog.querySelector(".segment-choice-field__hint");
+    const footer = dialog.querySelector(".live-action-frame__footer");
+    if (helper === null || footer === null) return Number.POSITIVE_INFINITY;
+    return footer.getBoundingClientRect().top - helper.getBoundingClientRect().bottom;
+  });
+  expect(helperToFooterGap).toBeLessThanOrEqual(48);
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Shoutout senden" }).click();
   await expect(page.getByRole("dialog", { name: "Shoutout senden" })).toBeVisible();

@@ -52,7 +52,7 @@ const lockReason = (
   if (!canOperate) return labels.operatorLocked;
   if (unavailableReason !== null) return unavailableReason;
   if (state === null) return labels.loading;
-  if (state.vote?.status === "open") return labels.runningLocked;
+  if (state.vote?.status === "open" || state.vote?.status === "closing") return labels.runningLocked;
   if (state.hasOpenBallot) return labels.votekickLocked;
   return null;
 };
@@ -98,7 +98,7 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
   const templateInspectorKeyRef = useRef<string | null>(null);
   const templateInspectorGenerationRef = useRef(0);
   const selectionClearedRef = useRef(selectionCleared);
-  const previousVote = useRef<{ id: string; status: "open" | "closed"; title: string | null } | null>(null);
+  const previousVote = useRef<{ id: string; status: ChatVote["status"]; title: string | null } | null>(null);
   const newDraftSequence = useRef(0);
   const inspectorActions = useRef<TemplateInspectorActions | null>(null);
   const [wide, setWide] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1280);
@@ -179,17 +179,19 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
     if (voteState === null) return;
     const current = voteState.vote;
     const previous = previousVote.current;
+    const currentActive = current?.status === "open" || current?.status === "closing";
+    const previousActive = previous?.status === "open" || previous?.status === "closing";
     if (previous === null && current?.status === "open") {
       announcementSequence.current += 1;
       setAnnouncement({ key: announcementSequence.current, text: labels.startAnnouncement(current.title || labels.untitled) });
-    } else if (previous !== null && previous.status !== "open" && current?.status === "open") {
+    } else if (previous !== null && !previousActive && current?.status === "open") {
       announcementSequence.current += 1;
       setAnnouncement({ key: announcementSequence.current, text: labels.startAnnouncement(current.title || labels.untitled) });
-    } else if (previous?.status === "open" && current?.status !== "open") {
+    } else if (previousActive && !currentActive) {
       announcementSequence.current += 1;
       setAnnouncement({ key: announcementSequence.current, text: labels.endAnnouncement(previous.title || labels.untitled) });
     }
-    const voteClosedOrReplaced = previous?.status === "open" && (current?.status !== "open" || current.id !== previous.id);
+    const voteClosedOrReplaced = previousActive && (!currentActive || current.id !== previous.id);
     const newlyObservedClosedVote = current?.status === "closed" && (previous === null || current.id !== previous.id);
     if (voteClosedOrReplaced || newlyObservedClosedVote) {
       if (mode === "recent") void refreshRecent();
@@ -468,7 +470,7 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
     isNew={newTemplateDraft?.id === selectedTemplate.id}
     initiallySaved={savedTemplateId === selectedTemplate.id}
     language={language}
-    isRunning={voteState?.vote?.status === "open" && (templates.find((entry) => entry.id === selectedTemplate.id)?.lastUsedAt ?? selectedTemplate.lastUsedAt) === voteState.vote.openedAt}
+    isRunning={(voteState?.vote?.status === "open" || voteState?.vote?.status === "closing") && (templates.find((entry) => entry.id === selectedTemplate.id)?.lastUsedAt ?? selectedTemplate.lastUsedAt) === voteState.vote.openedAt}
     startLockReason={activeLockReason}
     onRegisterActions={registerInspectorActions}
     onTemplateSaved={(template) => { onTemplateSaved(template, templateInspectorGeneration); }}

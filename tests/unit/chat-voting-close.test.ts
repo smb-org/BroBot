@@ -116,11 +116,11 @@ describe("chat voting close service", () => {
     for (const [pollId, deadline, revision] of scheduleClose.mock.calls) {
       expect(pollId).toBe("fictional-poll");
       expect(deadline).toEqual(expect.any(Number));
-      expect(revision).toBeGreaterThan(Date.parse("2026-10-04T14:00:00.000Z"));
+      expect(revision).toBeGreaterThanOrEqual(1);
     }
     await expect(repository.open("fictional-channel")).resolves.toMatchObject({
       id: "fictional-poll",
-      status: "open",
+      status: "closing",
       closeReason: "manual",
     });
   });
@@ -134,7 +134,7 @@ describe("chat voting close service", () => {
     await expect(requestChatVoteClose(repository, "fictional-channel", scheduleClose))
       .rejects.toThrow("alarm unavailable");
     await expect(repository.open("fictional-channel")).resolves.toMatchObject({
-      status: "open",
+      status: "closing",
       closeReason: "manual",
     });
 
@@ -163,6 +163,21 @@ describe("chat voting close service", () => {
       .resolves.toMatchObject({ status: "closed", counts: [7, 3], voterCount: 10 });
   });
 
+  it("does not close a ballot when a claimed alarm fires before the persisted deadline", async () => {
+    const repository = await seedOpenVote(false);
+    await database.prepare(
+      "UPDATE chat_votes SET closes_at = ? WHERE channel_id = ? AND poll_id = ?",
+    ).bind("2099-10-04T14:00:00.000Z", "fictional-channel", "fictional-poll").run();
+    const order: string[] = [];
+    const { context, close, read } = createAlarmContext(order);
+
+    await closeChatVoteFromAlarm(context, repository, "fictional-poll");
+
+    expect(read).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+    await expect(repository.byId("fictional-channel", "fictional-poll")).resolves.toMatchObject({ status: "open" });
+  });
+
   it("recovers the final snapshot when persistence fails after the ballot closes", async () => {
     const repository = await seedOpenVote(false);
     const order: string[] = [];
@@ -179,7 +194,7 @@ describe("chat voting close service", () => {
     await expect(closeChatVoteFromAlarm(context, repository, "fictional-poll"))
       .rejects.toThrow("storage interrupted after close");
     expect(close).toHaveBeenCalledOnce();
-    await expect(repository.byId("fictional-channel", "fictional-poll")).resolves.toMatchObject({ status: "open" });
+    await expect(repository.byId("fictional-channel", "fictional-poll")).resolves.toMatchObject({ status: "closing" });
 
     await closeChatVoteFromAlarm(context, repository, "fictional-poll");
 

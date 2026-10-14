@@ -226,7 +226,9 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
         onMessage={(text) => { setFooterMessage({ text }); }}
         onRefresh={refreshLiveData}
       />
-      <LiveCockpitEventFeed channelId={overview.channelId} role={overview.role} now={now} onMessage={(text) => { setFooterMessage({ text }); }} />
+      <LiveCockpitEventFeed channelId={overview.channelId} role={overview.role} now={now}
+        streamState={overview.streamState} raidEnabled={modules.some((module) => module.id === "raid" && module.enabled)}
+        onMessage={(text) => { setFooterMessage({ text }); }} />
     </div>
     <footer className="live-cockpit__status" aria-live="polite" aria-label={labels.systemStatus}>
       <StatusLed state="ok" label={labels.systemStatus} />

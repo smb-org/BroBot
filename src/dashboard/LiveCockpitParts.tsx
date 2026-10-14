@@ -1,18 +1,19 @@
 import { useMemo, useState, type ReactElement } from "react";
 
-import { canManage, hasRequiredChannelRole, type ChannelRole } from "../contracts/values";
+import { canManage, hasRequiredChannelRole, type ChannelRole, type ChannelStreamState } from "../contracts/values";
 import type { PanelEventEntry } from "../panel-contract";
 import { MODULES } from "../modules/registry";
 import type { ModuleLiveTileSnapshot } from "../modules/contract";
 import { cancelVotekick } from "../modules/votekick/panel/service";
 import { closeChatVoting, extendChatVoting } from "../modules/chat_voting/panel/service";
 import { snoozeAds } from "../modules/ads/panel/service";
-import { dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, formatNumber } from "./locale";
+import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, formatNumber, immediateActionUnavailableReasonText } from "./locale";
 import { moduleName } from "./module-labels";
 import { eventDetail } from "./events/model";
 import { useChannelSettings } from "./data/channel-settings";
 import { useEventsQuery } from "./data/lists";
 import { emptyEventFilter } from "./events/model";
+import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
 import { browserTimeZone, formatRelativeTime } from "./ui/format-relative-time";
 import { Button, ChipGroup, ConfirmDialog, DataTable, Field, FilterBar, Icon, LoadStateLines } from "./ui";
 
@@ -171,11 +172,19 @@ export const LiveCockpitTiles = ({
           const relative = formatRelativeTime(item.at, new Date(now), dashboardLanguage(), timeZone).label;
           const title = item.category === "ad" ? labels.nextAdBreak : item.name;
           const detail = item.category === "ad" && item.detail !== null ? labels.adDuration(item.detail) : item.detail;
+          const snoozeReason = !roleCanSnooze ? dashboardTexts().streamManager.managerOnly
+            : item.canSnooze !== true ? labels.adSnoozeUnavailable : null;
+          const snoozeReasonId = `ad-snooze-reason-${item.id}`;
           return <div className="live-cockpit-next-item" key={`${item.category}:${item.id}`}>
             <span className="live-cockpit-next-item__icon"><Icon name={item.category === "ad" ? "ad" : "clock-hour-4"} size={16} /></span>
             <span className="live-cockpit-next-item__copy"><strong>{title}</strong>{detail === null ? null : <small>{detail}</small>}</span>
             <time className="live-cockpit-next-item__time" dateTime={item.at} title={new Date(item.at).toLocaleString(dashboardLanguage(), { timeZone })}>{relative}</time>
-            {item.category === "ad" ? <Button size="compact" variant="subtle" disabled={busy || !roleCanSnooze || item.canSnooze !== true} onClick={() => { void doSnoozeAd(item.canSnooze === true); }}>{labels.adSnooze}</Button> : null}
+            {item.category === "ad" ? <>
+              <Button size="compact" variant="subtle" disabled={busy || !roleCanSnooze || item.canSnooze !== true}
+                {...(snoozeReason === null ? {} : { describedBy: snoozeReasonId })}
+                onClick={() => { void doSnoozeAd(item.canSnooze === true); }}>{labels.adSnooze}</Button>
+              {snoozeReason === null ? null : <span className="sr-only" id={snoozeReasonId}>{snoozeReason}</span>}
+            </> : null}
           </div>;
         })}
       </div>}
@@ -183,10 +192,12 @@ export const LiveCockpitTiles = ({
   </div>;
 };
 
-export const LiveCockpitEventFeed = ({ channelId, role, now, onMessage }: {
+export const LiveCockpitEventFeed = ({ channelId, role, now, streamState, raidEnabled, onMessage }: {
   channelId: string;
   role: ChannelRole;
   now: number;
+  streamState: ChannelStreamState | null | undefined;
+  raidEnabled: boolean;
   onMessage: (message: string) => void;
 }): ReactElement => {
   const labels = dashboardTexts().liveCockpit;
@@ -209,6 +220,10 @@ export const LiveCockpitEventFeed = ({ channelId, role, now, onMessage }: {
   }), [entries, filter, language, query]);
   const raidAction = MODULES.find((module) => module.id === "raid")?.actions?.find((action) => action.id === "send-shoutout");
   const roleCanShoutout = raidAction !== undefined && hasRequiredChannelRole(role, raidAction.requiredRole);
+  const shoutoutAvailability = evaluateImmediateActionAvailability(raidAction?.conditions ?? [], streamState);
+  const shoutoutReason = !raidEnabled
+    ? apiErrorText("module_disabled", labels.raidShoutoutFailed, language)
+    : shoutoutAvailability.reason === null ? null : immediateActionUnavailableReasonText(shoutoutAvailability.reason, language);
   const rows = filtered.map((entry) => ({
     id: entry.eventId,
     at: new Date(entry.createdAt),
@@ -220,7 +235,7 @@ export const LiveCockpitEventFeed = ({ channelId, role, now, onMessage }: {
   }));
 
   const sendShoutout = async (entry: PanelEventEntry): Promise<void> => {
-    if (raidAction === undefined || busyEntry !== null) return;
+    if (raidAction === undefined || !raidEnabled || !shoutoutAvailability.enabled || busyEntry !== null) return;
     const login = raidLogin(entry);
     if (login === null) return;
     setBusyEntry(entry.eventId);
@@ -261,7 +276,13 @@ export const LiveCockpitEventFeed = ({ channelId, role, now, onMessage }: {
             return <>
               <span className="event-label event-table__primary">
                 <span className="event-table__text" title={row.summary}>{row.summary}</span>
-                {login === null ? null : <Button size="compact" variant="secondary" disabled={!roleCanShoutout || busyEntry !== null} onClick={() => { void sendShoutout(row.entry); }}>{labels.raidShoutout}</Button>}
+                {login === null ? null : <>
+                  <Button size="compact" variant="secondary"
+                    disabled={!roleCanShoutout || !raidEnabled || !shoutoutAvailability.enabled || busyEntry !== null}
+                    {...(shoutoutReason === null ? {} : { describedBy: `${row.entry.eventId}-raid-shoutout-reason` })}
+                    onClick={() => { void sendShoutout(row.entry); }}>{labels.raidShoutout}</Button>
+                  {shoutoutReason === null ? null : <span className="sr-only" id={`${row.entry.eventId}-raid-shoutout-reason`}>{shoutoutReason}</span>}
+                </>}
               </span>
               <span className="event-table__mobile-meta muted">
                 <span className="data-table__module-group" data-module-group={row.moduleGroup} aria-hidden="true" />

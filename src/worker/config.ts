@@ -19,8 +19,8 @@ const REQUIRED_SECRET_NAMES = [
 // update it and /healthz reports a freshly set-up database as broken (503)
 // even though everything is fine. `tests/unit/schema-baseline.test.ts`
 // therefore pins it to the last file in `migrations/`.
-export const LATEST_SCHEMA_MIGRATION = "0063_faq_tier_and_order.sql";
-export const LATEST_SCHEMA_TABLE = "faq_entry_order";
+export const LATEST_SCHEMA_MIGRATION = "0064_chat_vote_deadline_fence.sql";
+export const LATEST_SCHEMA_TABLE = "chat_votes";
 
 const REQUIRED_BINDING_NAMES = ["DB", "CHANNEL", "ASSETS", "CF_VERSION_METADATA"] as const;
 

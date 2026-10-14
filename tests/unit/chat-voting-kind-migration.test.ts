@@ -190,7 +190,7 @@ describe("chat voting kind migration", () => {
     const actual = createChatVotingRepository(database as unknown as D1Database);
     const repository: ChatVotingRepository = {
       ...actual,
-      async requestManualClose(channelId, pollId, authorization) {
+      async requestManualClose(channelId, pollId, expectedClosesAt, authorization) {
         await database.prepare(`
           UPDATE chat_votes SET status = 'closed', closed_at = '2026-10-04T10:01:00.000Z',
             counts_json = '[0,0]', voter_count = 0
@@ -203,7 +203,7 @@ describe("chat voting kind migration", () => {
           VALUES ('race-channel', 'new-poll', 'yes_no', 2, '["Yes","No"]',
                   'open', '2026-10-04T10:02:00.000Z', '2026-10-04T14:02:00.000Z', 'limit')
         `).bind().run();
-        return await actual.requestManualClose(channelId, pollId, authorization);
+        return await actual.requestManualClose(channelId, pollId, expectedClosesAt, authorization);
       },
     };
     const scheduleClose = vi.fn(() => Promise.resolve());

@@ -1,4 +1,5 @@
 import type { BallotTermCount } from "../../contract";
+import { chatVotingKindForPreset, chatVotingPresetForKind } from "../contracts";
 import type { ChatVotingKind, ChatVotingPreset, ChatVotingTextMode } from "../contracts";
 
 export interface TallyState {
@@ -7,7 +8,7 @@ export interface TallyState {
   closesAt?: string;
   requestedDurationSeconds?: number | null;
   title?: string | null;
-  status?: "open" | "closed";
+  status?: "open" | "closing" | "closed";
   labels?: readonly string[];
   kind?: ChatVotingKind;
   preset?: ChatVotingPreset;
@@ -18,8 +19,60 @@ export interface TallyState {
   more?: number;
   termFilterReady?: boolean;
   revision: number;
+  deadlineRevision?: number;
   closedAt?: string | null;
 }
+
+const record = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
+const isNonNegativeInteger = (value: unknown): value is number =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+export const parseTallyState = (value: unknown): TallyState | null => {
+  const state = record(value);
+  if (state === null || typeof state.pollId !== "string" || !Array.isArray(state.counts) ||
+      !state.counts.every(isNonNegativeInteger) ||
+      !Number.isSafeInteger(state.revision) || (state.revision as number) < 0) return null;
+  const labels = Array.isArray(state.labels) && state.labels.every((label) => typeof label === "string")
+    ? state.labels
+    : undefined;
+  const terms = Array.isArray(state.terms) && state.terms.every((entry) => {
+    const term = record(entry);
+    return term !== null && typeof term.term === "string" && Array.from(term.term).length <= 25 &&
+      isNonNegativeInteger(term.count) && term.count > 0 && typeof term.approved === "boolean";
+  }) ? state.terms as TallyState["terms"] : undefined;
+  const validPreset = state.preset === "yes_no" || state.preset === "scale_5" || state.preset === "options_n" ||
+    state.preset === "digit_01" || state.preset === "digit_12" || state.preset === "free_text";
+  const validKind = state.kind === "yes_no" || state.kind === "options" || state.kind === "free_text";
+  const storedPreset = validPreset ? state.preset as ChatVotingPreset : undefined;
+  const kind: ChatVotingKind | undefined = validKind ? state.kind as ChatVotingKind
+    : storedPreset === undefined ? undefined : chatVotingKindForPreset(storedPreset);
+  const preset = storedPreset ?? (kind === undefined ? undefined : chatVotingPresetForKind(kind));
+  return {
+    pollId: state.pollId,
+    ...(typeof state.openedAt === "string" ? { openedAt: state.openedAt } : {}),
+    ...(typeof state.closesAt === "string" && Number.isFinite(Date.parse(state.closesAt)) ? { closesAt: state.closesAt } : {}),
+    ...(state.requestedDurationSeconds === null || typeof state.requestedDurationSeconds === "number" &&
+      Number.isSafeInteger(state.requestedDurationSeconds) && state.requestedDurationSeconds > 0
+      ? { requestedDurationSeconds: state.requestedDurationSeconds } : {}),
+    ...(state.title === null || typeof state.title === "string" && Array.from(state.title).length <= 80 ? { title: state.title } : {}),
+    ...(state.status === "open" || state.status === "closing" || state.status === "closed" ? { status: state.status } : {}),
+    ...(labels === undefined ? {} : { labels }),
+    ...(kind === undefined ? {} : { kind }),
+    ...(preset === undefined ? {} : { preset }),
+    ...(typeof state.optionCount === "number" && Number.isInteger(state.optionCount) ? { optionCount: state.optionCount } : {}),
+    ...(state.textMode === "first_word" || state.textMode === "whole_message" || state.textMode === null
+      ? { textMode: state.textMode } : {}),
+    counts: state.counts,
+    ...(terms === undefined ? {} : { terms }),
+    ...(isNonNegativeInteger(state.more) ? { more: state.more } : {}),
+    ...(typeof state.termFilterReady === "boolean" ? { termFilterReady: state.termFilterReady } : {}),
+    revision: state.revision as number,
+    ...(Number.isSafeInteger(state.deadlineRevision) && (state.deadlineRevision as number) >= 0
+      ? { deadlineRevision: state.deadlineRevision as number } : {}),
+    ...(typeof state.closedAt === "string" ? { closedAt: state.closedAt } : {}),
+  };
+};
 
 const isTallyState = (value: unknown): value is TallyState => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -27,7 +80,8 @@ const isTallyState = (value: unknown): value is TallyState => {
   return typeof state.pollId === "string" && Array.isArray(state.counts) &&
     state.counts.every((count) => Number.isSafeInteger(count) && count >= 0) &&
     typeof state.revision === "number" && Number.isSafeInteger(state.revision) && state.revision >= 0 &&
-    (state.status === undefined || state.status === "open" || state.status === "closed") &&
+    (state.status === undefined || state.status === "open" || state.status === "closing" || state.status === "closed") &&
+    (state.deadlineRevision === undefined || Number.isSafeInteger(state.deadlineRevision) && (state.deadlineRevision as number) >= 0) &&
     (state.openedAt === undefined || typeof state.openedAt === "string" && Number.isFinite(Date.parse(state.openedAt))) &&
     (state.closesAt === undefined || typeof state.closesAt === "string" && Number.isFinite(Date.parse(state.closesAt))) &&
     (state.requestedDurationSeconds === undefined || state.requestedDurationSeconds === null ||
@@ -63,12 +117,26 @@ export const mergeTallyState = (previous: TallyState | null, incoming: TallyStat
   if (incoming.pollId !== previous.pollId) {
     return isNewerPoll(incoming, previous) ? incoming : previous;
   }
+  const previousDeadlineRevision = previous.deadlineRevision ?? 0;
+  const incomingDeadlineRevision = incoming.deadlineRevision ?? 0;
   if (incoming.status === "closed") {
+    if (incomingDeadlineRevision < previousDeadlineRevision) return previous;
     return { ...previous, ...incoming };
   }
   if (previous.status === "closed") return previous;
-  if (incoming.revision < previous.revision) return previous;
-  return { ...previous, ...incoming };
+  if (incoming.revision < previous.revision && incomingDeadlineRevision <= previousDeadlineRevision) return previous;
+  const merged = incoming.revision < previous.revision ? { ...previous } : { ...previous, ...incoming };
+  if (incomingDeadlineRevision < previousDeadlineRevision) {
+    if (previous.closesAt === undefined) delete merged.closesAt;
+    else merged.closesAt = previous.closesAt;
+    merged.deadlineRevision = previousDeadlineRevision;
+    if (previous.requestedDurationSeconds !== undefined) merged.requestedDurationSeconds = previous.requestedDurationSeconds;
+  } else {
+    if (incoming.closesAt === undefined && previous.closesAt !== undefined) merged.closesAt = previous.closesAt;
+    merged.deadlineRevision = incomingDeadlineRevision;
+  }
+  if (previous.status === "closing" && incoming.status === "open") merged.status = "closing";
+  return merged;
 };
 
 /** Applies the tally reducer to arbitrary JSON realtime state. */

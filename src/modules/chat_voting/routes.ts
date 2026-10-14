@@ -85,6 +85,7 @@ const chatVoteTallyState = (vote: ChatVote, snapshot: BallotSnapshot) => ({
   more: snapshot.more ?? 0,
   termFilterReady: snapshot.termFilterReady ?? vote.termFilterReady ?? false,
   revision: snapshot.revision,
+  deadlineRevision: vote.deadlineRevision ?? 0,
 });
 
 export const chatVotingRoutes = new Hono<ModuleRouteEnvironment>();
@@ -112,7 +113,7 @@ chatVotingRoutes.get("/current", async (context) => {
     return context.json({ vote: null, counts: null, revision: 0, terms: null, moreTerms: null, hasOpenBallot, defaultDurationSeconds: effectiveSettings.autoCloseSeconds, defaultLabels });
   }
   const [snapshot, hasOpenBallot] = await Promise.all([
-    vote.status === "open" ? ballots.readSnapshot?.(vote.id) ?? Promise.resolve(null) : Promise.resolve(null),
+    vote.status !== "closed" ? ballots.readSnapshot?.(vote.id) ?? Promise.resolve(null) : Promise.resolve(null),
     ballots.hasOpenBallotSnapshot?.() ?? Promise.resolve(false),
   ]);
   return context.json({

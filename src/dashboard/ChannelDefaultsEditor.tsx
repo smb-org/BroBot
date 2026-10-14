@@ -10,6 +10,8 @@ import { queryKeys } from "./data/keys";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts } from "./locale";
 import { ChannelTimeZoneField } from "./ChannelTimeZoneField";
 import { channelSettingsTexts } from "./channel-settings-locale";
+import { chatTargetFieldTexts } from "./chat-target-field-locale";
+import { mergeChannelSettingsResponse } from "./channel-settings-cache";
 import { ChatTargetField, ConfirmDialog, LoadState, LoadStateLines, SaveStatus, Section, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
 
 interface ChannelDefaultsEditorProperties {
@@ -27,6 +29,7 @@ interface ChannelDefaultsDraft {
 
 export const ChannelDefaultsEditor = ({ channelId, role }: ChannelDefaultsEditorProperties): ReactElement => {
   const labels = channelSettingsTexts(dashboardLanguage());
+  const targetLabels = chatTargetFieldTexts[dashboardLanguage()];
   const common = dashboardCommonTexts();
   const dashboard = dashboardTexts();
   const queryClient = useQueryClient();
@@ -45,6 +48,8 @@ export const ChannelDefaultsEditor = ({ channelId, role }: ChannelDefaultsEditor
   const chatTargetDraftMatchesSettings = settings !== undefined && draftForChannel && draftState.chatTargetRevision === settings.defaultChatTargetRevision;
   const timeZone = settings === undefined ? "" : timeZoneDraftMatchesSettings ? draftState.timeZone : settings.timeZone;
   const chatTarget = settings === undefined ? "source_only" : chatTargetDraftMatchesSettings ? draftState.chatTarget : settings.defaultChatTarget;
+  const chatTargetLabel = chatTarget === "all_chats" ? targetLabels.allChats
+    : chatTarget === "source_only" ? targetLabels.onlyOurChat : targetLabels.automatic;
   const dirty = settings !== undefined && (timeZone !== settings.timeZone || chatTarget !== settings.defaultChatTarget);
 
   const writeDraft = (next: Partial<Pick<ChannelDefaultsDraft, "timeZone" | "chatTarget">>): void => {
@@ -63,7 +68,7 @@ export const ChannelDefaultsEditor = ({ channelId, role }: ChannelDefaultsEditor
 
   const updateSettingsCache = async (update: Partial<PanelChannelSettings>): Promise<void> => {
     await queryClient.cancelQueries({ queryKey, exact: true });
-    queryClient.setQueryData<PanelChannelSettings>(queryKey, (current) => current === undefined ? current : { ...current, ...update });
+    queryClient.setQueryData<PanelChannelSettings>(queryKey, (current) => current === undefined ? current : mergeChannelSettingsResponse(current, update));
   };
 
   const saveDraft = async (): Promise<string | null> => {
@@ -109,27 +114,32 @@ export const ChannelDefaultsEditor = ({ channelId, role }: ChannelDefaultsEditor
   useEffect(() => registerDashboardNavigationGuard(navigationGuard.guardSwitch), [navigationGuard.guardSwitch]);
 
   return <Section title={labels.section} className="channel-defaults-editor">
-    <LoadState variant="panel-178"
+    <LoadState variant={canEdit ? "panel-178" : "panel-0"}
       status={!settingsReady ? settingsQuery.isError || settings !== undefined ? "error" : "loading" : "success"}
       loading={<LoadStateLines rows={2} height={58} />}
       empty={<LoadStateLines rows={2} height={58} />}
       error={<p role="alert">{labels.loadError}</p>}
       queryError={{ title: dashboard.errors.dataLoadFailed, message: labels.loadError, onRetry: () => { void settingsQuery.refetch(); } }}>
-      {!settingsReady ? null : <>
+      {!settingsReady ? null : !canEdit ? <>
+        <p className="lock-reason">{labels.readOnly}</p>
+        <dl className="properties channel-defaults-editor__properties">
+          <div><dt>{labels.timeZone}</dt><dd>{timeZone}</dd></div>
+          <div><dt>{labels.defaultChatTarget}</dt><dd>{chatTargetLabel}</dd></div>
+        </dl>
+      </> : <>
         <div className="channel-defaults-editor__fields">
           <div className="channel-defaults-editor__field">
             <ChannelTimeZoneField label={labels.timeZone} hint={labels.timeZoneHint} value={timeZone}
-              onChange={(value) => { writeDraft({ timeZone: value }); }} canEdit={canEdit} disabled={pending} />
+              onChange={(value) => { writeDraft({ timeZone: value }); }} canEdit disabled={pending} />
           </div>
           <div className="channel-defaults-editor__field channel-defaults-editor__field--chat-target">
             <ChatTargetField label={labels.defaultChatTarget} value={chatTarget}
               allowed={["all_chats", "source_only", "where_asked"]}
               onChange={(value) => { if (value !== null) writeDraft({ chatTarget: value }); }}
-              disabled={!canEdit || pending} />
+              disabled={pending} />
             <p className="muted channel-defaults-editor__hint">{labels.defaultChatTargetHint}</p>
           </div>
         </div>
-        {!canEdit ? <p className="lock-reason">{labels.readOnly}</p> : null}
         <SaveStatus dirty={dirty} pending={pending} persistent {...(saveError === undefined ? {} : { error: saveError })} saved={saved}
           onSave={() => { void saveDraft(); }} onDiscard={discard}
           saveLabel={common.save} discardLabel={common.discard} savedLabel={common.saved} pendingLabel={common.saving} />

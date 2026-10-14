@@ -67,7 +67,7 @@ export interface ChatVote {
   title: string | null;
   textMode?: ChatVotingTextMode | null;
   termFilterReady?: boolean | null;
-  status: "open" | "closed";
+  status: "open" | "closing" | "closed";
   openedAt: string;
   closesAt: string;
   requestedDurationSeconds: number | null;
@@ -77,6 +77,8 @@ export interface ChatVote {
   voterCount: number | null;
   textResults?: readonly ChatVoteTerm[] | null;
   moreTerms?: number | null;
+  closingAt?: string | null;
+  deadlineRevision?: number;
 }
 
 export interface ChatVoteDraft extends Omit<ChatVote, "status" | "closedAt" | "counts" | "voterCount"> {

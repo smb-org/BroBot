@@ -44,7 +44,7 @@ export function ChatVoteTemplateList({
   return <div className="chat-voting-template-list">
     {templates.map((template) => {
       const title = displayTitle(template, labels.untitled);
-      const isRunning = vote?.status === "open" && template.lastUsedAt === vote.openedAt;
+      const isRunning = (vote?.status === "open" || vote?.status === "closing") && template.lastUsedAt === vote.openedAt;
       const problem = templateStartProblem(template);
       const lockReason = startsLockedReason ?? (problem === null ? null : labels.problem(problem));
       const canStart = canOperate && lockReason === null && !isRunning;

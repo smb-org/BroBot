@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { chatVotingOverlayElement } from "../../src/modules/chat_voting/overlay/element";
-import { mergeTallyRealtimeState, mergeTallyState, type TallyState } from "../../src/modules/chat_voting/overlay/tally-state";
+import { mergeTallyRealtimeState, mergeTallyState, parseTallyState, type TallyState } from "../../src/modules/chat_voting/overlay/tally-state";
 
 const tally = (
   pollId: string,
@@ -29,6 +29,60 @@ describe("chat voting tally state", () => {
 
     expect(mergeTallyState(current, tally("poll-a", 2))).toBe(current);
     expect(mergeTallyState(current, tally("poll-a", 5))).toMatchObject({ revision: 5, counts: [5, 0] });
+  });
+
+  it("keeps an extended deadline when a later ballot revision carries stale deadline metadata", () => {
+    const current = {
+      ...tally("poll-a", 4),
+      closesAt: "2026-10-04T14:02:00.000Z",
+      deadlineRevision: 2,
+    } as TallyState;
+    const delayed = {
+      ...tally("poll-a", 5),
+      closesAt: "2026-10-04T14:01:00.000Z",
+      deadlineRevision: 1,
+    } as TallyState;
+
+    expect(mergeTallyState(current, delayed)).toMatchObject({
+      closesAt: "2026-10-04T14:02:00.000Z",
+      deadlineRevision: 2,
+      counts: [5, 0],
+    });
+  });
+
+  it("preserves deadline revisions through the renderer parser before merging stale messages", () => {
+    const current = parseTallyState({
+      ...tally("poll-a", 4),
+      closesAt: "2026-10-04T14:02:00.000Z",
+      deadlineRevision: 2,
+    });
+    const delayed = parseTallyState({
+      ...tally("poll-a", 5),
+      closesAt: "2026-10-04T14:01:00.000Z",
+      deadlineRevision: 1,
+    });
+
+    expect(current?.deadlineRevision).toBe(2);
+    expect(mergeTallyState(current, delayed)).toMatchObject({
+      closesAt: "2026-10-04T14:02:00.000Z",
+      deadlineRevision: 2,
+      counts: [5, 0],
+    });
+  });
+
+  it("keeps a claimed close state when a delayed open tally arrives", () => {
+    const closing = {
+      ...tally("poll-a", 4, "closing"),
+      closesAt: "2026-10-04T14:01:00.000Z",
+      deadlineRevision: 1,
+    } as TallyState;
+    const delayedOpen = {
+      ...tally("poll-a", 5, "open"),
+      closesAt: "2026-10-04T14:01:00.000Z",
+      deadlineRevision: 1,
+    } as TallyState;
+
+    expect(mergeTallyState(closing, delayedOpen)).toMatchObject({ status: "closing", revision: 5, counts: [5, 0] });
   });
 
   it("replaces reducer state with a null or lower-revision closed snapshot", () => {

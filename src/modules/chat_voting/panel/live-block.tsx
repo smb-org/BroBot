@@ -19,7 +19,7 @@ export interface ChatVotingLiveBlockProperties {
 export function ChatVotingLiveBlock({ state, language, busy, canOperate, onClose, onApprove }: ChatVotingLiveBlockProperties): ReactElement {
   const labels = chatVotingSavedPanelTexts(language);
   const vote = state?.vote ?? null;
-  const running = vote?.status === "open";
+  const running = vote?.status === "open" || vote?.status === "closing";
   const counts = state?.counts ?? vote?.counts ?? [];
   const total = counts.reduce((sum, count) => sum + count, 0);
   const textTerms = state?.terms ?? vote?.textResults ?? [];

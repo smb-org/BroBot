@@ -861,8 +861,9 @@ export interface DashboardTexts {
     moderatorStatus: string;
     chatSubscription: string;
     tokenStatus: string;
-    broadcasterConsentMissing: string;
-    chatBotRequired: string;
+    requestChannelBotConsent: string;
+    channelBotConsentLocked: string;
+    channelBotConsentMissing: string;
   };
   time: {
     updated: (relativeTime: string) => string;
@@ -1285,8 +1286,9 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     statusCard: {
       broadcasterOauth: "Broadcaster-OAuth", chatConsent: "Chat-Zustimmung",
       botAccount: "Bot-Account", botPermissions: "Bot-Berechtigungen", moderatorStatus: "Moderatorstatus", chatSubscription: "Chat-Abo", tokenStatus: "Token-Zustand",
-      broadcasterConsentMissing: "Broadcaster-Zustimmung fehlt",
-      chatBotRequired: "channel:bot wird vom Broadcaster benötigt.",
+      requestChannelBotConsent: "channel:bot-Zustimmung erteilen",
+      channelBotConsentLocked: "Nur der Twitch-Kanalinhaber kann diese Zustimmung erteilen.",
+      channelBotConsentMissing: "channel:bot-Zustimmung fehlt.",
     },
     time: {
       updated: (relativeTime) => `aktualisiert ${relativeTime}`, secondsAgo: (count) => `vor ${String(count)} s`,
@@ -1681,8 +1683,9 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     statusCard: {
       broadcasterOauth: "Broadcaster OAuth", chatConsent: "Chat consent", botAccount: "Bot account", botPermissions: "Bot permissions",
       moderatorStatus: "Moderator status", chatSubscription: "Chat subscription", tokenStatus: "Token status",
-      broadcasterConsentMissing: "Broadcaster consent missing",
-      chatBotRequired: "channel:bot is required from the broadcaster.",
+      requestChannelBotConsent: "Grant channel:bot consent",
+      channelBotConsentLocked: "Only the Twitch channel owner can grant this consent.",
+      channelBotConsentMissing: "channel:bot consent is missing.",
     },
     time: {
       updated: (relativeTime) => `updated ${relativeTime}`, secondsAgo: (count) => `${String(count)} sec ago`,

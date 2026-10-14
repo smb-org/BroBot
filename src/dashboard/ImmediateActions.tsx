@@ -80,7 +80,7 @@ const ActionButton = ({ action, moduleId, channelId, streamState, role, onAction
       const timeout = window.setTimeout(() => {
         if (!active) return;
         controller.abort();
-        setConditionState((current) => ({ ...current, loading: false, stale: true }));
+        setConditionState({ loading: false, reason: null, until: null, stale: true });
       }, 10_000);
       setConditionState((current) => ({ ...current, loading: current.reason === null && !current.stale }));
       try {
@@ -95,7 +95,7 @@ const ActionButton = ({ action, moduleId, channelId, streamState, role, onAction
         if (active) setConditionState({ loading: false, reason: null, until: null, stale: false });
       } catch {
         if (!active) return;
-        setConditionState((current) => ({ ...current, loading: false, stale: true }));
+        setConditionState({ loading: false, reason: null, until: null, stale: true });
       } finally {
         window.clearTimeout(timeout);
         if (pendingController === controller) pendingController = null;
@@ -252,7 +252,8 @@ const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason, 
     <span className="live-action__name">{action.name[language]}</span>
     <span id={reasonId} className={`live-action__reason${reason !== null ? " is-locked" : error !== null ? " has-error" : ""}`} aria-live="polite">{reasonLine}</span>
   </>;
-  const triggerClassName = `live-action__button${reason !== null ? " is-locked" : ""}`;
+  const hasReason = reason !== null || availabilityStale || error !== null || result !== null;
+  const triggerClassName = `live-action__button${reason !== null ? " is-locked" : ""}${hasReason ? " has-reason" : ""}`;
   const availabilityRetry = availabilityStale ? <Button className="live-action__retry" ariaLabel={dashboardCommonTexts().retry} size="compact" variant="subtle" onClick={onRetryAvailability}>{dashboardCommonTexts().retry}</Button> : null;
   const triggerProps = {
     "aria-label": action.name[language],

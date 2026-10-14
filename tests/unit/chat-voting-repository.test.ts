@@ -209,7 +209,7 @@ describe("chat voting repository mutation guards", () => {
         "DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?",
       ).bind("fictional-channel", "fictional-operator").run();
 
-      await expect(repository.requestManualClose("fictional-channel", vote.id, authorization)).resolves.toBe(false);
+      await expect(repository.requestManualClose("fictional-channel", vote.id, vote.closesAt, authorization)).resolves.toBe(false);
       await expect(repository.open("fictional-channel")).resolves.toMatchObject({ id: vote.id, status: "open" });
     } finally {
       database.close();
@@ -234,19 +234,59 @@ describe("chat voting repository mutation guards", () => {
         closeReason: "limit",
       };
       await repository.insertOpen(vote);
-      await expect(repository.requestManualClose("fictional-channel", vote.id)).resolves.toBe(true);
+      await expect(repository.requestManualClose("fictional-channel", vote.id, vote.closesAt)).resolves.toBe(true);
       await expect(repository.open("fictional-channel")).resolves.toMatchObject({
         id: vote.id,
-        status: "open",
+        status: "closing",
         closeReason: "manual",
       });
 
-      await expect(repository.requestManualClose("fictional-channel", vote.id)).resolves.toBe(true);
+      await expect(repository.requestManualClose("fictional-channel", vote.id, vote.closesAt)).resolves.toBe(true);
 
       await expect(repository.open("fictional-channel")).resolves.toMatchObject({
-        status: "open",
+        status: "closing",
         closeReason: "manual",
         requestedDurationSeconds: 120,
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("fences alarms, extensions, and manual close against the persisted deadline", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "fictional-channel");
+      const repository = createChatVotingRepository(database as unknown as D1Database);
+      const vote: ChatVoteDraft = {
+        id: "fictional-poll",
+        channelId: "fictional-channel",
+        kind: "yes_no",
+        optionCount: 2,
+        labels: ["Yes", "No"],
+        title: null,
+        openedAt: "2026-10-04T10:00:00.000Z",
+        closesAt: "2026-10-04T14:00:00.000Z",
+        requestedDurationSeconds: 120,
+        closeReason: "timer",
+      };
+      await repository.insertOpen(vote);
+      const extendedDeadline = "2026-10-04T14:02:00.000Z";
+      const nextExtension = "2026-10-04T14:04:00.000Z";
+
+      await expect(repository.extendClose("fictional-channel", vote.id, vote.closesAt, extendedDeadline)).resolves.toBe(true);
+      await expect(repository.requestManualClose("fictional-channel", vote.id, vote.closesAt)).resolves.toBe(false);
+      await expect(repository.claimAlarmClose("fictional-channel", vote.id, vote.closesAt, "2026-10-04T14:01:00.000Z")).resolves.toBe(false);
+      await expect(repository.claimAlarmClose("fictional-channel", vote.id, extendedDeadline, "2026-10-04T14:01:00.000Z")).resolves.toBe(false);
+      await expect(repository.extendClose("fictional-channel", vote.id, vote.closesAt, nextExtension)).resolves.toBe(false);
+
+      await expect(repository.requestManualClose("fictional-channel", vote.id, extendedDeadline)).resolves.toBe(true);
+      await expect(repository.extendClose("fictional-channel", vote.id, extendedDeadline, nextExtension)).resolves.toBe(false);
+      await expect(repository.open("fictional-channel")).resolves.toMatchObject({
+        status: "closing",
+        closesAt: extendedDeadline,
+        closeReason: "manual",
+        deadlineRevision: 2,
       });
     } finally {
       database.close();

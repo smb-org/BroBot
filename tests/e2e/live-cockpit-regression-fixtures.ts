@@ -6,6 +6,9 @@ export interface LiveCockpitMockOptions {
   channelId: string;
   modules?: readonly { id: string; enabled: boolean; settings: string }[];
   role?: "broadcaster" | "manager" | "operator";
+  streamState?: "online" | "offline" | null;
+  events?: readonly Record<string, unknown>[];
+  upcomingAd?: boolean;
   location?: { name: string; latitude: number; longitude: number; timeZone: string } | null;
   viewerCount?: number | null;
   nextViewerCount?: number | null;
@@ -41,7 +44,7 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
     displayName: "Demo Kanal",
     language: "de",
     role: options.role ?? "manager",
-    streamState: "online",
+    streamState: options.streamState ?? "online",
     streamStartedAt: new Date(Date.now() - 60_000).toISOString(),
     viewerCount: options.viewerCount ?? 42,
     location: options.location ?? null,
@@ -107,7 +110,8 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
       }));
     }
     if (pathname === `${channelPrefix}/overlays`) return route.fulfill(json({ overlays: [], maximum: 20, elementMaximum: 20 }));
-    if (pathname === `${channelPrefix}/events` || pathname === `${channelPrefix}/audit-log`) return route.fulfill(json({ entries: [], nextCursor: null }));
+    if (pathname === `${channelPrefix}/events`) return route.fulfill(json({ entries: options.events ?? [], nextCursor: null }));
+    if (pathname === `${channelPrefix}/audit-log`) return route.fulfill(json({ entries: [], nextCursor: null }));
     if (pathname === `${channelPrefix}/modules/chat_voting/current`) {
       currentStateRequests += 1;
       await options.waitForCurrentState?.();
@@ -127,6 +131,20 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
         errorCode: options.belaboxStatus?.errorCode ?? null, polling: true, pollingDesired: true, streamId: "stream-a",
         belaboxStreamId: "stream-a", alertNotice: null, fetchFailureNotice: options.belaboxStatus?.fetchFailureNotice ?? false,
         intervalSeconds: 5,
+      }));
+    }
+    if (pathname === `${channelPrefix}/modules/ads/schedule`) {
+      return route.fulfill(json({
+        schedule: {
+          nextAdAt: options.upcomingAd ? new Date(Date.now() + 10 * 60_000).toISOString() : null,
+          duration: options.upcomingAd ? 60 : null,
+          lastAdAt: null,
+          prerollFreeTime: null,
+          snoozeCount: options.upcomingAd ? 1 : 0,
+          snoozeRefreshAt: null,
+        },
+        snoozeScopeAvailable: true,
+        recentAdBreaks: [],
       }));
     }
     if (pathname === `${channelPrefix}/modules/belabox/test` && method === "POST") return route.fulfill(json({ ok: true, connected: false, bitrateKbps: 0 }));

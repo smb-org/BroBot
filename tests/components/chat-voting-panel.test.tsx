@@ -696,6 +696,21 @@ describe("saved chat voting panel", () => {
     expect(screen.getByRole("button", { name: "End vote" })).toBeEnabled();
   });
 
+  it("keeps a vote with a claimed close active until the final close arrives", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    const closingVote: ChatVote = {
+      ...runningVote,
+      status: "closing",
+      closingAt: "2026-10-04T10:01:00.000Z",
+      deadlineRevision: 1,
+    };
+    mount(fetchHarness({ current: currentState({ vote: closingVote, counts: [2, 1] }) }));
+
+    expect(await screen.findByText("Running")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "End vote" })).toBeEnabled();
+    expect(screen.getByText("A vote is running", { selector: ".chat-voting-editor__start-reason" })).toBeInTheDocument();
+  });
+
   it("keeps the newest live state when revision invalidation supersedes an in-flight read", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     let resolveFirst!: (state: ChatVotingPanelState) => void;

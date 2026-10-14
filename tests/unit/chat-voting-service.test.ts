@@ -73,6 +73,7 @@ const repositoryWith = (overrides: Partial<ChatVotingRepository> = {}): ChatVoti
   approveTerm: vi.fn(() => Promise.resolve({ authorized: true, changed: true })),
   insertOpen: vi.fn(() => Promise.resolve(true)),
   requestManualClose: vi.fn(() => Promise.resolve(true)),
+  claimAlarmClose: vi.fn(() => Promise.resolve(true)),
   extendClose: vi.fn(() => Promise.resolve(true)),
   finish: vi.fn(() => Promise.resolve(true)),
   templates: templateRepositoryWith(),
@@ -265,6 +266,7 @@ describe("chat voting event service", () => {
         title: null,
         counts: [0, 1],
         revision: 1,
+        deadlineRevision: 0,
       },
     }]);
   });
@@ -338,6 +340,7 @@ describe("chat voting event service", () => {
         more: 1,
         termFilterReady: true,
         revision: 4,
+        deadlineRevision: 0,
       },
     }]);
   });
@@ -583,7 +586,7 @@ describe("chat voting event service", () => {
 
     const allowed = await processChatVotingMessage(eventWithText("!vote end", ["moderator"]), repository, context);
     expect(allowed.actions).toEqual([{ kind: "chat", text: "The vote is closing.", automated: false }]);
-    expect(requestManualClose).toHaveBeenCalledWith("fictional-channel", "fictional-poll", undefined);
+    expect(requestManualClose).toHaveBeenCalledWith("fictional-channel", "fictional-poll", openVote.closesAt, undefined);
     expect(context.scheduleAlarm).toHaveBeenCalledWith("close", "fictional-poll", expect.any(Number), expect.any(Number));
   });
 
@@ -603,14 +606,29 @@ describe("chat voting event service", () => {
       .resolves.toMatchObject({ closeReason: "manual" });
 
     expect(requestManualClose).toHaveBeenCalledTimes(2);
-    expect(requestManualClose).toHaveBeenNthCalledWith(1, "fictional-channel", "fictional-poll", undefined);
-    expect(requestManualClose).toHaveBeenNthCalledWith(2, "fictional-channel", "fictional-poll", undefined);
+    expect(requestManualClose).toHaveBeenNthCalledWith(1, "fictional-channel", "fictional-poll", openVote.closesAt, undefined);
+    expect(requestManualClose).toHaveBeenNthCalledWith(2, "fictional-channel", "fictional-poll", openVote.closesAt, undefined);
     expect(scheduleClose).toHaveBeenCalledTimes(2);
     for (const [pollId, deadline, revision] of scheduleClose.mock.calls) {
       expect(pollId).toBe("fictional-poll");
       expect(deadline).toEqual(expect.any(Number));
-      expect(revision).toBeGreaterThan(Date.parse(openVote.closesAt));
+      expect(revision).toBeGreaterThanOrEqual(1);
     }
+  });
+
+  it("fences manual close against a deadline changed after the initial read", async () => {
+    const expectedClosesAt = "2026-10-04T14:00:00.000Z";
+    const requestManualClose = vi.fn<ChatVotingRepository["requestManualClose"]>(() => Promise.resolve(false));
+    const repository = repositoryWith({
+      open: vi.fn(() => Promise.resolve({ ...openVote, closesAt: expectedClosesAt })),
+      requestManualClose,
+    });
+    const scheduleClose = vi.fn(() => Promise.resolve());
+
+    await expect(requestChatVoteClose(repository, "fictional-channel", scheduleClose)).resolves.toBeNull();
+
+    expect(requestManualClose).toHaveBeenCalledWith("fictional-channel", "fictional-poll", expectedClosesAt, undefined);
+    expect(scheduleClose).not.toHaveBeenCalled();
   });
 
   it("keeps the newest alarm deadline when vote extensions schedule out of order", async () => {
@@ -631,9 +649,10 @@ describe("chat voting event service", () => {
     });
     const repository = repositoryWith({
       open: vi.fn<ChatVotingRepository["open"]>(() => Promise.resolve({ ...persistedVote })),
+      byId: vi.fn<ChatVotingRepository["byId"]>(() => Promise.resolve({ ...persistedVote })),
       extendClose: vi.fn<ChatVotingRepository["extendClose"]>((_channelId, _pollId, expectedClosesAt, closesAt) => {
         if (persistedVote.closesAt !== expectedClosesAt) return Promise.resolve(false);
-        persistedVote = { ...persistedVote, closesAt };
+        persistedVote = { ...persistedVote, closesAt, deadlineRevision: (persistedVote.deadlineRevision ?? 0) + 1 };
         return Promise.resolve(true);
       }),
     });

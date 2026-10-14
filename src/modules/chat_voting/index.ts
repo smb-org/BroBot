@@ -52,7 +52,7 @@ const initialTallyState = async (
   let terms = vote.textResults ?? null;
   let more = vote.moreTerms;
   let termFilterReady = vote.termFilterReady ?? false;
-  if (vote.status === "open") {
+  if (vote.status !== "closed") {
     const snapshot = await context?.readBallot(vote.id) ?? null;
     if (snapshot === null) return null;
     counts = snapshot.counts;
@@ -111,7 +111,7 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
     load: async (channelId, signal) => {
       const state = await (await import("./panel/service")).loadChatVotingState(channelId, signal);
       const vote = state.vote;
-      if (vote === null || vote.status !== "open") return [];
+      if (vote === null || vote.status === "closed") return [];
       const options = vote.kind === "free_text"
         ? (state.terms ?? []).map(({ term, count }) => ({ label: term, count }))
         : vote.labels.map((label, index) => ({ label, count: state.counts?.[index] ?? 0 }));
@@ -124,7 +124,7 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
         options,
         totalVotes,
         closesAt: vote.closesAt,
-        canExtend: Number.isFinite(openedAt) && Number.isFinite(closesAt) && closesAt < openedAt + CHAT_VOTING_HARD_LIMIT_MS,
+        canExtend: vote.status === "open" && Number.isFinite(openedAt) && Number.isFinite(closesAt) && closesAt < openedAt + CHAT_VOTING_HARD_LIMIT_MS,
       }];
     },
   },
@@ -137,7 +137,7 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
         const service = await import("./panel/service");
         try {
           const state = await service.loadChatVotingState(channelId, signal);
-          if (state.vote?.status === "open") {
+          if (state.vote?.status === "open" || state.vote?.status === "closing") {
             const until = Date.parse(state.vote.closesAt);
             return {
               reason: chatVotingImmediateActionTexts.running,
