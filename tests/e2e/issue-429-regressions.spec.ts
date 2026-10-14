@@ -47,9 +47,11 @@ const commandRecord = (name: string, text: string): Record<string, unknown> => (
 
 interface MockDashboardOptions {
   failPatches?: boolean;
+  role?: "manager" | "operator";
 }
 
-const mockDashboard = async (page: Page, { failPatches = false }: MockDashboardOptions = {}): Promise<{ posts: number; patches: number }> => {
+const mockDashboard = async (page: Page, { failPatches = false, role = "manager" }: MockDashboardOptions = {}): Promise<{ posts: number; patches: number }> => {
+  const actorChannel = role === channel.role ? channel : { ...channel, role };
   const commands = new Map<string, Record<string, unknown>>([["hallo", commandRecord("hallo", "Hallo {user}! Willkommen im Kanal.")]]);
   const counts = { posts: 0, patches: 0 };
   const faqEntry = {
@@ -73,9 +75,9 @@ const mockDashboard = async (page: Page, { failPatches = false }: MockDashboardO
   await page.route("**/api/**", async (route: Route) => {
     const { pathname } = new URL(route.request().url());
     const method = route.request().method();
-    if (pathname === "/api/channels") return route.fulfill(json({ channels: [channel], bot: channel.bot }));
+    if (pathname === "/api/channels") return route.fulfill(json({ channels: [actorChannel], bot: actorChannel.bot }));
     if (pathname === `/api/channels/${channelId}/overview`) {
-      return route.fulfill(json({ ...channel, activeModules: modules.map(({ id, settings }) => ({ moduleId: id, settings })) }));
+      return route.fulfill(json({ ...actorChannel, activeModules: modules.map(({ id, settings }) => ({ moduleId: id, settings })) }));
     }
     if (pathname === `/api/channels/${channelId}/settings`) {
       return route.fulfill(json({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 1, defaultChatTarget: "source_only", defaultChatTargetRevision: 1 }));
@@ -137,6 +139,38 @@ test("failed command save preserves drafts for inactive response kinds", async (
 
   await kinds.getByRole("button", { name: "Antworttext", exact: true }).click();
   await expect(response).toHaveValue("Textentwurf bleibt erhalten");
+});
+
+test("operator command settings render as properties and keep the operational switch", async ({ page }) => {
+  const counts = await mockDashboard(page, { role: "operator" });
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto(`/channels/${channelId}/modules/text_commands`);
+
+  const editor = page.getByRole("region", { name: "Eigenschaften von !hallo" });
+  await expect(editor).toBeVisible();
+  await expect(editor.locator("dl.properties")).toBeVisible();
+  await expect(editor.getByText("Hallo {user}! Willkommen im Kanal.", { exact: true })).toBeVisible();
+  await expect(editor.getByRole("textbox")).toHaveCount(0);
+
+  const active = editor.getByRole("switch", { name: "Aktiv" });
+  await expect(active).toBeEnabled();
+  await active.click();
+  await editor.getByRole("button", { name: "Speichern", exact: true }).click();
+  await expect.poll(() => counts.patches).toBe(1);
+});
+
+test("Ctrl+Enter and Cmd+Enter save the current command draft", async ({ page }) => {
+  const counts = await mockDashboard(page);
+  await openTextCommand(page, 1280, 800);
+
+  const response = page.getByRole("textbox", { name: "Antworttext" });
+  await response.fill("Per Tastenkürzel gespeichert.");
+  await response.press("Control+Enter");
+  await expect.poll(() => counts.patches).toBe(1);
+
+  await response.fill("Auch mit Cmd+Enter gespeichert.");
+  await response.press("Meta+Enter");
+  await expect.poll(() => counts.patches).toBe(2);
 });
 
 test("mobile Save and switch turns a new command into its editor", async ({ page }) => {

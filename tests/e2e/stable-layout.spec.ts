@@ -13,13 +13,14 @@ test("field error and warning slots keep their layout boxes stable", async ({ pa
   }));
 
   await page.getByRole("button", { name: "Toggle issues" }).click();
-  await expect(page.locator(".chips-input__warning")).toContainText("A duplicate warning that should");
+  const tagFeedback = page.locator(".chips-input__feedback");
   const tagError = page.locator(".chips-input .ui-field__error");
-  const tagWarning = page.locator(".chips-input__warning");
+  await expect(tagError).toContainText("A validation error that should");
+  await expect(tagFeedback.locator(".chips-input__warning")).toHaveCount(0);
   const tagErrorBox = await tagError.boundingBox();
-  const tagWarningBox = await tagWarning.boundingBox();
-  if (tagErrorBox === null || tagWarningBox === null) throw new Error("ChipsInput error and warning rows should have layout boxes.");
-  expect(tagErrorBox.y + tagErrorBox.height).toBeLessThanOrEqual(tagWarningBox.y);
+  const tagFeedbackBox = await tagFeedback.boundingBox();
+  if (tagErrorBox === null || tagFeedbackBox === null) throw new Error("ChipsInput feedback row should have a layout box.");
+  expect(tagFeedbackBox.height).toBe(24);
   const markerY = await tagError.locator("[aria-hidden='true']").first().evaluate((element) => Math.round(element.getBoundingClientRect().y));
   const copyY = await tagError.evaluate((element) => Math.round(element.getBoundingClientRect().y));
   expect(Math.abs(copyY - markerY)).toBeLessThanOrEqual(1);
@@ -29,6 +30,14 @@ test("field error and warning slots keep their layout boxes stable", async ({ pa
     return box.height;
   }));
   expect(after).toEqual(before);
+
+  await page.getByRole("button", { name: "Toggle issues" }).click();
+  await page.getByRole("button", { name: "Toggle chip warning" }).click();
+  const tagWarning = tagFeedback.locator(".chips-input__warning");
+  await expect(tagWarning).toContainText("A duplicate warning that should");
+  expect((await tagFeedback.boundingBox())?.height).toBe(24);
+  const afterWarning = await page.locator(".chips-input").first().boundingBox();
+  expect(afterWarning?.height).toBe(before[3]);
 
   const preview = page.locator(".ui-chat-preview");
   const previewHeight = (await preview.boundingBox())?.height;

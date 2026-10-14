@@ -1555,15 +1555,22 @@ describe("Text command editor", () => {
     expect(screen.getByRole("button", { name: "Ankündigung" })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("locks the editor and stages enabled changes until the explicit save", async () => {
+  it("shows operator settings as properties and stages the Active switch until save", async () => {
     const fetcher = panelFetch();
-    renderPanel(fetcher, { canManage: false });
+    renderPanel(fetcher, { canManage: false, canOperate: true });
     await selectCommand();
     const readonly = editor();
-    expect(within(readonly).getByText("Operatoren dürfen Befehle pausieren und fortsetzen. Andere Einstellungen ändern nur Broadcaster und Verwalter.")).toBeInTheDocument();
-    expect(within(readonly).getByRole("textbox", { name: "Antworttext" })).toBeDisabled();
-    expect(within(readonly).getByRole("switch", { name: "Aktiv" })).toBeDisabled();
+    expect(within(readonly).getByText("Einstellungen ändern nur Broadcaster und Verwalter.")).toBeInTheDocument();
+    expect(readonly.querySelector("dl.properties")).toBeInTheDocument();
+    expect(within(readonly).getByText("Hallo {user} aus {channel}")).toBeInTheDocument();
+    expect(within(readonly).queryAllByRole("textbox")).toHaveLength(0);
+    const active = within(readonly).getByRole("switch", { name: "Aktiv" });
+    expect(active).toBeEnabled();
     expect(within(readonly).getByRole("button", { name: "Speichern" })).toBeDisabled();
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
+
+    fireEvent.click(active);
+    expect(within(readonly).getByRole("button", { name: "Speichern" })).toBeEnabled();
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
   });
 
@@ -1572,7 +1579,8 @@ describe("Text command editor", () => {
     renderPanel(fetcher, { canManage: false, canOperate: true });
     await selectCommand();
     const readonly = editor();
-    expect(within(readonly).getByRole("textbox", { name: "Antworttext" })).toBeDisabled();
+    expect(readonly.querySelector("dl.properties")).toBeInTheDocument();
+    expect(within(readonly).queryAllByRole("textbox")).toHaveLength(0);
     expect(within(readonly).getByRole("switch", { name: "Aktiv" })).toBeEnabled();
 
     fireEvent.click(within(readonly).getByRole("switch", { name: "Aktiv" }));

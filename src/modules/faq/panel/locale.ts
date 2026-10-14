@@ -2,7 +2,7 @@ import type { DashboardLanguage, LocaleCatalog } from "../../../dashboard/locale
 import type { ChipsInputMessages, GameMultiSelectMessages, TemplateTextFieldMessages } from "../../../dashboard/ui";
 import type { FaqMinimumTier } from "../contracts";
 import type { FaqMatcherValidationReasonCode } from "../domain";
-import { formatCharacterCount, formatCharacterTotal } from "../../../dashboard/ui/text-length";
+import { formatCharacterCount, formatCharacterTotal, formatCount } from "../../../dashboard/ui/text-length";
 
 export interface FaqTexts {
   title: string;
@@ -139,7 +139,7 @@ const catalog: LocaleCatalog<FaqTexts> = {
       faq_regex_invalid: "Der RE2-Ausdruck ist ungültig oder verwendet nicht unterstützte Syntax.",
       faq_keywords_invalid: "Gib 1 bis 20 gültige Schlüsselwörter oder Wortgruppen ein.",
     },
-    keywordChipMessages: { countLabel: (count, maximum) => `${String(count)}/${String(maximum)}`, atLimitHint: "Maximal 20 Auslöser. Entferne einen zum Austauschen.", duplicateWarning: (entry) => `„${entry}“ ist bereits hinzugefügt.` },
+    keywordChipMessages: { countLabel: formatCount, atLimitHint: "Maximal 20 Auslöser. Entferne einen zum Austauschen.", duplicateWarning: (entry) => `„${entry}“ ist bereits hinzugefügt.` },
     removePattern: (pattern) => `${pattern} entfernen`, sampleMessage: "Beispielnachricht testen", testSample: "Beispiel testen", sampleMessageHint: "Die Prüfung verwendet genau diesen Eintrag und läuft beim Tippen.", sampleMessageInvalid: "Korrigiere den Auslöser, um ihn zu testen.",
     sampleMessageEmpty: "Gib eine Nachricht ein, um den Auslöser zu testen.", sampleMessageCommand: "Nachrichten mit ! am Anfang werden übersprungen.", sampleMessageNoMatch: "Kein Auslöser passt zu dieser Nachricht.",
     sampleMessageMatch: (pattern) => `Treffer durch „${pattern}“.`,
@@ -167,7 +167,7 @@ const catalog: LocaleCatalog<FaqTexts> = {
       searchHint: "Mindestens 2 Zeichen eingeben", loading: "Spiele werden geladen …", empty: "Keine Spiele gefunden.",
       error: "Spiele konnten nicht geladen werden.", suggestions: "Vorschläge", allGames: "Alle Spiele",
       limitReached: "10er-Limit erreicht; entferne eins zum Austauschen.",
-      selectedCount: (count, maximum) => `${String(count)} von ${String(maximum)}`, remove: (name) => `${name} entfernen`,
+      selectedCount: formatCount, remove: (name) => `${name} entfernen`,
     },
   },
   en: {
@@ -187,7 +187,7 @@ const catalog: LocaleCatalog<FaqTexts> = {
       faq_regex_invalid: "The RE2 pattern is invalid or uses unsupported syntax.",
       faq_keywords_invalid: "Enter 1 to 20 valid keywords or phrases.",
     },
-    keywordChipMessages: { countLabel: (count, maximum) => `${String(count)}/${String(maximum)}`, atLimitHint: "Up to 20 triggers. Remove one to replace it.", duplicateWarning: (entry) => `“${entry}” has already been added.` },
+    keywordChipMessages: { countLabel: formatCount, atLimitHint: "Up to 20 triggers. Remove one to replace it.", duplicateWarning: (entry) => `“${entry}” has already been added.` },
     removePattern: (pattern) => `Remove ${pattern}`, sampleMessage: "Test a sample message", testSample: "Test sample", sampleMessageHint: "This checks only this entry and updates as you type.", sampleMessageInvalid: "Fix the trigger before testing it.",
     sampleMessageEmpty: "Enter a message to test the trigger.", sampleMessageCommand: "Messages starting with ! are skipped.", sampleMessageNoMatch: "No trigger matches this message.",
     sampleMessageMatch: (pattern) => `Matched by “${pattern}”.`,
@@ -214,7 +214,7 @@ const catalog: LocaleCatalog<FaqTexts> = {
       searchHint: "Enter at least 2 characters", loading: "Loading games…", empty: "No games found.",
       error: "Games could not be loaded.", suggestions: "Suggestions", allGames: "All games",
       limitReached: "10-game limit reached; remove one to add another.",
-      selectedCount: (count, maximum) => `${String(count)} of ${String(maximum)}`, remove: (name) => `Remove ${name}`,
+      selectedCount: formatCount, remove: (name) => `Remove ${name}`,
     },
   },
 };

@@ -7,6 +7,7 @@ import {
   mapServerFieldErrors, registerDashboardNavigationGuard, RoleThreshold, SaveStatus, Section, SegmentChoice, Select, StatusLed,
   SwitchSection, TemplateTextField, TimeoutDurationRangeFields, UnitInput, useDraft, useDraftGuard, useInspectorSelection, notify,
 } from "../../../dashboard/ui";
+import { Switch as SwitchPrimitive } from "../../../dashboard/ui/primitives/switch";
 import { PanelApiError } from "../../../contracts/panel-error";
 import { TEXT_COMMAND_KINDS, TEXT_COMMAND_MAX_ALIASES, TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_TEMPLATE_FIELDS, TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES, type TextCommand, type TextCommandKind, type TextCommandMinimumTier } from "../contracts";
 import { MODERATION_TIMEOUT_MAX_SECONDS } from "../../contracts/moderation";
@@ -1010,6 +1011,42 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
       items={[{ label: labels.delete, danger: true, disabled: !canManageContent || pending, onSelect: requestDelete }]}
     />}
   </>;
+  const readOnlyProperties = <dl className="properties text-command-properties">
+    <div>
+      <dt>{labels.active}</dt>
+      <dd className="text-command-properties__switch">
+        <SwitchPrimitive
+          aria-label={labels.active}
+          checked={draft.enabled}
+          disabled={!canOperate || pending}
+          onCheckedChange={(enabled) => { setDraftField("enabled", enabled); }}
+        />
+        <span>{draft.enabled ? common.activeModule : common.pausedModule}</span>
+      </dd>
+    </div>
+    <div><dt>{labels.name}</dt><dd className="mono">!{draft.name}</dd></div>
+    <div><dt>{labels.aliases}</dt><dd>{draft.aliases.length === 0 ? "—" : draft.aliases.map((alias) => `!${alias}`).join(", ")}</dd></div>
+    <div><dt>{labels.kind}</dt><dd>{labels.kindLabels[draft.kind]}</dd></div>
+    {draft.kind === "list" ? null : <div><dt>{labels.response}</dt><dd className="text-command-properties__response">{draft.text || "—"}</dd></div>}
+    <div><dt>{labels.minimumRole}</dt><dd>{labels.tierLabels[draft.minimumTier]}</dd></div>
+    <div><dt>{labels.cooldownField}</dt><dd>{String(draft.cooldownSeconds)} s</dd></div>
+    <div><dt>{labels.streamCondition}</dt><dd>{labels.streamLabels[draft.streamCondition]}</dd></div>
+    <div><dt>{labels.gameFilter}</dt><dd>{draft.games.length === 0 ? labels.gameMultiSelect.allGames : draft.games.map(({ name }) => name).join(", ")}</dd></div>
+    <div><dt>{labels.userCooldown}</dt><dd>{String(draft.userCooldownSeconds)} s</dd></div>
+    <div><dt>{labels.responseType}</dt><dd>{labels.responseTypeLabels[draft.responseType]}</dd></div>
+    <div><dt>{labels.chatTarget}</dt><dd>{draft.chatTarget === null ? labels.chatTargetDefault : labels.chatTargetLabels[draft.chatTarget]}</dd></div>
+    {draft.kind === "list" ? null : <div><dt>{labels.templateFieldLabels.usageText}</dt><dd className="text-command-properties__response">{draft.usageText || "—"}</dd></div>}
+    <div><dt>{labels.variableAction}</dt><dd>{draft.variableAction === null
+      ? "—"
+      : `${draft.variableAction.name} · ${labels.variableOperations[draft.variableAction.operation]}${draft.variableAction.amount === null ? "" : ` ${String(draft.variableAction.amount)}`}`}</dd></div>
+    {draft.timeoutAction === null ? null : <>
+      <div><dt>{labels.timeoutDuration}</dt><dd>{draft.timeoutAction.minSeconds === draft.timeoutAction.maxSeconds
+        ? `${String(draft.timeoutAction.minSeconds)} s`
+        : `${String(draft.timeoutAction.minSeconds)}–${String(draft.timeoutAction.maxSeconds)} s`}</dd></div>
+      <div><dt>{labels.timeoutFallbackTextOptional}</dt><dd className="text-command-properties__response">{draft.timeoutAction.fallbackText || "—"}</dd></div>
+      <div><dt>{labels.timeoutReason}</dt><dd className="text-command-properties__response">{draft.timeoutAction.reason || "—"}</dd></div>
+    </>}
+  </dl>;
   const saveBar = <SaveStatus
     persistent
     dirty={dirty}
@@ -1036,6 +1073,10 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
   const saveStatus = <div className="text-command-editor__save">{saveBar}</div>;
   return <div className="text-command-editor" role="region" aria-label={isCreate ? labels.add : labels.details(command.name)} onKeyDown={(event) => {
     if (event.key === "Escape") { event.preventDefault(); onClose(); }
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && canManageContent && dirty && !pending) {
+      event.preventDefault();
+      void saveDraft();
+    }
   }}>
     <PageHeader
       kind="module"
@@ -1045,33 +1086,39 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
       headingLevel="h2"
       {...(pageMeta === undefined ? {} : { meta: pageMeta })}
       badge={<StatusLed state="ok" label={labels.ready} />}
-      active={draft.enabled}
-      switchTitle={labels.active}
-      switchDisabled={!(canManageContent || canOperate && command !== null) || pending}
-      switchBusy={pending}
-      onToggle={(enabled) => { setDraftField("enabled", enabled); }}
+      {...(canManageContent ? {
+        active: draft.enabled,
+        switchTitle: labels.active,
+        switchDisabled: pending,
+        switchBusy: pending,
+        onToggle: (enabled: boolean) => { setDraftField("enabled", enabled); },
+      } : {})}
       saveStatus={saveStatus}
       actions={pageActions}
     />
-    <div className="text-command-editor__scroll">
-      {canManageContent ? null : <RuleNote>{labels.managementLocked}</RuleNote>}
-      <Section title={labels.triggerSection} className="text-command-trigger-section" headingAction={<div className="text-command-section-rule">
-        <span className="ui-section__rule" aria-hidden="true" />
-        {registeredVariableStatus}
-      </div>}>{triggerFields}</Section>
-      <Section title={labels.kind} headingAction={<div className="text-command-kind-choice"><SegmentChoice
-        label={labels.kind}
-        hint={labels.kindHints[draft.kind]}
-        value={draft.kind}
-        {...(serverFieldErrors.kind === undefined ? {} : { error: serverFieldErrors.kind })}
-        reserveError
-        options={kindOptions.map(({ value, label }) => ({ value, label }))}
-        disabled={!canManageContent || pending}
-        onChange={(value) => { changeKind(value); }}
-      /></div>}>
-        {sections[0]?.content}
-      </Section>
-      {sections[1]?.content}
+    <div className={`text-command-editor__scroll${canManageContent ? "" : " text-command-editor__scroll--readonly"}`}>
+      {canManageContent ? <>
+        <Section title={labels.triggerSection} className="text-command-trigger-section" headingAction={<div className="text-command-section-rule">
+          <span className="ui-section__rule" aria-hidden="true" />
+          {registeredVariableStatus}
+        </div>}>{triggerFields}</Section>
+        <Section title={labels.kind} headingAction={<div className="text-command-kind-choice"><SegmentChoice
+          label={labels.kind}
+          hint={labels.kindHints[draft.kind]}
+          value={draft.kind}
+          {...(serverFieldErrors.kind === undefined ? {} : { error: serverFieldErrors.kind })}
+          reserveError
+          options={kindOptions.map(({ value, label }) => ({ value, label }))}
+          disabled={pending}
+          onChange={(value) => { changeKind(value); }}
+        /></div>}>
+          {sections[0]?.content}
+        </Section>
+        {sections[1]?.content}
+      </> : <>
+        <RuleNote>{labels.managementLocked}</RuleNote>
+        {readOnlyProperties}
+      </>}
     </div>
     {guard.confirmOpen ? <ConfirmDialog
       opened

@@ -386,7 +386,7 @@ describe("editor field seam", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     expect(await screen.findByText(/letters, numbers/)).toBeInTheDocument();
     expect(input).toHaveAttribute("aria-describedby");
-    expect(input.getAttribute("aria-describedby")).toMatch(/error/u);
+    expect(input.getAttribute("aria-describedby")).toMatch(/feedback/u);
   });
 });
 

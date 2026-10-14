@@ -5,7 +5,7 @@ import type { TextCommandKind, TextCommandMinimumTier, TextCommandResponseType, 
 import type { ChipsInputMessages, TemplateTextFieldMessages } from "../../../dashboard/ui";
 import type { PanelTemplateWarning } from "../contract";
 import type { GameMultiSelectMessages } from "../../../dashboard/ui";
-import { formatCharacterCount, formatCharacterTotal } from "../../../dashboard/ui/text-length";
+import { formatCharacterCount, formatCharacterTotal, formatCount } from "../../../dashboard/ui/text-length";
 
 export interface TextCommandsTexts {
   title: string;
@@ -245,7 +245,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     gameFilter: "Nur bei Spielen",
     gameFilterHint: "Der Befehl antwortet nur, wenn gerade eines dieser Spiele läuft.",
     availability: "Weitere Einstellungen",
-    gameMultiSelect: { label: "Twitch-Spiele", hint: "Spiele über Twitch-Kategorien suchen und auswählen.", search: "Spiel suchen", searchHint: "Mindestens zwei Zeichen eingeben.", loading: "Spiele werden gesucht …", empty: "Keine Spiele gefunden.", error: "Die Twitch-Spiele konnten nicht geladen werden.", suggestions: "Vorschläge", allGames: "Alle Spiele", limitReached: "10er-Limit erreicht; entferne eins zum Austauschen.", selectedCount: (count, maximum) => `${String(count)} von ${String(maximum)}`, remove: (name) => `${name} entfernen` },
+    gameMultiSelect: { label: "Twitch-Spiele", hint: "Spiele über Twitch-Kategorien suchen und auswählen.", search: "Spiel suchen", searchHint: "Mindestens zwei Zeichen eingeben.", loading: "Spiele werden gesucht …", empty: "Keine Spiele gefunden.", error: "Die Twitch-Spiele konnten nicht geladen werden.", suggestions: "Vorschläge", allGames: "Alle Spiele", limitReached: "10er-Limit erreicht; entferne eins zum Austauschen.", selectedCount: formatCount, remove: (name) => `${name} entfernen` },
     cooldown: "Abklingzeit", cooldownField: "Zwischen zwei Aufrufen", userCooldown: "Je Nutzer", cooldownHint: "Für den ganzen Kanal. 0 bis 86 400.", userCooldownHint: "Für jeden Zuschauer einzeln. 0 = aus.", numberMissing: "Zahl eingeben.",
     nameHint: "a–z, 0–9, - und _",
     nameInvalid: "Nur Kleinbuchstaben, Zahlen, Bindestrich und Unterstrich.", nameMissing: "Namen ausfüllen.", nameExists: "Der Befehl existiert bereits.",
@@ -263,15 +263,15 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     draftGuardDescription: "Du hast Änderungen an diesem Befehl. Was möchtest du tun?",
     continueEditing: "Weiter bearbeiten", discardAndSwitch: "Verwerfen und wechseln", saveAndSwitch: "Speichern und wechseln",
     save: "Speichern", create: "Anlegen", discard: "Verwerfen", saved: "Alle Änderungen gespeichert",
-    pending: "Wird gespeichert …", invalid: "Bitte korrigiere die markierten Felder.", issueError: "Fehler", issueWarning: "Hinweis",
+    pending: "Wird gespeichert …", invalid: "Markierte Felder prüfen.", issueError: "Fehler", issueWarning: "Hinweis",
     conflictMessage: "Inzwischen von jemand anderem geändert.", reloadError: "Der Serverstand konnte nicht geladen werden.", reload: "Serverstand laden",
-    managementLocked: "Operatoren dürfen Befehle pausieren und fortsetzen. Andere Einstellungen ändern nur Broadcaster und Verwalter.",
+    managementLocked: "Einstellungen ändern nur Broadcaster und Verwalter.",
     active: "Aktiv", ready: "Bereit", variableBadge: "Variable",
     never: "noch nie", secondsAgo: (count) => `vor ${String(count)} s`, minutesAgo: (count) => `vor ${String(count)} min`, hoursAgo: (count) => `vor ${String(count)} h`,
     lastUsed: "zuletzt",
     previewLabel: "Vorschau", previewSpeaker: "BroBot",
     templateMessages: templateMessages.de,
-    chipsInputMessages: { countLabel: (count, max) => `${String(count)} von ${String(max)}`, atLimitHint: "Höchstens 10 Aliase.", duplicateWarning: (alias) => `${alias} steht schon in der Liste.` },
+    chipsInputMessages: { countLabel: formatCount, atLimitHint: "Höchstens 10 Aliase.", duplicateWarning: (alias) => `${alias} steht schon in der Liste.` },
     warningLabel: (warning) => warning.code === "unknown_template_variables"
       ? `Unbekannte Variable${warning.unknownVariables.length === 1 ? "" : "n"}: ${warning.unknownVariables.map((name) => `{${name}}`).join(", ")}`
       : warning.code === "template_parameters_invalid"
@@ -342,7 +342,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     gameFilter: "Only for games",
     gameFilterHint: "The command only replies while one of these games is current.",
     availability: "More settings",
-    gameMultiSelect: { label: "Twitch games", hint: "Search and select games from Twitch categories.", search: "Search games", searchHint: "Enter at least two characters.", loading: "Searching games …", empty: "No games found.", error: "Twitch games could not be loaded.", suggestions: "Suggestions", allGames: "All games", limitReached: "10-game limit reached; remove one to add another.", selectedCount: (count, maximum) => `${String(count)} of ${String(maximum)}`, remove: (name) => `Remove ${name}` },
+    gameMultiSelect: { label: "Twitch games", hint: "Search and select games from Twitch categories.", search: "Search games", searchHint: "Enter at least two characters.", loading: "Searching games …", empty: "No games found.", error: "Twitch games could not be loaded.", suggestions: "Suggestions", allGames: "All games", limitReached: "10-game limit reached; remove one to add another.", selectedCount: formatCount, remove: (name) => `Remove ${name}` },
     cooldown: "Cooldown", cooldownField: "Between uses", userCooldown: "Per user", cooldownHint: "For the whole channel. 0 to 86,400.", userCooldownHint: "For each viewer separately. 0 = off.", numberMissing: "Enter a number.",
     nameHint: "a–z, 0–9, - and _",
     nameInvalid: "Use lowercase letters, numbers, hyphen, and underscore.", nameMissing: "Enter a name.", nameExists: "This command already exists.",
@@ -360,15 +360,15 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     draftGuardDescription: "This command has unsaved changes. What would you like to do?",
     continueEditing: "Continue editing", discardAndSwitch: "Discard and switch", saveAndSwitch: "Save and switch",
     save: "Save", create: "Create", discard: "Discard", saved: "All changes saved",
-    pending: "Saving …", invalid: "Please correct the marked fields.", issueError: "Error", issueWarning: "Warning",
+    pending: "Saving …", invalid: "Check marked fields.", issueError: "Error", issueWarning: "Warning",
     conflictMessage: "This command was changed by someone else.", reloadError: "The server version could not be loaded.", reload: "Load server version",
-    managementLocked: "Operators can pause and resume commands. Only broadcasters and managers can change other settings.",
+    managementLocked: "Only broadcasters and managers can change settings.",
     active: "Active", ready: "Ready", variableBadge: "Variable",
     never: "never", secondsAgo: (count) => `${String(count)} s ago`, minutesAgo: (count) => `${String(count)} min ago`, hoursAgo: (count) => `${String(count)} h ago`,
     lastUsed: "last used",
     previewLabel: "Preview", previewSpeaker: "BroBot",
     templateMessages: templateMessages.en,
-    chipsInputMessages: { countLabel: (count, max) => `${String(count)} of ${String(max)}`, atLimitHint: "Up to 10 aliases.", duplicateWarning: (alias) => `${alias} is already in the list.` },
+    chipsInputMessages: { countLabel: formatCount, atLimitHint: "Up to 10 aliases.", duplicateWarning: (alias) => `${alias} is already in the list.` },
     warningLabel: (warning) => warning.code === "unknown_template_variables"
       ? `Unknown variable${warning.unknownVariables.length === 1 ? "" : "s"}: ${warning.unknownVariables.map((name) => `{${name}}`).join(", ")}`
       : warning.code === "template_parameters_invalid"

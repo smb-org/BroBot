@@ -54,8 +54,7 @@ export function ChipsInput({ id: suppliedId, label, values, onChange, pending, o
   const effectiveError = error ?? (draft.length > 0 ? validationError : null) ?? undefined;
   const effectiveWarning = warning ?? duplicateWarning ?? undefined;
   const descriptionId = `${id}-description`;
-  const errorId = `${id}-error`;
-  const warningId = `${id}-warning`;
+  const feedbackId = `${id}-feedback`;
   const prefixed = (entry: string): string => `${stripPrefix ?? ""}${entry}`;
   const splitEntries = (value: string): string[] => value.split(separator === "comma" ? /[,\n]+/u : /[ ,]+/u);
   const containsSeparator = (value: string): boolean => separator === "comma" ? /[,\n]/u.test(value) : /[ ,]/u.test(value);
@@ -134,7 +133,8 @@ export function ChipsInput({ id: suppliedId, label, values, onChange, pending, o
   };
 
   const currentHint = atLimit ? messages.atLimitHint : hint;
-  const describedBy = [descriptionId, effectiveError === undefined ? null : errorId, effectiveWarning === undefined ? null : warningId, disabledReason?.id].filter((part): part is string => part !== null && part !== undefined).join(" ");
+  const hasFeedback = effectiveError !== undefined || effectiveWarning !== undefined;
+  const describedBy = [descriptionId, hasFeedback ? feedbackId : null, disabledReason?.id].filter((part): part is string => part !== null && part !== undefined).join(" ");
 
   return <div data-ui="" className="chips-input" role="group" aria-label={listLabel}>
     <label className="ui-field__label" htmlFor={id}>{label}</label>
@@ -149,7 +149,10 @@ export function ChipsInput({ id: suppliedId, label, values, onChange, pending, o
       <input data-ui="" id={id} className="chips-input__input" value={draft} placeholder={placeholder} disabled={disabled} readOnly={atLimit && draft.length === 0} aria-describedby={describedBy} onChange={(event) => { handleDraftChange(event.currentTarget.value); }} onPaste={handlePaste} onKeyDown={handleKeyDown} onBlur={add} />
     </div>
     <span data-ui="" id={descriptionId} className="chips-input__description"><span>{currentHint ?? ""}</span>{max === undefined ? null : <span className="chips-input__count">{messages.countLabel(values.length, max)}</span>}{describedHelper(null, disabledReason, `chips-${id}`)}</span>
-    <FieldError id={errorId} className="ui-field__error" message={effectiveError} />
-    <span data-ui="" id={warningId} className="chips-input__warning" aria-hidden={effectiveWarning === undefined || undefined}><span>{effectiveWarning ?? ""}</span></span>
+    <div className="chips-input__feedback">
+      {effectiveError !== undefined
+        ? <FieldError id={feedbackId} className="ui-field__error" message={effectiveError} />
+        : effectiveWarning === undefined ? null : <span data-ui="" id={feedbackId} className="chips-input__warning" role="status" aria-live="polite">{effectiveWarning}</span>}
+    </div>
   </div>;
 }
