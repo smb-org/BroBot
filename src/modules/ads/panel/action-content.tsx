@@ -6,7 +6,7 @@ import { adsActionContentTexts } from "./action-content-locale";
 
 const LENGTHS = ["30", "60", "90", "120", "150", "180"] as const;
 
-export default function AdActionContent({ language }: ModuleImmediateActionContentProperties): ReactElement {
+export default function AdActionContent({ language, onDraftChange }: ModuleImmediateActionContentProperties): ReactElement {
   const [length, setLength] = useState<(typeof LENGTHS)[number]>("60");
 
   return <div className="live-action-content">
@@ -15,7 +15,7 @@ export default function AdActionContent({ language }: ModuleImmediateActionConte
       hint={adsActionContentTexts.lengthHint[language]}
       name="length"
       value={length}
-      onChange={setLength}
+      onChange={(value) => { setLength(value); onDraftChange?.(true); }}
       options={LENGTHS.map((value) => ({ value, label: `${value}s`, compactLabel: value }))}
       size="compact"
     />

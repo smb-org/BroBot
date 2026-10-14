@@ -82,15 +82,18 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded }: {
 
   return <div className="live-cockpit" data-stream-state={streamState ?? "unknown"}>
     <header className="live-cockpit-header">
-      <div className="live-cockpit-header__identity">
-        <h1>{overview.displayName}</h1>
+      <div className="live-cockpit-header__summary">
+        <h1 className="sr-only">{overview.displayName}</h1>
         <span className={`live-cockpit-header__stream${streamState === "online" ? " is-live" : streamState === "offline" ? " is-offline" : " is-unknown"}`}>
-          <span aria-hidden="true" />{streamLabel}
+          <span className="live-cockpit-header__stream-dot" aria-hidden="true" />
+          <span className="live-cockpit-header__stream-label">{streamLabel}</span>
         </span>
-      </div>
-      <div className="live-cockpit-header__metrics">
         <span className="live-cockpit-header__metric"><Icon name="clock-hour-4" size={16} /><span>{labels.duration}</span><strong className="mono">{streamState === "online" ? formatDuration(overview.streamStartedAt, now) : "—"}</strong></span>
         <span className="live-cockpit-header__metric"><Icon name="member" size={16} /><span>{labels.viewers}</span><strong className="mono">{viewerCount == null ? "—" : formatNumber(viewerCount)}</strong></span>
+        <span className="live-cockpit-header__role">{labels.youAre(labels.roles[overview.role])}</span>
+      </div>
+      <div className="live-cockpit-header__title-slot" data-slot="stream-title-category" aria-label={labels.titleCategoryReserved}>
+        <span>{labels.titleCategoryReserved}</span>
       </div>
       <div className="live-cockpit-header__indicators" aria-label={labels.statusIndicators}>
         <StatusLed state={botConnected ? "ok" : "off"} label={`${labels.bot} · ${botConnected ? labels.botConnected : labels.botUnavailable}`} />
@@ -115,6 +118,7 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded }: {
             : <StatusLed state={overlayCount > 0 ? "ok" : "off"} label={`${labels.overlays} · ${overlayCount === 0 ? labels.overlaysNotSetUp : labels.overlaysCount(formatNumber(overlayCount))}`} />}
       </div>
     </header>
+    <div className="live-cockpit__warning-slot" data-slot="warning-banner" />
     <div className="live-cockpit__wall">
       <ImmediateActions
         channelId={overview.channelId}
@@ -123,16 +127,15 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded }: {
         modules={modules}
         modulesLoaded={modulesLoaded}
       />
-      <div className="live-cockpit__reserved-grid" aria-label={labels.runningNow}>
+      <div className="live-cockpit__running">
         <ReserveTile slot="running-now" title={labels.runningNow} description={labels.runningNowReserved} />
         <ReserveTile slot="next-up" title={labels.nextUp} description={labels.nextUpReserved} />
-        <ReserveTile slot="events" title={labels.events} description={labels.eventsReserved} />
-        <ReserveTile slot="warnings" title={labels.warnings} description={labels.warningsReserved} />
       </div>
+      <ReserveTile slot="events" title={labels.events} description={labels.eventsReserved} />
     </div>
-    <footer className="live-cockpit__status" aria-live="polite">
-      <span><StatusLed state="ok" label={texts.status.healthy} /></span>
-      <span>{labels.roleLabel}: {labels.roles[overview.role]}</span>
+    <footer className="live-cockpit__status" aria-live="polite" aria-label={`${labels.systemStatus} · ${labels.systemReady} · ${labels.liveDataCurrent}`}>
+      <StatusLed state="ok" label={labels.systemStatus} />
+      <span>{labels.systemReady} · {labels.liveDataCurrent}</span>
     </footer>
   </div>;
 };

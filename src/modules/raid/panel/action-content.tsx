@@ -4,7 +4,7 @@ import { Field } from "../../../dashboard/ui";
 import type { ModuleImmediateActionContentProperties } from "../../contract";
 import { raidActionContentTexts } from "./action-content-locale";
 
-export default function ShoutoutActionContent({ language }: ModuleImmediateActionContentProperties): ReactElement {
+export default function ShoutoutActionContent({ language, onDraftChange }: ModuleImmediateActionContentProperties): ReactElement {
   const [login, setLogin] = useState("");
 
   return <div className="live-action-content">
@@ -14,7 +14,7 @@ export default function ShoutoutActionContent({ language }: ModuleImmediateActio
       hint={raidActionContentTexts.channelHint[language]}
       prefix="@"
       value={login}
-      onChange={setLogin}
+      onChange={(value) => { setLogin(value); onDraftChange?.(true); }}
       required
       autoComplete="off"
       placeholder={raidActionContentTexts.channelRequired[language]}

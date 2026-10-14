@@ -7,7 +7,7 @@ import { dashboardCommonTexts, dashboardLanguage, dashboardTexts, immediateActio
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
 import { loadModuleImmediateActionContent, retryModuleChunkLoad } from "./module-panel-loaders";
 import type { PanelModuleState } from "../panel-contract";
-import { Button, Icon, LoadStateLines } from "./ui";
+import { Button, ConfirmDialog, Icon, LoadStateLines } from "./ui";
 import { DialogContent, DialogPrimitive, DialogTitle } from "./ui/primitives/dialog";
 import { PopoverContent, PopoverPrimitive } from "./ui/primitives/popover";
 
@@ -124,6 +124,8 @@ const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason }
   const texts = dashboardTexts();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [draftDirty, setDraftDirty] = useState(false);
+  const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false);
   const [contentFailed, setContentFailed] = useState(false);
   const [loadedContent, setLoadedContent] = useState<{ actionId: string; component: ComponentType<ModuleImmediateActionContentProperties> } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -149,10 +151,20 @@ const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason }
     return () => { active = false; };
   }, [action.content, action.id, channelId, content, contentFailed, moduleId, open]);
 
-  const close = (): void => {
+  const closeNow = (): void => {
     if (busy) return;
     setOpen(false);
+    setDraftDirty(false);
     setError(null);
+  };
+
+  const close = (): void => {
+    if (busy) return;
+    if (draftDirty) {
+      setConfirmDiscardOpen(true);
+      return;
+    }
+    closeNow();
   };
 
   const run = async (formData: FormData): Promise<void> => {
@@ -163,7 +175,10 @@ const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason }
     try {
       await action.execute({ channelId, language, formData });
       setResult(texts.streamManager.actionSucceeded(action.name[language]));
-      if (action.content !== undefined) setOpen(false);
+      if (action.content !== undefined) {
+        setDraftDirty(false);
+        setOpen(false);
+      }
     } catch {
       setError(action.errorMessage?.[language] ?? texts.streamManager.actionFailed);
     } finally {
@@ -176,13 +191,15 @@ const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason }
     void run(new FormData(event.currentTarget));
   };
 
+  const reasonLine = reason ?? result ?? error ?? "\u00a0";
   const buttonContents = <>
     <span className="live-action__icon"><Icon name={action.icon} size={20} /></span>
     <span className="live-action__name">{action.name[language]}</span>
+    <span id={reasonId} className={`live-action__reason${reason !== null ? " is-locked" : error !== null ? " has-error" : ""}`} aria-live="polite">{reasonLine}</span>
   </>;
-  const reasonLine = reason ?? result ?? error ?? "\u00a0";
   const triggerClassName = `live-action__button${reason !== null ? " is-locked" : ""}`;
   const triggerProps = {
+    "aria-label": action.name[language],
     "aria-describedby": reasonId,
     "aria-haspopup": action.content === undefined ? undefined : action.content.presentation === "dialog" ? "dialog" as const : "dialog" as const,
     "aria-busy": busy,
@@ -203,7 +220,7 @@ const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason }
           <p>{texts.streamManager.actionLoadFailed}</p>
           <Button size="compact" variant="neutral" onClick={retryModuleChunkLoad}>{dashboardCommonTexts().retry}</Button>
         </div>
-        : Content === null ? null : <fieldset disabled={busy} className="live-action-frame__fields"><Content channelId={channelId} language={language} /></fieldset>}
+        : Content === null ? null : <fieldset disabled={busy} className="live-action-frame__fields"><Content channelId={channelId} language={language} onDraftChange={setDraftDirty} /></fieldset>}
     </div>
     <p className={`live-action-frame__error${error === null ? "" : " has-error"}`} aria-live="polite" role="status">{error ?? "\u00a0"}</p>
     <footer className="live-action-frame__footer">
@@ -216,29 +233,46 @@ const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason }
 
   if (action.content?.presentation === "popover") {
     return <div className="live-action">
-      <PopoverPrimitive.Root open={open} onOpenChange={(next) => { if (!busy) { setOpen(next); if (next) setError(null); } }}>
+      <PopoverPrimitive.Root open={open} onOpenChange={(next) => { if (next) { if (!busy) { setOpen(true); setDraftDirty(false); setError(null); } } else close(); }}>
         <PopoverPrimitive.Trigger {...triggerProps} type="button" className={triggerClassName}>{buttonContents}</PopoverPrimitive.Trigger>
-        <p id={reasonId} className={`live-action__reason${reason !== null ? " is-locked" : ""}`} title={reason ?? result ?? error ?? undefined}>{reasonLine}</p>
         <PopoverContent align="start" side="bottom" className="live-action-frame-popover">{frameBody}</PopoverContent>
       </PopoverPrimitive.Root>
+      <ConfirmDialog
+        opened={confirmDiscardOpen}
+        title={texts.liveCockpit.actionDraftDiscardTitle}
+        description={texts.liveCockpit.actionDraftDiscardDescription}
+        confirmLabel={texts.liveCockpit.actionDraftDiscard}
+        cancelLabel={texts.liveCockpit.actionDraftContinue}
+        danger
+        onCancel={() => { setConfirmDiscardOpen(false); }}
+        onConfirm={() => { setConfirmDiscardOpen(false); closeNow(); }}
+      />
     </div>;
   }
 
   if (action.content?.presentation === "dialog") {
     return <div className="live-action">
-      <DialogPrimitive.Root open={open} onOpenChange={(next) => { if (!busy) { setOpen(next); if (next) setError(null); } }}>
+      <DialogPrimitive.Root open={open} modal="trap-focus" onOpenChange={(next) => { if (next) { if (!busy) { setOpen(true); setDraftDirty(false); setError(null); } } else close(); }}>
         <DialogPrimitive.Trigger {...triggerProps} type="button" className={triggerClassName}>{buttonContents}</DialogPrimitive.Trigger>
-        <p id={reasonId} className={`live-action__reason${reason !== null ? " is-locked" : ""}`} title={reason ?? result ?? error ?? undefined}>{reasonLine}</p>
         <DialogContent className="live-action-frame-dialog">
           {frameBody}
         </DialogContent>
       </DialogPrimitive.Root>
+      <ConfirmDialog
+        opened={confirmDiscardOpen}
+        title={texts.liveCockpit.actionDraftDiscardTitle}
+        description={texts.liveCockpit.actionDraftDiscardDescription}
+        confirmLabel={texts.liveCockpit.actionDraftDiscard}
+        cancelLabel={texts.liveCockpit.actionDraftContinue}
+        danger
+        onCancel={() => { setConfirmDiscardOpen(false); }}
+        onConfirm={() => { setConfirmDiscardOpen(false); closeNow(); }}
+      />
     </div>;
   }
 
   return <div className="live-action">
     <button {...triggerProps} className={triggerClassName} type="button" onClick={() => { void run(new FormData()); }}>{buttonContents}</button>
-    <p id={reasonId} className={`live-action__reason${reason !== null ? " is-locked" : error !== null ? " has-error" : ""}`} title={reason ?? result ?? error ?? undefined} aria-live="polite">{reasonLine}</p>
   </div>;
 };
 
@@ -266,6 +300,5 @@ export const ImmediateActions = ({ channelId, streamState, role, modules = [], m
         ? actions.map(({ moduleId, action }) => <ActionButton key={`${moduleId}:${action.id}`} action={action} moduleId={moduleId} channelId={channelId} streamState={streamState} role={role} />)
         : <div className="live-cockpit-actions__loading" aria-hidden="true"><LoadStateLines rows={3} height={64} /></div>}
     </div>
-    <p className="live-cockpit-actions__role">{texts.liveCockpit.roleLabel}: {texts.liveCockpit.roles[role]}</p>
   </section>;
 };

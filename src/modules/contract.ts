@@ -1307,6 +1307,7 @@ export type ModuleImmediateActionCondition = "streamLive" | {
 export interface ModuleImmediateActionContentProperties {
   channelId: string;
   language: ModuleLanguage;
+  onDraftChange?: (dirty: boolean) => void;
 }
 
 interface ModuleImmediateActionExecutionProperties extends ModuleImmediateActionContentProperties {

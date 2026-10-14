@@ -2045,13 +2045,14 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     const actions = await screen.findByRole("region", { name: "Sofortaktionen" });
-    const warnings = await screen.findByRole("region", { name: "Warnungen" });
+    const events = await screen.findByRole("region", { name: "Ereignisse" });
     expect(screen.queryByRole("region", { name: "Module" })).not.toBeInTheDocument();
-    expect(document.querySelectorAll(".live-cockpit-reserve")).toHaveLength(4);
+    expect(document.querySelectorAll(".live-cockpit-reserve")).toHaveLength(3);
     const runningNow = screen.getByRole("region", { name: "Läuft gerade" });
+    const nextUp = screen.getByRole("region", { name: "Als Nächstes" });
     expect(actions.compareDocumentPosition(runningNow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(runningNow.compareDocumentPosition(warnings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.queryByRole("region", { name: "Warnungen und Fehler" })).not.toBeInTheDocument();
+    expect(runningNow.compareDocumentPosition(nextUp) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(nextUp.compareDocumentPosition(events) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("links to active modules from the sidebar instead of embedding their forms", async () => {

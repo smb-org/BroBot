@@ -1064,8 +1064,9 @@ export interface DashboardTexts {
     unknown: string;
     duration: string;
     viewers: string;
-    roleLabel: string;
+    youAre: (role: string) => string;
     roles: Record<ChannelRole, string>;
+    titleCategoryReserved: string;
     bot: string;
     botConnected: string;
     botUnavailable: string;
@@ -1086,9 +1087,14 @@ export interface DashboardTexts {
     nextUpReserved: string;
     events: string;
     eventsReserved: string;
-    warnings: string;
-    warningsReserved: string;
     statusIndicators: string;
+    systemStatus: string;
+    systemReady: string;
+    liveDataCurrent: string;
+    actionDraftDiscardTitle: string;
+    actionDraftDiscardDescription: string;
+    actionDraftDiscard: string;
+    actionDraftContinue: string;
   };
   channelControls: {
     controlsHeading: string;
@@ -1415,8 +1421,9 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       unknown: "Status unbekannt",
       duration: "Dauer",
       viewers: "Zuschauer",
-      roleLabel: "Rolle",
+      youAre: (role) => `Du bist: ${role}`,
       roles: { broadcaster: "Broadcaster", manager: "Verwalter", operator: "Bediener" },
+      titleCategoryReserved: "Streamtitel und Kategorie",
       bot: "Bot",
       botConnected: "Verbunden",
       botUnavailable: "Nicht verbunden",
@@ -1432,14 +1439,19 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       overlaysNotSetUp: "Nicht eingerichtet",
       overlaysChecking: "wird geprüft",
       runningNow: "Läuft gerade",
-      runningNowReserved: "Laufende Live-Aktionen erscheinen hier.",
+      runningNowReserved: "Noch keine Aktion läuft.",
       nextUp: "Als Nächstes",
-      nextUpReserved: "Anstehende Aktionen erscheinen hier.",
+      nextUpReserved: "Noch nichts geplant.",
       events: "Ereignisse",
-      eventsReserved: "Neue Ereignisse erscheinen hier.",
-      warnings: "Warnungen",
-      warningsReserved: "Hinweise und Fehler erscheinen hier.",
+      eventsReserved: "Noch keine Ereignisse.",
       statusIndicators: "Verbindungsstatus",
+      systemStatus: "Systemstatus",
+      systemReady: "Alles bereit",
+      liveDataCurrent: "Live-Daten aktuell",
+      actionDraftDiscardTitle: "Eingaben verwerfen?",
+      actionDraftDiscardDescription: "Deine Eingaben gehen verloren, wenn du diese Aktion schließt.",
+      actionDraftDiscard: "Eingaben verwerfen",
+      actionDraftContinue: "Weiter bearbeiten",
     },
     channelControls: {
       controlsHeading: "Kanalsteuerung",
@@ -1753,8 +1765,9 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       unknown: "Status unknown",
       duration: "Duration",
       viewers: "Viewers",
-      roleLabel: "Role",
+      youAre: (role) => `You are: ${role}`,
       roles: { broadcaster: "Broadcaster", manager: "Manager", operator: "Operator" },
+      titleCategoryReserved: "Stream title and category",
       bot: "Bot",
       botConnected: "Connected",
       botUnavailable: "Not connected",
@@ -1770,14 +1783,19 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       overlaysNotSetUp: "Not set up",
       overlaysChecking: "checking",
       runningNow: "Running now",
-      runningNowReserved: "Active live actions will appear here.",
+      runningNowReserved: "No action is running.",
       nextUp: "Coming up",
-      nextUpReserved: "Upcoming actions will appear here.",
+      nextUpReserved: "Nothing scheduled yet.",
       events: "Events",
-      eventsReserved: "New events will appear here.",
-      warnings: "Warnings",
-      warningsReserved: "Notices and errors will appear here.",
+      eventsReserved: "No events yet.",
       statusIndicators: "Connection status",
+      systemStatus: "System status",
+      systemReady: "All systems ready",
+      liveDataCurrent: "Live data up to date",
+      actionDraftDiscardTitle: "Discard your changes?",
+      actionDraftDiscardDescription: "Your entries will be lost if you close this action.",
+      actionDraftDiscard: "Discard entries",
+      actionDraftContinue: "Continue editing",
     },
     channelControls: {
       controlsHeading: "Channel controls",
