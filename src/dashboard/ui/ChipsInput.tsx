@@ -15,6 +15,8 @@ export interface ChipsInputProps {
   label: string;
   values: readonly string[];
   onChange: (values: string[]) => void;
+  /** Controlled pending text; omit it and the input keeps its own. */
+  pending?: string;
   onPendingChange?: (pending: string) => void;
   placeholder?: string;
   hint?: string;
@@ -39,15 +41,17 @@ const normalizeEntry = (entry: string, stripPrefix: string | undefined, normaliz
   return next;
 };
 
-export function ChipsInput({ id: suppliedId, label, values, onChange, onPendingChange, placeholder, hint, error, warning, invalidValues = [], stripPrefix, normalize, validate, removeLabel, disabled = false, messages, listLabel, max, separator = "whitespace" }: ChipsInputProps) {
+export function ChipsInput({ id: suppliedId, label, values, onChange, pending, onPendingChange, placeholder, hint, error, warning, invalidValues = [], stripPrefix, normalize, validate, removeLabel, disabled = false, messages, listLabel, max, separator = "whitespace" }: ChipsInputProps) {
   const generatedId = useId();
   const id = suppliedId ?? generatedId;
   const disabledReason = useDisabledFieldReason();
-  const [draft, setDraft] = useState("");
+  const [localDraft, setDraft] = useState("");
+  const draft = pending ?? localDraft;
   const [validationError, setValidationError] = useState<string | null>(null);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
   const atLimit = max !== undefined && values.length >= max;
-  const effectiveError = error ?? validationError ?? undefined;
+  // A rejection belongs to the pending text: once that is cleared (typing, parent reset) it goes too.
+  const effectiveError = error ?? (draft.length > 0 ? validationError : null) ?? undefined;
   const effectiveWarning = warning ?? duplicateWarning ?? undefined;
   const descriptionId = `${id}-description`;
   const errorId = `${id}-error`;
@@ -142,7 +146,7 @@ export function ChipsInput({ id: suppliedId, label, values, onChange, onPendingC
           <button className="chips-input__remove" id={`${id}-remove-${encodeURIComponent(entry)}`} type="button" aria-label={removeLabel(prefixed(entry))} disabled={disabled} onClick={() => { onChange(values.filter((value) => value !== entry)); }}><Icon name="close" size={16} /></button>
         </span>)}
       </div>
-      <input data-ui="" id={id} className="chips-input__input" value={draft} placeholder={placeholder} disabled={disabled} readOnly={atLimit} aria-describedby={describedBy} onChange={(event) => { handleDraftChange(event.currentTarget.value); }} onPaste={handlePaste} onKeyDown={handleKeyDown} onBlur={add} />
+      <input data-ui="" id={id} className="chips-input__input" value={draft} placeholder={placeholder} disabled={disabled} readOnly={atLimit && draft.length === 0} aria-describedby={describedBy} onChange={(event) => { handleDraftChange(event.currentTarget.value); }} onPaste={handlePaste} onKeyDown={handleKeyDown} onBlur={add} />
     </div>
     <span data-ui="" id={descriptionId} className="chips-input__description"><span>{currentHint ?? ""}</span>{max === undefined ? null : <span className="chips-input__count">{messages.countLabel(values.length, max)}</span>}{describedHelper(null, disabledReason, `chips-${id}`)}</span>
     <FieldError id={errorId} className="ui-field__error" message={effectiveError} />

@@ -273,4 +273,22 @@ describe("FAQ panel", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Supportsupport$/u }));
     expect(await screen.findByRole("dialog", { name: "Unsaved changes" })).toBeInTheDocument();
   });
+
+  it("Discard clears a rejected keyword so the draft is clean again", async () => {
+    installPanelFetch((url, method) => url.pathname.endsWith("/entries") && method === "GET"
+      ? jsonResponse({ entries: [entry, secondEntry], orderRevision: 1 })
+      : undefined);
+    renderFaqPanel("en");
+
+    const field = await screen.findByRole("textbox", { name: "Keywords and phrases" });
+    fireEvent.change(field, { target: { value: "x".repeat(81) } });
+    fireEvent.blur(field);
+    expect(field).toHaveValue("x".repeat(81));
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+
+    expect(field).toHaveValue("");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Discard" })).toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: /^Supportsupport$/u }));
+    expect(screen.queryByRole("dialog", { name: "Unsaved changes" })).not.toBeInTheDocument();
+  });
 });

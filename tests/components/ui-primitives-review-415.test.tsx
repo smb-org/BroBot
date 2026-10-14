@@ -71,6 +71,25 @@ describe("issue 415 primitive regressions", () => {
     expect(screen.getAllByText("Maximum reached").length).toBeGreaterThan(1);
   });
 
+  it("keeps the input editable while it holds overflow text at the limit", () => {
+    const long = "x".repeat(81);
+    const existing = Array.from({ length: 19 }, (_, index) => `kw${String(index)}`);
+    function Controlled() {
+      const [values, setValues] = useState(existing);
+      const [pending, setPending] = useState("");
+      return <ChipsInput id="kw" label="Keywords" values={values} pending={pending} onPendingChange={setPending} max={20} separator="comma" validate={(entry) => entry.length > 80 ? "Too long" : null} onChange={setValues} removeLabel={(entry) => `Remove ${entry}`} messages={chipMessages} listLabel="Keywords" />;
+    }
+    render(<Controlled />);
+    const input = screen.getByRole("textbox");
+    fireEvent.paste(input, { clipboardData: { getData: () => `${long}, valid20` } });
+    expect(input).toHaveValue(long);
+    expect(input).not.toHaveAttribute("readonly");
+    fireEvent.change(input, { target: { value: "" } });
+    expect(input).toHaveValue("");
+    expect(input).toHaveAttribute("readonly");
+    expect(screen.queryByText("Too long")).not.toBeInTheDocument();
+  });
+
   it("keeps pending text and reports a limit error when committing at the limit", () => {
     const onChange = vi.fn();
     render(<ChipsInput id="kw" label="Keywords" values={["a", "b"]} max={2} onChange={onChange} removeLabel={(entry) => `Remove ${entry}`} messages={chipMessages} listLabel="Keywords" />);

@@ -437,6 +437,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
                 label={labels.patterns}
                 values={entryPatterns(draft)}
                 onChange={(patterns) => { patchDraft({ patterns: patterns.join("\n") }); }}
+                pending={pendingPatterns}
                 onPendingChange={setPendingPatterns}
                 placeholder={labels.patternsPlaceholder}
                 hint={labels.patternsHint}
