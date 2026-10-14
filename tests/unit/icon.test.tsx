@@ -39,6 +39,7 @@ const iconNames: Readonly<Record<IconName, true>> = {
   tabMessages: true,
   tabPrewarning: true,
   broadcast: true,
+  vote: true,
   "broadcast-off": true,
   "volume-3": true,
   "volume-off": true,

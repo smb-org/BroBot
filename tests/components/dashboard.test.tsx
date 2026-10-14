@@ -4,9 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DashboardApp } from "../../src/dashboard/main";
 import { dashboardRoutePath, parseDashboardRoute } from "../../src/dashboard/router";
 import { dashboardDataKeys } from "../../src/dashboard/data/keys";
-import { emptyEventFilter } from "../../src/dashboard/events/model";
-import { WarningsAndErrorsFeed } from "../../src/dashboard/stream-manager";
-import { UiProvider } from "../../src/dashboard/ui";
 import { queryKeys } from "../../src/dashboard/data/keys";
 import { clickSelectOption, renderWithQuery as renderWithQueryBase, type DashboardQueryTestOptions } from "../query-test-utils";
 import { jsonResponse } from "../unit/fixtures";
@@ -1640,110 +1637,6 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByText("403")).toBeInTheDocument();
   });
 
-  it("shows bot permissions on the channel page, names missing scopes, and offers no authorization", async () => {
-    const channel = {
-      ...healthyChannel("kanal-a", "Alpha"),
-      botPermissions: { missingScopes: ["user:bot", "user:read:chat"] },
-    };
-    stubDashboardFetch((url) => {
-      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
-    }, [channel]);
-    window.history.replaceState({}, "", "/channels/kanal-a");
-
-    render(<DashboardApp />);
-
-    const permissions = await screen.findByRole("article", { name: "Bot-Berechtigungen" });
-    expect(permissions).toHaveAttribute("data-status", "warning");
-    expect(within(permissions).getByText("2 fehlen")).toBeInTheDocument();
-    expect(screen.getByText("Der Betreiber muss die Anwendung neu autorisieren.")).toBeInTheDocument();
-    expect(screen.getByText("user:bot")).toHaveClass("mono");
-    expect(screen.getByText("user:read:chat")).toHaveClass("mono");
-    // Authorization belongs to the platform account, not to the channel-scoped panel role.
-    expect(screen.queryByRole("button", { name: /autoris/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /autoris/i })).not.toBeInTheDocument();
-  });
-
-  it("shows a flagged channel with incomplete full consent, including status row, scopes, and consent link", async () => {
-    const channel = {
-      ...healthyChannel("kanal-a", "Alpha"),
-      role: "broadcaster",
-      broadcasterPermissions: { missingScopes: ["channel:manage:broadcast"] },
-    };
-    stubDashboardFetch((url) => {
-      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
-    }, [channel]);
-    window.history.replaceState({}, "", "/channels/kanal-a");
-
-    render(<DashboardApp />);
-
-    expect(await screen.findByRole("article", { name: "Vollzustimmung fehlt" })).toHaveAttribute("data-status", "warning");
-    const inspector = await screen.findByRole("region", { name: "Fehlende Broadcaster-Berechtigungen" });
-    expect(within(inspector).getByText("channel:manage:broadcast")).toHaveClass("mono");
-    const consentLink = await screen.findByRole("link", { name: "Vollzustimmung erteilen" });
-    expect(consentLink).toHaveAttribute("href", "/auth/login?channel=kanal-a");
-  });
-
-  it("shows no full-consent state for an unflagged channel", async () => {
-    const channel = { ...healthyChannel("kanal-a", "Alpha"), broadcasterPermissions: null };
-    stubDashboardFetch((url) => {
-      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
-    }, [channel]);
-    window.history.replaceState({}, "", "/channels/kanal-a");
-
-    render(<DashboardApp />);
-
-    await screen.findByRole("heading", { name: "Alpha", level: 1 });
-    expect(screen.queryByRole("article", { name: "Vollzustimmung fehlt" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Vollzustimmung erteilen" })).not.toBeInTheDocument();
-  });
-
-  it("shows no full-consent state for a fully consented channel", async () => {
-    const channel = { ...healthyChannel("kanal-a", "Alpha"), broadcasterPermissions: { missingScopes: [] } };
-    stubDashboardFetch((url) => {
-      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
-    }, [channel]);
-    window.history.replaceState({}, "", "/channels/kanal-a");
-
-    render(<DashboardApp />);
-
-    await screen.findByRole("heading", { name: "Alpha", level: 1 });
-    expect(screen.queryByRole("article", { name: "Vollzustimmung fehlt" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Vollzustimmung erteilen" })).not.toBeInTheDocument();
-  });
-
-  it("shows managers full consent disabled with a reason", async () => {
-    const channel = {
-      ...healthyChannel("kanal-a", "Alpha"),
-      role: "manager",
-      broadcasterPermissions: { missingScopes: ["channel:manage:broadcast"] },
-    };
-    stubDashboardFetch((url) => {
-      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
-    }, [channel]);
-    window.history.replaceState({}, "", "/channels/kanal-a");
-
-    render(<DashboardApp />);
-
-    await screen.findByRole("article", { name: "Vollzustimmung fehlt" });
-    const button = await screen.findByRole("button", { name: "Vollzustimmung erteilen" });
-    expect(button).toBeDisabled();
-    expect(screen.getAllByText("Nur der Broadcaster kann die Vollzustimmung erteilen.").length).toBeGreaterThan(0);
-  });
-
-  it("shows full bot permissions as a healthy state with a word", async () => {
-    const channel = { ...healthyChannel("kanal-a", "Alpha"), botPermissions: { missingScopes: [] } };
-    stubDashboardFetch((url) => {
-      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
-    }, [channel]);
-    window.history.replaceState({}, "", "/channels/kanal-a");
-
-    render(<DashboardApp />);
-
-    const permissions = await screen.findByRole("article", { name: "Bot-Berechtigungen" });
-    expect(permissions).toHaveAttribute("data-status", "healthy");
-    expect(within(permissions).getByText("Gesund")).toBeInTheDocument();
-  });
-
   it("explicitly asks for the actual access scope when adding", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     let addRequestCount = 0;
@@ -2133,7 +2026,7 @@ describe("Dashboard skeleton", () => {
     expect(requested).not.toContain("/api/channels/kanal-a/system");
   });
 
-  it("puts Stream Manager actions and warnings before the compact healthy state", async () => {
+  it("keeps the cockpit action and reserved warning tiles in the live wall", async () => {
     const channel = {
       ...healthyChannel("kanal-a", "Alpha"),
       chatSubscriptionNeeded: true,
@@ -2152,40 +2045,13 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     const actions = await screen.findByRole("region", { name: "Sofortaktionen" });
-    const warnings = await screen.findByRole("region", { name: "Warnungen und Fehler" });
+    const warnings = await screen.findByRole("region", { name: "Warnungen" });
     expect(screen.queryByRole("region", { name: "Module" })).not.toBeInTheDocument();
-    const state = document.querySelector("details.channel-state-checks");
-    expect(state).not.toBeNull();
-    expect(actions.compareDocumentPosition(warnings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(warnings.compareDocumentPosition(state as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(state).not.toHaveAttribute("open");
-    expect(within(state as HTMLElement).getByText("Alles in Ordnung · 8 Prüfungen")).toBeInTheDocument();
-  });
-
-  it("lists unhealthy channel checks prominently and keeps the moderator recheck with its row", async () => {
-    const channel = {
-      ...healthyChannel("kanal-a", "Alpha"),
-      chatSubscriptionNeeded: true,
-      botPermissions: { missingScopes: [] },
-      moderator: { ...moderator, isModerator: false },
-    };
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (path === "/api/channels/kanal-a/overview") return jsonResponse(overview(channel));
-      if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
-      if (path === "/api/channels/kanal-a/events") return jsonResponse({ entries: [], nextCursor: null });
-      return jsonResponse({}, 404);
-    }));
-    window.history.replaceState({}, "", "/channels/kanal-a");
-
-    render(<DashboardApp />);
-
-    const state = await screen.findByText("1 auffällige Prüfung · 8 Prüfungen");
-    const details = state.closest("details");
-    expect(details).toHaveAttribute("open");
-    const moderatorRow = within(details as HTMLElement).getByRole("article", { name: "Moderatorstatus" });
-    expect(within(moderatorRow).getByRole("button", { name: "Moderatorstatus prüfen" })).toBeInTheDocument();
+    expect(document.querySelectorAll(".live-cockpit-reserve")).toHaveLength(4);
+    const runningNow = screen.getByRole("region", { name: "Läuft gerade" });
+    expect(actions.compareDocumentPosition(runningNow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(runningNow.compareDocumentPosition(warnings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Warnungen und Fehler" })).not.toBeInTheDocument();
   });
 
   it("links to active modules from the sidebar instead of embedding their forms", async () => {
@@ -2761,110 +2627,6 @@ describe("Dashboard skeleton", () => {
     expect([channelCalls, overviewCalls, systemCalls]).toEqual([3, 1, 3]);
   });
 
-  it("keeps a completed time zone save when a stale settings read resolves later", async () => {
-    const channel = healthyChannel("kanal-a", "Alpha");
-    const oldSettings = { timeZone: "UTC", revision: 1, location: null, locationRevision: 1 };
-    let settingsReads = 0;
-    const staleSettingsResolvers = new Map<number, (response: Response) => void>();
-    let savedRevision: number | null = null;
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-      const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
-      if (url.pathname === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse(overview(channel)));
-      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
-      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
-      if (url.pathname === "/api/channels/kanal-a/settings") {
-        if (init?.method === "PATCH") {
-          if (typeof init.body !== "string") throw new Error("Channel settings mutation body must be JSON.");
-          const body = JSON.parse(init.body) as { revision: number; timeZone: string };
-          savedRevision = body.revision + 1;
-          return Promise.resolve(jsonResponse({ ok: true, timeZone: body.timeZone, revision: savedRevision }));
-        }
-        settingsReads += 1;
-        if (settingsReads === 1) return Promise.resolve(jsonResponse(oldSettings));
-        return new Promise<Response>((resolve) => { staleSettingsResolvers.set(settingsReads, resolve); });
-      }
-      return Promise.resolve(jsonResponse({}, 404));
-    }));
-    window.history.replaceState({}, "", "/channels/kanal-a");
-
-    const rendered = render(<DashboardApp />, undefined, { staleTime: 0 });
-    const timeZoneField = await screen.findByRole("combobox", { name: "Kanalzeitzone" });
-    await waitFor(() => expect(settingsReads).toBe(1));
-    await waitFor(() => expect(timeZoneField).toHaveValue("UTC"));
-    const settingsKey = queryKeys.channel("kanal-a", "settings");
-    // A stale background read is already in flight when the settings mutation completes.
-    const staleRead = rendered.queryClient.refetchQueries({ queryKey: settingsKey, exact: true });
-    await waitFor(() => expect(settingsReads).toBe(2));
-
-    fireEvent.click(timeZoneField);
-    fireEvent.change(timeZoneField, { target: { value: "Europe/Vienna" } });
-    clickSelectOption(await screen.findByRole("option", { name: "Europe/Vienna", hidden: true }));
-    await waitFor(() => expect(timeZoneField).toHaveValue("Europe/Vienna"));
-    fireEvent.click(screen.getByRole("button", { name: "Zeitzone speichern", hidden: true }));
-    await waitFor(() => expect(savedRevision).toBe(2));
-    await waitFor(() => expect(rendered.queryClient.getQueryData<typeof oldSettings>(settingsKey)?.revision).toBe(2));
-
-    staleSettingsResolvers.get(2)?.(jsonResponse(oldSettings));
-    await act(async () => { await staleRead; });
-
-    // A later read can also return an older revision. The shared revision
-    // merge keeps it from replacing the mutation result in the cache.
-    const laterStaleRead = rendered.queryClient.refetchQueries({ queryKey: settingsKey, exact: true });
-    await waitFor(() => expect(settingsReads).toBe(3));
-    staleSettingsResolvers.get(3)?.(jsonResponse(oldSettings));
-    await act(async () => { await laterStaleRead; });
-    expect(rendered.queryClient.getQueryData<typeof oldSettings>(settingsKey)).toMatchObject({ timeZone: "Europe/Vienna", revision: 2 });
-    expect(timeZoneField).toHaveValue("Europe/Vienna");
-  });
-
-  it("saves the channel default chat target only after an explicit save", async () => {
-    const channel = healthyChannel("kanal-a", "Alpha");
-    let targetPatchCount = 0;
-    let savedTargetBody: Record<string, unknown> | null = null;
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-      const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
-      if (url.pathname === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse(overview(channel)));
-      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
-      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
-      if (url.pathname === "/api/channels/kanal-a/settings" && init?.method === "PATCH") {
-        if (typeof init.body !== "string") throw new Error("Channel settings mutation body must be JSON.");
-        targetPatchCount += 1;
-        savedTargetBody = JSON.parse(init.body) as Record<string, unknown>;
-        return Promise.resolve(jsonResponse({
-          ok: true,
-          defaultChatTarget: "all_chats",
-          defaultChatTargetRevision: 2,
-        }));
-      }
-      if (url.pathname === "/api/channels/kanal-a/settings") return Promise.resolve(jsonResponse({
-        timeZone: "Europe/Berlin",
-        revision: 1,
-        location: null,
-        locationRevision: 1,
-        defaultChatTarget: "source_only",
-        defaultChatTargetRevision: 1,
-      }));
-      return Promise.resolve(jsonResponse({}, 404));
-    }));
-    window.history.replaceState({}, "", "/channels/kanal-a");
-
-    render(<DashboardApp />);
-    const targetField = await screen.findByRole("button", { name: "Standard-Chat-Ziel" });
-    await waitFor(() => expect(targetField).toHaveTextContent("Nur unser Chat"));
-    fireEvent.click(targetField);
-    const allChatsOption = await screen.findByRole("radio", { name: /Alle Chats/u, hidden: true });
-    fireEvent.click(allChatsOption);
-
-    expect(targetPatchCount).toBe(0);
-    expect(targetField).toHaveTextContent("Alle Chats");
-    fireEvent.click(screen.getByRole("button", { name: "Standard-Chat-Ziel speichern" }));
-
-    await waitFor(() => expect(targetPatchCount).toBe(1));
-    expect(savedTargetBody).toEqual({ defaultChatTarget: "all_chats", defaultChatTargetRevision: 1 });
-  });
-
   it("resets ad settings when a warm module route changes channel", async () => {
     Object.defineProperty(window.navigator, "language", { configurable: true, value: "en-US" });
     const alpha = { ...healthyChannel("kanal-a", "Alpha"), modules: [{ id: "ads", enabled: true, settings: "{}" }] };
@@ -3177,7 +2939,7 @@ describe("Dashboard skeleton", () => {
     expect(channelCalls).toBe(3);
   });
 
-  it("is the Stream Manager after sign-in: immediate actions, and the warnings feed together, no page change", async () => {
+  it("shows the live cockpit and its module actions after sign-in", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "manager" as const };
     let modulesCalls = 0;
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -3219,41 +2981,12 @@ describe("Dashboard skeleton", () => {
     // 1000 ms, so give it real headroom.
     expect(await screen.findByRole("button", { name: "Clip erstellen" }, { timeout: 5000 })).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Shoutout senden" }, { timeout: 5000 })).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: /Werbung jetzt/ }, { timeout: 5000 })).toBeInTheDocument();
-
-    // Warnings/errors feed needs no interaction to show.
-    expect(await screen.findByText("Werbeeinblendung nicht gestartet: Twitch-Abklingzeit aktiv")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Werbung starten" }, { timeout: 5000 })).toBeInTheDocument();
+    expect(document.querySelector(".live-cockpit")).toBeVisible();
     // Warm runs take ~0.5 s, but on a cold CI transform cache the lazy
     // module imports above are slow; the test timeout must exceed the
     // 5 s findBy waits it contains (the 5 s default did not).
   }, 20_000);
-
-  it("keeps cached Stream Manager warnings visible after a failed background refresh", async () => {
-    const entry = {
-      eventId: "cached-warning", createdAt: relativeIso(0), moduleId: "ads", triggerId: "t1",
-      code: "ads.commercial.failed", detail: "{\"reason\":\"rate_limited\"}",
-      actorUserId: null, actorLogin: null, actorDisplayName: null,
-    };
-    let failEvents = false;
-    const fetcher = vi.fn((input: RequestInfo | URL) => {
-      if (requestUrl(input).pathname === "/api/channels/kanal-a/events") {
-        return Promise.resolve(failEvents ? jsonResponse({ error: "events_unavailable" }, 503) : jsonResponse({ entries: [entry], nextCursor: null }));
-      }
-      return Promise.resolve(jsonResponse({}, 404));
-    });
-    vi.stubGlobal("fetch", fetcher);
-    const view = render(<UiProvider><WarningsAndErrorsFeed channelId="kanal-a" /></UiProvider>);
-    expect(await screen.findByText("Werbeeinblendung nicht gestartet: Twitch-Abklingzeit aktiv")).toBeInTheDocument();
-    const eventKey = dashboardDataKeys.events("kanal-a", { ...emptyEventFilter, tones: ["warning", "error"] });
-    failEvents = true;
-    await act(async () => { await view.queryClient.refetchQueries({ queryKey: eventKey, exact: true }, { throwOnError: true }).catch(() => undefined); });
-
-    expect(fetcher.mock.calls.filter(([input]) => requestUrl(input).pathname.endsWith("/events"))).toHaveLength(2);
-    expect(view.queryClient.getQueryState(eventKey)?.status).toBe("error");
-    expect(screen.getByText("Werbeeinblendung nicht gestartet: Twitch-Abklingzeit aktiv")).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent("Verbindung unterbrochen. Die Ereignisse konnten nicht geladen werden.");
-    expect(screen.getByRole("button", { name: "Erneut versuchen" })).toBeInTheDocument();
-  });
 
   it("uses the overview stream state for command palette actions", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), streamState: "offline" as const };
@@ -4023,7 +3756,7 @@ describe("Dashboard skeleton", () => {
 
     fireEvent.click(screen.getByRole("link", { name: /Alpha/ }));
     await screen.findByRole("heading", { name: "Alpha", level: 1 });
-    expect(screen.getByRole("article", { name: "Broadcaster-OAuth" })).toHaveAttribute("data-status", "neutral");
+    expect(screen.queryByRole("article", { name: "Broadcaster-OAuth" })).not.toBeInTheDocument();
 
     await openSetupNavigation();
     fireEvent.click(screen.getByRole("link", { name: "System" }));
@@ -4047,357 +3780,6 @@ describe("Dashboard skeleton", () => {
     expect(status.closest(".module-locked-status")).toHaveAttribute("title", "Kanalereignisse werden für den Betrieb der Module benötigt.");
     expect(screen.queryByText("channel_events", { exact: true })).not.toBeInTheDocument();
     expect(screen.queryByText("Module werden geladen …")).not.toBeInTheDocument();
-  });
-
-  it("shows chat as not needed when no active module reads it, even if no subscription row exists", async () => {
-    const channel = { ...healthyChannel("kanal-a", "Alpha"), chatSubscription: null, chatSubscriptionNeeded: false };
-    const overviewState = { ...channel, activeModules: [] };
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (path === "/api/channels/kanal-a/overview") return jsonResponse(overviewState);
-      if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
-      return jsonResponse({}, 404);
-    }));
-    window.history.replaceState({}, "", "/channels/kanal-a");
-
-    render(<DashboardApp />);
-
-    const chatRow = await screen.findByRole("article", { name: "Chat-Abo" });
-    expect(chatRow).toHaveAttribute("data-status", "neutral");
-    expect(chatRow).toHaveTextContent("Nicht benötigt — kein aktives Modul liest den Chat");
-  });
-
-  it.each([
-    ["de-DE", "pending_adoption", "Wird übernommen"],
-    ["de-DE", "moderator_required", "Wartet auf Moderatorstatus des Bots"],
-    ["en-US", "pending_adoption", "Being adopted"],
-    ["en-US", "moderator_required", "Waiting for the bot's moderator status"],
-  ])("shows %s EventSub reason %s as neutral, not as an error", async (browserLanguage, reason, expected) => {
-    const channel = { ...healthyChannel("kanal-a", "Alpha"), chatSubscription: { status: "missing", subscriptionId: null, reason, updatedAt: relativeIso(0) }, chatSubscriptionNeeded: true };
-    const overviewState = { ...channel, activeModules: [] };
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (path === "/api/channels/kanal-a/overview") return jsonResponse(overviewState);
-      if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
-      return jsonResponse({}, 404);
-    }));
-    Object.defineProperty(window.navigator, "language", { value: browserLanguage, configurable: true });
-    window.history.replaceState({}, "", "/channels/kanal-a");
-
-    render(<DashboardApp />);
-
-    const chatRow = await screen.findByRole("article", { name: browserLanguage === "de-DE" ? "Chat-Abo" : "Chat subscription" });
-    expect(chatRow).toHaveAttribute("data-status", "neutral");
-    expect(chatRow).toHaveTextContent(expected);
-    expect(await screen.findByRole("article", { name: browserLanguage === "de-DE" ? "Letzter Fehler" : "Last error" })).toHaveAttribute("data-status", "healthy");
-  });
-
-  it("shows a missing moderator status as a red error state", async () => {
-    const channel = {
-      ...healthyChannel("kanal-a", "Alpha"),
-      moderator: { isModerator: false, checkedAt: "2026-09-18T02:00:00.000Z", reason: "moderator_entfernt" },
-      lastError: { source: "moderator", reason: "moderator_entfernt", at: "2026-09-18T02:00:00.000Z" },
-    };
-    stubDashboardFetch((url) => {
-      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
-    }, [channel]);
-    window.history.replaceState({}, "", "/channels/kanal-a");
-
-    render(<DashboardApp />);
-
-    const moderatorCard = await screen.findByRole("article", { name: "Moderatorstatus" });
-    expect(moderatorCard).toHaveAttribute("data-status", "error");
-    expect(moderatorCard).toHaveTextContent("Moderatorrolle fehlt");
-  });
-
-  it("shows the affected subscription in the last error in German and English", async () => {
-    const channel = {
-      ...healthyChannel("kanal-a", "Alpha"),
-      lastError: {
-        source: "eventsub",
-        reason: "Forbidden",
-        message: "Keine Berechtigung.",
-        status: 403,
-        subscriptionType: "channel.moderate",
-        subscriptionVariant: "",
-        at: "2026-09-18T02:00:00.000Z",
-      },
-    };
-    const showChannel = async (): Promise<void> => {
-      stubDashboardFetch((url) => {
-      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
-    }, [channel]);
-      window.history.replaceState({}, "", "/channels/kanal-a");
-      render(<DashboardApp />);
-      await screen.findByRole("heading", { name: "Alpha", level: 1 });
-    };
-
-    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
-    await showChannel();
-    expect(screen.getByText(/Moderationsereignisse: Forbidden/)).toBeInTheDocument();
-    expect(screen.getByText(/Keine Berechtigung\./)).toBeInTheDocument();
-    expect(screen.getByText(/HTTP 403/)).toBeInTheDocument();
-
-    cleanup();
-    vi.unstubAllGlobals();
-    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
-    await showChannel();
-    expect(screen.getByText(/Moderation events: Forbidden/)).toBeInTheDocument();
-    cleanup();
-    vi.unstubAllGlobals();
-    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
-  });
-
-  it("shows missing broadcaster consent as a warning and offers the reauthorization path only to the broadcaster", async () => {
-    const channel = {
-      ...healthyChannel("kanal-a", "Alpha"),
-      channelBotConsent: "missing",
-      lastError: null,
-    };
-    const showChannel = (displayedChannel: typeof channel): void => {
-      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-        const path = requestUrl(input).pathname;
-        if (path === "/api/channels") return jsonResponse({ channels: [displayedChannel], bot: displayedChannel.bot });
-        if (path.endsWith("/overview")) return jsonResponse({ ...displayedChannel, activeModules: [] });
-        return jsonResponse({}, 404);
-      }));
-      window.history.replaceState({}, "", "/channels/kanal-a");
-      render(<DashboardApp />);
-    };
-
-    showChannel(channel);
-
-    expect((await screen.findAllByText("Broadcaster-Zustimmung fehlt")).length).toBeGreaterThanOrEqual(1);
-    expect(await screen.findByText("Der Broadcaster muss Twitch erneut autorisieren.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Broadcaster-Zustimmung anfordern" })).toBeDisabled();
-
-    cleanup();
-    const broadcasterChannel = { ...channel, role: "broadcaster" };
-    showChannel(broadcasterChannel);
-
-    const action = await screen.findByRole("link", { name: "Broadcaster-Zustimmung anfordern" });
-    expect(action).toHaveAttribute("href", "/auth/channels/kanal-a/channel-bot");
-    expect(screen.getByRole("article", { name: "Chat-Zustimmung" })).toHaveAttribute("data-status", "warning");
-  });
-
-  it("shows the last moderator check and the action only for authorized roles", async () => {
-    const channel = {
-      ...healthyChannel("kanal-a", "Alpha"),
-      role: "manager",
-      moderator: { isModerator: false, checkedAt: "2026-09-18T02:00:00.000Z", reason: "moderator_entfernt" },
-    };
-    stubDashboardFetch((url) => {
-      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
-    }, [channel]);
-    window.history.replaceState({}, "", "/channels/kanal-a");
-
-    render(<DashboardApp />);
-
-    await screen.findByRole("article", { name: "Moderatorstatus" });
-    expect(within(screen.getByRole("article", { name: "Moderatorstatus" })).getByText("moderator_entfernt")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Moderatorstatus prüfen" })).toBeInTheDocument();
-
-    cleanup();
-    const operatorChannel = { ...channel, role: "operator" };
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [operatorChannel], bot: operatorChannel.bot });
-      if (path.endsWith("/overview")) return jsonResponse({ ...operatorChannel, activeModules: [] });
-      return jsonResponse({}, 404);
-    }));
-    window.history.replaceState({}, "", "/channels/kanal-a");
-    render(<DashboardApp />);
-
-    await screen.findByRole("article", { name: "Moderatorstatus" });
-    expect(screen.getByRole("button", { name: "Moderatorstatus prüfen" })).toBeDisabled();
-    expect(screen.getByText("Nur Broadcaster und Verwalter dürfen den Moderatorstatus prüfen.")).toBeInTheDocument();
-  });
-
-  it("shows feedback during and after the manual check", async () => {
-    const channel = {
-      ...healthyChannel("kanal-a", "Alpha"),
-      role: "broadcaster",
-      moderator: { isModerator: false, checkedAt: "2026-09-18T02:00:00.000Z", reason: "moderator_entfernt" },
-    };
-    let resolveCheck!: (response: Response) => void;
-    const check = new Promise<Response>((resolve) => { resolveCheck = resolve; });
-    const fetcher = vi.fn((input: RequestInfo | URL) => {
-      const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
-      if (url.pathname === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
-      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
-      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
-      if (url.pathname === "/api/channels/kanal-a/moderator-status") return check;
-      return Promise.resolve(jsonResponse({}, 404));
-    });
-    vi.stubGlobal("fetch", fetcher);
-    window.history.replaceState({}, "", "/channels/kanal-a");
-
-    render(<DashboardApp />);
-    const button = await screen.findByRole("button", { name: "Moderatorstatus prüfen" });
-    fireEvent.click(button);
-
-    expect(await screen.findByRole("button", { name: "Prüfung läuft …" })).toBeDisabled();
-    resolveCheck(jsonResponse({
-      moderator: { isModerator: true, checkedAt: "2026-09-18T04:00:00.000Z", reason: null },
-      nextAllowedAt: "2026-09-18T04:05:00.000Z",
-    }));
-
-    // Healthy states stay visible and keep a green LED.
-    await waitFor(() => expect(screen.getAllByText(/Letzte Prüfung:/).length).toBeGreaterThanOrEqual(1));
-    expect(screen.getByRole("article", { name: "Moderatorstatus" })).toHaveAttribute("data-status", "healthy");
-    expect(screen.getAllByText(/Letzte Prüfung:/).length).toBeGreaterThanOrEqual(1);
-  });
-
-  it("resets a moderator check when leaving and returning to its route", async () => {
-    const channel = {
-      ...healthyChannel("kanal-a", "Alpha"),
-      role: "broadcaster",
-      moderator: { isModerator: false, checkedAt: "2026-09-18T02:00:00.000Z", reason: "moderator_entfernt" },
-    };
-    let resolveCheck!: (response: Response) => void;
-    const check = new Promise<Response>((resolve) => { resolveCheck = resolve; });
-    const fetcher = vi.fn((input: RequestInfo | URL) => {
-      const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
-      if (url.pathname === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
-      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
-      if (url.pathname === "/api/channels/kanal-a/system") return Promise.resolve(jsonResponse(system));
-      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
-      if (url.pathname === "/api/channels/kanal-a/moderator-status") return check;
-      return Promise.resolve(jsonResponse({}, 404));
-    });
-    vi.stubGlobal("fetch", fetcher);
-    window.history.replaceState({}, "", "/channels/kanal-a");
-
-    render(<DashboardApp />);
-    fireEvent.click(await screen.findByRole("button", { name: "Moderatorstatus prüfen" }));
-    expect(await screen.findByRole("button", { name: "Prüfung läuft …" })).toBeDisabled();
-
-    navigateToPath("/channels/kanal-a/system");
-    await screen.findByRole("heading", { name: "System", level: 1 });
-    resolveCheck(jsonResponse({
-      moderator: { isModerator: true, checkedAt: "2026-09-18T04:00:00.000Z", reason: null },
-      nextAllowedAt: "2026-09-18T04:05:00.000Z",
-    }));
-    await act(async () => { await new Promise<void>((resolve) => { window.setTimeout(resolve, 0); }); });
-
-    navigateToPath("/channels/kanal-a");
-    const checkButton = await screen.findByRole("button", { name: /Moderatorstatus prüfen|Prüfung läuft/u });
-    expect(checkButton).toBeEnabled();
-    expect(checkButton).toHaveAccessibleName("Moderatorstatus prüfen");
-  });
-
-  it("reactivates the moderator check after the lockout period expires", async () => {
-    vi.useFakeTimers();
-    try {
-      const channel = {
-        ...healthyChannel("kanal-a", "Alpha"),
-        role: "broadcaster",
-        moderator: { isModerator: true, checkedAt: "2026-09-18T02:00:00.000Z", reason: null },
-      };
-      const nextAllowedAt = new Date(Date.now() + 5000).toISOString();
-      const fetcher = vi.fn((input: RequestInfo | URL) => {
-        const url = requestUrl(input);
-        if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
-        if (url.pathname === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
-        if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
-        if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
-        if (url.pathname === "/api/channels/kanal-a/moderator-status") return Promise.resolve(jsonResponse({
-          moderator: { isModerator: true, checkedAt: "2026-09-18T04:00:00.000Z", reason: null },
-          nextAllowedAt,
-        }));
-        return Promise.resolve(jsonResponse({}, 404));
-      });
-      vi.stubGlobal("fetch", fetcher);
-      window.history.replaceState({}, "", "/channels/kanal-a");
-
-      render(<DashboardApp />);
-      await flushQueryUpdates();
-      const button = screen.getByRole("button", { name: "Moderatorstatus prüfen" });
-      fireEvent.click(button);
-      await flushQueryUpdates();
-      expect(button).toBeDisabled();
-
-      act(() => { vi.advanceTimersByTime(5000); });
-      expect(button).toBeEnabled();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("shows Twitch errors and keeps the previous moderator state", async () => {
-    const channel = {
-      ...healthyChannel("kanal-a", "Alpha"),
-      moderator: { isModerator: true, checkedAt: "2026-09-18T02:00:00.000Z", reason: null },
-    };
-    const fetcher = vi.fn((input: RequestInfo | URL) => {
-      const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
-      if (url.pathname === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
-      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
-      if (url.pathname === "/api/channels/kanal-a/moderator-status") return Promise.resolve(jsonResponse({ error: "moderator_status_check_failed" }, 502));
-      return Promise.resolve(jsonResponse({}, 404));
-    });
-    vi.stubGlobal("fetch", fetcher);
-    window.history.replaceState({}, "", "/channels/kanal-a");
-
-    render(<DashboardApp />);
-    fireEvent.click(await screen.findByRole("button", { name: "Moderatorstatus prüfen" }));
-
-    const moderatorError = await screen.findByText("Moderatorstatus konnte nicht gelesen werden.");
-    expect(moderatorError.closest(".ui-toast--error")).toHaveAttribute("role", "alert");
-    expect(screen.queryByText("Nicht geprüft")).not.toBeInTheDocument();
-    expect(screen.getByRole("article", { name: "Moderatorstatus" })).toHaveAttribute("data-status", "healthy");
-  });
-
-  it("does not show missing token expiry dates as valid or healthy", async () => {
-    const channel = {
-      ...healthyChannel("kanal-a", "Alpha"),
-      tokens: {
-        botExpiresAt: null,
-        loginStatus: "connected",
-        loginReason: null,
-        loginExpiresAt: "2099-09-19T00:00:00.000Z",
-      },
-    };
-    stubDashboardFetch((url) => {
-      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
-    }, [channel]);
-    window.history.replaceState({}, "", "/channels/kanal-a");
-
-    render(<DashboardApp />);
-
-    const tokenCard = await screen.findByRole("article", { name: "Token-Zustand" });
-    expect(tokenCard).toHaveAttribute("data-status", "neutral");
-    expect(within(tokenCard).getByText("Nicht geprüft")).toBeInTheDocument();
-    expect(within(tokenCard).queryByText("Gültig")).not.toBeInTheDocument();
-    expect(within(tokenCard).queryByText("Gesund")).not.toBeInTheDocument();
-    expect(tokenCard.querySelector('[data-status="healthy"]')).toBeNull();
-  });
-
-  it("shows a working channel with three hours remaining as healthy", async () => {
-    const channel = healthyChannel("kanal-a", "Alpha");
-    const secondChannel = healthyChannel("kanal-b", "Beta");
-    stubDashboardFetch((url) => {
-      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
-    }, [channel, secondChannel]);
-    window.history.replaceState({}, "", "/");
-
-    render(<DashboardApp />);
-
-    const channelTaste = await screen.findByRole("link", { name: /Alpha/ });
-    expect(channelTaste).toHaveAttribute("data-status", "ok");
-    expect(within(channelTaste).getByText("Gesund", { selector: "span" })).toBeInTheDocument();
-    expect(within(channelTaste).queryByText("Warnung")).not.toBeInTheDocument();
-
-    // Healthy states stay visible on the channel page.
-    fireEvent.click(screen.getByRole("link", { name: /Alpha/ }));
-    await screen.findByRole("heading", { name: "Alpha", level: 1 });
-    expect(screen.getByRole("article", { name: "Token-Zustand" })).toHaveAttribute("data-status", "healthy");
-    expect(screen.getByRole("article", { name: "Bot-Account" })).toHaveAttribute("data-status", "healthy");
   });
 
   it("stays healthy as long as expiry is only approaching on its regular cycle", async () => {
@@ -4972,25 +4354,6 @@ describe("Dashboard skeleton", () => {
     expect(await screen.findByRole("region", { name: "Detail" })).toBeInTheDocument();
   });
 
-  it("shows both scope lists as ordinary regions without the inspector class", async () => {
-    const channel = {
-      ...healthyChannel("kanal-a", "Alpha"),
-      botPermissions: { missingScopes: ["user:bot"] },
-      broadcasterPermissions: { missingScopes: ["channel:manage:broadcast"] },
-    };
-    stubDashboardFetch((url) => {
-      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
-    }, [channel]);
-    window.history.replaceState({}, "", "/channels/kanal-a");
-
-    render(<DashboardApp />);
-
-    const botScopes = await screen.findByRole("region", { name: "Fehlende Bot-Berechtigungen" });
-    const broadcasterScopes = await screen.findByRole("region", { name: "Fehlende Broadcaster-Berechtigungen" });
-    expect(botScopes).not.toHaveClass("sub-inspector");
-    expect(broadcasterScopes).not.toHaveClass("sub-inspector");
-  });
-
   it("closes the subscription inspector by button and Escape, returning focus to the row", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const beta = healthyChannel("kanal-b", "Beta");
@@ -5335,90 +4698,4 @@ describe("Dashboard skeleton", () => {
     replaceState.mockRestore();
   });
 
-  // This full DashboardApp integration exercises overlapping saves through
-  // async dialogs; CI measured 5.1 s on PR #351, so give this case room beyond
-  // Vitest's default without raising the suite-wide timeout.
-  it("keeps a newly saved location when an unrelated, slower time zone save resolves after it", async () => {
-    // #268 review: the time zone save's response used to spread a channelSettings
-    // snapshot captured before the call, wiping out a location save that finished
-    // first and reverting `locationRevision` -- the next location edit then
-    // conflicted with the server until reload.
-    const channel = healthyChannel("kanal-a", "Alpha");
-    const initialSettings = { timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 1 };
-    const geocodeResult = {
-      name: "Tromsø",
-      admin1: "Troms og Finnmark",
-      country: "Norway",
-      latitude: 69.6492,
-      longitude: 18.9553,
-      timeZone: "Europe/Oslo",
-    };
-    const savedLocation = { name: "Tromsø, Troms og Finnmark, Norway", latitude: 69.6492, longitude: 18.9553, timeZone: "Europe/Oslo" };
-    const settingsPath = `/api/channels/${channel.channelId}/settings`;
-    const locationPath = `${settingsPath}/location`;
-
-    let resolveLocationSave: (() => void) | undefined;
-    const locationSavePromise = new Promise<Response>((resolve) => {
-      resolveLocationSave = () => resolve(jsonResponse({ ok: true, location: savedLocation, locationRevision: 2 }));
-    });
-    let resolveTimeZoneSave: (() => void) | undefined;
-    const timeZoneSavePromise = new Promise<Response>((resolve) => {
-      resolveTimeZoneSave = () => resolve(jsonResponse({ ok: true, timeZone: "Europe/Vienna", revision: 2 }));
-    });
-
-    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-      const url = requestUrl(input);
-      const method = init?.method ?? "GET";
-      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-token" });
-      if (url.pathname === `/api/channels/${channel.channelId}/overview`) return jsonResponse(overview(channel));
-      if (url.pathname === `/api/channels/${channel.channelId}/modules`) return jsonResponse({ modules: [] });
-      if (url.pathname === `${locationPath}/geocode`) return jsonResponse({ results: [geocodeResult] });
-      if (url.pathname === locationPath) return locationSavePromise;
-      if (url.pathname === settingsPath) return method === "PATCH" ? timeZoneSavePromise : jsonResponse(initialSettings);
-      return jsonResponse({}, 404);
-    });
-    vi.stubGlobal("fetch", fetcher);
-
-    window.history.replaceState({}, "", `/channels/${channel.channelId}`);
-    render(<DashboardApp />);
-    expect(await screen.findByRole("heading", { name: "Alpha", level: 1 })).toBeInTheDocument();
-
-    // Pick a location from the dialog; its PATCH is held back deliberately.
-    fireEvent.click(await screen.findByRole("button", { name: "Standort ändern" }));
-    fireEvent.change(await screen.findByRole("textbox", { name: "Ort suchen" }), { target: { value: "Tromsø" } });
-    fireEvent.click(screen.getByRole("button", { name: "Suchen" }));
-    clickSelectOption(await screen.findByRole("option", { name: /Tromsø/u }));
-
-    // While that save is still in flight, save an unrelated time zone change too.
-    const timeZoneField = screen.getByRole("combobox", { name: "Kanalzeitzone", hidden: true });
-    fireEvent.click(timeZoneField);
-    fireEvent.change(timeZoneField, { target: { value: "Europe/Vienna" } });
-    clickSelectOption(await screen.findByRole("option", { name: "Europe/Vienna", hidden: true }));
-    // The location dialog makes the page inert; dispatch directly to the save
-    // control to model the overlapping request without exposing it to a user.
-    fireEvent.click(screen.getByText("Zeitzone speichern", { exact: true }));
-
-    // The location save resolves first ...
-    resolveLocationSave?.();
-    await screen.findByText("Der Standort wurde gespeichert.");
-
-    // ... and only afterwards does the (slower) time zone response arrive. It
-    // must not restore the pre-save location snapshot.
-    resolveTimeZoneSave?.();
-    await waitFor(() => expect(timeZoneField).toHaveValue("Europe/Vienna"));
-
-    // A further location edit must use the fresh revision (2), not the one from
-    // before the race (1) -- otherwise the server would reject it as a conflict.
-    fireEvent.click(screen.getByRole("button", { name: "Standort entfernen" }));
-    fireEvent.click(within(await screen.findByRole("dialog", { name: "Standort entfernen?" })).getByRole("button", { name: "Standort entfernen" }));
-    await waitFor(() => {
-      const patchCalls = fetcher.mock.calls.filter(([callInput, callInit]) =>
-        requestUrl(callInput).pathname === locationPath && callInit?.method === "PATCH");
-      expect(patchCalls).toHaveLength(2);
-    });
-    const secondLocationSave = fetcher.mock.calls.filter(([callInput, callInit]) =>
-      requestUrl(callInput).pathname === locationPath && callInit?.method === "PATCH")[1];
-    expect(JSON.parse(secondLocationSave?.[1]?.body as string)).toEqual({ revision: 2, location: null });
-  }, 15_000);
 });

@@ -14,15 +14,6 @@ export const rateLimitWaitMessage = (error: unknown, labels: AdsPanelTexts): str
   return labels.rateLimited(Math.max(1, Math.ceil((retryAfter - Date.now()) / 1000)));
 };
 
-export const commercialCooldownWaitMessage = (error: unknown, labels: AdsPanelTexts): string | null => {
-  if (!(error instanceof PanelApiError) || (error.status !== 400 && error.status !== 429) || adFailureReason(error) !== "commercial_cooldown") return null;
-  const details = recordValue(error.details);
-  const detail = recordValue(details?.detail);
-  const cooldownUntil = detail?.commercialCooldownUntil;
-  if (typeof cooldownUntil !== "number" || !Number.isFinite(cooldownUntil) || cooldownUntil <= Date.now()) return null;
-  return labels.immediateCooldownWait(Math.max(1, Math.ceil((cooldownUntil - Date.now()) / 1000)));
-};
-
 export const adFailureReason = (error: unknown): string | null => {
   if (!(error instanceof PanelApiError)) return null;
   const details = recordValue(error.details);

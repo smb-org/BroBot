@@ -4,6 +4,7 @@ import { DEFAULT_TEXT_LONG, DEFAULT_TEXT_SHORT } from "./contracts/chat-defaults
 import { processRaid } from "./service";
 import { settingsVariableReferences } from "../contract";
 import { raidTemplateVariableGroupLabels } from "./contracts/template-variable-catalog";
+import { raidImmediateActionTexts } from "./action-locale";
 
 const raidPanelIcon = { paths: ["m4 17 5-10 3 6 2-4 6 8H4Z", "M8 19h8"] } as const;
 
@@ -43,9 +44,19 @@ export const raidModule: BotModule<typeof raidSettingsSchema> = {
   },
   eventSubTypes: ["channel.raid"],
   settingsEditor: () => import("./panel/settings-editor"),
-  immediateActions: {
-    requires: ["streamLive"],
-    load: () => import("./panel/immediate-actions"),
-  },
+  actions: [{
+    id: "send-shoutout",
+    name: raidImmediateActionTexts.name,
+    icon: "shoutout",
+    conditions: ["streamLive"],
+    requiredRole: "operator",
+    content: { presentation: "popover", load: () => import("./panel/action-content") },
+    errorMessage: raidImmediateActionTexts.error,
+    execute: async ({ channelId, formData }) => {
+      const login = formData.get("login");
+      if (typeof login !== "string" || login.trim().length === 0) throw new Error("A channel login is required.");
+      await (await import("./panel/immediate-action-service")).sendManualShoutout(channelId, login.trim());
+    },
+  }],
   handleEvent: (event, context) => processRaid(event, context.renderTemplate),
 };

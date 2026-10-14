@@ -28,13 +28,13 @@ const channelIdOf = (context: { req: { param: (name: string) => string | undefin
 const managementDenied = (context: { json: (body: { error: string }, status: 403) => Response }): Response =>
   context.json({ error: "belabox_management_denied" }, 403);
 
-const hasManagementAuthorization = async (
+const hasMemberAuthorization = async (
   db: D1Database,
   channelId: string,
   actor: ModuleMutationActor,
-  authorizeManagementMutation: AuthorizeModuleMutation,
+  authorizeMutation: AuthorizeModuleMutation,
 ): Promise<boolean> => {
-  const authorization = authorizeManagementMutation(channelId, actor, new Date().toISOString());
+  const authorization = authorizeMutation(channelId, actor, new Date().toISOString());
   const row = await db.prepare(`SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`)
     .bind(...authorization.values).first<{ authorized: number }>();
   return row !== null;
@@ -272,14 +272,16 @@ belaboxRoutes.post("/polling/retry", async (context) => {
 });
 
 belaboxRoutes.post("/test", async (context) => {
-  if (!canManage(context.get("channelRole"))) return managementDenied(context);
+  const channelId = channelIdOf(context);
+  const actor = context.get("actor");
+  const authorizeMutation = context.get("authorizeMutation");
+  if (!await hasMemberAuthorization(context.env.DB, channelId, actor, authorizeMutation)) {
+    return managementDenied(context);
+  }
   const parsed = testSchema.safeParse(await context.req.json().catch(() => ({})));
   if (!parsed.success) return context.json({ error: "belabox_test_invalid" }, 400);
 
-  const channelId = channelIdOf(context);
-  const actor = context.get("actor");
-  const authorizeManagementMutation = context.get("authorizeManagementMutation");
-  if (!await hasManagementAuthorization(context.env.DB, channelId, actor, authorizeManagementMutation)) {
+  if (!await hasMemberAuthorization(context.env.DB, channelId, actor, authorizeMutation)) {
     return managementDenied(context);
   }
 
@@ -296,7 +298,7 @@ belaboxRoutes.post("/test", async (context) => {
     return context.json({ ok: false, reason: validation.reason } satisfies BelaboxTestResult);
   }
 
-  if (!await hasManagementAuthorization(context.env.DB, channelId, actor, authorizeManagementMutation)) {
+  if (!await hasMemberAuthorization(context.env.DB, channelId, actor, authorizeMutation)) {
     return managementDenied(context);
   }
 

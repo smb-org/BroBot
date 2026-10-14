@@ -2,7 +2,7 @@ import type { ComponentType } from "react";
 
 import { MODULES } from "../modules/registry";
 import { MODULE_OVERLAY_ELEMENTS } from "../modules/overlay-element-registry";
-import type { ModuleOverlayElementDefinition, ModulePanelProperties } from "../modules/contract";
+import type { ModuleImmediateActionContentProperties, ModuleOverlayElementDefinition, ModulePanelProperties } from "../modules/contract";
 
 type RegisteredModule = (typeof MODULES)[number];
 
@@ -47,11 +47,12 @@ export const loadModuleSettingsEditor = (moduleId: string): ReturnType<NonNullab
     : memoizedModuleLoad(module.id, "settingsEditor", module.settingsEditor);
 };
 
-export const loadModuleImmediateActions = (moduleId: string): ReturnType<NonNullable<NonNullable<RegisteredModule["immediateActions"]>["load"]>> | null => {
+export const loadModuleImmediateActionContent = (moduleId: string, actionId: string): Promise<{ default: ComponentType<ModuleImmediateActionContentProperties> }> | null => {
   const module = MODULES.find((candidate) => candidate.id === moduleId);
-  return module?.immediateActions === undefined
+  const action = module?.actions?.find((candidate) => candidate.id === actionId);
+  return action?.content === undefined
     ? null
-    : memoizedModuleLoad(module.id, "immediateActions", module.immediateActions.load);
+    : memoizedModuleLoad(moduleId, `action-content:${actionId}`, action.content.load);
 };
 
 export const loadModuleOverlayElementEditor = (kind: string): ReturnType<NonNullable<ModuleOverlayElementDefinition["editor"]>> | null => {
@@ -68,9 +69,12 @@ export const preloadModulePanel = (moduleId: string): Promise<void> => {
   const loads: Promise<unknown>[] = [];
   const panelLoad = loadModulePanel(module);
   const settingsLoad = loadModuleSettingsEditor(moduleId);
-  const actionsLoad = loadModuleImmediateActions(moduleId);
+  const actionContentLoads = (module.actions ?? []).flatMap((action) => {
+    const contentLoad = loadModuleImmediateActionContent(moduleId, action.id);
+    return contentLoad === null ? [] : [contentLoad];
+  });
   if (panelLoad !== null) loads.push(panelLoad);
   if (settingsLoad !== null) loads.push(settingsLoad);
-  if (actionsLoad !== null) loads.push(actionsLoad);
+  loads.push(...actionContentLoads);
   return Promise.all(loads).then(() => undefined);
 };

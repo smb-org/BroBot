@@ -798,6 +798,7 @@ export interface DashboardTexts {
     members: string;
     variables: string;
     overlays: string;
+    overlaysChecking: string;
     module: string;
     manageModules: string;
     moduleCategories: Readonly<Record<ModuleNavigationCategory, string>>;
@@ -1032,46 +1033,62 @@ export interface DashboardTexts {
     chatCommandCopyFailed: string;
     chatCommandThresholds: Record<ModuleChatCommandThreshold, string>;
   };
-  /** Stream Manager: the immediate-action row and the warnings/errors feed
-   *  on the channel overview -- each action reports success/failure at
-   *  itself, never a global toast (see docs/input/umbau-plan.md Epic 4). */
+  /** Shared live-cockpit action frames and reserved tile copy. */
   streamManager: {
     immediateActions: string;
-    notices: {
-      title: string;
-      showAll: (count: string) => string;
-      showFewer: string;
-      botPermissionsSentence: string;
-      botPermissionsConsequence: string;
-      broadcasterPermissionsSentence: string;
-      broadcasterPermissionsConsequence: string;
-      moderatorMissingSentence: string;
-      moderatorMissingConsequence: string;
-      modulePermissionsSentence: (name: string) => string;
-      modulePermissionsConsequence: string;
-      tokenExpiredSentence: string;
-      tokenExpiredConsequence: string;
-      tokenRenewalSentence: string;
-      tokenRenewalConsequence: string;
-      grantPermission: string;
-      reviewPermissions: string;
-      checkModerator: string;
-      checkModeratorRunning: string;
-      checkModeratorLocked: string;
-    };
+    actionCount: (count: string) => string;
+    actionRun: string;
+    actionCancel: string;
+    actionRunning: string;
+    actionLoading: string;
+    actionLoadFailed: string;
+    actionAvailabilityFailed: string;
+    actionFailed: string;
+    actionSucceeded: (name: string) => string;
+    operatorOnly: string;
+    managerOnly: string;
+    broadcasterOnly: string;
     availabilityReasons: Record<ImmediateActionUnavailableReason, string>;
-    checksHealthy: (count: string) => string;
-    checksNeedAttention: (problems: string, checks: string) => string;
-    /** Command palette action labels; action cards use their module catalogue. */
+    /** Command palette action labels; cockpit labels come from module declarations. */
     runAd: (length: string) => string;
     createClip: string;
     sendShoutout: string;
-    feedTitle: string;
-    feedEmpty: string;
-    feedAll: string;
     today: string;
     yesterday: string;
     browserTimeZoneFallback: string;
+  };
+  liveCockpit: {
+    live: string;
+    actionsHint: string;
+    offline: string;
+    unknown: string;
+    duration: string;
+    viewers: string;
+    roleLabel: string;
+    roles: Record<ChannelRole, string>;
+    bot: string;
+    botConnected: string;
+    botUnavailable: string;
+    belabox: string;
+    belaboxDisabled: string;
+    belaboxChecking: string;
+    belaboxNotConfigured: string;
+    belaboxUnavailable: string;
+    belaboxDisconnected: string;
+    belaboxConnected: (bitrate: string) => string;
+    overlays: string;
+    overlaysCount: (count: string) => string;
+    overlaysNotSetUp: string;
+    overlaysChecking: string;
+    runningNow: string;
+    runningNowReserved: string;
+    nextUp: string;
+    nextUpReserved: string;
+    events: string;
+    eventsReserved: string;
+    warnings: string;
+    warningsReserved: string;
+    statusIndicators: string;
   };
   channelControls: {
     controlsHeading: string;
@@ -1177,6 +1194,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       accountMenu: "Konto", appearance: "Darstellung", appearanceNightShift: "Nachtschicht", appearanceIndigoNight: "Indigo-Nacht",
       manageModules: "Module verwalten", moduleCategories: { chat: "Chat", participation: "Mitmachen", twitch: "Twitch", data: "Daten", stream: "Stream", admin: "Verwaltung" },
       overlays: "Overlays",
+      overlaysChecking: "Wird geprüft …",
       signingOut: "Abmeldung …", signOut: "Abmelden",
       openSidebar: "Seitenleiste öffnen", closeSidebar: "Seitenleiste schließen",
       sidebarSetupHeading: "Einrichten", sidebarSetupDescription: "Alles für deinen Stream.", sidebarSearch: "Alles durchsuchen", moduleOff: "Aus",
@@ -1367,43 +1385,61 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     streamManager: {
       immediateActions: "Sofortaktionen",
-      notices: {
-        title: "Hinweise",
-        showAll: (count) => `Alle ${count} Hinweise anzeigen`,
-        showFewer: "Weniger Hinweise anzeigen",
-        botPermissionsSentence: "Dem Bot fehlen benötigte Berechtigungen.",
-        botPermissionsConsequence: "Chatbefehle und Moderationsaktionen können fehlschlagen.",
-        broadcasterPermissionsSentence: "Dem Broadcaster fehlen angeforderte Berechtigungen.",
-        broadcasterPermissionsConsequence: "Module, die diese Berechtigungen brauchen, können nicht laufen.",
-        moderatorMissingSentence: "Der Bot ist in diesem Kanal kein Moderator.",
-        moderatorMissingConsequence: "Chataktionen mit Moderationsrechten können fehlschlagen.",
-        modulePermissionsSentence: (name) => `Für das Modul „${name}“ fehlen Berechtigungen.`,
-        modulePermissionsConsequence: "Das Modul bleibt deaktiviert, bis die Berechtigungen erteilt sind.",
-        tokenExpiredSentence: "Ein Twitch-Token ist abgelaufen.",
-        tokenExpiredConsequence: "Die Verbindung des Bots kann unterbrochen sein.",
-        tokenRenewalSentence: "Die Erneuerung eines Twitch-Tokens ist überfällig.",
-        tokenRenewalConsequence: "Die Verbindung des Bots kann unterbrochen werden.",
-        grantPermission: "Berechtigung erteilen",
-        reviewPermissions: "Berechtigungen prüfen",
-        checkModerator: "Moderator prüfen",
-        checkModeratorRunning: "Moderatorprüfung läuft …",
-        checkModeratorLocked: "Nur Broadcaster und Verwalter dürfen diese Prüfung ausführen.",
-      },
+      actionCount: (count) => `${count} Aktionen`,
+      actionRun: "Ausführen",
+      actionCancel: "Abbrechen",
+      actionRunning: "Wird ausgeführt …",
+      actionLoading: "Aktion wird geladen …",
+      actionLoadFailed: "Die Aktion konnte nicht geladen werden.",
+      actionAvailabilityFailed: "Die Verfügbarkeit konnte nicht geprüft werden.",
+      actionFailed: "Die Aktion konnte nicht ausgeführt werden.",
+      actionSucceeded: (name) => `${name} ausgeführt.`,
+      operatorOnly: "Nur Bediener und höhere Rollen dürfen diese Aktion ausführen.",
+      managerOnly: "Nur Verwalter und Broadcaster dürfen diese Aktion ausführen.",
+      broadcasterOnly: "Nur Broadcaster dürfen diese Aktion ausführen.",
       availabilityReasons: {
         stream_offline: "Der Stream ist offline.",
         stream_state_unknown: "Der Streamstatus ist derzeit nicht verfügbar.",
       },
-      checksHealthy: (count) => `Alles in Ordnung · ${count} Prüfungen`,
-      checksNeedAttention: (problems, checks) => `${problems} auffällige ${problems === "1" ? "Prüfung" : "Prüfungen"} · ${checks} Prüfungen`,
       runAd: (length) => `Werbung jetzt (${length}s)`,
       createClip: "Clip erstellen",
       sendShoutout: "Shoutout senden",
-      feedTitle: "Warnungen und Fehler",
-      feedEmpty: "Keine Warnungen oder Fehler.",
-      feedAll: "Alle im Ereignisprotokoll",
       today: "Heute",
       yesterday: "Gestern",
       browserTimeZoneFallback: "Browser-Zeitzone wird verwendet",
+    },
+    liveCockpit: {
+      live: "Live",
+      actionsHint: "Direkt im Stream steuerbar",
+      offline: "Offline",
+      unknown: "Status unbekannt",
+      duration: "Dauer",
+      viewers: "Zuschauer",
+      roleLabel: "Rolle",
+      roles: { broadcaster: "Broadcaster", manager: "Verwalter", operator: "Bediener" },
+      bot: "Bot",
+      botConnected: "Verbunden",
+      botUnavailable: "Nicht verbunden",
+      belabox: "BELABOX",
+      belaboxDisabled: "Aus",
+      belaboxChecking: "wird geprüft",
+      belaboxNotConfigured: "nicht eingerichtet",
+      belaboxUnavailable: "nicht erreichbar",
+      belaboxDisconnected: "getrennt",
+      belaboxConnected: (bitrate) => `${bitrate} kbit/s verbunden`,
+      overlays: "Overlays",
+      overlaysCount: (count) => `${count} aktiv`,
+      overlaysNotSetUp: "Nicht eingerichtet",
+      overlaysChecking: "wird geprüft",
+      runningNow: "Läuft gerade",
+      runningNowReserved: "Laufende Live-Aktionen erscheinen hier.",
+      nextUp: "Als Nächstes",
+      nextUpReserved: "Anstehende Aktionen erscheinen hier.",
+      events: "Ereignisse",
+      eventsReserved: "Neue Ereignisse erscheinen hier.",
+      warnings: "Warnungen",
+      warningsReserved: "Hinweise und Fehler erscheinen hier.",
+      statusIndicators: "Verbindungsstatus",
     },
     channelControls: {
       controlsHeading: "Kanalsteuerung",
@@ -1504,6 +1540,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       accountMenu: "Account", appearance: "Appearance", appearanceNightShift: "Night shift", appearanceIndigoNight: "Indigo night",
       manageModules: "Manage modules", moduleCategories: { chat: "Chat", participation: "Participation", twitch: "Twitch", data: "Data", stream: "Stream", admin: "Administration" },
       overlays: "Overlays",
+      overlaysChecking: "Checking …",
       signingOut: "Signing out …", signOut: "Sign out",
       openSidebar: "Open sidebar", closeSidebar: "Close sidebar",
       sidebarSetupHeading: "Setup", sidebarSetupDescription: "Everything for your stream.", sidebarSearch: "Search everything", moduleOff: "Off",
@@ -1686,43 +1723,61 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     streamManager: {
       immediateActions: "Immediate actions",
-      notices: {
-        title: "Notices",
-        showAll: (count) => `Show all ${count} notices`,
-        showFewer: "Show fewer notices",
-        botPermissionsSentence: "The bot is missing required permissions.",
-        botPermissionsConsequence: "Chat commands and moderation actions may fail.",
-        broadcasterPermissionsSentence: "The broadcaster is missing requested permissions.",
-        broadcasterPermissionsConsequence: "Modules that need these permissions cannot run.",
-        moderatorMissingSentence: "The bot is not a moderator in this channel.",
-        moderatorMissingConsequence: "Chat actions that need moderator rights may fail.",
-        modulePermissionsSentence: (name) => `The ${name} module is missing permissions.`,
-        modulePermissionsConsequence: "The module stays disabled until they are granted.",
-        tokenExpiredSentence: "A Twitch token has expired.",
-        tokenExpiredConsequence: "The bot connection may be interrupted.",
-        tokenRenewalSentence: "A Twitch token renewal is overdue.",
-        tokenRenewalConsequence: "The bot connection may be interrupted.",
-        grantPermission: "Grant permission",
-        reviewPermissions: "Review permissions",
-        checkModerator: "Check moderator",
-        checkModeratorRunning: "Checking moderator …",
-        checkModeratorLocked: "Only broadcasters and managers may run this check.",
-      },
+      actionCount: (count) => `${count} actions`,
+      actionRun: "Run",
+      actionCancel: "Cancel",
+      actionRunning: "Running …",
+      actionLoading: "Loading action …",
+      actionLoadFailed: "The action could not be loaded.",
+      actionAvailabilityFailed: "The action availability could not be checked.",
+      actionFailed: "The action could not be completed.",
+      actionSucceeded: (name) => `${name} completed.`,
+      operatorOnly: "Operators and higher roles may run this action.",
+      managerOnly: "Only managers and broadcasters may run this action.",
+      broadcasterOnly: "Only broadcasters may run this action.",
       availabilityReasons: {
         stream_offline: "The stream is offline.",
         stream_state_unknown: "The stream status is currently unavailable.",
       },
-      checksHealthy: (count) => `All clear · ${count} checks`,
-      checksNeedAttention: (problems, checks) => `${problems} ${problems === "1" ? "check needs" : "checks need"} attention · ${checks} checks`,
       runAd: (length) => `Run ad now (${length}s)`,
       createClip: "Create clip",
       sendShoutout: "Send shoutout",
-      feedTitle: "Warnings and errors",
-      feedEmpty: "No warnings or errors.",
-      feedAll: "View all in the event log",
       today: "Today",
       yesterday: "Yesterday",
       browserTimeZoneFallback: "Using browser time zone",
+    },
+    liveCockpit: {
+      live: "Live",
+      actionsHint: "Control actions directly during the stream",
+      offline: "Offline",
+      unknown: "Status unknown",
+      duration: "Duration",
+      viewers: "Viewers",
+      roleLabel: "Role",
+      roles: { broadcaster: "Broadcaster", manager: "Manager", operator: "Operator" },
+      bot: "Bot",
+      botConnected: "Connected",
+      botUnavailable: "Not connected",
+      belabox: "BELABOX",
+      belaboxDisabled: "Off",
+      belaboxChecking: "checking",
+      belaboxNotConfigured: "not configured",
+      belaboxUnavailable: "unavailable",
+      belaboxDisconnected: "disconnected",
+      belaboxConnected: (bitrate) => `connected · ${bitrate} kbps`,
+      overlays: "Overlays",
+      overlaysCount: (count) => `${count} active`,
+      overlaysNotSetUp: "Not set up",
+      overlaysChecking: "checking",
+      runningNow: "Running now",
+      runningNowReserved: "Active live actions will appear here.",
+      nextUp: "Coming up",
+      nextUpReserved: "Upcoming actions will appear here.",
+      events: "Events",
+      eventsReserved: "New events will appear here.",
+      warnings: "Warnings",
+      warningsReserved: "Notices and errors will appear here.",
+      statusIndicators: "Connection status",
     },
     channelControls: {
       controlsHeading: "Channel controls",
@@ -3204,22 +3259,6 @@ export const formatDate = (value: string): string =>
 
 export const formatTimestamp = (value: string): string =>
   formatDashboardDate(value, { dateStyle: "medium", timeStyle: "short" });
-
-const formatClockTime = (value: string): string =>
-  formatDashboardDate(value, { hour: "2-digit", minute: "2-digit" });
-
-const localDayKey = (date: Date): string =>
-  `${String(date.getFullYear())}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-
-export const formatStreamManagerFeedTime = (value: string, now = new Date()): string => {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  const time = formatClockTime(value);
-  if (localDayKey(date) === localDayKey(now)) return time;
-  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-  if (localDayKey(date) === localDayKey(yesterday)) return `${dashboardTexts().streamManager.yesterday} ${time}`;
-  return `${formatDate(value)} ${time}`;
-};
 
 export const formatNumber = (value: number, language: DashboardLanguage = dashboardLanguage()): string =>
   new Intl.NumberFormat(language).format(value);

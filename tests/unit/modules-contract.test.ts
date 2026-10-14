@@ -24,7 +24,13 @@ describe("Module contract", () => {
   it("registers the clips module as default-enabled with a stream-live action", () => {
     expect(MODULES).toContain(clipsModule);
     expect(clipsModule.defaultEnabled).toBe(true);
-    expect(clipsModule.immediateActions?.requires).toEqual(["streamLive"]);
+    expect(clipsModule.actions).toMatchObject([{
+      id: "create-clip",
+      name: { de: "Clip erstellen", en: "Create clip" },
+      icon: "clip",
+      conditions: ["streamLive"],
+      requiredRole: "operator",
+    }]);
   });
 
   describe("apiErrorDetail", () => {

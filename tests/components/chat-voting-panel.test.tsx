@@ -5,7 +5,6 @@ import { UiProvider } from "../../src/dashboard/ui";
 import { ToastHost } from "../../src/dashboard/ui/Toast";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import ChatVotingPanel from "../../src/modules/chat_voting/panel";
-import ChatVotingImmediateAction from "../../src/modules/chat_voting/panel/immediate-actions";
 import type { ChatVote, ChatVoteTemplate } from "../../src/modules/chat_voting/contracts";
 import type { ChatVotingPanelState } from "../../src/modules/chat_voting/panel/service";
 import { moduleQueryKey } from "../../src/dashboard/data/module-query";
@@ -222,50 +221,6 @@ describe("saved chat voting panel", () => {
     expect(view.queryClient.getQueryData(key.queryKey)).toBe(loadedState);
   });
 
-  it("unlocks immediate start after an identical successful live-state refresh", async () => {
-    let unavailable = false;
-    let currentCalls = 0;
-    let revisions: Readonly<Record<string, number>> = {};
-    const savedTemplate = template({ channelId: "channel-a" });
-    setDashboardRealtimeStatus("channel-a", "connected");
-    vi.stubGlobal("fetch", vi.fn<typeof globalThis.fetch>((input) => {
-      const path = input instanceof Request
-        ? new URL(input.url).pathname
-        : new URL(String(input), "https://brobot.example").pathname;
-      if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
-      if (path.endsWith("/revisions")) return Promise.resolve(jsonResponse({ revisions }));
-      if (path.endsWith("/current")) {
-        currentCalls += 1;
-        if (unavailable) throw new Error("state unavailable");
-        return Promise.resolve(jsonResponse(currentState()));
-      }
-      if (path.endsWith("/templates")) return Promise.resolve(jsonResponse({ templates: [savedTemplate], count: 1, maximum: 100 }));
-      return Promise.resolve(jsonResponse({ error: "not_found" }, 404));
-    }));
-    const view = render(<UiProvider><ChatVotingImmediateAction channelId="channel-a" canManage availabilityReason={null} /></UiProvider>);
-    const start = await screen.findByRole("button", { name: /Dinner/u });
-    await waitFor(() => expect(start).toBeEnabled());
-    const key = { queryKey: moduleQueryKey("channel-a", "chat_voting", "panel"), exact: true };
-    const loadedState = view.queryClient.getQueryData(key.queryKey);
-
-    unavailable = true;
-    await act(async () => { await view.queryClient.refetchQueries(key, { throwOnError: true }).catch(() => undefined); });
-    await waitFor(() => expect(view.container.querySelector(".chat-voting-immediate__live-state .ui-load-state__retry")).toBeVisible());
-    const retry = view.container.querySelector(".chat-voting-immediate__live-state .ui-load-state__retry");
-    if (!(retry instanceof HTMLButtonElement)) throw new Error("The immediate-action retry button is missing.");
-    fireEvent.click(retry);
-    await waitFor(() => expect(currentCalls).toBe(3));
-    await waitFor(() => expect(start).toBeDisabled());
-
-    unavailable = false;
-    await new Promise((resolve) => window.setTimeout(resolve, 5));
-    revisions = { "module:chat_voting:panel": 1 };
-    await act(async () => { await reconcileDashboardPanelResourceRevisions(view.queryClient, "channel-a"); });
-    await waitFor(() => expect(currentCalls).toBe(4));
-    await waitFor(() => expect(start).toBeEnabled());
-    expect(view.queryClient.getQueryData(key.queryKey)).toBe(loadedState);
-  });
-
   it("keeps canceled reads silent and reports later query failures inline", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     let phase: "initial" | "cancel" | "failure" = "initial";
@@ -361,7 +316,7 @@ describe("saved chat voting panel", () => {
     expect(toastsSnapshot().filter((toast) => toast.tone === "error")).toHaveLength(0);
   });
 
-  it("refreshes the live, saved, recent, and immediate-action views from panel resource revisions", async () => {
+  it("refreshes the live, saved, and recent views from panel resource revisions", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     let current = currentState();
     let templates: ChatVoteTemplate[] = [];
@@ -377,7 +332,6 @@ describe("saved chat voting panel", () => {
     vi.stubGlobal("fetch", fetcher);
     const view = render(<UiProvider><ToastHost />
       <ChatVotingPanel channelId="fictional-channel" language="en" />
-      <ChatVotingImmediateAction channelId="fictional-channel" availabilityReason={null} />
     </UiProvider>);
 
     expect(await screen.findByText("No saved votes yet")).toBeInTheDocument();
@@ -408,9 +362,11 @@ describe("saved chat voting panel", () => {
     await waitFor(() => expect(view.queryClient.getQueryData(moduleQueryKey("fictional-channel", "chat_voting", "panel")))
       .toMatchObject({ vote: { id: runningVote.id, status: "open" } }));
     expect(view.container.querySelector(".chat-voting-live")).toHaveTextContent("Dinner");
-    expect(view.container.querySelector(".chat-voting-template-list")).toHaveTextContent("Updated dinner");
-    expect(view.container.querySelector(".chat-voting-immediate")).toHaveTextContent("Dinner");
     expect(view.container.querySelector(".chat-voting-recent-list")).toHaveTextContent("Completed dinner");
+    const savedMode = screen.getAllByRole("button", { name: "Saved" })[0];
+    if (savedMode === undefined) throw new Error("The Saved view control is missing.");
+    fireEvent.click(savedMode);
+    await waitFor(() => expect(view.container.querySelector(".chat-voting-template-list")).toHaveTextContent("Updated dinner"));
   });
 
   it("keeps a new draft local and retains edits made while its first Save is pending", async () => {

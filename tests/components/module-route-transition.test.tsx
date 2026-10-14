@@ -77,6 +77,7 @@ describe("Module route during client-side navigation", () => {
         });
       }
       if (path === "/api/channels/kanal-a/events") return response({ entries: [], nextCursor: null });
+      if (path === "/api/channels/kanal-a/overlays") return response({ overlays: [] });
       if (path === "/api/channels/kanal-a/settings") return response({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 1 });
       unmockedRequests.push(path);
       return response({}, 404);

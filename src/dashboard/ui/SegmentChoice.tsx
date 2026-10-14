@@ -9,13 +9,14 @@ export interface SegmentChoiceProps<T extends string = string> {
   onChange: (value: T) => void;
   options: readonly ({ value: T; label: string; compactLabel?: string; description?: string })[];
   size?: "form" | "compact";
+  name?: string;
   disabled?: boolean;
   warning?: string;
   error?: string;
   reserveError?: boolean;
 }
 
-export function SegmentChoice<T extends string>({ label, hint, value, onChange, options, size = "form", disabled = false, warning, error, reserveError = false }: SegmentChoiceProps<T>) {
+export function SegmentChoice<T extends string>({ label, hint, value, onChange, options, size = "form", name, disabled = false, warning, error, reserveError = false }: SegmentChoiceProps<T>) {
   const id = useId();
   const hintId = `${id}-hint`;
   const warningId = `${id}-warning`;
@@ -56,6 +57,7 @@ export function SegmentChoice<T extends string>({ label, hint, value, onChange, 
         {option.description === undefined ? null : <span className="segment-choice__description">{option.description}</span>}
       </button>)}
     </div>
+    {name === undefined ? null : <input type="hidden" name={name} value={value} />}
     {hint === undefined ? <span className="segment-choice-field__hint" aria-hidden="true">&nbsp;</span> : <span id={hintId} className="segment-choice-field__hint">{hint}</span>}
     {warning === undefined ? <span className="segment-choice-field__warning" aria-hidden="true">&nbsp;</span> : <span id={warningId} className="segment-choice-field__warning"><Icon name="warning" size={16} />{warning}</span>}
     {reserveError || error !== undefined ? <span id={errorId} className="segment-choice-field__error" aria-live="polite">{!hasError ? <span aria-hidden="true">&nbsp;</span> : <><span aria-hidden="true">× </span>{error}</>}</span> : null}

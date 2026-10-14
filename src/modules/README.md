@@ -507,27 +507,40 @@ sie aggregiert sind und keine Personendaten enthalten (Entscheidung 0003).
 Routenabfragen binden `channel_id`; `/history` liefert pro Messpunkt nur
 numerische Werte.
 
-### Sofortaktionen (`immediateActions`)
+### Modulaktionen (`actions`)
 
-**Zweck:** Eine Karte in der Sofortaktionsleiste des Kanals (Werbung, Raid,
-Clip), nur solange das Modul aktiviert ist.
+**Zweck:** Ein Modul deklariert jede direkt ausführbare Aktion. Das Dashboard
+stellt alle Deklarationen in derselben Aktionsleiste und demselben Laufrahmen
+dar.
 
 **Einsatz:**
 
 ```ts
-immediateActions: { requires: ["streamLive"], load: () => import("./panel/immediate-actions") },
+actions: [{
+  id: "start-ad",
+  name: { de: "Werbung starten", en: "Start ad break" },
+  icon: "ad",
+  conditions: ["streamLive"],
+  requiredRole: "manager",
+  execute: async ({ channelId, formData, signal }) => {
+    // Call the module route; it checks authorization again on the server.
+  },
+  content: {
+    presentation: "dialog",
+    load: () => import("./panel/action-content"),
+  },
+} satisfies ModuleImmediateActionDefinition],
 ```
 
-**Grenzen:** `requires` listet Bedingungen, die der Host selbst auswertet
-(derzeit nur `streamLive`); er übergibt `availabilityReason` lokalisiert an die
-Karte, die ihre Steuerung entsprechend sperrt. `canManage` übergibt zusätzlich
-die Kanalrolle für managementpflichtige Kartenaktionen; die Route prüft die
-Berechtigung weiterhin selbst. `load` bleibt ein lazy `import()`,
-damit ein deaktiviertes Modul null Bytes kostet. Die Karte ruft Modul- oder Host-Routen auf (Clip und Raid
-nutzen `/api/channels/:channelId/clips` bzw. `/shoutout`);
-`requires` ist eine reine Verfügbarkeitsprüfung im Dashboard. Voraussetzungen
-auf der Serverseite setzt jede Route selbst durch (Berechtigung, Aktivierung)
-oder Twitch (etwa ein Clip nur bei laufendem Stream).
+`id`, localized `name`, `icon`, `conditions`, `requiredRole`, and `execute`
+are required. Use `streamLive` for the host's live-stream condition or a
+module-owned async condition when availability depends on module state. A
+condition can return a localized reason and an expiry time; the dashboard
+refreshes it and shows the remaining wait. `content` is optional and lazy; its
+module exports the middle of a standard popover or dialog, while the host owns
+the title, run/cancel controls, loading state, and error line. The browser uses
+`requiredRole` to mirror access, and every mutation route must enforce the same
+role independently.
 
 ### Overlay-Elemente (`overlayElements`)
 

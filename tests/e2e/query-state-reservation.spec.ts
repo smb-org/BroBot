@@ -233,7 +233,6 @@ test("compact, panel, toolbar, and module settings retries keep their declared b
     await page.unroute("**/api/**");
   }
 });
-
 test.describe("ListToolbar status-row retry in German", () => {
   test.use({ locale: "de-DE" });
 
@@ -259,110 +258,5 @@ test.describe("ListToolbar status-row retry in German", () => {
       await expect(toolbar.locator(".ui-load-state__inline-error")).toHaveCount(0);
       expect(await size(toolbar)).toEqual(originalSize);
     }
-  });
-});
-
-const checkWarningsFeedReservation = async (page: Page, language: "de" | "en"): Promise<void> => {
-  const channelId = "feed-error-channel";
-  const channel = {
-    channelId,
-    login: channelId,
-    displayName: "Feed error channel",
-    language,
-    role: "manager",
-    broadcasterConnection: "connected",
-    channelBotConsent: "granted",
-    bot: { status: "connected", reason: null, updatedAt: "2026-10-08T08:00:00.000Z" },
-    botPermissions: { missingScopes: [] },
-    broadcasterPermissions: { missingScopes: [] },
-    moderator: { isModerator: true, checkedAt: "2026-10-08T08:00:00.000Z", reason: null },
-    chatSubscription: { status: "enabled", subscriptionId: "subscription-feed-error", reason: null, updatedAt: "2026-10-08T08:00:00.000Z" },
-    chatSubscriptionNeeded: false,
-    modules: [],
-    tokens: {
-      botExpiresAt: "2099-10-08T08:00:00.000Z",
-      loginStatus: "connected",
-      loginReason: null,
-      loginExpiresAt: "2099-10-08T08:00:00.000Z",
-    },
-    streamState: "offline",
-    streamStartedAt: null,
-    controls: { mute: { active: false, until: null, mode: null }, pause: { active: false, until: null, mode: null } },
-    lastError: null,
-  };
-  let failEvents = true;
-  let signalEventRequest: () => void = () => undefined;
-  let eventRequestStarted: Promise<void>;
-  await page.route("**/api/channels**", async (route) => {
-    const pathname = new URL(route.request().url()).pathname;
-    if (pathname === "/api/channels") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ channels: [channel], bot: channel.bot, platformAdmin: false, viewerIsBot: false }) });
-      return;
-    }
-    if (pathname === `/api/channels/${channelId}/overview`) {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...channel, activeModules: [] }) });
-      return;
-    }
-    if (pathname === `/api/channels/${channelId}/modules`) {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ modules: [] }) });
-      return;
-    }
-    if (pathname === `/api/channels/${channelId}/settings`) {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ timeZone: "UTC", revision: 1, location: null, locationRevision: 1 }) });
-      return;
-    }
-    if (pathname === `/api/channels/${channelId}/events`) {
-      signalEventRequest();
-      if (failEvents) {
-        await new Promise((resolve) => { setTimeout(resolve, 180); });
-        await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "service_unavailable" }) });
-        return;
-      }
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: [], nextCursor: null }) });
-      return;
-    }
-    await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
-  });
-
-  for (const width of [1280, 390, 320]) {
-    await page.setViewportSize({ width, height: 844 });
-    failEvents = true;
-    eventRequestStarted = new Promise<void>((resolve) => { signalEventRequest = resolve; });
-    await page.goto(`/channels/${channelId}`);
-    await eventRequestStarted;
-
-    const feedSection = page.locator("section.content-section").filter({ has: page.locator(".stream-manager-feed__all") });
-    const feedState = feedSection.locator(".ui-load-state");
-    await expect(feedState).toHaveAttribute("data-status", "loading");
-    await feedState.scrollIntoViewIfNeeded();
-    const loadingBox = await box(feedState);
-    await expect(feedState).toHaveAttribute("data-status", "error");
-    const errorBox = await box(feedState);
-    expect(errorBox).toEqual(loadingBox);
-    const retry = feedState.getByRole("button", { name: language === "de" ? "Erneut versuchen" : "Retry" });
-    await expectControlInsideSlot(retry, feedState);
-
-    failEvents = false;
-    eventRequestStarted = new Promise<void>((resolve) => { signalEventRequest = resolve; });
-    await retry.click();
-    await eventRequestStarted;
-    await expect(feedState).toHaveAttribute("data-status", "empty");
-    expect(await box(feedState)).toEqual(loadingBox);
-  }
-};
-
-test.describe("warnings feed retry reservation in English", () => {
-  test.use({ locale: "en-US" });
-
-  test("initial failure fits its reserved box and leaves Retry hittable", async ({ page }) => {
-    await checkWarningsFeedReservation(page, "en");
-  });
-});
-
-test.describe("warnings feed retry reservation in German", () => {
-  test.use({ locale: "de-DE" });
-
-  test("initial failure fits its reserved box and leaves retry hittable", async ({ page }) => {
-    await checkWarningsFeedReservation(page, "de");
   });
 });

@@ -98,7 +98,6 @@ test("API source editor and expression hint keep their boxes stable", async ({ p
   expect(await box(panel)).toEqual(panelBefore);
   expect(dialogAfter).toEqual(dialogBefore);
 });
-
 test("API source list keeps its final populated row reachable at desktop and mobile widths", async ({ page }) => {
   const sources = Array.from({ length: 8 }, (_, index) => ({
     name: `source_${String(index)}`,
@@ -126,7 +125,6 @@ test("API source list keeps its final populated row reachable at desktop and mob
     expect(lastRow.buttonBottom).toBeLessThanOrEqual(lastRow.listBottom + 0.5);
   }
 });
-
 test("text-library picker space is reserved until populated variables arrive", async ({ page }) => {
   let signalRequest: () => void = () => undefined;
   const requestStarted = new Promise<void>((resolve) => { signalRequest = resolve; });
@@ -484,62 +482,6 @@ test("FAQ collection tests the draft, saves explicitly, and undoes an immediate 
   await page.getByRole("button", { name: "Undo" }).click();
   await expect.poll(() => orderWrites).toBe(2);
   expect(entries.map(({ id }) => id)).toEqual(["faq-a", "faq-b"]);
-});
-
-test("BELABOX immediate action keeps manual results separate from live notices", async ({ page }) => {
-  await page.addInitScript(() => {
-    class OfflineWebSocket extends EventTarget {
-      readyState = 0;
-      constructor(url: string, protocols?: string | string[]) {
-        super();
-        void url;
-        void protocols;
-        queueMicrotask(() => { this.close(1006, "Offline fallback test"); });
-      }
-      close(code = 1000, reason = "closed"): void {
-        if (this.readyState === 3) return;
-        this.readyState = 3;
-        this.dispatchEvent(new CloseEvent("close", { code, reason }));
-      }
-      send(data: string): void { void data; }
-    }
-    Object.defineProperty(window, "WebSocket", { value: OfflineWebSocket, writable: true, configurable: true });
-  });
-  const connectedStatus = {
-    configured: true, updatedAt: "2030-01-01T12:00:00.000Z",
-    sample: { at: "2030-01-01T12:00:00.000Z", connected: true, bitrateKbps: 3200, rttMs: 41, latencyMs: 115, network: 2, droppedPackets: 0 },
-    errorCode: null, polling: true, pollingDesired: true, streamId: "stream-a", belaboxStreamId: "stream-a",
-    alertNotice: null, fetchFailureNotice: false, intervalSeconds: 5,
-  };
-  const disconnectedStatus = {
-    ...connectedStatus,
-    sample: { ...connectedStatus.sample, connected: false, bitrateKbps: 0 },
-    alertNotice: { phase: "alarm", kind: "disconnect", bitrateKbps: 0 },
-  };
-  let statusCalls = 0;
-  await page.route("**/api/channels/channel-a/modules/belabox/status", async (route) => {
-    statusCalls += 1;
-    const value = statusCalls >= 3 ? disconnectedStatus : connectedStatus;
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(value) });
-  });
-  await routeJson(page, "/api/csrf", { token: "csrf" });
-  await routeJson(page, "/api/channels/channel-a/modules/belabox/test", { ok: true, connected: true, bitrateKbps: 4200 }, "POST");
-  await gotoPanel(page, "belabox-action");
-
-  const notice = page.getByTestId("belabox-immediate-status-slot");
-  const result = page.getByTestId("immediate-action-result-slot");
-  const button = page.getByRole("button", { name: "Check now" });
-  await expect(notice).toContainText("Connected");
-  const layoutBefore = { notice: await box(notice), result: await box(result), button: await box(button) };
-
-  await button.click();
-  await expect(result).toContainText("4200 kbps");
-  await expect(notice).toContainText("Connected");
-  expect({ notice: await box(notice), result: await box(result), button: await box(button) }).toEqual(layoutBefore);
-
-  await expect(notice).toContainText(/BELABOX encoder disconnected|BELABOX-Encoder getrennt/u, { timeout: 10_000 });
-  await expect(result).toBeEmpty();
-  expect({ notice: await box(notice), result: await box(result), button: await box(button) }).toEqual(layoutBefore);
 });
 
 test("Belabox test results stay inside the reserved result box", async ({ page }) => {
@@ -1365,60 +1307,7 @@ test("saved voting inspector stays open at desktop, overlay, and compact widths"
     await expect(page.locator(".list-detail")).toHaveClass(/list-detail--open/u);
   }
 
-  await page.setViewportSize({ width: 1440, height: 1200 });
-  await gotoPanel(page, "chat_voting-action", "de");
-  await expect(page.locator(".chat-voting-immediate")).toContainText("Abstimmung");
-  await expect(page.getByRole("button", { name: "Beenden" })).toBeVisible();
 });
-test("chat voting immediate action fits the 264px card with two visible rows and inner scroll", async ({ page }) => {
-  const openedAt = "2030-01-01T12:00:00.000Z";
-  const templates: ChatVoteTemplate[] = Array.from({ length: 6 }, (_, index) => ({
-    id: `template-${String(index)}`, channelId: "channel-a", shortcut: `t${String(index)}`, title: `Vorlage ${String(index + 1)}`,
-    labels: ["Ja", "Nein"], freeTextMode: null, durationSeconds: 120, revision: 1,
-    legacyAlias: null, lastUsedAt: null, createdAt: openedAt, updatedAt: openedAt,
-  }));
-  const vote = {
-    id: "vote-a", channelId: "channel-a", kind: "options", optionCount: 2, labels: ["Ja", "Nein"],
-    title: "Was essen wir heute Abend?", status: "open", openedAt, closesAt: "2030-01-01T12:02:00.000Z",
-    requestedDurationSeconds: 120, closedAt: null, closeReason: null, counts: [3, 1], voterCount: 4,
-  };
-  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/current", {
-    vote, counts: vote.counts, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120,
-  });
-  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates, count: 6, maximum: 100 });
-  await page.addInitScript(() => {
-    Object.defineProperty(window.navigator, "language", { value: "de-DE" });
-    Object.defineProperty(window.navigator, "languages", { value: ["de-DE", "de"] });
-  });
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await gotoPanel(page, "chat_voting-action", "de");
-  const card = page.locator(".chat-voting-immediate");
-  await expect(card.getByRole("button", { name: "Beenden" })).toBeVisible();
-  await expect(card.locator(".list-row")).toHaveCount(6);
-  const metrics = await page.evaluate(() => {
-    const cardElement = document.querySelector(".chat-voting-immediate") as HTMLElement;
-    const list = cardElement.querySelector(".chat-voting-immediate__list") as HTMLElement;
-    const card = cardElement.getBoundingClientRect();
-    const rows = [...list.querySelectorAll(".list-row")].map((row) => row.getBoundingClientRect());
-    const listBox = list.getBoundingClientRect();
-    const children = [...cardElement.children].map((child) => child.getBoundingClientRect());
-    return {
-      cardHeight: card.height,
-      cardOverflows: cardElement.scrollHeight > cardElement.clientHeight,
-      childrenInside: children.every((child) => child.bottom <= card.bottom + 0.5),
-      rowHeight: rows[0]?.height ?? 0,
-      visibleRows: rows.filter((row) => row.top >= listBox.top - 0.5 && row.bottom <= listBox.bottom + 0.5).length,
-      listScrolls: list.scrollHeight > list.clientHeight,
-    };
-  });
-  expect(metrics.cardHeight).toBe(264);
-  expect(metrics.cardOverflows).toBe(false);
-  expect(metrics.childrenInside).toBe(true);
-  expect(metrics.rowHeight).toBeGreaterThanOrEqual(34);
-  expect(metrics.visibleRows).toBe(2);
-  expect(metrics.listScrolls).toBe(true);
-});
-
 test("chat voting panel applies resource revisions and ignores an older pending response", async ({ page }) => {
   let requests = 0;
   let startedFirst: () => void = () => undefined;
@@ -1463,111 +1352,6 @@ test("chat voting panel applies resource revisions and ignores an older pending 
   } finally {
     releaseFirst();
   }
-});
-
-test("chat voting immediate action refreshes the live state from resource revisions", async ({ page }) => {
-  let requests = 0;
-  let startedFirst: () => void = () => undefined;
-  let startedSecond: () => void = () => undefined;
-  let releaseFirst: () => void = () => undefined;
-  const firstStarted = new Promise<void>((resolve) => { startedFirst = resolve; });
-  const secondStarted = new Promise<void>((resolve) => { startedSecond = resolve; });
-  const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
-  const timestamp = "2030-01-01T12:00:00.000Z";
-  const vote = {
-    id: "vote-revision-card", channelId: "channel-a", kind: "options", optionCount: 2, labels: ["Yes", "No"],
-    title: "Revision card", status: "open", openedAt: timestamp, closesAt: "2030-01-01T12:01:00.000Z",
-    requestedDurationSeconds: 60, closedAt: null, closeReason: null, counts: [1, 0], voterCount: 1,
-  };
-  const template: ChatVoteTemplate = {
-    id: "template-revision-card", channelId: "channel-a", shortcut: "revision", title: "Revision card",
-    labels: ["Yes", "No"], freeTextMode: null, durationSeconds: 60, revision: 1,
-    legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
-  };
-  const realtime = await installChatVotingRealtime(page);
-  await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
-    requests += 1;
-    if (requests === 1) {
-      startedFirst();
-      await firstGate;
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
-        vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120,
-      }) });
-      return;
-    }
-    if (requests === 2) startedSecond();
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
-      vote, counts: vote.counts, revision: 2, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120,
-    }) });
-  });
-  await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates: [template], count: 1, maximum: 100 });
-  try {
-    await gotoPanel(page, "chat_voting-action", "en", true);
-    await firstStarted;
-    await realtime.waitForSocket();
-    realtime.sendHint({ "module:chat_voting:panel": 1 });
-    await secondStarted;
-    await expect(page.getByRole("button", { name: "End vote" })).toBeVisible();
-    releaseFirst();
-    await expect(page.getByRole("button", { name: "End vote" })).toBeVisible();
-  } finally {
-    releaseFirst();
-  }
-});
-
-test("the immediate-action card merges refreshed template configuration and membership in session order", async ({ page }) => {
-  const timestamp = "2030-01-01T12:00:00.000Z";
-  let vote: Record<string, unknown> | null = null;
-  let templateReads = 0;
-  const templateA: ChatVoteTemplate = { id: "template-a", channelId: "channel-a", shortcut: "a", title: "A", labels: ["Yes", "No"], freeTextMode: null, durationSeconds: 60, revision: 1, legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp };
-  const templateB: ChatVoteTemplate = { id: "template-b", channelId: "channel-a", shortcut: "b", title: "B", labels: ["Up", "Down"], freeTextMode: null, durationSeconds: 120, revision: 1, legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp };
-  const original: ChatVoteTemplate[] = [
-    templateA,
-    templateB,
-    { id: "template-c", channelId: "channel-a", shortcut: "c", title: "C", labels: ["First", "Second"], freeTextMode: null, durationSeconds: 300, revision: 1, legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp },
-  ];
-  const refreshed: ChatVoteTemplate[] = [
-    { id: "template-d", channelId: "channel-a", shortcut: "d", title: "New D", labels: ["One", "Two"], freeTextMode: null, durationSeconds: 0, revision: 1, legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp },
-    { ...templateB, shortcut: "b-v2", title: "B refreshed", labels: ["Only one"], durationSeconds: 90, revision: 2 },
-    { ...templateA, shortcut: "a-v2", title: "A refreshed", labels: ["Yes", "No", "Maybe"], durationSeconds: 180, revision: 2 },
-  ];
-  await routeJson(page, "/api/csrf", { token: "csrf" });
-  await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
-      vote, counts: vote?.counts ?? null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120,
-    }) });
-  });
-  await page.route("**/api/channels/channel-a/modules/chat_voting/templates", async (route) => {
-    templateReads += 1;
-    const templates = templateReads === 1 ? original : refreshed;
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ templates, count: templates.length, maximum: 100 }) });
-  });
-  await page.route("**/api/channels/channel-a/modules/chat_voting/start", async (route) => {
-    vote = {
-      id: "vote-card-refresh", channelId: "channel-a", kind: "options", optionCount: 2, labels: ["Yes", "No"],
-      title: "A", status: "open", openedAt: timestamp, closesAt: "2030-01-01T12:01:00.000Z",
-      requestedDurationSeconds: 60, closedAt: null, closeReason: null, counts: [0, 0], voterCount: 0,
-    };
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ vote }) });
-  });
-
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await gotoPanel(page, "chat_voting-action", "en");
-  await expect(page.getByRole("button", { name: "Start “A”" })).toBeEnabled();
-  await page.getByRole("button", { name: "Start “A”" }).click();
-  await expect.poll(() => templateReads).toBeGreaterThan(1);
-  const rows = page.locator(".chat-voting-immediate .list-row");
-  await expect(rows).toHaveCount(3);
-  await expect(rows.nth(0)).toContainText("A refreshed");
-  await expect(rows.nth(0)).toContainText("!vote a-v2");
-  await expect(rows.nth(0)).toContainText("3 answers");
-  await expect(rows.nth(0)).toContainText("3 min");
-  await expect(rows.nth(0)).toContainText("Running");
-  await expect(rows.nth(1)).toContainText("B refreshed");
-  await expect(rows.nth(1)).toContainText("Incomplete");
-  await expect(rows.nth(1).locator(".list-row__action button")).toBeDisabled();
-  await expect(rows.nth(2)).toContainText("New D");
-  await expect(rows.nth(2)).toContainText("!vote d");
 });
 
 test("text command slash help stays stable and optional variable fields mount only when enabled", async ({ page }) => {
@@ -2053,26 +1837,3 @@ test("the mobile live state reserves the same height while loading, failed, empt
   expect(emptyHeight).toBe(loadingHeight);
   expect(populatedHeight).toBe(loadingHeight);
 });
-
-for (const width of [1920, 390]) {
-  test(`ad lock reason is fully visible and keeps the slot height at ${String(width)}px`, async ({ page }) => {
-    await page.setViewportSize({ width, height: 900 });
-    await page.addInitScript(() => { document.addEventListener("DOMContentLoaded", () => { const style = document.createElement("style"); style.textContent = "* { letter-spacing: 0.03em !important; }"; document.head.appendChild(style); }); }); // wider than any CI fallback font
-    await gotoPanel(page, "ads-action");
-    const slot = page.getByTestId("immediate-action-result-slot");
-    await expect(slot).toBeAttached();
-    const enabledHeight = (await box(slot)).height;
-
-    await gotoPanel(page, "ads-action&locked=1");
-    await expect(slot).not.toBeEmpty();
-    expect((await box(slot)).height).toBe(enabledHeight);
-    const clipped = await slot.evaluate((element) => element.scrollHeight > element.clientHeight);
-    expect(clipped).toBe(false);
-    const card = await box(page.locator(".stream-manager-action"));
-    const reason = await box(slot);
-    expect(reason.y).toBeGreaterThanOrEqual(card.y);
-    expect(reason.y + reason.height).toBeLessThanOrEqual(card.y + card.height);
-    expect(reason.x + reason.width).toBeLessThanOrEqual(card.x + card.width);
-    expect(await page.locator(".stream-manager-action").evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(false);
-  });
-}

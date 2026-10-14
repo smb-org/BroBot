@@ -18,6 +18,16 @@ export const PLATFORM_ASSIGNABLE_ROLES = ["manager", "operator"] as const satisf
 export const canManage = (role: ChannelRole): boolean =>
   (MANAGING_ROLES as readonly ChannelRole[]).includes(role);
 
+const CHANNEL_ROLE_RANK: Readonly<Record<ChannelRole, number>> = {
+  operator: 0,
+  manager: 1,
+  broadcaster: 2,
+};
+
+/** Checks whether a channel member meets an action's minimum role. */
+export const hasRequiredChannelRole = (role: ChannelRole, requiredRole: ChannelRole): boolean =>
+  CHANNEL_ROLE_RANK[role] >= CHANNEL_ROLE_RANK[requiredRole];
+
 export type AuditActorKind = "member" | "platform_admin" | "system";
 
 export const EVENT_TONES = ["info", "warning", "error"] as const;
@@ -25,9 +35,6 @@ export type EventTone = (typeof EVENT_TONES)[number];
 
 /** Persisted Twitch stream state exposed to the channel dashboard. */
 export type ChannelStreamState = "online" | "offline";
-
-/** Conditions a registered immediate action can declare before it is rendered as available. */
-export type ImmediateActionRequirement = "streamLive";
 
 /** Stable catalogue keys for immediate actions that cannot currently run. */
 export type ImmediateActionUnavailableReason = "stream_offline" | "stream_state_unknown";

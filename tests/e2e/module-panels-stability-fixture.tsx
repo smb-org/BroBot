@@ -6,11 +6,8 @@ import { UiProvider } from "../../src/dashboard/ui";
 import { ToastHost } from "../../src/dashboard/ui/Toast";
 import { useRealtimePanelMessages } from "../../src/dashboard/realtime";
 import { runDashboardNavigationGuards } from "../../src/dashboard/ui/navigation-guard";
-import AdNowAction from "../../src/modules/ads/panel/immediate-actions";
 import ApiSourcePanel from "../../src/modules/api_source/panel";
 import BelaboxPanel from "../../src/modules/belabox/panel";
-import BelaboxStatusAction from "../../src/modules/belabox/panel/immediate-actions";
-import ChatVotingImmediateAction from "../../src/modules/chat_voting/panel/immediate-actions";
 import ChatVotingPanel from "../../src/modules/chat_voting/panel";
 import FaqPanel from "../../src/modules/faq/panel";
 import TextCommandsPanel from "../../src/modules/text_commands/panel";
@@ -32,10 +29,7 @@ export const RealtimeHarness = ({ children }: { children: ReactNode }) => {
 
 const panel = panelName === "api_source" ? <ApiSourcePanel channelId={channelId} language={language} canManage />
   : panelName === "belabox" ? <BelaboxPanel channelId={channelId} language={language} canManage />
-  : panelName === "ads-action" ? <AdNowAction channelId={channelId} canManage={query.get("locked") !== "1"} availabilityReason={null} />
-  : panelName === "belabox-action" ? <BelaboxStatusAction channelId={channelId} canManage availabilityReason={null} />
-    : panelName === "chat_voting" ? <ChatVotingPanel channelId={channelId} language={language} canOperate />
-      : panelName === "chat_voting-action" ? <ChatVotingImmediateAction channelId={channelId} canManage availabilityReason={null} />
+  : panelName === "chat_voting" ? <ChatVotingPanel channelId={channelId} language={language} canOperate />
       : panelName === "faq" ? <FaqPanel channelId={channelId} language={language} />
         : panelName === "text_commands" ? <TextCommandsPanel channelId={channelId} language={language} />
           : panelName === "text_library" ? <TextLibraryPanel channelId={channelId} language={language} canManage />

@@ -6,4 +6,3 @@ export type {
   TemplateVariable,
   TemplateValues,
 } from "../contract";
-export type { ModuleImmediateActionProperties } from "../contract";

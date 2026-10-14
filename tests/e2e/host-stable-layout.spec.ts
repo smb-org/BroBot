@@ -63,9 +63,6 @@ interface ChannelMockData {
   modules?: readonly Record<string, unknown>[];
   moduleStatus?: number;
   moduleToggleStatus?: number;
-  locationSearchStatus?: number;
-  locationSaveStatus?: number;
-  locationResults?: readonly Record<string, unknown>[];
   shoutoutStatus?: number;
 }
 
@@ -107,15 +104,6 @@ const installChannelMocks = async (page: Page, gates: ChannelGates = {}, data: C
       gate?.started();
       if (gate !== undefined) await gate.wait;
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(data.variables ?? { variables: [], count: 0, maximum: 25 }) });
-      return;
-    }
-    if (pathname === `/api/channels/${channelId}/settings/location/geocode`) {
-      await route.fulfill({ status: data.locationSearchStatus ?? 200, contentType: "application/json", body: JSON.stringify(data.locationSearchStatus === undefined ? { results: data.locationResults ?? [] } : { error: "location_search_failed" }) });
-      return;
-    }
-    if (pathname === `/api/channels/${channelId}/settings/location` && route.request().method() === "PATCH") {
-      const status = data.locationSaveStatus ?? 200;
-      await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(status === 200 ? { ok: true, location: null, locationRevision: 2 } : { error: "location_save_failed" }) });
       return;
     }
     if (pathname === `/api/channels/${channelId}/overlays`) {
@@ -338,27 +326,6 @@ const installPlatformMocks = async (page: Page, gates: Partial<Record<"audit" | 
   });
 };
 
-test("the overview location region is present and keeps its box while settings load", async ({ page }) => {
-  let releaseSettings!: () => void;
-  let markSettingsStarted!: () => void;
-  const settingsGate = new Promise<void>((resolve) => { releaseSettings = resolve; });
-  const settingsStarted = new Promise<void>((resolve) => { markSettingsStarted = resolve; });
-  await installChannelMocks(page, { settings: { wait: settingsGate, started: markSettingsStarted } });
-
-  await page.goto(`/channels/${channelId}/overview`);
-  await settingsStarted;
-  await expect(page.getByRole("heading", { name: "Stable Channel" })).toBeVisible();
-  const location = page.locator(".channel-location-field");
-  const presentBeforeSettings = await location.count();
-  const before = presentBeforeSettings === 0 ? null : await measureBox(page, ".channel-location-field");
-  releaseSettings();
-  await expect(page.locator(".channel-location-field")).toBeVisible();
-  const after = await measureBox(page, ".channel-location-field");
-
-  expect(presentBeforeSettings).toBe(1);
-  expect(before).toEqual(after);
-});
-
 test("event pagination keeps a fixed footer below the loaded rows", async ({ page }) => {
   let releaseResponse!: () => void;
   let markResponseStarted!: () => void;
@@ -552,30 +519,6 @@ test("setting an event filter leaves the list top fixed at desktop and 390px", a
     expect(await measureDocumentBox(page, ".ui-load-state--panel")).toEqual(listTop);
     await page.unrouteAll();
   }
-});
-
-test("a saved location with a time-zone suggestion keeps the action strip fixed at 390px", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  let releaseSettings!: () => void;
-  let markSettingsStarted!: () => void;
-  const settingsGate = new Promise<void>((resolve) => { releaseSettings = resolve; });
-  const settingsStarted = new Promise<void>((resolve) => { markSettingsStarted = resolve; });
-  await installChannelMocks(page, { settings: { wait: settingsGate, started: markSettingsStarted } }, {
-    settings: {
-      timeZone: "UTC",
-      revision: 1,
-      location: { name: "Honolulu", latitude: 21.3069, longitude: -157.8583, timeZone: "Pacific/Honolulu" },
-      locationRevision: 1,
-    },
-  });
-
-  await page.goto(`/channels/${channelId}/overview`);
-  await settingsStarted;
-  const before = await measureBox(page, ".channel-location-field__actions");
-  releaseSettings();
-  await expect(page.getByText("Set channel time zone to Pacific/Honolulu?")).toBeVisible();
-  expect(await measureBox(page, ".channel-location-field__actions")).toEqual(before);
-  await page.unrouteAll();
 });
 
 test("the channel-variable limit and create controls stay above a full list", async ({ page }) => {
@@ -996,89 +939,6 @@ test.describe("frozen event sections with a Europe/Berlin browser", () => {
   });
 });
 
-test("a keyboard-focused immediate-action control scrolls fully into view at 390px", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await installChannelMocks(page, {}, { modules: ["ads", "clips", "raid"].map((id) => ({ id, enabled: true, settings: "{}" })) });
-  await page.goto(`/channels/${channelId}/overview`);
-  const strip = page.locator(".stream-manager-actions");
-  await expect(strip.locator(":scope > .stream-manager-action")).toHaveCount(3);
-  const button = page.getByRole("button", { name: "Create clip" });
-  await expect(button).toBeVisible();
-  for (let i = 0; i < 80 && !(await button.evaluate((element) => element === document.activeElement)); i++) await page.keyboard.press("Tab");
-  await expect(button).toBeFocused();
-  await expect.poll(async () => {
-    const [b, s] = await Promise.all([button.boundingBox(), strip.boundingBox()]);
-    return b !== null && s !== null && b.x >= s.x - 0.5 && b.x + b.width <= s.x + s.width + 0.5;
-  }).toBe(true);
-});
-
-test("immediate-action cards keep their reserved strip height after a shoutout failure", async ({ page }) => {
-  for (const width of [1280, 390]) {
-    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
-    await installChannelMocks(page, {}, {
-      modules: ["ads", "clips", "raid"].map((id) => ({ id, enabled: true, settings: "{}" })),
-      shoutoutStatus: 429,
-    });
-    await page.goto(`/channels/${channelId}/overview`);
-    const strip = page.locator(".stream-manager-actions");
-    await expect(strip.locator(":scope > .stream-manager-action")).toHaveCount(3);
-    await expect(page.getByRole("textbox", { name: "Twitch login" })).toBeVisible();
-    const before = await measureDocumentBox(page, ".stream-manager-actions");
-    const cardsBefore = await Promise.all(Array.from({ length: 3 }, (_, index) => measureBox(page, `.stream-manager-action:nth-child(${String(index + 1)})`)));
-    expect(cardsBefore.map((box) => box[3])).toEqual([264, 264, 264]);
-    expect(cardsBefore.map((box) => box[2])).toEqual([300, 300, 300]);
-    await expect(strip).toHaveAttribute("tabindex", "0");
-    expect(await strip.evaluate((element) => getComputedStyle(element).scrollSnapType)).toMatch(/^x( proximity)?$/);
-    if (width === 390) {
-      expect(await strip.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
-      await strip.focus();
-      await page.keyboard.press("ArrowRight");
-      await expect.poll(() => strip.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
-    }
-
-    await page.getByRole("textbox", { name: "Twitch login" }).fill("someone");
-    await page.getByRole("button", { name: "Send shoutout" }).click();
-    await expect(page.locator(".ui-toast--error")).toBeVisible();
-    expect(await measureDocumentBox(page, ".stream-manager-actions")).toEqual(before);
-    await page.unrouteAll();
-  }
-});
-
-test("stream manager waits for module data and keeps its immediate-action strip stable at desktop and mobile widths", async ({ page }) => {
-  for (const width of [1280, 390]) {
-    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
-    let releaseModules!: () => void;
-    let markModulesStarted!: () => void;
-    const modulesGate = new Promise<void>((resolve) => { releaseModules = resolve; });
-    const modulesStarted = new Promise<void>((resolve) => { markModulesStarted = resolve; });
-    await installChannelMocks(page, { modules: { wait: modulesGate, started: markModulesStarted } }, {
-      modules: [{ id: "raid", enabled: true, settings: "{}" }],
-    });
-
-    await page.goto(`/channels/${channelId}/overview`);
-    await modulesStarted;
-    const pageLoad = page.locator(".main-content > .ui-load-state");
-    await expect(pageLoad).toHaveAttribute("data-status", "loading");
-    await expect(page.getByRole("heading", { name: "Stable Channel", level: 1 })).toHaveCount(0);
-    await expect(page.locator(".stream-manager-actions")).toHaveCount(0);
-
-    releaseModules();
-    await expect(page.getByRole("heading", { name: "Stable Channel", level: 1 })).toBeVisible();
-    const strip = page.locator(".stream-manager-actions");
-    await expect(page.getByRole("textbox", { name: "Twitch login" })).toBeVisible();
-    await expect(strip.locator(":scope > .stream-manager-action--loading")).toHaveCount(0);
-    await expect(strip.locator(":scope > .stream-manager-action")).toHaveCount(1);
-    const before = await measureDocumentBox(page, ".stream-manager-actions");
-    expect(before[3]).toBe(264);
-    await page.waitForTimeout(100);
-    expect(await measureDocumentBox(page, ".stream-manager-actions")).toEqual(before);
-    const card = await measureBox(page, ".stream-manager-action");
-    expect(card[2]).toBe(300);
-    expect(card[3]).toBe(264);
-    await page.unrouteAll();
-  }
-});
-
 test("window visibility changes do not broadly refresh populated overview cards", async ({ page }) => {
   const secondChannel = {
     ...channel,
@@ -1223,46 +1083,6 @@ test("the collapsed legacy overlay list stays below primary content while loadin
     expect(await measureDocumentBox(page, ".list-toolbar__create")).toEqual(createActionBefore);
     await page.unrouteAll();
   }
-});
-
-test("a location-search error stays inside its dialog", async ({ page }) => {
-  await installChannelMocks(page, {}, { locationSearchStatus: 503 });
-  await page.goto(`/channels/${channelId}/overview`);
-  await page.getByRole("button", { name: "Change location" }).click();
-  const dialog = page.getByRole("dialog", { name: "Change location" });
-  await expect(dialog).toBeVisible();
-  await page.getByRole("textbox", { name: "Search for a place" }).fill("Reykjavik");
-  await page.getByRole("button", { name: "Search", exact: true }).click();
-
-  await expect(dialog.getByRole("alert")).toContainText("Locations could not be searched.");
-  await expect(page.locator(".ui-toast--error")).toHaveCount(0);
-  await expect(dialog).toBeVisible();
-});
-
-test("a failed location save keeps its dialog and attribution in place", async ({ page }) => {
-  await installChannelMocks(page, {}, {
-    locationSaveStatus: 500,
-    locationResults: [{ name: "Sample Cove", admin1: "Example District", country: "Example State", latitude: 12.3456, longitude: 45.6789, timeZone: "UTC" }],
-  });
-  await page.goto(`/channels/${channelId}/overview`);
-  await page.getByRole("button", { name: "Change location" }).click();
-  const dialog = page.getByRole("dialog", { name: "Change location" });
-  await page.getByRole("textbox", { name: "Search for a place" }).fill("Sample Cove");
-  await page.getByRole("button", { name: "Search", exact: true }).click();
-  const location = dialog.getByRole("option", { name: /Sample Cove/ });
-  await expect(location).toBeVisible();
-
-  const dialogBefore = await dialog.boundingBox();
-  const attribution = dialog.locator('a[href="https://open-meteo.com/"]');
-  const attributionBefore = await attribution.boundingBox();
-  const errorSlotBefore = await dialog.locator(".channel-location-field__save-error-slot").boundingBox();
-  await location.click();
-  await expect(dialog.getByRole("alert")).toContainText("Location could not be saved.");
-
-  expect(await dialog.boundingBox()).toEqual(dialogBefore);
-  expect(await attribution.boundingBox()).toEqual(attributionBefore);
-  expect(await dialog.locator(".channel-location-field__save-error-slot").boundingBox()).toEqual(errorSlotBefore);
-  await page.unrouteAll();
 });
 
 test("a channel control error appears as a toast without changing header boxes", async ({ page }) => {

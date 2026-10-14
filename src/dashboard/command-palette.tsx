@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactElement } from "re
 import { MODULES } from "../modules/registry";
 import type { TextCommand } from "../modules/text_commands/contracts";
 import { loadTextCommands } from "../modules/text_commands/panel/service";
-import { canManage, type ChannelRole } from "../contracts/values";
+import { canManage, hasRequiredChannelRole, type ChannelRole } from "../contracts/values";
 import type { PanelChannelControls, PanelModuleState } from "../panel-contract";
 import { PanelApiError, createClip, fetchChannelVariables, sendManualShoutout, setChannelControl, setChannelModuleEnabled, startCommercial, type PanelChannelVariable } from "./api";
 import { dispatchDashboardAuthenticationRequired } from "./data/events";
@@ -25,21 +25,29 @@ const botBlocksRoute = (route: DashboardRoute, botSignedIn: boolean | undefined)
   botSignedIn === false && dashboardRouteRequiresBot(route);
 
 /**
- * Presence and availability for a module's immediate action, from the exact
- * same source Stream Manager reads (`ImmediateActions` in stream-manager.tsx)
- * -- so the command palette can't offer an action for a disabled module.
+ * Presence and availability for a module action, from the same declarations
+ * as the live cockpit so the command palette cannot offer a disabled action.
  */
 const moduleImmediateActionAvailability = (
   moduleId: string,
+  actionId: string,
   modules: readonly Pick<PanelModuleState, "id" | "enabled">[],
   streamState: "online" | "offline" | null | undefined,
+  role: ChannelRole | null,
 ): { offered: boolean; disabledReason: string | null } => {
   const module = MODULES.find((entry) => entry.id === moduleId);
+  const action = module?.actions?.find((entry) => entry.id === actionId);
   const state = modules.find((entry) => entry.id === moduleId);
-  if (module?.immediateActions === undefined || state === undefined || !state.enabled) {
+  if (action === undefined || state === undefined || !state.enabled || role === null) {
     return { offered: false, disabledReason: null };
   }
-  const availability = evaluateImmediateActionAvailability(module.immediateActions.requires, streamState);
+  if (!hasRequiredChannelRole(role, action.requiredRole)) {
+    return {
+      offered: true,
+      disabledReason: action.requiredRole === "manager" ? dashboardTexts().streamManager.managerOnly : dashboardTexts().streamManager.operatorOnly,
+    };
+  }
+  const availability = evaluateImmediateActionAvailability(action.conditions, streamState);
   return {
     offered: true,
     disabledReason: availability.reason === null ? null : immediateActionUnavailableReasonText(availability.reason),
@@ -219,12 +227,11 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
   const actionItems = useMemo<CommandPaletteItem[]>(() => {
     if (channelId === null) return [];
     const managementLockReason = manageable ? undefined : texts.module.managementLocked;
-    // Ad now, clip, and shoutout are the same immediate actions Stream
-    // Manager offers. Ads require management rights; clips and shoutouts stay
-    // available to every member. Each also reports its stream-state reason.
-    const adNow = moduleImmediateActionAvailability("ads", modules, streamState);
-    const clip = moduleImmediateActionAvailability("clips", modules, streamState);
-    const shoutout = moduleImmediateActionAvailability("raid", modules, streamState);
+    // The quick actions share their module declarations with the live cockpit.
+    // Each command uses the declared role and stream-state requirements.
+    const adNow = moduleImmediateActionAvailability("ads", "start-commercial", modules, streamState, ownRole);
+    const clip = moduleImmediateActionAvailability("clips", "create-clip", modules, streamState, ownRole);
+    const shoutout = moduleImmediateActionAvailability("raid", "send-shoutout", modules, streamState, ownRole);
     const items: CommandPaletteItem[] = [];
     const channelControlLabels = texts.channelControls;
     for (const kind of ["mute", "pause"] as const) {
@@ -315,7 +322,7 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
       });
     }
     return items;
-  }, [texts, manageable, adsEnabled, channelId, channelControls, shoutoutLogin, streamState, modules, toggleAds, toggleChannelControl]);
+  }, [texts, manageable, adsEnabled, channelId, channelControls, ownRole, shoutoutLogin, streamState, modules, toggleAds, toggleChannelControl]);
 
   const targetItems = navigationItems;
   const recentItems = recentTargetPaths.flatMap((path, index) => {

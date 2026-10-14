@@ -109,6 +109,8 @@ export interface PanelChannelState {
   streamState?: ChannelStreamState | null;
   /** EventSub stream.online time, present only while the stored state is online. */
   streamStartedAt?: string | null;
+  /** Latest viewer count observed by the live-status lookup. */
+  viewerCount?: number | null;
   /** Latest stream-state transition timestamp used to order realtime updates. */
   streamStateChangedAt?: string | null;
   /** Most recent successful observation of the stream state. */

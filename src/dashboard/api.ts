@@ -357,50 +357,8 @@ export interface PanelChannelSettings {
   defaultChatTargetRevision: number;
 }
 
-export type { PanelChannelLocation } from "../panel-contract";
-
-export interface PanelChannelLocationResult extends PanelChannelLocation {
-  country: string;
-  admin1: string | null;
-}
-
 export const fetchChannelSettings = (channelId: string, signal?: AbortSignal): Promise<PanelChannelSettings> =>
   requestJson<PanelChannelSettings>(channelPath(channelId, "settings"), requestOptions(signal));
-
-export const saveChannelTimeZone = (
-  channelId: string,
-  revision: number,
-  timeZone: string,
-): Promise<{ ok: boolean; timeZone: string; revision: number }> =>
-  requestMutation(channelPath(channelId, "settings"), "PATCH", { revision, timeZone });
-
-export const saveChannelDefaultChatTarget = (
-  channelId: string,
-  revision: number,
-  defaultChatTarget: ChatOutputTarget,
-): Promise<{ ok: boolean; defaultChatTarget: ChatOutputTarget; defaultChatTargetRevision: number }> =>
-  requestMutation(channelPath(channelId, "settings"), "PATCH", {
-    defaultChatTargetRevision: revision,
-    defaultChatTarget,
-  });
-
-export const searchChannelLocations = (
-  channelId: string,
-  query: string,
-  language: "de" | "en",
-): Promise<readonly PanelChannelLocationResult[]> => {
-  const search = new URLSearchParams({ q: query, language });
-  return requestJson<{ results: PanelChannelLocationResult[] }>(
-    `${channelPath(channelId, "settings/location/geocode")}?${search}`,
-  ).then(({ results }) => results);
-};
-
-export const saveChannelLocation = (
-  channelId: string,
-  revision: number,
-  location: PanelChannelLocation | null,
-): Promise<{ ok: boolean; location: PanelChannelLocation | null; locationRevision: number }> =>
-  requestMutation(channelPath(channelId, "settings/location"), "PATCH", { revision, location });
 
 export const fetchSystemOverview = (
   channelId: string,

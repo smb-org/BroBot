@@ -7,7 +7,7 @@ const paletteShortcut = async (page: Page): Promise<string> => page.evaluate(() 
   /Mac|iPhone|iPad|iPod/u.test(navigator.platform || navigator.userAgent) ? "Meta+k" : "Control+k",
 );
 
-test("command palette and channel notices work on desktop and mobile", async ({ page }) => {
+test("command palette and cockpit navigation work on desktop and mobile", async ({ page }) => {
   const modules = [
     { id: "ads", enabled: false, settings: "{}", missingBroadcasterScopes: ["channel:manage:ads"] },
   ];
@@ -69,11 +69,6 @@ test("command palette and channel notices work on desktop and mobile", async ({ 
   await page.goto("/channels/kanal-e2e");
   await expect(page.getByRole("heading", { name: "Brotkrumen Channel", level: 1 })).toBeVisible();
 
-  const notices = page.getByRole("region", { name: "Notices" });
-  await expect(notices.getByRole("heading", { name: "Notices 3" })).toBeVisible();
-  await expect(notices.locator(".state-row")).toHaveCount(2);
-  await expect(notices).toHaveAttribute("data-status", "error");
-
   const paletteTrigger = page.getByRole("banner").getByRole("button", { name: "Search or run action …" });
   await expect(paletteTrigger).toBeVisible();
   await expect(paletteTrigger.locator("kbd")).toHaveText(/^(⌘ K|Ctrl K)$/u);
@@ -83,16 +78,6 @@ test("command palette and channel notices work on desktop and mobile", async ({ 
   await page.keyboard.press(await paletteShortcut(page));
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.keyboard.press("Escape");
-
-  await page.getByRole("button", { name: "Show all 3 notices" }).click();
-  await expect(notices.locator(".state-row")).toHaveCount(3);
-  for (const row of await notices.locator(".state-row").all()) {
-    await expect(row.locator(".state-row__detail")).not.toBeEmpty();
-    await expect(row.locator(".state-row__action button, .state-row__action a")).toHaveCount(1);
-  }
-  const modulePermissionButton = notices.getByRole("button", { name: "Grant permission" });
-  await expect(modulePermissionButton).toBeDisabled();
-  await expect(page.locator(`#${await modulePermissionButton.getAttribute("aria-describedby") ?? ""}`)).toHaveText(/Only this channel’s broadcaster/u);
 
   await page.getByRole("button", { name: "Setup" }).click();
   const sidebar = page.getByRole("navigation", { name: "Main navigation" });
@@ -125,7 +110,7 @@ test("command palette and channel notices work on desktop and mobile", async ({ 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
-test("waits for notice modules before rendering the stream manager at desktop and mobile widths", async ({ page }) => {
+test("waits for module data before rendering cockpit actions at desktop and mobile widths", async ({ page }) => {
   const channel = {
     channelId: "kanal-e2e",
     login: "brotkrumen-kanal",
@@ -191,28 +176,25 @@ test("waits for notice modules before rendering the stream manager at desktop an
 
     const pageLoad = page.locator(".main-content > .ui-load-state");
     await expect(pageLoad).toHaveAttribute("data-status", "loading");
-    await expect(page.getByRole("heading", { name: "Brotkrumen Channel", level: 1 })).toHaveCount(0);
-    await expect(page.getByRole("region", { name: "Notices" })).toHaveCount(0);
+    await expect(page.locator(".live-cockpit")).toHaveCount(0);
 
     releaseModules?.();
-    const heading = page.getByRole("heading", { name: "Brotkrumen Channel", level: 1 });
-    await expect(heading).toBeVisible();
-    const notices = page.getByRole("region", { name: "Notices" });
-    await expect(notices.getByRole("heading", { name: "Notices 3" })).toBeVisible();
+    const cockpit = page.locator(".live-cockpit");
+    await expect(cockpit).toBeVisible();
     const actions = page.getByRole("group", { name: "Immediate actions" });
-    await expect(actions.locator(".stream-manager-action--loading")).toHaveCount(0);
+    await expect(actions.locator(".live-cockpit-actions__loading")).toHaveCount(0);
+    await expect(actions.getByRole("button", { name: "Start ad break" })).toBeVisible();
 
     const layout = async () => {
-      const headingBox = await heading.boundingBox();
-      const noticesBox = await notices.boundingBox();
+      const cockpitBox = await cockpit.boundingBox();
       const actionsBox = await actions.boundingBox();
-      if (headingBox === null || noticesBox === null || actionsBox === null) {
-        throw new Error("The loaded Stream Manager layout is missing a measured surface.");
+      if (cockpitBox === null || actionsBox === null) {
+        throw new Error("The loaded cockpit layout is missing a measured surface.");
       }
-      return { heading: headingBox, notices: noticesBox, actions: actionsBox };
+      return { cockpit: cockpitBox, actions: actionsBox };
     };
     const firstLayout = await layout();
-    for (const box of [firstLayout.heading, firstLayout.notices, firstLayout.actions]) {
+    for (const box of [firstLayout.cockpit, firstLayout.actions]) {
       expect(box.x).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width).toBeLessThanOrEqual(width);
     }

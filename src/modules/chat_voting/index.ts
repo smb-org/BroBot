@@ -4,9 +4,10 @@ import { createChatVotingRepository } from "./repository";
 import { CHAT_VOTING_CHAT_COMMANDS } from "./contracts/chat-commands";
 import { chatVotingDurationVariableCatalog, chatVotingOptionsVariableCatalog, chatVotingResultVariableCatalog, chatVotingTitleVariableCatalog } from "./contracts/template-variable-catalog";
 import { chatVotingAlarmDefinition, chatVotingStartAnnouncementAlarmDefinition, processChatVotingMessage } from "./service";
-import { CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_MODULE_ID, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingPresetForKind, chatVotingSettingsSchema } from "./contracts";
+import { CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_MODULE_ID, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingPresetForKind, chatVotingSettingsSchema, type ChatVotingKind } from "./contracts";
 import { chatVotingOverlayElements } from "./overlay/element";
 import { chatVotingRoutes } from "./routes";
+import { chatVotingImmediateActionTexts } from "./action-locale";
 
 const settingsSchema = chatVotingSettingsSchema;
 
@@ -106,7 +107,63 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
   },
   routes: chatVotingRoutes,
   panel: () => import("./panel"),
-  immediateActions: { requires: [], load: () => import("./panel/immediate-actions") },
+  actions: [{
+    id: "start-vote",
+    name: chatVotingImmediateActionTexts.name,
+    icon: "vote",
+    conditions: ["streamLive", {
+      check: async ({ channelId, signal }) => {
+        const service = await import("./panel/service");
+        try {
+          const state = await service.loadChatVotingState(channelId, signal);
+          if (state.vote?.status === "open") {
+            const until = Date.parse(state.vote.closesAt);
+            return {
+              reason: chatVotingImmediateActionTexts.running,
+              ...(Number.isFinite(until) ? { until } : {}),
+            };
+          }
+          if (state.hasOpenBallot) {
+            return { reason: chatVotingImmediateActionTexts.votekickRunning };
+          }
+          return { reason: null };
+        } catch (error: unknown) {
+          if (error instanceof Error && error.name === "AbortError") throw error;
+          return { reason: chatVotingImmediateActionTexts.liveDataUnavailable };
+        }
+      },
+    }],
+    requiredRole: "operator",
+    content: { presentation: "dialog", load: () => import("./panel/action-content") },
+    errorMessage: chatVotingImmediateActionTexts.error,
+    execute: async ({ channelId, formData }) => {
+      const mode = formData.get("mode");
+      const templateId = formData.get("templateId");
+      if (mode === "saved") {
+        if (typeof templateId !== "string" || templateId.length === 0) throw new Error("A vote template is required.");
+        await (await import("./panel/service")).startChatVoting(channelId, { templateId });
+        return;
+      }
+      const rawKind = formData.get("kind");
+      if (rawKind !== "yes_no" && rawKind !== "options") throw new Error("A vote type is required.");
+      const title = formData.get("title");
+      const durationSeconds = Number(formData.get("durationSeconds"));
+      if (typeof title !== "string" || title.trim().length === 0 || !Number.isSafeInteger(durationSeconds)) {
+        throw new Error("A vote question and duration are required.");
+      }
+      const kind: ChatVotingKind = rawKind;
+      const labels = formData.getAll("labels").map((label) => typeof label === "string" ? label.trim() : "");
+      if (kind === "options" && (labels.length < 2 || labels.length > 9 || labels.some((label) => label.length === 0))) {
+        throw new Error("Two to nine answer options are required.");
+      }
+      await (await import("./panel/service")).startChatVoting(channelId, {
+        kind,
+        ...(kind === "options" ? { optionCount: labels.length, labels } : {}),
+        durationSeconds,
+        title: title.trim(),
+      });
+    },
+  }],
   settingsEditor: () => import("./panel/settings-editor"),
   settingsEditorRelatedParts: ["panel"],
   eventSubTypes: ["channel.chat.message"],

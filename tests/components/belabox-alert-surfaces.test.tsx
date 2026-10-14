@@ -1,14 +1,11 @@
 import type { ReactElement } from "react";
 
-import { cleanup, screen, waitFor } from "@testing-library/react";
+import { cleanup, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { BelaboxStatusResponse } from "../../src/modules/belabox/contracts";
 import BelaboxPanel from "../../src/modules/belabox/panel/index";
-import BelaboxStatusAction from "../../src/modules/belabox/panel/immediate-actions";
 import { UiProvider } from "../../src/dashboard/ui";
-import { reconcileDashboardRealtimeMessage } from "../../src/dashboard/data/realtime";
-import type { RealtimeMessage } from "../../src/realtime-contract";
 import { renderWithQuery as render } from "../query-test-utils";
 
 const status: BelaboxStatusResponse = {
@@ -42,41 +39,6 @@ describe("BELABOX alert surfaces", () => {
     const notice = await screen.findByText(/BELABOX encoder disconnected/u);
     expect(notice).toHaveTextContent("BELABOX encoder disconnected");
     expect(screen.getByRole("button", { name: /Check now|Jetzt prüfen/u })).toBeEnabled();
-  });
-
-  it("shows the same current-stream alert in the lazy immediate-action card", async () => {
-    vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.resolve(Response.json(status))));
-    renderWithUi(<BelaboxStatusAction channelId="channel-a" canManage availabilityReason={null} />);
-
-    expect(await screen.findByText(/BELABOX encoder disconnected|BELABOX-Encoder getrennt/u)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Check now|Jetzt prüfen/u })).toBeEnabled();
-  });
-
-  it("reloads status when stream availability changes from offline to live", async () => {
-    let statusReads = 0;
-    const fetcher = vi.fn<typeof fetch>((input) => {
-      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
-      if (url.pathname.endsWith("/revisions")) return Promise.resolve(Response.json({ revisions: { "module:belabox:live": 1 } }));
-      statusReads += 1;
-      return Promise.resolve(Response.json(status));
-    });
-    vi.stubGlobal("fetch", fetcher);
-    const view = renderWithUi(<BelaboxStatusAction channelId="channel-a" canManage availabilityReason="Stream is offline." />);
-
-    expect(await screen.findByTestId("belabox-immediate-status-slot")).toHaveTextContent("Stream is offline.");
-    expect(statusReads).toBe(1);
-    view.rerender(<UiProvider><BelaboxStatusAction channelId="channel-a" canManage availabilityReason={null} /></UiProvider>);
-    await reconcileDashboardRealtimeMessage(view.queryClient, {
-      version: 1,
-      id: "stream-now-live",
-      createdAt: new Date().toISOString(),
-      channelId: "channel-a",
-      type: "stream.state.changed",
-      payload: { state: "online", startedAt: new Date().toISOString(), changedAt: new Date().toISOString() },
-    } satisfies RealtimeMessage);
-
-    await waitFor(() => { expect(statusReads).toBe(2); });
-    expect(await screen.findByTestId("belabox-immediate-status-slot")).toHaveTextContent(/BELABOX encoder disconnected|BELABOX-Encoder getrennt/u);
   });
 
 });
