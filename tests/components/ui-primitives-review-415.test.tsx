@@ -50,6 +50,38 @@ describe("issue 415 primitive regressions", () => {
     await waitFor(() => expect(onChange).toHaveBeenCalledWith("paris"));
   });
 
+  it("keeps rejected pasted text through blur once the limit is reached", () => {
+    const onChange = vi.fn();
+    const onPendingChange = vi.fn();
+    const long = "x".repeat(81);
+    const existing = Array.from({ length: 19 }, (_, index) => `kw${String(index)}`);
+    const validate = (entry: string): string | null => entry.length > 80 ? "Too long" : null;
+    const { rerender } = render(<ChipsInput id="kw" label="Keywords" values={existing} max={20} separator="comma" validate={validate} onChange={onChange} onPendingChange={onPendingChange} removeLabel={(entry) => `Remove ${entry}`} messages={chipMessages} listLabel="Keywords" />);
+    const input = screen.getByRole("textbox");
+
+    fireEvent.paste(input, { clipboardData: { getData: () => `${long}, valid20` } });
+    expect(onChange).toHaveBeenCalledWith([...existing, "valid20"]);
+    expect(screen.getByText("Too long")).toBeInTheDocument();
+    expect(input).toHaveValue(long);
+
+    rerender(<ChipsInput id="kw" label="Keywords" values={[...existing, "valid20"]} max={20} separator="comma" validate={validate} onChange={onChange} onPendingChange={onPendingChange} removeLabel={(entry) => `Remove ${entry}`} messages={chipMessages} listLabel="Keywords" />);
+    fireEvent.blur(input);
+    expect(input).toHaveValue(long);
+    expect(onPendingChange).toHaveBeenLastCalledWith(long);
+    expect(screen.getAllByText("Maximum reached").length).toBeGreaterThan(1);
+  });
+
+  it("keeps pending text and reports a limit error when committing at the limit", () => {
+    const onChange = vi.fn();
+    render(<ChipsInput id="kw" label="Keywords" values={["a", "b"]} max={2} onChange={onChange} removeLabel={(entry) => `Remove ${entry}`} messages={chipMessages} listLabel="Keywords" />);
+    const input = screen.getByRole("textbox");
+    fireEvent.change(input, { target: { value: "c" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(input).toHaveValue("c");
+    expect(screen.getAllByText("Maximum reached").length).toBeGreaterThan(1);
+  });
+
   it("commits the current chip draft when the input blurs", () => {
     const onChange = vi.fn();
     const onPendingChange = vi.fn();

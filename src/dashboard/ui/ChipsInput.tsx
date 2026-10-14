@@ -72,7 +72,12 @@ export function ChipsInput({ id: suppliedId, label, values, onChange, onPendingC
         nextWarning ??= messages.duplicateWarning(prefixed(nextValue));
         continue;
       }
-      if (max !== undefined && nextValues.length >= max) continue;
+      if (max !== undefined && nextValues.length >= max) {
+        // At the limit nothing is committed: keep the text so it is never dropped silently.
+        rejected.push(rawEntry.trim());
+        nextError ??= messages.atLimitHint;
+        continue;
+      }
       const invalid = validate?.(nextValue) ?? null;
       if (invalid !== null) {
         rejected.push(rawEntry.trim());

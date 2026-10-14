@@ -244,7 +244,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
   const searchGames = useCallback((query: string) => searchTextGames(channelId, query), [channelId]);
   const lookupGames = useCallback((ids: readonly string[]) => lookupTextGames(channelId, ids), [channelId]);
   const resolvedLanguage = language ?? dashboardLanguage();
-  const { value: draft, setValue, dirty: draftDirty, reset, accept } = useDraft<CommandDraft>(initial);
+  const { value: draft, setValue, dirty, reset, accept } = useDraft<CommandDraft>(initial);
   const draftRevision = useRef(command?.revision ?? null);
   const [active, setActive] = useState(command?.enabled ?? true);
   const [activePending, setActivePending] = useState(false);
@@ -252,7 +252,6 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
   const [saved, setSaved] = useState(false);
   const [deleteError, setDeleteError] = useState<string | undefined>();
   const [fieldError, setFieldError] = useState<{ field: "name" | "aliases"; message: string; invalidAlias?: string } | null>(null);
-  const [pendingAliases, setPendingAliases] = useState("");
   const [concurrentConflict, setConcurrentConflict] = useState(false);
   const [reloadError, setReloadError] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -264,7 +263,6 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
   const registeredVariables = registeredVariablesQuery.data ?? [];
   const libraryBlocks = textBlockNamesForPicker(registeredVariables);
   const [selectedLibraryBlock, setSelectedLibraryBlock] = useState("");
-  const dirty = draftDirty || pendingAliases.length > 0;
   const isCreate = command === null;
   const blockVariables: TemplateVariable[] = libraryBlocks.map((name) => ({ name, group: "channel", sample: name, maxLength: 500 }));
   const baseTemplateFields = templateFieldsForKind(draft.kind, channelVariables, draft.timeoutAction !== null);
@@ -558,7 +556,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
   const completeSwitchRef = useRef<() => boolean>(() => false);
   const saveDraft = useCallback(async (): Promise<string | null> => {
     setAttemptedSave(true);
-    if (!canManageContent || pendingAliases.trim().length > 0) return labels.invalid;
+    if (!canManageContent) return labels.invalid;
     const parsedSlashInput = parseLeadingSlashCommand(draft.text);
     if (parsedSlashInput.status === "invalid") return labels.invalid;
     const savedDraft = parsedSlashInput.status === "valid"
@@ -640,13 +638,9 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
       notify({ tone: "error", message: labels.saveError });
       return labels.saveError;
     } finally { setPending(false); }
-  }, [accept, canManageContent, channelId, channelVariables, command, draft, generation, isCreate, labels, onRefresh, onSaved, onWrite, pendingAliases, setAttemptedSave, setConcurrentConflict, setFieldError, setPending, setSaved, setServerWarnings, setValue]);
+  }, [accept, canManageContent, channelId, channelVariables, command, draft, generation, isCreate, labels, onRefresh, onSaved, onWrite, setAttemptedSave, setConcurrentConflict, setFieldError, setPending, setSaved, setServerWarnings, setValue]);
 
-  const discardDraft = (): void => {
-    setPendingAliases("");
-    reset();
-  };
-  const guard = useDraftGuard(dirty, saveDraft, discardDraft);
+  const guard = useDraftGuard(dirty, saveDraft, reset);
   useEffect(() => { completeSwitchRef.current = guard.completeSwitch; }, [guard.completeSwitch]);
   useEffect(() => {
     onGuardChange(guard.guardSwitch);
@@ -842,7 +836,6 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
           hint={labels.aliasHint}
           values={draft.aliases}
           onChange={(value) => { setDraftField("aliases", value); }}
-          onPendingChange={setPendingAliases}
           stripPrefix="!"
           normalize={normalizeCommandName}
           validate={(alias) => !validCommandName(alias) ? labels.aliasInvalid(alias) : alias === normalizedName ? labels.aliasIsName : null}
