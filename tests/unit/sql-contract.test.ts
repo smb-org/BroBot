@@ -150,10 +150,11 @@ const sqlGetFixtures = new Map<string, string>([
     updatedAt: now,
   }).sql],
   ["rowColumns", "votekick_id, target_user_id, target_login, initiator_user_id, status, threshold, yes_votes, no_votes, ballot_revision, duration_seconds, started_at, expires_at, ended_at, lifted_at"],
-  ["selectFaqEntries", `SELECT faq_id, name, enabled, matcher_type, matcher_json, answer_text, cooldown_seconds,
-                                 games_json, chat_target, sort_order, revision, last_used_at, created_at, updated_at
-                            FROM faq_entries
-                           WHERE channel_id = ?`],
+  ["selectFaqEntries", `SELECT faq.faq_id, faq.name, faq.enabled, faq.matcher_type, faq.matcher_json, faq.answer_text, faq.cooldown_seconds,
+                                 faq.games_json, faq.chat_target, entry_order.sort_order, faq.revision, faq.last_used_at, faq.created_at, faq.updated_at
+                            FROM faq_entries AS faq
+                            JOIN faq_entry_order AS entry_order ON entry_order.channel_id = faq.channel_id AND entry_order.faq_id = faq.faq_id
+                           WHERE faq.channel_id = ?`],
   ["textBlockSelectColumns", textBlockSelectColumns],
   ["textBlockCategorySelectColumns", textBlockCategorySelectColumns],
   ["blockUsageExistsSql", blockUsageExistsSql],
@@ -240,10 +241,10 @@ describe("SQL contract", () => {
       const objects = database.prepare(
         "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY tbl_name, type DESC, name",
       ).all() as unknown as SchemaObject[];
-      expect(objects.filter((object) => object.type === "table")).toHaveLength(61);
+      expect(objects.filter((object) => object.type === "table")).toHaveLength(63);
       expect(objects.filter((object) => object.type === "index")).toHaveLength(51);
-      expect(objects.filter((object) => object.type === "trigger")).toHaveLength(126);
-      expect(objects).toHaveLength(238);
+      expect(objects.filter((object) => object.type === "trigger")).toHaveLength(132);
+      expect(objects).toHaveLength(246);
 
       const tableColumns = (table: string): Set<string> => new Set(
         (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(({ name }) => name),

@@ -273,7 +273,7 @@ test("votekick loading sections reserve their populated structure", async ({ pag
 });
 
 test("FAQ game search opens on its first click and narrow chat controls stay readable", async ({ page }) => {
-  await routeJson(page, "/api/channels/channel-a/modules/faq/entries", { entries: [{
+  await routeJson(page, "/api/channels/channel-a/modules/faq/entries", { orderRevision: 1, entries: [{
     id: "faq-416", name: "Example", enabled: true, matcher: { type: "keywords", patterns: ["hello"] }, answerText: "Hello", minimumTier: "everyone",
     cooldownSeconds: 30, userCooldownSeconds: 0, games: [], chatTarget: null, order: 0, revision: 1,
     lastUsedAt: null, createdAt: "2030-01-01T12:00:00.000Z", updatedAt: "2030-01-01T12:00:00.000Z",
@@ -327,7 +327,7 @@ test("FAQ game search opens on its first click and narrow chat controls stay rea
 
 test("FAQ game limit explains the cap without shifting the fields below it", async ({ page }) => {
   const games = Array.from({ length: 9 }, (_, index) => ({ id: `game-${String(index + 1)}`, name: `Game ${String(index + 1)}` }));
-  await routeJson(page, "/api/channels/channel-a/modules/faq/entries", { entries: [{
+  await routeJson(page, "/api/channels/channel-a/modules/faq/entries", { orderRevision: 1, entries: [{
     id: "faq-limit-416", name: "Full game list", enabled: true, matcher: { type: "keywords", patterns: ["hello"] }, answerText: "Hello", minimumTier: "everyone",
     cooldownSeconds: 30, userCooldownSeconds: 0, games, chatTarget: "source_only", order: 0, revision: 1,
     lastUsedAt: null, createdAt: "2030-01-01T12:00:00.000Z", updatedAt: "2030-01-01T12:00:00.000Z",
@@ -436,6 +436,7 @@ test("FAQ collection tests the draft, saves explicitly, and undoes an immediate 
     },
   ];
   let orderWrites = 0;
+  let orderRevision = 1;
   await routeJson(page, "/api/csrf", { token: "csrf" });
   await routeJson(page, "/api/channels/channel-a/settings", {
     timeZone: "UTC", revision: 1, location: null, locationRevision: 1,
@@ -444,7 +445,7 @@ test("FAQ collection tests the draft, saves explicitly, and undoes an immediate 
   await routeJson(page, "/api/channels/channel-a/template-variables", { variables: [] });
   await page.route("**/api/channels/channel-a/modules/faq/entries", async (route) => {
     if (route.request().method() === "GET") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries }) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries, orderRevision }) });
       return;
     }
     await route.fallback();
@@ -459,13 +460,14 @@ test("FAQ collection tests the draft, saves explicitly, and undoes an immediate 
   await page.route("**/api/channels/channel-a/modules/faq/entries/order", async (route) => {
     if (route.request().method() !== "POST") return route.fallback();
     orderWrites += 1;
-    const body = route.request().postDataJSON() as { order: { id: string; revision: number }[] };
-    entries = body.order.map(({ id }, order) => {
+    const body = route.request().postDataJSON() as { order: string[]; revision: number };
+    entries = body.order.map((id, order) => {
       const entry = entries.find((candidate) => candidate.id === id);
       if (entry === undefined) throw new Error(`Missing FAQ fixture entry ${id}.`);
-      return { ...entry, order, revision: entry.revision + (entry.order === order ? 0 : 1) };
+      return { ...entry, order };
     });
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries }) });
+    orderRevision += 1;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries, orderRevision }) });
   });
 
   await gotoPanel(page, "faq", "en");

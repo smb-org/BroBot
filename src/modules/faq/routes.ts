@@ -74,9 +74,11 @@ const parseMutation = (value: unknown, existing?: FaqEntry): FaqMutationInput | 
 
 const readEntry = async (context: FaqRouteContext, channelId: string, id: string): Promise<FaqEntry | null> => {
   const row = await context.env.DB.prepare(
-    `SELECT faq_id, name, enabled, matcher_type, matcher_json, answer_text, minimum_tier, cooldown_seconds, user_cooldown_seconds,
-            games_json, chat_target, use_channel_default_target, sort_order, revision, last_used_at, created_at, updated_at
-       FROM faq_entries WHERE channel_id = ? AND faq_id = ?`,
+    `SELECT faq.faq_id, faq.name, faq.enabled, faq.matcher_type, faq.matcher_json, faq.answer_text, faq.minimum_tier, faq.cooldown_seconds, faq.user_cooldown_seconds,
+            faq.games_json, faq.chat_target, faq.use_channel_default_target, entry_order.sort_order, faq.revision, faq.last_used_at, faq.created_at, faq.updated_at
+       FROM faq_entries AS faq
+       JOIN faq_entry_order AS entry_order ON entry_order.channel_id = faq.channel_id AND entry_order.faq_id = faq.faq_id
+      WHERE faq.channel_id = ? AND faq.faq_id = ?`,
   ).bind(channelId, id).first<FaqEntryRow>();
   return row === null ? null : mapFaqEntryRow(row);
 };
@@ -120,7 +122,8 @@ export const faqRoutes = new Hono<ModuleRouteEnvironment>();
 
 faqRoutes.get("/entries", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
-  return context.json({ entries: await createFaqRepository(context.env.DB).list(channelId) });
+  const list = await createFaqRepository(context.env.DB).listWithOrderRevision(channelId);
+  return context.json(list);
 });
 
 faqRoutes.post("/entries", async (context) => {
@@ -142,19 +145,19 @@ faqRoutes.post("/entries", async (context) => {
 
   const entryId = crypto.randomUUID();
   const now = nowIso();
-  const orderRow = await context.env.DB.prepare("SELECT COALESCE(MAX(sort_order), -1) AS last_order FROM faq_entries WHERE channel_id = ?")
+  const orderRow = await context.env.DB.prepare("SELECT COALESCE(MAX(sort_order), -1) AS last_order FROM faq_entry_order WHERE channel_id = ?")
     .bind(channelId).first<{ last_order: number }>();
   const order = (orderRow?.last_order ?? -1) + 1;
   const authorization = authorizationFor(context, channelId, now);
   const mutation = context.env.DB.prepare(
     `INSERT INTO faq_entries
        (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, minimum_tier, cooldown_seconds, user_cooldown_seconds,
-       games_json, chat_target, use_channel_default_target, sort_order, revision, last_used_at, created_at, updated_at)
-     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?
+       games_json, chat_target, use_channel_default_target, revision, last_used_at, created_at, updated_at)
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?
       WHERE (SELECT COUNT(*) FROM faq_entries WHERE channel_id = ?) < ? ${blockGuard.sql} ${authorization.sql}`,
   ).bind(entryId, channelId, input.name, input.enabled ? 1 : 0, input.matcher.type, JSON.stringify(input.matcher), input.answerText,
     input.minimumTier, input.cooldownSeconds, input.userCooldownSeconds, JSON.stringify(input.games), input.chatTarget ?? "source_only",
-    input.chatTarget === null ? 1 : 0, order,
+    input.chatTarget === null ? 1 : 0,
     now, now, channelId, FAQ_ENTRY_MAXIMUM_COUNT, ...blockGuard.values, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
     channelId,
@@ -228,56 +231,48 @@ faqRoutes.post("/entries/order", async (context) => {
   if (!canManage(context.get("channelRole"))) return denied(context);
   const channelId = context.req.param("channelId") ?? "";
   const body = await readBody(context.req.raw);
-  if (!isRecord(body) || !Array.isArray(body.order) || body.order.length > FAQ_ENTRY_MAXIMUM_COUNT) {
+  if (!isRecord(body) || !Array.isArray(body.order) || body.order.length > FAQ_ENTRY_MAXIMUM_COUNT ||
+      !Number.isSafeInteger(body.revision) || (body.revision as number) < 1) {
     return context.json({ error: "faq_entry_order_invalid" }, 400);
   }
-  const requested = body.order.flatMap((item) => {
-    if (!isRecord(item) || typeof item.id !== "string" || item.id.length === 0 ||
-        !Number.isSafeInteger(item.revision) || (item.revision as number) < 1) return [];
-    return [{ id: item.id, revision: item.revision as number }];
-  });
-  if (requested.length !== body.order.length || new Set(requested.map((entry) => entry.id)).size !== requested.length) {
+  const requested = body.order.filter((id): id is string => typeof id === "string" && id.length > 0);
+  if (requested.length !== body.order.length || new Set(requested).size !== requested.length) {
     return context.json({ error: "faq_entry_order_invalid" }, 400);
   }
 
   const repository = createFaqRepository(context.env.DB);
   const entries = await repository.list(channelId);
   const currentById = new Map(entries.map((entry) => [entry.id, entry]));
-  if (requested.length !== entries.length || requested.some((item) => currentById.get(item.id)?.revision !== item.revision)) {
+  if (requested.length !== entries.length || requested.some((id) => !currentById.has(id))) {
     return context.json({ error: "faq_entry_conflict" }, 409);
   }
-  const nextEntries = requested.map(({ id }) => currentById.get(id)).filter((entry): entry is FaqEntry => entry !== undefined);
+  const orderState = await context.env.DB.prepare("SELECT revision FROM faq_order_revision WHERE channel_id = ?")
+    .bind(channelId).first<{ revision: number }>();
+  const orderRevision = orderState?.revision ?? 1;
+  if (body.revision !== orderRevision) return context.json({ error: "faq_entry_order_conflict" }, 409);
+  const nextEntries = requested.map((id) => currentById.get(id)).filter((entry): entry is FaqEntry => entry !== undefined);
   const changedCount = nextEntries.reduce((count, entry, index) => count + (entry.order === index ? 0 : 1), 0);
-  if (changedCount === 0) return context.json({ entries });
+  if (changedCount === 0) return context.json({ entries, orderRevision });
 
   const now = nowIso();
   const authorization = authorizationFor(context, channelId, now);
   const serializedOrder = JSON.stringify(requested);
   const mutation = context.env.DB.prepare(
-    `WITH requested(faq_id, sort_order, revision) AS MATERIALIZED (
-       SELECT json_extract(value, '$.id'), CAST(key AS INTEGER), CAST(json_extract(value, '$.revision') AS INTEGER)
-         FROM json_each(?)
-     ),
-     valid AS MATERIALIZED (
-       SELECT requested.faq_id, requested.sort_order, requested.revision
-         FROM requested
-        WHERE (SELECT COUNT(*) FROM faq_entries WHERE channel_id = ?) = (SELECT COUNT(*) FROM requested)
-          AND NOT EXISTS (
-            SELECT 1
-              FROM requested AS expected
-              LEFT JOIN faq_entries AS current
-                ON current.channel_id = ? AND current.faq_id = expected.faq_id
-             WHERE current.faq_id IS NULL OR current.revision != expected.revision
-          )
+    `WITH requested(faq_id, sort_order) AS MATERIALIZED (
+       SELECT value, CAST(key AS INTEGER) FROM json_each(?)
      )
-     UPDATE faq_entries
-        SET sort_order = (SELECT sort_order FROM valid WHERE valid.faq_id = faq_entries.faq_id),
-            revision = revision + 1, updated_at = ?
+     UPDATE faq_entry_order
+        SET sort_order = (SELECT sort_order FROM requested WHERE requested.faq_id = faq_entry_order.faq_id)
       WHERE channel_id = ?
-        AND EXISTS (SELECT 1 FROM valid WHERE valid.faq_id = faq_entries.faq_id AND valid.revision = faq_entries.revision)
-        AND sort_order != (SELECT sort_order FROM valid WHERE valid.faq_id = faq_entries.faq_id)
+        AND faq_id IN (SELECT faq_id FROM requested)
+        AND sort_order != (SELECT sort_order FROM requested WHERE requested.faq_id = faq_entry_order.faq_id)
+        AND EXISTS (SELECT 1 FROM faq_order_revision WHERE channel_id = ? AND revision = ?)
         ${authorization.sql}`,
-  ).bind(serializedOrder, channelId, channelId, now, channelId, ...authorization.values);
+  ).bind(serializedOrder, channelId, channelId, body.revision, ...authorization.values);
+  const advanceOrderRevision = context.env.DB.prepare(
+    `UPDATE faq_order_revision SET revision = revision + 1
+      WHERE channel_id = ? AND revision = ? AND changes() = ? ${authorization.sql}`,
+  ).bind(channelId, body.revision, changedCount, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
     channelId,
     moduleId: FAQ_MODULE_ID,
@@ -285,10 +280,10 @@ faqRoutes.post("/entries/order", async (context) => {
     before: { priority: entries.map(({ id, order }) => `${id}:${String(order)}`) },
     after: { priority: nextEntries.map(({ id }, order) => `${id}:${String(order)}`) },
   }, now);
-  const [result] = await context.env.DB.batch([mutation, audit]);
-  if ((result?.meta.changes ?? 0) !== changedCount) return context.json({ error: "faq_entry_conflict" }, 409);
+  const [, revisionResult] = await context.env.DB.batch([mutation, advanceOrderRevision, audit]);
+  if ((revisionResult?.meta.changes ?? 0) !== 1) return context.json({ error: "faq_entry_order_conflict" }, 409);
   repository.invalidate(channelId);
-  return context.json({ entries: await repository.list(channelId) });
+  return context.json(await repository.listWithOrderRevision(channelId));
 });
 
 faqRoutes.delete("/entries/:entryId", async (context) => {

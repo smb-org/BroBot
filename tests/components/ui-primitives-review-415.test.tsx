@@ -52,13 +52,16 @@ describe("issue 415 primitive regressions", () => {
 
   it("commits the current chip draft when the input blurs", () => {
     const onChange = vi.fn();
-    render(<ChipsInput id="aliases" label="Aliases" values={[]} onChange={onChange} removeLabel={(entry) => `Remove ${entry}`} messages={chipMessages} listLabel="Aliases" />);
+    const onPendingChange = vi.fn();
+    render(<ChipsInput id="aliases" label="Aliases" values={[]} onChange={onChange} onPendingChange={onPendingChange} removeLabel={(entry) => `Remove ${entry}`} messages={chipMessages} listLabel="Aliases" />);
 
     const input = screen.getByRole("textbox");
     fireEvent.change(input, { target: { value: "draftAlias" } });
+    expect(onPendingChange).toHaveBeenLastCalledWith("draftAlias");
     fireEvent.blur(input);
 
     expect(onChange).toHaveBeenCalledWith(["draftAlias"]);
+    expect(onPendingChange).toHaveBeenLastCalledWith("");
   });
 
   it("splits space-delimited aliases typed into the field before validating each alias", () => {

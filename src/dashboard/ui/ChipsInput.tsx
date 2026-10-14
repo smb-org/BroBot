@@ -15,6 +15,7 @@ export interface ChipsInputProps {
   label: string;
   values: readonly string[];
   onChange: (values: string[]) => void;
+  onPendingChange?: (pending: string) => void;
   placeholder?: string;
   hint?: string;
   error?: string;
@@ -38,7 +39,7 @@ const normalizeEntry = (entry: string, stripPrefix: string | undefined, normaliz
   return next;
 };
 
-export function ChipsInput({ id: suppliedId, label, values, onChange, placeholder, hint, error, warning, invalidValues = [], stripPrefix, normalize, validate, removeLabel, disabled = false, messages, listLabel, max, separator = "whitespace" }: ChipsInputProps) {
+export function ChipsInput({ id: suppliedId, label, values, onChange, onPendingChange, placeholder, hint, error, warning, invalidValues = [], stripPrefix, normalize, validate, removeLabel, disabled = false, messages, listLabel, max, separator = "whitespace" }: ChipsInputProps) {
   const generatedId = useId();
   const id = suppliedId ?? generatedId;
   const disabledReason = useDisabledFieldReason();
@@ -54,6 +55,10 @@ export function ChipsInput({ id: suppliedId, label, values, onChange, placeholde
   const prefixed = (entry: string): string => `${stripPrefix ?? ""}${entry}`;
   const splitEntries = (value: string): string[] => value.split(separator === "comma" ? /[,\n]+/u : /[ ,]+/u);
   const containsSeparator = (value: string): boolean => separator === "comma" ? /[,\n]/u.test(value) : /[ ,]/u.test(value);
+  const updateDraft = (next: string): void => {
+    setDraft(next);
+    onPendingChange?.(next);
+  };
 
   const commitEntries = (entries: readonly string[], remainder = ""): void => {
     const nextValues = [...values];
@@ -77,7 +82,7 @@ export function ChipsInput({ id: suppliedId, label, values, onChange, placeholde
       nextValues.push(nextValue);
     }
     if (nextValues.length !== values.length) onChange(nextValues);
-    setDraft([...rejected, remainder].filter((entry) => entry.length > 0).join(", "));
+    updateDraft([...rejected, remainder].filter((entry) => entry.length > 0).join(", "));
     setValidationError(nextError);
     setDuplicateWarning(nextWarning);
   };
@@ -89,7 +94,7 @@ export function ChipsInput({ id: suppliedId, label, values, onChange, placeholde
   const handleDraftChange = (next: string): void => {
     const entries = splitEntries(next);
     if (entries.length === 1) {
-      setDraft(next);
+      updateDraft(next);
       setValidationError(null);
       setDuplicateWarning(null);
       return;

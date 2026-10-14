@@ -275,37 +275,41 @@ describe("FAQ routes", () => {
     });
   });
 
-  it("reorders the complete priority list atomically and rejects stale entry revisions", async () => {
+  it("reorders the list without changing entry revisions and rejects stale order revisions", async () => {
     database = new TestD1Database();
     await insertChannel(database, "channel-a");
     await insertLoginIdentityAndSession(database, "manager-1");
     await insertMember(database, "channel-a", "manager-1", "manager");
     await insertFaqEntry(database);
     await insertRestrictedFaqEntry(database);
+    const initialOrderRevision = await database.prepare(
+      "SELECT revision FROM faq_order_revision WHERE channel_id = 'channel-a'",
+    ).first<{ revision: number }>();
+    expect(initialOrderRevision?.revision).toBe(3);
 
     const reordered = await panelRouter.fetch(
       await requestFor("manager-1", "/api/channels/channel-a/modules/faq/entries/order", "POST", {
-        order: [{ id: "entry-2", revision: 1 }, { id: "entry-1", revision: 1 }],
+        order: ["entry-2", "entry-1"], revision: initialOrderRevision?.revision,
       }),
       environmentFor(database),
     );
     expect(reordered.status).toBe(200);
-    await expect(reordered.json()).resolves.toMatchObject({ entries: [
-      { id: "entry-2", order: 0, revision: 2 },
-      { id: "entry-1", order: 1, revision: 2 },
+    await expect(reordered.json()).resolves.toMatchObject({ orderRevision: 4, entries: [
+      { id: "entry-2", order: 0, revision: 1 },
+      { id: "entry-1", order: 1, revision: 1 },
     ] });
 
     const stale = await panelRouter.fetch(
       await requestFor("manager-1", "/api/channels/channel-a/modules/faq/entries/order", "POST", {
-        order: [{ id: "entry-1", revision: 1 }, { id: "entry-2", revision: 1 }],
+        order: ["entry-1", "entry-2"], revision: initialOrderRevision?.revision,
       }),
       environmentFor(database),
     );
     expect(stale.status).toBe(409);
-    await expect(database.prepare("SELECT faq_id, sort_order, revision FROM faq_entries WHERE channel_id = 'channel-a' ORDER BY sort_order")
+    await expect(database.prepare("SELECT order_row.faq_id, order_row.sort_order, entry.revision FROM faq_entry_order AS order_row JOIN faq_entries AS entry ON entry.channel_id = order_row.channel_id AND entry.faq_id = order_row.faq_id WHERE order_row.channel_id = 'channel-a' ORDER BY order_row.sort_order")
       .all()).resolves.toMatchObject({ results: [
-        { faq_id: "entry-2", sort_order: 0, revision: 2 },
-        { faq_id: "entry-1", sort_order: 1, revision: 2 },
+        { faq_id: "entry-2", sort_order: 0, revision: 1 },
+        { faq_id: "entry-1", sort_order: 1, revision: 1 },
       ] });
   });
 

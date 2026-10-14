@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type DragEvent, type KeyboardEvent, type ReactElement } from "react";
 
-import { moduleQueryKey, runModuleQueryWrite, useChannelSettings, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { refetchModuleQueryData, runModuleQueryWrite, useChannelSettings, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import {
   Badge,
   Button,
@@ -79,8 +79,8 @@ const draftFromEntry = (entry: FaqEntry): FaqDraft => ({
 
 const faqPanelDataFrom = (value: unknown): FaqPanelData => {
   if (typeof value === "object" && value !== null && "entries" in value && "variables" in value &&
-      Array.isArray(value.entries) && Array.isArray(value.variables)) return value as FaqPanelData;
-  return { entries: [], variables: [] };
+      "orderRevision" in value && Array.isArray(value.entries) && Array.isArray(value.variables)) return value as FaqPanelData;
+  return { entries: [], orderRevision: 1, variables: [] };
 };
 
 const withFaqEntry = (current: unknown, entry: FaqEntry): FaqPanelData => {
@@ -92,9 +92,10 @@ const withFaqEntry = (current: unknown, entry: FaqEntry): FaqPanelData => {
   return { ...data, entries: entries.sort((left, right) => left.order - right.order) };
 };
 
-const withFaqEntries = (current: unknown, entries: FaqEntry[]): FaqPanelData => ({
+const withFaqEntries = (current: unknown, entries: FaqEntry[], orderRevision: number): FaqPanelData => ({
   ...faqPanelDataFrom(current),
   entries,
+  orderRevision,
 });
 
 const withoutFaqEntry = (current: unknown, entryId: string): FaqPanelData => {
@@ -126,11 +127,11 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
   const query = useModuleQuery(channelId, "faq", "panel", (signal) => loadFaqPanel(channelId, signal));
   const data = query.data;
   const orderedEntries = useMemo(() => data?.entries ?? [], [data?.entries]);
-  const queryKey = moduleQueryKey(channelId, "faq", "panel");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [baseline, setBaseline] = useState<FaqDraft>(emptyDraft);
   const [draft, setDraft] = useState<FaqDraft>(emptyDraft);
   const [draftRevision, setDraftRevision] = useState<number | null>(null);
+  const [pendingPatterns, setPendingPatterns] = useState("");
   const [sampleMessage, setSampleMessage] = useState("");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "active" | "paused">("all");
@@ -154,7 +155,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
 
   const isNew = selectedId === NEW_ENTRY_ID;
   const selectedEntry = orderedEntries.find((entry) => entry.id === selectedId);
-  const dirty = JSON.stringify(draft) !== JSON.stringify(baseline);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(baseline) || pendingPatterns.length > 0;
   const input = inputFromDraft(draft);
   const matcherValidation = faqMatcherValidationError(matcherFromDraft(draft));
   const matcherLocalError = matcherValidation === null || (!attemptedSave && draft.patterns.trim().length === 0)
@@ -185,6 +186,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
       setBaseline(next);
       setDraftRevision(entry.revision);
     }
+    setPendingPatterns("");
     setSampleMessage("");
     setAttemptedSave(false);
     setSaveError(undefined);
@@ -194,12 +196,14 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
 
   const patchDraft = (change: Partial<FaqDraft>): void => {
     setDraft((current) => ({ ...current, ...change }));
+    if ("matcherType" in change) setPendingPatterns("");
     if ("matcherType" in change || "patterns" in change) setMatcherServerError(undefined);
     setSaveError(undefined);
   };
 
   const resetDraft = (): void => {
     setDraft(baseline);
+    setPendingPatterns("");
     setSaveError(undefined);
     setMatcherServerError(undefined);
     setAttemptedSave(false);
@@ -232,6 +236,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
       setDraft(next);
       setBaseline(next);
       setDraftRevision(saved.revision);
+      setPendingPatterns("");
       setSaveError(undefined);
       setMatcherServerError(undefined);
       setAttemptedSave(false);
@@ -271,33 +276,29 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
     snapshot: readonly FaqEntry[],
     targetIds: readonly string[],
     undoIds: readonly string[],
+    revision: number,
     offerUndo: boolean,
   ): Promise<void> {
     if (ordering || !canManage) return;
     const byId = new Map(snapshot.map((entry) => [entry.id, entry]));
     const nextOrder = targetIds.map((id) => byId.get(id)).filter((entry): entry is FaqEntry => entry !== undefined);
     if (nextOrder.length !== snapshot.length || nextOrder.every((entry, index) => snapshot[index]?.id === entry.id)) return;
-    const optimistic = nextOrder.map((entry, order) => ({ ...entry, order }));
-    const cached = queryClient.getQueryData(queryKey);
-    queryClient.setQueryData(queryKey, withFaqEntries(cached ?? data, optimistic));
     setOrdering(true);
     try {
-      const savedEntries = await runModuleQueryWrite(queryClient, channelId, "faq", "panel", () =>
-        reorderFaqEntries(channelId, nextOrder.map(({ id, revision }) => ({ id, revision }))), {
+      const savedOrder = await runModuleQueryWrite(queryClient, channelId, "faq", "panel", () =>
+        reorderFaqEntries(channelId, nextOrder.map(({ id }) => id), revision), {
         baselineRevision: null,
-        updateCache: (current, entries) => withFaqEntries(current, entries),
+        updateCache: (current, result) => withFaqEntries(current, result.entries, result.orderRevision),
       });
-      const currentEntry = savedEntries.find((entry) => entry.id === selectedId);
-      if (currentEntry !== undefined) setDraftRevision(currentEntry.revision);
       if (offerUndo) {
         notify({
           tone: "success",
           message: labels.prioritySaved,
-          action: { label: labels.undo, onClick: () => { void persistOrder(savedEntries, undoIds, targetIds, false); } },
+          action: { label: labels.undo, onClick: () => { void persistOrder(savedOrder.entries, undoIds, targetIds, savedOrder.orderRevision, false); } },
         });
       }
     } catch {
-      queryClient.setQueryData(queryKey, withFaqEntries(queryClient.getQueryData(queryKey) ?? data, [...snapshot]));
+      await refetchModuleQueryData<FaqPanelData>(queryClient, channelId, "faq", "panel").catch(() => undefined);
       notify({ tone: "error", message: labels.orderError });
     } finally {
       setOrdering(false);
@@ -309,7 +310,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
     const index = orderedEntries.findIndex((entry) => entry.id === entryId);
     const next = moveEntry(orderedEntries, index, index + delta);
     if (next.every((entry, position) => orderedEntries[position]?.id === entry.id)) return;
-    void persistOrder(orderedEntries, next.map((entry) => entry.id), orderedEntries.map((entry) => entry.id), true);
+    void persistOrder(orderedEntries, next.map((entry) => entry.id), orderedEntries.map((entry) => entry.id), data?.orderRevision ?? 1, true);
   };
 
   const reorderOnDrop = (event: DragEvent<HTMLDivElement>, targetId: string): void => {
@@ -319,7 +320,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
     const targetIndex = orderedEntries.findIndex((entry) => entry.id === targetId);
     const next = moveEntry(orderedEntries, sourceIndex, targetIndex);
     if (next.every((entry, index) => orderedEntries[index]?.id === entry.id)) return;
-    void persistOrder(orderedEntries, next.map((entry) => entry.id), orderedEntries.map((entry) => entry.id), true);
+    void persistOrder(orderedEntries, next.map((entry) => entry.id), orderedEntries.map((entry) => entry.id), data?.orderRevision ?? 1, true);
   };
 
   const remove = async (): Promise<void> => {
@@ -427,9 +428,11 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
                 disabled={!canManage || saving}
               />
               {draft.matcherType === "keywords" ? <ChipsInput
+                key={`${selectedId}-patterns`}
                 label={labels.patterns}
                 values={entryPatterns(draft)}
                 onChange={(patterns) => { patchDraft({ patterns: patterns.join("\n") }); }}
+                onPendingChange={setPendingPatterns}
                 placeholder={labels.patternsPlaceholder}
                 hint={labels.patternsHint}
                 {...(matcherError === undefined ? {} : { error: matcherError })}

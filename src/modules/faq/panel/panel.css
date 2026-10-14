@@ -280,7 +280,7 @@
 }
 
 .faq-panel__answer-preview .ui-chat-preview {
-  min-height: 100%;
+  align-self: start;
 }
 
 @container editor (max-width: 479px) {

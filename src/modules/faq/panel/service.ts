@@ -6,6 +6,7 @@ import type { FaqEntry, FaqGame, FaqMutationInput } from "../contracts";
 
 export interface FaqPanelData {
   entries: FaqEntry[];
+  orderRevision: number;
   variables: TemplateTextFieldVariable[];
 }
 
@@ -29,11 +30,12 @@ export const loadFaqPanel = async (channelId: string, signal?: AbortSignal): Pro
     fetch(`/api/channels/${encoded}/template-variables`, signal === undefined ? undefined : { signal }),
   ]);
   const [entries, variables] = await Promise.all([
-    readJson<{ entries: FaqEntry[] }>(entriesResponse),
+    readJson<{ entries: FaqEntry[]; orderRevision: number }>(entriesResponse),
     readJson<{ variables: { name: string; isTextBlock?: boolean; availableInEventTemplates?: boolean; description?: string; sample?: string; group?: TemplateTextFieldVariable["group"]; contexts?: TemplateVariable["contexts"]; parameters?: TemplateTextFieldVariable["parameters"]; parameterDefault?: string }[] }>(variablesResponse),
   ]);
   return {
     entries: entries.entries,
+    orderRevision: entries.orderRevision,
     variables: variables.variables.filter(isEventTemplateVariableAvailable).map((variable) => ({
       name: variable.name,
       description: variable.description ?? variable.name,
@@ -75,8 +77,8 @@ export const createFaqEntry = async (channelId: string, input: FaqMutationInput)
 export const updateFaqEntry = async (channelId: string, entryId: string, input: FaqMutationInput, revision: number): Promise<FaqEntry> =>
   (await mutate<{ entry: FaqEntry }>(channelId, `/entries/${encodeURIComponent(entryId)}`, "PATCH", { ...input, revision })).entry;
 
-export const reorderFaqEntries = async (channelId: string, order: readonly { id: string; revision: number }[]): Promise<FaqEntry[]> =>
-  (await mutate<{ entries: FaqEntry[] }>(channelId, "/entries/order", "POST", { order })).entries;
+export const reorderFaqEntries = async (channelId: string, order: readonly string[], revision: number): Promise<{ entries: FaqEntry[]; orderRevision: number }> =>
+  mutate<{ entries: FaqEntry[]; orderRevision: number }>(channelId, "/entries/order", "POST", { order, revision });
 
 export const deleteFaqEntry = async (channelId: string, entryId: string, revision: number): Promise<void> => {
   const token = await csrf();
