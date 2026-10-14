@@ -99,7 +99,8 @@ const render = (
 
 const openSetupNavigation = async (): Promise<HTMLElement> => {
   await screen.findByRole("combobox", { name: /Kanal auswählen/u });
-  const setupButton = screen.getByRole("button", { name: "Einrichten" });
+  const setupButton = screen.getByRole("group", { name: "Einrichten" }).querySelector<HTMLButtonElement>('button[aria-label="Einrichten"]');
+  if (setupButton === null) throw new Error("The setup mode button is missing.");
   if (setupButton.getAttribute("aria-pressed") !== "true") fireEvent.click(setupButton);
   await waitFor(() => expect(document.querySelector(".dashboard-shell")).toHaveAttribute("data-mode", "setup"));
   const drawerButton = document.querySelector<HTMLButtonElement>(".dashboard-shell__burger");

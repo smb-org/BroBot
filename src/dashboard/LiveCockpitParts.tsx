@@ -140,7 +140,7 @@ export const LiveCockpitTiles = ({
         ? <div className="live-vote-tile" data-testid="live-vote-tile">
           <header className="live-vote-tile__header">
             <div><span>{labels.voteType}</span><h3>{running.title?.trim() || labels.voteType}</h3></div>
-            <span className="live-vote-tile__countdown">{labels.voteEndsIn(remainingLabel(running.closesAt, now))}</span>
+            <span className="live-vote-tile__countdown mono">{labels.voteEndsIn(remainingLabel(running.closesAt, now))}</span>
           </header>
           <div className="live-vote-tile__options" aria-label={labels.voteType}>
             {running.options.map((option, index) => {
@@ -158,7 +158,7 @@ export const LiveCockpitTiles = ({
           </footer>
         </div>
         : <div className="live-votekick-tile" data-testid="live-votekick-tile">
-          <header><div><span>{labels.votekickType}</span><h3>{running.target}</h3></div><span className="live-vote-tile__countdown">{labels.voteEndsIn(remainingLabel(running.endsAt, now))}</span></header>
+          <header><div><span>{labels.votekickType}</span><h3>{running.target}</h3></div><span className="live-vote-tile__countdown mono">{labels.voteEndsIn(remainingLabel(running.endsAt, now))}</span></header>
           <p className="live-votekick-tile__votes">{labels.votekickVotes(formatNumber(running.yesVotes), formatNumber(running.noVotes), formatNumber(running.threshold))}</p>
           <div className="live-votekick-tile__actions"><Button size="compact" variant="neutral" danger disabled={busy || !roleCanManage} onClick={() => { setConfirmCancel(true); setCancelError(undefined); }}>{labels.votekickCancel}</Button></div>
           <ConfirmDialog opened={confirmCancel} title={labels.votekickCancelTitle} description={labels.votekickCancelDescription(running.target)} confirmLabel={labels.votekickCancel} cancelLabel={dashboardCommonTexts().cancel} onConfirm={() => { void doCancelVotekick(); }} onCancel={() => { if (!busy) setConfirmCancel(false); }} pending={busy} danger {...(cancelError === undefined ? {} : { error: cancelError })} />

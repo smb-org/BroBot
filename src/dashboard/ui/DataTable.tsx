@@ -173,7 +173,7 @@ export function DataTable<Row extends DataTableRecord>({
           {columns.map((column) => <th key={column.key} className={columnClass(column)} scope="col">{column.label}</th>)}
         </tr>
       </thead>
-      {days.length === 0 ? <tbody><tr><td className="data-table__empty" colSpan={count}>{emptyLabel}</td></tr></tbody> : days.map((day) => (
+      {days.length === 0 ? <tbody><tr className="data-table__empty-row"><td className="data-table__empty" colSpan={count}>{emptyLabel}</td></tr></tbody> : days.map((day) => (
         <tbody key={day.key}>
           <tr className="data-table__day-row" role="row"><th scope="rowgroup" colSpan={count}>{day.label}</th></tr>
           {day.rows.map((row) => {

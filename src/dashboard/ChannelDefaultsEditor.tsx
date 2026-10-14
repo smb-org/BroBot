@@ -109,7 +109,7 @@ export const ChannelDefaultsEditor = ({ channelId, role }: ChannelDefaultsEditor
   useEffect(() => registerDashboardNavigationGuard(navigationGuard.guardSwitch), [navigationGuard.guardSwitch]);
 
   return <Section title={labels.section} className="channel-defaults-editor">
-    <LoadState variant="panel-260"
+    <LoadState variant="panel-178"
       status={!settingsReady ? settingsQuery.isError || settings !== undefined ? "error" : "loading" : "success"}
       loading={<LoadStateLines rows={2} height={58} />}
       empty={<LoadStateLines rows={2} height={58} />}
@@ -130,7 +130,7 @@ export const ChannelDefaultsEditor = ({ channelId, role }: ChannelDefaultsEditor
           </div>
         </div>
         {!canEdit ? <p className="lock-reason">{labels.readOnly}</p> : null}
-        <SaveStatus dirty={dirty} pending={pending} {...(saveError === undefined ? {} : { error: saveError })} saved={saved}
+        <SaveStatus dirty={dirty} pending={pending} persistent {...(saveError === undefined ? {} : { error: saveError })} saved={saved}
           onSave={() => { void saveDraft(); }} onDiscard={discard}
           saveLabel={common.save} discardLabel={common.discard} savedLabel={common.saved} pendingLabel={common.saving} />
       </>}

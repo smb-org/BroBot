@@ -25,6 +25,18 @@ test("End vote is available to operators while start vote keeps its running coun
   await expect(page.getByText(/Abstimmung läuft noch/u)).toBeVisible();
   await expect(startVote).toBeDisabled();
   await expect(endVote).toBeEnabled();
+  const countdown = page.locator(".live-vote-tile__countdown");
+  const countdownStyle = await countdown.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { border: style.borderTopWidth, background: style.backgroundColor, family: style.fontFamily };
+  });
+  expect(countdownStyle.border).toBe("1px");
+  expect(countdownStyle.background).not.toBe("rgba(0, 0, 0, 0)");
+  expect(countdownStyle.family).toContain("IBM Plex Mono");
+  const bars = await page.locator(".live-vote-tile__options").boundingBox();
+  const footer = await page.locator(".live-vote-tile__footer").boundingBox();
+  if (bars === null || footer === null) throw new Error("The running vote bars and footer need layout boxes.");
+  expect(footer.y - (bars.y + bars.height)).toBeLessThanOrEqual(12);
   await endVote.click();
   await expect.poll(() => closeRequests).toBe(1);
   await expect(page.locator(".live-cockpit__status-message")).toContainText("Abstimmung beendet.");
@@ -57,8 +69,11 @@ test("action rows and warning controls share their grid gaps and center line", a
   expect(Math.abs(geometry.rowGap - geometry.columnGap)).toBeLessThanOrEqual(1);
 
   const warning = page.locator(".live-cockpit__location-warning");
-  const locationButton = warning.getByRole("button", { name: "Standort festlegen" });
+  const locationButton = warning.getByRole("button", { name: "Einrichten" });
   await expect(locationButton).toBeVisible();
+  await expect(locationButton.locator("svg")).toHaveCount(1);
+  const warningButtonBackground = await locationButton.evaluate((element) => getComputedStyle(element).backgroundColor);
+  expect(warningButtonBackground).not.toBe("rgba(0, 0, 0, 0)");
   const centerDiff = await warning.evaluate((element) => {
     const button = element.querySelector("button");
     if (button === null) return Number.POSITIVE_INFINITY;
@@ -67,6 +82,32 @@ test("action rows and warning controls share their grid gaps and center line", a
     return Math.abs((warningBox.top + warningBox.height / 2) - (buttonBox.top + buttonBox.height / 2));
   });
   expect(centerDiff).toBeLessThanOrEqual(1);
+
+  const table = page.locator(".live-cockpit-event-feed .data-table__table");
+  const emptyRow = table.locator(".data-table__empty-row");
+  await expect(emptyRow).toContainText("Noch keine Ereignisse.");
+  const emptyGeometry = await table.evaluate((element) => {
+    const row = element.querySelector(".data-table__empty-row");
+    const cell = row?.querySelector(".data-table__empty");
+    if (row === null || cell === null || cell === undefined) return null;
+    const tableBox = element.getBoundingClientRect();
+    const rowBox = row.getBoundingClientRect();
+    const cellBox = cell.getBoundingClientRect();
+    return {
+      tableWidth: tableBox.width,
+      rowWidth: rowBox.width,
+      cellWidth: cellBox.width,
+      cellDisplay: getComputedStyle(cell).display,
+      cellHeight: cellBox.height,
+      cellScrollHeight: cell.scrollHeight,
+    };
+  });
+  expect(emptyGeometry).not.toBeNull();
+  if (emptyGeometry === null) return;
+  expect(Math.abs(emptyGeometry.tableWidth - emptyGeometry.rowWidth)).toBeLessThanOrEqual(1);
+  expect(Math.abs(emptyGeometry.tableWidth - emptyGeometry.cellWidth)).toBeLessThanOrEqual(1);
+  expect(emptyGeometry.cellDisplay).toBe("block");
+  expect(emptyGeometry.cellScrollHeight).toBeLessThanOrEqual(emptyGeometry.cellHeight);
 });
 
 test("slow availability checks are not aborted by the four-second poll", async ({ page }) => {
@@ -109,7 +150,7 @@ test("the location warning opens Ort & Wetter and both channel defaults save fro
   const mocks = await installLiveCockpitMocks(page, { channelId });
 
   await page.goto(`/channels/${channelId}`);
-  await page.getByRole("button", { name: "Standort festlegen" }).click();
+  await page.locator(".live-cockpit__warning-slot").getByRole("button", { name: "Einrichten" }).click();
   await expect(page).toHaveURL(`/channels/${channelId}/location-weather`);
   await expect(page.getByRole("heading", { name: "Ort & Wetter" })).toBeVisible();
   await page.getByRole("button", { name: "Standort ändern" }).click();
@@ -125,12 +166,29 @@ test("the location warning opens Ort & Wetter and both channel defaults save fro
   await expect(page.getByRole("heading", { name: "System" })).toBeVisible();
   const timeZone = page.getByRole("combobox", { name: "Kanalzeitzone" });
   await expect(timeZone).toBeVisible();
-  await expect(page.getByRole("button", { name: "Standard-Chat-Ziel", exact: true })).toBeVisible();
+  const chatTarget = page.getByRole("button", { name: "Standard-Chat-Ziel", exact: true });
+  await expect(chatTarget).toBeVisible();
+  const save = page.getByRole("button", { name: "Speichern" });
+  await expect(save).toBeVisible();
+  await expect(save).toBeDisabled();
+  const controlHeights = await Promise.all([timeZone, chatTarget].map(async (control) => (await control.boundingBox())?.height ?? 0));
+  expect(Math.abs((controlHeights[0] ?? 0) - (controlHeights[1] ?? 0))).toBeLessThanOrEqual(1);
+  const hintPositions = await Promise.all([
+    page.locator(".channel-defaults-editor .ui-select__description").first(),
+    page.locator(".channel-defaults-editor__hint"),
+  ].map(async (hint) => (await hint.boundingBox())?.y ?? Number.NaN));
+  expect(Math.abs((hintPositions[0] ?? 0) - (hintPositions[1] ?? 0))).toBeLessThanOrEqual(1);
+  const sectionBox = await page.locator(".channel-defaults-editor").boundingBox();
+  const sectionBottom = sectionBox === null ? 0 : sectionBox.y + sectionBox.height;
+  const statusTop = (await page.locator(".state-list").first().boundingBox())?.y ?? 0;
+  expect(statusTop - sectionBottom).toBeLessThanOrEqual(48);
+  expect(statusTop - sectionBottom).toBeGreaterThanOrEqual(0);
   await timeZone.fill("UTC");
   await page.getByRole("option", { name: "UTC" }).click();
-  await page.getByRole("button", { name: "Standard-Chat-Ziel", exact: true }).click();
+  await chatTarget.click();
   await page.getByRole("radio", { name: /Alle Chats/u }).click();
-  await page.getByRole("button", { name: "Speichern" }).click();
+  await expect(save).toBeEnabled();
+  await save.click();
   await expect(page.locator(".channel-defaults-editor .ui-save-bar__status")).toHaveText("Gespeichert.");
   expect(mocks.settingsState()).toMatchObject({ timeZone: "UTC", defaultChatTarget: "all_chats" });
 });

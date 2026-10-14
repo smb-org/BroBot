@@ -49,6 +49,7 @@ const iconNames: Readonly<Record<IconName, true>> = {
   cause: true,
   edit: true,
   more: true,
+  "map-pin": true,
   drag: true,
   token: true,
   variable: true,

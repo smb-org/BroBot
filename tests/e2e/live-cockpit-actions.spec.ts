@@ -111,7 +111,7 @@ test("vote action keeps its draft while templates load and guards every close pa
   await page.getByRole("button", { name: "Eingaben verwerfen" }).click();
   await expect(dialog).toBeHidden();
 
-  await page.getByRole("button", { name: "Einrichten" }).click();
+  await page.getByRole("group", { name: "Einrichten" }).getByRole("button", { name: "Einrichten" }).click();
   await expect(page).toHaveURL(`/channels/${channelId}/system`);
   await page.getByRole("button", { name: "Live" }).click();
   await expect(page).toHaveURL(`/channels/${channelId}`);

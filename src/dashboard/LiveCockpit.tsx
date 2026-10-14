@@ -192,7 +192,9 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
     <div className="live-cockpit__warning-slot" data-slot="warning-banner" data-warning-count={warnings.length} aria-live="polite">
       {warnings.map((warning) => <div className="live-cockpit__location-warning" role="status" key={warning.key}>
         <div><strong>{warning.title}</strong><span>{warning.description}</span></div>
-        <Button variant="secondary" size="compact" onClick={warning.run}>{warning.action}</Button>
+        <Button {...(warning.key === "location"
+          ? { className: "live-cockpit__location-action", icon: "map-pin" as const, variant: "primary" as const }
+          : { variant: "secondary" as const, size: "compact" as const })} onClick={warning.run}>{warning.action}</Button>
       </div>)}
     </div>
     <div className="live-cockpit__wall">

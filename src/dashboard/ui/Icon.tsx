@@ -1,6 +1,6 @@
 import {
   AlertTriangle, ArrowUp, BellRing, Braces, Check, ChevronLeft, Clock, Copy, Diamond, ExternalLink, Film, GripVertical, Image, Info, KeyRound, Layers,
-  Lock, Megaphone, MessageSquareText, Minus, MoreVertical, Pause, Pencil, Play, Plus, Radio, RadioTower, RefreshCw, Search, Settings,
+  Lock, MapPin, Megaphone, MessageSquareText, Minus, MoreVertical, Pause, Pencil, Play, Plus, Radio, RadioTower, RefreshCw, Search, Settings,
   SlidersHorizontal, Square, Star, Sword, Trash2, Type, User, UserMinus, UserPlus, Users, Video, Volume2, VolumeX, Vote, X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -11,6 +11,7 @@ const glyphs = {
   add: Plus, remove: Trash2, close: X, copy: Copy, copied: Check,
   reload: RefreshCw, search: Search, lock: Lock, external: ExternalLink,
   warning: AlertTriangle, jumpToTop: ArrowUp, collapse: ChevronLeft,
+  "map-pin": MapPin,
   minus: Minus, plus: Plus, member: User, memberAdd: UserPlus, memberRemove: UserMinus,
   tierEveryone: Users, tierSubscriber: Star, tierVip: Diamond,
   tierModerator: Sword, tierBroadcaster: Video,
