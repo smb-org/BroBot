@@ -24,7 +24,7 @@ export const useAuditQuery = (channelId: string, filters: PanelAuditFilters) => 
   refetchOnWindowFocus: false,
 });
 
-export const useEventsQuery = (channelId: string, filters: PanelEventFilters) => {
+export const useEventsQuery = (channelId: string, filters: PanelEventFilters, refetchInterval: number | false = false) => {
   const queryKey = dashboardDataKeys.events(channelId, filters);
   return useInfiniteQuery({
     queryKey,
@@ -35,6 +35,7 @@ export const useEventsQuery = (channelId: string, filters: PanelEventFilters) =>
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     // Filters own separate displayed snapshots; do not borrow another filter's cached rows while loading.
     placeholderData: () => undefined,
+    refetchInterval,
     refetchOnWindowFocus: false,
   });
 };

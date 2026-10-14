@@ -1334,6 +1334,38 @@ export interface ModuleImmediateActionDefinition {
   };
 }
 
+export type ModuleLiveTileSnapshot =
+  | {
+    kind: "vote";
+    title: string | null;
+    options: readonly { label: string; count: number }[];
+    totalVotes: number;
+    closesAt: string;
+    canExtend: boolean;
+  }
+  | {
+    kind: "votekick";
+    id: string;
+    target: string;
+    endsAt: string;
+    yesVotes: number;
+    noVotes: number;
+    threshold: number;
+  }
+  | {
+    kind: "upcoming";
+    id: string;
+    category: "timer" | "ad";
+    name: string;
+    at: string;
+    detail: string | null;
+    canSnooze?: boolean;
+  };
+
+interface ModuleLiveTileDefinition {
+  load: (channelId: string, signal: AbortSignal) => Promise<readonly ModuleLiveTileSnapshot[]>;
+}
+
 export type ModuleLanguage = "de" | "en";
 
 export const MODULE_TEMPLATE_MINIMUM_TIERS = ["everyone", "subscriber", "vip", "moderator", "broadcaster"] as const;
@@ -1653,6 +1685,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   settingsChangedAlarm?: { handlerKey: string; alarmKey: string };
   /** Individual dashboard actions; only their optional content is loaded on demand. */
   actions?: readonly ModuleImmediateActionDefinition[];
+  /** Optional live state read by the host; the host owns its fixed-size tile presentation. */
+  liveTile?: ModuleLiveTileDefinition;
 };
 
 /**

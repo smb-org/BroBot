@@ -61,6 +61,22 @@ export const adsModule: BotModule<typeof adsSettingsSchema> = {
   eventSubTypes: ["stream.online", "channel.ad_break.begin"],
   routes: adsRoutes,
   panel: () => import("./panel"),
+  liveTile: {
+    load: async (channelId, signal) => {
+      const schedule = await (await import("./panel/service")).loadAdsSchedule(channelId, signal);
+      const at = schedule.schedule.nextAdAt;
+      if (at === null || Date.parse(at) <= Date.now()) return [];
+      return [{
+        kind: "upcoming",
+        id: "next-ad-break",
+        category: "ad",
+        name: "",
+        at,
+        detail: schedule.schedule.duration === null ? null : String(schedule.schedule.duration),
+        canSnooze: schedule.snoozeScopeAvailable && (schedule.schedule.snoozeCount ?? 0) > 0,
+      }];
+    },
+  },
   settingsEditor: () => import("./panel/settings-editor"),
   settingsEditorRelatedParts: ["schedule"],
   overlayElements: adsOverlayElements.map((element) => element.kind === "ads.countdown"

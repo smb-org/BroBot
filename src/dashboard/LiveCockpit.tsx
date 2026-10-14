@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import type { ChannelStreamState } from "../contracts/values";
 import type { PanelChannelOverview, PanelModuleState } from "../panel-contract";
 import type { BelaboxStatusResponse } from "../modules/belabox/contracts";
-import type { ModuleImmediateActionResult } from "../modules/contract";
+import type { ModuleImmediateActionResult, ModuleLiveTileSnapshot } from "../modules/contract";
+import { MODULES } from "../modules/registry";
 import { fetchChannelOverview } from "./api";
 import type { DashboardRoute } from "./router";
 import { dashboardTexts, formatNumber } from "./locale";
@@ -12,6 +13,9 @@ import { useOverlaysQuery } from "./data/lists";
 import { queryKeys } from "./data/keys";
 import { Button, Icon, StatusLed } from "./ui";
 import { ImmediateActions } from "./ImmediateActions";
+import { LiveCockpitEventFeed, LiveCockpitTiles } from "./LiveCockpitParts";
+import { browserTimeZone } from "./ui/format-relative-time";
+import { useChannelSettings } from "./data/channel-settings";
 
 const formatDuration = (startedAt: string | null | undefined, now: number): string => {
   if (startedAt == null) return "—";
@@ -29,13 +33,6 @@ const streamStateLabel = (state: ChannelStreamState | null | undefined): string 
   return state === "online" ? texts.live : state === "offline" ? texts.offline : texts.unknown;
 };
 
-const ReserveTile = ({ title, description, slot }: { title: string; description: string; slot: string }): ReactElement => (
-  <section className="live-cockpit-reserve" data-slot={slot} aria-label={title}>
-    <h2>{title}</h2>
-    <p>{description}</p>
-  </section>
-);
-
 export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
   overview: PanelChannelOverview;
   modules: readonly PanelModuleState[];
@@ -46,10 +43,31 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
   const labels = texts.liveCockpit;
   const [now, setNow] = useState(() => Date.now());
   const queryClient = useQueryClient();
+  const moduleState = useMemo(() => new Map(modules.map((module) => [module.id, module.enabled])), [modules]);
   const [belaboxStatus, setBelaboxStatus] = useState<{ data: BelaboxStatusResponse | null; failed: boolean }>({ data: null, failed: false });
   const [belaboxActionSample, setBelaboxActionSample] = useState<{ channelId: string; connected: boolean; bitrateKbps: number; sampledAt: number } | null>(null);
+  const [footerMessage, setFooterMessage] = useState<{ text: string; link?: { href: string; label: string } } | null>(null);
   const overlaysQuery = useOverlaysQuery(overview.channelId);
-  const moduleState = useMemo(() => new Map(modules.map((module) => [module.id, module.enabled])), [modules]);
+  const channelSettings = useChannelSettings(overview.channelId);
+  const timeZone = channelSettings.data?.timeZone ?? browserTimeZone();
+  const liveQuery = useQuery({
+    queryKey: queryKeys.channel(overview.channelId, "live-cockpit", { modules: modules.map((module) => `${module.id}:${String(module.enabled)}`).sort((left, right) => left.localeCompare(right)).join(",") }),
+    queryFn: async ({ signal }): Promise<{ snapshots: ModuleLiveTileSnapshot[]; failed: boolean }> => {
+      const results = await Promise.all(MODULES.flatMap((module) => {
+        if (module.liveTile === undefined || moduleState.get(module.id) !== true) return [];
+        return [module.liveTile.load(overview.channelId, signal)
+          .then((snapshots) => ({ snapshots, failed: false }))
+          .catch((error: unknown) => {
+            if (error instanceof Error && error.name === "AbortError") throw error;
+            return { snapshots: [] as readonly ModuleLiveTileSnapshot[], failed: true };
+          })];
+      }));
+      return { snapshots: results.flatMap((result) => result.snapshots), failed: results.some((result) => result.failed) };
+    },
+    enabled: modulesLoaded,
+    refetchInterval: modulesLoaded ? 5_000 : false,
+    refetchOnWindowFocus: false,
+  });
   const belaboxEnabled = moduleState.get("belabox") === true;
   const streamState = overview.streamState;
   const streamLabel = streamStateLabel(streamState);
@@ -58,10 +76,9 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
   const botConnected = overview.bot?.status === "connected";
 
   useEffect(() => {
-    if (streamState !== "online") return;
     const timer = window.setInterval(() => { setNow(Date.now()); }, 1_000);
     return () => { window.clearInterval(timer); };
-  }, [streamState]);
+  }, []);
 
   useEffect(() => {
     if (streamState !== "online") return;
@@ -125,6 +142,14 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
   const freshActionSample = actionSample !== null && actionSample.sampledAt > statusSampleAt ? actionSample : null;
   const sampleConnected = freshActionSample?.connected ?? statusSample?.connected ?? false;
   const sampleBitrate = freshActionSample?.bitrateKbps ?? statusSample?.bitrateKbps ?? 0;
+  const belaboxWeak = belaboxEnabled && belaboxStatus.data?.configured === true && statusSample?.phase === "low";
+  const warnings = [
+    ...(overview.location == null ? [{ key: "location", title: labels.locationMissing, description: labels.locationMissingDescription, action: labels.configureLocation, run: () => onNavigate({ kind: "channel", channelId: overview.channelId, section: "location-weather" }) }] : []),
+    ...(belaboxWeak ? [{ key: "belabox", title: labels.belaboxWeak, description: labels.belaboxWeakDescription(formatNumber(Math.round(sampleBitrate))), action: labels.openBelabox, run: () => onNavigate({ kind: "module", channelId: overview.channelId, moduleId: "belabox" }) }] : []),
+  ];
+  const refreshLiveData = (): void => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.channel(overview.channelId, "live-cockpit") });
+  };
 
   return <div className="live-cockpit" data-stream-state={streamState ?? "unknown"}>
     <header className="live-cockpit-header">
@@ -144,7 +169,7 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
       <div className="live-cockpit-header__indicators" aria-label={labels.statusIndicators}>
         <StatusLed state={botConnected ? "ok" : "off"} label={`${labels.bot} · ${botConnected ? labels.botConnected : labels.botUnavailable}`} />
         <StatusLed
-          state={!belaboxEnabled || belaboxStatus.data?.configured === false ? "off" : belaboxStatus.failed && statusSample === null && freshActionSample === null ? "warn" : sampleConnected ? "ok" : "warn"}
+          state={!belaboxEnabled || belaboxStatus.data?.configured === false ? "off" : belaboxStatus.failed && statusSample === null && freshActionSample === null ? "warn" : statusSample?.phase === "low" ? "warn" : sampleConnected ? "ok" : "warn"}
           label={`${labels.belabox} · ${!belaboxEnabled
             ? labels.belaboxDisabled
             : belaboxStatus.data === null && !belaboxStatus.failed && freshActionSample === null
@@ -164,11 +189,11 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
             : <StatusLed state={overlayCount > 0 ? "ok" : "off"} label={`${labels.overlays} · ${overlayCount === 0 ? labels.overlaysNotSetUp : labels.overlaysCount(formatNumber(overlayCount))}`} />}
       </div>
     </header>
-    <div className="live-cockpit__warning-slot" data-slot="warning-banner">
-      {overview.location == null ? <div className="live-cockpit__location-warning" role="status">
-        <div><strong>{labels.locationMissing}</strong><span>{labels.locationMissingDescription}</span></div>
-        <Button variant="secondary" size="compact" onClick={() => { onNavigate({ kind: "channel", channelId: overview.channelId, section: "location-weather" }); }}>{labels.configureLocation}</Button>
-      </div> : null}
+    <div className="live-cockpit__warning-slot" data-slot="warning-banner" data-warning-count={warnings.length} aria-live="polite">
+      {warnings.map((warning) => <div className="live-cockpit__location-warning" role="status" key={warning.key}>
+        <div><strong>{warning.title}</strong><span>{warning.description}</span></div>
+        <Button variant="secondary" size="compact" onClick={warning.run}>{warning.action}</Button>
+      </div>)}
     </div>
     <div className="live-cockpit__wall">
       <ImmediateActions
@@ -182,16 +207,26 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
             setBelaboxActionSample({ channelId: overview.channelId, ...result.belaboxSample });
           }
         }}
+        onFeedbackMessage={(text, link) => { setFooterMessage({ text, ...(link === undefined ? {} : { link }) }); }}
       />
-      <div className="live-cockpit__running">
-        <ReserveTile slot="running-now" title={labels.runningNow} description={labels.runningNowReserved} />
-        <ReserveTile slot="next-up" title={labels.nextUp} description={labels.nextUpReserved} />
-      </div>
-      <ReserveTile slot="events" title={labels.events} description={labels.eventsReserved} />
+      <LiveCockpitTiles
+        channelId={overview.channelId}
+        role={overview.role}
+        snapshots={liveQuery.data?.snapshots ?? []}
+        loading={liveQuery.isPending}
+        failed={liveQuery.data?.failed ?? liveQuery.isError}
+        now={now}
+        timeZone={timeZone}
+        onMessage={(text) => { setFooterMessage({ text }); }}
+        onRefresh={refreshLiveData}
+      />
+      <LiveCockpitEventFeed channelId={overview.channelId} role={overview.role} now={now} onMessage={(text) => { setFooterMessage({ text }); }} />
     </div>
-    <footer className="live-cockpit__status" aria-live="polite" aria-label={`${labels.systemStatus} · ${labels.systemReady} · ${labels.liveDataCurrent}`}>
+    <footer className="live-cockpit__status" aria-live="polite" aria-label={labels.systemStatus}>
       <StatusLed state="ok" label={labels.systemStatus} />
-      <span>{labels.systemReady} · {labels.liveDataCurrent}</span>
+      {footerMessage === null ? <span>{labels.systemReady} · {labels.liveDataCurrent}</span> : <span className="live-cockpit__status-message">
+        {footerMessage.text}{footerMessage.link === undefined ? null : <a href={footerMessage.link.href} target="_blank" rel="noreferrer">{footerMessage.link.label}</a>}
+      </span>}
     </footer>
   </div>;
 };

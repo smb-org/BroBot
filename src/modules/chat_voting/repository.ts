@@ -152,6 +152,13 @@ export interface ChatVotingRepository {
   ): Promise<{ authorized: boolean; changed: boolean }>;
   insertOpen(vote: ChatVoteDraft, authorization?: ModuleMutationAuthorization): Promise<boolean>;
   requestManualClose(channelId: string, pollId: string, authorization?: ModuleMutationAuthorization): Promise<boolean>;
+  extendClose(
+    channelId: string,
+    pollId: string,
+    expectedClosesAt: string,
+    closesAt: string,
+    authorization?: ModuleMutationAuthorization,
+  ): Promise<boolean>;
   finish(
     channelId: string,
     pollId: string,
@@ -349,6 +356,16 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
         WHERE channel_id = ? AND poll_id = ? AND status = 'open'
           AND close_reason IN ('timer', 'limit', 'manual') ${guard}`,
     ).bind(channelId, pollId, ...(authorization?.values ?? []));
+    const result = await statement.run();
+    return result.meta.changes > 0;
+  },
+  async extendClose(channelId, pollId, expectedClosesAt, closesAt, authorization) {
+    const guard = authorization?.sql ?? "";
+    const statement = db.prepare(
+      `UPDATE chat_votes
+          SET closes_at = ?
+        WHERE channel_id = ? AND poll_id = ? AND status = 'open' AND close_reason <> 'manual' AND closes_at = ? ${guard}`,
+    ).bind(closesAt, channelId, pollId, expectedClosesAt, ...(authorization?.values ?? []));
     const result = await statement.run();
     return result.meta.changes > 0;
   },

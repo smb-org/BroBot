@@ -162,3 +162,9 @@ export const closeChatVoting = async (channelId: string): Promise<void> => {
     headers: { "X-CSRF-Token": token },
   })));
 };
+
+export const extendChatVoting = async (channelId: string): Promise<ChatVote> =>
+  csrfMutation(async (token) => (await readJson<{ vote: ChatVote }>(await fetch(route(channelId, "/extend"), {
+    method: "POST",
+    headers: { "X-CSRF-Token": token },
+  }))).vote);

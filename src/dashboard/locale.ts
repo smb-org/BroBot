@@ -1089,11 +1089,47 @@ export interface DashboardTexts {
     overlaysNotSetUp: string;
     overlaysChecking: string;
     runningNow: string;
-    runningNowReserved: string;
+    liveDataLoading: string;
+    liveDataUnavailable: string;
+    noActionRunning: string;
+    voteType: string;
+    votekickType: string;
+    voteEndsIn: (time: string) => string;
+    voteTotal: (count: string) => string;
+    voteOptionCount: (count: string, percent: string) => string;
+    voteExtend: string;
+    voteEnd: string;
+    voteExtended: string;
+    voteExtensionUnavailable: string;
+    voteEnded: string;
+    voteEndFailed: string;
+    votekickVotes: (yes: string, no: string, threshold: string) => string;
+    votekickCancel: string;
+    votekickCancelTitle: string;
+    votekickCancelDescription: (target: string) => string;
+    votekickCanceled: string;
+    votekickCancelFailed: string;
     nextUp: string;
-    nextUpReserved: string;
+    noUpcomingItems: string;
+    nextAdBreak: string;
+    adDuration: (duration: string) => string;
+    adSnooze: string;
+    adSnoozed: string;
+    adSnoozeFailed: string;
+    adSnoozeUnavailable: string;
     events: string;
-    eventsReserved: string;
+    eventsFilterLabel: string;
+    eventsAll: string;
+    eventsRaids: string;
+    eventsCommunity: string;
+    eventsChat: string;
+    eventsSearch: string;
+    eventsEmpty: string;
+    eventsUnavailable: string;
+    eventsLoading: string;
+    raidShoutout: string;
+    raidShoutoutSent: string;
+    raidShoutoutFailed: string;
     statusIndicators: string;
     systemStatus: string;
     systemReady: string;
@@ -1101,6 +1137,9 @@ export interface DashboardTexts {
     locationMissing: string;
     locationMissingDescription: string;
     configureLocation: string;
+    belaboxWeak: string;
+    belaboxWeakDescription: (bitrate: string) => string;
+    openBelabox: string;
     actionDraftDiscardTitle: string;
     actionDraftDiscardDescription: string;
     actionDraftDiscard: string;
@@ -1283,6 +1322,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         "module.secret.removed": ({ actor, object }) => `${actor} entfernte ein Geheimnis für ${object}`,
         "chat_voting.started": ({ actor }) => `${actor} startete eine Chat-Abstimmung`,
         "chat_voting.closed": ({ actor }) => `${actor} schloss eine Chat-Abstimmung`,
+        "chat_voting.extended": ({ actor }) => `${actor} verlängerte eine Chat-Abstimmung`,
         "chat_voting.template.created": ({ actor, object }) => `${actor} erstellte die Abstimmungsvorlage ${object}`,
         "chat_voting.template.updated": ({ actor, object }) => `${actor} änderte die Abstimmungsvorlage ${object}`,
         "chat_voting.template.deleted": ({ actor, object }) => `${actor} löschte die Abstimmungsvorlage ${object}`,
@@ -1455,11 +1495,47 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       overlaysNotSetUp: "Nicht eingerichtet",
       overlaysChecking: "wird geprüft",
       runningNow: "Läuft gerade",
-      runningNowReserved: "Noch keine Aktion läuft.",
+      liveDataLoading: "Live-Daten werden geladen.",
+      liveDataUnavailable: "Live-Daten sind gerade nicht verfügbar.",
+      noActionRunning: "Noch keine Aktion läuft.",
+      voteType: "Abstimmung",
+      votekickType: "Votekick",
+      voteEndsIn: (time) => `gleich ${time}`,
+      voteTotal: (count) => `${count} Stimmen gesamt`,
+      voteOptionCount: (count, percent) => `${count} Stimmen · ${percent} %`,
+      voteExtend: "+30 s",
+      voteEnd: "Beenden",
+      voteExtended: "Abstimmung um 30 Sekunden verlängert.",
+      voteExtensionUnavailable: "Die Abstimmung lässt sich nicht weiter verlängern.",
+      voteEnded: "Abstimmung beendet.",
+      voteEndFailed: "Abstimmung konnte nicht beendet werden.",
+      votekickVotes: (yes, no, threshold) => `Ja ${yes} · Nein ${no} · Schwelle ${threshold}`,
+      votekickCancel: "Votekick abbrechen",
+      votekickCancelTitle: "Votekick abbrechen?",
+      votekickCancelDescription: (target) => `Die Abstimmung gegen ${target} endet sofort. Es wird kein Timeout ausgelöst.`,
+      votekickCanceled: "Votekick abgebrochen.",
+      votekickCancelFailed: "Votekick konnte nicht abgebrochen werden.",
       nextUp: "Als Nächstes",
-      nextUpReserved: "Noch nichts geplant.",
+      noUpcomingItems: "Noch nichts geplant.",
+      nextAdBreak: "Nächste Werbepause",
+      adDuration: (duration) => `Werbepause · ${duration} s`,
+      adSnooze: "Verschieben",
+      adSnoozed: "Werbepause verschoben.",
+      adSnoozeFailed: "Werbepause konnte nicht verschoben werden.",
+      adSnoozeUnavailable: "Werbepause lässt sich nicht weiter verschieben.",
       events: "Ereignisse",
-      eventsReserved: "Noch keine Ereignisse.",
+      eventsFilterLabel: "Ereignisse filtern",
+      eventsAll: "Alle",
+      eventsRaids: "Raids",
+      eventsCommunity: "Community",
+      eventsChat: "Chat",
+      eventsSearch: "Person oder Ereignis suchen",
+      eventsEmpty: "Noch keine Ereignisse.",
+      eventsUnavailable: "Ereignisse konnten nicht geladen werden.",
+      eventsLoading: "Ereignisse werden geladen.",
+      raidShoutout: "Shoutout senden",
+      raidShoutoutSent: "Shoutout gesendet.",
+      raidShoutoutFailed: "Shoutout konnte nicht gesendet werden.",
       statusIndicators: "Verbindungsstatus",
       systemStatus: "Systemstatus",
       systemReady: "Alles bereit",
@@ -1467,6 +1543,9 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       locationMissing: "Standort fehlt",
       locationMissingDescription: "Wetter, Sonnenzeiten und Mondphase brauchen einen Kanalstandort.",
       configureLocation: "Standort festlegen",
+      belaboxWeak: "BELABOX-Verbindung schwach",
+      belaboxWeakDescription: (bitrate) => `Aktuelle Bitrate: ${bitrate} kbit/s.`,
+      openBelabox: "BELABOX öffnen",
       actionDraftDiscardTitle: "Eingaben verwerfen?",
       actionDraftDiscardDescription: "Deine Eingaben gehen verloren, wenn du diese Aktion schließt.",
       actionDraftDiscard: "Eingaben verwerfen",
@@ -1639,6 +1718,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         "module.secret.removed": ({ actor, object }) => `${actor} removed a secret for ${object}`,
         "chat_voting.started": ({ actor }) => `${actor} started a chat vote`,
         "chat_voting.closed": ({ actor }) => `${actor} closed a chat vote`,
+        "chat_voting.extended": ({ actor }) => `${actor} extended a chat vote`,
         "chat_voting.template.created": ({ actor, object }) => `${actor} created chat vote template ${object}`,
         "chat_voting.template.updated": ({ actor, object }) => `${actor} updated chat vote template ${object}`,
         "chat_voting.template.deleted": ({ actor, object }) => `${actor} deleted chat vote template ${object}`,
@@ -1808,11 +1888,47 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       overlaysNotSetUp: "Not set up",
       overlaysChecking: "checking",
       runningNow: "Running now",
-      runningNowReserved: "No action is running.",
+      liveDataLoading: "Loading live data.",
+      liveDataUnavailable: "Live data is unavailable right now.",
+      noActionRunning: "No action is running.",
+      voteType: "Vote",
+      votekickType: "Votekick",
+      voteEndsIn: (time) => `in ${time}`,
+      voteTotal: (count) => `${count} votes total`,
+      voteOptionCount: (count, percent) => `${count} votes · ${percent}%`,
+      voteExtend: "+30 s",
+      voteEnd: "End",
+      voteExtended: "Vote extended by 30 seconds.",
+      voteExtensionUnavailable: "This vote cannot be extended further.",
+      voteEnded: "Vote ended.",
+      voteEndFailed: "The vote could not be ended.",
+      votekickVotes: (yes, no, threshold) => `Yes ${yes} · No ${no} · Threshold ${threshold}`,
+      votekickCancel: "Cancel votekick",
+      votekickCancelTitle: "Cancel votekick?",
+      votekickCancelDescription: (target) => `The vote against ${target} ends now. No timeout will be applied.`,
+      votekickCanceled: "Votekick canceled.",
+      votekickCancelFailed: "The votekick could not be canceled.",
       nextUp: "Coming up",
-      nextUpReserved: "Nothing scheduled yet.",
+      noUpcomingItems: "Nothing scheduled yet.",
+      nextAdBreak: "Next ad break",
+      adDuration: (duration) => `Ad break · ${duration}s`,
+      adSnooze: "Snooze",
+      adSnoozed: "Ad break postponed.",
+      adSnoozeFailed: "The ad break could not be postponed.",
+      adSnoozeUnavailable: "This ad break cannot be postponed again.",
       events: "Events",
-      eventsReserved: "No events yet.",
+      eventsFilterLabel: "Filter events",
+      eventsAll: "All",
+      eventsRaids: "Raids",
+      eventsCommunity: "Community",
+      eventsChat: "Chat",
+      eventsSearch: "Search people or events",
+      eventsEmpty: "No events yet.",
+      eventsUnavailable: "Events could not be loaded.",
+      eventsLoading: "Loading events.",
+      raidShoutout: "Send shoutout",
+      raidShoutoutSent: "Shoutout sent.",
+      raidShoutoutFailed: "The shoutout could not be sent.",
       statusIndicators: "Connection status",
       systemStatus: "System status",
       systemReady: "All systems ready",
@@ -1820,6 +1936,9 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       locationMissing: "Location missing",
       locationMissingDescription: "Weather, sunrise and moon data need a channel location.",
       configureLocation: "Set location",
+      belaboxWeak: "BELABOX connection is weak",
+      belaboxWeakDescription: (bitrate) => `Current bitrate: ${bitrate} kbps.`,
+      openBelabox: "Open BELABOX",
       actionDraftDiscardTitle: "Discard your changes?",
       actionDraftDiscardDescription: "Your entries will be lost if you close this action.",
       actionDraftDiscard: "Discard entries",
@@ -2762,6 +2881,7 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "module.secret.removed": "Modulgeheimnis entfernt",
     "chat_voting.started": "Abstimmung gestartet",
     "chat_voting.closed": "Abstimmung geschlossen",
+    "chat_voting.extended": "Abstimmung verlängert",
     "chat_voting.template.created": "Abstimmungsvorlage erstellt",
     "chat_voting.template.updated": "Abstimmungsvorlage geändert",
     "chat_voting.template.deleted": "Abstimmungsvorlage gelöscht",
@@ -2829,6 +2949,7 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "module.secret.removed": "Module secret removed",
     "chat_voting.started": "Vote started",
     "chat_voting.closed": "Vote closed",
+    "chat_voting.extended": "Vote extended",
     "chat_voting.template.created": "Vote template created",
     "chat_voting.template.updated": "Vote template updated",
     "chat_voting.template.deleted": "Vote template deleted",

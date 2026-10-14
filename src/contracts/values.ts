@@ -284,6 +284,7 @@ export const AUDIT_ACTIONS = [
   "module.secret.removed",
   "chat_voting.started",
   "chat_voting.closed",
+  "chat_voting.extended",
   "chat_voting.template.created",
   "chat_voting.template.updated",
   "chat_voting.template.deleted",

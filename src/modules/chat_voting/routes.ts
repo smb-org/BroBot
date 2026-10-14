@@ -5,7 +5,7 @@ import type { BallotSnapshot, ModuleRouteEnvironment } from "../contract";
 import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, CHAT_VOTE_TEMPLATE_MAXIMUM, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingPresetForKind, chatVotingSettingsSchema, chatVotingStartAnnouncementAlarmKey } from "./contracts";
 import type { ChatVotePreset, ChatVoteTemplateDraft, ChatVotingKind } from "./contracts";
 import { createChatVotingRepository } from "./repository";
-import { requestChatVoteClose, startChatVote } from "./service";
+import { requestChatVoteClose, requestChatVoteExtension, startChatVote } from "./service";
 import { chatVoteTemplateConfiguration, configuredLabels, isBlockedFreeTextVote, isValidTemplateShortcut, isValidVoteTitle, labelsForVote, normalizeBlockedVoteTerm, normalizeVoteTitle, templateStartProblem, voteLabelLength } from "./domain";
 
 const readBody = async (request: Request): Promise<unknown> => request.json().catch(() => null);
@@ -454,4 +454,24 @@ chatVotingRoutes.post("/close", async (context) => {
   if (result === null) return context.json({ error: "chat_voting_not_running" }, 404);
   await context.get("writeModuleAudit")(audit, now);
   return context.json({ closing: true, pollId: result.id });
+});
+
+chatVotingRoutes.post("/extend", async (context) => {
+  const channelId = context.req.param("channelId") ?? "";
+  const now = new Date().toISOString();
+  const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
+  const repository = createChatVotingRepository(context.env.DB);
+  const result = await requestChatVoteExtension(repository, channelId, async (pollId, deadline, ownerRevision) => {
+    const object = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
+    await object.scheduleModuleAlarm(CHAT_VOTING_MODULE_ID, CHAT_VOTING_ALARM_HANDLER, pollId, deadline, ownerRevision);
+  }, authorization);
+  if (result === null) return context.json({ error: "chat_voting_extension_unavailable" }, 409);
+  await context.get("writeModuleAudit")({
+    channelId,
+    moduleId: CHAT_VOTING_MODULE_ID,
+    action: "chat_voting.extended" satisfies AuditAction,
+    before: { pollId: result.id, status: "open" },
+    after: { pollId: result.id, closesAt: result.closesAt },
+  }, now);
+  return context.json({ vote: result });
 });

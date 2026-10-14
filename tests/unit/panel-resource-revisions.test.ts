@@ -363,7 +363,7 @@ describe("panel resource revisions", () => {
     expect(moduleMutations.length).toBeGreaterThan(0);
     expect(chatVoting).toBeDefined();
     expect(chatVotingMutations.map(({ method, path }) => `${method} ${path.slice(path.lastIndexOf("/"))}`)).toEqual(
-      expect.arrayContaining(["POST /start", "POST /approve-term", "POST /close"]),
+      expect.arrayContaining(["POST /start", "POST /approve-term", "POST /close", "POST /extend"]),
     );
     expect(chatVotingRoutes.some(({ method, path }) => method === "GET" && path.endsWith("/current"))).toBe(true);
     for (const { path } of chatVotingRoutes) {

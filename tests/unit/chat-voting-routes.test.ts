@@ -314,6 +314,32 @@ describe("chat voting routes", () => {
     expect(writeAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "chat_voting.closed" }), expect.any(String));
   });
 
+  it("extends an open vote by thirty seconds and schedules its updated deadline", async () => {
+    const database = await createDatabase();
+    const openedAt = Date.now() - 60_000;
+    const closesAt = Date.now() + 60_000;
+    const expectedDeadline = closesAt + 30_000;
+    await database.prepare("UPDATE chat_votes SET opened_at = ?, closes_at = ? WHERE channel_id = ? AND poll_id = ?")
+      .bind(new Date(openedAt).toISOString(), new Date(closesAt).toISOString(), CHANNEL_ID, openTextVote.id).run();
+    const writeAudit = vi.fn(() => Promise.resolve());
+    const app = appFor(ballotAccess(), () => Promise.resolve([]), vi.fn(() => Promise.resolve()), authorizeModuleMutation, writeAudit);
+    const scheduleModuleAlarm = vi.fn(() => Promise.resolve());
+    const namespace = {
+      idFromName: vi.fn(() => ({})),
+      get: vi.fn(() => ({ scheduleModuleAlarm })),
+    } as unknown as Env["CHANNEL"];
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/modules/chat_voting/extend`, { method: "POST" }), {
+      DB: database as unknown as D1Database,
+      CHANNEL: namespace,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ vote: { id: openTextVote.id, closesAt: new Date(expectedDeadline).toISOString() } });
+    expect(scheduleModuleAlarm).toHaveBeenCalledWith("chat_voting", "close", openTextVote.id, expectedDeadline, 0);
+    expect(writeAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "chat_voting.extended" }), expect.any(String));
+  });
+
   it.each(["digit_01", "digit_12"])("does not accept the retired %s preset wire value", async (preset) => {
     const database = await createDatabase();
     await createChatVotingRepository(database as unknown as D1Database).finish(

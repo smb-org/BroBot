@@ -27,7 +27,46 @@ test("End vote is available to operators while start vote keeps its running coun
   await expect(endVote).toBeEnabled();
   await endVote.click();
   await expect.poll(() => closeRequests).toBe(1);
-  await expect(page.locator(".live-action__feedback").filter({ hasText: "Abstimmung beendet." })).toBeVisible();
+  await expect(page.locator(".live-cockpit__status-message")).toContainText("Abstimmung beendet.");
+});
+
+test("action rows and warning controls share their grid gaps and center line", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await installLiveCockpitMocks(page, {
+    channelId: "kanal-cockpit-geometry",
+    modules: ["ads", "belabox", "chat_voting", "clips", "raid"].map((id) => ({ id, enabled: true, settings: "{}" })),
+  });
+  await page.goto("/channels/kanal-cockpit-geometry");
+  const buttons = page.locator(".live-cockpit-actions__grid .live-action__button");
+  await expect(buttons.first()).toBeVisible();
+  const geometry = await buttons.evaluateAll((elements) => {
+    const boxes = elements.map((element) => {
+      const box = element.getBoundingClientRect();
+      return { x: box.x, y: box.y, right: box.right, bottom: box.bottom };
+    });
+    const firstRow = boxes.filter((box) => Math.abs(box.y - (boxes[0]?.y ?? box.y)) < 1);
+    const nextRowFirst = boxes.find((box) => box.y > (boxes[0]?.y ?? Number.POSITIVE_INFINITY));
+    const first = firstRow[0];
+    const second = firstRow[1];
+    return first === undefined || second === undefined || nextRowFirst === undefined
+      ? null
+      : { rowGap: nextRowFirst.y - first.bottom, columnGap: second.x - first.right };
+  });
+  expect(geometry).not.toBeNull();
+  if (geometry === null) return;
+  expect(Math.abs(geometry.rowGap - geometry.columnGap)).toBeLessThanOrEqual(1);
+
+  const warning = page.locator(".live-cockpit__location-warning");
+  const locationButton = warning.getByRole("button", { name: "Standort festlegen" });
+  await expect(locationButton).toBeVisible();
+  const centerDiff = await warning.evaluate((element) => {
+    const button = element.querySelector("button");
+    if (button === null) return Number.POSITIVE_INFINITY;
+    const warningBox = element.getBoundingClientRect();
+    const buttonBox = button.getBoundingClientRect();
+    return Math.abs((warningBox.top + warningBox.height / 2) - (buttonBox.top + buttonBox.height / 2));
+  });
+  expect(centerDiff).toBeLessThanOrEqual(1);
 });
 
 test("slow availability checks are not aborted by the four-second poll", async ({ page }) => {
@@ -41,9 +80,9 @@ test("slow availability checks are not aborted by the four-second poll", async (
   });
 
   await page.goto(`/channels/${channelId}`);
-  await expect.poll(mocks.currentStateRequestCount).toBe(2);
+  await expect.poll(mocks.currentStateRequestCount).toBe(3);
   await page.waitForTimeout(5_100);
-  expect(mocks.currentStateRequestCount()).toBe(2);
+  expect(mocks.currentStateRequestCount()).toBe(3);
   releaseCurrentState?.();
   await expect(page.getByRole("button", { name: "Abstimmung starten" })).toBeEnabled();
 });
@@ -105,7 +144,7 @@ test("clip creation keeps its returned edit URL in the action result", async ({ 
 
   await page.goto(`/channels/${channelId}`);
   await page.getByRole("button", { name: "Clip erstellen" }).click();
-  const result = page.locator(".live-action__feedback");
+  const result = page.locator(".live-cockpit__status-message");
   await expect(result).toContainText("Clip erstellt.");
   await expect(result.getByRole("link", { name: "Öffnen" })).toHaveAttribute("href", "https://clips.twitch.tv/edit/clip-regression");
 });
@@ -121,7 +160,7 @@ test("a disconnected BELABOX test result replaces the older connected header sam
   await expect(page.getByText("BELABOX · 4.000 kbit/s verbunden")).toBeVisible();
   await page.getByRole("button", { name: "BELABOX prüfen" }).click();
   await expect(page.getByText("BELABOX · getrennt")).toBeVisible();
-  await expect(page.locator(".live-action__feedback")).toContainText("Getrennt · 0 kbit/s");
+  await expect(page.locator(".live-cockpit__status-message")).toContainText("Getrennt · 0 kbit/s");
 });
 
 test("viewer count refreshes while the live cockpit is open", async ({ page }) => {

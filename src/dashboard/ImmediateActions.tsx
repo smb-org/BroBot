@@ -40,13 +40,14 @@ const roleReason = (requiredRole: ChannelRole): string => {
   return texts.operatorOnly;
 };
 
-const ActionButton = ({ action, moduleId, channelId, streamState, role, onActionResult }: {
+const ActionButton = ({ action, moduleId, channelId, streamState, role, onActionResult, onFeedbackMessage }: {
   action: ModuleImmediateActionDefinition;
   moduleId: string;
   channelId: string;
   streamState: ChannelStreamState | null | undefined;
   role: ChannelRole;
   onActionResult?: (moduleId: string, result: ModuleImmediateActionResult) => void;
+  onFeedbackMessage?: (message: string, link?: { href: string; label: string }) => void;
 }): ReactElement => {
   const language = dashboardLanguage();
   const texts = dashboardTexts();
@@ -132,10 +133,11 @@ const ActionButton = ({ action, moduleId, channelId, streamState, role, onAction
   return <ActionFrame action={action} moduleId={moduleId} channelId={channelId} language={language}
     disabled={lockReason !== null} reason={lockReason} availabilityStale={conditionState.stale}
     onRetryAvailability={() => { setAvailabilityRetry((retry) => retry + 1); }}
+    {...(onFeedbackMessage === undefined ? {} : { onFeedbackMessage })}
     {...(onActionResult === undefined ? {} : { onActionResult })} />;
 };
 
-const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason, availabilityStale, onRetryAvailability, onActionResult }: {
+const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason, availabilityStale, onRetryAvailability, onActionResult, onFeedbackMessage }: {
   action: ModuleImmediateActionDefinition;
   moduleId: string;
   channelId: string;
@@ -145,6 +147,7 @@ const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason, 
   availabilityStale: boolean;
   onRetryAvailability: () => void;
   onActionResult?: (moduleId: string, result: ModuleImmediateActionResult) => void;
+  onFeedbackMessage?: (message: string, link?: { href: string; label: string }) => void;
 }): ReactElement => {
   const texts = dashboardTexts();
   const [open, setOpen] = useState(false);
@@ -218,6 +221,10 @@ const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason, 
         message: actionResult?.message?.[language] ?? texts.streamManager.actionSucceeded(action.name[language]),
         ...(actionResult?.link === undefined ? {} : { href: actionResult.link.href, linkLabel: actionResult.link.label[language] }),
       });
+      onFeedbackMessage?.(
+        actionResult?.message?.[language] ?? texts.streamManager.actionSucceeded(action.name[language]),
+        actionResult?.link === undefined ? undefined : { href: actionResult.link.href, label: actionResult.link.label[language] },
+      );
       if (actionResult !== undefined) onActionResult?.(moduleId, actionResult);
       if (action.content !== undefined) {
         setDraftDirty(false);
@@ -227,6 +234,7 @@ const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason, 
       const feedback = immediateActionErrorFeedback(caught, moduleId,
         action.errorMessage?.[language] ?? texts.streamManager.actionFailed, language);
       setError({ message: feedback.message, ...(feedback.until === null ? {} : { until: feedback.until }) });
+      onFeedbackMessage?.(feedback.message);
     } finally {
       setBusy(false);
     }
@@ -237,17 +245,14 @@ const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason, 
     void run(new FormData(event.currentTarget));
   };
 
-  const reasonLine = reason ?? "\u00a0";
+  const reasonLine = reason ?? (availabilityStale ? texts.streamManager.actionAvailabilityStale : error !== null ? feedbackMessage(error) : result?.message ?? "\u00a0");
   const buttonContents = <>
     <span className="live-action__icon"><Icon name={action.icon} size={20} /></span>
     <span className="live-action__name">{action.name[language]}</span>
     <span id={reasonId} className={`live-action__reason${reason !== null ? " is-locked" : error !== null ? " has-error" : ""}`} aria-live="polite">{reasonLine}</span>
   </>;
   const triggerClassName = `live-action__button${reason !== null ? " is-locked" : ""}`;
-  const availabilityFeedback = availabilityStale ? <div className="live-action__feedback" aria-live="polite" role="status">
-    <span className="live-action__stale">{texts.streamManager.actionAvailabilityStale}</span>
-    <Button size="compact" variant="subtle" onClick={onRetryAvailability}>{dashboardCommonTexts().retry}</Button>
-  </div> : null;
+  const availabilityRetry = availabilityStale ? <Button className="live-action__retry" ariaLabel={dashboardCommonTexts().retry} size="compact" variant="subtle" onClick={onRetryAvailability}>{dashboardCommonTexts().retry}</Button> : null;
   const triggerProps = {
     "aria-label": action.name[language],
     "aria-describedby": reasonId,
@@ -287,6 +292,7 @@ const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason, 
         <PopoverPrimitive.Trigger {...triggerProps} type="button" className={triggerClassName}>{buttonContents}</PopoverPrimitive.Trigger>
         <PopoverContent align="start" side="bottom" className="live-action-frame-popover">{frameBody}</PopoverContent>
       </PopoverPrimitive.Root>
+      {availabilityRetry}
       <ConfirmDialog
         opened={navigationGuard.confirmOpen}
         title={texts.liveCockpit.actionDraftDiscardTitle}
@@ -297,7 +303,6 @@ const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason, 
         onCancel={navigationGuard.continueEditing}
         onConfirm={navigationGuard.discardAndSwitch}
       />
-      {availabilityFeedback}
     </div>;
   }
 
@@ -309,6 +314,7 @@ const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason, 
           {frameBody}
         </DialogContent>
       </DialogPrimitive.Root>
+      {availabilityRetry}
       <ConfirmDialog
         opened={navigationGuard.confirmOpen}
         title={texts.liveCockpit.actionDraftDiscardTitle}
@@ -319,28 +325,23 @@ const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason, 
         onCancel={navigationGuard.continueEditing}
         onConfirm={navigationGuard.discardAndSwitch}
       />
-      {availabilityFeedback}
     </div>;
   }
 
   return <div className="live-action">
     <button {...triggerProps} className={triggerClassName} type="button" onClick={() => { void run(new FormData()); }}>{buttonContents}</button>
-    <div className="live-action__feedback" aria-live="polite">
-      {availabilityStale ? <span className="live-action__stale">{texts.streamManager.actionAvailabilityStale}</span> : error !== null
-        ? <span className="live-action__feedback-error">{feedbackMessage(error)}</span>
-        : result === null ? null : <span>{feedbackMessage(result)}{result.href === undefined ? null : <> <a href={result.href} target="_blank" rel="noopener noreferrer">{result.linkLabel}</a></>}</span>}
-      {availabilityStale ? <Button size="compact" variant="subtle" onClick={onRetryAvailability}>{dashboardCommonTexts().retry}</Button> : null}
-    </div>
+    {availabilityRetry}
   </div>;
 };
 
-export const ImmediateActions = ({ channelId, streamState, role, modules = [], modulesLoaded = true, onActionResult }: {
+export const ImmediateActions = ({ channelId, streamState, role, modules = [], modulesLoaded = true, onActionResult, onFeedbackMessage }: {
   channelId: string;
   streamState?: ChannelStreamState | null | undefined;
   role: ChannelRole;
   modules?: readonly Pick<PanelModuleState, "id" | "enabled">[];
   modulesLoaded?: boolean;
   onActionResult?: (moduleId: string, result: ModuleImmediateActionResult) => void;
+  onFeedbackMessage?: (message: string, link?: { href: string; label: string }) => void;
 }): ReactElement => {
   const texts = dashboardTexts();
   const moduleStates = new Map(modules.map((module) => [module.id, module.enabled]));
@@ -356,7 +357,7 @@ export const ImmediateActions = ({ channelId, streamState, role, modules = [], m
     </header>
     <div className="live-cockpit-actions__grid" role="group" aria-label={texts.streamManager.immediateActions}>
       {modulesLoaded
-        ? actions.map(({ moduleId, action }) => <ActionButton key={`${moduleId}:${action.id}`} action={action} moduleId={moduleId} channelId={channelId} streamState={streamState} role={role} {...(onActionResult === undefined ? {} : { onActionResult })} />)
+        ? actions.map(({ moduleId, action }) => <ActionButton key={`${moduleId}:${action.id}`} action={action} moduleId={moduleId} channelId={channelId} streamState={streamState} role={role} {...(onActionResult === undefined ? {} : { onActionResult })} {...(onFeedbackMessage === undefined ? {} : { onFeedbackMessage })} />)
         : <div className="live-cockpit-actions__loading" aria-hidden="true"><LoadStateLines rows={3} height={64} /></div>}
     </div>
   </section>;

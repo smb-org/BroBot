@@ -4,7 +4,7 @@ import { createChatVotingRepository } from "./repository";
 import { CHAT_VOTING_CHAT_COMMANDS } from "./contracts/chat-commands";
 import { chatVotingDurationVariableCatalog, chatVotingOptionsVariableCatalog, chatVotingResultVariableCatalog, chatVotingTitleVariableCatalog } from "./contracts/template-variable-catalog";
 import { chatVotingAlarmDefinition, chatVotingStartAnnouncementAlarmDefinition, processChatVotingMessage } from "./service";
-import { CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_MODULE_ID, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingPresetForKind, chatVotingSettingsSchema, type ChatVotingKind } from "./contracts";
+import { CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingPresetForKind, chatVotingSettingsSchema, type ChatVotingKind } from "./contracts";
 import { chatVotingOverlayElements } from "./overlay/element";
 import { chatVotingRoutes } from "./routes";
 import { chatVotingImmediateActionTexts } from "./action-locale";
@@ -107,6 +107,27 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
   },
   routes: chatVotingRoutes,
   panel: () => import("./panel"),
+  liveTile: {
+    load: async (channelId, signal) => {
+      const state = await (await import("./panel/service")).loadChatVotingState(channelId, signal);
+      const vote = state.vote;
+      if (vote === null || vote.status !== "open") return [];
+      const options = vote.kind === "free_text"
+        ? (state.terms ?? []).map(({ term, count }) => ({ label: term, count }))
+        : vote.labels.map((label, index) => ({ label, count: state.counts?.[index] ?? 0 }));
+      const totalVotes = options.reduce((total, option) => total + option.count, 0);
+      const openedAt = Date.parse(vote.openedAt);
+      const closesAt = Date.parse(vote.closesAt);
+      return [{
+        kind: "vote",
+        title: vote.title,
+        options,
+        totalVotes,
+        closesAt: vote.closesAt,
+        canExtend: Number.isFinite(openedAt) && Number.isFinite(closesAt) && closesAt < openedAt + CHAT_VOTING_HARD_LIMIT_MS,
+      }];
+    },
+  },
   actions: [{
     id: "start-vote",
     name: chatVotingImmediateActionTexts.name,
