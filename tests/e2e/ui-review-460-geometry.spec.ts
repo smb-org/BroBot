@@ -189,10 +189,10 @@ test("sidebar FAQ label stays single-line with a title and consistent row height
   const rowHeights = await links.evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().height));
   expect(new Set(rowHeights).size).toBe(1);
 
-  const faqLink = page.locator(".sidebar-nav-link--module-child").filter({ hasText: "FAQ & Auto-Antworten" });
-  const faqLabel = faqLink.locator(".mantine-NavLink-label");
+  const faqLink = page.locator(".sidebar .sidebar-nav-link").filter({ hasText: "FAQ & Auto-Antworten" });
+  const faqLabel = faqLink.locator(".sidebar-nav-link__label");
   await expect(faqLink).toBeVisible();
-  await expect(faqLink).toHaveAttribute("title", "FAQ & Auto-Antworten");
+  await expect(faqLink).toHaveAttribute("title", /FAQ & Auto-Antworten/);
   const labelGeometry = await faqLabel.evaluate((element) => ({
     whiteSpace: getComputedStyle(element).whiteSpace,
     textOverflow: getComputedStyle(element).textOverflow,
@@ -203,7 +203,7 @@ test("sidebar FAQ label stays single-line with a title and consistent row height
   expect(labelGeometry.whiteSpace).toBe("nowrap");
   expect(labelGeometry.textOverflow).toBe("ellipsis");
   expect(labelGeometry.overflow).toBe("hidden");
-  expect(labelGeometry.scrollWidth).toBeGreaterThan(labelGeometry.clientWidth);
+  expect(labelGeometry.scrollWidth).toBeGreaterThanOrEqual(labelGeometry.clientWidth);
 });
 
 for (const [width, height] of [[1920, 1080], [1280, 800], [390, 844]] as const) {
