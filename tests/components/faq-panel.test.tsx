@@ -254,4 +254,23 @@ describe("FAQ panel", () => {
 
     expect(await screen.findByRole("dialog", { name: "Ungespeicherte Änderungen" })).toBeInTheDocument();
   });
+
+  it("keeps a rejected keyword in the draft: no save, text kept, guard prompts", async () => {
+    const fetcher = installPanelFetch((url, method) => url.pathname.endsWith("/entries") && method === "GET"
+      ? jsonResponse({ entries: [entry, secondEntry], orderRevision: 1 })
+      : undefined);
+    renderFaqPanel("en");
+
+    const field = await screen.findByRole("textbox", { name: "Keywords and phrases" });
+    const tooLong = "x".repeat(81);
+    fireEvent.change(field, { target: { value: tooLong } });
+    fireEvent.blur(field);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Enter 1 to 20 valid keywords or phrases.")).toBeInTheDocument();
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
+    expect(field).toHaveValue(tooLong);
+    fireEvent.click(screen.getByRole("button", { name: /^Supportsupport$/u }));
+    expect(await screen.findByRole("dialog", { name: "Unsaved changes" })).toBeInTheDocument();
+  });
 });

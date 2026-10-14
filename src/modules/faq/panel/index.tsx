@@ -216,6 +216,11 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
       setSaveError(labels.roleLocked);
       return labels.roleLocked;
     }
+    // Rejected or uncommitted chip text is part of the draft: never save around it.
+    if (pendingPatterns.trim().length > 0) {
+      setSaveError(labels.invalid);
+      return labels.invalid;
+    }
     if (input === null || matcherValidation !== null) {
       const message = matcherLocalError ?? labels.saveError;
       setSaveError(message);
@@ -370,7 +375,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
     persistent: true,
     pending: saving,
     ...(saveError === undefined ? {} : { error: saveError }),
-    invalid: input === null || matcherValidation !== null,
+    invalid: input === null || matcherValidation !== null || pendingPatterns.trim().length > 0,
     invalidMessage: labels.invalid,
     onSave: () => { void saveDraft(); },
     onInvalidSave: () => { setAttemptedSave(true); },

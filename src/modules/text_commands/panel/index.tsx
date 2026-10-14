@@ -558,7 +558,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
   const completeSwitchRef = useRef<() => boolean>(() => false);
   const saveDraft = useCallback(async (): Promise<string | null> => {
     setAttemptedSave(true);
-    if (!canManageContent) return labels.invalid;
+    if (!canManageContent || pendingAliases.trim().length > 0) return labels.invalid;
     const parsedSlashInput = parseLeadingSlashCommand(draft.text);
     if (parsedSlashInput.status === "invalid") return labels.invalid;
     const savedDraft = parsedSlashInput.status === "valid"
@@ -640,7 +640,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, init
       notify({ tone: "error", message: labels.saveError });
       return labels.saveError;
     } finally { setPending(false); }
-  }, [accept, canManageContent, channelId, channelVariables, command, draft, generation, isCreate, labels, onRefresh, onSaved, onWrite, setAttemptedSave, setConcurrentConflict, setFieldError, setPending, setSaved, setServerWarnings, setValue]);
+  }, [accept, canManageContent, channelId, channelVariables, command, draft, generation, isCreate, labels, onRefresh, onSaved, onWrite, pendingAliases, setAttemptedSave, setConcurrentConflict, setFieldError, setPending, setSaved, setServerWarnings, setValue]);
 
   const discardDraft = (): void => {
     setPendingAliases("");
