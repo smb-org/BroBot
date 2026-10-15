@@ -32,6 +32,8 @@ export interface LiveCockpitMockOptions {
 export interface LiveCockpitMockController {
   currentStateRequestCount: () => number;
   failCurrentState: () => void;
+  eventRequestCount: () => number;
+  setEventsError: (failed: boolean) => void;
   overviewRequestCount: () => number;
   settingsState: () => {
     timeZone: string;
@@ -83,6 +85,8 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
   let currentStateRequests = 0;
   let currentStateFailed = false;
   let overviewRequests = 0;
+  let eventRequests = 0;
+  let eventsFailed = options.eventsError ?? false;
 
   await page.route("**/api/**", async (route: Route) => {
     const { pathname } = new URL(route.request().url());
@@ -127,7 +131,8 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
       return route.fulfill(json({ overlays: [], maximum: 20, elementMaximum: 20 }));
     }
     if (pathname === `${channelPrefix}/events`) {
-      if (options.eventsError) return route.fulfill(json({ error: "temporarily_unavailable" }, 503));
+      eventRequests += 1;
+      if (eventsFailed) return route.fulfill(json({ error: "temporarily_unavailable" }, 503));
       return route.fulfill(json({ entries: options.events ?? [], nextCursor: null }));
     }
     if (pathname === `${channelPrefix}/audit-log`) return route.fulfill(json({ entries: [], nextCursor: null }));
@@ -188,6 +193,8 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
   return {
     currentStateRequestCount: () => currentStateRequests,
     failCurrentState: () => { currentStateFailed = true; },
+    eventRequestCount: () => eventRequests,
+    setEventsError: (failed) => { eventsFailed = failed; },
     overviewRequestCount: () => overviewRequests,
     settingsState: () => settings,
   };

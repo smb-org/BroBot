@@ -272,38 +272,41 @@ export const LiveCockpitEventFeed = ({ channelId, role, now, timeZone, eventQuer
       ]} />
     </FilterBar>
     <div className="live-cockpit-event-feed__scroll" aria-busy={eventQuery.isFetching}>
-      {eventQuery.isPending ? <div role="status"><LoadStateLines rows={5} height={36} /></div> : <DataTable
-        ariaLabel={labels.events}
-        className="event-table live-cockpit-event-feed__table"
-        rows={rows}
-        timeZone={timeZone}
-        emptyLabel={eventQuery.isError ? labels.eventsUnavailable : labels.eventsEmpty}
-        now={new Date(now)}
-        columns={[
-          { key: "event", label: dashboardTexts().events.event, render: (row) => {
-            const login = raidLogin(row.entry);
-            return <>
-              <span className="event-label event-table__primary">
-                <span className="event-table__text" title={row.summary}>{row.summary}</span>
-                {login === null ? null : <>
-                  <Button size="compact" variant="secondary"
-                    disabled={!roleCanShoutout || !raidEnabled || !shoutoutAvailability.enabled || busyEntry !== null}
-                    {...(shoutoutReason === null ? {} : { describedBy: `${row.entry.eventId}-raid-shoutout-reason` })}
-                    onClick={() => { void sendShoutout(row.entry); }}>{labels.raidShoutout}</Button>
-                  {shoutoutReason === null ? null : <span className="sr-only" id={`${row.entry.eventId}-raid-shoutout-reason`}>{shoutoutReason}</span>}
-                </>}
-              </span>
-              <span className="event-table__mobile-meta muted">
-                <span className="data-table__module-group" data-module-group={row.moduleGroup} aria-hidden="true" />
-                <span title={row.module}>{row.module}</span><span aria-hidden="true">·</span><span title={row.actor}>{row.actor}</span>
-              </span>
-            </>;
-          } },
-          { key: "module", label: dashboardTexts().events.module, moduleGroup: true, hideOnMobile: true, render: (row) => <span title={row.module}>{row.module}</span> },
-        ]}
-      />}
+      {eventQuery.isError && entries.length === 0 ? <div className="live-cockpit-event-feed__error" role="alert">
+        <p>{labels.eventsUnavailable}</p>
+        <Button size="compact" variant="secondary" disabled={eventQuery.isFetching} onClick={() => { void eventQuery.refetch(); }}>{common.retry}</Button>
+      </div> : eventQuery.isPending ? <div role="status"><LoadStateLines rows={5} height={36} /></div> : <DataTable
+          ariaLabel={labels.events}
+          className="event-table live-cockpit-event-feed__table"
+          rows={rows}
+          timeZone={timeZone}
+          emptyLabel={labels.eventsEmpty}
+          now={new Date(now)}
+          columns={[
+            { key: "event", label: dashboardTexts().events.event, render: (row) => {
+              const login = raidLogin(row.entry);
+              return <>
+                <span className="event-label event-table__primary">
+                  <span className="event-table__text" title={row.summary}>{row.summary}</span>
+                  {login === null ? null : <>
+                    <Button size="compact" variant="secondary"
+                      disabled={!roleCanShoutout || !raidEnabled || !shoutoutAvailability.enabled || busyEntry !== null}
+                      {...(shoutoutReason === null ? {} : { describedBy: `${row.entry.eventId}-raid-shoutout-reason` })}
+                      onClick={() => { void sendShoutout(row.entry); }}>{labels.raidShoutout}</Button>
+                    {shoutoutReason === null ? null : <span className="sr-only" id={`${row.entry.eventId}-raid-shoutout-reason`}>{shoutoutReason}</span>}
+                  </>}
+                </span>
+                <span className="event-table__mobile-meta muted">
+                  <span className="data-table__module-group" data-module-group={row.moduleGroup} aria-hidden="true" />
+                  <span title={row.module}>{row.module}</span><span aria-hidden="true">·</span><span title={row.actor}>{row.actor}</span>
+                </span>
+              </>;
+            } },
+            { key: "module", label: dashboardTexts().events.module, moduleGroup: true, hideOnMobile: true, render: (row) => <span title={row.module}>{row.module}</span> },
+          ]}
+        />}
     </div>
-    <span className="sr-only" aria-live="polite">{eventQuery.isError ? labels.eventsUnavailable : eventQuery.isPending ? labels.eventsLoading : ""}</span>
+    <span className="sr-only" aria-live="polite">{eventQuery.isError && entries.length > 0 ? labels.eventsUnavailable : eventQuery.isPending ? labels.eventsLoading : ""}</span>
   </section>;
 };
 

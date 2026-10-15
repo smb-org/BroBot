@@ -1135,6 +1135,7 @@ export interface DashboardTexts {
     raidShoutoutFailed: string;
     statusIndicators: string;
     systemStatus: string;
+    systemStatusDescription: (health: string) => string;
     systemReady: string;
     liveDataCurrent: string;
     locationMissing: string;
@@ -1544,6 +1545,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       raidShoutoutFailed: "Shoutout konnte nicht gesendet werden.",
       statusIndicators: "Verbindungsstatus",
       systemStatus: "Systemstatus",
+      systemStatusDescription: (health) => `Systemstatus: ${health}`,
       systemReady: "Alles bereit",
       liveDataCurrent: "Live-Daten aktuell",
       locationMissing: "Standort fehlt",
@@ -1940,6 +1942,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       raidShoutoutFailed: "The shoutout could not be sent.",
       statusIndicators: "Connection status",
       systemStatus: "System status",
+      systemStatusDescription: (health) => `System status: ${health}`,
       systemReady: "All systems ready",
       liveDataCurrent: "Live data up to date",
       locationMissing: "Location missing",

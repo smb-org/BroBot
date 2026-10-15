@@ -59,6 +59,46 @@ test("live system footer includes an event-feed query failure", async ({ page })
   await expect(footer).not.toContainText("Alles bereit");
 });
 
+test("successful action feedback never masks a live-data failure and clears when health recovers", async ({ page }) => {
+  const channelId = "kanal-live-footer-feedback-health";
+  const mocks = await installLiveCockpitMocks(page, {
+    channelId,
+    modules: [{ id: "clips", enabled: true, settings: "{}" }],
+    eventsError: true,
+  });
+
+  await page.goto(`/channels/${channelId}`);
+  const footer = page.locator(".live-cockpit__status");
+  await expect(page.locator(".live-cockpit-event-feed__error")).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("button", { name: "Clip erstellen" }).click();
+  await expect(footer).toContainText("Live-Daten sind gerade nicht verfügbar.");
+  await expect(footer).not.toContainText("Clip erstellt.");
+  await expect(footer).toHaveAttribute("aria-label", "Systemstatus: Live-Daten sind gerade nicht verfügbar.");
+
+  const requestsBeforeRetry = mocks.eventRequestCount();
+  mocks.setEventsError(false);
+  await page.locator(".live-cockpit-event-feed__error").getByRole("button", { name: "Erneut versuchen" }).click();
+  await expect.poll(mocks.eventRequestCount).toBeGreaterThan(requestsBeforeRetry);
+  await expect(footer).toContainText("Alles bereit · Live-Daten aktuell");
+  await expect(footer).not.toContainText("Clip erstellt.");
+});
+
+test.describe("English health status", () => {
+  test.use({ locale: "en-US" });
+
+  test("names the live-data failure accessibly in the English catalog", async ({ page }) => {
+    const channelId = "channel-live-footer-english-health";
+    await installLiveCockpitMocks(page, { channelId, eventsError: true });
+
+    await page.goto(`/channels/${channelId}`);
+    await expect(page.locator(".live-cockpit-event-feed__error")).toBeVisible({ timeout: 10_000 });
+    const footer = page.locator(".live-cockpit__status");
+    await expect(footer).toHaveAttribute("aria-label", "System status: Live data is unavailable right now.");
+    await expect(footer).toContainText("Live data is unavailable right now.");
+    await expect(page.locator(".live-cockpit-event-feed__error").getByRole("button", { name: "Retry" })).toBeVisible();
+  });
+});
+
 test("owner status rows share status and reason columns", async ({ page }) => {
   const channelId = "kanal-owner-consent-grid";
   await page.setViewportSize({ width: 1920, height: 1080 });

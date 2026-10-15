@@ -29,6 +29,18 @@ const formatDuration = (startedAt: string | null | undefined, now: number): stri
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 };
 
+const ACTION_FEEDBACK_TIMEOUT_MS = 5_000;
+
+interface LiveCockpitFooterMessage {
+  text: string;
+  link?: { href: string; label: string };
+}
+
+interface LiveCockpitFooterState {
+  healthKey: string;
+  message: LiveCockpitFooterMessage | null;
+}
+
 const streamStateLabel = (state: ChannelStreamState | null | undefined): string => {
   const texts = dashboardTexts().liveCockpit;
   return state === "online" ? texts.live : state === "offline" ? texts.offline : texts.unknown;
@@ -47,7 +59,6 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
   const moduleState = useMemo(() => new Map(modules.map((module) => [module.id, module.enabled])), [modules]);
   const [belaboxStatus, setBelaboxStatus] = useState<{ data: BelaboxStatusResponse | null; failed: boolean }>({ data: null, failed: false });
   const [belaboxActionSample, setBelaboxActionSample] = useState<{ channelId: string; connected: boolean; bitrateKbps: number; sampledAt: number } | null>(null);
-  const [footerMessage, setFooterMessage] = useState<{ text: string; link?: { href: string; label: string } } | null>(null);
   const overlaysQuery = useOverlaysQuery(overview.channelId);
   const eventsQuery = useEventsQuery(overview.channelId, emptyEventFilter, 30_000);
   const channelSettings = useChannelSettings(overview.channelId);
@@ -158,6 +169,21 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
     : liveDataFailed ? labels.liveDataUnavailable
       : liveDataPending ? labels.liveDataLoading
         : `${labels.systemReady} · ${labels.liveDataCurrent}`;
+  const footerHealthKey = `${footerStatus}:${footerHealthText}`;
+  const [footerState, setFooterState] = useState<LiveCockpitFooterState>(() => ({ healthKey: footerHealthKey, message: null }));
+  if (footerState.healthKey !== footerHealthKey) setFooterState({ healthKey: footerHealthKey, message: null });
+  useEffect(() => {
+    const message = footerState.message;
+    if (message === null) return;
+    const timeout = window.setTimeout(() => {
+      setFooterState((current) => current.message === message ? { ...current, message: null } : current);
+    }, ACTION_FEEDBACK_TIMEOUT_MS);
+    return () => { window.clearTimeout(timeout); };
+  }, [footerState.message]);
+  const showFooterMessage = (message: LiveCockpitFooterMessage): void => {
+    setFooterState({ healthKey: footerHealthKey, message });
+  };
+  const visibleFooterMessage = footerStatus === "ok" && footerState.healthKey === footerHealthKey ? footerState.message : null;
   const warnings = [
     ...(overview.location == null ? [{ key: "location", title: labels.locationMissing, description: labels.locationMissingDescription, action: labels.configureLocation, run: () => onNavigate({ kind: "channel", channelId: overview.channelId, section: "location-weather" }) }] : []),
     ...(belaboxWeak ? [{ key: "belabox", title: labels.belaboxWeak, description: labels.belaboxWeakDescription(formatNumber(Math.round(sampleBitrate))), action: labels.openBelabox, run: () => onNavigate({ kind: "module", channelId: overview.channelId, moduleId: "belabox" }) }] : []),
@@ -224,7 +250,7 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
             setBelaboxActionSample({ channelId: overview.channelId, ...result.belaboxSample });
           }
         }}
-        onFeedbackMessage={(text, link) => { setFooterMessage({ text, ...(link === undefined ? {} : { link }) }); }}
+        onFeedbackMessage={(text, link) => { showFooterMessage({ text, ...(link === undefined ? {} : { link }) }); }}
       />
       <LiveCockpitTiles
         channelId={overview.channelId}
@@ -234,17 +260,17 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
         failed={liveQuery.data?.failed ?? liveQuery.isError}
         now={now}
         timeZone={timeZone}
-        onMessage={(text) => { setFooterMessage({ text }); }}
+        onMessage={(text) => { showFooterMessage({ text }); }}
         onRefresh={refreshLiveData}
       />
       <LiveCockpitEventFeed channelId={overview.channelId} role={overview.role} now={now} timeZone={timeZone} eventQuery={eventsQuery}
         streamState={overview.streamState} raidEnabled={modules.some((module) => module.id === "raid" && module.enabled)}
-        onMessage={(text) => { setFooterMessage({ text }); }} />
+        onMessage={(text) => { showFooterMessage({ text }); }} />
     </div>
-    <footer className="live-cockpit__status" aria-live="polite" aria-label={labels.systemStatus}>
+    <footer className="live-cockpit__status" aria-live="polite" aria-label={labels.systemStatusDescription(footerHealthText)}>
       <StatusLed state={footerStatus} label={labels.systemStatus} />
-      {footerMessage === null ? <span>{footerHealthText}</span> : <span className="live-cockpit__status-message">
-        {footerMessage.text}{footerMessage.link === undefined ? null : <a href={footerMessage.link.href} target="_blank" rel="noreferrer">{footerMessage.link.label}</a>}
+      {visibleFooterMessage === null ? <span>{footerHealthText}</span> : <span className="live-cockpit__status-message">
+        {visibleFooterMessage.text}{visibleFooterMessage.link === undefined ? null : <a href={visibleFooterMessage.link.href} target="_blank" rel="noreferrer">{visibleFooterMessage.link.label}</a>}
       </span>}
     </footer>
   </div>;
