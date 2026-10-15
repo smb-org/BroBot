@@ -140,6 +140,7 @@ const editorCatalog: LocaleCatalog<SettingsEditorCatalog> = {
       automatic: {
         label: "Automatische Werbepause", hint: "Geht raus, wenn eine geplante Werbung beginnt. Leer lassen, um diese Nachricht auszuschalten. Ohne {ads.duration} ergänzt die Vorschau (N Sekunden).",
         optionalHint: "Leer lassen, um diese Nachricht auszuschalten.",
+        previewEmptyText: "Nachricht ausgeschaltet",
         requiredError: "Text eingeben", previewLabel: "Vorschau", previewSpeaker: "Bot",
         variables: [{ name: "ads.duration", description: "Dauer der Werbepause in Sekunden", sample: "90" }],
       },
@@ -147,6 +148,7 @@ const editorCatalog: LocaleCatalog<SettingsEditorCatalog> = {
       manual: {
         label: "Manuell gestartete Werbepause", hint: "Geht raus, wenn jemand die Werbung von Hand startet. Leer lassen, um diese Nachricht auszuschalten. Ohne {ads.duration} ergänzt die Vorschau (N Sekunden).",
         optionalHint: "Leer lassen, um diese Nachricht auszuschalten.",
+        previewEmptyText: "Nachricht ausgeschaltet",
         requiredError: "Text eingeben", previewLabel: "Vorschau", previewSpeaker: "Bot",
         variables: [{ name: "ads.duration", description: "Dauer der Werbepause in Sekunden", sample: "90" }],
       },
@@ -180,6 +182,7 @@ const editorCatalog: LocaleCatalog<SettingsEditorCatalog> = {
       automatic: {
         label: "Automatic ad break", hint: "Sent when a scheduled ad break starts. Leave blank to turn this message off. If {ads.duration} is missing, the preview adds (N seconds).", requiredError: "Enter text",
         optionalHint: "Leave blank to turn this message off.",
+        previewEmptyText: "Message is off",
         previewLabel: "Preview", previewSpeaker: "Bot",
         variables: [{ name: "ads.duration", description: "Ad break duration in seconds", sample: "90" }],
       },
@@ -187,6 +190,7 @@ const editorCatalog: LocaleCatalog<SettingsEditorCatalog> = {
       manual: {
         label: "Manually started ad break", hint: "Sent when someone starts an ad break by hand. Leave blank to turn this message off. If {ads.duration} is missing, the preview adds (N seconds).", requiredError: "Enter text",
         optionalHint: "Leave blank to turn this message off.",
+        previewEmptyText: "Message is off",
         previewLabel: "Preview", previewSpeaker: "Bot",
         variables: [{ name: "ads.duration", description: "Ad break duration in seconds", sample: "90" }],
       },

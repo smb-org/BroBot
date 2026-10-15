@@ -14,10 +14,11 @@ import { dashboardCommonTexts, dashboardTexts } from "./locale";
 import { queryKeys } from "./data/keys";
 import { Button, Field, FormDialog, GameMultiSelect } from "./ui";
 
-export const LiveCockpitBroadcast = ({ channelId, role, onSaved }: {
+export const LiveCockpitBroadcast = ({ channelId, role, onSaved, onQueryStateChange }: {
   channelId: string;
   role: ChannelRole;
   onSaved: (message: string) => void;
+  onQueryStateChange: (state: "pending" | "ready" | "error") => void;
 }): ReactElement => {
   const labels = dashboardTexts().liveCockpit;
   const common = dashboardCommonTexts();
@@ -43,6 +44,10 @@ export const LiveCockpitBroadcast = ({ channelId, role, onSaved }: {
     activeRef.current = true;
     return () => { activeRef.current = false; };
   }, []);
+
+  useEffect(() => {
+    onQueryStateChange(broadcast.isPending ? "pending" : broadcast.isError ? "error" : "ready");
+  }, [broadcast.isError, broadcast.isPending, onQueryStateChange]);
 
   const openEditor = (): void => {
     const current = broadcast.data;
@@ -91,31 +96,35 @@ export const LiveCockpitBroadcast = ({ channelId, role, onSaved }: {
 
   const data = broadcast.data;
   const scopeMissing = data?.manageScopeAvailable === false;
-  const reconnectAction = scopeMissing
-    ? role === "broadcaster"
-      ? <Button size="compact" variant="secondary" onClick={reconnect}>{labels.broadcastReconnect}</Button>
-      : <span className="live-cockpit-broadcast__reason" role="note">{labels.broadcastReconnectOwnerOnly}</span>
+  const reconnectAction = scopeMissing && role === "broadcaster"
+    ? <Button size="compact" variant="secondary" onClick={reconnect}>{labels.broadcastReconnect}</Button>
     : null;
+  const reason = data === undefined ? "" : !canEdit
+    ? labels.broadcastManagerOnly
+    : scopeMissing ? labels.broadcastScopeMissing : "";
+  const lockedReasonId = "live-cockpit-broadcast-reason";
 
   return <div className="live-cockpit-header__title-slot" data-slot="stream-title-category" aria-busy={broadcast.isPending}>
-    {broadcast.isPending ? <p className="live-cockpit-broadcast__status" role="status">{labels.broadcastLoading}</p>
-      : broadcast.isError || data === undefined ? <div className="live-cockpit-broadcast__status" role="alert">
-        <span>{labels.broadcastUnavailable}</span>
-        <Button size="compact" variant="subtle" disabled={broadcast.isFetching} onClick={() => { void broadcast.refetch(); }}>{common.retry}</Button>
-      </div> : <>
-        <div className="live-cockpit-broadcast__copy">
-          <strong title={data.title || labels.broadcastEmptyTitle}>{data.title || labels.broadcastEmptyTitle}</strong>
-          <span>{data.game?.name ?? labels.broadcastNoCategory}</span>
-        </div>
-        <div className="live-cockpit-broadcast__actions">
-          <Button size="compact" variant="subtle" disabled={!canEdit || scopeMissing}
-            {...(!canEdit ? { title: labels.broadcastManagerOnly } : scopeMissing ? { title: labels.broadcastScopeMissing } : {})}
-            onClick={openEditor}>{labels.broadcastEdit}</Button>
-          {!canEdit ? <span className="live-cockpit-broadcast__reason" role="note">{labels.broadcastManagerOnly}</span> : null}
-          {reconnectAction}
-          {scopeMissing ? <span className="live-cockpit-broadcast__reason" role="note">{labels.broadcastScopeMissing}</span> : null}
-        </div>
-      </>}
+    <div className="live-cockpit-broadcast__copy">
+      <div className="live-cockpit-broadcast__title-row">
+        {broadcast.isPending ? <strong role="status">{labels.broadcastLoading}</strong>
+          : broadcast.isError || data === undefined ? <strong role="alert">{labels.broadcastUnavailable}</strong>
+            : <strong title={data.title || labels.broadcastEmptyTitle}>{data.title || labels.broadcastEmptyTitle}</strong>}
+        {broadcast.isPending ? <span className="live-cockpit-broadcast__button-slot" aria-hidden="true" />
+          : broadcast.isError || data === undefined ? <Button size="compact" variant="secondary" disabled={broadcast.isFetching}
+            onClick={() => { void broadcast.refetch(); }}>{common.retry}</Button>
+            : <Button size="compact" variant="secondary" icon="edit" iconOnly ariaLabel={labels.broadcastEdit}
+              className="live-cockpit-broadcast__edit" disabled={!canEdit || scopeMissing}
+              {...(!canEdit || scopeMissing ? { describedBy: lockedReasonId } : {})}
+              onClick={openEditor} />}
+      </div>
+      <span>{data === undefined ? "" : data.game?.name ?? labels.broadcastNoCategory}</span>
+    </div>
+    <div className="live-cockpit-broadcast__actions">{reconnectAction}</div>
+    <div className={`live-cockpit-broadcast__reason-slot${scopeMissing ? " is-warning" : ""}`} id={lockedReasonId}
+      role={reason === "" ? undefined : "note"} title={reason}>
+      {reason}
+    </div>
 
     <FormDialog
       opened={opened}
@@ -135,6 +144,7 @@ export const LiveCockpitBroadcast = ({ channelId, role, onSaved }: {
           value={draftTitle}
           maxLength={140}
           countLabel={labels.broadcastTitleCount}
+          errorInDescription
           required
           disabled={pending || !canEdit}
           onChange={setDraftTitle}
@@ -146,6 +156,7 @@ export const LiveCockpitBroadcast = ({ channelId, role, onSaved }: {
           onChange={(games) => { setDraftGame(games.slice(0, 1)); }}
           messages={labels.broadcastGamePicker}
           maximum={1}
+          singleValue
           disabled={pending || !canEdit}
         />
         {scopeMissing ? <div className="live-cockpit-broadcast__scope-warning">

@@ -20,8 +20,10 @@ import { getPanelModuleStates } from "./module-repository";
 import { actorOf, readJsonBody } from "./member-routes";
 import { broadcasterHasScope, broadcasterScopesForChannel } from "../broadcaster-scope";
 import { getAppAccessToken } from "../app-token";
-import { getLoginIdentity } from "../db/login-identity";
-import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "../auth/crypto";
+import { getLoginIdentity, rotateLoginTokensForUser, setLoginIdentityTokenScopes, type LoginIdentityRecord } from "../db/login-identity";
+import { decryptJson, encryptJson, getTokenEncryptionKeys, parseKeyRing } from "../auth/crypto";
+import { refreshBotToken } from "../bot-maintenance";
+import { recordAudit } from "../db/audit";
 import { writeModuleDiagnostics } from "../event-log";
 import { helixRequest } from "../twitch/helix";
 import { readChannelBlockedTerms } from "../twitch/blocked-terms";
@@ -191,6 +193,60 @@ const broadcastUpdateSchema = z.object({
 }).strict();
 
 const BROADCAST_MANAGE_SCOPE = "channel:manage:broadcast";
+
+const loginIdentityHasBroadcastScope = (identity: LoginIdentityRecord | null): boolean => {
+  if (identity === null || identity.status !== "connected") return false;
+  try {
+    const scopes: unknown = JSON.parse(identity.tokenScopesJson);
+    return Array.isArray(scopes) && scopes.includes(BROADCAST_MANAGE_SCOPE);
+  } catch {
+    return false;
+  }
+};
+
+const decryptLoginAccessToken = async (identity: LoginIdentityRecord, environment: Env): Promise<string | null> => {
+  const token = await decryptJson<{ token?: unknown }>(identity.accessTokenCiphertext,
+    parseKeyRing(getTokenEncryptionKeys(environment)));
+  return token !== null && typeof token.token === "string" && token.token.length > 0 ? token.token : null;
+};
+
+const refreshBroadcastIdentity = async (
+  environment: Env,
+  identity: LoginIdentityRecord,
+  now: string,
+): Promise<LoginIdentityRecord | null> => {
+  const refresh = await decryptJson<{ token?: unknown }>(identity.refreshTokenCiphertext,
+    parseKeyRing(getTokenEncryptionKeys(environment)));
+  if (refresh === null || typeof refresh.token !== "string" || refresh.token.length === 0) return null;
+  const refreshed = await refreshBotToken(fetch, environment, refresh.token);
+  const keys = parseKeyRing(getTokenEncryptionKeys(environment));
+  const accessTokenCiphertext = await encryptJson({ token: refreshed.accessToken }, keys);
+  const refreshTokenCiphertext = await encryptJson({ token: refreshed.refreshToken }, keys);
+  const rotated = await rotateLoginTokensForUser(
+    environment.DB,
+    identity.userId,
+    identity.accessTokenCiphertext,
+    identity.refreshTokenCiphertext,
+    accessTokenCiphertext,
+    refreshTokenCiphertext,
+    new Date(Date.parse(now) + refreshed.expiresIn * 1_000).toISOString(),
+    now,
+    identity.updatedAt,
+  );
+  if (!rotated) {
+    const current = await getLoginIdentity(environment.DB, identity.userId);
+    return current !== null && current.accessTokenCiphertext !== identity.accessTokenCiphertext ? current : null;
+  }
+  await setLoginIdentityTokenScopes(
+    environment.DB,
+    identity.userId,
+    JSON.stringify(refreshed.scopes),
+    now,
+    accessTokenCiphertext,
+    refreshTokenCiphertext,
+  );
+  return await getLoginIdentity(environment.DB, identity.userId);
+};
 
 const canManageModules = canManage;
 
@@ -545,7 +601,7 @@ moduleRouter.get("/api/channels/:channelId/broadcast", async (context) => {
     return context.json({
       title: row.title,
       game: parseTwitchGame({ id: row.game_id, name: row.game_name }),
-      manageScopeAvailable: await broadcasterHasScope(context.env.DB, channelId, BROADCAST_MANAGE_SCOPE),
+      manageScopeAvailable: loginIdentityHasBroadcastScope(await getLoginIdentity(context.env.DB, channelId)),
     });
   } catch {
     return context.json({ error: "broadcast_unavailable" }, 503);
@@ -557,46 +613,65 @@ moduleRouter.patch("/api/channels/:channelId/broadcast", async (context) => {
   const parsed = broadcastUpdateSchema.safeParse(await readJsonBody(context.req.raw));
   if (!parsed.success) return context.json({ error: "broadcast_invalid" }, 400);
 
-  const now = nowIso();
-  const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
-  const authorized = await context.env.DB.prepare(
-    `SELECT channel_id FROM channels WHERE channel_id = ? ${authorization.sql}`,
-  ).bind(channelId, ...authorization.values).first<{ channel_id: string }>();
-  if (authorized === null) return context.json({ error: "broadcast_manage_denied" }, 403);
+  const managementStillAuthorized = async (): Promise<boolean> => {
+    const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), nowIso());
+    const authorized = await context.env.DB.prepare(
+      `SELECT channel_id FROM channels WHERE channel_id = ? ${authorization.sql}`,
+    ).bind(channelId, ...authorization.values).first<{ channel_id: string }>();
+    return authorized !== null;
+  };
+  if (!await managementStillAuthorized()) return context.json({ error: "broadcast_manage_denied" }, 403);
 
-  const identity = await getLoginIdentity(context.env.DB, channelId);
+  let identity = await getLoginIdentity(context.env.DB, channelId);
   if (identity === null || identity.status !== "connected") return context.json({ error: "broadcast_identity_missing" }, 409);
-  let scopes: unknown;
+  if (!loginIdentityHasBroadcastScope(identity)) return context.json({ error: "broadcast_scope_missing" }, 403);
+  let accessToken: string | null;
   try {
-    scopes = JSON.parse(identity.tokenScopesJson) as unknown;
-  } catch {
-    scopes = null;
-  }
-  if (!Array.isArray(scopes) || !scopes.includes(BROADCAST_MANAGE_SCOPE)) {
-    return context.json({ error: "broadcast_scope_missing" }, 403);
-  }
-  let accessToken: string;
-  try {
-    const token = await decryptJson<{ token?: unknown }>(identity.accessTokenCiphertext,
-      parseKeyRing(getTokenEncryptionKeys(context.env)));
-    if (token === null || typeof token.token !== "string" || token.token.length === 0) throw new Error("Missing access token.");
-    accessToken = token.token;
+    accessToken = await decryptLoginAccessToken(identity, context.env);
   } catch {
     return context.json({ error: "broadcast_identity_missing" }, 409);
   }
+  if (accessToken === null) {
+    return context.json({ error: "broadcast_identity_missing" }, 409);
+  }
 
-  const result = await context.get("measureServerTiming")("helix", () => context.get("helixRequest")({
+  const updateBroadcast = (token: string) => context.get("measureServerTiming")("helix", () => context.get("helixRequest")({
     url: "https://api.twitch.tv/helix/channels",
     query: { broadcaster_id: channelId },
-    accessToken,
+    accessToken: token,
     clientId: context.env.TWITCH_CLIENT_ID,
     method: "PATCH",
     body: { title: parsed.data.title, game_id: parsed.data.gameId },
   }));
+  if (!await managementStillAuthorized()) return context.json({ error: "broadcast_manage_denied" }, 403);
+  let result = await updateBroadcast(accessToken);
   if (!result.ok) {
-    if (result.status === 401 || result.status === 403) return context.json({ error: "broadcast_scope_missing" }, 403);
-    return context.json({ error: "broadcast_update_failed" }, 502);
+    if (result.status === 401) {
+      try {
+        const refreshedIdentity = await refreshBroadcastIdentity(context.env, identity, nowIso());
+        if (refreshedIdentity === null || refreshedIdentity.status !== "connected") {
+          return context.json({ error: "broadcast_identity_missing" }, 409);
+        }
+        identity = refreshedIdentity;
+        if (!loginIdentityHasBroadcastScope(identity)) return context.json({ error: "broadcast_scope_missing" }, 403);
+        const refreshedToken = await decryptLoginAccessToken(identity, context.env);
+        if (refreshedToken === null) return context.json({ error: "broadcast_identity_missing" }, 409);
+        if (!await managementStillAuthorized()) return context.json({ error: "broadcast_manage_denied" }, 403);
+        result = await updateBroadcast(refreshedToken);
+      } catch {
+        return context.json({ error: "broadcast_update_failed" }, 502);
+      }
+    }
+    if (!result.ok) {
+      if (result.status === 403) return context.json({ error: "broadcast_scope_missing" }, 403);
+      return context.json({ error: "broadcast_update_failed" }, 502);
+    }
   }
+
+  const actor = context.get("actor");
+  const updatedAt = nowIso();
+  const changed = { title: parsed.data.title, gameId: parsed.data.gameId };
+  await recordAudit(context.env.DB, actor.userId, updatedAt, channelId, null, "channel.broadcast.updated", null, changed);
   return context.body(null, 204);
 });
 

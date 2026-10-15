@@ -51,6 +51,7 @@ interface SettingsFieldText {
   countLabel?: (count: number, maxLength: number) => string;
   previewLabel?: string;
   previewSpeaker?: string;
+  previewEmptyText?: string;
   variables?: readonly TemplateTextFieldVariable[];
 }
 
@@ -234,7 +235,7 @@ export function SettingsEditor<Settings extends object>({
             id={id}
             name={field.key}
             label={copy.label}
-            hint=""
+            hint={field.optional ? copy.optionalHint ?? "" : ""}
             {...(error === undefined ? {} : { error })}
             value={typeof fieldValue === "string" ? fieldValue : ""}
             disabled={disabled}
@@ -247,12 +248,10 @@ export function SettingsEditor<Settings extends object>({
             onIssuesChange={(issues) => { onIssuesChange?.(field.key, issues); }}
             {...(copy.previewLabel === undefined ? {} : { previewLabel: copy.previewLabel })}
             {...(copy.previewSpeaker === undefined ? {} : { previewSpeaker: copy.previewSpeaker })}
+            {...(copy.previewEmptyText === undefined ? {} : { previewEmptyText: copy.previewEmptyText })}
             {...(field.minRows === undefined ? {} : { minRows: field.minRows })}
             messages={templateMessages}
           />
-          {field.optional && copy.optionalHint !== undefined
-            ? <span className="ui-settings-editor__optional-hint">{copy.optionalHint}</span>
-            : null}
         </InspectorFieldRow>
       );
     }

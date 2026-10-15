@@ -2,7 +2,7 @@ import { ADS_SKIPPED_REASONS, COMMERCIAL_FAILURE_REASONS, EVENTSUB_NEUTRAL_REASO
 import { browserModuleLanguage, type ModuleChatCommandThreshold, type ModuleChatStatus, type ModuleLanguage, type ModuleNavigationCategory } from "../modules/contract";
 import type { ApiSourceFailureReason } from "../modules/api_source/contracts";
 import type { SystemVariableName } from "../template-variables";
-import type { GameMultiSelectMessages } from "./ui/GameMultiSelect";
+import type { GameSingleValueMessages } from "./ui/GameMultiSelect";
 
 export type DashboardLanguage = ModuleLanguage;
 export type LocaleCatalog<T> = Record<DashboardLanguage, T>;
@@ -1090,7 +1090,7 @@ export interface DashboardTexts {
     broadcastSaveError: string;
     broadcastIdentityMissing: string;
     broadcastSaved: string;
-    broadcastGamePicker: GameMultiSelectMessages;
+    broadcastGamePicker: GameSingleValueMessages;
     bot: string;
     botConnected: string;
     botUnavailable: string;
@@ -1335,6 +1335,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         "channel.time_zone.updated": ({ actor, object, from, to }) => `${actor} änderte die Zeitzone für ${object} von ${from ?? "—"} zu ${to ?? "—"}`,
         "channel.default_chat_target.updated": ({ actor, object, from, to }) => `${actor} änderte das Standard-Chat-Ziel für ${object} von ${from ?? "—"} zu ${to ?? "—"}`,
         "channel.location.updated": ({ actor, object, from, to }) => `${actor} änderte den Standort für ${object} von ${from ?? "—"} zu ${to ?? "—"}`,
+        "channel.broadcast.updated": ({ actor, object }) => `${actor} änderte Streamtitel und Kategorie für ${object}`,
         "member.added": ({ actor, object, to }) => `${actor} fügte ${object}${to === null ? "" : ` als ${to}`} hinzu`,
         "member.role_changed": ({ actor, object, from, to }) => `${actor} änderte die Rolle von ${object} von ${from ?? "—"} zu ${to ?? "—"}`,
         "member.removed": ({ actor, object, from }) => `${actor} entfernte ${object}${from === null ? "" : ` mit der Rolle ${from}`}`,
@@ -1519,8 +1520,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       broadcastGamePicker: {
         label: "Kategorie", hint: "Eine Kategorie auswählen.", search: "Kategorie suchen", searchHint: "Mindestens zwei Zeichen eingeben.",
         loading: "Kategorien werden geladen.", empty: "Keine Kategorien gefunden.", error: "Kategorien konnten nicht geladen werden.",
-        suggestions: "Vorschläge", allGames: "Kategorie auswählen", limitReached: "Es kann nur eine Kategorie gewählt werden.",
-        selectedCount: (count, maximum) => `${String(count)} von ${String(maximum)} ausgewählt`, remove: (name) => `${name} entfernen`,
+        suggestions: "Vorschläge", allGames: "Kategorie auswählen", remove: (name) => `${name} entfernen`,
       },
       bot: "Bot",
       botConnected: "Verbunden",
@@ -1755,6 +1755,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         "channel.time_zone.updated": ({ actor, object, from, to }) => `${actor} changed the time zone for ${object} from ${from ?? "—"} to ${to ?? "—"}`,
         "channel.default_chat_target.updated": ({ actor, object, from, to }) => `${actor} changed the default chat target for ${object} from ${from ?? "—"} to ${to ?? "—"}`,
         "channel.location.updated": ({ actor, object, from, to }) => `${actor} changed the location for ${object} from ${from ?? "—"} to ${to ?? "—"}`,
+        "channel.broadcast.updated": ({ actor, object }) => `${actor} changed the stream title and category for ${object}`,
         "channel.full_consent_changed": ({ actor, object, from, to }) => `${actor} changed full consent for ${object} from ${from ?? "—"} to ${to ?? "—"}`,
         "member.added": ({ actor, object, to }) => `${actor} added ${object}${to === null ? "" : ` as ${to}`}`,
         "member.role_changed": ({ actor, object, from, to }) => `${actor} changed ${object}'s role from ${from ?? "—"} to ${to ?? "—"}`,
@@ -1937,8 +1938,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       broadcastGamePicker: {
         label: "Category", hint: "Select one category.", search: "Search categories", searchHint: "Enter at least two characters.",
         loading: "Loading categories.", empty: "No categories found.", error: "Categories could not be loaded.",
-        suggestions: "Suggestions", allGames: "Choose a category", limitReached: "Only one category can be selected.",
-        selectedCount: (count, maximum) => `${String(count)} of ${String(maximum)} selected`, remove: (name) => `Remove ${name}`,
+        suggestions: "Suggestions", allGames: "Choose a category", remove: (name) => `Remove ${name}`,
       },
       bot: "Bot",
       botConnected: "Connected",
@@ -2943,6 +2943,7 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "channel.time_zone.updated": "Kanalzeitzone geändert",
     "channel.default_chat_target.updated": "Standard-Chat-Ziel geändert",
     "channel.location.updated": "Kanalstandort geändert",
+    "channel.broadcast.updated": "Streamtitel und Kategorie geändert",
     "member.added": "Mitglied hinzugefügt",
     "member.role_changed": "Mitgliedsrolle geändert",
     "member.removed": "Mitglied entfernt",
@@ -3011,6 +3012,7 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "channel.time_zone.updated": "Channel time zone changed",
     "channel.default_chat_target.updated": "Default chat target changed",
     "channel.location.updated": "Channel location changed",
+    "channel.broadcast.updated": "Stream title and category changed",
     "member.added": "Member added",
     "member.role_changed": "Member role changed",
     "member.removed": "Member removed",
@@ -3099,7 +3101,7 @@ export const auditUnknownActionLabel = (language: DashboardLanguage = dashboardL
 
 const auditObjectFallbacks: LocaleCatalog<Partial<Record<AuditAction, string>>> = {
   de: {
-    "channel.released": "Kanal", "channel.full_consent_changed": "Kanal", "channel.time_zone.updated": "Kanal", "channel.default_chat_target.updated": "Kanal", "channel.location.updated": "Kanal",
+    "channel.released": "Kanal", "channel.full_consent_changed": "Kanal", "channel.time_zone.updated": "Kanal", "channel.default_chat_target.updated": "Kanal", "channel.location.updated": "Kanal", "channel.broadcast.updated": "Kanal",
     "member.added": "Mitglied", "member.role_changed": "Mitglied", "member.removed": "Mitglied",
     "chat_voting.template.created": "Abstimmungsvorlage", "chat_voting.template.updated": "Abstimmungsvorlage", "chat_voting.template.deleted": "Abstimmungsvorlage",
     "module.enabled": "Modul", "module.disabled": "Modul",
@@ -3118,7 +3120,7 @@ const auditObjectFallbacks: LocaleCatalog<Partial<Record<AuditAction, string>>> 
     "overlay.created": "Overlay", "overlay.updated": "Overlay", "overlay.deleted": "Overlay", "overlay.legacy.imported": "Overlay-Link",
   },
   en: {
-    "channel.released": "channel", "channel.full_consent_changed": "channel", "channel.time_zone.updated": "channel", "channel.default_chat_target.updated": "channel", "channel.location.updated": "channel",
+    "channel.released": "channel", "channel.full_consent_changed": "channel", "channel.time_zone.updated": "channel", "channel.default_chat_target.updated": "channel", "channel.location.updated": "channel", "channel.broadcast.updated": "channel",
     "member.added": "member", "member.role_changed": "member", "member.removed": "member",
     "chat_voting.template.created": "chat vote template", "chat_voting.template.updated": "chat vote template", "chat_voting.template.deleted": "chat vote template",
     "module.enabled": "module", "module.disabled": "module",
@@ -3171,14 +3173,14 @@ export const memberAsWord = (language: DashboardLanguage = dashboardLanguage()):
 type AuditFieldKey =
   | "role" | "enabled" | "fullConsent" | "revocationReason" | "expiresAt" | "createdAt" | "revokedAt"
   | "length" | "retryAfter" | "clipId" | "tokenId" | "login" | "displayName" | "leadSeconds" | "name"
-  | "value" | "description" | "overlayId" | "categoryId" | "timeZone" | "locationName" | "locationTimeZone" | "latitude" | "longitude" | "width" | "height" | "revision" | "elementCount";
+  | "value" | "description" | "overlayId" | "categoryId" | "gameId" | "title" | "timeZone" | "locationName" | "locationTimeZone" | "latitude" | "longitude" | "width" | "height" | "revision" | "elementCount";
 
 const auditFieldLabels: LocaleCatalog<Record<AuditFieldKey, string>> = {
   de: {
     role: "Rolle", enabled: "Aktiv", fullConsent: "Vollzustimmung", revocationReason: "Widerrufsgrund",
     expiresAt: "Gültig bis", createdAt: "Erstellt am", revokedAt: "Widerrufen am", length: "Länge (Sekunden)", retryAfter: "Erneut möglich ab",
     clipId: "Clip-ID", tokenId: "Token-ID", login: "Login", displayName: "Anzeigename", leadSeconds: "Vorlaufzeit",
-    name: "Objektname", value: "Wert", description: "Beschreibung", overlayId: "Overlay-ID", categoryId: "Kategorie-ID",
+    name: "Objektname", value: "Wert", description: "Beschreibung", overlayId: "Overlay-ID", categoryId: "Kategorie-ID", gameId: "Twitch-Kategorie-ID", title: "Streamtitel",
     timeZone: "Kanalzeitzone", locationName: "Standort", locationTimeZone: "Standortzeitzone", latitude: "Breitengrad", longitude: "Längengrad",
     width: "Breite", height: "Höhe", revision: "Revision", elementCount: "Elemente",
   },
@@ -3186,7 +3188,7 @@ const auditFieldLabels: LocaleCatalog<Record<AuditFieldKey, string>> = {
     role: "Role", enabled: "Enabled", fullConsent: "Full consent", revocationReason: "Revocation reason",
     expiresAt: "Valid until", createdAt: "Created at", revokedAt: "Revoked at", length: "Length (seconds)", retryAfter: "Retry after",
     clipId: "Clip ID", tokenId: "Token ID", login: "Login", displayName: "Display name", leadSeconds: "lead time",
-    name: "Object name", value: "Value", description: "Description", overlayId: "Overlay ID", categoryId: "Category ID",
+    name: "Object name", value: "Value", description: "Description", overlayId: "Overlay ID", categoryId: "Category ID", gameId: "Twitch category ID", title: "Stream title",
     timeZone: "Channel time zone", locationName: "Location", locationTimeZone: "Location time zone", latitude: "Latitude", longitude: "Longitude",
     width: "Width", height: "Height", revision: "Revision", elementCount: "Elements",
   },
