@@ -615,17 +615,20 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
         <Icon name="plus" size={16} />{labels.add}
       </Button>
     </div>
-    <SegmentChoice
-      label={labels.filterLabel}
-      size="compact"
-      value={filter}
-      onChange={setFilter}
-      options={[
-        { value: "all", label: labels.filterAll },
-        { value: "active", label: labels.filterActive },
-        { value: "paused", label: labels.filterPaused },
-      ]}
-    />
+    <div className="faq-panel__filter-row">
+      <SegmentChoice
+        label={labels.filterLabel}
+        size="compact"
+        value={filter}
+        onChange={setFilter}
+        options={[
+          { value: "all", label: labels.filterAll },
+          { value: "active", label: labels.filterActive },
+          { value: "paused", label: labels.filterPaused },
+        ]}
+      />
+      <span className="faq-panel__entry-count">{labels.entryCount(visibleEntries.length)}</span>
+    </div>
     <RuleNote>{labels.priorityNote}</RuleNote>
   </div>;
 

@@ -151,13 +151,16 @@ test("template editor stays in place while registered variables arrive", async (
   const desktopBefore = { editor: await box(editor), insertVariable: await box(insertVariable) };
 
   await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator(".collection-page")).toHaveAttribute("data-single-column", "true");
   const mobileBefore = { editor: await box(editor), insertVariable: await box(insertVariable) };
   releaseResponse();
   await expect(insertVariable).toBeVisible();
 
   await page.setViewportSize({ width: 1280, height: 844 });
+  await expect(page.locator(".collection-page")).toHaveAttribute("data-single-column", "false");
   expect({ editor: await box(editor), insertVariable: await box(insertVariable) }).toEqual(desktopBefore);
   await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator(".collection-page")).toHaveAttribute("data-single-column", "true");
   expect({ editor: await box(editor), insertVariable: await box(insertVariable) }).toEqual(mobileBefore);
 });
 

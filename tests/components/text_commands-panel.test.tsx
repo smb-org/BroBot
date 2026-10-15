@@ -193,7 +193,7 @@ describe("Text command editor", () => {
     const list = await commandList();
     expect(within(list).getByText("!discord")).toBeVisible();
     expect(within(list).queryByText("!hallo")).not.toBeInTheDocument();
-    expect(document.querySelector(".text-command-filter-count")).toHaveTextContent("1 Einträge");
+    expect(document.querySelector(".text-command-filter-count")).toHaveTextContent("1 Eintrag");
   });
 
   it.each([
@@ -207,7 +207,7 @@ describe("Text command editor", () => {
     const searchBox = await screen.findByRole("textbox", { name: search });
     expect(document.querySelector(".list-toolbar__search .ui-field__clear")).toHaveAttribute("aria-label", clear);
     fireEvent.change(searchBox, { target: { value: "hallo" } });
-    expect(document.querySelector(".text-command-filter-count")).toHaveTextContent(usage.includes(" of ") ? "1 entries" : "1 Einträge");
+    expect(document.querySelector(".text-command-filter-count")).toHaveTextContent(usage.includes(" of ") ? "1 entry" : "1 Eintrag");
   });
 
   it("uses the panel language for commands without a response", async () => {

@@ -469,9 +469,9 @@ test("FAQ mobile editor scrolls its final field above the fixed save bar", async
 
   await expect(page.getByRole("heading", { name: "FAQ & Auto-Antworten", level: 1 })).toHaveCount(1);
   const search = page.locator(".faq-panel__toolbar-top input");
-  const status = page.locator(".faq-panel__toolbar > .segment-choice-field");
+  const status = page.locator(".faq-panel__filter-row > .segment-choice-field");
   const searchStatusGap = await search.evaluate((element) => {
-    const statusField = document.querySelector(".faq-panel__toolbar > .segment-choice-field");
+    const statusField = document.querySelector(".faq-panel__filter-row > .segment-choice-field");
     if (statusField === null) throw new Error("The FAQ status filter is missing.");
     return statusField.getBoundingClientRect().top - element.getBoundingClientRect().bottom;
   });

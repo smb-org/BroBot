@@ -6,6 +6,7 @@ import { formatCharacterCount, formatCharacterTotal, formatCount } from "../../.
 
 export interface FaqTexts {
   title: string;
+  entryCount: (count: number) => string;
   add: string;
   newEntry: string;
   noSelection: string;
@@ -123,7 +124,7 @@ const templateMessages: LocaleCatalog<TemplateTextFieldMessages> = {
 
 const catalog: LocaleCatalog<FaqTexts> = {
   de: {
-    title: "FAQ & Auto-Antworten", add: "Neu", newEntry: "Neue Antwort", noSelection: "Wähle eine Antwort aus oder erstelle eine neue.",
+    title: "FAQ & Auto-Antworten", entryCount: (count) => `${String(count)} ${count === 1 ? "Eintrag" : "Einträge"}`, add: "Neu", newEntry: "Neue Antwort", noSelection: "Wähle eine Antwort aus oder erstelle eine neue.",
     noEntries: "Noch keine FAQ-Antworten.", emptySearch: "Keine Antwort passt zu deiner Suche.", search: "Antwort oder Auslöser suchen", searchPlaceholder: "FAQ durchsuchen", clearSearch: "Suche leeren",
     filterAll: "Alle", filterActive: "Aktiv", filterPaused: "Pausiert", filterLabel: "Status", priorityNote: "Die erste passende Antwort gewinnt. Ziehe Einträge an eine neue Stelle; Alt+↑/↓ verschiebt die Auswahl sofort.",
     keyboardMove: "Position sofort ändern", priorityMeta: (priority) => `Priorität ${String(priority)}`, prioritySaved: "Priorität gespeichert.", undo: "Rückgängig",
@@ -171,7 +172,7 @@ const catalog: LocaleCatalog<FaqTexts> = {
     },
   },
   en: {
-    title: "FAQ & Auto replies", add: "New", newEntry: "New answer", noSelection: "Choose an answer or create a new one.",
+    title: "FAQ & Auto replies", entryCount: (count) => `${String(count)} ${count === 1 ? "entry" : "entries"}`, add: "New", newEntry: "New answer", noSelection: "Choose an answer or create a new one.",
     noEntries: "No FAQ answers yet.", emptySearch: "No answer matches your search.", search: "Search answers or triggers", searchPlaceholder: "Search FAQ", clearSearch: "Clear search",
     filterAll: "All", filterActive: "Active", filterPaused: "Paused", filterLabel: "Status", priorityNote: "The first matching answer wins. Drag entries to reorder them; Alt+↑/↓ moves the selection immediately.",
     keyboardMove: "Change position immediately", priorityMeta: (priority) => `Priority ${String(priority)}`, prioritySaved: "Priority saved.", undo: "Undo",

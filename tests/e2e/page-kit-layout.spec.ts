@@ -7,6 +7,7 @@ test("page kit stays within narrow viewports, uses shared collection widths, and
 
   for (const [width, expectedListWidth] of [[390, null], [1280, 360], [1920, 420], [2560, 480]] as const) {
     await page.setViewportSize({ width, height: 900 });
+    await expect(page.locator(".collection-page")).toHaveAttribute("data-single-column", width === 390 ? "true" : "false");
     const geometry = await page.evaluate(() => {
       const list = document.querySelector<HTMLElement>(".collection-page__list");
       const detail = document.querySelector<HTMLElement>(".collection-page__detail");
