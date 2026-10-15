@@ -33,6 +33,7 @@ import { ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, ModuleW
 import { preloadModulePanel } from "./module-panel-loaders";
 import { BroadcasterConsentAction } from "./channel-actions";
 import { refreshAfterModuleToggle } from "./data/module-toggle";
+import { updateChannelCache } from "./data/channel-cache";
 import { useSystemQuery } from "./data/lists";
 import { ChannelCommandPalette } from "./command-palette";
 import { MembersPage } from "./members";
@@ -1169,12 +1170,12 @@ export const DashboardApp = (): ReactElement => {
   const reloadAfterModuleToggle = async (channelId: string): Promise<void> => refreshAfterModuleToggle(queryClient, channelId);
 
   const recheckModerator = useCallback(async (channelId: string): Promise<void> => {
+    const requestStartedAt = Date.now();
     const { moderator } = await refreshModeratorStatus(channelId);
-    queryClient.setQueryData<PanelChannelsResponse>(queryKeys.channels(), (current) => current === undefined ? current : {
-      ...current,
-      channels: current.channels.map((channel) => channel.channelId === channelId ? { ...channel, moderator } : channel),
+    updateChannelCache(queryClient, channelId, requestStartedAt, {
+      channel: (current) => ({ ...current, moderator }),
+      overview: (current) => ({ ...current, moderator }),
     });
-    queryClient.setQueryData<PanelChannelOverview>(queryKeys.channel(channelId, "overview"), (current) => current === undefined ? current : { ...current, moderator });
   }, [queryClient]);
 
   const reloadOverview = useCallback(async (): Promise<void> => {

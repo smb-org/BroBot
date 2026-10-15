@@ -1,12 +1,10 @@
-import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import type { ChannelStreamState } from "../contracts/values";
 import type { PanelChannelOverview, PanelModuleState } from "../panel-contract";
-import type { BelaboxStatusResponse } from "../modules/belabox/contracts";
 import type { ModuleImmediateActionResult, ModuleLiveTileSnapshot } from "../modules/contract";
 import { MODULES } from "../modules/registry";
-import { fetchChannelOverview } from "./api";
 import type { DashboardRoute } from "./router";
 import { dashboardTexts, formatNumber } from "./locale";
 import { useEventsQuery, useOverlaysQuery } from "./data/lists";
@@ -17,6 +15,14 @@ import { LiveCockpitEventFeed, LiveCockpitTiles } from "./LiveCockpitParts";
 import { browserTimeZone } from "./ui/format-relative-time";
 import { useChannelSettings } from "./data/channel-settings";
 import { emptyEventFilter } from "./events/model";
+import {
+  belaboxObservationFromStatus,
+  belaboxObservationIsExpired,
+  failedBelaboxObservation,
+  latestBelaboxObservation,
+  successfulManualBelaboxObservation,
+  type LiveCockpitBelaboxObservation,
+} from "./live-cockpit-belabox";
 
 const formatDuration = (startedAt: string | null | undefined, now: number): string => {
   if (startedAt == null) return "—";
@@ -57,8 +63,22 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
   const [now, setNow] = useState(() => Date.now());
   const queryClient = useQueryClient();
   const moduleState = useMemo(() => new Map(modules.map((module) => [module.id, module.enabled])), [modules]);
-  const [belaboxStatus, setBelaboxStatus] = useState<{ data: BelaboxStatusResponse | null; failed: boolean }>({ data: null, failed: false });
-  const [belaboxActionSample, setBelaboxActionSample] = useState<{ channelId: string; connected: boolean; bitrateKbps: number; sampledAt: number } | null>(null);
+  const [belaboxObservationState, setBelaboxObservationState] = useState<{ channelId: string; observation: LiveCockpitBelaboxObservation } | null>(null);
+  const belaboxObservationClock = useRef(0);
+  const nextBelaboxObservationAt = useCallback((): number => {
+    const observedAt = Math.max(Date.now(), belaboxObservationClock.current + 1);
+    belaboxObservationClock.current = observedAt;
+    return observedAt;
+  }, []);
+  const recordBelaboxObservation = useCallback((
+    channelId: string,
+    create: (current: LiveCockpitBelaboxObservation | null) => LiveCockpitBelaboxObservation,
+  ): void => {
+    setBelaboxObservationState((current) => {
+      const previous = current?.channelId === channelId ? current.observation : null;
+      return { channelId, observation: latestBelaboxObservation(previous, create(previous)) };
+    });
+  }, []);
   const overlaysQuery = useOverlaysQuery(overview.channelId);
   const eventsQuery = useEventsQuery(overview.channelId, emptyEventFilter, 30_000);
   const channelSettings = useChannelSettings(overview.channelId);
@@ -95,33 +115,11 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
 
   useEffect(() => {
     if (streamState !== "online") return;
-    let active = true;
-    let inFlight = false;
-    let controller: AbortController | null = null;
-    const refresh = async (): Promise<void> => {
-      if (inFlight) return;
-      inFlight = true;
-      controller = new AbortController();
-      try {
-        const freshOverview = await fetchChannelOverview(overview.channelId, controller.signal);
-        if (active) {
-          queryClient.setQueryData<PanelChannelOverview>(queryKeys.channel(overview.channelId, "overview"), (current) =>
-            current === undefined ? current : { ...current, ...freshOverview, viewerCount: freshOverview.viewerCount ?? null });
-        }
-      } catch (error: unknown) {
-        if (active && !(error instanceof Error && error.name === "AbortError")) {
-          // Keep the last useful viewer count until a later refresh succeeds.
-        }
-      } finally {
-        inFlight = false;
-      }
+    const refresh = (): void => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.channel(overview.channelId, "overview"), exact: true });
     };
-    const interval = window.setInterval(() => { void refresh(); }, 30_000);
-    return () => {
-      active = false;
-      controller?.abort();
-      window.clearInterval(interval);
-    };
+    const interval = window.setInterval(refresh, 30_000);
+    return () => { window.clearInterval(interval); };
   }, [overview.channelId, queryClient, streamState]);
 
   useEffect(() => {
@@ -131,13 +129,14 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
     const refresh = async (): Promise<void> => {
       controller?.abort();
       controller = new AbortController();
+      const observedAt = nextBelaboxObservationAt();
       try {
         const service = await import("../modules/belabox/panel/service");
         const data = await service.loadBelaboxStatus(overview.channelId, controller.signal);
-        if (active) setBelaboxStatus({ data, failed: false });
+        if (active) recordBelaboxObservation(overview.channelId, () => belaboxObservationFromStatus(data, observedAt));
       } catch (error: unknown) {
         if (!active || (error instanceof Error && error.name === "AbortError")) return;
-        setBelaboxStatus({ data: null, failed: true });
+        recordBelaboxObservation(overview.channelId, (previous) => failedBelaboxObservation(observedAt, previous));
       }
     };
     void refresh();
@@ -147,19 +146,15 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
       controller?.abort();
       window.clearInterval(interval);
     };
-  }, [belaboxEnabled, overview.channelId]);
+  }, [belaboxEnabled, nextBelaboxObservationAt, overview.channelId, recordBelaboxObservation]);
 
-  const statusSample = belaboxStatus.data?.sample ?? null;
-  const actionSample = belaboxActionSample?.channelId === overview.channelId ? belaboxActionSample : null;
-  const statusSampleAt = statusSample === null ? Number.NEGATIVE_INFINITY : Date.parse(statusSample.at);
-  const freshActionSample = actionSample !== null && actionSample.sampledAt > statusSampleAt ? actionSample : null;
-  const sampleConnected = freshActionSample?.connected ?? statusSample?.connected ?? false;
-  const sampleBitrate = freshActionSample?.bitrateKbps ?? statusSample?.bitrateKbps ?? 0;
-  const belaboxFetchFailed = belaboxStatus.data !== null &&
-    (belaboxStatus.data.fetchFailureNotice || belaboxStatus.data.errorCode !== null);
-  const belaboxUnavailable = belaboxFetchFailed ||
-    belaboxStatus.failed && statusSample === null && freshActionSample === null;
-  const belaboxWeak = belaboxEnabled && belaboxStatus.data?.configured === true && statusSample?.phase === "low";
+  const belaboxObservation = belaboxObservationState?.channelId === overview.channelId ? belaboxObservationState.observation : null;
+  const belaboxUnavailable = belaboxObservation !== null &&
+    (belaboxObservation.failed || belaboxObservationIsExpired(belaboxObservation, now));
+  const sampleConnected = belaboxObservation !== null && !belaboxUnavailable &&
+    belaboxObservation.sampledAt !== null && belaboxObservation.connected;
+  const sampleBitrate = belaboxObservation?.bitrateKbps ?? 0;
+  const belaboxWeak = belaboxEnabled && !belaboxUnavailable && belaboxObservation?.configured === true && belaboxObservation.phase === "low";
   const liveDataFailed = liveQuery.isError || liveQuery.data?.failed === true || overlaysQuery.isError || eventsQuery.isError;
   const liveDataPending = liveQuery.isPending || overlaysQuery.isPending || eventsQuery.isPending;
   const footerStatus: "ok" | "warn" | "loading" = !botConnected || liveDataFailed
@@ -210,15 +205,15 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
       <div className="live-cockpit-header__indicators" aria-label={labels.statusIndicators}>
         <StatusLed state={botConnected ? "ok" : "off"} label={`${labels.bot} · ${botConnected ? labels.botConnected : labels.botUnavailable}`} />
         <StatusLed
-          state={!belaboxEnabled || belaboxStatus.data?.configured === false ? "off" : belaboxUnavailable ? "warn" : statusSample?.phase === "low" ? "warn" : sampleConnected ? "ok" : "warn"}
+          state={!belaboxEnabled || belaboxObservation?.configured === false ? "off" : belaboxUnavailable || belaboxObservation === null ? "warn" : belaboxObservation.phase === "low" ? "warn" : sampleConnected ? "ok" : "warn"}
           label={`${labels.belabox} · ${!belaboxEnabled
             ? labels.belaboxDisabled
-            : belaboxStatus.data === null && !belaboxStatus.failed && freshActionSample === null
+            : belaboxObservation === null
               ? labels.belaboxChecking
-              : belaboxUnavailable
-                ? labels.belaboxUnavailable
-                : belaboxStatus.data?.configured === false
-                  ? labels.belaboxNotConfigured
+              : belaboxObservation.configured === false
+                ? labels.belaboxNotConfigured
+                : belaboxUnavailable
+                  ? labels.belaboxUnavailable
                   : sampleConnected
                     ? labels.belaboxConnected(formatNumber(Math.round(sampleBitrate)))
                     : labels.belaboxDisconnected}`}
@@ -245,9 +240,23 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
         role={overview.role}
         modules={modules}
         modulesLoaded={modulesLoaded}
-        onActionResult={(moduleId: string, result: ModuleImmediateActionResult) => {
+        onActionStart={(moduleId: string, actionId: string) => moduleId === "belabox" && actionId === "check-belabox"
+          ? nextBelaboxObservationAt()
+          : Date.now()}
+        onActionResult={(moduleId: string, result: ModuleImmediateActionResult, observedAt: number) => {
           if (moduleId === "belabox" && result.belaboxSample !== undefined) {
-            setBelaboxActionSample({ channelId: overview.channelId, ...result.belaboxSample });
+            recordBelaboxObservation(overview.channelId, (previous) => successfulManualBelaboxObservation(
+              observedAt,
+              result.belaboxSample?.sampledAt ?? Date.now(),
+              result.belaboxSample?.connected ?? false,
+              result.belaboxSample?.bitrateKbps ?? 0,
+              previous,
+            ));
+          }
+        }}
+        onActionFailure={(moduleId: string, actionId: string, observedAt: number) => {
+          if (moduleId === "belabox" && actionId === "check-belabox") {
+            recordBelaboxObservation(overview.channelId, (previous) => failedBelaboxObservation(observedAt, previous));
           }
         }}
         onFeedbackMessage={(text, link) => { showFooterMessage({ text, ...(link === undefined ? {} : { link }) }); }}

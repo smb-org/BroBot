@@ -1,4 +1,5 @@
 import type { Page, Route } from "@playwright/test";
+import type { PanelChannelControls } from "../../src/panel-contract";
 
 const json = (value: unknown, status = 200) => ({ status, contentType: "application/json", body: JSON.stringify(value) });
 
@@ -18,6 +19,8 @@ export interface LiveCockpitMockOptions {
   location?: { name: string; latitude: number; longitude: number; timeZone: string } | null;
   viewerCount?: number | null;
   nextViewerCount?: number | null;
+  nextViewerCountAfter?: number;
+  controls?: PanelChannelControls;
   tokens?: { botExpiresAt: string | null; loginStatus: "connected" | "error" | "revoked" | null; loginReason: string | null; loginExpiresAt: string | null };
   vote?: Record<string, unknown> | null;
   votekick?: Record<string, unknown> | null;
@@ -36,6 +39,7 @@ export interface LiveCockpitMockController {
   eventRequestCount: () => number;
   setEventsError: (failed: boolean) => void;
   overviewRequestCount: () => number;
+  setControls: (controls: PanelChannelControls) => void;
   settingsState: () => {
     timeZone: string;
     revision: number;
@@ -88,16 +92,20 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
   let overviewRequests = 0;
   let eventRequests = 0;
   let eventsFailed = options.eventsError ?? false;
+  let controls = options.controls ?? {
+    mute: { active: false, until: null, mode: null },
+    pause: { active: false, until: null, mode: null },
+  };
 
   await page.route("**/api/**", async (route: Route) => {
     const { pathname } = new URL(route.request().url());
     const method = route.request().method();
     const channelPrefix = `/api/channels/${channelId}`;
-    if (pathname === "/api/channels") return route.fulfill(json({ channels: [channel], bot, viewerUserId: options.viewerUserId ?? "viewer-live-regression" }));
+    if (pathname === "/api/channels") return route.fulfill(json({ channels: [{ ...channel, controls }], bot, viewerUserId: options.viewerUserId ?? "viewer-live-regression" }));
     if (pathname === `${channelPrefix}/overview`) {
       overviewRequests += 1;
-      const viewerCount = overviewRequests < 3 ? options.viewerCount ?? 42 : options.nextViewerCount ?? options.viewerCount ?? 42;
-      return route.fulfill(json({ ...channel, tokens, viewerCount, activeModules: modules.filter((module) => module.enabled).map(({ id, settings: moduleSettings }) => ({ moduleId: id, settings: moduleSettings })) }));
+      const viewerCount = overviewRequests < (options.nextViewerCountAfter ?? 3) ? options.viewerCount ?? 42 : options.nextViewerCount ?? options.viewerCount ?? 42;
+      return route.fulfill(json({ ...channel, controls, tokens, viewerCount, activeModules: modules.filter((module) => module.enabled).map(({ id, settings: moduleSettings }) => ({ moduleId: id, settings: moduleSettings })) }));
     }
     if (pathname === `${channelPrefix}/modules` && method === "GET") return route.fulfill(json({ modules }));
     if (pathname === `${channelPrefix}/settings` && method === "GET") return route.fulfill(json(settings));
@@ -197,6 +205,7 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
     eventRequestCount: () => eventRequests,
     setEventsError: (failed) => { eventsFailed = failed; },
     overviewRequestCount: () => overviewRequests,
+    setControls: (nextControls) => { controls = nextControls; },
     settingsState: () => settings,
   };
 };
