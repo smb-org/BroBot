@@ -7,6 +7,14 @@ import { prepareModuleAudit } from "../../src/worker/module-audit";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
+const setChatVotingEnabled = async (database: TestD1Database, enabled: boolean): Promise<void> => {
+  await database.prepare(
+    `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+     VALUES ('fictional-channel', 'chat_voting', ?, '{}')
+     ON CONFLICT (channel_id, module_id) DO UPDATE SET enabled = excluded.enabled`,
+  ).bind(Number(enabled)).run();
+};
+
 describe("chat voting repository mutation guards", () => {
   it("creates, revision-saves, conflicts, deletes, and resolves a legacy alias", async () => {
     const database = new TestD1Database();
@@ -151,6 +159,7 @@ describe("chat voting repository mutation guards", () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "fictional-channel");
+      await setChatVotingEnabled(database, true);
       const repository = createChatVotingRepository(database as unknown as D1Database);
       const vote: ChatVoteDraft = {
         id: "question-poll",
@@ -183,6 +192,7 @@ describe("chat voting repository mutation guards", () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "fictional-channel");
+      await setChatVotingEnabled(database, true);
       await insertLoginIdentityAndSession(database, "fictional-operator");
       await insertMember(database, "fictional-channel", "fictional-operator", "operator");
       const repository = createChatVotingRepository(database as unknown as D1Database);
@@ -209,7 +219,7 @@ describe("chat voting repository mutation guards", () => {
         "DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?",
       ).bind("fictional-channel", "fictional-operator").run();
 
-      await expect(repository.requestManualClose("fictional-channel", vote.id, authorization)).resolves.toBe(false);
+      await expect(repository.requestManualClose("fictional-channel", vote.id, vote.closesAt, authorization)).resolves.toBe(false);
       await expect(repository.open("fictional-channel")).resolves.toMatchObject({ id: vote.id, status: "open" });
     } finally {
       database.close();
@@ -220,6 +230,7 @@ describe("chat voting repository mutation guards", () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "fictional-channel");
+      await setChatVotingEnabled(database, true);
       const repository = createChatVotingRepository(database as unknown as D1Database);
       const vote: ChatVoteDraft = {
         id: "fictional-poll",
@@ -234,19 +245,154 @@ describe("chat voting repository mutation guards", () => {
         closeReason: "limit",
       };
       await repository.insertOpen(vote);
-      await expect(repository.requestManualClose("fictional-channel", vote.id)).resolves.toBe(true);
+      await expect(repository.requestManualClose("fictional-channel", vote.id, vote.closesAt)).resolves.toBe(true);
       await expect(repository.open("fictional-channel")).resolves.toMatchObject({
         id: vote.id,
-        status: "open",
+        status: "closing",
         closeReason: "manual",
       });
 
-      await expect(repository.requestManualClose("fictional-channel", vote.id)).resolves.toBe(true);
+      await expect(repository.requestManualClose("fictional-channel", vote.id, vote.closesAt)).resolves.toBe(true);
 
       await expect(repository.open("fictional-channel")).resolves.toMatchObject({
-        status: "open",
+        status: "closing",
         closeReason: "manual",
         requestedDurationSeconds: 120,
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("fences alarms, extensions, and manual close against the persisted deadline", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "fictional-channel");
+      await setChatVotingEnabled(database, true);
+      const repository = createChatVotingRepository(database as unknown as D1Database);
+      const vote: ChatVoteDraft = {
+        id: "fictional-poll",
+        channelId: "fictional-channel",
+        kind: "yes_no",
+        optionCount: 2,
+        labels: ["Yes", "No"],
+        title: null,
+        openedAt: "2026-10-04T10:00:00.000Z",
+        closesAt: "2026-10-04T14:00:00.000Z",
+        requestedDurationSeconds: 120,
+        closeReason: "timer",
+      };
+      await repository.insertOpen(vote);
+      const extendedDeadline = "2026-10-04T14:02:00.000Z";
+      const nextExtension = "2026-10-04T14:04:00.000Z";
+
+      await expect(repository.extendClose("fictional-channel", vote.id, vote.closesAt, extendedDeadline)).resolves.toBe(true);
+      await expect(repository.requestManualClose("fictional-channel", vote.id, vote.closesAt)).resolves.toBe(false);
+      await expect(repository.claimAlarmClose("fictional-channel", vote.id, vote.closesAt, "2026-10-04T14:01:00.000Z")).resolves.toBe(false);
+      await expect(repository.claimAlarmClose("fictional-channel", vote.id, extendedDeadline, "2026-10-04T14:01:00.000Z")).resolves.toBe(false);
+      await expect(repository.extendClose("fictional-channel", vote.id, vote.closesAt, nextExtension)).resolves.toBe(false);
+
+      await expect(repository.requestManualClose("fictional-channel", vote.id, extendedDeadline)).resolves.toBe(true);
+      await expect(repository.extendClose("fictional-channel", vote.id, extendedDeadline, nextExtension)).resolves.toBe(false);
+      await expect(repository.open("fictional-channel")).resolves.toMatchObject({
+        status: "closing",
+        closesAt: extendedDeadline,
+        closeReason: "manual",
+        deadlineRevision: 2,
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("increments the deadline revision when an alarm first claims the close", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "fictional-channel");
+      await setChatVotingEnabled(database, true);
+      const repository = createChatVotingRepository(database as unknown as D1Database);
+      const vote: ChatVoteDraft = {
+        id: "alarm-claim-poll",
+        channelId: "fictional-channel",
+        kind: "yes_no",
+        optionCount: 2,
+        labels: ["Yes", "No"],
+        title: null,
+        openedAt: "2026-10-04T10:00:00.000Z",
+        closesAt: "2026-10-04T14:00:00.000Z",
+        requestedDurationSeconds: 120,
+        closeReason: "timer",
+      };
+      await repository.insertOpen(vote);
+
+      await expect(repository.claimAlarmClose("fictional-channel", vote.id, vote.closesAt, "2026-10-04T14:01:00.000Z"))
+        .resolves.toBe(true);
+      await expect(repository.byId("fictional-channel", vote.id)).resolves.toMatchObject({
+        status: "closing",
+        deadlineRevision: 1,
+      });
+      await expect(repository.claimAlarmClose("fictional-channel", vote.id, vote.closesAt, "2026-10-04T14:02:00.000Z"))
+        .resolves.toBe(false);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("does not start a vote in the SQL statement when chat voting is disabled", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "fictional-channel");
+      await setChatVotingEnabled(database, false);
+      const repository = createChatVotingRepository(database as unknown as D1Database);
+      const vote: ChatVoteDraft = {
+        id: "disabled-start-poll",
+        channelId: "fictional-channel",
+        kind: "yes_no",
+        optionCount: 2,
+        labels: ["Yes", "No"],
+        title: null,
+        openedAt: "2026-10-04T10:00:00.000Z",
+        closesAt: "2026-10-04T14:00:00.000Z",
+        requestedDurationSeconds: 120,
+        closeReason: "timer",
+      };
+
+      await expect(repository.insertOpen(vote)).resolves.toBe(false);
+      await expect(repository.open("fictional-channel")).resolves.toBeNull();
+    } finally {
+      database.close();
+    }
+  });
+
+  it("does not close or extend a vote after chat voting is disabled", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "fictional-channel");
+      await setChatVotingEnabled(database, true);
+      const repository = createChatVotingRepository(database as unknown as D1Database);
+      const vote: ChatVoteDraft = {
+        id: "disabled-mutation-poll",
+        channelId: "fictional-channel",
+        kind: "yes_no",
+        optionCount: 2,
+        labels: ["Yes", "No"],
+        title: null,
+        openedAt: "2026-10-04T10:00:00.000Z",
+        closesAt: "2026-10-04T14:00:00.000Z",
+        requestedDurationSeconds: 120,
+        closeReason: "timer",
+      };
+      await expect(repository.insertOpen(vote)).resolves.toBe(true);
+      await setChatVotingEnabled(database, false);
+
+      await expect(repository.requestManualClose("fictional-channel", vote.id, vote.closesAt)).resolves.toBe(false);
+      await expect(repository.extendClose("fictional-channel", vote.id, vote.closesAt, "2026-10-04T14:02:00.000Z"))
+        .resolves.toBe(false);
+      await expect(repository.open("fictional-channel")).resolves.toMatchObject({
+        id: vote.id,
+        status: "open",
+        closesAt: vote.closesAt,
+        deadlineRevision: 0,
       });
     } finally {
       database.close();

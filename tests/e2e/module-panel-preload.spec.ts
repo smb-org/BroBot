@@ -153,7 +153,7 @@ test("idle preload warms every registered chunk for enabled modules only", async
   const chunkRequests = Promise.all([
     page.waitForRequest((request) => new URL(request.url()).pathname.endsWith("/src/modules/ads/panel/index.tsx")),
     page.waitForRequest((request) => new URL(request.url()).pathname.endsWith("/src/modules/ads/panel/settings-editor.ts")),
-    page.waitForRequest((request) => new URL(request.url()).pathname.endsWith("/src/modules/ads/panel/immediate-actions.tsx")),
+    page.waitForRequest((request) => new URL(request.url()).pathname.endsWith("/src/modules/ads/panel/action-content.tsx")),
   ]);
   await page.evaluate(() => {
     type IdleTestWindow = Window & { __idleCallbacks?: Array<() => void> };
@@ -165,7 +165,7 @@ test("idle preload warms every registered chunk for enabled modules only", async
   expect(requestedPaths.some((path) => path.includes("/src/modules/faq/panel/"))).toBe(false);
   expect(requestedPaths).toContain("/src/modules/ads/panel/index.tsx");
   expect(requestedPaths).toContain("/src/modules/ads/panel/settings-editor.ts");
-  expect(requestedPaths).toContain("/src/modules/ads/panel/immediate-actions.tsx");
+  expect(requestedPaths).toContain("/src/modules/ads/panel/action-content.tsx");
 });
 
 test("idle preload skips an enabled module hidden by missing broadcaster scopes", async ({ page }) => {
@@ -210,7 +210,7 @@ test("idle preload skips an enabled module hidden by missing broadcaster scopes"
   });
   await visibleChunkRequests;
 
-  expect(requestedPaths.some((path) => path.includes("/src/modules/ads/panel/")), requestedPaths.join("\n")).toBe(false);
+  expect(requestedPaths.some((path) => path.includes("/src/modules/ads/panel/index.tsx") || path.includes("/src/modules/ads/panel/settings-editor.ts") || path.includes("/src/modules/ads/panel/action-content.tsx")), requestedPaths.join("\n")).toBe(false);
 });
 
 test("cold module navigation keeps the reserved page height and scroll position while its chunk resolves", async ({ page }) => {
@@ -329,8 +329,9 @@ for (const lazyCase of lazyLayoutCases) {
       await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
     });
 
+    const panelEntry = ["sun", "moon", "weather"].includes(lazyCase.moduleId) ? "settings.tsx" : "index.tsx";
     const pattern = lazyCase.type === "module"
-      ? `**/src/modules/${lazyCase.moduleId}/panel/**`
+      ? `**/src/modules/${lazyCase.moduleId}/panel/${panelEntry}*`
       : `**/src/modules/${lazyCase.moduleId}/overlay/${lazyCase.chunk}.tsx*`;
     let markRequestStarted: () => void = () => undefined;
     const requestStarted = new Promise<void>((resolve) => { markRequestStarted = resolve; });

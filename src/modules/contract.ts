@@ -1,7 +1,7 @@
 import type { Hono } from "hono";
 import type { ComponentType } from "react";
 import type { z } from "zod";
-import type { AuditWriteAction, ChannelRole, ChannelStreamState, ChannelVariableOperation, ChatOutputTarget, ImmediateActionRequirement } from "../contracts/values";
+import type { AuditWriteAction, ChannelRole, ChannelStreamState, ChannelVariableOperation, ChatOutputTarget } from "../contracts/values";
 import type { TemplateContext, TemplateFields, TemplateVariable } from "../template";
 import type { SettingsEditorDefinition } from "../dashboard/ui";
 import type { ModerationResult, ModerationTimeoutExpectation } from "./contracts/moderation";
@@ -1285,21 +1285,89 @@ export interface ModulePanelProperties {
   initialSelection?: string;
 }
 
-/** Props for one lazily loaded card in the channel's immediate-action row. */
-export interface ModuleImmediateActionProperties {
+type ModuleImmediateActionIcon = "ad" | "shoutout" | "clip" | "broadcast" | "vote";
+
+type ModuleImmediateActionAvailability = {
+  reason: Readonly<Record<ModuleLanguage, string>> | null;
+  /** Used for short countdowns such as an open voting round. */
+  until?: number;
+  /** Snapshot identity that must accompany any later mutation from this action. */
+  pollId?: string;
+};
+
+interface ModuleImmediateActionConditionContext {
   channelId: string;
-  streamState?: ChannelStreamState | null;
-  /** Whether the channel member may use management-only actions. */
-  canManage?: boolean;
-  /** Localized by the host from the action's declared requirements and current stream state. */
-  availabilityReason: string | null;
+  streamState: ChannelStreamState | null | undefined;
+  language: ModuleLanguage;
+  signal: AbortSignal;
 }
 
-interface ModuleImmediateActionDefinition {
-  /** Conditions are evaluated by the host; the module remains enabled implicitly. */
-  requires: readonly ImmediateActionRequirement[];
-  /** Kept lazy so disabled modules add no immediate-action bytes to the panel bundle. */
-  load: () => Promise<{ default: ComponentType<ModuleImmediateActionProperties> }>;
+export type ModuleImmediateActionCondition = "streamLive" | {
+  check: (context: ModuleImmediateActionConditionContext) => Promise<ModuleImmediateActionAvailability>;
+};
+
+export interface ModuleImmediateActionContentProperties {
+  channelId: string;
+  language: ModuleLanguage;
+  onDraftChange?: (dirty: boolean) => void;
+}
+
+interface ModuleImmediateActionExecutionProperties extends ModuleImmediateActionContentProperties {
+  formData: FormData;
+  pollId?: string;
+}
+
+export interface ModuleImmediateActionResult {
+  message?: Readonly<Record<ModuleLanguage, string>>;
+  link?: { href: string; label: Readonly<Record<ModuleLanguage, string>> };
+  belaboxSample?: { connected: boolean; bitrateKbps: number; sampledAt: number };
+}
+
+export interface ModuleImmediateActionDefinition {
+  id: string;
+  name: Readonly<Record<ModuleLanguage, string>>;
+  icon: ModuleImmediateActionIcon;
+  conditions: readonly ModuleImmediateActionCondition[];
+  requiredRole: ChannelRole;
+  execute: (properties: ModuleImmediateActionExecutionProperties) => Promise<ModuleImmediateActionResult> | Promise<void>;
+  errorMessage?: Readonly<Record<ModuleLanguage, string>>;
+  content?: {
+    presentation: "popover" | "dialog";
+    load: () => Promise<{ default: ComponentType<ModuleImmediateActionContentProperties> }>;
+  };
+}
+
+export type ModuleLiveTileSnapshot =
+  | {
+    kind: "vote";
+    id: string;
+    title: string | null;
+    options: readonly { label: string; count: number }[];
+    totalVotes: number;
+    closesAt: string;
+    canExtend: boolean;
+  }
+  | {
+    kind: "votekick";
+    id: string;
+    target: string;
+    endsAt: string;
+    yesVotes: number;
+    noVotes: number;
+    threshold: number;
+  }
+  | {
+    kind: "upcoming";
+    id: string;
+    category: "timer" | "ad";
+    name: string;
+    at: string;
+    detail: string | null;
+    canSnooze?: boolean;
+  };
+
+interface ModuleLiveTileDefinition {
+  load: (channelId: string, signal: AbortSignal) => Promise<readonly ModuleLiveTileSnapshot[]>;
 }
 
 export type ModuleLanguage = "de" | "en";
@@ -1619,8 +1687,10 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   settingsEditorPlacement?: "before-panel" | "after-panel";
   /** Reconciles one module-owned alarm immediately after settings are saved. */
   settingsChangedAlarm?: { handlerKey: string; alarmKey: string };
-  /** Lazily loaded immediate-action card, shown only while this module is enabled. */
-  immediateActions?: ModuleImmediateActionDefinition;
+  /** Individual dashboard actions; only their optional content is loaded on demand. */
+  actions?: readonly ModuleImmediateActionDefinition[];
+  /** Optional live state read by the host; the host owns its fixed-size tile presentation. */
+  liveTile?: ModuleLiveTileDefinition;
 };
 
 /**

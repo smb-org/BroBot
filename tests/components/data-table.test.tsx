@@ -11,6 +11,22 @@ afterEach(() => {
 });
 
 describe("DataTable", () => {
+  it("spans the full table width for an empty state", () => {
+    const rows: { id: string; at: string; moduleGroup: string }[] = [];
+    render(<DataTable
+      ariaLabel="Ereignisprotokoll"
+      rows={rows}
+      columns={[{ key: "summary", label: "Eintrag", render: (row) => row.id }]}
+      timeZone="Europe/Berlin"
+      emptyLabel="Noch keine Ereignisse."
+    />);
+
+    const cell = screen.getByText("Noch keine Ereignisse.");
+    expect(cell).toHaveClass("data-table__empty");
+    expect(cell.closest("tr")).toHaveClass("data-table__empty-row");
+    expect(cell).toHaveAttribute("colspan", "2");
+  });
+
   it("groups channel-local days and exposes each exact time as title and accessible label", () => {
     const now = new Date("2026-10-13T12:00:00.000Z");
     const rows = [

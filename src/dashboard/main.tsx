@@ -14,7 +14,6 @@ import type {
   PanelChannelState,
   PanelEventFilters,
   PanelEventSubSubscription,
-  PanelLastError,
   PanelModeratorStatus,
   PanelModuleState,
   PanelModulesResponse,
@@ -23,47 +22,44 @@ import type {
 } from "../panel-contract";
 import {
   fetchChannelOverview,
-  fetchChannelSettings,
   fetchChannels,
   logout,
   PanelApiError,
   refreshModeratorStatus,
   setChannelControl,
-  saveChannelTimeZone,
-  saveChannelDefaultChatTarget,
   setChannelModuleEnabled,
-  type PanelChannelSettings,
 } from "./api";
 import { ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, ModuleWorkspace, NavigationIcon, StateRow, type StateTone } from "./module-panels";
 import { preloadModulePanel } from "./module-panel-loaders";
-import { BroadcasterConsentAction, ChannelNotices, ImmediateActions, ModeratorCheckAction, WarningsAndErrorsFeed } from "./stream-manager";
+import { BroadcasterConsentAction } from "./channel-actions";
 import { refreshAfterModuleToggle } from "./data/module-toggle";
+import { mergeChannelRefreshData, mergeChannelsRefreshData, runModeratorRecheck } from "./data/channel-cache";
+import { useMountedPageGuard } from "./data/page-generation";
 import { useSystemQuery } from "./data/lists";
 import { ChannelCommandPalette } from "./command-palette";
 import { MembersPage } from "./members";
 import { PlatformPage } from "./platform";
-import { channelPanelTexts, roleLabel } from "./labels";
+import { channelPanelTexts } from "./labels";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatTimestamp as formatTimestampBase, formatNumber, maintenanceReasonText } from "./locale";
-import { CHANNEL_CONTROL_DURATIONS, canManage, type ChannelControlDuration, type ChannelRole, type ChatOutputTarget } from "../contracts/values";
+import { CHANNEL_CONTROL_DURATIONS, canManage, type ChannelControlDuration, type ChannelRole } from "../contracts/values";
 import { MODULES } from "../modules/registry";
 import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardModeForRoute, dashboardRoutePath, dashboardRouteRequiresBot, routeForDashboardMode, routeForSelectedChannel, replaceDashboardRoute, useDashboardRoute, type DashboardMode, type DashboardRoute } from "./router";
 import { dashboardNavigationGroups, visibleModuleNavigationIds } from "./nav-pages";
-import { truncateTo200Chars } from "../text";
-import { BlockingState, Button, ChannelLocationMenu, ChatTargetField, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, LoadStateLines, notify, Select as UiSelect, Shell, Sidebar, StatusLed, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type StatusLedState } from "./ui";
+import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, LoadStateLines, notify, PageHeader, Select as UiSelect, Shell, Sidebar, StatusLed, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type StatusLedState } from "./ui";
 import { readPalette, writePalette, type Palette } from "./ui/palette";
 import { EventsPage } from "./events/EventsPage";
 import { emptyEventFilter, eventFilterIsActive } from "./events/model";
 import { AuditPage } from "./audit/AuditPage";
 import { ChannelVariablesPage } from "./ChannelVariablesPage";
+import { ChannelDefaultsEditor } from "./ChannelDefaultsEditor";
+import { ChannelLocationPage } from "./ChannelLocationPage";
+import { LiveCockpit } from "./LiveCockpit";
 import { OverlaysPage } from "./OverlaysPage";
 import { OverlayEditorPage } from "./OverlayEditorPage";
 import { emptyAuditFilter, auditFilterIsActive } from "./audit/model";
 import { useRealtimePanelMessages } from "./realtime";
 import { useDashboardRealtimeStatus } from "./data/realtime";
-import { channelSettingsTexts } from "./channel-settings-locale";
-import { ChannelTimeZoneField } from "./ChannelTimeZoneField";
-import { ChannelLocationField } from "./ChannelLocationField";
 import { botPermissionsAreMissing, broadcasterPermissionsAreMissing, moderatorIsMissing, parseDashboardDate, tokenHealth } from "./channel-health";
 import { loadingState, type LoadState } from "./load-state";
 import { queryKeys } from "./data/keys";
@@ -73,18 +69,6 @@ import { DashboardDataProvider } from "./data/provider";
 writePalette(readPalette());
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
-
-interface ModeratorCheckState {
-  status: "idle" | "loading" | "error";
-  error: string | null;
-  nextAllowedAt: string | null;
-}
-
-const idleModeratorCheck = (): ModeratorCheckState => ({
-  status: "idle",
-  error: null,
-  nextAllowedAt: null,
-});
 
 const statusLabel = (status: PanelBotStatus["status"]): string => {
   const texts = dashboardTexts();
@@ -192,40 +176,6 @@ const loadStateFromQuery = <T,>(query: UseQueryResult<T>): LoadState<T> => {
     ...(loadedAt === undefined ? {} : { loadedAt }),
   };
 };
-
-const nextAllowedAtFromError = (error: unknown): string | null => {
-  if (!(error instanceof PanelApiError) || error.details === null || typeof error.details !== "object" || Array.isArray(error.details)) return null;
-  const nextAllowedAt = (error.details as Record<string, unknown>).nextAllowedAt;
-  return typeof nextAllowedAt === "string" ? nextAllowedAt : null;
-};
-
-const moderatorLastError = (moderator: PanelModeratorStatus): PanelLastError | null =>
-  moderator.reason === null
-    ? null
-    : { source: "moderator", reason: moderator.reason, at: moderator.checkedAt };
-
-const mergeModeratorStatus = <T extends { moderator: PanelModeratorStatus | null; lastError: PanelLastError | null }>(
-  current: T,
-  moderator: PanelModeratorStatus,
-): T => ({
-  ...current,
-  moderator,
-  lastError: current.lastError?.source === "moderator" ? moderatorLastError(moderator) : current.lastError,
-});
-
-const mergeChannelSettings = (
-  current: PanelChannelSettings | undefined,
-  incoming: PanelChannelSettings,
-): PanelChannelSettings => ({
-  timeZone: current !== undefined && current.revision > incoming.revision ? current.timeZone : incoming.timeZone,
-  revision: Math.max(current?.revision ?? -1, incoming.revision),
-  location: current !== undefined && current.locationRevision > incoming.locationRevision ? current.location : incoming.location,
-  locationRevision: Math.max(current?.locationRevision ?? -1, incoming.locationRevision),
-  defaultChatTarget: current !== undefined && current.defaultChatTargetRevision > incoming.defaultChatTargetRevision
-    ? current.defaultChatTarget
-    : incoming.defaultChatTarget,
-  defaultChatTargetRevision: Math.max(current?.defaultChatTargetRevision ?? -1, incoming.defaultChatTargetRevision),
-});
 
 const formatTimestamp = (value: string): string => formatTimestampBase(value);
 
@@ -776,31 +726,11 @@ const DataAge = ({ since, format, className }: {
   return <span className={`data-age${className === undefined ? "" : ` ${className}`}`}>{format === undefined ? dashboardTexts().time.updated(age) : format(age)}</span>;
 };
 
-const ChannelBotConsentAction = ({ channelId, needed, canRequest }: {
-  channelId: string;
-  needed: boolean;
-  canRequest: boolean;
-}): ReactElement | null => {
-  if (!needed) return null;
-  const texts = dashboardTexts();
-  return (
-    <div className="header-action">
-      {canRequest ? <a className="button button--primary" href={`/auth/channels/${encodeURIComponent(channelId)}/channel-bot`}>{texts.moderation.requestBroadcasterConsent}</a> : <button className="button" type="button" disabled>{texts.moderation.requestBroadcasterConsent}</button>}
-      <div className="header-action__reason-slot">{!canRequest ? <span className="lock-reason">{texts.moderation.broadcasterReauthorize}</span> : null}</div>
-    </div>
-  );
-};
-
-const toneRank: Record<StateTone, number> = { error: 0, warning: 1, neutral: 2, healthy: 3 };
-
 interface StatusEntry {
   key: string;
   tone: StateTone;
   node: ReactElement;
 }
-
-const sortBySeverity = (entries: StatusEntry[]): StatusEntry[] =>
-  [...entries].sort((a, b) => toneRank[a.tone] - toneRank[b.tone]);
 
 const botRow = (bot: PanelBotStatus | null): StatusEntry => {
   const texts = dashboardTexts();
@@ -864,11 +794,38 @@ const broadcasterPermissionsRow = (permissions: PanelBroadcasterPermissions | nu
     key: "broadcaster-permissions",
     tone: "warning",
     node: <StateRow
-      label={texts.fullConsentMissing}
+      label={texts.fullConsent}
       tone="warning"
       word={texts.fullConsentMissing}
-      detail={texts.fullConsentLocked}
       action={login === undefined ? undefined : <BroadcasterConsentAction login={login} needed canRequest={canRequest} />}
+    />,
+  };
+};
+
+const channelBotConsentRow = (
+  channelId: string,
+  consent: PanelChannelState["channelBotConsent"],
+  viewerUserId: string | null,
+): StatusEntry | null => {
+  if (consent !== "missing") return null;
+  const texts = dashboardTexts();
+  const reasonId = `channel-bot-consent-reason-${channelId}`;
+  const requestConsent = viewerUserId === channelId;
+  const action = requestConsent
+    ? <a className="button button--primary" href={`/auth/channels/${encodeURIComponent(channelId)}/channel-bot`}>{texts.statusCard.requestChannelBotConsent}</a>
+    : <div className="header-action">
+      <Button size="compact" variant="neutral" disabled describedBy={reasonId}>{texts.statusCard.requestChannelBotConsent}</Button>
+      <div className="header-action__reason-slot"><span className="lock-reason" id={reasonId}>{texts.statusCard.channelBotConsentLocked}</span></div>
+    </div>;
+  return {
+    key: "channel-bot-consent",
+    tone: "warning",
+    node: <StateRow
+      label={texts.statusCard.chatConsent}
+      tone="warning"
+      word={texts.status.broadcasterConsentMissing}
+      detail={texts.statusCard.channelBotConsentMissing}
+      action={action}
     />,
   };
 };
@@ -877,54 +834,6 @@ const tokenRow = (tokens: PanelTokenStatus, bot: PanelBotStatus | null, loadedAt
   const texts = dashboardTexts();
   const token = tokenHealth(tokens, bot, loadedAt);
   return { key: "token", tone: token.tone, node: <StateRow label={texts.statusCard.tokenStatus} tone={token.tone} word={token.label} detail={maintenanceReasonText(tokens.loginReason) ?? undefined} /> };
-};
-
-const channelBotConsentRow = (status: PanelChannelState["channelBotConsent"], channelId: string, canRequest: boolean): StatusEntry => {
-  const texts = dashboardTexts();
-  const tone: StateTone = status === "missing" ? "warning" : "healthy";
-  return { key: "channel-bot-consent", tone, node: <StateRow
-    label={texts.statusCard.chatConsent}
-    tone={tone}
-    word={status === "missing" ? texts.statusCard.broadcasterConsentMissing : texts.status.present}
-    detail={status === "missing" ? texts.statusCard.chatBotRequired : undefined}
-    action={status === "missing" ? <ChannelBotConsentAction channelId={channelId} needed canRequest={canRequest} /> : undefined}
-  /> };
-};
-
-const moderatorRow = (moderator: PanelModeratorStatus | null, overview: PanelChannelOverview, check: ModeratorCheckState, onCheck: () => void): StatusEntry => {
-  const texts = dashboardTexts();
-  const tone: StateTone = moderator === null ? "neutral" : moderatorIsMissing(moderator) ? "error" : "healthy";
-  const word = moderator === null ? texts.status.notChecked : moderator.isModerator ? texts.status.moderator : texts.status.moderatorRoleMissing;
-  const detail = moderator === null
-    ? texts.moderation.noCheckForChannel
-    : maintenanceReasonText(moderator.reason) ?? texts.moderation.lastCheck(formatTimestamp(moderator.checkedAt));
-  return { key: "moderator", tone, node: <StateRow
-    label={texts.statusCard.moderatorStatus}
-    tone={tone}
-    word={word}
-    detail={detail}
-    action={<ModeratorCheckAction canCheck={canManage(overview.role)} checking={check.status === "loading"} checkError={check.error} nextAllowedAt={check.nextAllowedAt} urgent={moderator === null || !moderator.isModerator} onCheck={onCheck} />}
-  /> };
-};
-
-const lastErrorRow = (error: PanelLastError | null): StatusEntry => {
-  const texts = dashboardTexts();
-  const tone: StateTone = error === null ? "healthy" : "error";
-  if (error === null) {
-    return { key: "error", tone, node: <StateRow label={texts.errors.last} tone={tone} word={texts.status.healthy} detail={texts.errors.noCause} /> };
-  }
-  const aboName = error.source === "eventsub" && error.subscriptionType !== undefined
-    ? eventSubName(error.subscriptionType, error.subscriptionVariant ?? "")
-    : null;
-  const reasonText = maintenanceReasonText(error.reason) ?? error.reason;
-  const reason = aboName === null ? reasonText : `${aboName}: ${reasonText}`;
-  const detail = [
-    reason,
-    error.message === null || error.message === undefined ? null : truncateTo200Chars(error.message),
-    error.status === null || error.status === undefined ? null : `HTTP ${String(error.status)}`,
-    formatTimestamp(error.at),
-  ].filter((part): part is string => part !== null).join(" · ");
-  return { key: "fehler", tone, node: <StateRow label={texts.errors.last} tone={tone} word={texts.status.error} detail={detail} /> };
 };
 
 const BotPermissionsInspector = ({ permissions }: { permissions: PanelBotPermissions | null | undefined }): ReactElement | null => {
@@ -1011,301 +920,65 @@ const SubscriptionsSection = ({ subscriptions }: { subscriptions: PanelEventSubS
   );
 };
 
-interface ChannelOverviewPageProperties {
-  overview: PanelChannelOverview;
-  loadedAt?: number | undefined;
-  moderatorCheck: ModeratorCheckState;
-  onCheckModeratorStatus: () => void;
-  onNavigate: (route: DashboardRoute) => void;
-  /** Stream Manager: every module, switchable without a page change. */
-  modules: PanelModuleState[];
-  modulesLoaded: boolean;
-  onLocationChanged: (channelId: string, location: NonNullable<PanelChannelOverview["location"]> | null) => void;
-}
-
-const ChannelStateChecks = ({ entries, children }: { entries: StatusEntry[]; children?: ReactNode }): ReactElement => {
-  const texts = dashboardTexts();
-  const allHealthy = entries.length > 0 && entries.every((entry) => entry.tone === "healthy");
-  const problemCount = entries.filter((entry) => entry.tone !== "healthy").length;
-  const summaryTone: StatusLedState = allHealthy
-    ? "ok"
-    : entries.some((entry) => entry.tone === "error") ? "error" : "warn";
-  const summary = allHealthy
-    ? texts.streamManager.checksHealthy(formatNumber(entries.length))
-    : texts.streamManager.checksNeedAttention(formatNumber(problemCount), formatNumber(entries.length));
-
-  return (
-    <details className="channel-state-checks" open={!allHealthy}>
-      <summary className="channel-state-checks__summary">
-        <StatusLed state={summaryTone} label={summary} />
-      </summary>
-      <div className="state-list">{entries.map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
-      {children}
-    </details>
-  );
-};
-
-const ChannelOverviewPage = ({ overview, loadedAt, moderatorCheck, onCheckModeratorStatus, onNavigate, modules, modulesLoaded, onLocationChanged }: ChannelOverviewPageProperties): ReactElement => {
-  const settingsTexts = channelSettingsTexts(dashboardLanguage());
-  const queryClient = useQueryClient();
-  const settingsQueryKey = queryKeys.channel(overview.channelId, "settings");
-  const channelSettingsQuery = useQuery<PanelChannelSettings>({
-    queryKey: settingsQueryKey,
-    queryFn: async ({ signal }) => {
-      const fetched = await fetchChannelSettings(overview.channelId, signal);
-      return mergeChannelSettings(queryClient.getQueryData<PanelChannelSettings>(settingsQueryKey), fetched);
-    },
-    placeholderData: (previousData, previousQuery) =>
-      previousQuery?.queryKey[1] === overview.channelId ? previousData : undefined,
-  });
-  const channelSettings = channelSettingsQuery.data ?? null;
-  const [timeZoneDraftState, setTimeZoneDraftState] = useState<{ channelId: string; revision: number; value: string } | null>(null);
-  const timeZoneDraft = channelSettings === null
-    ? ""
-    : timeZoneDraftState?.channelId === overview.channelId && timeZoneDraftState.revision === channelSettings.revision
-      ? timeZoneDraftState.value
-      : channelSettings.timeZone;
-  const [defaultChatTargetDraftState, setDefaultChatTargetDraftState] = useState<{
-    channelId: string;
-    revision: number;
-    value: ChatOutputTarget;
-  } | null>(null);
-  const savedDefaultChatTarget = channelSettings?.defaultChatTarget ?? "source_only";
-  const defaultChatTargetRevision = channelSettings?.defaultChatTargetRevision ?? 1;
-  const defaultChatTargetDraft = defaultChatTargetDraftState?.channelId === overview.channelId &&
-      defaultChatTargetDraftState.revision === defaultChatTargetRevision
-    ? defaultChatTargetDraftState.value
-    : savedDefaultChatTarget;
-  const [settingsBusy, setSettingsBusy] = useState(false);
-  const commitSettingsUpdate = async (update: Partial<PanelChannelSettings>): Promise<void> => {
-    await queryClient.cancelQueries({ queryKey: settingsQueryKey, exact: true });
-    queryClient.setQueryData<PanelChannelSettings>(settingsQueryKey, (current) => current === undefined
-      ? current
-      : mergeChannelSettings(current, { ...current, ...update }));
-  };
-  useEffect(() => {
-    if (channelSettingsQuery.error !== null) notify({ tone: "error", message: settingsTexts.loadError });
-  }, [channelSettingsQuery.error, settingsTexts.loadError]);
-  const changeTimeZoneDraft = (value: string): void => {
-    if (channelSettings === null) return;
-    setTimeZoneDraftState({ channelId: overview.channelId, revision: channelSettings.revision, value });
-  };
-  const changeDefaultChatTargetDraft = (value: ChatOutputTarget | null): void => {
-    if (channelSettings === null || value === null) return;
-    setDefaultChatTargetDraftState({
-      channelId: overview.channelId,
-      revision: defaultChatTargetRevision,
-      value,
-    });
-  };
-  const saveTimeZone = async (): Promise<void> => {
-    if (channelSettings === null || timeZoneDraft.trim().length === 0 || !canManage(overview.role)) {
-      notify({ tone: "error", message: settingsTexts.invalid });
-      return;
-    }
-    setSettingsBusy(true);
-    try {
-      const saved = await saveChannelTimeZone(overview.channelId, channelSettings.revision, timeZoneDraft.trim());
-      await commitSettingsUpdate({ timeZone: saved.timeZone, revision: saved.revision });
-      setTimeZoneDraftState({ channelId: overview.channelId, revision: saved.revision, value: saved.timeZone });
-    } catch {
-      notify({ tone: "error", message: settingsTexts.saveError });
-    } finally {
-      setSettingsBusy(false);
-    }
-  };
-  const saveDefaultChatTarget = async (): Promise<void> => {
-    if (channelSettings === null || !canManage(overview.role)) return;
-    setSettingsBusy(true);
-    try {
-      const saved = await saveChannelDefaultChatTarget(
-        overview.channelId,
-        defaultChatTargetRevision,
-        defaultChatTargetDraft,
-      );
-      await commitSettingsUpdate({
-        defaultChatTarget: saved.defaultChatTarget,
-        defaultChatTargetRevision: saved.defaultChatTargetRevision,
-      });
-      setDefaultChatTargetDraftState({
-        channelId: overview.channelId,
-        revision: saved.defaultChatTargetRevision,
-        value: saved.defaultChatTarget,
-      });
-    } catch {
-      notify({ tone: "error", message: settingsTexts.defaultChatTargetSaveError });
-    } finally {
-      setSettingsBusy(false);
-    }
-  };
-  const saveSuggestedTimeZone = async (timeZone: string): Promise<void> => {
-    if (channelSettings === null) throw new Error("Channel settings are still loading.");
-    setSettingsBusy(true);
-    try {
-      const saved = await saveChannelTimeZone(overview.channelId, channelSettings.revision, timeZone);
-      await commitSettingsUpdate({ timeZone: saved.timeZone, revision: saved.revision });
-      setTimeZoneDraftState({ channelId: overview.channelId, revision: saved.revision, value: saved.timeZone });
-    } finally {
-      setSettingsBusy(false);
-    }
-  };
-  const locationSaved = async (location: PanelChannelSettings["location"], revision: number): Promise<void> => {
-    await commitSettingsUpdate({ location, locationRevision: revision });
-    onLocationChanged(overview.channelId, location);
-  };
-  const entries = sortBySeverity([
-    broadcasterRow(overview.broadcasterConnection),
-    channelBotConsentRow(overview.channelBotConsent, overview.channelId, overview.role === "broadcaster"),
-    chatRow(overview.chatSubscription, overview.chatSubscriptionNeeded === true),
-    moderatorRow(overview.moderator, overview, moderatorCheck, onCheckModeratorStatus),
-    botRow(overview.bot),
-    botPermissionsRow(overview.botPermissions),
-    broadcasterPermissionsRow(overview.broadcasterPermissions, overview.login, overview.role === "broadcaster"),
-    tokenRow(overview.tokens, overview.bot, loadedAt),
-    lastErrorRow(overview.lastError),
-  ].filter((entry): entry is StatusEntry => entry !== null));
-
-  return (
-    <>
-      <ChannelNotices
-        channel={overview}
-        modules={modules}
-        modulesLoaded={modulesLoaded}
-        {...(loadedAt === undefined ? {} : { loadedAt })}
-        moderatorCheck={moderatorCheck}
-        onCheckModeratorStatus={onCheckModeratorStatus}
-        onNavigate={onNavigate}
-      />
-      <ModuleHeading
-        kind="channel"
-        title={overview.displayName}
-        subtitle={roleLabel(overview.role)}
-      />
-      <section className="content-section channel-overview-settings" aria-label={settingsTexts.section}>
-        <div className="section-heading"><h2>{settingsTexts.section}</h2></div>
-        <div className="form-actions channel-overview-settings__row channel-overview-settings__row--timezone">
-          <ChannelTimeZoneField
-            label={settingsTexts.timeZone}
-            hint={settingsTexts.timeZoneHint}
-            value={timeZoneDraft}
-            onChange={changeTimeZoneDraft}
-            disabled={settingsBusy || channelSettings === null}
-            canEdit={canManage(overview.role)}
-          />
-          {canManage(overview.role)
-            ? <Button disabled={settingsBusy || channelSettings === null || timeZoneDraft === channelSettings.timeZone || timeZoneDraft.trim().length === 0} onClick={() => { void saveTimeZone(); }}>{settingsTexts.save}</Button>
-            : <p className="muted">{settingsTexts.readOnly}</p>}
-        </div>
-        <ChannelLocationField
-          channelId={overview.channelId}
-          language={dashboardLanguage()}
-          value={channelSettings?.location ?? null}
-          revision={channelSettings?.locationRevision ?? 0}
-          onSaved={locationSaved}
-          channelTimeZone={channelSettings?.timeZone ?? ""}
-          onSaveChannelTimeZone={saveSuggestedTimeZone}
-          canEdit={canManage(overview.role)}
-          disabled={settingsBusy || channelSettings === null}
-        />
-      </section>
-      <ImmediateActions channelId={overview.channelId} streamState={overview.streamState} canManage={canManage(overview.role)} modules={modules} modulesLoaded={modulesLoaded} />
-      <section className="content-section channel-overview-settings" aria-label={settingsTexts.defaultChatTargetSection}>
-        <div className="section-heading"><h2>{settingsTexts.defaultChatTargetSection}</h2></div>
-        <div className="form-actions channel-overview-settings__row">
-          <ChatTargetField
-            label={settingsTexts.defaultChatTarget}
-            value={defaultChatTargetDraft}
-            allowed={["all_chats", "source_only", "where_asked"]}
-            inline
-            onChange={changeDefaultChatTargetDraft}
-            disabled={settingsBusy || channelSettings === null || !canManage(overview.role)}
-          />
-          {canManage(overview.role)
-            ? <Button disabled={settingsBusy || channelSettings === null || defaultChatTargetDraft === savedDefaultChatTarget} onClick={() => { void saveDefaultChatTarget(); }}>{settingsTexts.defaultChatTargetSave}</Button>
-            : <p className="muted">{settingsTexts.readOnly}</p>}
-          <p className="muted channel-overview-settings__hint">{settingsTexts.defaultChatTargetHint}</p>
-        </div>
-      </section>
-      <WarningsAndErrorsFeed channelId={overview.channelId} onNavigate={onNavigate} />
-      <ChannelStateChecks entries={entries}>
-        <BotPermissionsInspector permissions={overview.botPermissions} />
-        <BroadcasterPermissionsInspector permissions={overview.broadcasterPermissions} />
-      </ChannelStateChecks>
-    </>
-  );
-};
-
 interface ChannelOverviewRouteProperties {
-  routeKey: string;
   overview: PanelChannelOverview;
-  loadedAt?: number | undefined;
-  onNavigate: (route: DashboardRoute) => void;
   modules: PanelModuleState[];
   modulesLoaded: boolean;
-  channelsLoadedAt: number;
-  onAuthenticationRequired: () => void;
-  onLocationChanged: (channelId: string, location: NonNullable<PanelChannelOverview["location"]> | null) => void;
+  onNavigate: (route: DashboardRoute) => void;
 }
 
-const ChannelOverviewRoute = ({ routeKey, overview, loadedAt, onNavigate, modules, modulesLoaded, channelsLoadedAt, onAuthenticationRequired, onLocationChanged }: ChannelOverviewRouteProperties): ReactElement => {
-  const queryClient = useQueryClient();
-  const [moderatorCheck, setModeratorCheck] = useState<ModeratorCheckState>(idleModeratorCheck);
-  const generationRef = useRef(0);
-  useLayoutEffect(() => {
-    generationRef.current += 1;
-    const generation = generationRef.current;
-    return () => {
-      if (generationRef.current === generation) generationRef.current += 1;
-    };
-  }, [routeKey]);
-
-  const handleModeratorStatusCheck = async (): Promise<void> => {
-    const channelId = overview.channelId;
-    const routePath = dashboardRoutePath({ kind: "channel", channelId, section: "overview" });
-    const generation = generationRef.current;
-    setModeratorCheck({ status: "loading", error: null, nextAllowedAt: null });
-    try {
-      const response = await refreshModeratorStatus(channelId);
-      if (generationRef.current !== generation || window.location.pathname !== routePath) return;
-      queryClient.setQueryData<PanelChannelOverview>(queryKeys.channel(channelId, "overview"), (current) =>
-        current?.channelId !== channelId ? current : mergeModeratorStatus(current, response.moderator),
-      { ...(loadedAt === undefined ? {} : { updatedAt: loadedAt }) });
-      queryClient.setQueryData<PanelChannelsResponse>(queryKeys.channels(), (current) => current === undefined ? current : {
-        ...current,
-        channels: current.channels.map((channel) => channel.channelId !== channelId ? channel : mergeModeratorStatus(channel, response.moderator)),
-      }, { updatedAt: channelsLoadedAt });
-      setModeratorCheck({ status: "idle", error: null, nextAllowedAt: response.nextAllowedAt });
-    } catch (error: unknown) {
-      if (generationRef.current !== generation || window.location.pathname !== routePath) return;
-      setModeratorCheck({ status: "error", error: errorMessage(error), nextAllowedAt: nextAllowedAtFromError(error) });
-      if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
-    }
-  };
-
-  return <ChannelOverviewPage
-    overview={overview}
-    loadedAt={loadedAt}
-    moderatorCheck={moderatorCheck}
-    onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }}
-    onNavigate={onNavigate}
-    modules={modules}
-    modulesLoaded={modulesLoaded}
-    onLocationChanged={onLocationChanged}
-  />;
-};
+const ChannelOverviewRoute = ({ overview, modules, modulesLoaded, onNavigate }: ChannelOverviewRouteProperties): ReactElement =>
+  <LiveCockpit overview={overview} modules={modules} modulesLoaded={modulesLoaded} onNavigate={onNavigate} />;
 
 interface SystemPageProperties {
+  channelId: string;
+  login: string;
+  role: ChannelRole;
+  channelBotConsent: PanelChannelState["channelBotConsent"];
+  viewerUserId: string | null;
+  moderator: PanelModeratorStatus | null;
   system: PanelSystemResponse | undefined;
   error: string | null;
   loadedAt: number | undefined;
   onRetry: () => void;
+  onModeratorRecheck: (isCurrentPage: () => boolean) => Promise<void>;
 }
 
-const SystemPage = ({ system, error, loadedAt, onRetry }: SystemPageProperties): ReactElement => {
+const SystemPage = ({ channelId, login, role, channelBotConsent, viewerUserId, moderator, system, error, loadedAt, onRetry, onModeratorRecheck }: SystemPageProperties): ReactElement => {
   const texts = dashboardTexts();
+  const [recheckingModerator, setRecheckingModerator] = useState(false);
+  const isCurrentPage = useMountedPageGuard();
+  const canRecheckModerator = canManage(role);
+  const moderatorReasonId = `moderator-recheck-reason-${channelId}`;
+  const moderatorTone: StateTone = moderator === null ? "neutral" : moderator.isModerator ? "healthy" : "error";
+  const moderatorWord = moderator === null ? texts.status.notChecked : moderator.isModerator ? texts.status.healthy : texts.status.moderatorRoleMissing;
+  const moderatorDetail = moderator === null
+    ? texts.moderation.noCheckForChannel
+    : texts.moderation.lastCheck(formatTimestamp(moderator.checkedAt));
+  const moderatorAction = <div className="header-action">
+    <Button
+      size="compact"
+      variant="neutral"
+      disabled={!canRecheckModerator || recheckingModerator}
+      {...(!canRecheckModerator ? { describedBy: moderatorReasonId } : {})}
+      onClick={() => {
+        setRecheckingModerator(true);
+        void onModeratorRecheck(isCurrentPage)
+          .catch(() => { if (isCurrentPage()) notify({ tone: "error", message: texts.errors.changeFailed }); })
+          .finally(() => { if (isCurrentPage()) setRecheckingModerator(false); });
+      }}
+    >{recheckingModerator ? texts.moderation.checkRunning : texts.moderation.checkModeratorStatus}</Button>
+    <div className="header-action__reason-slot">{!canRecheckModerator ? <span className="lock-reason" id={moderatorReasonId}>{texts.moderation.checkLocked}</span> : null}</div>
+  </div>;
+  const moderatorStatusRow: StatusEntry = {
+    key: "moderator-status",
+    tone: moderatorTone,
+    node: <StateRow label={texts.statusCard.moderatorStatus} tone={moderatorTone} word={moderatorWord} detail={moderatorDetail} action={moderatorAction} />,
+  };
   return (
     <>
-      <ModuleHeading kind="system" title={texts.system.title} subtitle={texts.system.readOnly} />
+      <PageHeader kind="system" title={texts.system.title} subtitle={texts.system.readOnly} />
+      <ChannelDefaultsEditor channelId={channelId} role={role} />
       <UiLoadState
         variant="status-row"
         status={system !== undefined && error !== null ? "error" : "success"}
@@ -1323,7 +996,7 @@ const SystemPage = ({ system, error, loadedAt, onRetry }: SystemPageProperties):
         queryError={{ title: texts.errors.dataLoadFailed, message: error ?? texts.system.loadState, onRetry }}
       >
         {system === undefined ? null : <>
-          <div className="state-list">{[broadcasterRow(system.broadcasterConnection), chatRow(system.chatSubscription, system.chatSubscriptionNeeded === true), botRow(system.bot), botPermissionsRow(system.botPermissions), broadcasterPermissionsRow(system.broadcasterPermissions), tokenRow(system.tokens, system.bot, loadedAt)].filter((entry): entry is StatusEntry => entry !== null).map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
+          <div className="state-list">{[broadcasterRow(system.broadcasterConnection), chatRow(system.chatSubscription, system.chatSubscriptionNeeded === true), botRow(system.bot), botPermissionsRow(system.botPermissions), channelBotConsentRow(channelId, channelBotConsent, viewerUserId), broadcasterPermissionsRow(system.broadcasterPermissions, login, role === "broadcaster"), moderatorStatusRow, tokenRow(system.tokens, system.bot, loadedAt)].filter((entry): entry is StatusEntry => entry !== null).map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
           <BotPermissionsInspector permissions={system.botPermissions} />
           <BroadcasterPermissionsInspector permissions={system.broadcasterPermissions} />
           <SubscriptionsSection subscriptions={system.subscriptions ?? []} />
@@ -1381,6 +1054,7 @@ export const DashboardApp = (): ReactElement => {
   const channelsQuery = useQuery<PanelChannelsResponse>({
     queryKey: queryKeys.channels(),
     refetchOnWindowFocus: false,
+    structuralSharing: mergeChannelsRefreshData,
     queryFn: async ({ signal }) => {
       const response = await fetchChannels(signal);
       return {
@@ -1414,6 +1088,7 @@ export const DashboardApp = (): ReactElement => {
   const overviewQuery = useQuery<PanelChannelOverview>({
     queryKey: queryKeys.channel(overviewChannelId ?? "", "overview"),
     refetchOnWindowFocus: false,
+    structuralSharing: mergeChannelRefreshData,
     queryFn: async ({ signal }) => {
       if (overviewChannelId === null) throw new Error("An overview query needs a channel ID.");
       const response = await fetchChannelOverview(overviewChannelId, signal);
@@ -1499,6 +1174,10 @@ export const DashboardApp = (): ReactElement => {
   }, [queryClient, reloadChannels, route, selectedChannel]);
 
   const reloadAfterModuleToggle = async (channelId: string): Promise<void> => refreshAfterModuleToggle(queryClient, channelId);
+
+  const recheckModerator = useCallback((channelId: string, isCurrentPage: () => boolean): Promise<void> => {
+    return runModeratorRecheck(queryClient, channelId, isCurrentPage, refreshModeratorStatus);
+  }, [queryClient]);
 
   const reloadOverview = useCallback(async (): Promise<void> => {
     if (route.kind !== "module" && !(route.kind === "channel" && route.section === "overview")) return;
@@ -1821,24 +1500,13 @@ export const DashboardApp = (): ReactElement => {
           error={<LoadStateLines rows={12} height={58} />}
         >{overviewMatchesRoute && overview.data !== null && overviewModulesLoaded ? <ChannelOverviewRoute
           key={routeKey}
-          routeKey={routeKey}
           overview={overview.data}
-          loadedAt={overview.loadedAt}
-          onNavigate={navigate}
           modules={selectedChannel.modules ?? overview.data.modules ?? modules.data?.modules ?? []}
           modulesLoaded={overviewModulesLoaded}
-          channelsLoadedAt={channelsQuery.dataUpdatedAt}
-          onAuthenticationRequired={clearProtectedState}
-          onLocationChanged={(channelId, location) => {
-            queryClient.setQueryData<PanelChannelsResponse>(queryKeys.channels(), (current) => current === undefined ? current : {
-              ...current,
-              channels: current.channels.map((channel) => channel.channelId === channelId ? { ...channel, location } : channel),
-            }, { updatedAt: channelsQuery.dataUpdatedAt });
-            queryClient.setQueryData<PanelChannelOverview>(queryKeys.channel(channelId, "overview"), (current) =>
-              current?.channelId !== channelId ? current : { ...current, location },
-            { updatedAt: overviewQuery.dataUpdatedAt });
-          }}
+          onNavigate={navigate}
         /> : null}</UiLoadState> : null}
+        {!showChannelNotReleased && route.kind === "channel" && route.section === "location-weather" && selectedChannel !== null
+          ? <ChannelLocationPage key={route.channelId} channelId={route.channelId} role={selectedChannel.role} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "members" && selectedChannel !== null ? <MembersPage key={route.channelId} channelId={route.channelId} ownRole={selectedChannel.role} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "variables" && selectedChannel !== null ? <ChannelVariablesPage key={route.channelId} channelId={route.channelId} canManage={canManage(selectedChannel.role)} onOpenCommand={(name) => { setPendingModuleSelection({ channelId: route.channelId, moduleId: "text_commands", value: name }); navigate({ kind: "module", channelId: route.channelId, moduleId: "text_commands" }); }} onOpenOverlay={(overlayId, initialVariable, initialOverlayName) => { navigate({ kind: "channel", channelId: route.channelId, section: "overlays", editorOverlayId: overlayId, ...(initialVariable === undefined ? {} : { initialVariable }), ...(overlayId === "new" && initialOverlayName !== undefined ? { initialOverlayName } : {}) }); }} onInitialSelectionConsumed={(name) => { setPendingVariableSelection((pending) => pending?.channelId === route.channelId && pending.name === name ? null : pending); }} {...(pendingVariableSelection?.channelId === route.channelId ? { initialSelection: pendingVariableSelection.name } : {})} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "overlays" && selectedChannel !== null
@@ -1863,10 +1531,17 @@ export const DashboardApp = (): ReactElement => {
         </div> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "system" && selectedChannel !== null ? <SystemPage
           key={route.channelId}
+          channelId={route.channelId}
+          login={selectedChannel.login}
+          role={selectedChannel.role}
+          channelBotConsent={selectedChannel.channelBotConsent}
+          viewerUserId={viewerUserId}
+          moderator={selectedChannel.moderator}
           system={systemQuery.data}
           error={systemQuery.isError ? errorMessage(systemQuery.error) : null}
           loadedAt={systemQuery.dataUpdatedAt > 0 ? systemQuery.dataUpdatedAt : undefined}
           onRetry={() => { void systemQuery.refetch(); }}
+          onModeratorRecheck={(isCurrentPage) => recheckModerator(route.channelId, isCurrentPage)}
         /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "audit" && selectedChannel !== null ? <AuditPage key={route.channelId} channelId={route.channelId} filters={auditFilters} onFiltersChange={updateAuditFilters} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "events" && selectedChannel !== null ? <EventsPage key={route.channelId} channelId={route.channelId} filters={eventFilters} moduleOptions={selectedChannel.modules ?? modules.data?.modules ?? []} onFiltersChange={updateEventFilters} /> : null}

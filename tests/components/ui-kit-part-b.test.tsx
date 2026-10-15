@@ -45,6 +45,14 @@ describe("Part B shared UI", () => {
     expect(onChange).toHaveBeenCalledWith("all_chats");
   });
 
+  it("uses only the chevron to signal that the chat target can be changed", () => {
+    renderUi(<ChatTargetField label="Chat-Ziel" value="source_only" onChange={() => undefined} />);
+
+    const trigger = screen.getByRole("button", { name: "Chat-Ziel" });
+    expect(trigger.querySelector(".ui-chat-target-field__change")).not.toBeInTheDocument();
+    expect(trigger.querySelector(".ui-chat-target-field__chevron")).toBeInTheDocument();
+  });
+
   it("shows channel default only when allowed and maps it to null", () => {
     const onChange = vi.fn();
     renderUi(<ChatTargetField label="Chat-Ziel" value="all_chats" onChange={onChange} allowed={["all_chats", "source_only", "channel_default", "where_asked"]} />);

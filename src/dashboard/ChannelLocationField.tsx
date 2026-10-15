@@ -113,19 +113,16 @@ export const ChannelLocationField = ({
       </div>
       <div className="channel-location-field__message-slot" aria-live="polite" />
       <div className="channel-location-field__actions">
-        <Button
-          variant="primary"
-          disabled={actionsDisabled}
+        <Button variant="primary" disabled={actionsDisabled}
           {...(locked === null ? {} : { describedBy: "channel-location-read-only" })}
-          onClick={() => { setOpened(true); setSearchFailed(false); setResults([]); }}
-        >{labels.locationChange}</Button>
-        <Button
-          variant="secondary"
-          danger="subtle"
-          disabled={actionsDisabled || value === null}
+          onClick={() => { setOpened(true); setSearchFailed(false); setResults([]); }}>
+          {labels.locationChange}
+        </Button>
+        <Button variant="secondary" danger="subtle" disabled={actionsDisabled || value === null}
           {...(removeDisabledReason === null ? {} : { describedBy: "channel-location-remove-reason" })}
-          onClick={() => { setConfirmError(undefined); setRemoveConfirmation(true); }}
-        >{labels.locationRemove}</Button>
+          onClick={() => { setConfirmError(undefined); setRemoveConfirmation(true); }}>
+          {labels.locationRemove}
+        </Button>
       </div>
       <div className="channel-location-field__reason-slot">
         {locked === null ? null : <p className="lock-reason" id="channel-location-read-only">{locked}</p>}
@@ -134,21 +131,15 @@ export const ChannelLocationField = ({
       <div className="channel-location-field__suggestion-slot">
         {value === null || value.timeZone === channelTimeZone ? null : <div className="channel-location-field__suggestion">
           <span>{labels.locationTimeZoneSuggestion(value.timeZone)}</span>
-          <Button
-            variant="secondary"
-            disabled={actionsDisabled}
+          <Button variant="secondary" disabled={actionsDisabled}
             {...(locked === null ? {} : { describedBy: "channel-location-read-only" })}
-            onClick={() => { void applyTimeZone(); }}
-          >{labels.locationTimeZoneAction}</Button>
+            onClick={() => { void applyTimeZone(); }}>
+            {labels.locationTimeZoneAction}
+          </Button>
         </div>}
       </div>
 
-      <Dialog
-        opened={opened}
-        onClose={() => { if (!busy) { setOpened(false); setLocationSaveFailed(false); } }}
-        title={labels.locationChange}
-        pending={busy}
-      >
+      <Dialog opened={opened} onClose={() => { if (!busy) { setOpened(false); setLocationSaveFailed(false); } }} title={labels.locationChange} pending={busy}>
         <div className="channel-location-dialog">
           <p className="muted">{labels.locationHint}</p>
           {locked === null ? null : <p className="lock-reason" id="channel-location-dialog-read-only">{locked}</p>}
@@ -159,34 +150,23 @@ export const ChannelLocationField = ({
                 void search();
               }
             }} />
-            <Button
-              variant="secondary"
-              disabled={actionsDisabled || searching || query.trim().length < 2}
+            <Button variant="secondary" disabled={actionsDisabled || searching || query.trim().length < 2}
               {...(!canEdit ? { describedBy: "channel-location-dialog-read-only" } : {})}
-              onClick={() => { void search(); }}
-            >
+              onClick={() => { void search(); }}>
               {searching ? labels.locationSearching : labels.locationSearchButton}
             </Button>
           </div>
-          <LoadState
-            variant="panel-178"
-            status={resultsStatus}
+          <LoadState variant="panel-178" status={resultsStatus}
             loading={<LoadStateLines rows={3} height={54} />}
             empty={query.trim().length >= 2 && !searchFailed ? <p className="muted">{labels.locationNoResults}</p> : <span aria-hidden="true" />}
-            error={<p role="alert" className="channel-location-field__error">{labels.locationSearchFailed}</p>}
-          >
+            error={<p role="alert" className="channel-location-field__error">{labels.locationSearchFailed}</p>}>
             <div className="channel-location-field__results" role="listbox" aria-label={labels.locationResults}>
               {results.map((result) => {
                 const selected = value !== null && value.latitude === result.latitude && value.longitude === result.longitude;
-                return <button
-                  className="channel-location-field__result"
-                  key={`${String(result.latitude)}:${String(result.longitude)}`}
-                  type="button"
-                  role="option"
-                  aria-selected={selected}
+                return <button className="channel-location-field__result"
+                  key={`${String(result.latitude)}:${String(result.longitude)}`} type="button" role="option" aria-selected={selected}
                   disabled={actionsDisabled || searching}
-                  onClick={() => { void save({ name: resultName(result), latitude: result.latitude, longitude: result.longitude, timeZone: result.timeZone }); }}
-                >
+                  onClick={() => { void save({ name: resultName(result), latitude: result.latitude, longitude: result.longitude, timeZone: result.timeZone }); }}>
                   <span><strong>{result.name}</strong>{result.admin1 || result.country ? <span className="muted"> · {[result.admin1, result.country].filter(Boolean).join(", ")}</span> : null}</span>
                   <span className="channel-location-field__result-action">{labels.locationSelect}</span>
                 </button>;
@@ -199,18 +179,11 @@ export const ChannelLocationField = ({
           <a className="muted" href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">{labels.locationAttribution}</a>
         </div>
       </Dialog>
-      <ConfirmDialog
-        opened={removeConfirmation}
-        title={labels.locationRemoveTitle}
-        description={labels.locationRemoveDescription}
-        confirmLabel={labels.locationRemove}
-        cancelLabel={labels.cancel}
-        danger
-        pending={busy}
+      <ConfirmDialog opened={removeConfirmation} title={labels.locationRemoveTitle} description={labels.locationRemoveDescription}
+        confirmLabel={labels.locationRemove} cancelLabel={labels.cancel} danger pending={busy}
         onConfirm={() => { void save(null); }}
         onCancel={() => { if (!busy) { setConfirmError(undefined); setRemoveConfirmation(false); } }}
-        {...(confirmError === undefined ? {} : { error: confirmError })}
-      />
+        {...(confirmError === undefined ? {} : { error: confirmError })} />
     </div>
   );
 };

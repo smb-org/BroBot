@@ -9,7 +9,7 @@ import { votekickTimeoutReason } from "../../src/modules/votekick/domain";
 import type { RealtimeMessage } from "../../src/realtime-contract";
 import { panelRouter } from "../../src/worker/panel/routes";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey } from "./fixtures";
-import { TestD1Database } from "./test-d1";
+import { createReadInterleavingDatabase, TestD1Database } from "./test-d1";
 
 const keys = {
   SESSION_COOKIE_KEYS: JSON.stringify({ active: { id: "cookie-v1", key: testKey(1) }, retired: [] }),
@@ -29,7 +29,7 @@ const databaseFor = async (): Promise<TestD1Database> => {
 };
 
 const environmentFor = (
-  database: TestD1Database,
+  database: TestD1Database | D1Database,
   runModuleAlarm = vi.fn(() => Promise.resolve()),
   publish = vi.fn<(messages: readonly RealtimeMessage[]) => Promise<void>>(() => Promise.resolve()),
 ): Env => {
@@ -136,6 +136,32 @@ describe("Votekick routes", () => {
 
     expect(response.status).toBe(204);
     expect(row).toEqual({ status: "cancelled" });
+  });
+
+  it("reports a replacement votekick when cancellation loses its guarded update race", async () => {
+    const database = await databaseFor();
+    await insertLoginIdentityAndSession(database, "operator-a");
+    await insertMember(database, "channel-a", "operator-a", "operator");
+    await insertRunning(database, "channel-a", "ballot-a");
+    const interleavedDatabase = createReadInterleavingDatabase(
+      database,
+      (sql) => sql.includes("FROM votekicks") && sql.includes("status = 'running'"),
+      async () => {
+        await database.prepare("UPDATE votekicks SET status = 'cancelled', ended_at = ? WHERE channel_id = ? AND votekick_id = ?")
+          .bind(new Date().toISOString(), "channel-a", "ballot-a").run();
+        await insertRunning(database, "channel-a", "ballot-b");
+      },
+    );
+
+    const response = await panelRouter.fetch(
+      await requestFor("operator-a", "/api/channels/channel-a/modules/votekick/votekicks/ballot-a/cancel", "POST"),
+      environmentFor(interleavedDatabase),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "votekick_changed" });
+    await expect(database.prepare("SELECT status FROM votekicks WHERE channel_id = 'channel-a' AND votekick_id = 'ballot-b'")
+      .first<{ status: string }>()).resolves.toEqual({ status: "running" });
   });
 
   it("publishes a votekick tally hint after an operator lifts its timeout", async () => {

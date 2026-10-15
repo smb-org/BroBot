@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { chatVotingOverlayElement } from "../../src/modules/chat_voting/overlay/element";
-import { mergeTallyRealtimeState, mergeTallyState, type TallyState } from "../../src/modules/chat_voting/overlay/tally-state";
+import { mergeTallyRealtimeState, mergeTallyState, parseTallyState, type TallyState } from "../../src/modules/chat_voting/overlay/tally-state";
 
 const tally = (
   pollId: string,
@@ -31,6 +31,80 @@ describe("chat voting tally state", () => {
     expect(mergeTallyState(current, tally("poll-a", 5))).toMatchObject({ revision: 5, counts: [5, 0] });
   });
 
+  it("keeps an extended deadline when a later ballot revision carries stale deadline metadata", () => {
+    const current = {
+      ...tally("poll-a", 4),
+      closesAt: "2026-10-04T14:02:00.000Z",
+      deadlineRevision: 2,
+    } as TallyState;
+    const delayed = {
+      ...tally("poll-a", 5),
+      closesAt: "2026-10-04T14:01:00.000Z",
+      deadlineRevision: 1,
+    } as TallyState;
+
+    expect(mergeTallyState(current, delayed)).toMatchObject({
+      closesAt: "2026-10-04T14:02:00.000Z",
+      deadlineRevision: 2,
+      counts: [5, 0],
+    });
+  });
+
+  it("accepts a newer deadline carried by an older ballot revision", () => {
+    const current = {
+      ...tally("poll-a", 11),
+      closesAt: "2026-10-04T14:00:00.000Z",
+      deadlineRevision: 0,
+    } as TallyState;
+    const extension = {
+      ...tally("poll-a", 10),
+      closesAt: "2026-10-04T14:01:00.000Z",
+      deadlineRevision: 1,
+    } as TallyState;
+
+    expect(mergeTallyState(current, extension)).toMatchObject({
+      revision: 11,
+      counts: [11, 0],
+      closesAt: "2026-10-04T14:01:00.000Z",
+      deadlineRevision: 1,
+    });
+  });
+
+  it("preserves deadline revisions through the renderer parser before merging stale messages", () => {
+    const current = parseTallyState({
+      ...tally("poll-a", 4),
+      closesAt: "2026-10-04T14:02:00.000Z",
+      deadlineRevision: 2,
+    });
+    const delayed = parseTallyState({
+      ...tally("poll-a", 5),
+      closesAt: "2026-10-04T14:01:00.000Z",
+      deadlineRevision: 1,
+    });
+
+    expect(current?.deadlineRevision).toBe(2);
+    expect(mergeTallyState(current, delayed)).toMatchObject({
+      closesAt: "2026-10-04T14:02:00.000Z",
+      deadlineRevision: 2,
+      counts: [5, 0],
+    });
+  });
+
+  it("keeps a claimed close state when a delayed open tally arrives", () => {
+    const closing = {
+      ...tally("poll-a", 4, "closing"),
+      closesAt: "2026-10-04T14:01:00.000Z",
+      deadlineRevision: 1,
+    } as TallyState;
+    const delayedOpen = {
+      ...tally("poll-a", 5, "open"),
+      closesAt: "2026-10-04T14:01:00.000Z",
+      deadlineRevision: 1,
+    } as TallyState;
+
+    expect(mergeTallyState(closing, delayedOpen)).toMatchObject({ status: "closing", revision: 5, counts: [5, 0] });
+  });
+
   it("replaces reducer state with a null or lower-revision closed snapshot", () => {
     const current = tally("poll-a", 7);
     const closed = {
@@ -40,7 +114,7 @@ describe("chat voting tally state", () => {
     };
 
     expect(mergeTallyState(current, null)).toBeNull();
-    expect(mergeTallyState(current, closed)).toEqual(closed);
+    expect(mergeTallyState(current, closed)).toMatchObject(closed);
   });
 
   it("keeps closed counts final even when the close revision is lower", () => {
@@ -53,6 +127,32 @@ describe("chat voting tally state", () => {
 
     expect(closed).toMatchObject({ revision: 0, counts: [4, 2], status: "closed" });
     expect(mergeTallyState(closed, tally("poll-a", 8))).toBe(closed);
+  });
+
+  it("keeps a newer deadline while accepting terminal state from a lower deadline revision", () => {
+    const current = {
+      ...tally("poll-a", 7),
+      closesAt: "2026-10-04T14:02:00.000Z",
+      requestedDurationSeconds: 300,
+      deadlineRevision: 2,
+    };
+    const closed = mergeTallyState(current, {
+      ...tally("poll-a", 0, "closed"),
+      closesAt: "2026-10-04T14:00:00.000Z",
+      requestedDurationSeconds: 120,
+      deadlineRevision: 1,
+      counts: [4, 2],
+      closedAt: "2026-10-04T10:05:00.000Z",
+    });
+
+    expect(closed).toMatchObject({
+      status: "closed",
+      revision: 0,
+      counts: [4, 2],
+      closesAt: "2026-10-04T14:02:00.000Z",
+      requestedDurationSeconds: 300,
+      deadlineRevision: 2,
+    });
   });
 
   it("accepts only newer polls and ignores old close retries", () => {

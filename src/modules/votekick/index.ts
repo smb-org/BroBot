@@ -73,5 +73,20 @@ export const votekickModule: BotModule<typeof votekickSettingsSchema> = {
   panel: () => import("./panel"),
   settingsEditor: () => import("./panel/settings-editor"),
   settingsEditorRelatedParts: ["panel"],
+  liveTile: {
+    load: async (channelId, signal) => {
+      const state = await (await import("./panel/service")).loadVotekickPanel(channelId, signal);
+      const running = state.running;
+      return running === null ? [] : [{
+        kind: "votekick",
+        id: running.id,
+        target: running.targetLogin ?? running.targetUserId ?? "—",
+        endsAt: running.endsAt,
+        yesVotes: running.yesVotes,
+        noVotes: running.noVotes,
+        threshold: running.threshold,
+      }];
+    },
+  },
   handleEvent: (event, context) => processVotekickMessage(event, createVotekickRepository(context.DB), context),
 };

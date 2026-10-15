@@ -9,7 +9,7 @@ import {
   type ChatVotingSettings,
 } from "../../src/modules/chat_voting/contracts";
 import type { ChatVoteTemplateRepository, ChatVotingRepository } from "../../src/modules/chat_voting/repository";
-import { processChatVotingMessage, requestChatVoteClose, startChatVote } from "../../src/modules/chat_voting/service";
+import { processChatVotingMessage, requestChatVoteClose, requestChatVoteExtension, startChatVote } from "../../src/modules/chat_voting/service";
 
 const openVote: ChatVote = {
   id: "fictional-poll",
@@ -73,6 +73,9 @@ const repositoryWith = (overrides: Partial<ChatVotingRepository> = {}): ChatVoti
   approveTerm: vi.fn(() => Promise.resolve({ authorized: true, changed: true })),
   insertOpen: vi.fn(() => Promise.resolve(true)),
   requestManualClose: vi.fn(() => Promise.resolve(true)),
+  claimAlarmClose: vi.fn(() => Promise.resolve(true)),
+  extendClose: vi.fn(() => Promise.resolve(true)),
+  rollbackCloseExtension: vi.fn(() => Promise.resolve(false)),
   finish: vi.fn(() => Promise.resolve(true)),
   templates: templateRepositoryWith(),
   ...overrides,
@@ -264,6 +267,7 @@ describe("chat voting event service", () => {
         title: null,
         counts: [0, 1],
         revision: 1,
+        deadlineRevision: 0,
       },
     }]);
   });
@@ -337,6 +341,7 @@ describe("chat voting event service", () => {
         more: 1,
         termFilterReady: true,
         revision: 4,
+        deadlineRevision: 0,
       },
     }]);
   });
@@ -582,8 +587,8 @@ describe("chat voting event service", () => {
 
     const allowed = await processChatVotingMessage(eventWithText("!vote end", ["moderator"]), repository, context);
     expect(allowed.actions).toEqual([{ kind: "chat", text: "The vote is closing.", automated: false }]);
-    expect(requestManualClose).toHaveBeenCalledWith("fictional-channel", "fictional-poll", undefined);
-    expect(context.scheduleAlarm).toHaveBeenCalledWith("close", "fictional-poll", expect.any(Number), 1);
+    expect(requestManualClose).toHaveBeenCalledWith("fictional-channel", "fictional-poll", openVote.closesAt, undefined);
+    expect(context.scheduleAlarm).toHaveBeenCalledWith("close", "fictional-poll", expect.any(Number), expect.any(Number));
   });
 
   it("keeps a manual close request after scheduling fails and retries on the next request", async () => {
@@ -602,13 +607,130 @@ describe("chat voting event service", () => {
       .resolves.toMatchObject({ closeReason: "manual" });
 
     expect(requestManualClose).toHaveBeenCalledTimes(2);
-    expect(requestManualClose).toHaveBeenNthCalledWith(1, "fictional-channel", "fictional-poll", undefined);
-    expect(requestManualClose).toHaveBeenNthCalledWith(2, "fictional-channel", "fictional-poll", undefined);
+    expect(requestManualClose).toHaveBeenNthCalledWith(1, "fictional-channel", "fictional-poll", openVote.closesAt, undefined);
+    expect(requestManualClose).toHaveBeenNthCalledWith(2, "fictional-channel", "fictional-poll", openVote.closesAt, undefined);
     expect(scheduleClose).toHaveBeenCalledTimes(2);
     for (const [pollId, deadline, revision] of scheduleClose.mock.calls) {
       expect(pollId).toBe("fictional-poll");
       expect(deadline).toEqual(expect.any(Number));
-      expect(revision).toBe(1);
+      expect(revision).toBeGreaterThanOrEqual(1);
     }
+  });
+
+  it("fences manual close against a deadline changed after the initial read", async () => {
+    const expectedClosesAt = "2026-10-04T14:00:00.000Z";
+    const requestManualClose = vi.fn<ChatVotingRepository["requestManualClose"]>(() => Promise.resolve(false));
+    const repository = repositoryWith({
+      open: vi.fn(() => Promise.resolve({ ...openVote, closesAt: expectedClosesAt })),
+      requestManualClose,
+    });
+    const scheduleClose = vi.fn(() => Promise.resolve());
+
+    await expect(requestChatVoteClose(repository, "fictional-channel", scheduleClose)).resolves.toBeNull();
+
+    expect(requestManualClose).toHaveBeenCalledWith("fictional-channel", "fictional-poll", expectedClosesAt, undefined);
+    expect(scheduleClose).not.toHaveBeenCalled();
+  });
+
+  it("keeps the newest alarm deadline when vote extensions schedule out of order", async () => {
+    let persistedVote: ChatVote = { ...openVote, closesAt: new Date(Date.now() + 60_000).toISOString() };
+    let releaseFirstSchedule = (): void => {};
+    let signalFirstScheduleStarted = (): void => {};
+    const firstScheduleStarted = new Promise<void>((resolve) => { signalFirstScheduleStarted = resolve; });
+    const firstScheduleGate = new Promise<void>((resolve) => { releaseFirstSchedule = resolve; });
+    let scheduleCalls = 0;
+    const alarm: { current: { deadline: number; ownerRevision: number } | null } = { current: null };
+    const scheduleClose = vi.fn(async (_pollId: string, deadline: number, ownerRevision: number): Promise<void> => {
+      scheduleCalls += 1;
+      if (scheduleCalls === 1) {
+        signalFirstScheduleStarted();
+        await firstScheduleGate;
+      }
+      if (alarm.current === null || ownerRevision >= alarm.current.ownerRevision) alarm.current = { deadline, ownerRevision };
+    });
+    const repository = repositoryWith({
+      open: vi.fn<ChatVotingRepository["open"]>(() => Promise.resolve({ ...persistedVote })),
+      byId: vi.fn<ChatVotingRepository["byId"]>(() => Promise.resolve({ ...persistedVote })),
+      extendClose: vi.fn<ChatVotingRepository["extendClose"]>((_channelId, _pollId, expectedClosesAt, closesAt) => {
+        if (persistedVote.closesAt !== expectedClosesAt) return Promise.resolve(false);
+        persistedVote = { ...persistedVote, closesAt, deadlineRevision: (persistedVote.deadlineRevision ?? 0) + 1 };
+        return Promise.resolve(true);
+      }),
+    });
+
+    const firstExtension = requestChatVoteExtension(repository, "fictional-channel", scheduleClose);
+    await firstScheduleStarted;
+    await requestChatVoteExtension(repository, "fictional-channel", scheduleClose);
+    releaseFirstSchedule();
+    await firstExtension;
+
+    expect(scheduleClose).toHaveBeenCalledTimes(2);
+    expect(alarm.current?.deadline).toBe(Date.parse(persistedVote.closesAt));
+  });
+
+  it("rolls back a persisted extension and schedules the restored deadline when rescheduling fails", async () => {
+    const originalDeadline = new Date(Date.now() + 60_000).toISOString();
+    let persistedVote: ChatVote = {
+      ...openVote,
+      closesAt: originalDeadline,
+      deadlineRevision: 0,
+    };
+    let scheduleAttempts = 0;
+    const scheduleClose = vi.fn((): Promise<void> => {
+      scheduleAttempts += 1;
+      if (scheduleAttempts <= 2) return Promise.reject(new Error("alarm unavailable"));
+      return Promise.resolve();
+    });
+    const rollbackCloseExtension = vi.fn<ChatVotingRepository["rollbackCloseExtension"]>(
+      (_channelId, _pollId, expectedClosesAt, expectedDeadlineRevision, closesAt) => {
+        if (persistedVote.closesAt !== expectedClosesAt || persistedVote.deadlineRevision !== expectedDeadlineRevision) return Promise.resolve(false);
+        persistedVote = { ...persistedVote, closesAt, deadlineRevision: expectedDeadlineRevision + 1 };
+        return Promise.resolve(true);
+      },
+    );
+    const publishRollback = vi.fn((vote: ChatVote): Promise<void> => {
+      void vote;
+      return Promise.resolve();
+    });
+    const repository = repositoryWith({
+      open: vi.fn<ChatVotingRepository["open"]>(() => Promise.resolve({ ...persistedVote })),
+      byId: vi.fn<ChatVotingRepository["byId"]>(() => Promise.reject(new Error("deadline read unavailable"))),
+      extendClose: vi.fn<ChatVotingRepository["extendClose"]>((_channelId, _pollId, expectedClosesAt, closesAt) => {
+        if (persistedVote.closesAt !== expectedClosesAt) return Promise.resolve(false);
+        persistedVote = { ...persistedVote, closesAt, deadlineRevision: (persistedVote.deadlineRevision ?? 0) + 1 };
+        return Promise.resolve(true);
+      }),
+      rollbackCloseExtension,
+    });
+
+    await expect(requestChatVoteExtension(repository, "fictional-channel", scheduleClose, undefined, {
+      onDeadlineRollback: publishRollback,
+    })).rejects.toThrow("alarm unavailable");
+
+    expect(rollbackCloseExtension).toHaveBeenCalledWith(
+      "fictional-channel", openVote.id, expect.any(String), 1, expect.any(String),
+    );
+    expect(persistedVote.closesAt).toBe(originalDeadline);
+    expect(persistedVote.deadlineRevision).toBe(2);
+    expect(scheduleClose).toHaveBeenCalledTimes(3);
+    expect(scheduleClose.mock.calls[2]).toEqual([openVote.id, Date.parse(originalDeadline), 2]);
+    expect(publishRollback).toHaveBeenCalledWith(expect.objectContaining({ closesAt: originalDeadline, deadlineRevision: 2 }));
+  });
+
+  it("schedules a persisted extension before a post-write read can fail", async () => {
+    const originalDeadline = new Date(Date.now() + 60_000).toISOString();
+    const persistedVote: ChatVote = { ...openVote, closesAt: originalDeadline, deadlineRevision: 0 };
+    const scheduleClose = vi.fn(() => Promise.resolve());
+    const repository = repositoryWith({
+      open: vi.fn<ChatVotingRepository["open"]>(() => Promise.resolve(persistedVote)),
+      extendClose: vi.fn<ChatVotingRepository["extendClose"]>(() => Promise.resolve(true)),
+      byId: vi.fn<ChatVotingRepository["byId"]>(() => Promise.reject(new Error("post-write read unavailable"))),
+    });
+
+    const result = await requestChatVoteExtension(repository, "fictional-channel", scheduleClose);
+
+    expect(result).toMatchObject({ deadlineRevision: 1 });
+    expect(result?.closesAt).toBe(new Date(Date.parse(originalDeadline) + 30_000).toISOString());
+    expect(scheduleClose).toHaveBeenCalledWith(openVote.id, Date.parse(result?.closesAt ?? ""), 1);
   });
 });

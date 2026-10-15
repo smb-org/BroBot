@@ -16,7 +16,6 @@ const channel = (role: string) => ({
   tokens: { botExpiresAt: "2099-09-20T08:00:00.000Z", loginStatus: "connected", loginReason: null, loginExpiresAt: "2099-09-20T08:00:00.000Z" },
   lastError: null,
 });
-
 const json = (value: unknown) => ({ status: 200, contentType: "application/json", body: JSON.stringify(value) });
 
 const mockDashboard = async (page: Page, role: string, modules: unknown[]): Promise<void> => {
@@ -65,24 +64,4 @@ test("operator module names keep priority while lock reasons sit below each row 
     return element.getBoundingClientRect().top >= link.getBoundingClientRect().bottom - 1;
   });
   expect(reasonBelowLink).toBe(true);
-});
-
-test("overview save action aligns with the chat target field at 1280px", async ({ page }) => {
-  await mockDashboard(page, "manager", []);
-  await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto(`/channels/${channelId}`);
-
-  const field = page.getByRole("button", { name: "Default chat target", exact: true });
-  const save = page.getByRole("button", { name: "Save default chat target", exact: true });
-  await expect(field).toBeVisible();
-  await expect(save).toBeVisible();
-  const topDifference = await save.evaluate((element) => {
-    const row = element.closest(".channel-overview-settings__row");
-    const action = row?.querySelector<HTMLButtonElement>(".ui-button");
-    if (action === null || action === undefined) throw new Error("The chat target save button is missing.");
-    const field = row?.querySelector<HTMLButtonElement>(".ui-chat-target-field__trigger");
-    if (field === null || field === undefined) throw new Error("The chat target field is missing.");
-    return Math.abs(field.getBoundingClientRect().top - action.getBoundingClientRect().top);
-  });
-  expect(topDifference).toBeLessThanOrEqual(8);
 });

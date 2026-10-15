@@ -2,8 +2,6 @@ import type {
   PanelBotPermissions,
   PanelBotStatus,
   PanelBroadcasterPermissions,
-  PanelChannelOverview,
-  PanelModuleState,
   PanelModeratorStatus,
   PanelTokenStatus,
 } from "../panel-contract";
@@ -26,28 +24,6 @@ export interface TokenHealth {
   label: string;
   kind: TokenHealthKind;
 }
-
-type ChannelNoticeKind =
-  | "moderator-missing"
-  | "bot-permissions-missing"
-  | "broadcaster-permissions-missing"
-  | "module-permissions-missing"
-  | "token-expired"
-  | "token-renewal-overdue";
-
-export interface ChannelNoticeFact {
-  id: string;
-  kind: ChannelNoticeKind;
-  tone: "warning" | "error";
-  moduleId?: string;
-}
-
-export type ChannelNoticeInput = Pick<PanelChannelOverview,
-  "moderator" | "bot" | "tokens" | "botPermissions" | "broadcasterPermissions"
-> & {
-  modules: readonly Pick<PanelModuleState, "id" | "missingBroadcasterScopes">[];
-  loadedAt?: number;
-};
 
 export const parseDashboardDate = (value: string | null): number | null => {
   if (value === null) return null;
@@ -104,37 +80,3 @@ export const broadcasterPermissionsAreMissing = (
 export const modulePermissionsAreMissing = (
   module: { missingBroadcasterScopes?: readonly string[] } | null | undefined,
 ): boolean => (module?.missingBroadcasterScopes?.length ?? 0) > 0;
-
-const severityRank: Record<ChannelNoticeFact["tone"], number> = { error: 0, warning: 1 };
-
-export const collectChannelNoticeFacts = (input: ChannelNoticeInput, now = Date.now()): ChannelNoticeFact[] => {
-  const facts: ChannelNoticeFact[] = [];
-  if (moderatorIsMissing(input.moderator)) {
-    facts.push({ id: "moderator-missing", kind: "moderator-missing", tone: "error" });
-  }
-  if (botPermissionsAreMissing(input.botPermissions)) {
-    facts.push({ id: "bot-permissions-missing", kind: "bot-permissions-missing", tone: "warning" });
-  }
-  if (broadcasterPermissionsAreMissing(input.broadcasterPermissions)) {
-    facts.push({ id: "broadcaster-permissions-missing", kind: "broadcaster-permissions-missing", tone: "warning" });
-  }
-  for (const module of input.modules) {
-    if (modulePermissionsAreMissing(module)) {
-      facts.push({
-        id: `module-permissions-missing:${module.id}`,
-        kind: "module-permissions-missing",
-        tone: "warning",
-        moduleId: module.id,
-      });
-    }
-  }
-  const token = tokenHealth(input.tokens, input.bot, input.loadedAt, now);
-  if (token.kind === "expired" || token.kind === "renewal-overdue") {
-    facts.push({
-      id: token.kind === "expired" ? "token-expired" : "token-renewal-overdue",
-      kind: token.kind === "expired" ? "token-expired" : "token-renewal-overdue",
-      tone: token.kind === "expired" ? "error" : "warning",
-    });
-  }
-  return facts.sort((left, right) => severityRank[left.tone] - severityRank[right.tone]);
-};

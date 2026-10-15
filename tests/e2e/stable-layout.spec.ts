@@ -138,7 +138,7 @@ test("clipped hints and dialog errors keep full copy in fixed reserved rows", as
   expect((await dialog.boundingBox())?.height).toBe(dialogHeight);
 });
 
-test("returning from a module keeps the overview loaded at the same header position", async ({ page }) => {
+test("returning from a module keeps the live cockpit header at the same position", async ({ page }) => {
   test.setTimeout(15_000);
 
   const channel = {
@@ -268,7 +268,7 @@ test("returning from a module keeps the overview loaded at the same header posit
   });
 
   await page.goto("/channels/stable-channel");
-  const pageHeader = page.locator(".main-content .page-header");
+  const pageHeader = page.locator(".live-cockpit-header");
   await expect(pageHeader).toBeVisible();
   await expect(page.locator(".main-content .ui-load-state__reserved-lines")).toHaveCount(0);
   const firstHeaderY = await pageHeader.evaluate((element) => element.getBoundingClientRect().y);
@@ -292,7 +292,7 @@ test("returning from a module keeps the overview loaded at the same header posit
 
   await page.getByRole("button", { name: "Live" }).click();
   await expect(page).toHaveURL("/channels/stable-channel");
-  expect(await pageHeader.count()).toBe(1);
+  await expect(pageHeader).toBeVisible();
   await expect.poll(() => pageHeader.evaluate((element) => element.getBoundingClientRect().y)).toBe(firstHeaderY);
   expect(await page.locator(".main-content .ui-load-state__reserved-lines").count()).toBe(0);
   expect(overviewRequests).toBe(initialOverviewRequestCount);

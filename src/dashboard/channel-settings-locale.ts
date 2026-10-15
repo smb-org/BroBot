@@ -1,8 +1,9 @@
 export interface ChannelSettingsTexts {
   section: string;
+  pageTitle: string;
+  pageDescription: string;
   timeZone: string;
   timeZoneHint: string;
-  save: string;
   readOnly: string;
   loadError: string;
   saveError: string;
@@ -30,25 +31,23 @@ export interface ChannelSettingsTexts {
   locationTimeZoneAction: string;
   locationTimeZoneSaved: string;
   locationTimeZoneSaveFailed: string;
-  defaultChatTargetSection: string;
   defaultChatTarget: string;
   defaultChatTargetHint: string;
-  defaultChatTargetSave: string;
-  defaultChatTargetSaveError: string;
 }
 
 const texts: Readonly<Record<"de" | "en", ChannelSettingsTexts>> = {
   de: {
     section: "Kanaleinstellungen",
+    pageTitle: "Ort & Wetter",
+    pageDescription: "Standort für standortabhängige Kanalmodule",
     timeZone: "Kanalzeitzone",
     timeZoneHint: "Gültige IANA-Zeitzone. Sie wird für Datum, Uhrzeit und zeitabhängige Textbausteine verwendet.",
-    save: "Zeitzone speichern",
     readOnly: "Nur Broadcaster und Verwalter dürfen diese Einstellung ändern.",
     loadError: "Die Kanaleinstellungen konnten nicht geladen werden.",
     saveError: "Die Zeitzone konnte nicht gespeichert werden.",
     invalid: "Bitte eine gültige IANA-Zeitzone eingeben.",
     location: "Standort",
-    locationHint: "Wird von Kanalmodulen für standortabhängige Daten verwendet.",
+    locationHint: "Wird von Wetter-, Sonnen- und Mondmodulen für standortabhängige Daten verwendet.",
     locationSearch: "Ort suchen",
     locationSearchButton: "Suchen",
     locationSearching: "Orte werden gesucht …",
@@ -70,23 +69,21 @@ const texts: Readonly<Record<"de" | "en", ChannelSettingsTexts>> = {
     locationTimeZoneAction: "Zeitzone übernehmen",
     locationTimeZoneSaved: "Die Kanalzeitzone wurde aktualisiert.",
     locationTimeZoneSaveFailed: "Die Kanalzeitzone konnte nicht aktualisiert werden.",
-    defaultChatTargetSection: "Chat-Ausgabe",
     defaultChatTarget: "Standard-Chat-Ziel",
     defaultChatTargetHint: "Wird für Einträge verwendet, die kein eigenes Chat-Ziel festlegen.",
-    defaultChatTargetSave: "Standard-Chat-Ziel speichern",
-    defaultChatTargetSaveError: "Das Standard-Chat-Ziel konnte nicht gespeichert werden.",
   },
   en: {
     section: "Channel settings",
+    pageTitle: "Location & weather",
+    pageDescription: "Location for channel modules that use local data",
     timeZone: "Channel time zone",
     timeZoneHint: "A valid IANA time zone used for date, time, and time based text block conditions.",
-    save: "Save time zone",
     readOnly: "Only broadcasters and managers can change this setting.",
     loadError: "Channel settings could not be loaded.",
     saveError: "The time zone could not be saved.",
     invalid: "Enter a valid IANA time zone.",
     location: "Location",
-    locationHint: "Used by channel modules for location based data.",
+    locationHint: "Used by weather, sun, and moon modules for location based data.",
     locationSearch: "Search for a place",
     locationSearchButton: "Search",
     locationSearching: "Searching locations …",
@@ -108,11 +105,8 @@ const texts: Readonly<Record<"de" | "en", ChannelSettingsTexts>> = {
     locationTimeZoneAction: "Apply time zone",
     locationTimeZoneSaved: "Channel time zone updated.",
     locationTimeZoneSaveFailed: "Channel time zone could not be updated.",
-    defaultChatTargetSection: "Chat output",
     defaultChatTarget: "Default chat target",
     defaultChatTargetHint: "Used by entries that do not set their own chat target.",
-    defaultChatTargetSave: "Save default chat target",
-    defaultChatTargetSaveError: "The default chat target could not be saved.",
   },
 };
 

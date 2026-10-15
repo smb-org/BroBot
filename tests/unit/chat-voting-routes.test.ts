@@ -2,13 +2,13 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleBallotAccess, ModuleRouteEnvironment } from "../../src/modules/contract";
-import { DEFAULT_CHAT_VOTING_SETTINGS, type ChatVoteDraft, type ChatVoteTemplate } from "../../src/modules/chat_voting/contracts";
+import { CHAT_VOTING_ELEMENT_KIND, DEFAULT_CHAT_VOTING_SETTINGS, type ChatVoteDraft, type ChatVoteTemplate } from "../../src/modules/chat_voting/contracts";
 import { chatVotingRoutes } from "../../src/modules/chat_voting/routes";
 import { createChatVotingRepository } from "../../src/modules/chat_voting/repository";
 import { authorizeModuleMutation } from "../../src/worker/module-authorization";
 import { prepareModuleAudit } from "../../src/worker/module-audit";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
-import { TestD1Database } from "./test-d1";
+import { createReadInterleavingDatabase, TestD1Database } from "./test-d1";
 
 const CHANNEL_ID = "chat-voting-route-channel";
 const ACTOR_ID = "chat-voting-route-actor";
@@ -306,12 +306,112 @@ describe("chat voting routes", () => {
 
     const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/modules/chat_voting/close`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pollId: openTextVote.id }),
     }), { DB: database as unknown as D1Database, CHANNEL: namespace });
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ closing: true, pollId: openTextVote.id });
     expect(scheduleModuleAlarm).toHaveBeenCalledOnce();
     expect(writeAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "chat_voting.closed" }), expect.any(String));
+  });
+
+  it("extends an open vote by thirty seconds and schedules its updated deadline", async () => {
+    const database = await createDatabase();
+    const openedAt = Date.now() - 60_000;
+    const closesAt = Date.now() + 60_000;
+    const expectedDeadline = closesAt + 30_000;
+    await database.prepare("UPDATE chat_votes SET opened_at = ?, closes_at = ? WHERE channel_id = ? AND poll_id = ?")
+      .bind(new Date(openedAt).toISOString(), new Date(closesAt).toISOString(), CHANNEL_ID, openTextVote.id).run();
+    const writeAudit = vi.fn(() => Promise.resolve());
+    const publish = vi.fn(() => Promise.resolve());
+    const ballots = ballotAccess({ readSnapshot: vi.fn(() => Promise.resolve({ counts: [], revision: 5, terms: [], more: 0, termFilterReady: true })) });
+    const app = appFor(ballots, () => Promise.resolve([]), publish, authorizeModuleMutation, writeAudit);
+    const scheduleModuleAlarm = vi.fn(() => Promise.resolve());
+    const namespace = {
+      idFromName: vi.fn(() => ({})),
+      get: vi.fn(() => ({ scheduleModuleAlarm })),
+    } as unknown as Env["CHANNEL"];
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/modules/chat_voting/extend`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pollId: openTextVote.id }),
+    }), {
+      DB: database as unknown as D1Database,
+      CHANNEL: namespace,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ vote: { id: openTextVote.id, closesAt: new Date(expectedDeadline).toISOString() } });
+    expect(scheduleModuleAlarm).toHaveBeenCalledWith("chat_voting", "close", openTextVote.id, expectedDeadline, 1);
+    expect(publish).toHaveBeenCalledWith(CHANNEL_ID, "chat_voting", "tally", CHAT_VOTING_ELEMENT_KIND, expect.objectContaining({
+      pollId: openTextVote.id,
+      closesAt: new Date(expectedDeadline).toISOString(),
+      counts: [],
+      revision: 5,
+      deadlineRevision: 1,
+    }));
+    expect(writeAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "chat_voting.extended" }), expect.any(String));
+  });
+
+  it.each(["close", "extend"] as const)("rejects a stale %s request after another vote replaces the rendered vote", async (action) => {
+    const database = await createDatabase();
+    const scheduleModuleAlarm = vi.fn(() => Promise.resolve());
+    const namespace = {
+      idFromName: vi.fn(() => ({})),
+      get: vi.fn(() => ({ scheduleModuleAlarm })),
+    } as unknown as Env["CHANNEL"];
+    const app = appFor(ballotAccess(), () => Promise.resolve([]));
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/modules/chat_voting/${action}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pollId: "rendered-old-vote" }),
+    }), { DB: database as unknown as D1Database, CHANNEL: namespace });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "chat_voting_poll_changed" });
+    expect(scheduleModuleAlarm).not.toHaveBeenCalled();
+    await expect(createChatVotingRepository(database as unknown as D1Database).open(CHANNEL_ID)).resolves.toMatchObject({
+      id: openTextVote.id,
+      status: "open",
+      deadlineRevision: 0,
+    });
+  });
+
+  it.each(["close", "extend"] as const)("returns the poll-changed reason when a %s loses a replacement race", async (action) => {
+    const database = await createDatabase();
+    const repository = createChatVotingRepository(database as unknown as D1Database);
+    const interleavedDatabase = createReadInterleavingDatabase(
+      database,
+      (sql) => sql.includes("FROM chat_votes") && sql.includes("status = 'open'"),
+      async () => {
+        await repository.finish(CHANNEL_ID, openTextVote.id, "manual", new Date().toISOString(), [], [], 0, true);
+        await repository.insertOpen({
+          ...openTextVote,
+          id: "replacement-text-poll",
+          openedAt: new Date(Date.now() + 1).toISOString(),
+          closesAt: new Date(Date.now() + 120_000).toISOString(),
+        });
+      },
+    );
+    const scheduleModuleAlarm = vi.fn(() => Promise.resolve());
+    const namespace = {
+      idFromName: vi.fn(() => ({})),
+      get: vi.fn(() => ({ scheduleModuleAlarm })),
+    } as unknown as Env["CHANNEL"];
+    const app = appFor(ballotAccess(), () => Promise.resolve([]));
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/modules/chat_voting/${action}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pollId: openTextVote.id }),
+    }), { DB: interleavedDatabase, CHANNEL: namespace });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "chat_voting_poll_changed" });
+    expect(scheduleModuleAlarm).not.toHaveBeenCalled();
   });
 
   it.each(["digit_01", "digit_12"])("does not accept the retired %s preset wire value", async (preset) => {

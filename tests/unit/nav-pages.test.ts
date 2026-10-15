@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ChannelRole } from "../../src/contracts/values";
 import { dashboardNavigationGroups, DASHBOARD_NAVIGATION_CATEGORIES, MODULE_NAVIGATION_CATEGORY_GROUPS, visibleModuleNavigationIds } from "../../src/dashboard/nav-pages";
 import { dashboardTexts } from "../../src/dashboard/locale";
-import { dashboardModeForRoute, routeForDashboardMode, routeForSelectedChannel, type DashboardRoute } from "../../src/dashboard/router";
+import { dashboardModeForRoute, parseDashboardRoute, routeForDashboardMode, routeForSelectedChannel, type DashboardRoute } from "../../src/dashboard/router";
 import { moduleName } from "../../src/dashboard/module-labels";
 import { MODULES } from "../../src/modules/registry";
 
@@ -54,6 +54,24 @@ describe("dashboard navigation", () => {
     const entries = groups.flatMap(({ entries: groupEntries }) => groupEntries);
     expect(entries.find(({ pageId }) => pageId === "events")?.label).toBe("Ereignisse");
     expect(entries.find(({ moduleId }) => moduleId === "channel_events")?.label).toBe("Kanalereignisse");
+  });
+
+  it("places Ort & Wetter in Setup data and keeps channel defaults in admin System", () => {
+    const groups = navigationFor(MODULES.map(({ id }) => ({ id, enabled: true })));
+    const entries = groups.flatMap(({ entries: groupEntries }) => groupEntries);
+    expect(entries.find(({ pageId }) => pageId === "location-weather")).toMatchObject({
+      category: "data",
+      area: "setup",
+      route: { kind: "channel", channelId: "channel-a", section: "location-weather" },
+    });
+    expect(entries.find(({ pageId }) => pageId === "system")).toMatchObject({
+      category: "admin",
+      area: "setup",
+      route: { kind: "channel", channelId: "channel-a", section: "system" },
+    });
+    expect(parseDashboardRoute("/channels/channel-a/location-weather")).toEqual({
+      kind: "channel", channelId: "channel-a", section: "location-weather",
+    });
   });
 
   it("keeps inactive modules out of the sidebar while leaving them searchable", () => {

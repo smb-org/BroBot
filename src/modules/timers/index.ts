@@ -49,6 +49,23 @@ export const timersModule: BotModule<typeof settingsSchema> = {
     iconKind: "timers",
     keywords: ["timer", "timers", "schedule", "zeitplan", "zeitplanung"],
   }],
+  liveTile: {
+    load: async (channelId, signal) => {
+      const timers = await (await import("./panel/service")).loadUpcomingTimers(channelId, signal);
+      const now = Date.now();
+      return timers.flatMap((timer) => {
+        if (!timer.enabled || timer.nextRunAt === null || Date.parse(timer.nextRunAt) <= now) return [];
+        return [{
+          kind: "upcoming" as const,
+          id: timer.id,
+          category: "timer" as const,
+          name: timer.name.trim() || timer.id,
+          at: timer.nextRunAt,
+          detail: null,
+        }];
+      }).sort((left, right) => Date.parse(left.at) - Date.parse(right.at)).slice(0, 10);
+    },
+  },
   eventSubTypes: ["channel.chat.message"],
   alarms: [{
     key: "run",

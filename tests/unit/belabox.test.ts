@@ -12,7 +12,7 @@ import { parseRelayStats } from "../../src/modules/belabox/domain/stats";
 import { publisherKeyFromUrl, validateBelaboxStatsUrl } from "../../src/modules/belabox/domain/stats-url";
 import { prepareModuleAudit } from "../../src/worker/module-audit";
 import { writeModuleDiagnostics } from "../../src/worker/event-log";
-import { authorizeModuleManagementMutation } from "../../src/worker/module-authorization";
+import { authorizeModuleManagementMutation, authorizeModuleMutation } from "../../src/worker/module-authorization";
 import { createModuleSecretAccess } from "../../src/worker/module-secrets";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, jsonResponse, testKey } from "./fixtures";
 import { TestD1Database } from "./test-d1";
@@ -42,10 +42,10 @@ const relayPayload = (publisherKey: string) => ({
   consumers: [],
 });
 
-const createBelaboxRouteHarness = async (testDatabase: TestD1Database) => {
+const createBelaboxRouteHarness = async (testDatabase: TestD1Database, role: "broadcaster" | "manager" | "operator" = "manager") => {
   await insertChannel(testDatabase, CHANNEL_ID);
   await insertLoginIdentityAndSession(testDatabase, MANAGER_ID);
-  await insertMember(testDatabase, CHANNEL_ID, MANAGER_ID, "manager");
+  await insertMember(testDatabase, CHANNEL_ID, MANAGER_ID, role);
   const db = testDatabase as unknown as D1Database;
   const secrets = createModuleSecretAccess({ DB: db, TOKEN_ENCRYPTION_KEYS }, CHANNEL_ID, "belabox");
   const runModuleAlarm = vi.fn(async (
@@ -84,8 +84,9 @@ const createBelaboxRouteHarness = async (testDatabase: TestD1Database) => {
   });
   const app = new Hono<ModuleRouteEnvironment>();
   app.use("*", async (context, next) => {
-    context.set("channelRole", "manager");
+    context.set("channelRole", role);
     context.set("actor", { userId: MANAGER_ID, sessionId: `session-${MANAGER_ID}` });
+    context.set("authorizeMutation", authorizeModuleMutation);
     context.set("authorizeManagementMutation", authorizeModuleManagementMutation);
     context.set("secrets", () => secrets);
     context.set("externalFetchBudget", sharedBudget());
@@ -331,6 +332,17 @@ describe("BELABOX secret and route redaction", () => {
     await expect(db.prepare(
       "SELECT history_sample_json FROM belabox_status WHERE channel_id = ?",
     ).bind(CHANNEL_ID).first()).resolves.toEqual({ history_sample_json: JSON.stringify(sample) });
+  });
+
+  it("allows an operator to run the BELABOX connection check", async () => {
+    const testDatabase = new TestD1Database();
+    database = testDatabase;
+    const { send } = await createBelaboxRouteHarness(testDatabase, "operator");
+
+    const response = await send("/test", "POST", {});
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: false, reason: "not_configured" });
   });
 
   it("exposes notices only after three failures on the current classified BELABOX stream", async () => {
@@ -859,7 +871,7 @@ describe("BELABOX secret and route redaction", () => {
     expect(stored).toMatchObject({ stream_id: "stream-s1", stream_session_key: "stream:stream-s1" });
   });
 
-  it("rechecks management membership after the POST /test body finishes before reading the stored secret", async () => {
+  it("rechecks member authorization after the POST /test body finishes before reading the stored secret", async () => {
     const testDatabase = new TestD1Database();
     database = testDatabase;
     const { app, db, secrets } = await createBelaboxRouteHarness(testDatabase);

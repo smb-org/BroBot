@@ -59,7 +59,7 @@ const installApiMocks = async (page: Page): Promise<void> => {
     } else if (pathname === `/api/channels/${channelId}/revisions`) {
       body = { revisions: {} };
     } else if (pathname === `/api/channels/${channelId}/overview`) {
-      body = { ...channel, activeModules: [] };
+      body = { ...channel, viewerCount: 312, activeModules: [{ moduleId: "ads", settings: "{}" }] };
     } else if (pathname === `/api/channels/${channelId}/settings`) {
       body = {
         timeZone: "UTC",
@@ -80,7 +80,7 @@ const installApiMocks = async (page: Page): Promise<void> => {
     } else if (pathname === `/api/channels/${channelId}/audit-log`) {
       body = { entries: [], nextCursor: null };
     } else if (pathname === `/api/channels/${channelId}/modules`) {
-      body = { modules: [] };
+      body = { modules: [{ id: "ads", enabled: true, settings: "{}" }] };
     } else if (pathname === `/api/channels/${channelId}/system`) {
       body = {
         broadcasterConnection: channel.broadcasterConnection,
@@ -114,13 +114,14 @@ test("captures the stable dashboard routes at desktop and mobile widths", async 
       await expect(page.locator("#root")).toBeVisible();
       await page.waitForTimeout(500);
       if (routeName === "overview" && viewport.width >= 1280) {
-        const locationReason = page.locator("#channel-location-remove-reason");
         const immediateActions = page.getByRole("group", { name: "Immediate actions" });
-        const actionsSection = immediateActions.locator("..");
-        await expect(locationReason).toBeVisible();
+        const cockpit = page.locator(".live-cockpit");
+        await expect(cockpit).toBeVisible();
         await expect(immediateActions).toBeVisible();
-        await expect.poll(async () => (await actionsSection.boundingBox())?.y).toBe(646.84375);
-        await expect(locationReason).toHaveCSS("margin-bottom", "11px");
+        await expect(page.locator(".live-cockpit-reserve")).toHaveCount(3);
+        if (viewport.width === 1920) {
+          await expect.poll(() => page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
+        }
       }
       await page.screenshot({
         path: join(outputDirectory, `${routeName}-${viewport.name}.png`),

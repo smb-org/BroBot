@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Field, UiProvider } from "../../src/dashboard/ui";
 import { MembersPage } from "../../src/dashboard/members";
 import { PlatformPage } from "../../src/dashboard/platform";
-import { ImmediateActions } from "../../src/dashboard/stream-manager";
 import type { PanelMembersResponse } from "../../src/panel-contract";
 import { dashboardDataKeys } from "../../src/dashboard/data/keys";
 import { jsonResponse } from "../unit/fixtures";
@@ -15,10 +14,8 @@ import { renderWithQuery } from "../query-test-utils";
 /**
  * Cross-cutting check for the helper-text rule (editor-konzept 3.0/15.1.3):
  * every `textbox`/`spinbutton`/`group`/`switch` field carries a
- * non-empty helper line via `aria-describedby`. Scoped to this agent's
- * pages -- members, platform, and the Stream Manager immediate actions --
- * not the module panels (text commands, raid, ads), which are migrating
- * separately and are covered by their own suites.
+ * non-empty helper line via `aria-describedby`. Scoped to members and
+ * platform pages, not module panels, which have their own suites.
  */
 const renderWithMantine = (element: ReactElement): ReturnType<typeof render> => render(<UiProvider>{element}</UiProvider>);
 
@@ -62,17 +59,6 @@ describe("helper text on every field (editor-konzept 3.0/15d)", () => {
   it("fails on a field without a hint -- proves the check itself catches a missing helper line", () => {
     const { container } = renderWithMantine(<Field label="Probe" value="" onChange={() => {}} />);
     expect(() => { expectEveryFieldHasHelperText(container); }).toThrow();
-  });
-
-  it("gives every enabled Stream Manager immediate-action field a helper text", async () => {
-    const { container } = renderWithMantine(<ImmediateActions
-      channelId="kanal-a"
-      streamState="online"
-      modules={[{ id: "ads", enabled: true }, { id: "raid", enabled: true }]}
-    />);
-    await screen.findByRole("group", { name: "Werbedauer" });
-    await screen.findByRole("textbox", { name: "Twitch-Name" });
-    expectEveryFieldHasHelperText(container);
   });
 
   it("gives every field in the members grant editor and member inspector a helper text", () => {

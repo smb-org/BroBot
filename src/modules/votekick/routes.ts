@@ -30,7 +30,8 @@ votekickRoutes.post("/votekicks/:id/cancel", async (context) => {
   const channelId = requiredParam(context.req.param("channelId"), "channelId");
   const id = requiredParam(context.req.param("id"), "id");
   const existing = await createVotekickRepository(context.env.DB).running(channelId);
-  if (existing === null || existing.id !== id) return context.json({ error: "votekick_not_running" }, 404);
+  if (existing === null) return context.json({ error: "votekick_not_running" }, 404);
+  if (existing.id !== id) return context.json({ error: "votekick_changed" }, 409);
 
   const now = new Date().toISOString();
   const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
@@ -46,7 +47,11 @@ votekickRoutes.post("/votekicks/:id/cancel", async (context) => {
     after: { status: "cancelled" },
   }, now);
   const results = await context.env.DB.batch([mutation, audit]);
-  if (results.at(0)?.meta.changes !== 1) return context.json({ error: "votekick_not_running" }, 409);
+  if (results.at(0)?.meta.changes !== 1) {
+    const current = await createVotekickRepository(context.env.DB).running(channelId);
+    if (current !== null && current.id !== id) return context.json({ error: "votekick_changed" }, 409);
+    return context.json({ error: "votekick_not_running" }, 409);
+  }
   try {
     const ballots = context.get("ballots")(channelId);
     const snapshot = await ballots.close(id);

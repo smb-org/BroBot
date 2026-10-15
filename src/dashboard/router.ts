@@ -11,7 +11,7 @@ export type DashboardRoute =
   | {
     kind: "channel";
     channelId: string;
-    section: "overview" | "system" | "members" | "variables" | "overlays" | "events" | "modules" | "audit";
+    section: "overview" | "system" | "members" | "variables" | "overlays" | "events" | "modules" | "audit" | "location-weather";
     overlayId?: string;
     editorOverlayId?: string;
     initialVariable?: string;
@@ -49,7 +49,8 @@ export const routeForDashboardMode = (
 /** Routes whose page content cannot work until the installation bot is signed in. */
 export const dashboardRouteRequiresBot = (route: DashboardRoute): boolean =>
   route.kind === "overview" || route.kind === "module" || (route.kind === "channel" &&
-    route.section !== "system" && route.section !== "audit" && route.section !== "variables" && route.section !== "overlays");
+    route.section !== "system" && route.section !== "audit" && route.section !== "variables" &&
+    route.section !== "overlays" && route.section !== "location-weather");
 
 let suppressNextPopState = false;
 let historyIndex = 0;
@@ -136,7 +137,7 @@ export const parseDashboardRoute = (pathname: string, search = ""): DashboardRou
       ...(editorOverlayId === "new" && initialOverlayName !== null && initialOverlayName.length > 0 ? { initialOverlayName } : {}),
     };
   }
-  const channelSections = ["system", "members", "variables", "overlays", "overlay-links", "events", "modules", "audit"];
+  const channelSections = ["system", "members", "variables", "overlays", "overlay-links", "events", "modules", "audit", "location-weather"];
   if (segments[0] !== "channels" || (segments.length !== 2 && segments.length !== 3) ||
       (segments.length === 3 && !channelSections.includes(segments[2] ?? ""))) return { kind: "overview" };
   const channelId = decodeSegment(segments[1] ?? "");
@@ -146,7 +147,7 @@ export const parseDashboardRoute = (pathname: string, search = ""): DashboardRou
     kind: "channel",
     channelId,
     section: section === "overlay-links" ? "overlays"
-      : section === "system" || section === "members" || section === "variables" || section === "overlays" || section === "events" || section === "modules" || section === "audit"
+      : section === "system" || section === "members" || section === "variables" || section === "overlays" || section === "events" || section === "modules" || section === "audit" || section === "location-weather"
       ? section
       : "overview",
   };

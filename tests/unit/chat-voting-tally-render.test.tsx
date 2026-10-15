@@ -197,6 +197,45 @@ describe("chat voting overlay tally", () => {
     }
   });
 
+  it("restarts the countdown when the same poll receives a later deadline after reaching zero", () => {
+    const localNow = "2030-01-01T00:00:00.000Z";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(localNow));
+    try {
+      const config = { layout: "bars", showPercent: true, showCountdown: true };
+      const state = {
+        pollId: "extended-poll",
+        openedAt: localNow,
+        closesAt: "2030-01-01T00:00:02.000Z",
+        deadlineRevision: 0,
+        requestedDurationSeconds: 2,
+        status: "open" as const,
+        preset: "yes_no" as const,
+        optionCount: 2,
+        labels: ["Yes", "No"],
+        counts: [0, 0],
+        revision: 0,
+      };
+      const { container, rerender } = render(<Tally config={config} state={state} now={Date.now()} language="en" />);
+      const countdown = container.querySelector<HTMLElement>(".chat-voting-tally__countdown");
+      act(() => { vi.advanceTimersByTime(2_000); });
+      expect(countdown).toHaveTextContent("0:00");
+
+      rerender(<Tally config={config} state={{
+        ...state,
+        closesAt: "2030-01-01T00:00:12.000Z",
+        deadlineRevision: 1,
+        requestedDurationSeconds: 12,
+      }} now={Date.now()} language="en" />);
+      expect(countdown).toHaveTextContent("0:10");
+      expect(vi.getTimerCount()).toBe(1);
+      act(() => { vi.advanceTimersByTime(1_000); });
+      expect(countdown).toHaveTextContent("0:09");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     ["open-ended", { requestedDurationSeconds: null, status: "open" }],
     ["closed", { requestedDurationSeconds: 90, status: "closed", closedAt: "2030-01-01T00:00:00.000Z" }],

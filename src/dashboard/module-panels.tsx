@@ -686,9 +686,9 @@ interface ModuleToggleListProperties {
 }
 
 /**
- * Just the switchable rows -- no page heading, so the Stream Manager can
- * embed it next to the immediate actions and the event feed. `ModuleWorkspace`
- * below wraps this with the full "Module" page's own heading and error line.
+ * Just the switchable rows -- no page heading, so a dashboard surface can
+ * embed it beside other channel content. `ModuleWorkspace` below wraps this
+ * with the full "Module" page's own heading and error line.
  */
 const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onChanged }: ModuleToggleListProperties): ReactElement => {
   const texts = dashboardTexts();

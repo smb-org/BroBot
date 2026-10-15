@@ -3,9 +3,9 @@ import { Hono } from "hono";
 import type { AuditAction } from "../../contracts/values";
 import type { BallotSnapshot, ModuleRouteEnvironment } from "../contract";
 import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, CHAT_VOTE_TEMPLATE_MAXIMUM, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingPresetForKind, chatVotingSettingsSchema, chatVotingStartAnnouncementAlarmKey } from "./contracts";
-import type { ChatVotePreset, ChatVoteTemplateDraft, ChatVotingKind } from "./contracts";
+import type { ChatVote, ChatVotePreset, ChatVoteTemplateDraft, ChatVotingKind } from "./contracts";
 import { createChatVotingRepository } from "./repository";
-import { requestChatVoteClose, startChatVote } from "./service";
+import { requestChatVoteClose, requestChatVoteExtension, startChatVote } from "./service";
 import { chatVoteTemplateConfiguration, configuredLabels, isBlockedFreeTextVote, isValidTemplateShortcut, isValidVoteTitle, labelsForVote, normalizeBlockedVoteTerm, normalizeVoteTitle, templateStartProblem, voteLabelLength } from "./domain";
 
 const readBody = async (request: Request): Promise<unknown> => request.json().catch(() => null);
@@ -68,6 +68,26 @@ const channelLanguage = async (db: D1Database, channelId: string): Promise<"de" 
   return row?.language === "en" ? "en" : "de";
 };
 
+const chatVoteTallyState = (vote: ChatVote, snapshot: BallotSnapshot) => ({
+  pollId: vote.id,
+  openedAt: vote.openedAt,
+  closesAt: vote.closesAt,
+  requestedDurationSeconds: vote.requestedDurationSeconds,
+  kind: vote.kind,
+  preset: chatVotingPresetForKind(vote.kind),
+  optionCount: vote.optionCount,
+  textMode: vote.textMode ?? null,
+  title: vote.title,
+  status: vote.status,
+  labels: [...vote.labels],
+  counts: [...snapshot.counts],
+  terms: (snapshot.terms ?? []).map((entry) => ({ ...entry })),
+  more: snapshot.more ?? 0,
+  termFilterReady: snapshot.termFilterReady ?? vote.termFilterReady ?? false,
+  revision: snapshot.revision,
+  deadlineRevision: vote.deadlineRevision ?? 0,
+});
+
 export const chatVotingRoutes = new Hono<ModuleRouteEnvironment>();
 
 chatVotingRoutes.get("/current", async (context) => {
@@ -93,7 +113,7 @@ chatVotingRoutes.get("/current", async (context) => {
     return context.json({ vote: null, counts: null, revision: 0, terms: null, moreTerms: null, hasOpenBallot, defaultDurationSeconds: effectiveSettings.autoCloseSeconds, defaultLabels });
   }
   const [snapshot, hasOpenBallot] = await Promise.all([
-    vote.status === "open" ? ballots.readSnapshot?.(vote.id) ?? Promise.resolve(null) : Promise.resolve(null),
+    vote.status !== "closed" ? ballots.readSnapshot?.(vote.id) ?? Promise.resolve(null) : Promise.resolve(null),
     ballots.hasOpenBallotSnapshot?.() ?? Promise.resolve(false),
   ]);
   return context.json({
@@ -353,8 +373,10 @@ chatVotingRoutes.post("/approve-term", async (context) => {
       new Date().toISOString(),
     );
     const row = await context.env.DB.prepare(
-      `SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`,
-    ).bind(...authorization.values).first<{ authorized: number }>();
+      `SELECT 1 AS authorized WHERE EXISTS (
+         SELECT 1 FROM channel_modules WHERE channel_id = ? AND module_id = 'chat_voting' AND enabled = 1
+       ) ${authorization.sql}`,
+    ).bind(channelId, ...authorization.values).first<{ authorized: number }>();
     return row !== null;
   };
 
@@ -364,23 +386,7 @@ chatVotingRoutes.post("/approve-term", async (context) => {
       CHAT_VOTING_MODULE_ID,
       "tally",
       CHAT_VOTING_ELEMENT_KIND,
-      {
-        pollId: vote.id,
-        openedAt: vote.openedAt,
-        closesAt: vote.closesAt,
-        requestedDurationSeconds: vote.requestedDurationSeconds,
-        kind: vote.kind,
-        preset: chatVotingPresetForKind(vote.kind),
-        optionCount: vote.optionCount,
-        textMode: vote.textMode,
-        title: vote.title,
-        labels: [...vote.labels],
-        counts: [...snapshot.counts],
-        terms: (snapshot.terms ?? []).map((entry) => ({ ...entry })),
-        more: snapshot.more ?? 0,
-        termFilterReady: snapshot.termFilterReady ?? false,
-        revision: snapshot.revision,
-      },
+      chatVoteTallyState(vote, snapshot),
     );
   };
 
@@ -435,11 +441,16 @@ chatVotingRoutes.post("/approve-term", async (context) => {
 
 chatVotingRoutes.post("/close", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
+  const body = await readBody(context.req.raw);
+  if (!isRecord(body) || typeof body.pollId !== "string" || body.pollId.length < 1 || body.pollId.length > 128) {
+    return context.json({ error: "chat_voting_request_invalid" }, 400);
+  }
   const now = new Date().toISOString();
   const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
   const repository = createChatVotingRepository(context.env.DB);
   const vote = await repository.open(channelId);
   if (vote === null) return context.json({ error: "chat_voting_not_running" }, 404);
+  if (body.pollId !== vote.id) return context.json({ error: "chat_voting_poll_changed" }, 409);
   const audit = {
     channelId,
     moduleId: CHAT_VOTING_MODULE_ID,
@@ -450,8 +461,56 @@ chatVotingRoutes.post("/close", async (context) => {
   const result = await requestChatVoteClose(repository, channelId, async (pollId, deadline, ownerRevision) => {
     const object = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
     await object.scheduleModuleAlarm(CHAT_VOTING_MODULE_ID, CHAT_VOTING_ALARM_HANDLER, pollId, deadline, ownerRevision);
-  }, authorization);
-  if (result === null) return context.json({ error: "chat_voting_not_running" }, 404);
+  }, authorization, { pollId: body.pollId });
+  if (result === null) {
+    const currentVote = await repository.open(channelId);
+    if (currentVote !== null && currentVote.id !== body.pollId) return context.json({ error: "chat_voting_poll_changed" }, 409);
+    return context.json({ error: "chat_voting_not_running" }, 404);
+  }
   await context.get("writeModuleAudit")(audit, now);
   return context.json({ closing: true, pollId: result.id });
+});
+
+chatVotingRoutes.post("/extend", async (context) => {
+  const channelId = context.req.param("channelId") ?? "";
+  const body = await readBody(context.req.raw);
+  if (!isRecord(body) || typeof body.pollId !== "string" || body.pollId.length < 1 || body.pollId.length > 128) {
+    return context.json({ error: "chat_voting_request_invalid" }, 400);
+  }
+  const repository = createChatVotingRepository(context.env.DB);
+  const currentVote = await repository.open(channelId);
+  if (currentVote === null) return context.json({ error: "chat_voting_not_running" }, 404);
+  if (body.pollId !== currentVote.id) return context.json({ error: "chat_voting_poll_changed" }, 409);
+  const now = new Date().toISOString();
+  const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
+  const publishTally = async (vote: ChatVote): Promise<void> => {
+    const ballots = context.get("ballots")(channelId);
+    const snapshot = await (ballots.readSnapshot?.(vote.id) ?? ballots.read(vote.id));
+    if (snapshot === null) return;
+    await context.get("publishModuleOverlayMessage")(
+      channelId,
+      CHAT_VOTING_MODULE_ID,
+      "tally",
+      CHAT_VOTING_ELEMENT_KIND,
+      chatVoteTallyState(vote, snapshot),
+    );
+  };
+  const result = await requestChatVoteExtension(repository, channelId, async (pollId, deadline, ownerRevision) => {
+    const object = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
+    await object.scheduleModuleAlarm(CHAT_VOTING_MODULE_ID, CHAT_VOTING_ALARM_HANDLER, pollId, deadline, ownerRevision);
+  }, authorization, { pollId: body.pollId, onDeadlineRollback: publishTally });
+  if (result === null) {
+    const latestVote = await repository.open(channelId);
+    if (latestVote !== null && latestVote.id !== body.pollId) return context.json({ error: "chat_voting_poll_changed" }, 409);
+    return context.json({ error: "chat_voting_extension_unavailable" }, 409);
+  }
+  await context.get("writeModuleAudit")({
+    channelId,
+    moduleId: CHAT_VOTING_MODULE_ID,
+    action: "chat_voting.extended" satisfies AuditAction,
+    before: { pollId: result.id, status: "open" },
+    after: { pollId: result.id, closesAt: result.closesAt },
+  }, now);
+  await publishTally(result);
+  return context.json({ vote: result });
 });

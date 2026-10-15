@@ -371,18 +371,21 @@ export const saveChannelTimeZone = (
   channelId: string,
   revision: number,
   timeZone: string,
-): Promise<{ ok: boolean; timeZone: string; revision: number }> =>
-  requestMutation(channelPath(channelId, "settings"), "PATCH", { revision, timeZone });
+): Promise<{ ok: boolean; timeZone: string; revision: number }> => requestMutation(
+  channelPath(channelId, "settings"),
+  "PATCH",
+  { revision, timeZone },
+);
 
 export const saveChannelDefaultChatTarget = (
   channelId: string,
   revision: number,
   defaultChatTarget: ChatOutputTarget,
-): Promise<{ ok: boolean; defaultChatTarget: ChatOutputTarget; defaultChatTargetRevision: number }> =>
-  requestMutation(channelPath(channelId, "settings"), "PATCH", {
-    defaultChatTargetRevision: revision,
-    defaultChatTarget,
-  });
+): Promise<{ ok: boolean; defaultChatTarget: ChatOutputTarget; defaultChatTargetRevision: number }> => requestMutation(
+  channelPath(channelId, "settings"),
+  "PATCH",
+  { defaultChatTargetRevision: revision, defaultChatTarget },
+);
 
 export const searchChannelLocations = (
   channelId: string,
@@ -399,8 +402,11 @@ export const saveChannelLocation = (
   channelId: string,
   revision: number,
   location: PanelChannelLocation | null,
-): Promise<{ ok: boolean; location: PanelChannelLocation | null; locationRevision: number }> =>
-  requestMutation(channelPath(channelId, "settings/location"), "PATCH", { revision, location });
+): Promise<{ ok: boolean; location: PanelChannelLocation | null; locationRevision: number }> => requestMutation(
+  channelPath(channelId, "settings/location"),
+  "PATCH",
+  { revision, location },
+);
 
 export const fetchSystemOverview = (
   channelId: string,

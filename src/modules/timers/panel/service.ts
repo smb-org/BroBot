@@ -58,6 +58,11 @@ export const loadTimersPanel = async (channelId: string, signal?: AbortSignal): 
   };
 };
 
+export const loadUpcomingTimers = async (channelId: string, signal?: AbortSignal): Promise<Timer[]> => {
+  const response = await fetch(`${basePath(channelId)}/timers`, signal === undefined ? {} : { signal });
+  return (await readJson<{ timers: Timer[] }>(response)).timers;
+};
+
 const mutate = async <Value,>(channelId: string, path: string, method: "POST" | "PATCH" | "DELETE", body?: unknown): Promise<Value> => {
   const token = await csrf();
   const response = await fetch(`${basePath(channelId)}${path}`, {

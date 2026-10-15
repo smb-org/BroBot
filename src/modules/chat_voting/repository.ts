@@ -13,6 +13,8 @@ interface ChatVoteRow {
   status: "open" | "closed";
   opened_at: string;
   closes_at: string;
+  closing_at: string | null;
+  deadline_revision: number;
   requested_duration_seconds: number | null;
   closed_at: string | null;
   close_reason: ChatVoteCloseReason;
@@ -82,9 +84,11 @@ const mapRow = (row: ChatVoteRow): ChatVote => {
     title: row.title,
     textMode: row.text_mode,
     termFilterReady: row.term_filter_ready === null ? null : row.term_filter_ready === 1,
-    status: row.status,
+    status: row.status === "closed" ? "closed" : row.closing_at === null ? "open" : "closing",
     openedAt: row.opened_at,
     closesAt: row.closes_at,
+    closingAt: row.closing_at,
+    deadlineRevision: row.deadline_revision,
     requestedDurationSeconds: row.requested_duration_seconds,
     closedAt: row.closed_at,
     closeReason: row.close_reason,
@@ -133,7 +137,7 @@ export interface ChatVoteTemplateRepository {
 }
 
 export const chatVoteSelectColumns = `channel_id, poll_id, kind, option_count, labels_json, status,
-                                      title, opened_at, closes_at, requested_duration_seconds, closed_at,
+                                      title, opened_at, closes_at, closing_at, deadline_revision, requested_duration_seconds, closed_at,
                                       close_reason, counts_json, voter_count, text_mode, text_results_json, more_terms,
                                       term_filter_ready`;
 
@@ -151,7 +155,22 @@ export interface ChatVotingRepository {
     authorization: ModuleMutationAuthorization,
   ): Promise<{ authorized: boolean; changed: boolean }>;
   insertOpen(vote: ChatVoteDraft, authorization?: ModuleMutationAuthorization): Promise<boolean>;
-  requestManualClose(channelId: string, pollId: string, authorization?: ModuleMutationAuthorization): Promise<boolean>;
+  requestManualClose(channelId: string, pollId: string, expectedClosesAt: string, authorization?: ModuleMutationAuthorization): Promise<boolean>;
+  claimAlarmClose(channelId: string, pollId: string, expectedClosesAt: string, claimedAt: string): Promise<boolean>;
+  extendClose(
+    channelId: string,
+    pollId: string,
+    expectedClosesAt: string,
+    closesAt: string,
+    authorization?: ModuleMutationAuthorization,
+  ): Promise<boolean>;
+  rollbackCloseExtension(
+    channelId: string,
+    pollId: string,
+    expectedClosesAt: string,
+    expectedDeadlineRevision: number,
+    closesAt: string,
+  ): Promise<boolean>;
   finish(
     channelId: string,
     pollId: string,
@@ -302,11 +321,14 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
         WHERE EXISTS (
           SELECT 1 FROM chat_votes
            WHERE channel_id = ? AND poll_id = ? AND status = 'open' AND kind = 'free_text'
+        ) AND EXISTS (
+          SELECT 1 FROM channel_modules
+           WHERE channel_id = ? AND module_id = 'chat_voting' AND enabled = 1
         ) ${authorization.sql}
        ON CONFLICT (channel_id, poll_id, term) DO UPDATE SET
          approved_at = excluded.approved_at,
          approved_by = excluded.approved_by`,
-    ).bind(channelId, pollId, term, approvedAt, approvedBy, channelId, pollId, ...authorization.values);
+    ).bind(channelId, pollId, term, approvedAt, approvedBy, channelId, pollId, channelId, ...authorization.values);
     const guard = db.prepare(
       `SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`,
     ).bind(...authorization.values);
@@ -322,7 +344,11 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
       `INSERT INTO chat_votes
          (channel_id, poll_id, kind, option_count, labels_json, title, text_mode, term_filter_ready, status, opened_at, closes_at,
           requested_duration_seconds, close_reason)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ? WHERE 1 = 1 ${guard}`,
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?
+        WHERE EXISTS (
+          SELECT 1 FROM channel_modules
+           WHERE channel_id = ? AND module_id = 'chat_voting' AND enabled = 1
+        ) ${guard}`,
     ).bind(
       vote.channelId,
       vote.id,
@@ -336,20 +362,63 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
       vote.closesAt,
       vote.requestedDurationSeconds,
       vote.closeReason,
+      vote.channelId,
       ...(authorization?.values ?? []),
     );
     const result = await statement.run();
     return result.meta.changes > 0;
   },
-  async requestManualClose(channelId, pollId, authorization) {
+  async requestManualClose(channelId, pollId, expectedClosesAt, authorization) {
     const guard = authorization?.sql ?? "";
     const statement = db.prepare(
       `UPDATE chat_votes
-          SET close_reason = 'manual'
+          SET close_reason = 'manual',
+              closing_at = COALESCE(closing_at, ?),
+              deadline_revision = deadline_revision + CASE WHEN closing_at IS NULL THEN 1 ELSE 0 END
         WHERE channel_id = ? AND poll_id = ? AND status = 'open'
-          AND close_reason IN ('timer', 'limit', 'manual') ${guard}`,
-    ).bind(channelId, pollId, ...(authorization?.values ?? []));
+          AND closes_at = ? AND close_reason IN ('timer', 'limit', 'manual')
+          AND (closing_at IS NULL OR close_reason = 'manual')
+          AND EXISTS (
+            SELECT 1 FROM channel_modules
+             WHERE channel_modules.channel_id = chat_votes.channel_id
+               AND channel_modules.module_id = 'chat_voting' AND channel_modules.enabled = 1
+          ) ${guard}`,
+    ).bind(new Date().toISOString(), channelId, pollId, expectedClosesAt, ...(authorization?.values ?? []));
     const result = await statement.run();
+    return result.meta.changes > 0;
+  },
+  async claimAlarmClose(channelId, pollId, expectedClosesAt, claimedAt) {
+    const result = await db.prepare(
+      `UPDATE chat_votes
+          SET closing_at = ?, deadline_revision = deadline_revision + CASE WHEN closing_at IS NULL THEN 1 ELSE 0 END
+        WHERE channel_id = ? AND poll_id = ? AND status = 'open' AND closing_at IS NULL
+          AND closes_at = ? AND (closes_at <= ? OR close_reason = 'manual')`,
+    ).bind(claimedAt, channelId, pollId, expectedClosesAt, claimedAt).run();
+    return result.meta.changes > 0;
+  },
+  async extendClose(channelId, pollId, expectedClosesAt, closesAt, authorization) {
+    const guard = authorization?.sql ?? "";
+    const statement = db.prepare(
+      `UPDATE chat_votes
+          SET closes_at = ?, deadline_revision = deadline_revision + 1
+        WHERE channel_id = ? AND poll_id = ? AND status = 'open' AND closing_at IS NULL
+          AND close_reason <> 'manual' AND closes_at = ?
+          AND EXISTS (
+            SELECT 1 FROM channel_modules
+             WHERE channel_modules.channel_id = chat_votes.channel_id
+               AND channel_modules.module_id = 'chat_voting' AND channel_modules.enabled = 1
+          ) ${guard}`,
+    ).bind(closesAt, channelId, pollId, expectedClosesAt, ...(authorization?.values ?? []));
+    const result = await statement.run();
+    return result.meta.changes > 0;
+  },
+  async rollbackCloseExtension(channelId, pollId, expectedClosesAt, expectedDeadlineRevision, closesAt) {
+    const result = await db.prepare(
+      `UPDATE chat_votes
+          SET closes_at = ?, deadline_revision = deadline_revision + 1
+        WHERE channel_id = ? AND poll_id = ? AND status = 'open' AND closing_at IS NULL
+          AND close_reason <> 'manual' AND closes_at = ? AND deadline_revision = ?`,
+    ).bind(closesAt, channelId, pollId, expectedClosesAt, expectedDeadlineRevision).run();
     return result.meta.changes > 0;
   },
   async finish(channelId, pollId, closeReason, closedAt, counts, textResults = null, moreTerms = 0, termFilterReady = null) {

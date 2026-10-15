@@ -58,6 +58,7 @@ import { isChannelControlInput, setChannelControl, type ChannelControlKind } fro
 import { actorGuard, bindActorGuard } from "../db/guards";
 import { prepareAudit } from "../db/audit";
 import { getChannelModuleForChannel } from "../db/channel-modules";
+import { readChannelStreamState } from "../db/stream-state";
 import { measureServerTiming } from "../server-timing";
 import { DEFAULT_CHANNEL_TIME_ZONE, validChannelTimeZone } from "../../modules/contract";
 import { readCompletePanelResourceRevisions } from "../panel-resources";
@@ -407,7 +408,18 @@ panelRouter.get(
     const channelId = context.req.param("channelId");
     const overview = await measureServerTiming(context, "d1", () => getChannelOverviewForUser(context.env.DB, session.userId, channelId));
     if (overview === null) return context.json({ error: "channel_not_found" }, 404);
-    return context.json(overview);
+    let viewerCount: number | null = null;
+    if (overview.streamState === "online") {
+      try {
+        const stream = await readChannelStreamState(context.env.DB, channelId);
+        const details = await context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId))
+          .getOverlayStreamDetails(stream?.startedAt ?? overview.streamStartedAt ?? null, stream?.streamId ?? null, Date.now());
+        viewerCount = details?.details?.viewerCount ?? null;
+      } catch {
+        viewerCount = null;
+      }
+    }
+    return context.json({ ...overview, viewerCount });
   },
 );
 

@@ -9,6 +9,7 @@ import { readAdCountdownSnapshot } from "./adapters/countdown-state";
 import { adsOverlayElements } from "./overlay/element";
 import { adsTemplateVariableGroupLabels } from "./contracts/template-variable-catalog";
 import { adsEventTimeLabel } from "./contracts/language";
+import { adsImmediateActionTexts } from "./action-locale";
 
 const adsPanelIcon = { paths: ["M6 8h12v8H6z", "M9 8V6h6v2", "M9 12h6", "M9 16v2h6v-2"] } as const;
 
@@ -60,6 +61,22 @@ export const adsModule: BotModule<typeof adsSettingsSchema> = {
   eventSubTypes: ["stream.online", "channel.ad_break.begin"],
   routes: adsRoutes,
   panel: () => import("./panel"),
+  liveTile: {
+    load: async (channelId, signal) => {
+      const schedule = await (await import("./panel/service")).loadAdsSchedule(channelId, signal);
+      const at = schedule.schedule.nextAdAt;
+      if (at === null || Date.parse(at) <= Date.now()) return [];
+      return [{
+        kind: "upcoming",
+        id: "next-ad-break",
+        category: "ad",
+        name: "",
+        at,
+        detail: schedule.schedule.duration === null ? null : String(schedule.schedule.duration),
+        canSnooze: schedule.snoozeScopeAvailable && (schedule.schedule.snoozeCount ?? 0) > 0,
+      }];
+    },
+  },
   settingsEditor: () => import("./panel/settings-editor"),
   settingsEditorRelatedParts: ["schedule"],
   overlayElements: adsOverlayElements.map((element) => element.kind === "ads.countdown"
@@ -68,10 +85,20 @@ export const adsModule: BotModule<typeof adsSettingsSchema> = {
       initialState: async (db, channelId) => ({ ...await readAdCountdownState(db, channelId) }),
     }
     : element),
-  immediateActions: {
-    requires: ["streamLive"],
-    load: () => import("./panel/immediate-actions"),
-  },
+  actions: [{
+    id: "start-commercial",
+    name: adsImmediateActionTexts.name,
+    icon: "ad",
+    conditions: ["streamLive"],
+    requiredRole: "manager",
+    content: { presentation: "popover", load: () => import("./panel/action-content") },
+    errorMessage: adsImmediateActionTexts.error,
+    execute: async ({ channelId, formData }) => {
+      const seconds = Number(formData.get("length"));
+      if (!Number.isFinite(seconds)) throw new Error("Invalid ad break length.");
+      await (await import("./panel/service")).startCommercialNow(channelId, seconds);
+    },
+  }],
   handleEvent: async (event, context) => event.subscriptionType === "channel.ad_break.begin"
     ? processAdBreak(event, context.renderTemplate, await context.channelLanguage())
     : { actions: [], diagnostics: [] },

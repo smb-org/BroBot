@@ -795,9 +795,11 @@ export interface DashboardTexts {
     setup: string;
     channel: string;
     system: string;
+    locationWeather: string;
     members: string;
     variables: string;
     overlays: string;
+    overlaysChecking: string;
     module: string;
     manageModules: string;
     moduleCategories: Readonly<Record<ModuleNavigationCategory, string>>;
@@ -859,8 +861,9 @@ export interface DashboardTexts {
     moderatorStatus: string;
     chatSubscription: string;
     tokenStatus: string;
-    broadcasterConsentMissing: string;
-    chatBotRequired: string;
+    requestChannelBotConsent: string;
+    channelBotConsentLocked: string;
+    channelBotConsentMissing: string;
   };
   time: {
     updated: (relativeTime: string) => string;
@@ -1032,46 +1035,119 @@ export interface DashboardTexts {
     chatCommandCopyFailed: string;
     chatCommandThresholds: Record<ModuleChatCommandThreshold, string>;
   };
-  /** Stream Manager: the immediate-action row and the warnings/errors feed
-   *  on the channel overview -- each action reports success/failure at
-   *  itself, never a global toast (see docs/input/umbau-plan.md Epic 4). */
+  /** Shared live-cockpit action frames and reserved tile copy. */
   streamManager: {
     immediateActions: string;
-    notices: {
-      title: string;
-      showAll: (count: string) => string;
-      showFewer: string;
-      botPermissionsSentence: string;
-      botPermissionsConsequence: string;
-      broadcasterPermissionsSentence: string;
-      broadcasterPermissionsConsequence: string;
-      moderatorMissingSentence: string;
-      moderatorMissingConsequence: string;
-      modulePermissionsSentence: (name: string) => string;
-      modulePermissionsConsequence: string;
-      tokenExpiredSentence: string;
-      tokenExpiredConsequence: string;
-      tokenRenewalSentence: string;
-      tokenRenewalConsequence: string;
-      grantPermission: string;
-      reviewPermissions: string;
-      checkModerator: string;
-      checkModeratorRunning: string;
-      checkModeratorLocked: string;
+    actionCount: (count: number) => string;
+    actionRun: string;
+    actionCancel: string;
+    actionRunning: string;
+    actionLoading: string;
+    actionLoadFailed: string;
+    actionAvailabilityFailed: string;
+    actionAvailabilityStale: string;
+    actionFailed: string;
+    actionSucceeded: (name: string) => string;
+    actionErrorActions: {
+      commercialScopeNextStep: string;
+      commercialCooldown: (remaining: string) => string;
+      clipScopeNextStep: string;
     };
+    operatorOnly: string;
+    managerOnly: string;
+    broadcasterOnly: string;
     availabilityReasons: Record<ImmediateActionUnavailableReason, string>;
-    checksHealthy: (count: string) => string;
-    checksNeedAttention: (problems: string, checks: string) => string;
-    /** Command palette action labels; action cards use their module catalogue. */
+    /** Command palette action labels; cockpit labels come from module declarations. */
     runAd: (length: string) => string;
     createClip: string;
     sendShoutout: string;
-    feedTitle: string;
-    feedEmpty: string;
-    feedAll: string;
     today: string;
     yesterday: string;
     browserTimeZoneFallback: string;
+  };
+  liveCockpit: {
+    live: string;
+    actionsHint: string;
+    offline: string;
+    unknown: string;
+    duration: string;
+    viewers: string;
+    youAre: (role: string) => string;
+    roles: Record<ChannelRole, string>;
+    titleCategoryPlaceholder: string;
+    bot: string;
+    botConnected: string;
+    botUnavailable: string;
+    belabox: string;
+    belaboxDisabled: string;
+    belaboxChecking: string;
+    belaboxNotConfigured: string;
+    belaboxUnavailable: string;
+    belaboxDisconnected: string;
+    belaboxConnected: (bitrate: string) => string;
+    overlays: string;
+    overlaysCount: (count: string) => string;
+    overlaysNotSetUp: string;
+    overlaysChecking: string;
+    runningNow: string;
+    liveDataLoading: string;
+    liveDataUnavailable: string;
+    noActionRunning: string;
+    voteType: string;
+    votekickType: string;
+    voteEndsIn: (time: string) => string;
+    voteTotal: (count: string) => string;
+    voteOptionCount: (count: string, percent: string) => string;
+    voteExtend: string;
+    voteEnd: string;
+    voteExtended: string;
+    voteExtensionUnavailable: string;
+    voteChanged: string;
+    voteEnded: string;
+    voteEndFailed: string;
+    votekickVotes: (yes: string, no: string, threshold: string) => string;
+    votekickCancel: string;
+    votekickCancelTitle: string;
+    votekickCancelDescription: (target: string) => string;
+    votekickCanceled: string;
+    votekickChanged: string;
+    votekickCancelFailed: string;
+    nextUp: string;
+    noUpcomingItems: string;
+    nextAdBreak: string;
+    adDuration: (duration: string) => string;
+    adSnooze: string;
+    adSnoozed: string;
+    adSnoozeFailed: string;
+    adSnoozeUnavailable: string;
+    events: string;
+    eventsFilterLabel: string;
+    eventsAll: string;
+    eventsRaids: string;
+    eventsCommunity: string;
+    eventsChat: string;
+    eventsSearch: string;
+    eventsEmpty: string;
+    eventsUnavailable: string;
+    eventsLoading: string;
+    raidShoutout: string;
+    raidShoutoutSent: string;
+    raidShoutoutFailed: string;
+    statusIndicators: string;
+    systemStatus: string;
+    systemStatusDescription: (health: string) => string;
+    systemReady: string;
+    liveDataCurrent: string;
+    locationMissing: string;
+    locationMissingDescription: string;
+    configureLocation: string;
+    belaboxWeak: string;
+    belaboxWeakDescription: (bitrate: string) => string;
+    openBelabox: string;
+    actionDraftDiscardTitle: string;
+    actionDraftDiscardDescription: string;
+    actionDraftDiscard: string;
+    actionDraftContinue: string;
   };
   channelControls: {
     controlsHeading: string;
@@ -1172,11 +1248,12 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       botPermissionsMissing: (count) => `${count} fehlen`,
     },
     navigation: {
-      mainNavigation: "Hauptnavigation", overview: "Übersicht", live: "Live", setup: "Einrichten", channel: "Kanal", system: "System",
+      mainNavigation: "Hauptnavigation", overview: "Übersicht", live: "Live", setup: "Einrichten", channel: "Kanal", system: "System", locationWeather: "Ort & Wetter",
       members: "Mitglieder", variables: "Variablen", module: "Module", events: "Ereignisse", audit: "Protokoll", selectChannel: "Kanal auswählen",
       accountMenu: "Konto", appearance: "Darstellung", appearanceNightShift: "Nachtschicht", appearanceIndigoNight: "Indigo-Nacht",
       manageModules: "Module verwalten", moduleCategories: { chat: "Chat", participation: "Mitmachen", twitch: "Twitch", data: "Daten", stream: "Stream", admin: "Verwaltung" },
       overlays: "Overlays",
+      overlaysChecking: "Wird geprüft …",
       signingOut: "Abmeldung …", signOut: "Abmelden",
       openSidebar: "Seitenleiste öffnen", closeSidebar: "Seitenleiste schließen",
       sidebarSetupHeading: "Einrichten", sidebarSetupDescription: "Alles für deinen Stream.", sidebarSearch: "Alles durchsuchen", moduleOff: "Aus",
@@ -1212,15 +1289,16 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     statusCard: {
       broadcasterOauth: "Broadcaster-OAuth", chatConsent: "Chat-Zustimmung",
       botAccount: "Bot-Account", botPermissions: "Bot-Berechtigungen", moderatorStatus: "Moderatorstatus", chatSubscription: "Chat-Abo", tokenStatus: "Token-Zustand",
-      broadcasterConsentMissing: "Broadcaster-Zustimmung fehlt",
-      chatBotRequired: "channel:bot wird vom Broadcaster benötigt.",
+      requestChannelBotConsent: "Chat-Zugriff erlauben",
+      channelBotConsentLocked: "Nur der Twitch-Kanalinhaber kann diese Zustimmung erteilen.",
+      channelBotConsentMissing: "Der Bot darf noch nicht im Chat schreiben.",
     },
     time: {
       updated: (relativeTime) => `aktualisiert ${relativeTime}`, secondsAgo: (count) => `vor ${String(count)} s`,
       minutesAgo: (count) => `vor ${String(count)} Min.`, hoursAgo: (count) => `vor ${String(count)} Std.`,
     },
     system: {
-      title: "System", readOnly: "nur lesend", loadState: "Systemzustand wird geladen …", properties: "Eigenschaften",
+      title: "System", readOnly: "Kanalvorgaben und technischer Systemzustand", loadState: "Systemzustand wird geladen …", properties: "Eigenschaften",
       botReason: "Bot-Grund", botUpdated: "Bot zuletzt aktualisiert", chatSubscriptionId: "Chat-Abo-ID", chatSubscriptionReason: "Chat-Abo-Grund",
       chatSubscriptionUpdated: "Chat-Abo zuletzt aktualisiert", loginStatus: "Login-Token-Status", loginReason: "Login-Token-Grund",
       loginValidUntil: "Login-Token gültig bis", botValidUntil: "Bot-Token gültig bis",
@@ -1249,6 +1327,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         "module.secret.removed": ({ actor, object }) => `${actor} entfernte ein Geheimnis für ${object}`,
         "chat_voting.started": ({ actor }) => `${actor} startete eine Chat-Abstimmung`,
         "chat_voting.closed": ({ actor }) => `${actor} schloss eine Chat-Abstimmung`,
+        "chat_voting.extended": ({ actor }) => `${actor} verlängerte eine Chat-Abstimmung`,
         "chat_voting.template.created": ({ actor, object }) => `${actor} erstellte die Abstimmungsvorlage ${object}`,
         "chat_voting.template.updated": ({ actor, object }) => `${actor} änderte die Abstimmungsvorlage ${object}`,
         "chat_voting.template.deleted": ({ actor, object }) => `${actor} löschte die Abstimmungsvorlage ${object}`,
@@ -1367,43 +1446,118 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     streamManager: {
       immediateActions: "Sofortaktionen",
-      notices: {
-        title: "Hinweise",
-        showAll: (count) => `Alle ${count} Hinweise anzeigen`,
-        showFewer: "Weniger Hinweise anzeigen",
-        botPermissionsSentence: "Dem Bot fehlen benötigte Berechtigungen.",
-        botPermissionsConsequence: "Chatbefehle und Moderationsaktionen können fehlschlagen.",
-        broadcasterPermissionsSentence: "Dem Broadcaster fehlen angeforderte Berechtigungen.",
-        broadcasterPermissionsConsequence: "Module, die diese Berechtigungen brauchen, können nicht laufen.",
-        moderatorMissingSentence: "Der Bot ist in diesem Kanal kein Moderator.",
-        moderatorMissingConsequence: "Chataktionen mit Moderationsrechten können fehlschlagen.",
-        modulePermissionsSentence: (name) => `Für das Modul „${name}“ fehlen Berechtigungen.`,
-        modulePermissionsConsequence: "Das Modul bleibt deaktiviert, bis die Berechtigungen erteilt sind.",
-        tokenExpiredSentence: "Ein Twitch-Token ist abgelaufen.",
-        tokenExpiredConsequence: "Die Verbindung des Bots kann unterbrochen sein.",
-        tokenRenewalSentence: "Die Erneuerung eines Twitch-Tokens ist überfällig.",
-        tokenRenewalConsequence: "Die Verbindung des Bots kann unterbrochen werden.",
-        grantPermission: "Berechtigung erteilen",
-        reviewPermissions: "Berechtigungen prüfen",
-        checkModerator: "Moderator prüfen",
-        checkModeratorRunning: "Moderatorprüfung läuft …",
-        checkModeratorLocked: "Nur Broadcaster und Verwalter dürfen diese Prüfung ausführen.",
+      actionCount: (count) => `${String(count)} ${count === 1 ? "Aktion" : "Aktionen"}`,
+      actionRun: "Ausführen",
+      actionCancel: "Abbrechen",
+      actionRunning: "Wird ausgeführt …",
+      actionLoading: "Aktion wird geladen …",
+      actionLoadFailed: "Die Aktion konnte nicht geladen werden.",
+      actionAvailabilityFailed: "Die Verfügbarkeit konnte nicht geprüft werden.",
+      actionAvailabilityStale: "Prüfung veraltet; Aktion bleibt verfügbar.",
+      actionFailed: "Die Aktion konnte nicht ausgeführt werden.",
+      actionSucceeded: (name) => `${name} ausgeführt.`,
+      actionErrorActions: {
+        commercialScopeNextStep: "Erneuere die Twitch-Berechtigung channel:edit:commercial für dieses Kanal-Konto.",
+        commercialCooldown: (remaining) => `Die Werbe-Abklingzeit läuft noch. Erneut versuchen in ${remaining}.`,
+        clipScopeNextStep: "Verbinde das Bot-Konto erneut und erteile die Twitch-Berechtigung clips:edit.",
       },
+      operatorOnly: "Nur Bediener und höhere Rollen dürfen diese Aktion ausführen.",
+      managerOnly: "Nur Verwalter und Broadcaster dürfen diese Aktion ausführen.",
+      broadcasterOnly: "Nur Broadcaster dürfen diese Aktion ausführen.",
       availabilityReasons: {
         stream_offline: "Der Stream ist offline.",
         stream_state_unknown: "Der Streamstatus ist derzeit nicht verfügbar.",
       },
-      checksHealthy: (count) => `Alles in Ordnung · ${count} Prüfungen`,
-      checksNeedAttention: (problems, checks) => `${problems} auffällige ${problems === "1" ? "Prüfung" : "Prüfungen"} · ${checks} Prüfungen`,
       runAd: (length) => `Werbung jetzt (${length}s)`,
       createClip: "Clip erstellen",
       sendShoutout: "Shoutout senden",
-      feedTitle: "Warnungen und Fehler",
-      feedEmpty: "Keine Warnungen oder Fehler.",
-      feedAll: "Alle im Ereignisprotokoll",
       today: "Heute",
       yesterday: "Gestern",
       browserTimeZoneFallback: "Browser-Zeitzone wird verwendet",
+    },
+    liveCockpit: {
+      live: "Live",
+      actionsHint: "Direkt im Stream steuerbar",
+      offline: "Offline",
+      unknown: "Status unbekannt",
+      duration: "Dauer",
+      viewers: "Zuschauer",
+      youAre: (role) => `Du bist: ${role}`,
+      roles: { broadcaster: "Broadcaster", manager: "Verwalter", operator: "Bediener" },
+      titleCategoryPlaceholder: "Streamtitel und Kategorie",
+      bot: "Bot",
+      botConnected: "Verbunden",
+      botUnavailable: "Nicht verbunden",
+      belabox: "BELABOX",
+      belaboxDisabled: "Aus",
+      belaboxChecking: "wird geprüft",
+      belaboxNotConfigured: "nicht eingerichtet",
+      belaboxUnavailable: "nicht erreichbar",
+      belaboxDisconnected: "getrennt",
+      belaboxConnected: (bitrate) => `${bitrate} kbit/s verbunden`,
+      overlays: "Overlays",
+      overlaysCount: (count) => `${count} aktiv`,
+      overlaysNotSetUp: "Nicht eingerichtet",
+      overlaysChecking: "wird geprüft",
+      runningNow: "Läuft gerade",
+      liveDataLoading: "Live-Daten werden geladen.",
+      liveDataUnavailable: "Live-Daten sind gerade nicht verfügbar.",
+      noActionRunning: "Noch keine Aktion läuft.",
+      voteType: "Abstimmung",
+      votekickType: "Votekick",
+      voteEndsIn: (time) => `noch ${time}`,
+      voteTotal: (count) => `${count} Stimmen gesamt`,
+      voteOptionCount: (count, percent) => `${count} Stimmen · ${percent} %`,
+      voteExtend: "+30 s",
+      voteEnd: "Beenden",
+      voteExtended: "Abstimmung um 30 Sekunden verlängert.",
+      voteExtensionUnavailable: "Die Abstimmung lässt sich nicht weiter verlängern.",
+      voteChanged: "Die Abstimmung wurde inzwischen ersetzt. Bitte prüfe den aktuellen Stand.",
+      voteEnded: "Abstimmung beendet.",
+      voteEndFailed: "Abstimmung konnte nicht beendet werden.",
+      votekickVotes: (yes, no, threshold) => `Ja ${yes} · Nein ${no} · Schwelle ${threshold}`,
+      votekickCancel: "Votekick abbrechen",
+      votekickCancelTitle: "Votekick abbrechen?",
+      votekickCancelDescription: (target) => `Die Abstimmung gegen ${target} endet sofort. Es wird kein Timeout ausgelöst.`,
+      votekickCanceled: "Votekick abgebrochen.",
+      votekickChanged: "Der Votekick wurde inzwischen ersetzt. Bitte prüfe den aktuellen Stand.",
+      votekickCancelFailed: "Votekick konnte nicht abgebrochen werden.",
+      nextUp: "Als Nächstes",
+      noUpcomingItems: "Noch nichts geplant.",
+      nextAdBreak: "Nächste Werbepause",
+      adDuration: (duration) => `Werbepause · ${duration} s`,
+      adSnooze: "Verschieben",
+      adSnoozed: "Werbepause verschoben.",
+      adSnoozeFailed: "Werbepause konnte nicht verschoben werden.",
+      adSnoozeUnavailable: "Werbepause lässt sich nicht weiter verschieben.",
+      events: "Ereignisse",
+      eventsFilterLabel: "Ereignisse filtern",
+      eventsAll: "Alle",
+      eventsRaids: "Raids",
+      eventsCommunity: "Community",
+      eventsChat: "Chat",
+      eventsSearch: "Person oder Ereignis suchen",
+      eventsEmpty: "Noch keine Ereignisse.",
+      eventsUnavailable: "Ereignisse konnten nicht geladen werden.",
+      eventsLoading: "Ereignisse werden geladen.",
+      raidShoutout: "Shoutout senden",
+      raidShoutoutSent: "Shoutout gesendet.",
+      raidShoutoutFailed: "Shoutout konnte nicht gesendet werden.",
+      statusIndicators: "Verbindungsstatus",
+      systemStatus: "Systemstatus",
+      systemStatusDescription: (health) => `Systemstatus: ${health}`,
+      systemReady: "Alles bereit",
+      liveDataCurrent: "Live-Daten aktuell",
+      locationMissing: "Standort fehlt",
+      locationMissingDescription: "Wetter, Sonnenzeiten und Mondphase brauchen einen Kanalstandort.",
+      configureLocation: "Einrichten",
+      belaboxWeak: "BELABOX-Verbindung schwach",
+      belaboxWeakDescription: (bitrate) => `Aktuelle Bitrate: ${bitrate} kbit/s.`,
+      openBelabox: "BELABOX öffnen",
+      actionDraftDiscardTitle: "Eingaben verwerfen?",
+      actionDraftDiscardDescription: "Deine Eingaben gehen verloren, wenn du diese Aktion schließt.",
+      actionDraftDiscard: "Eingaben verwerfen",
+      actionDraftContinue: "Weiter bearbeiten",
     },
     channelControls: {
       controlsHeading: "Kanalsteuerung",
@@ -1499,11 +1653,12 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       botPermissionsMissing: (count) => `${count} missing`,
     },
     navigation: {
-      mainNavigation: "Main navigation", overview: "Overview", live: "Live", setup: "Setup", channel: "Channel", system: "System",
+      mainNavigation: "Main navigation", overview: "Overview", live: "Live", setup: "Setup", channel: "Channel", system: "System", locationWeather: "Location & weather",
       members: "Members", variables: "Variables", module: "Modules", events: "Events", audit: "Log", selectChannel: "Select channel",
       accountMenu: "Account", appearance: "Appearance", appearanceNightShift: "Night shift", appearanceIndigoNight: "Indigo night",
       manageModules: "Manage modules", moduleCategories: { chat: "Chat", participation: "Participation", twitch: "Twitch", data: "Data", stream: "Stream", admin: "Administration" },
       overlays: "Overlays",
+      overlaysChecking: "Checking …",
       signingOut: "Signing out …", signOut: "Sign out",
       openSidebar: "Open sidebar", closeSidebar: "Close sidebar",
       sidebarSetupHeading: "Setup", sidebarSetupDescription: "Everything for your stream.", sidebarSearch: "Search everything", moduleOff: "Off",
@@ -1534,15 +1689,16 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     statusCard: {
       broadcasterOauth: "Broadcaster OAuth", chatConsent: "Chat consent", botAccount: "Bot account", botPermissions: "Bot permissions",
       moderatorStatus: "Moderator status", chatSubscription: "Chat subscription", tokenStatus: "Token status",
-      broadcasterConsentMissing: "Broadcaster consent missing",
-      chatBotRequired: "channel:bot is required from the broadcaster.",
+      requestChannelBotConsent: "Allow chat access",
+      channelBotConsentLocked: "Only the Twitch channel owner can grant this consent.",
+      channelBotConsentMissing: "The bot cannot write in chat yet.",
     },
     time: {
       updated: (relativeTime) => `updated ${relativeTime}`, secondsAgo: (count) => `${String(count)} sec ago`,
       minutesAgo: (count) => `${String(count)} min ago`, hoursAgo: (count) => `${String(count)} hr ago`,
     },
     system: {
-      title: "System", readOnly: "read-only", loadState: "Loading system status …", properties: "Properties",
+      title: "System", readOnly: "Channel defaults and technical system status", loadState: "Loading system status …", properties: "Properties",
       botReason: "Bot reason", botUpdated: "Bot last updated", chatSubscriptionId: "Chat subscription ID", chatSubscriptionReason: "Chat subscription reason",
       chatSubscriptionUpdated: "Chat subscription last updated", loginStatus: "Login token status", loginReason: "Login token reason",
       loginValidUntil: "Login token valid until", botValidUntil: "Bot token valid until",
@@ -1571,6 +1727,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         "module.secret.removed": ({ actor, object }) => `${actor} removed a secret for ${object}`,
         "chat_voting.started": ({ actor }) => `${actor} started a chat vote`,
         "chat_voting.closed": ({ actor }) => `${actor} closed a chat vote`,
+        "chat_voting.extended": ({ actor }) => `${actor} extended a chat vote`,
         "chat_voting.template.created": ({ actor, object }) => `${actor} created chat vote template ${object}`,
         "chat_voting.template.updated": ({ actor, object }) => `${actor} updated chat vote template ${object}`,
         "chat_voting.template.deleted": ({ actor, object }) => `${actor} deleted chat vote template ${object}`,
@@ -1686,43 +1843,118 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     streamManager: {
       immediateActions: "Immediate actions",
-      notices: {
-        title: "Notices",
-        showAll: (count) => `Show all ${count} notices`,
-        showFewer: "Show fewer notices",
-        botPermissionsSentence: "The bot is missing required permissions.",
-        botPermissionsConsequence: "Chat commands and moderation actions may fail.",
-        broadcasterPermissionsSentence: "The broadcaster is missing requested permissions.",
-        broadcasterPermissionsConsequence: "Modules that need these permissions cannot run.",
-        moderatorMissingSentence: "The bot is not a moderator in this channel.",
-        moderatorMissingConsequence: "Chat actions that need moderator rights may fail.",
-        modulePermissionsSentence: (name) => `The ${name} module is missing permissions.`,
-        modulePermissionsConsequence: "The module stays disabled until they are granted.",
-        tokenExpiredSentence: "A Twitch token has expired.",
-        tokenExpiredConsequence: "The bot connection may be interrupted.",
-        tokenRenewalSentence: "A Twitch token renewal is overdue.",
-        tokenRenewalConsequence: "The bot connection may be interrupted.",
-        grantPermission: "Grant permission",
-        reviewPermissions: "Review permissions",
-        checkModerator: "Check moderator",
-        checkModeratorRunning: "Checking moderator …",
-        checkModeratorLocked: "Only broadcasters and managers may run this check.",
+      actionCount: (count) => `${String(count)} ${count === 1 ? "action" : "actions"}`,
+      actionRun: "Run",
+      actionCancel: "Cancel",
+      actionRunning: "Running …",
+      actionLoading: "Loading action …",
+      actionLoadFailed: "The action could not be loaded.",
+      actionAvailabilityFailed: "The action availability could not be checked.",
+      actionAvailabilityStale: "Availability check is stale; the action remains available.",
+      actionFailed: "The action could not be completed.",
+      actionSucceeded: (name) => `${name} completed.`,
+      actionErrorActions: {
+        commercialScopeNextStep: "Renew the channel:edit:commercial permission for this channel account.",
+        commercialCooldown: (remaining) => `The commercial cooldown is active. Try again in ${remaining}.`,
+        clipScopeNextStep: "Reconnect the bot account and grant the Twitch clips:edit permission.",
       },
+      operatorOnly: "Operators and higher roles may run this action.",
+      managerOnly: "Only managers and broadcasters may run this action.",
+      broadcasterOnly: "Only broadcasters may run this action.",
       availabilityReasons: {
         stream_offline: "The stream is offline.",
         stream_state_unknown: "The stream status is currently unavailable.",
       },
-      checksHealthy: (count) => `All clear · ${count} checks`,
-      checksNeedAttention: (problems, checks) => `${problems} ${problems === "1" ? "check needs" : "checks need"} attention · ${checks} checks`,
       runAd: (length) => `Run ad now (${length}s)`,
       createClip: "Create clip",
       sendShoutout: "Send shoutout",
-      feedTitle: "Warnings and errors",
-      feedEmpty: "No warnings or errors.",
-      feedAll: "View all in the event log",
       today: "Today",
       yesterday: "Yesterday",
       browserTimeZoneFallback: "Using browser time zone",
+    },
+    liveCockpit: {
+      live: "Live",
+      actionsHint: "Control actions directly during the stream",
+      offline: "Offline",
+      unknown: "Status unknown",
+      duration: "Duration",
+      viewers: "Viewers",
+      youAre: (role) => `You are: ${role}`,
+      roles: { broadcaster: "Broadcaster", manager: "Manager", operator: "Operator" },
+      titleCategoryPlaceholder: "Stream title and category",
+      bot: "Bot",
+      botConnected: "Connected",
+      botUnavailable: "Not connected",
+      belabox: "BELABOX",
+      belaboxDisabled: "Off",
+      belaboxChecking: "checking",
+      belaboxNotConfigured: "not configured",
+      belaboxUnavailable: "unavailable",
+      belaboxDisconnected: "disconnected",
+      belaboxConnected: (bitrate) => `connected · ${bitrate} kbps`,
+      overlays: "Overlays",
+      overlaysCount: (count) => `${count} active`,
+      overlaysNotSetUp: "Not set up",
+      overlaysChecking: "checking",
+      runningNow: "Running now",
+      liveDataLoading: "Loading live data.",
+      liveDataUnavailable: "Live data is unavailable right now.",
+      noActionRunning: "No action is running.",
+      voteType: "Vote",
+      votekickType: "Votekick",
+      voteEndsIn: (time) => `${time} left`,
+      voteTotal: (count) => `${count} votes total`,
+      voteOptionCount: (count, percent) => `${count} votes · ${percent}%`,
+      voteExtend: "+30 s",
+      voteEnd: "End",
+      voteExtended: "Vote extended by 30 seconds.",
+      voteExtensionUnavailable: "This vote cannot be extended further.",
+      voteChanged: "This vote has been replaced. Check the current vote and try again.",
+      voteEnded: "Vote ended.",
+      voteEndFailed: "The vote could not be ended.",
+      votekickVotes: (yes, no, threshold) => `Yes ${yes} · No ${no} · Threshold ${threshold}`,
+      votekickCancel: "Cancel votekick",
+      votekickCancelTitle: "Cancel votekick?",
+      votekickCancelDescription: (target) => `The vote against ${target} ends now. No timeout will be applied.`,
+      votekickCanceled: "Votekick canceled.",
+      votekickChanged: "This votekick has been replaced. Check the current vote and try again.",
+      votekickCancelFailed: "The votekick could not be canceled.",
+      nextUp: "Coming up",
+      noUpcomingItems: "Nothing scheduled yet.",
+      nextAdBreak: "Next ad break",
+      adDuration: (duration) => `Ad break · ${duration}s`,
+      adSnooze: "Snooze",
+      adSnoozed: "Ad break postponed.",
+      adSnoozeFailed: "The ad break could not be postponed.",
+      adSnoozeUnavailable: "This ad break cannot be postponed again.",
+      events: "Events",
+      eventsFilterLabel: "Filter events",
+      eventsAll: "All",
+      eventsRaids: "Raids",
+      eventsCommunity: "Community",
+      eventsChat: "Chat",
+      eventsSearch: "Search people or events",
+      eventsEmpty: "No events yet.",
+      eventsUnavailable: "Events could not be loaded.",
+      eventsLoading: "Loading events.",
+      raidShoutout: "Send shoutout",
+      raidShoutoutSent: "Shoutout sent.",
+      raidShoutoutFailed: "The shoutout could not be sent.",
+      statusIndicators: "Connection status",
+      systemStatus: "System status",
+      systemStatusDescription: (health) => `System status: ${health}`,
+      systemReady: "All systems ready",
+      liveDataCurrent: "Live data up to date",
+      locationMissing: "Location missing",
+      locationMissingDescription: "Weather, sunrise and moon data need a channel location.",
+      configureLocation: "Set up",
+      belaboxWeak: "BELABOX connection is weak",
+      belaboxWeakDescription: (bitrate) => `Current bitrate: ${bitrate} kbps.`,
+      openBelabox: "Open BELABOX",
+      actionDraftDiscardTitle: "Discard your changes?",
+      actionDraftDiscardDescription: "Your entries will be lost if you close this action.",
+      actionDraftDiscard: "Discard entries",
+      actionDraftContinue: "Continue editing",
     },
     channelControls: {
       controlsHeading: "Channel controls",
@@ -2016,7 +2248,7 @@ const commercialFailureTexts: LocaleCatalog<Record<CommercialFailureReason, stri
   },
 };
 
-const commercialFailureReasonText = (reason: unknown, language: DashboardLanguage): string =>
+export const commercialFailureReasonText = (reason: unknown, language: DashboardLanguage): string =>
   typeof reason === "string" && COMMERCIAL_FAILURE_REASONS.includes(reason as CommercialFailureReason)
     ? commercialFailureTexts[language][reason as CommercialFailureReason]
     : commercialFailureTexts[language].twitch_error;
@@ -2047,6 +2279,9 @@ const clipFailureTexts: LocaleCatalog<Record<string, string>> = {
     network_error: "Network error from Twitch",
   },
 };
+
+export const clipFailureReasonText = (reason: unknown, language: DashboardLanguage): string | null =>
+  typeof reason === "string" ? catalogString(clipFailureTexts[language], reason) ?? null : null;
 
 /**
  * `sendChatMessage` (`worker/chat.ts`)'s own reason beyond what the generic
@@ -2658,6 +2893,7 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "module.secret.removed": "Modulgeheimnis entfernt",
     "chat_voting.started": "Abstimmung gestartet",
     "chat_voting.closed": "Abstimmung geschlossen",
+    "chat_voting.extended": "Abstimmung verlängert",
     "chat_voting.template.created": "Abstimmungsvorlage erstellt",
     "chat_voting.template.updated": "Abstimmungsvorlage geändert",
     "chat_voting.template.deleted": "Abstimmungsvorlage gelöscht",
@@ -2725,6 +2961,7 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "module.secret.removed": "Module secret removed",
     "chat_voting.started": "Vote started",
     "chat_voting.closed": "Vote closed",
+    "chat_voting.extended": "Vote extended",
     "chat_voting.template.created": "Vote template created",
     "chat_voting.template.updated": "Vote template updated",
     "chat_voting.template.deleted": "Vote template deleted",
@@ -3204,22 +3441,6 @@ export const formatDate = (value: string): string =>
 
 export const formatTimestamp = (value: string): string =>
   formatDashboardDate(value, { dateStyle: "medium", timeStyle: "short" });
-
-const formatClockTime = (value: string): string =>
-  formatDashboardDate(value, { hour: "2-digit", minute: "2-digit" });
-
-const localDayKey = (date: Date): string =>
-  `${String(date.getFullYear())}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-
-export const formatStreamManagerFeedTime = (value: string, now = new Date()): string => {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  const time = formatClockTime(value);
-  if (localDayKey(date) === localDayKey(now)) return time;
-  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-  if (localDayKey(date) === localDayKey(yesterday)) return `${dashboardTexts().streamManager.yesterday} ${time}`;
-  return `${formatDate(value)} ${time}`;
-};
 
 export const formatNumber = (value: number, language: DashboardLanguage = dashboardLanguage()): string =>
   new Intl.NumberFormat(language).format(value);

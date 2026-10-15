@@ -26,6 +26,7 @@ import {
 } from "./service";
 import { formatTemplateValues } from "./template-values";
 import { belaboxOverlayElements } from "./overlay/element";
+import { belaboxImmediateActionTexts } from "./action-locale";
 
 const unavailableText = { de: belaboxCatalog.de.unavailable, en: belaboxCatalog.en.unavailable } as const;
 
@@ -206,7 +207,23 @@ export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
   panel: () => import("./panel/index"),
   settingsEditor: () => import("./panel/settings-editor"),
   settingsEditorRelatedParts: ["status"],
-  immediateActions: { requires: ["streamLive"], load: () => import("./panel/immediate-actions") },
+  actions: [{
+    id: "check-belabox",
+    name: belaboxImmediateActionTexts.name,
+    icon: "broadcast",
+    conditions: ["streamLive"],
+    requiredRole: "operator",
+    errorMessage: belaboxImmediateActionTexts.error,
+    execute: async ({ channelId }) => {
+      const result = await (await import("./panel/service")).testBelaboxConnection(channelId);
+      if (!result.ok) throw new Error(result.reason);
+      const sampledAt = Date.now();
+      return {
+        message: belaboxImmediateActionTexts.checked(result.connected, String(result.bitrateKbps)),
+        belaboxSample: { connected: result.connected, bitrateKbps: result.bitrateKbps, sampledAt },
+      };
+    },
+  }],
   handleEvent: async (event, context) => {
     if (context.streamStateTransitionAccepted !== true ||
         (event.subscriptionType !== "stream.online" && event.subscriptionType !== "stream.offline")) {

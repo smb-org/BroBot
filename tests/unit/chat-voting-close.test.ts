@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { BallotSnapshot, ModuleAlarmContext, ModuleEvent } from "../../src/modules/contract";
+import type { BallotSnapshot, ModuleAlarmContext, ModuleEvent, ModuleOverlayElementContext } from "../../src/modules/contract";
 import { chatVotingModule } from "../../src/modules/chat_voting";
 import { createTemplateRenderer } from "../../src/worker/template-resolver";
 import { prepareModuleOverlayRealtimeMessage } from "../../src/worker/module-overlay-realtime";
 import type { ChatVoteDraft } from "../../src/modules/chat_voting/contracts";
 import { createChatVotingRepository } from "../../src/modules/chat_voting/repository";
-import { announceChatVoteStartFromAlarm, closeChatVoteFromAlarm, requestChatVoteClose } from "../../src/modules/chat_voting/service";
+import { announceChatVoteStartFromAlarm, closeChatVoteFromAlarm, requestChatVoteClose, requestChatVoteExtension } from "../../src/modules/chat_voting/service";
 import { insertChannel } from "./fixtures";
 import { createReadBarrierDatabase, TestD1Database } from "./test-d1";
 
@@ -45,6 +45,7 @@ describe("chat voting close service", () => {
     order: string[],
     overrides: {
       put?: (key: string, value: unknown) => Promise<void>;
+      schedule?: ModuleAlarmContext["schedule"];
       sendChat?: () => Promise<{ sent: boolean; reason: string | null; retryable: boolean }>;
     } = {},
   ) => {
@@ -77,7 +78,7 @@ describe("chat voting close service", () => {
         put: storagePut,
         delete: vi.fn((key: string) => Promise.resolve(values.delete(key))),
       },
-      schedule: vi.fn(),
+      schedule: overrides.schedule ?? vi.fn(),
       clear: vi.fn(),
       renderTemplate: vi.fn(() => Promise.resolve({ text: "Yes: 7 (70%) · No: 3 (30%)" })),
       publishModuleOverlayMessage,
@@ -116,12 +117,134 @@ describe("chat voting close service", () => {
     for (const [pollId, deadline, revision] of scheduleClose.mock.calls) {
       expect(pollId).toBe("fictional-poll");
       expect(deadline).toEqual(expect.any(Number));
-      expect(revision).toBe(1);
+      expect(revision).toBeGreaterThanOrEqual(1);
     }
     await expect(repository.open("fictional-channel")).resolves.toMatchObject({
       id: "fictional-poll",
-      status: "open",
+      status: "closing",
       closeReason: "manual",
+    });
+  });
+
+  it("rearms an early alarm from the persisted deadline and deadline revision", async () => {
+    const repository = await seedOpenVote(false);
+    const closesAt = new Date(Date.now() + 60_000).toISOString();
+    await database.prepare("UPDATE chat_votes SET closes_at = ?, deadline_revision = 4 WHERE channel_id = ? AND poll_id = ?")
+      .bind(closesAt, "fictional-channel", "fictional-poll").run();
+    const order: string[] = [];
+    const { context, close } = createAlarmContext(order);
+
+    await closeChatVoteFromAlarm(context, repository, "fictional-poll");
+
+    expect(context.schedule).toHaveBeenCalledWith("fictional-poll", Date.parse(closesAt), 4);
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it("throws when a lost alarm claim cannot reread a concurrent manual close", async () => {
+    const repository = await seedOpenVote(false);
+    const closesAt = new Date(Date.now() - 1_000).toISOString();
+    await database.prepare("UPDATE chat_votes SET closes_at = ? WHERE channel_id = ? AND poll_id = ?")
+      .bind(closesAt, "fictional-channel", "fictional-poll").run();
+    const originalById = repository.byId.bind(repository);
+    vi.spyOn(repository, "byId")
+      .mockImplementationOnce((channelId, pollId) => originalById(channelId, pollId))
+      .mockRejectedValueOnce(new Error("concurrent close read unavailable"));
+    vi.spyOn(repository, "claimAlarmClose").mockImplementationOnce(async () => {
+      await repository.requestManualClose("fictional-channel", "fictional-poll", closesAt);
+      return false;
+    });
+    const order: string[] = [];
+    const { context, close } = createAlarmContext(order);
+
+    await expect(closeChatVoteFromAlarm(context, repository, "fictional-poll"))
+      .rejects.toThrow("concurrent close read unavailable");
+
+    await expect(repository.open("fictional-channel")).resolves.toMatchObject({ status: "closing", closeReason: "manual" });
+    expect(context.schedule).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it("finishes a concurrent manual close after losing its alarm claim", async () => {
+    const repository = await seedOpenVote(false);
+    const closesAt = new Date(Date.now() - 1_000).toISOString();
+    await database.prepare("UPDATE chat_votes SET closes_at = ? WHERE channel_id = ? AND poll_id = ?")
+      .bind(closesAt, "fictional-channel", "fictional-poll").run();
+    vi.spyOn(repository, "claimAlarmClose").mockImplementationOnce(async () => {
+      await repository.requestManualClose("fictional-channel", "fictional-poll", closesAt);
+      return false;
+    });
+    const order: string[] = [];
+    const { context, close } = createAlarmContext(order);
+
+    await closeChatVoteFromAlarm(context, repository, "fictional-poll");
+
+    await expect(repository.byId("fictional-channel", "fictional-poll"))
+      .resolves.toMatchObject({ status: "closed", closeReason: "manual", counts: [7, 3] });
+    expect(close).toHaveBeenCalledOnce();
+    expect(context.schedule).not.toHaveBeenCalled();
+  });
+
+  it("rearms the rolled-back deadline after an extension schedule fails during a lost alarm claim", async () => {
+    const repository = await seedOpenVote(false);
+    const now = Date.now();
+    const openedAt = new Date(now - 60_000).toISOString();
+    const originalDeadline = new Date(now - 1_000).toISOString();
+    await database.prepare("UPDATE chat_votes SET opened_at = ?, closes_at = ?, deadline_revision = 0 WHERE channel_id = ? AND poll_id = ?")
+      .bind(openedAt, originalDeadline, "fictional-channel", "fictional-poll").run();
+    const failedExtensionSchedule = vi.fn(() => Promise.reject(new Error("extension alarm unavailable")));
+    vi.spyOn(repository, "claimAlarmClose").mockImplementationOnce(async () => {
+      await requestChatVoteExtension(repository, "fictional-channel", failedExtensionSchedule).catch(() => null);
+      return false;
+    });
+    const order: string[] = [];
+    const { context, close } = createAlarmContext(order);
+
+    await closeChatVoteFromAlarm(context, repository, "fictional-poll");
+
+    expect(failedExtensionSchedule).toHaveBeenCalledTimes(4);
+    await expect(repository.byId("fictional-channel", "fictional-poll"))
+      .resolves.toMatchObject({ status: "open", closesAt: originalDeadline, deadlineRevision: 2 });
+    expect(context.schedule).toHaveBeenCalledWith("fictional-poll", Date.parse(originalDeadline), 2);
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it("retries a lost alarm claim when the persisted deadline cannot be rearmed", async () => {
+    const repository = await seedOpenVote(false);
+    const closesAt = new Date(Date.now() - 1_000).toISOString();
+    await database.prepare("UPDATE chat_votes SET closes_at = ? WHERE channel_id = ? AND poll_id = ?")
+      .bind(closesAt, "fictional-channel", "fictional-poll").run();
+    const claim = vi.spyOn(repository, "claimAlarmClose").mockResolvedValueOnce(false);
+    const schedule = vi.fn<ModuleAlarmContext["schedule"]>().mockRejectedValueOnce(new Error("alarm storage unavailable"));
+    const order: string[] = [];
+    const { context } = createAlarmContext(order, { schedule });
+
+    await expect(closeChatVoteFromAlarm(context, repository, "fictional-poll"))
+      .rejects.toThrow("alarm storage unavailable");
+    await expect(repository.byId("fictional-channel", "fictional-poll")).resolves.toMatchObject({ status: "open" });
+
+    claim.mockRestore();
+    await closeChatVoteFromAlarm(context, repository, "fictional-poll");
+
+    await expect(repository.byId("fictional-channel", "fictional-poll"))
+      .resolves.toMatchObject({ status: "closed", counts: [7, 3], voterCount: 10 });
+  });
+
+  it("includes the persisted deadline revision in overlay bootstrap state", async () => {
+    await seedOpenVote(false);
+    const closesAt = new Date(Date.now() + 120_000).toISOString();
+    await database.prepare("UPDATE chat_votes SET closes_at = ?, deadline_revision = 3 WHERE channel_id = ? AND poll_id = ?")
+      .bind(closesAt, "fictional-channel", "fictional-poll").run();
+    const element = chatVotingModule.overlayElements?.[0];
+    if (element?.initialState === undefined) throw new Error("The chat voting overlay needs an initial state loader.");
+
+    const bootstrap = await element.initialState(database as unknown as D1Database, "fictional-channel", {}, {
+      readBallot: vi.fn(() => Promise.resolve(snapshot)),
+    } as unknown as ModuleOverlayElementContext);
+
+    expect(bootstrap).toMatchObject({
+      pollId: "fictional-poll",
+      closesAt,
+      deadlineRevision: 3,
     });
   });
 
@@ -134,7 +257,7 @@ describe("chat voting close service", () => {
     await expect(requestChatVoteClose(repository, "fictional-channel", scheduleClose))
       .rejects.toThrow("alarm unavailable");
     await expect(repository.open("fictional-channel")).resolves.toMatchObject({
-      status: "open",
+      status: "closing",
       closeReason: "manual",
     });
 
@@ -163,6 +286,21 @@ describe("chat voting close service", () => {
       .resolves.toMatchObject({ status: "closed", counts: [7, 3], voterCount: 10 });
   });
 
+  it("does not close a ballot when a claimed alarm fires before the persisted deadline", async () => {
+    const repository = await seedOpenVote(false);
+    await database.prepare(
+      "UPDATE chat_votes SET closes_at = ? WHERE channel_id = ? AND poll_id = ?",
+    ).bind("2099-10-04T14:00:00.000Z", "fictional-channel", "fictional-poll").run();
+    const order: string[] = [];
+    const { context, close, read } = createAlarmContext(order);
+
+    await closeChatVoteFromAlarm(context, repository, "fictional-poll");
+
+    expect(read).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+    await expect(repository.byId("fictional-channel", "fictional-poll")).resolves.toMatchObject({ status: "open" });
+  });
+
   it("recovers the final snapshot when persistence fails after the ballot closes", async () => {
     const repository = await seedOpenVote(false);
     const order: string[] = [];
@@ -179,7 +317,7 @@ describe("chat voting close service", () => {
     await expect(closeChatVoteFromAlarm(context, repository, "fictional-poll"))
       .rejects.toThrow("storage interrupted after close");
     expect(close).toHaveBeenCalledOnce();
-    await expect(repository.byId("fictional-channel", "fictional-poll")).resolves.toMatchObject({ status: "open" });
+    await expect(repository.byId("fictional-channel", "fictional-poll")).resolves.toMatchObject({ status: "closing" });
 
     await closeChatVoteFromAlarm(context, repository, "fictional-poll");
 

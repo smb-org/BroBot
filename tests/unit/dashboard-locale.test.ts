@@ -30,6 +30,14 @@ describe("dashboard locale", () => {
     expect(roleLabel("operator")).toBe("Bediener");
   });
 
+  it("labels running vote countdowns as time remaining in both languages", () => {
+    setBrowserLanguage("de-DE");
+    expect(dashboardTexts().liveCockpit.voteEndsIn("0:42")).toBe("noch 0:42");
+
+    setBrowserLanguage("en-US");
+    expect(dashboardTexts().liveCockpit.voteEndsIn("0:42")).toBe("0:42 left");
+  });
+
   it("states honestly in German and English when overlay sources are still closing", () => {
     expect(overlaysTexts("de").revokedPending)
       .toBe("Zugang widerrufen. Verbundene Quellen werden noch geschlossen.");

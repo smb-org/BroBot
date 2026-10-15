@@ -3,62 +3,11 @@ import { useMemo, type ReactElement } from "react";
 import type { ModuleOverlayElementProps } from "../../contract";
 import { rankVoteTerms } from "../domain";
 import { chatVotingOverlayLabels } from "./locale";
-import type { TallyState } from "./tally-state";
-import { chatVotingKindForPreset, chatVotingPresetForKind } from "../contracts";
-import type { ChatVotingKind, ChatVotingPreset } from "../contracts";
+import { parseTallyState } from "./tally-state";
 import { OverlayTally, OverlayTallyOptions, type OverlayTallyRow } from "../../../overlay/tally/OverlayTally";
 
-const record = (value: unknown): Record<string, unknown> | null =>
-  typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
-const isNonNegativeInteger = (value: unknown): value is number =>
-  typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-
-const parseState = (value: unknown): TallyState | null => {
-  const state = record(value);
-  if (state === null || typeof state.pollId !== "string" || !Array.isArray(state.counts) ||
-      !state.counts.every(isNonNegativeInteger) ||
-      !Number.isSafeInteger(state.revision) || (state.revision as number) < 0) return null;
-  const labels = Array.isArray(state.labels) && state.labels.every((label) => typeof label === "string")
-    ? state.labels
-    : undefined;
-  const terms = Array.isArray(state.terms) && state.terms.every((entry) => {
-    const term = record(entry);
-    return term !== null && typeof term.term === "string" && Array.from(term.term).length <= 25 &&
-      isNonNegativeInteger(term.count) && term.count > 0 && typeof term.approved === "boolean";
-  }) ? state.terms as TallyState["terms"] : undefined;
-  const validPreset = state.preset === "yes_no" || state.preset === "scale_5" || state.preset === "options_n" ||
-    state.preset === "digit_01" || state.preset === "digit_12" || state.preset === "free_text";
-  const validKind = state.kind === "yes_no" || state.kind === "options" || state.kind === "free_text";
-  const storedPreset = validPreset ? state.preset as ChatVotingPreset : undefined;
-  const kind: ChatVotingKind | undefined = validKind ? state.kind as ChatVotingKind
-    : storedPreset === undefined ? undefined : chatVotingKindForPreset(storedPreset);
-  const preset = storedPreset ?? (kind === undefined ? undefined : chatVotingPresetForKind(kind));
-  return {
-    pollId: state.pollId,
-    ...(typeof state.openedAt === "string" ? { openedAt: state.openedAt } : {}),
-    ...(typeof state.closesAt === "string" && Number.isFinite(Date.parse(state.closesAt)) ? { closesAt: state.closesAt } : {}),
-    ...(state.requestedDurationSeconds === null || typeof state.requestedDurationSeconds === "number" &&
-      Number.isSafeInteger(state.requestedDurationSeconds) && state.requestedDurationSeconds > 0
-      ? { requestedDurationSeconds: state.requestedDurationSeconds } : {}),
-    ...(state.title === null || typeof state.title === "string" && Array.from(state.title).length <= 80 ? { title: state.title } : {}),
-    ...(state.status === "open" || state.status === "closed" ? { status: state.status } : {}),
-    ...(labels === undefined ? {} : { labels }),
-    ...(kind === undefined ? {} : { kind }),
-    ...(preset === undefined ? {} : { preset }),
-    ...(typeof state.optionCount === "number" && Number.isInteger(state.optionCount) ? { optionCount: state.optionCount } : {}),
-    ...(state.textMode === "first_word" || state.textMode === "whole_message" || state.textMode === null
-      ? { textMode: state.textMode } : {}),
-    counts: state.counts,
-    ...(terms === undefined ? {} : { terms }),
-    ...(isNonNegativeInteger(state.more) ? { more: state.more } : {}),
-    ...(typeof state.termFilterReady === "boolean" ? { termFilterReady: state.termFilterReady } : {}),
-    revision: state.revision as number,
-    ...(typeof state.closedAt === "string" ? { closedAt: state.closedAt } : {}),
-  };
-};
-
 const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): ReactElement | null => {
-  const current = useMemo(() => parseState(state), [state]);
+  const current = useMemo(() => parseTallyState(state), [state]);
   const labels = chatVotingOverlayLabels(language);
   if (current === null || current.counts.length === 0 && current.kind !== "free_text") return null;
 

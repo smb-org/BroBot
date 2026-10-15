@@ -1,5 +1,6 @@
 import type { BotModule } from "../contract";
 import { clipsSettingsSchema } from "./contracts";
+import { clipsImmediateActionTexts } from "./action-locale";
 
 export const clipsModule: BotModule<typeof clipsSettingsSchema> = {
   id: "clips",
@@ -8,8 +9,19 @@ export const clipsModule: BotModule<typeof clipsSettingsSchema> = {
   defaultEnabled: true,
   settingsSchema: clipsSettingsSchema,
   defaultSettings: {},
-  immediateActions: {
-    requires: ["streamLive"],
-    load: () => import("./panel/immediate-actions"),
-  },
+  actions: [{
+    id: "create-clip",
+    name: clipsImmediateActionTexts.name,
+    icon: "clip",
+    conditions: ["streamLive"],
+    requiredRole: "operator",
+    errorMessage: clipsImmediateActionTexts.error,
+    execute: async ({ channelId }) => {
+      const result = await (await import("./panel/service")).createClip(channelId);
+      return {
+        message: clipsImmediateActionTexts.created,
+        ...(result.editUrl === null ? {} : { link: { href: result.editUrl, label: clipsImmediateActionTexts.open } }),
+      };
+    },
+  }],
 };
