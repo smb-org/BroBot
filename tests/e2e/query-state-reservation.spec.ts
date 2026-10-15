@@ -195,10 +195,10 @@ test("compact, panel, toolbar, and module settings retries keep their declared b
     await page.goto("/tests/e2e/module-panels-stability-fixture.html?panel=text_commands");
     await page.getByRole("button", { name: "Add command" }).click();
     await templateRequestStarted;
-    const templateState = page.locator(".command-editor-shell .ui-load-state--compact");
+    const templateState = page.locator(".text-command-editor .ui-load-state--compact");
     await expect(templateState).toHaveAttribute("data-status", "loading");
     const templateLoadingSize = await size(templateState);
-    expect(templateLoadingSize.height).toBe(64);
+    expect(templateLoadingSize.height).toBe(20);
     releaseTemplateRequest();
     await expect(templateState).toHaveAttribute("data-status", "error");
     expect(await size(templateState)).toEqual(templateLoadingSize);

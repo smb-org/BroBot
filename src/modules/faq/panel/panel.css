@@ -16,11 +16,17 @@
   --collection-list-width: 380px;
 }
 
+.faq-panel .collection-page__heading {
+  display: none;
+}
+
 .faq-panel__toolbar {
+  box-sizing: border-box;
   display: grid;
-  flex: 1 1 100%;
+  flex: none;
   gap: 10px;
   min-width: 0;
+  width: 100%;
 }
 
 .faq-panel__toolbar-top {
@@ -37,12 +43,37 @@
   white-space: nowrap;
 }
 
+.faq-panel__toolbar-top .ui-field__description,
+.faq-panel__toolbar-top .ui-field__error {
+  display: none;
+}
+
 .faq-panel__entry-name .ui-field__error {
   display: none;
 }
 
 .faq-panel__toolbar .segment-choice-field {
   min-width: 0;
+}
+
+.faq-panel__filter-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  gap: 8px;
+  min-width: 0;
+}
+
+.faq-panel__entry-count {
+  grid-row: 1;
+  justify-self: end;
+  color: var(--text-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.faq-panel__filter-row > .segment-choice-field {
+  grid-row: 2;
 }
 
 .faq-panel__toolbar .segment-choice {
@@ -224,9 +255,19 @@
 
 .faq-panel__editor {
   display: grid;
+  flex: 1 1 auto;
   gap: 16px;
   min-width: 0;
+  min-height: 0;
   padding: 16px 0 24px;
+}
+
+.faq-panel__detail {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
 }
 
 .faq-panel__editor-grid {
@@ -283,15 +324,67 @@
   align-self: start;
 }
 
-@container editor (max-width: 479px) {
-  .faq-panel .ui-field-pair {
+.faq-panel__answer-preview .ui-template-text-field__description-content {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.faq-panel__answer-preview .ui-template-text-field__helper-row {
+  display: flex;
+  align-items: flex-start;
+  height: auto;
+  min-height: 0;
+}
+
+.faq-panel__answer-preview .ui-template-text-field__helper-copy {
+  order: 1;
+  align-items: flex-start;
+  min-width: 0;
+  overflow: visible;
+}
+
+.faq-panel__answer-preview .ui-template-text-field__helper-copy .ui-truncated-text {
+  overflow: visible;
+}
+
+.faq-panel__answer-preview .ui-template-text-field__helper-copy .ui-truncated-text::before {
+  display: block;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.faq-panel__answer-preview .ui-template-text-field__warnings {
+  order: 2;
+}
+
+.faq-panel__answer-preview .ui-template-text-field__count {
+  order: 3;
+  align-self: flex-start;
+  flex: none;
+  min-width: 8ch;
+  max-width: 100%;
+}
+
+@media (max-width: 639px) {
+  .faq-panel__answer-preview .ui-template-text-field__helper-row {
+    display: grid;
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(18px, auto) auto;
+    min-height: 40px;
+    gap: 4px;
+  }
+
+  .faq-panel__answer-preview .ui-template-text-field__count {
+    justify-self: end;
   }
 }
 
-@container editor (min-width: 520px) {
-  .faq-panel__answer-preview {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+@container editor (max-width: 479px) {
+  .faq-panel .ui-field-pair {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -321,6 +414,7 @@
 }
 
 .faq-panel__detail > .page-header {
+  flex: none;
   min-width: 0;
   width: 100%;
   max-width: none;
@@ -351,21 +445,20 @@
   .faq-panel .collection-page {
     --collection-list-width: 330px;
   }
+}
 
-  .faq-panel__editor-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.collection-page[data-single-column="true"] .faq-panel__editor-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.collection-page[data-single-column="true"] .faq-panel__editor {
+  padding-top: 12px;
+  padding-bottom: 76px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 @media (max-width: 768px) {
-  .faq-panel .collection-page {
-    --collection-list-width: 100%;
-  }
-
-  .faq-panel .collection-page__body {
-    grid-template-rows: minmax(460px, 54vh) minmax(320px, 1fr);
-  }
-
   .faq-panel__toolbar-top {
     grid-template-columns: minmax(0, 1fr) auto;
   }
@@ -379,9 +472,19 @@
     gap: 16px;
   }
 
-  .faq-panel__editor {
-    padding-top: 12px;
-    padding-bottom: 76px;
+  .faq-panel__editor .ui-field__description {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    gap: 4px;
+  }
+
+  .faq-panel__editor .ui-field__hint {
+    width: 100%;
+  }
+
+  .faq-panel__editor .ui-field__count {
+    justify-self: end;
   }
 
   .faq-panel__detail > .page-header .page-header__save {

@@ -6,6 +6,7 @@ import { closestTemplateVariable, templateTextLength, tokenizeTemplate, unknownT
 import type { TemplateVariableGroup } from "../../contracts/values";
 import { Button } from "./Button";
 import { ChatPreview } from "./ChatPreview";
+import { FieldError } from "./FieldError";
 import { Icon } from "./Icon";
 import { InlineSuggestionPicker, InlineSuggestionPickerTarget } from "./InlineSuggestionPicker";
 import { TruncatedText } from "./TruncatedText";
@@ -59,6 +60,7 @@ interface TemplateTextFieldProps {
   preview?: (template: string, values: Readonly<Record<string, string>>) => string;
   previewLabel?: string;
   previewSpeaker?: string;
+  insertVariableLabel?: string;
   onIssuesChange?: (issues: { unknown: readonly string[]; worstCaseExceeded: boolean }) => void;
   disabled?: boolean;
   readOnly?: boolean;
@@ -140,6 +142,7 @@ export function TemplateTextField({
   preview,
   previewLabel,
   previewSpeaker,
+  insertVariableLabel,
   onIssuesChange,
   disabled = false,
   readOnly = false,
@@ -275,6 +278,17 @@ export function TemplateTextField({
     setQuery(null);
   };
 
+  const openVariablePicker = (): void => {
+    const textarea = textareaRef.current;
+    if (textarea === null || variables === undefined || disabled || readOnly) return;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    insertText("{", start, end);
+    const caret = start + 1;
+    dismissedQuery.current = null;
+    setQuery({ fragment: "", start: caret, end: caret });
+  };
+
   const chooseSuggestion = (variableName: string): void => {
     const currentQuery = query;
     if (currentQuery === null) return;
@@ -340,7 +354,12 @@ export function TemplateTextField({
   const description: ReactNode = (
     <div className="ui-template-text-field__description-content">
       <div className="ui-template-text-field__helper-row">
-        <span><TruncatedText text={hint} />{describedHelper(null, disabledReason, `template-text-field-${id}`)}</span>
+        <span className="ui-template-text-field__helper-copy">
+          {effectiveError === undefined
+            ? <TruncatedText text={hint} />
+            : <FieldError id={`${id}-error`} className="ui-template-text-field__helper-error" message={effectiveError} />}
+          {describedHelper(null, disabledReason, `template-text-field-${id}`)}
+        </span>
         {countNode}
       </div>
       <div className="ui-template-text-field__warnings" id={`${id}-warnings`} aria-live="polite">
@@ -418,9 +437,16 @@ export function TemplateTextField({
         description={description}
         descriptionProps={{ component: "div" }}
         inputWrapperOrder={["label", "input", "description", "error"]}
-        error={effectiveError === undefined ? undefined : <span><span aria-hidden="true">× </span><TruncatedText text={effectiveError} /></span>}
         withAsterisk={required}
       >
+        {insertVariableLabel === undefined ? null : <Button
+          className="ui-template-text-field__insert-variable"
+          size="compact"
+          variant="subtle"
+          type="button"
+          disabled={disabled || readOnly || variables === undefined}
+          onClick={openVariablePicker}
+        >{insertVariableLabel}</Button>}
         <div ref={frameRef} className="template-text-field" data-composing={composing ? "true" : undefined} data-readonly={readOnly ? "true" : undefined}>
           <RichTextarea
             data-ui=""

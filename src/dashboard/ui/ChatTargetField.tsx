@@ -67,7 +67,6 @@ export function ChatTargetField({ label, value, onChange, allowed = DEFAULT_ALLO
           >
             <MessageCircle aria-hidden="true" size={15} />
             <span className="ui-chat-target-field__value">{selected === undefined ? label : labelFor(selected)}</span>
-            <span className="ui-chat-target-field__change">{texts.change}</span>
             <span className="ui-chat-target-field__chevron" aria-hidden="true">⌄</span>
           </PopoverPrimitive.Trigger>
           <PopoverContent role="dialog" aria-label={label} className="ui-chat-target-field__popover" initialFocus={false}>

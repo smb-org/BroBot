@@ -32,6 +32,7 @@ export interface ListToolbarProperties {
   filtersLabel?: string;
   create?: {
     label: string;
+    ariaLabel?: string;
     onClick: () => void;
     ref?: Ref<HTMLButtonElement>;
     disabled?: boolean;
@@ -115,6 +116,7 @@ export function ListToolbar({
             <Button
               variant="primary"
               icon="add"
+              {...(create.ariaLabel === undefined ? {} : { ariaLabel: create.ariaLabel })}
               {...(create.ref === undefined ? {} : { ref: create.ref })}
               disabled={create.disabled === true || createReason !== undefined}
               {...(createReason === undefined ? {} : { describedBy: createReasonId })}

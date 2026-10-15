@@ -317,7 +317,7 @@ export const createTextCommandRepository = (
          games_json, template_fields_json, variable_name, variable_operation, variable_amount,
          timeout_min_seconds, timeout_max_seconds, timeout_fallback_text, timeout_reason,
          last_used_at, created_at, updated_at, revision)
-       SELECT ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?
         WHERE NOT EXISTS (
           SELECT 1 FROM text_commands AS other
            WHERE other.channel_id = ? AND other.command_name = ?
@@ -339,6 +339,7 @@ export const createTextCommandRepository = (
       input.name,
       input.text,
       input.kind,
+      input.enabled === false ? 0 : 1,
       minimumTier,
       input.cooldownSeconds,
       aliasesJson,
@@ -376,7 +377,7 @@ export const createTextCommandRepository = (
       text: input.text,
       kind: input.kind,
       ...extraTemplatesOf(input),
-      enabled: true,
+      enabled: input.enabled ?? true,
       minimumTier,
       cooldownSeconds: input.cooldownSeconds,
       aliases,

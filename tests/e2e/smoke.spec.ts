@@ -169,7 +169,7 @@ test("setup navigation stays reachable across desktop and mobile widths", async 
   expect((channelSelectBox?.y ?? 0) + (channelSelectBox?.height ?? 0)).toBeLessThanOrEqual((topbarBox?.y ?? 0) + (topbarBox?.height ?? 0));
 });
 
-test("ListDetail uses the shared desktop grid and mobile overlay inspector", async ({ page }) => {
+test("text command collection keeps list and editor in desktop columns and stacks on mobile", async ({ page }) => {
   const channel = {
     channelId: "kanal-e2e",
     login: "brotkrumen-kanal",
@@ -242,39 +242,32 @@ test("ListDetail uses the shared desktop grid and mobile overlay inspector", asy
   await page.goto("/channels/kanal-e2e/modules/text_commands");
   await expect(page.getByRole("heading", { name: "Textbefehle", level: 1 })).toBeVisible();
 
-  const list = page.getByRole("region", { name: "Befehle", exact: true });
-  const row = page.getByRole("row", { name: /!hallo/ });
-  const inspector = page.getByRole("region", { name: "Eigenschaften von !hallo" });
+  const list = page.locator(".collection-page__list");
+  const row = page.locator(".text-command-row").filter({ hasText: "!hallo" });
+  const editor = page.locator(".collection-page__detail");
 
   // At 1280px, selecting a row uses the shared desktop grid with the list
   // beside a fixed-width inspector.
   await page.setViewportSize({ width: 1280, height: 900 });
   await row.click();
-  await expect(inspector).toBeVisible();
+  await expect(editor).toBeVisible();
   const listBoxDesktop = await list.boundingBox();
-  const inspectorBoxDesktop = await inspector.boundingBox();
+  const editorBoxDesktop = await editor.boundingBox();
   expect(listBoxDesktop).not.toBeNull();
-  expect(inspectorBoxDesktop).not.toBeNull();
-  // Side by side: the inspector starts at or after the list's right edge,
-  // and roughly on the same row rather than further down the page.
-  expect(inspectorBoxDesktop?.x ?? 0).toBeGreaterThanOrEqual((listBoxDesktop?.x ?? 0) + (listBoxDesktop?.width ?? 0) - 1);
-  expect(Math.abs((inspectorBoxDesktop?.y ?? 0) - (listBoxDesktop?.y ?? 0))).toBeLessThan(80);
-  expect(inspectorBoxDesktop?.width ?? 0).toBeCloseTo(592, -1);
+  expect(editorBoxDesktop).not.toBeNull();
+  expect(editorBoxDesktop?.x ?? 0).toBeGreaterThanOrEqual((listBoxDesktop?.x ?? 0) + (listBoxDesktop?.width ?? 0) - 1);
+  expect(Math.abs((editorBoxDesktop?.y ?? 0) - (listBoxDesktop?.y ?? 0))).toBeLessThan(80);
 
-  // Counter-probe: below 1280px the same selection must NOT produce that
-  // two-column form -- the inspector floats over the list as a drawer
-  // instead, sized to the drawer's own 480px rather than the column's
-  // 592px, and overlapping the list horizontally rather than sitting
-  // beside it.
-  await page.setViewportSize({ width: 900, height: 900 });
-  await expect(inspector).toBeVisible();
-  // The modal drawer makes the list behind it inert and hidden from the
-  // accessibility tree, so it is only reachable with includeHidden.
-  const hiddenList = page.getByRole("region", { name: "Befehle", exact: true, includeHidden: true });
-  const listBoxNarrow = await hiddenList.boundingBox();
-  const inspectorBoxNarrow = await inspector.boundingBox();
-  expect(listBoxNarrow).not.toBeNull();
-  expect(inspectorBoxNarrow).not.toBeNull();
-  expect(inspectorBoxNarrow?.width ?? 0).toBeCloseTo(480, -1);
-  expect(inspectorBoxNarrow?.x ?? 0).toBeLessThan((listBoxNarrow?.x ?? 0) + (listBoxNarrow?.width ?? 0));
+  await page.setViewportSize({ width: 390, height: 844 });
+  const collection = page.locator(".collection-page");
+  await expect(collection).toHaveAttribute("data-single-column", "true");
+  await expect(collection).toHaveAttribute("data-detail-open", "true");
+  const listBoxNarrow = await list.boundingBox();
+  const editorBoxNarrow = await editor.boundingBox();
+  expect(listBoxNarrow).toBeNull();
+  expect(editorBoxNarrow).not.toBeNull();
+  await expect(page.locator(".collection-page__detail-back")).toBeVisible();
+  await page.locator(".collection-page__detail-back").click();
+  await expect(list).toBeVisible();
+  await expect(editor).toBeHidden();
 });

@@ -127,7 +127,7 @@ test("API source list keeps its final populated row reachable at desktop and mob
   }
 });
 
-test("text-library picker space is reserved until populated variables arrive", async ({ page }) => {
+test("template editor stays in place while registered variables arrive", async ({ page }) => {
   let signalRequest: () => void = () => undefined;
   const requestStarted = new Promise<void>((resolve) => { signalRequest = resolve; });
   let releaseResponse: () => void = () => undefined;
@@ -144,21 +144,24 @@ test("text-library picker space is reserved until populated variables arrive", a
   await gotoPanel(page, "text_commands");
   await page.getByRole("button", { name: "Add command" }).click();
   await requestStarted;
-  const response = page.getByRole("textbox", { name: "Response" });
+  const response = page.getByRole("textbox", { name: "Response text", exact: true });
   await expect(response).toBeVisible();
   const editor = page.locator(".command-template-editor").first();
-  const pickerSlot = page.getByTestId("command-library-picker-slot").first();
-  const desktopBefore = { editor: await box(editor), slot: await box(pickerSlot) };
+  const insertVariable = page.getByRole("button", { name: "Insert variable" });
+  const desktopBefore = { editor: await box(editor), insertVariable: await box(insertVariable) };
 
   await page.setViewportSize({ width: 390, height: 844 });
-  const mobileBefore = { editor: await box(editor), slot: await box(pickerSlot) };
+  await expect(page.locator(".collection-page")).toHaveAttribute("data-single-column", "true");
+  const mobileBefore = { editor: await box(editor), insertVariable: await box(insertVariable) };
   releaseResponse();
-  await expect(page.getByRole("combobox", { name: "Text from library" }).first()).toBeVisible();
+  await expect(insertVariable).toBeVisible();
 
   await page.setViewportSize({ width: 1280, height: 844 });
-  expect({ editor: await box(editor), slot: await box(pickerSlot) }).toEqual(desktopBefore);
+  await expect(page.locator(".collection-page")).toHaveAttribute("data-single-column", "false");
+  expect({ editor: await box(editor), insertVariable: await box(insertVariable) }).toEqual(desktopBefore);
   await page.setViewportSize({ width: 390, height: 844 });
-  expect({ editor: await box(editor), slot: await box(pickerSlot) }).toEqual(mobileBefore);
+  await expect(page.locator(".collection-page")).toHaveAttribute("data-single-column", "true");
+  expect({ editor: await box(editor), insertVariable: await box(insertVariable) }).toEqual(mobileBefore);
 });
 
 test("template picker keeps its footer visible and scrolls options within the available height", async ({ page }) => {
@@ -288,6 +291,7 @@ test("FAQ game search opens on its first click and narrow chat controls stay rea
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await gotoPanel(page, "faq", "en");
+  await page.getByRole("button", { name: "Example hello", exact: true }).click();
   await page.getByRole("switch", { name: "Games" }).click();
 
   const gameSearch = page.getByRole("searchbox", { name: "Games" });
@@ -344,14 +348,15 @@ test("FAQ game limit explains the cap without shifting the fields below it", asy
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await gotoPanel(page, "faq", "en");
+  await page.getByRole("button", { name: "Full game list hello", exact: true }).click();
 
   const limitMessage = page.locator(".ui-game-multi-select__limit-message");
   const target = page.getByRole("button", { name: "Chat target", exact: true });
   const messageBefore = await limitMessage.boundingBox();
   const targetOffset = async () => target.evaluate((element) => {
-    const detail = element.closest(".collection-page__detail");
-    if (!(detail instanceof HTMLElement)) throw new Error("The FAQ detail scroll region is missing.");
-    return element.getBoundingClientRect().top - detail.getBoundingClientRect().top + detail.scrollTop;
+    const editor = element.closest<HTMLElement>(".faq-panel__editor");
+    if (editor === null) throw new Error("The FAQ editor scroll region is missing.");
+    return element.getBoundingClientRect().top - editor.getBoundingClientRect().top + editor.scrollTop;
   });
   const targetBefore = await targetOffset();
   await page.getByRole("searchbox", { name: "Games" }).click();
@@ -365,6 +370,46 @@ test("FAQ game limit explains the cap without shifting the fields below it", asy
   expect(targetAfter).toBe(targetBefore);
 });
 
+test("FAQ collection uses the shared mobile list, detail, and focus transitions", async ({ page }) => {
+  await routeJson(page, "/api/channels/channel-a/modules/faq/entries", { orderRevision: 1, entries: [{
+    id: "faq-mobile", name: "Greeting", enabled: true, matcher: { type: "keywords", patterns: ["hello"] }, answerText: "Hello!", minimumTier: "everyone",
+    cooldownSeconds: 30, userCooldownSeconds: 0, games: [], chatTarget: "source_only", order: 0, revision: 1,
+    lastUsedAt: null, createdAt: "2030-01-01T12:00:00.000Z", updatedAt: "2030-01-01T12:00:00.000Z",
+  }] });
+  await routeJson(page, "/api/channels/channel-a/settings", {
+    timeZone: "UTC", revision: 1, location: null, locationRevision: 1,
+    defaultChatTarget: "source_only", defaultChatTargetRevision: 1,
+  });
+  await routeJson(page, "/api/channels/channel-a/template-variables", { variables: [] });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await gotoPanel(page, "faq", "en");
+
+  const collection = page.locator(".faq-panel .collection-page");
+  const list = collection.locator(".collection-page__list");
+  const detail = collection.locator(".collection-page__detail");
+  const row = page.getByRole("button", { name: "Greeting hello", exact: true });
+  await expect(list).toBeVisible();
+  await expect(row).toBeVisible();
+  await expect(detail).toBeHidden();
+  expect(await collection.locator(".collection-page__list-content").evaluate((element) => element.clientHeight)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+  await row.click();
+  await expect(detail).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Greeting" })).toBeFocused();
+  await page.getByRole("button", { name: "Back" }).click();
+  await expect(list).toBeVisible();
+  await expect(row).toBeFocused();
+
+  await row.click();
+  await expect(detail).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Greeting" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(list).toBeVisible();
+  await expect(row).toBeFocused();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
 test("text command switch and role inclusion fit their narrow and desktop layouts", async ({ page }) => {
   await routeJson(page, "/api/channels/channel-a/modules/text_commands/commands", {
     commands: [], variables: [{ name: "score", value: 1, description: "Points" }],
@@ -372,7 +417,25 @@ test("text command switch and role inclusion fit their narrow and desktop layout
   await page.setViewportSize({ width: 390, height: 844 });
   await gotoPanel(page, "text_commands", "en");
   await page.getByRole("button", { name: "Add command" }).click();
-  await page.getByRole("textbox", { name: "Response" }).waitFor();
+  await page.getByRole("textbox", { name: "Response text", exact: true }).waitFor();
+  const prefixGeometry = await page.evaluate(() => {
+    const nameInput = document.querySelector("#command-name");
+    const aliases = document.querySelector(".chips-input__control");
+    const namePrefix = document.querySelector("#command-name")?.parentElement?.querySelector(".ui-field__leading--prefix");
+    const aliasPrefix = aliases?.querySelector(":scope > .ui-field__prefix");
+    if (!(nameInput instanceof HTMLElement) || !(aliases instanceof HTMLElement) || !(namePrefix instanceof HTMLElement) || !(aliasPrefix instanceof HTMLElement)) {
+      throw new Error("Command name or alias prefix groups are missing.");
+    }
+    return {
+      nameBorder: getComputedStyle(nameInput.parentElement as HTMLElement).borderTopWidth,
+      nameInputBorder: getComputedStyle(nameInput).borderTopWidth,
+      nameSeparator: getComputedStyle(namePrefix).borderRightWidth,
+      aliasBorder: getComputedStyle(aliases).borderTopWidth,
+      aliasSeparator: getComputedStyle(aliasPrefix).borderRightWidth,
+    };
+  });
+  expect(prefixGeometry).toEqual({ nameBorder: "1px", nameInputBorder: "0px", nameSeparator: "1px", aliasBorder: "1px", aliasSeparator: "1px" });
+  await page.locator(".command-usage-advanced > summary").click();
   const targetSwitch = page.getByRole("switch", { name: "Change channel variable" });
   await targetSwitch.scrollIntoViewIfNeeded();
   const switchFits = await targetSwitch.evaluate((element) => {
@@ -383,7 +446,6 @@ test("text command switch and role inclusion fit their narrow and desktop layout
   expect(switchFits).toBe(true);
 
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.getByRole("tab", { name: "Advanced" }).click();
   const inclusion = page.locator(".ui-role-threshold .ui-select__description .ui-truncated-text").first();
   await expect(inclusion).toBeVisible();
   const inclusionStyle = await inclusion.evaluate((element) => {
@@ -1577,18 +1639,18 @@ test("text command slash help stays stable and optional variable fields mount on
   await routeJson(page, "/api/channels/channel-a/template-variables", { variables: [] });
   await gotoPanel(page, "text_commands");
   await page.getByRole("button", { name: "Add command" }).click();
-  const editor = page.locator(".command-editor-shell");
-  const response = page.getByRole("textbox", { name: "Response" });
+  const editor = page.locator(".text-command-editor");
+  const response = page.getByRole("textbox", { name: "Response text", exact: true });
   await expect(response).toBeVisible();
   const slashHelp = page.locator(".command-slash-help");
-  const slashBefore = await box(slashHelp);
   const editorBeforeSlash = await box(editor);
 
   await response.fill("/t");
   await expect(slashHelp).toContainText("Leading Twitch-style commands");
-  expect(await box(slashHelp)).toEqual(slashBefore);
+  await expect(slashHelp).toHaveCSS("position", "absolute");
   expect(await box(editor)).toEqual(editorBeforeSlash);
 
+  await page.locator(".command-usage-advanced > summary").click();
   const actionSlot = page.getByTestId("command-variable-action-slot");
   const actionSection = page.locator(".ui-switch-section").filter({ has: page.getByRole("switch", { name: "Change channel variable" }) });
   await expect(actionSection).toContainText("Applied atomically with the command.");

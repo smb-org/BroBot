@@ -46,6 +46,7 @@ export interface PageHeaderProps {
   pageActions?: ReactNode;
   overflow?: ReactNode;
   lockHint?: string;
+  headingLevel?: "h1" | "h2" | "h3";
 }
 
 export function PageHeader({
@@ -69,6 +70,7 @@ export function PageHeader({
   pageActions,
   overflow,
   lockHint,
+  headingLevel = "h1",
 }: PageHeaderProps): ReactElement {
   const common = dashboardCommonTexts();
   const switchControl = moduleSwitch ?? (active === undefined || onToggle === undefined
@@ -76,6 +78,7 @@ export function PageHeader({
     : <ModuleStatusSwitch title={switchTitle} active={active} onToggle={onToggle} disabled={switchDisabled} busy={switchBusy} />);
   const headerActions = actions === undefined ? pageActions : pageActions === undefined ? actions : <>{actions}{pageActions}</>;
   const headerMeta = lockHint === undefined ? meta : <>{meta}{meta === undefined ? null : " "}<span className="page-header__lock"><Icon name="lock" size={16} />{lockHint}</span></>;
+  const Heading = headingLevel;
 
   return (
     <header data-ui="" className="page-header module-detail-heading">
@@ -84,7 +87,7 @@ export function PageHeader({
       </div>}
       <div className="page-header__main page-header__copy module-detail-heading__copy">
         <div className="page-header__title-row">
-          <h1>{titleContent ?? title}</h1>
+          <Heading>{titleContent ?? title}</Heading>
           {switchControl === null ? null : <div className="page-header__module-switch module-detail__switch">{switchControl}</div>}
           {(badges ?? badge) === undefined || (badges ?? badge) === null ? null : <div className="page-header__badges">{badges ?? badge}</div>}
         </div>

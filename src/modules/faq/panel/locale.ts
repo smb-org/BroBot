@@ -2,9 +2,11 @@ import type { DashboardLanguage, LocaleCatalog } from "../../../dashboard/locale
 import type { ChipsInputMessages, GameMultiSelectMessages, TemplateTextFieldMessages } from "../../../dashboard/ui";
 import type { FaqMinimumTier } from "../contracts";
 import type { FaqMatcherValidationReasonCode } from "../domain";
+import { formatCharacterCount, formatCharacterTotal, formatCount } from "../../../dashboard/ui/text-length";
 
 export interface FaqTexts {
   title: string;
+  entryCount: (count: number) => string;
   add: string;
   newEntry: string;
   noSelection: string;
@@ -70,6 +72,7 @@ export interface FaqTexts {
   chatTarget: string;
   save: string;
   cancel: string;
+  back: string;
   discard: string;
   saved: string;
   saving: string;
@@ -90,8 +93,8 @@ export interface FaqTexts {
 
 const templateMessages: LocaleCatalog<TemplateTextFieldMessages> = {
   de: {
-    countLabel: (count, max) => `${String(count)}/${String(max)}`,
-    previewCountLabel: (count) => `${String(count)} Zeichen`,
+    countLabel: (count, max) => formatCharacterCount(count, max, "de"),
+    previewCountLabel: (count) => formatCharacterTotal(count, "de"),
     openBrace: "Offene Variable: Schließe die geschweifte Klammer mit } ab.",
     unknownVariable: (name, suggestion) => suggestion === null ? `Unbekannte Variable {${name}}.` : `Unbekannte Variable {${name}} – meintest du {${suggestion}}?`,
     insertSuggestionLabel: (name) => `{${name}} einsetzen`,
@@ -104,8 +107,8 @@ const templateMessages: LocaleCatalog<TemplateTextFieldMessages> = {
     },
   },
   en: {
-    countLabel: (count, max) => `${String(count)}/${String(max)}`,
-    previewCountLabel: (count) => `${String(count)} characters`,
+    countLabel: (count, max) => formatCharacterCount(count, max, "en"),
+    previewCountLabel: (count) => formatCharacterTotal(count, "en"),
     openBrace: "Unclosed variable: add a closing brace }.",
     unknownVariable: (name, suggestion) => suggestion === null ? `Unknown variable {${name}}.` : `Unknown variable {${name}} — did you mean {${suggestion}}?`,
     insertSuggestionLabel: (name) => `Insert {${name}}`,
@@ -121,7 +124,7 @@ const templateMessages: LocaleCatalog<TemplateTextFieldMessages> = {
 
 const catalog: LocaleCatalog<FaqTexts> = {
   de: {
-    title: "FAQ & Auto-Antworten", add: "Neu", newEntry: "Neue Antwort", noSelection: "Wähle eine Antwort aus oder erstelle eine neue.",
+    title: "FAQ & Auto-Antworten", entryCount: (count) => `${String(count)} ${count === 1 ? "Eintrag" : "Einträge"}`, add: "Neu", newEntry: "Neue Antwort", noSelection: "Wähle eine Antwort aus oder erstelle eine neue.",
     noEntries: "Noch keine FAQ-Antworten.", emptySearch: "Keine Antwort passt zu deiner Suche.", search: "Antwort oder Auslöser suchen", searchPlaceholder: "FAQ durchsuchen", clearSearch: "Suche leeren",
     filterAll: "Alle", filterActive: "Aktiv", filterPaused: "Pausiert", filterLabel: "Status", priorityNote: "Die erste passende Antwort gewinnt. Ziehe Einträge an eine neue Stelle; Alt+↑/↓ verschiebt die Auswahl sofort.",
     keyboardMove: "Position sofort ändern", priorityMeta: (priority) => `Priorität ${String(priority)}`, prioritySaved: "Priorität gespeichert.", undo: "Rückgängig",
@@ -137,7 +140,7 @@ const catalog: LocaleCatalog<FaqTexts> = {
       faq_regex_invalid: "Der RE2-Ausdruck ist ungültig oder verwendet nicht unterstützte Syntax.",
       faq_keywords_invalid: "Gib 1 bis 20 gültige Schlüsselwörter oder Wortgruppen ein.",
     },
-    keywordChipMessages: { countLabel: (count, maximum) => `${String(count)}/${String(maximum)}`, atLimitHint: "Maximal 20 Auslöser. Entferne einen zum Austauschen.", duplicateWarning: (entry) => `„${entry}“ ist bereits hinzugefügt.` },
+    keywordChipMessages: { countLabel: formatCount, atLimitHint: "Maximal 20 Auslöser. Entferne einen zum Austauschen.", duplicateWarning: (entry) => `„${entry}“ ist bereits hinzugefügt.` },
     removePattern: (pattern) => `${pattern} entfernen`, sampleMessage: "Beispielnachricht testen", testSample: "Beispiel testen", sampleMessageHint: "Die Prüfung verwendet genau diesen Eintrag und läuft beim Tippen.", sampleMessageInvalid: "Korrigiere den Auslöser, um ihn zu testen.",
     sampleMessageEmpty: "Gib eine Nachricht ein, um den Auslöser zu testen.", sampleMessageCommand: "Nachrichten mit ! am Anfang werden übersprungen.", sampleMessageNoMatch: "Kein Auslöser passt zu dieser Nachricht.",
     sampleMessageMatch: (pattern) => `Treffer durch „${pattern}“.`,
@@ -153,7 +156,7 @@ const catalog: LocaleCatalog<FaqTexts> = {
     cooldownMinError: "Die Abkühlzeit muss mindestens 30 Sekunden betragen.",
     userCooldown: "Abkühlzeit pro Person", userCooldownHint: "0 deaktiviert diese zusätzliche Abkühlzeit. Höchstens 86.400 Sekunden.",
     games: "Spiele", chatTarget: "Chat-Ziel",
-    save: "Speichern", cancel: "Abbrechen", discard: "Verwerfen", saved: "Gespeichert", saving: "Speichert …", invalid: "Prüfe die markierten Felder.", delete: "Antwort löschen",
+    save: "Speichern", cancel: "Abbrechen", back: "Zurück", discard: "Verwerfen", saved: "Gespeichert", saving: "Speichert …", invalid: "Prüfe die markierten Felder.", delete: "Antwort löschen",
     deleteTitle: (name) => `„${name}“ löschen?`, deleteConfirm: (name) => `Die Antwort „${name}“ wird aus der Prioritätenliste entfernt.`,
     loadError: "FAQ-Einträge konnten nicht geladen werden.", saveError: "Der FAQ-Eintrag konnte nicht gespeichert werden.",
     deleteError: "Der FAQ-Eintrag konnte nicht entfernt werden.", missingTextBlock: "Ein verwendeter Textbaustein existiert nicht mehr.",
@@ -165,11 +168,11 @@ const catalog: LocaleCatalog<FaqTexts> = {
       searchHint: "Mindestens 2 Zeichen eingeben", loading: "Spiele werden geladen …", empty: "Keine Spiele gefunden.",
       error: "Spiele konnten nicht geladen werden.", suggestions: "Vorschläge", allGames: "Alle Spiele",
       limitReached: "10er-Limit erreicht; entferne eins zum Austauschen.",
-      selectedCount: (count, maximum) => `${String(count)} von ${String(maximum)}`, remove: (name) => `${name} entfernen`,
+      selectedCount: formatCount, remove: (name) => `${name} entfernen`,
     },
   },
   en: {
-    title: "FAQ & Auto replies", add: "New", newEntry: "New answer", noSelection: "Choose an answer or create a new one.",
+    title: "FAQ & Auto replies", entryCount: (count) => `${String(count)} ${count === 1 ? "entry" : "entries"}`, add: "New", newEntry: "New answer", noSelection: "Choose an answer or create a new one.",
     noEntries: "No FAQ answers yet.", emptySearch: "No answer matches your search.", search: "Search answers or triggers", searchPlaceholder: "Search FAQ", clearSearch: "Clear search",
     filterAll: "All", filterActive: "Active", filterPaused: "Paused", filterLabel: "Status", priorityNote: "The first matching answer wins. Drag entries to reorder them; Alt+↑/↓ moves the selection immediately.",
     keyboardMove: "Change position immediately", priorityMeta: (priority) => `Priority ${String(priority)}`, prioritySaved: "Priority saved.", undo: "Undo",
@@ -185,7 +188,7 @@ const catalog: LocaleCatalog<FaqTexts> = {
       faq_regex_invalid: "The RE2 pattern is invalid or uses unsupported syntax.",
       faq_keywords_invalid: "Enter 1 to 20 valid keywords or phrases.",
     },
-    keywordChipMessages: { countLabel: (count, maximum) => `${String(count)}/${String(maximum)}`, atLimitHint: "Up to 20 triggers. Remove one to replace it.", duplicateWarning: (entry) => `“${entry}” has already been added.` },
+    keywordChipMessages: { countLabel: formatCount, atLimitHint: "Up to 20 triggers. Remove one to replace it.", duplicateWarning: (entry) => `“${entry}” has already been added.` },
     removePattern: (pattern) => `Remove ${pattern}`, sampleMessage: "Test a sample message", testSample: "Test sample", sampleMessageHint: "This checks only this entry and updates as you type.", sampleMessageInvalid: "Fix the trigger before testing it.",
     sampleMessageEmpty: "Enter a message to test the trigger.", sampleMessageCommand: "Messages starting with ! are skipped.", sampleMessageNoMatch: "No trigger matches this message.",
     sampleMessageMatch: (pattern) => `Matched by “${pattern}”.`,
@@ -200,7 +203,7 @@ const catalog: LocaleCatalog<FaqTexts> = {
     cooldownHint: "At least 30 seconds; up to 86,400 seconds.", cooldownMinError: "Cooldown must be at least 30 seconds.",
     userCooldown: "Per-person cooldown", userCooldownHint: "0 disables this additional cooldown. Up to 86,400 seconds.",
     games: "Games",
-    chatTarget: "Chat target", save: "Save", cancel: "Cancel", discard: "Discard", saved: "Saved", saving: "Saving …", invalid: "Check the highlighted fields.", delete: "Delete answer",
+    chatTarget: "Chat target", save: "Save", cancel: "Cancel", back: "Back", discard: "Discard", saved: "Saved", saving: "Saving …", invalid: "Check the highlighted fields.", delete: "Delete answer",
     deleteTitle: (name) => `Delete “${name}”?`, deleteConfirm: (name) => `The answer “${name}” will be removed from the priority list.`,
     loadError: "FAQ entries could not be loaded.", saveError: "The FAQ entry could not be saved.", deleteError: "The FAQ entry could not be deleted.",
     missingTextBlock: "A referenced text block no longer exists.",
@@ -212,7 +215,7 @@ const catalog: LocaleCatalog<FaqTexts> = {
       searchHint: "Enter at least 2 characters", loading: "Loading games…", empty: "No games found.",
       error: "Games could not be loaded.", suggestions: "Suggestions", allGames: "All games",
       limitReached: "10-game limit reached; remove one to add another.",
-      selectedCount: (count, maximum) => `${String(count)} of ${String(maximum)}`, remove: (name) => `Remove ${name}`,
+      selectedCount: formatCount, remove: (name) => `Remove ${name}`,
     },
   },
 };

@@ -40,6 +40,10 @@ const member = {
 const capture = async (page: Page, testInfo: TestInfo, name: string): Promise<void> => {
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    const collection = page.locator(".collection-page");
+    if (await collection.count() > 0) {
+      await expect(collection).toHaveAttribute("data-single-column", width <= 935 ? "true" : "false");
+    }
     const documentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(documentWidth, `${name} should not overflow horizontally at ${String(width)}px`).toBeLessThanOrEqual(width);
     await page.screenshot({
@@ -72,8 +76,20 @@ const installMocks = async (page: Page, events: readonly unknown[] = []): Promis
       });
       return;
     }
+    if (pathname === `/api/channels/${channel.channelId}/settings`) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 1, defaultChatTarget: "source_only", defaultChatTargetRevision: 1 }),
+      });
+      return;
+    }
     if (pathname === `/api/channels/${channel.channelId}/modules`) {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ modules }) });
+      return;
+    }
+    if (pathname === `/api/channels/${channel.channelId}/template-variables`) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ variables: [] }) });
       return;
     }
     if (pathname === `/api/channels/${channel.channelId}/modules/text_commands/commands`) {
@@ -154,30 +170,27 @@ test("editor stage 2 pages fit at 1280px and 390px and produce review screenshot
   await capture(page, testInfo, "01-overview");
 
   await page.goto(`/channels/${channel.channelId}/modules/text_commands`);
-  const commandRow = page.getByRole("row", { name: /!hallo/ });
+  const commandRow = page.getByRole("button", { name: /!hallo/ });
   await expect(commandRow).toBeVisible();
   await capture(page, testInfo, "07-commands");
   await page.setViewportSize({ width: 1280, height: 900 });
   await commandRow.click();
   await expect(page.getByRole("region", { name: "Eigenschaften von !hallo" })).toBeVisible();
-  const commandTableLayout = await page.evaluate(() => {
-    const wrapper = document.querySelector(".command-panel .table-wrap");
-    const table = wrapper?.querySelector("table");
-    const activeCell = table?.querySelector("tbody tr td:last-child");
-    const switchTrack = activeCell?.querySelector('[data-slot="switch"]');
-    if (!wrapper || !table || !activeCell || !switchTrack) {
-      throw new Error("The active command column is missing from the table.");
+  const commandCollectionLayout = await page.evaluate(() => {
+    const list = document.querySelector(".collection-page__list");
+    const detail = document.querySelector(".collection-page__detail");
+    if (!list || !detail) {
+      throw new Error("The command collection list and detail are missing.");
     }
     return {
-      wrapperRight: wrapper.getBoundingClientRect().right,
-      tableRight: table.getBoundingClientRect().right,
-      activeCellRight: activeCell.getBoundingClientRect().right,
-      switchRight: switchTrack.getBoundingClientRect().right,
+      listRight: list.getBoundingClientRect().right,
+      detailRight: detail.getBoundingClientRect().right,
+      scrollWidth: document.documentElement.scrollWidth,
     };
   });
-  expect(commandTableLayout.tableRight).toBeLessThanOrEqual(commandTableLayout.wrapperRight + 1);
-  expect(commandTableLayout.activeCellRight).toBeLessThanOrEqual(commandTableLayout.wrapperRight + 1);
-  expect(commandTableLayout.switchRight).toBeLessThanOrEqual(commandTableLayout.activeCellRight + 1);
+  expect(commandCollectionLayout.listRight).toBeLessThanOrEqual(commandCollectionLayout.detailRight + 1);
+  expect(commandCollectionLayout.detailRight).toBeLessThanOrEqual(1280 + 1);
+  expect(commandCollectionLayout.scrollWidth).toBeLessThanOrEqual(1280);
   await capture(page, testInfo, "08-command-inspector");
 
   await page.goto(`/channels/${channel.channelId}/events`);

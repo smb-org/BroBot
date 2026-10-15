@@ -49,6 +49,7 @@ const timeoutActionSchema = z.object({
 
 const bodySchema = z.object({
   name: z.string(),
+  enabled: z.boolean().default(true),
   kind: z.enum(TEXT_COMMAND_KINDS).default("text"),
   minimumTier: z.enum(TEXT_COMMAND_MINIMUM_TIERS).optional(),
   text: templateTextSchema().optional(),
@@ -133,24 +134,36 @@ const readBody = async (request: Request): Promise<unknown> => {
 type ValidTextCommandBody = Omit<z.infer<typeof bodySchema>, "text" | "offlineText" | "notFollowingText" | "unavailableText" | "usageText" | "minimumTier"> &
   { minimumTier: TextCommand["minimumTier"] } & TemplateInput;
 
-const validBody = async (request: Request): Promise<ValidTextCommandBody | null> => {
+type BodyValidationFailure = { path: string; reasonCode: string };
+type BodyValidationResult<Value> = { value: Value } | { failure: BodyValidationFailure };
+
+const validationFailure = (path: string, reasonCode = "custom"): BodyValidationResult<never> => ({ failure: { path, reasonCode } });
+const firstZodFailure = (issues: readonly { path: readonly PropertyKey[]; code: string }[]): BodyValidationFailure => {
+  const issue = issues[0];
+  return { path: issue?.path.map(String).join(".") || "name", reasonCode: issue?.code ?? "custom" };
+};
+
+const validBody = async (request: Request): Promise<BodyValidationResult<ValidTextCommandBody>> => {
   const parsed = bodySchema.safeParse(await readBody(request));
-  if (!parsed.success || !validCommandName(parsed.data.name) || parsed.data.aliases.includes(parsed.data.name)) return null;
+  if (!parsed.success) return { failure: firstZodFailure(parsed.error.issues) };
+  if (!validCommandName(parsed.data.name)) return validationFailure("name");
+  if (parsed.data.aliases.includes(parsed.data.name)) return validationFailure("aliases");
   const variableAction = parsed.data.variableAction;
   const timeoutAction = parsed.data.timeoutAction;
-  if (variableAction !== null && parsed.data.kind !== "text" && parsed.data.kind !== "timeout") return null;
-  if (timeoutAction !== null && parsed.data.kind !== "timeout") return null;
-  if (parsed.data.kind === "timeout" && timeoutAction === null) return null;
-  if (!validVariableAction(variableAction)) return null;
+  if (variableAction !== null && parsed.data.kind !== "text" && parsed.data.kind !== "timeout") return validationFailure("variableAction");
+  if (timeoutAction !== null && parsed.data.kind !== "timeout") return validationFailure("timeoutAction");
+  if (parsed.data.kind === "timeout" && timeoutAction === null) return validationFailure("timeoutAction");
+  if (!validVariableAction(variableAction)) return validationFailure("variableAction");
   const defaults = defaultsForKind(parsed.data.kind);
   const text = parsed.data.kind === "list" ? "" : parsed.data.text ?? defaults.text ?? "";
-  if (parsed.data.kind !== "list" && parsed.data.kind !== "timeout" && text.trim().length === 0 && variableAction === null) return null;
+  if (parsed.data.kind !== "list" && parsed.data.kind !== "timeout" && text.trim().length === 0 && variableAction === null) return validationFailure("text");
   const offlineText = parsed.data.offlineText ?? defaults.offlineText;
   const notFollowingText = parsed.data.notFollowingText ?? defaults.notFollowingText;
   const unavailableText = parsed.data.unavailableText ?? defaults.unavailableText;
   const usageText = parsed.data.usageText ?? defaults.usageText;
   const body: ValidTextCommandBody = {
     name: parsed.data.name,
+    enabled: parsed.data.enabled,
     kind: parsed.data.kind,
     minimumTier: parsed.data.minimumTier ?? (variableAction?.operation === "set_argument" ? "moderator" : "everyone"),
     cooldownSeconds: parsed.data.cooldownSeconds,
@@ -168,13 +181,14 @@ const validBody = async (request: Request): Promise<ValidTextCommandBody | null>
     ...(unavailableText === undefined ? {} : { unavailableText }),
     ...(usageText === undefined ? {} : { usageText }),
   };
-  return body;
+  return { value: body };
 };
 
-const validEditBody = async (request: Request): Promise<z.infer<typeof editBodySchema> | null> => {
+const validEditBody = async (request: Request): Promise<BodyValidationResult<z.infer<typeof editBodySchema>>> => {
   const parsed = editBodySchema.safeParse(await readBody(request));
-  if (!parsed.success || Object.keys(parsed.data).every((key) => key === "revision")) return null;
-  return parsed.data;
+  if (!parsed.success) return { failure: firstZodFailure(parsed.error.issues) };
+  if (Object.keys(parsed.data).every((key) => key === "revision")) return validationFailure("revision");
+  return { value: parsed.data };
 };
 
 const managementDenied = (context: { json: (body: { error: string }, status: 403) => Response }): Response =>
@@ -242,8 +256,9 @@ textCommandRoutes.get("/commands", async (context) => {
 });
 
 textCommandRoutes.post("/commands", async (context) => {
-  const body = await validBody(context.req.raw);
-  if (body === null) return context.json({ error: "command_data_invalid" }, 400);
+  const parsedBody = await validBody(context.req.raw);
+  if ("failure" in parsedBody) return context.json({ error: "command_data_invalid", ...parsedBody.failure }, 400);
+  const body = parsedBody.value;
   if (!canManage(context.get("channelRole"))) return managementDenied(context);
   const repository = createTextCommandRepository(
     context.env.DB,
@@ -254,7 +269,7 @@ textCommandRoutes.post("/commands", async (context) => {
   const graphRevision = await readTextBlockGraphRevision(context.env.DB, channelId);
   const hasBlockReferences = textBlockWriteGuard(channelId, graphRevision, commandTemplateTexts(body)).references.length > 0;
   if (body.variableAction !== null && await context.get("findChannelVariable")(channelId, body.variableAction.name) === null) {
-    return context.json({ error: "command_data_invalid" }, 400);
+    return context.json({ error: "command_data_invalid", path: "variableAction.name", reasonCode: "custom" }, 400);
   }
   const now = nowIso();
   const [channelVariables, registeredVariables] = await Promise.all([
@@ -275,7 +290,7 @@ textCommandRoutes.post("/commands", async (context) => {
       ...(body.notFollowingText === undefined ? {} : { notFollowingText: body.notFollowingText }),
       ...(body.unavailableText === undefined ? {} : { unavailableText: body.unavailableText }),
       ...(body.usageText === undefined ? {} : { usageText: body.usageText }),
-      enabled: true,
+      enabled: body.enabled,
       minimumTier: body.minimumTier,
       cooldownSeconds: body.cooldownSeconds,
       aliases: body.aliases,
@@ -306,22 +321,23 @@ textCommandRoutes.post("/commands", async (context) => {
 });
 
 textCommandRoutes.patch("/commands/:name", async (context) => {
-  const body = await validEditBody(context.req.raw);
-  if (body === null) return context.json({ error: "command_data_invalid" }, 400);
+  const parsedBody = await validEditBody(context.req.raw);
+  if ("failure" in parsedBody) return context.json({ error: "command_data_invalid", ...parsedBody.failure }, 400);
+  const body = parsedBody.value;
   const channelId = param(context, "channelId");
   const graphRevision = await readTextBlockGraphRevision(context.env.DB, channelId);
   const oldName = param(context, "name");
   const repository = createTextCommandRepository(context.env.DB, context.get("authorizeMutation"));
   const before = await repository.find(channelId, oldName);
   if (before === null) return context.json({ error: "command_not_found" }, 404);
-  if (body.revision === undefined) return context.json({ error: "command_data_invalid" }, 400);
+  if (body.revision === undefined) return context.json({ error: "command_data_invalid", path: "revision", reasonCode: "custom" }, 400);
   if (body.revision !== before.revision) {
     return context.json({ error: "command_changed_concurrently", current: before }, 409);
   }
   const newName = body.name ?? before.name;
-  if (!validCommandName(newName)) return context.json({ error: "command_data_invalid" }, 400);
+  if (!validCommandName(newName)) return context.json({ error: "command_data_invalid", path: "name", reasonCode: "custom" }, 400);
   const aliases = body.aliases ?? before.aliases;
-  if (aliases.includes(newName)) return context.json({ error: "command_data_invalid" }, 400);
+  if (aliases.includes(newName)) return context.json({ error: "command_data_invalid", path: "aliases", reasonCode: "custom" }, 400);
   const contentChanged = Object.keys(body).some((key) => key !== "enabled" && key !== "revision");
   if (contentChanged && !canManage(context.get("channelRole"))) return managementDenied(context);
   const kind = body.kind ?? before.kind;
@@ -329,10 +345,10 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
   const kindChanged = kind !== before.kind;
   const variableAction = body.variableAction === undefined ? before.variableAction : body.variableAction;
   const timeoutAction = body.timeoutAction === undefined ? before.timeoutAction : body.timeoutAction;
-  if (variableAction !== null && kind !== "text" && kind !== "timeout") return context.json({ error: "command_data_invalid" }, 400);
-  if (timeoutAction !== null && kind !== "timeout") return context.json({ error: "command_data_invalid" }, 400);
-  if (kind === "timeout" && timeoutAction === null) return context.json({ error: "command_data_invalid" }, 400);
-  if (!validVariableAction(variableAction)) return context.json({ error: "command_data_invalid" }, 400);
+  if (variableAction !== null && kind !== "text" && kind !== "timeout") return context.json({ error: "command_data_invalid", path: "variableAction", reasonCode: "custom" }, 400);
+  if (timeoutAction !== null && kind !== "timeout") return context.json({ error: "command_data_invalid", path: "timeoutAction", reasonCode: "custom" }, 400);
+  if (kind === "timeout" && timeoutAction === null) return context.json({ error: "command_data_invalid", path: "timeoutAction", reasonCode: "custom" }, 400);
+  if (!validVariableAction(variableAction)) return context.json({ error: "command_data_invalid", path: "variableAction", reasonCode: "custom" }, 400);
   const text = kind === "list" ? "" : body.text ?? (kindChanged ? defaults.text ?? before.text : before.text);
   const offlineText = body.offlineText ?? (kindChanged ? defaults.offlineText : before.offlineText);
   const notFollowingText = body.notFollowingText ?? (kindChanged ? defaults.notFollowingText : before.notFollowingText);
@@ -346,10 +362,10 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
   };
   const hasBlockReferences = textBlockWriteGuard(channelId, graphRevision, commandTemplateTexts({ text, ...templateValues, timeoutAction })).references.length > 0;
   if (kind !== "list" && kind !== "timeout" && text.trim().length === 0 && variableAction === null) {
-    return context.json({ error: "command_data_invalid" }, 400);
+    return context.json({ error: "command_data_invalid", path: "text", reasonCode: "custom" }, 400);
   }
   if (variableAction !== null && await context.get("findChannelVariable")(channelId, variableAction.name) === null) {
-    return context.json({ error: "command_data_invalid" }, 400);
+    return context.json({ error: "command_data_invalid", path: "variableAction.name", reasonCode: "custom" }, 400);
   }
   const cooldownSeconds = body.cooldownSeconds ?? before.cooldownSeconds;
   const minimumTier = body.minimumTier ?? (variableAction?.operation === "set_argument" && before.variableAction?.operation !== "set_argument"

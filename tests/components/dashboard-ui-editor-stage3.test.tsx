@@ -386,7 +386,7 @@ describe("editor field seam", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     expect(await screen.findByText(/letters, numbers/)).toBeInTheDocument();
     expect(input).toHaveAttribute("aria-describedby");
-    expect(input.getAttribute("aria-describedby")).toMatch(/error/u);
+    expect(input.getAttribute("aria-describedby")).toMatch(/feedback/u);
   });
 });
 
@@ -403,7 +403,7 @@ describe("template field", () => {
     expect(input).not.toHaveAttribute("maxlength");
     rerender(<UiProvider><form onSubmit={onSubmit}><TemplateTextField label="Reply" hint="What the bot writes." value="12345678901" maxLength={10} onChange={() => {}} messages={templateTextFieldMessages} /></form></UiProvider>);
     expect(screen.getByRole("textbox", { name: "Reply" })).toHaveAttribute("aria-invalid", "true");
-    expect(document.querySelector(".ui-template-text-field .mantine-InputWrapper-error")).toHaveTextContent("× 11 von 10 Zeichen");
+    expect(document.querySelector(".ui-template-text-field__helper-error")).toHaveTextContent("11 von 10 Zeichen");
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Reply" }), { key: "Enter", ctrlKey: true });
     expect(onSubmit).toHaveBeenCalledOnce();
   });

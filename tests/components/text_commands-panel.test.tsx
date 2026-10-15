@@ -51,11 +51,12 @@ const makeCommand = (overrides: Partial<TextCommand> = {}): TextCommand => ({
 
 interface FetchOptions {
   commands?: () => TextCommand[];
+  channelVariables?: readonly { name: string; value: number; description: string }[];
   templateVariables?: readonly unknown[];
   onMutation?: (method: string, path: string, body: unknown) => Response | Promise<Response>;
 }
 
-const panelFetch = ({ commands = () => [makeCommand()], templateVariables, onMutation = () => jsonResponse({ warnings: [] }) }: FetchOptions = {}): ReturnType<typeof vi.fn<typeof fetch>> =>
+const panelFetch = ({ commands = () => [makeCommand()], channelVariables = [], templateVariables, onMutation = () => jsonResponse({ warnings: [] }) }: FetchOptions = {}): ReturnType<typeof vi.fn<typeof fetch>> =>
   vi.fn<typeof fetch>((input, init) => {
     const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
     const method = init?.method ?? "GET";
@@ -64,7 +65,7 @@ const panelFetch = ({ commands = () => [makeCommand()], templateVariables, onMut
       { name: "text.welcome", moduleId: "text_library", isTextBlock: true, sample: "Willkommen im Kanal" },
       ...TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES.map((variable) => ({ ...variable, moduleId: "text_commands", isTextBlock: false })),
     ] }));
-    if (url.pathname.endsWith("/commands") && method === "GET") return Promise.resolve(jsonResponse({ commands: commands(), variables: [] }));
+    if (url.pathname.endsWith("/commands") && method === "GET") return Promise.resolve(jsonResponse({ commands: commands(), variables: channelVariables }));
     if (url.pathname.includes("/commands/") || (url.pathname.endsWith("/commands") && method !== "GET")) {
       const body = typeof init?.body === "string" ? JSON.parse(init.body) as unknown : null;
       return Promise.resolve(onMutation(method, url.pathname, body)).then(async (response) => {
@@ -92,22 +93,36 @@ const panelFetch = ({ commands = () => [makeCommand()], templateVariables, onMut
     return Promise.resolve(jsonResponse({}, 404));
   });
 
-const renderPanel = (fetcher: typeof fetch, props: { language?: "de" | "en"; canManage?: boolean; botIsModerator?: boolean | null } = {}) => {
+const renderPanel = (fetcher: typeof fetch, props: { language?: "de" | "en"; canManage?: boolean; canOperate?: boolean; botIsModerator?: boolean | null } = {}) => {
   vi.stubGlobal("fetch", fetcher);
   const { language = "de", ...panelProps } = props;
   return renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language={language} {...panelProps} /></UiProvider>);
 };
 
+const commandList = async (): Promise<HTMLElement> => waitFor(() => {
+  const node = document.querySelector(".text-command-list");
+  if (!(node instanceof HTMLElement)) throw new Error("Command list is missing");
+  return node;
+});
+
 const selectCommand = async (name = "hallo"): Promise<HTMLElement> => {
-  const heading = await screen.findByText(`!${name}`);
-  const row = heading.closest("tr");
+  const list = await commandList();
+  const heading = await within(list).findByText(`!${name}`);
+  const row = heading.closest(".text-command-row");
   if (!(row instanceof HTMLElement)) throw new Error("Command row is missing");
   fireEvent.click(row);
   return row;
 };
 
+const selectKind = (label: string): HTMLElement => {
+  const group = screen.getByRole("group", { name: "Art der Antwort" });
+  const option = within(group).getByRole("button", { name: label });
+  fireEvent.click(option);
+  return option;
+};
+
 const editor = (): HTMLElement => {
-  const node = document.querySelector(".ui-editor-shell");
+  const node = document.querySelector(".text-command-editor");
   if (!(node instanceof HTMLElement)) throw new Error("Command editor is missing");
   return node;
 };
@@ -119,7 +134,7 @@ const tierInclusion = (tier: TextCommand["minimumTier"]): string => {
 
 const selectMinimumTier = async (tier: TextCommand["minimumTier"]): Promise<HTMLElement> => {
   const labels = textCommandsTexts("de");
-  const select = screen.getByRole("combobox", { name: labels.minimumTier });
+  const select = screen.getByRole("combobox", { name: labels.minimumRole });
   fireEvent.click(select);
   clickSelectOption(await screen.findByRole("option", { name: labels.tierLabels[tier], hidden: true }));
   return select;
@@ -145,10 +160,10 @@ describe("Text command editor", () => {
   it("shows cached commands immediately when returning to the module", async () => {
     vi.stubGlobal("fetch", panelFetch());
     const view = renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" /></UiProvider>, undefined, { gcTime: 600_000 });
-    await screen.findByText("!hallo");
+    await within(await commandList()).findByText("!hallo");
     view.rerender(<UiProvider><div /></UiProvider>);
     view.rerender(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" /></UiProvider>);
-    expect(screen.getByText("!hallo")).toBeInTheDocument();
+    expect(within(await commandList()).getByText("!hallo")).toBeInTheDocument();
     expect(document.querySelector(".ui-load-state")).not.toHaveAttribute("data-status", "loading");
   });
 
@@ -163,7 +178,7 @@ describe("Text command editor", () => {
     expect(reason).toBeVisible();
     expect(reason).toHaveTextContent(textCommandsTexts("de").managementLocked);
     expect(reason).not.toHaveAttribute("aria-hidden");
-    expect(document.querySelector(".command-list .form-error")).toBeNull();
+    expect(document.querySelector(".text-command-list .form-error")).toBeNull();
   });
 
   it("filters commands immediately and reports the filtered count", async () => {
@@ -175,9 +190,10 @@ describe("Text command editor", () => {
     const search = await screen.findByRole("textbox", { name: "Befehle suchen" });
     fireEvent.change(search, { target: { value: "discord" } });
 
-    expect(screen.getByText("!discord")).toBeVisible();
-    expect(screen.queryByText("!hallo")).not.toBeInTheDocument();
-    expect(document.querySelector(".list-toolbar__usage")).toHaveTextContent("1 von 2 Befehle");
+    const list = await commandList();
+    expect(within(list).getByText("!discord")).toBeVisible();
+    expect(within(list).queryByText("!hallo")).not.toBeInTheDocument();
+    expect(document.querySelector(".text-command-filter-count")).toHaveTextContent("1 Eintrag");
   });
 
   it.each([
@@ -187,19 +203,19 @@ describe("Text command editor", () => {
     Object.defineProperty(window.navigator, "language", { configurable: true, value: browserLanguage });
     renderPanel(panelFetch(), { language: panelLanguage });
 
-    await screen.findByText("!hallo");
+    await within(await commandList()).findByText("!hallo");
     const searchBox = await screen.findByRole("textbox", { name: search });
     expect(document.querySelector(".list-toolbar__search .ui-field__clear")).toHaveAttribute("aria-label", clear);
     fireEvent.change(searchBox, { target: { value: "hallo" } });
-    expect(document.querySelector(".list-toolbar__usage")).toHaveTextContent(usage);
+    expect(document.querySelector(".text-command-filter-count")).toHaveTextContent(usage.includes(" of ") ? "1 entry" : "1 Eintrag");
   });
 
-  it("uses the panel language for empty table value labels", async () => {
+  it("uses the panel language for commands without a response", async () => {
     Object.defineProperty(window.navigator, "language", { configurable: true, value: "de-DE" });
-    renderPanel(panelFetch({ commands: () => [makeCommand({ kind: "list", text: "" })] }), { language: "en" });
+    renderPanel(panelFetch({ commands: () => [makeCommand({ kind: "list", text: "", aliases: [] })] }), { language: "en" });
 
-    expect(await screen.findByText("no value")).toHaveClass("sr-only");
-    expect(screen.getByText("—")).toHaveAttribute("aria-hidden", "true");
+    expect(await within(await commandList()).findByText("Lists all enabled commands (without aliases).")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Response type" })).toBeInTheDocument();
   });
 
   it("reports a command-list load failure in the persistent toast host", async () => {
@@ -223,10 +239,10 @@ describe("Text command editor", () => {
     const loadError = textCommandsTexts("de").loadError;
     await waitFor(() => expect(document.querySelector(".ui-toast--error")).toHaveTextContent(loadError));
     expect(document.querySelector(".ui-load-state__content [role=alert]")).toHaveTextContent(loadError);
-    expect(document.querySelector(".command-list .form-error")).toBeNull();
+    expect(document.querySelector(".text-command-list .form-error")).toBeNull();
     expect(screen.getByRole("button", { name: "Befehl anlegen" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: /^(Retry|Erneut versuchen)$/u }));
-    expect(await screen.findByText("!hallo")).toBeInTheDocument();
+    expect(await within(await commandList()).findByText("!hallo")).toBeInTheDocument();
     expect(commandLoads).toBe(2);
   });
 
@@ -287,7 +303,7 @@ describe("Text command editor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Leave module" }));
     failNextRead = true;
     fireEvent.click(screen.getByRole("button", { name: "Re-enter module" }));
-    await screen.findByText("!hallo");
+    await within(await commandList()).findByText("!hallo");
     await selectCommand();
     await waitFor(() => expect(variableReads).toBe(2));
 
@@ -298,24 +314,25 @@ describe("Text command editor", () => {
     expect(variableReads).toBe(3);
   });
 
-  it("opens in the ListDetail inspector with icon tabs, prefixes, counters, preview, and tier descriptions", async () => {
+  it("opens a collection editor with message, timing, and destination sections", async () => {
     const fetcher = panelFetch();
     renderPanel(fetcher);
     await selectCommand();
 
-    const settingsTab = screen.getByRole("tab", { name: "Einstellungen" });
-    const advancedTab = screen.getByRole("tab", { name: "Erweitert" });
-    expect(settingsTab.querySelector("svg[aria-hidden='true']")).not.toBeNull();
-    expect(advancedTab.querySelector("svg[aria-hidden='true']")).not.toBeNull();
-    expect(screen.getByText("5 von 32")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Auslöser" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Art der Antwort" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Wer darf auslösen" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Abklingzeit" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Weitere Einstellungen" })).toBeInTheDocument();
+    expect(screen.getByText("5 / 32 Zeichen")).toBeInTheDocument();
     expect(screen.getByText("a–z, 0–9, - und _")).toBeInTheDocument();
     expect(editor().querySelector(".ui-field__prefix")).toHaveTextContent("!");
     expect(screen.getByText(renderCommandText("Hallo {user} aus {channel}", { user: "zuschauerin", channel: "beispielkanal" }))).toBeInTheDocument();
-    expect(within(editor()).getByRole("switch", { name: "Kanalvariable ändern" })).toBeInTheDocument();
+    const advanced = editor().querySelector("details.command-usage-advanced");
+    expect(advanced).not.toHaveAttribute("open");
     expect(screen.getAllByText(textCommandsTexts("de").variableSelectHint)).toHaveLength(1);
     expect(within(editor()).queryByTestId("command-variable-action-slot")).not.toBeInTheDocument();
 
-    fireEvent.click(advancedTab);
     expect(screen.getByText(tierInclusion("everyone"))).toBeInTheDocument();
     for (const tier of TEXT_COMMAND_MINIMUM_TIERS) {
       await selectMinimumTier(tier);
@@ -323,17 +340,17 @@ describe("Text command editor", () => {
     }
   });
 
-  it("shows a one-line description for each kind option in the Art select", async () => {
+  it("shows a description for the selected response type", async () => {
     const fetcher = panelFetch();
     renderPanel(fetcher);
     await selectCommand();
-    fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
-    await waitFor(() => {
-      expect(screen.getByRole("listbox")).toHaveTextContent("AntworttextAntwortet mit dem Text unten.");
-      expect(screen.getByRole("listbox")).toHaveTextContent("BefehlslisteZählt alle eingeschalteten Befehle auf (ohne Aliase).");
-      expect(screen.getByRole("listbox")).toHaveTextContent("Shoutout!so <name> empfiehlt einen Twitch-Kanal im Chat.");
-      expect(screen.getByRole("listbox")).toHaveTextContent("TimeoutTimeout für den Aufrufer; Antwort bei Erfolg und Ersatztext bei Ablehnung.");
-    });
+    expect(screen.getByText("Antwortet mit dem Text unten.")).toBeInTheDocument();
+    selectKind("Befehlsliste");
+    expect(screen.getByText("Zählt alle eingeschalteten Befehle auf (ohne Aliase).")).toBeInTheDocument();
+    selectKind("Shoutout");
+    expect(screen.getByText("!so <name> empfiehlt einen Twitch-Kanal im Chat.")).toBeInTheDocument();
+    selectKind("Timeout");
+    expect(screen.getByText("Timeout für den Aufrufer; Antwort bei Erfolg und Ersatztext bei Ablehnung.")).toBeInTheDocument();
   });
 
   it("offers slash syntax, blocks malformed known commands, and keeps unknown commands as text", async () => {
@@ -347,8 +364,8 @@ describe("Text command editor", () => {
     });
     renderPanel(fetcher);
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "test" } });
-    const response = screen.getByRole("textbox", { name: "Antwort" });
+    fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: "test" } });
+    const response = screen.getByRole("textbox", { name: "Antworttext" });
     fireEvent.change(response, { target: { value: "/" } });
 
     const suggestions = screen.getByRole("group", { name: "Twitch-Befehle am Anfang werden beim Speichern in strukturierte Felder umgewandelt." });
@@ -357,7 +374,7 @@ describe("Text command editor", () => {
     expect(within(suggestions).getByRole("button", { name: /\/shoutout \{target\}/u })).toHaveTextContent("Befehlsargument");
 
     fireEvent.change(response, { target: { value: "/timeout somebody 30" } });
-    expect(screen.getByRole("alert")).toHaveTextContent("Ungültige Syntax: /timeout {user} <seconds|min-max> [reason]");
+    expect(editor().querySelector("#command-text-error")).toHaveTextContent("Ungültige Syntax: /timeout {user} <seconds|min-max> [reason]");
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
     expect(created).toBeUndefined();
 
@@ -377,7 +394,7 @@ describe("Text command editor", () => {
   it("replaces a slash suggestion while preserving the response body", async () => {
     renderPanel(panelFetch({ commands: () => [] }));
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    const response = screen.getByRole("textbox", { name: "Antwort" });
+    const response = screen.getByRole("textbox", { name: "Antworttext" });
     fireEvent.change(response, { target: { value: "/time\nKeep this response" } });
 
     const suggestions = screen.getByRole("group", { name: "Twitch-Befehle am Anfang werden beim Speichern in strukturierte Felder umgewandelt." });
@@ -397,10 +414,9 @@ describe("Text command editor", () => {
     });
     renderPanel(fetcher);
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "shout" } });
-    fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
-    clickSelectOption(await screen.findByRole("option", { name: /Timeout/u }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Antwort (optional)" }), { target: { value: "/shoutout {target}" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: "shout" } });
+    selectKind("Timeout");
+    fireEvent.change(screen.getByRole("textbox", { name: "Antworttext (optional)" }), { target: { value: "/shoutout {target}" } });
 
     const save = screen.getByRole("button", { name: "Anlegen" });
     expect(save).toBeEnabled();
@@ -420,15 +436,14 @@ describe("Text command editor", () => {
     });
     renderPanel(fetcher);
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "shout" } });
-    fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
-    clickSelectOption(await screen.findByRole("option", { name: /Timeout/u }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: "shout" } });
+    selectKind("Timeout");
     fireEvent.change(screen.getByRole("spinbutton", { name: "Höchstens" }), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
-    expect(await screen.findByRole("tab", { name: "Einstellungen, Fehler" })).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "Höchstens" })).toHaveAttribute("aria-invalid", "true");
     expect(created).toBeUndefined();
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Antwort (optional)" }), { target: { value: "/shoutout {target}" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Antworttext (optional)" }), { target: { value: "/shoutout {target}" } });
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
 
     await waitFor(() => expect(created).toMatchObject({ kind: "shoutout" }));
@@ -445,13 +460,14 @@ describe("Text command editor", () => {
     });
     renderPanel(fetcher);
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "shout" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: "shout" } });
+    fireEvent.click(screen.getByText("Erweitert"));
     fireEvent.click(screen.getByRole("switch", { name: "Kanalvariable ändern" }));
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
-    expect(await screen.findByRole("tab", { name: "Einstellungen, Fehler" })).toBeInTheDocument();
+    expect(screen.getByText("Keine Kanalvariablen angelegt.")).toBeInTheDocument();
     expect(created).toBeUndefined();
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "/shoutout {target}" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "/shoutout {target}" } });
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
 
     await waitFor(() => expect(created).toMatchObject({ kind: "shoutout" }));
@@ -467,12 +483,12 @@ describe("Text command editor", () => {
       },
     }));
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "ann" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: "ann" } });
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
     expect(created).toBeUndefined();
-    expect(screen.getByRole("tab", { name: "Einstellungen, Fehler" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveAttribute("aria-invalid", "true");
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: `/announce ${"a".repeat(495)}` } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: `/announce ${"a".repeat(495)}` } });
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
 
     await waitFor(() => expect(created?.text).toBe("a".repeat(495)));
@@ -488,11 +504,11 @@ describe("Text command editor", () => {
       },
     }));
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "tmo" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: "tmo" } });
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
     expect(created).toBeUndefined();
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: `/timeout {user} 120\n${"a".repeat(495)}` } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: `/timeout {user} 120\n${"a".repeat(495)}` } });
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
 
     await waitFor(() => expect(created).toMatchObject({ kind: "timeout", text: "a".repeat(495) }));
@@ -508,11 +524,11 @@ describe("Text command editor", () => {
       },
     }));
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "shout" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: "shout" } });
     fireEvent.change(editor().querySelector('[name="usageText"]') as HTMLElement, { target: { value: " ".repeat(501) } });
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
     expect(created).toBeUndefined();
-    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "/shoutout {target}" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "/shoutout {target}" } });
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
 
     await waitFor(() => expect(created).toMatchObject({ kind: "shoutout" }));
@@ -529,10 +545,9 @@ describe("Text command editor", () => {
     });
     renderPanel(fetcher);
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "timeout" } });
-    fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
-    clickSelectOption(await screen.findByRole("option", { name: /Timeout/u }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Antwort (optional)" }), { target: { value: "Timed out." } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: "timeout" } });
+    selectKind("Timeout");
+    fireEvent.change(screen.getByRole("textbox", { name: "Antworttext (optional)" }), { target: { value: "Timed out." } });
     fireEvent.change(screen.getByRole("textbox", { name: "Ersatztext bei Ablehnung (optional)" }), { target: { value: "Could not time out." } });
     fireEvent.click(within(editor()).getByText("Erweitert", { selector: "summary" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Antwort bei fehlenden oder ungültigen Argumenten" }), { target: { value: "Usage: !timeout <amount>" } });
@@ -544,7 +559,7 @@ describe("Text command editor", () => {
   it("offers the shared system variable catalog in the response picker", async () => {
     renderPanel(panelFetch({ commands: () => [] }));
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    const input = within(templateEditorFor("text")).getByRole("textbox", { name: "Antwort" });
+    const input = within(templateEditorFor("text")).getByRole<HTMLTextAreaElement>("textbox", { name: "Antworttext" });
     fireEvent.change(input, { target: { value: "{", selectionStart: 1, selectionEnd: 1 } });
     const picker = await screen.findByRole("listbox", { name: "Variable auswählen" });
     expect(within(picker).getByRole("option", { name: /\{user\}/u, hidden: true })).toBeInTheDocument();
@@ -566,23 +581,21 @@ describe("Text command editor", () => {
     await waitFor(() => expect(input).toHaveValue("{uptime}"));
   });
 
-  it("inserts a selected text-library block into a command response", async () => {
+  it("inserts a selected text-library block through the shared variable picker", async () => {
     const fetcher = panelFetch();
     renderPanel(fetcher);
     await selectCommand();
 
     await waitFor(() => expect(fetcher.mock.calls.some(([input]) => (typeof input === "string" ? input : input instanceof URL ? input.href : input.url).includes("/template-variables"))).toBe(true));
-    await waitFor(() => expect(within(templateEditorFor("text")).getByRole("combobox", { name: "Text aus Bibliothek" })).toBeEnabled());
-    const picker = templateEditorFor("text").querySelector(".command-library-picker");
-    if (!(picker instanceof HTMLElement)) throw new Error("Text-library picker is missing");
-    fireEvent.click(within(picker).getByRole("combobox", { name: "Text aus Bibliothek" }));
-    const welcomeOptions = await screen.findAllByText("{text.welcome}");
-    const welcomeOption = welcomeOptions[0];
-    if (welcomeOption === undefined) throw new Error("Text-library option is missing");
-    fireEvent.click(welcomeOption);
-    fireEvent.click(within(picker).getByRole("button", { name: "Text einsetzen" }));
+    const input = within(templateEditorFor("text")).getByRole<HTMLTextAreaElement>("textbox", { name: "Antworttext" });
+    fireEvent.change(input, { target: { value: `${input.value} ` } });
+    input.setSelectionRange(input.value.length, input.value.length);
+    fireEvent.select(input);
+    fireEvent.click(within(templateEditorFor("text")).getByRole("button", { name: "Variable einfügen" }));
+    const picker = await screen.findByRole("listbox", { name: "Variable auswählen" });
+    fireEvent.click(within(picker).getByRole("option", { name: /\{text\.welcome\}/u, hidden: true }));
 
-    expect(within(templateEditorFor("text")).getByRole("textbox", { name: "Antwort" })).toHaveValue("Hallo {user} aus {channel} {text.welcome}");
+    expect(input).toHaveValue("Hallo {user} aus {channel} {text.welcome}");
   });
 
   it("orders timeout fields before advanced settings and accepts silent timeout text", async () => {
@@ -596,17 +609,16 @@ describe("Text command editor", () => {
     });
     renderPanel(fetcher);
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "quiet" } });
-    fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
-    clickSelectOption(await screen.findByRole("option", { name: /Timeout/u }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: "quiet" } });
+    selectKind("Timeout");
 
     const ordered = [
-      screen.getByRole("combobox", { name: "Art" }),
+      screen.getByRole("group", { name: "Art der Antwort" }),
       screen.getByRole("spinbutton", { name: "Mindestens" }),
       screen.getByRole("spinbutton", { name: "Höchstens" }),
-      screen.getByRole("textbox", { name: "Timeout-Grund" }),
-      screen.getByRole("textbox", { name: "Antwort (optional)" }),
+      screen.getByRole("textbox", { name: "Antworttext (optional)" }),
       screen.getByRole("textbox", { name: "Ersatztext bei Ablehnung (optional)" }),
+      screen.getByRole("textbox", { name: "Timeout-Grund" }),
       editor().querySelector("details.command-usage-advanced > summary"),
     ];
     for (let index = 0; index < ordered.length - 1; index++) {
@@ -615,10 +627,7 @@ describe("Text command editor", () => {
       if (current === null || current === undefined || next === null || next === undefined) throw new Error("Timeout editor fields are missing.");
       expect(current.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     }
-    expect(screen.getByRole("textbox", { name: "Antwort (optional)" })).not.toBeRequired();
-    for (const field of ["text", "timeoutFallbackText", "usageText"] as const) {
-      expect(templateEditorFor(field).querySelectorAll(".command-library-picker")).toHaveLength(1);
-    }
+    expect(screen.getByRole("textbox", { name: "Antworttext (optional)" })).not.toBeRequired();
     expect([...editor().querySelectorAll("h2, h3")].some((heading) => heading.textContent.includes("Text aus Bibliothek"))).toBe(false);
 
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
@@ -629,12 +638,11 @@ describe("Text command editor", () => {
     }));
   });
 
-  it("marks a blocking timeout range error and focuses its field from the summary", async () => {
+  it("marks a blocking timeout range error beside its fields", async () => {
     renderPanel(panelFetch({ commands: () => [] }));
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "quiet" } });
-    fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
-    clickSelectOption(await screen.findByRole("option", { name: /Timeout/u }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: "quiet" } });
+    selectKind("Timeout");
     const minimum = screen.getByRole("spinbutton", { name: "Mindestens" });
     const maximum = screen.getByRole("spinbutton", { name: "Höchstens" });
     fireEvent.change(minimum, { target: { value: "120" } });
@@ -642,30 +650,77 @@ describe("Text command editor", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
 
-    await waitFor(() => expect(minimum).toHaveFocus());
     expect(minimum).toHaveAttribute("aria-invalid", "true");
     expect(maximum).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByRole("tab", { name: "Einstellungen, Fehler" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Fehlerhafte Felder anzeigen" }));
-    fireEvent.click(within(await screen.findByRole("dialog", { name: "Fehlerhafte Felder" })).getByRole("button", { name: "Dauer: Die Dauer muss zwischen 1 s und 14 Tagen liegen; das Minimum darf das Maximum nicht überschreiten." }));
-    expect(minimum).toHaveFocus();
+    expect(screen.getAllByText("Die Dauer muss zwischen 1 s und 14 Tagen liegen; das Minimum darf das Maximum nicht überschreiten.")).toHaveLength(2);
   });
 
-  it("focuses the variable-action switch from the error summary", async () => {
-    renderPanel(panelFetch({ commands: () => [] }));
+  it("shows variable-action validation beside the action fields", async () => {
+    const fetcher = panelFetch({ commands: () => [] });
+    renderPanel(fetcher);
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "shout" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: "shout" } });
+    fireEvent.click(screen.getByText("Erweitert"));
     const toggle = screen.getByRole("switch", { name: "Kanalvariable ändern" });
     fireEvent.click(toggle);
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
-    await screen.findByRole("tab", { name: "Einstellungen, Fehler" });
-
-    fireEvent.click(screen.getByRole("button", { name: "Fehlerhafte Felder anzeigen" }));
-    const dialog = await screen.findByRole("dialog", { name: "Fehlerhafte Felder" });
-    fireEvent.click(within(dialog).getByRole("button", { name: /^Kanalvariable ändern:/u }));
-
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("switch", { name: "Kanalvariable ändern" })));
     expect(toggle).toHaveAttribute("id", "command-variable-action");
+    expect(screen.getAllByText(/Kanalvariable und Betrag prüfen/u)).toHaveLength(2);
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  });
+
+  it("shows a localized server validation error beside its field", async () => {
+    const fetcher = panelFetch({
+      commands: () => [],
+      onMutation: () => jsonResponse({ error: "command_data_invalid", path: "cooldownSeconds", reasonCode: "too_small" }, 400),
+    });
+    renderPanel(fetcher);
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: "zeit" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "Test" } });
+    const cooldown = screen.getByRole("spinbutton", { name: "Zwischen zwei Aufrufen" });
+    fireEvent.change(cooldown, { target: { value: "30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+
+    expect(await screen.findByText("Der Wert liegt unter dem erlaubten Minimum.")).toBeVisible();
+    expect(cooldown).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("marks a stale variable action field after server validation even when variables are available", async () => {
+    const fetcher = panelFetch({
+      channelVariables: [{ name: "score", value: 5, description: "Points" }],
+      commands: () => [makeCommand({ variableAction: { name: "score", operation: "add", amount: 2 } })],
+      onMutation: () => jsonResponse({ error: "command_data_invalid", path: "variableAction.name", reasonCode: "custom" }, 400),
+    });
+    renderPanel(fetcher);
+    await selectCommand();
+    fireEvent.click(within(editor()).getByText("Erweitert", { selector: "summary" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "Changed response" } });
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+
+    const variable = screen.getByRole("combobox", { name: "Variable" });
+    await waitFor(() => expect(variable).toHaveAttribute("aria-invalid", "true"));
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true);
+  });
+
+  it("keeps rejected alias text dirty, blocks save, and prompts before Escape closes", async () => {
+    const fetcher = panelFetch();
+    renderPanel(fetcher);
+    await selectCommand();
+
+    const aliases = screen.getByRole("textbox", { name: "Weitere Auslöser" });
+    fireEvent.change(aliases, { target: { value: "bad!" } });
+    fireEvent.keyDown(aliases, { key: "Enter" });
+    expect(aliases).toHaveValue("bad!");
+    expect(screen.getByRole("button", { name: "Speichern" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+
+    expect(await screen.findByText("Alias-Eingabe erst bestätigen oder entfernen.")).toBeVisible();
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
+    fireEvent.keyDown(editor(), { key: "Escape" });
+    expect(await screen.findByRole("dialog")).toHaveTextContent("Ungespeicherte Änderungen");
+    fireEvent.click(screen.getByRole("button", { name: "Weiter bearbeiten" }));
+    expect(screen.getByRole("textbox", { name: "Weitere Auslöser" })).toHaveValue("bad!");
   });
 
   it("keeps the usage reply editor collapsed by default for text commands", async () => {
@@ -682,6 +737,71 @@ describe("Text command editor", () => {
     fireEvent.click(within(editor()).getByText(labels.usageAdvanced, { selector: "summary" }));
     expect(screen.getByRole("textbox", { name: labels.templateFieldLabels.usageText })).toHaveValue("Try !hallo 10");
     expect(screen.getByText(labels.usageTextHint)).toBeInTheDocument();
+  });
+
+  it("keeps custom Shoutout text when the selected kind is clicked again", async () => {
+    renderPanel(panelFetch({ commands: () => [makeCommand({ kind: "shoutout", text: "Custom shoutout", usageText: "Custom usage" })] }));
+    await selectCommand();
+
+    selectKind("Shoutout");
+
+    expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("Custom shoutout");
+  });
+
+  it("restores per-kind response, usage, variable, and timeout drafts until the active kind is saved", async () => {
+    const onMutation = vi.fn<(method: string, path: string, body: unknown) => Response>(() => jsonResponse({ warnings: [] }));
+    renderPanel(panelFetch({ commands: () => [makeCommand({ text: "Text draft", variableAction: { name: "score", operation: "add", amount: 2 } })], onMutation }));
+    await selectCommand();
+
+    selectKind("Shoutout");
+    fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "Shoutout draft" } });
+    fireEvent.click(within(editor()).getByText("Erweitert", { selector: "summary" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort bei fehlenden oder ungültigen Argumenten" }), { target: { value: "Shoutout usage draft" } });
+    selectKind("Befehlsliste");
+    expect(screen.queryByRole("textbox", { name: "Antworttext" })).not.toBeInTheDocument();
+    selectKind("Shoutout");
+    expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("Shoutout draft");
+    fireEvent.click(within(editor()).getByText("Erweitert", { selector: "summary" }));
+    expect(screen.getByRole("textbox", { name: "Antwort bei fehlenden oder ungültigen Argumenten" })).toHaveValue("Shoutout usage draft");
+
+    selectKind("Timeout");
+    fireEvent.change(screen.getByRole("textbox", { name: "Antworttext (optional)" }), { target: { value: "Timeout draft" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Ersatztext bei Ablehnung (optional)" }), { target: { value: "Timeout fallback draft" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Timeout-Grund" }), { target: { value: "Timeout reason draft" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Mindestens" }), { target: { value: "30" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Höchstens" }), { target: { value: "90" } });
+    selectKind("Antworttext");
+    expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("Text draft");
+    fireEvent.click(within(editor()).getByText("Erweitert", { selector: "summary" }));
+    expect(screen.getByRole("switch", { name: "Kanalvariable ändern" })).toBeChecked();
+
+    selectKind("Timeout");
+    expect(screen.getByRole("textbox", { name: "Antworttext (optional)" })).toHaveValue("Timeout draft");
+    expect(screen.getByRole("textbox", { name: "Ersatztext bei Ablehnung (optional)" })).toHaveValue("Timeout fallback draft");
+    expect(screen.getByRole("textbox", { name: "Timeout-Grund" })).toHaveValue("Timeout reason draft");
+    expect(await screen.findByRole("spinbutton", { name: "Mindestens" })).toHaveValue(30);
+    expect(screen.getByRole("spinbutton", { name: "Höchstens" })).toHaveValue(90);
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+
+    await waitFor(() => expect(onMutation).toHaveBeenCalledTimes(1));
+    const payload = onMutation.mock.calls[0]?.[2] as Record<string, unknown>;
+    expect(payload).toMatchObject({ kind: "timeout", text: "Timeout draft", timeoutAction: { minSeconds: 30, maxSeconds: 90, fallbackText: "Timeout fallback draft", reason: "Timeout reason draft" } });
+    expect(payload).toHaveProperty("usageText", "");
+    expect(payload).not.toHaveProperty("kindDrafts");
+  });
+
+  it("edits only the selected currency token", async () => {
+    renderPanel(panelFetch({ commands: () => [makeCommand({ text: "{currency.convert USD EUR} then {currency.convert GBP CAD}" })] }));
+    await selectCommand();
+
+    const target = screen.getByRole("combobox", { name: "Währungsvariable" });
+    fireEvent.click(target);
+    clickSelectOption(await screen.findByRole("option", { name: "Antworttext · 2", hidden: true }));
+    const from = screen.getByRole("combobox", { name: "Von" });
+    fireEvent.click(from);
+    clickSelectOption(await screen.findByRole("option", { name: "JPY", hidden: true }));
+
+    expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("{currency.convert USD EUR} then {currency.convert JPY CAD}");
   });
 
   it("persists edits and explicit clearing of the usage reply", async () => {
@@ -709,10 +829,9 @@ describe("Text command editor", () => {
     renderPanel(panelFetch({ commands: () => [makeCommand({ usageText: "x".repeat(501) })], onMutation }));
     await selectCommand();
 
-    fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
-    clickSelectOption(await screen.findByRole("option", { name: /Befehlsliste/u }));
+    selectKind("Befehlsliste");
     expect(screen.queryByRole("textbox", { name: textCommandsTexts("de").templateFieldLabels.usageText })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Änderungen speichern" }));
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
 
     await waitFor(() => expect(onMutation).toHaveBeenCalledTimes(1));
     expect(onMutation.mock.calls[0]?.[2]).toMatchObject({ kind: "list", text: "" });
@@ -724,8 +843,9 @@ describe("Text command editor", () => {
     renderPanel(panelFetch());
     await selectCommand();
 
-    expect(editor()).toHaveClass("command-editor-shell");
-    expect(editor().querySelector(".ui-editor-shell__body")).toHaveClass("ui-editor-shell__body");
+    expect(editor()).toHaveClass("text-command-editor");
+    expect(editor().querySelector(".text-command-editor__scroll")).toBeInTheDocument();
+    fireEvent.click(within(editor()).getByText("Erweitert"));
     const toggle = screen.getByRole("switch", { name: "Kanalvariable ändern" });
     const section = toggle.closest(".ui-switch-section");
     expect(section).toBeInTheDocument();
@@ -738,35 +858,33 @@ describe("Text command editor", () => {
   it("defaults set_argument to moderators unless the draft already chose a tier", async () => {
     renderPanel(panelFetch({ commands: () => [] }));
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.click(screen.getByText("Erweitert"));
     fireEvent.click(screen.getByRole("switch", { name: "Kanalvariable ändern" }));
     fireEvent.click(within(screen.getByRole("group", { name: "Kanalvariable ändern" })).getByRole("button", { name: "Argument" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Erweitert" }));
-    expect(screen.getByRole("combobox", { name: "Wer darf auslösen" })).toHaveTextContent("Moderatoren");
+    expect(screen.getByRole("combobox", { name: "Mindestrolle" })).toHaveTextContent("Moderatoren");
     expect(screen.getByText(tierInclusion("moderator"))).toBeInTheDocument();
   });
 
   it("keeps an explicit everyone tier when set_argument is selected later", async () => {
     renderPanel(panelFetch({ commands: () => [] }));
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Erweitert" }));
     await selectMinimumTier("vip");
     await selectMinimumTier("everyone");
-    fireEvent.click(screen.getByRole("tab", { name: "Einstellungen" }));
+    fireEvent.click(screen.getByText("Erweitert"));
     fireEvent.click(screen.getByRole("switch", { name: "Kanalvariable ändern" }));
     fireEvent.click(within(screen.getByRole("group", { name: "Kanalvariable ändern" })).getByRole("button", { name: "Argument" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Erweitert" }));
-    expect(screen.getByRole("combobox", { name: "Wer darf auslösen" })).toHaveTextContent("Alle");
+    expect(screen.getByRole("combobox", { name: "Mindestrolle" })).toHaveTextContent("Alle");
     expect(screen.getByText(tierInclusion("everyone"))).toBeInTheDocument();
   });
 
-  it("describes a silent action in the response column", async () => {
+  it("describes a silent action in the command list", async () => {
     const actionCommand = makeCommand({
       text: "",
+      aliases: [],
       variableAction: { name: "score", operation: "add", amount: 1 },
     });
     renderPanel(panelFetch({ commands: () => [actionCommand] }));
-    const cell = await screen.findByRole("cell", { name: "Ändert score um +1" });
-    expect(cell).toHaveClass("table__answer--placeholder");
+    expect(await screen.findByText("Ändert score um +1")).toBeInTheDocument();
   });
 
   it("opens the anchored variable overlay below 600 pixels", async () => {
@@ -778,7 +896,7 @@ describe("Text command editor", () => {
     try {
       renderPanel(panelFetch({ commands: () => [] }));
       fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-      const input = within(templateEditorFor("text")).getByRole("textbox", { name: "Antwort" });
+      const input = within(templateEditorFor("text")).getByRole("textbox", { name: "Antworttext" });
       fireEvent.change(input, { target: { value: "{", selectionStart: 1, selectionEnd: 1 } });
       const picker = await screen.findByRole("listbox", { name: "Variable auswählen" });
       expect(picker.parentElement).toHaveClass("ui-template-text-field__suggestions-dropdown");
@@ -791,13 +909,11 @@ describe("Text command editor", () => {
   it("shows the shoutout usage response and its Twitch cooldown hint", async () => {
     renderPanel(panelFetch({ commands: () => [] }));
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
-    clickSelectOption(await screen.findByRole("option", { name: /Shoutout/u }));
+    selectKind("Shoutout");
     fireEvent.click(within(editor()).getByText("Erweitert", { selector: "summary" }));
     expect(screen.getByRole("textbox", { name: "Antwort bei fehlenden oder ungültigen Argumenten" })).toBeInTheDocument();
     expect(screen.getByText("Twitch begrenzt Shoutouts selbst: 2 Minuten pro Kanal und 60 Minuten pro Ziel.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: "Erweitert" }));
-    expect(screen.getByRole("combobox", { name: "Wer darf auslösen" })).toHaveTextContent("Moderatoren");
+    expect(screen.getByRole("combobox", { name: "Mindestrolle" })).toHaveTextContent("Moderatoren");
     expect(screen.getByText(tierInclusion("moderator"))).toBeInTheDocument();
   });
 
@@ -805,17 +921,17 @@ describe("Text command editor", () => {
     const fetcher = panelFetch();
     renderPanel(fetcher);
     await selectCommand();
-    const combobox = screen.getByRole("combobox", { name: "Art" });
-    const hint = combobox.closest(".ui-select")?.querySelector(".ui-select__description");
+    const group = screen.getByRole("group", { name: "Art der Antwort" });
+    const hint = group.closest(".segment-choice-field")?.querySelector(".segment-choice-field__hint");
     expect(hint).toHaveTextContent("Antwortet mit dem Text unten.");
-    expect(combobox.compareDocumentPosition(hint as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(group.compareDocumentPosition(hint as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("inserts a response variable inline from the keyboard", async () => {
     const fetcher = panelFetch({ commands: () => [] });
     renderPanel(fetcher);
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    const input = within(templateEditorFor("text")).getByRole("textbox", { name: "Antwort" });
+    const input = within(templateEditorFor("text")).getByRole("textbox", { name: "Antworttext" });
     fireEvent.change(input, { target: { value: "{channel", selectionStart: 8, selectionEnd: 8 } });
     await screen.findByRole("listbox", { name: "Variable auswählen" });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -829,9 +945,9 @@ describe("Text command editor", () => {
     await selectCommand("commands");
     const panel = editor();
     expect(within(panel).getByText("Vorschau")).toBeInTheDocument();
-    expect(within(panel).getByText("Bot")).toBeInTheDocument();
+    expect(within(panel).getByText("BroBot")).toBeInTheDocument();
     expect(within(panel).getByText("Befehle: !hallo")).toBeInTheDocument();
-    expect(within(panel).queryByRole("textbox", { name: "Antwort" })).not.toBeInTheDocument();
+    expect(within(panel).queryByRole("textbox", { name: "Antworttext" })).not.toBeInTheDocument();
   });
 
   it("gives every editor field a non-empty helper line and edits aliases and cooldowns", async () => {
@@ -844,6 +960,7 @@ describe("Text command editor", () => {
       for (const role of ["textbox", "group", "spinbutton", "switch"] as const) {
         for (const field of within(panel).queryAllByRole(role)) {
           if (role === "group" && !field.classList.contains("segment-choice")) continue;
+          if (role === "switch" && field.closest(".page-header__module-switch") !== null) continue;
           const describedBy = field.getAttribute("aria-describedby");
           expect(describedBy, `${role} should reference its helper line`).toBeTruthy();
           for (const id of (describedBy ?? "").split(/\s+/u).filter(Boolean)) {
@@ -857,20 +974,22 @@ describe("Text command editor", () => {
 
     const aliasGroup = within(panel).getByRole("group", { name: "Aliase" });
     expect(aliasGroup.querySelector(".ui-field__prefix")).toHaveTextContent("!");
-    fireEvent.click(screen.getByRole("tab", { name: "Erweitert" }));
+    expect(within(panel).getByRole("textbox", { name: "Befehlsname" }).closest(".ui-field")?.querySelector(".ui-field__prefix")).toHaveTextContent("!");
+    fireEvent.click(within(panel).getByText("Erweitert", { selector: "summary" }));
     assertVisibleFieldHelpers();
-    const cooldown = screen.getByRole("spinbutton", { name: "Abkühlzeit" });
+    const cooldown = screen.getByRole("spinbutton", { name: "Zwischen zwei Aufrufen" });
     const userCooldown = screen.getByRole("spinbutton", { name: "Je Nutzer" });
     expect(cooldown).toHaveValue(5);
     expect(userCooldown).toHaveValue(15);
     expect(within(panel).getAllByText("s")).toHaveLength(2);
     fireEvent.change(userCooldown, { target: { value: "0" } });
-    fireEvent.click(screen.getByRole("button", { name: "Änderungen speichern" }));
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
     await waitFor(() => {
       const patch = fetcher.mock.calls.find(([, init]) => init?.method === "PATCH");
       expect(patch?.[1]?.body).toBe(JSON.stringify({
         revision: 1,
         name: "hallo",
+        enabled: true,
         kind: "text",
         text: "Hallo {user} aus {channel}",
         usageText: "",
@@ -899,12 +1018,13 @@ describe("Text command editor", () => {
     });
     renderPanel(fetcher);
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "!Neu" } });
-    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Hallo" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: "!Neu" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "Hallo" } });
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
 
     await waitFor(() => expect(created).toEqual({
       name: "neu",
+      enabled: true,
       text: "Hallo",
       kind: "text",
       usageText: "",
@@ -932,14 +1052,14 @@ describe("Text command editor", () => {
     });
     renderPanel(fetcher);
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
-    clickSelectOption(await screen.findByRole("option", { name: /Befehlsliste/u }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "befehle" } });
-    expect(screen.queryByRole("textbox", { name: "Antwort" })).not.toBeInTheDocument();
+    selectKind("Befehlsliste");
+    fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: "befehle" } });
+    expect(screen.queryByRole("textbox", { name: "Antworttext" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
 
     await waitFor(() => expect(created).toEqual({
       name: "befehle",
+      enabled: true,
       text: "",
       kind: "list",
       minimumTier: "everyone",
@@ -961,26 +1081,25 @@ describe("Text command editor", () => {
     const fetcher = panelFetch({ commands: () => [], onMutation: () => createRequest });
     renderPanel(fetcher);
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "neu" } });
-    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Hallo" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: "neu" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "Hallo" } });
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
 
     await waitFor(() => expect(fetcher.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true));
-    expect(document.querySelector(".ui-editor-shell .ui-save-bar")).toHaveAttribute("aria-busy", "true");
-    expect(screen.getByRole("textbox", { name: "Name" })).toBeDisabled();
-    expect(screen.getByRole("textbox", { name: "Antwort" })).toBeDisabled();
+    expect(document.querySelector(".text-command-editor .ui-save-bar")).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("textbox", { name: "Befehlsname" })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "Antworttext" })).toBeDisabled();
     resolveCreate?.(jsonResponse({ warnings: [] }));
-    await waitFor(() => expect(document.querySelector(".ui-editor-shell")).not.toBeInTheDocument());
+    await waitFor(() => expect(document.querySelector(".text-command-editor")).not.toBeInTheDocument());
   });
 
   it("keeps a cleared cooldown empty and does not send a null value", async () => {
     const fetcher = panelFetch({ commands: () => [] });
     renderPanel(fetcher);
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "neu" } });
-    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Hallo" } });
-    fireEvent.click(screen.getByRole("tab", { name: "Erweitert" }));
-    const cooldown = screen.getByRole("spinbutton", { name: "Abkühlzeit" });
+    fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: "neu" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "Hallo" } });
+    const cooldown = screen.getByRole("spinbutton", { name: "Zwischen zwei Aufrufen" });
     fireEvent.change(cooldown, { target: { value: "" } });
     expect(cooldown).toHaveValue(null);
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
@@ -996,42 +1115,41 @@ describe("Text command editor", () => {
     });
     renderPanel(fetcher);
     await selectCommand();
-    const response = screen.getByRole("textbox", { name: "Antwort" });
+    const response = screen.getByRole("textbox", { name: "Antworttext" });
     fireEvent.change(response, { target: { value: "Hallo {viewer}" } });
     expect(await screen.findByText(/Unbekannte Variable \{viewer\}/u)).toBeInTheDocument();
-    const save = screen.getByRole("button", { name: "Änderungen speichern" });
+    const save = screen.getByRole("button", { name: "Speichern" });
     expect(save).toBeEnabled();
     expect(save).toHaveAttribute("data-variant", "primary");
     fireEvent.click(save);
     await waitFor(() => expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true));
-    expect(await screen.findByRole("status")).toHaveTextContent("Gespeichert. Unbekannte Variable: {viewer}");
+    expect(await screen.findByRole("status")).toHaveTextContent("Alle Änderungen gespeichert Unbekannte Variable: {viewer}");
     expect(response).toHaveValue("Hallo {viewer}");
   });
 
-  it("guards row switching, Escape, and the inspector backdrop with all three choices", async () => {
+  it("guards row switching and Escape with all three choices", async () => {
     const rows = [makeCommand(), makeCommand({ name: "beta", text: "Antwort B", aliases: [] })];
     const fetcher = panelFetch({ commands: () => rows });
     renderPanel(fetcher);
     await selectCommand("hallo");
-    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Entwurf" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "Entwurf" } });
     const beta = await screen.findByText("!beta");
-    fireEvent.click(beta.closest("tr") as HTMLElement);
+    fireEvent.click(beta.closest(".text-command-row") as HTMLElement);
     const guard = await screen.findByRole("dialog");
     expect(within(guard).getByRole("button", { name: "Weiter bearbeiten" })).toBeInTheDocument();
     expect(within(guard).getByRole("button", { name: "Verwerfen und wechseln" })).toBeInTheDocument();
     expect(within(guard).getByRole("button", { name: "Speichern und wechseln" })).toBeInTheDocument();
     fireEvent.click(within(guard).getByRole("button", { name: "Weiter bearbeiten" }));
-    expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Entwurf");
+    expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("Entwurf");
 
     fireEvent.keyDown(editor(), { key: "Escape" });
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Weiter bearbeiten" }));
-    const backdrop = document.querySelector(".list-detail__backdrop");
-    if (!(backdrop instanceof HTMLElement)) throw new Error("Inspector backdrop is missing");
-    fireEvent.click(backdrop);
+    fireEvent.click(document.querySelector(".collection-page__detail-back") as HTMLElement);
     fireEvent.click(await screen.findByRole("button", { name: "Verwerfen und wechseln" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(document.querySelector(".ui-editor-shell")).not.toBeInTheDocument();
+    expect(document.querySelector(".collection-page")).toHaveAttribute("data-detail-open", "false");
+    expect(document.querySelector(".text-command-editor")).toBeInTheDocument();
   });
 
   it("blocks route navigation from a dirty command editor", async () => {
@@ -1048,7 +1166,7 @@ describe("Text command editor", () => {
     };
     renderWithQuery(<UiProvider><Harness /></UiProvider>);
 
-    const response = await screen.findByRole("textbox", { name: "Antwort" });
+    const response = await screen.findByRole("textbox", { name: "Antworttext" });
     fireEvent.change(response, { target: { value: "Entwurf" } });
     fireEvent.click(screen.getByRole("button", { name: "Go overview" }));
     const guard = await screen.findByRole("dialog");
@@ -1058,7 +1176,7 @@ describe("Text command editor", () => {
     expect(within(guard).getByRole("button", { name: "Speichern und wechseln" })).toBeInTheDocument();
 
     fireEvent.click(within(guard).getByRole("button", { name: "Weiter bearbeiten" }));
-    expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Entwurf");
+    expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("Entwurf");
     fireEvent.click(screen.getByRole("button", { name: "Go overview" }));
     fireEvent.click(await screen.findByRole("button", { name: "Verwerfen und wechseln" }));
     await waitFor(() => expect(screen.getByText("overview")).toBeInTheDocument());
@@ -1069,11 +1187,11 @@ describe("Text command editor", () => {
     const fetcher = panelFetch({ commands: () => rows });
     renderPanel(fetcher);
     await selectCommand("hallo");
-    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Gespeichert" } });
-    fireEvent.click((await screen.findByText("!beta")).closest("tr") as HTMLElement);
+    fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "Gespeichert" } });
+    fireEvent.click((await screen.findByText("!beta")).closest(".text-command-row") as HTMLElement);
     fireEvent.click(await screen.findByRole("button", { name: "Speichern und wechseln" }));
 
-    await waitFor(() => expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Antwort B"));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("Antwort B"));
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true);
   });
 
@@ -1085,16 +1203,16 @@ describe("Text command editor", () => {
     });
     renderPanel(fetcher);
     await selectCommand();
-    const response = screen.getByRole("textbox", { name: "Antwort" });
+    const response = screen.getByRole("textbox", { name: "Antworttext" });
     fireEvent.change(response, { target: { value: "Mein Entwurf" } });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Änderungen speichern" })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: "Änderungen speichern" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Speichern" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
     await waitFor(() => expect(fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1));
     expect(await screen.findByText(/Inzwischen von jemand anderem geändert\./u)).toBeInTheDocument();
     expect(response).toHaveValue("Mein Entwurf");
     rows[0] = makeCommand({ text: "Serverstand" });
     fireEvent.click(screen.getByRole("button", { name: "Serverstand laden" }));
-    await waitFor(() => expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Serverstand"));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("Serverstand"));
   });
 
   it("keeps a newer selection and its draft when a renamed command's refresh is delayed", async () => {
@@ -1124,16 +1242,16 @@ describe("Text command editor", () => {
     });
 
     await selectCommand("hallo");
-    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "hallo2" } });
-    fireEvent.click(screen.getByRole("button", { name: "Änderungen speichern" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: "hallo2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
     await selectCommand("beta");
-    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Entwurf B" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "Entwurf B" } });
 
     releaseGet();
-    await screen.findByText("!hallo2");
+    await within(await commandList()).findByText("!hallo2");
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("beta");
-    expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Entwurf B");
+    expect(screen.getByRole("textbox", { name: "Befehlsname" })).toHaveValue("beta");
+    expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("Entwurf B");
   });
 
   describe("obsolete editor continuations", () => {
@@ -1173,60 +1291,60 @@ describe("Text command editor", () => {
     };
     const openCreate = async (name: string): Promise<void> => {
       fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-      fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: name } });
+      fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: name } });
     };
     const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 50));
 
     it("keeps a newer create draft when an earlier create POST is released late", async () => {
       const release = setup("POST");
       await openCreate("eins");
-      fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Hallo" } });
+      fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "Hallo" } });
       fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
-      fireEvent.click((await screen.findByText("!beta")).closest("tr") as HTMLElement);
+      fireEvent.click((await within(await commandList()).findByText("!beta")).closest(".text-command-row") as HTMLElement);
       fireEvent.click(await screen.findByRole("button", { name: "Verwerfen und wechseln" }));
       await openCreate("zwei");
 
       release();
-      await screen.findByText("!eins");
+      await within(await commandList()).findByText("!eins");
       await settle();
-      expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("zwei");
+      expect(screen.getByRole("textbox", { name: "Befehlsname" })).toHaveValue("zwei");
     });
 
     it("keeps a newer create form when an earlier create's revalidation finishes late", async () => {
       const release = setup("GET");
       await openCreate("eins");
-      fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Hallo" } });
+      fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "Hallo" } });
       fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
-      await waitFor(() => expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("eins"));
+      await waitFor(() => expect(screen.getByRole("textbox", { name: "Befehlsname" })).toHaveValue("eins"));
       fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-      fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "zwei" } });
+      fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: "zwei" } });
 
       release();
       await settle();
-      expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("zwei");
+      expect(screen.getByRole("textbox", { name: "Befehlsname" })).toHaveValue("zwei");
     });
 
     it("completes save-and-switch only for the current editor when the refresh is delayed", async () => {
       const release = setup("GET");
       await selectCommand("hallo");
-      fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "hallo2" } });
-      fireEvent.click((await screen.findByText("!beta")).closest("tr") as HTMLElement);
+      fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: "hallo2" } });
+      fireEvent.click((await within(await commandList()).findByText("!beta")).closest(".text-command-row") as HTMLElement);
       fireEvent.click(await screen.findByRole("button", { name: "Speichern und wechseln" }));
-      await waitFor(() => expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("beta"));
+      await waitFor(() => expect(screen.getByRole("textbox", { name: "Befehlsname" })).toHaveValue("beta"));
       await selectCommand("gamma");
-      fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Entwurf C" } });
+      fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "Entwurf C" } });
 
       release();
       await settle();
-      expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("gamma");
-      expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Entwurf C");
+      expect(screen.getByRole("textbox", { name: "Befehlsname" })).toHaveValue("gamma");
+      expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("Entwurf C");
     });
 
     it("does not run a held save-and-switch navigation after the panel unmounted", async () => {
       const onCloseInspector = vi.fn();
       const release = setup("PATCH", onCloseInspector);
       await selectCommand("hallo");
-      fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Entwurf" } });
+      fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "Entwurf" } });
       fireEvent.keyDown(editor(), { key: "Escape" });
       fireEvent.click(await screen.findByRole("button", { name: "Speichern und wechseln" }));
       await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true));
@@ -1240,17 +1358,18 @@ describe("Text command editor", () => {
     it("keeps a newly selected command when a deletion's revalidation finishes late", async () => {
       const release = setup("GET");
       await selectCommand("hallo");
-      fireEvent.click(screen.getByRole("button", { name: /löschen/u }));
+      fireEvent.click(screen.getByRole("button", { name: "Weitere Aktionen", hidden: true }));
+      fireEvent.click(await screen.findByRole("menuitem", { name: "Befehl löschen" }));
       const dialog = await screen.findByRole("dialog");
       fireEvent.click(within(dialog).getByRole("button", { name: "Befehl !hallo löschen" }));
       await waitFor(() => expect(screen.queryByText("!hallo")).not.toBeInTheDocument());
       await selectCommand("beta");
-      fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Entwurf B" } });
+      fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "Entwurf B" } });
 
       release();
       await settle();
-      expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("beta");
-      expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Entwurf B");
+      expect(screen.getByRole("textbox", { name: "Befehlsname" })).toHaveValue("beta");
+      expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("Entwurf B");
     });
   });
 
@@ -1282,9 +1401,9 @@ describe("Text command editor", () => {
       staleTime: 600_000,
     });
     await selectCommand();
-    const response = screen.getByRole("textbox", { name: "Antwort" });
+    const response = screen.getByRole("textbox", { name: "Antworttext" });
     fireEvent.change(response, { target: { value: "Mein Entwurf" } });
-    fireEvent.click(screen.getByRole("button", { name: "Änderungen speichern" }));
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
     await waitFor(() => expect(submittedRevisions).toEqual([1]));
     expect(await screen.findByText(/Inzwischen von jemand anderem geändert\./u)).toBeInTheDocument();
 
@@ -1292,17 +1411,17 @@ describe("Text command editor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Serverstand laden" }));
 
     expect(await screen.findByText(/Der Serverstand konnte nicht geladen werden\./u)).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Mein Entwurf");
+    expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("Mein Entwurf");
     expect(screen.getByText(/Inzwischen von jemand anderem geändert\./u)).toBeInTheDocument();
     expect(within(editor()).getByRole("button", { name: "Erneut versuchen" })).toBeInTheDocument();
 
     failCommandReload = false;
     rows = [makeCommand({ text: "Serverstand", revision: 2 })];
     fireEvent.click(within(editor()).getByRole("button", { name: "Erneut versuchen" }));
-    await waitFor(() => expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Serverstand"));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("Serverstand"));
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Nach erneutem Laden" } });
-    fireEvent.click(screen.getByRole("button", { name: "Änderungen speichern" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "Nach erneutem Laden" } });
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
     await waitFor(() => expect(submittedRevisions).toEqual([1, 2]));
   });
 
@@ -1313,8 +1432,8 @@ describe("Text command editor", () => {
     });
     renderPanel(fetcher);
     await selectCommand();
-    const name = screen.getByRole("textbox", { name: "Name" });
-    const save = screen.getByRole("button", { name: "Änderungen speichern" });
+    const name = screen.getByRole("textbox", { name: "Befehlsname" });
+    const save = screen.getByRole("button", { name: "Speichern" });
 
     fireEvent.change(name, { target: { value: "neu" } });
     await waitFor(() => expect(save).toBeEnabled());
@@ -1346,16 +1465,13 @@ describe("Text command editor", () => {
     renderPanel(panelFetch({ commands: () => [makeCommand({ aliases })] }));
     await selectCommand();
 
-    const name = screen.getByRole("textbox", { name: "Name" });
+    const name = screen.getByRole("textbox", { name: "Befehlsname" });
     fireEvent.change(name, { target: { value: "alias5" } });
-    const save = screen.getByRole("button", { name: "Änderungen speichern" });
-    expect(screen.getByRole("textbox", { name: "Aliase" })).toHaveAttribute("readonly");
+    const save = screen.getByRole("button", { name: "Speichern" });
+    expect(screen.getByRole("textbox", { name: "Weitere Auslöser" })).toHaveAttribute("readonly");
     fireEvent.click(save);
 
-    fireEvent.click(screen.getByRole("button", { name: "Fehlerhafte Felder anzeigen" }));
-    const aliasError = within(await screen.findByRole("dialog", { name: "Fehlerhafte Felder" })).getByRole("button", { name: "Aliase: Das ist schon der Name." });
-    fireEvent.click(aliasError);
-    expect(screen.getByRole("button", { name: "Alias !alias5 entfernen" })).toHaveFocus();
+    expect(screen.getByText("Das ist schon der Name.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Alias !alias5 entfernen" })).toBeEnabled();
   });
 
@@ -1366,8 +1482,7 @@ describe("Text command editor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Ankündigung" }));
     expect(screen.getByText("Der Bot ist hier kein Moderator — der Text geht als normale Nachricht raus.")).toBeInTheDocument();
     expect(editor().querySelector(".segment-choice-field__warning")).not.toBeNull();
-    expect(editor().querySelector(".ui-editor-shell__issue-dot--warning")).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Änderungen speichern" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Speichern" })).toBeEnabled();
 
     cleanup();
     renderPanel(panelFetch(), { botIsModerator: null });
@@ -1378,28 +1493,34 @@ describe("Text command editor", () => {
 
   it("converts a leading timeout slash command into structured fields before saving", async () => {
     let created: unknown;
+    const commands: TextCommand[] = [];
     const fetcher = panelFetch({
-      commands: () => [],
+      commands: () => commands,
       onMutation: (method, _path, body) => {
-        if (method === "POST") created = body;
+        if (method === "POST" && typeof body === "object" && body !== null) {
+          created = body;
+          commands.push({ ...makeCommand({ name: "roulette" }), ...(body as Partial<TextCommand>) });
+        }
         return jsonResponse({ warnings: [] });
       },
     });
     renderPanel(fetcher, { botIsModerator: false });
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "roulette" } });
-    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: "roulette" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), {
       target: { value: "/timeout {user} 30-60 Raid spamming\nTimed out for {timeout.duration}" },
     });
     expect(screen.getByText("Timeout für den Aufrufer für 30–60 s.")).toHaveAttribute("role", "status");
     expect(screen.queryByRole("switch", { name: "Aufrufer timeouten" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
 
-    expect(screen.getByRole("spinbutton", { name: "Mindestens" })).toHaveValue(30);
+    await waitFor(() => expect(created).toMatchObject({ name: "roulette", kind: "timeout" }));
+    expect(await screen.findByRole("spinbutton", { name: "Mindestens" })).toHaveValue(30);
     expect(screen.getByRole("spinbutton", { name: "Höchstens" })).toHaveValue(60);
-    expect(screen.getByRole("textbox", { name: "Antwort (optional)" })).toHaveValue("Timed out for {timeout.duration}");
+    expect(screen.getByRole("textbox", { name: "Antworttext (optional)" })).toHaveValue("Timed out for {timeout.duration}");
     expect(screen.getByRole("textbox", { name: "Timeout-Grund" })).toHaveValue("Raid spamming");
     expect(screen.getByText("Der Bot ist kein Moderator. Timeouts können nicht ausgeführt werden.")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Erweitert"));
     expect(screen.getByRole("switch", { name: "Kanalvariable ändern" })).toBeInTheDocument();
 
     await waitFor(() => expect(created).toMatchObject({
@@ -1425,60 +1546,118 @@ describe("Text command editor", () => {
     });
     renderPanel(fetcher);
     await selectCommand();
-    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "/announce Stream starts now!" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "/announce Stream starts now!" } });
     expect(screen.getByText("Wird als Twitch-Ankündigung gesendet.")).toHaveAttribute("role", "status");
-    fireEvent.click(screen.getByRole("button", { name: "Änderungen speichern" }));
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
 
     await waitFor(() => expect(saved).toMatchObject({ kind: "text", responseType: "announcement", text: "Stream starts now!" }));
-    expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Stream starts now!");
+    expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("Stream starts now!");
     expect(screen.getByRole("button", { name: "Ankündigung" })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("shows operators a read-only property list and keeps Active as an immediate action", async () => {
+  it("shows operator settings as properties and stages the Active switch until save", async () => {
     const fetcher = panelFetch();
-    renderPanel(fetcher, { canManage: false });
+    renderPanel(fetcher, { canManage: false, canOperate: true });
     await selectCommand();
     const readonly = editor();
-    expect(within(readonly).getByText("Nur Broadcaster und Verwalter dürfen Befehle anlegen, bearbeiten oder löschen.")).toBeInTheDocument();
-    expect(within(readonly).getByText("!hey")).toBeInTheDocument();
-    expect(within(readonly).getAllByText("Aktiv")).toHaveLength(1);
-    expect(within(readonly).getAllByText("Antwort")).toHaveLength(2);
-    expect(within(readonly).getByText("nur online")).toBeInTheDocument();
-    expect(within(readonly).getByText("aus")).toBeInTheDocument();
-    expect(within(readonly).queryByRole("textbox")).not.toBeInTheDocument();
-    expect(within(readonly).queryByRole("button", { name: "Änderungen speichern" })).not.toBeInTheDocument();
+    expect(within(readonly).getByText("Einstellungen ändern nur Broadcaster und Verwalter.")).toBeInTheDocument();
+    expect(readonly.querySelector("dl.properties")).toBeInTheDocument();
+    expect(within(readonly).getByText("Hallo {user} aus {channel}")).toBeInTheDocument();
+    expect(within(readonly).queryAllByRole("textbox")).toHaveLength(0);
+    const active = within(readonly).getByRole("switch", { name: "Aktiv" });
+    expect(active).toBeEnabled();
+    expect(within(readonly).getByRole("button", { name: "Speichern" })).toBeDisabled();
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
 
-    fireEvent.click(within(readonly).getByRole("switch", { name: "Aktiv" }));
-    await waitFor(() => {
-      const toggle = fetcher.mock.calls.find(([, init]) => init?.method === "PATCH");
-      expect(toggle).toBeDefined();
-      expect(toggle?.[1]?.body).toBe(JSON.stringify({ revision: 1, enabled: false }));
-    });
+    fireEvent.click(active);
+    expect(within(readonly).getByRole("button", { name: "Speichern" })).toBeEnabled();
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
   });
 
-  it("shows the minimum tier as a badge and restores focus when the inspector closes", async () => {
+  it("lets operators save only the enabled flag", async () => {
+    const fetcher = panelFetch();
+    renderPanel(fetcher, { canManage: false, canOperate: true });
+    await selectCommand();
+    const readonly = editor();
+    expect(readonly.querySelector("dl.properties")).toBeInTheDocument();
+    expect(within(readonly).queryAllByRole("textbox")).toHaveLength(0);
+    expect(within(readonly).getByRole("switch", { name: "Aktiv" })).toBeEnabled();
+
+    fireEvent.click(within(readonly).getByRole("switch", { name: "Aktiv" }));
+    fireEvent.click(within(readonly).getByRole("button", { name: "Speichern" }));
+
+    await waitFor(() => expect(fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1));
+    const patch = fetcher.mock.calls.find(([, init]) => init?.method === "PATCH");
+    expect(patch?.[1]?.body).toBe(JSON.stringify({ revision: 1, enabled: false }));
+  });
+
+  it("continues deletion after saving a renamed command and targets its new name", async () => {
+    let current = makeCommand();
+    const fetcher = panelFetch({
+      commands: () => [current],
+      onMutation: (method, _path, body) => {
+        if (method === "PATCH") {
+          const fields = body as Partial<TextCommand>;
+          current = { ...current, ...fields, name: fields.name ?? current.name, revision: 2 };
+          return jsonResponse({ command: current, warnings: [] });
+        }
+        return jsonResponse({});
+      },
+    });
+    renderPanel(fetcher);
+    await selectCommand();
+    fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: "renamed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Weitere Aktionen", hidden: true }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Befehl löschen" }));
+
+    const guard = await screen.findByRole("dialog");
+    fireEvent.click(within(guard).getByRole("button", { name: "Speichern und wechseln" }));
+    await waitFor(() => expect(guard).not.toBeInTheDocument());
+    const deleteDialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(within(deleteDialog).getByRole("heading")).toHaveTextContent("Befehl !renamed löschen?"));
+    fireEvent.click(within(deleteDialog).getByRole("button", { name: "Befehl !renamed löschen" }));
+
+    await waitFor(() => expect(fetcher.mock.calls.some(([input, init]) => {
+      const url = input instanceof Request ? input.url : input instanceof URL ? input.href : input;
+      return init?.method === "DELETE" && url.includes("/commands/renamed?revision=2");
+    })).toBe(true));
+  });
+
+  it("does not classify host variables as module badges or filters", async () => {
+    renderPanel(panelFetch({
+      commands: () => [makeCommand({ text: "Hello {user}" })],
+      templateVariables: [{ name: "user", moduleId: "host", isTextBlock: false, sample: "viewer" }],
+    }));
+    const row = await screen.findByRole("button", { name: /!hallo/u });
+
+    expect(within(row).getByText("Antworttext")).toBeInTheDocument();
+    const moduleFilter = screen.getByRole("combobox", { name: "Verwendet Modul-Variablen" });
+    expect(moduleFilter).toBeDisabled();
+    expect(screen.queryByRole("option", { name: "host", hidden: true })).not.toBeInTheDocument();
+  });
+
+  it("restores focus to the selected command when its details close", async () => {
     const fetcher = panelFetch();
     const onCloseInspector = vi.fn();
     vi.stubGlobal("fetch", fetcher);
     renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" onCloseInspector={onCloseInspector} /></UiProvider>);
 
-    const row = await screen.findByRole("row", { name: /!hallo/u });
-    expect(within(row).getByText("Alle")).toHaveClass("ui-badge");
+    const row = await screen.findByRole("button", { name: /!hallo/u });
     expect(within(row).queryByRole("combobox")).not.toBeInTheDocument();
 
     row.focus();
     fireEvent.click(row);
-    const inspector = await screen.findByRole("region", { name: "Eigenschaften von !hallo" });
-    expect(within(inspector).getByRole("tab", { name: "Einstellungen" })).toBeInTheDocument();
-    fireEvent.click(within(inspector).getByRole("button", { name: "Schließen" }));
-    expect(row).toHaveFocus();
-    expect(onCloseInspector).toHaveBeenCalledOnce();
+    await screen.findByRole("region", { name: "Eigenschaften von !hallo" });
+    fireEvent.click(document.querySelector(".collection-page__detail-back") as HTMLElement);
+    await waitFor(() => expect(row).toHaveFocus());
+    expect(onCloseInspector).not.toHaveBeenCalled();
 
     fireEvent.click(row);
-    const reopened = await screen.findByRole("region", { name: "Eigenschaften von !hallo" });
-    fireEvent.keyDown(within(reopened).getByRole("button", { name: "Schließen" }), { key: "Escape" });
-    expect(screen.queryByRole("region", { name: "Eigenschaften von !hallo" })).not.toBeInTheDocument();
-    expect(onCloseInspector).toHaveBeenCalledTimes(2);
+    await screen.findByRole("region", { name: "Eigenschaften von !hallo" });
+    fireEvent.keyDown(document.querySelector(".collection-page__detail-back") as HTMLElement, { key: "Escape" });
+    await waitFor(() => expect(row).toHaveFocus());
+    expect(document.querySelector(".collection-page")).toHaveAttribute("data-detail-open", "false");
+    expect(onCloseInspector).not.toHaveBeenCalled();
   });
 
   it("edits the minimum tier in the inspector and saves the draft as one change", async () => {
@@ -1502,9 +1681,8 @@ describe("Text command editor", () => {
     });
     renderPanel(fetcher);
     await selectCommand();
-    fireEvent.click(within(editor()).getByRole("tab", { name: "Erweitert" }));
     await selectMinimumTier("moderator");
-    fireEvent.click(within(editor()).getByRole("button", { name: "Änderungen speichern" }));
+    fireEvent.click(within(editor()).getByRole("button", { name: "Speichern" }));
     await waitFor(() => expect(current).toMatchObject({ minimumTier: "moderator", revision: 2 }));
 
     const patches = fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH");
@@ -1512,6 +1690,7 @@ describe("Text command editor", () => {
     expect(patches[0]?.[1]?.body).toEqual(JSON.stringify({
       revision: 1,
       name: "hallo",
+      enabled: true,
       kind: "text",
       text: "Hallo {user} aus {channel}",
       usageText: "",
@@ -1526,7 +1705,7 @@ describe("Text command editor", () => {
       variableAction: null,
       timeoutAction: null,
     }));
-    await waitFor(() => expect(within(screen.getByRole("row", { name: /!hallo/u })).getByText("Moderatoren")).toHaveClass("ui-badge"));
+    expect(screen.getByRole("combobox", { name: "Mindestrolle" })).toHaveTextContent("Moderatoren");
     expect(current.minimumTier).toBe("moderator");
   });
 
@@ -1534,9 +1713,8 @@ describe("Text command editor", () => {
     const fetcher = panelFetch();
     renderPanel(fetcher);
     await selectCommand();
-    const deleteButton = screen.getByRole("button", { name: "Befehl löschen" });
-    expect(deleteButton).toHaveTextContent("Befehl löschen");
-    fireEvent.click(deleteButton);
+    fireEvent.click(screen.getByRole("button", { name: "Weitere Aktionen", hidden: true }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Befehl löschen" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("heading")).toHaveTextContent("Befehl !hallo löschen?");
     expect(within(dialog).getByText(/Aliase !hey/)).toBeInTheDocument();
@@ -1552,7 +1730,7 @@ describe("Text command editor", () => {
     renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" /></UiProvider>);
 
     expect(await screen.findByRole("button", { name: "Add command" })).toBeInTheDocument();
-    expect(await screen.findByRole("columnheader", { name: "Response" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Triggers" })).toBeInTheDocument();
   });
 
   it("preselects the command requested by the command palette after the command list loads", async () => {
@@ -1560,6 +1738,6 @@ describe("Text command editor", () => {
     renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" initialSelection="clip" /></UiProvider>);
 
     expect(await screen.findByRole("region", { name: "Eigenschaften von !clip" })).toBeInTheDocument();
-    expect(screen.getByRole("row", { name: /!clip/u })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("button", { name: /!clip/u })).toHaveAttribute("aria-current", "true");
   });
 });

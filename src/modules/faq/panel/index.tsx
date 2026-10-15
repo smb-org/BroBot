@@ -32,6 +32,7 @@ import { renderTemplate, type ModulePanelProperties } from "../../contract";
 import type { FaqEntry, FaqGame } from "../contracts";
 import { FAQ_ANSWER_MAX_LENGTH, FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_MINIMUM_TIERS, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH, FAQ_USER_COOLDOWN_MAXIMUM_SECONDS } from "../contracts";
 import { faqMatcherValidationError, matchFaqMatcher } from "../domain";
+import { formatCharacterCount } from "../../../dashboard/ui/text-length";
 import { inputFromDraft, matcherFromDraft, type FaqDraft } from "./draft";
 import { faqMatcherValidationReasonText, faqTexts } from "./locale";
 import {
@@ -122,12 +123,14 @@ export default function FaqPanel(properties: ModulePanelProperties): ReactElemen
 
 function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelProperties): ReactElement {
   const labels = faqTexts(language);
+  const characterCount = (count: number, maximum: number): string => formatCharacterCount(count, maximum, language ?? "de");
   const channelSettings = useChannelSettings(channelId);
   const queryClient = useDashboardQueryClient();
   const query = useModuleQuery(channelId, "faq", "panel", (signal) => loadFaqPanel(channelId, signal));
   const data = query.data;
   const orderedEntries = useMemo(() => data?.entries ?? [], [data?.entries]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [baseline, setBaseline] = useState<FaqDraft>(emptyDraft);
   const [draft, setDraft] = useState<FaqDraft>(emptyDraft);
   const [draftRevision, setDraftRevision] = useState<number | null>(null);
@@ -273,8 +276,14 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
   useEffect(() => registerDashboardNavigationGuard(draftGuard.guardSwitch), [draftGuard.guardSwitch]);
 
   const requestSwitch = (id: string): void => {
-    if (id === selectedId) return;
-    draftGuard.guardSwitch(() => loadSelection(id));
+    if (id === selectedId) {
+      setMobileDetailOpen(true);
+      return;
+    }
+    draftGuard.guardSwitch(() => {
+      loadSelection(id);
+      setMobileDetailOpen(true);
+    });
   };
 
   async function persistOrder(
@@ -418,7 +427,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
                 value={draft.name}
                 onChange={(name) => { patchDraft({ name }); }}
                 maxLength={FAQ_ENTRY_NAME_MAX_LENGTH}
-                countLabel={(count, maximum) => `${String(count)}/${String(maximum)}`}
+                countLabel={characterCount}
                 disabled={!canManage || saving}
                 required
               />
@@ -455,7 +464,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
                 value={draft.patterns}
                 onChange={(patterns) => { patchDraft({ patterns }); }}
                 maxLength={FAQ_PATTERN_MAX_LENGTH}
-                countLabel={(count, maximum) => `${String(count)}/${String(maximum)}`}
+                countLabel={characterCount}
                 {...(matcherError === undefined ? {} : { error: matcherError })}
                 mono
                 disabled={!canManage || saving}
@@ -469,7 +478,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
                 id="faq-sample-message"
                 className="faq-panel__sample-message"
                 maxLength={500}
-                countLabel={(count, maximum) => `${String(count)}/${String(maximum)}`}
+                countLabel={characterCount}
                 disabled={saving}
               />
               <div className="faq-panel__sample-result" data-testid="faq-test-result-slot" aria-live="polite" role={matcherError === undefined ? "status" : "alert"}>
@@ -606,17 +615,20 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
         <Icon name="plus" size={16} />{labels.add}
       </Button>
     </div>
-    <SegmentChoice
-      label={labels.filterLabel}
-      size="compact"
-      value={filter}
-      onChange={setFilter}
-      options={[
-        { value: "all", label: labels.filterAll },
-        { value: "active", label: labels.filterActive },
-        { value: "paused", label: labels.filterPaused },
-      ]}
-    />
+    <div className="faq-panel__filter-row">
+      <SegmentChoice
+        label={labels.filterLabel}
+        size="compact"
+        value={filter}
+        onChange={setFilter}
+        options={[
+          { value: "all", label: labels.filterAll },
+          { value: "active", label: labels.filterActive },
+          { value: "paused", label: labels.filterPaused },
+        ]}
+      />
+      <span className="faq-panel__entry-count">{labels.entryCount(visibleEntries.length)}</span>
+    </div>
     <RuleNote>{labels.priorityNote}</RuleNote>
   </div>;
 
@@ -692,6 +704,9 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
       list={list}
       detail={detail}
       empty={labels.noEntries}
+      detailOpen={mobileDetailOpen}
+      backLabel={labels.back}
+      onCloseDetail={() => { draftGuard.guardSwitch(() => { setMobileDetailOpen(false); }); }}
     />
   </div>;
 }

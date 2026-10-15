@@ -36,7 +36,7 @@ describe("template variable catalog", () => {
     ]);
     expect(effective.find(({ name }) => name === "game")).toMatchObject({ source: "system" });
     expect(effective.find(({ name }) => name === "var.points")).toMatchObject({ source: "channel" });
-    expect(effective.some(({ name }) => name === "user")).toBe(false);
+    expect(effective.find(({ name }) => name === "user")).toMatchObject({ source: "system" });
   });
 
   it("renders every effective chat declaration while leaving undeclared names literal", () => {
