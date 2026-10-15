@@ -458,7 +458,7 @@ test("text command switch and role inclusion fit their narrow and desktop layout
   await expect(page.locator(".ui-role-threshold > .ui-locked-reason--reserved")).toHaveCount(0);
 });
 
-test("timer dialog submits from Enter", async ({ page }) => {
+test("timer creation stays explicit when Enter is pressed in the name", async ({ page }) => {
   const variables = { variables: [{ name: "text.greeting", moduleId: "text_library", isTextBlock: true }] };
   await routeJson(page, "/api/csrf", { token: "csrf" });
   await routeJson(page, "/api/channels/channel-a/template-variables", variables);
@@ -475,12 +475,14 @@ test("timer dialog submits from Enter", async ({ page }) => {
   });
   await routeJson(page, "/api/channels/channel-a/modules/timers/event-time-sources", { sources: [] });
   await gotoPanel(page, "timers");
-  await page.getByRole("button", { name: "Create timer" }).click();
-  const timerDialog = page.getByRole("dialog", { name: "Create" });
-  await timerDialog.getByRole("textbox", { name: "Name" }).fill("Hourly");
-  await timerDialog.getByRole("textbox", { name: "Message" }).fill("Hello, chat!");
-  await expect(timerDialog.locator("form")).toBeAttached();
-  await timerDialog.getByRole("textbox", { name: "Name" }).press("Enter");
+  await page.locator(".collection-page__list-toolbar").getByRole("button", { name: "Create timer" }).click();
+  const editor = page.locator(".timer-editor");
+  const nameField = editor.getByRole("textbox", { name: "Name" });
+  await nameField.fill("Hourly");
+  await nameField.press("Enter");
+  expect(timerCreated).toBe(false);
+  await editor.getByRole("textbox", { name: "Message" }).fill("Hello, chat!");
+  await editor.getByRole("button", { name: "Create", exact: true }).click();
   await expect.poll(() => timerCreated).toBe(true);
 });
 
@@ -1447,7 +1449,7 @@ test("text command slash help stays stable and optional variable fields mount on
   await expect(actionSection.locator(".ui-switch-section__content")).toBeVisible();
 });
 
-test("text-library filter keeps desktop geometry and tracks wrapped mobile chip growth", async ({ page }) => {
+test("text-library filters fit the shared list and track mobile chip growth", async ({ page }) => {
   await routeJson(page, "/api/channels/channel-a/modules/text_library/library", {
     blocks: [], categories: [], settings: { revision: 1, graphRevision: 1, updatedAt: "2026-09-20T08:00:00.000Z" }, usages: {},
   });
@@ -1462,7 +1464,7 @@ test("text-library filter keeps desktop geometry and tracks wrapped mobile chip 
   for (const width of [1280, 700, 390]) {
     await page.setViewportSize({ width, height: 844 });
     await gotoPanel(page, "text_library");
-    const list = page.getByTestId("text-library-list-slot");
+    const list = page.locator(".collection-page__list-content");
     await expect(list).toBeVisible();
     const toolbar = page.locator(".text-library__list-toolbar");
     const filters = toolbar.locator(".list-toolbar__filters");
@@ -1473,20 +1475,24 @@ test("text-library filter keeps desktop geometry and tracks wrapped mobile chip 
     const filtersBox = await filters.boundingBox();
     const createBox = await create.boundingBox();
     expect(pickerBox?.height).toBeLessThanOrEqual(44);
-    if (width === 390) {
-      // Narrow toolbars give the game filter its own full-width row below category and create.
+    if (width === 390 || width === 1280) {
+      // The collection list is narrow enough for its toolbar container to use the stacked filter layout.
       const toolbarBox = await toolbar.boundingBox();
       expect(pickerBox?.y ?? 0).toBeGreaterThanOrEqual((createBox?.y ?? 0) + (createBox?.height ?? 0) - 0.5);
       expect(pickerBox?.width ?? 0).toBeGreaterThanOrEqual((toolbarBox?.width ?? 0) - 1);
     }
     else {
+      // At 700px the category and game filters shrink within the toolbar row.
       expect(pickerBox?.y ?? 0).toBeGreaterThanOrEqual(filtersBox?.y ?? 0);
       expect((pickerBox?.y ?? 0) + (pickerBox?.height ?? 0)).toBeLessThanOrEqual((filtersBox?.y ?? 0) + (filtersBox?.height ?? 0) + 0.5);
       expect(createBox?.x ?? 0).toBeGreaterThanOrEqual((filtersBox?.x ?? 0) + (filtersBox?.width ?? 0) - 0.5);
     }
     if (width === 700) {
       const filterOverflow = await filters.evaluate((element) => element.scrollWidth > element.clientWidth);
-      expect(filterOverflow).toBe(true);
+      expect(filterOverflow).toBe(false);
+      expect((pickerBox?.x ?? 0) + (pickerBox?.width ?? 0)).toBeLessThanOrEqual((createBox?.x ?? 0) + 0.5);
+      const pageOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+      expect(pageOverflow).toBe(false);
     }
     const before = { list: await box(list), slot: await box(slot) };
     let previous = before;
@@ -1495,7 +1501,7 @@ test("text-library filter keeps desktop geometry and tracks wrapped mobile chip 
       await search.fill("ga");
       await page.getByRole("option", { name }).click();
       const current = { list: await box(list), slot: await box(slot) };
-      if (width === 390) {
+      if (width === 390 || width === 1280) {
         const chipRowGrowth = current.slot.height - previous.slot.height;
         const listGrowth = current.list.y - previous.list.y;
         expect(chipRowGrowth).toBeGreaterThanOrEqual(0);
@@ -1508,7 +1514,7 @@ test("text-library filter keeps desktop geometry and tracks wrapped mobile chip 
       }
       previous = current;
     }
-    if (width === 390) {
+    if (width === 390 || width === 1280) {
       const activeFilters = toolbar.locator(".list-toolbar__active-filters");
       await expect(activeFilters).toContainText("Just Chatting");
       await expect(activeFilters).toContainText("Software and Game Development");
@@ -1528,7 +1534,7 @@ test("text-library filter keeps desktop geometry and tracks wrapped mobile chip 
   }
 });
 
-test("text-library inspector stays at its sticky offset while the page scrolls at desktop width", async ({ page }) => {
+test("text-library detail stays in place while the collection list scrolls", async ({ page }) => {
   const blocks = Array.from({ length: 40 }, (_, index) => ({
     name: `block_${String(index + 1)}`,
     categoryId: "social",
@@ -1546,12 +1552,14 @@ test("text-library inspector stays at its sticky offset while the page scrolls a
   await page.setViewportSize({ width: 1400, height: 800 });
   await gotoPanel(page, "text_library");
   await page.getByRole("button", { name: "{text.block_1}" }).click();
-  const inspector = page.locator(".list-detail__inspector");
-  await expect(inspector).toBeVisible();
-  await page.evaluate(() => { window.scrollTo(0, 100); });
-  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(100);
-  const top = await inspector.evaluate((element) => element.getBoundingClientRect().top);
-  expect(top).toBe(16);
+  const detail = page.locator(".collection-page__detail");
+  const list = page.locator(".collection-page__list-content");
+  await expect(detail).toBeVisible();
+  const before = await detail.evaluate((element) => element.getBoundingClientRect().top);
+  await list.evaluate((element) => { element.scrollTop = 100; });
+  await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBe(100);
+  const after = await detail.evaluate((element) => element.getBoundingClientRect().top);
+  expect(after).toBe(before);
 });
 
 test("custom duration fits with its controls and unit at desktop and mobile widths", async ({ page }) => {

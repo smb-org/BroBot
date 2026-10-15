@@ -6,7 +6,7 @@ import type { TextBlock, TextBlockCategory, TextBlockConditions, TextBlockVarian
 import { firstMatchingTextBlockVariant, validTextBlockConditions, validTextBlockName } from "../domain";
 import { blockReferencesInText } from "../../contracts/text-block-references";
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Badge, Button, ChatPreview, ConfirmDialog, Field, GameMultiSelect, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, ListToolbar, LoadState, LoadStateLines, registeredModuleTemplateGroup, registerDashboardNavigationGuard, Select, SubInspector, TemplateTextField, notify, useDraftGuard } from "../../../dashboard/ui";
+import { Badge, Button, ChatPreview, CollectionPage, ConfirmDialog, EmptyState, Field, GameMultiSelect, InspectorFieldRow, ListToolbar, LoadState, LoadStateLines, PageHeader, registeredModuleTemplateGroup, registerDashboardNavigationGuard, RuleNote, Section, Select, TemplateTextField, notify, useDraftGuard } from "../../../dashboard/ui";
 import { templateVariableNames } from "../../contract";
 import { dashboardCommonTexts, systemTemplateVariableLocale } from "../../../dashboard/locale";
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
@@ -153,9 +153,19 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
   const [simulatedTier, setSimulatedTier] = useState("everyone");
   const [pending, setPending] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const [attemptedSave, setAttemptedSave] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [serverConflict, setServerConflict] = useState(false);
+  const initialSelectionDone = useRef(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [categoryDrafts, setCategoryDrafts] = useState<Record<string, string>>({});
   const [previewNow, setPreviewNow] = useState(() => Date.now());
+
+  const patchDraft = (next: DraftBlock): void => {
+    setDraft(next);
+    setSaveError(null);
+  };
 
   useEffect(() => {
     const timer = window.setInterval(() => setPreviewNow(Date.now()), 30_000);
@@ -202,7 +212,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
     Object.keys(draft.variants.at(-1)?.conditions ?? {}).length !== 0 ||
     draft.variants.some((variant) => !validTextBlockConditions(variant.conditions) || variant.texts.length === 0 || variant.texts.length > TEXT_BLOCK_MAXIMUMS.textsPerVariant || variant.texts.some((text) => text.trim().length === 0 || templateTextLength(text) > TEXT_BLOCK_MAXIMUMS.textLength));
   const valid = draft !== null && !nameInvalid && !nameTaken && !nameReserved && !variantInvalid && draft.categoryId.length > 0;
-  const dirty = draft !== null && baselineDraft !== null && JSON.stringify(draft) !== JSON.stringify(baselineDraft);
+  const dirty = draft !== null && (revision === null || (baselineDraft !== null && JSON.stringify(draft) !== JSON.stringify(baselineDraft)));
   const blockVariants = new Map((data?.blocks ?? [])
     .filter((block) => !reservedNames.has(block.name))
     .map((block) => [block.name, block.variants]));
@@ -233,7 +243,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
   // the preview for whatever is current now.
   const previewRequestId = useRef(0);
   useEffect(() => {
-    if (data === null || debouncedPreviewTemplate.length === 0) return;
+    if (data === null || debouncedPreviewTemplate.length === 0 || debouncedPreviewTemplate !== previewTemplate) return;
     const requestId = ++previewRequestId.current;
     const chatStatus: ("viewer" | "subscriber" | "vip" | "moderator" | "broadcaster")[] | null = simulatedContext === "command"
       ? [simulatedTier === "everyone" ? "viewer" : simulatedTier as "subscriber" | "vip" | "moderator" | "broadcaster"]
@@ -251,7 +261,10 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
       // must not blank out a still-current, already-rendered preview.
       if (previewRequestId.current === requestId) setPreviewResult(null);
     });
-  }, [channelId, data, debouncedPreviewTemplate, previewNow, simulatedContext, simulatedGame, simulatedStream, simulatedTier]);
+    return () => {
+      if (previewRequestId.current === requestId) previewRequestId.current += 1;
+    };
+  }, [channelId, data, debouncedPreviewTemplate, previewNow, previewTemplate, simulatedContext, simulatedGame, simulatedStream, simulatedTier]);
   const previewText = previewTemplate.length === 0 ? "" : previewResult ?? previewTemplate;
   const previewOverflow = matchingVariant === null ? null : estimateEmbeddedBlockOverflow(matchingVariant.texts, blockVariants, data?.templateVariables ?? []);
   const nestedVariants = (name: string, visited = new Set<string>()): TextBlockVariant[] => {
@@ -263,47 +276,69 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
   };
   const variantsInDraftTree = draft === null ? [] : nestedVariants(draft.name);
   const roleConditionUsedOutsideCommand = draft !== null && variantsInDraftTree.some((variant) => variant.conditions.minimumTier !== undefined) &&
-    (data?.usages[draft.name] ?? []).some((usage) => usage.kind !== "command");
+    (data?.usages[selectedName ?? draft.name] ?? []).some((usage) => usage.kind !== "command");
   const commandInputVariables = new Set(data?.templateVariables
     .filter((variable) => variable.unavailableContextText !== undefined && !(variable.contexts?.includes("event") ?? true))
     .map((variable) => variable.name) ?? []);
   const inputVariableUsedOutsideCommand = draft !== null && variantsInDraftTree.some((variant) => variant.texts.some((text) =>
     templateVariableNames(text).some((name) => commandInputVariables.has(name)),
   )) &&
-    (data?.usages[draft.name] ?? []).some((usage) => usage.kind !== "command");
-  const blockUsages = draft === null ? [] : data?.usages[draft.name] ?? [];
+    (data?.usages[selectedName ?? draft.name] ?? []).some((usage) => usage.kind !== "command");
+  const blockUsages = draft === null ? [] : data?.usages[selectedName ?? draft.name] ?? [];
 
   // Bumped on every editor switch; an obsolete save/delete must not touch the newer editor.
   const editorSwitch = useRef(0);
 
   const openCreateNow = (): void => {
     editorSwitch.current += 1;
+    previewRequestId.current += 1;
+    setPreviewResult(null);
     const categoryId = data?.categories[0]?.id ?? "";
     const initial = newDraft(categoryId);
     setSelectedName(null);
     setDraft(initial);
     setBaselineDraft(initial);
     setRevision(null);
+    setAttemptedSave(false);
+    setSaveError(null);
+    setServerConflict(false);
   };
 
   const closeEditorNow = (): void => {
     editorSwitch.current += 1;
+    previewRequestId.current += 1;
+    setPreviewResult(null);
     setSelectedName(null);
     setDraft(null);
     setBaselineDraft(null);
     setRevision(null);
+    setMobileDetailOpen(false);
+    setConfirmingDelete(false);
+    setAttemptedSave(false);
+    setSaveError(null);
+    setServerConflict(false);
   };
 
   const selectBlockNow = (block: TextBlock): void => {
     editorSwitch.current += 1;
+    previewRequestId.current += 1;
+    setPreviewResult(null);
     setSelectedName(block.name);
     setDraft(draftFromBlock(block));
     setBaselineDraft(draftFromBlock(block));
     setRevision(block.revision);
+    setAttemptedSave(false);
+    setSaveError(null);
+    setServerConflict(false);
   };
 
   const saveDraft = async (): Promise<string | null> => {
-    if (draft === null || !valid || !canManage) return labels.saveError;
+    setAttemptedSave(true);
+    setSaveError(null);
+    if (draft === null || !valid || !canManage) {
+      setSaveError(labels.saveError);
+      return labels.saveError;
+    }
     setPending(true);
     const startedSwitch = editorSwitch.current;
     try {
@@ -337,8 +372,11 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
       setDraft(draftFromBlock(saved));
       setBaselineDraft(draftFromBlock(saved));
       setRevision(saved.revision);
+      setAttemptedSave(false);
+      setServerConflict(false);
       return null;
     } catch (caught: unknown) {
+      if (editorSwitch.current !== startedSwitch) return null;
       const code = errorCode(caught);
       const path = errorPath(caught);
       const contentIssues = templateContentIssues(caught, labels);
@@ -346,6 +384,8 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
         : code === "text_library_reference_depth_exceeded" ? labels.depth(path)
           : code === "text_library_template_usage_invalid" && contentIssues.length > 0 ? contentIssues.join(" ")
             : code === null ? labels.saveError : labels.errors[code] ?? (caught instanceof PanelApiError && caught.status === 409 ? labels.conflict : labels.saveError);
+      setSaveError(message);
+      if (caught instanceof PanelApiError && caught.status === 409) setServerConflict(true);
       return message;
     } finally {
       setPending(false);
@@ -358,13 +398,109 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
   };
 
   const discardDraft = useCallback((): void => {
+    previewRequestId.current += 1;
+    setPreviewResult(null);
+    if (revision === null) {
+      editorSwitch.current += 1;
+      setSelectedName(null);
+      setDraft(null);
+      setBaselineDraft(null);
+      setRevision(null);
+      setMobileDetailOpen(false);
+      setAttemptedSave(false);
+      setSaveError(null);
+      setServerConflict(false);
+      return;
+    }
     if (baselineDraft !== null) setDraft({ ...baselineDraft, games: [...baselineDraft.games], variants: baselineDraft.variants.map((variant) => ({ ...variant, conditions: { ...variant.conditions }, texts: [...variant.texts] })) });
-  }, [baselineDraft]);
+    setSaveError(null);
+    setServerConflict(false);
+  }, [baselineDraft, revision]);
   const draftGuard = useDraftGuard(dirty, saveDraft, discardDraft);
-  useEffect(() => registerDashboardNavigationGuard(draftGuard.guardSwitch), [draftGuard.guardSwitch]);
-  const openCreate = (): void => { draftGuard.guardSwitch(openCreateNow); };
-  const closeEditor = (): void => { draftGuard.guardSwitch(closeEditorNow); };
-  const selectBlock = (block: TextBlock): void => { draftGuard.guardSwitch(() => { selectBlockNow(block); }); };
+  const guardSwitch = draftGuard.guardSwitch;
+  useEffect(() => registerDashboardNavigationGuard((proceed, cancel) => {
+    if (pending) {
+      cancel();
+      return;
+    }
+    guardSwitch(proceed, cancel);
+  }), [guardSwitch, pending]);
+  const openCreate = (): void => {
+    if (pending) return;
+    guardSwitch(() => { openCreateNow(); setMobileDetailOpen(true); });
+  };
+  const openDelete = (): void => {
+    if (!pending) guardSwitch(() => { setConfirmingDelete(true); });
+  };
+  const closeEditor = (): void => { if (!pending) guardSwitch(closeEditorNow); };
+  const selectBlock = (block: TextBlock): void => {
+    if (pending) return;
+    if (block.name === selectedName) {
+      setMobileDetailOpen(true);
+      return;
+    }
+    guardSwitch(() => { selectBlockNow(block); setMobileDetailOpen(true); });
+  };
+
+  useEffect(() => {
+    if (data === null || initialSelectionDone.current) return;
+    initialSelectionDone.current = true;
+    const first = data.blocks[0];
+    if (first === undefined || selectedName !== null || draft !== null) return;
+    const startedSwitch = editorSwitch.current;
+    const timer = window.setTimeout(() => {
+      if (editorSwitch.current !== startedSwitch) return;
+      setSelectedName(first.name);
+      setDraft(draftFromBlock(first));
+      setBaselineDraft(draftFromBlock(first));
+      setRevision(first.revision);
+    }, 0);
+    return () => { window.clearTimeout(timer); };
+  }, [data, draft, selectedName]);
+
+  useEffect(() => {
+    if (data === null || selectedName === null || revision === null) return;
+    const startedSwitch = editorSwitch.current;
+    const timer = window.setTimeout(() => {
+      if (editorSwitch.current !== startedSwitch) return;
+      const latest = data.blocks.find((block) => block.name === selectedName);
+      if (latest === undefined) {
+        if (dirty) setServerConflict(true);
+        else closeEditorNow();
+        return;
+      }
+      if (latest.revision === revision) return;
+      if (dirty) {
+        setServerConflict(true);
+        return;
+      }
+      const next = draftFromBlock(latest);
+      previewRequestId.current += 1;
+      setPreviewResult(null);
+      setDraft(next);
+      setBaselineDraft(next);
+      setRevision(latest.revision);
+      setServerConflict(false);
+    }, 0);
+    return () => { window.clearTimeout(timer); };
+  }, [data, dirty, revision, selectedName]);
+
+  const reloadCurrent = (): void => {
+    previewRequestId.current += 1;
+    setPreviewResult(null);
+    const latest = data?.blocks.find((block) => block.name === selectedName);
+    if (latest === undefined) {
+      closeEditorNow();
+      return;
+    }
+    const next = draftFromBlock(latest);
+    setDraft(next);
+    setBaselineDraft(next);
+    setRevision(latest.revision);
+    setSaveError(null);
+    setServerConflict(false);
+    setAttemptedSave(false);
+  };
 
   const removeBlock = async (): Promise<void> => {
     if (selectedName === null || revision === null || !canManage) return;
@@ -385,9 +521,16 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
       setDraft(null);
       setBaselineDraft(null);
       setRevision(null);
+      setMobileDetailOpen(false);
       setConfirmingDelete(false);
     } catch (caught: unknown) {
-      notify({ tone: "error", message: errorCode(caught) === "text_library_block_conflict" ? labels.conflict : labels.saveError });
+      const code = errorCode(caught);
+      if (code === "text_library_block_in_use") {
+        await libraryQuery.refetch().catch(() => undefined);
+        notify({ tone: "error", message: labels.deleteBlocked });
+      } else {
+        notify({ tone: "error", message: code === "text_library_block_conflict" ? labels.conflict : labels.saveError });
+      }
     } finally {
       setPending(false);
     }
@@ -395,7 +538,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
 
   const updateCondition = (id: string, update: (conditions: TextBlockConditions) => TextBlockConditions): void => {
     if (draft === null) return;
-    setDraft({ ...draft, variants: updateVariant(draft.variants, id, (variant) => ({ ...variant, conditions: update(variant.conditions) })) });
+    patchDraft({ ...draft, variants: updateVariant(draft.variants, id, (variant) => ({ ...variant, conditions: update(variant.conditions) })) });
   };
 
   const saveCategory = async (category: TextBlockCategory): Promise<void> => {
@@ -447,10 +590,10 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
     finally { setPending(false); }
   };
 
-  if (data === null) return <section className="module-stack text-library" aria-label={labels.library} style={{ minHeight: "calc(var(--s10) * 30)" }}>
-    <section className="config-section text-library__list-panel" aria-label={labels.library}>
-      <div className="section-heading"><h2>{labels.library}</h2></div>
-      <ListToolbar
+  if (data === null) return <div className="text-library">
+    <CollectionPage
+      title={labels.library}
+      toolbar={<ListToolbar
         className="text-library__list-toolbar"
         language={resolvedLanguage}
         searchLabel={labels.search}
@@ -466,16 +609,25 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
             messages={{ ...labels.gameMultiSelect, label: labels.gameFilter }} visuallyHiddenLabel compact disabled />
         </>}
         create={{ label: labels.addBlock, onClick: openCreate, disabled: true, ...(!canManage ? { reason: labels.managementLocked } : {}) }}
-      />
-      <LoadState variant="panel-1200" status={libraryQuery.isError ? "error" : "loading"}
-        loading={<LoadStateLines rows={8} height={34} />}
+        usage={{ count: 0, maximum: TEXT_BLOCK_MAXIMUMS.blocksPerChannel, copy: {
+          countSuffix: labels.countSuffix,
+          filteredInfix: common.of,
+          filteredSuffix: labels.filteredSuffix,
+          limitInfix: common.of,
+          limitSuffix: labels.limitSuffix,
+          loadedSuffix: common.loaded,
+        } }}
+      />}
+      list={<LoadState variant="panel-1200" status={libraryQuery.isError ? "error" : "loading"}
+        loading={<LoadStateLines rows={8} height={42} />}
         empty={<div />}
         error={<p>{labels.loadError}</p>}
         queryError={{ message: labels.loadError, onRetry: () => { void libraryQuery.refetch(); } }}
         refreshError={libraryQuery.isRefetchError}
-      >{null}</LoadState>
-    </section>
-  </section>;
+      >{null}</LoadState>}
+      detail={<EmptyState title={common.chooseCollection} description={common.editSelection} />}
+    />
+  </div>;
   const categories = data.categories.map((category) => ({ value: category.id, label: categoryLabel(category, labels) }));
   const categoryBlockCounts = new Map(data.categories.map((category) => [category.id, data.blocks.filter((block) => block.categoryId === category.id).length]));
   const activeFilters = [
@@ -493,23 +645,11 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
     : atBlockLimit ? labels.blockLimitReached(data.blocks.length, TEXT_BLOCK_MAXIMUMS.blocksPerChannel) : undefined;
 
   return (
-    <LoadState
-      variant="panel-1200"
-      status="success"
-      loading={<LoadStateLines rows={8} height={34} />}
-      empty={<div />}
-      error={<p>{labels.loadError}</p>}
-      queryError={{ message: labels.loadError, onRetry: () => { void libraryQuery.refetch(); } }}
-      refreshError={libraryQuery.isRefetchError}
-    >
-    <section className="module-stack text-library" aria-label={labels.library} style={{ minHeight: "calc(var(--s10) * 30)" }}>
+    <section className="text-library" aria-label={labels.library}>
 
-      <ListDetail
-        list={<section className="config-section text-library__list-panel" aria-label={labels.library}>
-          <div className="section-heading">
-            <h2>{labels.library}</h2>
-          </div>
-          <ListToolbar
+      <CollectionPage
+        title={labels.library}
+        toolbar={<ListToolbar
             className="text-library__list-toolbar"
             language={resolvedLanguage}
             searchLabel={labels.search}
@@ -526,53 +666,79 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
             create={{ label: labels.addBlock, onClick: openCreate, disabled: pending || createReason !== undefined, ...(createReason === undefined ? {} : { reason: createReason }) }}
             usage={{ count: data.blocks.length, maximum: TEXT_BLOCK_MAXIMUMS.blocksPerChannel, ...(activeFilters.length === 0 ? {} : { filteredCount: visibleBlocks.length }), copy: { countSuffix: labels.countSuffix, filteredInfix: common.of, filteredSuffix: labels.filteredSuffix, limitInfix: common.of, limitSuffix: labels.limitSuffix, loadedSuffix: common.loaded } }}
             {...(activeFilters.length === 0 ? {} : { activeFilters: activeFilters.join(" · "), activeFiltersLabel: labels.activeFilters, resetLabel: labels.resetFilters, onReset: () => { setSearch(""); setCategoryFilter(""); setGameFilter([]); } })}
-          />
-          <div data-testid="text-library-list-slot" style={{ height: "calc(var(--s10) * 18)", overflowY: "auto" }}>
-          {visibleBlocks.length === 0 ? <p className="empty-state" style={{ minHeight: "calc(var(--s10) * 18)" }}>{labels.empty}</p> : (
-            <div className="table-wrap">
-              <table className="table table--content text-library__table">
-                <thead><tr><th scope="col">{labels.name}</th><th scope="col">{labels.category}</th><th scope="col">{labels.variants}</th><th scope="col">{labels.uses}</th></tr></thead>
-                <tbody>{visibleBlocks.map((block) => {
-                  const category = data.categories.find((entry) => entry.id === block.categoryId);
-                  const usages = data.usages[block.name] ?? [];
-                  return <tr key={block.name} aria-selected={selectedName === block.name}>
-                    <th scope="row"><button type="button" className="text-library__name-button mono" aria-current={selectedName === block.name ? "true" : undefined} onClick={(event) => { event.currentTarget.focus(); selectBlock(block); }}>{`{text.${block.name}}`}</button></th>
-                    <td>{category === undefined ? block.categoryId : categoryLabel(category, labels)}</td>
-                    <td><Badge>{labels.variantsCount(block.variants.length)}</Badge></td>
-                    <td><Badge tone={usages.length === 0 ? "neutral" : "brand"}>{labels.usesCount(usages.length)}</Badge></td>
-                  </tr>;
-                })}</tbody>
-              </table>
-            </div>
-          )}
-          </div>
-        </section>}
-        inspector={draft === null ? null : (
+          />}
+        list={data.blocks.length === 0 ? null : <LoadState
+          variant="panel-0"
+          status="success"
+          loading={<LoadStateLines rows={8} height={34} />}
+          empty={<div />}
+          error={<p>{labels.loadError}</p>}
+          queryError={{ message: labels.loadError, onRetry: () => { void libraryQuery.refetch(); } }}
+          refreshError={libraryQuery.isRefetchError}
+        ><div data-testid="text-library-list-slot" className="text-library__list">
+          {visibleBlocks.length === 0 ? <p className="text-library__empty-search">{labels.empty}</p> : visibleBlocks.map((block) => {
+            const category = data.categories.find((entry) => entry.id === block.categoryId);
+            const usages = data.usages[block.name] ?? [];
+            const sample = block.variants.flatMap((variant) => variant.texts)[0] ?? "";
+            return <button type="button" className={`text-library__item${selectedName === block.name ? " is-selected" : ""}`} aria-current={selectedName === block.name ? "true" : undefined} key={block.name} disabled={pending} onClick={() => { selectBlock(block); }}>
+              <span className="text-library__item-dot" aria-hidden="true" />
+              <span className="text-library__item-copy">
+                <strong>{`{text.${block.name}}`}</strong>
+                <small>{sample}</small>
+                <span className="text-library__item-meta">{category === undefined ? block.categoryId : categoryLabel(category, labels)} · {labels.variantsCount(block.variants.length)}</span>
+              </span>
+              <Badge tone={usages.length === 0 ? "neutral" : "brand"}>{labels.usesCount(usages.length)}</Badge>
+            </button>;
+          })}
+        </div></LoadState>}
+      detail={draft === null ? <EmptyState title={common.chooseCollection} description={common.editSelection} /> : (
 
-          <SubInspector className="text-library__editor" ariaLabel={isCreate ? labels.addBlock : labels.name} title={isCreate ? labels.addBlock : `${labels.name}: ${draft.name}`} identifier={isCreate ? undefined : draft.name} closeLabel={labels.close} onClose={closeEditor}>
+          <div className="text-library__editor">
+            <PageHeader
+              title={isCreate ? labels.addBlock : `{text.${draft.name}}`}
+              meta={isCreate ? labels.nameHint : labels.usesCount(blockUsages.length)}
+              {...(!canManage ? { lockHint: labels.operatorReason } : {})}
+              {...(canManage && !isCreate ? { pageActions: <Button variant="subtle" danger disabled={pending || blockUsages.length > 0} {...(blockUsages.length > 0 ? { title: labels.deleteBlocked } : {})} onClick={openDelete}>{labels.delete}</Button> } : {})}
+              {...(canManage ? { save: {
+                dirty,
+                pending,
+                ...(saveError === null ? {} : { error: saveError }),
+                invalid: !valid,
+                invalidMessage: labels.saveError,
+                onInvalidSave: () => { setAttemptedSave(true); },
+                persistent: true,
+                ...(serverConflict && !isCreate ? { conflict: { message: labels.conflict, reloadLabel: labels.reload, onReload: reloadCurrent } } : {}),
+                onSave: () => { void saveDraftWithToast(); },
+                onDiscard: discardDraft,
+                saveLabel: isCreate ? labels.create : labels.save,
+                discardLabel: common.discard,
+                savedLabel: common.saved,
+                pendingLabel: common.saving,
+              } } : {})}
+            />
             <div className="text-library__editor-body">
               {canManage ? <>
-              <InspectorSection title={labels.generalSection}>
+              <Section title={labels.generalSection} variant="inspector">
                 <InspectorFieldRow label={labels.name} help={labels.nameHint}>
                   <Field
                     label={labels.name}
                     hint={labels.nameHint}
                     value={draft.name}
-                    onChange={(name) => setDraft({ ...draft, name: name.toLowerCase().replace(/[^a-z0-9_]/gu, "_").slice(0, 32) })}
+                    onChange={(name) => patchDraft({ ...draft, name: name.toLowerCase().replace(/[^a-z0-9_]/gu, "_").slice(0, 32) })}
                     disabled={pending}
-                    {...(draft.name.length > 0 && nameInvalid ? { error: labels.nameInvalid } : nameTaken ? { error: labels.nameExists } : nameReserved ? { error: labels.nameReserved } : {})}
+                    {...((attemptedSave || draft.name.length > 0) && nameInvalid ? { error: labels.nameInvalid } : nameTaken ? { error: labels.nameExists } : nameReserved ? { error: labels.nameReserved } : {})}
                     mono
                   />
                 </InspectorFieldRow>
                 <InspectorFieldRow label={labels.category}>
-                  <Select label={labels.category} value={draft.categoryId} onChange={(value) => value !== null && setDraft({ ...draft, categoryId: value })} disabled={pending} options={categories} />
+                  <Select label={labels.category} value={draft.categoryId} onChange={(value) => value !== null && patchDraft({ ...draft, categoryId: value })} disabled={pending} options={categories} />
                 </InspectorFieldRow>
                 <InspectorFieldRow label={labels.gameBound} help={labels.gameMultiSelect.hint}>
-                  <GameMultiSelect searchGames={searchGames} lookupGames={lookupGames} value={draft.games} onChange={(games) => setDraft({ ...draft, games })} messages={{ ...labels.gameMultiSelect, label: labels.gameBound }} disabled={pending} />
+                  <GameMultiSelect searchGames={searchGames} lookupGames={lookupGames} value={draft.games} onChange={(games) => patchDraft({ ...draft, games })} messages={{ ...labels.gameMultiSelect, label: labels.gameBound }} disabled={pending} />
                 </InspectorFieldRow>
-              </InspectorSection>
+              </Section>
 
-              <InspectorSection title={labels.variants} help={labels.variantsCount(draft.variants.length)}>
+              <Section title={labels.variants} variant="inspector" headingAction={<Badge>{labels.variantsCount(draft.variants.length)}</Badge>}>
                 {draft.variants.map((variant, index) => {
                   const isDefault = index === draft.variants.length - 1;
                   const variantOverflow = estimateEmbeddedBlockOverflow(variant.texts, blockVariants, data.templateVariables);
@@ -582,9 +748,9 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
                         <strong>{isDefault ? labels.defaultVariant : labels.variant(index + 1)}</strong>
                         <span className="muted">{isDefault ? labels.noConditions : conditionSummary(variant, labels, conditionDefinitions, language === "en" ? "en" : "de")}</span>
                         {isDefault ? null : <div className="form-actions">
-                          <Button size="compact" disabled={pending || index === 0} onClick={() => setDraft({ ...draft, variants: draft.variants.map((entry, entryIndex, all) => entryIndex === index - 1 ? all[index] as TextBlockVariant : entryIndex === index ? all[index - 1] as TextBlockVariant : entry) })}>{labels.moveUp}</Button>
-                          <Button size="compact" disabled={pending || index >= draft.variants.length - 2} onClick={() => setDraft({ ...draft, variants: draft.variants.map((entry, entryIndex, all) => entryIndex === index + 1 ? all[index] as TextBlockVariant : entryIndex === index ? all[index + 1] as TextBlockVariant : entry) })}>{labels.moveDown}</Button>
-                          <Button size="compact" danger="subtle" disabled={pending} onClick={() => setDraft({ ...draft, variants: draft.variants.filter((entry) => entry.id !== variant.id) })}>{labels.removeVariant}</Button>
+                          <Button size="compact" disabled={pending || index === 0} onClick={() => patchDraft({ ...draft, variants: draft.variants.map((entry, entryIndex, all) => entryIndex === index - 1 ? all[index] as TextBlockVariant : entryIndex === index ? all[index - 1] as TextBlockVariant : entry) })}>{labels.moveUp}</Button>
+                          <Button size="compact" disabled={pending || index >= draft.variants.length - 2} onClick={() => patchDraft({ ...draft, variants: draft.variants.map((entry, entryIndex, all) => entryIndex === index + 1 ? all[index] as TextBlockVariant : entryIndex === index ? all[index + 1] as TextBlockVariant : entry) })}>{labels.moveDown}</Button>
+                          <Button size="compact" danger="subtle" disabled={pending} onClick={() => patchDraft({ ...draft, variants: draft.variants.filter((entry) => entry.id !== variant.id) })}>{labels.removeVariant}</Button>
                         </div>}
                       </div>
                       {isDefault ? null : <fieldset className="text-library__conditions" disabled={pending}>
@@ -640,7 +806,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
                       <div className="text-library__texts">
                         {variant.texts.map((text, textIndex) => (
                           <div className="text-library__text-field" key={`${variant.id}-${String(textIndex)}`}>
-                            <TemplateTextField label={`${labels.text}${variant.texts.length > 1 ? ` ${String(textIndex + 1)}` : ""}`} hint={labels.textHint} value={text} onChange={(value) => setDraft({ ...draft, variants: updateVariant(draft.variants, variant.id, (entry) => ({ ...entry, texts: entry.texts.map((current, currentIndex) => currentIndex === textIndex ? value : current) })) })} maxLength={TEXT_BLOCK_MAXIMUMS.textLength} disabled={pending} variables={[
+                            <TemplateTextField label={`${labels.text}${variant.texts.length > 1 ? ` ${String(textIndex + 1)}` : ""}`} hint={labels.textHint} value={text} onChange={(value) => patchDraft({ ...draft, variants: updateVariant(draft.variants, variant.id, (entry) => ({ ...entry, texts: entry.texts.map((current, currentIndex) => currentIndex === textIndex ? value : current) })) })} maxLength={TEXT_BLOCK_MAXIMUMS.textLength} disabled={pending} variables={[
                               ...data.templateVariables.filter((variable) => !variable.isTextBlock).flatMap((variable) => {
                                 if (variable.group === undefined) return [];
                                 const pickerCopy = variable.picker?.[resolvedLanguage];
@@ -672,21 +838,21 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
                               worstCaseLength: (length, maximum) => `${String(length)} / ${String(maximum)}`,
                               picker: labels.picker,
                             }} />
-                            {variant.texts.length <= 1 ? null : <Button size="compact" danger="subtle" disabled={pending} onClick={() => setDraft({ ...draft, variants: updateVariant(draft.variants, variant.id, (entry) => ({ ...entry, texts: entry.texts.filter((_entry, entryIndex) => entryIndex !== textIndex) })) })}>{labels.removeText}</Button>}
+                            {variant.texts.length <= 1 ? null : <Button size="compact" danger="subtle" disabled={pending} onClick={() => patchDraft({ ...draft, variants: updateVariant(draft.variants, variant.id, (entry) => ({ ...entry, texts: entry.texts.filter((_entry, entryIndex) => entryIndex !== textIndex) })) })}>{labels.removeText}</Button>}
                           </div>
                         ))}
-                        {variant.texts.length >= TEXT_BLOCK_MAXIMUMS.textsPerVariant ? null : <Button size="compact" disabled={pending} onClick={() => setDraft({ ...draft, variants: updateVariant(draft.variants, variant.id, (entry) => ({ ...entry, texts: [...entry.texts, ""] })) })}>{labels.addText}</Button>}
+                        {variant.texts.length >= TEXT_BLOCK_MAXIMUMS.textsPerVariant ? null : <Button size="compact" disabled={pending} onClick={() => patchDraft({ ...draft, variants: updateVariant(draft.variants, variant.id, (entry) => ({ ...entry, texts: [...entry.texts, ""] })) })}>{labels.addText}</Button>}
                       </div>
-                      <p className="text-library__warning" role={variantOverflow === null ? undefined : "note"} aria-live="polite"
-                        style={{ height: "var(--s6)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", margin: 0 }}
+                      <p className={`text-library__warning${variantOverflow === null ? " is-empty" : ""}`} role={variantOverflow === null ? undefined : "note"} aria-live="polite"
+                        style={{ minHeight: "var(--s6)", margin: 0 }}
                         title={variantOverflow === null ? undefined : labels.previewTooLong(variantOverflow.blockNames)}>
                         {variantOverflow === null ? "" : labels.previewTooLong(variantOverflow.blockNames)}
                       </p>
                     </article>
                   );
                 })}
-                {draft.variants.length >= TEXT_BLOCK_MAXIMUMS.variantsPerBlock ? null : <Button disabled={pending} onClick={() => setDraft({ ...draft, variants: [...draft.variants.slice(0, -1), newVariant(), draft.variants[draft.variants.length - 1] as TextBlockVariant] })}>{labels.addVariant}</Button>}
-              </InspectorSection>
+                {draft.variants.length >= TEXT_BLOCK_MAXIMUMS.variantsPerBlock ? null : <Button disabled={pending} onClick={() => patchDraft({ ...draft, variants: [...draft.variants.slice(0, -1), newVariant(), draft.variants[draft.variants.length - 1] as TextBlockVariant] })}>{labels.addVariant}</Button>}
+              </Section>
               </> : <>
                 <p className="lock-reason lock-reason--with-icon" role="note">{labels.operatorReason}</p>
                 <dl className="text-library__read-only-properties">
@@ -706,79 +872,73 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
                 </dl>
               </>}
 
-              <InspectorSection title={labels.preview}>
+              <Section title={labels.preview} variant="inspector">
                 <div className="text-library__condition-grid">
                   <Select label={labels.simulateStream} value={simulatedStream} onChange={(value) => value !== null && setSimulatedStream(value as "online" | "offline")} options={[{ value: "online", label: labels.online }, { value: "offline", label: labels.offline }]} />
                   <Select label={labels.simulateContext} value={simulatedContext} onChange={(value) => value !== null && setSimulatedContext(value as "command" | "event")} options={[{ value: "command", label: labels.commandContext }, { value: "event", label: labels.eventContext }]} />
                   {simulatedContext === "command" ? <Select label={labels.minimumTier} value={simulatedTier} onChange={(value) => value !== null && setSimulatedTier(value)} options={Object.entries(labels.tierLabels).map(([value, label]) => ({ value, label }))} /> : null}
                   <GameMultiSelect searchGames={searchGames} lookupGames={lookupGames} value={simulatedGame} onChange={(games) => setSimulatedGame(games.slice(0, 1))} messages={{ ...labels.gameMultiSelect, label: labels.gameCondition }} />
                 </div>
-                <div data-testid="text-library-preview-slot" style={{ height: "calc(var(--s10) * 9)", overflow: "hidden" }}>
+                <div data-testid="text-library-preview-slot">
                   {matchingVariant === null ? <p className="muted">{blockUnavailableForGame ? labels.blockUnavailableForGame : labels.noMatchingVariant}</p> : <>
                     <p className="muted" style={{ minHeight: "var(--s6)", margin: 0 }}>{labels.selectedVariant(isDefaultVariant(matchingVariant, draft) ? labels.defaultVariant : labels.variant(draft.variants.findIndex((variant) => variant.id === matchingVariant.id) + 1))}</p>
-                    <div className="text-library__preview-output" style={{ height: "calc(var(--s10) * 8)", overflow: "hidden" }}>
+                    <div className="text-library__preview-output">
                       <ChatPreview label={labels.preview} text={previewText} speaker="Bot" countLabel={String(previewText.length)} />
                     </div>
                   </>}
                 </div>
-                <p className="text-library__warning" data-testid="text-library-warning-slot" role={previewWarnings.length > 0 ? "note" : undefined} aria-live="polite"
-                  style={{ height: "calc(var(--s10) * 3)", overflowY: "auto", margin: 0 }}>
+                <p className={`text-library__warning${previewWarnings.length === 0 ? " is-empty" : ""}`} data-testid="text-library-warning-slot" role={previewWarnings.length > 0 ? "note" : undefined} aria-live="polite"
+                  style={{ minHeight: "var(--s8)", margin: 0 }}>
                   {previewWarnings.join(" ")}
                 </p>
-              </InspectorSection>
+              </Section>
 
-              <InspectorSection title={labels.uses}>
-                <div data-testid="text-library-usage-slot" style={{ height: "calc(var(--s10) * 7)", overflowY: "auto" }}>
+              <Section title={labels.uses} variant="inspector">
+                <div data-testid="text-library-usage-slot" style={{ minHeight: "var(--s12)", maxHeight: "calc(var(--s10) * 7)", overflowY: "auto" }}>
                   {blockUsages.length === 0 ? <p className="muted">{labels.noUsages}</p> : <ul className="text-library__usages">{blockUsages.map((usage, index) => <li key={`${usage.kind}-${usage.label}-${String(index)}`}><span>{labels.usageKind[usage.kind]}</span><span>{usage.label}</span></li>)}</ul>}
                   {blockUsages.length === 0 ? null : <p className="muted">{labels.deleteBlocked}</p>}
                 </div>
-              </InspectorSection>
+              </Section>
 
-              <InspectorActions destructive={isCreate ? undefined : <Button danger="subtle" disabled={!canManage || pending || blockUsages.length > 0} onClick={() => { setConfirmingDelete(true); }}>{labels.delete}</Button>}>
-                {canManage ? <Button variant="primary" disabled={pending || !valid || (isCreate && atBlockLimit)} onClick={() => { void saveDraftWithToast(); }}>{isCreate ? labels.create : labels.save}</Button> : null}
-                {canManage ? <Button variant="subtle" disabled={pending} onClick={closeEditor}>{labels.discard}</Button> : null}
-              </InspectorActions>
-              <p className="list-create-action__reason" role={isCreate && atBlockLimit ? "note" : undefined} aria-hidden={!isCreate || !atBlockLimit}>
-                {isCreate && atBlockLimit ? labels.blockLimitReached(data.blocks.length, TEXT_BLOCK_MAXIMUMS.blocksPerChannel) : ""}
-              </p>
+              {isCreate && atBlockLimit ? <RuleNote>{labels.blockLimitReached(data.blocks.length, TEXT_BLOCK_MAXIMUMS.blocksPerChannel)}</RuleNote> : null}
             </div>
-          </SubInspector>
-        )}
-        onCloseInspector={closeEditor}
-      />
-
-      <details className="text-library__settings">
-        <summary>{labels.categories}</summary>
-        <div className="text-library__settings-body">
-          {canManage ? <>
-          <InspectorSection title={labels.categories}>
-          {data.categories.map((category) => {
-            const originalName = categoryLabel(category, labels);
-            const value = categoryDrafts[category.id] ?? category.customName ?? originalName;
-            const isEmpty = categoryBlockCounts.get(category.id) === 0;
-            return <div className="text-library__category-row" key={category.id}>
-              <Field label={`${labels.categoryName}: ${originalName}`} value={value} onChange={(name) => setCategoryDrafts({ ...categoryDrafts, [category.id]: name })} disabled={pending || category.catalogKey !== null} maxLength={40} countLabel={(count, maximum) => `${String(count)} / ${String(maximum)}`} />
-              {category.catalogKey === null ? <>
-                <Button size="compact" disabled={pending || value.trim().length === 0 || value === originalName} onClick={() => { void saveCategory(category); }}>{labels.categoryRename}</Button>
-                <Button size="compact" danger="subtle" disabled={pending || !isEmpty} {...(isEmpty ? {} : { title: labels.categoryDeleteBlocked })} onClick={() => { void removeCategory(category); }}>{labels.categoryDelete}</Button>
-              </> : null}
-              {!isEmpty ? null : <span className="muted">{labels.categoryEmpty}</span>}
-            </div>;
-          })}
-          <div className="text-library__category-create">
-            <Field label={labels.categoryName} value={newCategoryName} onChange={setNewCategoryName} maxLength={40} countLabel={(count, maximum) => `${String(count)} / ${String(maximum)}`} disabled={pending} />
-            <Button disabled={pending || newCategoryName.trim().length === 0 || data.categories.length >= 25} onClick={() => { void addCategory(); }}>{labels.categoryAdd}</Button>
-            {data.categories.length >= 25 ? <p className="muted">{labels.categoryLimit}</p> : null}
+            <details className="text-library__settings">
+              <summary>{labels.categories}</summary>
+              <div className="text-library__settings-body">
+                {canManage ? <Section title={labels.categories} variant="inspector">
+                  {data.categories.map((category) => {
+                    const originalName = categoryLabel(category, labels);
+                    const value = categoryDrafts[category.id] ?? category.customName ?? originalName;
+                    const isEmpty = categoryBlockCounts.get(category.id) === 0;
+                    return <div className="text-library__category-row" key={category.id}>
+                      <Field label={`${labels.categoryName}: ${originalName}`} value={value} onChange={(name) => setCategoryDrafts({ ...categoryDrafts, [category.id]: name })} disabled={pending || category.catalogKey !== null} maxLength={40} countLabel={(count, maximum) => `${String(count)} / ${String(maximum)}`} />
+                      {category.catalogKey === null ? <>
+                        <Button size="compact" disabled={pending || value.trim().length === 0 || value === originalName} onClick={() => { void saveCategory(category); }}>{labels.categoryRename}</Button>
+                      <Button size="compact" danger="subtle" disabled={pending || !isEmpty} {...(!isEmpty ? { title: labels.categoryDeleteBlocked } : {})} onClick={() => { void removeCategory(category); }}>{labels.categoryDelete}</Button>
+                      </> : null}
+                      {!isEmpty ? null : <span className="muted">{labels.categoryEmpty}</span>}
+                    </div>;
+                  })}
+                  <div className="text-library__category-create">
+                    <Field label={labels.categoryName} value={newCategoryName} onChange={setNewCategoryName} maxLength={40} countLabel={(count, maximum) => `${String(count)} / ${String(maximum)}`} disabled={pending} />
+                    <Button disabled={pending || newCategoryName.trim().length === 0 || data.categories.length >= 25} onClick={() => { void addCategory(); }}>{labels.categoryAdd}</Button>
+                    {data.categories.length >= 25 ? <p className="muted">{labels.categoryLimit}</p> : null}
+                  </div>
+                </Section> : <>
+                  <p className="lock-reason lock-reason--with-icon" role="note">{labels.operatorReason}</p>
+                  <dl className="text-library__read-only-properties">
+                    {data.categories.map((category) => <div key={category.id}><dt>{`${labels.categoryName}: ${categoryLabel(category, labels)}`}</dt><dd>{category.customName ?? categoryLabel(category, labels)}</dd></div>)}
+                  </dl>
+                </>}
+              </div>
+            </details>
           </div>
-          </InspectorSection>
-          </> : <>
-            <p className="lock-reason lock-reason--with-icon" role="note">{labels.operatorReason}</p>
-            <dl className="text-library__read-only-properties">
-              {data.categories.map((category) => <div key={category.id}><dt>{`${labels.categoryName}: ${categoryLabel(category, labels)}`}</dt><dd>{category.customName ?? categoryLabel(category, labels)}</dd></div>)}
-            </dl>
-          </>}
-        </div>
-      </details>
+        )}
+        empty={<EmptyState title={labels.library} description={labels.empty} />}
+        detailOpen={mobileDetailOpen}
+        backLabel={labels.close}
+        {...(pending ? {} : { onCloseDetail: closeEditor })}
+      />
       <ConfirmDialog opened={confirmingDelete} title={labels.deleteTitle(selectedName ?? "")} description={labels.deleteConsequence(selectedName ?? "")} confirmLabel={labels.deleteConfirm(selectedName ?? "")} cancelLabel={labels.close} onCancel={() => { setConfirmingDelete(false); }} onConfirm={() => { void removeBlock(); }} pending={pending} danger />
       <ConfirmDialog
         opened={draftGuard.confirmOpen}
@@ -794,7 +954,6 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
         danger
       />
     </section>
-    </LoadState>
   );
 }
 

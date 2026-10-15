@@ -7,9 +7,9 @@ export interface TextLibraryTexts {
   search: string;
   activeFilters: string;
   resetFilters: string;
-  countSuffix: string;
-  limitSuffix: string;
-  filteredSuffix: string;
+  countSuffix: (count: number) => string;
+  limitSuffix: (count: number) => string;
+  filteredSuffix: (count: number) => string;
   categoryFilter: string;
   gameFilter: string;
   allCategories: string;
@@ -18,7 +18,6 @@ export interface TextLibraryTexts {
   loadError: string;
   save: string;
   create: string;
-  discard: string;
   draftGuardTitle: string;
   draftGuardDescription: string;
   continueEditing: string;
@@ -96,6 +95,7 @@ export interface TextLibraryTexts {
   previewTooLong: (blockNames: readonly string[]) => string;
   operatorReason: string;
   conflict: string;
+  reload: string;
   cycle: (path: readonly string[]) => string;
   depth: (path: readonly string[]) => string;
   saveError: string;
@@ -120,9 +120,9 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     search: "Textbausteine suchen",
     activeFilters: "Aktive Filter:",
     resetFilters: "Zurücksetzen",
-    countSuffix: "Textbausteine",
-    limitSuffix: "Textbausteine belegt",
-    filteredSuffix: "Textbausteine",
+    countSuffix: (count) => count === 1 ? "Textbaustein" : "Textbausteine",
+    limitSuffix: (count) => `${count === 1 ? "Textbaustein" : "Textbausteinen"} belegt`,
+    filteredSuffix: (count) => count === 1 ? "Textbaustein" : "Textbausteine",
     categoryFilter: "Kategorie",
     allCategories: "Alle Kategorien",
     gameFilter: "Spiel",
@@ -131,7 +131,6 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     loadError: "Die Textbibliothek konnte nicht geladen werden.",
     save: "Änderungen speichern",
     create: "Anlegen",
-    discard: "Verwerfen",
     draftGuardTitle: "Ungespeicherte Änderungen",
     draftGuardDescription: "Dieser Textbaustein enthält ungespeicherte Änderungen. Was möchtest du tun?",
     continueEditing: "Weiter bearbeiten",
@@ -217,6 +216,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     },
     operatorReason: "Nur Broadcaster und Verwalter dürfen Textbausteine und Kategorien ändern.",
     conflict: "Dieser Textbaustein wurde inzwischen geändert. Lade den Serverstand neu.",
+    reload: "Neu laden",
     cycle: (path) => `Zirkuläre Einbettung: ${path.join(" → ")}.`,
     depth: (path) => `Die Einbettung überschreitet die maximale Tiefe von 3: ${path.join(" → ")}.`,
     saveError: "Der Textbaustein konnte nicht gespeichert werden.",
@@ -266,9 +266,9 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     search: "Search text blocks",
     activeFilters: "Active filters:",
     resetFilters: "Reset",
-    countSuffix: "text blocks",
-    limitSuffix: "text blocks used",
-    filteredSuffix: "text blocks",
+    countSuffix: (count) => count === 1 ? "text block" : "text blocks",
+    limitSuffix: (count) => `${count === 1 ? "text block" : "text blocks"} used`,
+    filteredSuffix: (count) => count === 1 ? "text block" : "text blocks",
     categoryFilter: "Category",
     allCategories: "All categories",
     gameFilter: "Game",
@@ -277,7 +277,6 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     loadError: "The text library could not be loaded.",
     save: "Save changes",
     create: "Create",
-    discard: "Discard",
     draftGuardTitle: "Unsaved changes",
     draftGuardDescription: "This text block has unsaved changes. What would you like to do?",
     continueEditing: "Continue editing",
@@ -363,6 +362,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     },
     operatorReason: "Only broadcasters and managers can change text blocks and categories.",
     conflict: "This text block has changed since you opened it. Reload the server version.",
+    reload: "Reload",
     cycle: (path) => `Circular reference: ${path.join(" → ")}.`,
     depth: (path) => `Nesting exceeds the maximum depth of 3: ${path.join(" → ")}.`,
     saveError: "The text block could not be saved.",

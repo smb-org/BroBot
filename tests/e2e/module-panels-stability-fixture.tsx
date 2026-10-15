@@ -21,6 +21,7 @@ const query = new URLSearchParams(window.location.search);
 const language = query.get("lang") === "de" ? "de" : "en";
 const panelName = query.get("panel");
 const realtimeEnabled = query.get("realtime") === "1";
+const canManage = query.get("operator") !== "1";
 
 export const RealtimeHarness = ({ children }: { children: ReactNode }) => {
   useRealtimePanelMessages(realtimeEnabled ? channelId : null, realtimeEnabled);
@@ -32,8 +33,8 @@ const panel = panelName === "api_source" ? <ApiSourcePanel channelId={channelId}
   : panelName === "chat_voting" ? <ChatVotingPanel channelId={channelId} language={language} canOperate />
       : panelName === "faq" ? <FaqPanel channelId={channelId} language={language} />
         : panelName === "text_commands" ? <TextCommandsPanel channelId={channelId} language={language} />
-          : panelName === "text_library" ? <TextLibraryPanel channelId={channelId} language={language} canManage />
-          : panelName === "timers" ? <TimersPanel channelId={channelId} language={language} />
+          : panelName === "text_library" ? <TextLibraryPanel channelId={channelId} language={language} canManage={canManage} />
+          : panelName === "timers" ? <TimersPanel channelId={channelId} language={language} canManage={canManage} />
             : panelName === "votekick" ? <VotekickPanel channelId={channelId} language={language} />
               : <p>Choose a module panel.</p>;
 
@@ -41,8 +42,8 @@ createRoot(document.getElementById("root") as HTMLElement).render(
   <DashboardDataProvider>
     <RealtimeHarness>
       <UiProvider>
-        <main className="main-content" style={panelName === "faq"
-          ? { display: "flex", flexDirection: "column", width: "min(1400px, 100%)", height: "100dvh", padding: "16px" }
+        <main className="main-content" style={panelName === "faq" || panelName === "text_library" || panelName === "timers"
+          ? { display: "flex", flexDirection: "column", width: "min(1400px, 100%)", height: "100dvh", minHeight: 0, padding: "16px" }
           : { width: "min(1400px, 100%)", padding: "16px" }}>
           {panel}
           {panelName === "faq" ? <ToastHost /> : null}

@@ -11,12 +11,12 @@ interface ListToolbarUsage {
   filteredCount?: number;
   loaded?: boolean;
   copy: {
-    countSuffix: string;
+    countSuffix: string | ((count: number) => string);
     filteredInfix: string;
-    filteredSuffix: string;
+    filteredSuffix: string | ((count: number) => string);
     limitInfix: string;
-    limitSuffix: string;
-    loadedSuffix: string;
+    limitSuffix: string | ((count: number) => string);
+    loadedSuffix: string | ((count: number) => string);
   };
 }
 
@@ -48,20 +48,21 @@ export interface ListToolbarProperties {
 }
 
 const numberValue = (value: number, language?: DashboardLanguage) => <span className="mono">{formatNumber(value, language)}</span>;
+const usageCopy = (copy: string | ((count: number) => string), count: number): string => typeof copy === "function" ? copy(count) : copy;
 
 const usageText = (usage: ListToolbarUsage, language?: DashboardLanguage): ReactNode => {
   const { copy } = usage;
   if (usage.maximum !== undefined) {
     return <>
-      {usage.filteredCount === undefined ? null : <>{numberValue(usage.filteredCount, language)} {copy.filteredInfix} {numberValue(usage.count, language)} {copy.filteredSuffix} · </>}
-      {numberValue(usage.count, language)} {copy.limitInfix} {numberValue(usage.maximum, language)} {copy.limitSuffix}
+      {usage.filteredCount === undefined ? null : <>{numberValue(usage.filteredCount, language)} {copy.filteredInfix} {numberValue(usage.count, language)} {usageCopy(copy.filteredSuffix, usage.count)} · </>}
+      {numberValue(usage.count, language)} {copy.limitInfix} {numberValue(usage.maximum, language)} {usageCopy(copy.limitSuffix, usage.maximum)}
     </>;
   }
   if (usage.filteredCount !== undefined) {
-    return <>{numberValue(usage.filteredCount, language)} {copy.filteredInfix} {numberValue(usage.count, language)} {copy.filteredSuffix}</>;
+    return <>{numberValue(usage.filteredCount, language)} {copy.filteredInfix} {numberValue(usage.count, language)} {usageCopy(copy.filteredSuffix, usage.count)}</>;
   }
-  if (usage.loaded === true) return <>{numberValue(usage.count, language)} {copy.loadedSuffix}</>;
-  return <>{numberValue(usage.count, language)} {copy.countSuffix}</>;
+  if (usage.loaded === true) return <>{numberValue(usage.count, language)} {usageCopy(copy.loadedSuffix, usage.count)}</>;
+  return <>{numberValue(usage.count, language)} {usageCopy(copy.countSuffix, usage.count)}</>;
 };
 
 /** A fixed-height search/filter/action row with a permanently reserved status line. */

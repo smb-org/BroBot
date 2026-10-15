@@ -4,7 +4,7 @@ import { MessageCircle } from "lucide-react";
 import { useId, useState, type ReactElement } from "react";
 
 import type { ChatOutputTarget } from "../../contracts/values";
-import { dashboardLanguage } from "../locale";
+import { dashboardLanguage, type DashboardLanguage } from "../locale";
 import { chatTargetFieldTexts } from "../chat-target-field-locale";
 import { InspectorFieldRow } from "./InspectorParts";
 import { FieldError } from "./FieldError";
@@ -17,6 +17,7 @@ const DEFAULT_ALLOWED: readonly ChatTargetChoice[] = ["all_chats", "source_only"
 
 export interface ChatTargetFieldProps {
   label: string;
+  language?: DashboardLanguage;
   value: ChatOutputTarget | null;
   onChange: (value: ChatOutputTarget | null) => void;
   allowed?: readonly ChatTargetChoice[];
@@ -29,16 +30,17 @@ export interface ChatTargetFieldProps {
 }
 
 /** Shared portal-backed destination picker for messages sent to chat. */
-export function ChatTargetField({ label, value, onChange, allowed = DEFAULT_ALLOWED, effectiveDefault, disabled = false, error, reserveError = false, inline = false }: ChatTargetFieldProps): ReactElement {
+export function ChatTargetField({ label, language, value, onChange, allowed = DEFAULT_ALLOWED, effectiveDefault, disabled = false, error, reserveError = false, inline = false }: ChatTargetFieldProps): ReactElement {
   const id = useId();
   const [open, setOpen] = useState(false);
-  const texts = chatTargetFieldTexts[dashboardLanguage()];
+  const texts = chatTargetFieldTexts[language ?? dashboardLanguage()];
   const hasError = error !== undefined && error.length > 0;
   const options = TARGETS.filter((target) => allowed.includes(target));
   const selectedValue = value ?? (allowed.includes("channel_default") ? "channel_default" : "source_only");
   const selected = options.find((target) => target === selectedValue) ?? options[0];
+  const inheritedOutsideChoices = value === null && !allowed.includes("channel_default");
   const isSelected = (target: ChatTargetChoice): boolean => value === null
-    ? allowed.includes("channel_default") ? target === "channel_default" : target === "source_only"
+    ? allowed.includes("channel_default") ? target === "channel_default" : false
     : value === target;
   const concreteLabelFor = (target: ChatOutputTarget): string => target === "all_chats"
     ? texts.allChats
@@ -66,7 +68,9 @@ export function ChatTargetField({ label, value, onChange, allowed = DEFAULT_ALLO
             aria-invalid={hasError ? true : undefined}
           >
             <MessageCircle aria-hidden="true" size={15} />
-            <span className="ui-chat-target-field__value">{selected === undefined ? label : labelFor(selected)}</span>
+            <span className="ui-chat-target-field__value">{inheritedOutsideChoices
+              ? texts.channelDefault(effectiveDefault === undefined ? undefined : concreteLabelFor(effectiveDefault))
+              : selected === undefined ? label : labelFor(selected)}</span>
             <span className="ui-chat-target-field__chevron" aria-hidden="true">⌄</span>
           </PopoverPrimitive.Trigger>
           <PopoverContent role="dialog" aria-label={label} className="ui-chat-target-field__popover" initialFocus={false}>
@@ -74,7 +78,7 @@ export function ChatTargetField({ label, value, onChange, allowed = DEFAULT_ALLO
             <RadioGroup
               className="ui-chat-target-field__options"
               aria-label={label}
-              value={selected}
+              value={inheritedOutsideChoices ? "channel_default" : selected}
               onValueChange={(target: ChatTargetChoice) => {
                 onChange(target === "channel_default" ? null : target);
                 setOpen(false);
