@@ -50,10 +50,28 @@ interface MockDashboardOptions {
   role?: "manager" | "operator";
 }
 
-const mockDashboard = async (page: Page, { failPatches = false, role = "manager" }: MockDashboardOptions = {}): Promise<{ posts: number; patches: number }> => {
+interface MockDashboardCounts {
+  posts: number;
+  patches: number;
+  patchRequests: { revision: string | null; payload: Record<string, unknown> }[];
+  commandReads: number;
+  revisionReads: number;
+  revisions: Record<string, number>;
+  updateCommand: (command: Record<string, unknown>) => void;
+}
+
+const mockDashboard = async (page: Page, { failPatches = false, role = "manager" }: MockDashboardOptions = {}): Promise<MockDashboardCounts> => {
   const actorChannel = role === channel.role ? channel : { ...channel, role };
   const commands = new Map<string, Record<string, unknown>>([["hallo", commandRecord("hallo", "Hallo {user}! Willkommen im Kanal.")]]);
-  const counts = { posts: 0, patches: 0 };
+  const counts: MockDashboardCounts = {
+    posts: 0,
+    patches: 0,
+    patchRequests: [],
+    commandReads: 0,
+    revisionReads: 0,
+    revisions: {},
+    updateCommand: (command) => { commands.set(String(command.name), command); },
+  };
   const faqEntry = {
     id: "faq-429-review",
     name: "Begrüßung",
@@ -84,7 +102,10 @@ const mockDashboard = async (page: Page, { failPatches = false, role = "manager"
     }
     if (pathname === `/api/channels/${channelId}/modules`) return route.fulfill(json({ modules }));
     if (pathname === `/api/channels/${channelId}/modules/text_commands/commands`) {
-      if (method === "GET") return route.fulfill(json({ commands: [...commands.values()], variables: [] }));
+      if (method === "GET") {
+        counts.commandReads += 1;
+        return route.fulfill(json({ commands: [...commands.values()], variables: [] }));
+      }
       if (method === "POST") {
         counts.posts += 1;
         const payload = route.request().postDataJSON() as Record<string, unknown>;
@@ -98,9 +119,10 @@ const mockDashboard = async (page: Page, { failPatches = false, role = "manager"
     const commandMatch = new RegExp(`/api/channels/${channelId}/modules/text_commands/commands/([^/]+)$`, "u").exec(pathname);
     if (method === "PATCH" && commandMatch !== null) {
       counts.patches += 1;
-      if (failPatches) return route.fulfill(json({ error: "temporary_save_failure" }, 500));
       const oldName = decodeURIComponent(commandMatch[1] ?? "");
       const payload = route.request().postDataJSON() as Record<string, unknown>;
+      counts.patchRequests.push({ revision: new URL(route.request().url()).searchParams.get("revision"), payload });
+      if (failPatches) return route.fulfill(json({ error: "temporary_save_failure" }, 500));
       const previous = commands.get(oldName) ?? commandRecord(oldName, "");
       const command: Record<string, unknown> = { ...previous, ...payload, revision: Number(previous.revision ?? 1) + 1, updatedAt: new Date().toISOString() };
       commands.delete(oldName);
@@ -109,12 +131,44 @@ const mockDashboard = async (page: Page, { failPatches = false, role = "manager"
     }
     if (pathname === `/api/channels/${channelId}/modules/faq/entries`) return route.fulfill(json({ orderRevision: 1, entries: [faqEntry] }));
     if (pathname === `/api/channels/${channelId}/template-variables`) return route.fulfill(json({ variables: [] }));
-    if (pathname === `/api/channels/${channelId}/revisions`) return route.fulfill(json({ revisions: {} }));
+    if (pathname === `/api/channels/${channelId}/revisions`) {
+      counts.revisionReads += 1;
+      return route.fulfill(json({ revisions: counts.revisions }));
+    }
     if (pathname === "/api/csrf") return route.fulfill(json({ token: "csrf-429-review" }));
     return route.fulfill(json({}));
   });
 
   return counts;
+};
+
+const installCommandRealtime = async (page: Page): Promise<{
+  waitForSocket: () => Promise<void>;
+  sendRevisionHint: (revision: number) => void;
+}> => {
+  let sendRevisionHint: ((revision: number) => void) | null = null;
+  let messageNumber = 0;
+  await page.routeWebSocket(`**/ws/channels/${channelId}`, (socket) => {
+    socket.onMessage(() => undefined);
+    sendRevisionHint = (revision) => {
+      messageNumber += 1;
+      socket.send(JSON.stringify({
+        version: 1,
+        id: `command-revision-${String(messageNumber)}`,
+        createdAt: "2030-01-01T12:00:00.000Z",
+        channelId,
+        type: "panel.resources.changed",
+        payload: { resources: ["module:text_commands:commands"], revisions: { "module:text_commands:commands": revision } },
+      }));
+    };
+  });
+  return {
+    waitForSocket: async () => { await expect.poll(() => sendRevisionHint !== null).toBe(true); },
+    sendRevisionHint: (revision) => {
+      if (sendRevisionHint === null) throw new Error("The text command realtime socket is not connected.");
+      sendRevisionHint(revision);
+    },
+  };
 };
 
 const openTextCommand = async (page: Page, width: number, height: number): Promise<void> => {
@@ -150,6 +204,8 @@ test("operator command settings render as properties and keep the operational sw
   await expect(editor).toBeVisible();
   await expect(editor.locator("dl.properties")).toBeVisible();
   await expect(editor.getByText("Hallo {user}! Willkommen im Kanal.", { exact: true })).toBeVisible();
+  const chatTarget = editor.locator("dl.properties > div").filter({ hasText: "Chat-Ziel" }).locator("dd");
+  await expect(chatTarget).toHaveText("Nur unser Chat");
   await expect(editor.getByRole("textbox")).toHaveCount(0);
 
   const active = editor.getByRole("switch", { name: "Aktiv" });
@@ -157,6 +213,43 @@ test("operator command settings render as properties and keep the operational sw
   await active.click();
   await editor.getByRole("button", { name: "Speichern", exact: true }).click();
   await expect.poll(() => counts.patches).toBe(1);
+});
+
+test("operator can toggle a command after realtime content changes using its latest revision", async ({ page }) => {
+  const realtime = await installCommandRealtime(page);
+  const counts = await mockDashboard(page, { role: "operator" });
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto(`/channels/${channelId}/modules/text_commands`);
+
+  const editor = page.getByRole("region", { name: "Eigenschaften von !hallo" });
+  await expect(editor).toBeVisible();
+  await realtime.waitForSocket();
+  await expect.poll(() => counts.revisionReads).toBeGreaterThan(0);
+  await page.waitForTimeout(300);
+
+  const row = page.locator(".text-command-row").filter({ hasText: "!hallo" });
+  counts.updateCommand({ ...commandRecord("hallo", "Der Verwalter hat die Antwort geändert."), revision: 2 });
+  counts.revisions["module:text_commands:commands"] = 2;
+  const previousReads = counts.commandReads;
+  realtime.sendRevisionHint(2);
+  await expect(row).toContainText("Der Verwalter hat die Antwort geändert.");
+  await expect.poll(() => counts.commandReads).toBeGreaterThan(previousReads);
+
+  await editor.getByRole("switch", { name: "Aktiv" }).click();
+  await editor.getByRole("button", { name: "Speichern", exact: true }).click();
+  await expect.poll(() => counts.patchRequests).toHaveLength(1);
+  expect(counts.patchRequests[0]).toEqual({ revision: null, payload: { enabled: false, revision: 2 } });
+  await expect(editor.getByText("Der Verwalter hat die Antwort geändert.", { exact: true })).toBeVisible();
+  await expect(editor.locator(".ui-save-bar__status")).toContainText("Alle Änderungen gespeichert");
+});
+
+test("selected command rows expose aria-current", async ({ page }) => {
+  await mockDashboard(page);
+  await openTextCommand(page, 1280, 800);
+
+  const row = page.locator(".text-command-row").filter({ hasText: "!hallo" });
+  await expect(row).toHaveAttribute("aria-current", "true");
+  await expect(row).not.toHaveAttribute("aria-selected");
 });
 
 test("Ctrl+Enter and Cmd+Enter save the current command draft", async ({ page }) => {
@@ -171,6 +264,25 @@ test("Ctrl+Enter and Cmd+Enter save the current command draft", async ({ page })
   await response.fill("Auch mit Cmd+Enter gespeichert.");
   await response.press("Meta+Enter");
   await expect.poll(() => counts.patches).toBe(2);
+});
+
+test("Ctrl+Enter does not save while an IME composition is active", async ({ page }) => {
+  const counts = await mockDashboard(page);
+  await openTextCommand(page, 1280, 800);
+
+  const response = page.getByRole("textbox", { name: "Antworttext", exact: true });
+  await response.fill("Ein unfertiger Eingabeentwurf.");
+  await response.evaluate((element) => {
+    element.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true, isComposing: true }));
+  });
+  await response.evaluate((element) => {
+    element.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true, keyCode: 229 }));
+  });
+  await page.waitForTimeout(100);
+  expect(counts.patches).toBe(0);
+
+  await response.press("Control+Enter");
+  await expect.poll(() => counts.patches).toBe(1);
 });
 
 test("mobile Save and switch turns a new command into its editor", async ({ page }) => {
@@ -304,6 +416,22 @@ test("FAQ mobile editor scrolls its final field above the fixed save bar", async
   expect(orderNoteGeometry.textHeight, JSON.stringify(orderNoteGeometry)).toBeGreaterThan(18);
 
   await page.locator(".faq-panel__entry").filter({ hasText: "Begrüßung" }).click();
+  for (const selector of [".faq-panel__entry-name", ".faq-panel__sample-message"]) {
+    const countGeometry = await page.locator(selector).evaluate((field) => {
+      const hint = field.querySelector<HTMLElement>(".ui-field__hint");
+      const count = field.querySelector<HTMLElement>(".ui-field__count");
+      const description = field.querySelector<HTMLElement>(".ui-field__description");
+      if (hint === null || count === null || description === null) throw new Error("FAQ helper or counter is missing.");
+      return {
+        hintBottom: hint.getBoundingClientRect().bottom,
+        countTop: count.getBoundingClientRect().top,
+        countRight: count.getBoundingClientRect().right,
+        descriptionRight: description.getBoundingClientRect().right,
+      };
+    });
+    expect(countGeometry.countTop).toBeGreaterThanOrEqual(countGeometry.hintBottom);
+    expect(countGeometry.countRight).toBeLessThanOrEqual(countGeometry.descriptionRight + 1);
+  }
   const faqHeaderGeometry = await page.evaluate(() => {
     const header = document.querySelector<HTMLElement>(".faq-panel__detail > .page-header");
     const testAction = document.querySelector<HTMLElement>(".faq-panel__detail .page-header__page-actions > button");

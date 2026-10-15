@@ -404,6 +404,21 @@
     overscroll-behavior: contain;
   }
 
+  .faq-panel__editor .ui-field__description {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    gap: 4px;
+  }
+
+  .faq-panel__editor .ui-field__hint {
+    width: 100%;
+  }
+
+  .faq-panel__editor .ui-field__count {
+    justify-self: end;
+  }
+
   .faq-panel__detail > .page-header .page-header__save {
     position: fixed;
     z-index: var(--layer-popover);

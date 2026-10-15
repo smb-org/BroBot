@@ -144,7 +144,7 @@ test("template editor stays in place while registered variables arrive", async (
   await gotoPanel(page, "text_commands");
   await page.getByRole("button", { name: "Add command" }).click();
   await requestStarted;
-  const response = page.getByRole("textbox", { name: "Response" });
+  const response = page.getByRole("textbox", { name: "Response text", exact: true });
   await expect(response).toBeVisible();
   const editor = page.locator(".command-template-editor").first();
   const insertVariable = page.getByRole("button", { name: "Insert variable" });
@@ -413,7 +413,7 @@ test("text command switch and role inclusion fit their narrow and desktop layout
   await page.setViewportSize({ width: 390, height: 844 });
   await gotoPanel(page, "text_commands", "en");
   await page.getByRole("button", { name: "Add command" }).click();
-  await page.getByRole("textbox", { name: "Response" }).waitFor();
+  await page.getByRole("textbox", { name: "Response text", exact: true }).waitFor();
   const prefixGeometry = await page.evaluate(() => {
     const nameInput = document.querySelector("#command-name");
     const aliases = document.querySelector(".chips-input__control");
@@ -1636,7 +1636,7 @@ test("text command slash help stays stable and optional variable fields mount on
   await gotoPanel(page, "text_commands");
   await page.getByRole("button", { name: "Add command" }).click();
   const editor = page.locator(".text-command-editor");
-  const response = page.getByRole("textbox", { name: "Response" });
+  const response = page.getByRole("textbox", { name: "Response text", exact: true });
   await expect(response).toBeVisible();
   const slashHelp = page.locator(".command-slash-help");
   const editorBeforeSlash = await box(editor);

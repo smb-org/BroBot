@@ -1738,6 +1738,6 @@ describe("Text command editor", () => {
     renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" initialSelection="clip" /></UiProvider>);
 
     expect(await screen.findByRole("region", { name: "Eigenschaften von !clip" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /!clip/u })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("button", { name: /!clip/u })).toHaveAttribute("aria-current", "true");
   });
 });

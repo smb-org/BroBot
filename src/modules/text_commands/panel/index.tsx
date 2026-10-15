@@ -532,9 +532,11 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
     if (pendingAliases.length > 0) return labels.aliasPendingInvalid;
     const operatorToggle = !canManageContent;
     if (operatorToggle) {
-      if (!canOperate || command === null) return labels.managementLocked;
+      if (!canOperate || command === null) {
+        setSaveError(labels.managementLocked);
+        return labels.managementLocked;
+      }
       const baseline = draftFromCommand(command);
-      if (JSON.stringify({ ...draft, enabled: baseline.enabled }) !== JSON.stringify(baseline)) return labels.managementLocked;
       if (draft.enabled === baseline.enabled) return null;
     }
     const parsedSlashInput = operatorToggle ? { status: "none" as const } : parseLeadingSlashCommand(draft.text);
@@ -571,7 +573,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
     };
     setPending(true); setDeleteError(undefined); setFieldError(null); setServerFieldErrors({}); setSaveError(undefined); setConcurrentConflict(false); setReloadError(false); setSaved(false);
     try {
-      const baselineRevision = isCreate ? null : draftRevision.current;
+      const baselineRevision = isCreate ? null : operatorToggle ? command.revision : draftRevision.current;
       const token = generation();
       const result = await onWrite(
         baselineRevision,
@@ -591,7 +593,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
         },
       );
       draftRevision.current = result.command.revision;
-      accept({ ...savedDraft, ...payload, name: payload.name });
+      accept(operatorToggle ? draftFromCommand(result.command) : { ...savedDraft, ...payload, name: payload.name });
       setServerWarnings(result.warnings);
       await onRefresh();
       setSaved(true);
@@ -1011,6 +1013,11 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
       items={[{ label: labels.delete, danger: true, disabled: !canManageContent || pending, onSelect: requestDelete }]}
     />}
   </>;
+  const rawChatTarget = draft.chatTarget as string | null;
+  const effectiveChatTarget = rawChatTarget === null || rawChatTarget === "channel_default"
+    ? channelDefaultChatTarget
+    : rawChatTarget as ChatOutputTarget;
+  const chatTargetLabel = effectiveChatTarget === undefined ? "—" : labels.chatTargetLabels[effectiveChatTarget];
   const readOnlyProperties = <dl className="properties text-command-properties">
     <div>
       <dt>{labels.active}</dt>
@@ -1034,7 +1041,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
     <div><dt>{labels.gameFilter}</dt><dd>{draft.games.length === 0 ? labels.gameMultiSelect.allGames : draft.games.map(({ name }) => name).join(", ")}</dd></div>
     <div><dt>{labels.userCooldown}</dt><dd>{String(draft.userCooldownSeconds)} s</dd></div>
     <div><dt>{labels.responseType}</dt><dd>{labels.responseTypeLabels[draft.responseType]}</dd></div>
-    <div><dt>{labels.chatTarget}</dt><dd>{draft.chatTarget === null ? labels.chatTargetDefault : labels.chatTargetLabels[draft.chatTarget]}</dd></div>
+    <div><dt>{labels.chatTarget}</dt><dd>{chatTargetLabel}</dd></div>
     {draft.kind === "list" ? null : <div><dt>{labels.templateFieldLabels.usageText}</dt><dd className="text-command-properties__response">{draft.usageText || "—"}</dd></div>}
     <div><dt>{labels.variableAction}</dt><dd>{draft.variableAction === null
       ? "—"
@@ -1073,7 +1080,10 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
   const saveStatus = <div className="text-command-editor__save">{saveBar}</div>;
   return <div className="text-command-editor" role="region" aria-label={isCreate ? labels.add : labels.details(command.name)} onKeyDown={(event) => {
     if (event.key === "Escape") { event.preventDefault(); onClose(); }
-    if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && canManageContent && dirty && !pending) {
+    // Legacy IME events can report keyCode 229 without setting isComposing.
+    // eslint-disable-next-line @typescript-eslint/no-deprecated
+    const isComposing = event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !isComposing && canManageContent && dirty && !pending) {
       event.preventDefault();
       void saveDraft();
     }
@@ -1377,7 +1387,7 @@ const TextCommandsPanelContent = ({
           ref={rowRef(command.name)}
           type="button"
           className="text-command-row"
-          aria-selected={selectedName === command.name}
+          aria-current={selectedName === command.name ? "true" : undefined}
           onClick={() => { selectCommand(command.name); }}
         >
           <span className="text-command-row__status"><StatusLed state={command.enabled ? "ok" : "off"} label={command.enabled ? labels.filterActive : labels.filterInactive} dotOnly /></span>
