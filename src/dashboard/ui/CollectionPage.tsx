@@ -26,6 +26,7 @@ export interface CollectionPageProps {
   empty?: ReactNode;
   detailOpen?: boolean;
   backLabel?: string;
+  closeDetailDisabled?: boolean;
   onCloseDetail?: () => void;
 }
 
@@ -38,6 +39,7 @@ export function CollectionPage({
   empty,
   detailOpen = false,
   backLabel,
+  closeDetailDisabled = false,
   onCloseDetail,
 }: CollectionPageProps): ReactElement {
   const texts = dashboardCommonTexts();
@@ -125,7 +127,7 @@ export function CollectionPage({
             onCloseDetail();
           }}
         >
-          {onCloseDetail === undefined || backLabel === undefined ? null : <Button className="collection-page__detail-back" variant="neutral" onClick={onCloseDetail}><Icon name="collapse" size={16} />{backLabel}</Button>}
+          {onCloseDetail === undefined || backLabel === undefined ? null : <Button className="collection-page__detail-back" variant="neutral" disabled={closeDetailDisabled} onClick={onCloseDetail}><Icon name="collapse" size={16} />{backLabel}</Button>}
           {detail}
         </section>
       </div>

@@ -26,6 +26,7 @@ import {
   useDraftGuard,
 } from "../../../dashboard/ui";
 import { formatRelativeTime } from "../../../dashboard/ui/format-relative-time";
+import { formatTimerRunLabel } from "./format-timer-run-label";
 import { Switch as SwitchPrimitive } from "../../../dashboard/ui/primitives/switch";
 import type { ModulePanelProperties } from "../../contract";
 import { TIMER_MAXIMUM_COUNT, type Timer, type TimerTrigger } from "../contracts";
@@ -237,15 +238,17 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
       return;
     }
     const next = draftFromTimer(editing);
-    previewRequestId.current += 1;
+    if (draft?.messageText !== next.messageText) {
+      previewRequestId.current += 1;
+      setPreviewText(null);
+      setPreviewBusy(false);
+    }
     dirtyRef.current = false;
     setDraft(cloneDraft(next));
     setBaselineDraft(cloneDraft(next));
     setError(null);
     setAttemptedSave(false);
     setServerConflict(false);
-    setPreviewText(null);
-    setPreviewBusy(false);
   };
 
   const saveDraft = async (): Promise<string | null> => {
@@ -306,7 +309,10 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
   };
   const selectTimer = (timer: Timer): void => {
     if (editorPending) return;
-    if (timer.id === selectedId) return;
+    if (timer.id === selectedId) {
+      setMobileDetailOpen(true);
+      return;
+    }
     guardSwitch(() => { selectTimerNow(timer); });
   };
   const closeEditor = (): void => { if (!editorPending) guardSwitch(closeEditorNow); };
@@ -520,13 +526,15 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
   </LoadState>;
 
   const title = draft === null ? labels.selectTimer : editing === null ? labels.create : draft.name || labels.edit;
-  const relativeRun = (timestamp: string): string => formatRelativeTime(timestamp, now, language ?? "de", timeZone).label;
+  const relativeRun = (timestamp: string): string => formatTimerRunLabel(timestamp, now, language ?? "de", timeZone);
   const selectedMeta = selectedTimer === undefined ? undefined : `${labels.lastRun}: ${selectedTimer.lastRunAt === null ? labels.neverRun : relativeRun(selectedTimer.lastRunAt)} · ${nextRunLabel(selectedTimer, labels)}: ${selectedTimer.nextRunAt === null ? labels.noNextRun : relativeRun(selectedTimer.nextRunAt)}`;
 
   const detail = draft === null ? <EmptyState title={labels.selectTimer} description={labels.selectTimerDescription}
     {...(canManage && createReason === undefined ? { action: { label: labels.add, onClick: openCreate } } : {})} /> : (
     <div className="timer-editor">
       <PageHeader
+        kind="timers"
+        icon={null}
         title={title}
         {...(selectedMeta === undefined ? {} : { meta: selectedMeta })}
         {...(editing === null || selectedTimer === undefined ? {} : { moduleSwitch: <div className="timer-header__switch">
@@ -539,7 +547,14 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
           <span>{selectedTimer.enabled ? labels.enabled : labels.disabled}</span>
         </div> })}
         {...(!canManage ? { lockHint: labels.roleLocked } : {})}
-        {...(canManage && editing !== null ? { pageActions: <Button variant="subtle" danger disabled={editorPending || dirty} onClick={() => { setDeleteTarget(editing); setDeleteError(null); }}>{labels.delete}</Button> } : {})}
+        {...(editing === null ? {} : { overflow: <div className="header-action">
+          <Button variant="subtle" danger="subtle" disabled={!canManage || editorPending || dirty} onClick={() => {
+            if (canManage) { setDeleteTarget(editing); setDeleteError(null); }
+          }}>{labels.delete}</Button>
+          {!canManage ? <span className="lock-reason" role="note">{labels.roleLocked}</span>
+            : dirty ? <span className="lock-reason" role="note">{labels.deleteNeedsSaved}</span>
+              : editorPending ? <span className="lock-reason" role="note">{common.saving}</span> : null}
+        </div> })}
         {...(canManage ? { save: {
           dirty,
           pending: editorPending,
@@ -595,13 +610,13 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
             <SwitchSection title={labels.live} hint={labels.liveRule} checked={draft.live !== null} onChange={(enabled) => patchDraft({ live: enabled ? emptyIntervalDraft() : null })} pending={editorPending}>
               <div className="timer-editor__unit-grid">
                 <UnitInput label={labels.minutes} value={draft.live?.minutes ?? ""} onChange={(minutes) => patchDraft({ live: draft.live === null ? null : { ...draft.live, minutes } })} min={1} max={1_440} unit={labels.minutesUnit} required />
-                <UnitInput label={labels.messageCount} value={draft.live?.minimumMessages ?? ""} onChange={(minimumMessages) => patchDraft({ live: draft.live === null ? null : { ...draft.live, minimumMessages } })} min={1} max={100_000} unit={labels.messagesUnit} />
+                <UnitInput label={labels.messageCount} hint={labels.minimumMessagesHint} value={draft.live?.minimumMessages ?? ""} onChange={(minimumMessages) => patchDraft({ live: draft.live === null ? null : { ...draft.live, minimumMessages } })} min={1} max={100_000} unit={labels.messagesUnit} />
               </div>
             </SwitchSection>
             <SwitchSection title={labels.offline} hint={labels.offlineRule} checked={draft.offline !== null} onChange={(enabled) => patchDraft({ offline: enabled ? emptyIntervalDraft() : null })} pending={editorPending}>
               <div className="timer-editor__unit-grid">
                 <UnitInput label={labels.minutes} value={draft.offline?.minutes ?? ""} onChange={(minutes) => patchDraft({ offline: draft.offline === null ? null : { ...draft.offline, minutes } })} min={1} max={1_440} unit={labels.minutesUnit} required />
-                <UnitInput label={labels.messageCount} value={draft.offline?.minimumMessages ?? ""} onChange={(minimumMessages) => patchDraft({ offline: draft.offline === null ? null : { ...draft.offline, minimumMessages } })} min={1} max={100_000} unit={labels.messagesUnit} />
+                <UnitInput label={labels.messageCount} hint={labels.minimumMessagesHint} value={draft.offline?.minimumMessages ?? ""} onChange={(minimumMessages) => patchDraft({ offline: draft.offline === null ? null : { ...draft.offline, minimumMessages } })} min={1} max={100_000} unit={labels.messagesUnit} />
               </div>
             </SwitchSection>
           </div> : null}
@@ -665,7 +680,8 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
       empty={<EmptyState title={labels.emptyTitle} description={labels.empty} />}
       detailOpen={mobileDetailOpen}
       backLabel={labels.back}
-      {...(editorPending ? {} : { onCloseDetail: closeEditor })}
+      closeDetailDisabled={editorPending}
+      onCloseDetail={closeEditor}
     />
     <ConfirmDialog
       opened={deleteTarget !== null}

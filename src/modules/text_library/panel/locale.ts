@@ -28,6 +28,9 @@ export interface TextLibraryTexts {
   deleteTitle: (name: string) => string;
   deleteConsequence: (name: string) => string;
   deleteBlocked: string;
+  deleteBlockedReason: (count: number) => string;
+  deleteBlockedTitle: (name: string) => string;
+  deleteOperatorReason: string;
   deleteConfirm: (name: string) => string;
   name: string;
   nameHint: string;
@@ -141,6 +144,9 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     deleteTitle: (name) => `Textbaustein „${name}“ löschen?`,
     deleteConsequence: (name) => `Textbaustein „${name}“ kann nur gelöscht werden, wenn er nicht verwendet wird.`,
     deleteBlocked: "Dieser Textbaustein wird verwendet und kann erst gelöscht werden, wenn alle Verwendungen entfernt sind.",
+    deleteBlockedReason: (count) => `Wird an ${String(count)} ${count === 1 ? "Stelle" : "Stellen"} verwendet`,
+    deleteBlockedTitle: (name) => `Verwendungen von „${name}“ verhindern das Löschen`,
+    deleteOperatorReason: "Nur Broadcaster und Verwalter",
     deleteConfirm: (name) => `Textbaustein löschen: ${name}`,
     name: "Name",
     nameHint: "Kleinbuchstaben, Zahlen und Unterstrich; wird als {text.name} eingesetzt.",
@@ -287,6 +293,9 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     deleteTitle: (name) => `Delete text block “${name}”?`,
     deleteConsequence: (name) => `Text block “${name}” can only be deleted when it is unused.`,
     deleteBlocked: "This text block is in use. Remove all listed uses before deleting it.",
+    deleteBlockedReason: (count) => `Used in ${String(count)} ${count === 1 ? "place" : "places"}`,
+    deleteBlockedTitle: (name) => `Uses of “${name}” prevent deletion`,
+    deleteOperatorReason: "Broadcasters and managers only",
     deleteConfirm: (name) => `Delete text block: ${name}`,
     name: "Name",
     nameHint: "Lowercase letters, numbers, and underscores; insert it as {text.name}.",

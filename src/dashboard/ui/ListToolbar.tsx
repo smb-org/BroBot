@@ -23,6 +23,7 @@ interface ListToolbarUsage {
 export interface ListToolbarProperties {
   language?: DashboardLanguage;
   searchLabel?: string;
+  searchLabelVisible?: boolean;
   searchPlaceholder?: string;
   searchClearLabel?: string;
   searchValue?: string;
@@ -69,6 +70,7 @@ const usageText = (usage: ListToolbarUsage, language?: DashboardLanguage): React
 export function ListToolbar({
   language,
   searchLabel,
+  searchLabelVisible = false,
   searchPlaceholder,
   searchClearLabel,
   searchValue,
@@ -96,7 +98,8 @@ export function ListToolbar({
   return (
     <div data-ui="" className={["list-toolbar", className].filter(Boolean).join(" ")}>
       <div className={`list-toolbar__row${hasSearch ? "" : " list-toolbar__row--no-search"}`}>
-        {hasSearch ? <div className="list-toolbar__search">
+        {hasSearch ? <div className={`list-toolbar__search${searchLabelVisible ? " list-toolbar__search--labeled" : ""}`}>
+          {searchLabelVisible ? <span className="list-toolbar__search-label">{searchLabel}</span> : null}
           <Field
             variant="search"
             label={searchLabel}

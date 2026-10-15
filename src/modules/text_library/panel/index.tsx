@@ -2,11 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 
 import type { ModulePanelProperties } from "../../contract";
 import { TEXT_BLOCK_MAXIMUMS } from "../contracts";
-import type { TextBlock, TextBlockCategory, TextBlockConditions, TextBlockVariant, TwitchGame } from "../contracts";
+import type { TextBlock, TextBlockCategory, TextBlockConditions, TextBlockUsage, TextBlockVariant, TwitchGame } from "../contracts";
 import { firstMatchingTextBlockVariant, validTextBlockConditions, validTextBlockName } from "../domain";
 import { blockReferencesInText } from "../../contracts/text-block-references";
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Badge, Button, ChatPreview, CollectionPage, ConfirmDialog, EmptyState, Field, GameMultiSelect, InspectorFieldRow, ListToolbar, LoadState, LoadStateLines, PageHeader, registeredModuleTemplateGroup, registerDashboardNavigationGuard, RuleNote, Section, Select, TemplateTextField, notify, useDraftGuard } from "../../../dashboard/ui";
+import { Badge, Button, ChatPreview, CollectionPage, ConfirmDialog, Dialog, EmptyState, Field, GameMultiSelect, InspectorFieldRow, ListToolbar, LoadState, LoadStateLines, PageHeader, registeredModuleTemplateGroup, registerDashboardNavigationGuard, RuleNote, Section, Select, TemplateTextField, notify, useDraftGuard } from "../../../dashboard/ui";
 import { templateVariableNames } from "../../contract";
 import { dashboardCommonTexts, systemTemplateVariableLocale } from "../../../dashboard/locale";
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
@@ -58,6 +58,18 @@ const categoryLabel = (category: TextBlockCategory, labels: ReturnType<typeof te
   category.customName ?? (category.catalogKey === null ? category.id : labels.categoryLabels[category.catalogKey]);
 
 const errorCode = (error: unknown): string | null => error instanceof PanelApiError ? error.code : null;
+
+const errorUsages = (error: unknown): TextBlockUsage[] => {
+  if (!(error instanceof PanelApiError) || typeof error.details !== "object" || error.details === null || !("usages" in error.details) || !Array.isArray(error.details.usages)) return [];
+  const kinds = new Set<TextBlockUsage["kind"]>(["block", "command", "faq", "timer", "overlay", "event"]);
+  return error.details.usages.flatMap((usage: unknown) => {
+    if (typeof usage !== "object" || usage === null) return [];
+    const record = usage as Record<string, unknown>;
+    return typeof record.kind === "string" && kinds.has(record.kind as TextBlockUsage["kind"]) && typeof record.label === "string"
+      ? [{ kind: record.kind as TextBlockUsage["kind"], label: record.label }]
+      : [];
+  });
+};
 
 const errorPath = (error: unknown): string[] => {
   if (!(error instanceof PanelApiError) || typeof error.details !== "object" || error.details === null || !("path" in error.details) || !Array.isArray(error.details.path)) return [];
@@ -153,6 +165,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
   const [simulatedTier, setSimulatedTier] = useState("everyone");
   const [pending, setPending] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleteBlockedResult, setDeleteBlockedResult] = useState<{ name: string; usages: TextBlockUsage[] } | null>(null);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [attemptedSave, setAttemptedSave] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -302,6 +315,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
     setAttemptedSave(false);
     setSaveError(null);
     setServerConflict(false);
+    setDeleteBlockedResult(null);
   };
 
   const closeEditorNow = (): void => {
@@ -317,6 +331,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
     setAttemptedSave(false);
     setSaveError(null);
     setServerConflict(false);
+    setDeleteBlockedResult(null);
   };
 
   const selectBlockNow = (block: TextBlock): void => {
@@ -330,6 +345,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
     setAttemptedSave(false);
     setSaveError(null);
     setServerConflict(false);
+    setDeleteBlockedResult(null);
   };
 
   const saveDraft = async (): Promise<string | null> => {
@@ -504,10 +520,10 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
 
   const removeBlock = async (): Promise<void> => {
     if (selectedName === null || revision === null || !canManage) return;
+    const startedSwitch = editorSwitch.current;
+    const deletedName = selectedName;
     setPending(true);
     try {
-      const deletedName = selectedName;
-      const startedSwitch = editorSwitch.current;
       await write(revision, (baselineRevision) => {
         if (baselineRevision === null) throw new Error("A text block revision is required for deletion.");
         return deleteTextBlock(channelId, deletedName, baselineRevision);
@@ -524,10 +540,20 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
       setMobileDetailOpen(false);
       setConfirmingDelete(false);
     } catch (caught: unknown) {
+      if (editorSwitch.current !== startedSwitch) return;
       const code = errorCode(caught);
       if (code === "text_library_block_in_use") {
-        await libraryQuery.refetch().catch(() => undefined);
-        notify({ tone: "error", message: labels.deleteBlocked });
+        const responseUsages = errorUsages(caught);
+        let refreshedUsages: readonly TextBlockUsage[] = data?.usages[deletedName] ?? [];
+        try {
+          const refreshed = await libraryQuery.refetch();
+          refreshedUsages = refreshed.data?.usages[deletedName] ?? refreshedUsages;
+        } catch {
+          // The DELETE response remains the source of truth when the refresh fails.
+        }
+        if (editorSwitch.current !== startedSwitch) return;
+        setConfirmingDelete(false);
+        setDeleteBlockedResult({ name: deletedName, usages: responseUsages.length > 0 ? responseUsages : [...refreshedUsages] });
       } else {
         notify({ tone: "error", message: code === "text_library_block_conflict" ? labels.conflict : labels.saveError });
       }
@@ -597,6 +623,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
         className="text-library__list-toolbar"
         language={resolvedLanguage}
         searchLabel={labels.search}
+        searchLabelVisible
         searchPlaceholder={labels.search}
         searchClearLabel={common.clearSearch}
         searchValue={search}
@@ -606,7 +633,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
           <Select label={labels.categoryFilter} value="" onChange={() => undefined}
             options={[{ value: "", label: labels.allCategories }]} disabled />
           <GameMultiSelect searchGames={searchGames} lookupGames={lookupGames} value={gameFilter} onChange={setGameFilter}
-            messages={{ ...labels.gameMultiSelect, label: labels.gameFilter }} visuallyHiddenLabel compact disabled />
+            messages={{ ...labels.gameMultiSelect, label: labels.gameFilter }} compact disabled />
         </>}
         create={{ label: labels.addBlock, onClick: openCreate, disabled: true, ...(!canManage ? { reason: labels.managementLocked } : {}) }}
         usage={{ count: 0, maximum: TEXT_BLOCK_MAXIMUMS.blocksPerChannel, copy: {
@@ -653,6 +680,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
             className="text-library__list-toolbar"
             language={resolvedLanguage}
             searchLabel={labels.search}
+            searchLabelVisible
             searchPlaceholder={labels.search}
             searchClearLabel={common.clearSearch}
             searchValue={search}
@@ -661,7 +689,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
             filters={<>
               <Select label={labels.categoryFilter} value={categoryFilter} onChange={(value) => setCategoryFilter(value ?? "")} options={[{ value: "", label: labels.allCategories }, ...categories]} />
               <GameMultiSelect searchGames={searchGames} lookupGames={lookupGames} value={gameFilter} onChange={setGameFilter}
-                messages={{ ...labels.gameMultiSelect, label: labels.gameFilter }} visuallyHiddenLabel compact />
+                messages={{ ...labels.gameMultiSelect, label: labels.gameFilter }} compact />
             </>}
             create={{ label: labels.addBlock, onClick: openCreate, disabled: pending || createReason !== undefined, ...(createReason === undefined ? {} : { reason: createReason }) }}
             usage={{ count: data.blocks.length, maximum: TEXT_BLOCK_MAXIMUMS.blocksPerChannel, ...(activeFilters.length === 0 ? {} : { filteredCount: visibleBlocks.length }), copy: { countSuffix: labels.countSuffix, filteredInfix: common.of, filteredSuffix: labels.filteredSuffix, limitInfix: common.of, limitSuffix: labels.limitSuffix, loadedSuffix: common.loaded } }}
@@ -695,10 +723,20 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
 
           <div className="text-library__editor">
             <PageHeader
+              kind="texts"
+              icon={null}
               title={isCreate ? labels.addBlock : `{text.${draft.name}}`}
               meta={isCreate ? labels.nameHint : labels.usesCount(blockUsages.length)}
               {...(!canManage ? { lockHint: labels.operatorReason } : {})}
-              {...(canManage && !isCreate ? { pageActions: <Button variant="subtle" danger disabled={pending || blockUsages.length > 0} {...(blockUsages.length > 0 ? { title: labels.deleteBlocked } : {})} onClick={openDelete}>{labels.delete}</Button> } : {})}
+              {...(!isCreate ? { actions: <div className="text-library__delete-actions">
+                <Button icon="remove" iconOnly ariaLabel={labels.delete} title={labels.delete} variant="subtle" danger="subtle" disabled={!canManage || pending || blockUsages.length > 0} onClick={() => { if (canManage) openDelete(); }} />
+                {!canManage ? <span className="lock-reason text-library__delete-reason--role"><span aria-hidden="true">{labels.deleteOperatorReason}</span><span className="sr-only">{labels.operatorReason}</span></span>
+                  : blockUsages.length > 0 ? <>
+                    <span className="lock-reason" role="note">{labels.deleteBlockedReason(blockUsages.length)}</span>
+                    <Button icon="cause" iconOnly ariaLabel={labels.uses} title={labels.uses} variant="neutral" size="compact" onClick={() => { setDeleteBlockedResult({ name: selectedName ?? draft.name, usages: [...blockUsages] }); }} />
+                  </>
+                    : pending ? <span className="lock-reason" role="note">{common.saving}</span> : null}
+              </div> } : {})}
               {...(canManage ? { save: {
                 dirty,
                 pending,
@@ -748,8 +786,8 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
                         <strong>{isDefault ? labels.defaultVariant : labels.variant(index + 1)}</strong>
                         <span className="muted">{isDefault ? labels.noConditions : conditionSummary(variant, labels, conditionDefinitions, language === "en" ? "en" : "de")}</span>
                         {isDefault ? null : <div className="form-actions">
-                          <Button size="compact" disabled={pending || index === 0} onClick={() => patchDraft({ ...draft, variants: draft.variants.map((entry, entryIndex, all) => entryIndex === index - 1 ? all[index] as TextBlockVariant : entryIndex === index ? all[index - 1] as TextBlockVariant : entry) })}>{labels.moveUp}</Button>
-                          <Button size="compact" disabled={pending || index >= draft.variants.length - 2} onClick={() => patchDraft({ ...draft, variants: draft.variants.map((entry, entryIndex, all) => entryIndex === index + 1 ? all[index] as TextBlockVariant : entryIndex === index ? all[index + 1] as TextBlockVariant : entry) })}>{labels.moveDown}</Button>
+                          {index === 0 ? null : <Button size="compact" variant="neutral" disabled={pending} onClick={() => patchDraft({ ...draft, variants: draft.variants.map((entry, entryIndex, all) => entryIndex === index - 1 ? all[index] as TextBlockVariant : entryIndex === index ? all[index - 1] as TextBlockVariant : entry) })}>{labels.moveUp}</Button>}
+                          {index >= draft.variants.length - 2 ? null : <Button size="compact" variant="neutral" disabled={pending} onClick={() => patchDraft({ ...draft, variants: draft.variants.map((entry, entryIndex, all) => entryIndex === index + 1 ? all[index] as TextBlockVariant : entryIndex === index ? all[index + 1] as TextBlockVariant : entry) })}>{labels.moveDown}</Button>}
                           <Button size="compact" danger="subtle" disabled={pending} onClick={() => patchDraft({ ...draft, variants: draft.variants.filter((entry) => entry.id !== variant.id) })}>{labels.removeVariant}</Button>
                         </div>}
                       </div>
@@ -937,9 +975,16 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
         empty={<EmptyState title={labels.library} description={labels.empty} />}
         detailOpen={mobileDetailOpen}
         backLabel={labels.close}
-        {...(pending ? {} : { onCloseDetail: closeEditor })}
+        closeDetailDisabled={pending}
+        onCloseDetail={closeEditor}
       />
       <ConfirmDialog opened={confirmingDelete} title={labels.deleteTitle(selectedName ?? "")} description={labels.deleteConsequence(selectedName ?? "")} confirmLabel={labels.deleteConfirm(selectedName ?? "")} cancelLabel={labels.close} onCancel={() => { setConfirmingDelete(false); }} onConfirm={() => { void removeBlock(); }} pending={pending} danger />
+      <Dialog opened={deleteBlockedResult !== null} title={labels.deleteBlockedTitle(deleteBlockedResult?.name ?? "")} onClose={() => { setDeleteBlockedResult(null); }}>
+        <p className="ui-dialog__description">{labels.deleteBlocked}</p>
+        {deleteBlockedResult === null || deleteBlockedResult.usages.length === 0
+          ? <p className="muted">{labels.noUsages}</p>
+          : <ul className="text-library__usages">{deleteBlockedResult.usages.map((usage, index) => <li key={`${usage.kind}-${usage.label}-${String(index)}`}><span>{labels.usageKind[usage.kind]}</span><span>{usage.label}</span></li>)}</ul>}
+      </Dialog>
       <ConfirmDialog
         opened={draftGuard.confirmOpen}
         title={labels.draftGuardTitle}

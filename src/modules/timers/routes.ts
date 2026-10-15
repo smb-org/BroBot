@@ -269,8 +269,14 @@ timerRoutes.patch("/timers/:timerId/enabled", async (context) => {
   const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
     `UPDATE timers SET enabled = ?, revision = revision + 1, updated_at = ?
-      WHERE channel_id = ? AND timer_id = ? AND revision = ? AND enabled <> ? ${authorization.sql}`,
-  ).bind(enabled ? 1 : 0, now, channelId, timerId, revision, enabled ? 1 : 0, ...authorization.values);
+      WHERE channel_id = ? AND timer_id = ? AND revision = ? AND enabled <> ?
+        AND EXISTS (
+          SELECT 1 FROM channel_modules AS active_module
+           WHERE active_module.channel_id = timers.channel_id
+             AND active_module.module_id = ?
+             AND active_module.enabled = 1
+        ) ${authorization.sql}`,
+  ).bind(enabled ? 1 : 0, now, channelId, timerId, revision, enabled ? 1 : 0, MODULE_ID, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
     channelId,
     moduleId: MODULE_ID,
@@ -290,7 +296,9 @@ timerRoutes.patch("/timers/:timerId/enabled", async (context) => {
     const current = await readTimer(context.env.DB, channelId, timerId);
     return current === null
       ? context.json({ error: "timer_not_found" }, 404)
-      : current.revision !== revision ? context.json({ error: "timer_conflict", timer: timerForApiResponse(current) }, 409) : context.json({ timer: timerForApiResponse(current) });
+      : current.revision !== revision || current.enabled !== enabled
+        ? context.json({ error: "timer_conflict", timer: timerForApiResponse(current) }, 409)
+        : context.json({ timer: timerForApiResponse(current) });
   }
   const config = {
     ...durableConfig(existing),

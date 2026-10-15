@@ -27,6 +27,7 @@ export interface TimersTexts {
   afterMessages: (count: number) => string;
   minutesBeforeEvent: (minutes: number) => string;
   messageCount: string;
+  minimumMessagesHint: string;
   time: string;
   weekdays: string;
   everyDay: string;
@@ -43,6 +44,7 @@ export interface TimersTexts {
   save: string;
   delete: string;
   deleteConfirm: string;
+  deleteNeedsSaved: string;
   preview: string;
   previewBot: string;
   characterCount: (count: number) => string;
@@ -108,6 +110,7 @@ const catalog: LocaleCatalog<TimersTexts> = {
     afterMessages: (count) => `ab ${String(count)} ${count === 1 ? "Nachricht" : "Nachrichten"}`,
     minutesBeforeEvent: (minutes) => `${String(minutes)} Min. vor einem Ereignis`,
     messageCount: "Mindestanzahl Chatnachrichten",
+    minimumMessagesHint: "Leer bedeutet: keine Mindestzahl.",
     time: "Uhrzeit im Kanal",
     weekdays: "Wochentage",
     everyDay: "Täglich",
@@ -124,6 +127,7 @@ const catalog: LocaleCatalog<TimersTexts> = {
     save: "Speichern",
     delete: "Entfernen",
     deleteConfirm: "Diesen Timer wirklich entfernen?",
+    deleteNeedsSaved: "Speichere oder verwerfe deine Änderungen, bevor du den Timer entfernst.",
     preview: "Vorschau",
     previewBot: "Bot",
     characterCount: (count) => `${String(count)} Zeichen`,
@@ -200,6 +204,7 @@ const catalog: LocaleCatalog<TimersTexts> = {
     afterMessages: (count) => `after ${String(count)} ${count === 1 ? "message" : "messages"}`,
     minutesBeforeEvent: (minutes) => `${String(minutes)} min before an event`,
     messageCount: "Minimum chat messages",
+    minimumMessagesHint: "Leave blank to set no minimum.",
     time: "Time in channel time zone",
     weekdays: "Weekdays",
     everyDay: "Every day",
@@ -216,6 +221,7 @@ const catalog: LocaleCatalog<TimersTexts> = {
     save: "Save",
     delete: "Delete",
     deleteConfirm: "Remove this timer?",
+    deleteNeedsSaved: "Save or discard your changes before deleting this timer.",
     preview: "Preview",
     previewBot: "Bot",
     characterCount: (count) => `${String(count)} ${count === 1 ? "character" : "characters"}`,
