@@ -1038,7 +1038,7 @@ export interface DashboardTexts {
   /** Shared live-cockpit action frames and reserved tile copy. */
   streamManager: {
     immediateActions: string;
-    actionCount: (count: string) => string;
+    actionCount: (count: number) => string;
     actionRun: string;
     actionCancel: string;
     actionRunning: string;
@@ -1446,7 +1446,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     streamManager: {
       immediateActions: "Sofortaktionen",
-      actionCount: (count) => `${count} Aktionen`,
+      actionCount: (count) => `${String(count)} ${count === 1 ? "Aktion" : "Aktionen"}`,
       actionRun: "Ausführen",
       actionCancel: "Abbrechen",
       actionRunning: "Wird ausgeführt …",
@@ -1843,7 +1843,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     streamManager: {
       immediateActions: "Immediate actions",
-      actionCount: (count) => `${count} actions`,
+      actionCount: (count) => `${String(count)} ${count === 1 ? "action" : "actions"}`,
       actionRun: "Run",
       actionCancel: "Cancel",
       actionRunning: "Running …",

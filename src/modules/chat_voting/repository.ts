@@ -321,11 +321,14 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
         WHERE EXISTS (
           SELECT 1 FROM chat_votes
            WHERE channel_id = ? AND poll_id = ? AND status = 'open' AND kind = 'free_text'
+        ) AND EXISTS (
+          SELECT 1 FROM channel_modules
+           WHERE channel_id = ? AND module_id = 'chat_voting' AND enabled = 1
         ) ${authorization.sql}
        ON CONFLICT (channel_id, poll_id, term) DO UPDATE SET
          approved_at = excluded.approved_at,
          approved_by = excluded.approved_by`,
-    ).bind(channelId, pollId, term, approvedAt, approvedBy, channelId, pollId, ...authorization.values);
+    ).bind(channelId, pollId, term, approvedAt, approvedBy, channelId, pollId, channelId, ...authorization.values);
     const guard = db.prepare(
       `SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`,
     ).bind(...authorization.values);
@@ -341,7 +344,11 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
       `INSERT INTO chat_votes
          (channel_id, poll_id, kind, option_count, labels_json, title, text_mode, term_filter_ready, status, opened_at, closes_at,
           requested_duration_seconds, close_reason)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ? WHERE 1 = 1 ${guard}`,
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?
+        WHERE EXISTS (
+          SELECT 1 FROM channel_modules
+           WHERE channel_id = ? AND module_id = 'chat_voting' AND enabled = 1
+        ) ${guard}`,
     ).bind(
       vote.channelId,
       vote.id,
@@ -355,6 +362,7 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
       vote.closesAt,
       vote.requestedDurationSeconds,
       vote.closeReason,
+      vote.channelId,
       ...(authorization?.values ?? []),
     );
     const result = await statement.run();
@@ -369,7 +377,12 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
               deadline_revision = deadline_revision + CASE WHEN closing_at IS NULL THEN 1 ELSE 0 END
         WHERE channel_id = ? AND poll_id = ? AND status = 'open'
           AND closes_at = ? AND close_reason IN ('timer', 'limit', 'manual')
-          AND (closing_at IS NULL OR close_reason = 'manual') ${guard}`,
+          AND (closing_at IS NULL OR close_reason = 'manual')
+          AND EXISTS (
+            SELECT 1 FROM channel_modules
+             WHERE channel_modules.channel_id = chat_votes.channel_id
+               AND channel_modules.module_id = 'chat_voting' AND channel_modules.enabled = 1
+          ) ${guard}`,
     ).bind(new Date().toISOString(), channelId, pollId, expectedClosesAt, ...(authorization?.values ?? []));
     const result = await statement.run();
     return result.meta.changes > 0;
@@ -389,7 +402,12 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
       `UPDATE chat_votes
           SET closes_at = ?, deadline_revision = deadline_revision + 1
         WHERE channel_id = ? AND poll_id = ? AND status = 'open' AND closing_at IS NULL
-          AND close_reason <> 'manual' AND closes_at = ? ${guard}`,
+          AND close_reason <> 'manual' AND closes_at = ?
+          AND EXISTS (
+            SELECT 1 FROM channel_modules
+             WHERE channel_modules.channel_id = chat_votes.channel_id
+               AND channel_modules.module_id = 'chat_voting' AND channel_modules.enabled = 1
+          ) ${guard}`,
     ).bind(closesAt, channelId, pollId, expectedClosesAt, ...(authorization?.values ?? []));
     const result = await statement.run();
     return result.meta.changes > 0;

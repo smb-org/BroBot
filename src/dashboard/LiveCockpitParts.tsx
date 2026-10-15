@@ -15,7 +15,7 @@ import type { useEventsQuery } from "./data/lists";
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
 import { immediateActionErrorFeedback } from "./immediate-action-errors";
 import { formatRelativeTime } from "./ui/format-relative-time";
-import { Button, ChipGroup, ConfirmDialog, DataTable, Field, FilterBar, Icon, LoadStateLines } from "./ui";
+import { Button, ChipGroup, ConfirmDialog, DataTable, Field, FilterBar, Icon } from "./ui";
 
 type EventFilter = "all" | "raids" | "community" | "chat";
 
@@ -272,10 +272,10 @@ export const LiveCockpitEventFeed = ({ channelId, role, now, timeZone, eventQuer
       ]} />
     </FilterBar>
     <div className="live-cockpit-event-feed__scroll" aria-busy={eventQuery.isFetching}>
-      {eventQuery.isError && entries.length === 0 ? <div className="live-cockpit-event-feed__error" role="alert">
+      {eventQuery.isError ? <div className="live-cockpit-event-feed__error" role="alert">
         <p>{labels.eventsUnavailable}</p>
         <Button size="compact" variant="secondary" disabled={eventQuery.isFetching} onClick={() => { void eventQuery.refetch(); }}>{common.retry}</Button>
-      </div> : eventQuery.isPending ? <div role="status"><LoadStateLines rows={5} height={36} /></div> : <DataTable
+      </div> : eventQuery.isPending ? <div className="live-cockpit-event-feed__loading" role="status">{labels.eventsLoading}</div> : <DataTable
           ariaLabel={labels.events}
           className="event-table live-cockpit-event-feed__table"
           rows={rows}

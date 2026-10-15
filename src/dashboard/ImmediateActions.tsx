@@ -288,12 +288,16 @@ const ActionFrame = ({ action, moduleId, channelId, language, pollId, disabled, 
   };
 
   const reasonLine = reason ?? (availabilityStale ? texts.streamManager.actionAvailabilityStale : error !== null ? feedbackMessage(error) : result?.message ?? "\u00a0");
+  const resultLink = result?.href === undefined || result.linkLabel === undefined
+    ? null
+    : { href: result.href, label: result.linkLabel, message: result.message };
+  const hasResultLink = resultLink !== null;
   const popoverTitleId = `${reasonId}-popover-title`;
   const availabilityWarning = availabilityStale || reason === texts.streamManager.actionAvailabilityFailed;
   const buttonContents = <>
     <span className="live-action__icon"><Icon name={action.icon} size={20} /></span>
     <span className="live-action__name">{action.name[language]}</span>
-    <span id={reasonId} className={`live-action__reason${reason !== null ? " is-locked" : error !== null ? " has-error" : ""}${availabilityWarning ? " is-availability-warning" : ""}`} aria-live="polite">{reasonLine}</span>
+    <span id={reasonId} className={`live-action__reason${hasResultLink ? " is-result" : reason !== null ? " is-locked" : error !== null ? " has-error" : ""}${availabilityWarning ? " is-availability-warning" : ""}`} aria-live="polite">{hasResultLink ? "\u00a0" : reasonLine}</span>
   </>;
   const hasReason = reason !== null || availabilityStale || error !== null || result !== null;
   const triggerClassName = `live-action__button${reason !== null ? " is-locked" : ""}${hasReason ? " has-reason" : ""}`;
@@ -372,6 +376,10 @@ const ActionFrame = ({ action, moduleId, channelId, language, pollId, disabled, 
 
   return <div className="live-action">
     <button {...triggerProps} className={triggerClassName} type="button" onClick={() => { void run(new FormData()); }}>{buttonContents}</button>
+    {resultLink === null ? null : <a className="live-action__result-link" href={resultLink.href} target="_blank" rel="noreferrer" aria-label={`${resultLink.message} ${resultLink.label}`}>
+      <span className="live-action__result-message">{resultLink.message}</span>
+      <span>{resultLink.label}</span>
+    </a>}
   </div>;
 };
 
@@ -389,7 +397,7 @@ export const ImmediateActions = ({ channelId, streamState, role, modules = [], m
   const actions = MODULES.flatMap((module) => module.actions === undefined || moduleStates.get(module.id) !== true
     ? []
     : module.actions.map((action) => ({ moduleId: module.id, action })));
-  const count = texts.streamManager.actionCount(String(actions.length));
+  const count = texts.streamManager.actionCount(actions.length);
   const [staleActionKeys, setStaleActionKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [availabilityRetryGeneration, setAvailabilityRetryGeneration] = useState(0);
   const onAvailabilityStateChange = useCallback((actionKey: string, stale: boolean): void => {
@@ -410,7 +418,7 @@ export const ImmediateActions = ({ channelId, streamState, role, modules = [], m
     <header className="live-cockpit-actions__heading">
       <div><h2>{texts.streamManager.immediateActions}</h2><p>{texts.liveCockpit.actionsHint}</p></div>
       <div className="live-cockpit-actions__heading-meta">
-        {staleActionKeys.size === 0 ? null : <Button className="live-cockpit-actions__retry" ariaLabel={dashboardCommonTexts().retry} size="compact" variant="subtle" onClick={retryAvailability}>{dashboardCommonTexts().retry}</Button>}
+        {staleActionKeys.size === 0 ? null : <Button className="live-cockpit-actions__retry" ariaLabel={dashboardCommonTexts().retry} size="compact" variant="secondary" onClick={retryAvailability}>{dashboardCommonTexts().retry}</Button>}
         <span className="live-cockpit-actions__count">{count}</span>
       </div>
     </header>

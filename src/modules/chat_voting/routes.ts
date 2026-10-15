@@ -373,8 +373,10 @@ chatVotingRoutes.post("/approve-term", async (context) => {
       new Date().toISOString(),
     );
     const row = await context.env.DB.prepare(
-      `SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`,
-    ).bind(...authorization.values).first<{ authorized: number }>();
+      `SELECT 1 AS authorized WHERE EXISTS (
+         SELECT 1 FROM channel_modules WHERE channel_id = ? AND module_id = 'chat_voting' AND enabled = 1
+       ) ${authorization.sql}`,
+    ).bind(channelId, ...authorization.values).first<{ authorized: number }>();
     return row !== null;
   };
 

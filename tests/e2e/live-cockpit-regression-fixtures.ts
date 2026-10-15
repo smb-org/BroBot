@@ -18,6 +18,7 @@ export interface LiveCockpitMockOptions {
   location?: { name: string; latitude: number; longitude: number; timeZone: string } | null;
   viewerCount?: number | null;
   nextViewerCount?: number | null;
+  tokens?: { botExpiresAt: string | null; loginStatus: "connected" | "error" | "revoked" | null; loginReason: string | null; loginExpiresAt: string | null };
   vote?: Record<string, unknown> | null;
   votekick?: Record<string, unknown> | null;
   shoutoutFailureReason?: string;
@@ -51,7 +52,7 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
   const now = new Date().toISOString();
   const bot = { status: options.botStatus ?? "connected", reason: null, updatedAt: now };
   const channelBot = { ...bot, status: options.channelBotStatus ?? bot.status };
-  const tokens = { botExpiresAt: "2099-09-20T08:00:00.000Z", loginStatus: "connected", loginReason: null, loginExpiresAt: "2099-09-20T08:00:00.000Z" };
+  const tokens = options.tokens ?? { botExpiresAt: "2099-09-20T08:00:00.000Z", loginStatus: "connected" as const, loginReason: null, loginExpiresAt: "2099-09-20T08:00:00.000Z" };
   const channel = {
     channelId,
     login: "demo-kanal",
@@ -96,7 +97,7 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
     if (pathname === `${channelPrefix}/overview`) {
       overviewRequests += 1;
       const viewerCount = overviewRequests < 3 ? options.viewerCount ?? 42 : options.nextViewerCount ?? options.viewerCount ?? 42;
-      return route.fulfill(json({ ...channel, viewerCount, activeModules: modules.filter((module) => module.enabled).map(({ id, settings: moduleSettings }) => ({ moduleId: id, settings: moduleSettings })) }));
+      return route.fulfill(json({ ...channel, tokens, viewerCount, activeModules: modules.filter((module) => module.enabled).map(({ id, settings: moduleSettings }) => ({ moduleId: id, settings: moduleSettings })) }));
     }
     if (pathname === `${channelPrefix}/modules` && method === "GET") return route.fulfill(json({ modules }));
     if (pathname === `${channelPrefix}/settings` && method === "GET") return route.fulfill(json(settings));

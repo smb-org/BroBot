@@ -106,7 +106,7 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
         const freshOverview = await fetchChannelOverview(overview.channelId, controller.signal);
         if (active) {
           queryClient.setQueryData<PanelChannelOverview>(queryKeys.channel(overview.channelId, "overview"), (current) =>
-            current === undefined ? current : { ...current, viewerCount: freshOverview.viewerCount ?? null });
+            current === undefined ? current : { ...current, ...freshOverview, viewerCount: freshOverview.viewerCount ?? null });
         }
       } catch (error: unknown) {
         if (active && !(error instanceof Error && error.name === "AbortError")) {
