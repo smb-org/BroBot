@@ -244,6 +244,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
   const [pendingAliases, setPendingAliases] = useState("");
   const [selectedCurrencyTokenId, setSelectedCurrencyTokenId] = useState<string | null>(null);
   const draftRevision = useRef(command?.revision ?? null);
+  const observedCommandRevision = useRef(command?.revision ?? null);
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState(false);
   const [deleteError, setDeleteError] = useState<string | undefined>();
@@ -259,6 +260,16 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
   const [serverWarnings, setServerWarnings] = useState<readonly PanelTemplateWarning[]>([]);
   const [minimumTierExplicit, setMinimumTierExplicit] = useState(false);
   const dirty = draftDirty || pendingAliases.length > 0;
+  useEffect(() => {
+    if (canManageContent || command === null || observedCommandRevision.current === command.revision) return;
+    observedCommandRevision.current = command.revision;
+
+    const pendingEnabled = draftDirty && draft.enabled !== command.enabled ? draft.enabled : null;
+    const refreshedDraft = draftFromCommand(command);
+    draftRevision.current = command.revision;
+    accept(refreshedDraft);
+    if (pendingEnabled !== null) setValue({ ...refreshedDraft, enabled: pendingEnabled });
+  }, [accept, canManageContent, command, draft.enabled, draftDirty, setValue]);
   const currencyTemplates: { field: CurrencyTemplateField; value: string }[] = draft.kind === "list"
     ? []
     : [

@@ -1,7 +1,7 @@
 import { PanelApiError } from "../../../contracts/panel-error";
 import { isEventTemplateVariableAvailable } from "../../../contracts/event-template-variables";
 import type { TemplateTextFieldVariable } from "../../../dashboard/ui";
-import type { TemplateVariable } from "../../contract";
+import { SYSTEM_TEMPLATE_VARIABLE_LIST, type TemplateVariable } from "../../contract";
 import type { FaqEntry, FaqGame, FaqMutationInput } from "../contracts";
 
 export interface FaqPanelData {
@@ -33,21 +33,38 @@ export const loadFaqPanel = async (channelId: string, signal?: AbortSignal): Pro
     readJson<{ entries: FaqEntry[]; orderRevision: number }>(entriesResponse),
     readJson<{ variables: { name: string; isTextBlock?: boolean; availableInEventTemplates?: boolean; description?: string; sample?: string; group?: TemplateTextFieldVariable["group"]; contexts?: TemplateVariable["contexts"]; parameters?: TemplateTextFieldVariable["parameters"]; parameterDefault?: string }[] }>(variablesResponse),
   ]);
+  const systemVariables: TemplateTextFieldVariable[] = SYSTEM_TEMPLATE_VARIABLE_LIST
+    .filter(isEventTemplateVariableAvailable)
+    .map((variable) => ({
+      name: variable.name,
+      description: variable.name,
+      sample: variable.sample,
+      ...(variable.group === undefined ? {} : { group: variable.group }),
+      kind: "system",
+      ...(variable.external === undefined ? {} : { external: variable.external }),
+      ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
+      ...(variable.parameters === "choices" || variable.parameters === "currency_pair"
+        ? { parameter: { value: variable.parameters === "choices" ? "a|b|c" : "USD EUR" } }
+        : {}),
+    }));
+  const registeredVariables = variables.variables.filter(isEventTemplateVariableAvailable).map((variable) => ({
+    name: variable.name,
+    description: variable.description ?? variable.name,
+    sample: variable.sample ?? "",
+    ...(variable.group === undefined ? {} : { group: variable.group }),
+    ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
+    ...(variable.parameters === "choices" || variable.parameters === "currency_pair"
+      ? { parameter: { value: variable.parameterDefault ?? (variable.parameters === "choices" ? "a|b|c" : "USD EUR") } }
+      : {}),
+    kind: "module" as const,
+    ...(variable.isTextBlock === true ? { isTextBlock: true } : {}),
+  }));
+  const pickerVariables = new Map<string, TemplateTextFieldVariable>();
+  [...systemVariables, ...registeredVariables].forEach((variable) => pickerVariables.set(variable.name, variable));
   return {
     entries: entries.entries,
     orderRevision: entries.orderRevision,
-    variables: variables.variables.filter(isEventTemplateVariableAvailable).map((variable) => ({
-      name: variable.name,
-      description: variable.description ?? variable.name,
-      sample: variable.sample ?? "",
-      ...(variable.group === undefined ? {} : { group: variable.group }),
-      ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
-      ...(variable.parameters === "choices" || variable.parameters === "currency_pair"
-        ? { parameter: { value: variable.parameterDefault ?? (variable.parameters === "choices" ? "a|b|c" : "USD EUR") } }
-        : {}),
-      kind: "module",
-      ...(variable.isTextBlock === true ? { isTextBlock: true } : {}),
-    })),
+    variables: [...pickerVariables.values()],
   };
 };
 

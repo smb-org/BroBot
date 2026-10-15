@@ -58,16 +58,22 @@
 
 .faq-panel__filter-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto;
   gap: 8px;
   min-width: 0;
 }
 
 .faq-panel__entry-count {
+  grid-row: 1;
+  justify-self: end;
   color: var(--text-3);
   font-size: 12px;
   white-space: nowrap;
+}
+
+.faq-panel__filter-row > .segment-choice-field {
+  grid-row: 2;
 }
 
 .faq-panel__toolbar .segment-choice {
@@ -316,6 +322,35 @@
 
 .faq-panel__answer-preview .ui-chat-preview {
   align-self: start;
+}
+
+.faq-panel__answer-preview .ui-template-text-field__description-content {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.faq-panel__answer-preview .ui-template-text-field__helper-row {
+  display: contents;
+  height: auto;
+  min-height: 0;
+}
+
+.faq-panel__answer-preview .ui-template-text-field__helper-copy {
+  order: 1;
+  align-items: flex-start;
+  min-width: 0;
+  overflow: visible;
+}
+
+.faq-panel__answer-preview .ui-template-text-field__warnings {
+  order: 2;
+}
+
+.faq-panel__answer-preview .ui-template-text-field__count {
+  order: 3;
+  align-self: flex-end;
+  max-width: 100%;
 }
 
 @container editor (max-width: 479px) {

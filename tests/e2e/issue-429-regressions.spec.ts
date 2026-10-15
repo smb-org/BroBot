@@ -230,17 +230,21 @@ test("operator can toggle a command after realtime content changes using its lat
   await page.waitForTimeout(300);
 
   const row = page.locator(".text-command-row").filter({ hasText: "!hallo" });
-  counts.updateCommand({ ...commandRecord("hallo", "Der Verwalter hat die Antwort geändert."), revision: 2 });
+  counts.updateCommand({ ...commandRecord("hallo", "Der Verwalter hat die Antwort geändert."), enabled: false, revision: 2 });
   counts.revisions["module:text_commands:commands"] = 2;
   const previousReads = counts.commandReads;
   realtime.sendRevisionHint(2);
   await expect(row).toContainText("Der Verwalter hat die Antwort geändert.");
   await expect.poll(() => counts.commandReads).toBeGreaterThan(previousReads);
 
-  await editor.getByRole("switch", { name: "Aktiv" }).click();
+  const active = editor.getByRole("switch", { name: "Aktiv" });
+  await expect(active).toHaveAttribute("aria-checked", "false");
+  await expect(editor.getByRole("button", { name: "Speichern", exact: true })).toBeDisabled();
+  await active.click();
+  await expect(active).toHaveAttribute("aria-checked", "true");
   await editor.getByRole("button", { name: "Speichern", exact: true }).click();
   await expect.poll(() => counts.patchRequests).toHaveLength(1);
-  expect(counts.patchRequests[0]).toEqual({ revision: null, payload: { enabled: false, revision: 2 } });
+  expect(counts.patchRequests[0]).toEqual({ revision: null, payload: { enabled: true, revision: 2 } });
   await expect(editor.getByText("Der Verwalter hat die Antwort geändert.", { exact: true })).toBeVisible();
   await expect(editor.locator(".ui-save-bar__status")).toContainText("Alle Änderungen gespeichert");
 });
@@ -469,13 +473,22 @@ test("FAQ mobile editor scrolls its final field above the fixed save bar", async
 
   await expect(page.getByRole("heading", { name: "FAQ & Auto-Antworten", level: 1 })).toHaveCount(1);
   const search = page.locator(".faq-panel__toolbar-top input");
+  const count = page.locator(".faq-panel__entry-count");
   const status = page.locator(".faq-panel__filter-row > .segment-choice-field");
-  const searchStatusGap = await search.evaluate((element) => {
+  const toolbarGaps = await search.evaluate((element) => {
+    const countElement = document.querySelector(".faq-panel__entry-count");
     const statusField = document.querySelector(".faq-panel__filter-row > .segment-choice-field");
-    if (statusField === null) throw new Error("The FAQ status filter is missing.");
-    return statusField.getBoundingClientRect().top - element.getBoundingClientRect().bottom;
+    if (countElement === null || statusField === null) throw new Error("The FAQ count or status filter is missing.");
+    const searchBottom = element.getBoundingClientRect().bottom;
+    const countBounds = countElement.getBoundingClientRect();
+    return {
+      searchCount: countBounds.top - searchBottom,
+      countStatus: statusField.getBoundingClientRect().top - countBounds.bottom,
+    };
   });
-  expect(searchStatusGap).toBeLessThanOrEqual(18);
+  await expect(count).toBeVisible();
+  expect(toolbarGaps.searchCount).toBeLessThanOrEqual(18);
+  expect(toolbarGaps.countStatus).toBeLessThanOrEqual(18);
   await expect(status).toBeVisible();
   const orderNote = page.locator(".faq-panel__toolbar .ui-rule-note");
   const orderNoteGeometry = await orderNote.evaluate((element) => {

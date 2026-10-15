@@ -21,7 +21,6 @@ const modules = [
   { id: "text_commands", enabled: true, settings: "{}" },
   { id: "faq", enabled: true, settings: "{}" },
 ];
-const screenshotDirectory = "/private/tmp/claude-501/-Users-sb-tools-BroBot/1cad8a03-1f71-4060-966c-d4bb551755e6/scratchpad/shots-429";
 const viewportCases = [
   { width: 820, height: 1180 },
   { width: 1024, height: 768 },
@@ -120,7 +119,7 @@ const mockDashboard = async (page: Page): Promise<void> => {
 for (const viewport of viewportCases) {
   const viewportLabel = `${String(viewport.width)}x${String(viewport.height)}`;
 
-  test(`commands show Back and return to the list at ${viewportLabel}`, async ({ page }) => {
+  test(`commands show Back and return to the list at ${viewportLabel}`, async ({ page }, testInfo) => {
     await mockDashboard(page);
     await page.setViewportSize(viewport);
     await page.goto(`/channels/${channelId}/modules/text_commands`);
@@ -141,10 +140,10 @@ for (const viewport of viewportCases) {
     await expect(command).toBeVisible();
     await expect(command).toBeFocused();
     await expect(collection).toHaveAttribute("data-detail-open", "false");
-    await page.screenshot({ path: `${screenshotDirectory}/tablet-${String(viewport.width)}-commands-after-back.png` });
+    await page.screenshot({ path: testInfo.outputPath(`tablet-${String(viewport.width)}-commands-after-back.png`) });
   });
 
-  test(`FAQ shows Back and keeps its last editor field reachable at ${viewportLabel}`, async ({ page }) => {
+  test(`FAQ shows Back and keeps its last editor field reachable at ${viewportLabel}`, async ({ page }, testInfo) => {
     await mockDashboard(page);
     await page.setViewportSize(viewport);
     await page.goto(`/channels/${channelId}/modules/faq`);
@@ -164,7 +163,7 @@ for (const viewport of viewportCases) {
     await expect(entry).toBeVisible();
     await expect(entry).toBeFocused();
     await expect(collection).toHaveAttribute("data-detail-open", "false");
-    await page.screenshot({ path: `${screenshotDirectory}/tablet-${String(viewport.width)}-faq-after-back.png` });
+    await page.screenshot({ path: testInfo.outputPath(`tablet-${String(viewport.width)}-faq-after-back.png`) });
 
     await entry.click();
     const games = page.getByRole("switch", { name: "Spiele" });
@@ -195,6 +194,6 @@ for (const viewport of viewportCases) {
     expect(geometry.scrollTop).toBeGreaterThan(0);
     expect(geometry.targetTop).toBeGreaterThanOrEqual(geometry.scrollTopEdge - 1);
     expect(geometry.targetBottom).toBeLessThanOrEqual(geometry.scrollBottomEdge + 1);
-    await page.screenshot({ path: `${screenshotDirectory}/tablet-${String(viewport.width)}-faq-editor-bottom.png` });
+    await page.screenshot({ path: testInfo.outputPath(`tablet-${String(viewport.width)}-faq-editor-bottom.png`) });
   });
 }
