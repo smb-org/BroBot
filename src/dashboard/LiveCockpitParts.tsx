@@ -39,6 +39,18 @@ const remainingLabel = (until: string, now: number): string => {
   return `${String(Math.floor(seconds / 60))}:${String(seconds % 60).padStart(2, "0")}`;
 };
 
+const adSnoozeRetryMessage = (error: unknown, messageForTime: (time: string) => string): string | null => {
+  if (!(error instanceof PanelApiError) || error.status !== 429) return null;
+  const details = error.details;
+  if (typeof details !== "object" || details === null || Array.isArray(details)) return null;
+  const detail = (details as Record<string, unknown>).detail;
+  if (typeof detail !== "object" || detail === null || Array.isArray(detail)) return null;
+  const retryAfter = (detail as Record<string, unknown>).retryAfter;
+  if (typeof retryAfter !== "number" || !Number.isFinite(retryAfter) || retryAfter <= Date.now()) return null;
+  const time = new Intl.DateTimeFormat(dashboardLanguage(), { hour: "2-digit", minute: "2-digit" }).format(retryAfter);
+  return messageForTime(time);
+};
+
 export const LiveCockpitTiles = ({
   channelId,
   role,
@@ -137,8 +149,8 @@ export const LiveCockpitTiles = ({
       await snoozeAds(channelId);
       onMessage(labels.adSnoozed);
       onRefresh();
-    } catch {
-      onMessage(labels.adSnoozeFailed);
+    } catch (error: unknown) {
+      onMessage(adSnoozeRetryMessage(error, labels.adSnoozeRetryAfter) ?? labels.adSnoozeFailed);
     } finally {
       setBusy(false);
     }
@@ -193,7 +205,7 @@ export const LiveCockpitTiles = ({
               <Button size="compact" variant="subtle" disabled={busy || !roleCanSnooze || item.canSnooze !== true}
                 {...(snoozeReason === null ? {} : { describedBy: snoozeReasonId })}
                 onClick={() => { void doSnoozeAd(item.canSnooze === true); }}>{labels.adSnooze}</Button>
-              {snoozeReason === null ? null : <span className="sr-only" id={snoozeReasonId}>{snoozeReason}</span>}
+              {snoozeReason === null ? null : <span className="live-cockpit-next-item__reason" id={snoozeReasonId}>{snoozeReason}</span>}
             </> : null}
           </div>;
         })}

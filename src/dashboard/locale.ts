@@ -2,6 +2,7 @@ import { ADS_SKIPPED_REASONS, COMMERCIAL_FAILURE_REASONS, EVENTSUB_NEUTRAL_REASO
 import { browserModuleLanguage, type ModuleChatCommandThreshold, type ModuleChatStatus, type ModuleLanguage, type ModuleNavigationCategory } from "../modules/contract";
 import type { ApiSourceFailureReason } from "../modules/api_source/contracts";
 import type { SystemVariableName } from "../template-variables";
+import type { GameMultiSelectMessages } from "./ui/GameMultiSelect";
 
 export type DashboardLanguage = ModuleLanguage;
 export type LocaleCatalog<T> = Record<DashboardLanguage, T>;
@@ -1074,7 +1075,22 @@ export interface DashboardTexts {
     viewers: string;
     youAre: (role: string) => string;
     roles: Record<ChannelRole, string>;
-    titleCategoryPlaceholder: string;
+    broadcastLoading: string;
+    broadcastUnavailable: string;
+    broadcastEmptyTitle: string;
+    broadcastNoCategory: string;
+    broadcastEdit: string;
+    broadcastSave: string;
+    broadcastTitleLabel: string;
+    broadcastTitleCount: (count: number, maximum: number) => string;
+    broadcastManagerOnly: string;
+    broadcastScopeMissing: string;
+    broadcastReconnect: string;
+    broadcastReconnectOwnerOnly: string;
+    broadcastSaveError: string;
+    broadcastIdentityMissing: string;
+    broadcastSaved: string;
+    broadcastGamePicker: GameMultiSelectMessages;
     bot: string;
     botConnected: string;
     botUnavailable: string;
@@ -1119,6 +1135,7 @@ export interface DashboardTexts {
     adSnooze: string;
     adSnoozed: string;
     adSnoozeFailed: string;
+    adSnoozeRetryAfter: (time: string) => string;
     adSnoozeUnavailable: string;
     events: string;
     eventsFilterLabel: string;
@@ -1484,7 +1501,27 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       viewers: "Zuschauer",
       youAre: (role) => `Du bist: ${role}`,
       roles: { broadcaster: "Broadcaster", manager: "Verwalter", operator: "Bediener" },
-      titleCategoryPlaceholder: "Streamtitel und Kategorie",
+      broadcastLoading: "Streamtitel und Kategorie werden geladen.",
+      broadcastUnavailable: "Streamtitel und Kategorie sind gerade nicht verfügbar.",
+      broadcastEmptyTitle: "Kein Streamtitel gesetzt",
+      broadcastNoCategory: "Keine Kategorie",
+      broadcastEdit: "Titel und Kategorie bearbeiten",
+      broadcastSave: "Änderungen speichern",
+      broadcastTitleLabel: "Streamtitel",
+      broadcastTitleCount: (count, maximum) => `${String(count)} / ${String(maximum)} Zeichen`,
+      broadcastManagerOnly: "Nur Verwalter und Broadcaster dürfen Streamtitel und Kategorie ändern.",
+      broadcastScopeMissing: "Dem Kanalzugang fehlt die Twitch-Berechtigung channel:manage:broadcast.",
+      broadcastReconnect: "Twitch-Zugang erneuern",
+      broadcastReconnectOwnerOnly: "Nur der Broadcaster kann diese Twitch-Berechtigung erneuern.",
+      broadcastSaveError: "Streamtitel und Kategorie konnten nicht gespeichert werden.",
+      broadcastIdentityMissing: "Der Twitch-Zugang dieses Kanals ist nicht verbunden.",
+      broadcastSaved: "Streamtitel und Kategorie gespeichert.",
+      broadcastGamePicker: {
+        label: "Kategorie", hint: "Eine Kategorie auswählen.", search: "Kategorie suchen", searchHint: "Mindestens zwei Zeichen eingeben.",
+        loading: "Kategorien werden geladen.", empty: "Keine Kategorien gefunden.", error: "Kategorien konnten nicht geladen werden.",
+        suggestions: "Vorschläge", allGames: "Kategorie auswählen", limitReached: "Es kann nur eine Kategorie gewählt werden.",
+        selectedCount: (count, maximum) => `${String(count)} von ${String(maximum)} ausgewählt`, remove: (name) => `${name} entfernen`,
+      },
       bot: "Bot",
       botConnected: "Verbunden",
       botUnavailable: "Nicht verbunden",
@@ -1529,6 +1566,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       adSnooze: "Verschieben",
       adSnoozed: "Werbepause verschoben.",
       adSnoozeFailed: "Werbepause konnte nicht verschoben werden.",
+      adSnoozeRetryAfter: (time) => `Erneut möglich ab ${time}.`,
       adSnoozeUnavailable: "Werbepause lässt sich nicht weiter verschieben.",
       events: "Ereignisse",
       eventsFilterLabel: "Ereignisse filtern",
@@ -1881,7 +1919,27 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       viewers: "Viewers",
       youAre: (role) => `You are: ${role}`,
       roles: { broadcaster: "Broadcaster", manager: "Manager", operator: "Operator" },
-      titleCategoryPlaceholder: "Stream title and category",
+      broadcastLoading: "Loading stream title and category.",
+      broadcastUnavailable: "Stream title and category are unavailable right now.",
+      broadcastEmptyTitle: "No stream title set",
+      broadcastNoCategory: "No category",
+      broadcastEdit: "Edit title and category",
+      broadcastSave: "Save changes",
+      broadcastTitleLabel: "Stream title",
+      broadcastTitleCount: (count, maximum) => `${String(count)} / ${String(maximum)} characters`,
+      broadcastManagerOnly: "Only managers and broadcasters may change the stream title and category.",
+      broadcastScopeMissing: "This channel account is missing the Twitch channel:manage:broadcast permission.",
+      broadcastReconnect: "Reconnect Twitch access",
+      broadcastReconnectOwnerOnly: "Only the broadcaster can renew this Twitch permission.",
+      broadcastSaveError: "The stream title and category could not be saved.",
+      broadcastIdentityMissing: "This channel's Twitch account is not connected.",
+      broadcastSaved: "Stream title and category saved.",
+      broadcastGamePicker: {
+        label: "Category", hint: "Select one category.", search: "Search categories", searchHint: "Enter at least two characters.",
+        loading: "Loading categories.", empty: "No categories found.", error: "Categories could not be loaded.",
+        suggestions: "Suggestions", allGames: "Choose a category", limitReached: "Only one category can be selected.",
+        selectedCount: (count, maximum) => `${String(count)} of ${String(maximum)} selected`, remove: (name) => `Remove ${name}`,
+      },
       bot: "Bot",
       botConnected: "Connected",
       botUnavailable: "Not connected",
@@ -1926,6 +1984,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       adSnooze: "Snooze",
       adSnoozed: "Ad break postponed.",
       adSnoozeFailed: "The ad break could not be postponed.",
+      adSnoozeRetryAfter: (time) => `Try again after ${time}.`,
       adSnoozeUnavailable: "This ad break cannot be postponed again.",
       events: "Events",
       eventsFilterLabel: "Filter events",

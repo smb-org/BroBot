@@ -12,6 +12,7 @@ import { queryKeys } from "./data/keys";
 import { Button, Icon, StatusLed } from "./ui";
 import { ImmediateActions } from "./ImmediateActions";
 import { LiveCockpitEventFeed, LiveCockpitTiles } from "./LiveCockpitParts";
+import { LiveCockpitBroadcast } from "./LiveCockpitBroadcast";
 import { browserTimeZone } from "./ui/format-relative-time";
 import { useChannelSettings } from "./data/channel-settings";
 import { emptyEventFilter } from "./events/model";
@@ -199,9 +200,8 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
         <span className="live-cockpit-header__metric"><Icon name="member" size={16} /><span>{labels.viewers}</span><strong className="mono">{viewerCount == null ? "—" : formatNumber(viewerCount)}</strong></span>
         <span className="live-cockpit-header__role">{labels.youAre(labels.roles[overview.role])}</span>
       </div>
-      <div className="live-cockpit-header__title-slot" data-slot="stream-title-category">
-        <span>{labels.titleCategoryPlaceholder}</span>
-      </div>
+      <LiveCockpitBroadcast key={overview.channelId} channelId={overview.channelId} role={overview.role}
+        onSaved={(text) => { showFooterMessage({ text }); }} />
       <div className="live-cockpit-header__indicators" aria-label={labels.statusIndicators}>
         <StatusLed state={botConnected ? "ok" : "off"} label={`${labels.bot} · ${botConnected ? labels.botConnected : labels.botUnavailable}`} />
         <StatusLed
@@ -262,6 +262,7 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
         onFeedbackMessage={(text, link) => { showFooterMessage({ text, ...(link === undefined ? {} : { link }) }); }}
       />
       <LiveCockpitTiles
+        key={overview.channelId}
         channelId={overview.channelId}
         role={overview.role}
         snapshots={liveQuery.data?.snapshots ?? []}

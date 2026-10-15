@@ -25,7 +25,7 @@ export interface GameMultiSelectMessages {
   remove: (name: string) => string;
 }
 
-const MAX_GAMES = 10;
+const DEFAULT_MAXIMUM = 10;
 const GAME_LOOKUP_RETRY_DELAY_MS = 30_000;
 
 const coverUrl = (game: GameMultiSelectGame, width: number, height: number): string | null => {
@@ -71,11 +71,12 @@ export interface GameMultiSelectProps {
   disabled?: boolean;
   visuallyHiddenLabel?: boolean;
   compact?: boolean;
+  maximum?: number;
   error?: string;
 }
 
-/** Async Twitch game search with channel suggestions and a ten-game cap. */
-export function GameMultiSelect({ searchGames, lookupGames, value, onChange, messages, disabled = false, visuallyHiddenLabel = false, compact = false, error }: GameMultiSelectProps): ReactElement {
+/** Async Twitch game search with channel suggestions and a configurable selection cap. */
+export function GameMultiSelect({ searchGames, lookupGames, value, onChange, messages, disabled = false, visuallyHiddenLabel = false, compact = false, maximum = DEFAULT_MAXIMUM, error }: GameMultiSelectProps): ReactElement {
   const id = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
@@ -169,7 +170,7 @@ export function GameMultiSelect({ searchGames, lookupGames, value, onChange, mes
   const results = currentSearch?.status === "ready" ? currentSearch.results : [];
   const selectedIds = new Set(value.map(({ id: gameId }) => gameId));
   const availableResults = results;
-  const atLimit = value.length >= MAX_GAMES;
+  const atLimit = value.length >= maximum;
 
   const displayedGame = (game: GameMultiSelectGame): GameMultiSelectGame => {
     const boxArtUrlTemplate = artworkById.get(game.id);
@@ -255,7 +256,7 @@ export function GameMultiSelect({ searchGames, lookupGames, value, onChange, mes
             type="search"
             autoComplete="off"
             value={query}
-            placeholder={atLimit ? messages.selectedCount(value.length, MAX_GAMES) : value.length === 0 ? messages.allGames : messages.search}
+            placeholder={atLimit ? messages.selectedCount(value.length, maximum) : value.length === 0 ? messages.allGames : messages.search}
             aria-describedby={`${id}-hint${error === undefined ? "" : ` ${id}-error`}`}
             aria-invalid={error === undefined ? undefined : true}
             aria-label={messages.label}
@@ -316,7 +317,7 @@ export function GameMultiSelect({ searchGames, lookupGames, value, onChange, mes
               </div>
               <div className="ui-game-multi-select__footer">
                 <span>{messages.hint}</span>
-                <span aria-live="polite">{messages.selectedCount(value.length, MAX_GAMES)}</span>
+                <span aria-live="polite">{messages.selectedCount(value.length, maximum)}</span>
               </div>
             </PopoverPrimitive.Popup>
           </PopoverPrimitive.Positioner>

@@ -42,6 +42,7 @@ interface SettingsFieldText {
   placeholder?: string;
   invalidError?: string;
   requiredError?: string;
+  optionalHint?: string;
   description?: string;
   disabledReason?: string;
   minimumLabel?: string;
@@ -249,6 +250,9 @@ export function SettingsEditor<Settings extends object>({
             {...(field.minRows === undefined ? {} : { minRows: field.minRows })}
             messages={templateMessages}
           />
+          {field.optional && copy.optionalHint !== undefined
+            ? <span className="ui-settings-editor__optional-hint">{copy.optionalHint}</span>
+            : null}
         </InspectorFieldRow>
       );
     }

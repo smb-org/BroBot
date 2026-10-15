@@ -63,6 +63,23 @@ describe("broadcaster scope route", () => {
     ).first()).resolves.toEqual({ redirect_path: "/channels/kanal-a/modules/ads" });
   });
 
+  it("requests only the broadcast scope and returns to the live cockpit", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "kanal-a");
+    await insertMember(database, "kanal-a", "kanal-a", "broadcaster");
+
+    const response = await authRouter.fetch(await requestFor("kanal-a", "kanal-a", "broadcast"), environment(database));
+    const location = new URL(response.headers.get("location") ?? "https://invalid");
+    const scopes = location.searchParams.get("scope")?.split(" ") ?? [];
+
+    expect(response.status).toBe(302);
+    expect(scopes).toEqual(["user:read:moderated_channels", "channel:bot", "channel:manage:broadcast"]);
+    expect(location.searchParams.has("force_verify")).toBe(false);
+    await expect(database.prepare("SELECT redirect_path FROM oauth_transactions").first())
+      .resolves.toEqual({ redirect_path: "/channels/kanal-a" });
+  });
+
   it("renders a localized forbidden page for a signed-in user without channel access", async () => {
     database = new TestD1Database();
     await insertChannel(database, "kanal-a");
@@ -100,6 +117,7 @@ describe("broadcaster scope route", () => {
   it.each([
     "/auth/channels/kanal-a/channel-bot",
     "/auth/channels/kanal-a/broadcaster-scopes/ads",
+    "/auth/channels/kanal-a/broadcaster-scopes/broadcast",
   ])("rejects a broadcaster member without the channel-owner identity on %s", async (path) => {
     database = new TestD1Database();
     await insertChannel(database, "kanal-a");

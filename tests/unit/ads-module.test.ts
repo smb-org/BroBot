@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { adsModule, processAdBreak } from "../../src/modules/ads";
-import type { AdsSettings } from "../../src/modules/ads/contracts";
+import { adsSettingsSchema, type AdsSettings } from "../../src/modules/ads/contracts";
 import type { ModuleEvent } from "../../src/modules/contract";
 
 const event = (payload: Record<string, unknown>, settings: AdsSettings = adsModule.defaultSettings): ModuleEvent<AdsSettings> => ({
@@ -92,5 +92,17 @@ describe("ads module", () => {
     }));
 
     expect(result.actions).toEqual([{ kind: "chat", text: "Pause {dauer} (45 Sekunden)", target: "source_only" }]);
+  });
+
+  it("allows the automatic announcement to be turned off independently", () => {
+    const settings = {
+      ...adsModule.defaultSettings,
+      automatic: "",
+      manual: "Manuelle Pause",
+    };
+    expect(adsSettingsSchema.safeParse(settings).success).toBe(true);
+    expect(processAdBreak(event({ duration_seconds: 30, started_at: "2026-09-20T10:00:00.000Z", is_automatic: true }, settings)).actions).toEqual([]);
+    expect(processAdBreak(event({ duration_seconds: 30, started_at: "2026-09-20T10:00:00.000Z", is_automatic: false }, settings)).actions)
+      .toEqual([{ kind: "chat", text: "Manuelle Pause (30 Sekunden)", target: "source_only" }]);
   });
 });

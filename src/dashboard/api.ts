@@ -357,6 +357,38 @@ export interface PanelChannelSettings {
   defaultChatTargetRevision: number;
 }
 
+export interface PanelBroadcastGame {
+  id: string;
+  name: string;
+  boxArtUrlTemplate?: string;
+}
+
+export interface PanelChannelBroadcast {
+  title: string;
+  game: PanelBroadcastGame | null;
+  manageScopeAvailable: boolean;
+}
+
+export const fetchChannelBroadcast = (channelId: string, signal?: AbortSignal): Promise<PanelChannelBroadcast> =>
+  requestJson<PanelChannelBroadcast>(channelPath(channelId, "broadcast"), requestOptions(signal));
+
+export const saveChannelBroadcast = (
+  channelId: string,
+  title: string,
+  gameId: string,
+): Promise<undefined> => requestMutation<undefined>(channelPath(channelId, "broadcast"), "PATCH", { title, gameId });
+
+export const searchChannelGames = async (channelId: string, query: string): Promise<readonly PanelBroadcastGame[]> => {
+  const search = new URLSearchParams({ q: query });
+  return requestJson<{ games: PanelBroadcastGame[] }>(`${channelPath(channelId, "games")}?${search}`).then(({ games }) => games);
+};
+
+export const lookupChannelGames = async (channelId: string, ids: readonly string[]): Promise<readonly PanelBroadcastGame[]> => {
+  if (ids.length === 0) return [];
+  const search = new URLSearchParams({ ids: ids.join(",") });
+  return requestJson<{ games: PanelBroadcastGame[] }>(`${channelPath(channelId, "games")}?${search}`).then(({ games }) => games);
+};
+
 export type { PanelChannelLocation } from "../panel-contract";
 
 export interface PanelChannelLocationResult extends PanelChannelLocation {

@@ -174,4 +174,21 @@ describe("Raid module", () => {
 
     expect(result.actions).toEqual([{ kind: "chat", text: "{kanal} {zuschauer}", target: "source_only" }]);
   });
+
+  it("turns each raid announcement off independently while preserving the shoutout", () => {
+    const settings = {
+      shoutoutEnabled: true,
+      shoutoutThreshold: 3,
+      textThreshold: 3,
+      textLong: "   ",
+      textShort: "Danke {channel}",
+    };
+    expect(raidSettingsSchema.safeParse(settings).success).toBe(true);
+    expect(processRaid(event(incomingRaid(8), settings)).actions).toEqual([
+      { kind: "shoutout", targetChannelId: "quelle-1" },
+    ]);
+    expect(processRaid(event(incomingRaid(2), settings)).actions).toEqual([
+      { kind: "chat", text: "Danke quelle", target: "source_only" },
+    ]);
+  });
 });

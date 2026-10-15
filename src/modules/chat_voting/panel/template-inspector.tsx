@@ -5,14 +5,13 @@ import { ActionMenu, Button, ConfirmDialog, Field, InspectorSection, UnitInput, 
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient } from "../../../dashboard/data";
 import type { ChatVoteTemplate, ChatVoteTemplateDraft } from "../contracts";
 import { CHAT_VOTE_TEMPLATE_MAXIMUM, CHAT_VOTING_TITLE_MAX_LENGTH } from "../contracts";
-import { isValidTemplateShortcut, normalizeFreeTextVoteForMatching, templateStartProblem, voteLabelLength } from "../domain";
+import { isValidTemplateShortcut, normalizeFreeTextVoteForMatching, voteLabelLength } from "../domain";
 import { chatVotingSavedPanelTexts } from "./locale-saved";
 import { createChatVoteTemplate, saveChatVoteTemplate } from "./service";
 import type { ChatVoteTemplateListState } from "./service";
 
 export interface TemplateInspectorActions {
   guardSwitch: (proceed: () => void, cancel?: () => void) => void;
-  start: () => Promise<void>;
   acceptTemplate: (template: ChatVoteTemplate) => void;
 }
 
@@ -24,12 +23,10 @@ export interface ChatVoteTemplateInspectorProperties {
   initiallySaved?: boolean;
   language: "de" | "en";
   isRunning: boolean;
-  startLockReason: string | null;
   onRegisterActions: (actions: TemplateInspectorActions | null) => void;
   onTemplateSaved: (template: ChatVoteTemplate) => void;
   onClose: () => void;
   onDiscardNew: () => void;
-  onStart: (template: ChatVoteTemplate) => Promise<void>;
   onDelete: (template: ChatVoteTemplate) => Promise<void>;
 }
 
@@ -55,12 +52,10 @@ export function ChatVoteTemplateInspector({
   initiallySaved = false,
   language,
   isRunning,
-  startLockReason,
   onRegisterActions,
   onTemplateSaved,
   onClose,
   onDiscardNew,
-  onStart,
   onDelete,
 }: ChatVoteTemplateInspectorProperties): ReactElement {
   const labels = chatVotingSavedPanelTexts(language);
@@ -76,7 +71,6 @@ export function ChatVoteTemplateInspector({
   const [durationMode, setDurationMode] = useState(() => durationPreset(draft.value.durationSeconds));
   const [customDurationSelected, setCustomDurationSelected] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [starting, setStarting] = useState(false);
   const [saved, setSaved] = useState(initiallySaved);
   const [saveError, setSaveError] = useState<string | undefined>();
   const [serverShortcutError, setServerShortcutError] = useState<string | null>(null);
@@ -85,12 +79,10 @@ export function ChatVoteTemplateInspector({
   const [deleting, setDeleting] = useState(false);
   const deletingRef = useRef(false);
   const dirty = isNew || draft.dirty;
-  const startProblem = templateStartProblem(draft.value);
   const shortcutError = serverShortcutError ?? (draft.value.shortcut === null ? null
     : !isValidTemplateShortcut(draft.value.shortcut) ? labels.shortcutInvalid
       : templates.some((entry) => entry.id !== template.id && entry.shortcut === draft.value.shortcut) ? labels.shortcutDuplicate
         : null);
-  const invalidReason = shortcutError ?? (startProblem === null ? null : labels.problem(startProblem));
   const saveInvalidReason = shortcutError ?? (blankDraft(draft.value) ? labels.emptyDraftError : null);
   const title = draft.value.title.trim() || labels.untitled;
   const yesNoLabels = language === "de" ? ["Ja", "Nein"] : ["Yes", "No"];
@@ -218,20 +210,7 @@ export function ChatVoteTemplateInspector({
     setConflict(false);
   };
 
-  const start = async (): Promise<void> => {
-    if (startLockReason !== null || invalidReason !== null || saving || starting || conflict) return;
-    setStarting(true);
-    try {
-      const savedTemplate = dirty ? await saveDraft() : template;
-      if (savedTemplate === null) return;
-      if (JSON.stringify(draftValue.current) !== JSON.stringify(draftFromTemplate(savedTemplate))) return;
-      await onStart(savedTemplate);
-    } finally {
-      setStarting(false);
-    }
-  };
-
-  const actions: TemplateInspectorActions = { guardSwitch: draftGuard.guardSwitch, start, acceptTemplate };
+  const actions: TemplateInspectorActions = { guardSwitch: draftGuard.guardSwitch, acceptTemplate };
   useLayoutEffect(() => {
     onRegisterActions(actions);
     return () => { onRegisterActions(null); };
@@ -447,12 +426,6 @@ export function ChatVoteTemplateInspector({
       </InspectorSection>
       </div>
       <div className="chat-voting-editor__footer">
-        <div className="chat-voting-editor__start-row">
-          <span className="chat-voting-editor__start-reason" title={invalidReason ?? startLockReason ?? (conflict ? labels.saveConflict : "")}>{invalidReason ?? startLockReason ?? (conflict ? labels.saveConflict : " ")}</span>
-          <Button className="chat-voting-editor__start-button" variant="primary" disabled={startLockReason !== null || invalidReason !== null || saving || starting || conflict} title={invalidReason ?? startLockReason ?? (conflict ? labels.saveConflict : labels.startAction)} onClick={() => { void start(); }}>
-            {starting ? labels.saving : labels.startAction}
-          </Button>
-        </div>
         <SaveStatus
           dirty={dirty}
           pending={saving}

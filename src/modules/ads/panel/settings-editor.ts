@@ -6,9 +6,9 @@ import { adsSettingsEditorCatalog } from "./locale";
 const spec: SettingsEditorSpec<AdsSettings> = {
   sections: [
     { id: "announcements", icon: "tabSettings", fields: [
-      { kind: "template", key: "automatic", preview: (template, values) => renderAdBreakText(template, Number(values["ads.duration"] ?? "90")) },
+      { kind: "template", key: "automatic", optional: true, preview: (template, values) => template.trim().length === 0 ? "" : renderAdBreakText(template, Number(values["ads.duration"] ?? "90")) },
       { kind: "chatTarget", key: "automaticTarget" },
-      { kind: "template", key: "manual", preview: (template, values) => renderAdBreakText(template, Number(values["ads.duration"] ?? "90")) },
+      { kind: "template", key: "manual", optional: true, preview: (template, values) => template.trim().length === 0 ? "" : renderAdBreakText(template, Number(values["ads.duration"] ?? "90")) },
       { kind: "chatTarget", key: "manualTarget" },
     ] },
     { id: "prewarning", icon: "tabPrewarning", fields: [

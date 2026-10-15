@@ -198,7 +198,7 @@ describe("saved chat voting panel", () => {
         return currentState();
       },
     }));
-    const start = await screen.findByRole("button", { name: "Start vote" });
+    await screen.findByText("No vote yet");
     const key = { queryKey: moduleQueryKey("fictional-channel", "chat_voting", "panel"), exact: true };
     const loadedState = view.queryClient.getQueryData(key.queryKey);
     expect(loadedState).toBeDefined();
@@ -210,14 +210,14 @@ describe("saved chat voting panel", () => {
     if (!(retry instanceof HTMLButtonElement)) throw new Error("The live-state retry button is missing.");
     fireEvent.click(retry);
     await waitFor(() => expect(currentCalls).toBe(3));
-    await waitFor(() => expect(start).toBeDisabled());
+    await waitFor(() => expect(view.container.querySelector(".ui-load-state__retry")).toBeInTheDocument());
 
     unavailable = false;
     await new Promise((resolve) => window.setTimeout(resolve, 5));
     revisions = { "module:chat_voting:panel": 1 };
     await act(async () => { await reconcileDashboardPanelResourceRevisions(view.queryClient, "fictional-channel"); });
     await waitFor(() => expect(currentCalls).toBe(4));
-    await waitFor(() => expect(start).toBeEnabled());
+    await waitFor(() => expect(view.container.querySelector(".ui-load-state__retry")).toBeNull());
     expect(view.queryClient.getQueryData(key.queryKey)).toBe(loadedState);
   });
 
@@ -445,12 +445,11 @@ describe("saved chat voting panel", () => {
     expect(screen.getByRole("textbox", { name: "Answer 2" })).toHaveValue("Burger");
   });
 
-  it("does not start a stale draft if it changes while the save is pending", async () => {
+  it("keeps newer local edits while an inspector save is pending", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     let resolveFirstSave!: (response: Response) => void;
     const firstSave = new Promise<Response>((resolve) => { resolveFirstSave = resolve; });
     const patches: Record<string, unknown>[] = [];
-    let started = false;
     mount(fetchHarness({
       onPatch: (_id, body) => {
         patches.push(body);
@@ -458,38 +457,33 @@ describe("saved chat voting panel", () => {
           ? firstSave
           : jsonResponse({ template: template({ title: "Dinner", revision: 3 }) });
       },
-      onStart: () => { started = true; return jsonResponse({ vote: runningVote }); },
     }));
     const question = await screen.findByRole("textbox", { name: "Question" });
     fireEvent.change(question, { target: { value: "Dinner B" } });
-    fireEvent.click(screen.getByRole("button", { name: "Start vote" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(patches).toHaveLength(1));
     fireEvent.change(question, { target: { value: "Newer local edit" } });
     resolveFirstSave(jsonResponse({ template: template({ title: "Dinner B", revision: 2 }) }));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Question" })).toHaveValue("Newer local edit"));
-    expect(started).toBe(false);
     expect(patches).toHaveLength(1);
     expect(patches[0]).toMatchObject({ title: "Dinner B", revision: 1 });
   });
 
-  it("saves an unsaved draft before starting it", async () => {
+  it("saves an edited draft from the inspector", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     let serverTemplate = template();
-    const order: string[] = [];
     const patches: Record<string, unknown>[] = [];
     mount(fetchHarness({
       onPatch: (_id, body) => {
         patches.push(body);
-        order.push("save");
         serverTemplate = { ...serverTemplate, ...body, revision: serverTemplate.revision + 1 };
         return jsonResponse({ template: serverTemplate });
       },
-      onStart: () => { order.push("start"); return jsonResponse({ vote: runningVote }); },
     }));
     const question = await screen.findByRole("textbox", { name: "Question" });
     fireEvent.change(question, { target: { value: "Saved before Start" } });
-    fireEvent.click(screen.getByRole("button", { name: "Start vote" }));
-    await waitFor(() => expect(order).toEqual(["save", "start"]));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(patches).toHaveLength(1));
     expect(patches[0]).toMatchObject({ title: "Saved before Start", revision: 1 });
   });
 
@@ -684,15 +678,14 @@ describe("saved chat voting panel", () => {
     expect(document.querySelector(".ui-save-bar__status")).toHaveTextContent("Unsaved changes");
   });
 
-  it("shows the shared start lock reason in the inspector footer", async () => {
+  it("keeps the template inspector edit-only while a vote is running", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     mount(fetchHarness({
       templates: [template({ lastUsedAt: runningVote.openedAt })],
       current: currentState({ vote: runningVote, counts: [3, 1], hasOpenBallot: true }),
     }));
-    const start = await screen.findByRole("button", { name: "Start vote" });
-    expect(start).toBeDisabled();
-    expect(screen.getByText("A vote is running", { selector: ".chat-voting-editor__start-reason" })).toBeInTheDocument();
+    await screen.findByRole("textbox", { name: "Question" });
+    expect(screen.queryByRole("button", { name: "Start vote" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "End vote" })).toBeEnabled();
   });
 
@@ -708,7 +701,7 @@ describe("saved chat voting panel", () => {
 
     expect(await screen.findByText("Running")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "End vote" })).toBeEnabled();
-    expect(screen.getByText("A vote is running", { selector: ".chat-voting-editor__start-reason" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start vote" })).not.toBeInTheDocument();
   });
 
   it("keeps the newest live state when revision invalidation supersedes an in-flight read", async () => {
@@ -726,11 +719,11 @@ describe("saved chat voting panel", () => {
     revisions = { "module:chat_voting:panel": 1 };
     await act(async () => { await reconcileDashboardPanelResourceRevisions(view.queryClient, "fictional-channel"); });
     await waitFor(() => expect(currentCalls).toBe(2));
-    const start = await screen.findByRole("button", { name: "Start vote" });
-    await waitFor(() => expect(start).toBeEnabled());
+    const queryKey = moduleQueryKey("fictional-channel", "chat_voting", "panel");
+    await waitFor(() => expect(view.queryClient.getQueryData<ChatVotingPanelState>(queryKey)?.vote?.status).toBe("closed"));
     resolveFirst(currentState({ vote: runningVote }));
     await new Promise((resolve) => window.setTimeout(resolve, 20));
-    expect(start).toBeEnabled();
+    expect(view.queryClient.getQueryData<ChatVotingPanelState>(queryKey)?.vote?.status).toBe("closed");
     expect(screen.queryByRole("button", { name: "End vote" })).not.toBeInTheDocument();
   });
 
@@ -746,7 +739,7 @@ describe("saved chat voting panel", () => {
         return [template({ title: templateCalls > 2 ? "Updated dinner" : "Dinner" })];
       },
     }));
-    await screen.findByRole("button", { name: "Start “Dinner”" });
+    await screen.findByRole("link", { name: /Dinner/u });
     await waitFor(() => expect(templateCalls).toBe(1));
     revisions = { "module:chat_voting:templates": 1 };
     await act(async () => { await reconcileDashboardPanelResourceRevisions(view.queryClient, "fictional-channel"); });
@@ -763,7 +756,6 @@ describe("saved chat voting panel", () => {
   it("accepts a refreshed template snapshot after guarded reselection", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     let revisions: Readonly<Record<string, number>> = {};
-    let started = false;
     const refreshed = template({
       title: "Updated by another moderator",
       labels: ["Fresh yes", "Fresh no"],
@@ -773,7 +765,6 @@ describe("saved chat voting panel", () => {
     const view = mount(fetchHarness({
       getRevisions: () => revisions,
       getTemplates: () => revisions["module:chat_voting:templates"] === undefined ? [template()] : [refreshed],
-      onStart: () => { started = true; return jsonResponse({ vote: runningVote }); },
     }));
     await screen.findByRole("textbox", { name: "Question" });
     revisions = { "module:chat_voting:templates": 1 };
@@ -785,10 +776,7 @@ describe("saved chat voting panel", () => {
     expect(screen.getByRole("textbox", { name: "Answer 1" })).toHaveValue("Fresh yes");
     expect(screen.getByRole("spinbutton", { name: "Seconds" })).toHaveValue(300);
     expect(screen.getByRole("button", { name: "5 min" })).toHaveAttribute("aria-pressed", "true");
-    const start = screen.getByRole("button", { name: "Start vote" });
-    expect(start).toBeEnabled();
-    fireEvent.click(start);
-    await waitFor(() => expect(started).toBe(true));
+    expect(screen.queryByRole("button", { name: "Start vote" })).not.toBeInTheDocument();
   });
 
   it("can enter Custom duration from a preset and return to it after choosing another preset", async () => {
@@ -865,7 +853,7 @@ describe("saved chat voting panel", () => {
     expect(view.container.querySelector(".ui-save-bar__status")).toHaveTextContent("Unsaved changes");
   });
 
-  it("opens a read-only inspector for recent results and offers repeat", async () => {
+  it("opens a read-only recent-results inspector without a start action", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     const recentVote: ChatVote = {
       ...runningVote,
@@ -879,73 +867,21 @@ describe("saved chat voting panel", () => {
     };
     mount(fetchHarness({ recent: [recentVote] }));
     fireEvent.click(await screen.findByRole("button", { name: "Recent" }));
-    expect(await screen.findByRole("button", { name: "Again" })).toBeInTheDocument();
+    await screen.findByRole("heading", { name: "Dinner" });
     expect(screen.getByText("Pizza", { selector: ".chat-voting-results__label" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Again" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Again" })).not.toBeInTheDocument();
   });
 
-  it("keeps the saved order fixed in the session after a template starts", async () => {
+  it("keeps saved order fixed when selecting an edit-only template row", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     const templates = [template(), template({ id: "template-breakfast", title: "Breakfast", shortcut: "morgen" })];
-    let started = false;
-    let current = currentState();
-    let serverTemplates = templates;
-    mount(fetchHarness({ templates, getCurrent: () => current, getTemplates: () => serverTemplates, onStart: () => {
-      started = true;
-      current = currentState({ vote: runningVote, counts: [0, 0] });
-      serverTemplates = templates.map((entry) => entry.id === templates[0]?.id ? { ...entry, lastUsedAt: runningVote.openedAt } : entry);
-      return jsonResponse({ vote: runningVote });
-    } }));
-    const play = await screen.findByRole("button", { name: "Start “Dinner”" });
-    fireEvent.click(play);
-    await waitFor(() => expect(started).toBe(true));
-    await waitFor(() => expect(document.querySelector(".chat-voting-template-list")).toHaveTextContent("Running"));
+    mount(fetchHarness({ templates }));
+    fireEvent.click(await screen.findByRole("link", { name: /Dinner/u }));
+    await screen.findByRole("textbox", { name: "Question" });
+    expect(screen.queryByRole("button", { name: "Start vote" })).not.toBeInTheDocument();
     expect(document.querySelector(".chat-voting-template-list .list-row:first-child .list-row__action button")).toBeNull();
     const titles = [...document.querySelectorAll(".chat-voting-template-list .list-row__title")].map((element) => element.textContent);
     expect(titles).toEqual(["Dinner", "Breakfast"]);
-  });
-
-  it("merges a delayed template start into the latest revision without regressing usage time", async () => {
-    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
-    let revisions: Readonly<Record<string, number>> = {};
-    let serverTemplate = template();
-    let markStartRequested!: () => void;
-    const startRequested = new Promise<void>((resolve) => { markStartRequested = resolve; });
-    let resolveStart!: (response: Response) => void;
-    const pendingStart = new Promise<Response>((resolve) => { resolveStart = resolve; });
-    const refreshed = template({
-      title: "Updated during start",
-      labels: ["Newest yes", "Newest no"],
-      durationSeconds: 300,
-      revision: 2,
-      lastUsedAt: "2030-01-01T12:30:00.000Z",
-    });
-    const view = mount(fetchHarness({
-      getRevisions: () => revisions,
-      getTemplates: () => [serverTemplate],
-      onStart: () => { markStartRequested(); return pendingStart; },
-    }));
-    await screen.findByRole("textbox", { name: "Question" });
-    fireEvent.click(screen.getByRole("button", { name: "Start vote" }));
-    await startRequested;
-
-    serverTemplate = refreshed;
-    revisions = { "module:chat_voting:templates": 1 };
-    await act(async () => { await reconcileDashboardPanelResourceRevisions(view.queryClient, "fictional-channel"); });
-    await waitFor(() => expect(document.querySelector(".chat-voting-template-list")).toHaveTextContent(refreshed.title));
-
-    const startedVote = { ...runningVote, openedAt: "2030-01-01T12:00:00.000Z", closesAt: "2030-01-01T12:05:00.000Z" };
-    resolveStart(jsonResponse({ vote: startedVote }));
-    await waitFor(() => {
-      const templates = view.queryClient.getQueryData<{ templates: ChatVoteTemplate[] }>(moduleQueryKey("fictional-channel", "chat_voting", "templates"))?.templates;
-      expect(templates?.[0]).toMatchObject({
-        title: "Updated during start",
-        labels: ["Newest yes", "Newest no"],
-        durationSeconds: 300,
-        revision: 2,
-        lastUsedAt: "2030-01-01T12:30:00.000Z",
-      });
-    });
   });
 
   it("refreshes template usage from resource revisions after a vote starts in chat", async () => {

@@ -377,7 +377,7 @@ export const processChatVotingMessage = async (
         ...(previous.kind === "free_text" ? {} : { labels: previous.labels }),
         ...(previous.kind === "free_text" ? { textMode: previous.textMode ?? "first_word" } : {}),
         title: previous.title,
-        durationSeconds: previous.requestedDurationSeconds ?? 0,
+        durationSeconds: previous.requestedDurationSeconds ?? event.settings.autoCloseSeconds,
       };
     }
     if (startCommand === null) return { actions: [], diagnostics: [] };

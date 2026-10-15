@@ -63,12 +63,14 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
     fields: {
       textThreshold: { label: "Text-Schwelle", hint: "Ab dieser Zahl wird der volle Text gesendet, darunter der kurze.", unit: "Zuschauer" },
       textLong: {
-        label: "Voller Raid-Text", hint: "Geht raus ab der Text-Schwelle.", previewLabel: "Vorschau", previewSpeaker: "Bot",
+        label: "Voller Raid-Text", hint: "Geht raus ab der Text-Schwelle. Leer lassen, um diese Nachricht auszuschalten.", previewLabel: "Vorschau", previewSpeaker: "Bot",
+        optionalHint: "Leer lassen, um diese Nachricht auszuschalten.",
         variables: [{ name: "channel", description: "Anzeigename des raidenden Kanals", sample: "beispielkanal" }, { name: "viewers", description: "Zahl der Zuschauer im Raid", sample: "42" }],
       },
       textLongTarget: { label: "Ziel für vollen Raid-Text", hint: "Wirkt nur während eines Shared Chats.", options: { all_chats: { label: "Alle Chats" }, source_only: { label: "Nur unser Chat" } } },
       textShort: {
-        label: "Kurzer Dankestext", hint: "Geht raus bei kleineren Raids.", previewLabel: "Vorschau", previewSpeaker: "Bot",
+        label: "Kurzer Dankestext", hint: "Geht raus bei kleineren Raids. Leer lassen, um diese Nachricht auszuschalten.", previewLabel: "Vorschau", previewSpeaker: "Bot",
+        optionalHint: "Leer lassen, um diese Nachricht auszuschalten.",
         variables: [{ name: "channel", description: "Anzeigename des raidenden Kanals", sample: "beispielkanal" }, { name: "viewers", description: "Zahl der Zuschauer im Raid", sample: "42" }],
       },
       textShortTarget: { label: "Ziel für kurzen Dankestext", hint: "Wirkt nur während eines Shared Chats.", options: { all_chats: { label: "Alle Chats" }, source_only: { label: "Nur unser Chat" } } },
@@ -102,12 +104,14 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
     fields: {
       textThreshold: { label: "Text threshold", hint: "At this number the full text is sent; smaller raids use the short one.", unit: "viewers" },
       textLong: {
-        label: "Full raid text", hint: "Sent at or above the text threshold.", previewLabel: "Preview", previewSpeaker: "Bot",
+        label: "Full raid text", hint: "Sent at or above the text threshold. Leave blank to turn this message off.", previewLabel: "Preview", previewSpeaker: "Bot",
+        optionalHint: "Leave blank to turn this message off.",
         variables: [{ name: "channel", description: "Display name of the raiding channel", sample: "samplechannel" }, { name: "viewers", description: "Number of viewers in the raid", sample: "42" }],
       },
       textLongTarget: { label: "Full raid text target", hint: "Only affects output during Shared Chat.", options: { all_chats: { label: "All chats" }, source_only: { label: "Only our chat" } } },
       textShort: {
-        label: "Short thank-you text", hint: "Sent for smaller raids.", previewLabel: "Preview", previewSpeaker: "Bot",
+        label: "Short thank-you text", hint: "Sent for smaller raids. Leave blank to turn this message off.", previewLabel: "Preview", previewSpeaker: "Bot",
+        optionalHint: "Leave blank to turn this message off.",
         variables: [{ name: "channel", description: "Display name of the raiding channel", sample: "samplechannel" }, { name: "viewers", description: "Number of viewers in the raid", sample: "42" }],
       },
       textShortTarget: { label: "Short thank-you target", hint: "Only affects output during Shared Chat.", options: { all_chats: { label: "All chats" }, source_only: { label: "Only our chat" } } },

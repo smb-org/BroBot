@@ -166,6 +166,14 @@ const insertBotAndAppToken = async (database: TestD1Database): Promise<void> => 
   ).bind(ciphertext, "2099-09-19T00:00:00.000Z", "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
 };
 
+const insertBroadcastIdentity = async (database: TestD1Database, scopes: string[]): Promise<void> => {
+  await insertLoginIdentityAndSession(database, "kanal-a", scopes);
+  const accessToken = await encryptJson({ token: "channel-token" }, parseKeyRing(environmentKeys.SESSION_ENCRYPTION_KEYS));
+  await database.prepare(
+    "UPDATE twitch_login_identity SET token_scopes_json = ?, access_token_ciphertext = ? WHERE user_id = 'kanal-a'",
+  ).bind(JSON.stringify(scopes), accessToken).run();
+};
+
 const remoteSubscription = (channelId: string, id: string) => ({
   id,
   type: "channel.chat.message",
@@ -241,6 +249,84 @@ describe("Module management in the panel", () => {
       // exactly like any other module. Only a real row makes it enabled.
       { id: "clips", enabled: false, settings: "{}", mandatory: false },
     ]);
+  });
+
+  it("updates only the authorized broadcaster channel title and category with its channel token", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertBroadcastIdentity(database, ["channel:manage:broadcast"]);
+    const twitchFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast", "PATCH", { title: "Neue Sendung", gameId: "509658" }),
+      environment,
+    );
+
+    expect(response.status).toBe(204);
+    expect(twitchFetch).toHaveBeenCalledTimes(1);
+    const [input, init] = twitchFetch.mock.calls[0] ?? [];
+    const url = urlForFetchInput(input);
+    expect(url.pathname).toBe("/helix/channels");
+    expect(url.searchParams.get("broadcaster_id")).toBe("kanal-a");
+    expect(init?.method).toBe("PATCH");
+    const requestBody = init?.body;
+    if (typeof requestBody !== "string") throw new Error("Expected a JSON request body.");
+    expect(JSON.parse(requestBody)).toEqual({ title: "Neue Sendung", game_id: "509658" });
+    expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer channel-token");
+  });
+
+  it("denies operators before attempting a broadcast update", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    const twitchFetch = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast", "PATCH", { title: "Neue Sendung", gameId: "" }),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "broadcast_manage_denied" });
+    expect(twitchFetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps broadcast management scoped to the route channel", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertChannel(database, "kanal-b");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-b", "user-1", "manager");
+    const twitchFetch = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast", "PATCH", { title: "Fremder Kanal", gameId: "" }),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    expect(twitchFetch).not.toHaveBeenCalled();
+  });
+
+  it("requires the broadcaster scope before calling Twitch", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertBroadcastIdentity(database, []);
+    const twitchFetch = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast", "PATCH", { title: "Neue Sendung", gameId: "" }),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "broadcast_scope_missing" });
+    expect(twitchFetch).not.toHaveBeenCalled();
   });
 
   it("caches category searches by normalized query for 24 hours", async () => {

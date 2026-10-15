@@ -109,6 +109,11 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
     }
     if (pathname === `${channelPrefix}/modules` && method === "GET") return route.fulfill(json({ modules }));
     if (pathname === `${channelPrefix}/settings` && method === "GET") return route.fulfill(json(settings));
+    if (pathname === `${channelPrefix}/broadcast` && method === "GET") return route.fulfill(json({
+      title: "Demo stream title",
+      game: { id: "509658", name: "Just Chatting" },
+      manageScopeAvailable: !(options.broadcasterMissingScopes ?? []).includes("channel:manage:broadcast"),
+    }));
     if (pathname === `${channelPrefix}/settings` && method === "PATCH") {
       const body = route.request().postDataJSON() as Record<string, unknown>;
       if (typeof body.timeZone === "string") settings = { ...settings, timeZone: body.timeZone, revision: settings.revision + 1 };

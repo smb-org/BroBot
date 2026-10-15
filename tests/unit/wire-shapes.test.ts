@@ -376,7 +376,7 @@ const realtimeForms = {
 const expectedModuleSettings = {
   channel_events: {},
   chat_voting: {
-    autoCloseSeconds: 0,
+    autoCloseSeconds: 120,
     startText: "Abstimmung gestartet: {vote.title} – {vote.options} – läuft {vote.duration}",
     announceResult: true,
     resultText: "{vote.result}",

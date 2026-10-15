@@ -7,9 +7,9 @@ const spec: SettingsEditorSpec<RaidSettings> = {
   sections: [
     { id: "messages", icon: "tabMessages", fields: [
       { kind: "number", key: "textThreshold", min: 0, max: 100000, step: 1 },
-      { kind: "template", key: "textLong", preview: (template, values) => renderRaidText(template, values) },
+      { kind: "template", key: "textLong", optional: true, preview: (template, values) => template.trim().length === 0 ? "" : renderRaidText(template, values) },
       { kind: "chatTarget", key: "textLongTarget" },
-      { kind: "template", key: "textShort", preview: (template, values) => renderRaidText(template, values) },
+      { kind: "template", key: "textShort", optional: true, preview: (template, values) => template.trim().length === 0 ? "" : renderRaidText(template, values) },
       { kind: "chatTarget", key: "textShortTarget" },
     ] },
     { id: "shoutout", icon: "shoutout", fields: [

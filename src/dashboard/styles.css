@@ -141,7 +141,15 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 .live-cockpit-header { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(280px, 1fr) minmax(0, .95fr); align-items: center; gap: var(--s4); min-height: 94px; padding: var(--s3) var(--s4); border: 1px solid var(--line); border-radius: var(--r-container); background: var(--surface); }
 .live-cockpit-header__summary { display: flex; align-items: center; gap: var(--s4); min-width: 0; }
 .live-cockpit-header__role { flex: none; color: var(--text-3); font-size: 11px; white-space: nowrap; }
-.live-cockpit-header__title-slot { display: flex; align-items: center; min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--text-3); font-size: 12px; }
+.live-cockpit-header__title-slot { display: flex; flex-direction: column; align-items: stretch; justify-content: center; gap: var(--s2); min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--text-3); font-size: 12px; }
+.live-cockpit-broadcast__copy { display: grid; gap: 3px; min-width: 0; }
+.live-cockpit-broadcast__copy strong { color: var(--text); font-size: 14px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
+.live-cockpit-broadcast__copy > span { color: var(--text-2); font-size: 12px; line-height: 1.3; overflow-wrap: anywhere; }
+.live-cockpit-broadcast__actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2); min-width: 0; }
+.live-cockpit-broadcast__reason { color: var(--text-3); font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
+.live-cockpit-broadcast__status { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2); margin: 0; color: var(--text-2); line-height: 1.35; }
+.live-cockpit-broadcast__form { display: grid; width: min(520px, 100%); gap: var(--s4); min-width: 0; }
+.live-cockpit-broadcast__scope-warning { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2); color: var(--text-2); font-size: 12px; line-height: 1.4; }
 .live-cockpit-header__indicators { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--s4); min-width: 0; }
 .live-cockpit-header__stream { display: inline-flex; align-items: center; justify-content: center; gap: var(--s2); flex: none; min-height: 36px; padding: 0 var(--s3); border: 1px solid var(--line); border-radius: var(--r-control); font-weight: 600; line-height: 1; }
 .live-cockpit-header__stream-dot { display: block; width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: var(--text-3); }
@@ -226,6 +234,7 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 .live-cockpit-next-item__copy strong { color: var(--text-2); font-size: 11px; }
 .live-cockpit-next-item__copy small { color: var(--text-3); font-size: 10px; }
 .live-cockpit-next-item__time { color: var(--text-3); font-size: 10px; white-space: nowrap; }
+.live-cockpit-next-item__reason { grid-column: 2 / -1; grid-row: 2; color: var(--text-3); font-size: 10px; line-height: 1.3; overflow-wrap: anywhere; }
 .live-cockpit-next-item .ui-button { min-height: 28px; padding-inline: var(--s2); font-size: 10px; }
 .live-cockpit-event-feed { display: flex; gap: var(--s2); }
 .live-cockpit-event-feed__heading { display: flex; align-items: center; justify-content: space-between; min-height: 22px; }
@@ -1772,6 +1781,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-editor-shell__readonly-reason { display: flex; align-items: center; gap: 8px; margin: 0 0 16px; color: var(--text-3); font-size: 11px; }
 .ui-editor-shell__readonly-reason .ui-icon { flex: none; }
 .ui-settings-editor { display: grid; gap: 16px; min-width: 0; container-type: inline-size; container-name: settings-editor; }
+.ui-settings-editor__optional-hint { color: var(--text-3); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
 .ui-settings-editor__properties { grid-template-columns: 1fr; }
 .ui-settings-editor__properties dd { overflow-wrap: anywhere; white-space: normal; }
 @container settings-editor (max-width: 600px) {
