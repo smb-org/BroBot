@@ -344,6 +344,18 @@
   overflow: visible;
 }
 
+.faq-panel__answer-preview .ui-template-text-field__helper-copy .ui-truncated-text {
+  overflow: visible;
+}
+
+.faq-panel__answer-preview .ui-template-text-field__helper-copy .ui-truncated-text::before {
+  display: block;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .faq-panel__answer-preview .ui-template-text-field__warnings {
   order: 2;
 }
@@ -351,6 +363,8 @@
 .faq-panel__answer-preview .ui-template-text-field__count {
   order: 3;
   align-self: flex-start;
+  flex: none;
+  min-width: 8ch;
   max-width: 100%;
 }
 
@@ -371,12 +385,6 @@
 @container editor (max-width: 479px) {
   .faq-panel .ui-field-pair {
     grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-@container editor (min-width: 520px) {
-  .faq-panel__answer-preview {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

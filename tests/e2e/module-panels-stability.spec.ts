@@ -403,6 +403,7 @@ test("FAQ collection uses the shared mobile list, detail, and focus transitions"
 
   await row.click();
   await expect(detail).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Greeting" })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(list).toBeVisible();
   await expect(row).toBeFocused();

@@ -203,6 +203,24 @@ test("command creation button's accessible name matches its visible label", asyn
   await expect(createButton).toHaveAccessibleName("Befehl anlegen");
 });
 
+test("blocked save expands Advanced settings and focuses its first invalid field", async ({ page }) => {
+  const counts = await mockDashboard(page);
+  await openTextCommand(page, 1920, 1080);
+
+  const advanced = page.locator("details.command-usage-advanced");
+  const userCooldown = page.locator("#command-user-cooldown");
+  await advanced.locator("summary").click();
+  await userCooldown.fill("");
+  await advanced.locator("summary").click();
+  await expect(advanced).not.toHaveAttribute("open", "");
+
+  await page.getByRole("button", { name: "Speichern", exact: true }).click();
+
+  await expect(advanced).toHaveAttribute("open", "");
+  await expect(userCooldown).toBeFocused();
+  expect(counts.patches).toBe(0);
+});
+
 test("FAQ answer counter shares the helper line above its reserved warning slot", async ({ page }) => {
   await mockDashboard(page);
   await page.setViewportSize({ width: 1920, height: 1080 });
@@ -226,6 +244,43 @@ test("FAQ answer counter shares the helper line above its reserved warning slot"
   expect(geometry.count.bottom).toBeLessThanOrEqual(geometry.row.bottom + 1);
   expect(geometry.warnings.top).toBeGreaterThanOrEqual(geometry.row.bottom);
   expect(geometry.warnings.height).toBeGreaterThanOrEqual(24);
+});
+
+test("FAQ answer preview stacks below its full-width editor without overflowing helper or counter", async ({ page }) => {
+  await mockDashboard(page);
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto(`/channels/${channelId}/modules/faq`);
+  await page.locator(".faq-panel__entry").filter({ hasText: "Begrüßung" }).click();
+
+  const geometry = await page.evaluate(() => {
+    const answer = document.querySelector<HTMLElement>(".faq-panel__answer-preview .template-text-field__input");
+    const preview = document.querySelector<HTMLElement>(".faq-panel__answer-preview > .ui-chat-preview");
+    const count = document.querySelector<HTMLElement>(".faq-panel__answer-preview .ui-template-text-field__count");
+    const helper = document.querySelector<HTMLElement>(".faq-panel__answer-preview .ui-template-text-field__helper-copy");
+    const visibleHelper = helper?.querySelector<HTMLElement>(".ui-truncated-text");
+    if (answer === null || preview === null || count === null || helper === null || visibleHelper === null || visibleHelper === undefined) {
+      throw new Error("FAQ answer layout geometry is incomplete.");
+    }
+    const bounds = (element: Element) => {
+      const box = element.getBoundingClientRect();
+      return { left: box.left, right: box.right, top: box.top, bottom: box.bottom, width: box.width };
+    };
+    return {
+      answer: bounds(answer),
+      preview: bounds(preview),
+      count: bounds(count),
+      helper: { clientWidth: helper.clientWidth, scrollWidth: helper.scrollWidth },
+      visibleHelper: { clientWidth: visibleHelper.clientWidth, scrollWidth: visibleHelper.scrollWidth },
+    };
+  });
+
+  expect(geometry.preview.top).toBeGreaterThanOrEqual(geometry.answer.bottom);
+  expect(Math.abs(geometry.preview.left - geometry.answer.left)).toBeLessThanOrEqual(1);
+  expect(Math.abs(geometry.preview.width - geometry.answer.width)).toBeLessThanOrEqual(2);
+  expect(geometry.count.left).toBeGreaterThanOrEqual(geometry.answer.left - 1);
+  expect(geometry.count.right).toBeLessThanOrEqual(geometry.answer.right + 1);
+  expect(geometry.helper.scrollWidth).toBeLessThanOrEqual(geometry.helper.clientWidth);
+  expect(geometry.visibleHelper.scrollWidth).toBeLessThanOrEqual(geometry.visibleHelper.clientWidth);
 });
 
 test("failed command save preserves drafts for inactive response kinds", async ({ page }) => {

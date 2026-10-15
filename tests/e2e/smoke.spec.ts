@@ -259,6 +259,9 @@ test("text command collection keeps list and editor in desktop columns and stack
   expect(Math.abs((editorBoxDesktop?.y ?? 0) - (listBoxDesktop?.y ?? 0))).toBeLessThan(80);
 
   await page.setViewportSize({ width: 390, height: 844 });
+  const collection = page.locator(".collection-page");
+  await expect(collection).toHaveAttribute("data-single-column", "true");
+  await expect(collection).toHaveAttribute("data-detail-open", "true");
   const listBoxNarrow = await list.boundingBox();
   const editorBoxNarrow = await editor.boundingBox();
   expect(listBoxNarrow).toBeNull();

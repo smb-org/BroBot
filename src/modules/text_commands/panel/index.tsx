@@ -257,6 +257,8 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
   const [deleteWhenGuardCloses, setDeleteWhenGuardCloses] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [attemptedSave, setAttemptedSave] = useState(false);
+  const [validationAttempt, setValidationAttempt] = useState(0);
+  const editorRef = useRef<HTMLDivElement>(null);
   const [serverWarnings, setServerWarnings] = useState<readonly PanelTemplateWarning[]>([]);
   const [minimumTierExplicit, setMinimumTierExplicit] = useState(false);
   const dirty = draftDirty || pendingAliases.length > 0;
@@ -401,6 +403,21 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
       (validationDraft.variableAction === null || validationDraft.kind === "text" || validationDraft.kind === "timeout") &&
       commandDraftIsValid(validationDraft, channelVariables)
     : canOperate && command !== null && pendingAliases.length === 0;
+  useEffect(() => {
+    if (validationAttempt === 0 || valid) return;
+    const invalidField = editorRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]');
+    if (invalidField === undefined || invalidField === null) return;
+    const focusableSelector = "input:not(:disabled), textarea:not(:disabled), select:not(:disabled), button:not(:disabled), [tabindex]:not([tabindex='-1']):not(:disabled)";
+    const focusTarget = invalidField.matches(focusableSelector)
+      ? invalidField
+      : invalidField.querySelector<HTMLElement>(focusableSelector);
+    if (focusTarget === null) return;
+    for (let details = focusTarget.closest("details"); details !== null; details = details.parentElement?.closest("details") ?? null) {
+      details.open = true;
+    }
+    if (typeof focusTarget.scrollIntoView === "function") focusTarget.scrollIntoView({ block: "center" });
+    focusTarget.focus();
+  }, [valid, validationAttempt]);
   const localWarnings = templateFieldNames.flatMap((field) => {
     const variables = templateFields[field] ?? [];
     const value = templateValue(field);
@@ -540,6 +557,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
   const deleteAfterSaveRef = useRef(false);
   const saveDraft = useCallback(async (): Promise<string | null> => {
     setAttemptedSave(true);
+    setValidationAttempt((attempt) => attempt + 1);
     if (pendingAliases.length > 0) return labels.aliasPendingInvalid;
     const operatorToggle = !canManageContent;
     if (operatorToggle) {
@@ -643,7 +661,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
       notify({ tone: "error", message: labels.saveError });
       return labels.saveError;
     } finally { setPending(false); }
-  }, [accept, canManageContent, canOperate, channelId, channelVariables, command, draft, generation, isCreate, labels, onRefresh, onSaved, onWrite, pendingAliases, resolvedLanguage, setAttemptedSave, setConcurrentConflict, setFieldError, setPending, setSaved, setServerFieldErrors, setServerWarnings]);
+  }, [accept, canManageContent, canOperate, channelId, channelVariables, command, draft, generation, isCreate, labels, onRefresh, onSaved, onWrite, pendingAliases, resolvedLanguage, setAttemptedSave, setConcurrentConflict, setFieldError, setPending, setSaved, setServerFieldErrors, setServerWarnings, setValidationAttempt]);
 
   const discardDraft = (): void => {
     reset(); setPendingAliases(""); setAttemptedSave(false); setSaved(false); setFieldError(null); setDeleteError(undefined);
@@ -1080,7 +1098,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
       reloadLabel: reloadError ? common.retry : labels.reload,
       onReload: () => { void reloadServer(); },
     } } : {})}
-    onInvalidSave={() => { setAttemptedSave(true); }}
+    onInvalidSave={() => { setAttemptedSave(true); setValidationAttempt((attempt) => attempt + 1); }}
     onSave={() => { void saveDraft(); }}
     onDiscard={discardDraft}
     saveLabel={isCreate ? labels.create : labels.save}
@@ -1089,7 +1107,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
     pendingLabel={labels.pending}
   />;
   const saveStatus = <div className="text-command-editor__save">{saveBar}</div>;
-  return <div className="text-command-editor" role="region" aria-label={isCreate ? labels.add : labels.details(command.name)} onKeyDown={(event) => {
+  return <div ref={editorRef} className="text-command-editor" role="region" aria-label={isCreate ? labels.add : labels.details(command.name)} onKeyDown={(event) => {
     if (event.key === "Escape") { event.preventDefault(); onClose(); }
     // Legacy IME events can report keyCode 229 without setting isComposing.
     // eslint-disable-next-line @typescript-eslint/no-deprecated
