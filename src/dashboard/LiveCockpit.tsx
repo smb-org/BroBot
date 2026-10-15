@@ -9,13 +9,14 @@ import { MODULES } from "../modules/registry";
 import { fetchChannelOverview } from "./api";
 import type { DashboardRoute } from "./router";
 import { dashboardTexts, formatNumber } from "./locale";
-import { useOverlaysQuery } from "./data/lists";
+import { useEventsQuery, useOverlaysQuery } from "./data/lists";
 import { queryKeys } from "./data/keys";
 import { Button, Icon, StatusLed } from "./ui";
 import { ImmediateActions } from "./ImmediateActions";
 import { LiveCockpitEventFeed, LiveCockpitTiles } from "./LiveCockpitParts";
 import { browserTimeZone } from "./ui/format-relative-time";
 import { useChannelSettings } from "./data/channel-settings";
+import { emptyEventFilter } from "./events/model";
 
 const formatDuration = (startedAt: string | null | undefined, now: number): string => {
   if (startedAt == null) return "—";
@@ -48,6 +49,7 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
   const [belaboxActionSample, setBelaboxActionSample] = useState<{ channelId: string; connected: boolean; bitrateKbps: number; sampledAt: number } | null>(null);
   const [footerMessage, setFooterMessage] = useState<{ text: string; link?: { href: string; label: string } } | null>(null);
   const overlaysQuery = useOverlaysQuery(overview.channelId);
+  const eventsQuery = useEventsQuery(overview.channelId, emptyEventFilter, 30_000);
   const channelSettings = useChannelSettings(overview.channelId);
   const timeZone = channelSettings.data?.timeZone ?? browserTimeZone();
   const liveQuery = useQuery({
@@ -147,13 +149,14 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
   const belaboxUnavailable = belaboxFetchFailed ||
     belaboxStatus.failed && statusSample === null && freshActionSample === null;
   const belaboxWeak = belaboxEnabled && belaboxStatus.data?.configured === true && statusSample?.phase === "low";
-  const liveDataFailed = liveQuery.isError || liveQuery.data?.failed === true || overlaysQuery.isError;
+  const liveDataFailed = liveQuery.isError || liveQuery.data?.failed === true || overlaysQuery.isError || eventsQuery.isError;
+  const liveDataPending = liveQuery.isPending || overlaysQuery.isPending || eventsQuery.isPending;
   const footerStatus: "ok" | "warn" | "loading" = !botConnected || liveDataFailed
     ? "warn"
-    : liveQuery.isPending || overlaysQuery.isPending ? "loading" : "ok";
+    : liveDataPending ? "loading" : "ok";
   const footerHealthText = !botConnected ? labels.botUnavailable
     : liveDataFailed ? labels.liveDataUnavailable
-      : liveQuery.isPending || overlaysQuery.isPending ? labels.liveDataLoading
+      : liveDataPending ? labels.liveDataLoading
         : `${labels.systemReady} · ${labels.liveDataCurrent}`;
   const warnings = [
     ...(overview.location == null ? [{ key: "location", title: labels.locationMissing, description: labels.locationMissingDescription, action: labels.configureLocation, run: () => onNavigate({ kind: "channel", channelId: overview.channelId, section: "location-weather" }) }] : []),
@@ -234,7 +237,7 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
         onMessage={(text) => { setFooterMessage({ text }); }}
         onRefresh={refreshLiveData}
       />
-      <LiveCockpitEventFeed channelId={overview.channelId} role={overview.role} now={now}
+      <LiveCockpitEventFeed channelId={overview.channelId} role={overview.role} now={now} timeZone={timeZone} eventQuery={eventsQuery}
         streamState={overview.streamState} raidEnabled={modules.some((module) => module.id === "raid" && module.enabled)}
         onMessage={(text) => { setFooterMessage({ text }); }} />
     </div>

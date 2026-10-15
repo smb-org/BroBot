@@ -13,6 +13,7 @@ export interface LiveCockpitMockOptions {
   botStatus?: "connected" | "disconnected";
   channelBotStatus?: "connected" | "disconnected";
   events?: readonly Record<string, unknown>[];
+  eventsError?: boolean;
   upcomingAd?: boolean;
   location?: { name: string; latitude: number; longitude: number; timeZone: string } | null;
   viewerCount?: number | null;
@@ -30,6 +31,7 @@ export interface LiveCockpitMockOptions {
 
 export interface LiveCockpitMockController {
   currentStateRequestCount: () => number;
+  failCurrentState: () => void;
   overviewRequestCount: () => number;
   settingsState: () => {
     timeZone: string;
@@ -79,6 +81,7 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
     defaultChatTargetRevision: 1,
   };
   let currentStateRequests = 0;
+  let currentStateFailed = false;
   let overviewRequests = 0;
 
   await page.route("**/api/**", async (route: Route) => {
@@ -123,12 +126,15 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
       await options.waitForOverlays?.();
       return route.fulfill(json({ overlays: [], maximum: 20, elementMaximum: 20 }));
     }
-    if (pathname === `${channelPrefix}/events`) return route.fulfill(json({ entries: options.events ?? [], nextCursor: null }));
+    if (pathname === `${channelPrefix}/events`) {
+      if (options.eventsError) return route.fulfill(json({ error: "temporarily_unavailable" }, 503));
+      return route.fulfill(json({ entries: options.events ?? [], nextCursor: null }));
+    }
     if (pathname === `${channelPrefix}/audit-log`) return route.fulfill(json({ entries: [], nextCursor: null }));
     if (pathname === `${channelPrefix}/modules/chat_voting/current`) {
       currentStateRequests += 1;
       await options.waitForCurrentState?.();
-      if (options.currentStateError) return route.fulfill(json({ error: "temporarily_unavailable" }, 503));
+      if (options.currentStateError || currentStateFailed) return route.fulfill(json({ error: "temporarily_unavailable" }, 503));
       const vote = options.vote === undefined ? null : options.vote;
       return route.fulfill(json({ vote, counts: vote === null ? null : [3, 1], revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120 }));
     }
@@ -181,6 +187,7 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
 
   return {
     currentStateRequestCount: () => currentStateRequests,
+    failCurrentState: () => { currentStateFailed = true; },
     overviewRequestCount: () => overviewRequests,
     settingsState: () => settings,
   };

@@ -1348,15 +1348,15 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .overlays-page__create-reason { max-width: 18rem; margin: 0; color: var(--text-3); font-size: 12px; line-height: 1.4; text-align: right; }
 .header-action { display: grid; justify-items: end; gap: 2px; min-width: 0; }
 .header-action__reason-slot { display: grid; align-content: start; min-height: 18px; width: 100%; overflow: hidden; }
-.state-row:has(.state-row__action) { grid-template-columns: 190px auto minmax(0, 1fr) 280px; gap: 8px; min-height: 112px; }
+.state-row:has(.state-row__action) { grid-template-columns: var(--state-label-width) auto minmax(0, 1fr) 280px; gap: 12px; min-height: 112px; }
 .state-row__action { position: relative; grid-column: 4; width: 280px; height: 78px; align-self: center; justify-self: end; }
 .state-row__action > .header-action { position: relative; display: block; width: 100%; height: 100%; }
 .state-row__action > .button,
 .state-row__action > .ui-button { position: absolute; top: 50%; right: 0; display: inline-flex; width: 100%; min-width: 0; align-items: center; justify-content: center; transform: translateY(-50%); }
 .state-row__action > .header-action > .button,
 .state-row__action > .header-action > .ui-button { position: absolute; top: 50%; right: 0; display: inline-flex; width: 100%; min-width: 0; align-items: center; justify-content: center; transform: translateY(-50%); }
-.state-row__action .header-action__reason-slot { position: absolute; right: 0; bottom: 0; display: grid; height: 24px; min-height: 24px; align-content: center; justify-items: end; text-align: right; }
-.state-row__action .header-action__reason-slot .lock-reason { display: -webkit-box; max-width: 100%; max-height: 24px; margin: 0; overflow: hidden; line-height: 12px; text-align: right; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.state-row__action .header-action__reason-slot { position: absolute; right: 0; bottom: 0; left: 0; display: grid; height: 24px; min-height: 24px; align-content: center; justify-items: stretch; text-align: left; }
+.state-row__action .header-action__reason-slot .lock-reason { display: -webkit-box; width: 100%; max-width: none; max-height: 24px; margin: 0; overflow: hidden; line-height: 12px; text-align: left; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .state-row:has(.state-row__action) .state-row__label,
 .state-row:has(.state-row__action) .state-row__detail { align-self: center; }
 .state-row:has(.state-row__action) .state-row__detail { display: -webkit-box; max-height: 30px; overflow: hidden; line-height: 15px; text-overflow: clip; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }

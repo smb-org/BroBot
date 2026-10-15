@@ -11,12 +11,10 @@ import { snoozeAds } from "../modules/ads/panel/service";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, formatNumber, immediateActionUnavailableReasonText } from "./locale";
 import { moduleName } from "./module-labels";
 import { eventDetail } from "./events/model";
-import { useChannelSettings } from "./data/channel-settings";
-import { useEventsQuery } from "./data/lists";
-import { emptyEventFilter } from "./events/model";
+import type { useEventsQuery } from "./data/lists";
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
 import { immediateActionErrorFeedback } from "./immediate-action-errors";
-import { browserTimeZone, formatRelativeTime } from "./ui/format-relative-time";
+import { formatRelativeTime } from "./ui/format-relative-time";
 import { Button, ChipGroup, ConfirmDialog, DataTable, Field, FilterBar, Icon, LoadStateLines } from "./ui";
 
 type EventFilter = "all" | "raids" | "community" | "chat";
@@ -204,10 +202,12 @@ export const LiveCockpitTiles = ({
   </div>;
 };
 
-export const LiveCockpitEventFeed = ({ channelId, role, now, streamState, raidEnabled, onMessage }: {
+export const LiveCockpitEventFeed = ({ channelId, role, now, timeZone, eventQuery, streamState, raidEnabled, onMessage }: {
   channelId: string;
   role: ChannelRole;
   now: number;
+  timeZone: string;
+  eventQuery: ReturnType<typeof useEventsQuery>;
   streamState: ChannelStreamState | null | undefined;
   raidEnabled: boolean;
   onMessage: (message: string) => void;
@@ -218,9 +218,6 @@ export const LiveCockpitEventFeed = ({ channelId, role, now, streamState, raidEn
   const [search, setSearch] = useState("");
   const [busyEntry, setBusyEntry] = useState<string | null>(null);
   const language = dashboardLanguage();
-  const eventQuery = useEventsQuery(channelId, emptyEventFilter, 30_000);
-  const settings = useChannelSettings(channelId);
-  const timeZone = settings.data?.timeZone ?? browserTimeZone();
   const entries = useMemo(() => eventQuery.data?.pages.flatMap((page) => page.entries) ?? [], [eventQuery.data]);
   const query = search.trim().toLocaleLowerCase(language);
   const filtered = useMemo(() => entries.filter((entry) => {

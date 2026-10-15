@@ -15,6 +15,7 @@ import { PopoverContent, PopoverPrimitive } from "./ui/primitives/popover";
 type CustomCondition = Extract<ModuleImmediateActionCondition, { check: unknown }>;
 
 interface ActionConditionState {
+  channelId: string;
   loading: boolean;
   reason: Readonly<Record<"de" | "en", string>> | null;
   until: number | null;
@@ -60,12 +61,21 @@ const ActionButton = ({ action, moduleId, channelId, streamState, role, onAction
   );
   const shouldCheckConditions = meetsRole && staticAvailability.enabled && customConditions.length > 0;
   const [conditionState, setConditionState] = useState<ActionConditionState>({
+    channelId,
     loading: shouldCheckConditions,
     reason: null,
     until: null,
     pollId: null,
     stale: false,
   });
+  const activeConditionState = conditionState.channelId === channelId ? conditionState : {
+    channelId,
+    loading: shouldCheckConditions,
+    reason: null,
+    until: null,
+    pollId: null,
+    stale: false,
+  };
   const [now, setNow] = useState(() => Date.now());
   const [availabilityRetry, setAvailabilityRetry] = useState(0);
 
@@ -82,9 +92,18 @@ const ActionButton = ({ action, moduleId, channelId, streamState, role, onAction
       const timeout = window.setTimeout(() => {
         if (!active) return;
         controller.abort();
-        setConditionState({ loading: false, reason: null, until: null, pollId: null, stale: true });
+        setConditionState((current) => ({
+          channelId,
+          loading: false,
+          reason: null,
+          until: null,
+          pollId: current.channelId === channelId ? current.pollId : null,
+          stale: true,
+        }));
       }, 10_000);
-      setConditionState((current) => ({ ...current, loading: current.reason === null && !current.stale }));
+      setConditionState((current) => current.channelId === channelId
+        ? { ...current, loading: current.reason === null && !current.stale }
+        : { channelId, loading: true, reason: null, until: null, pollId: null, stale: false });
       try {
         let pollId: string | null = null;
         for (const condition of customConditions) {
@@ -92,14 +111,21 @@ const ActionButton = ({ action, moduleId, channelId, streamState, role, onAction
           if (!active || controller.signal.aborted) return;
           pollId = result.pollId ?? pollId;
           if (result.reason !== null) {
-            setConditionState({ loading: false, reason: result.reason, until: result.until ?? null, pollId, stale: false });
+            setConditionState({ channelId, loading: false, reason: result.reason, until: result.until ?? null, pollId, stale: false });
             return;
           }
         }
-        if (active) setConditionState({ loading: false, reason: null, until: null, pollId, stale: false });
+        if (active) setConditionState({ channelId, loading: false, reason: null, until: null, pollId, stale: false });
       } catch {
         if (!active) return;
-        setConditionState({ loading: false, reason: null, until: null, pollId: null, stale: true });
+        setConditionState((current) => ({
+          channelId,
+          loading: false,
+          reason: null,
+          until: null,
+          pollId: current.channelId === channelId ? current.pollId : null,
+          stale: true,
+        }));
       } finally {
         window.clearTimeout(timeout);
         if (pendingController === controller) pendingController = null;
@@ -116,26 +142,28 @@ const ActionButton = ({ action, moduleId, channelId, streamState, role, onAction
   }, [availabilityRetry, channelId, customConditions, language, shouldCheckConditions, streamState]);
 
   useEffect(() => {
-    if (conditionState.until === null || conditionState.reason === null || !conditionState.reason[language].includes("{time}")) return;
+    if (activeConditionState.until === null || activeConditionState.reason === null || !activeConditionState.reason[language].includes("{time}")) return;
     const interval = window.setInterval(() => { setNow(Date.now()); }, 1_000);
     return () => { window.clearInterval(interval); };
-  }, [conditionState.reason, conditionState.until, language]);
+  }, [activeConditionState.reason, activeConditionState.until, language]);
 
   const staticReason = staticAvailability.reason;
   const lockReason = !meetsRole
     ? roleReason(action.requiredRole)
     : !staticAvailability.enabled
       ? staticReason === null ? texts.streamManager.actionAvailabilityFailed : immediateActionUnavailableReasonText(staticReason, language)
-      : conditionState.loading
+      : activeConditionState.loading
         ? texts.streamManager.actionLoading
-        : conditionState.reason === null
-          ? null
-          : conditionState.until === null
-            ? conditionState.reason[language]
-            : conditionState.reason[language].replace("{time}", remainingTime(conditionState.until, now));
+        : activeConditionState.reason === null
+          ? activeConditionState.stale && activeConditionState.pollId === null && moduleId === "chat_voting" && action.id === "end-vote"
+            ? texts.streamManager.actionAvailabilityFailed
+            : null
+          : activeConditionState.until === null
+            ? activeConditionState.reason[language]
+            : activeConditionState.reason[language].replace("{time}", remainingTime(activeConditionState.until, now));
 
-  return <ActionFrame action={action} moduleId={moduleId} channelId={channelId} language={language} pollId={conditionState.pollId}
-    disabled={lockReason !== null} reason={lockReason} availabilityStale={conditionState.stale}
+  return <ActionFrame action={action} moduleId={moduleId} channelId={channelId} language={language} pollId={activeConditionState.pollId}
+    disabled={lockReason !== null} reason={lockReason} availabilityStale={activeConditionState.stale}
     onRetryAvailability={() => { setAvailabilityRetry((retry) => retry + 1); }}
     {...(onFeedbackMessage === undefined ? {} : { onFeedbackMessage })}
     {...(onActionResult === undefined ? {} : { onActionResult })} />;

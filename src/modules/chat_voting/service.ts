@@ -613,9 +613,29 @@ export const closeChatVoteFromAlarm = async (
       vote.closesAt,
       new Date(now).toISOString(),
     );
-    if (!claimed) return;
-    vote = await repository.byId(context.channelId, pollId);
-    if (vote === null || vote.status === "closed") return;
+    if (!claimed) {
+      const currentVote = await repository.byId(context.channelId, pollId);
+      if (currentVote === null || currentVote.status === "closed") return;
+      if (currentVote.status === "closing") {
+        // The manual close or another alarm owns the claim. This handler still
+        // owns the running alarm, so finish the persisted close instead of
+        // acknowledging it while the vote is left without a recovery alarm.
+        vote = currentVote;
+      } else {
+        const currentDeadline = currentVote.closeReason === "manual"
+          ? Date.now()
+          : Date.parse(currentVote.closesAt);
+        if (!Number.isFinite(currentDeadline)) throw new Error("The persisted vote deadline is invalid.");
+        // A lost claim can also mean that the deadline changed while this
+        // alarm was running. Confirm a new alarm for the persisted state
+        // before allowing the current alarm to complete.
+        await context.schedule(pollId, currentDeadline, currentVote.deadlineRevision ?? 0);
+        return;
+      }
+    } else {
+      vote = await repository.byId(context.channelId, pollId);
+      if (vote === null || vote.status === "closed") return;
+    }
   }
 
   const storageKey = voteSnapshotStorageKey(pollId);
