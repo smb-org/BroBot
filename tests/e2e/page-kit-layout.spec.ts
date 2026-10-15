@@ -7,6 +7,7 @@ test("page kit stays within narrow viewports, uses shared collection widths, and
 
   for (const [width, expectedListWidth] of [[390, null], [1280, 360], [1920, 420], [2560, 480]] as const) {
     await page.setViewportSize({ width, height: 900 });
+    await expect(page.locator(".collection-page")).toHaveAttribute("data-single-column", width === 390 ? "true" : "false");
     const geometry = await page.evaluate(() => {
       const list = document.querySelector<HTMLElement>(".collection-page__list");
       const detail = document.querySelector<HTMLElement>(".collection-page__detail");
@@ -27,9 +28,15 @@ test("page kit stays within narrow viewports, uses shared collection widths, and
     expect(geometry.documentWidth).toBeLessThanOrEqual(geometry.viewportWidth);
     if (expectedListWidth !== null) expect(geometry.listWidth).toBe(expectedListWidth);
     expect(geometry.detailOverflowY).toBe("auto");
-    expect(geometry.detailScrollHeight).toBeGreaterThan(geometry.detailClientHeight);
-    expect(initialGeometry.pageHeader).not.toBeNull();
-    expect(initialGeometry.detail).not.toBeNull();
+    if (width === 390) {
+      await expect(page.locator(".collection-page__detail")).toBeHidden();
+      expect(initialGeometry.detail).toBeNull();
+      expect(initialGeometry.pageHeader).toBeNull();
+    } else {
+      expect(geometry.detailScrollHeight).toBeGreaterThan(geometry.detailClientHeight);
+      expect(initialGeometry.detail).not.toBeNull();
+      expect(initialGeometry.pageHeader).not.toBeNull();
+    }
     await page.waitForTimeout(250);
     const settledGeometry = {
       pageHeader: await page.locator(".page-header").boundingBox(),

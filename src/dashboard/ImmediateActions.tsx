@@ -312,7 +312,7 @@ const ActionFrame = ({ action, moduleId, channelId, language, pollId, disabled, 
   const triggerProps = {
     "aria-label": action.name[language],
     "aria-describedby": reasonId,
-    "aria-haspopup": action.content === undefined ? undefined : action.content.presentation === "dialog" ? "dialog" as const : "dialog" as const,
+    "aria-haspopup": action.content === undefined ? undefined : "dialog" as const,
     "aria-busy": busy,
     disabled: disabled || busy,
     title: reason ?? action.name[language],

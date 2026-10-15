@@ -44,6 +44,7 @@ const searchFixtureGames = (): Promise<readonly GameMultiSelectGame[]> => Promis
 
 export function LayoutFixture() {
   const [showIssues, setShowIssues] = useState(false);
+  const [showChipWarning, setShowChipWarning] = useState(false);
   const [previewLong, setPreviewLong] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogError, setDialogError] = useState(false);
@@ -58,6 +59,7 @@ export function LayoutFixture() {
     <UiProvider>
       <main className="main-content" style={{ width: "min(960px, 100%)", padding: "16px" }}>
         <button id="toggle-issues" type="button" onClick={() => { setShowIssues((current) => !current); }}>Toggle issues</button>
+        <button id="toggle-chip-warning" type="button" onClick={() => { setShowChipWarning((current) => !current); }}>Toggle chip warning</button>
         <button id="toggle-preview" type="button" onClick={() => { setPreviewLong((current) => !current); }}>Toggle preview</button>
         <button id="toggle-save-pending" type="button" onClick={() => { setSavePending((current) => !current); }}>Toggle save pending</button>
         <button id="open-dialog" type="button" onClick={() => { setDialogOpen(true); }}>Open dialog</button>
@@ -72,7 +74,7 @@ export function LayoutFixture() {
           <Field id="layout-name" label="Name" hint="A short name." value="hello" onChange={() => {}} {...errorProps} maxLength={30} countLabel={(count, max) => `${String(count)}/${String(max)}`} />
           <UnitInput id="layout-number" label="Count" hint="A short count." value={number} onChange={setNumber} {...errorProps} />
           <Select id="layout-select" label="Mode" hint="A short mode." value="one" onChange={() => {}} options={[{ value: "one", label: "One" }]} {...errorProps} />
-          <ChipsInput id="layout-tags" label="Aliases" hint="A short alias hint." values={tags} onChange={setTags} {...(showIssues ? { error: "A validation error that should remain on one line beside its marker and not cover the warning row." } : {})} {...(showIssues ? { warning: "A duplicate warning that should remain in its own one-line row." } : {})} removeLabel={(entry) => `Remove ${entry}`} listLabel="Alias list" messages={{ countLabel: (count, max) => `${String(count)}/${String(max)}`, atLimitHint: "At limit.", duplicateWarning: (entry) => `${entry} is duplicated.` }} />
+          <ChipsInput id="layout-tags" label="Aliases" hint="A short alias hint." values={tags} onChange={setTags} {...(showIssues ? { error: "A validation error that should remain on one line beside its marker." } : {})} {...(showChipWarning ? { warning: "A duplicate warning that should remain in its one-line feedback row." } : {})} removeLabel={(entry) => `Remove ${entry}`} listLabel="Alias list" messages={{ countLabel: (count, max) => `${String(count)}/${String(max)}`, atLimitHint: "At limit.", duplicateWarning: (entry) => `${entry} is duplicated.` }} />
           <TemplateTextField id="layout-template" label="Reply" hint="A short reply hint." value={showIssues ? "Hi {missing}" : "Hi there"} onChange={() => {}} {...errorProps} variables={[]} preview={(text) => previewLong ? `${text} ${"long preview ".repeat(30)}` : text} previewLabel="Preview" previewSpeaker="Bot" messages={templateMessages} />
         </div>
         <SaveStatus dirty={showIssues} pending={savePending} {...(showIssues ? { error: "The module settings are invalid." } : {})} persistent saveLabel="Save" discardLabel="Discard" savedLabel="Saved." pendingLabel="Saving settings …" onSave={() => {}} onDiscard={() => {}} />

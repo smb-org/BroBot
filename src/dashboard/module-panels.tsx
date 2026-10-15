@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState, type ComponentType, type ReactElement
 
 import { MODULES } from "../modules/registry";
 import type { ModulePanelProperties } from "../modules/contract";
+import { textCommandListChatCommand } from "../modules/text_commands/contracts/chat-commands";
+import type { TextCommandPanelData } from "../modules/text_commands/panel/service";
 import { loadModulePanel, loadModuleSettingsEditor, ModuleChunkLoadError, retryModuleChunkLoad } from "./module-panel-loaders";
 import { RetryableLazy } from "./RetryableLazy";
 import { canManage, type ChannelRole } from "../contracts/values";
@@ -41,6 +43,27 @@ const iconFor = (moduleId: string, className = "module-glyph"): ReactElement => 
 };
 
 export const ModuleIcon = ({ moduleId, className }: { moduleId: string; className?: string }): ReactElement => iconFor(moduleId, className);
+
+const TextCommandChatCommandHelp = ({ channelId }: { channelId: string }): ReactElement | null => {
+  const language = dashboardLanguage();
+  const commandsQuery = useModuleQuery<TextCommandPanelData>(
+    channelId,
+    "text_commands",
+    "commands",
+    (signal) => import("../modules/text_commands/panel/service").then(({ loadTextCommandData }) => loadTextCommandData(channelId, signal)),
+  );
+  const listCommand = commandsQuery.data?.commands.find(({ kind }) => kind === "list");
+  if (listCommand === undefined) {
+    return commandsQuery.data === undefined
+      ? <ChatCommandsHelp
+        commands={[]}
+        language={language}
+        loadingLabel={dashboardTexts(language).module.chatCommandsButtonLabel(formatNumber(1, language))}
+      />
+      : null;
+  }
+  return <ChatCommandsHelp commands={[textCommandListChatCommand(listCommand.name)]} language={language} />;
+};
 
 export const StateRow = ({ label, tone, word, detail, action, icon }: {
   label: string;
@@ -786,6 +809,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   const navigationPage = registered?.navigationEntries?.find((entry) => entry.showMainSwitch === false);
   const moduleState = modules.find((candidate) => candidate.id === moduleId);
   const activeModule = activeModules.find((candidate) => candidate.moduleId === moduleId);
+  const chatCommands = registered?.chatCommands ?? [];
   const mandatory = moduleState?.mandatory === true || registered?.mandatory === true;
   const mandatoryReason = registered?.mandatoryReason?.[dashboardLanguage()] ?? labels.mandatoryReason;
   const enabled = mandatory || moduleState?.enabled === true;
@@ -832,8 +856,10 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
             ...(mandatory ? { moduleSwitch: <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} /> } : {}),
             ...(disabledReason === null ? {} : { lockHint: disabledReason }),
           })}
-          {...(registered?.chatCommands === undefined || registered.chatCommands.length === 0 ? {} : {
-            pageActions: <ChatCommandsHelp commands={registered.chatCommands} language={dashboardLanguage()} />,
+          {...(moduleId === "text_commands" ? {
+            pageActions: <TextCommandChatCommandHelp channelId={channelId} />,
+          } : chatCommands.length === 0 ? {} : {
+            pageActions: <ChatCommandsHelp commands={chatCommands} language={dashboardLanguage()} />,
           })}
         />
         {!permissionsMissing ? null : <section className="module-detail__authorization" aria-label={texts.module.scopeList}>

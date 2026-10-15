@@ -78,6 +78,7 @@ export type PrepareTextCommandVariableChange = (
 export interface NewTextCommand {
   channelId: string;
   name: string;
+  enabled?: boolean;
   text: string;
   kind: TextCommandKind;
   offlineText?: string;

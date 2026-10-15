@@ -41,7 +41,9 @@ createRoot(document.getElementById("root") as HTMLElement).render(
   <DashboardDataProvider>
     <RealtimeHarness>
       <UiProvider>
-        <main className="main-content" style={{ width: "min(1400px, 100%)", padding: "16px" }}>
+        <main className="main-content" style={panelName === "faq"
+          ? { display: "flex", flexDirection: "column", width: "min(1400px, 100%)", height: "100dvh", padding: "16px" }
+          : { width: "min(1400px, 100%)", padding: "16px" }}>
           {panel}
           {panelName === "faq" ? <ToastHost /> : null}
           {panelName === "chat_voting" ? <button type="button" onClick={() => {

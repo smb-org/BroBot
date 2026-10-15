@@ -3168,11 +3168,16 @@ describe("Dashboard skeleton", () => {
       await rendered.queryClient.invalidateQueries({ queryKey: dashboardDataKeys.system("kanal-a"), exact: true });
     });
 
+    const statusRow = rendered.container.querySelector(".ui-load-state--status-row");
+    await waitFor(() => {
+      expect(rendered.queryClient.getQueryState(dashboardDataKeys.system("kanal-a"))?.status).toBe("error");
+      expect(statusRow?.querySelector(".ui-load-state__inline-message")).not.toBeNull();
+      expect(statusRow?.querySelector(".ui-load-state__retry")).not.toBeNull();
+    });
     expect(rendered.container.querySelector(".state-list")).toBeInTheDocument();
-    expect(rendered.container.querySelector(".ui-load-state--status-row .ui-load-state__inline-message")).not.toBeNull();
-    const systemRetry = rendered.container.querySelector(".ui-load-state--status-row .ui-load-state__retry");
-    expect(systemRetry).not.toBeNull();
-    fireEvent.click(systemRetry as HTMLButtonElement);
+    const systemRetry = statusRow?.querySelector<HTMLButtonElement>(".ui-load-state__retry");
+    if (systemRetry === null || systemRetry === undefined) throw new Error("The cached System error should offer Retry.");
+    fireEvent.click(systemRetry);
 
     await waitFor(() => {
       expect(rendered.queryClient.getQueryData(dashboardDataKeys.system("kanal-a"))).toMatchObject({
@@ -3653,8 +3658,8 @@ describe("Dashboard skeleton", () => {
     window.history.replaceState({}, "", "/channels/kanal-a/modules/text_commands");
 
     render(<DashboardApp />);
-    fireEvent.click(await screen.findByRole("row", { name: /!hallo/i }));
-    const response = await screen.findByRole("textbox", { name: "Antwort" });
+    fireEvent.click(await screen.findByRole("button", { name: /!hallo/i }));
+    const response = await screen.findByRole("textbox", { name: "Antworttext" });
     fireEvent.change(response, { target: { value: "Nicht gespeicherter Entwurf" } });
 
     fireEvent.keyDown(document.body, platformPaletteShortcut());
@@ -3665,7 +3670,7 @@ describe("Dashboard skeleton", () => {
     const firstGuard = await screen.findByRole("dialog", { name: "Ungespeicherte Änderungen" });
     fireEvent.click(within(firstGuard).getByRole("button", { name: "Weiter bearbeiten" }));
     expect(window.location.pathname).toBe("/channels/kanal-a/modules/text_commands");
-    expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Nicht gespeicherter Entwurf");
+    expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("Nicht gespeicherter Entwurf");
 
     const navigation = await openSetupNavigation();
     fireEvent.click(within(navigation).getByRole("link", { name: "Variablen" }));
@@ -3757,6 +3762,7 @@ describe("Dashboard skeleton", () => {
       if (path === "/api/channels/kanal-a/events") return jsonResponse({ entries: [], nextCursor: null });
       if (path === "/api/channels/kanal-a/settings") return jsonResponse({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 1 });
       if (path === "/api/channels/kanal-a/modules/text_commands/commands") return jsonResponse({ commands: [], variables: [] });
+      if (path === "/api/channels/kanal-a/template-variables") return jsonResponse({ variables: [] });
       unmockedRequests.push(path);
       return jsonResponse({}, 404);
     }));

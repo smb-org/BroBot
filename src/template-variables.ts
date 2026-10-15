@@ -1,7 +1,7 @@
 import type { TemplateVariable } from "./template";
 
 const SYSTEM_TEMPLATE_VARIABLES = {
-  user: { name: "user", group: "context", contexts: ["chat_command"], sample: "viewer", maxLength: 25 },
+  user: { name: "user", group: "context", contexts: ["chat_command", "event"], sample: "viewer", maxLength: 25 },
   displayname: { name: "displayname", group: "context", contexts: ["chat_command"], sample: "Viewer", maxLength: 25 },
   channel: { name: "channel", group: "context", contexts: ["chat_command"], sample: "samplechannel", maxLength: 25 },
   target: { name: "target", group: "context", contexts: ["chat_command"], sample: "friend", maxLength: 25 },

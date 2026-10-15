@@ -526,7 +526,7 @@ test("the live title placeholder is read-only and the channel target has one aff
   await expect(chatTarget.locator(".ui-chat-target-field__chevron")).toBeVisible();
 });
 
-test("action tiles center reasonless content and keep vote labels on one line", async ({ page }) => {
+test("action tiles center reasonless content and keep vote labels within two lines", async ({ page }) => {
   const channelId = "kanal-live-action-centering";
   await page.setViewportSize({ width: 1280, height: 800 });
   await installLiveCockpitMocks(page, {
@@ -553,7 +553,6 @@ test("action tiles center reasonless content and keep vote labels on one line", 
       const nameBox = name.getBoundingClientRect();
       return {
         labelTop: nameBox.top,
-        nameHeight: nameBox.height,
         nameScrollHeight: name.scrollHeight,
         nameClientHeight: name.clientHeight,
         nameScrollWidth: name.scrollWidth,
@@ -567,10 +566,9 @@ test("action tiles center reasonless content and keep vote labels on one line", 
     if (startGeometry === undefined || endGeometry === undefined) continue;
     expect(Math.abs(startGeometry.labelTop - endGeometry.labelTop)).toBeLessThanOrEqual(1);
     for (const item of geometry) {
-      expect(item.nameHeight).toBeLessThanOrEqual(18);
       expect(item.nameScrollHeight).toBeLessThanOrEqual(item.nameClientHeight + 1);
       expect(item.nameScrollWidth).toBeLessThanOrEqual(item.nameClientWidth + 1);
-      expect(item.whiteSpace).toBe("nowrap");
+      expect(item.whiteSpace).toBe("normal");
     }
   }
 });

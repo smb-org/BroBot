@@ -81,7 +81,7 @@ const mutation = async <Result,>(
 
 export const createTextCommand = async (
   channelId: string,
-  command: Pick<TextCommand, "name" | "kind" | "text" | "offlineText" | "notFollowingText" | "unavailableText" | "usageText" | "minimumTier" | "cooldownSeconds" | "aliases" | "userCooldownSeconds" | "streamCondition" | "games" | "responseType" | "chatTarget" | "variableAction" | "timeoutAction">,
+  command: Pick<TextCommand, "name" | "enabled" | "kind" | "text" | "offlineText" | "notFollowingText" | "unavailableText" | "usageText" | "minimumTier" | "cooldownSeconds" | "aliases" | "userCooldownSeconds" | "streamCondition" | "games" | "responseType" | "chatTarget" | "variableAction" | "timeoutAction">,
 ): Promise<TextCommandMutationResult> => mutation<TextCommandMutationResult>(channelId, "POST", command);
 
 export const saveTextCommand = async (
@@ -90,6 +90,7 @@ export const saveTextCommand = async (
     oldName: string;
     revision: number;
     name: string;
+    enabled: boolean;
     kind: TextCommandKind;
     text: string;
     offlineText?: string;
@@ -110,6 +111,7 @@ export const saveTextCommand = async (
 ): Promise<TextCommandMutationResult> => mutation<TextCommandMutationResult>(channelId, "PATCH", {
   revision: command.revision,
   name: command.name,
+  enabled: command.enabled,
   kind: command.kind,
   text: command.text,
   offlineText: command.offlineText,
@@ -128,12 +130,15 @@ export const saveTextCommand = async (
   timeoutAction: command.timeoutAction,
 }, command.oldName);
 
-export const toggleTextCommand = async (
+export const setTextCommandEnabled = async (
   channelId: string,
   name: string,
   revision: number,
   enabled: boolean,
-): Promise<TextCommandMutationResult> => mutation<TextCommandMutationResult>(channelId, "PATCH", { revision, enabled }, name);
+): Promise<TextCommandMutationResult> => mutation<TextCommandMutationResult>(channelId, "PATCH", {
+  revision,
+  enabled,
+}, name);
 
 export const deleteTextCommand = async (channelId: string, name: string, revision: number): Promise<void> => {
   await mutation<{ ok: true }>(channelId, "DELETE", undefined, name, `revision=${String(revision)}`);
