@@ -172,7 +172,7 @@ for (const viewport of viewportCases) {
     const editor = page.locator(".faq-panel__editor");
     const lastField = editor.locator(".ui-game-multi-select").last();
     await expect(lastField).toBeVisible();
-    await editor.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+    await editor.evaluate((element) => { element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight - 96); });
     const geometry = await page.evaluate(() => {
       const scroller = document.querySelector<HTMLElement>(".faq-panel__editor");
       const target = [...(scroller?.querySelectorAll<HTMLElement>(".ui-game-multi-select") ?? [])].at(-1);
