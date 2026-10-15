@@ -175,7 +175,7 @@ const openTextCommand = async (page: Page, width: number, height: number): Promi
   await page.setViewportSize({ width, height });
   await page.goto(`/channels/${channelId}/modules/text_commands`);
   const row = page.locator(".text-command-row").filter({ hasText: "!hallo" });
-  if (width <= 768) await row.click();
+  await row.click();
   await expect(page.getByRole("region", { name: "Eigenschaften von !hallo" })).toBeVisible();
 };
 
@@ -202,6 +202,8 @@ test("operator command settings render as properties and keep the operational sw
 
   const editor = page.getByRole("region", { name: "Eigenschaften von !hallo" });
   await expect(editor).toBeVisible();
+  const row = page.locator(".text-command-row").filter({ hasText: "!hallo" });
+  await expect(row).toHaveCSS("border-left-width", "4px");
   await expect(editor.locator("dl.properties")).toBeVisible();
   await expect(editor.getByText("Hallo {user}! Willkommen im Kanal.", { exact: true })).toBeVisible();
   const chatTarget = editor.locator("dl.properties > div").filter({ hasText: "Chat-Ziel" }).locator("dd");
@@ -243,14 +245,89 @@ test("operator can toggle a command after realtime content changes using its lat
   await expect(editor.locator(".ui-save-bar__status")).toContainText("Alle Änderungen gespeichert");
 });
 
-test("selected command rows expose aria-current", async ({ page }) => {
+test("selected command rows keep their visual highlight after focus leaves", async ({ page }) => {
   await mockDashboard(page);
-  await openTextCommand(page, 1280, 800);
+  for (const [width, height] of [[1280, 800], [390, 844]] as const) {
+    await openTextCommand(page, width, height);
 
-  const row = page.locator(".text-command-row").filter({ hasText: "!hallo" });
-  await expect(row).toHaveAttribute("aria-current", "true");
-  await expect(row).not.toHaveAttribute("aria-selected");
+    const row = page.locator(".text-command-row").filter({ hasText: "!hallo" });
+    await expect(row).toHaveAttribute("aria-current", "true");
+    await expect(row).not.toHaveAttribute("aria-selected");
+    await page.getByRole("textbox", { name: "Antworttext" }).focus();
+    await expect(row).toHaveCSS("border-left-width", "4px");
+    const selectedStyle = await row.evaluate((element) => getComputedStyle(element).backgroundColor);
+    expect(selectedStyle).not.toBe("rgba(0, 0, 0, 0)");
+  }
 });
+
+const expectCollectionPaneGeometry = async (page: Page, saveActionsSelector: string): Promise<void> => {
+  const geometry = await page.evaluate((selector) => {
+    const detail = document.querySelector<HTMLElement>(".collection-page__detail");
+    const actions = document.querySelector<HTMLElement>(selector);
+    const mainContent = document.querySelector<HTMLElement>(".main-content");
+    if (detail === null || actions === null || mainContent === null) throw new Error("The collection pane geometry is incomplete.");
+    const detailBox = detail.getBoundingClientRect();
+    const actionsBox = actions.getBoundingClientRect();
+    const collection = detail.closest<HTMLElement>(".collection-page");
+    const collectionBody = collection?.querySelector<HTMLElement>(".collection-page__body");
+    const faqEditorGrid = detail.querySelector<HTMLElement>(".faq-panel__editor-grid");
+    return {
+      viewportWidth: document.documentElement.clientWidth,
+      documentScrollWidth: document.documentElement.scrollWidth,
+      mainContentClientWidth: mainContent.clientWidth,
+      mainContentScrollWidth: mainContent.scrollWidth,
+      detailClientWidth: detail.clientWidth,
+      detailScrollWidth: detail.scrollWidth,
+      detailLeft: detailBox.left,
+      detailRight: detailBox.right,
+      actionsLeft: actionsBox.left,
+      actionsRight: actionsBox.right,
+      collectionColumns: collectionBody == null ? "missing" : getComputedStyle(collectionBody).gridTemplateColumns,
+      faqEditorColumns: faqEditorGrid == null ? "missing" : getComputedStyle(faqEditorGrid).gridTemplateColumns,
+      visibleOverflowingChildren: Array.from(detail.querySelectorAll<HTMLElement>("*"))
+        .filter((element) => {
+          const bounds = element.getBoundingClientRect();
+          const style = getComputedStyle(element);
+          return style.display !== "none" && style.visibility !== "hidden" && bounds.width > 1
+            && (bounds.left < detailBox.left - 1 || bounds.right > detailBox.right + 1);
+        })
+        .map((element) => ({ className: element.className, left: element.getBoundingClientRect().left, right: element.getBoundingClientRect().right })),
+    };
+  }, saveActionsSelector);
+  expect(geometry.documentScrollWidth).toBeLessThanOrEqual(geometry.viewportWidth);
+  expect(geometry.mainContentScrollWidth).toBeLessThanOrEqual(geometry.mainContentClientWidth);
+  expect(geometry.detailScrollWidth).toBeLessThanOrEqual(geometry.detailClientWidth + 4);
+  expect(geometry.detailClientWidth).toBeGreaterThan(440);
+  expect(geometry.collectionColumns).not.toBe("missing");
+  expect(geometry.collectionColumns.split(" ")).toHaveLength(1);
+  if (saveActionsSelector.includes("faq-panel__detail")) {
+    expect(geometry.faqEditorColumns).not.toBe("missing");
+    expect(geometry.faqEditorColumns.split(" ")).toHaveLength(1);
+  }
+  expect(geometry.visibleOverflowingChildren).toEqual([]);
+  expect(geometry.actionsLeft).toBeGreaterThanOrEqual(geometry.detailLeft - 1);
+  expect(geometry.actionsRight).toBeLessThanOrEqual(geometry.detailRight + 1);
+};
+
+for (const [width, height] of [[820, 1180], [1024, 768]] as const) {
+  test(`commands and FAQ editors fit the workspace at ${String(width)}x${String(height)}`, async ({ page }) => {
+    await mockDashboard(page);
+    await openTextCommand(page, width, height);
+
+    await expect(page.locator(".text-command-editor")).toBeVisible();
+    const commandSaveActions = page.locator(".text-command-editor__save .ui-save-bar__actions");
+    await expect(commandSaveActions.getByRole("button", { name: "Speichern", exact: true })).toBeVisible();
+    await expectCollectionPaneGeometry(page, ".text-command-editor__save .ui-save-bar__actions");
+
+    await page.goto(`/channels/${channelId}/modules/faq`);
+    const faqEntry = page.locator(".faq-panel__entry").filter({ hasText: "Begrüßung" });
+    await faqEntry.click();
+    await expect(page.locator(".faq-panel__editor")).toBeVisible();
+    const faqSaveActions = page.locator(".faq-panel__detail > .page-header .ui-save-bar__actions");
+    await expect(faqSaveActions.getByRole("button", { name: "Speichern", exact: true })).toBeVisible();
+    await expectCollectionPaneGeometry(page, ".faq-panel__detail > .page-header .ui-save-bar__actions");
+  });
+}
 
 test("Ctrl+Enter and Cmd+Enter save the current command draft", async ({ page }) => {
   const counts = await mockDashboard(page);

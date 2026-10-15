@@ -379,6 +379,12 @@
   }
 }
 
+@container collection-workspace (max-width: 935px) {
+  .faq-panel__editor-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 @media (max-width: 768px) {
   .faq-panel .collection-page {
     --collection-list-width: 100%;
