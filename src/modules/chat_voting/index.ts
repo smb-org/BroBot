@@ -81,6 +81,7 @@ const initialTallyState = async (
     revision,
     openedAt: vote.openedAt,
     closesAt: vote.closesAt,
+    deadlineRevision: vote.deadlineRevision ?? 0,
     requestedDurationSeconds: vote.requestedDurationSeconds,
     closedAt: vote.closedAt,
     closeReason: vote.closeReason,
@@ -120,6 +121,7 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
       const closesAt = Date.parse(vote.closesAt);
       return [{
         kind: "vote",
+        id: vote.id,
         title: vote.title,
         options,
         totalVotes,
@@ -194,7 +196,7 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
         try {
           const state = await service.loadChatVotingState(channelId, signal);
           return state.vote?.status === "open"
-            ? { reason: null }
+            ? { reason: null, pollId: state.vote.id }
             : { reason: chatVotingImmediateActionTexts.notRunning };
         } catch (error: unknown) {
           if (error instanceof Error && error.name === "AbortError") throw error;
@@ -204,8 +206,9 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
     }],
     requiredRole: "operator",
     errorMessage: chatVotingImmediateActionTexts.endError,
-    execute: async ({ channelId }) => {
-      await (await import("./panel/service")).closeChatVoting(channelId);
+    execute: async ({ channelId, pollId }) => {
+      if (pollId === undefined) throw new Error("The rendered vote is no longer available.");
+      await (await import("./panel/service")).closeChatVoting(channelId, pollId);
       return { message: chatVotingImmediateActionTexts.endSucceeded };
     },
   }],

@@ -164,6 +164,13 @@ export interface ChatVotingRepository {
     closesAt: string,
     authorization?: ModuleMutationAuthorization,
   ): Promise<boolean>;
+  rollbackCloseExtension(
+    channelId: string,
+    pollId: string,
+    expectedClosesAt: string,
+    expectedDeadlineRevision: number,
+    closesAt: string,
+  ): Promise<boolean>;
   finish(
     channelId: string,
     pollId: string,
@@ -370,7 +377,7 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
   async claimAlarmClose(channelId, pollId, expectedClosesAt, claimedAt) {
     const result = await db.prepare(
       `UPDATE chat_votes
-          SET closing_at = ?
+          SET closing_at = ?, deadline_revision = deadline_revision + CASE WHEN closing_at IS NULL THEN 1 ELSE 0 END
         WHERE channel_id = ? AND poll_id = ? AND status = 'open' AND closing_at IS NULL
           AND closes_at = ? AND (closes_at <= ? OR close_reason = 'manual')`,
     ).bind(claimedAt, channelId, pollId, expectedClosesAt, claimedAt).run();
@@ -385,6 +392,15 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
           AND close_reason <> 'manual' AND closes_at = ? ${guard}`,
     ).bind(closesAt, channelId, pollId, expectedClosesAt, ...(authorization?.values ?? []));
     const result = await statement.run();
+    return result.meta.changes > 0;
+  },
+  async rollbackCloseExtension(channelId, pollId, expectedClosesAt, expectedDeadlineRevision, closesAt) {
+    const result = await db.prepare(
+      `UPDATE chat_votes
+          SET closes_at = ?, deadline_revision = deadline_revision + 1
+        WHERE channel_id = ? AND poll_id = ? AND status = 'open' AND closing_at IS NULL
+          AND close_reason <> 'manual' AND closes_at = ? AND deadline_revision = ?`,
+    ).bind(closesAt, channelId, pollId, expectedClosesAt, expectedDeadlineRevision).run();
     return result.meta.changes > 0;
   },
   async finish(channelId, pollId, closeReason, closedAt, counts, textResults = null, moreTerms = 0, termFilterReady = null) {

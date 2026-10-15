@@ -156,15 +156,17 @@ export const approveChatVotingTerm = async (channelId: string, pollId: string, t
   })));
 };
 
-export const closeChatVoting = async (channelId: string): Promise<void> => {
+export const closeChatVoting = async (channelId: string, pollId: string): Promise<void> => {
   await csrfMutation(async (token) => readJson<{ closing: boolean; pollId: string }>(await fetch(route(channelId, "/close"), {
     method: "POST",
-    headers: { "X-CSRF-Token": token },
+    headers: { "Content-Type": "application/json", "X-CSRF-Token": token },
+    body: JSON.stringify({ pollId }),
   })));
 };
 
-export const extendChatVoting = async (channelId: string): Promise<ChatVote> =>
+export const extendChatVoting = async (channelId: string, pollId: string): Promise<ChatVote> =>
   csrfMutation(async (token) => (await readJson<{ vote: ChatVote }>(await fetch(route(channelId, "/extend"), {
     method: "POST",
-    headers: { "X-CSRF-Token": token },
+    headers: { "Content-Type": "application/json", "X-CSRF-Token": token },
+    body: JSON.stringify({ pollId }),
   }))).vote);

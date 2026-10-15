@@ -1502,7 +1502,7 @@ describe("Dashboard skeleton", () => {
 
     const consent = await screen.findByRole("link", { name: "Vollzustimmung erteilen" });
     expect(consent).toHaveAttribute("href", "/auth/login?channel=alpha");
-    const channelBotConsent = await screen.findByRole("link", { name: "channel:bot-Zustimmung erteilen" });
+    const channelBotConsent = await screen.findByRole("link", { name: "Chat-Zugriff erlauben" });
     expect(channelBotConsent).toHaveAttribute("href", "/auth/channels/kanal-a/channel-bot");
     fireEvent.click(await screen.findByRole("button", { name: "Moderatorstatus prüfen" }));
     expect(await screen.findAllByText("Moderatorrolle fehlt")).not.toHaveLength(0);
@@ -1535,7 +1535,7 @@ describe("Dashboard skeleton", () => {
     expect(consent).toBeDisabled();
     expect(consent).toHaveAttribute("aria-describedby");
     expect(screen.getAllByText("Nur der Broadcaster kann die Vollzustimmung erteilen.")).toHaveLength(1);
-    const channelBotConsent = screen.getByRole("button", { name: "channel:bot-Zustimmung erteilen" });
+    const channelBotConsent = screen.getByRole("button", { name: "Chat-Zugriff erlauben" });
     expect(channelBotConsent).toBeDisabled();
     expect(channelBotConsent).toHaveAttribute("aria-describedby");
     expect(screen.getByText("Nur der Twitch-Kanalinhaber kann diese Zustimmung erteilen.")).toBeInTheDocument();

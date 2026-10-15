@@ -218,7 +218,14 @@ export const createReadInterleavingDatabase = (
           statement.bind(...values);
           return wrapped;
         },
-        first: <T>() => statement.first<T>(),
+        first: async <T>() => {
+          const result = await statement.first<T>();
+          if (!triggered) {
+            triggered = true;
+            await afterRead();
+          }
+          return result;
+        },
         all: async <T>(...typeHint: readonly T[]) => {
           const result = await statement.all<T>(...typeHint);
           if (!triggered) {

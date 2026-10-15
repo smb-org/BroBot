@@ -17,6 +17,7 @@ export const roleDescription = (role: ChannelRole): string => {
 };
 
 export interface ChannelPanelTexts {
+  fullConsent: string;
   fullConsentMissing: string;
   requestFullConsent: string;
   fullConsentLocked: string;
@@ -26,6 +27,7 @@ export interface ChannelPanelTexts {
 
 const channelPanelCatalog: LocaleCatalog<ChannelPanelTexts> = {
   de: {
+    fullConsent: "Vollzustimmung",
     fullConsentMissing: "Vollzustimmung fehlt",
     requestFullConsent: "Vollzustimmung erteilen",
     fullConsentLocked: "Nur der Broadcaster kann die Vollzustimmung erteilen.",
@@ -33,6 +35,7 @@ const channelPanelCatalog: LocaleCatalog<ChannelPanelTexts> = {
     missingScopes: "Fehlende Scopes",
   },
   en: {
+    fullConsent: "Full consent",
     fullConsentMissing: "Full consent missing",
     requestFullConsent: "Grant full consent",
     fullConsentLocked: "Only the broadcaster can grant full consent.",

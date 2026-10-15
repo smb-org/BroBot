@@ -792,7 +792,7 @@ const broadcasterPermissionsRow = (permissions: PanelBroadcasterPermissions | nu
     key: "broadcaster-permissions",
     tone: "warning",
     node: <StateRow
-      label={texts.fullConsentMissing}
+      label={texts.fullConsent}
       tone="warning"
       word={texts.fullConsentMissing}
       action={login === undefined ? undefined : <BroadcasterConsentAction login={login} needed canRequest={canRequest} />}

@@ -292,4 +292,36 @@ describe("chat voting repository mutation guards", () => {
       database.close();
     }
   });
+
+  it("increments the deadline revision when an alarm first claims the close", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "fictional-channel");
+      const repository = createChatVotingRepository(database as unknown as D1Database);
+      const vote: ChatVoteDraft = {
+        id: "alarm-claim-poll",
+        channelId: "fictional-channel",
+        kind: "yes_no",
+        optionCount: 2,
+        labels: ["Yes", "No"],
+        title: null,
+        openedAt: "2026-10-04T10:00:00.000Z",
+        closesAt: "2026-10-04T14:00:00.000Z",
+        requestedDurationSeconds: 120,
+        closeReason: "timer",
+      };
+      await repository.insertOpen(vote);
+
+      await expect(repository.claimAlarmClose("fictional-channel", vote.id, vote.closesAt, "2026-10-04T14:01:00.000Z"))
+        .resolves.toBe(true);
+      await expect(repository.byId("fictional-channel", vote.id)).resolves.toMatchObject({
+        status: "closing",
+        deadlineRevision: 1,
+      });
+      await expect(repository.claimAlarmClose("fictional-channel", vote.id, vote.closesAt, "2026-10-04T14:02:00.000Z"))
+        .resolves.toBe(false);
+    } finally {
+      database.close();
+    }
+  });
 });

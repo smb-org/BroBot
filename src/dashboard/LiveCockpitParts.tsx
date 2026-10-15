@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactElement } from "react";
 
+import { PanelApiError } from "../contracts/panel-error";
 import { canManage, hasRequiredChannelRole, type ChannelRole, type ChannelStreamState } from "../contracts/values";
 import type { PanelEventEntry } from "../panel-contract";
 import { MODULES } from "../modules/registry";
@@ -14,6 +15,7 @@ import { useChannelSettings } from "./data/channel-settings";
 import { useEventsQuery } from "./data/lists";
 import { emptyEventFilter } from "./events/model";
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
+import { immediateActionErrorFeedback } from "./immediate-action-errors";
 import { browserTimeZone, formatRelativeTime } from "./ui/format-relative-time";
 import { Button, ChipGroup, ConfirmDialog, DataTable, Field, FilterBar, Icon, LoadStateLines } from "./ui";
 
@@ -67,49 +69,59 @@ export const LiveCockpitTiles = ({
     .sort((left, right) => Date.parse(left.at) - Date.parse(right.at))
     .slice(0, 12);
   const [busy, setBusy] = useState(false);
-  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState<{ id: string; target: string } | null>(null);
   const [cancelError, setCancelError] = useState<string | undefined>();
   const roleCanManage = hasRequiredChannelRole(role, "operator");
   const roleCanSnooze = canManage(role);
 
-  const extendVote = async (): Promise<void> => {
+  const extendVote = async (pollId: string): Promise<void> => {
     if (busy) return;
     setBusy(true);
     try {
-      await extendChatVoting(channelId);
+      await extendChatVoting(channelId, pollId);
       onMessage(labels.voteExtended);
       onRefresh();
-    } catch {
-      onMessage(labels.voteExtensionUnavailable);
+    } catch (error: unknown) {
+      onMessage(error instanceof PanelApiError && error.code === "chat_voting_poll_changed"
+        ? labels.voteChanged : labels.voteExtensionUnavailable);
+      onRefresh();
     } finally {
       setBusy(false);
     }
   };
 
-  const endVote = async (): Promise<void> => {
+  const endVote = async (pollId: string): Promise<void> => {
     if (busy) return;
     setBusy(true);
     try {
-      await closeChatVoting(channelId);
+      await closeChatVoting(channelId, pollId);
       onMessage(labels.voteEnded);
       onRefresh();
-    } catch {
-      onMessage(labels.voteEndFailed);
+    } catch (error: unknown) {
+      onMessage(error instanceof PanelApiError && error.code === "chat_voting_poll_changed"
+        ? labels.voteChanged : labels.voteEndFailed);
+      onRefresh();
     } finally {
       setBusy(false);
     }
   };
 
   const doCancelVotekick = async (): Promise<void> => {
-    if (running?.kind !== "votekick" || busy) return;
+    if (cancelTarget === null || busy) return;
     setBusy(true);
     setCancelError(undefined);
     try {
-      await cancelVotekick(channelId, running.id);
-      setConfirmCancel(false);
+      await cancelVotekick(channelId, cancelTarget.id);
+      setCancelTarget(null);
       onMessage(labels.votekickCanceled);
       onRefresh();
-    } catch {
+    } catch (error: unknown) {
+      if (error instanceof PanelApiError && error.code === "votekick_changed") {
+        setCancelTarget(null);
+        onMessage(labels.votekickChanged);
+        onRefresh();
+        return;
+      }
       setCancelError(labels.votekickCancelFailed);
     } finally {
       setBusy(false);
@@ -154,15 +166,15 @@ export const LiveCockpitTiles = ({
           </div>
           <footer className="live-vote-tile__footer">
             <span>{labels.voteTotal(formatNumber(running.totalVotes))}</span>
-            <div><Button size="compact" variant="secondary" icon="plus" disabled={busy || !roleCanManage || !running.canExtend} onClick={() => { void extendVote(); }}>{labels.voteExtend}</Button>
-              <Button size="compact" variant="neutral" danger disabled={busy || !roleCanManage} onClick={() => { void endVote(); }}>{labels.voteEnd}</Button></div>
+            <div><Button size="compact" variant="secondary" icon="plus" disabled={busy || !roleCanManage || !running.canExtend} onClick={() => { void extendVote(running.id); }}>{labels.voteExtend}</Button>
+              <Button size="compact" variant="neutral" danger disabled={busy || !roleCanManage} onClick={() => { void endVote(running.id); }}>{labels.voteEnd}</Button></div>
           </footer>
         </div>
         : <div className="live-votekick-tile" data-testid="live-votekick-tile">
           <header><div><span>{labels.votekickType}</span><h3>{running.target}</h3></div><span className="live-vote-tile__countdown mono">{labels.voteEndsIn(remainingLabel(running.endsAt, now))}</span></header>
           <p className="live-votekick-tile__votes">{labels.votekickVotes(formatNumber(running.yesVotes), formatNumber(running.noVotes), formatNumber(running.threshold))}</p>
-          <div className="live-votekick-tile__actions"><Button size="compact" variant="neutral" danger disabled={busy || !roleCanManage} onClick={() => { setConfirmCancel(true); setCancelError(undefined); }}>{labels.votekickCancel}</Button></div>
-          <ConfirmDialog opened={confirmCancel} title={labels.votekickCancelTitle} description={labels.votekickCancelDescription(running.target)} confirmLabel={labels.votekickCancel} cancelLabel={dashboardCommonTexts().cancel} onConfirm={() => { void doCancelVotekick(); }} onCancel={() => { if (!busy) setConfirmCancel(false); }} pending={busy} danger {...(cancelError === undefined ? {} : { error: cancelError })} />
+          <div className="live-votekick-tile__actions"><Button size="compact" variant="neutral" danger disabled={busy || !roleCanManage} onClick={() => { setCancelTarget({ id: running.id, target: running.target }); setCancelError(undefined); }}>{labels.votekickCancel}</Button></div>
+          <ConfirmDialog opened={cancelTarget !== null} title={labels.votekickCancelTitle} description={labels.votekickCancelDescription(cancelTarget?.target ?? running.target)} confirmLabel={labels.votekickCancel} cancelLabel={dashboardCommonTexts().cancel} onConfirm={() => { void doCancelVotekick(); }} onCancel={() => { if (!busy) setCancelTarget(null); }} pending={busy} danger {...(cancelError === undefined ? {} : { error: cancelError })} />
         </div>}
     </section>
     <section className="live-cockpit-reserve live-cockpit-next-tile" data-slot="next-up" aria-label={labels.nextUp}>
@@ -244,8 +256,8 @@ export const LiveCockpitEventFeed = ({ channelId, role, now, streamState, raidEn
       formData.set("login", login);
       await raidAction.execute({ channelId, language, formData });
       onMessage(`${labels.raidShoutoutSent} @${login}`);
-    } catch {
-      onMessage(labels.raidShoutoutFailed);
+    } catch (error: unknown) {
+      onMessage(immediateActionErrorFeedback(error, "raid", labels.raidShoutoutFailed, language).message);
     } finally {
       setBusyEntry(null);
     }

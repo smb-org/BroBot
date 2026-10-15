@@ -50,6 +50,26 @@ describe("chat voting tally state", () => {
     });
   });
 
+  it("accepts a newer deadline carried by an older ballot revision", () => {
+    const current = {
+      ...tally("poll-a", 11),
+      closesAt: "2026-10-04T14:00:00.000Z",
+      deadlineRevision: 0,
+    } as TallyState;
+    const extension = {
+      ...tally("poll-a", 10),
+      closesAt: "2026-10-04T14:01:00.000Z",
+      deadlineRevision: 1,
+    } as TallyState;
+
+    expect(mergeTallyState(current, extension)).toMatchObject({
+      revision: 11,
+      counts: [11, 0],
+      closesAt: "2026-10-04T14:01:00.000Z",
+      deadlineRevision: 1,
+    });
+  });
+
   it("preserves deadline revisions through the renderer parser before merging stale messages", () => {
     const current = parseTallyState({
       ...tally("poll-a", 4),
@@ -94,7 +114,7 @@ describe("chat voting tally state", () => {
     };
 
     expect(mergeTallyState(current, null)).toBeNull();
-    expect(mergeTallyState(current, closed)).toEqual(closed);
+    expect(mergeTallyState(current, closed)).toMatchObject(closed);
   });
 
   it("keeps closed counts final even when the close revision is lower", () => {
@@ -107,6 +127,32 @@ describe("chat voting tally state", () => {
 
     expect(closed).toMatchObject({ revision: 0, counts: [4, 2], status: "closed" });
     expect(mergeTallyState(closed, tally("poll-a", 8))).toBe(closed);
+  });
+
+  it("keeps a newer deadline while accepting terminal state from a lower deadline revision", () => {
+    const current = {
+      ...tally("poll-a", 7),
+      closesAt: "2026-10-04T14:02:00.000Z",
+      requestedDurationSeconds: 300,
+      deadlineRevision: 2,
+    };
+    const closed = mergeTallyState(current, {
+      ...tally("poll-a", 0, "closed"),
+      closesAt: "2026-10-04T14:00:00.000Z",
+      requestedDurationSeconds: 120,
+      deadlineRevision: 1,
+      counts: [4, 2],
+      closedAt: "2026-10-04T10:05:00.000Z",
+    });
+
+    expect(closed).toMatchObject({
+      status: "closed",
+      revision: 0,
+      counts: [4, 2],
+      closesAt: "2026-10-04T14:02:00.000Z",
+      requestedDurationSeconds: 300,
+      deadlineRevision: 2,
+    });
   });
 
   it("accepts only newer polls and ignores old close retries", () => {

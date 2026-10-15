@@ -12,7 +12,7 @@ export interface ChatVotingLiveBlockProperties {
   language: "de" | "en";
   busy: boolean;
   canOperate: boolean;
-  onClose: () => void;
+  onClose: (pollId: string) => void;
   onApprove: (pollId: string, term: string) => void;
 }
 
@@ -44,7 +44,7 @@ export function ChatVotingLiveBlock({ state, language, busy, canOperate, onClose
       <StatusLed state={running ? "ok" : "off"} label={running ? labels.running : labels.ended} />
       <h2 className="chat-voting-live__question" title={vote.title ?? ""}>{vote.title ?? labels.untitled}</h2>
       <span className="chat-voting-live__meta mono">{meta}</span>
-      <span className="chat-voting-live__action-slot">{running ? <Button onClick={onClose} disabled={busy || !canOperate}>{labels.end}</Button> : null}</span>
+      <span className="chat-voting-live__action-slot">{running ? <Button onClick={() => { onClose(vote.id); }} disabled={busy || !canOperate}>{labels.end}</Button> : null}</span>
     </header>
     {vote.kind === "free_text" ? <div className="chat-voting-live__rows chat-voting-live__rows--free-text" role="list" aria-label={labels.answers}>
       {Array.from({ length: 5 }, (_unused, index) => {

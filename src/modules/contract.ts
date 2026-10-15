@@ -1291,6 +1291,8 @@ type ModuleImmediateActionAvailability = {
   reason: Readonly<Record<ModuleLanguage, string>> | null;
   /** Used for short countdowns such as an open voting round. */
   until?: number;
+  /** Snapshot identity that must accompany any later mutation from this action. */
+  pollId?: string;
 };
 
 interface ModuleImmediateActionConditionContext {
@@ -1312,6 +1314,7 @@ export interface ModuleImmediateActionContentProperties {
 
 interface ModuleImmediateActionExecutionProperties extends ModuleImmediateActionContentProperties {
   formData: FormData;
+  pollId?: string;
 }
 
 export interface ModuleImmediateActionResult {
@@ -1337,6 +1340,7 @@ export interface ModuleImmediateActionDefinition {
 export type ModuleLiveTileSnapshot =
   | {
     kind: "vote";
+    id: string;
     title: string | null;
     options: readonly { label: string; count: number }[];
     totalVotes: number;

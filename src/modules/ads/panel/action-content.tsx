@@ -9,7 +9,7 @@ const LENGTHS = ["30", "60", "90", "120", "150", "180"] as const;
 export default function AdActionContent({ language, onDraftChange }: ModuleImmediateActionContentProperties): ReactElement {
   const [length, setLength] = useState<(typeof LENGTHS)[number]>("60");
 
-  return <div className="live-action-content">
+  return <div className="live-action-content live-action-content--ad">
     <SegmentChoice
       label={adsActionContentTexts.length[language]}
       hint={adsActionContentTexts.lengthHint[language]}

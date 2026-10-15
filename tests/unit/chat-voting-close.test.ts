@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { BallotSnapshot, ModuleAlarmContext, ModuleEvent } from "../../src/modules/contract";
+import type { BallotSnapshot, ModuleAlarmContext, ModuleEvent, ModuleOverlayElementContext } from "../../src/modules/contract";
 import { chatVotingModule } from "../../src/modules/chat_voting";
 import { createTemplateRenderer } from "../../src/worker/template-resolver";
 import { prepareModuleOverlayRealtimeMessage } from "../../src/worker/module-overlay-realtime";
@@ -122,6 +122,39 @@ describe("chat voting close service", () => {
       id: "fictional-poll",
       status: "closing",
       closeReason: "manual",
+    });
+  });
+
+  it("rearms an early alarm from the persisted deadline and deadline revision", async () => {
+    const repository = await seedOpenVote(false);
+    const closesAt = new Date(Date.now() + 60_000).toISOString();
+    await database.prepare("UPDATE chat_votes SET closes_at = ?, deadline_revision = 4 WHERE channel_id = ? AND poll_id = ?")
+      .bind(closesAt, "fictional-channel", "fictional-poll").run();
+    const order: string[] = [];
+    const { context, close } = createAlarmContext(order);
+
+    await closeChatVoteFromAlarm(context, repository, "fictional-poll");
+
+    expect(context.schedule).toHaveBeenCalledWith("fictional-poll", Date.parse(closesAt), 4);
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it("includes the persisted deadline revision in overlay bootstrap state", async () => {
+    await seedOpenVote(false);
+    const closesAt = new Date(Date.now() + 120_000).toISOString();
+    await database.prepare("UPDATE chat_votes SET closes_at = ?, deadline_revision = 3 WHERE channel_id = ? AND poll_id = ?")
+      .bind(closesAt, "fictional-channel", "fictional-poll").run();
+    const element = chatVotingModule.overlayElements?.[0];
+    if (element?.initialState === undefined) throw new Error("The chat voting overlay needs an initial state loader.");
+
+    const bootstrap = await element.initialState(database as unknown as D1Database, "fictional-channel", {}, {
+      readBallot: vi.fn(() => Promise.resolve(snapshot)),
+    } as unknown as ModuleOverlayElementContext);
+
+    expect(bootstrap).toMatchObject({
+      pollId: "fictional-poll",
+      closesAt,
+      deadlineRevision: 3,
     });
   });
 

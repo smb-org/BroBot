@@ -1102,6 +1102,7 @@ export interface DashboardTexts {
     voteEnd: string;
     voteExtended: string;
     voteExtensionUnavailable: string;
+    voteChanged: string;
     voteEnded: string;
     voteEndFailed: string;
     votekickVotes: (yes: string, no: string, threshold: string) => string;
@@ -1109,6 +1110,7 @@ export interface DashboardTexts {
     votekickCancelTitle: string;
     votekickCancelDescription: (target: string) => string;
     votekickCanceled: string;
+    votekickChanged: string;
     votekickCancelFailed: string;
     nextUp: string;
     noUpcomingItems: string;
@@ -1286,9 +1288,9 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     statusCard: {
       broadcasterOauth: "Broadcaster-OAuth", chatConsent: "Chat-Zustimmung",
       botAccount: "Bot-Account", botPermissions: "Bot-Berechtigungen", moderatorStatus: "Moderatorstatus", chatSubscription: "Chat-Abo", tokenStatus: "Token-Zustand",
-      requestChannelBotConsent: "channel:bot-Zustimmung erteilen",
+      requestChannelBotConsent: "Chat-Zugriff erlauben",
       channelBotConsentLocked: "Nur der Twitch-Kanalinhaber kann diese Zustimmung erteilen.",
-      channelBotConsentMissing: "channel:bot-Zustimmung fehlt.",
+      channelBotConsentMissing: "Der Bot darf noch nicht im Chat schreiben.",
     },
     time: {
       updated: (relativeTime) => `aktualisiert ${relativeTime}`, secondsAgo: (count) => `vor ${String(count)} s`,
@@ -1509,6 +1511,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       voteEnd: "Beenden",
       voteExtended: "Abstimmung um 30 Sekunden verlängert.",
       voteExtensionUnavailable: "Die Abstimmung lässt sich nicht weiter verlängern.",
+      voteChanged: "Die Abstimmung wurde inzwischen ersetzt. Bitte prüfe den aktuellen Stand.",
       voteEnded: "Abstimmung beendet.",
       voteEndFailed: "Abstimmung konnte nicht beendet werden.",
       votekickVotes: (yes, no, threshold) => `Ja ${yes} · Nein ${no} · Schwelle ${threshold}`,
@@ -1516,6 +1519,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       votekickCancelTitle: "Votekick abbrechen?",
       votekickCancelDescription: (target) => `Die Abstimmung gegen ${target} endet sofort. Es wird kein Timeout ausgelöst.`,
       votekickCanceled: "Votekick abgebrochen.",
+      votekickChanged: "Der Votekick wurde inzwischen ersetzt. Bitte prüfe den aktuellen Stand.",
       votekickCancelFailed: "Votekick konnte nicht abgebrochen werden.",
       nextUp: "Als Nächstes",
       noUpcomingItems: "Noch nichts geplant.",
@@ -1683,9 +1687,9 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     statusCard: {
       broadcasterOauth: "Broadcaster OAuth", chatConsent: "Chat consent", botAccount: "Bot account", botPermissions: "Bot permissions",
       moderatorStatus: "Moderator status", chatSubscription: "Chat subscription", tokenStatus: "Token status",
-      requestChannelBotConsent: "Grant channel:bot consent",
+      requestChannelBotConsent: "Allow chat access",
       channelBotConsentLocked: "Only the Twitch channel owner can grant this consent.",
-      channelBotConsentMissing: "channel:bot consent is missing.",
+      channelBotConsentMissing: "The bot cannot write in chat yet.",
     },
     time: {
       updated: (relativeTime) => `updated ${relativeTime}`, secondsAgo: (count) => `${String(count)} sec ago`,
@@ -1903,6 +1907,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       voteEnd: "End",
       voteExtended: "Vote extended by 30 seconds.",
       voteExtensionUnavailable: "This vote cannot be extended further.",
+      voteChanged: "This vote has been replaced. Check the current vote and try again.",
       voteEnded: "Vote ended.",
       voteEndFailed: "The vote could not be ended.",
       votekickVotes: (yes, no, threshold) => `Yes ${yes} · No ${no} · Threshold ${threshold}`,
@@ -1910,6 +1915,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       votekickCancelTitle: "Cancel votekick?",
       votekickCancelDescription: (target) => `The vote against ${target} ends now. No timeout will be applied.`,
       votekickCanceled: "Votekick canceled.",
+      votekickChanged: "This votekick has been replaced. Check the current vote and try again.",
       votekickCancelFailed: "The votekick could not be canceled.",
       nextUp: "Coming up",
       noUpcomingItems: "Nothing scheduled yet.",

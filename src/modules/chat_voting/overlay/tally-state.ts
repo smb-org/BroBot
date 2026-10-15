@@ -120,11 +120,25 @@ export const mergeTallyState = (previous: TallyState | null, incoming: TallyStat
   const previousDeadlineRevision = previous.deadlineRevision ?? 0;
   const incomingDeadlineRevision = incoming.deadlineRevision ?? 0;
   if (incoming.status === "closed") {
-    if (incomingDeadlineRevision < previousDeadlineRevision) return previous;
-    return { ...previous, ...incoming };
+    const closed = { ...previous, ...incoming };
+    if (incomingDeadlineRevision < previousDeadlineRevision) {
+      if (previous.closesAt === undefined) delete closed.closesAt;
+      else closed.closesAt = previous.closesAt;
+      if (previous.requestedDurationSeconds === undefined) delete closed.requestedDurationSeconds;
+      else closed.requestedDurationSeconds = previous.requestedDurationSeconds;
+      closed.deadlineRevision = previousDeadlineRevision;
+    } else {
+      if (incoming.closesAt === undefined) {
+        if (previous.closesAt === undefined) delete closed.closesAt;
+        else closed.closesAt = previous.closesAt;
+      }
+      closed.deadlineRevision = incomingDeadlineRevision;
+    }
+    return closed;
   }
   if (previous.status === "closed") return previous;
   if (incoming.revision < previous.revision && incomingDeadlineRevision <= previousDeadlineRevision) return previous;
+  // Deadline lifecycle invariant: every deadline change increments a persisted deadlineRevision; bootstrap and every tally carry it; this reducer takes closesAt only from the highest deadlineRevision, independent of ballot revision; the countdown latch resets when closesAt moves later for the same poll; a failed reschedule after a persisted extension is retried or the extension is rolled back so an alarm always exists for the persisted deadline.
   const merged = incoming.revision < previous.revision ? { ...previous } : { ...previous, ...incoming };
   if (incomingDeadlineRevision < previousDeadlineRevision) {
     if (previous.closesAt === undefined) delete merged.closesAt;
@@ -132,7 +146,15 @@ export const mergeTallyState = (previous: TallyState | null, incoming: TallyStat
     merged.deadlineRevision = previousDeadlineRevision;
     if (previous.requestedDurationSeconds !== undefined) merged.requestedDurationSeconds = previous.requestedDurationSeconds;
   } else {
-    if (incoming.closesAt === undefined && previous.closesAt !== undefined) merged.closesAt = previous.closesAt;
+    if (incoming.closesAt === undefined) {
+      if (previous.closesAt === undefined) delete merged.closesAt;
+      else merged.closesAt = previous.closesAt;
+    } else {
+      merged.closesAt = incoming.closesAt;
+    }
+    if (incoming.requestedDurationSeconds === undefined && previous.requestedDurationSeconds !== undefined) {
+      merged.requestedDurationSeconds = previous.requestedDurationSeconds;
+    }
     merged.deadlineRevision = incomingDeadlineRevision;
   }
   if (previous.status === "closing" && incoming.status === "open") merged.status = "closing";

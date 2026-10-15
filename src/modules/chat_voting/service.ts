@@ -139,7 +139,7 @@ export const requestChatVoteClose = async (
   channelId: string,
   scheduleClose: (pollId: string, deadline: number, ownerRevision: number) => Promise<void>,
   authorization?: ModuleMutationAuthorization,
-  options: { pollId?: string } = {},
+  options: { pollId?: string; onDeadlineRollback?: (vote: ChatVote) => Promise<void> } = {},
 ): Promise<ChatVote | null> => {
   const vote = options.pollId === undefined
     ? await repository.open(channelId)
@@ -164,9 +164,11 @@ export const requestChatVoteExtension = async (
   channelId: string,
   scheduleClose: (pollId: string, deadline: number, ownerRevision: number) => Promise<void>,
   authorization?: ModuleMutationAuthorization,
+  options: { pollId?: string; onDeadlineRollback?: (vote: ChatVote) => Promise<void> } = {},
 ): Promise<ChatVote | null> => {
   const vote = await repository.open(channelId);
-  if (vote === null || vote.status !== "open" || vote.closeReason === "manual") return null;
+  if (vote === null || vote.status !== "open" || vote.closeReason === "manual" ||
+      options.pollId !== undefined && vote.id !== options.pollId) return null;
   const openedAt = Date.parse(vote.openedAt);
   const closesAt = Date.parse(vote.closesAt);
   if (!Number.isFinite(openedAt) || !Number.isFinite(closesAt)) return null;
@@ -176,10 +178,70 @@ export const requestChatVoteExtension = async (
   if (extendedUntil <= closesAt) return null;
   const nextClosesAt = new Date(extendedUntil).toISOString();
   if (!await repository.extendClose(channelId, vote.id, vote.closesAt, nextClosesAt, authorization)) return null;
-  const extendedVote = await repository.byId(channelId, vote.id);
-  if (extendedVote === null || extendedVote.status !== "open") return null;
-  await scheduleClose(vote.id, Date.parse(extendedVote.closesAt), extendedVote.deadlineRevision ?? (vote.deadlineRevision ?? 0) + 1);
-  return extendedVote;
+  const extendedDeadlineRevision = (vote.deadlineRevision ?? 0) + 1;
+  const extendedVote: ChatVote = { ...vote, closesAt: nextClosesAt, deadlineRevision: extendedDeadlineRevision };
+  const scheduleWithRetry = async (deadline: number, ownerRevision: number): Promise<{ ok: true } | { ok: false; error: Error }> => {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await scheduleClose(vote.id, deadline, ownerRevision);
+        return { ok: true };
+      } catch (error: unknown) {
+        const lastError = error instanceof Error ? error : new Error(String(error));
+        if (attempt === 1) return { ok: false, error: lastError };
+      }
+    }
+    return { ok: false, error: new Error("The vote deadline alarm could not be scheduled.") };
+  };
+  const scheduleResult = await scheduleWithRetry(Date.parse(extendedVote.closesAt), extendedDeadlineRevision);
+  if (!scheduleResult.ok) {
+    let rolledBack: boolean;
+    try {
+      rolledBack = await repository.rollbackCloseExtension(
+        channelId,
+        vote.id,
+        extendedVote.closesAt,
+        extendedDeadlineRevision,
+        vote.closesAt,
+      );
+    } catch (recoveryError: unknown) {
+      throw new Error("The failed vote deadline reschedule could not be reconciled; the existing alarm will retry from persisted state.", { cause: recoveryError });
+    }
+    let currentVote: ChatVote | null;
+    try {
+      currentVote = await repository.byId(channelId, vote.id);
+    } catch (recoveryError: unknown) {
+      if (!rolledBack) {
+        throw new Error("The failed vote deadline reschedule could not be reconciled; the existing alarm will retry from persisted state.", { cause: recoveryError });
+      }
+      const restoredRevision = extendedDeadlineRevision + 1;
+      const restoredVote: ChatVote = { ...vote, deadlineRevision: restoredRevision };
+      const recoveryResult = await scheduleWithRetry(Date.parse(restoredVote.closesAt), restoredRevision);
+      if (!recoveryResult.ok) {
+        throw recoveryResult.error;
+      }
+      await options.onDeadlineRollback?.(restoredVote);
+      throw scheduleResult.error;
+    }
+    if (currentVote !== null && currentVote.status !== "closed") {
+      const recoveryDeadline = currentVote.status === "closing" ? Date.now() : Date.parse(currentVote.closesAt);
+      const recoveryRevision = currentVote.deadlineRevision ?? extendedDeadlineRevision + Number(rolledBack);
+      const recoveryResult = await scheduleWithRetry(recoveryDeadline, recoveryRevision);
+      if (!recoveryResult.ok) {
+        throw recoveryResult.error;
+      }
+    }
+    if (rolledBack) {
+      if (currentVote !== null && currentVote.status !== "closed") await options.onDeadlineRollback?.(currentVote);
+      throw scheduleResult.error;
+    }
+    if (currentVote?.status === "open" && currentVote.closesAt === extendedVote.closesAt) return currentVote;
+    return currentVote;
+  }
+  try {
+    return await repository.byId(channelId, vote.id) ?? extendedVote;
+  } catch {
+    return extendedVote;
+  }
 };
 
 const messageText = (event: ModuleEvent): string | null => {
@@ -538,7 +600,13 @@ export const closeChatVoteFromAlarm = async (
   if (vote.status === "open") {
     const now = Date.now();
     const closesAt = Date.parse(vote.closesAt);
-    if (vote.closeReason !== "manual" && (!Number.isFinite(closesAt) || now < closesAt)) return;
+    if (vote.closeReason !== "manual") {
+      if (!Number.isFinite(closesAt)) throw new Error("The persisted vote deadline is invalid.");
+      if (now < closesAt) {
+        await context.schedule(pollId, closesAt, vote.deadlineRevision ?? 0);
+        return;
+      }
+    }
     const claimed = await repository.claimAlarmClose(
       context.channelId,
       pollId,
@@ -660,6 +728,7 @@ export const closeChatVoteFromAlarm = async (
 
 export const chatVotingAlarmDefinition = {
   key: CHAT_VOTING_ALARM_HANDLER,
+  retryDelaysMs: [5_000, 15_000, 60_000],
   handle: async (context: ModuleAlarmContext, alarmKey: string) => {
     if (!/^[A-Za-z0-9_-]{1,128}$/u.test(alarmKey)) throw new RangeError("The chat vote id is invalid.");
     await closeChatVoteFromAlarm(context, createChatVotingRepository(context.DB), alarmKey);

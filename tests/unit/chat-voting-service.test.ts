@@ -75,6 +75,7 @@ const repositoryWith = (overrides: Partial<ChatVotingRepository> = {}): ChatVoti
   requestManualClose: vi.fn(() => Promise.resolve(true)),
   claimAlarmClose: vi.fn(() => Promise.resolve(true)),
   extendClose: vi.fn(() => Promise.resolve(true)),
+  rollbackCloseExtension: vi.fn(() => Promise.resolve(false)),
   finish: vi.fn(() => Promise.resolve(true)),
   templates: templateRepositoryWith(),
   ...overrides,
@@ -665,5 +666,71 @@ describe("chat voting event service", () => {
 
     expect(scheduleClose).toHaveBeenCalledTimes(2);
     expect(alarm.current?.deadline).toBe(Date.parse(persistedVote.closesAt));
+  });
+
+  it("rolls back a persisted extension and schedules the restored deadline when rescheduling fails", async () => {
+    const originalDeadline = new Date(Date.now() + 60_000).toISOString();
+    let persistedVote: ChatVote = {
+      ...openVote,
+      closesAt: originalDeadline,
+      deadlineRevision: 0,
+    };
+    let scheduleAttempts = 0;
+    const scheduleClose = vi.fn((): Promise<void> => {
+      scheduleAttempts += 1;
+      if (scheduleAttempts <= 2) return Promise.reject(new Error("alarm unavailable"));
+      return Promise.resolve();
+    });
+    const rollbackCloseExtension = vi.fn<ChatVotingRepository["rollbackCloseExtension"]>(
+      (_channelId, _pollId, expectedClosesAt, expectedDeadlineRevision, closesAt) => {
+        if (persistedVote.closesAt !== expectedClosesAt || persistedVote.deadlineRevision !== expectedDeadlineRevision) return Promise.resolve(false);
+        persistedVote = { ...persistedVote, closesAt, deadlineRevision: expectedDeadlineRevision + 1 };
+        return Promise.resolve(true);
+      },
+    );
+    const publishRollback = vi.fn((vote: ChatVote): Promise<void> => {
+      void vote;
+      return Promise.resolve();
+    });
+    const repository = repositoryWith({
+      open: vi.fn<ChatVotingRepository["open"]>(() => Promise.resolve({ ...persistedVote })),
+      byId: vi.fn<ChatVotingRepository["byId"]>(() => Promise.reject(new Error("deadline read unavailable"))),
+      extendClose: vi.fn<ChatVotingRepository["extendClose"]>((_channelId, _pollId, expectedClosesAt, closesAt) => {
+        if (persistedVote.closesAt !== expectedClosesAt) return Promise.resolve(false);
+        persistedVote = { ...persistedVote, closesAt, deadlineRevision: (persistedVote.deadlineRevision ?? 0) + 1 };
+        return Promise.resolve(true);
+      }),
+      rollbackCloseExtension,
+    });
+
+    await expect(requestChatVoteExtension(repository, "fictional-channel", scheduleClose, undefined, {
+      onDeadlineRollback: publishRollback,
+    })).rejects.toThrow("alarm unavailable");
+
+    expect(rollbackCloseExtension).toHaveBeenCalledWith(
+      "fictional-channel", openVote.id, expect.any(String), 1, expect.any(String),
+    );
+    expect(persistedVote.closesAt).toBe(originalDeadline);
+    expect(persistedVote.deadlineRevision).toBe(2);
+    expect(scheduleClose).toHaveBeenCalledTimes(3);
+    expect(scheduleClose.mock.calls[2]).toEqual([openVote.id, Date.parse(originalDeadline), 2]);
+    expect(publishRollback).toHaveBeenCalledWith(expect.objectContaining({ closesAt: originalDeadline, deadlineRevision: 2 }));
+  });
+
+  it("schedules a persisted extension before a post-write read can fail", async () => {
+    const originalDeadline = new Date(Date.now() + 60_000).toISOString();
+    const persistedVote: ChatVote = { ...openVote, closesAt: originalDeadline, deadlineRevision: 0 };
+    const scheduleClose = vi.fn(() => Promise.resolve());
+    const repository = repositoryWith({
+      open: vi.fn<ChatVotingRepository["open"]>(() => Promise.resolve(persistedVote)),
+      extendClose: vi.fn<ChatVotingRepository["extendClose"]>(() => Promise.resolve(true)),
+      byId: vi.fn<ChatVotingRepository["byId"]>(() => Promise.reject(new Error("post-write read unavailable"))),
+    });
+
+    const result = await requestChatVoteExtension(repository, "fictional-channel", scheduleClose);
+
+    expect(result).toMatchObject({ deadlineRevision: 1 });
+    expect(result?.closesAt).toBe(new Date(Date.parse(originalDeadline) + 30_000).toISOString());
+    expect(scheduleClose).toHaveBeenCalledWith(openVote.id, Date.parse(result?.closesAt ?? ""), 1);
   });
 });

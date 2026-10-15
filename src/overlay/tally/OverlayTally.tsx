@@ -60,14 +60,17 @@ export const OverlayTally = ({
   // The countdown is based on the local overlay clock, not update frequency from the server.
   // eslint-disable-next-line react-hooks/purity -- intentional: remaining time is local-clock minus closesAt at render time
   const now = Date.now();
-  const [zeroLatchedId, setZeroLatchedId] = useState<string | null>(null);
+  const [zeroLatch, setZeroLatch] = useState<{ id: string; deadline: number } | null>(null);
   const closeTime = closedAt == null ? Number.NaN : Date.parse(closedAt);
   const closeDeadline = closesAt == null ? Number.NaN : Date.parse(closesAt);
   const rawSeconds = showCountdown && open && Number.isFinite(closeDeadline)
     ? Math.max(0, Math.ceil((closeDeadline - now) / 1_000))
     : null;
-  if (rawSeconds === 0 && zeroLatchedId !== id) setZeroLatchedId(id);
-  const countdownSeconds = open && zeroLatchedId === id ? 0 : rawSeconds;
+  const deadlineMovedLater = zeroLatch?.id === id && Number.isFinite(closeDeadline) && closeDeadline > zeroLatch.deadline;
+  if (deadlineMovedLater) setZeroLatch(null);
+  else if (rawSeconds === 0 && zeroLatch?.id !== id) setZeroLatch({ id, deadline: closeDeadline });
+  const latchedAtCurrentDeadline = zeroLatch?.id === id && Number.isFinite(closeDeadline) && closeDeadline <= zeroLatch.deadline;
+  const countdownSeconds = open && latchedAtCurrentDeadline && !deadlineMovedLater ? 0 : rawSeconds;
   const countdownText = countdownSeconds === null ? "" : formatOverlayCountdown(countdownSeconds);
 
   useEffect(() => {

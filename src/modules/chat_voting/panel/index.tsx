@@ -356,11 +356,11 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
     }
   };
 
-  const closeVote = async (): Promise<void> => {
+  const closeVote = async (pollId: string): Promise<void> => {
     if (busy || !canOperate) return;
     setBusy(true);
     try {
-      await closeChatVoting(channelId);
+      await closeChatVoting(channelId, pollId);
       await refreshVote();
     } catch {
       notify({ tone: "error", message: labels.endError });
@@ -530,7 +530,7 @@ const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = tr
           language={language}
           busy={busy}
           canOperate={canOperate}
-          onClose={() => { void closeVote(); }}
+          onClose={(pollId) => { void closeVote(pollId); }}
           onApprove={(pollId, term) => { void approveTerm(pollId, term); }}
         />
       </LoadState>

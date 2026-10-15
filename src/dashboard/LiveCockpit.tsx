@@ -147,6 +147,14 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
   const belaboxUnavailable = belaboxFetchFailed ||
     belaboxStatus.failed && statusSample === null && freshActionSample === null;
   const belaboxWeak = belaboxEnabled && belaboxStatus.data?.configured === true && statusSample?.phase === "low";
+  const liveDataFailed = liveQuery.isError || liveQuery.data?.failed === true || overlaysQuery.isError;
+  const footerStatus: "ok" | "warn" | "loading" = !botConnected || liveDataFailed
+    ? "warn"
+    : liveQuery.isPending || overlaysQuery.isPending ? "loading" : "ok";
+  const footerHealthText = !botConnected ? labels.botUnavailable
+    : liveDataFailed ? labels.liveDataUnavailable
+      : liveQuery.isPending || overlaysQuery.isPending ? labels.liveDataLoading
+        : `${labels.systemReady} · ${labels.liveDataCurrent}`;
   const warnings = [
     ...(overview.location == null ? [{ key: "location", title: labels.locationMissing, description: labels.locationMissingDescription, action: labels.configureLocation, run: () => onNavigate({ kind: "channel", channelId: overview.channelId, section: "location-weather" }) }] : []),
     ...(belaboxWeak ? [{ key: "belabox", title: labels.belaboxWeak, description: labels.belaboxWeakDescription(formatNumber(Math.round(sampleBitrate))), action: labels.openBelabox, run: () => onNavigate({ kind: "module", channelId: overview.channelId, moduleId: "belabox" }) }] : []),
@@ -231,8 +239,8 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
         onMessage={(text) => { setFooterMessage({ text }); }} />
     </div>
     <footer className="live-cockpit__status" aria-live="polite" aria-label={labels.systemStatus}>
-      <StatusLed state="ok" label={labels.systemStatus} />
-      {footerMessage === null ? <span>{labels.systemReady} · {labels.liveDataCurrent}</span> : <span className="live-cockpit__status-message">
+      <StatusLed state={footerStatus} label={labels.systemStatus} />
+      {footerMessage === null ? <span>{footerHealthText}</span> : <span className="live-cockpit__status-message">
         {footerMessage.text}{footerMessage.link === undefined ? null : <a href={footerMessage.link.href} target="_blank" rel="noreferrer">{footerMessage.link.label}</a>}
       </span>}
     </footer>

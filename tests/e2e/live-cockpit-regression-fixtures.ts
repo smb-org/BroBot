@@ -6,17 +6,26 @@ export interface LiveCockpitMockOptions {
   channelId: string;
   modules?: readonly { id: string; enabled: boolean; settings: string }[];
   role?: "broadcaster" | "manager" | "operator";
+  channelBotConsent?: "granted" | "missing";
+  broadcasterMissingScopes?: readonly string[];
+  viewerUserId?: string;
   streamState?: "online" | "offline" | null;
+  botStatus?: "connected" | "disconnected";
+  channelBotStatus?: "connected" | "disconnected";
   events?: readonly Record<string, unknown>[];
   upcomingAd?: boolean;
   location?: { name: string; latitude: number; longitude: number; timeZone: string } | null;
   viewerCount?: number | null;
   nextViewerCount?: number | null;
   vote?: Record<string, unknown> | null;
+  votekick?: Record<string, unknown> | null;
+  shoutoutFailureReason?: string;
   currentStateError?: boolean;
   belaboxStatus?: { errorCode?: string | null; fetchFailureNotice?: boolean };
   waitForCurrentState?: () => Promise<void>;
-  onVoteClose?: () => void;
+  waitForOverlays?: () => Promise<void>;
+  onVoteClose?: (pollId: string) => void;
+  onVotekickCancel?: (id: string) => void;
 }
 
 export interface LiveCockpitMockController {
@@ -36,7 +45,8 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
   const modules = options.modules ?? [];
   const channelId = options.channelId;
   const now = new Date().toISOString();
-  const bot = { status: "connected", reason: null, updatedAt: now };
+  const bot = { status: options.botStatus ?? "connected", reason: null, updatedAt: now };
+  const channelBot = { ...bot, status: options.channelBotStatus ?? bot.status };
   const tokens = { botExpiresAt: "2099-09-20T08:00:00.000Z", loginStatus: "connected", loginReason: null, loginExpiresAt: "2099-09-20T08:00:00.000Z" };
   const channel = {
     channelId,
@@ -49,10 +59,10 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
     viewerCount: options.viewerCount ?? 42,
     location: options.location ?? null,
     broadcasterConnection: "connected",
-    channelBotConsent: "granted",
-    bot,
+    channelBotConsent: options.channelBotConsent ?? "granted",
+    bot: channelBot,
     botPermissions: { missingScopes: [] },
-    broadcasterPermissions: { missingScopes: [] },
+    broadcasterPermissions: { missingScopes: options.broadcasterMissingScopes ?? [] },
     moderator: { isModerator: true, checkedAt: now, reason: null },
     chatSubscription: { status: "enabled", subscriptionId: "sub-live-regression", reason: null, updatedAt: now },
     chatSubscriptionNeeded: false,
@@ -75,7 +85,7 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
     const { pathname } = new URL(route.request().url());
     const method = route.request().method();
     const channelPrefix = `/api/channels/${channelId}`;
-    if (pathname === "/api/channels") return route.fulfill(json({ channels: [channel], bot, viewerUserId: "viewer-live-regression" }));
+    if (pathname === "/api/channels") return route.fulfill(json({ channels: [channel], bot, viewerUserId: options.viewerUserId ?? "viewer-live-regression" }));
     if (pathname === `${channelPrefix}/overview`) {
       overviewRequests += 1;
       const viewerCount = overviewRequests < 3 ? options.viewerCount ?? 42 : options.nextViewerCount ?? options.viewerCount ?? 42;
@@ -109,7 +119,10 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
         tokens,
       }));
     }
-    if (pathname === `${channelPrefix}/overlays`) return route.fulfill(json({ overlays: [], maximum: 20, elementMaximum: 20 }));
+    if (pathname === `${channelPrefix}/overlays`) {
+      await options.waitForOverlays?.();
+      return route.fulfill(json({ overlays: [], maximum: 20, elementMaximum: 20 }));
+    }
     if (pathname === `${channelPrefix}/events`) return route.fulfill(json({ entries: options.events ?? [], nextCursor: null }));
     if (pathname === `${channelPrefix}/audit-log`) return route.fulfill(json({ entries: [], nextCursor: null }));
     if (pathname === `${channelPrefix}/modules/chat_voting/current`) {
@@ -120,8 +133,23 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
       return route.fulfill(json({ vote, counts: vote === null ? null : [3, 1], revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120 }));
     }
     if (pathname === `${channelPrefix}/modules/chat_voting/close` && method === "POST") {
-      options.onVoteClose?.();
+      const body = route.request().postDataJSON() as { pollId?: unknown };
+      const pollId = typeof body.pollId === "string" ? body.pollId : "";
+      options.onVoteClose?.(pollId);
+      if (pollId.length === 0 || pollId !== options.vote?.id) return route.fulfill(json({ error: "chat_voting_poll_changed" }, 409));
       return route.fulfill(json({ closing: true, pollId: "vote-regression" }));
+    }
+    if (pathname === `${channelPrefix}/modules/votekick/votekicks` && method === "GET") {
+      return route.fulfill(json({ running: options.votekick ?? null, votekicks: options.votekick === null ? [] : [options.votekick], now }));
+    }
+    if (pathname.startsWith(`${channelPrefix}/modules/votekick/votekicks/`) && pathname.endsWith("/cancel") && method === "POST") {
+      const requestedId = decodeURIComponent(pathname.split("/").at(-2) ?? "");
+      options.onVotekickCancel?.(requestedId);
+      if (requestedId !== options.votekick?.id) return route.fulfill(json({ error: "votekick_changed" }, 409));
+      return route.fulfill({ status: 204, body: "" });
+    }
+    if (pathname === `${channelPrefix}/shoutout` && method === "POST" && options.shoutoutFailureReason !== undefined) {
+      return route.fulfill(json({ error: "shoutout_send_failed", reason: options.shoutoutFailureReason }, 502));
     }
     if (pathname === `${channelPrefix}/clips` && method === "POST") return route.fulfill(json({ clipId: "clip-regression", editUrl: "https://clips.twitch.tv/edit/clip-regression" }));
     if (pathname === "/api/csrf") return route.fulfill(json({ token: "csrf-live-regression" }));

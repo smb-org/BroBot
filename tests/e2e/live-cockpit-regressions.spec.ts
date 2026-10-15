@@ -6,7 +6,7 @@ test.use({ locale: "de-DE", timezoneId: "Europe/Berlin" });
 
 test("End vote is available to operators while start vote keeps its running countdown lock", async ({ page }) => {
   const channelId = "kanal-vote-end";
-  let closeRequests = 0;
+  const closeRequests: string[] = [];
   await installLiveCockpitMocks(page, {
     channelId,
     role: "operator",
@@ -16,7 +16,7 @@ test("End vote is available to operators while start vote keeps its running coun
       status: "open", openedAt: new Date().toISOString(), closesAt: new Date(Date.now() + 90_000).toISOString(),
       requestedDurationSeconds: 120, closedAt: null, closeReason: "manual", counts: [3, 1], voterCount: 4,
     },
-    onVoteClose: () => { closeRequests += 1; },
+    onVoteClose: (pollId) => { closeRequests.push(pollId); },
   });
 
   await page.goto(`/channels/${channelId}`);
@@ -38,8 +38,126 @@ test("End vote is available to operators while start vote keeps its running coun
   if (bars === null || footer === null) throw new Error("The running vote bars and footer need layout boxes.");
   expect(footer.y - (bars.y + bars.height)).toBeLessThanOrEqual(12);
   await endVote.click();
-  await expect.poll(() => closeRequests).toBe(1);
+  await expect.poll(() => closeRequests).toEqual(["vote-regression"]);
   await expect(page.locator(".live-cockpit__status-message")).toContainText("Abstimmung beendet.");
+});
+
+test("live system footer shows unavailable data instead of healthy while chat voting is offline", async ({ page }) => {
+  await installLiveCockpitMocks(page, {
+    channelId: "kanal-live-footer-unavailable",
+    modules: [{ id: "chat_voting", enabled: true, settings: "{}" }],
+    currentStateError: true,
+  });
+  await page.goto("/channels/kanal-live-footer-unavailable");
+  const footer = page.locator(".live-cockpit__status");
+  await expect(footer.locator(".status-led")).toHaveAttribute("data-status", "warn");
+  await expect(footer).toContainText("Live-Daten sind gerade nicht verfügbar.");
+  await expect(footer).not.toContainText("Alles bereit");
+});
+
+test("live system footer gives a known query failure precedence over another pending query", async ({ page }) => {
+  let releaseOverlays: () => void = () => {};
+  const overlaysPending = new Promise<void>((resolve) => { releaseOverlays = resolve; });
+  await installLiveCockpitMocks(page, {
+    channelId: "kanal-live-footer-mixed-query-state",
+    modules: [{ id: "chat_voting", enabled: true, settings: "{}" }],
+    currentStateError: true,
+    waitForOverlays: () => overlaysPending,
+  });
+  await page.goto("/channels/kanal-live-footer-mixed-query-state");
+  const footer = page.locator(".live-cockpit__status");
+  try {
+    await expect(footer.locator(".status-led")).toHaveAttribute("data-status", "warn");
+    await expect(footer).toContainText("Live-Daten sind gerade nicht verfügbar.");
+    await expect(footer).not.toContainText("Live-Daten werden geladen.");
+  } finally {
+    releaseOverlays();
+  }
+});
+
+test("live system footer shows a disconnected bot as a warning", async ({ page }) => {
+  await installLiveCockpitMocks(page, {
+    channelId: "kanal-bot-disconnected-footer",
+    channelBotStatus: "disconnected",
+  });
+  await page.goto("/channels/kanal-bot-disconnected-footer");
+  const footer = page.locator(".live-cockpit__status");
+  await expect(footer.locator(".status-led")).toHaveAttribute("data-status", "warn");
+  await expect(footer).toContainText("Nicht verbunden");
+  await expect(footer).not.toContainText("Alles bereit");
+});
+
+test("owner consent actions keep the shared right edge and plain status labels", async ({ page }) => {
+  const channelId = "kanal-owner-consent-layout";
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await installLiveCockpitMocks(page, {
+    channelId,
+    role: "broadcaster",
+    viewerUserId: channelId,
+    channelBotConsent: "missing",
+    broadcasterMissingScopes: ["channel:manage:broadcast"],
+  });
+  await page.goto(`/channels/${channelId}`);
+  await page.getByRole("group", { name: "Einrichten" }).getByRole("button", { name: "Einrichten" }).click();
+  await page.getByRole("link", { name: "System" }).click();
+
+  const chatConsent = page.locator('.state-list .state-row[aria-label="Chat-Zustimmung"]');
+  await expect(chatConsent.locator(".state-row__label")).toHaveText("Chat-Zustimmung");
+  await expect(chatConsent).toContainText("Broadcaster-Zustimmung fehlt");
+  await expect(chatConsent).toContainText("Der Bot darf noch nicht im Chat schreiben.");
+  const fullConsent = page.locator('.state-list .state-row[aria-label="Vollzustimmung"]');
+  await expect(fullConsent.locator(".state-row__label")).toHaveText("Vollzustimmung");
+  await expect(fullConsent).toContainText("Vollzustimmung fehlt");
+  await expect(page.getByText(/channel:bot/u)).toHaveCount(0);
+
+  const alignment = await page.locator(".state-list .state-row:has(.state-row__action)").evaluateAll((rows) => {
+    const boxes = rows.map((row) => {
+      const rowBox = row.getBoundingClientRect();
+      const button = row.querySelector<HTMLElement>(".state-row__action > .button, .state-row__action > .ui-button, .state-row__action .header-action > .button, .state-row__action .header-action > .ui-button");
+      if (button === null) return null;
+      const buttonBox = button.getBoundingClientRect();
+      return { right: buttonBox.right, centerDelta: Math.abs((rowBox.top + rowBox.height / 2) - (buttonBox.top + buttonBox.height / 2)) };
+    });
+    const valid = boxes.filter((box): box is NonNullable<typeof box> => box !== null);
+    return valid.length < 2 ? null : {
+      rightEdgeSpread: Math.max(...valid.map((box) => box.right)) - Math.min(...valid.map((box) => box.right)),
+      maxCenterDelta: Math.max(...valid.map((box) => box.centerDelta)),
+    };
+  });
+  expect(alignment).not.toBeNull();
+  if (alignment === null) throw new Error("Owner status action rows need visible controls.");
+  expect(alignment.rightEdgeSpread).toBeLessThanOrEqual(1);
+  expect(alignment.maxCenterDelta).toBeLessThanOrEqual(1);
+});
+
+test("an open votekick confirmation keeps the id it was rendered for", async ({ page }) => {
+  const channelId = "kanal-stale-votekick-confirmation";
+  const options: LiveCockpitMockOptions = {
+    channelId,
+    modules: [{ id: "votekick", enabled: true, settings: "{}" }],
+    votekick: {
+      id: "kick-a", targetLogin: "alice", targetUserId: "user-a", endsAt: new Date(Date.now() + 60_000).toISOString(),
+      yesVotes: 3, noVotes: 1, threshold: 5,
+    },
+  };
+  const canceledIds: string[] = [];
+  options.onVotekickCancel = (id) => { canceledIds.push(id); };
+  await installLiveCockpitMocks(page, options);
+  await page.goto(`/channels/${channelId}`);
+  const tile = page.locator(".live-votekick-tile");
+  await expect(tile.locator("h3")).toHaveText("alice");
+  await tile.getByRole("button", { name: "Votekick abbrechen" }).click();
+  await expect(page.getByRole("dialog", { name: "Votekick abbrechen?" })).toContainText("alice");
+
+  options.votekick = {
+    id: "kick-b", targetLogin: "bob", targetUserId: "user-b", endsAt: new Date(Date.now() + 60_000).toISOString(),
+    yesVotes: 2, noVotes: 1, threshold: 5,
+  };
+  await expect(tile.locator("h3")).toHaveText("bob", { timeout: 7_000 });
+  await page.getByRole("dialog", { name: "Votekick abbrechen?" }).getByRole("button", { name: "Votekick abbrechen" }).click();
+
+  await expect.poll(() => canceledIds).toEqual(["kick-a"]);
+  await expect(page.locator(".live-cockpit__status-message")).toContainText("Der Votekick wurde inzwischen ersetzt.");
 });
 
 test("action rows and warning controls share their grid gaps and center line", async ({ page }) => {
@@ -67,6 +185,14 @@ test("action rows and warning controls share their grid gaps and center line", a
   expect(geometry).not.toBeNull();
   if (geometry === null) return;
   expect(Math.abs(geometry.rowGap - geometry.columnGap)).toBeLessThanOrEqual(1);
+  const labelTops = await buttons.evaluateAll((elements) => elements.map((element) => {
+    const label = element.querySelector(".live-action__name");
+    return label === null ? null : { rowTop: Math.round(element.getBoundingClientRect().top), labelTop: label.getBoundingClientRect().top };
+  }));
+  const firstRowTop = await buttons.first().evaluate((element) => Math.round(element.getBoundingClientRect().top));
+  const firstRowLabels = labelTops.filter((entry): entry is NonNullable<typeof entry> => entry !== null && entry.rowTop === firstRowTop);
+  expect(firstRowLabels.length).toBeGreaterThanOrEqual(2);
+  expect(Math.max(...firstRowLabels.map((entry) => entry.labelTop)) - Math.min(...firstRowLabels.map((entry) => entry.labelTop))).toBeLessThanOrEqual(1);
 
   const warning = page.locator(".live-cockpit__location-warning");
   const locationButton = warning.getByRole("button", { name: "Einrichten" });
@@ -258,6 +384,35 @@ test("event shoutouts respect raid-module and live-stream availability", async (
   await expect(page.locator(`#${streamReason}`)).toContainText("Stream ist offline");
 });
 
+test("event shoutout failures retain the specific Twitch reason", async ({ page }) => {
+  const event = {
+    eventId: "raid-event-shoutout-reason",
+    createdAt: new Date().toISOString(),
+    moduleId: "channel_events",
+    triggerId: "raid-trigger",
+    code: "channel.raid.incoming",
+    detail: JSON.stringify({ source: "raider" }),
+    actorUserId: "raider-id",
+    actorLogin: "raider",
+    actorDisplayName: "Raider",
+  };
+  await installLiveCockpitMocks(page, {
+    channelId: "kanal-raid-shoutout-reason",
+    modules: [{ id: "raid", enabled: true, settings: "{}" }],
+    events: [event],
+    shoutoutFailureReason: "scope_missing",
+  });
+  await page.goto("/channels/kanal-raid-shoutout-reason");
+  const eventRow = page.getByRole("row").filter({ hasText: "Raider" });
+  const shoutoutResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname.endsWith("/shoutout") && response.request().method() === "POST";
+  });
+  await eventRow.getByRole("button", { name: "Shoutout senden" }).click();
+  expect((await shoutoutResponse).status()).toBe(502);
+  await expect(page.locator(".live-cockpit__status-message")).toContainText("Berechtigung zum Senden des Shoutouts fehlt");
+});
+
 test("operator sees why the upcoming ad snooze action is disabled", async ({ page }) => {
   await installLiveCockpitMocks(page, {
     channelId: "kanal-operator-ad-snooze",
@@ -350,19 +505,18 @@ test("action tiles center reasonless content and keep vote labels on one line", 
   });
 
   await page.goto(`/channels/${channelId}`);
-  const action = page.getByRole("button", { name: "Abstimmung beenden" });
-  await expect(action).toBeVisible();
+  const startAction = page.getByRole("button", { name: "Abstimmung starten" });
+  const endAction = page.getByRole("button", { name: "Abstimmung beenden" });
+  await expect(startAction).toBeVisible();
+  await expect(endAction).toBeVisible();
   for (const width of [1280, 1920]) {
     await page.setViewportSize({ width, height: width === 1280 ? 800 : 1080 });
-    const geometry = await action.evaluate((element) => {
-      const icon = element.querySelector(".live-action__icon");
+    const geometry = await Promise.all([startAction, endAction].map((action) => action.evaluate((element) => {
       const name = element.querySelector<HTMLElement>(".live-action__name");
-      if (icon === null || name === null) return null;
-      const tileBox = element.getBoundingClientRect();
-      const iconBox = icon.getBoundingClientRect();
+      if (name === null) throw new Error("The action label should be present for layout checks.");
       const nameBox = name.getBoundingClientRect();
       return {
-        centerDiff: Math.abs((iconBox.top + nameBox.bottom) / 2 - (tileBox.top + tileBox.height / 2)),
+        labelTop: nameBox.top,
         nameHeight: nameBox.height,
         nameScrollHeight: name.scrollHeight,
         nameClientHeight: name.clientHeight,
@@ -370,14 +524,18 @@ test("action tiles center reasonless content and keep vote labels on one line", 
         nameClientWidth: name.clientWidth,
         whiteSpace: getComputedStyle(name).whiteSpace,
       };
-    });
-    expect(geometry).not.toBeNull();
-    if (geometry === null) continue;
-    expect(geometry.centerDiff).toBeLessThanOrEqual(4);
-    expect(geometry.nameHeight).toBeLessThanOrEqual(18);
-    expect(geometry.nameScrollHeight).toBeLessThanOrEqual(geometry.nameClientHeight + 1);
-    expect(geometry.nameScrollWidth).toBeLessThanOrEqual(geometry.nameClientWidth + 1);
-    expect(geometry.whiteSpace).toBe("nowrap");
+    })));
+    const [startGeometry, endGeometry] = geometry;
+    expect(startGeometry).toBeDefined();
+    expect(endGeometry).toBeDefined();
+    if (startGeometry === undefined || endGeometry === undefined) continue;
+    expect(Math.abs(startGeometry.labelTop - endGeometry.labelTop)).toBeLessThanOrEqual(1);
+    for (const item of geometry) {
+      expect(item.nameHeight).toBeLessThanOrEqual(18);
+      expect(item.nameScrollHeight).toBeLessThanOrEqual(item.nameClientHeight + 1);
+      expect(item.nameScrollWidth).toBeLessThanOrEqual(item.nameClientWidth + 1);
+      expect(item.whiteSpace).toBe("nowrap");
+    }
   }
 });
 
@@ -406,7 +564,7 @@ test("ad and shoutout popovers are named by their linked headings", async ({ pag
     if (helper === null || footer === null) return Number.POSITIVE_INFINITY;
     return footer.getBoundingClientRect().top - helper.getBoundingClientRect().bottom;
   });
-  expect(helperToFooterGap).toBeLessThanOrEqual(48);
+  expect(helperToFooterGap).toBeLessThanOrEqual(32);
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Shoutout senden" }).click();
   await expect(page.getByRole("dialog", { name: "Shoutout senden" })).toBeVisible();

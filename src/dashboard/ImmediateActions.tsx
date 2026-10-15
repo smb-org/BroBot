@@ -18,6 +18,7 @@ interface ActionConditionState {
   loading: boolean;
   reason: Readonly<Record<"de" | "en", string>> | null;
   until: number | null;
+  pollId: string | null;
   stale: boolean;
 }
 
@@ -62,6 +63,7 @@ const ActionButton = ({ action, moduleId, channelId, streamState, role, onAction
     loading: shouldCheckConditions,
     reason: null,
     until: null,
+    pollId: null,
     stale: false,
   });
   const [now, setNow] = useState(() => Date.now());
@@ -80,22 +82,24 @@ const ActionButton = ({ action, moduleId, channelId, streamState, role, onAction
       const timeout = window.setTimeout(() => {
         if (!active) return;
         controller.abort();
-        setConditionState({ loading: false, reason: null, until: null, stale: true });
+        setConditionState({ loading: false, reason: null, until: null, pollId: null, stale: true });
       }, 10_000);
       setConditionState((current) => ({ ...current, loading: current.reason === null && !current.stale }));
       try {
+        let pollId: string | null = null;
         for (const condition of customConditions) {
           const result = await condition.check({ channelId, streamState, language, signal: controller.signal });
           if (!active || controller.signal.aborted) return;
+          pollId = result.pollId ?? pollId;
           if (result.reason !== null) {
-            setConditionState({ loading: false, reason: result.reason, until: result.until ?? null, stale: false });
+            setConditionState({ loading: false, reason: result.reason, until: result.until ?? null, pollId, stale: false });
             return;
           }
         }
-        if (active) setConditionState({ loading: false, reason: null, until: null, stale: false });
+        if (active) setConditionState({ loading: false, reason: null, until: null, pollId, stale: false });
       } catch {
         if (!active) return;
-        setConditionState({ loading: false, reason: null, until: null, stale: true });
+        setConditionState({ loading: false, reason: null, until: null, pollId: null, stale: true });
       } finally {
         window.clearTimeout(timeout);
         if (pendingController === controller) pendingController = null;
@@ -130,18 +134,19 @@ const ActionButton = ({ action, moduleId, channelId, streamState, role, onAction
             ? conditionState.reason[language]
             : conditionState.reason[language].replace("{time}", remainingTime(conditionState.until, now));
 
-  return <ActionFrame action={action} moduleId={moduleId} channelId={channelId} language={language}
+  return <ActionFrame action={action} moduleId={moduleId} channelId={channelId} language={language} pollId={conditionState.pollId}
     disabled={lockReason !== null} reason={lockReason} availabilityStale={conditionState.stale}
     onRetryAvailability={() => { setAvailabilityRetry((retry) => retry + 1); }}
     {...(onFeedbackMessage === undefined ? {} : { onFeedbackMessage })}
     {...(onActionResult === undefined ? {} : { onActionResult })} />;
 };
 
-const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason, availabilityStale, onRetryAvailability, onActionResult, onFeedbackMessage }: {
+const ActionFrame = ({ action, moduleId, channelId, language, pollId, disabled, reason, availabilityStale, onRetryAvailability, onActionResult, onFeedbackMessage }: {
   action: ModuleImmediateActionDefinition;
   moduleId: string;
   channelId: string;
   language: "de" | "en";
+  pollId: string | null;
   disabled: boolean;
   reason: string | null;
   availabilityStale: boolean;
@@ -216,7 +221,7 @@ const ActionFrame = ({ action, moduleId, channelId, language, disabled, reason, 
     setError(null);
     setResult(null);
     try {
-      const actionResult = await action.execute({ channelId, language, formData });
+      const actionResult = await action.execute({ channelId, language, formData, ...(pollId === null ? {} : { pollId }) });
       setResult({
         message: actionResult?.message?.[language] ?? texts.streamManager.actionSucceeded(action.name[language]),
         ...(actionResult?.link === undefined ? {} : { href: actionResult.link.href, linkLabel: actionResult.link.label[language] }),
