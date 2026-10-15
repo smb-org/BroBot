@@ -57,11 +57,11 @@ const faqEntries = [
     name: "Begrüßung",
     enabled: true,
     matcher: { type: "keywords", patterns: ["hallo", "moin"] },
-    answerText: "Hallo {user}, schön dass du da bist!",
+    answerText: "Hallo, schön dass du da bist!",
     minimumTier: "everyone",
     cooldownSeconds: 30,
     userCooldownSeconds: 0,
-    games: [],
+    games: [{ id: "minecraft", name: "Minecraft" }],
     chatTarget: "channel_default",
     order: 0,
     revision: 1,
@@ -74,7 +74,7 @@ const faqEntries = [
     name: "Verabschiedung",
     enabled: true,
     matcher: { type: "keywords", patterns: ["tschüss"] },
-    answerText: "Bis bald, {user}!",
+    answerText: "Bis bald!",
     minimumTier: "everyone",
     cooldownSeconds: 30,
     userCooldownSeconds: 0,
@@ -109,6 +109,7 @@ const mockDashboard = async (page: Page): Promise<void> => {
       ], variables: [] }));
     }
     if (pathname === `/api/channels/${channelId}/modules/faq/entries`) return route.fulfill(json({ orderRevision: 1, entries: faqEntries }));
+    if (pathname === `/api/channels/${channelId}/games`) return route.fulfill(json({ games: [{ id: "minecraft", name: "Minecraft" }] }));
     if (pathname === `/api/channels/${channelId}/template-variables`) return route.fulfill(json({ variables: [] }));
     if (pathname === `/api/channels/${channelId}/revisions`) return route.fulfill(json({ revisions: {} }));
     if (pathname === "/api/csrf") return route.fulfill(json({ token: "csrf-429-tablet" }));

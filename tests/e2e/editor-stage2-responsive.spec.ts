@@ -40,6 +40,10 @@ const member = {
 const capture = async (page: Page, testInfo: TestInfo, name: string): Promise<void> => {
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    const collection = page.locator(".collection-page");
+    if (await collection.count() > 0) {
+      await expect(collection).toHaveAttribute("data-single-column", width <= 935 ? "true" : "false");
+    }
     const documentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(documentWidth, `${name} should not overflow horizontally at ${String(width)}px`).toBeLessThanOrEqual(width);
     await page.screenshot({
