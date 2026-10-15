@@ -47,6 +47,7 @@ const commandRecord = (name: string, text: string): Record<string, unknown> => (
 
 interface MockDashboardOptions {
   failPatches?: boolean;
+  listCommandName?: string;
   role?: "manager" | "operator";
 }
 
@@ -60,9 +61,10 @@ interface MockDashboardCounts {
   updateCommand: (command: Record<string, unknown>) => void;
 }
 
-const mockDashboard = async (page: Page, { failPatches = false, role = "manager" }: MockDashboardOptions = {}): Promise<MockDashboardCounts> => {
+const mockDashboard = async (page: Page, { failPatches = false, listCommandName, role = "manager" }: MockDashboardOptions = {}): Promise<MockDashboardCounts> => {
   const actorChannel = role === channel.role ? channel : { ...channel, role };
   const commands = new Map<string, Record<string, unknown>>([["hallo", commandRecord("hallo", "Hallo {user}! Willkommen im Kanal.")]]);
+  if (listCommandName !== undefined) commands.set(listCommandName, { ...commandRecord(listCommandName, ""), kind: "list" });
   const counts: MockDashboardCounts = {
     posts: 0,
     patches: 0,
@@ -178,6 +180,53 @@ const openTextCommand = async (page: Page, width: number, height: number): Promi
   await row.click();
   await expect(page.getByRole("region", { name: "Eigenschaften von !hallo" })).toBeVisible();
 };
+
+test("text command help uses the channel's configured list command name", async ({ page }) => {
+  await mockDashboard(page, { listCommandName: "commands" });
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto(`/channels/${channelId}/modules/text_commands`);
+
+  const helpButton = page.getByRole("button", { name: "Chatbefehle · 1", exact: true });
+  await expect(helpButton).toBeVisible();
+  await helpButton.click();
+  const help = page.getByRole("dialog", { name: "Chatbefehle" });
+  await expect(help.getByText("!commands", { exact: true })).toBeVisible();
+  await expect(help.getByText("!befehle", { exact: true })).toHaveCount(0);
+});
+
+test("command creation button's accessible name matches its visible label", async ({ page }) => {
+  await mockDashboard(page);
+  await openTextCommand(page, 1920, 1080);
+
+  const createButton = page.getByRole("button", { name: "Befehl anlegen", exact: true });
+  await expect(createButton).toHaveText("Befehl anlegen");
+  await expect(createButton).toHaveAccessibleName("Befehl anlegen");
+});
+
+test("FAQ answer counter shares the helper line above its reserved warning slot", async ({ page }) => {
+  await mockDashboard(page);
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto(`/channels/${channelId}/modules/faq`);
+  await page.locator(".faq-panel__entry").filter({ hasText: "Begrüßung" }).click();
+
+  const geometry = await page.locator(".faq-panel__answer-preview .ui-template-text-field__helper-row").evaluate((row) => {
+    const copy = row.querySelector<HTMLElement>(".ui-template-text-field__helper-copy");
+    const count = row.querySelector<HTMLElement>(".ui-template-text-field__count");
+    const warnings = row.parentElement?.querySelector<HTMLElement>(".ui-template-text-field__warnings");
+    if (copy === null || count === null || warnings === null || warnings === undefined) throw new Error("FAQ answer helper geometry is incomplete.");
+    const bounds = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      return { top: rect.top, right: rect.right, bottom: rect.bottom, height: rect.height };
+    };
+    return { row: bounds(row), copy: bounds(copy), count: bounds(count), warnings: bounds(warnings) };
+  });
+
+  expect(Math.abs(geometry.count.top - geometry.copy.top)).toBeLessThanOrEqual(2);
+  expect(Math.abs(geometry.count.right - geometry.row.right)).toBeLessThanOrEqual(1);
+  expect(geometry.count.bottom).toBeLessThanOrEqual(geometry.row.bottom + 1);
+  expect(geometry.warnings.top).toBeGreaterThanOrEqual(geometry.row.bottom);
+  expect(geometry.warnings.height).toBeGreaterThanOrEqual(24);
+});
 
 test("failed command save preserves drafts for inactive response kinds", async ({ page }) => {
   await mockDashboard(page, { failPatches: true });

@@ -1352,7 +1352,7 @@ const TextCommandsPanelContent = ({
       searchClearLabel={common.clearSearch}
       searchValue={search}
       onSearchChange={setSearch}
-      create={{ label: labels.newCommand, ariaLabel: labels.add, onClick: openCreate, disabled: !canManageContent, ...(createReason === undefined ? {} : { reason: createReason }) }}
+      create={{ label: labels.add, onClick: openCreate, disabled: !canManageContent, ...(createReason === undefined ? {} : { reason: createReason }) }}
       className="text-command-list-toolbar__search"
     />
     <div className="text-command-filter-row">

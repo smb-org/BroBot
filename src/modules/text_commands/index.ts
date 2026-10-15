@@ -14,7 +14,6 @@ import { textCommandRoutes } from "./routes";
 import { processTextCommandMessage } from "./service";
 import { moduleVariableRenameTarget } from "../contract";
 import type { ModuleVariableReferences } from "../contract";
-import { TEXT_COMMAND_CHAT_COMMANDS } from "./contracts/chat-commands";
 
 const variableReferences: ModuleVariableReferences = {
   async usages(db, channelId, name) {
@@ -73,7 +72,6 @@ export const textCommandModule: BotModule<typeof settingsSchema> = {
   templateContext: "chat_command",
   templateVariableGroup: TEXT_COMMAND_TEMPLATE_VARIABLE_GROUP,
   templateVariableCatalog: TEXT_COMMAND_TIMEOUT_TEMPLATE_VARIABLES,
-  chatCommands: TEXT_COMMAND_CHAT_COMMANDS,
   templateUsageSources: listTextCommandTemplateUsageSources,
   variableReferences,
   settingsSchema,

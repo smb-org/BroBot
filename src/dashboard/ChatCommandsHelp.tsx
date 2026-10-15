@@ -10,11 +10,16 @@ export interface ChatCommandsHelpProps {
   commands: readonly ModuleChatCommandDeclaration[];
   language?: DashboardLanguage;
   minimumRole?: string;
+  loadingLabel?: string;
 }
 
-export function ChatCommandsHelp({ commands, language = dashboardLanguage(), minimumRole }: ChatCommandsHelpProps): ReactElement | null {
+export function ChatCommandsHelp({ commands, language = dashboardLanguage(), minimumRole, loadingLabel }: ChatCommandsHelpProps): ReactElement | null {
   const [open, setOpen] = useState(false);
-  if (commands.length === 0) return null;
+  if (commands.length === 0) {
+    return loadingLabel === undefined
+      ? null
+      : <Button disabled className="chat-commands-help__trigger">{loadingLabel}</Button>;
+  }
 
   const texts = dashboardTexts(language).module;
   const buttonLabel = texts.chatCommandsButtonLabel(formatNumber(commands.length, language));
