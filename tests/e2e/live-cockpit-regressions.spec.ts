@@ -130,6 +130,42 @@ test("owner consent actions keep the shared right edge and plain status labels",
   expect(alignment.maxCenterDelta).toBeLessThanOrEqual(1);
 });
 
+for (const viewport of [{ width: 800, height: 900 }, { width: 1024, height: 768 }]) {
+  const widthLabel = String(viewport.width);
+  test(`system status rows keep actions inside the row at ${widthLabel}px`, async ({ page }, testInfo) => {
+    const channelId = `kanal-system-rows-${widthLabel}`;
+    await page.setViewportSize(viewport);
+    await installLiveCockpitMocks(page, {
+      channelId,
+      role: "broadcaster",
+      viewerUserId: channelId,
+      channelBotConsent: "missing",
+      broadcasterMissingScopes: ["channel:manage:broadcast"],
+    });
+    await page.goto(`/channels/${channelId}`);
+    await page.getByRole("group", { name: "Einrichten" }).getByRole("button", { name: "Einrichten" }).click();
+    await page.getByRole("link", { name: "System" }).click();
+    await expect(page.locator(".state-list .state-row:has(.state-row__action)").first()).toBeVisible();
+
+    const result = await page.locator(".state-list .state-row:has(.state-row__action)").evaluateAll((rows) => rows.map((row) => {
+      const rowBox = row.getBoundingClientRect();
+      const inside = [...row.querySelectorAll<HTMLElement>(".state-row__action button, .state-row__action .lock-reason")].map((element) => {
+        const box = element.getBoundingClientRect();
+        return box.left >= rowBox.left - 1 && box.right <= rowBox.right + 1 && box.top >= rowBox.top - 1 && box.bottom <= rowBox.bottom + 1;
+      });
+      return { controls: inside.length, allInside: inside.every(Boolean), rowOverflow: row.scrollWidth > row.clientWidth };
+    }));
+    const withControls = result.filter((row) => row.controls > 0);
+    expect(withControls.length).toBeGreaterThan(0);
+    for (const row of withControls) {
+      expect(row).toMatchObject({ allInside: true, rowOverflow: false });
+    }
+    const pageOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+    expect(pageOverflow).toBe(false);
+    await page.screenshot({ path: testInfo.outputPath(`system-rows-${widthLabel}.png`) });
+  });
+}
+
 test("an open votekick confirmation keeps the id it was rendered for", async ({ page }) => {
   const channelId = "kanal-stale-votekick-confirmation";
   const options: LiveCockpitMockOptions = {
