@@ -20,9 +20,8 @@ import { getPanelModuleStates } from "./module-repository";
 import { actorOf, readJsonBody } from "./member-routes";
 import { broadcasterHasScope, broadcasterScopesForChannel } from "../broadcaster-scope";
 import { getAppAccessToken } from "../app-token";
-import { getLoginIdentity, rotateLoginTokensForUser, setLoginIdentityTokenScopes, type LoginIdentityRecord } from "../db/login-identity";
-import { decryptJson, encryptJson, getTokenEncryptionKeys, parseKeyRing } from "../auth/crypto";
-import { refreshBotToken } from "../bot-maintenance";
+import { getLoginIdentity, type LoginIdentityRecord } from "../db/login-identity";
+import { decryptLoginIdentityAccessToken, refreshLoginIdentityTokens } from "../auth/login-token-refresh";
 import { recordAudit } from "../db/audit";
 import { writeModuleDiagnostics } from "../event-log";
 import { helixRequest } from "../twitch/helix";
@@ -188,9 +187,9 @@ const previewSchema = z.object({
 });
 
 const broadcastUpdateSchema = z.object({
-  title: z.string().trim().min(1).max(140),
-  gameId: z.string().regex(/^[0-9]{1,20}$/u).or(z.literal("")),
-}).strict();
+  title: z.string().trim().min(1).max(140).optional(),
+  gameId: z.string().regex(/^[0-9]{1,20}$/u).or(z.literal("")).optional(),
+}).strict().refine((update) => update.title !== undefined || update.gameId !== undefined);
 
 const BROADCAST_MANAGE_SCOPE = "channel:manage:broadcast";
 
@@ -202,50 +201,6 @@ const loginIdentityHasBroadcastScope = (identity: LoginIdentityRecord | null): b
   } catch {
     return false;
   }
-};
-
-const decryptLoginAccessToken = async (identity: LoginIdentityRecord, environment: Env): Promise<string | null> => {
-  const token = await decryptJson<{ token?: unknown }>(identity.accessTokenCiphertext,
-    parseKeyRing(getTokenEncryptionKeys(environment)));
-  return token !== null && typeof token.token === "string" && token.token.length > 0 ? token.token : null;
-};
-
-const refreshBroadcastIdentity = async (
-  environment: Env,
-  identity: LoginIdentityRecord,
-  now: string,
-): Promise<LoginIdentityRecord | null> => {
-  const refresh = await decryptJson<{ token?: unknown }>(identity.refreshTokenCiphertext,
-    parseKeyRing(getTokenEncryptionKeys(environment)));
-  if (refresh === null || typeof refresh.token !== "string" || refresh.token.length === 0) return null;
-  const refreshed = await refreshBotToken(fetch, environment, refresh.token);
-  const keys = parseKeyRing(getTokenEncryptionKeys(environment));
-  const accessTokenCiphertext = await encryptJson({ token: refreshed.accessToken }, keys);
-  const refreshTokenCiphertext = await encryptJson({ token: refreshed.refreshToken }, keys);
-  const rotated = await rotateLoginTokensForUser(
-    environment.DB,
-    identity.userId,
-    identity.accessTokenCiphertext,
-    identity.refreshTokenCiphertext,
-    accessTokenCiphertext,
-    refreshTokenCiphertext,
-    new Date(Date.parse(now) + refreshed.expiresIn * 1_000).toISOString(),
-    now,
-    identity.updatedAt,
-  );
-  if (!rotated) {
-    const current = await getLoginIdentity(environment.DB, identity.userId);
-    return current !== null && current.accessTokenCiphertext !== identity.accessTokenCiphertext ? current : null;
-  }
-  await setLoginIdentityTokenScopes(
-    environment.DB,
-    identity.userId,
-    JSON.stringify(refreshed.scopes),
-    now,
-    accessTokenCiphertext,
-    refreshTokenCiphertext,
-  );
-  return await getLoginIdentity(environment.DB, identity.userId);
 };
 
 const canManageModules = canManage;
@@ -627,7 +582,7 @@ moduleRouter.patch("/api/channels/:channelId/broadcast", async (context) => {
   if (!loginIdentityHasBroadcastScope(identity)) return context.json({ error: "broadcast_scope_missing" }, 403);
   let accessToken: string | null;
   try {
-    accessToken = await decryptLoginAccessToken(identity, context.env);
+    accessToken = await decryptLoginIdentityAccessToken(identity, context.env);
   } catch {
     return context.json({ error: "broadcast_identity_missing" }, 409);
   }
@@ -635,26 +590,30 @@ moduleRouter.patch("/api/channels/:channelId/broadcast", async (context) => {
     return context.json({ error: "broadcast_identity_missing" }, 409);
   }
 
+  const twitchUpdate = {
+    ...(parsed.data.title === undefined ? {} : { title: parsed.data.title }),
+    ...(parsed.data.gameId === undefined ? {} : { game_id: parsed.data.gameId }),
+  };
   const updateBroadcast = (token: string) => context.get("measureServerTiming")("helix", () => context.get("helixRequest")({
     url: "https://api.twitch.tv/helix/channels",
     query: { broadcaster_id: channelId },
     accessToken: token,
     clientId: context.env.TWITCH_CLIENT_ID,
     method: "PATCH",
-    body: { title: parsed.data.title, game_id: parsed.data.gameId },
+    body: twitchUpdate,
   }));
   if (!await managementStillAuthorized()) return context.json({ error: "broadcast_manage_denied" }, 403);
   let result = await updateBroadcast(accessToken);
   if (!result.ok) {
     if (result.status === 401) {
       try {
-        const refreshedIdentity = await refreshBroadcastIdentity(context.env, identity, nowIso());
+        const refreshedIdentity = await refreshLoginIdentityTokens(context.env, identity, nowIso());
         if (refreshedIdentity === null || refreshedIdentity.status !== "connected") {
           return context.json({ error: "broadcast_identity_missing" }, 409);
         }
         identity = refreshedIdentity;
         if (!loginIdentityHasBroadcastScope(identity)) return context.json({ error: "broadcast_scope_missing" }, 403);
-        const refreshedToken = await decryptLoginAccessToken(identity, context.env);
+        const refreshedToken = await decryptLoginIdentityAccessToken(identity, context.env);
         if (refreshedToken === null) return context.json({ error: "broadcast_identity_missing" }, 409);
         if (!await managementStillAuthorized()) return context.json({ error: "broadcast_manage_denied" }, 403);
         result = await updateBroadcast(refreshedToken);
@@ -670,7 +629,7 @@ moduleRouter.patch("/api/channels/:channelId/broadcast", async (context) => {
 
   const actor = context.get("actor");
   const updatedAt = nowIso();
-  const changed = { title: parsed.data.title, gameId: parsed.data.gameId };
+  const changed = parsed.data;
   await recordAudit(context.env.DB, actor.userId, updatedAt, channelId, null, "channel.broadcast.updated", null, changed);
   return context.body(null, 204);
 });

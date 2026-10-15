@@ -169,9 +169,10 @@ const insertBotAndAppToken = async (database: TestD1Database): Promise<void> => 
 const insertBroadcastIdentity = async (database: TestD1Database, scopes: string[]): Promise<void> => {
   await insertLoginIdentityAndSession(database, "kanal-a", scopes);
   const accessToken = await encryptJson({ token: "channel-token" }, parseKeyRing(environmentKeys.SESSION_ENCRYPTION_KEYS));
+  const refreshToken = await encryptJson({ token: "channel-refresh-token" }, parseKeyRing(environmentKeys.SESSION_ENCRYPTION_KEYS));
   await database.prepare(
-    "UPDATE twitch_login_identity SET token_scopes_json = ?, access_token_ciphertext = ? WHERE user_id = 'kanal-a'",
-  ).bind(JSON.stringify(scopes), accessToken).run();
+    "UPDATE twitch_login_identity SET token_scopes_json = ?, access_token_ciphertext = ?, refresh_token_ciphertext = ? WHERE user_id = 'kanal-a'",
+  ).bind(JSON.stringify(scopes), accessToken, refreshToken).run();
 };
 
 const remoteSubscription = (channelId: string, id: string) => ({
@@ -275,6 +276,129 @@ describe("Module management in the panel", () => {
     if (typeof requestBody !== "string") throw new Error("Expected a JSON request body.");
     expect(JSON.parse(requestBody)).toEqual({ title: "Neue Sendung", game_id: "509658" });
     expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer channel-token");
+  });
+
+  it("keeps a rotated broadcast token when the first D1 persistence attempt fails", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertBroadcastIdentity(database, ["channel:manage:broadcast"]);
+
+    const originalBatch = database.batch.bind(database);
+    let tokenWriteAttempts = 0;
+    database.batch = (statements) => {
+      if (statements.some((statement) => (statement as unknown as { sql: string }).sql.includes("SET access_token_ciphertext"))) {
+        tokenWriteAttempts += 1;
+        if (tokenWriteAttempts === 1) return Promise.reject(new Error("Transient D1 failure."));
+      }
+      return originalBatch(statements);
+    };
+
+    const twitchFetch = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = urlForFetchInput(input);
+      if (url.pathname === "/oauth2/token") {
+        return Promise.resolve(new Response(JSON.stringify({
+          access_token: "channel-token-refreshed",
+          refresh_token: "channel-refresh-refreshed",
+          expires_in: 7_200,
+          scope: ["channel:manage:broadcast"],
+        }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      }
+      const authorization = new Headers(init?.headers).get("Authorization");
+      return Promise.resolve(authorization === "Bearer channel-token"
+        ? new Response(null, { status: 401 })
+        : new Response(null, { status: 204 }));
+    });
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast", "PATCH", { title: "Neue Sendung", gameId: "509658" }),
+      environment,
+    );
+
+    expect(response.status).toBe(204);
+    expect(tokenWriteAttempts).toBe(2);
+    expect(twitchFetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("recovers a concurrent broadcast save after another refresh rotates the identity", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertBroadcastIdentity(database, ["channel:manage:broadcast"]);
+
+    let initialHelixRequests = 0;
+    let refreshRequests = 0;
+    let releaseInitialHelix!: () => void;
+    const initialHelixBarrier = new Promise<void>((resolve) => { releaseInitialHelix = resolve; });
+    let releaseWinnerUse!: () => void;
+    const winnerUse = new Promise<void>((resolve) => { releaseWinnerUse = resolve; });
+    const twitchFetch = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
+      const url = urlForFetchInput(input);
+      if (url.pathname === "/oauth2/token") {
+        refreshRequests += 1;
+        if (refreshRequests === 1) {
+          return new Response(JSON.stringify({
+            access_token: "channel-token-winner",
+            refresh_token: "channel-refresh-winner",
+            expires_in: 7_200,
+            scope: ["channel:manage:broadcast"],
+          }), { status: 200, headers: { "Content-Type": "application/json" } });
+        }
+        await winnerUse;
+        return new Response(JSON.stringify({ error: "invalid_grant" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const authorization = new Headers(init?.headers).get("Authorization");
+      if (authorization === "Bearer channel-token") {
+        initialHelixRequests += 1;
+        if (initialHelixRequests === 2) releaseInitialHelix();
+        await initialHelixBarrier;
+        return new Response(null, { status: 401 });
+      }
+      if (authorization === "Bearer channel-token-winner") releaseWinnerUse();
+      return new Response(null, { status: 204 });
+    });
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const responses = await Promise.all([
+      requestFor("user-1", "/api/channels/kanal-a/broadcast", "PATCH", { title: "Titel A", gameId: "509658" })
+        .then((request) => panelRouter.fetch(request, environment)),
+      requestFor("user-1", "/api/channels/kanal-a/broadcast", "PATCH", { title: "Titel B", gameId: "509658" })
+        .then((request) => panelRouter.fetch(request, environment)),
+    ]);
+
+    expect(responses.map(({ status }) => status)).toEqual([204, 204]);
+    expect(refreshRequests).toBe(2);
+  });
+
+  it("sends only fields changed by each manager to Twitch", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertBroadcastIdentity(database, ["channel:manage:broadcast"]);
+    const bodies: unknown[] = [];
+    const twitchFetch = vi.fn<typeof fetch>().mockImplementation((_input, init) => {
+      if (typeof init?.body === "string") bodies.push(JSON.parse(init.body));
+      return Promise.resolve(new Response(null, { status: 204 }));
+    });
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const firstManagerSave = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast", "PATCH", { title: "Aktueller Titel" }),
+      environment,
+    );
+    const secondManagerSave = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast", "PATCH", { gameId: "509658" }),
+      environment,
+    );
+
+    expect(firstManagerSave.status).toBe(204);
+    expect(secondManagerSave.status).toBe(204);
+    expect(bodies).toEqual([{ title: "Aktueller Titel" }, { game_id: "509658" }]);
   });
 
   it("denies operators before attempting a broadcast update", async () => {

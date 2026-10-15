@@ -386,6 +386,7 @@ export const rotateLoginTokensForUser = async (
   expiresAt: string,
   updatedAt: string,
   expectedUpdatedAt: string,
+  tokenScopesJson?: string,
 ): Promise<boolean> => {
   const tokenRotation = db.prepare(
     `UPDATE twitch_login_identity
@@ -417,6 +418,20 @@ export const rotateLoginTokensForUser = async (
     expectedAccessTokenCiphertext,
     expectedRefreshTokenCiphertext,
   );
+  const tokenScopes = tokenScopesJson === undefined ? null : db.prepare(
+    `UPDATE twitch_login_identity
+        SET token_scopes_json = ?, updated_at = ?
+      WHERE user_id = ?
+        AND status <> 'revoked'
+        AND access_token_ciphertext = ?
+        AND refresh_token_ciphertext = ?`,
+  ).bind(
+    tokenScopesJson,
+    updatedAt,
+    userId,
+    accessTokenCiphertext,
+    refreshTokenCiphertext,
+  );
   const sessionRecovery = db.prepare(
     `UPDATE auth_sessions
         SET revoked_at = NULL, revocation_reason = NULL, updated_at = ?
@@ -440,6 +455,8 @@ export const rotateLoginTokensForUser = async (
     accessTokenCiphertext,
     refreshTokenCiphertext,
   );
-  const results = await db.batch([tokenRotation, sessionRecovery]);
+  const results = await db.batch(tokenScopes === null
+    ? [tokenRotation, sessionRecovery]
+    : [tokenRotation, tokenScopes, sessionRecovery]);
   return (results[0]?.meta.changes ?? 0) > 0;
 };

@@ -118,5 +118,5 @@ test("scope recovery and retry actions use the shared button kit", async ({ page
   const reconnectButton = page.locator(".live-cockpit-broadcast__actions .ui-button");
   await expect(reconnectButton).toHaveAttribute("data-variant", "secondary");
   await expect(page.locator('[data-slot="stream-title-category"]')).toContainText("channel:manage:broadcast");
-  await expect(page.locator('[data-slot="stream-title-category"]')).toHaveCSS("height", "84px");
+  await expect(page.locator('[data-slot="stream-title-category"]')).toHaveCSS("height", "90px");
 });

@@ -141,11 +141,13 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 .live-cockpit-header { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(280px, 1fr) minmax(0, .95fr); align-items: center; gap: var(--s4); min-height: 94px; padding: var(--s3) var(--s4); border: 1px solid var(--line); border-radius: var(--r-container); background: var(--surface); }
 .live-cockpit-header__summary { display: flex; align-items: center; gap: var(--s4); min-width: 0; }
 .live-cockpit-header__role { flex: none; color: var(--text-3); font-size: 11px; white-space: nowrap; }
-.live-cockpit-header__title-slot { box-sizing: border-box; display: grid; grid-template-rows: 36px 28px 16px; gap: 2px; height: 84px; min-height: 84px; max-height: 84px; min-width: 0; overflow: hidden; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--text-3); font-size: 12px; }
-.live-cockpit-broadcast__copy { display: grid; grid-template-rows: 18px 16px; gap: 2px; min-width: 0; }
+.live-cockpit-header__title-slot { box-sizing: border-box; display: grid; grid-template-rows: 46px 28px 16px; gap: 0; height: 90px; min-height: 90px; max-height: 90px; min-width: 0; overflow: hidden; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--text-3); font-size: 12px; }
+.live-cockpit-broadcast__copy { display: grid; grid-template-rows: 28px 16px; gap: 2px; min-width: 0; }
 .live-cockpit-broadcast__title-row { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
 .live-cockpit-broadcast__title-row > strong { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--text); font-size: 14px; font-weight: 600; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
 .live-cockpit-broadcast__title-row > .ui-button { flex: none; min-height: 28px; }
+.live-cockpit-broadcast__copy:has(.live-cockpit-broadcast__title-row > strong[role="alert"]) { grid-template-rows: 46px 0; gap: 0; }
+.live-cockpit-broadcast__title-row > strong[role="alert"] { display: -webkit-box; max-height: 36px; overflow: hidden; overflow-wrap: normal; text-overflow: clip; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .live-cockpit-broadcast__title-row > .live-cockpit-broadcast__edit { width: 28px; min-width: 28px; height: 28px; padding: 0; }
 .live-cockpit-broadcast__button-slot { display: block; width: 28px; height: 28px; flex: none; visibility: hidden; }
 .live-cockpit-broadcast__copy > span { min-width: 0; overflow: hidden; color: var(--text-2); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
@@ -1729,6 +1731,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-chat-preview__speaker { color: var(--brand-text); }
 .ui-chat-preview__colon { color: var(--text-2); }
 .ui-chat-preview__text { overflow-wrap: anywhere; }
+.ui-chat-preview__text--empty { color: var(--text-3); }
 .ui-chat-preview__count { align-self: end; grid-column: 2; grid-row: 1 / 3; }
 .ui-load-state { display: flow-root; min-width: 0; }
 .ui-load-state--compact { display: flex; min-width: 0; align-items: center; overflow: hidden; }

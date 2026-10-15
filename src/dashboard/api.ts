@@ -374,9 +374,8 @@ export const fetchChannelBroadcast = (channelId: string, signal?: AbortSignal): 
 
 export const saveChannelBroadcast = (
   channelId: string,
-  title: string,
-  gameId: string,
-): Promise<undefined> => requestMutation<undefined>(channelPath(channelId, "broadcast"), "PATCH", { title, gameId });
+  update: { title?: string; gameId?: string },
+): Promise<undefined> => requestMutation<undefined>(channelPath(channelId, "broadcast"), "PATCH", update);
 
 export const searchChannelGames = async (channelId: string, query: string): Promise<readonly PanelBroadcastGame[]> => {
   const search = new URLSearchParams({ q: query });

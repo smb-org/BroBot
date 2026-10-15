@@ -14,6 +14,11 @@ import { dashboardCommonTexts, dashboardTexts } from "./locale";
 import { queryKeys } from "./data/keys";
 import { Button, Field, FormDialog, GameMultiSelect } from "./ui";
 
+interface BroadcastEditorSnapshot {
+  title: string;
+  gameId: string;
+}
+
 export const LiveCockpitBroadcast = ({ channelId, role, onSaved, onQueryStateChange }: {
   channelId: string;
   role: ChannelRole;
@@ -34,6 +39,7 @@ export const LiveCockpitBroadcast = ({ channelId, role, onSaved, onQueryStateCha
   const [opened, setOpened] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
   const [draftGame, setDraftGame] = useState<PanelBroadcastGame[]>([]);
+  const [openingSnapshot, setOpeningSnapshot] = useState<BroadcastEditorSnapshot | null>(null);
   const [pending, setPending] = useState(false);
   const [saveError, setSaveError] = useState<string>();
   const canEdit = canManage(role);
@@ -51,7 +57,12 @@ export const LiveCockpitBroadcast = ({ channelId, role, onSaved, onQueryStateCha
 
   const openEditor = (): void => {
     const current = broadcast.data;
-    setDraftTitle(current?.title ?? "");
+    const snapshot = {
+      title: current?.title ?? "",
+      gameId: current?.game?.id ?? "",
+    };
+    setOpeningSnapshot(snapshot);
+    setDraftTitle(snapshot.title);
     setDraftGame(current?.game === null || current?.game === undefined ? [] : [current.game]);
     setSaveError(undefined);
     setOpened(true);
@@ -61,17 +72,32 @@ export const LiveCockpitBroadcast = ({ channelId, role, onSaved, onQueryStateCha
     window.location.assign(`/auth/channels/${encodeURIComponent(channelId)}/broadcaster-scopes/broadcast`);
   };
 
+  const hasChanges = openingSnapshot !== null && (
+    draftTitle.trim() !== openingSnapshot.title ||
+    (draftGame[0]?.id ?? "") !== openingSnapshot.gameId
+  );
+
   const save = async (): Promise<void> => {
-    if (pending || !canEdit || !broadcast.data?.manageScopeAvailable || draftTitle.trim().length === 0) return;
+    if (pending || !canEdit || !broadcast.data?.manageScopeAvailable || openingSnapshot === null ||
+        draftTitle.trim().length === 0 || !hasChanges) return;
+    const update: { title?: string; gameId?: string } = {};
+    const title = draftTitle.trim();
+    const gameId = draftGame[0]?.id ?? "";
+    if (title !== openingSnapshot.title) update.title = title;
+    if (gameId !== openingSnapshot.gameId) update.gameId = gameId;
     setPending(true);
     setSaveError(undefined);
     try {
-      await saveChannelBroadcast(channelId, draftTitle.trim(), draftGame[0]?.id ?? "");
+      await saveChannelBroadcast(channelId, update);
       await queryClient.cancelQueries({ queryKey: key });
-      queryClient.setQueryData(key, {
-        title: draftTitle.trim(),
-        game: draftGame[0] ?? null,
-        manageScopeAvailable: true,
+      queryClient.setQueryData(key, (current: typeof broadcast.data) => {
+        return {
+          ...current,
+          ...(update.title === undefined ? {} : { title: update.title }),
+          ...(update.gameId === undefined ? {} : {
+            game: update.gameId === "" ? null : draftGame[0] ?? null,
+          }),
+        };
       });
       setOpened(false);
       if (activeRef.current) onSaved(labels.broadcastSaved);
@@ -96,13 +122,16 @@ export const LiveCockpitBroadcast = ({ channelId, role, onSaved, onQueryStateCha
 
   const data = broadcast.data;
   const scopeMissing = data?.manageScopeAvailable === false;
-  const reconnectAction = scopeMissing && role === "broadcaster"
-    ? <Button size="compact" variant="secondary" onClick={reconnect}>{labels.broadcastReconnect}</Button>
+  const lockedReasonId = "live-cockpit-broadcast-reason";
+  const reconnectAction = scopeMissing
+    ? <Button size="compact" variant="secondary" disabled={role !== "broadcaster"}
+      {...(role !== "broadcaster" ? { title: labels.broadcastReconnectOwnerOnly } : {})}
+      {...(role !== "broadcaster" ? { describedBy: lockedReasonId } : {})}
+      onClick={reconnect}>{labels.broadcastReconnect}</Button>
     : null;
   const reason = data === undefined ? "" : !canEdit
     ? labels.broadcastManagerOnly
-    : scopeMissing ? labels.broadcastScopeMissing : "";
-  const lockedReasonId = "live-cockpit-broadcast-reason";
+    : scopeMissing ? role === "broadcaster" ? labels.broadcastScopeMissing : labels.broadcastReconnectOwnerOnly : "";
 
   return <div className="live-cockpit-header__title-slot" data-slot="stream-title-category" aria-busy={broadcast.isPending}>
     <div className="live-cockpit-broadcast__copy">
@@ -134,7 +163,7 @@ export const LiveCockpitBroadcast = ({ channelId, role, onSaved, onQueryStateCha
       onConfirm={() => { void save(); }}
       onCancel={() => { if (!pending) setOpened(false); }}
       pending={pending}
-      confirmDisabled={!canEdit || !data?.manageScopeAvailable || draftTitle.trim().length === 0 || draftTitle.length > 140}
+      confirmDisabled={!canEdit || !data?.manageScopeAvailable || !hasChanges || draftTitle.trim().length === 0 || draftTitle.length > 140}
       {...(saveError === undefined ? {} : { error: saveError })}
     >
       <div className="live-cockpit-broadcast__form">
