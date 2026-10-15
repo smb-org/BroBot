@@ -14,6 +14,7 @@ import { eventDetail } from "./events/model";
 import type { useEventsQuery } from "./data/lists";
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
 import { immediateActionErrorFeedback } from "./immediate-action-errors";
+import { adSnoozeRetryMessage } from "./ad-snooze-retry";
 import { formatRelativeTime } from "./ui/format-relative-time";
 import { Button, ChipGroup, ConfirmDialog, DataTable, Field, FilterBar, Icon } from "./ui";
 
@@ -37,18 +38,6 @@ const raidLogin = (entry: PanelEventEntry): string | null => {
 const remainingLabel = (until: string, now: number): string => {
   const seconds = Math.max(0, Math.ceil((Date.parse(until) - now) / 1_000));
   return `${String(Math.floor(seconds / 60))}:${String(seconds % 60).padStart(2, "0")}`;
-};
-
-const adSnoozeRetryMessage = (error: unknown, messageForTime: (time: string) => string): string | null => {
-  if (!(error instanceof PanelApiError) || error.status !== 429) return null;
-  const details = error.details;
-  if (typeof details !== "object" || details === null || Array.isArray(details)) return null;
-  const detail = (details as Record<string, unknown>).detail;
-  if (typeof detail !== "object" || detail === null || Array.isArray(detail)) return null;
-  const retryAfter = (detail as Record<string, unknown>).retryAfter;
-  if (typeof retryAfter !== "number" || !Number.isFinite(retryAfter) || retryAfter <= Date.now()) return null;
-  const time = new Intl.DateTimeFormat(dashboardLanguage(), { hour: "2-digit", minute: "2-digit" }).format(retryAfter);
-  return messageForTime(time);
 };
 
 export const LiveCockpitTiles = ({
@@ -161,7 +150,7 @@ export const LiveCockpitTiles = ({
       onMessage(labels.adSnoozed);
       onRefresh();
     } catch (error: unknown) {
-      const retryMessage = adSnoozeRetryMessage(error, labels.adSnoozeRetryAfter);
+      const retryMessage = adSnoozeRetryMessage(error, timeZone, labels.adSnoozeRetryAfter);
       if (retryMessage === null) onMessage(labels.adSnoozeFailed);
       else {
         setSnoozeFeedback({ itemId, text: retryMessage });
