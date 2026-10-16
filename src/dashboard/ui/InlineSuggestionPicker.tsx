@@ -144,7 +144,7 @@ export function InlineSuggestionPicker<Option extends { name: string }>({
       preventPositionChangeWhenVisible={false}
       middlewares={{
         flip: true,
-        shift: { padding: 12 },
+        shift: { padding: 16 },
         size: {
           padding: 12,
           apply: ({ availableHeight, elements }) => {
@@ -153,7 +153,7 @@ export function InlineSuggestionPicker<Option extends { name: string }>({
         },
       }}
       shadow="xs"
-      width="min(400px, calc(100vw - 24px))"
+      width="min(400px, calc(100vw - 70px))"
     >
       {children(controls)}
       {open ? (

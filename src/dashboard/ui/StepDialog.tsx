@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactElement, ReactNode } from "react";
+import type { ComponentProps, KeyboardEvent, ReactElement, ReactNode, SyntheticEvent } from "react";
 
 import { dashboardCommonTexts } from "../locale";
 import { Icon } from "./Icon";
@@ -12,10 +12,13 @@ interface StepDialogProps {
   footer?: ReactNode;
   description?: ReactNode;
   pending?: boolean;
+  size?: "fixed" | "content";
+  onSubmit?: (event: SyntheticEvent<HTMLFormElement>) => void;
+  onKeyDown?: (event: KeyboardEvent<HTMLFormElement>) => void;
 }
 
-/** Fixed-height dialog surface for guided flows whose content changes by step. */
-export function StepDialog({ opened, title, children, onClose, footer, description, pending = false }: StepDialogProps): ReactElement {
+/** Guided dialog surface for flows that change content by step. */
+export function StepDialog({ opened, title, children, onClose, footer, description, pending = false, size = "fixed", onSubmit, onKeyDown }: StepDialogProps): ReactElement {
   const closeLabel = dashboardCommonTexts().close;
   const handleOpenChange: NonNullable<ComponentProps<typeof DialogPrimitive.Root>["onOpenChange"]> = (nextOpen, eventDetails) => {
     if (!nextOpen && pending) {
@@ -27,18 +30,22 @@ export function StepDialog({ opened, title, children, onClose, footer, descripti
 
   return <DialogPrimitive.Root open={opened} onOpenChange={handleOpenChange}>
     <DialogContent
-      className="ui-step-dialog"
-      style={{ height: "min(760px, calc(100dvh - 32px))" }}
+      className={`ui-step-dialog${size === "content" ? " ui-step-dialog--content" : ""}`}
+      style={size === "content"
+        ? { height: "auto", maxHeight: "calc(100dvh - 32px)" }
+        : { height: "min(760px, calc(100dvh - 32px))" }}
     >
       <DialogHeader className="ui-dialog__header">
         <DialogTitle>{title}</DialogTitle>
         <button className="ui-dialog__close" type="button" aria-label={closeLabel} disabled={pending} onClick={onClose}><Icon name="close" /></button>
       </DialogHeader>
-      <div className="ui-step-dialog__body">
-        {description === undefined ? null : <div className="ui-step-dialog__description">{description}</div>}
-        {children}
-      </div>
-      {footer === undefined ? null : <div className="ui-step-dialog__footer">{footer}</div>}
+      <form className="ui-step-dialog__form" onSubmit={onSubmit} onKeyDown={onKeyDown}>
+        <div className="ui-step-dialog__body">
+          {description === undefined ? null : <div className="ui-step-dialog__description">{description}</div>}
+          {children}
+        </div>
+        {footer === undefined ? null : <div className="ui-step-dialog__footer">{footer}</div>}
+      </form>
     </DialogContent>
   </DialogPrimitive.Root>;
 }

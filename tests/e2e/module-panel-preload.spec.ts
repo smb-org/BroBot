@@ -111,7 +111,7 @@ test("hover preloads a module and navigation keeps the current view until its pa
   await expect(page.getByText("Loading module views …", { exact: true })).toHaveCount(0);
 
   releaseRequest();
-  await expect(page.getByRole("heading", { name: "API sources", level: 1, exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Data sources", level: 1, exact: true })).toBeVisible();
   await expect(page.getByText("Loading module views …", { exact: true })).toHaveCount(0);
 });
 
@@ -238,7 +238,7 @@ test("cold module navigation keeps the reserved page height and scroll position 
 
   releaseRequest();
   await expect(page.locator(".module-view-fallback")).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "API sources", level: 1, exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Data sources", level: 1, exact: true })).toBeVisible();
 
   expect(await reservedPage.evaluate((element) => element.getBoundingClientRect().height)).toBe(heightBefore);
   expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);

@@ -39,6 +39,8 @@ export interface ListToolbarProperties {
     ref?: Ref<HTMLButtonElement>;
     disabled?: boolean;
     reason?: string;
+    reasonId?: string;
+    reasonVisible?: boolean;
   };
   usage?: ListToolbarUsage;
   queryError?: QueryError;
@@ -89,8 +91,10 @@ export function ListToolbar({
   onReset,
   className,
 }: ListToolbarProperties) {
-  const createReasonId = useId();
+  const generatedCreateReasonId = useId();
+  const createReasonId = create?.reasonId ?? generatedCreateReasonId;
   const createReason = create?.reason;
+  const createReasonClassName = `list-toolbar__reason${create?.reasonVisible === false ? " sr-only" : ""}`;
   const activeFilterText = activeFilters?.trim() ?? "";
   const hasActiveFilters = activeFilterText.length > 0;
   const warning = usage?.maximum !== undefined && usage.maximum > 0 && usage.count >= usage.maximum * 0.9;
@@ -147,7 +151,7 @@ export function ListToolbar({
             </span>
           ) : null}
           {createReason === undefined ? null : (
-            <span id={createReasonId} className="list-toolbar__reason" role="note" title={createReason}>{createReason}</span>
+            <span id={createReasonId} className={createReasonClassName} role="note" title={createReason}>{createReason}</span>
           )}
           {hasActiveFilters && onReset !== undefined && resetLabel !== undefined ? (
             <button className="list-toolbar__reset" type="button" onClick={onReset}>{resetLabel}</button>
@@ -165,13 +169,13 @@ export function ListToolbar({
                 {activeFiltersLabel === undefined ? activeFilterText : `${activeFiltersLabel} ${activeFilterText}`}
               </span>
             ) : createReason === undefined ? null : (
-              <span id={createReasonId} className="list-toolbar__reason" role="note" title={createReason}>{createReason}</span>
+              <span id={createReasonId} className={createReasonClassName} role="note" title={createReason}>{createReason}</span>
             )}
             {hasActiveFilters && onReset !== undefined && resetLabel !== undefined ? (
               <button className="list-toolbar__reset" type="button" onClick={onReset}>{resetLabel}</button>
             ) : null}
             {hasActiveFilters && createReason !== undefined ? (
-              <span id={createReasonId} className="list-toolbar__reason" role="note" title={createReason}>{createReason}</span>
+              <span id={createReasonId} className={createReasonClassName} role="note" title={createReason}>{createReason}</span>
             ) : null}
           </div>
         </>

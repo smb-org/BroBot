@@ -67,7 +67,8 @@ const installChatVotingRealtime = async (page: Page) => {
 };
 
 test("API source editor and expression hint keep their boxes stable", async ({ page }) => {
-  const sources = Array.from({ length: 8 }, (_, index) => ({
+  await page.setViewportSize({ width: 390, height: 844 });
+  const sources = Array.from({ length: 16 }, (_, index) => ({
     name: `source_${String(index)}`,
     url: `https://example.com/${String(index)}`,
     expression: "$.status",
@@ -77,29 +78,42 @@ test("API source editor and expression hint keep their boxes stable", async ({ p
   await routeJson(page, "/api/channels/channel-a/modules/api_source/sources", { sources });
   await gotoPanel(page, "api_source");
   const panel = page.locator(".api-source-panel");
-  await expect(page.getByRole("button", { name: "Add source" })).toBeVisible();
-  const listSlot = page.getByTestId("api-source-list-slot");
+  await expect(page.getByRole("button", { name: "Create source" })).toBeVisible();
+  const listSlot = page.locator(".collection-page__list-content");
   const listBefore = await box(listSlot);
-  expect(await listSlot.locator(".api-source-panel__list").evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+  expect(await listSlot.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
   const panelBefore = await box(panel);
 
-  await page.getByRole("button", { name: "Add source" }).click();
-  const dialog = page.getByRole("dialog", { name: "Create source" });
+  await page.getByRole("button", { name: "Create source" }).click();
+  const dialog = page.getByRole("dialog", { name: "Create data source" });
   await expect(dialog).toBeVisible();
   await dialog.evaluate(async (element) => {
     await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => undefined)));
   });
-  const dialogBefore = await box(dialog);
-  const expression = page.getByRole("textbox", { name: "JSONata expression (optional)" });
+  await dialog.getByRole("textbox", { name: "Web address" }).fill("https://example.com");
+  await dialog.getByRole("button", { name: "Continue" }).click();
+  const expression = page.getByRole("textbox", { name: "Value from the response" });
   await expect(expression).toBeVisible();
-  await expression.fill("$.status");
+  const dialogBefore = await box(dialog);
+  await expression.fill("$.status & $from");
+  const functionPicker = page.locator(".ui-template-text-field__suggestions-dropdown");
+  await expect(functionPicker).toBeVisible();
+  expect(await functionPicker.locator(".ui-template-text-field__key-hints").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  const pickerBounds = await functionPicker.boundingBox();
+  const dialogBounds = await dialog.boundingBox();
+  expect(pickerBounds).not.toBeNull();
+  expect(dialogBounds).not.toBeNull();
+  if (pickerBounds !== null && dialogBounds !== null) {
+    expect(pickerBounds.x).toBeGreaterThanOrEqual(dialogBounds.x - 1);
+    expect(pickerBounds.x + pickerBounds.width).toBeLessThanOrEqual(dialogBounds.x + dialogBounds.width + 1);
+  }
   const dialogAfter = await box(dialog);
   expect(await box(listSlot)).toEqual(listBefore);
   expect(await box(panel)).toEqual(panelBefore);
   expect(dialogAfter).toEqual(dialogBefore);
 });
 test("API source list keeps its final populated row reachable at desktop and mobile widths", async ({ page }) => {
-  const sources = Array.from({ length: 8 }, (_, index) => ({
+  const sources = Array.from({ length: 16 }, (_, index) => ({
     name: `source_${String(index)}`,
     url: `https://example.com/${String(index)}`,
     expression: "$.status",
@@ -111,11 +125,12 @@ test("API source list keeps its final populated row reachable at desktop and mob
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 844 });
     await gotoPanel(page, "api_source");
-    const list = page.getByTestId("api-source-list-slot").locator(".api-source-panel__list");
+    const listSlot = page.locator(".collection-page__list-content");
+    const list = listSlot.locator(".api-source-panel__list");
     await expect(list.locator("li")).toHaveCount(sources.length);
-    const lastRow = await list.evaluate((element) => {
+    const lastRow = await listSlot.evaluate((element) => {
       element.scrollTop = element.scrollHeight;
-      const lastButton = element.querySelector("li:last-child button");
+      const lastButton = element.querySelector(".api-source-panel__list li:last-child button");
       if (!(lastButton instanceof HTMLElement)) throw new Error("The last source button is missing.");
       const listBounds = element.getBoundingClientRect();
       const buttonBounds = lastButton.getBoundingClientRect();
