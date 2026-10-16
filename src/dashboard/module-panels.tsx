@@ -706,7 +706,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
         setSaved(false); setConflict(false); setError(undefined);
       }}
       settingsRevision={settingsRevision}
-      onSettingsRevisionChange={(revision) => { baselineRevision.current = revision; setLatestSettingsRevision(revision); }}
+      onSettingsRevisionChange={setLatestSettingsRevision}
       onRemovePendingChange={setUrlRemovalPending}
       savingSettings={pending || urlRemovalPending} /> } : {})}
     columns={module.id === "ads"

@@ -348,6 +348,124 @@ test("BELABOX URL replacement and settings use one revision-checked save", async
   expect(mocks.lastWrite()).toEqual(expect.objectContaining({ statsUrl: "http://relay.belabox.net:8080/new-publisher-key" }));
 });
 
+test("BELABOX URL removal preserves a dirty draft baseline after a concurrent settings change", async ({ page }) => {
+  await page.setViewportSize({ width: 1_280, height: 800 });
+  await installMocks(page);
+
+  let currentSettings: Record<string, unknown> = { ...moduleSettings };
+  let currentRevision = 1;
+  let resourceRevisions: Readonly<Record<string, number>> = {};
+  let latestReadSettings: Record<string, unknown> = {};
+  let lastDraftSaveStatus = 0;
+  let urlConfigured = true;
+  const settingsRevisionSocket: { send: ((revision: number) => void) | null } = { send: null };
+  const writes: Record<string, unknown>[] = [];
+  await page.routeWebSocket(`**/ws/channels/${channelId}`, (socket) => {
+    socket.onMessage(() => undefined);
+    settingsRevisionSocket.send = (revision) => {
+      socket.send(JSON.stringify({
+        version: 1,
+        id: `belabox-settings-revision-${String(revision)}`,
+        createdAt: new Date().toISOString(),
+        channelId,
+        type: "panel.resources.changed",
+        payload: {
+          resources: ["module:belabox:settings"],
+          revisions: { "module:belabox:settings": revision },
+        },
+      }));
+    };
+  });
+  await page.route(`**/api/channels/${channelId}/modules/belabox/settings`, async (route) => {
+    const request = route.request();
+    if (request.method() === "GET") {
+      latestReadSettings = currentSettings;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ settings: currentSettings, revision: currentRevision, variables: [] }) });
+      return;
+    }
+    const payload = request.postDataJSON() as Record<string, unknown>;
+    writes.push(payload);
+    if (payload.revision !== currentRevision) {
+      if (payload.removeStatsUrl !== true) lastDraftSaveStatus = 409;
+      await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "module_settings_changed_concurrently" }) });
+      return;
+    }
+    if (payload.removeStatsUrl === true) {
+      urlConfigured = false;
+      currentRevision += 1;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ settings: currentSettings, revision: currentRevision, warnings: [] }) });
+      return;
+    }
+    lastDraftSaveStatus = 200;
+    currentSettings = payload.settings as Record<string, unknown>;
+    currentRevision += 1;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ settings: currentSettings, revision: currentRevision, warnings: [] }) });
+  });
+  await page.route(`**/api/channels/${channelId}/revisions`, async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ revisions: resourceRevisions }) });
+  });
+  await page.goto(`/channels/${channelId}/modules/belabox`);
+
+  await expect(page.getByRole("spinbutton", { name: "Niedrige Bitrate" })).toBeVisible();
+  await page.getByRole("spinbutton", { name: "Niedrige Bitrate" }).fill("650");
+  await expect.poll(() => settingsRevisionSocket.send).not.toBeNull();
+  currentSettings = { ...currentSettings, chatCooldownSeconds: 600 };
+  currentRevision = 2;
+  resourceRevisions = { "module:belabox:settings": currentRevision };
+  settingsRevisionSocket.send?.(currentRevision);
+  await expect.poll(() => latestReadSettings.chatCooldownSeconds).toBe(600);
+
+  await page.getByRole("button", { name: "Weitere Verbindungsaktionen" }).click();
+  await page.getByRole("menuitem", { name: "Statistik-URL entfernen" }).click();
+  await page.getByRole("button", { name: "Statistik-URL entfernen", exact: true }).click();
+  await expect.poll(() => writes.length).toBe(1);
+  expect(writes[0]).toMatchObject({ revision: 2, removeStatsUrl: true });
+  await expect.poll(() => urlConfigured).toBe(false);
+  await page.getByRole("button", { name: "Speichern", exact: true }).click();
+  await expect.poll(() => writes.length).toBe(2);
+  await expect(page.getByRole("alert")).toContainText("Die Abrufeinstellungen wurden inzwischen geändert.");
+
+  expect(writes[1]).toMatchObject({ revision: 1 });
+  expect(lastDraftSaveStatus).toBe(409);
+  expect(currentSettings).toMatchObject({ chatCooldownSeconds: 600, lowBitrateKbps: 1_000 });
+  expect(currentRevision).toBe(3);
+});
+
+test("BELABOX chart stays within its grid column at desktop and mobile sizes", async ({ page }) => {
+  await page.setViewportSize({ width: 1_280, height: 800 });
+  await installMocks(page);
+  await page.goto(`/channels/${channelId}/modules/belabox`);
+  await expect(page.locator(".belabox-chart")).toBeVisible();
+
+  for (const viewport of [{ width: 1_280, height: 800 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    const layout = await page.evaluate(() => {
+      const chart = document.querySelector<HTMLElement>(".belabox-chart");
+      const history = document.querySelector<HTMLElement>(".belabox-history-section");
+      const content = document.querySelector<HTMLElement>(".settings-page__top");
+      if (chart === null || history === null || content === null) throw new Error("The BELABOX chart layout is incomplete.");
+      const bounds = (element: HTMLElement) => {
+        const rect = element.getBoundingClientRect();
+        return { left: rect.left, right: rect.right, width: rect.width };
+      };
+      const axisLabels = Array.from(chart.querySelectorAll<HTMLElement>(".belabox-chart__axis-label"));
+      return {
+        chart: bounds(chart),
+        history: bounds(history),
+        content: bounds(content),
+        axisFontSizes: axisLabels.map((label) => Number.parseFloat(getComputedStyle(label).fontSize)),
+        axisText: axisLabels.map((label) => label.textContent.trim()),
+      };
+    });
+
+    expect(layout.chart.left).toBeGreaterThanOrEqual(layout.history.left - 1);
+    expect(layout.chart.right, `chart fits its section at ${String(viewport.width)}px`).toBeLessThanOrEqual(layout.history.right + 1);
+    expect(layout.history.right, `chart column fits the content at ${String(viewport.width)}px`).toBeLessThanOrEqual(layout.content.right + 1);
+    expect(layout.axisFontSizes.every((size) => size >= 10)).toBe(true);
+    expect(layout.axisText.every((label) => label.length > 0)).toBe(true);
+  }
+});
+
 test("BELABOX URL and settings remain dirty when their shared save fails", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   const mocks = await installMocks(page, { settingsWriteError: true });

@@ -1549,7 +1549,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .belabox-connection-actions { display: flex; min-height: 40px; flex-wrap: wrap; align-items: center; gap: var(--s2); }
 .belabox-connection-actions > .ui-button { flex: none; }
 .belabox-test-result { box-sizing: border-box; min-height: 20px; max-height: 36px; margin: 0; overflow: hidden; overflow-wrap: anywhere; }
-.belabox-history-section { min-width: 0; }
+.belabox-history-section { min-width: 0; grid-template-columns: minmax(0, 1fr); }
 .belabox-chart { position: relative; width: 100%; min-height: 200px; aspect-ratio: 640 / 200; }
 .belabox-chart > svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
 .belabox-chart__axis-label { position: absolute; z-index: 1; color: var(--text-3); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; line-height: 1.2; white-space: nowrap; }
