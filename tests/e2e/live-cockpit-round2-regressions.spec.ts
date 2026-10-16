@@ -150,10 +150,24 @@ test("all active Votekick timeouts remain reachable in a fixed-height list", asy
     height: element.getBoundingClientRect().height,
     scrollHeight: element.scrollHeight,
     clientHeight: element.clientHeight,
+    paddingBottom: Number.parseFloat(getComputedStyle(element).paddingBottom),
+    scrollbarWidth: getComputedStyle(element).scrollbarWidth,
+    scrollbarColor: getComputedStyle(element).scrollbarColor,
     nextHeadingTop: element.parentElement?.querySelector(":scope > h2:last-of-type")?.getBoundingClientRect().top,
   }));
   expect(initialGeometry.height).toBe(224);
   expect(initialGeometry.scrollHeight).toBeGreaterThan(initialGeometry.clientHeight);
+  expect(initialGeometry.paddingBottom).toBeGreaterThanOrEqual(8);
+  expect(initialGeometry.scrollbarWidth).toBe("thin");
+  expect(initialGeometry.scrollbarColor).not.toBe("auto");
+  const liftButton = list.getByRole("button", { name: /Timeout aufheben|Lift timeout/u }).first();
+  const liftButtonStyle = await liftButton.evaluate((button) => {
+    const style = getComputedStyle(button);
+    return { height: button.getBoundingClientRect().height, borderWidth: style.borderTopWidth, borderColor: style.borderTopColor };
+  });
+  expect(liftButtonStyle.height).toBeGreaterThanOrEqual(28);
+  expect(liftButtonStyle.borderWidth).not.toBe("0px");
+  expect(liftButtonStyle.borderColor).not.toBe("rgba(0, 0, 0, 0)");
 
   const finalItem = await list.evaluate((element) => {
     element.scrollTop = element.scrollHeight;
@@ -166,11 +180,13 @@ test("all active Votekick timeouts remain reachable in a fixed-height list", asy
       itemName: button.getAttribute("aria-label") ?? button.innerText.trim(),
       buttonBottom: button.getBoundingClientRect().bottom,
       listBottom: element.getBoundingClientRect().bottom,
+      itemBottom: element.querySelector(".live-cockpit-next-item:last-child")?.getBoundingClientRect().bottom,
       nextHeadingTop: nextHeading.getBoundingClientRect().top,
     };
   });
   expect(finalItem.itemName).toMatch(/Lift timeout|Timeout aufheben/u);
   expect(finalItem.buttonBottom).toBeLessThanOrEqual(finalItem.listBottom + 0.5);
+  expect(finalItem.listBottom - (finalItem.itemBottom ?? finalItem.listBottom)).toBeGreaterThanOrEqual(8);
   expect(finalItem.nextHeadingTop).toBeCloseTo(initialGeometry.nextHeadingTop ?? 0, 0);
 });
 

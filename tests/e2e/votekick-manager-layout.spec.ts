@@ -75,6 +75,21 @@ for (const viewport of viewports) {
 
     const editor = page.locator(".ui-editor-shell.votekick-settings-editor");
     await expect(editor).toBeVisible();
+    const header = page.locator(".module-detail-heading");
+    const content = page.locator(".module-detail__content");
+    const headerRight = await header.evaluate((element) => element.getBoundingClientRect().right);
+    const contentRight = await content.evaluate((element) => element.getBoundingClientRect().right);
+    expect(Math.abs(headerRight - contentRight)).toBeLessThanOrEqual(1);
+
+    await expect(header.getByRole("button", { name: "Speichern" })).toBeVisible();
+    await expect(editor.getByRole("button", { name: "Einstellungen speichern" })).toHaveCount(0);
+    await expect(editor.getByRole("heading", { name: "Votekick" })).toHaveCount(0);
+    const editorSurface = await editor.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { borderWidth: style.borderTopWidth, backgroundColor: style.backgroundColor };
+    });
+    expect(editorSurface.borderWidth).toBe("0px");
+
     const columns = editor.locator(".ui-editor-shell__columns > .ui-editor-shell__column");
     await expect(columns).toHaveCount(2);
     const positions = await columns.evaluateAll((elements) => elements.map((element) => {
@@ -88,6 +103,22 @@ for (const viewport of viewports) {
     } else {
       expect(positions[1]?.y).toBeGreaterThan(positions[0]?.y ?? 0);
     }
+    const fieldLayouts = await editor.locator(".inspector-field-row").evaluateAll((rows) => rows.map((row) => {
+      const label = row.querySelector(".inspector-field-row__label");
+      const control = row.querySelector(".inspector-field-row__control");
+      if (!(label instanceof HTMLElement) || !(control instanceof HTMLElement)) throw new Error("A Votekick field row is incomplete.");
+      return { labelBottom: label.getBoundingClientRect().bottom, controlTop: control.getBoundingClientRect().top };
+    }));
+    for (const layout of fieldLayouts) expect(layout.controlTop).toBeGreaterThanOrEqual(layout.labelBottom);
+    const messageHeight = await editor.locator(".template-text-field__input").first().evaluate((element) => element.getBoundingClientRect().height);
+    expect(messageHeight).toBeLessThanOrEqual(80);
+    const previewLayout = await editor.locator(".inspector-field-row:has(.ui-chat-preview)").first().evaluate((row) => {
+      const control = row.querySelector(".inspector-field-row__control");
+      const preview = row.querySelector(".ui-chat-preview");
+      if (!(control instanceof HTMLElement) || !(preview instanceof HTMLElement)) throw new Error("A message preview is missing.");
+      return { controlLeft: control.getBoundingClientRect().left, previewLeft: preview.getBoundingClientRect().left };
+    });
+    expect(Math.abs(previewLayout.controlLeft - previewLayout.previewLeft)).toBeLessThanOrEqual(2);
     if (viewport.width >= 1920) expect(await editor.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(960);
 
     const range = editor.locator(".timeout-duration-range-fields--visible-labels");

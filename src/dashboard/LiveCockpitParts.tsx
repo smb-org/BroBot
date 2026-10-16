@@ -234,7 +234,7 @@ export const LiveCockpitTiles = ({
           <span className="live-cockpit-next-item__icon"><Icon name="vote" size={16} /></span>
           <span className="live-cockpit-next-item__copy"><strong>{item.target}</strong></span>
           <time className="live-cockpit-next-item__time" dateTime={item.endedAt}>{formatRelativeTime(item.endedAt, new Date(now), dashboardLanguage(), timeZone).label}</time>
-          <Button size="compact" variant="subtle" disabled={busy || !roleCanManage} onClick={() => { setLiftTarget({ id: item.id, target: item.target }); setLiftError(undefined); }}>{labels.votekickLift}</Button>
+          <Button size="compact" variant="neutral" disabled={busy || !roleCanManage} onClick={() => { setLiftTarget({ id: item.id, target: item.target }); setLiftError(undefined); }}>{labels.votekickLift}</Button>
         </div>)}
       </div>
       <ConfirmDialog opened={liftTarget !== null} title={labels.votekickLiftTitle} description={labels.votekickLiftDescription(liftTarget?.target ?? "")} confirmLabel={labels.votekickLift} cancelLabel={dashboardCommonTexts().cancel} onConfirm={() => { void doLiftVotekick(); }} onCancel={() => { if (!busy) setLiftTarget(null); }} pending={busy} danger {...(liftError === undefined ? {} : { error: liftError })} />

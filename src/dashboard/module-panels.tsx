@@ -156,6 +156,7 @@ export const ModuleNavigation = ({ channelId, activeModules, onNavigate }: {
 interface ModulePanelMountProperties {
   channelId: string;
   activeModules: PanelActiveModule[];
+  settingsSaveTarget?: HTMLElement | null;
   suspendModuleId?: string;
   canManage?: boolean;
   canOperate?: boolean;
@@ -164,24 +165,27 @@ interface ModulePanelMountProperties {
   initialSelection?: string;
 }
 
-const ModuleSettingsEditor = ({ module, channelId, canManageContent, language }: {
+const ModuleSettingsEditor = ({ module, channelId, canManageContent, language, settingsSaveTarget }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
   language: DashboardLanguage;
+  settingsSaveTarget?: HTMLElement | null;
 }): ReactElement | null => module.settingsEditor === undefined ? null : <ModuleSettingsEditorQuery
   key={`${channelId}:${module.id}`}
   module={module}
   channelId={channelId}
   canManageContent={canManageContent}
   language={language}
+  {...(settingsSaveTarget === undefined ? {} : { settingsSaveTarget })}
 />;
 
-const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, language }: {
+const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, language, settingsSaveTarget }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
   language: DashboardLanguage;
+  settingsSaveTarget?: HTMLElement | null;
 }): ReactElement => {
   const [generation, setGeneration] = useState(0);
   const queryClient = useDashboardQueryClient();
@@ -230,6 +234,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       channelId={channelId}
       canManageContent={canManageContent}
       language={language}
+      {...(settingsSaveTarget === undefined ? {} : { settingsSaveTarget })}
       definition={loaded.definition}
       copy={copy}
       retryLabel={dashboardCommonTexts(language).retry}
@@ -249,7 +254,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
   </LoadState>;
 };
 
-const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, language, definition, copy, retryLabel, channelVariables, initial, initialRevision, onReload }: {
+const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, language, definition, copy, retryLabel, channelVariables, initial, initialRevision, settingsSaveTarget, onReload }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
@@ -260,6 +265,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   channelVariables: readonly PanelChannelVariable[];
   initial: Record<string, unknown>;
   initialRevision: number;
+  settingsSaveTarget?: HTMLElement | null;
   onReload: () => Promise<boolean>;
 }): ReactElement => {
   const queryClient = useDashboardQueryClient();
@@ -477,6 +483,8 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   return <>
     <EditorShell
     ariaLabel={copy.ariaLabel}
+      showTitle={definition.showTitle ?? true}
+      {...(definition.savePosition === "page-header" ? { saveTarget: settingsSaveTarget ?? null } : {})}
     {...(definition.className === undefined ? {} : { className: definition.className })}
     {...(definition.layout === undefined ? {} : { layout: definition.layout })}
     {...(definition.savePosition === undefined ? {} : { savePosition: definition.savePosition })}
@@ -535,7 +543,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   </>;
 };
 
-export const ModulePanelMount = ({ channelId, activeModules, suspendModuleId, canManage = true, canOperate = true, botIsModerator = null, initialSelection }: ModulePanelMountProperties): ReactElement => {
+export const ModulePanelMount = ({ channelId, activeModules, settingsSaveTarget = null, suspendModuleId, canManage = true, canOperate = true, botIsModerator = null, initialSelection }: ModulePanelMountProperties): ReactElement => {
   const registeredViews = activeModules.flatMap((activeModule) => {
     const module = MODULES.find((candidate) => candidate.id === activeModule.moduleId);
     if (module === undefined) return [];
@@ -558,6 +566,7 @@ export const ModulePanelMount = ({ channelId, activeModules, suspendModuleId, ca
           key={`${channelId}:${id}`}
           module={module}
           channelId={channelId}
+          settingsSaveTarget={settingsSaveTarget}
           canManage={canManage}
           canOperate={canOperate}
           botIsModerator={botIsModerator}
@@ -568,13 +577,14 @@ export const ModulePanelMount = ({ channelId, activeModules, suspendModuleId, ca
   );
 };
 
-const MountedModuleView = ({ module, channelId, canManage, canOperate, botIsModerator, suspendToParent, initialSelection }: {
+const MountedModuleView = ({ module, channelId, canManage, canOperate, botIsModerator, suspendToParent, settingsSaveTarget, initialSelection }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManage: boolean;
   canOperate: boolean;
   botIsModerator: boolean | null;
   suspendToParent: boolean;
+  settingsSaveTarget: HTMLElement | null;
   initialSelection?: string;
 }): ReactElement => {
   const loadPanel = useCallback(() => loadModulePanel(module) as Promise<{ default: ComponentType<ModulePanelProperties> }>, [module]);
@@ -583,6 +593,7 @@ const MountedModuleView = ({ module, channelId, canManage, canOperate, botIsMode
     channelId={channelId}
     canManageContent={canManage}
     language={dashboardLanguage()}
+    settingsSaveTarget={settingsSaveTarget}
   />;
   return <div className="module-view">
     {module.settingsEditorPlacement === "before-panel" ? settingsEditor : null}
@@ -825,6 +836,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   const requiredScopes = moduleState?.requiredBroadcasterScopes ?? registered?.broadcasterScopes ?? [];
   const missingScopeSet = new Set(missingScopes);
   const effectiveEnabled = enabled && !permissionsMissing;
+  const [settingsSaveTarget, setSettingsSaveTarget] = useState<HTMLDivElement | null>(null);
   const viewLoading = loading || moduleState === undefined || ((registered?.panel !== undefined || registered?.settingsEditor !== undefined) && enabled && activeModule === undefined);
   const showActiveView = activeModule !== undefined && (enabled || moduleState === undefined);
 
@@ -851,6 +863,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
             : <NavigationIcon kind={navigationPage.iconKind} className="module-heading-glyph module-glyph" />}
           title={details.name}
           subtitle={details.description}
+          saveTargetRef={setSettingsSaveTarget}
           {...(navigationPage?.showMainSwitch === false ? {} : {
             active: effectiveEnabled,
             onToggle: (nextEnabled: boolean) => { if (nextEnabled !== effectiveEnabled) onToggle(); },
@@ -890,7 +903,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
         {stateMessage === null ? (
           registered?.panel === undefined && registered?.settingsEditor === undefined ? (showActiveView ? <p className="module-state">{texts.module.noView}</p> : null) : !showActiveView ? null : (
             <section className={`module-detail__content${viewLoading ? " stale" : ""}`} aria-label={labels.content}>
-              <ModulePanelMount key={`${channelId}:${moduleId}`} channelId={channelId} activeModules={[activeModule]} {...(suspendPanelUntilReady ? { suspendModuleId: moduleId } : {})} canManage={ownRole !== "operator"} canOperate={true} botIsModerator={botIsModerator} {...(initialSelection === undefined ? {} : { initialSelection })} />
+              <ModulePanelMount key={`${channelId}:${moduleId}`} channelId={channelId} activeModules={[activeModule]} settingsSaveTarget={settingsSaveTarget} {...(suspendPanelUntilReady ? { suspendModuleId: moduleId } : {})} canManage={ownRole !== "operator"} canOperate={true} botIsModerator={botIsModerator} {...(initialSelection === undefined ? {} : { initialSelection })} />
             </section>
           )
         ) : (

@@ -57,7 +57,7 @@ const makeSettingsCatalog = (language: DashboardLanguage): SettingsEditorCatalog
   const de = language === "de";
   const words = de ? {
     title: "Votekick", readOnly: "Nur Broadcaster und Verwalter dürfen diese Einstellungen ändern.",
-    save: "Einstellungen speichern", saved: "Einstellungen gespeichert.", pending: "Wird gespeichert …",
+    save: "Speichern", saved: "Einstellungen gespeichert.", pending: "Wird gespeichert …",
     invalid: "Bitte korrigiere die markierten Felder.", error: "Einstellungen konnten nicht gespeichert werden.",
     conflict: "Einstellungen wurden inzwischen geändert.", reload: "Serverstand laden",
     settings: "Einstellungen", threshold: "Wann gilt er als bestanden?", messages: "Nachrichten im Chat",
@@ -84,7 +84,7 @@ const makeSettingsCatalog = (language: DashboardLanguage): SettingsEditorCatalog
     targetCooldownHint: "Zeit, bis dasselbe Ziel erneut gewählt werden kann.",
   } : {
     title: "Votekick", readOnly: "Only broadcasters and managers may change these settings.",
-    save: "Save settings", saved: "Settings saved.", pending: "Saving …",
+    save: "Save", saved: "Settings saved.", pending: "Saving …",
     invalid: "Please correct the marked fields.", error: "Settings could not be saved.",
     conflict: "Settings have changed since they were loaded.", reload: "Load server version",
     settings: "Settings", threshold: "When does it pass?", messages: "Chat messages",

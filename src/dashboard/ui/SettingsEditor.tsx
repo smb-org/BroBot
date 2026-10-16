@@ -88,7 +88,8 @@ export interface SettingsEditorDefinition<Settings> {
   spec: SettingsEditorSpec<Settings>;
   locales: Readonly<Record<"de" | "en", SettingsEditorCatalog>>;
   layout?: "tabs" | "columns";
-  savePosition?: "header" | "footer";
+  savePosition?: "header" | "footer" | "page-header";
+  showTitle?: boolean;
   className?: string;
 }
 

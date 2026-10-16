@@ -1,5 +1,6 @@
 import { Popover as MantinePopover } from "@mantine/core";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type SyntheticEvent } from "react";
+import { createPortal } from "react-dom";
 
 import { dashboardCommonTexts } from "../locale";
 import { FormDensity } from "./FormDensity";
@@ -26,7 +27,9 @@ export interface EditorInvalidField {
 export interface EditorShellProps {
   className?: string;
   layout?: "tabs" | "columns";
-  savePosition?: "header" | "footer";
+  savePosition?: "header" | "footer" | "page-header";
+  saveTarget?: HTMLElement | null;
+  showTitle?: boolean;
   ariaLabel: string;
   title: ReactNode;
   identifier?: string;
@@ -179,6 +182,8 @@ export function EditorShell({
   className,
   layout = "tabs",
   savePosition = "footer",
+  saveTarget = null,
+  showTitle = true,
   ariaLabel,
   title,
   identifier,
@@ -363,39 +368,42 @@ export function EditorShell({
   if (readOnly !== undefined) {
     return (
       <section data-ui="" className={`ui-editor-shell ui-editor-shell--readonly${className === undefined ? "" : ` ${className}`}`} aria-label={ariaLabel} onKeyDown={handleEditorKeyDown}>
-        <InspectorHeading level="h3" title={title} {...(identifier === undefined ? {} : { identifier })} {...(meta === undefined ? {} : { meta })} {...(closeAction === undefined ? {} : { action: closeAction })} />
+        {showTitle ? <InspectorHeading level="h3" title={title} {...(identifier === undefined ? {} : { identifier })} {...(meta === undefined ? {} : { meta })} {...(closeAction === undefined ? {} : { action: closeAction })} /> : null}
         <div className="ui-editor-shell__readonly-reason"><Icon name="lock" size={16} /><span>{readOnly.reason}</span></div>
         {readOnly.content}
       </section>
     );
   }
 
+  const saveStatus = <SaveStatus
+    persistent
+    dirty={dirty}
+    pending={pending}
+    saved={saved}
+    {...(error === undefined ? {} : { error })}
+    invalid={hasInvalid}
+    {...(invalidMessage === undefined ? {} : { invalidMessage })}
+    {...(invalidStatus === undefined ? {} : { invalidStatus })}
+    {...(warnings === undefined ? {} : { warnings })}
+    {...(warningStatusLabel === undefined ? {} : { warningStatusLabel })}
+    {...(conflict === undefined ? {} : { conflict })}
+    {...(footer === undefined ? {} : { footer })}
+    {...(destructive === undefined ? {} : { destructive })}
+    onSave={handleSaveAttempt}
+    onInvalidSave={handleInvalidSave}
+    onDiscard={onDiscard}
+    saveLabel={saveLabel}
+    discardLabel={discardLabel}
+    savedLabel={savedLabel}
+    pendingLabel={pendingLabel}
+  />;
+
   return (
     <FormDensity.Provider value="form">
       <section data-ui="" className={`ui-editor-shell${className === undefined ? "" : ` ${className}`}`} aria-label={ariaLabel} onKeyDown={handleEditorKeyDown}>
-        <InspectorHeading level="h3" title={title} {...(identifier === undefined ? {} : { identifier })} {...(meta === undefined ? {} : { meta })} {...(closeAction === undefined ? {} : { action: closeAction })} />
-        {savePosition === "header" ? <div className="ui-editor-shell__header-save"><SaveStatus
-          persistent
-          dirty={dirty}
-          pending={pending}
-          saved={saved}
-          {...(error === undefined ? {} : { error })}
-          invalid={hasInvalid}
-          {...(invalidMessage === undefined ? {} : { invalidMessage })}
-          {...(invalidStatus === undefined ? {} : { invalidStatus })}
-          {...(warnings === undefined ? {} : { warnings })}
-          {...(warningStatusLabel === undefined ? {} : { warningStatusLabel })}
-          {...(conflict === undefined ? {} : { conflict })}
-          {...(footer === undefined ? {} : { footer })}
-          {...(destructive === undefined ? {} : { destructive })}
-          onSave={handleSaveAttempt}
-          onInvalidSave={handleInvalidSave}
-          onDiscard={onDiscard}
-          saveLabel={saveLabel}
-          discardLabel={discardLabel}
-          savedLabel={savedLabel}
-          pendingLabel={pendingLabel}
-        /></div> : null}
+        {showTitle ? <InspectorHeading level="h3" title={title} {...(identifier === undefined ? {} : { identifier })} {...(meta === undefined ? {} : { meta })} {...(closeAction === undefined ? {} : { action: closeAction })} /> : null}
+        {savePosition === "header" ? <div className="ui-editor-shell__header-save">{saveStatus}</div> : null}
+        {savePosition === "page-header" && saveTarget !== null ? createPortal(saveStatus, saveTarget) : null}
         {layout === "columns" || sections.length < 2 ? null : (
           <div className="ui-editor-shell__tabs" role="tablist" aria-label={ariaLabel} onKeyDown={handleTabKeyDown}>
             {sections.map((candidate) => {
@@ -440,28 +448,7 @@ export function EditorShell({
             )}
           </div>
         </form>
-        {savePosition === "footer" ? <SaveStatus
-          persistent
-          dirty={dirty}
-          pending={pending}
-          saved={saved}
-          {...(error === undefined ? {} : { error })}
-          invalid={hasInvalid}
-          {...(invalidMessage === undefined ? {} : { invalidMessage })}
-          {...(invalidStatus === undefined ? {} : { invalidStatus })}
-          {...(warnings === undefined ? {} : { warnings })}
-          {...(warningStatusLabel === undefined ? {} : { warningStatusLabel })}
-          {...(conflict === undefined ? {} : { conflict })}
-          {...(footer === undefined ? {} : { footer })}
-          {...(destructive === undefined ? {} : { destructive })}
-          onSave={handleSaveAttempt}
-          onInvalidSave={handleInvalidSave}
-          onDiscard={onDiscard}
-          saveLabel={saveLabel}
-          discardLabel={discardLabel}
-          savedLabel={savedLabel}
-          pendingLabel={pendingLabel}
-        /> : null}
+        {savePosition === "footer" ? saveStatus : null}
       </section>
     </FormDensity.Provider>
   );

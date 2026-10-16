@@ -33,7 +33,8 @@ const spec: SettingsEditorSpec<VotekickSettings> = {
 const definition: SettingsEditorDefinition<VotekickSettings> = {
   spec,
   layout: "columns",
-  savePosition: "header",
+  savePosition: "page-header",
+  showTitle: false,
   className: "votekick-settings-editor",
   locales: { de: votekickSettingsEditorCatalog("de"), en: votekickSettingsEditorCatalog("en") },
 };
