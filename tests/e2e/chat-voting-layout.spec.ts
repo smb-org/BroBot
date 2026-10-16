@@ -241,7 +241,7 @@ for (const viewport of viewports) {
       const contentElement = element.closest<HTMLElement>(".module-detail__content");
       const style = getComputedStyle(element);
       const body = element.querySelector<HTMLElement>(".ui-editor-shell__body");
-      const label = element.querySelector<HTMLElement>(".inspector-field-row__label");
+      const label = element.querySelector<HTMLElement>(".ui-field__label");
       const input = element.querySelector<HTMLElement>("input");
       if (contentElement === null || body === null || label === null || input === null) throw new Error("The full-width voting settings editor is missing its form or scroll body.");
       const content = contentElement.getBoundingClientRect();
@@ -261,7 +261,7 @@ for (const viewport of viewports) {
     expect(settingsLayout.bodyOverflow).toBe("auto");
     expect(settingsLayout.labelBottom).toBeLessThanOrEqual(settingsLayout.inputTop + 1);
     await settingsEditor.getByRole("tab", { name: "Nachrichten" }).click();
-    const saveBar = page.locator(".module-detail-heading .page-header__save .ui-save-bar");
+    const saveBar = settingsEditor.locator(".ui-editor-shell__header-save .ui-save-bar");
     await expect(saveBar).toBeVisible();
     const saveBox = await saveBar.boundingBox();
     const settingsBody = settingsEditor.locator(".ui-editor-shell__body");

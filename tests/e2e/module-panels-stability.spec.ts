@@ -790,12 +790,14 @@ test("the saved vote inspector keeps its draft while leaving vote starts to the 
   await expect(header.locator(".page-header__save .ui-save-bar")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 
   const selectedLink = page.locator(".chat-voting-template-list .list-row--selected .list-row__link");
-  const selectedStyles = await selectedLink.evaluate((element) => ({
+  const selectedRow = page.locator(".chat-voting-template-list .list-row--selected");
+  const selectedStyles = await selectedRow.evaluate((element) => ({
     boxShadow: getComputedStyle(element).boxShadow,
     backgroundColor: getComputedStyle(element).backgroundColor,
   }));
   expect(selectedStyles.boxShadow).not.toBe("none");
   expect(selectedStyles.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+  await expect(selectedLink).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 
   const createButton = page.getByRole("button", { name: "Create vote" });
   const firstVote = page.locator(".chat-voting-template-list .list-row__link").first();

@@ -36,6 +36,11 @@ const authorize = () => ({ sql: "AND 1 = 1", values: [] as const });
 const TEST_SESSION_KEYS = JSON.stringify({ active: { id: "cookie-v1", key: testKey(1) }, retired: [] });
 const TEST_ENCRYPTION_KEYS = JSON.stringify({ active: { id: "encryption-v1", key: testKey(2) }, retired: [] });
 
+const reconciliationChannelNamespace = () => ({
+  idFromName: (name: string) => name,
+  get: () => ({ reconcileLegacyChatVoteResultDeliveries: () => Promise.resolve() }),
+});
+
 const renderTextLibraryPanel = (canManage = true): void => {
   renderWithQuery(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage={canManage} /></MantineProvider>);
 };
@@ -996,6 +1001,7 @@ describe("text library", () => {
     const csrf = await createCsrfToken("session-manager-1", TEST_SESSION_KEYS, new Date().toISOString());
     const environment = {
       DB: database as unknown as D1Database,
+      CHANNEL: reconciliationChannelNamespace(),
       TWITCH_CLIENT_ID: "client-id",
       SESSION_COOKIE_KEYS: TEST_SESSION_KEYS,
       SESSION_ENCRYPTION_KEYS: TEST_ENCRYPTION_KEYS,
@@ -1082,6 +1088,7 @@ describe("text library", () => {
     expect(cachedFaqMatchers[0]?.entry.revision).toBe(1);
     const environment = {
       DB: database as unknown as D1Database,
+      CHANNEL: reconciliationChannelNamespace(),
       TWITCH_CLIENT_ID: "client-id",
       SESSION_COOKIE_KEYS: TEST_SESSION_KEYS,
       SESSION_ENCRYPTION_KEYS: TEST_ENCRYPTION_KEYS,
@@ -1172,6 +1179,7 @@ describe("text library", () => {
     const csrf = await createCsrfToken("session-manager-channel-scoped-rename", TEST_SESSION_KEYS, new Date().toISOString());
     const environment = {
       DB: database as unknown as D1Database,
+      CHANNEL: reconciliationChannelNamespace(),
       TWITCH_CLIENT_ID: "client-id",
       SESSION_COOKIE_KEYS: TEST_SESSION_KEYS,
       SESSION_ENCRYPTION_KEYS: TEST_ENCRYPTION_KEYS,
@@ -1228,6 +1236,7 @@ describe("text library", () => {
     };
     const environment = {
       DB: database as unknown as D1Database,
+      CHANNEL: reconciliationChannelNamespace(),
       TWITCH_CLIENT_ID: "client-id",
       SESSION_COOKIE_KEYS: TEST_SESSION_KEYS,
       SESSION_ENCRYPTION_KEYS: TEST_ENCRYPTION_KEYS,
@@ -1286,6 +1295,7 @@ describe("text library", () => {
     );
     const environment = {
       DB: interleavedDatabase,
+      CHANNEL: reconciliationChannelNamespace(),
       TWITCH_CLIENT_ID: "client-id",
       SESSION_COOKIE_KEYS: TEST_SESSION_KEYS,
       SESSION_ENCRYPTION_KEYS: TEST_ENCRYPTION_KEYS,
@@ -1333,6 +1343,7 @@ describe("text library", () => {
     const csrf = await createCsrfToken("session-manager-stale-rename", TEST_SESSION_KEYS, new Date().toISOString());
     const environment = {
       DB: database as unknown as D1Database,
+      CHANNEL: reconciliationChannelNamespace(),
       TWITCH_CLIENT_ID: "client-id",
       SESSION_COOKIE_KEYS: TEST_SESSION_KEYS,
       SESSION_ENCRYPTION_KEYS: TEST_ENCRYPTION_KEYS,
@@ -1388,6 +1399,7 @@ describe("text library", () => {
     const csrf = await createCsrfToken("session-manager-variant-rename", TEST_SESSION_KEYS, new Date().toISOString());
     const environment = {
       DB: database as unknown as D1Database,
+      CHANNEL: reconciliationChannelNamespace(),
       TWITCH_CLIENT_ID: "client-id",
       SESSION_COOKIE_KEYS: TEST_SESSION_KEYS,
       SESSION_ENCRYPTION_KEYS: TEST_ENCRYPTION_KEYS,
@@ -1568,6 +1580,7 @@ describe("text library", () => {
     const csrf = await createCsrfToken("session-manager-rename-compatibility", TEST_SESSION_KEYS, new Date().toISOString());
     const environment = {
       DB: database as unknown as D1Database,
+      CHANNEL: reconciliationChannelNamespace(),
       TWITCH_CLIENT_ID: "client-id",
       SESSION_COOKIE_KEYS: TEST_SESSION_KEYS,
       SESSION_ENCRYPTION_KEYS: TEST_ENCRYPTION_KEYS,
@@ -1728,6 +1741,52 @@ describe("text library", () => {
       .bind(CHANNEL_ID, "concurrent").first()).toEqual({ response_text: "Use {text.welcome}" });
   });
 
+  it("rejects a rename when a vote result template changes after length validation", async () => {
+    const created = await createBlock("a", [variant("default", "Hello")]);
+    if (!created.ok) throw new Error("Could not create the concurrent vote-result block.");
+    const snapshot = await service.list(CHANNEL_ID);
+    const resultText = `${"x".repeat(497)}{text.a}`;
+    const renamedBlock = "b".repeat(32);
+    expect(templateTextLength(resultText)).toBe(500);
+    expect(templateTextLength(resultText.replaceAll("{text.a}", `{text.${renamedBlock}}`))).toBe(531);
+    let inserted = false;
+    const interleavedDatabase = {
+      prepare: (sql: string) => database.prepare(sql),
+      batch: async (statements: Parameters<TestD1Database["batch"]>[0]) => {
+        if (!inserted) {
+          inserted = true;
+          const now = new Date(NOW).toISOString();
+          await database.prepare(
+            `INSERT INTO chat_vote_templates
+              (id, channel_id, shortcut, title, result_text, labels, free_text_mode, duration_seconds,
+               revision, legacy_alias, last_used_at, created_at, updated_at)
+             VALUES ('concurrent-result', ?, NULL, 'Concurrent result', ?, '["Yes","No"]', NULL, 120,
+               1, NULL, NULL, ?, ?)`,
+          ).bind(CHANNEL_ID, resultText, now, now).run();
+        }
+        return database.batch(statements);
+      },
+    } as unknown as D1Database;
+    const interleavedRepository = createTextBlockRepository(interleavedDatabase, authorize);
+
+    const result = await interleavedRepository.rename({
+      channelId: CHANNEL_ID,
+      name: renamedBlock,
+      categoryId: created.block.categoryId,
+      games: [],
+      variants: [variant("default", "Hello")],
+      expectedRevision: created.block.revision,
+      expectedGraphRevision: snapshot.settings.graphRevision,
+      now: new Date(NOW).toISOString(),
+    }, "a", ACTOR);
+
+    expect(result).toMatchObject({ ok: false, reason: "conflict" });
+    await expect(service.find(CHANNEL_ID, "a")).resolves.toMatchObject({ name: "a" });
+    await expect(service.find(CHANNEL_ID, renamedBlock)).resolves.toBeNull();
+    await expect(database.prepare("SELECT result_text FROM chat_vote_templates WHERE id = 'concurrent-result'").first())
+      .resolves.toEqual({ result_text: resultText });
+  });
+
   it("invalidates edited overlay blocks and refuses to delete a block used by an overlay", async () => {
     const created = await createBlock("welcome", [variant("default", "Before edit")]);
     if (!created.ok) throw new Error("Could not create the realtime test block.");
@@ -1750,10 +1809,13 @@ describe("text library", () => {
     const published: unknown[] = [];
     const channel = {
       idFromName: (name: string) => name,
-      get: () => ({ publish: (messages: readonly unknown[]) => {
-        published.push(...messages);
-        return Promise.resolve();
-      } }),
+      get: () => ({
+        reconcileLegacyChatVoteResultDeliveries: () => Promise.resolve(),
+        publish: (messages: readonly unknown[]) => {
+          published.push(...messages);
+          return Promise.resolve();
+        },
+      }),
     };
     const environment = {
       DB: database as unknown as D1Database,

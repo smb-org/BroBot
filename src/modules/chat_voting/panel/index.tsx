@@ -196,7 +196,7 @@ const ChatVotingCollection = ({ channelId, language = "de", canManage = true, on
   </div>;
 
   const list = <LoadState
-    variant="panel-600"
+    variant="panel-0"
     status={listStatus}
     loading={<LoadStateLines rows={7} height={48} />}
     empty={<EmptyState title={templates.length === 0 ? labels.emptySaved : common.noMatches} description={templates.length === 0 ? labels.emptySavedDescription : ""} {...(templates.length === 0 && canManage ? { action: { label: labels.create, onClick: createTemplate } } : {})} />}

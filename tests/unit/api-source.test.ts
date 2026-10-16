@@ -56,6 +56,11 @@ const insertSource = async (
   ).bind(CHANNEL_ID, name, url, expression, new Date(NOW).toISOString(), new Date(NOW).toISOString()).run();
 };
 
+const chatVoteReconciliationNamespace = (reconcile: () => Promise<void> = () => Promise.resolve()): Env["CHANNEL"] => ({
+  idFromName: (channelId: string) => channelId,
+  get: () => ({ reconcileLegacyChatVoteResultDeliveries: reconcile }),
+} as unknown as Env["CHANNEL"]);
+
 const sharedBudget = (maximum = 3): { claim: () => boolean; count: () => number } => {
   let count = 0;
   return {
@@ -452,6 +457,64 @@ describe("API source test request", () => {
 });
 
 describe("API source deletion guard", () => {
+  it("reconciles migrated vote result candidates before checking API source usage", async () => {
+    const database = await createDatabase();
+    await insertSource(database, "sunset", "$.sunset");
+    const openedAt = new Date(NOW - 120_000).toISOString();
+    const closedAt = new Date(NOW - 60_000).toISOString();
+    await database.prepare(
+      `INSERT INTO chat_votes
+        (channel_id, poll_id, kind, option_count, labels_json, status, opened_at, closes_at, closed_at,
+         close_reason, counts_json, voter_count, title, result_text, result_delivery_pending)
+       VALUES (?, 'poll-migrated-result', 'yes_no', 2, '["Yes","No"]', 'closed', ?, ?, ?, 'timer',
+         '[1,0]', 1, 'Historical vote', 'Result: {api.sunset}', 1)`,
+    ).bind(CHANNEL_ID, openedAt, closedAt, closedAt).run();
+    const latestOpenedAt = new Date(NOW - 30_000).toISOString();
+    await database.prepare(
+      `INSERT INTO chat_votes
+        (channel_id, poll_id, kind, option_count, labels_json, status, opened_at, closes_at, closed_at,
+         close_reason, counts_json, voter_count, title, result_text)
+       VALUES (?, 'poll-latest-result', 'yes_no', 2, '["Yes","No"]', 'closed', ?, ?, ?, 'timer',
+         '[1,0]', 1, 'Latest vote', 'Result without source')`,
+    ).bind(CHANNEL_ID, latestOpenedAt, closedAt, closedAt).run();
+    await database.prepare(
+      "INSERT INTO chat_vote_result_delivery_reconciliation (channel_id, poll_id) VALUES (?, ?)",
+    ).bind(CHANNEL_ID, "poll-migrated-result").run();
+    const reconciliation = vi.fn(async () => {
+      await database.prepare(
+        "UPDATE chat_votes SET result_delivery_pending = 0 WHERE channel_id = ? AND poll_id = ?",
+      ).bind(CHANNEL_ID, "poll-migrated-result").run();
+      await database.prepare(
+        "DELETE FROM chat_vote_result_delivery_reconciliation WHERE channel_id = ? AND poll_id = ?",
+      ).bind(CHANNEL_ID, "poll-migrated-result").run();
+    });
+    const app = new Hono<ModuleRouteEnvironment>();
+    const actorId = "api-source-manager";
+    app.use("*", async (context, next) => {
+      context.set("channelRole", "manager");
+      context.set("actor", { userId: actorId, sessionId: "api-source-session" });
+      context.set("authorizeManagementMutation", () => ({ sql: "AND 1 = 1", values: [] }));
+      context.set("prepareModuleAudit", (entry, changedAt) =>
+        prepareModuleAudit(database as unknown as D1Database, actorId, changedAt, entry));
+      context.set("publishOverlayHostEvent", () => Promise.resolve());
+      await next();
+    });
+    app.route("/channels/:channelId", apiSourceRoutes);
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/sources/sunset`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ revision: 1 }),
+    }), {
+      DB: database as unknown as D1Database,
+      CHANNEL: chatVoteReconciliationNamespace(reconciliation),
+    });
+
+    expect(reconciliation).toHaveBeenCalledOnce();
+    expect(response.status).toBe(200);
+    await expect(getApiSource(database as unknown as D1Database, CHANNEL_ID, "sunset")).resolves.toBeNull();
+  });
+
   it("blocks deletion while saved templates, text, or conditions reference the source", async () => {
     const database = await createDatabase();
     await insertSource(database, "sunset", "$.sunset");
@@ -517,7 +580,10 @@ describe("API source deletion guard", () => {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ revision: 1 }),
-    }), { DB: database as unknown as D1Database });
+    }), {
+      DB: database as unknown as D1Database,
+      CHANNEL: chatVoteReconciliationNamespace(),
+    });
 
     expect(response.status).toBe(409);
     const responseBody: unknown = await response.json();
@@ -572,7 +638,10 @@ describe("API source deletion guard", () => {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ revision: 1 }),
-    }), { DB: interleavedDatabase });
+    }), {
+      DB: interleavedDatabase,
+      CHANNEL: chatVoteReconciliationNamespace(),
+    });
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
@@ -614,7 +683,10 @@ describe("API source deletion guard", () => {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ revision: 1 }),
-    }), { DB: interleavedDatabase });
+    }), {
+      DB: interleavedDatabase,
+      CHANNEL: chatVoteReconciliationNamespace(),
+    });
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({

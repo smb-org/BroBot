@@ -129,6 +129,11 @@ const apiSourceUsages = async (db: D1Database, channelId: string, name: string):
   return [...usages.values()];
 };
 
+const reconcileLegacyChatVoteResults = async (channelNamespace: Env["CHANNEL"], channelId: string): Promise<void> => {
+  const object = channelNamespace.get(channelNamespace.idFromName(channelId));
+  await object.reconcileLegacyChatVoteResultDeliveries();
+};
+
 export const apiSourceRoutes = new Hono<ModuleRouteEnvironment>();
 
 apiSourceRoutes.get("/sources", async (context) => {
@@ -243,6 +248,7 @@ apiSourceRoutes.delete("/sources/:name", async (context) => {
   const before = await getApiSource(context.env.DB, channelId, name);
   if (before === null) return context.json({ error: "api_source_not_found" }, 404);
   if (parsed.data.revision !== before.revision) return context.json({ error: "api_source_conflict" }, 409);
+  await reconcileLegacyChatVoteResults(context.env.CHANNEL, channelId);
   const usages = await apiSourceUsages(context.env.DB, channelId, name);
   if (usages.length > 0) return context.json({ error: "api_source_in_use", usages }, 409);
   const now = new Date().toISOString();

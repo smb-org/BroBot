@@ -1588,6 +1588,7 @@ describe("panel resource revisions", () => {
         "bot_channel_status_check_locks",
         "channel_game_history",
         "channel_variable_stream_resets",
+        "chat_vote_result_delivery_reconciliation",
         "currency_rate_cache",
         "eventsub_maintenance_locks",
         "eventsub_messages",

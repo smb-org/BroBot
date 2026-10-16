@@ -48,7 +48,7 @@ describe("chat voting close service", () => {
     overrides: {
       put?: (key: string, value: unknown) => Promise<void>;
       schedule?: ModuleAlarmContext["schedule"];
-      sendChat?: () => Promise<{ sent: boolean; reason: string | null; retryable: boolean }>;
+      sendChat?: (...args: Parameters<ModuleAlarmContext["sendChat"]>) => Promise<{ sent: boolean; reason: string | null; retryable: boolean }>;
     } = {},
   ) => {
     const values = new Map<string, unknown>();
@@ -85,9 +85,8 @@ describe("chat voting close service", () => {
       renderTemplate: vi.fn(() => Promise.resolve({ text: "Yes: 7 (70%) · No: 3 (30%)" })),
       publishModuleOverlayMessage,
       sendChat: vi.fn((...args: Parameters<ModuleAlarmContext["sendChat"]>) => {
-        void args;
         order.push("chat");
-        return sendChat();
+        return sendChat(...args);
       }),
       chatActivityCount: vi.fn(() => Promise.resolve(0)),
       resolveEventTimes: vi.fn(() => Promise.resolve([])),
@@ -406,6 +405,66 @@ describe("chat voting close service", () => {
     expect(sendChat).toHaveBeenCalledTimes(2);
     await expect(repository.byId("fictional-channel", "fictional-poll"))
       .resolves.toMatchObject({ status: "closed", counts: [7, 3] });
+  });
+
+  it("retries with the current result template when a text-block rename crosses alarm awaits", async () => {
+    const repository = await seedOpenVote(true, "Dinner", "Result: {text.old}");
+    const announcements: string[] = [];
+    const order: string[] = [];
+    const { context, publishModuleOverlayMessage } = createAlarmContext(order, {
+      sendChat: async (text, _idempotencyKey, _attributions, stillValid) => {
+        if (stillValid !== undefined && !await stillValid()) {
+          return { sent: false, reason: "stale_before_send", retryable: false };
+        }
+        announcements.push(text);
+        return { sent: true, reason: null, retryable: false };
+      },
+    });
+    let overlayRenamed = false;
+    publishModuleOverlayMessage.mockImplementation(async () => {
+      order.push("overlay");
+      if (overlayRenamed) return;
+      overlayRenamed = true;
+      await database.prepare(
+        "UPDATE chat_votes SET result_text = 'Result: {text.middle}' WHERE channel_id = ? AND poll_id = ?",
+      ).bind("fictional-channel", "fictional-poll").run();
+    });
+    let renderCount = 0;
+    (context as { renderTemplate: ModuleAlarmContext["renderTemplate"] }).renderTemplate = vi.fn(async (text: string) => {
+      renderCount += 1;
+      if (renderCount === 1) {
+        await database.prepare(
+          "UPDATE chat_votes SET result_text = 'Result: {text.new}' WHERE channel_id = ? AND poll_id = ?",
+        ).bind("fictional-channel", "fictional-poll").run();
+      }
+      return { text };
+    });
+
+    await expect(closeChatVoteFromAlarm(context, repository, "fictional-poll"))
+      .rejects.toThrow("changed before it could be sent");
+    await expect(repository.byId("fictional-channel", "fictional-poll")).resolves.toMatchObject({
+      resultText: "Result: {text.new}",
+      resultDeliveryPending: true,
+    });
+
+    await closeChatVoteFromAlarm(context, repository, "fictional-poll");
+
+    expect(context.renderTemplate).toHaveBeenNthCalledWith(
+      1,
+      "Result: {text.middle}",
+      expect.any(Number),
+      expect.any(Object),
+    );
+    expect(context.renderTemplate).toHaveBeenNthCalledWith(
+      2,
+      "Result: {text.new}",
+      expect.any(Number),
+      expect.any(Object),
+    );
+    expect(announcements).toEqual(["Result: {text.new}"]);
+    await expect(repository.byId("fictional-channel", "fictional-poll")).resolves.toMatchObject({
+      resultDeliveryPending: false,
+    });
   });
 
   it("publishes a bounded panel hint when a large closed tally exceeds the overlay limit", async () => {

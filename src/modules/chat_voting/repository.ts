@@ -482,10 +482,16 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
     return result.meta.changes > 0;
   },
   async completeResultDelivery(channelId, pollId) {
-    const result = await db.prepare(
-      `UPDATE chat_votes SET result_delivery_pending = 0
-        WHERE channel_id = ? AND poll_id = ? AND status = 'closed' AND result_delivery_pending = 1`,
-    ).bind(channelId, pollId).run();
-    return result.meta.changes > 0;
+    const [result] = await db.batch([
+      db.prepare(
+        `UPDATE chat_votes SET result_delivery_pending = 0
+          WHERE channel_id = ? AND poll_id = ? AND status = 'closed' AND result_delivery_pending = 1`,
+      ).bind(channelId, pollId),
+      db.prepare(
+        `DELETE FROM chat_vote_result_delivery_reconciliation
+          WHERE channel_id = ? AND poll_id = ?`,
+      ).bind(channelId, pollId),
+    ]);
+    return (result?.meta.changes ?? 0) > 0;
   },
 });

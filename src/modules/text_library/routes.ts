@@ -58,6 +58,14 @@ const readBody = async (request: Request): Promise<unknown> => request.json().ca
 const denied = (context: { json: (body: { error: string }, status: 403) => Response }): Response =>
   context.json({ error: "text_library_management_denied" }, 403);
 
+const reconcileLegacyChatVoteResults = async (
+  channelNamespace: Env["CHANNEL"],
+  channelId: string,
+): Promise<void> => {
+  const object = channelNamespace.get(channelNamespace.idFromName(channelId));
+  await object.reconcileLegacyChatVoteResultDeliveries();
+};
+
 const blocksAffectedBy = (blocks: readonly TextBlock[], changedName: string): string[] => {
   const affected = new Set([changedName]);
   let changed = true;
@@ -123,6 +131,7 @@ export const textLibraryRoutes = new Hono<ModuleRouteEnvironment>();
 
 textLibraryRoutes.get("/library", async (context) => {
   const channelId = param(context, "channelId");
+  await reconcileLegacyChatVoteResults(context.env.CHANNEL, channelId);
   const service = createTextLibraryService(createTextBlockRepository(context.env.DB, context.get("authorizeMutation"), context.get("prepareModuleAudit")));
   const [data, registeredVariables, dataConditionDefinitions] = await Promise.all([
     service.list(channelId, await context.get("templateUsageSources")(channelId)),
@@ -208,6 +217,7 @@ textLibraryRoutes.patch("/blocks/:name", async (context) => {
   ]);
   if (reservedNames.has(parsed.name)) return context.json({ error: "text_library_block_reserved_name" }, 400);
   const service = createTextLibraryService(createTextBlockRepository(context.env.DB, context.get("authorizeManagementMutation"), context.get("prepareModuleAudit")));
+  if (parsed.name !== oldName) await reconcileLegacyChatVoteResults(context.env.CHANNEL, channelId);
   const expectedLibraryRevision = parsed.name === oldName ? undefined : await service.libraryRevision(channelId);
   const snapshot = await service.list(channelId);
   const templateIssues = await context.get("validateTemplateContentMutation")(channelId, {
@@ -273,6 +283,7 @@ textLibraryRoutes.delete("/blocks/:name", async (context) => {
   if (!Number.isSafeInteger(revision) || revision < 1) return context.json({ error: "text_library_block_invalid" }, 400);
   const service = createTextLibraryService(createTextBlockRepository(context.env.DB, context.get("authorizeManagementMutation"), context.get("prepareModuleAudit")));
   const channelId = param(context, "channelId");
+  await reconcileLegacyChatVoteResults(context.env.CHANNEL, channelId);
   const snapshot = await service.list(channelId, await context.get("templateUsageSources")(channelId));
   const name = param(context, "name");
   const usages = snapshot.usages[name] ?? [];

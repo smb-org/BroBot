@@ -730,33 +730,43 @@ export const closeChatVoteFromAlarm = async (
     deadlineRevision: closedVote.deadlineRevision ?? 0,
   });
 
-  if (settings.announceResult) {
+  if (settings.announceResult && closedVote.resultDeliveryPending) {
     const language = await context.channelLanguage();
-    const result = closedVote.kind === "free_text"
+    const deliveryVote = await repository.byId(context.channelId, pollId);
+    if (deliveryVote === null || deliveryVote.status !== "closed" || !deliveryVote.resultDeliveryPending) {
+      throw new Error("The chat vote result changed before it could be sent.");
+    }
+    const result = deliveryVote.kind === "free_text"
       ? formatFreeTextVoteResult(
-        closedVote.textResults ?? snapshot.terms ?? [],
-        closedVote.moreTerms ?? snapshot.more ?? 0,
+        deliveryVote.textResults ?? snapshot.terms ?? [],
+        deliveryVote.moreTerms ?? snapshot.more ?? 0,
         language === "de" ? "weitere" : "more",
       )
-      : formatVoteResult(closedVote.labels, closedVote.counts ?? snapshot.counts);
+      : formatVoteResult(deliveryVote.labels, deliveryVote.counts ?? snapshot.counts);
+    const resultText = deliveryVote.resultText ?? settings.resultText;
     const rendered = await context.renderTemplate(
-      closedVote.resultText ?? settings.resultText,
-      Date.parse(closedVote.closedAt ?? new Date().toISOString()),
-      chatVotingTemplateValues(closedVote, language, result),
+      resultText,
+      Date.parse(deliveryVote.closedAt ?? new Date().toISOString()),
+      chatVotingTemplateValues(deliveryVote, language, result),
     );
-    const resultText = closedVote.resultText ?? settings.resultText;
     const announcement = resultText === DEFAULT_CHAT_VOTING_SETTINGS.resultText
-      ? closedVote.title === null ? result
-        : chatVotingChatText(language, "result", undefined, undefined, undefined, closedVote.title, result)
+      ? deliveryVote.title === null ? result
+        : chatVotingChatText(language, "result", undefined, undefined, undefined, deliveryVote.title, result)
       : rendered.text;
     if (announcement.trim().length > 0) {
       const delivery = await context.sendChat(
         announcement,
         `chat-voting:${pollId}:result`,
         rendered.attributions,
-        async () => (await repository.byId(context.channelId, pollId))?.status === "closed",
+        async () => {
+          const current = await repository.byId(context.channelId, pollId);
+          return current !== null && current.status === "closed" && current.resultDeliveryPending === true && current.resultText === deliveryVote.resultText;
+        },
         settings.resultTarget,
       );
+      if (delivery.reason === "stale_before_send") {
+        throw new Error("The chat vote result changed before it could be sent.");
+      }
       if (delivery.retryable) throw new Error("The chat vote result is waiting for the automated output limit.");
     }
   }

@@ -26,7 +26,7 @@ const spec: SettingsEditorSpec<ChatVotingSettings> = {
 const definition: SettingsEditorDefinition<ChatVotingSettings> = {
   spec,
   registeredTemplateVariableFields: ["resultText"],
-  savePosition: "page-header",
+  savePosition: "header",
   showTitle: false,
   className: "chat-voting-settings-editor",
   locales: { de: chatVotingSettingsEditorCatalog("de"), en: chatVotingSettingsEditorCatalog("en") },
