@@ -30,7 +30,7 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
       loadErrorNotified.current = false;
       return response;
     } catch (failure: unknown) {
-      if (!suppressLoadErrorNotification.current && !loadErrorNotified.current) {
+      if (!signal.aborted && !suppressLoadErrorNotification.current && !loadErrorNotified.current) {
         loadErrorNotified.current = true;
         notify({ tone: "error", message: labels.testFailed });
       }
