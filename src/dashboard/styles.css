@@ -1535,6 +1535,13 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .module-detail--settings-page .page-header__save .ui-save-bar--persistent { min-height: var(--control-height); margin: 0; padding: 0; border-top: 0; background: transparent; }
 .module-detail--settings-page .page-header__save .ui-save-bar__buttons { flex-wrap: nowrap; gap: 4px; }
 .module-detail--settings-page .settings-page__columns { padding-top: 12px; }
+.module-detail--settings-page .settings-page__column:has(.belabox-panel) .inspector-actions {
+  position: static;
+  bottom: auto;
+  margin: 12px 0 0;
+  padding: 12px 0 0;
+  background: transparent;
+}
 .ui-settings-editor__message { display: grid; gap: var(--s2); min-width: 0; }
 .ui-settings-editor__message .mantine-InputWrapper-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
 .ui-settings-editor__message-heading { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: var(--s2); }
@@ -2071,6 +2078,7 @@ body:has(.module-detail--settings-page) .ui-toast-host { top: auto; bottom: var(
 .ui-toast__message { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .ui-toast--success { border-color: var(--green); }
 .ui-toast--error { border-color: var(--error); background: var(--error-surface); }
+.belabox-connection-state { display: flex; min-height: var(--control-height); align-items: center; }
 .belabox-polling-retry-slot { display: flex; min-height: 44px; align-items: center; }
 .state-row[data-status="warning"] { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); background: var(--warning-surface); }
 .state-row[data-status="error"] { border-color: color-mix(in srgb, var(--error) 45%, var(--line)); background: var(--error-surface); }

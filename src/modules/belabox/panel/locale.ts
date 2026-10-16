@@ -4,8 +4,9 @@ import type { BelaboxFetchFailureReason, BelaboxStatsUrlError } from "../contrac
 export interface BelaboxPanelTexts {
   title: string;
   connection: string;
-  configured: string;
   notConfigured: string;
+  loading: string;
+  awaitingSample: string;
   updatedAt: string;
   latestSample: string;
   pollingInactive: string;
@@ -74,8 +75,9 @@ const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
   de: {
     title: "BELABOX-Verbindung",
     connection: "Verbindung",
-    configured: "Statistik-URL hinterlegt",
     notConfigured: "Keine Statistik-URL hinterlegt",
+    loading: "Wird geladen",
+    awaitingSample: "Warte auf erste Messung",
     updatedAt: "Geändert am",
     latestSample: "Letzte Messung",
     pollingInactive: "Abfrage nicht aktiv – erneut versuchen",
@@ -142,8 +144,9 @@ const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
   en: {
     title: "BELABOX connection",
     connection: "Connection",
-    configured: "Stats URL stored",
     notConfigured: "No stats URL stored",
+    loading: "Loading",
+    awaitingSample: "Waiting for first sample",
     updatedAt: "Changed",
     latestSample: "Latest sample",
     pollingInactive: "Polling inactive – try again",

@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Button, ConfirmDialog, Field, InspectorActions, InspectorFieldRow, InspectorSection, LoadState, LoadStateLines, notify } from "../../../dashboard/ui";
+import { Button, ConfirmDialog, Field, InspectorActions, InspectorFieldRow, InspectorSection, LoadState, LoadStateLines, StatusLed, notify, type StatusLedState } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
+import type { BelaboxSettings } from "../contracts";
 import type { BelaboxHistoryPoint, BelaboxStatusResponse, BelaboxStreamSummary } from "../contracts";
 import { belaboxReasonText, belaboxPanelTexts } from "./locale";
 import { BelaboxHistorySection } from "./history-chart";
 import { loadBelaboxHistory, loadBelaboxStatus, loadBelaboxStreams, removeBelaboxStatsUrl, replaceBelaboxStatsUrl, retryBelaboxPolling, testBelaboxConnection } from "./service";
 import { moduleQueryKey, refetchModuleQueryData, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
+
+interface BelaboxPanelProperties extends ModulePanelProperties {
+  lowBitrateKbps?: BelaboxSettings["lowBitrateKbps"];
+  recoverBitrateKbps?: BelaboxSettings["recoverBitrateKbps"];
+}
 
 const errorCode = (error: unknown): string | null => error instanceof PanelApiError ? error.code : null;
 const IDLE_STATUS_REFRESH_MS = 60_000;
@@ -18,7 +24,7 @@ const statusTimestamp = (value: string, locale: string): string => {
   return Number.isNaN(date.valueOf()) ? "" : new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(date);
 };
 
-export default function BelaboxPanel({ channelId, language = "de", canManage = false }: ModulePanelProperties): ReactElement {
+export default function BelaboxPanel({ channelId, language = "de", canManage = false, lowBitrateKbps: draftLowBitrateKbps, recoverBitrateKbps: draftRecoverBitrateKbps }: BelaboxPanelProperties): ReactElement {
   const labels = belaboxPanelTexts(language);
   const realtimeStatus = useDashboardRealtimeStatus(channelId);
   const queryClient = useDashboardQueryClient();
@@ -30,7 +36,7 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
       loadErrorNotified.current = false;
       return response;
     } catch (failure: unknown) {
-      if (!suppressLoadErrorNotification.current && !loadErrorNotified.current) {
+      if (!signal.aborted && !suppressLoadErrorNotification.current && !loadErrorNotified.current) {
         loadErrorNotified.current = true;
         notify({ tone: "error", message: labels.testFailed });
       }
@@ -46,6 +52,8 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
     },
   });
   const status = statusQuery.data ?? null;
+  const lowBitrateKbps = draftLowBitrateKbps ?? 1_000;
+  const recoverBitrateKbps = draftRecoverBitrateKbps ?? 2_000;
   const [url, setUrl] = useState("");
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
@@ -221,14 +229,28 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
       ? labels.alertRecovering : status.alertNotice.kind === "disconnect" ? labels.alertDisconnect : labels.alertLow}${
       status.alertNotice.bitrateKbps === null ? "" : ` · ${labels.bitrate}: ${String(status.alertNotice.bitrateKbps)} kbps`}`;
   const noticeText = status?.fetchFailureNotice === true ? labels.fetchFailureNotice : alertNoticeText;
+  const connectionState: StatusLedState = status === null
+    ? loadFailed ? "error" : "loading"
+    : !status.configured
+      ? "off"
+      : status.sample === null
+        ? "warn"
+        : status.sample.connected ? "ok" : "error";
+  const connectionLabel = status === null
+    ? loadFailed ? labels.statusUnavailable : labels.loading
+    : !status.configured
+      ? labels.notConfigured
+      : status.sample === null
+        ? labels.awaitingSample
+        : status.sample.connected ? labels.connected : labels.disconnected;
 
-  return <section className="module-stack" aria-label={labels.title}>
+  return <section className="module-stack belabox-panel" aria-label={labels.title}>
     <InspectorSection title={labels.connection}>
+      <div className="belabox-connection-state"><StatusLed state={connectionState} label={connectionLabel} /></div>
       <LoadState variant="panel-320" status={connectionStatus}
         loading={<LoadStateLines rows={5} height={34} />}
         empty={<p className="muted">{labels.notConfigured}</p>}
         error={<p className="muted">{labels.refreshFailed}</p>}>
-        <p className="muted">{status?.configured ? labels.configured : labels.notConfigured}</p>
         <div className="belabox-polling-retry-slot">
           {pollingInactive && canManage ? <Button disabled={busy} onClick={() => { void retryPolling(); }}>{labels.retryPolling}</Button> : null}
         </div>
@@ -253,10 +275,6 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
           style={{ height: "calc(var(--s6) * 2)", overflow: "hidden", margin: 0, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2, overflowWrap: "anywhere" }}>{testOutcome ?? ""}</p>
       </LoadState>
     </InspectorSection>
-    <p className="lock-reason" title={canManage ? undefined : labels.readOnly}
-      style={{ height: "calc(var(--s6) * 2)", overflow: "hidden", margin: 0, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2 }} aria-live="polite">
-      {canManage ? "" : labels.readOnly}
-    </p>
     <InspectorSection title={labels.replace}>
       <InspectorFieldRow label={labels.statsUrl}>
         <Field
@@ -281,6 +299,7 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
       onConfirm={() => { void remove(); }} pending={busy} danger {...(removeError === null ? {} : { error: removeError })} />
     <BelaboxHistorySection labels={labels} locale={language === "de" ? "de-DE" : "en-US"}
       points={status?.mode === "interval" ? history : []} streams={status?.mode === "interval" ? streams : []}
+      lowBitrateKbps={lowBitrateKbps} recoverBitrateKbps={recoverBitrateKbps}
       selectedStreamId={currentStreamId} range={historyRange}
       onRangeChange={setHistoryRange} onStreamSelect={setSelectedStreamId} onDemand={status?.mode === "on_demand"} />
   </section>;

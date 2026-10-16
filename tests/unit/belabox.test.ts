@@ -173,8 +173,8 @@ describe("BELABOX stats URL", () => {
     expect(recoveryThreshold.validate?.(1_000, BELABOX_DEFAULT_SETTINGS)).toBe(false);
     const chatCard = alertCard.children?.find(({ key }) => key === "chatEnabled");
     if (chatCard?.kind !== "switchCard") throw new Error("BELABOX chat settings card is missing.");
-    expect(chatCard.children?.map(({ key }) => key)).toEqual([
-      "chatCooldownSeconds", "lowText", "lowTarget", "disconnectText", "disconnectTarget", "recoveryText", "recoveryTarget",
+    expect(chatCard.children?.map((field) => field.kind === "message" ? [field.key, field.targetKey] : [field.key])).toEqual([
+      ["chatCooldownSeconds"], ["lowText", "lowTarget"], ["disconnectText", "disconnectTarget"], ["recoveryText", "recoveryTarget"],
     ]);
   });
 

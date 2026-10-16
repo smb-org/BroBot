@@ -2,7 +2,6 @@ import type { CSSProperties, ReactElement } from "react";
 
 import type { BelaboxHistoryPoint, BelaboxStreamSummary } from "../contracts";
 import { BELABOX_STREAM_HISTORY_LIMIT } from "../contracts";
-import { BELABOX_LOW_BITRATE_KBPS, BELABOX_RECOVER_BITRATE_KBPS } from "../domain/history";
 import type { BelaboxPanelTexts } from "./locale";
 
 const WIDTH = 640;
@@ -14,14 +13,16 @@ interface HistoryChartProps {
   range: "live" | "stream";
   locale: string;
   labels: BelaboxPanelTexts;
+  lowBitrateKbps: number;
+  recoverBitrateKbps: number;
 }
 
-const HistoryChart = ({ points, range, locale, labels }: HistoryChartProps): ReactElement => {
+const HistoryChart = ({ points, range, locale, labels, lowBitrateKbps, recoverBitrateKbps }: HistoryChartProps): ReactElement => {
   const firstAt = points[0]?.[0] ?? 0;
   const lastAt = points.at(-1)?.[0] ?? 0;
   const xStart = range === "live" ? lastAt - 10 * 60_000 : firstAt;
   const xEnd = range === "live" ? lastAt : Math.max(lastAt, xStart + 60_000);
-  const maxBitrate = Math.max(BELABOX_RECOVER_BITRATE_KBPS, ...points.map((point) => point[1]));
+  const maxBitrate = Math.max(recoverBitrateKbps, ...points.map((point) => point[1]));
   const yMaximum = Math.max(2_200, maxBitrate * 1.1);
   const plotWidth = WIDTH - PLOT.left - PLOT.right;
   const plotHeight = HEIGHT - PLOT.top - PLOT.bottom;
@@ -41,8 +42,8 @@ const HistoryChart = ({ points, range, locale, labels }: HistoryChartProps): Rea
   if (segment.length > 0) connectedSegments.push(segment.join(" "));
 
   const dateFormatter = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" });
-  const lowY = y(BELABOX_LOW_BITRATE_KBPS);
-  const recoverY = y(BELABOX_RECOVER_BITRATE_KBPS);
+  const lowY = y(lowBitrateKbps);
+  const recoverY = y(recoverBitrateKbps);
   const markerWidth = Math.max(4, Math.min(14, plotWidth / Math.max(points.length, 1)));
 
   return <div style={{ position: "relative", height: HEIGHT, minHeight: HEIGHT }}>
@@ -89,6 +90,8 @@ interface BelaboxHistorySectionProps {
   locale: string;
   points: readonly BelaboxHistoryPoint[];
   streams: readonly BelaboxStreamSummary[];
+  lowBitrateKbps: number;
+  recoverBitrateKbps: number;
   selectedStreamId: string | null;
   range: "live" | "stream";
   onRangeChange: (range: "live" | "stream") => void;
@@ -108,6 +111,8 @@ export const BelaboxHistorySection = ({
   locale,
   points,
   streams,
+  lowBitrateKbps,
+  recoverBitrateKbps,
   selectedStreamId,
   range,
   onRangeChange,
@@ -135,11 +140,12 @@ export const BelaboxHistorySection = ({
         <button type="button" aria-pressed={range === "stream"} style={toggleStyle(range === "stream")}
           onClick={() => onRangeChange("stream")}>{labels.streamRange}</button>
       </div>
-      <HistoryChart points={points} range={range} locale={locale} labels={labels} />
+      <HistoryChart points={points} range={range} locale={locale} labels={labels}
+        lowBitrateKbps={lowBitrateKbps} recoverBitrateKbps={recoverBitrateKbps} />
       <div aria-label={labels.history} style={{ display: "flex", flexWrap: "wrap", gap: "var(--s2) var(--s4)", color: "var(--text-2)", fontSize: 12 }}>
         <span><i aria-hidden="true" style={{ display: "inline-block", width: 16, borderTop: "2px solid var(--text-2)", marginRight: 6, verticalAlign: "middle" }} />{labels.bitrate}</span>
-        <span><i aria-hidden="true" style={{ display: "inline-block", width: 16, borderTop: "2px dashed var(--warn)", marginRight: 6, verticalAlign: "middle" }} />{labels.lowThreshold}: {BELABOX_LOW_BITRATE_KBPS.toLocaleString(locale)} kbps</span>
-        <span><i aria-hidden="true" style={{ display: "inline-block", width: 16, borderTop: "2px dashed var(--green)", marginRight: 6, verticalAlign: "middle" }} />{labels.recoverThreshold}: {BELABOX_RECOVER_BITRATE_KBPS.toLocaleString(locale)} kbps</span>
+        <span><i aria-hidden="true" style={{ display: "inline-block", width: 16, borderTop: "2px dashed var(--warn)", marginRight: 6, verticalAlign: "middle" }} />{labels.lowThreshold}: {lowBitrateKbps.toLocaleString(locale)} kbps</span>
+        <span><i aria-hidden="true" style={{ display: "inline-block", width: 16, borderTop: "2px dashed var(--green)", marginRight: 6, verticalAlign: "middle" }} />{labels.recoverThreshold}: {recoverBitrateKbps.toLocaleString(locale)} kbps</span>
         <span><i aria-hidden="true" style={{ display: "inline-block", width: 10, height: 10, background: "var(--error-surface)", border: "1px solid var(--error)", marginRight: 6, verticalAlign: "middle" }} />{labels.disconnects}</span>
       </div>
       <h4 style={{ margin: "var(--s5) 0 var(--s2)", fontSize: 13 }}>{labels.streams}</h4>

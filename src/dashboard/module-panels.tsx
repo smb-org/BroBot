@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ComponentType, type Reac
 
 import { MODULES } from "../modules/registry";
 import type { ModulePanelProperties } from "../modules/contract";
+import type { BelaboxSettings } from "../modules/belabox/contracts";
 import { textCommandListChatCommand } from "../modules/text_commands/contracts/chat-commands";
 import type { TextCommandPanelData } from "../modules/text_commands/panel/service";
 import { loadModulePanel, loadModuleSettingsEditor, ModuleChunkLoadError, retryModuleChunkLoad } from "./module-panel-loaders";
@@ -24,6 +25,8 @@ import { worstCaseTemplateLength } from "../template";
 import type { TemplateVariable } from "../template";
 
 const workspaceTexts = moduleWorkspaceTexts;
+
+type BelaboxSettingsPanelProperties = ModulePanelProperties & Pick<BelaboxSettings, "lowBitrateKbps" | "recoverBitrateKbps">;
 
 const moduleDetails = (moduleId: string, language: DashboardLanguage = dashboardLanguage()): { name: string; description: string } => ({
   name: moduleName(moduleId, language),
@@ -293,6 +296,32 @@ const AdsSettingsPanelMount = ({ module, channelId, language, canManageContent, 
     instanceKey="ads:settings-panel"
     load={loadPanel}
     properties={{ channelId, language, canManage: canManageContent, canOperate: true, moduleActive }}
+    loadingFallback={<LoadStateLines rows={5} height={34} />}
+    renderError={(retry) => <LoadState
+      variant="panel-320"
+      status="error"
+      loading={null}
+      empty={null}
+      error={null}
+      queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: dashboardTexts().module.componentLoadError, onRetry: retry }}
+    >{null}</LoadState>}
+    onRetry={retryModuleChunkLoad}
+  />;
+};
+
+const BelaboxSettingsPanelMount = ({ module, channelId, language, canManageContent, lowBitrateKbps, recoverBitrateKbps }: {
+  module: (typeof MODULES)[number];
+  channelId: string;
+  language: DashboardLanguage;
+  canManageContent: boolean;
+  lowBitrateKbps: number;
+  recoverBitrateKbps: number;
+}): ReactElement => {
+  const loadPanel = useCallback(() => loadModulePanel(module) as Promise<{ default: ComponentType<BelaboxSettingsPanelProperties> }>, [module]);
+  return <RetryableLazy
+    instanceKey="belabox:settings-panel"
+    load={loadPanel}
+    properties={{ channelId, language, canManage: canManageContent, canOperate: true, lowBitrateKbps, recoverBitrateKbps }}
     loadingFallback={<LoadStateLines rows={5} height={34} />}
     renderError={(retry) => <LoadState
       variant="panel-320"
@@ -619,6 +648,14 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
         settingsEditor("announcements", fieldErrors),
         settingsEditor("prewarning", fieldErrors),
       ]
+      : module.id === "belabox"
+        ? [
+          <BelaboxSettingsPanelMount key="belabox-panel" module={module} channelId={channelId} language={language} canManageContent={canManageContent}
+            lowBitrateKbps={typeof currentValue.lowBitrateKbps === "number" ? currentValue.lowBitrateKbps : 1_000}
+            recoverBitrateKbps={typeof currentValue.recoverBitrateKbps === "number" ? currentValue.recoverBitrateKbps : 2_000} />,
+          settingsEditor("polling", fieldErrors),
+          settingsEditor("alerts", fieldErrors),
+        ]
       : sections.map(({ id }) => settingsEditor(id, fieldErrors))}
   />;
   return <>
@@ -990,7 +1027,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
     if (error !== null) notify({ tone: "error", message: error });
   }, [error]);
 
-  if ((moduleId === "ads" || moduleId === "raid") && registered?.settingsEditor !== undefined && !permissionsMissing) {
+  if ((moduleId === "ads" || moduleId === "raid" || moduleId === "belabox") && registered?.settingsEditor !== undefined && !permissionsMissing) {
     return <section className="module-detail module-detail--settings-page" aria-label={details.name}>
       <ModuleSettingsEditor
         module={registered}
