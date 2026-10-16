@@ -61,6 +61,7 @@ interface TemplateTextFieldProps {
   previewLabel?: string;
   previewSpeaker?: string;
   previewEmptyText?: string;
+  previewLayout?: "stacked" | "side-by-side";
   insertVariableLabel?: string;
   onIssuesChange?: (issues: { unknown: readonly string[]; worstCaseExceeded: boolean }) => void;
   disabled?: boolean;
@@ -144,6 +145,7 @@ export function TemplateTextField({
   previewLabel,
   previewSpeaker,
   previewEmptyText,
+  previewLayout = "stacked",
   insertVariableLabel,
   onIssuesChange,
   disabled = false,
@@ -352,6 +354,11 @@ export function TemplateTextField({
       {messages.countLabel(count, maxLength)}
     </span>
   );
+  const previewNode = preview === undefined || previewLabel === undefined || previewSpeaker === undefined ? null : (
+    <ChatPreview label={previewLabel} speaker={previewSpeaker} text={previewText ?? ""}
+      {...(previewEmptyText === undefined ? {} : { emptyText: previewEmptyText })}
+      countLabel={messages.previewCountLabel(previewCount)} />
+  );
 
   const description: ReactNode = (
     <div className="ui-template-text-field__description-content">
@@ -389,11 +396,7 @@ export function TemplateTextField({
             <div className="ui-template-text-field__warning"><Icon name="warning" size={16} /><span>{messages.worstCaseLength(worstCase, maxLength)}</span></div>
           ) : null}
       </div>
-      {preview === undefined || previewLabel === undefined || previewSpeaker === undefined ? null : (
-        <ChatPreview label={previewLabel} speaker={previewSpeaker} text={previewText ?? ""}
-          {...(previewEmptyText === undefined ? {} : { emptyText: previewEmptyText })}
-          countLabel={messages.previewCountLabel(previewCount)} />
-      )}
+      {previewLayout === "stacked" ? previewNode : null}
     </div>
   );
 
@@ -432,7 +435,8 @@ export function TemplateTextField({
         ) : null}
       </>}
     >
-      {({ activeOptionId, handleKeyDown: handlePickerKeyDown, close }) => (
+      {({ activeOptionId, handleKeyDown: handlePickerKeyDown, close }) => {
+      const inputWrapper = (
       <Input.Wrapper
         data-ui=""
         className="ui-template-text-field"
@@ -502,7 +506,11 @@ export function TemplateTextField({
             </InlineSuggestionPickerTarget>
         </div>
       </Input.Wrapper>
-      )}
+      );
+      return previewLayout === "side-by-side"
+        ? <div className="ui-template-text-field-layout ui-template-text-field-layout--side-by-side">{inputWrapper}{previewNode}</div>
+        : inputWrapper;
+      }}
     </InlineSuggestionPicker>
   );
 }

@@ -52,6 +52,8 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
     saveLabel: "Speichern", discardLabel: "Verwerfen", savedLabel: "Einstellungen gespeichert.",
     pendingLabel: "Wird gespeichert …", invalidMessage: "Bitte korrigiere die markierten Felder.", numberMissing: "Zahl eingeben.",
     saveError: "Die Abrufeinstellungen konnten nicht gespeichert werden.",
+    urlSaveError: "Die Statistik-URL konnte nicht gespeichert werden.",
+    partialSaveError: "Die Statistik-URL wurde gespeichert, aber die übrigen Einstellungen konnten nicht gespeichert werden.",
     conflictMessage: "Die Abrufeinstellungen wurden inzwischen geändert.", reloadLabel: "Serverstand laden",
     sections: { polling: "Abruf", alerts: "Alarme" },
     fields: {
@@ -62,7 +64,7 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
       intervalSeconds: { label: "Intervall", hint: "Abrufabstand nach der BELABOX-Erkennung.", options: {
         "5": { label: "5 s" }, "15": { label: "15 s" }, "30": { label: "30 s" }, "60": { label: "60 s" },
       } },
-      alertsEnabled: { label: "Alarme", hint: "Bitrateneinbruch und Encoder-Abbruch im Panel melden.", description: "BELABOX-Alarme aktivieren." },
+      alertsEnabled: { label: "Alarme aktiv", hint: "Bitrateneinbruch und Encoder-Abbruch im Panel melden.", description: "BELABOX-Alarme aktivieren." },
       lowBitrateKbps: { label: "Niedrige Bitrate", hint: "Alarm, wenn dieser Wert mindestens für die Haltezeit unterschritten wird.", unit: "kbps" },
       recoverBitrateKbps: { label: "Erholungsbitrate", hint: "Die Erholungsschwelle muss über der niedrigen Bitrate liegen.", unit: "kbps", invalidError: "Muss über der niedrigen Bitrate liegen." },
       holdSeconds: { label: "Haltezeit", hint: "Zeit unter der Schwelle bis zum Alarm.", unit: "s", invalidError: "Muss mindestens dem Abrufintervall entsprechen." },
@@ -86,6 +88,8 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
     saveLabel: "Save", discardLabel: "Discard", savedLabel: "Settings saved.",
     pendingLabel: "Saving …", invalidMessage: "Please correct the marked fields.", numberMissing: "Enter a number.",
     saveError: "Polling settings could not be saved.",
+    urlSaveError: "The stats URL could not be saved.",
+    partialSaveError: "The stats URL was saved, but the remaining settings could not be saved.",
     conflictMessage: "Polling settings have changed since they were loaded.", reloadLabel: "Load server version",
     sections: { polling: "Polling", alerts: "Alerts" },
     fields: {
@@ -96,7 +100,7 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
       intervalSeconds: { label: "Interval", hint: "Polling interval after BELABOX detection.", options: {
         "5": { label: "5 s" }, "15": { label: "15 s" }, "30": { label: "30 s" }, "60": { label: "60 s" },
       } },
-      alertsEnabled: { label: "Alerts", hint: "Show low bitrate and encoder disconnect notices in the panel.", description: "Enable BELABOX alerts." },
+      alertsEnabled: { label: "Alerts enabled", hint: "Show low bitrate and encoder disconnect notices in the panel.", description: "Enable BELABOX alerts." },
       lowBitrateKbps: { label: "Low bitrate", hint: "Alert when the bitrate remains below this value for the hold time.", unit: "kbps" },
       recoverBitrateKbps: { label: "Recovery bitrate", hint: "The recovery threshold must be above the low bitrate.", unit: "kbps", invalidError: "Must be above the low bitrate." },
       holdSeconds: { label: "Hold time", hint: "Time below the threshold before alerting.", unit: "s", invalidError: "Must be at least the polling interval." },

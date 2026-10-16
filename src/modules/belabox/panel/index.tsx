@@ -1,19 +1,22 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Button, ConfirmDialog, Field, InspectorActions, InspectorFieldRow, InspectorSection, LoadState, LoadStateLines, StatusLed, notify, type StatusLedState } from "../../../dashboard/ui";
+import { ActionMenu, Button, ConfirmDialog, Field, InspectorSection, LoadState, LoadStateLines, StatusLed, notify, type StatusLedState } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { BelaboxSettings } from "../contracts";
 import type { BelaboxHistoryPoint, BelaboxStatusResponse, BelaboxStreamSummary } from "../contracts";
 import { belaboxReasonText, belaboxPanelTexts } from "./locale";
 import { BelaboxHistorySection } from "./history-chart";
-import { loadBelaboxHistory, loadBelaboxStatus, loadBelaboxStreams, removeBelaboxStatsUrl, replaceBelaboxStatsUrl, retryBelaboxPolling, testBelaboxConnection } from "./service";
+import { loadBelaboxHistory, loadBelaboxStatus, loadBelaboxStreams, removeBelaboxStatsUrl, retryBelaboxPolling, testBelaboxConnection } from "./service";
 import { moduleQueryKey, refetchModuleQueryData, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
 
 interface BelaboxPanelProperties extends ModulePanelProperties {
   lowBitrateKbps?: BelaboxSettings["lowBitrateKbps"];
   recoverBitrateKbps?: BelaboxSettings["recoverBitrateKbps"];
+  statsUrlDraft?: string;
+  onStatsUrlDraftChange?: (value: string) => void;
+  savingSettings?: boolean;
 }
 
 const errorCode = (error: unknown): string | null => error instanceof PanelApiError ? error.code : null;
@@ -24,7 +27,18 @@ const statusTimestamp = (value: string, locale: string): string => {
   return Number.isNaN(date.valueOf()) ? "" : new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(date);
 };
 
-export default function BelaboxPanel({ channelId, language = "de", canManage = false, lowBitrateKbps: draftLowBitrateKbps, recoverBitrateKbps: draftRecoverBitrateKbps }: BelaboxPanelProperties): ReactElement {
+const sampleIsStale = (status: BelaboxStatusResponse | null, now: number): boolean => {
+  if (status === null) return false;
+  if (status.errorCode != null) return true;
+  if (status.sample == null) return false;
+  const sampledAt = Date.parse(status.sample.at);
+  return !Number.isFinite(sampledAt) ||
+    now - sampledAt > Math.max(60_000, status.intervalSeconds * 3_000);
+};
+
+export default function BelaboxPanel({ channelId, language = "de", canManage = false, lowBitrateKbps: draftLowBitrateKbps,
+  recoverBitrateKbps: draftRecoverBitrateKbps, statsUrlDraft = "", onStatsUrlDraftChange,
+  savingSettings = false }: BelaboxPanelProperties): ReactElement {
   const labels = belaboxPanelTexts(language);
   const realtimeStatus = useDashboardRealtimeStatus(channelId);
   const queryClient = useDashboardQueryClient();
@@ -52,9 +66,10 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
     },
   });
   const status = statusQuery.data ?? null;
+  const [now, setNow] = useState(() => Date.now());
+  const staleSample = sampleIsStale(status, now);
   const lowBitrateKbps = draftLowBitrateKbps ?? 1_000;
   const recoverBitrateKbps = draftRecoverBitrateKbps ?? 2_000;
-  const [url, setUrl] = useState("");
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -63,6 +78,13 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
   const [historyRange, setHistoryRange] = useState<"live" | "stream">("live");
   const [selectedStreamId, setSelectedStreamId] = useState<string | null>(null);
   const pollingInactive = status?.pollingDesired === true && !status.polling;
+  const sampleTimestamp = status?.sample?.at;
+
+  useEffect(() => {
+    if (sampleTimestamp === undefined) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 15_000);
+    return () => window.clearInterval(timer);
+  }, [sampleTimestamp]);
 
   const refresh = useCallback(async (): Promise<void> => {
     suppressLoadErrorNotification.current = true;
@@ -99,33 +121,18 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
     });
   const history: readonly BelaboxHistoryPoint[] = historyQuery.data ?? [];
 
-  const save = async (): Promise<void> => {
-    if (!canManage || busy || url.length === 0) return;
-    setBusy(true);
-    try {
-      await replaceBelaboxStatsUrl(channelId, url);
-      setUrl("");
-      await refresh();
-      notify({ tone: "success", message: labels.saved });
-    } catch (failure: unknown) {
-      notify({ tone: "error", message: errorCode(failure) === "belabox_management_denied" ? labels.readOnly : labels.saveFailed });
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const test = async (): Promise<void> => {
-    if (!canManage || busy) return;
+    if (busy) return;
     setBusy(true);
     try {
-      const next = await testBelaboxConnection(channelId, url.length === 0 ? undefined : url);
+      const next = await testBelaboxConnection(channelId, statsUrlDraft.length === 0 ? undefined : statsUrlDraft);
       if (!next.ok) {
         const reason = belaboxReasonText(labels, next.reason);
         setTestOutcome(reason);
         notify({ tone: "error", message: reason });
         return;
       }
-      if (url.length === 0) {
+      if (statsUrlDraft.length === 0) {
         try {
           await refresh();
         } catch {
@@ -220,7 +227,7 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
   };
 
   const sampleSummary = status?.sample === null || status?.sample === undefined
-    ? null
+    ? "—"
     : `${status.sample.connected ? labels.connected : labels.disconnected} · ${labels.bitrate}: ${String(status.sample.bitrateKbps)} kbps`;
   const connectionStatus = status === null ? loadFailed ? "error" : "loading" : "success";
   const alertNoticeText = status?.alertNotice === null || status?.alertNotice === undefined
@@ -233,74 +240,79 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
     ? loadFailed ? "error" : "loading"
     : !status.configured
       ? "off"
-      : status.sample === null
-        ? "warn"
-        : status.sample.connected ? "ok" : "error";
+      : staleSample
+        ? "error"
+        : status.sample === null
+          ? "warn"
+          : status.sample.connected ? "ok" : "error";
   const connectionLabel = status === null
     ? loadFailed ? labels.statusUnavailable : labels.loading
     : !status.configured
       ? labels.notConfigured
-      : status.sample === null
-        ? labels.awaitingSample
-        : status.sample.connected ? labels.connected : labels.disconnected;
+      : staleSample
+        ? labels.stale
+        : status.sample === null
+          ? labels.awaitingSample
+          : status.sample.connected ? labels.connected : labels.disconnected;
+  const statusLocale = language === "de" ? "de-DE" : "en-US";
+  const updatedAt = status?.updatedAt === null || status?.updatedAt === undefined ? "—" : statusTimestamp(status.updatedAt, statusLocale);
+  const latestSampleAt = status?.sample === null || status?.sample === undefined ? "—" : statusTimestamp(status.sample.at, statusLocale);
+  const readOnlyUrlState = status?.configured === true ? labels.statsUrlConfigured : labels.statsUrlNotConfigured;
+  const menuItems = [{
+    label: labels.remove,
+    danger: true,
+    disabled: !canManage || busy || status?.configured !== true,
+    ...(!canManage ? { description: labels.readOnly } : {}),
+    onSelect: () => { setRemoveError(null); setRemoveConfirmOpen(true); },
+  }] as const;
 
   return <section className="module-stack belabox-panel" aria-label={labels.title}>
-    <InspectorSection title={labels.connection}>
-      <div className="belabox-connection-state"><StatusLed state={connectionState} label={connectionLabel} /></div>
-      <LoadState variant="panel-320" status={connectionStatus}
-        loading={<LoadStateLines rows={5} height={34} />}
-        empty={<p className="muted">{labels.notConfigured}</p>}
-        error={<p className="muted">{labels.refreshFailed}</p>}>
-        <div className="belabox-polling-retry-slot">
-          {pollingInactive && canManage ? <Button disabled={busy} onClick={() => { void retryPolling(); }}>{labels.retryPolling}</Button> : null}
-        </div>
-        <p className="muted" data-testid="belabox-updated-at-slot" title={status?.updatedAt == null ? undefined : `${labels.updatedAt}: ${statusTimestamp(status.updatedAt, language === "de" ? "de-DE" : "en-US")}`}
-          style={{ height: "calc(var(--s6) * 2)", overflow: "hidden", margin: 0, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2, overflowWrap: "anywhere" }}>
-          {status?.updatedAt == null ? "" : `${labels.updatedAt}: ${statusTimestamp(status.updatedAt, language === "de" ? "de-DE" : "en-US")}`}
-        </p>
-        <p className="muted" data-testid="belabox-sample-slot" title={sampleSummary === null ? undefined : `${labels.latestSample}: ${sampleSummary}`}
-          style={{ height: "calc(var(--s6) * 2)", overflow: "hidden", margin: 0, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2, overflowWrap: "anywhere" }}>
-          {sampleSummary === null ? "" : `${labels.latestSample}: ${sampleSummary}`}
-        </p>
-        <div className="belabox-alert-notice-slot" role="status" aria-live="polite" data-testid="belabox-alert-notice-slot"
-          style={{ height: "calc(var(--s6) * 2)", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--s2)" }}>
-          <span className={noticeText === null ? "muted" : ""} title={noticeText ?? undefined}
-            style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{noticeText ?? ""}</span>
-          {noticeText !== null && status?.configured === true && canManage
-            ? <Button disabled={busy} onClick={() => { void checkNow(); }}>{labels.checkNow}</Button>
-            : null}
-        </div>
-        <Button disabled={!canManage || busy || status === null} onClick={() => { void test(); }}>{labels.testConnection}</Button>
-        <p className="muted" data-testid="belabox-test-result-slot" role="status" aria-live="polite" title={testOutcome ?? undefined}
-          style={{ height: "calc(var(--s6) * 2)", overflow: "hidden", margin: 0, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2, overflowWrap: "anywhere" }}>{testOutcome ?? ""}</p>
-      </LoadState>
-    </InspectorSection>
-    <InspectorSection title={labels.replace}>
-      <InspectorFieldRow label={labels.statsUrl}>
-        <Field
-          id="belabox-stats-url"
-          label={labels.statsUrl}
-          type="password"
-          autoComplete="off"
-          spellCheck={false}
-          value={url}
-          onChange={setUrl}
-          disabled={!canManage || busy}
-        />
-      </InspectorFieldRow>
-      <div className="form-actions">
-        <Button variant="primary" disabled={!canManage || busy || url.length === 0} onClick={() => { void save(); }}>{labels.save}</Button>
-      </div>
-    </InspectorSection>
-    <InspectorActions destructive={<Button danger="subtle" disabled={!canManage || busy || status?.configured !== true}
-      onClick={() => { setRemoveError(null); setRemoveConfirmOpen(true); }}>{labels.remove}</Button>} />
+    <div className="belabox-overview">
+      <InspectorSection title={labels.connection}>
+        <LoadState variant="panel-0" status={connectionStatus}
+          loading={<LoadStateLines rows={2} height={28} />}
+          empty={<p className="muted">{labels.notConfigured}</p>}
+          error={<p className="muted">{labels.refreshFailed}</p>}>
+          <div className="belabox-connection-state"><StatusLed state={connectionState} label={connectionLabel} /></div>
+          <dl className="properties belabox-connection-properties">
+            <div><dt>{labels.updatedAt}</dt><dd>{updatedAt}</dd></div>
+            <div><dt>{labels.latestSample}</dt><dd>{latestSampleAt} · {sampleSummary}</dd></div>
+            {!canManage ? <div><dt>{labels.statsUrl}</dt><dd>{readOnlyUrlState}</dd></div> : null}
+          </dl>
+          {canManage && onStatsUrlDraftChange !== undefined ? <Field
+            className="belabox-url-field"
+            id="belabox-stats-url"
+            label={labels.statsUrl}
+            hint={labels.statsUrlHint}
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            value={statsUrlDraft}
+            onChange={onStatsUrlDraftChange}
+            disabled={savingSettings}
+          /> : null}
+          <div className="belabox-alert-notice-slot" role="status" aria-live="polite" data-testid="belabox-alert-notice-slot">
+            <span className={noticeText === null ? "muted" : ""} title={noticeText ?? undefined}>{noticeText ?? ""}</span>
+            {noticeText !== null && status?.configured === true && canManage
+              ? <Button disabled={busy} onClick={() => { void checkNow(); }}>{labels.checkNow}</Button>
+              : null}
+          </div>
+          <div className="belabox-connection-actions">
+            {pollingInactive && canManage ? <Button disabled={busy} onClick={() => { void retryPolling(); }}>{labels.retryPolling}</Button> : null}
+            <Button disabled={busy || status === null} onClick={() => { void test(); }}>{labels.testConnection}</Button>
+            <ActionMenu label={labels.connectionActions} items={menuItems} />
+          </div>
+          <p className="belabox-test-result muted" data-testid="belabox-test-result-slot" role="status" aria-live="polite" title={testOutcome ?? undefined}>{testOutcome ?? ""}</p>
+        </LoadState>
+      </InspectorSection>
+      <BelaboxHistorySection labels={labels} locale={statusLocale}
+        points={status?.mode === "interval" ? history : []} streams={status?.mode === "interval" ? streams : []}
+        lowBitrateKbps={lowBitrateKbps} recoverBitrateKbps={recoverBitrateKbps}
+        selectedStreamId={currentStreamId} range={historyRange}
+        onRangeChange={setHistoryRange} onStreamSelect={setSelectedStreamId} onDemand={status?.mode === "on_demand"} />
+    </div>
     <ConfirmDialog opened={removeConfirmOpen} title={labels.removeTitle} description={labels.removeConsequence}
       confirmLabel={labels.confirmRemove} cancelLabel={labels.cancel} onCancel={() => { setRemoveConfirmOpen(false); setRemoveError(null); }}
       onConfirm={() => { void remove(); }} pending={busy} danger {...(removeError === null ? {} : { error: removeError })} />
-    <BelaboxHistorySection labels={labels} locale={language === "de" ? "de-DE" : "en-US"}
-      points={status?.mode === "interval" ? history : []} streams={status?.mode === "interval" ? streams : []}
-      lowBitrateKbps={lowBitrateKbps} recoverBitrateKbps={recoverBitrateKbps}
-      selectedStreamId={currentStreamId} range={historyRange}
-      onRangeChange={setHistoryRange} onStreamSelect={setSelectedStreamId} onDemand={status?.mode === "on_demand"} />
   </section>;
 }

@@ -46,9 +46,11 @@ const HistoryChart = ({ points, range, locale, labels, lowBitrateKbps, recoverBi
   const recoverY = y(recoverBitrateKbps);
   const markerWidth = Math.max(4, Math.min(14, plotWidth / Math.max(points.length, 1)));
 
-  return <div style={{ position: "relative", height: HEIGHT, minHeight: HEIGHT }}>
-    <svg viewBox={`0 0 ${String(WIDTH)} ${String(HEIGHT)}`} role="img" aria-label={labels.history}
-      style={{ display: "block", width: "100%", height: HEIGHT }}>
+  const axisFractions = [1, 0.5, 0];
+  const xTicks = [xStart, xStart + (xEnd - xStart) / 2, xEnd];
+
+  return <div className="belabox-chart" role="img" aria-label={labels.history}>
+    <svg viewBox={`0 0 ${String(WIDTH)} ${String(HEIGHT)}`} aria-hidden="true" preserveAspectRatio="none">
       <line x1={PLOT.left} x2={WIDTH - PLOT.right} y1={PLOT.top + plotHeight} y2={PLOT.top + plotHeight}
         stroke="var(--line)" />
       {[0, 0.5, 1].map((fraction) => {
@@ -56,8 +58,6 @@ const HistoryChart = ({ points, range, locale, labels, lowBitrateKbps, recoverBi
         const yValue = y(value);
         return <g key={fraction}>
           <line x1={PLOT.left} x2={WIDTH - PLOT.right} y1={yValue} y2={yValue} stroke="var(--line)" strokeOpacity="0.55" />
-          <text x={PLOT.left - 8} y={yValue + 4} textAnchor="end" fill="var(--text-3)"
-            fontFamily="IBM Plex Mono, ui-monospace, monospace" fontSize="10">{Math.round(value)}</text>
         </g>;
       })}
       <line x1={PLOT.left} x2={WIDTH - PLOT.right} y1={lowY} y2={lowY}
@@ -71,15 +71,14 @@ const HistoryChart = ({ points, range, locale, labels, lowBitrateKbps, recoverBi
         strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />)}
       {points.filter((point) => point[2] > 0).map((point) => <circle key={point[0]} cx={x(point[0])} cy={y(point[1])}
         r="2.5" fill="var(--green)" />)}
-      {points.length > 0 ? <>
-        <text x={PLOT.left} y={HEIGHT - 6} fill="var(--text-3)" fontSize="10">{dateFormatter.format(xStart)}</text>
-        <text x={WIDTH - PLOT.right} y={HEIGHT - 6} textAnchor="end" fill="var(--text-3)" fontSize="10">
-          {dateFormatter.format(xEnd)}
-        </text>
-      </> : null}
     </svg>
-    {points.length === 0 ? <p className="muted" role="status" aria-live="polite"
-      style={{ position: "absolute", inset: "0 0 0 0", display: "grid", placeItems: "center", margin: 0 }}>
+    <div className="belabox-chart__axis--y" aria-hidden="true">
+      {axisFractions.map((fraction) => <span className="belabox-chart__axis-label" key={fraction}>{Math.round(yMaximum * fraction)}</span>)}
+    </div>
+    {points.length === 0 ? null : <div className="belabox-chart__axis--x" aria-hidden="true">
+      {xTicks.map((tick) => <span className="belabox-chart__axis-label" key={tick}>{dateFormatter.format(tick)}</span>)}
+    </div>}
+    {points.length === 0 ? <p className="muted belabox-chart__empty" role="status" aria-live="polite">
       {labels.noHistory}
     </p> : null}
   </div>;
@@ -129,7 +128,7 @@ export const BelaboxHistorySection = ({
     cursor: "pointer",
   });
 
-  return <section className="config-section" aria-label={labels.history}>
+  return <section className="config-section belabox-history-section" aria-label={labels.history}>
     <div className="section-heading"><h3>{labels.history}</h3></div>
     {onDemand ? <p className="muted" role="status" style={{ minHeight: HEIGHT, display: "grid", placeItems: "center", margin: 0, textAlign: "center" }}>
       {labels.onDemandHistory}

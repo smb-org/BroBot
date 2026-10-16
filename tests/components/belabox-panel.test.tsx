@@ -19,6 +19,13 @@ const mocks = vi.hoisted(() => ({
   loadBelaboxStreams: vi.fn(),
 }));
 
+const openRemoveAction = async () => {
+  const menuButton = await screen.findByRole("button", { name: "More connection actions" });
+  await waitFor(() => { expect(menuButton).toBeEnabled(); });
+  fireEvent.click(menuButton);
+  return screen.findByRole("menuitem", { name: "Remove stats URL" });
+};
+
 vi.mock("../../src/modules/belabox/panel/service", () => mocks);
 
 describe("BELABOX panel", () => {
@@ -53,7 +60,7 @@ describe("BELABOX panel", () => {
     mocks.removeBelaboxStatsUrl.mockRejectedValue(new Error("D1 DELETE failed"));
 
     render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage /></></UiProvider>);
-    const removeButton = await screen.findByRole("button", { name: "Remove stats URL" });
+    const removeButton = await openRemoveAction();
     await waitFor(() => { expect(removeButton).toBeEnabled(); });
     fireEvent.click(removeButton);
 
@@ -84,7 +91,7 @@ describe("BELABOX panel", () => {
     mocks.removeBelaboxStatsUrl.mockResolvedValue(undefined);
 
     render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage /></></UiProvider>);
-    const removeButton = await screen.findByRole("button", { name: "Remove stats URL" });
+    const removeButton = await openRemoveAction();
     await waitFor(() => { expect(removeButton).toBeEnabled(); });
     fireEvent.click(removeButton);
     mocks.loadBelaboxStatus.mockRejectedValue(new Error("refresh failed"));
@@ -121,12 +128,13 @@ describe("BELABOX panel", () => {
     });
   });
 
-  it("reserves the test result and live status rows before values are available", async () => {
+  it("shows compact connection property rows before the test result is available", async () => {
     render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage /></></UiProvider>);
 
     expect(await screen.findByText("Waiting for first sample")).toBeInTheDocument();
-    expect(screen.getByTestId("belabox-updated-at-slot")).toBeInTheDocument();
-    expect(screen.getByTestId("belabox-sample-slot")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Stats URL")).not.toBeInTheDocument();
+    expect(screen.getByText("Changed")).toBeInTheDocument();
+    expect(screen.getByText("Latest sample")).toBeInTheDocument();
     expect(screen.getByTestId("belabox-test-result-slot")).toBeInTheDocument();
   });
 
@@ -147,7 +155,7 @@ describe("BELABOX panel", () => {
     render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage /></></UiProvider>);
 
     expect(await screen.findByText(/On-demand mode does not store history/)).toBeInTheDocument();
-    expect(screen.getByTestId("belabox-sample-slot")).toHaveTextContent("2400 kbps");
+    expect(screen.getByText("Latest sample").parentElement).toHaveTextContent("2400 kbps");
     expect(mocks.loadBelaboxHistory).not.toHaveBeenCalled();
     expect(mocks.loadBelaboxStreams).not.toHaveBeenCalled();
   });
