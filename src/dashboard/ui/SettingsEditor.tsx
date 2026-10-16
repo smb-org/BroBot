@@ -66,7 +66,6 @@ export interface SettingsEditorCatalog extends SettingsEditorTexts {
   ariaLabel: string;
   readOnlyReason: string;
   urlSaveError?: string;
-  partialSaveError?: string;
   saveLabel: string;
   discardLabel: string;
   savedLabel: string;

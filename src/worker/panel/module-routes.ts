@@ -14,6 +14,9 @@ import {
 import { canManage, type AuditAction } from "../../contracts/values";
 import type { ModuleChannelInfo, ModuleChannelVariable, ModuleEvent, ModuleExternalFetchBudget, ModuleLanguage, ModuleOverlayHostEvent, ModuleRegisteredTemplateVariable, ModuleRouteVariables, ModuleStreamState, ModuleTemplateConditionContext } from "../../modules/contract";
 import { MODULES, templateVariableGroupForModule, validateModuleTemplateVariable, variablesForModuleTemplateContext } from "../../modules/registry";
+import { BELABOX_MODULE_ID, BELABOX_STATS_URL_SECRET } from "../../modules/belabox/contracts";
+import { validateBelaboxStatsUrl } from "../../modules/belabox/domain/stats-url";
+import { resetSampleAfterStatsUrlChangeBestEffort } from "../../modules/belabox/routes";
 import type { PanelModuleState } from "../../panel-contract";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { moduleBroadcasterScopeState } from "../module-scopes";
@@ -806,7 +809,35 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
     reason: "A valid settings revision is required.",
   }, 400);
   const expectedRevision = Reflect.get(body, "revision") as number;
-  const settings = module.settingsSchema.safeParse(Reflect.get(body, "settings"));
+  const hasStatsUrl = Reflect.has(body, "statsUrl");
+  const hasRemoveStatsUrl = Reflect.has(body, "removeStatsUrl");
+  const removeStatsUrl = module.id === BELABOX_MODULE_ID && Reflect.get(body, "removeStatsUrl") === true;
+  if (module.id !== BELABOX_MODULE_ID && (hasStatsUrl || hasRemoveStatsUrl)) return context.json({ error: "module_settings_invalid" }, 400);
+  if (hasRemoveStatsUrl && !removeStatsUrl) return context.json({ error: "module_settings_invalid" }, 400);
+  if (removeStatsUrl && hasStatsUrl) return context.json({ error: "module_settings_invalid" }, 400);
+  let statsUrl: string | undefined;
+  if (hasStatsUrl) {
+    const submittedUrl = Reflect.get(body, "statsUrl");
+    if (typeof submittedUrl !== "string") return context.json({ error: "belabox_stats_url_invalid" }, 400);
+    const validation = validateBelaboxStatsUrl(submittedUrl);
+    if (!validation.ok) return context.json({ error: `belabox_stats_url_${validation.reason}` }, 400);
+    statsUrl = validation.url.href;
+  }
+  let settingsInput = Reflect.get(body, "settings");
+  if (settingsInput === undefined) {
+    if (!removeStatsUrl) return context.json({
+      error: "module_settings_invalid",
+      path: "settings",
+      reasonCode: "settings_payload_invalid",
+      reason: "Settings data and revision are required.",
+    }, 400);
+    try {
+      settingsInput = JSON.parse(stored.settings) as unknown;
+    } catch {
+      return context.json({ error: "module_settings_invalid" }, 500);
+    }
+  }
+  const settings = module.settingsSchema.safeParse(settingsInput);
   if (!settings.success) {
     const issue = settings.error.issues[0];
     const path = issue === undefined || issue.path.length === 0
@@ -860,6 +891,23 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
     const effective = effectiveTemplateVariables(module.templateContext ?? "event", (variables ?? []) as readonly TemplateVariable[], channelVariables, SYSTEM_TEMPLATE_VARIABLE_LIST);
     return templateWarnings(field, value, effective, registeredVariables);
   });
+  const changedAt = nowIso();
+  let dependentMutations: D1PreparedStatement[] = [];
+  if (statsUrl !== undefined || removeStatsUrl) {
+    const secretAccess = context.get("secrets")(channelId);
+    const actor = actorOf(context);
+    const secretMutation = statsUrl === undefined
+      ? secretAccess.prepareDelete(BELABOX_STATS_URL_SECRET, actor, changedAt, true)
+      : await secretAccess.prepareWrite(BELABOX_STATS_URL_SECRET, statsUrl, actor, changedAt, true);
+    const secretAudit = context.get("prepareModuleAudit")({
+      channelId,
+      moduleId: BELABOX_MODULE_ID,
+      action: statsUrl === undefined ? "module.secret.removed" : "module.secret.replaced",
+      before: statsUrl === undefined ? { statsUrl: "configured" } : null,
+      after: statsUrl === undefined ? { statsUrl: "removed" } : { statsUrl: "replaced" },
+    }, changedAt);
+    dependentMutations = [secretMutation, secretAudit];
+  }
   const changed = await updateChannelModuleSettingsWithAudit(
     context.env.DB,
     actorOf(context),
@@ -867,8 +915,8 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
     module.id,
     JSON.stringify(settings.data),
     `${module.id}.settings_changed`,
-    nowIso(),
-    [],
+    changedAt,
+    dependentMutations,
     expectedRevision,
     blockGuard.references.length === 0 ? undefined : blockGuard,
     module.id === "clips",
@@ -889,6 +937,14 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
       error: "module_settings_changed_concurrently",
       current: current === null ? null : { settings: currentSettings, revision: current.settingsRevision },
     }, 409);
+  }
+  if (module.id === BELABOX_MODULE_ID && (statsUrl !== undefined || removeStatsUrl)) {
+    await resetSampleAfterStatsUrlChangeBestEffort(
+      context.get("runModuleAlarm"),
+      context.get("writeModuleDiagnostics"),
+      context.env.DB,
+      channelId,
+    );
   }
   if (module.settingsChangedAlarm !== undefined) {
     await runModuleAlarmAfterMutation(

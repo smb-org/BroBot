@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   loadBelaboxStatus: vi.fn(),
   retryBelaboxPolling: vi.fn(),
   removeBelaboxStatsUrl: vi.fn(),
-  replaceBelaboxStatsUrl: vi.fn(),
   testBelaboxConnection: vi.fn(),
   loadBelaboxHistory: vi.fn(),
   loadBelaboxStreams: vi.fn(),
@@ -42,7 +41,6 @@ describe("BELABOX panel", () => {
     });
     mocks.retryBelaboxPolling.mockReset().mockResolvedValue(undefined);
     mocks.removeBelaboxStatsUrl.mockReset();
-    mocks.replaceBelaboxStatsUrl.mockReset();
     mocks.testBelaboxConnection.mockReset();
     mocks.loadBelaboxHistory.mockReset().mockResolvedValue([]);
     mocks.loadBelaboxStreams.mockReset().mockResolvedValue([]);
@@ -59,7 +57,7 @@ describe("BELABOX panel", () => {
   it("shows a failed stats URL deletion inside its confirmation dialog", async () => {
     mocks.removeBelaboxStatsUrl.mockRejectedValue(new Error("D1 DELETE failed"));
 
-    render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage /></></UiProvider>);
+    render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage settingsRevision={1} /></></UiProvider>);
     const removeButton = await openRemoveAction();
     await waitFor(() => { expect(removeButton).toBeEnabled(); });
     fireEvent.click(removeButton);
@@ -88,9 +86,9 @@ describe("BELABOX panel", () => {
   });
 
   it("reflects a successful removal even when the status refresh fails", async () => {
-    mocks.removeBelaboxStatsUrl.mockResolvedValue(undefined);
+    mocks.removeBelaboxStatsUrl.mockResolvedValue({ revision: 2 });
 
-    render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage /></></UiProvider>);
+    render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage settingsRevision={1} /></></UiProvider>);
     const removeButton = await openRemoveAction();
     await waitFor(() => { expect(removeButton).toBeEnabled(); });
     fireEvent.click(removeButton);

@@ -16,6 +16,9 @@ interface BelaboxPanelProperties extends ModulePanelProperties {
   recoverBitrateKbps?: BelaboxSettings["recoverBitrateKbps"];
   statsUrlDraft?: string;
   onStatsUrlDraftChange?: (value: string) => void;
+  settingsRevision?: number;
+  onSettingsRevisionChange?: (revision: number) => void;
+  onRemovePendingChange?: (pending: boolean) => void;
   savingSettings?: boolean;
 }
 
@@ -38,7 +41,7 @@ const sampleIsStale = (status: BelaboxStatusResponse | null, now: number): boole
 
 export default function BelaboxPanel({ channelId, language = "de", canManage = false, lowBitrateKbps: draftLowBitrateKbps,
   recoverBitrateKbps: draftRecoverBitrateKbps, statsUrlDraft = "", onStatsUrlDraftChange,
-  savingSettings = false }: BelaboxPanelProperties): ReactElement {
+  settingsRevision, onSettingsRevisionChange, onRemovePendingChange, savingSettings = false }: BelaboxPanelProperties): ReactElement {
   const labels = belaboxPanelTexts(language);
   const realtimeStatus = useDashboardRealtimeStatus(channelId);
   const queryClient = useDashboardQueryClient();
@@ -190,14 +193,25 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
   };
 
   const remove = async (): Promise<void> => {
-    if (!canManage || busy || status?.configured !== true) return;
+    if (!canManage || busy || savingSettings || settingsRevision === undefined || status?.configured !== true) return;
     setBusy(true);
+    onRemovePendingChange?.(true);
     setRemoveError(null);
     try {
-      await removeBelaboxStatsUrl(channelId);
+      const response = await removeBelaboxStatsUrl(channelId, settingsRevision);
+      onSettingsRevisionChange?.(response.revision);
+      onStatsUrlDraftChange?.("");
+      const settingsKey = moduleQueryKey(channelId, "belabox", "settings");
+      const cachedSettings = queryClient.getQueryData(settingsKey);
+      if (cachedSettings !== undefined && typeof cachedSettings === "object" && cachedSettings !== null) {
+        queryClient.setQueryData(settingsKey, { ...cachedSettings, revision: response.revision });
+      } else {
+        await refetchModuleQueryData(queryClient, channelId, "belabox", "settings").catch(() => undefined);
+      }
     } catch (failure: unknown) {
       setRemoveError(errorCode(failure) === "belabox_management_denied" ? labels.readOnly : labels.removeFailed);
       setBusy(false);
+      onRemovePendingChange?.(false);
       return;
     }
     // The delete succeeded: reflect it locally, independent of the refresh below.
@@ -223,6 +237,7 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
       notify({ tone: "error", message: labels.refreshFailed });
     } finally {
       setBusy(false);
+      onRemovePendingChange?.(false);
     }
   };
 
@@ -261,7 +276,7 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
   const menuItems = [{
     label: labels.remove,
     danger: true,
-    disabled: !canManage || busy || status?.configured !== true,
+    disabled: !canManage || busy || savingSettings || settingsRevision === undefined || status?.configured !== true,
     ...(!canManage ? { description: labels.readOnly } : {}),
     onSelect: () => { setRemoveError(null); setRemoveConfirmOpen(true); },
   }] as const;

@@ -147,8 +147,8 @@ export const BelaboxHistorySection = ({
         <span><i aria-hidden="true" style={{ display: "inline-block", width: 16, borderTop: "2px dashed var(--green)", marginRight: 6, verticalAlign: "middle" }} />{labels.recoverThreshold}: {recoverBitrateKbps.toLocaleString(locale)} kbps</span>
         <span><i aria-hidden="true" style={{ display: "inline-block", width: 10, height: 10, background: "var(--error-surface)", border: "1px solid var(--error)", marginRight: 6, verticalAlign: "middle" }} />{labels.disconnects}</span>
       </div>
-      <h4 style={{ margin: "var(--s5) 0 var(--s2)", fontSize: 13 }}>{labels.streams}</h4>
-      {streams.length === 0 ? <p className="muted" role="status" style={{ minHeight: 44, margin: 0, display: "flex", alignItems: "center" }}>{labels.noStreams}</p> :
+      <h4 style={{ margin: "var(--s3) 0 var(--s1)", fontSize: 13 }}>{labels.streams}</h4>
+      {streams.length === 0 ? <p className="muted belabox-history-section__empty-streams" role="status" style={{ minHeight: 28, display: "flex", alignItems: "center" }}>{labels.noStreams}</p> :
         <div aria-label={labels.streams} data-testid="belabox-stream-history-list"
           style={{ maxHeight: 320, overflowY: "auto", scrollbarGutter: "stable" }}>
           <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>

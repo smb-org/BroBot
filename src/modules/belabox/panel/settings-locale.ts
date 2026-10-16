@@ -53,7 +53,6 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
     pendingLabel: "Wird gespeichert …", invalidMessage: "Bitte korrigiere die markierten Felder.", numberMissing: "Zahl eingeben.",
     saveError: "Die Abrufeinstellungen konnten nicht gespeichert werden.",
     urlSaveError: "Die Statistik-URL konnte nicht gespeichert werden.",
-    partialSaveError: "Die Statistik-URL wurde gespeichert, aber die übrigen Einstellungen konnten nicht gespeichert werden.",
     conflictMessage: "Die Abrufeinstellungen wurden inzwischen geändert.", reloadLabel: "Serverstand laden",
     sections: { polling: "Abruf", alerts: "Alarme" },
     fields: {
@@ -89,7 +88,6 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
     pendingLabel: "Saving …", invalidMessage: "Please correct the marked fields.", numberMissing: "Enter a number.",
     saveError: "Polling settings could not be saved.",
     urlSaveError: "The stats URL could not be saved.",
-    partialSaveError: "The stats URL was saved, but the remaining settings could not be saved.",
     conflictMessage: "Polling settings have changed since they were loaded.", reloadLabel: "Load server version",
     sections: { polling: "Polling", alerts: "Alerts" },
     fields: {
