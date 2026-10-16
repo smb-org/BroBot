@@ -382,7 +382,15 @@ const expectedModuleSettings = {
     resultText: "{vote.result}",
     resultTarget: "source_only",
   },
-  clips: {},
+  clips: {
+    commandMinimumRole: "viewer",
+    commandCooldownSeconds: 60,
+    postClipLinkInChat: true,
+    chatLinkTemplate: "Clip aus dem Stream: {clip.title} {clip.url}",
+    automaticClipsEnabled: false,
+    automaticThresholdMultiplier: 2.5,
+    automaticCooldownSeconds: 900,
+  },
   faq: {},
   raid: {
     shoutoutEnabled: true,

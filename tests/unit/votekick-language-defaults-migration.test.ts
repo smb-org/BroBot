@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { VOTEKICK_DEFAULT_TEXTS } from "../../src/modules/votekick/contracts/chat-defaults";
 import { votekickDefaultSettingsForLanguage } from "../../src/modules/votekick/contracts";
 
-const migration = readFileSync(resolve(import.meta.dirname, "../../migrations/0066_votekick_language_defaults.sql"), "utf8");
+const migration = readFileSync(resolve(import.meta.dirname, "../../migrations/0067_votekick_language_defaults.sql"), "utf8");
 const defaultTextFields = ["startText", "passText", "failText", "expiredText", "protectedText", "busyText"] as const;
 
 describe("Votekick language defaults", () => {

@@ -7,7 +7,7 @@ import { templateStartProblem } from "../../src/modules/chat_voting/domain";
 import { templateTextLength } from "../../src/contracts/template-text-length";
 
 const migration = readFileSync(resolve(import.meta.dirname, "../../migrations/0052_chat_vote_templates.sql"), "utf8");
-const resultTextMigration = readFileSync(resolve(import.meta.dirname, "../../migrations/0067_chat_vote_template_result_text.sql"), "utf8");
+const resultTextMigration = readFileSync(resolve(import.meta.dirname, "../../migrations/0068_chat_vote_template_result_text.sql"), "utf8");
 
 const databaseWithLegacySettings = (resultText = "{vote.result}"): DatabaseSync => {
   const database = new DatabaseSync(":memory:");

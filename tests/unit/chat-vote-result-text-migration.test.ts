@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { templateTextLength } from "../../src/contracts/template-text-length";
 
-const migration = readFileSync(resolve(import.meta.dirname, "../../migrations/0068_chat_vote_result_text_snapshot.sql"), "utf8");
+const migration = readFileSync(resolve(import.meta.dirname, "../../migrations/0069_chat_vote_result_text_snapshot.sql"), "utf8");
 
 describe("chat vote result text migration", () => {
   it("snapshots the existing module result text onto open and historical votes", () => {

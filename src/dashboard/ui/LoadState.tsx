@@ -46,6 +46,8 @@ interface LoadStateContentProps {
   queryError?: QueryError;
   /** Declares a reserved refresh row; its presence is stable across query states. */
   refreshError?: boolean;
+  /** Overrides the variant height when loading content has a known responsive size. */
+  reserveHeight?: CSSProperties["minHeight"];
   trailing?: ReactNode;
   className?: string;
 }
@@ -94,9 +96,9 @@ const inlineError = (queryError: QueryError, trailing?: ReactNode) => (
 );
 
 /** Keeps loading, error, and success states inside the caller's declared box. */
-export function LoadState({ variant, status, loading, empty, error, children, queryError, refreshError, trailing, className }: LoadStateProps) {
+export function LoadState({ variant, status, loading, empty, error, children, queryError, refreshError, reserveHeight, trailing, className }: LoadStateProps) {
   const variantDefinition = loadStateVariants[variant];
-  const contentMinHeight = variantDefinition.minHeight;
+  const contentMinHeight = reserveHeight ?? variantDefinition.minHeight;
   const hasRefreshSlot = variantDefinition.reservesRefreshRow && refreshError !== undefined;
   const layoutStyle: CSSProperties = !hasRefreshSlot
     ? { minHeight: contentMinHeight }

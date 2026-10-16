@@ -58,6 +58,7 @@ import { isChannelControlInput, setChannelControl, type ChannelControlKind } fro
 import { actorGuard, bindActorGuard } from "../db/guards";
 import { prepareAudit } from "../db/audit";
 import { getChannelModuleForChannel } from "../db/channel-modules";
+import { clipsModuleIsActiveForActor, listCurrentSessionClips } from "../db/clips";
 import { readChannelStreamState } from "../db/stream-state";
 import { measureServerTiming } from "../server-timing";
 import { DEFAULT_CHANNEL_TIME_ZONE, validChannelTimeZone } from "../../modules/contract";
@@ -219,7 +220,7 @@ const clipStatusFor = (reason: string | null): 400 | 401 | 429 | 502 | 503 => {
   if (reason === "not_live") return 400;
   if (reason === "scope_missing" || reason === "bot_identity_missing") return 401;
   if (reason === "rate_limited") return 429;
-  if (reason === "network_error") return 503;
+  if (reason === "network_error" || reason === "timeout" || reason === "availability_timeout" || reason === "availability_check_failed") return 503;
   return 502;
 };
 
@@ -517,8 +518,12 @@ panelRouter.post(
     const clipsModule = await getChannelModuleForChannel(context.env.DB, channelId, "clips");
     if (clipsModule === null) return context.json({ error: "module_not_configured" }, 404);
     if (!clipsModule.enabled) return context.json({ error: "module_disabled" }, 409);
-    const triggerId = `clip:${crypto.randomUUID()}`;
+    const actor = context.get("actor");
     const now = nowIso();
+    if (!await clipsModuleIsActiveForActor(context.env.DB, channelId, actor, now)) {
+      return context.json({ error: "module_disabled" }, 409);
+    }
+    const triggerId = `clip:${crypto.randomUUID()}`;
     const credentials = await readBotCredentials(context.env);
     const result: CreateClipResult = credentials === null
       ? { created: false, reason: "bot_identity_missing", detail: {}, clipId: null, editUrl: null }
@@ -540,10 +545,24 @@ panelRouter.post(
       moduleId: null,
       action: "clip.created",
       before: null,
-      after: { clipId: result.clipId },
+      after: { clipId: result.clipId, availabilityConfirmed: true },
     });
 
     return context.json({ clipId: result.clipId, editUrl: result.editUrl });
+  },
+);
+
+panelRouter.get(
+  "/api/channels/:channelId/clips",
+  requireChannelAuthorization(),
+  async (context) => {
+    const channelId = context.req.param("channelId");
+    const clips = await listCurrentSessionClips(context.env.DB, channelId, context.get("actor"), nowIso());
+    if (clips !== null) return context.json(clips);
+    const module = await getChannelModuleForChannel(context.env.DB, channelId, "clips");
+    return module === null
+      ? context.json({ error: "module_not_configured" }, 404)
+      : context.json({ error: "module_disabled" }, 409);
   },
 );
 
