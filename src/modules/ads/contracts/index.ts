@@ -9,8 +9,8 @@ import { templateTextLength } from "../../../contracts/template-text-length";
 export const ADS_OPTIONAL_BROADCASTER_SCOPES = ["channel:manage:ads", "channel:edit:commercial"] as const;
 
 export const adsSettingsSchema = z.object({
-  automatic: z.string().trim().min(1).refine((text) => templateTextLength(text) <= 500),
-  manual: z.string().trim().min(1).refine((text) => templateTextLength(text) <= 500),
+  automatic: z.string().trim().refine((text) => templateTextLength(text) <= 500),
+  manual: z.string().trim().refine((text) => templateTextLength(text) <= 500),
   automaticTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
   manualTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
   prewarning: z.boolean().default(true),

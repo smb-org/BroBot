@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../contracts/panel-error";
 import { canManage, hasRequiredChannelRole, type ChannelRole, type ChannelStreamState } from "../contracts/values";
@@ -14,6 +14,7 @@ import { eventDetail } from "./events/model";
 import type { useEventsQuery } from "./data/lists";
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
 import { immediateActionErrorFeedback } from "./immediate-action-errors";
+import { adSnoozeRetryMessage } from "./ad-snooze-retry";
 import { formatRelativeTime } from "./ui/format-relative-time";
 import { Button, ChipGroup, ConfirmDialog, DataTable, Field, FilterBar, Icon } from "./ui";
 
@@ -57,7 +58,7 @@ export const LiveCockpitTiles = ({
   failed: boolean;
   now: number;
   timeZone: string;
-  onMessage: (message: string) => void;
+  onMessage: (message: string, tone?: "warning") => void;
   onRefresh: () => void;
 }): ReactElement => {
   const labels = dashboardTexts().liveCockpit;
@@ -69,8 +70,18 @@ export const LiveCockpitTiles = ({
   const [busy, setBusy] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<{ id: string; target: string } | null>(null);
   const [cancelError, setCancelError] = useState<string | undefined>();
+  const [snoozeFeedback, setSnoozeFeedback] = useState<{ itemId: string; text: string } | null>(null);
   const roleCanManage = hasRequiredChannelRole(role, "operator");
   const roleCanSnooze = canManage(role);
+
+  useEffect(() => {
+    if (snoozeFeedback === null) return;
+    const feedback = snoozeFeedback;
+    const timeout = window.setTimeout(() => {
+      setSnoozeFeedback((current) => current === feedback ? null : current);
+    }, 5_000);
+    return () => { window.clearTimeout(timeout); };
+  }, [snoozeFeedback]);
 
   const extendVote = async (pollId: string): Promise<void> => {
     if (busy) return;
@@ -126,19 +137,25 @@ export const LiveCockpitTiles = ({
     }
   };
 
-  const doSnoozeAd = async (canSnooze: boolean): Promise<void> => {
+  const doSnoozeAd = async (itemId: string, canSnooze: boolean): Promise<void> => {
     if (busy) return;
     if (!roleCanSnooze || !canSnooze) {
       onMessage(labels.adSnoozeUnavailable);
       return;
     }
+    setSnoozeFeedback(null);
     setBusy(true);
     try {
       await snoozeAds(channelId);
       onMessage(labels.adSnoozed);
       onRefresh();
-    } catch {
-      onMessage(labels.adSnoozeFailed);
+    } catch (error: unknown) {
+      const retryMessage = adSnoozeRetryMessage(error, timeZone, labels.adSnoozeRetryAfter);
+      if (retryMessage === null) onMessage(labels.adSnoozeFailed);
+      else {
+        setSnoozeFeedback({ itemId, text: retryMessage });
+        onMessage(retryMessage, "warning");
+      }
     } finally {
       setBusy(false);
     }
@@ -182,8 +199,9 @@ export const LiveCockpitTiles = ({
           const relative = formatRelativeTime(item.at, new Date(now), dashboardLanguage(), timeZone).label;
           const title = item.category === "ad" ? labels.nextAdBreak : item.name;
           const detail = item.category === "ad" && item.detail !== null ? labels.adDuration(item.detail) : item.detail;
-          const snoozeReason = !roleCanSnooze ? dashboardTexts().streamManager.managerOnly
-            : item.canSnooze !== true ? labels.adSnoozeUnavailable : null;
+          const retryMessage = snoozeFeedback?.itemId === item.id ? snoozeFeedback.text : null;
+          const snoozeReason = retryMessage ?? (!roleCanSnooze ? dashboardTexts().streamManager.managerOnly
+            : item.canSnooze !== true ? labels.adSnoozeUnavailable : "");
           const snoozeReasonId = `ad-snooze-reason-${item.id}`;
           return <div className="live-cockpit-next-item" key={`${item.category}:${item.id}`}>
             <span className="live-cockpit-next-item__icon"><Icon name={item.category === "ad" ? "ad" : "clock-hour-4"} size={16} /></span>
@@ -191,9 +209,9 @@ export const LiveCockpitTiles = ({
             <time className="live-cockpit-next-item__time" dateTime={item.at} title={new Date(item.at).toLocaleString(dashboardLanguage(), { timeZone })}>{relative}</time>
             {item.category === "ad" ? <>
               <Button size="compact" variant="subtle" disabled={busy || !roleCanSnooze || item.canSnooze !== true}
-                {...(snoozeReason === null ? {} : { describedBy: snoozeReasonId })}
-                onClick={() => { void doSnoozeAd(item.canSnooze === true); }}>{labels.adSnooze}</Button>
-              {snoozeReason === null ? null : <span className="sr-only" id={snoozeReasonId}>{snoozeReason}</span>}
+                {...(snoozeReason === "" ? {} : { describedBy: snoozeReasonId })}
+                onClick={() => { void doSnoozeAd(item.id, item.canSnooze === true); }}>{labels.adSnooze}</Button>
+              <span className={`live-cockpit-next-item__reason${retryMessage === null ? "" : " is-warning"}`} id={snoozeReasonId} aria-live="polite">{snoozeReason}</span>
             </> : null}
           </div>;
         })}

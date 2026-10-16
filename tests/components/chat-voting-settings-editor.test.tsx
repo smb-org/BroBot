@@ -11,7 +11,7 @@ import { SettingsEditor, UiProvider } from "../../src/dashboard/ui";
 describe("chat voting settings editor", () => {
   afterEach(() => { cleanup(); });
 
-  it("removes saved answer labels from settings and keeps the default duration editor", () => {
+  it("removes saved answer labels from settings and defaults the timer to two minutes", () => {
     const copy = chatVotingSettingsEditorCatalog("en");
     const Harness = () => {
       const [values, setValues] = useState(DEFAULT_CHAT_VOTING_SETTINGS);
@@ -28,9 +28,8 @@ describe("chat voting settings editor", () => {
 
     expect(screen.queryByRole("textbox", { name: /labels|beschriftungen/iu })).not.toBeInTheDocument();
     const timer = screen.getByRole("spinbutton", { name: "Default duration" });
-    expect(timer).toHaveValue(0);
-    expect(timer.parentElement).toHaveTextContent("Off");
-    expect(timer.parentElement).not.toHaveTextContent("s");
+    expect(timer).toHaveValue(120);
+    expect(timer.parentElement).toHaveTextContent("s");
     fireEvent.change(timer, { target: { value: "30" } });
     expect(timer).toHaveValue(30);
   });
@@ -83,7 +82,7 @@ describe("chat voting settings editor", () => {
     expect(chatVotingSettingsSchema.safeParse({ ...DEFAULT_CHAT_VOTING_SETTINGS, startText: "x".repeat(501) }).success).toBe(false);
   });
 
-  it("shows the localized zero label in the read-only operator properties", () => {
+  it("shows the two-minute default in read-only operator properties", () => {
     const copy = chatVotingSettingsEditorCatalog("de");
     render(<UiProvider><SettingsEditor
       spec={settingsEditor.spec}
@@ -96,8 +95,7 @@ describe("chat voting settings editor", () => {
     /></UiProvider>);
 
     expect(screen.getByText("Standarddauer")).toBeInTheDocument();
-    expect(screen.getByText("Aus")).toBeInTheDocument();
-    expect(screen.queryByText("0 s")).not.toBeInTheDocument();
+    expect(screen.getByText("Standarddauer").parentElement).toHaveTextContent("120 s");
     expect(screen.queryByRole("spinbutton", { name: "Standarddauer" })).not.toBeInTheDocument();
   });
 

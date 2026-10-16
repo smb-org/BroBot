@@ -18,6 +18,9 @@ export const OVERLAY_STREAM_DETAILS_CACHE_TTL_MS = 60_000;
 /** Maximum decoded size accepted for JSON responses from external providers. */
 export const PROVIDER_JSON_MAX_BYTES = 256 * 1024;
 
+/** A blank chat template uses the same opt-out behavior across announcement editors. */
+export const hasChatMessage = (text: string): boolean => text.trim().length > 0;
+
 /** Reads a provider JSON response while enforcing a decoded body size limit. */
 export const readBoundedJsonResponseWithBytes = async (
   response: Response,

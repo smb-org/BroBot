@@ -64,6 +64,7 @@ import { closeRealtimeTokenBeforeResponse } from "../realtime-revocation";
 import { MODULES, moduleOverlayElementForKind } from "../../modules/registry";
 import {
   listAllBroadcasterScopes,
+  listRequiredBroadcasterScopesForUser,
   listRequiredBroadcasterScopesForUserAndModule,
 } from "../module-scopes";
 import { canManage, type ApiErrorCode } from "../../contracts/values";
@@ -113,13 +114,14 @@ const isSafeLoginRedirectPath = (path: string | null | undefined): path is strin
   const segments = pathOnly.split("/");
   const safeModulePath = segments.length === 5 && segments[1] === "channels" && segments[3] === "modules" &&
     isEncodedPathSegment(segments[2] ?? "") && isEncodedPathSegment(segments[4] ?? "");
+  const safeChannelPath = segments.length === 3 && segments[1] === "channels" && isEncodedPathSegment(segments[2] ?? "");
   const safeBotLoginPath = segments.length === 4 && segments[1] === "auth" && segments[2] === "bot" && segments[3] === "login";
   const safeChannelBotPath = segments.length === 5 && segments[1] === "auth" && segments[2] === "channels" &&
     isEncodedPathSegment(segments[3] ?? "") && segments[4] === "channel-bot";
   const safeBroadcasterScopePath = segments.length === 6 && segments[1] === "auth" && segments[2] === "channels" &&
     isEncodedPathSegment(segments[3] ?? "") && segments[4] === "broadcaster-scopes" &&
     isEncodedPathSegment(segments[5] ?? "");
-  return path === "/" || safeModulePath || safeBotLoginPath || safeChannelBotPath || safeBroadcasterScopePath;
+  return path === "/" || safeChannelPath || safeModulePath || safeBotLoginPath || safeChannelBotPath || safeBroadcasterScopePath;
 };
 
 const redirectAfterLogin = (origin: string, path: string | null | undefined): string =>
@@ -454,7 +456,27 @@ authRouter.get(
     if (context.get("session").userId !== channelId) {
       return oauthError(context, "channel_owner_only_scope_grant", 403);
     }
-    const module = MODULES.find((candidate) => candidate.id === context.req.param("moduleId"));
+    const moduleId = context.req.param("moduleId");
+    if (moduleId === "broadcast") {
+      const scopes = [...new Set([
+        "channel:manage:broadcast",
+        ...await listRequiredBroadcasterScopesForUser(context.env.DB, channelId),
+      ])];
+      const started = await startOAuthAuthorization(
+        context.env.DB,
+        context.env,
+        "login",
+        nowIso(),
+        scopes,
+        true,
+        `/channels/${encodeURIComponent(channelId)}`,
+        false,
+        channelId,
+      );
+      context.header("Set-Cookie", serializeOAuthStateCookie(started.stateNonce));
+      return context.redirect(started.url, 302);
+    }
+    const module = MODULES.find((candidate) => candidate.id === moduleId);
     if (module === undefined) return oauthError(context, "module_not_found", 404);
 
     const scopes = await listRequiredBroadcasterScopesForUserAndModule(

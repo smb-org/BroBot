@@ -212,7 +212,27 @@ describe("chat voting event service", () => {
 
     await processChatVotingMessage(eventWithText(text, ["moderator"]), repository, executionContext());
 
-    expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({ kind, labels }), undefined);
+    expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({ kind, labels, requestedDurationSeconds: 120 }), undefined);
+  });
+
+  it("uses the two-minute default when repeating a vote that had no timer", async () => {
+    const previous: ChatVote = {
+      ...openVote,
+      status: "closed",
+      closedAt: "2026-10-04T10:30:00.000Z",
+      counts: [3, 1],
+      voterCount: 4,
+      closeReason: "manual",
+    };
+    const insertOpen = vi.fn<ChatVotingRepository["insertOpen"]>(() => Promise.resolve(true));
+    const repository = repositoryWith({
+      latest: vi.fn(() => Promise.resolve(previous)),
+      insertOpen,
+    });
+
+    await processChatVotingMessage(eventWithText("!vote again", ["moderator"]), repository, executionContext());
+
+    expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({ requestedDurationSeconds: 120 }), undefined);
   });
 
   it("uses the shared start-problem reason for an invalid saved template", async () => {

@@ -510,20 +510,40 @@ for (const scenario of [
   });
 }
 
-test("the live title placeholder is read-only and the channel target has one affordance", async ({ page }) => {
+test("the live title and category open one editor while the channel target has one affordance", async ({ page }) => {
   const channelId = "kanal-live-header-placeholder";
   await installLiveCockpitMocks(page, { channelId });
 
   await page.goto(`/channels/${channelId}`);
   const titleSlot = page.locator('[data-slot="stream-title-category"]');
-  await expect(titleSlot).toContainText("Streamtitel und Kategorie");
+  await expect(titleSlot).toContainText("Demo stream title");
+  await expect(titleSlot).toContainText("Just Chatting");
   await expect(titleSlot).toHaveCSS("border-top-width", "0px");
-  await expect(titleSlot.locator("input, button")).toHaveCount(0);
+  await titleSlot.getByRole("button", { name: "Titel und Kategorie bearbeiten" }).click();
+  const editor = page.getByRole("dialog", { name: "Titel und Kategorie bearbeiten" });
+  await expect(editor.getByRole("textbox", { name: "Streamtitel" })).toHaveValue("Demo stream title");
+  await expect(editor.getByRole("searchbox", { name: "Kategorie" })).toBeVisible();
+  await editor.getByRole("button", { name: "Abbrechen" }).click();
 
   await page.getByRole("group", { name: "Einrichten" }).getByRole("button", { name: "Einrichten" }).click();
   const chatTarget = page.getByRole("button", { name: "Standard-Chat-Ziel", exact: true });
   await expect(chatTarget.locator(".ui-chat-target-field__change")).toHaveCount(0);
   await expect(chatTarget.locator(".ui-chat-target-field__chevron")).toBeVisible();
+});
+
+test("broadcast editing waits for channel:manage:broadcast and offers reconnect to the broadcaster", async ({ page }) => {
+  const channelId = "kanal-broadcast-scope-missing";
+  await installLiveCockpitMocks(page, {
+    channelId,
+    role: "broadcaster",
+    broadcasterMissingScopes: ["channel:manage:broadcast"],
+  });
+
+  await page.goto(`/channels/${channelId}`);
+  const titleSlot = page.locator('[data-slot="stream-title-category"]');
+  await expect(titleSlot).toContainText("channel:manage:broadcast");
+  await expect(titleSlot.getByRole("button", { name: "Titel und Kategorie bearbeiten" })).toBeDisabled();
+  await expect(titleSlot.getByRole("button", { name: "Twitch-Zugang erneuern" })).toBeVisible();
 });
 
 test("action tiles center reasonless content and keep vote labels within two lines", async ({ page }) => {

@@ -1,5 +1,5 @@
 import type { EventCode, ShoutoutSuppressedReason } from "../../contracts/values";
-import type { ModuleDiagnostic, ModuleEvent, ModuleResult } from "../contract";
+import { hasChatMessage, type ModuleDiagnostic, type ModuleEvent, type ModuleResult } from "../contract";
 import type { RaidSettings } from "./contracts";
 import { decideRaid, renderRaidText } from "./domain";
 
@@ -37,36 +37,38 @@ export function processRaid(
   const chatTarget = (decision.aboveThreshold ? event.settings.textLongTarget : event.settings.textShortTarget) ?? "source_only";
   const moduleValues = { channel: decision.sourceChannelName, viewers: decision.viewers };
   const makeResult = (chatText: string, templateDiagnostics: readonly ModuleDiagnostic[] = []): ModuleResult => {
-  const shoutoutPossible = event.settings.shoutoutEnabled && decision.viewers >= event.settings.shoutoutThreshold;
-  if (!shoutoutPossible) {
+    const shoutoutPossible = event.settings.shoutoutEnabled && decision.viewers >= event.settings.shoutoutThreshold;
+    const chatAction = hasChatMessage(chatText) ? [{ kind: "chat" as const, text: chatText, target: chatTarget }] : [];
+    if (!shoutoutPossible) {
+      return {
+        actions: chatAction,
+        diagnostics: [...templateDiagnostics, {
+          code: "shoutout.suppressed" satisfies EventCode,
+          detail: {
+            reason: (event.settings.shoutoutEnabled ? "below_threshold" : "disabled") satisfies ShoutoutSuppressedReason,
+            viewers: decision.viewers,
+            threshold: event.settings.shoutoutThreshold,
+          },
+        }],
+      };
+    }
+
     return {
-      actions: [{ kind: "chat", text: chatText, target: chatTarget }],
+      actions: [
+        { kind: "shoutout", targetChannelId: decision.sourceChannelId },
+        ...chatAction,
+      ],
       diagnostics: [...templateDiagnostics, {
-        code: "shoutout.suppressed" satisfies EventCode,
+        code: "raid.shoutout" satisfies EventCode,
         detail: {
-          reason: (event.settings.shoutoutEnabled ? "below_threshold" : "disabled") satisfies ShoutoutSuppressedReason,
+          sourceChannelId: decision.sourceChannelId,
           viewers: decision.viewers,
           threshold: event.settings.shoutoutThreshold,
         },
       }],
     };
-  }
-
-  return {
-    actions: [
-      { kind: "shoutout", targetChannelId: decision.sourceChannelId },
-      { kind: "chat", text: chatText, target: chatTarget },
-    ],
-    diagnostics: [...templateDiagnostics, {
-      code: "raid.shoutout" satisfies EventCode,
-      detail: {
-        sourceChannelId: decision.sourceChannelId,
-        viewers: decision.viewers,
-        threshold: event.settings.shoutoutThreshold,
-      },
-    }],
   };
-  };
+  if (!hasChatMessage(template)) return makeResult("");
   if (render !== undefined) return render(template, moduleValues).then(({ text, diagnostics }) => makeResult(text, diagnostics));
   return makeResult(renderRaidText(template, moduleValues));
 }
