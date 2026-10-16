@@ -703,6 +703,8 @@ form.content-section { display: grid; gap: var(--s4); }
 .text-library__list-toolbar .list-toolbar__filters { grid-column: 1 / -1; grid-row: 2; }
 .text-library__list-toolbar .list-toolbar__search--labeled { display: grid; gap: var(--s1); }
 .text-library__list-toolbar .list-toolbar__search-label { color: var(--text-2); font-size: 12px; font-weight: 500; }
+.text-library__list-toolbar .list-toolbar__status > .ui-load-state__content { grid-template-columns: minmax(0, 1fr) auto; }
+.text-library__list-toolbar .list-toolbar__status .list-toolbar__status-right:empty { display: none; }
 .text-library__list-toolbar .list-toolbar__filters { display: grid; flex: 1 1 auto; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: var(--s2); overflow: visible; }
 .text-library__list-toolbar .ui-select,
 .text-library__list-toolbar .ui-game-multi-select { width: 100%; min-width: 0; flex: none; }
@@ -2412,7 +2414,6 @@ p.lock-reason { margin-bottom: 1em; }
   .text-library__editor > .page-header { grid-template-columns: minmax(0, 1fr); }
   .text-library__editor > .page-header .page-header__right { grid-column: 1; justify-content: flex-start; width: 100%; }
   .text-library__editor > .page-header .page-header__page-actions { width: 100%; justify-content: flex-start; }
-  .text-library__delete-actions .ui-button--icon-only { width: 36px; min-width: 36px; height: 36px; min-height: 36px; }
   .text-library__editor > .page-header .page-header__save,
   .timer-editor > .page-header .page-header__save { position: fixed; z-index: 20; right: 0; bottom: 0; left: 0; width: auto; max-width: none; margin: 0; padding: 8px 16px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface); box-shadow: 0 -8px 18px color-mix(in srgb, var(--color-shadow) 8%, transparent); }
   .text-library__editor,
@@ -2453,7 +2454,6 @@ p.lock-reason { margin-bottom: 1em; }
 @media (min-width: 769px) and (max-width: 1399px) {
   .text-library__editor > .page-header { grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
   .text-library__editor > .page-header .page-header__right { grid-column: 1; justify-content: flex-end; width: 100%; }
-  .text-library__delete-actions .lock-reason { flex-basis: 120px; }
   .text-command-editor > .page-header { grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
   .text-command-editor > .page-header .page-header__right { grid-column: 1; justify-content: flex-end; width: 100%; }
   .text-command-editor > .page-header .page-header__save { flex: 1 1 auto; }

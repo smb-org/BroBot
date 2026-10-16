@@ -1425,6 +1425,7 @@ test("text-library filters fit the shared list and track mobile chip growth", as
     const create = toolbar.getByRole("button", { name: "Add text block" });
     const picker = filters.locator(".ui-game-multi-select--compact");
     const slot = picker.locator(".ui-game-multi-select__selected");
+    await expect(picker).toBeVisible();
     const pickerBox = await picker.boundingBox();
     const filtersBox = await filters.boundingBox();
     const createBox = await create.boundingBox();

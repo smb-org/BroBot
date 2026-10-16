@@ -5,6 +5,7 @@ import type { GameMultiSelectMessages, TemplateTextFieldPickerMessages } from ".
 export interface TextLibraryTexts {
   library: string;
   search: string;
+  searchPlaceholder: string;
   activeFilters: string;
   resetFilters: string;
   countSuffix: (count: number) => string;
@@ -31,6 +32,8 @@ export interface TextLibraryTexts {
   deleteBlockedReason: (count: number) => string;
   deleteBlockedTitle: (name: string) => string;
   deleteOperatorReason: string;
+  usageDialogTitle: (name: string) => string;
+  usageDialogDescription: string;
   deleteConfirm: (name: string) => string;
   name: string;
   nameHint: string;
@@ -123,6 +126,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
   de: {
     library: "Textbausteine",
     search: "Textbausteine suchen",
+    searchPlaceholder: "Suchen …",
     activeFilters: "Aktive Filter:",
     resetFilters: "Zurücksetzen",
     countSuffix: (count) => count === 1 ? "Textbaustein" : "Textbausteine",
@@ -149,6 +153,8 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     deleteBlockedReason: (count) => `Wird an ${String(count)} ${count === 1 ? "Stelle" : "Stellen"} verwendet`,
     deleteBlockedTitle: (name) => `Verwendungen von „${name}“ verhindern das Löschen`,
     deleteOperatorReason: "Nur Broadcaster und Verwalter",
+    usageDialogTitle: (name) => `Verwendungen von „${name}“`,
+    usageDialogDescription: "Hier findest du die Stellen, an denen dieser Textbaustein verwendet wird.",
     deleteConfirm: (name) => `Textbaustein löschen: ${name}`,
     name: "Name",
     nameHint: "Kleinbuchstaben, Zahlen und Unterstrich; wird als {text.name} eingesetzt.",
@@ -274,6 +280,7 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
   en: {
     library: "Text blocks",
     search: "Search text blocks",
+    searchPlaceholder: "Search …",
     activeFilters: "Active filters:",
     resetFilters: "Reset",
     countSuffix: (count) => count === 1 ? "text block" : "text blocks",
@@ -300,6 +307,8 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     deleteBlockedReason: (count) => `Used in ${String(count)} ${count === 1 ? "place" : "places"}`,
     deleteBlockedTitle: (name) => `Uses of “${name}” prevent deletion`,
     deleteOperatorReason: "Broadcasters and managers only",
+    usageDialogTitle: (name) => `Usage of “${name}”`,
+    usageDialogDescription: "This lists the places where the text block is used.",
     deleteConfirm: (name) => `Delete text block: ${name}`,
     name: "Name",
     nameHint: "Lowercase letters, numbers, and underscores; insert it as {text.name}.",

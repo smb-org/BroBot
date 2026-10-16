@@ -95,6 +95,7 @@ export { InspectorHeading, SubInspector } from "./Inspector";
 export { useInspectorSelection } from "./inspector-selection";
 export { useDraft } from "./useDraft";
 export { useDraftGuard } from "./useDraftGuard";
+export { useTemplatePreview } from "./use-template-preview";
 export { registerDashboardNavigationGuard } from "./navigation-guard";
 export { ListDetail } from "./ListDetail";
 export { ListPaginationFooter } from "./ListPaginationFooter";

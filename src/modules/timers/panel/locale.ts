@@ -45,9 +45,11 @@ export interface TimersTexts {
   edit: string;
   save: string;
   delete: string;
+  deleteOperatorReason: string;
   deleteConfirm: string;
   deleteNeedsSaved: string;
   preview: string;
+  previewLoading: string;
   previewBot: string;
   characterCount: (count: number) => string;
   empty: string;
@@ -129,10 +131,12 @@ const catalog: LocaleCatalog<TimersTexts> = {
     create: "Anlegen",
     edit: "Bearbeiten",
     save: "Speichern",
-    delete: "Entfernen",
+    delete: "Löschen",
+    deleteOperatorReason: "Nur Broadcaster und Verwalter",
     deleteConfirm: "Diesen Timer wirklich entfernen?",
     deleteNeedsSaved: "Speichere oder verwerfe deine Änderungen, bevor du den Timer entfernst.",
     preview: "Vorschau",
+    previewLoading: "Vorschau wird aktualisiert …",
     previewBot: "Bot",
     characterCount: (count) => `${String(count)} Zeichen`,
     empty: "Noch keine Timer angelegt.",
@@ -226,9 +230,11 @@ const catalog: LocaleCatalog<TimersTexts> = {
     edit: "Edit",
     save: "Save",
     delete: "Delete",
+    deleteOperatorReason: "Broadcasters and managers only",
     deleteConfirm: "Remove this timer?",
     deleteNeedsSaved: "Save or discard your changes before deleting this timer.",
     preview: "Preview",
+    previewLoading: "Updating preview …",
     previewBot: "Bot",
     characterCount: (count) => `${String(count)} ${count === 1 ? "character" : "characters"}`,
     empty: "No timers yet.",

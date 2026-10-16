@@ -4,9 +4,9 @@ import type { ModulePanelProperties } from "../../contract";
 import { TEXT_BLOCK_MAXIMUMS } from "../contracts";
 import type { TextBlock, TextBlockCategory, TextBlockConditions, TextBlockUsage, TextBlockVariant, TwitchGame } from "../contracts";
 import { firstMatchingTextBlockVariant, validTextBlockConditions, validTextBlockName } from "../domain";
-import { blockReferencesInText } from "../../contracts/text-block-references";
+import { blockReferencesInText, textBlockPreviewDependencies } from "../../contracts/text-block-references";
 import { PanelApiError } from "../../../contracts/panel-error";
-import { ActionMenu, Badge, Button, ChatPreview, CollectionPage, ConfirmDialog, Dialog, EmptyState, Field, GameMultiSelect, InspectorFieldRow, ListToolbar, LoadState, LoadStateLines, PageHeader, registeredModuleTemplateGroup, registerDashboardNavigationGuard, RuleNote, Section, Select, TemplateTextField, notify, useDraftGuard } from "../../../dashboard/ui";
+import { ActionMenu, Badge, Button, ChatPreview, CollectionPage, ConfirmDialog, Dialog, EmptyState, Field, GameMultiSelect, InspectorFieldRow, ListToolbar, LoadState, LoadStateLines, PageHeader, registeredModuleTemplateGroup, registerDashboardNavigationGuard, RuleNote, Section, Select, TemplateTextField, notify, useDraftGuard, useTemplatePreview } from "../../../dashboard/ui";
 import { templateVariableNames } from "../../contract";
 import { dashboardCommonTexts, systemTemplateVariableLocale } from "../../../dashboard/locale";
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
@@ -245,40 +245,40 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
     ...(data.dataConditionValues === undefined ? {} : { dataConditions: data.dataConditionValues }),
   });
   const previewTemplate = matchingVariant?.texts[0] ?? "";
-  const [previewResult, setPreviewResult] = useState<string | null>(null);
-  const [debouncedPreviewTemplate, setDebouncedPreviewTemplate] = useState(previewTemplate);
-  useEffect(() => {
-    const timer = window.setTimeout(() => setDebouncedPreviewTemplate(previewTemplate), 300);
-    return () => window.clearTimeout(timer);
-  }, [previewTemplate]);
-  // requestId identifies the in-flight request so a late response from a superseded
-  // request (older template or simulation inputs) is ignored instead of overwriting
-  // the preview for whatever is current now.
-  const previewRequestId = useRef(0);
-  useEffect(() => {
-    if (data === null || debouncedPreviewTemplate.length === 0 || debouncedPreviewTemplate !== previewTemplate) return;
-    const requestId = ++previewRequestId.current;
-    const chatStatus: ("viewer" | "subscriber" | "vip" | "moderator" | "broadcaster")[] | null = simulatedContext === "command"
-      ? [simulatedTier === "everyone" ? "viewer" : simulatedTier as "subscriber" | "vip" | "moderator" | "broadcaster"]
-      : null;
-    renderTextLibraryPreview(channelId, {
-      text: debouncedPreviewTemplate,
-      templateContext: simulatedContext === "command" ? "chat_command" : "event",
-      streamState: simulatedStream,
-      game: simulatedGame[0] ?? null,
-      chatStatus,
-    }).then((result) => {
-      if (previewRequestId.current === requestId) setPreviewResult(result.text);
-    }).catch(() => {
-      // Only the latest request clears a stale result; a superseded request failing
-      // must not blank out a still-current, already-rendered preview.
-      if (previewRequestId.current === requestId) setPreviewResult(null);
-    });
-    return () => {
-      if (previewRequestId.current === requestId) previewRequestId.current += 1;
-    };
-  }, [channelId, data, debouncedPreviewTemplate, previewNow, previewTemplate, simulatedContext, simulatedGame, simulatedStream, simulatedTier]);
-  const previewText = previewTemplate.length === 0 ? "" : previewResult ?? previewTemplate;
+  const previewBlockDependencies = textBlockPreviewDependencies(previewTemplate, data?.blocks ?? []);
+  const previewSourceTexts = [
+    previewTemplate,
+    ...previewBlockDependencies.flatMap((dependency) => dependency.missing ? [] : dependency.variants.flatMap((variant) => variant.texts)),
+  ];
+  const previewVariableNames = new Set(previewSourceTexts.flatMap((text) => templateVariableNames(text)));
+  const previewVariables = (data?.templateVariables ?? []).filter((variable) => previewVariableNames.has(variable.name)).map((variable) => ({
+    name: variable.name,
+    sample: variable.sample,
+  })).sort((left, right) => left.name.localeCompare(right.name));
+  const previewChatStatus: ("viewer" | "subscriber" | "vip" | "moderator" | "broadcaster")[] | null = simulatedContext === "command"
+    ? [simulatedTier === "everyone" ? "viewer" : simulatedTier as "subscriber" | "vip" | "moderator" | "broadcaster"]
+    : null;
+  const previewInput = {
+    text: previewTemplate,
+    templateContext: simulatedContext === "command" ? "chat_command" as const : "event" as const,
+    streamState: simulatedStream,
+    game: simulatedGame[0] ?? null,
+    chatStatus: previewChatStatus,
+  };
+  const preview = useTemplatePreview({
+    inputs: {
+      channelId,
+      ...previewInput,
+      textBlocks: previewBlockDependencies,
+      variables: previewVariables,
+      timeZone: data?.channelSettings.timeZone ?? null,
+      dataConditionValues: data?.dataConditionValues ?? null,
+      now: previewNow,
+    },
+    enabled: data !== null && previewTemplate.length > 0,
+    render: () => renderTextLibraryPreview(channelId, previewInput).then((result) => result.text),
+  });
+  const previewText = previewTemplate.length === 0 ? "" : preview.value ?? previewTemplate;
   const previewOverflow = matchingVariant === null ? null : estimateEmbeddedBlockOverflow(matchingVariant.texts, blockVariants, data?.templateVariables ?? []);
   const nestedVariants = (name: string, visited = new Set<string>()): TextBlockVariant[] => {
     if (visited.has(name)) return [];
@@ -304,8 +304,6 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
 
   const openCreateNow = (): void => {
     editorSwitch.current += 1;
-    previewRequestId.current += 1;
-    setPreviewResult(null);
     const categoryId = data?.categories[0]?.id ?? "";
     const initial = newDraft(categoryId);
     setSelectedName(null);
@@ -320,8 +318,6 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
 
   const closeEditorNow = (): void => {
     editorSwitch.current += 1;
-    previewRequestId.current += 1;
-    setPreviewResult(null);
     setSelectedName(null);
     setDraft(null);
     setBaselineDraft(null);
@@ -336,8 +332,6 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
 
   const selectBlockNow = (block: TextBlock): void => {
     editorSwitch.current += 1;
-    previewRequestId.current += 1;
-    setPreviewResult(null);
     setSelectedName(block.name);
     setDraft(draftFromBlock(block));
     setBaselineDraft(draftFromBlock(block));
@@ -414,8 +408,6 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
   };
 
   const discardDraft = useCallback((): void => {
-    previewRequestId.current += 1;
-    setPreviewResult(null);
     if (revision === null) {
       editorSwitch.current += 1;
       setSelectedName(null);
@@ -491,8 +483,6 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
         return;
       }
       const next = draftFromBlock(latest);
-      previewRequestId.current += 1;
-      setPreviewResult(null);
       setDraft(next);
       setBaselineDraft(next);
       setRevision(latest.revision);
@@ -633,7 +623,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
         language={resolvedLanguage}
         searchLabel={labels.search}
         searchLabelVisible
-        searchPlaceholder={labels.search}
+        searchPlaceholder={labels.searchPlaceholder}
         searchClearLabel={common.clearSearch}
         searchValue={search}
         onSearchChange={setSearch}
@@ -691,7 +681,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
             language={resolvedLanguage}
             searchLabel={labels.search}
             searchLabelVisible
-            searchPlaceholder={labels.search}
+            searchPlaceholder={labels.searchPlaceholder}
             searchClearLabel={common.clearSearch}
             searchValue={search}
             onSearchChange={setSearch}
@@ -702,7 +692,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
               <GameMultiSelect searchGames={searchGames} lookupGames={lookupGames} value={gameFilter} onChange={setGameFilter}
                 messages={{ ...labels.gameMultiSelect, label: labels.gameFilter }} compact />
             </>}
-            create={{ label: labels.addBlock, onClick: openCreate, disabled: pending || createReason !== undefined, ...(createReason === undefined ? {} : { reason: createReason }) }}
+            create={{ label: labels.addBlock, onClick: openCreate, disabled: pending || createReason !== undefined, ...(!canManage || createReason === undefined ? {} : { reason: createReason }) }}
             usage={{ count: data.blocks.length, maximum: TEXT_BLOCK_MAXIMUMS.blocksPerChannel, ...(activeFilters.length === 0 ? {} : { filteredCount: visibleBlocks.length }), copy: { countSuffix: labels.countSuffix, filteredInfix: common.of, filteredSuffix: labels.filteredSuffix, limitInfix: common.of, limitSuffix: labels.limitSuffix, loadedSuffix: common.loaded } }}
             {...(activeFilters.length === 0 ? {} : { activeFilters: activeFilters.join(" · "), activeFiltersLabel: labels.activeFilters, resetLabel: labels.resetFilters, onReset: () => { setSearch(""); setCategoryFilter(""); setGameFilter([]); } })}
           />}
@@ -736,7 +726,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
             <PageHeader
               kind="texts"
               icon={null}
-              title={isCreate ? labels.addBlock : `{text.${draft.name}}`}
+              title={isCreate ? labels.addBlock : `{text.${draft.name || selectedName || ""}}`}
               meta={isCreate ? labels.nameHint : labels.usesCount(blockUsages.length)}
               {...(!canManage ? { lockHint: labels.operatorReason } : {})}
               {...(!isCreate ? { actions: <ActionMenu label={common.moreActions} items={[
@@ -745,7 +735,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
                     onSelect: () => { if (canManage) openDelete(); },
                     disabled: !canManage || pending || blockUsages.length > 0,
                     danger: true,
-                    ...(!canManage ? { description: labels.operatorReason }
+                    ...(!canManage ? { description: labels.deleteOperatorReason }
                       : blockUsages.length > 0 ? { description: labels.deleteBlockedReason(blockUsages.length) }
                         : pending ? { description: common.saving } : {}),
                   },
@@ -909,7 +899,6 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
                 {draft.variants.length >= TEXT_BLOCK_MAXIMUMS.variantsPerBlock ? null : <Button disabled={pending} onClick={() => patchDraft({ ...draft, variants: [...draft.variants.slice(0, -1), newVariant(), draft.variants[draft.variants.length - 1] as TextBlockVariant] })}>{labels.addVariant}</Button>}
               </Section>
               </> : <>
-                <p className="lock-reason lock-reason--with-icon" role="note">{labels.operatorReason}</p>
                 <dl className="text-library__read-only-properties">
                   <div><dt>{labels.name}</dt><dd className="mono">{draft.name}</dd></div>
                   <div><dt>{labels.category}</dt><dd>{categories.find((category) => category.value === draft.categoryId)?.label ?? draft.categoryId}</dd></div>
@@ -980,7 +969,6 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
                     {data.categories.length >= 25 ? <p className="muted">{labels.categoryLimit}</p> : null}
                   </div>
                 </Section> : <>
-                  <p className="lock-reason lock-reason--with-icon" role="note">{labels.operatorReason}</p>
                   <dl className="text-library__read-only-properties">
                     {data.categories.map((category) => <div key={category.id}><dt>{`${labels.categoryName}: ${categoryLabel(category, labels)}`}</dt><dd>{category.customName ?? categoryLabel(category, labels)}</dd></div>)}
                   </dl>
@@ -996,8 +984,14 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
         onCloseDetail={closeEditor}
       />
       <ConfirmDialog opened={confirmingDelete} title={labels.deleteTitle(selectedName ?? "")} description={labels.deleteConsequence(selectedName ?? "")} confirmLabel={labels.deleteConfirm(selectedName ?? "")} cancelLabel={labels.close} onCancel={() => { setConfirmingDelete(false); }} onConfirm={() => { void removeBlock(); }} pending={pending} danger />
-      <Dialog opened={deleteBlockedResult !== null} title={labels.deleteBlockedTitle(deleteBlockedResult?.name ?? "")} onClose={() => { setDeleteBlockedResult(null); }}>
-        <p className="ui-dialog__description">{labels.deleteBlocked}</p>
+      <Dialog
+        opened={deleteBlockedResult !== null}
+        title={deleteBlockedResult !== null && deleteBlockedResult.usages.length === 0
+          ? labels.usageDialogTitle(deleteBlockedResult.name)
+          : labels.deleteBlockedTitle(deleteBlockedResult?.name ?? "")}
+        onClose={() => { setDeleteBlockedResult(null); }}
+      >
+        <p className="ui-dialog__description">{deleteBlockedResult !== null && deleteBlockedResult.usages.length === 0 ? labels.usageDialogDescription : labels.deleteBlocked}</p>
         {deleteBlockedResult === null || deleteBlockedResult.usages.length === 0
           ? <p className="muted">{labels.noUsages}</p>
           : <ul className="text-library__usages">{deleteBlockedResult.usages.map((usage, index) => <li key={`${usage.kind}-${usage.label}-${String(index)}`}><span>{labels.usageKind[usage.kind]}</span><span>{usage.label}</span></li>)}</ul>}

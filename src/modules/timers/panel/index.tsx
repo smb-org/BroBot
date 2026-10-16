@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { refetchModuleQueryData, runModuleQueryWrite, useChannelSettings, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { dashboardCommonTexts } from "../../../dashboard/locale";
 import {
-  Button,
+  ActionMenu,
   ChatPreview,
   ChatTargetField,
   CollectionPage,
@@ -24,11 +24,13 @@ import {
   notify,
   registerDashboardNavigationGuard,
   useDraftGuard,
+  useTemplatePreview,
 } from "../../../dashboard/ui";
 import { formatRelativeTime } from "../../../dashboard/ui/format-relative-time";
 import { formatTimerRunLabel } from "./format-timer-run-label";
 import { Switch as SwitchPrimitive } from "../../../dashboard/ui/primitives/switch";
-import type { ModulePanelProperties } from "../../contract";
+import { templateVariableNames, type ModulePanelProperties } from "../../contract";
+import { textBlockPreviewDependencies } from "../../contracts/text-block-references";
 import { TIMER_MAXIMUM_COUNT, type Timer, type TimerTrigger } from "../contracts";
 import { inputFromDraft, type TimerDraft } from "./draft";
 import { timersTexts } from "./locale";
@@ -97,9 +99,12 @@ const cloneDraft = (draft: TimerDraft): TimerDraft => ({
 const timersPanelDataFrom = (value: unknown): TimersPanelData => {
   if (typeof value === "object" && value !== null && "timers" in value && "sources" in value && "variables" in value &&
       Array.isArray(value.timers) && Array.isArray(value.sources) && Array.isArray(value.variables)) {
-    return value as TimersPanelData;
+    const textBlocks = "textBlocks" in value && Array.isArray(value.textBlocks)
+      ? value.textBlocks as TimersPanelData["textBlocks"]
+      : [];
+    return { ...value, textBlocks } as TimersPanelData;
   }
-  return { timers: [], sources: [], variables: [] };
+  return { timers: [], sources: [], variables: [], textBlocks: [] };
 };
 
 const withTimer = (current: unknown, timer: Timer): TimersPanelData => {
@@ -154,19 +159,38 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
   const [serverConflict, setServerConflict] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Timer | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [previewResult, setPreviewResult] = useState<{ messageText: string; text: string } | null>(null);
-  const [previewRequest, setPreviewRequest] = useState<{ messageText: string; requestId: number } | null>(null);
-  const [debouncedMessage, setDebouncedMessage] = useState("");
   const editorSwitch = useRef(0);
-  const previewRequestId = useRef(0);
   const initialSelectionDone = useRef(false);
   const dirtyRef = useRef(false);
   const [now, setNow] = useState(() => Date.now());
 
   const dirty = draft !== null && (editing === null || (baselineDraft !== null && JSON.stringify(draft) !== JSON.stringify(baselineDraft)));
   const input = draft === null ? null : inputFromDraft(draft);
-  const previewText = draft === null || previewResult?.messageText !== draft.messageText ? null : previewResult.text;
-  const previewBusy = draft !== null && previewRequest?.messageText === draft.messageText;
+  const previewMessage = draft?.messageText ?? "";
+  const previewBlockDependencies = textBlockPreviewDependencies(previewMessage, data?.textBlocks ?? []);
+  const previewVariableNames = new Set([
+    ...templateVariableNames(previewMessage),
+    ...previewBlockDependencies.flatMap((dependency) => dependency.missing ? [] : dependency.variants.flatMap((variant) => variant.texts.flatMap((text) => templateVariableNames(text)))),
+  ]);
+  const previewVariables = (data?.variables ?? []).filter((variable) => previewVariableNames.has(variable.name)).map((variable) => ({
+    name: variable.name,
+    sample: variable.sample,
+    isTextBlock: variable.isTextBlock ?? false,
+  })).sort((left, right) => left.name.localeCompare(right.name));
+  const previewInput = {
+    text: previewMessage,
+    templateContext: "event" as const,
+    streamState: "online" as const,
+    game: null,
+    chatStatus: null,
+  };
+  const preview = useTemplatePreview({
+    inputs: { channelId, ...previewInput, variables: previewVariables, textBlocks: previewBlockDependencies },
+    enabled: draft !== null && previewMessage.trim().length > 0,
+    render: () => previewTimerText(channelId, previewMessage),
+  });
+  const previewText = preview.value ?? previewMessage;
+  const previewBusy = preview.pending;
   const sourceOptions = useMemo(() => (data?.sources ?? []).map((source) => ({
     value: source.id,
     label: source.label[language ?? "de"],
@@ -361,31 +385,6 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
     return () => { window.clearInterval(timer); };
   }, []);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => { setDebouncedMessage(draft?.messageText ?? ""); }, 300);
-    return () => { window.clearTimeout(timer); };
-  }, [draft?.messageText]);
-
-  useEffect(() => {
-    const currentMessage = draft?.messageText ?? "";
-    if (currentMessage.trim().length === 0 || debouncedMessage !== currentMessage) return;
-    const requestId = ++previewRequestId.current;
-    const timer = window.setTimeout(() => {
-      setPreviewRequest({ messageText: debouncedMessage, requestId });
-      previewTimerText(channelId, debouncedMessage).then((text) => {
-        if (previewRequestId.current === requestId) setPreviewResult({ messageText: debouncedMessage, text });
-      }).catch(() => {
-        // Keep the last resolved result; it remains valid for its original message text.
-      }).finally(() => {
-        if (previewRequestId.current === requestId) setPreviewRequest(null);
-      });
-    });
-    return () => {
-      window.clearTimeout(timer);
-      previewRequestId.current += 1;
-    };
-  }, [channelId, debouncedMessage, draft?.messageText]);
-
   const toggle = async (timer: Timer, enabled: boolean): Promise<void> => {
     if (pending || deleteTarget !== null || busyTimerId !== null || dirty) return;
     setBusyTimerId(timer.id);
@@ -462,7 +461,7 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
     searchValue={search}
     onSearchChange={setSearch}
     filtersLabel={labels.title}
-    create={{ label: labels.add, onClick: openCreate, disabled: editorPending || createReason !== undefined, ...(createReason === undefined ? {} : { reason: createReason }) }}
+    create={{ label: labels.add, onClick: openCreate, disabled: editorPending || createReason !== undefined, ...(!canManage || createReason === undefined ? {} : { reason: createReason }) }}
     usage={{
       count: data?.timers.length ?? 0,
       maximum: TIMER_MAXIMUM_COUNT,
@@ -535,14 +534,15 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
           <span>{selectedTimer.enabled ? labels.enabled : labels.disabled}</span>
         </div> })}
         {...(!canManage ? { lockHint: labels.roleLocked } : {})}
-        {...(editing === null ? {} : { overflow: <div className="header-action">
-          <Button variant="subtle" danger="subtle" disabled={!canManage || editorPending || dirty} onClick={() => {
-            if (canManage) { setDeleteTarget(editing); setDeleteError(null); }
-          }}>{labels.delete}</Button>
-          {!canManage ? <span className="lock-reason" role="note">{labels.roleLocked}</span>
-            : dirty ? <span className="lock-reason" role="note">{labels.deleteNeedsSaved}</span>
-              : editorPending ? <span className="lock-reason" role="note">{common.saving}</span> : null}
-        </div> })}
+        {...(editing === null ? {} : { actions: <ActionMenu label={common.moreActions} items={[{
+          label: labels.delete,
+          onSelect: () => { if (canManage) { setDeleteTarget(editing); setDeleteError(null); } },
+          disabled: !canManage || editorPending || dirty,
+          danger: true,
+          ...(!canManage ? { description: labels.deleteOperatorReason }
+            : dirty ? { description: labels.deleteNeedsSaved }
+              : editorPending ? { description: common.saving } : {}),
+        }]} />})}
         {...(canManage ? { save: {
           dirty,
           pending: editorPending,
@@ -586,8 +586,8 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
               </p>
             </div>
             <div className="timer-editor__preview">
-              <ChatPreview label={labels.preview} speaker={labels.previewBot} text={previewText ?? draft.messageText} countLabel={labels.characterCount((previewText ?? draft.messageText).length)} />
-              {previewBusy ? <span className="timer-editor__preview-status" role="status">{common.saving}</span> : null}
+              <ChatPreview label={labels.preview} speaker={labels.previewBot} text={previewText} countLabel={labels.characterCount(previewText.length)} />
+              {previewBusy ? <span className="timer-editor__preview-status" role="status">{labels.previewLoading}</span> : null}
             </div>
           </div>
         </Section>
@@ -646,7 +646,6 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
           />
         </Section>
       </div> : <>
-        <RuleNote>{labels.roleLocked}</RuleNote>
         <dl className="timer-editor__properties">
           <div><dt>{labels.name}</dt><dd>{draft.name}</dd></div>
           <div><dt>{labels.message}</dt><dd><pre>{draft.messageText}</pre></dd></div>

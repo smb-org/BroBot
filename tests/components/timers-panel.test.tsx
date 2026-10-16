@@ -188,7 +188,7 @@ describe("Timers panel", () => {
     fireEvent.change(nameField, { target: { value: "Greeting timer" } });
 
     queryClient.setQueryData<TimersPanelData>(moduleQueryKey("channel-a", "timers", "panel"), {
-      timers: [{ ...timer, name: "Updated elsewhere", revision: 2 }], sources: [], variables: [],
+      timers: [{ ...timer, name: "Updated elsewhere", revision: 2 }], sources: [], variables: [], textBlocks: [],
     });
 
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Updated elsewhere"));
@@ -219,13 +219,13 @@ describe("Timers panel", () => {
       { gcTime: 600_000, staleTime: 600_000 },
     );
     expect(await screen.findByText("Greeting timer")).toBeInTheDocument();
-    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(fetcher).toHaveBeenCalledTimes(5);
 
     view.rerender(<UiProvider>{null}</UiProvider>);
     view.rerender(<UiProvider><TimersPanel channelId="channel-a" language="en" /></UiProvider>);
 
     expect(screen.getByText("Greeting timer")).toBeInTheDocument();
-    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(fetcher).toHaveBeenCalledTimes(5);
   });
 
   it("keeps a committed timer revision when the post-save refresh fails and offers retry", async () => {
@@ -340,7 +340,7 @@ describe("Timers panel", () => {
     renderWithQuery(<UiProvider><TimersPanel channelId="channel-a" language="en" canManage={false} /></UiProvider>);
 
     expect(toolbarButton("Create timer")).toBeDisabled();
-    expect(document.querySelector(".list-toolbar__reason")).toHaveTextContent("Only broadcasters and managers can edit timers.");
+    expect(document.querySelector(".list-toolbar__reason")).not.toBeInTheDocument();
   });
 
   it("shows timer field errors after an invalid create attempt", async () => {
@@ -490,6 +490,55 @@ describe("Timers panel", () => {
     expect(previewCalls).toBe(1);
   });
 
+  it("refreshes a timer preview when a referenced nested text block changes", async () => {
+    const timer: Timer = {
+      id: "timer-dependency-preview", name: "Dependency preview", enabled: true, messageText: "{text.welcome}", chatTarget: "source_only",
+      trigger: { type: "interval", live: { minutes: 30 } }, revision: 1, nextRunAt: null, nextRunState: null,
+      lastRunAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
+    };
+    const welcome = {
+      name: "welcome", revision: 1, games: [],
+      variants: [{ id: "default", conditions: {}, texts: ["Hello {text.greeting}"] }],
+    };
+    const greeting = { name: "greeting", revision: 1, games: [], variants: [{ id: "default", conditions: {}, texts: ["old"] }] };
+    let previewCalls = 0;
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/template-preview")) {
+        previewCalls += 1;
+        return Promise.resolve(jsonResponse({ text: previewCalls === 1 ? "Hello old" : "Hello refreshed", diagnostics: [] }));
+      }
+      if (url.pathname.endsWith("/timers")) return Promise.resolve(jsonResponse({ timers: [timer] }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({
+        timeZone: "UTC", revision: 1, location: null, locationRevision: 1,
+        defaultChatTarget: "source_only", defaultChatTargetRevision: 1,
+      }));
+      if (url.pathname.endsWith("/event-time-sources")) return Promise.resolve(jsonResponse({ sources: [] }));
+      if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
+      if (url.pathname.endsWith("/modules/text_library/library")) return Promise.resolve(jsonResponse({ blocks: [welcome, greeting] }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const { queryClient } = renderWithQuery(<UiProvider><TimersPanel channelId="channel-a" language="en" /></UiProvider>);
+    await screen.findByRole("textbox", { name: "Message" });
+    const preview = document.querySelector(".timer-editor__preview");
+    if (!(preview instanceof HTMLElement)) throw new Error("The timer preview is missing.");
+    await within(preview).findByText("Hello old");
+    expect(previewCalls).toBe(1);
+
+    queryClient.setQueryData<TimersPanelData>(moduleQueryKey("channel-a", "timers", "panel"), {
+      timers: [timer],
+      sources: [],
+      variables: [],
+      textBlocks: [welcome, { ...greeting, revision: 2, variants: [{ id: "default", conditions: {}, texts: ["refreshed"] }] }],
+    });
+
+    await within(preview).findByText("Hello refreshed");
+    expect(previewCalls).toBe(2);
+  });
+
   it("shows timer details as a read-only property list for operators", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>((input) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
@@ -509,6 +558,12 @@ describe("Timers panel", () => {
     await waitFor(() => expect(document.querySelector(".timer-editor__properties")).toBeInTheDocument());
     expect(document.querySelector(".timer-editor__properties")).toHaveTextContent("Hello there!");
     expect(document.querySelector(".page-header__lock")).toHaveTextContent("Only broadcasters and managers can edit timers.");
+    expect(document.querySelectorAll(".page-header__lock")).toHaveLength(1);
+    expect(document.querySelector(".timer-editor .lock-reason")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    const deleteItem = screen.getByRole("menuitem", { name: "Delete" });
+    expect(deleteItem).toHaveAttribute("aria-disabled", "true");
+    expect(deleteItem).toHaveAccessibleDescription("Broadcasters and managers only");
   });
 
   it("summarises interval parts and the next run state per language", () => {

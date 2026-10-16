@@ -213,18 +213,12 @@ test("operators see disabled timer and text block delete actions with reasons", 
   for (const panel of ["text_library", "timers"] as const) {
     await gotoPanel(page, panel, true);
     await openFirstRow(page, panel);
-    const menu = panel === "text_library"
-      ? page.getByRole("menu")
-      : page.locator(".page-header__overflow");
-    if (panel === "text_library") await page.getByRole("button", { name: "More actions" }).click();
-    else await page.locator(".page-header__overflow-trigger").click();
-    const deleteAction = panel === "text_library"
-      ? menu.getByRole("menuitem", { name: "Delete", exact: true })
-      : menu.getByRole("button", { name: "Delete", exact: true });
+    const menu = page.getByRole("menu");
+    await page.getByRole("button", { name: "More actions" }).click();
+    const deleteAction = menu.getByRole("menuitem", { name: "Delete", exact: true });
     await expect(deleteAction).toBeVisible();
     await expect(deleteAction).toBeDisabled();
-    if (panel === "text_library") await expect(menu.locator(".ui-action-menu__item-description")).toContainText("Only broadcasters and managers");
-    else await expect(menu.locator(".lock-reason")).toBeVisible();
+    await expect(menu.locator(".ui-action-menu__item-description")).toHaveText("Broadcasters and managers only");
     await page.goto("about:blank");
   }
 });
