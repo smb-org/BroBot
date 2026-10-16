@@ -1,5 +1,5 @@
 export type ChatVoteResultTextReference = {
-  source_kind: "template" | "running_vote" | "replay_vote";
+  source_kind: "template" | "running_vote" | "pending_vote" | "replay_vote";
   source_id: string;
   item_name: string | null;
   result_text: string;
@@ -7,6 +7,10 @@ export type ChatVoteResultTextReference = {
 
 const currentVoteResultTextWhere = (alias: string): string => `(
   ${alias}.status = 'open'
+  OR (
+    ${alias}.status = 'closed'
+    AND ${alias}.result_delivery_pending = 1
+  )
   OR (
     ${alias}.status = 'closed'
     AND NOT EXISTS (
@@ -36,7 +40,9 @@ export const CHAT_VOTE_RESULT_TEXT_REFERENCE_SOURCE_SQL = `
    WHERE template.result_text IS NOT NULL
   UNION ALL
   SELECT vote.channel_id,
-         CASE WHEN vote.status = 'open' THEN 'running_vote' ELSE 'replay_vote' END AS source_kind,
+         CASE WHEN vote.status = 'open' THEN 'running_vote'
+              WHEN vote.result_delivery_pending = 1 THEN 'pending_vote'
+              ELSE 'replay_vote' END AS source_kind,
          vote.poll_id AS source_id,
          vote.title AS item_name, vote.result_text
     FROM chat_votes AS vote
@@ -60,7 +66,7 @@ export const findChatVoteResultTextReferences = async (
     `SELECT result_reference.source_kind, result_reference.source_id, result_reference.item_name, result_reference.result_text
        FROM (${CHAT_VOTE_RESULT_TEXT_REFERENCE_SOURCE_SQL}) AS result_reference
       WHERE result_reference.channel_id = ?${tokenPredicate}
-      ORDER BY CASE result_reference.source_kind WHEN 'template' THEN 0 WHEN 'running_vote' THEN 1 ELSE 2 END,
+      ORDER BY CASE result_reference.source_kind WHEN 'template' THEN 0 WHEN 'running_vote' THEN 1 WHEN 'pending_vote' THEN 2 ELSE 3 END,
                result_reference.item_name, result_reference.source_id`,
   ).bind(...values).all<ChatVoteResultTextReference>();
   return rows.results;

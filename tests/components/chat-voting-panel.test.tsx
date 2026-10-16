@@ -247,11 +247,11 @@ describe("saved chat voting collection", () => {
     expect(JSON.parse(secondSave as string)).toMatchObject({ title: "Vote B draft", revision: 1 });
   });
 
-  it("shows saved vote properties without edit controls to operators", async () => {
+  it("shows saved vote properties without repeating the page permission reason to operators", async () => {
     mount({ canManage: false });
     expect(await screen.findByRole("link", { name: /Abendessen/u })).toBeInTheDocument();
     const inspector = screen.getByRole("region", { name: "Frage" });
-    expect(within(inspector).getByRole("note")).toHaveTextContent("Nur Broadcaster und Verwalter dürfen Abstimmungen bearbeiten.");
+    expect(within(inspector).queryByRole("note")).not.toBeInTheDocument();
     expect(within(inspector).getByText("Pizza, Burger")).toBeInTheDocument();
     expect(within(inspector).getByText("Danke fürs Abstimmen! Ergebnis: {vote.result}")).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Frage" })).not.toBeInTheDocument();
@@ -259,19 +259,20 @@ describe("saved chat voting collection", () => {
     expect(screen.queryByRole("button", { name: "Abstimmung anlegen" })).toBeDisabled();
   });
 
-  it("keeps the delete action visible and explains why operators cannot use it", async () => {
+  it("keeps the delete action visible without repeating the page permission reason", async () => {
     mount({ canManage: false });
     await screen.findByRole("link", { name: /Abendessen/u });
     fireEvent.click(screen.getByRole("button", { name: "Weitere Aktionen" }));
 
     const deleteItem = await screen.findByRole("menuitem", { name: /Abstimmung löschen/u });
     expect(deleteItem).toHaveAttribute("aria-disabled", "true");
-    expect(deleteItem).toHaveTextContent("Nur Broadcaster und Verwalter dürfen Abstimmungen bearbeiten.");
+    expect(deleteItem).not.toHaveTextContent("Nur Broadcaster und Verwalter dürfen Abstimmungen bearbeiten.");
   });
 
   it("accepts the saved vote edit response after an explicit save", async () => {
     const { requests } = mount();
     const resultText = await screen.findByRole("textbox", { name: "Ergebnistext" });
+    expect(screen.getAllByText("Ergebnistext", { exact: true })).toHaveLength(1);
     expect(resultText).toHaveValue("Danke fürs Abstimmen! Ergebnis: {vote.result}");
     expect(screen.getAllByText("Chat-Vorschau", { exact: true })).toHaveLength(2);
 

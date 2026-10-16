@@ -138,6 +138,51 @@ describe("chat voting repository mutation guards", () => {
     }
   });
 
+  it("rejects a vote start when its saved result text template revision changed after it was read", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "fictional-channel");
+      await setChatVotingEnabled(database, true);
+      const repository = createChatVotingRepository(database as unknown as D1Database);
+      await repository.templates.createTemplate(
+        "fictional-channel",
+        "template-race",
+        { shortcut: "essen", title: "Dinner", resultText: "Result: {var.score}", labels: ["Yes", "No"], freeTextMode: null, durationSeconds: 120 },
+        "2026-10-04T10:00:00.000Z",
+        { sql: "", values: [] },
+      );
+      const vote: ChatVoteDraft = {
+        id: "vote-template-race",
+        channelId: "fictional-channel",
+        kind: "yes_no",
+        optionCount: 2,
+        labels: ["Yes", "No"],
+        title: "Dinner",
+        resultText: "Result: {var.score}",
+        openedAt: "2026-10-04T10:00:00.000Z",
+        closesAt: "2026-10-04T10:02:00.000Z",
+        requestedDurationSeconds: 120,
+        closeReason: "timer",
+        status: "open",
+      };
+
+      await database.prepare(
+        "UPDATE chat_vote_templates SET result_text = ?, revision = revision + 1 WHERE channel_id = ? AND id = ?",
+      ).bind("Result: {var.points}", "fictional-channel", "template-race").run();
+      const insertAtTemplateRevision = repository.insertOpen(vote, undefined, {
+        id: "template-race",
+        revision: 1,
+        resultText: "Result: {var.score}",
+      });
+
+      await expect(insertAtTemplateRevision).resolves.toBe(false);
+      await expect(database.prepare("SELECT poll_id FROM chat_votes WHERE channel_id = ? AND poll_id = ?")
+        .bind("fictional-channel", vote.id).first()).resolves.toBeNull();
+    } finally {
+      database.close();
+    }
+  });
+
   it("returns the PATCH acknowledgement from its UPDATE batch during a concurrent write", async () => {
     const database = new TestD1Database();
     try {

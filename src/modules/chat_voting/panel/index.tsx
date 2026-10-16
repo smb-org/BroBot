@@ -175,7 +175,7 @@ const ChatVotingCollection = ({ channelId, language = "de", canManage = true, on
   const selectedTemplate = newTemplateDraft ?? selectedSnapshot ?? templates.find((template) => template.id === selectedId) ?? null;
   const listStatus = templateState === null ? templatesQuery.isPending ? "loading" : "error"
     : visibleTemplates.length === 0 ? "empty" : "success";
-  const createDisabledReason = !canManage ? labels.operatorLocked : count >= CHAT_VOTE_TEMPLATE_MAXIMUM ? labels.templateLimit : undefined;
+  const createDisabledReason = canManage && count >= CHAT_VOTE_TEMPLATE_MAXIMUM ? labels.templateLimit : undefined;
 
   const toolbar = <div className="chat-voting-collection__toolbar">
     <h3>{labels.saved}</h3>

@@ -7,6 +7,7 @@ import { prepareModuleOverlayRealtimeMessage } from "../../src/worker/module-ove
 import type { ChatVoteDraft } from "../../src/modules/chat_voting/contracts";
 import { createChatVotingRepository } from "../../src/modules/chat_voting/repository";
 import { announceChatVoteStartFromAlarm, closeChatVoteFromAlarm, requestChatVoteClose, requestChatVoteExtension } from "../../src/modules/chat_voting/service";
+import { findChatVoteResultTextReferences } from "../../src/modules/contracts/chat-vote-result-text-references";
 import { insertChannel } from "./fixtures";
 import { createReadBarrierDatabase, TestD1Database } from "./test-d1";
 
@@ -36,6 +37,7 @@ describe("chat voting close service", () => {
       requestedDurationSeconds: null,
       closeReason: "limit",
       status: "open",
+      ...(resultText === undefined ? {} : { resultText }),
     };
     await repository.insertOpen(vote);
     return repository;
@@ -138,6 +140,54 @@ describe("chat voting close service", () => {
 
     expect(context.schedule).toHaveBeenCalledWith("fictional-poll", Date.parse(closesAt), 4);
     expect(close).not.toHaveBeenCalled();
+  });
+
+  it("keeps a closed vote in result references while its alarm retries delivery beside a newer open vote", async () => {
+    const repository = await seedOpenVote(true, "First dinner", "First result: {var.score}");
+    const firstOrder: string[] = [];
+    const failedDelivery = createAlarmContext(firstOrder, {
+      sendChat: () => Promise.resolve({ sent: false, reason: "output_limit", retryable: true }),
+    });
+
+    await expect(closeChatVoteFromAlarm(failedDelivery.context, repository, "fictional-poll"))
+      .rejects.toThrow("waiting for the automated output limit");
+    await expect(repository.byId("fictional-channel", "fictional-poll")).resolves.toMatchObject({
+      status: "closed",
+      resultDeliveryPending: true,
+    });
+
+    await repository.insertOpen({
+      id: "later-poll",
+      channelId: "fictional-channel",
+      kind: "yes_no",
+      optionCount: 2,
+      labels: ["Yes", "No"],
+      title: "Later dinner",
+      resultText: "Later result: {var.points}",
+      openedAt: "2026-10-16T10:00:00.000Z",
+      closesAt: "2026-10-16T10:02:00.000Z",
+      requestedDurationSeconds: 120,
+      closeReason: "timer",
+      status: "open",
+    });
+
+    const references = await findChatVoteResultTextReferences(database as unknown as D1Database, "fictional-channel");
+    expect(references.map(({ source_id }) => source_id)).toEqual(["later-poll", "fictional-poll"]);
+    expect(references.find(({ source_id }) => source_id === "fictional-poll")).toMatchObject({
+      source_kind: "pending_vote",
+      result_text: "First result: {var.score}",
+    });
+
+    const successfulRetry = createAlarmContext([], {
+      sendChat: () => Promise.resolve({ sent: true, reason: null, retryable: false }),
+    });
+    await closeChatVoteFromAlarm(successfulRetry.context, repository, "fictional-poll");
+    await expect(repository.byId("fictional-channel", "fictional-poll")).resolves.toMatchObject({
+      status: "closed",
+      resultDeliveryPending: false,
+    });
+    await expect(findChatVoteResultTextReferences(database as unknown as D1Database, "fictional-channel"))
+      .resolves.toHaveLength(1);
   });
 
   it("throws when a lost alarm claim cannot reread a concurrent manual close", async () => {

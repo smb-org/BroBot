@@ -37,7 +37,7 @@ export interface EditorShellProps {
   sections: readonly EditorSection[];
   section?: string;
   onSectionChange?: (id: string) => void;
-  readOnly?: { reason: string; content: ReactNode };
+  readOnly?: { reason?: string; content: ReactNode };
   dirty: boolean;
   pending?: boolean;
   saved?: boolean;
@@ -369,7 +369,7 @@ export function EditorShell({
     return (
       <section data-ui="" className={`ui-editor-shell ui-editor-shell--readonly${className === undefined ? "" : ` ${className}`}`} aria-label={ariaLabel} onKeyDown={handleEditorKeyDown}>
         {showTitle ? <InspectorHeading level="h3" title={title} {...(identifier === undefined ? {} : { identifier })} {...(meta === undefined ? {} : { meta })} {...(closeAction === undefined ? {} : { action: closeAction })} /> : null}
-        <div className="ui-editor-shell__readonly-reason"><Icon name="lock" size={16} /><span>{readOnly.reason}</span></div>
+        {readOnly.reason === undefined ? null : <div className="ui-editor-shell__readonly-reason"><Icon name="lock" size={16} /><span>{readOnly.reason}</span></div>}
         {readOnly.content}
       </section>
     );

@@ -77,6 +77,7 @@ const repositoryWith = (overrides: Partial<ChatVotingRepository> = {}): ChatVoti
   extendClose: vi.fn(() => Promise.resolve(true)),
   rollbackCloseExtension: vi.fn(() => Promise.resolve(false)),
   finish: vi.fn(() => Promise.resolve(true)),
+  completeResultDelivery: vi.fn(() => Promise.resolve(true)),
   templates: templateRepositoryWith(),
   ...overrides,
 });
@@ -143,7 +144,11 @@ describe("chat voting event service", () => {
 
     expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({
       kind: "options", labels: ["Pizza", "Burger"], title: "Dinner", resultText: "Danke {vote.result}", requestedDurationSeconds: 300,
-    }), undefined);
+    }), undefined, {
+      id: savedTemplate.id,
+      revision: savedTemplate.revision,
+      resultText: savedTemplate.resultText ?? "{vote.result}",
+    });
     const inserted = insertOpen.mock.calls[0]?.[0];
     expect(markTemplateUsed).toHaveBeenCalledWith("fictional-channel", "saved-template", inserted?.openedAt);
     const [action] = result.actions;
@@ -197,7 +202,11 @@ describe("chat voting event service", () => {
     await processChatVotingMessage(eventWithText("!vote yesno Pizza tonight?", ["moderator"]), repository, context);
 
     expect(aliasLookup).toHaveBeenCalledWith("fictional-channel", "yesno");
-    expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({ title: "Pizza tonight?", labels: ["Pizza", "Burger"] }), undefined);
+    expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({ title: "Pizza tonight?", labels: ["Pizza", "Burger"] }), undefined, {
+      id: savedTemplate.id,
+      revision: savedTemplate.revision,
+      resultText: savedTemplate.resultText ?? "{vote.result}",
+    });
     expect(markTemplateUsed).toHaveBeenCalledOnce();
   });
 

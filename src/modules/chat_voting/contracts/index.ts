@@ -80,6 +80,7 @@ export interface ChatVote {
   moreTerms?: number | null;
   closingAt?: string | null;
   deadlineRevision?: number;
+  resultDeliveryPending?: boolean;
 }
 
 export interface ChatVoteDraft extends Omit<ChatVote, "status" | "closedAt" | "counts" | "voterCount"> {

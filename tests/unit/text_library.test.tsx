@@ -584,7 +584,7 @@ describe("text library", () => {
     ]);
   });
 
-  it("tracks and rewrites text block references in saved, running, and replayable vote result text", async () => {
+  it("tracks and rewrites saved, running, retrying, and replayable vote result text", async () => {
     const created = await createBlock("answer", [variant("default", "A reusable answer")]);
     if (!created.ok) throw new Error("Could not create the saved vote result test block.");
     const now = new Date(NOW).toISOString();
@@ -600,15 +600,16 @@ describe("text library", () => {
     ).bind(CHANNEL_ID, now, new Date(NOW + 120_000).toISOString()).run();
     await database.prepare(
       `INSERT INTO chat_votes
-        (channel_id, poll_id, kind, option_count, labels_json, status, opened_at, closes_at, closed_at, close_reason, counts_json, voter_count, title, result_text)
+        (channel_id, poll_id, kind, option_count, labels_json, status, opened_at, closes_at, closed_at, close_reason, counts_json, voter_count, title, result_text, result_delivery_pending)
        VALUES (?, 'poll-closed', 'yes_no', 2, '["Yes","No"]', 'closed', ?, ?, ?, 'timer', '[1,0]', 1,
-         'Closed vote', 'Closed: {text.answer}')`,
+         'Closed vote', 'Closed: {text.answer}', 1)`,
     ).bind(CHANNEL_ID, new Date(NOW - 60_000).toISOString(), now, now).run();
     const sources = await chatVotingModule.templateUsageSources?.(database as unknown as D1Database, CHANNEL_ID) ?? [];
     const snapshot = await service.list(CHANNEL_ID, sources);
     expect(snapshot.usages.answer).toEqual([
       { kind: "event", label: "chat_voting.Dinner vote" },
       { kind: "event", label: "chat_voting.Running vote" },
+      { kind: "event", label: "chat_voting.Closed vote" },
     ]);
 
     const result = await repository.rename({
@@ -628,7 +629,7 @@ describe("text library", () => {
     expect(await database.prepare("SELECT result_text FROM chat_votes WHERE poll_id = 'poll-open'").first())
       .toEqual({ result_text: "Running: {text.response}" });
     expect(await database.prepare("SELECT result_text FROM chat_votes WHERE poll_id = 'poll-closed'").first())
-      .toEqual({ result_text: "Closed: {text.answer}" });
+      .toEqual({ result_text: "Closed: {text.response}" });
 
     if (!result.ok) throw new Error("Could not rename the referenced text block.");
     await database.prepare(
@@ -637,6 +638,7 @@ describe("text library", () => {
     const replaySources = await chatVotingModule.templateUsageSources?.(database as unknown as D1Database, CHANNEL_ID) ?? [];
     expect(replaySources).toEqual([
       { text: "Result: {text.response}", kind: "event", label: "chat_voting.Dinner vote" },
+      { text: "Closed: {text.response}", kind: "event", label: "chat_voting.Closed vote" },
       { text: "Running: {text.response}", kind: "event", label: "chat_voting.Running vote" },
     ]);
     const replaySnapshot = await service.list(CHANNEL_ID, replaySources);
@@ -655,7 +657,38 @@ describe("text library", () => {
     expect(await database.prepare("SELECT result_text FROM chat_votes WHERE poll_id = 'poll-open'").first())
       .toEqual({ result_text: "Running: {text.outcome}" });
     expect(await database.prepare("SELECT result_text FROM chat_votes WHERE poll_id = 'poll-closed'").first())
-      .toEqual({ result_text: "Closed: {text.answer}" });
+      .toEqual({ result_text: "Closed: {text.outcome}" });
+  });
+
+  it("blocks deleting a text block used by a closed vote whose result alarm is retrying", async () => {
+    const created = await createBlock("answer", [variant("default", "A reusable answer")]);
+    if (!created.ok) throw new Error("Could not create the pending result test block.");
+    const now = new Date(NOW).toISOString();
+    await database.prepare(
+      `INSERT INTO chat_votes
+        (channel_id, poll_id, kind, option_count, labels_json, status, opened_at, closes_at, closed_at, close_reason, counts_json, voter_count, title, result_text, result_delivery_pending)
+       VALUES (?, 'poll-pending-result', 'yes_no', 2, '["Yes","No"]', 'closed', ?, ?, ?, 'timer', '[1,0]', 1,
+         'Pending result', 'Result: {text.answer}', 1)`,
+    ).bind(CHANNEL_ID, new Date(NOW - 120_000).toISOString(), new Date(NOW - 60_000).toISOString(), now).run();
+    await database.prepare(
+      `INSERT INTO chat_votes
+        (channel_id, poll_id, kind, option_count, labels_json, status, opened_at, closes_at, close_reason, title, result_text)
+       VALUES (?, 'poll-newer-open', 'yes_no', 2, '["Yes","No"]', 'open', ?, ?, 'timer', 'Newer vote', '{vote.result}')`,
+    ).bind(CHANNEL_ID, now, new Date(NOW + 120_000).toISOString()).run();
+    const sources = await chatVotingModule.templateUsageSources?.(database as unknown as D1Database, CHANNEL_ID) ?? [];
+    const snapshot = await service.list(CHANNEL_ID, sources);
+    expect(snapshot.usages.answer).toEqual([{ kind: "event", label: "chat_voting.Pending result" }]);
+
+    const result = await repository.delete(
+      CHANNEL_ID,
+      "answer",
+      created.block.revision,
+      snapshot.settings.graphRevision,
+      ACTOR,
+      now,
+    );
+
+    expect(result).toMatchObject({ ok: false, reason: "in_use" });
   });
 
   it("blocks deleting a text block saved into a vote after the usage scan", async () => {

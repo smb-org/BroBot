@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import type { AuditAction } from "../../contracts/values";
 import type { BallotSnapshot, ModuleRouteEnvironment } from "../contract";
 import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, CHAT_VOTE_TEMPLATE_MAXIMUM, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingPresetForKind, chatVotingSettingsSchema, chatVotingStartAnnouncementAlarmKey } from "./contracts";
-import type { ChatVote, ChatVotePreset, ChatVoteTemplateDraft, ChatVotingKind } from "./contracts";
+import type { ChatVote, ChatVotePreset, ChatVoteTemplate, ChatVoteTemplateDraft, ChatVotingKind } from "./contracts";
 import { createChatVotingRepository } from "./repository";
 import { requestChatVoteClose, requestChatVoteExtension, startChatVote } from "./service";
 import { templateTextLength } from "../../contracts/template-text-length";
@@ -230,7 +230,7 @@ chatVotingRoutes.post("/start", async (context) => {
     return context.json({ error: "chat_voting_request_invalid" }, 400);
   }
   let repository: ReturnType<typeof createChatVotingRepository> | null = null;
-  let templateToMarkUsed: string | null = null;
+  let templateToMarkUsed: ChatVoteTemplate | null = null;
   let startBody = body;
   if (typeof body.templateId === "string") {
     repository = createChatVotingRepository(context.env.DB);
@@ -239,7 +239,7 @@ chatVotingRoutes.post("/start", async (context) => {
     const problem = templateStartProblem(template);
     if (problem !== null) return context.json({ error: "chat_vote_template_invalid", problem }, 409);
     startBody = chatVoteTemplateConfiguration(template);
-    templateToMarkUsed = template.id;
+    templateToMarkUsed = template;
   }
   let kind: ChatVotingKind;
   const requestedKind = startBody.kind ?? startBody.voteKind;
@@ -298,7 +298,14 @@ chatVotingRoutes.post("/start", async (context) => {
       optionCount: optionCount as number,
       durationSeconds: durationSeconds as number,
       title,
-      ...(templateToMarkUsed === null || typeof startBody.resultText !== "string" ? {} : { resultText: startBody.resultText }),
+      ...(templateToMarkUsed === null ? {} : {
+        resultText: templateToMarkUsed.resultText ?? "{vote.result}",
+        resultTextTemplate: {
+          id: templateToMarkUsed.id,
+          revision: templateToMarkUsed.revision,
+          resultText: templateToMarkUsed.resultText ?? "{vote.result}",
+        },
+      }),
       ...(voteLabels === undefined ? {} : { labels: voteLabels }),
       ...(kind === "free_text" ? { textMode: textMode ?? "first_word", blockedTerms } : {}),
       settings,
@@ -317,7 +324,7 @@ chatVotingRoutes.post("/start", async (context) => {
   if (result.status === "busy") return context.json({ error: "chat_voting_busy" }, 409);
   if (templateToMarkUsed !== null) {
     try {
-      await repository.templates.markTemplateUsed(channelId, templateToMarkUsed, result.vote.openedAt);
+      await repository.templates.markTemplateUsed(channelId, templateToMarkUsed.id, result.vote.openedAt);
     } catch {
       // Usage ordering is secondary to the already opened vote.
     }

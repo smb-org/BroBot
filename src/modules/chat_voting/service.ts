@@ -3,7 +3,7 @@ import type { ModuleLanguage, ModuleAlarmContext } from "../contract";
 import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_BALLOT_RETENTION_MS, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, CHAT_VOTING_TITLE_MAX_LENGTH, DEFAULT_CHAT_VOTING_SETTINGS, DEFAULT_CHAT_VOTING_START_TEXT, DEFAULT_CHAT_VOTING_START_TEXT_EN, chatVotingPresetForKind, chatVotingSettingsSchema, chatVotingStartAnnouncementAlarmKey, chatVotingStartAnnouncementPollId } from "./contracts";
 import type { ChatVote, ChatVoteDraft, ChatVotePreset, ChatVoteTemplate, ChatVotingKind, ChatVotingSettings, ChatVotingTextMode } from "./contracts";
 import { chatVoteTemplateConfiguration, configuredLabels, formatFreeTextVoteResult, formatVoteOptions, formatVoteResult, labelsForVote, normalizeBlockedVoteTerm, normalizeFreeTextVote, normalizeFreeTextVoteForMatching, normalizeVoteTitle, parseVoteCommand, templateStartProblem, voteChoiceFromMessage, voteCloseDeadline, voteLabelLength } from "./domain";
-import type { ChatVotingRepository } from "./repository";
+import type { ChatVoteResultTextTemplateSnapshot, ChatVotingRepository } from "./repository";
 import type { VoteCommand } from "./domain";
 import { chatVotingChatText, chatVotingDurationText, DEFAULT_CHAT_VOTING_START_DURATION_SUFFIX, LEGACY_CHAT_VOTING_START_TEXT, LEGACY_CHAT_VOTING_START_TEXT_EN } from "./contracts/chat-defaults";
 import { createChatVotingRepository } from "./repository";
@@ -16,6 +16,7 @@ export interface StartChatVoteInput {
   labels?: readonly string[];
   title?: string | null;
   resultText?: string;
+  resultTextTemplate?: ChatVoteResultTextTemplateSnapshot;
   textMode?: ChatVotingTextMode;
   blockedTerms?: readonly string[] | null;
   settings: ChatVotingSettings;
@@ -101,7 +102,9 @@ export const startChatVote = async (
 
   let inserted = false;
   try {
-    inserted = await repository.insertOpen(vote, input.authorization);
+    inserted = input.resultTextTemplate === undefined
+      ? await repository.insertOpen(vote, input.authorization)
+      : await repository.insertOpen(vote, input.authorization, input.resultTextTemplate);
     if (!inserted) {
       await ballots.close(vote.id);
       await ballots.acknowledgeClosed?.(vote.id);
@@ -399,6 +402,13 @@ export const processChatVotingMessage = async (
         ...(startCommand.labels === undefined ? {} : { labels: startCommand.labels }),
         title: startCommand.title,
         ...(startCommand.resultText === undefined ? {} : { resultText: startCommand.resultText }),
+        ...(templateToMarkUsed === null ? {} : {
+          resultTextTemplate: {
+            id: templateToMarkUsed.id,
+            revision: templateToMarkUsed.revision,
+            resultText: templateToMarkUsed.resultText ?? "{vote.result}",
+          },
+        }),
         ...(startCommand.textMode === undefined ? {} : { textMode: startCommand.textMode }),
         ...(startCommand.voteKind === "free_text" ? { blockedTerms } : {}),
         settings: event.settings,
@@ -678,6 +688,10 @@ export const closeChatVoteFromAlarm = async (
     ? { counts: [...(vote.counts ?? [])], revision: 0, terms: [...(vote.textResults ?? [])], more: vote.moreTerms ?? 0 }
     : { counts: [...(vote.counts ?? Array.from({ length: vote.optionCount }, () => 0))], revision: 0 };
 
+  const settings = await alarmSettings(context);
+  const resultTextTemplate = vote.resultText ?? settings.resultText;
+  const resultDeliveryPending = settings.announceResult && resultTextTemplate.trim().length > 0;
+
   if (vote.status !== "closed") {
     await repository.finish(
       context.channelId,
@@ -688,6 +702,7 @@ export const closeChatVoteFromAlarm = async (
       snapshot.terms ?? null,
       snapshot.more ?? 0,
       snapshot.termFilterReady ?? vote.termFilterReady ?? false,
+      resultDeliveryPending,
     );
   }
   const closedVote = await repository.byId(context.channelId, pollId);
@@ -715,7 +730,6 @@ export const closeChatVoteFromAlarm = async (
     deadlineRevision: closedVote.deadlineRevision ?? 0,
   });
 
-  const settings = await alarmSettings(context);
   if (settings.announceResult) {
     const language = await context.channelLanguage();
     const result = closedVote.kind === "free_text"
@@ -747,6 +761,7 @@ export const closeChatVoteFromAlarm = async (
     }
   }
 
+  await repository.completeResultDelivery(context.channelId, pollId);
   await context.ballots.acknowledgeClosed?.(pollId);
   await context.storage.delete(storageKey);
 };

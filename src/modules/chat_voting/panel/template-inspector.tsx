@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { ActionMenu, Button, ChatPreview, ConfirmDialog, Field, InspectorSection, PageHeader, RuleNote, SaveStatus, SegmentChoice, SwitchSection, TemplateTextField, UnitInput, panelTemplateOptions, registeredModuleTemplateGroup, registerDashboardNavigationGuard, useDraft, useDraftGuard } from "../../../dashboard/ui";
+import { ActionMenu, Button, ChatPreview, ConfirmDialog, Field, InspectorSection, PageHeader, SaveStatus, SegmentChoice, SwitchSection, TemplateTextField, UnitInput, panelTemplateOptions, registeredModuleTemplateGroup, registerDashboardNavigationGuard, useDraft, useDraftGuard } from "../../../dashboard/ui";
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient } from "../../../dashboard/data";
 import { useModuleQuery } from "../../../dashboard/data";
 import { isEventTemplateVariableAvailable } from "../../../contracts/event-template-variables";
@@ -346,7 +346,7 @@ export function ChatVoteTemplateInspector({
         /> } : {})}
         {...(!isNew ? { actions: <ActionMenu
           label={common.moreActions}
-          items={[{ label: labels.delete, danger: canManageContent, disabled: !canManageContent, ...(!canManageContent ? { description: labels.operatorLocked } : {}), onSelect: () => {
+          items={[{ label: labels.delete, danger: canManageContent, disabled: !canManageContent, onSelect: () => {
             draftGuard.guardSwitch(() => { setDeleteError(undefined); setDeleteOpen(true); });
           } }]}
         /> } : {})}
@@ -482,7 +482,7 @@ export function ChatVoteTemplateInspector({
         </div>
       </InspectorSection>
 
-      <InspectorSection title={resultTextCopy.label}>
+      <div className="chat-voting-editor__result-text">
         <TemplateTextField
           label={resultTextCopy.label}
           hint={resultTextCopy.hint}
@@ -499,7 +499,7 @@ export function ChatVoteTemplateInspector({
           text={previewResult}
           countLabel={labels.previewCountLabel(voteLabelLength(previewResult))}
         />
-      </InspectorSection>
+      </div>
 
       <InspectorSection title={labels.shortcut}>
         <Field
@@ -517,7 +517,6 @@ export function ChatVoteTemplateInspector({
         />
       </InspectorSection>
       </> : <>
-        <RuleNote>{labels.operatorLocked}</RuleNote>
         <dl className="properties chat-voting-template-inspector__properties">
           <div><dt>{labels.question}</dt><dd>{template.title || labels.untitled}</dd></div>
           <div><dt>{labels.answers}</dt><dd>{template.freeTextMode === null ? template.labels.join(", ") : labels.freeText}</dd></div>

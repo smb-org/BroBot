@@ -23,6 +23,7 @@ interface ChatVoteRow {
   voter_count: number | null;
   text_results_json: string | null;
   more_terms: number | null;
+  result_delivery_pending: number;
 }
 
 interface ChatVoteTemplateRow {
@@ -99,6 +100,7 @@ const mapRow = (row: ChatVoteRow): ChatVote => {
     voterCount: row.voter_count,
     textResults: parseTermArray(row.text_results_json),
     moreTerms: row.more_terms,
+    resultDeliveryPending: row.result_delivery_pending === 1,
   };
 };
 
@@ -143,7 +145,13 @@ export interface ChatVoteTemplateRepository {
 export const chatVoteSelectColumns = `channel_id, poll_id, kind, option_count, labels_json, status,
                                       title, result_text, opened_at, closes_at, closing_at, deadline_revision, requested_duration_seconds, closed_at,
                                       close_reason, counts_json, voter_count, text_mode, text_results_json, more_terms,
-                                      term_filter_ready`;
+                                      term_filter_ready, result_delivery_pending`;
+
+export interface ChatVoteResultTextTemplateSnapshot {
+  id: string;
+  revision: number;
+  resultText: string;
+}
 
 export interface ChatVotingRepository {
   open(channelId: string): Promise<ChatVote | null>;
@@ -157,7 +165,7 @@ export interface ChatVotingRepository {
     approvedBy: string,
     authorization: ModuleMutationAuthorization,
   ): Promise<{ authorized: boolean; changed: boolean }>;
-  insertOpen(vote: ChatVoteDraft, authorization?: ModuleMutationAuthorization): Promise<boolean>;
+  insertOpen(vote: ChatVoteDraft, authorization?: ModuleMutationAuthorization, resultTextTemplate?: ChatVoteResultTextTemplateSnapshot): Promise<boolean>;
   requestManualClose(channelId: string, pollId: string, expectedClosesAt: string, authorization?: ModuleMutationAuthorization): Promise<boolean>;
   claimAlarmClose(channelId: string, pollId: string, expectedClosesAt: string, claimedAt: string): Promise<boolean>;
   extendClose(
@@ -183,7 +191,9 @@ export interface ChatVotingRepository {
     textResults?: readonly ChatVoteTerm[] | null,
     moreTerms?: number,
     termFilterReady?: boolean | null,
+    resultDeliveryPending?: boolean,
   ): Promise<boolean>;
+  completeResultDelivery(channelId: string, pollId: string): Promise<boolean>;
   templates: ChatVoteTemplateRepository;
 }
 
@@ -357,7 +367,7 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
       changed: (result?.meta.changes ?? 0) > 0,
     };
   },
-  async insertOpen(vote, authorization) {
+  async insertOpen(vote, authorization, resultTextTemplate) {
     const guard = authorization?.sql ?? "";
     const statement = db.prepare(
       `INSERT INTO chat_votes
@@ -367,7 +377,10 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
         WHERE EXISTS (
           SELECT 1 FROM channel_modules
            WHERE channel_id = ? AND module_id = 'chat_voting' AND enabled = 1
-        ) ${guard}`,
+        ) AND (? IS NULL OR EXISTS (
+          SELECT 1 FROM chat_vote_templates
+           WHERE channel_id = ? AND id = ? AND revision = ? AND result_text = ?
+        )) ${guard}`,
     ).bind(
       vote.channelId,
       vote.id,
@@ -383,6 +396,11 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
       vote.requestedDurationSeconds,
       vote.closeReason,
       vote.channelId,
+      resultTextTemplate?.id ?? null,
+      resultTextTemplate?.id === undefined ? null : vote.channelId,
+      resultTextTemplate?.id ?? null,
+      resultTextTemplate?.revision ?? null,
+      resultTextTemplate?.resultText ?? null,
       ...(authorization?.values ?? []),
     );
     const result = await statement.run();
@@ -441,11 +459,11 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
     ).bind(closesAt, channelId, pollId, expectedClosesAt, expectedDeadlineRevision).run();
     return result.meta.changes > 0;
   },
-  async finish(channelId, pollId, closeReason, closedAt, counts, textResults = null, moreTerms = 0, termFilterReady = null) {
+  async finish(channelId, pollId, closeReason, closedAt, counts, textResults = null, moreTerms = 0, termFilterReady = null, resultDeliveryPending = false) {
     const statement = db.prepare(
       `UPDATE chat_votes
           SET status = 'closed', closed_at = ?, close_reason = ?, counts_json = ?, voter_count = ?,
-              text_results_json = ?, more_terms = ?, term_filter_ready = ?
+              text_results_json = ?, more_terms = ?, term_filter_ready = ?, result_delivery_pending = ?
         WHERE channel_id = ? AND poll_id = ? AND status = 'open'`,
     ).bind(
       closedAt,
@@ -456,10 +474,18 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
       textResults === null ? null : JSON.stringify(textResults),
       textResults === null ? null : moreTerms,
       textResults === null || termFilterReady === null ? null : Number(termFilterReady),
+      Number(resultDeliveryPending),
       channelId,
       pollId,
     );
     const result = await statement.run();
+    return result.meta.changes > 0;
+  },
+  async completeResultDelivery(channelId, pollId) {
+    const result = await db.prepare(
+      `UPDATE chat_votes SET result_delivery_pending = 0
+        WHERE channel_id = ? AND poll_id = ? AND status = 'closed' AND result_delivery_pending = 1`,
+    ).bind(channelId, pollId).run();
     return result.meta.changes > 0;
   },
 });

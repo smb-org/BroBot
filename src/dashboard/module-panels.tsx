@@ -17,8 +17,9 @@ import { templateTextLength } from "../template";
 import { modulePermissionsAreMissing } from "./channel-health";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { effectivePanelTemplateVariables, panelTemplateOptions, registeredModuleTemplateGroup, type PanelChannelVariable } from "./ui/template-variable-options";
-import { ChatCommandsHelp, ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, SettingsPage, StatusLed, LockedReason, mapServerFieldErrors, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
+import { ChatCommandsHelp, ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, SettingsPage, StatusLed, LockedReason, Tabs, mapServerFieldErrors, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
 import { Switch as SwitchPrimitive } from "./ui/primitives/switch";
+import { runDashboardNavigationGuards } from "./ui/navigation-guard";
 import { worstCaseTemplateLength } from "../template";
 import type { TemplateVariable } from "../template";
 
@@ -187,6 +188,7 @@ interface ModulePanelMountProperties {
   botIsModerator?: boolean | null;
   /** Deep-link target from the command palette (#164); passed through to the panel unchanged. */
   initialSelection?: string;
+  chatVotingTab?: "votes" | "settings";
 }
 
 const ModuleSettingsEditor = ({ module, channelId, canManageContent, language, settingsSaveTarget }: {
@@ -524,7 +526,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   };
   const navigationGuard = useDraftGuard(dirty, save, discard);
   useEffect(() => registerDashboardNavigationGuard(navigationGuard.guardSwitch), [navigationGuard.guardSwitch]);
-  const readOnly = !canManageContent ? { reason: copy.readOnlyReason,
+  const readOnly = !canManageContent ? { ...(module.id === "chat_voting" ? {} : { reason: copy.readOnlyReason }),
     content: <SettingsEditor spec={spec} sectionId={spec.sections[0]?.id ?? ""} settings={currentValue} onChange={() => undefined} texts={copy} variables={templateVariableOptions} templateMetadata={templateMetadata} templateMessages={copy.templateMessages} readOnly enabledLabel={copy.enabledLabel} disabledLabel={copy.disabledLabel} /> } : undefined;
   return <>
     <EditorShell
@@ -589,7 +591,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   </>;
 };
 
-export const ModulePanelMount = ({ channelId, activeModules, settingsSaveTarget = null, streamSessionIdentity, suspendModuleId, canManage = true, canOperate = true, botIsModerator = null, initialSelection }: ModulePanelMountProperties): ReactElement => {
+export const ModulePanelMount = ({ channelId, activeModules, settingsSaveTarget = null, streamSessionIdentity, suspendModuleId, canManage = true, canOperate = true, botIsModerator = null, initialSelection, chatVotingTab = "votes" }: ModulePanelMountProperties): ReactElement => {
   const registeredViews = activeModules.flatMap((activeModule) => {
     const module = MODULES.find((candidate) => candidate.id === activeModule.moduleId);
     if (module === undefined) return [];
@@ -619,12 +621,13 @@ export const ModulePanelMount = ({ channelId, activeModules, settingsSaveTarget 
           botIsModerator={botIsModerator}
           suspendToParent={module.id === suspendModuleId}
           {...(initialSelection === undefined ? {} : { initialSelection })}
+          {...(id === "chat_voting" ? { chatVotingTab } : {})}
         />)}
     </section>
   );
 };
 
-const MountedModuleView = ({ module, channelId, streamSessionIdentity, canManage, canOperate, botIsModerator, suspendToParent, settingsSaveTarget, initialSelection }: {
+const MountedModuleView = ({ module, channelId, streamSessionIdentity, canManage, canOperate, botIsModerator, suspendToParent, settingsSaveTarget, initialSelection, chatVotingTab }: {
   module: (typeof MODULES)[number];
   channelId: string;
   streamSessionIdentity?: string;
@@ -634,6 +637,7 @@ const MountedModuleView = ({ module, channelId, streamSessionIdentity, canManage
   suspendToParent: boolean;
   settingsSaveTarget: HTMLElement | null;
   initialSelection?: string;
+  chatVotingTab?: "votes" | "settings";
 }): ReactElement => {
   const loadPanel = useCallback(() => loadModulePanel(module) as Promise<{ default: ComponentType<ModulePanelProperties> }>, [module]);
   const settingsEditor = <ModuleSettingsEditor
@@ -643,9 +647,10 @@ const MountedModuleView = ({ module, channelId, streamSessionIdentity, canManage
     language={dashboardLanguage()}
     settingsSaveTarget={settingsSaveTarget}
   />;
+  const chatVotingView = module.id === "chat_voting";
   return <div className="module-view">
-    {module.settingsEditorPlacement === "before-panel" ? settingsEditor : null}
-    {module.panel === undefined ? null : <RetryableLazy
+    {chatVotingView ? chatVotingTab === "settings" ? settingsEditor : null : module.settingsEditorPlacement === "before-panel" ? settingsEditor : null}
+    {module.panel === undefined || chatVotingView && chatVotingTab === "settings" ? null : <RetryableLazy
       instanceKey={`${module.id}:panel`}
       load={loadPanel}
       suspendToParent={suspendToParent}
@@ -674,7 +679,7 @@ const MountedModuleView = ({ module, channelId, streamSessionIdentity, canManage
         queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: dashboardTexts().module.componentLoadError, onRetry: retry }}
       >{null}</LoadState>}
     />}
-    {module.settingsEditorPlacement === "before-panel" ? null : settingsEditor}
+    {!chatVotingView && module.settingsEditorPlacement !== "before-panel" ? settingsEditor : null}
   </div>;
 };
 
@@ -887,6 +892,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   const missingScopeSet = new Set(missingScopes);
   const effectiveEnabled = enabled && !permissionsMissing;
   const [settingsSaveTarget, setSettingsSaveTarget] = useState<HTMLDivElement | null>(null);
+  const [chatVotingTab, setChatVotingTab] = useState<"votes" | "settings">("votes");
   const viewLoading = loading || moduleState === undefined || ((registered?.panel !== undefined || registered?.settingsEditor !== undefined) && enabled && activeModule === undefined);
   const showActiveView = activeModule !== undefined && (enabled || moduleState === undefined);
 
@@ -916,14 +922,31 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
           saveTargetRef={setSettingsSaveTarget}
           {...(navigationPage?.showMainSwitch === false ? {} : {
             active: effectiveEnabled,
-            onToggle: (nextEnabled: boolean) => { if (nextEnabled !== effectiveEnabled) onToggle(); },
+            onToggle: (nextEnabled: boolean) => {
+              if (nextEnabled === effectiveEnabled) return;
+              if (moduleId === "chat_voting") runDashboardNavigationGuards(onToggle, () => undefined);
+              else onToggle();
+            },
             switchTitle: `${details.name}: ${statusWord(effectiveEnabled)}`,
             switchDisabled: !manageable || switchDisabled || busy || mandatory,
             switchBusy: busy,
             ...(mandatory ? { moduleSwitch: <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} /> } : {}),
-            ...(disabledReason === null || (registered?.settingsEditor !== undefined && showActiveView) || (registered?.panelManagesSettings && moduleState?.enabled !== false && moduleId !== "clips") ? {} : { lockHint: disabledReason }),
+            ...(disabledReason === null || (registered?.settingsEditor !== undefined && showActiveView && moduleId !== "chat_voting") || (registered?.panelManagesSettings && moduleState?.enabled !== false && moduleId !== "clips") ? {} : { lockHint: disabledReason }),
           })}
-          {...(moduleId === "text_commands" ? {
+          {...(moduleId === "chat_voting" ? {
+            pageActions: <>
+              <Tabs className="chat-voting-page-tabs" value={chatVotingTab} keepMounted={false} onChange={(value) => {
+                if (value !== "votes" && value !== "settings") return;
+                runDashboardNavigationGuards(() => { setChatVotingTab(value); }, () => undefined);
+              }}>
+                <Tabs.List className="chat-voting-page-tabs__list" aria-label={dashboardLanguage() === "de" ? "Abstimmungsseite" : "Voting page"}>
+                  <Tabs.Tab className="chat-voting-page-tabs__tab" value="votes">{dashboardLanguage() === "de" ? "Abstimmungen" : "Votes"}</Tabs.Tab>
+                  <Tabs.Tab className="chat-voting-page-tabs__tab" value="settings">{dashboardLanguage() === "de" ? "Einstellungen" : "Settings"}</Tabs.Tab>
+                </Tabs.List>
+              </Tabs>
+              {chatCommands.length === 0 ? null : <ChatCommandsHelp commands={chatCommands} language={dashboardLanguage()} />}
+            </>,
+          } : moduleId === "text_commands" ? {
             pageActions: <TextCommandChatCommandHelp channelId={channelId} />,
           } : chatCommands.length === 0 ? {} : {
             pageActions: <ChatCommandsHelp commands={chatCommands} language={dashboardLanguage()} />,
@@ -953,7 +976,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
         {stateMessage === null ? (
           registered?.panel === undefined && registered?.settingsEditor === undefined ? (showActiveView ? <p className="module-state">{texts.module.noView}</p> : null) : !showActiveView ? null : (
             <section className={`module-detail__content${viewLoading ? " stale" : ""}`} aria-label={labels.content}>
-              <ModulePanelMount key={`${channelId}:${moduleId}`} channelId={channelId} activeModules={[activeModule]} settingsSaveTarget={settingsSaveTarget} {...(streamSessionIdentity === undefined ? {} : { streamSessionIdentity })} {...(suspendPanelUntilReady ? { suspendModuleId: moduleId } : {})} canManage={ownRole !== "operator"} canOperate={true} botIsModerator={botIsModerator} {...(initialSelection === undefined ? {} : { initialSelection })} />
+              <ModulePanelMount key={`${channelId}:${moduleId}`} channelId={channelId} activeModules={[activeModule]} settingsSaveTarget={settingsSaveTarget} {...(streamSessionIdentity === undefined ? {} : { streamSessionIdentity })} {...(suspendPanelUntilReady ? { suspendModuleId: moduleId } : {})} canManage={ownRole !== "operator"} canOperate={true} botIsModerator={botIsModerator} {...(initialSelection === undefined ? {} : { initialSelection })} {...(moduleId === "chat_voting" ? { chatVotingTab } : {})} />
             </section>
           )
         ) : (
