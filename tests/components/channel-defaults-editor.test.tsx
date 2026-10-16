@@ -10,7 +10,7 @@ import { renderWithQuery } from "../query-test-utils";
 afterEach(() => { cleanup(); });
 
 describe("channel defaults editor", () => {
-  it("keeps a time-zone draft when a remote refresh changes the chat target", async () => {
+  it("keeps a chat-target draft when a remote refresh changes the time zone", async () => {
     const channelId = "channel-defaults-editor";
     const queryKey = queryKeys.channel(channelId, "settings");
     const initialSettings: PanelChannelSettings = {
@@ -27,19 +27,17 @@ describe("channel defaults editor", () => {
       { initialData: [{ queryKey, data: initialSettings }] },
     );
 
-    const timeZone = screen.getByRole("combobox", { name: "Kanalzeitzone" });
-    fireEvent.change(timeZone, { target: { value: "UTC" } });
-    fireEvent.click(await screen.findByRole("option", { name: "UTC", hidden: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Standard-Chat-Ziel" }));
+    fireEvent.click(await screen.findByRole("radio", { name: /Alle Chats/u, hidden: true }));
     const save = await screen.findByRole("button", { name: "Speichern" });
     await waitFor(() => { expect(save).toBeEnabled(); });
 
     queryClient.setQueryData<PanelChannelSettings>(queryKey, {
       ...initialSettings,
-      defaultChatTarget: "all_chats",
-      defaultChatTargetRevision: 2,
+      timeZone: "UTC",
+      revision: 2,
     });
 
-    await waitFor(() => { expect(timeZone).toHaveValue("UTC"); });
     expect(screen.getByRole("button", { name: "Standard-Chat-Ziel" })).toHaveTextContent("Alle Chats");
     expect(save).toBeEnabled();
   });
@@ -63,7 +61,7 @@ describe("channel defaults editor", () => {
 
     expect(await screen.findByText("Nur Broadcaster und Verwalter dürfen diese Einstellung ändern.")).toBeVisible();
     expect(screen.getAllByText("Nur Broadcaster und Verwalter dürfen diese Einstellung ändern.")).toHaveLength(1);
-    expect(screen.getByText("Europe/Berlin")).toBeVisible();
+    expect(screen.queryByText("Europe/Berlin")).not.toBeInTheDocument();
     expect(screen.getByText("Nur unser Chat")).toBeVisible();
     expect(container.querySelectorAll("input, [role=combobox]")).toHaveLength(0);
     expect(screen.queryByRole("button", { name: "Speichern" })).not.toBeInTheDocument();

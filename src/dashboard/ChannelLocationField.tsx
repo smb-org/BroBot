@@ -16,9 +16,11 @@ interface ChannelLocationFieldProperties {
   revision: number;
   onSaved: (location: PanelChannelLocation | null, revision: number) => void | Promise<void>;
   channelTimeZone: string;
-  onSaveChannelTimeZone: (timeZone: string) => Promise<void>;
+  onSelectChannelTimeZone: (timeZone: string) => void;
   canEdit: boolean;
   disabled: boolean;
+  readOnlyReasonId?: string;
+  renderReadOnlyReason?: boolean;
 }
 
 export const ChannelLocationField = ({
@@ -28,9 +30,11 @@ export const ChannelLocationField = ({
   revision,
   onSaved,
   channelTimeZone,
-  onSaveChannelTimeZone,
+  onSelectChannelTimeZone,
   canEdit,
   disabled,
+  readOnlyReasonId = "channel-location-read-only",
+  renderReadOnlyReason = true,
 }: ChannelLocationFieldProperties): ReactElement => {
   const labels = channelSettingsTexts(language);
   const [opened, setOpened] = useState(false);
@@ -80,17 +84,9 @@ export const ChannelLocationField = ({
     }
   };
 
-  const applyTimeZone = async (): Promise<void> => {
+  const applyTimeZone = (): void => {
     if (!canEdit || value === null) return;
-    setBusy(true);
-    try {
-      await onSaveChannelTimeZone(value.timeZone);
-      notify({ tone: "success", message: labels.locationTimeZoneSaved });
-    } catch {
-      notify({ tone: "error", message: labels.locationTimeZoneSaveFailed });
-    } finally {
-      setBusy(false);
-    }
+    onSelectChannelTimeZone(value.timeZone);
   };
 
   const resultName = (result: PanelChannelLocationResult): string =>
@@ -98,12 +94,13 @@ export const ChannelLocationField = ({
   const locked = !canEdit ? labels.readOnly : null;
   const actionsDisabled = disabled || busy || !canEdit;
   const removeDisabledReason = !canEdit ? labels.readOnly : value === null ? labels.locationNotSet : null;
+  const removeDescriptionId = !canEdit ? readOnlyReasonId : "channel-location-remove-reason";
   const resultsStatus = searching ? "loading" : searchFailed ? "error" : query.trim().length >= 2 && results.length > 0 ? "success" : "empty";
 
   return (
     <div className="channel-location-field" aria-label={labels.location}>
       <div className="channel-location-field__heading">
-        <div><strong>{labels.location}</strong><p className="muted">{labels.locationHint}</p></div>
+        <div><p className="muted">{labels.locationHint}</p></div>
         <span className="channel-location-field__current" aria-live="polite">
           {value === null ? <span className="muted">—</span> : <>
             <strong title={value.name}>{value.name}</strong>
@@ -114,26 +111,26 @@ export const ChannelLocationField = ({
       <div className="channel-location-field__message-slot" aria-live="polite" />
       <div className="channel-location-field__actions">
         <Button variant="primary" disabled={actionsDisabled}
-          {...(locked === null ? {} : { describedBy: "channel-location-read-only" })}
+          {...(locked === null ? {} : { describedBy: readOnlyReasonId })}
           onClick={() => { setOpened(true); setSearchFailed(false); setResults([]); }}>
           {labels.locationChange}
         </Button>
         <Button variant="secondary" danger="subtle" disabled={actionsDisabled || value === null}
-          {...(removeDisabledReason === null ? {} : { describedBy: "channel-location-remove-reason" })}
+          {...(removeDisabledReason === null ? {} : { describedBy: removeDescriptionId })}
           onClick={() => { setConfirmError(undefined); setRemoveConfirmation(true); }}>
           {labels.locationRemove}
         </Button>
       </div>
       <div className="channel-location-field__reason-slot">
-        {locked === null ? null : <p className="lock-reason" id="channel-location-read-only">{locked}</p>}
-        {removeDisabledReason === null ? null : <p className="lock-reason" id="channel-location-remove-reason">{removeDisabledReason}</p>}
+        {renderReadOnlyReason && locked !== null ? <p className="lock-reason" id={readOnlyReasonId}>{locked}</p> : null}
+        {canEdit && removeDisabledReason !== null ? <p className="lock-reason" id="channel-location-remove-reason">{removeDisabledReason}</p> : null}
       </div>
       <div className="channel-location-field__suggestion-slot">
         {value === null || value.timeZone === channelTimeZone ? null : <div className="channel-location-field__suggestion">
           <span>{labels.locationTimeZoneSuggestion(value.timeZone)}</span>
           <Button variant="secondary" disabled={actionsDisabled}
-            {...(locked === null ? {} : { describedBy: "channel-location-read-only" })}
-            onClick={() => { void applyTimeZone(); }}>
+            {...(locked === null ? {} : { describedBy: readOnlyReasonId })}
+            onClick={applyTimeZone}>
             {labels.locationTimeZoneAction}
           </Button>
         </div>}

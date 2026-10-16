@@ -8,6 +8,14 @@ export interface ApiSourcePanelTexts {
   addSource: string;
   editSource: string;
   createSource: string;
+  steps: { url: string; expression: string; test: string; name: string };
+  stepCounter: (current: number, total: number) => string;
+  continue: string;
+  back: string;
+  searchPlaceholder: string;
+  noSearchResults: string;
+  selectSource: string;
+  sourceExpression: string;
   name: string;
   nameHint: string;
   url: string;
@@ -50,6 +58,14 @@ const texts: Readonly<Record<ModuleLanguage, ApiSourcePanelTexts>> = {
     addSource: "Quelle hinzufügen",
     editSource: "Quelle bearbeiten",
     createSource: "Quelle anlegen",
+    steps: { url: "Adresse", expression: "Wert auswählen", test: "Quelle testen", name: "Variable benennen" },
+    stepCounter: (current, total) => `Schritt ${String(current)} von ${String(total)}`,
+    continue: "Weiter",
+    back: "Zurück",
+    searchPlaceholder: "Quelle suchen",
+    noSearchResults: "Keine Quellen gefunden.",
+    selectSource: "Wähle eine Quelle, um Details zu sehen.",
+    sourceExpression: "Ausdruck",
     name: "Name",
     nameHint: "Kleinbuchstaben, Ziffern und Unterstriche; beginnt mit einem Buchstaben.",
     url: "HTTPS-URL",
@@ -95,6 +111,14 @@ const texts: Readonly<Record<ModuleLanguage, ApiSourcePanelTexts>> = {
     addSource: "Add source",
     editSource: "Edit source",
     createSource: "Create source",
+    steps: { url: "Address", expression: "Choose a value", test: "Test source", name: "Name the variable" },
+    stepCounter: (current, total) => `Step ${String(current)} of ${String(total)}`,
+    continue: "Continue",
+    back: "Back",
+    searchPlaceholder: "Search sources",
+    noSearchResults: "No sources found.",
+    selectSource: "Select a source to see its details.",
+    sourceExpression: "Expression",
     name: "Name",
     nameHint: "Lowercase letters, digits and underscores; must start with a letter.",
     url: "HTTPS URL",

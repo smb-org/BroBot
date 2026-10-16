@@ -4,9 +4,13 @@ export interface ChannelSettingsTexts {
   pageDescription: string;
   timeZone: string;
   timeZoneHint: string;
+  timeZoneSection: string;
+  locationMissing: string;
+  locationMissingWarning: string;
   readOnly: string;
   loadError: string;
   saveError: string;
+  settingsConflict: string;
   invalid: string;
   location: string;
   locationHint: string;
@@ -29,8 +33,6 @@ export interface ChannelSettingsTexts {
   locationSearchFailed: string;
   locationTimeZoneSuggestion: (timeZone: string) => string;
   locationTimeZoneAction: string;
-  locationTimeZoneSaved: string;
-  locationTimeZoneSaveFailed: string;
   defaultChatTarget: string;
   defaultChatTargetHint: string;
 }
@@ -42,9 +44,13 @@ const texts: Readonly<Record<"de" | "en", ChannelSettingsTexts>> = {
     pageDescription: "Standort für standortabhängige Kanalmodule",
     timeZone: "Kanalzeitzone",
     timeZoneHint: "Gültige IANA-Zeitzone. Sie wird für Datum, Uhrzeit und zeitabhängige Textbausteine verwendet.",
+    timeZoneSection: "Zeitzone",
+    locationMissing: "Standort fehlt",
+    locationMissingWarning: "Wetter, Sonnenzeiten und Mondphase benötigen einen Kanalstandort.",
     readOnly: "Nur Broadcaster und Verwalter dürfen diese Einstellung ändern.",
     loadError: "Die Kanaleinstellungen konnten nicht geladen werden.",
     saveError: "Die Zeitzone konnte nicht gespeichert werden.",
+    settingsConflict: "Die Einstellungen wurden zwischenzeitlich geändert. Bitte neu laden.",
     invalid: "Bitte eine gültige IANA-Zeitzone eingeben.",
     location: "Standort",
     locationHint: "Wird von Wetter-, Sonnen- und Mondmodulen für standortabhängige Daten verwendet.",
@@ -67,8 +73,6 @@ const texts: Readonly<Record<"de" | "en", ChannelSettingsTexts>> = {
     locationSearchFailed: "Orte konnten nicht gesucht werden.",
     locationTimeZoneSuggestion: (timeZone) => `Kanalzeitzone auf ${timeZone} setzen?`,
     locationTimeZoneAction: "Zeitzone übernehmen",
-    locationTimeZoneSaved: "Die Kanalzeitzone wurde aktualisiert.",
-    locationTimeZoneSaveFailed: "Die Kanalzeitzone konnte nicht aktualisiert werden.",
     defaultChatTarget: "Standard-Chat-Ziel",
     defaultChatTargetHint: "Wird für Einträge verwendet, die kein eigenes Chat-Ziel festlegen.",
   },
@@ -78,9 +82,13 @@ const texts: Readonly<Record<"de" | "en", ChannelSettingsTexts>> = {
     pageDescription: "Location for channel modules that use local data",
     timeZone: "Channel time zone",
     timeZoneHint: "A valid IANA time zone used for date, time, and time based text block conditions.",
+    timeZoneSection: "Time zone",
+    locationMissing: "Location missing",
+    locationMissingWarning: "Weather, sunrise and moon phase need a channel location.",
     readOnly: "Only broadcasters and managers can change this setting.",
     loadError: "Channel settings could not be loaded.",
     saveError: "The time zone could not be saved.",
+    settingsConflict: "Settings changed in another session. Reload before saving.",
     invalid: "Enter a valid IANA time zone.",
     location: "Location",
     locationHint: "Used by weather, sun, and moon modules for location based data.",
@@ -103,8 +111,6 @@ const texts: Readonly<Record<"de" | "en", ChannelSettingsTexts>> = {
     locationSearchFailed: "Locations could not be searched.",
     locationTimeZoneSuggestion: (timeZone) => `Set channel time zone to ${timeZone}?`,
     locationTimeZoneAction: "Apply time zone",
-    locationTimeZoneSaved: "Channel time zone updated.",
-    locationTimeZoneSaveFailed: "Channel time zone could not be updated.",
     defaultChatTarget: "Default chat target",
     defaultChatTargetHint: "Used by entries that do not set their own chat target.",
   },

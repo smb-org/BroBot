@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
@@ -21,7 +21,7 @@ describe("API source panel", () => {
     expect(await screen.findByRole("dialog", { name: "Create source" })).toBeInTheDocument();
   });
 
-  it("shows operators why an existing API source is read-only inside its dialog", async () => {
+  it("shows operators why API sources are read-only and keeps edit actions unavailable", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse({ sources: [{
       name: "weather", url: "https://example.com/weather", expression: "$.temperature", revision: 2,
       updatedAt: "2026-10-01T12:00:00.000Z",
@@ -30,11 +30,9 @@ describe("API source panel", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /weather/u }));
 
-    const dialog = await screen.findByRole("dialog", { name: "Edit source" });
-    expect(within(dialog).getByText("Operators can read API sources but cannot define them.")).toBeInTheDocument();
-    expect(within(dialog).getByRole("textbox", { name: "Name" })).toHaveAttribute("readonly");
-    expect(within(dialog).getByRole("textbox", { name: "HTTPS URL" })).toBeDisabled();
-    expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.getByText("Operators can read API sources but cannot define them.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add source" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Edit source" })).not.toBeInTheDocument();
   });
 
   it("shows cached API sources immediately when the panel is mounted again", async () => {

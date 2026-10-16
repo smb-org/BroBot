@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { moduleQueryKey } from "../../src/dashboard/data";
@@ -74,6 +74,7 @@ describe("API source panel query lifecycle", () => {
     const view = renderPanel(fetcher);
     expect(await screen.findByRole("button", { name: "sunset" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "sunset" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit source" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "HTTPS URL" }), {
       target: { value: "https://api.example.test/changed" },
     });
@@ -124,6 +125,7 @@ describe("API source panel query lifecycle", () => {
     expect(await screen.findByText("recreated.example.test")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "sunset" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit source" }));
 
     expect(await screen.findByRole("textbox", { name: "HTTPS URL" })).toHaveValue(
       "https://recreated.example.test/recreated-generation",
@@ -154,9 +156,11 @@ describe("API source panel query lifecycle", () => {
     fireEvent.change(await screen.findByRole("textbox", { name: "HTTPS URL" }), {
       target: { value: "https://api.example.test/weather" },
     });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     fireEvent.change(screen.getByRole("textbox", { name: "JSONata expression (optional)" }), {
       target: { value: "$.temperature" },
     });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     const resultArea = screen.getByTestId("api-source-test-result");
     const reservedHeight = getComputedStyle(resultArea).height;
 
@@ -168,6 +172,40 @@ describe("API source panel query lifecycle", () => {
       body: JSON.stringify({ url: "https://api.example.test/weather", expression: "$.temperature" }),
     }));
     expect(getComputedStyle(resultArea).height).toBe(reservedHeight);
+  });
+
+  it("requires a test attempt before naming a source and shows the typed test failure", async () => {
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      const method = init?.method ?? "GET";
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+      if (url.pathname.endsWith("/sources") && method === "GET") return Promise.resolve(jsonResponse({ sources: [] }));
+      if (url.pathname.endsWith("/sources/test") && method === "POST") return Promise.resolve(jsonResponse({
+        status: "error",
+        reason: "timeout",
+        httpStatus: 504,
+      }));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    renderPanel(fetcher);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add source" }));
+    const dialog = await screen.findByRole("dialog", { name: "Create source" });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "HTTPS URL" }), {
+      target: { value: "https://api.example.test/weather" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Continue" }));
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "JSONata expression (optional)" }), {
+      target: { value: "$.temperature" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Continue" }));
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Test" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("The endpoint did not respond in time.");
+    expect(within(dialog).getByRole("button", { name: "Continue" })).toBeEnabled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Continue" }));
+    expect(within(dialog).getByRole("textbox", { name: "Name" })).toBeInTheDocument();
   });
 
   it("marks a source with its localized last failure reason", async () => {

@@ -3,7 +3,23 @@ import { useState, type ReactElement } from "react";
 import { PanelApiError } from "../../../contracts/panel-error";
 import { apiSourceFailureText } from "../../../dashboard/locale";
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
-import { Button, ConfirmDialog, Field, FormDialog, InspectorFieldRow, InspectorSection, LoadState, LoadStateLines, notify } from "../../../dashboard/ui";
+import {
+  Button,
+  CollectionPage,
+  ConfirmDialog,
+  Field,
+  FormDialog,
+  InspectorFieldRow,
+  InspectorSection,
+  LoadState,
+  LoadStateLines,
+  LockedReason,
+  PageHeader,
+  StatusLed,
+  StepDialog,
+  TokenChip,
+  notify,
+} from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { ApiSource, ApiSourceTestResult } from "../contracts";
 import { apiSourcePanelTexts } from "./locale";
@@ -32,14 +48,17 @@ export default function ApiSourcePanel(properties: ModulePanelProperties): React
 }
 
 function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelProperties): ReactElement {
-  const labels = apiSourcePanelTexts(language ?? "de");
+  const locale = language ?? "de";
+  const labels = apiSourcePanelTexts(locale);
   const canEdit = canManage ?? false;
   const queryClient = useDashboardQueryClient();
   const query = useModuleQuery(channelId, "api_source", "sources", (signal) => loadApiSources(channelId, signal));
   const sources = query.data ?? [];
+  const [selectedName, setSelectedName] = useState<string | null>(null);
   const [editingName, setEditingName] = useState<string | null>(null);
   const [draft, setDraft] = useState<SourceDraft | null>(null);
   const [draftBaselineRevision, setDraftBaselineRevision] = useState<number | null>(null);
+  const [creationStep, setCreationStep] = useState(0);
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<ApiSourceTestResult>();
@@ -47,11 +66,13 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
   const [formError, setFormError] = useState<string | undefined>();
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | undefined>();
+  const selectedSource = selectedName === null ? undefined : sources.find((source) => source.name === selectedName);
 
   const closeEditor = (): void => {
     setDraft(null);
     setEditingName(null);
     setDraftBaselineRevision(null);
+    setCreationStep(0);
     setFormError(undefined);
     setConfirmDeleteOpen(false);
     setDeleteError(undefined);
@@ -60,19 +81,29 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
   };
 
   const startCreate = (): void => {
+    setSelectedName(null);
     setEditingName(null);
     setDraftBaselineRevision(null);
     setDraft(emptyDraft());
+    setCreationStep(0);
     setFormError(undefined);
     setTestResult(undefined);
     setTestRequestError(undefined);
   };
 
   const startEdit = (source: ApiSource): void => {
+    setSelectedName(source.name);
     setEditingName(source.name);
     setDraftBaselineRevision(source.revision);
     setDraft({ name: source.name, url: source.url, expression: source.expression });
     setFormError(undefined);
+    setTestResult(undefined);
+    setTestRequestError(undefined);
+  };
+
+  const updateDraft = (patch: Partial<SourceDraft>): void => {
+    if (draft === null) return;
+    setDraft({ ...draft, ...patch });
     setTestResult(undefined);
     setTestRequestError(undefined);
   };
@@ -95,13 +126,13 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
   };
 
   const save = async (): Promise<void> => {
-    if (draft === null || !canEdit || busy) return;
+    if (draft === null || !canEdit || busy || (editingName === null && creationStep !== 3)) return;
     const normalized = { ...draft, name: draft.name.trim(), url: draft.url.trim(), expression: draft.expression.trim() };
     setBusy(true);
     setFormError(undefined);
     try {
       if (editingName === null) {
-        await runModuleQueryWrite(
+        const created = await runModuleQueryWrite(
           queryClient,
           channelId,
           "api_source",
@@ -109,11 +140,11 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
           () => createApiSource(channelId, normalized),
           {
             baselineRevision: null,
-            updateCache: (current, created) => updateSourceCache(current, created),
+            updateCache: (current, source) => updateSourceCache(current, source),
           },
         );
-      }
-      else {
+        setSelectedName(created.name);
+      } else {
         if (draftBaselineRevision === null) throw new Error("api_source_revision_missing");
         await runModuleQueryWrite(
           queryClient,
@@ -164,6 +195,7 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
           updateCache: (current) => removeSourceFromCache(current, source.name),
         },
       );
+      setSelectedName(null);
       closeEditor();
       notify({ tone: "success", message: labels.deleted });
     } catch (failure: unknown) {
@@ -175,100 +207,190 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
     }
   };
 
+  const testAttempted = testResult !== undefined || testRequestError !== undefined;
   const loadStatus = query.data === undefined ? query.isPending ? "loading" : "error" : sources.length === 0 ? "empty" : "success";
+  const statusFor = (source: ApiSource): { label: string; state: "ok" | "error" | "off" } => {
+    if (source.lastStatus === null) return { label: labels.notTested, state: "off" };
+    if (source.lastStatus === "error") return {
+      label: apiSourceFailureText(source.lastError ?? "unreachable", locale),
+      state: "error",
+    };
+    return { label: labels.statusOk, state: "ok" };
+  };
+  const list = <LoadState
+    variant="panel-0"
+    status={loadStatus}
+    loading={<LoadStateLines rows={4} height={54} />}
+    empty={<p className="muted">{labels.empty}</p>}
+    error={<p className="muted">{labels.loadFailed}</p>}
+    queryError={{ message: labels.loadFailed, onRetry: () => { void query.refetch(); } }}
+    refreshError={query.isRefetchError}
+  >
+    {sources.length === 0 ? null : <ul className="api-source-panel__list">
+      {sources.map((source) => {
+        const status = statusFor(source);
+        return <li className="api-source-panel__row" key={source.name}>
+          <Button
+            className="api-source-panel__select"
+            variant={selectedName === source.name ? "secondary" : "subtle"}
+            ariaLabel={source.name}
+            ariaPressed={selectedName === source.name}
+            onClick={() => { setSelectedName(source.name); }}
+          >
+            <span className="api-source-panel__source-copy">
+              <code>{source.name}</code>
+              <span className="muted api-source-panel__host">{new URL(source.url).hostname}</span>
+            </span>
+            <StatusLed state={status.state} label={status.label} />
+          </Button>
+        </li>;
+      })}
+    </ul>}
+  </LoadState>;
 
-  return <section className="module-stack api-source-panel" aria-label={labels.title}>
-    <p className="muted">{labels.explanation}</p>
-    <InspectorSection title={labels.sourceList}>
-      <div data-testid="api-source-list-slot" style={{ height: "calc(var(--s10) * 6)", overflow: "hidden" }}>
-      <LoadState
-        variant="panel-200"
-        status={loadStatus}
-        loading={<LoadStateLines rows={4} height={34} />}
-        empty={<p className="muted">{labels.empty}</p>}
-        error={<p className="muted">{labels.loadFailed}</p>}
-        queryError={{ message: labels.loadFailed, onRetry: () => { void query.refetch(); } }}
-        refreshError={query.isRefetchError}
-      >
-        <ul className="api-source-panel__list" style={{ height: "calc(var(--s10) * 5)", overflowY: "auto", margin: 0, padding: 0, listStyle: "none" }}>
-          {sources.map((source) => {
-            const failed = source.lastStatus === "error";
-            const statusText = source.lastStatus === null
-              ? labels.notTested
-              : failed
-                ? apiSourceFailureText(source.lastError ?? "unreachable", language ?? "de")
-                : labels.statusOk;
-            const status = source.lastStatus === null ? "off" : failed ? "error" : "ok";
-            return <li key={source.name} style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto", alignItems: "center", gap: "var(--s2)" }}>
-              <Button size="compact" variant={editingName === source.name ? "secondary" : "neutral"} onClick={() => startEdit(source)}>
-                <code>{source.name}</code>
-              </Button>
-              <span className="muted" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{new URL(source.url).hostname}</span>
-              <span className="status-led" data-status={status} title={source.lastFetchedAt ?? undefined}>
-                <span className="status-led__dot" aria-hidden="true" />
-                <span className="status-led__label">{statusText}</span>
-              </span>
-            </li>;
-          })}
-        </ul>
-      </LoadState>
+  const detail = selectedSource === undefined ? <p className="muted">{labels.selectSource}</p> : <>
+    <PageHeader
+      title={selectedSource.name}
+      icon={null}
+      meta={new URL(selectedSource.url).hostname}
+      actions={<TokenChip token={`{api.${selectedSource.name}}`} />}
+      {...(canEdit ? { pageActions: <Button size="compact" onClick={() => { startEdit(selectedSource); }}>{labels.editSource}</Button> } : {})}
+    />
+    <div className="api-source-panel__detail-content">
+      <InspectorFieldRow label={labels.url} help={labels.urlHint}>
+        <a className="api-source-panel__url" href={selectedSource.url} target="_blank" rel="noreferrer">{selectedSource.url}</a>
+      </InspectorFieldRow>
+      <InspectorSection title={labels.sourceExpression}>
+        <pre className="api-source-panel__expression">{selectedSource.expression || labels.noExpression}</pre>
+      </InspectorSection>
+      <div className="api-source-panel__status-detail">
+        <StatusLed {...statusFor(selectedSource)} />
+        <span className="muted" title={selectedSource.lastFetchedAt ?? undefined}>{selectedSource.lastFetchedAt ?? labels.notTested}</span>
       </div>
-      <p className="lock-reason" data-testid="api-source-permission-slot" title={canEdit ? undefined : labels.readOnlyReason}
-        style={{ height: "calc(var(--s6) * 2)", overflow: "hidden", margin: 0, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2 }} aria-live="polite">
-        {canEdit ? "" : labels.readOnlyReason}
-      </p>
-      <Button disabled={!canEdit || busy} onClick={startCreate}>{labels.addSource}</Button>
-    </InspectorSection>
+    </div>
+  </>;
 
+  const stepTitle = creationStep === 0 ? labels.steps.url
+    : creationStep === 1 ? labels.steps.expression
+      : creationStep === 2 ? labels.steps.test : labels.steps.name;
+  const stepDialog = <StepDialog
+    opened={draft !== null && editingName === null}
+    title={labels.createSource}
+    description={labels.stepCounter(creationStep + 1, 4)}
+    pending={busy || testing}
+    onClose={closeEditor}
+    footer={<div className="form-actions api-source-panel__step-actions">
+      {creationStep === 0
+        ? <Button variant="subtle" disabled={testing || busy} onClick={closeEditor}>{labels.cancel}</Button>
+        : <Button variant="neutral" disabled={testing || busy} onClick={() => { setCreationStep((step) => Math.max(0, step - 1)); }}>{labels.back}</Button>}
+      {creationStep < 3 ? <Button variant="primary"
+        disabled={testing || busy || (creationStep === 0 && (draft?.url.trim().length ?? 0) === 0) || (creationStep === 2 && !testAttempted)}
+        onClick={() => { setCreationStep((step) => Math.min(3, step + 1)); }}>{labels.continue}</Button>
+        : <Button variant="primary" disabled={busy || draft?.name.trim().length === 0} onClick={() => { void save(); }}>{labels.save}</Button>}
+    </div>}
+  >
+    {draft === null ? null : <div className="api-source-panel__step" data-step={String(creationStep + 1)}>
+      <h3>{stepTitle}</h3>
+      {creationStep === 0 ? <InspectorFieldRow label={labels.url} help={labels.urlHint}>
+        <Field label={labels.url} value={draft.url} onChange={(url) => updateDraft({ url })} disabled={busy || testing} mono />
+      </InspectorFieldRow> : null}
+      {creationStep === 1 ? <InspectorFieldRow label={labels.expression} help={labels.expressionHint}>
+        <ExpressionField id="api-source-expression" label={labels.expression} value={draft.expression}
+          onChange={(expression) => updateDraft({ expression })} maxLength={512} language={locale}
+          messages={labels.expressionPicker} disabled={busy || testing} />
+      </InspectorFieldRow> : null}
+      {creationStep === 2 ? <>
+        <p className="muted">{labels.url}: <code>{draft.url || "—"}</code></p>
+        <p className="muted">{labels.expression}: <code>{draft.expression || labels.noExpression}</code></p>
+        <Button type="button" disabled={busy || testing || draft.url.trim().length === 0} onClick={() => { void testDraft(); }}>
+          {testing ? labels.testing : labels.test}
+        </Button>
+        <div data-testid="api-source-test-result" aria-live="polite" className="api-source-panel__test-result"
+          style={{ height: "calc(var(--s10) * 5)", overflowY: "auto", boxSizing: "border-box", margin: 0 }}>
+          {testRequestError === undefined ? null : <p className="api-source-test-result__error" role="alert">{testRequestError}</p>}
+          {testResult?.status === "error" ? <p className="api-source-test-result__error" role="alert">
+            {apiSourceFailureText(testResult.reason, locale, testResult.retryAfter)}
+            {testResult.constructName === undefined ? "" : ` · ${testResult.constructName}`}
+            {testResult.httpStatus === undefined ? "" : ` · HTTP ${String(testResult.httpStatus)}`}
+          </p> : null}
+          {testResult?.status === "ok" ? <>
+            <p role="status">{labels.testSucceeded(testResult.httpStatus, testResult.bytes)}</p>
+            <pre>{JSON.stringify({ json: testResult.json, value: testResult.value }, null, 2)}</pre>
+          </> : null}
+        </div>
+      </> : null}
+      {creationStep === 3 ? <InspectorFieldRow label={labels.name} help={labels.nameHint}>
+        <Field label={labels.name} value={draft.name}
+          onChange={(name) => { updateDraft({ name: name.toLowerCase().replace(/[^a-z0-9_]/gu, "").slice(0, 32) }); }}
+          disabled={busy || testing} />
+      </InspectorFieldRow> : null}
+      {formError === undefined ? null : <p className="api-source-test-result__error" role="alert">{formError}</p>}
+    </div>}
+  </StepDialog>;
+
+  return <section className="api-source-panel" aria-label={labels.title}>
+    <CollectionPage
+      title={labels.title}
+      toolbar={<div className="api-source-panel__toolbar">
+        <p className="muted">{labels.explanation}</p>
+        <Button disabled={!canEdit || busy} onClick={startCreate}>{labels.addSource}</Button>
+        <LockedReason {...(!canEdit ? { reason: labels.readOnlyReason } : {})} />
+      </div>}
+      list={list}
+      detail={detail}
+      detailOpen={selectedSource !== undefined}
+      backLabel={labels.back}
+      onCloseDetail={() => { setSelectedName(null); }}
+    />
+    {stepDialog}
     <FormDialog
-      opened={draft !== null}
+      opened={draft !== null && editingName !== null}
       title={editingName === null ? labels.createSource : labels.editSource}
       confirmLabel={labels.save}
       cancelLabel={labels.cancel}
-      {...(canEdit ? {} : { description: labels.readOnlyReason })}
       onConfirm={() => { void save(); }}
       onCancel={closeEditor}
       pending={busy || testing}
-      confirmDisabled={!canEdit || draft === null || draft.name.trim().length === 0 || draft.url.trim().length === 0 || testing}
+      confirmDisabled={draft === null || draft.name.trim().length === 0 || draft.url.trim().length === 0 || testing}
       {...(formError === undefined ? {} : { error: formError })}
     >
-      {draft === null ? null : <div className="module-stack">
+      {draft === null || editingName === null ? null : <div className="module-stack">
         <InspectorFieldRow label={labels.name} help={labels.nameHint}>
-          <Field label={labels.name} value={draft.name} onChange={(name) => { setDraft({ ...draft, name: name.toLowerCase().replace(/[^a-z0-9_]/gu, "").slice(0, 32) }); setTestResult(undefined); }} disabled={busy || testing || !canEdit || editingName !== null} readOnly={editingName !== null} />
+          <Field label={labels.name} value={draft.name} onChange={() => {}} disabled readOnly />
         </InspectorFieldRow>
         <InspectorFieldRow label={labels.url} help={labels.urlHint}>
-          <Field label={labels.url} value={draft.url} onChange={(url) => { setDraft({ ...draft, url }); setTestResult(undefined); setTestRequestError(undefined); }} disabled={busy || testing || !canEdit} mono />
+          <Field label={labels.url} value={draft.url} onChange={(url) => updateDraft({ url })} disabled={busy || testing} mono />
         </InspectorFieldRow>
         <InspectorFieldRow label={labels.expression} help={labels.expressionHint}>
-          <ExpressionField id="api-source-expression" label={labels.expression} value={draft.expression} onChange={(expression) => { setDraft({ ...draft, expression }); setTestResult(undefined); setTestRequestError(undefined); }} maxLength={512} language={language ?? "de"} messages={labels.expressionPicker} disabled={busy || testing || !canEdit} />
+          <ExpressionField id="api-source-expression" label={labels.expression} value={draft.expression}
+            onChange={(expression) => updateDraft({ expression })} maxLength={512} language={locale}
+            messages={labels.expressionPicker} disabled={busy || testing} />
         </InspectorFieldRow>
         <p className="muted" title={draft.expression.trim().length === 0 ? labels.noExpression : undefined}
           style={{ height: "var(--s6)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", margin: 0 }} aria-live="polite">
           {draft.expression.trim().length === 0 ? labels.noExpression : ""}
         </p>
         <div className="form-actions">
-          <Button type="button" disabled={!canEdit || busy || testing || draft.url.trim().length === 0} onClick={() => { void testDraft(); }}>
+          <Button type="button" disabled={busy || testing || draft.url.trim().length === 0} onClick={() => { void testDraft(); }}>
             {testing ? labels.testing : labels.test}
           </Button>
-          {editingName === null ? null : <Button type="button" danger="subtle" disabled={!canEdit || busy || testing} onClick={() => { setDeleteError(undefined); setConfirmDeleteOpen(true); }}>{labels.delete}</Button>}
+          <Button type="button" danger="subtle" disabled={busy || testing} onClick={() => { setDeleteError(undefined); setConfirmDeleteOpen(true); }}>{labels.delete}</Button>
         </div>
-        <div data-testid="api-source-test-result" aria-live="polite" style={{ height: "calc(var(--s10) * 5)", overflowY: "auto", boxSizing: "border-box", margin: 0 }}>
+        <div data-testid="api-source-test-result" aria-live="polite" className="api-source-panel__test-result"
+          style={{ height: "calc(var(--s10) * 5)", overflowY: "auto", boxSizing: "border-box", margin: 0 }}>
           {testRequestError === undefined ? null : <p className="api-source-test-result__error" role="alert">{testRequestError}</p>}
           {testResult?.status === "error" ? <p className="api-source-test-result__error" role="alert">
-            {apiSourceFailureText(testResult.reason, language ?? "de", testResult.retryAfter)}
+            {apiSourceFailureText(testResult.reason, locale, testResult.retryAfter)}
             {testResult.constructName === undefined ? "" : ` · ${testResult.constructName}`}
             {testResult.httpStatus === undefined ? "" : ` · HTTP ${String(testResult.httpStatus)}`}
           </p> : null}
           {testResult?.status === "ok" ? <>
             <p role="status">{labels.testSucceeded(testResult.httpStatus, testResult.bytes)}</p>
-            <pre style={{ margin: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
-              {JSON.stringify({ json: testResult.json, value: testResult.value }, null, 2)}
-            </pre>
+            <pre>{JSON.stringify({ json: testResult.json, value: testResult.value }, null, 2)}</pre>
           </> : null}
         </div>
       </div>}
     </FormDialog>
-
     <ConfirmDialog
       opened={confirmDeleteOpen}
       title={labels.deleteTitle}
@@ -291,7 +413,7 @@ const requireBaselineRevision = (revision: number | null): number => {
 
 const updateSourceCache = (current: unknown, source: ApiSource): unknown => {
   const sources = Array.isArray(current) ? current as ApiSource[] : [];
-  return [...sources.filter((entry) => entry.name !== source.name), source];
+  return [...sources.filter((entry) => entry.name !== source.name), source].sort((left, right) => left.name.localeCompare(right.name));
 };
 
 const removeSourceFromCache = (current: unknown, name: string): unknown => {
