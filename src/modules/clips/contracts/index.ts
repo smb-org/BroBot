@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const MIN_AUTOMATIC_CLIP_COOLDOWN_SECONDS = 60;
+const MIN_AUTOMATIC_CLIP_COOLDOWN_SECONDS = 60;
 
 export const clipsSettingsSchema = z.object({
   commandMinimumRole: z.enum(["viewer", "subscriber", "vip", "moderator", "broadcaster"]).default("viewer"),

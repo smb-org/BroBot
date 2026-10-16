@@ -854,7 +854,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
             switchDisabled: !manageable || switchDisabled || busy || mandatory,
             switchBusy: busy,
             ...(mandatory ? { moduleSwitch: <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} /> } : {}),
-            ...(disabledReason === null || registered?.panelManagesSettings ? {} : { lockHint: disabledReason }),
+            ...(disabledReason === null || (registered?.panelManagesSettings && moduleState?.enabled !== false) ? {} : { lockHint: disabledReason }),
           })}
           {...(moduleId === "text_commands" ? {
             pageActions: <TextCommandChatCommandHelp channelId={channelId} />,

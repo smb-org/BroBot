@@ -9,15 +9,6 @@ export const clipsModule: BotModule<typeof clipsSettingsSchema> = {
   defaultEnabled: true,
   settingsSchema: clipsSettingsSchema,
   defaultSettings: clipsSettingsSchema.parse({}),
-  chatCommands: [{
-    name: "clip",
-    syntax: "!clip",
-    description: {
-      de: "Erstellt einen Clip des laufenden Streams.",
-      en: "Creates a clip of the live stream.",
-    },
-    minimumChatStatus: "configurable",
-  }],
   panel: () => import("./panel"),
   panelManagesSettings: true,
   actions: [{

@@ -54,4 +54,26 @@ describe("clip availability confirmation", () => {
     expect(result).toMatchObject({ created: false, reason: "availability_timeout", clipId: null, editUrl: null });
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
+
+  it("includes response body reading in the availability confirmation deadline", async () => {
+    const delayedBody = new Response(null, { status: 200 });
+    delayedBody.json = () => new Promise<never>(() => undefined);
+    const fetcher = vi.fn<typeof fetch>((_input, init) => Promise.resolve(init?.method === "POST"
+      ? new Response(JSON.stringify({ data: [{ id: "clip-stalled", edit_url: "https://clips.twitch.tv/clip-stalled/edit" }] }), { status: 202 })
+      : delayedBody));
+
+    const result = await Promise.race([
+      createClip(
+        { TWITCH_CLIENT_ID: "client-id" },
+        "access-token",
+        "broadcaster-id",
+        fetcher,
+        { timeoutMs: 20, pollIntervalMs: 5 },
+      ),
+      new Promise<null>((resolve) => { setTimeout(() => { resolve(null); }, 250); }),
+    ]);
+
+    expect(result).toMatchObject({ created: false, reason: "availability_timeout", clipId: null, editUrl: null });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
 });

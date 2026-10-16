@@ -26,11 +26,20 @@ describe("clips settings", () => {
     expect(clipsSettingsSchema.safeParse({ automaticThresholdMultiplier: 0 }).success).toBe(false);
   });
 
-  it("explains that this version does not evaluate an automatic clip trigger", () => {
+  it("keeps unreleased clip settings visible with neutral bilingual copy", () => {
+    expect(clipsPanelTexts("de").lockedLaterVersion).toBe("Kommt in einer späteren Version.");
+    expect(clipsPanelTexts("en").lockedLaterVersion).toBe("Coming in a later version.");
+    expect(clipsPanelTexts("de").automaticLaterVersion).toBe("Automatische Clips kommen in einer späteren Version.");
+    expect(clipsPanelTexts("en").automaticLaterVersion).toBe("Automatic clips are coming in a later version.");
     for (const language of ["de", "en"] as const) {
-      const expected = language === "de" ? "nicht implementiert" : "not implemented";
-      expect(clipsPanelTexts(language).thresholdRule.toLocaleLowerCase()).toContain(expected);
+      const labels = clipsPanelTexts(language);
+      const copy = Object.values(labels).flatMap((value) => typeof value === "string" ? [value] : []);
+      expect(copy.join(" ").toLocaleLowerCase()).not.toMatch(/not implemented|nicht implementiert|helix|code version|codeversion/u);
     }
+  });
+
+  it("does not register a chat command before its behavior is available", () => {
+    expect(clipsModule.chatCommands).toBeUndefined();
   });
 
   it("owns its settings in the custom panel with bilingual labels and hints", () => {
@@ -40,22 +49,22 @@ describe("clips settings", () => {
 
     const fieldCopy = {
       de: {
-        commandMinimumRole: [clipsPanelTexts("de").commandRole, ...clipsPanelTexts("de").roleOptions.map(({ inclusion }) => inclusion)],
-        commandCooldownSeconds: [clipsPanelTexts("de").commandCooldown, clipsPanelTexts("de").commandCooldownHint],
-        postClipLinkInChat: [clipsPanelTexts("de").chatLink, clipsPanelTexts("de").chatLinkHint],
-        chatLinkTemplate: [clipsPanelTexts("de").chatMessage, clipsPanelTexts("de").chatMessageHint],
-        automaticClipsEnabled: [clipsPanelTexts("de").automatic, clipsPanelTexts("de").automaticHint],
-        automaticThresholdMultiplier: [clipsPanelTexts("de").threshold, clipsPanelTexts("de").thresholdHint],
-        automaticCooldownSeconds: [clipsPanelTexts("de").automaticCooldown, clipsPanelTexts("de").automaticCooldownHint],
+        commandMinimumRole: [clipsPanelTexts("de").commandRole, ...clipsPanelTexts("de").roleOptions.map(({ label }) => label)],
+        commandCooldownSeconds: [clipsPanelTexts("de").commandCooldown],
+        postClipLinkInChat: [clipsPanelTexts("de").chatLink, clipsPanelTexts("de").chatLinkEnabled],
+        chatLinkTemplate: [clipsPanelTexts("de").chatMessage],
+        automaticClipsEnabled: [clipsPanelTexts("de").automatic],
+        automaticThresholdMultiplier: [clipsPanelTexts("de").threshold, clipsPanelTexts("de").thresholdUnit],
+        automaticCooldownSeconds: [clipsPanelTexts("de").automaticCooldown],
       },
       en: {
-        commandMinimumRole: [clipsPanelTexts("en").commandRole, ...clipsPanelTexts("en").roleOptions.map(({ inclusion }) => inclusion)],
-        commandCooldownSeconds: [clipsPanelTexts("en").commandCooldown, clipsPanelTexts("en").commandCooldownHint],
-        postClipLinkInChat: [clipsPanelTexts("en").chatLink, clipsPanelTexts("en").chatLinkHint],
-        chatLinkTemplate: [clipsPanelTexts("en").chatMessage, clipsPanelTexts("en").chatMessageHint],
-        automaticClipsEnabled: [clipsPanelTexts("en").automatic, clipsPanelTexts("en").automaticHint],
-        automaticThresholdMultiplier: [clipsPanelTexts("en").threshold, clipsPanelTexts("en").thresholdHint],
-        automaticCooldownSeconds: [clipsPanelTexts("en").automaticCooldown, clipsPanelTexts("en").automaticCooldownHint],
+        commandMinimumRole: [clipsPanelTexts("en").commandRole, ...clipsPanelTexts("en").roleOptions.map(({ label }) => label)],
+        commandCooldownSeconds: [clipsPanelTexts("en").commandCooldown],
+        postClipLinkInChat: [clipsPanelTexts("en").chatLink, clipsPanelTexts("en").chatLinkEnabled],
+        chatLinkTemplate: [clipsPanelTexts("en").chatMessage],
+        automaticClipsEnabled: [clipsPanelTexts("en").automatic],
+        automaticThresholdMultiplier: [clipsPanelTexts("en").threshold, clipsPanelTexts("en").thresholdUnit],
+        automaticCooldownSeconds: [clipsPanelTexts("en").automaticCooldown],
       },
     };
     const schemaKeys = Object.keys(clipsSettingsSchema.shape).sort((left, right) => left.localeCompare(right));
