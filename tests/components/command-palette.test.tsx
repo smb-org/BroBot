@@ -97,6 +97,7 @@ describe("cmdk command palette", () => {
         channelId="kanal-a"
         ownRole="manager"
         modules={[{ id: "timers", enabled: false, settings: "{}" }]}
+        onToggleModule={() => Promise.resolve()}
         onNavigate={onNavigate}
         onOpenCommand={vi.fn()}
         onOpenVariable={vi.fn()}
@@ -125,6 +126,7 @@ describe("cmdk command palette", () => {
         modules={[]}
         channelControls={channelControls}
         onRefreshChannelState={() => Promise.resolve()}
+        onToggleModule={() => Promise.resolve()}
         onNavigate={vi.fn()}
         onOpenCommand={vi.fn()}
         onOpenVariable={vi.fn()}

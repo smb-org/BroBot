@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { MODULES } from "../../src/modules/registry";
-import { moduleDescription, moduleName } from "../../src/dashboard/module-labels";
+import { moduleDescription, moduleName, moduleNavigationName } from "../../src/dashboard/module-labels";
 
 /**
  * The label catalogs are keyed by module id, and a missing entry
@@ -49,9 +49,11 @@ describe("Module labels", () => {
     expect(moduleName("host", "en")).toBe("System");
   });
 
-  it("uses the Shoutout name for the existing raid module id in both catalogues", () => {
-    expect(moduleName("raid", "de")).toBe("Shoutout");
-    expect(moduleName("raid", "en")).toBe("Shoutout");
+  it("uses the raid announcements and shoutout name for the existing raid module id in both catalogues", () => {
+    expect(moduleName("raid", "de")).toBe("Raid-Ankündigungen & Shoutout");
+    expect(moduleName("raid", "en")).toBe("Raid announcements & shoutout");
+    expect(moduleNavigationName("raid", "de")).toBe("Raid & Shoutout");
+    expect(moduleNavigationName("raid", "en")).toBe("Raid & shoutout");
     expect(moduleDescription("raid", "de")).toContain("Raids");
     expect(moduleDescription("raid", "de")).toContain("manuelle Shoutouts");
     expect(moduleDescription("raid", "en")).toContain("incoming raids");

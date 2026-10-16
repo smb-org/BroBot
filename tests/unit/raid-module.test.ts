@@ -39,9 +39,9 @@ describe("Raid module", () => {
       shoutoutThreshold: 3,
       textThreshold: 3,
       textLong: "full",
-      textLongTarget: "source_only",
+      textLongTarget: "channel_default",
       textShort: "klein",
-      textShortTarget: "source_only",
+      textShortTarget: "channel_default",
     });
   });
 
@@ -63,6 +63,19 @@ describe("Raid module", () => {
       { kind: "shoutout", targetChannelId: "quelle-1" },
       { kind: "chat", text: "Willkommen quelle mit 8 Zuschauern!", target: "source_only" },
     ]);
+  });
+
+  it("leaves inherited raid chat destinations unset for the host to resolve", () => {
+    const result = processRaid(event(incomingRaid(8), {
+      ...raidModule.defaultSettings,
+      textLongTarget: "channel_default",
+    }));
+
+    expect(result.actions.some((action) => action.kind === "chat" && action.target === undefined)).toBe(true);
+    expect(raidSettingsSchema.parse({
+      ...raidModule.defaultSettings,
+      textLongTarget: "channel_default",
+    }).textLongTarget).toBe("channel_default");
   });
 
   it("produces only the full chat line at the shoutout threshold when the switch is off", () => {

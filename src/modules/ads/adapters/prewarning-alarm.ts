@@ -65,7 +65,7 @@ export const refreshAdPrewarningAlarm = async (
   const warningScopeAvailable = grantedScopes === undefined
     ? await broadcasterHasScope(environment.DB, channelId, WARNING_SCOPE)
     : grantedScopes.includes(WARNING_SCOPE);
-  if (!settings.success || !settings.data.prewarning || !warningScopeAvailable) {
+  if (!settings.success || settings.data.prewarningText.trim().length === 0 || !warningScopeAvailable) {
     await clearPrewarning(scheduler);
     return;
   }

@@ -7,9 +7,12 @@ import { insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
 describe("ad setting defaults", () => {
-  let database: TestD1Database;
+  let database: TestD1Database | undefined;
 
-  afterEach(() => { database.close(); });
+  afterEach(() => {
+    database?.close();
+    database = undefined;
+  });
 
   it("accepts stored JSON without prewarning fields, filling in defaults", async () => {
     database = new TestD1Database();
@@ -48,12 +51,23 @@ describe("ad setting defaults", () => {
     expect(geleseneEinstellungen).toEqual({
       automatic: "auto",
       manual: "manuell",
-      prewarning: true,
       leadSeconds: 60,
       prewarningText: "Werbung in {ads.seconds} Sekunden. Bin gleich zurück!",
       automaticTarget: "source_only",
       manualTarget: "source_only",
       prewarningTarget: "source_only",
     });
+  });
+
+  it("migrates a legacy disabled prewarning to the blank-only switch", () => {
+    const settings = adsModule.settingsSchema.parse({
+      automatic: "auto",
+      manual: "manuell",
+      prewarning: false,
+      prewarningText: "Werbung in {ads.seconds} Sekunden.",
+    });
+
+    expect(settings.prewarningText).toBe("");
+    expect(settings).not.toHaveProperty("prewarning");
   });
 });

@@ -1,14 +1,22 @@
 import type { AdsSkippedReason } from "../../../contracts/values";
 import type { ADS_TEMPLATE_FIELDS, AdBreaksEvent, AdsSettings } from "../contracts";
-import { renderTemplate, templateVariableNames } from "../contract";
+import { renderTemplate, templateVariableNames, type ModuleLanguage } from "../contract";
 import type { TemplateValues } from "../contract";
+import { adsChatLanguage } from "../contracts/language";
 
-export const renderAdBreakText = (template: string, duration: number): string => {
+export const localizeAdDurationGrammar = (text: string, duration: number, language: ModuleLanguage): string => {
+  const unit = duration === 1 ? adsChatLanguage[language].second : adsChatLanguage[language].seconds;
+  const units = language === "de" ? "Sekunden?" : "seconds?";
+  return text.replace(new RegExp(`\\b${String(duration)}\\s+${units}\\b`, "gu"), `${String(duration)} ${unit}`);
+};
+
+export const renderAdBreakText = (template: string, duration: number, language: ModuleLanguage = "de"): string => {
   const normalized = template.trim();
   const values: TemplateValues<typeof ADS_TEMPLATE_FIELDS.automatic> = { "ads.duration": duration };
-  return templateVariableNames(normalized).includes("ads.duration")
+  const rendered = templateVariableNames(normalized).includes("ads.duration")
     ? renderTemplate(normalized, values)
-    : `${renderTemplate(normalized, {})} (${String(duration)} Sekunden)`;
+    : `${renderTemplate(normalized, {})} (${String(duration)} ${duration === 1 ? adsChatLanguage[language].second : adsChatLanguage[language].seconds})`;
+  return localizeAdDurationGrammar(rendered, duration, language);
 };
 
 export const renderPrewarningText = (
@@ -62,7 +70,7 @@ interface AdPrewarningSchedule {
 }
 
 export interface AdPrewarningInput {
-  settings: Pick<AdsSettings, "prewarning" | "leadSeconds" | "prewarningText">;
+  settings: Pick<AdsSettings, "leadSeconds" | "prewarningText">;
   scopeAvailable: boolean;
   nowAtMs: number;
   plannedAtMs: number;
@@ -98,7 +106,7 @@ const skip = (
 export const decideAdPrewarning = (
   input: AdPrewarningInput,
 ): AdPrewarningDecision => {
-  if (!input.settings.prewarning) return skip("disabled");
+  if (input.settings.prewarningText.trim().length === 0) return skip("disabled");
   if (!input.scopeAvailable) return skip("scope_missing", { scope: "channel:read:ads" });
 
   const nextAdAtMs = dateMs(input.schedule.nextAdAt);

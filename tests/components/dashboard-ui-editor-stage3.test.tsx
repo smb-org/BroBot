@@ -1064,12 +1064,18 @@ describe("EditorShell and declaration renderer", () => {
       ["Message", "What the bot writes."],
       ["Mode", "First choice."],
     ];
-    for (const [label, help] of fieldHelp) expect(screen.getByRole("button", { name: `${label}: ${help}` })).toHaveAttribute("title", help);
+    for (const [label, help] of fieldHelp) {
+      if (label === "Threshold") {
+        expect(screen.getByText(help, { selector: ".unit-input__description" })).toBeVisible();
+      } else {
+        expect(screen.getByRole("button", { name: `${label}: ${help}` })).toHaveAttribute("title", help);
+      }
+    }
     expect(screen.getByText("Send a shoutout after a large raid.")).toBeInTheDocument();
     expect(screen.queryByRole("spinbutton", { name: "Dependent threshold" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("switch", { name: "Shoutout" }));
     expect(screen.getByRole("spinbutton", { name: "Dependent threshold" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Dependent threshold: Minimum viewer count." })).toHaveAttribute("title", "Minimum viewer count.");
+    expect(screen.getAllByText("Minimum viewer count.", { selector: ".unit-input__description" })).toHaveLength(2);
     expect(screen.getByRole("group", { name: "Mode" })).toBeInTheDocument();
   });
 });

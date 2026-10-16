@@ -43,7 +43,7 @@ import { channelPanelTexts } from "./labels";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatTimestamp as formatTimestampBase, formatNumber, maintenanceReasonText } from "./locale";
 import { CHANNEL_CONTROL_DURATIONS, canManage, type ChannelControlDuration, type ChannelRole } from "../contracts/values";
 import { MODULES } from "../modules/registry";
-import { eventSubName, moduleName, statusWord } from "./module-labels";
+import { eventSubName, moduleNavigationName, statusWord } from "./module-labels";
 import { dashboardModeForRoute, dashboardRoutePath, dashboardRouteRequiresBot, routeForDashboardMode, routeForSelectedChannel, replaceDashboardRoute, useDashboardRoute, type DashboardMode, type DashboardRoute } from "./router";
 import { dashboardNavigationGroups, visibleModuleNavigationIds } from "./nav-pages";
 import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, LoadStateLines, notify, PageHeader, Select as UiSelect, Shell, Sidebar, StatusLed, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type StatusLedState } from "./ui";
@@ -238,7 +238,7 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
     moduleStates ?? [],
     memberRole,
     dashboardLanguage(),
-    (moduleId) => moduleName(moduleId),
+    (moduleId) => moduleNavigationName(moduleId),
   );
   const groups: SidebarGroup[] = navigationGroups.flatMap(({ category, heading, entries }) => {
     const sidebarEntries = entries.filter((entry) => entry.area === "setup" && entry.sidebarVisible).map((entry): SidebarEntry => ({
@@ -1111,6 +1111,7 @@ export const DashboardApp = (): ReactElement => {
   const [, setFreshnessTick] = useState(0);
   const routeKey = dashboardRoutePath(route);
   const [headerModuleBusyKeys, setHeaderModuleBusyKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const headerModuleBusyKeysRef = useRef<ReadonlySet<string>>(new Set());
   const headerModuleBusy = route.kind === "module" && headerModuleBusyKeys.has(`${route.channelId}:${route.moduleId}`);
   // The command palette sets this before navigating so a module can preselect
   // can pre-select something on mount (e.g. a text command by name). Not
@@ -1174,6 +1175,36 @@ export const DashboardApp = (): ReactElement => {
   }, [queryClient, reloadChannels, route, selectedChannel]);
 
   const reloadAfterModuleToggle = async (channelId: string): Promise<void> => refreshAfterModuleToggle(queryClient, channelId);
+
+  const toggleModuleEnabled = async (channelId: string, moduleId: string, enabled: boolean): Promise<void> => {
+    const targetKey = `${channelId}:${moduleId}`;
+    if (headerModuleBusyKeysRef.current.has(targetKey)) return;
+    const channel = channels.data?.find((candidate) => candidate.channelId === channelId)
+      ?? (selectedChannel?.channelId === channelId ? selectedChannel : null);
+    const moduleState = channel?.modules?.find((candidate) => candidate.id === moduleId)
+      ?? (selectedChannel?.channelId === channelId ? modules.data?.modules.find((candidate) => candidate.id === moduleId) : undefined);
+    const module = MODULES.find((candidate) => candidate.id === moduleId);
+    if (channel === null || !canManage(channel.role) || moduleState === undefined || moduleState.mandatory === true || module?.mandatory === true) return;
+
+    const busyKeys = new Set(headerModuleBusyKeysRef.current);
+    busyKeys.add(targetKey);
+    headerModuleBusyKeysRef.current = busyKeys;
+    setHeaderModuleBusyKeys(busyKeys);
+    try {
+      await setChannelModuleEnabled(channelId, moduleId, enabled);
+      await reloadAfterModuleToggle(channelId);
+    } catch (error) {
+      notify({ tone: "error", message: error instanceof PanelApiError
+        ? apiErrorText(error.code, dashboardTexts().errors.changeFailed)
+        : dashboardTexts().errors.changeFailed });
+      if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
+    } finally {
+      const nextBusyKeys = new Set(headerModuleBusyKeysRef.current);
+      nextBusyKeys.delete(targetKey);
+      headerModuleBusyKeysRef.current = nextBusyKeys;
+      setHeaderModuleBusyKeys(nextBusyKeys);
+    }
+  };
 
   const recheckModerator = useCallback((channelId: string, isCurrentPage: () => boolean): Promise<void> => {
     return runModeratorRecheck(queryClient, channelId, isCurrentPage, refreshModeratorStatus);
@@ -1260,28 +1291,9 @@ export const DashboardApp = (): ReactElement => {
   const toggleHeaderModule = async (): Promise<void> => {
     if (route.kind !== "module") return;
     const targetModuleId = route.moduleId;
-    const targetKey = `${route.channelId}:${targetModuleId}`;
     const state = (selectedChannel?.modules ?? modules.data?.modules ?? []).find((module) => module.id === targetModuleId);
-    const module = MODULES.find((candidate) => candidate.id === targetModuleId);
-    if (state === undefined || state.mandatory === true || module?.mandatory === true ||
-        (selectedChannel !== null && !canManage(selectedChannel.role)) || headerModuleBusyKeys.has(targetKey)) return;
-    setHeaderModuleBusyKeys((current) => new Set(current).add(targetKey));
-    try {
-      await setChannelModuleEnabled(route.channelId, targetModuleId, !state.enabled);
-      await reloadAfterModuleToggle(route.channelId);
-    } catch (error) {
-      notify({ tone: "error", message: error instanceof PanelApiError
-        ? apiErrorText(error.code, dashboardTexts().errors.changeFailed)
-        : dashboardTexts().errors.changeFailed });
-      if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
-    } finally {
-      setHeaderModuleBusyKeys((current) => {
-        if (!current.has(targetKey)) return current;
-        const next = new Set(current);
-        next.delete(targetKey);
-        return next;
-      });
-    }
+    if (state === undefined) return;
+    await toggleModuleEnabled(route.channelId, targetModuleId, !state.enabled);
   };
 
   const selectedChannelIdForModules = selectedChannel?.channelId ?? null;
@@ -1558,6 +1570,7 @@ export const DashboardApp = (): ReactElement => {
           streamState={paletteStreamState}
           {...(paletteControls === undefined ? {} : { channelControls: paletteControls })}
           onRefreshChannelState={refreshChannelState}
+          onToggleModule={toggleModuleEnabled}
           modules={paletteModules}
           onNavigate={navigate}
           onOpenCommand={(name) => {

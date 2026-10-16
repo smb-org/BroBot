@@ -287,8 +287,10 @@ test("returning from a module keeps the live cockpit header at the same position
   await page.locator('a[href="/channels/stable-channel/modules/ads"]').click();
   await expect(page).toHaveURL("/channels/stable-channel/modules/ads");
   await expect(page.getByRole("heading", { name: "Ad breaks", level: 1 })).toBeVisible();
-  expect(await moduleHeaderHandle.evaluate((element) => element.isConnected)).toBe(true);
-  expect(await moduleHeader.evaluate((element) => element.getBoundingClientRect().y)).toBe(moduleHeaderY);
+  expect(await moduleHeaderHandle.evaluate((element) => element.isConnected)).toBe(false);
+  const adsHeader = page.locator(".main-content .page-header");
+  await expect(adsHeader.getByRole("heading", { name: "Ad breaks", level: 1 })).toBeVisible();
+  expect(await adsHeader.evaluate((element) => element.getBoundingClientRect().y)).toBe(moduleHeaderY);
 
   await page.getByRole("button", { name: "Live" }).click();
   await expect(page).toHaveURL("/channels/stable-channel");

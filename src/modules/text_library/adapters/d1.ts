@@ -7,6 +7,7 @@ import type { ModuleTemplateUsageSource } from "../../contract";
 import { blockReferencesInText } from "../domain";
 import { templateTextLength } from "../../../contracts/template-text-length";
 import { timerScheduleReconciliationMutation } from "../../contracts/timer-schedule-reconciliation";
+import { prepareChannelModuleSettingsWrite } from "../../repository/channel-module-storage";
 
 const MODULE_ID = "text_library";
 
@@ -464,10 +465,15 @@ export const createTextBlockRepository = (
         `UPDATE faq_entries SET answer_text = replace(answer_text, ?, ?), revision = revision + 1, updated_at = ?
           WHERE channel_id = ? AND instr(answer_text, ?) > 0 AND ${renamedBlockGuard}`,
       ).bind(`{text.${fromName}}`, `{text.${input.name}}`, input.now, input.channelId, `{text.${fromName}}`, ...renamedBlockValues);
-      const rewriteModuleSettings = db.prepare(
-        `UPDATE channel_modules SET settings = replace(settings, ? , ?), revision = revision + 1
-          WHERE channel_id = ? AND instr(settings, ?) > 0 AND ${renamedBlockGuard}`,
-      ).bind(`{text.${fromName}}`, `{text.${input.name}}`, input.channelId, `{text.${fromName}}`, ...renamedBlockValues);
+      const rewriteModuleSettings = prepareChannelModuleSettingsWrite(
+        db,
+        input.channelId,
+        null,
+        "replace(settings, ? , ?)",
+        [`{text.${fromName}}`, `{text.${input.name}}`],
+        `AND instr(settings, ?) > 0 AND ${renamedBlockGuard}`,
+        [`{text.${fromName}}`, ...renamedBlockValues],
+      );
       const updateOverlayRevisions = db.prepare(
         `UPDATE overlays SET revision = revision + 1, updated_at = ?
           WHERE channel_id = ? AND EXISTS (

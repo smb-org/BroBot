@@ -28,7 +28,7 @@ describe("Twitch ad schedule", () => {
     );
   });
 
-  afterEach(() => { database.close(); });
+  afterEach(() => { database.close(); vi.restoreAllMocks(); });
 
   const environment = () => ({
     DB: database as unknown as D1Database,
@@ -128,6 +128,40 @@ describe("Twitch ad schedule", () => {
       fetched: false,
       reason,
       detail: { status, twitchMessage: "Twitch-Antwort" },
+      schedule: null,
+    });
+  });
+
+  it("classifies a Twitch 401 for the ad read scope as missing scope", async () => {
+    const message = "Missing required scope: channel:read:ads";
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({ message }),
+      { status: 401 },
+    ));
+
+    await expect(getAdSchedule(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", getAppAccessToken, helixRequest, fetcher)).resolves.toEqual({
+      fetched: false,
+      reason: "scope_missing",
+      detail: { status: 401, twitchMessage: message },
+      schedule: null,
+    });
+  });
+
+  it.each([
+    ["Retry-After", "90"],
+    ["Ratelimit-Reset", "1800000090"],
+  ])("preserves the Twitch 429 %s timestamp in schedule details", async (header, value) => {
+    const now = 1_800_000_000_000;
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({ message: "Too Many Requests" }),
+      { status: 429, headers: { [header]: value } },
+    ));
+
+    await expect(getAdSchedule(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", getAppAccessToken, helixRequest, fetcher)).resolves.toEqual({
+      fetched: false,
+      reason: "rate_limited",
+      detail: { status: 429, twitchMessage: "Too Many Requests", retryAfter: now + 90_000 },
       schedule: null,
     });
   });

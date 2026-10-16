@@ -74,6 +74,11 @@ export const useDraftGuard = (
     pendingNavigation?.proceed();
   }, []);
 
+  useEffect(() => {
+    if (dirty || switching.current || pending.current === null) return;
+    resolve();
+  }, [dirty, resolve]);
+
   const completeSwitch = useCallback((): boolean => {
     if (!mounted.current || !switching.current || pending.current === null) return false;
     switching.current = false;
