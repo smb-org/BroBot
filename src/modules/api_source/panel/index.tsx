@@ -263,7 +263,7 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
   };
   const normalizedSearch = searchTerm.trim().toLocaleLowerCase(locale);
   const visibleSources = sources.filter((source) => normalizedSearch.length === 0 || source.name.toLocaleLowerCase(locale).includes(normalizedSearch) ||
-    new URL(source.url).hostname.toLocaleLowerCase(locale).includes(normalizedSearch));
+    source.url.toLocaleLowerCase(locale).includes(normalizedSearch));
   const list = <LoadState
     variant="panel-0"
     status={loadStatus}
