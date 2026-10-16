@@ -10,7 +10,6 @@ import { canManage, type ChannelRole } from "../contracts/values";
 import type { PanelActiveModule, PanelModuleState, PanelTemplateWarning } from "../panel-contract";
 import { PanelApiError, getChannelModuleSettings, saveChannelModuleSettings, setChannelModuleEnabled } from "./api";
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "./data";
-import { withModuleWriteLock } from "./data/module-toggle";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber, serverFieldErrorText, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
 import { templateTextLength } from "../template";
@@ -522,23 +521,23 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     if (pending || conflict || !canManageContent) return copy.saveError;
     setPending(true); setError(undefined); setSaved(false); setServerFieldErrors({});
     try {
-      const response = await withModuleWriteLock(channelId, module.id, () => runModuleQueryWrite(
-          queryClient,
-          channelId,
-          module.id,
-          "settings",
-          (baselineRevision) => {
-            if (baselineRevision === null) throw new Error("Module settings require a baseline revision.");
-            return saveChannelModuleSettings(channelId, module.id, baselineRevision, currentValue);
-          },
-          {
-            baselineRevision: baselineRevision.current,
-            updateCache: (current, result) => typeof current === "object" && current !== null
-              ? { ...current, ...result }
-              : current,
-            relatedParts: (module.settingsEditorRelatedParts ?? []).map((part) => ({ moduleId: module.id, part })),
-          },
-        ));
+      const response = await runModuleQueryWrite(
+        queryClient,
+        channelId,
+        module.id,
+        "settings",
+        (revision) => {
+          if (revision === null) throw new Error("Module settings require a baseline revision.");
+          return saveChannelModuleSettings(channelId, module.id, revision, currentValue);
+        },
+        {
+          baselineRevision: baselineRevision.current,
+          updateCache: (current, result) => typeof current === "object" && current !== null
+            ? { ...current, ...result }
+            : current,
+          relatedParts: (module.settingsEditorRelatedParts ?? []).map((part) => ({ moduleId: module.id, part })),
+        },
+      );
       baselineSettings.current = response.settings;
       accept(response.settings);
       baselineRevision.current = response.revision;
@@ -577,7 +576,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     persistent: true,
     dirty,
     pending,
-    saveDisabled: page.switchBusy || pending,
+    saveDisabled: pending,
     saved,
     ...(error === undefined ? {} : { error }),
     invalid,
@@ -609,7 +608,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     active={page.active}
     onToggle={page.onToggle}
     switchDisabled={page.switchDisabled || pending}
-    switchBusy={page.switchBusy || pending}
+    switchBusy={page.switchBusy}
     {...(page.lockHint === undefined ? {} : { lockHint: page.lockHint })}
     {...(pageSave === undefined ? {} : { save: pageSave })}
     overflow={<ModuleListLink channelId={channelId} onNavigate={page.onNavigate} />}

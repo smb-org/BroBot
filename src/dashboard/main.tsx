@@ -32,7 +32,7 @@ import {
 import { ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, ModuleWorkspace, NavigationIcon, StateRow, type StateTone } from "./module-panels";
 import { preloadModulePanel } from "./module-panel-loaders";
 import { BroadcasterConsentAction } from "./channel-actions";
-import { refreshAfterModuleToggle, withModuleWriteLock } from "./data/module-toggle";
+import { refreshAfterModuleToggle } from "./data/module-toggle";
 import { mergeChannelRefreshData, mergeChannelsRefreshData, runModeratorRecheck } from "./data/channel-cache";
 import { useMountedPageGuard } from "./data/page-generation";
 import { useSystemQuery } from "./data/lists";
@@ -1191,10 +1191,8 @@ export const DashboardApp = (): ReactElement => {
     headerModuleBusyKeysRef.current = busyKeys;
     setHeaderModuleBusyKeys(busyKeys);
     try {
-      await withModuleWriteLock(channelId, moduleId, async () => {
-        await setChannelModuleEnabled(channelId, moduleId, enabled);
-        await reloadAfterModuleToggle(channelId);
-      });
+      await setChannelModuleEnabled(channelId, moduleId, enabled);
+      await reloadAfterModuleToggle(channelId);
     } catch (error) {
       notify({ tone: "error", message: error instanceof PanelApiError
         ? apiErrorText(error.code, dashboardTexts().errors.changeFailed)

@@ -28,6 +28,7 @@ const record = (channelId: string, moduleId: string, enabled: boolean): ChannelM
   initialized: enabled,
   settings: SETTINGS,
   revision: 1,
+  settingsRevision: 1,
 });
 
 const auditCount = async (database: TestD1Database): Promise<number> => {

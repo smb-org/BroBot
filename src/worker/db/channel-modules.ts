@@ -9,6 +9,7 @@ export interface ChannelModuleRecord {
   initialized: boolean;
   settings: string;
   revision: number;
+  settingsRevision: number;
 }
 
 interface ChannelModuleRow {
@@ -18,6 +19,7 @@ interface ChannelModuleRow {
   initialized: number;
   settings: string;
   revision: number;
+  settings_revision: number;
 }
 
 const mapChannelModule = (row: ChannelModuleRow): ChannelModuleRecord => ({
@@ -27,6 +29,7 @@ const mapChannelModule = (row: ChannelModuleRow): ChannelModuleRecord => ({
   initialized: row.initialized === 1,
   settings: row.settings,
   revision: row.revision,
+  settingsRevision: row.settings_revision,
 });
 
 const moduleAuditValue = (module: Pick<ChannelModuleRecord, "channelId" | "moduleId" | "enabled" | "settings">) => ({
@@ -36,13 +39,19 @@ const moduleAuditValue = (module: Pick<ChannelModuleRecord, "channelId" | "modul
   settings: module.settings,
 });
 
+const moduleSettingsAuditValue = (module: Pick<ChannelModuleRecord, "channelId" | "moduleId" | "settings">) => ({
+  channelId: module.channelId,
+  moduleId: module.moduleId,
+  settings: module.settings,
+});
+
 const getChannelModule = async (
   db: D1Database,
   channelId: string,
   moduleId: string,
 ): Promise<ChannelModuleRecord | null> => {
   const row = await db.prepare(
-    `SELECT channel_id, module_id, enabled, initialized, settings, revision
+    `SELECT channel_id, module_id, enabled, initialized, settings, revision, settings_revision
        FROM channel_modules
       WHERE channel_id = ? AND module_id = ?`,
   ).bind(channelId, moduleId).first<ChannelModuleRow>();
@@ -111,42 +120,66 @@ export const updateChannelModuleWithAudit = async (
   markInitialized = false,
   textBlockGuard?: { sql: string; values: readonly (string | number)[] },
   requireEnabled = false,
+  expectedSettingsRevision?: number,
 ): Promise<boolean> => {
   const before = await getChannelModule(db, channelId, moduleId);
   if (before === null) return false;
+  const settingsOnly = expectedSettingsRevision !== undefined;
+  const settingsRevisionIncrement = settingsOnly || before.settings !== settings ? 1 : 0;
   const after: ChannelModuleRecord = {
     channelId,
     moduleId,
-    enabled,
+    enabled: settingsOnly ? before.enabled : enabled,
     initialized: before.initialized || markInitialized,
     settings,
     revision: before.revision + 1,
+    settingsRevision: before.settingsRevision + settingsRevisionIncrement,
   };
-  const mutation = db.prepare(
-    `UPDATE channel_modules
-        SET enabled = ?, settings = ?, initialized = ?, revision = revision + 1
-      WHERE channel_id = ? AND module_id = ?
-        AND revision = ?
-        AND (? = 0 OR enabled = 1)
-        ${textBlockGuard?.sql ?? ""}
-      ${actorGuard(MANAGING_ROLES)}`,
-  ).bind(
-    after.enabled ? 1 : 0,
-    after.settings,
-    after.initialized ? 1 : 0,
-    after.channelId,
-    after.moduleId,
-    expectedRevision ?? before.revision,
-    requireEnabled ? 1 : 0,
-    ...(textBlockGuard?.values ?? []),
-    ...bindActorGuard(actor, after.channelId, changedAt),
-  );
+  const mutation = settingsOnly
+    ? db.prepare(
+      `UPDATE channel_modules
+          SET settings = ?, revision = revision + 1, settings_revision = settings_revision + ?
+        WHERE channel_id = ? AND module_id = ?
+          AND settings_revision = ?
+          AND (? = 0 OR enabled = 1)
+          ${textBlockGuard?.sql ?? ""}
+        ${actorGuard(MANAGING_ROLES)}`,
+    ).bind(
+      after.settings,
+      settingsRevisionIncrement,
+      after.channelId,
+      after.moduleId,
+      expectedSettingsRevision,
+      requireEnabled ? 1 : 0,
+      ...(textBlockGuard?.values ?? []),
+      ...bindActorGuard(actor, after.channelId, changedAt),
+    )
+    : db.prepare(
+      `UPDATE channel_modules
+          SET enabled = ?, settings = ?, initialized = ?, revision = revision + 1, settings_revision = settings_revision + ?
+        WHERE channel_id = ? AND module_id = ?
+          AND revision = ?
+          AND (? = 0 OR enabled = 1)
+          ${textBlockGuard?.sql ?? ""}
+        ${actorGuard(MANAGING_ROLES)}`,
+    ).bind(
+      after.enabled ? 1 : 0,
+      after.settings,
+      after.initialized ? 1 : 0,
+      settingsRevisionIncrement,
+      after.channelId,
+      after.moduleId,
+      expectedRevision ?? before.revision,
+      requireEnabled ? 1 : 0,
+      ...(textBlockGuard?.values ?? []),
+      ...bindActorGuard(actor, after.channelId, changedAt),
+    );
   const audit = prepareHostModuleAudit(db, actor.userId, changedAt, {
     channelId,
     moduleId,
     action,
-    before: moduleAuditValue(before),
-    after: moduleAuditValue(after),
+    before: settingsOnly ? moduleSettingsAuditValue(before) : moduleAuditValue(before),
+    after: settingsOnly ? moduleSettingsAuditValue(after) : moduleAuditValue(after),
   });
   const results = await db.batch([mutation, audit, ...dependentMutations]);
   return (results[0]?.meta.changes ?? 0) > 0;

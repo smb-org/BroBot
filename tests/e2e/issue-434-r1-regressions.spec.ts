@@ -26,7 +26,7 @@ const raidSettings = {
   textShortTarget: "channel_default",
 };
 
-const installModule = async (page: Page, moduleId: ModuleId, state: State, width: number, height: number): Promise<{ scheduleRequests: () => number; submittedRevision: () => number | undefined; settingsReadRevisions: () => readonly number[]; toggleRequestStarted: () => Promise<void>; releaseToggleRequest: () => void }> => {
+const installModule = async (page: Page, moduleId: ModuleId, state: State, width: number, height: number, startAtModules = false): Promise<{ scheduleRequests: () => number; submittedRevision: () => number | undefined; settingsReadRevisions: () => readonly number[]; moduleRevision: () => number; toggleRequestStarted: () => Promise<void>; commitToggleRequest: () => void; releaseToggleRequest: () => void }> => {
   const channelId = `issue-434-${moduleId}-${state}-${String(width)}`;
   const role: Role = state === "operator" ? "operator" : state === "missing-scope" ? "broadcaster" : "manager";
   const module = {
@@ -36,12 +36,22 @@ const installModule = async (page: Page, moduleId: ModuleId, state: State, width
     ...(state === "missing-scope" ? { missingBroadcasterScopes: ["channel:read:ads"] } : {}),
   };
   let moduleEnabled = true;
+  let rowRevision = 1;
   let settingsRevision = 1;
+  let currentSettings: Record<string, unknown> = moduleId === "ads" ? adsSettings : state === "raid-message-off" ? { ...raidSettings, textShort: "" } : raidSettings;
+  let pendingEnabled: boolean | undefined;
+  let toggleCommitted = false;
   let submittedRevision: number | undefined;
   let resolveToggleRequestStarted: (() => void) | undefined;
   let releaseToggleRequest: (() => void) | undefined;
   const toggleRequestStarted = new Promise<void>((resolve) => { resolveToggleRequestStarted = resolve; });
   const settingsReadRevisions: number[] = [];
+  const commitToggleRequest = (): void => {
+    if (toggleCommitted || pendingEnabled === undefined) return;
+    moduleEnabled = pendingEnabled;
+    rowRevision += 1;
+    toggleCommitted = true;
+  };
   const currentModule = () => ({ ...module, enabled: moduleEnabled });
   const readySchedule = () => {
     const now = Date.now();
@@ -82,24 +92,28 @@ const installModule = async (page: Page, moduleId: ModuleId, state: State, width
     if (pathname === `/api/channels/${channelId}/variables`) return route.fulfill(json({ variables: [], count: 0, maximum: 100 }));
     if (pathname === "/api/csrf") return route.fulfill(json({ token: "issue-434-csrf" }));
     if (pathname === `/api/channels/${channelId}/modules/${moduleId}/settings`) {
-      const settings = moduleId === "ads" ? adsSettings : state === "raid-message-off" ? { ...raidSettings, textShort: "" } : raidSettings;
       if (request.method() === "PATCH" && state === "save-error") return route.fulfill(json({ error: "settings_write_failed" }, 500));
       if (request.method() === "PATCH" && state === "toggle-and-save") {
         const body = JSON.parse(request.postData() ?? "{}") as { revision: number; settings: Record<string, unknown> };
         submittedRevision = body.revision;
+        if (body.revision !== settingsRevision) {
+          return route.fulfill(json({ error: "module_settings_changed_concurrently" }, 409));
+        }
+        currentSettings = body.settings;
+        rowRevision += 1;
         settingsRevision += 1;
-        return route.fulfill(json({ settings: body.settings, revision: settingsRevision, variables: [], warnings: [] }));
+        return route.fulfill(json({ settings: currentSettings, revision: settingsRevision, variables: [], warnings: [] }));
       }
-      if (request.method() === "PATCH") return route.fulfill(json({ settings, revision: settingsRevision + 1, variables: [], warnings: [] }));
+      if (request.method() === "PATCH") return route.fulfill(json({ settings: currentSettings, revision: settingsRevision + 1, variables: [], warnings: [] }));
       settingsReadRevisions.push(settingsRevision);
-      return route.fulfill(json({ settings, revision: settingsRevision, variables: [], warnings: [] }));
+      return route.fulfill(json({ settings: currentSettings, revision: settingsRevision, variables: [], warnings: [] }));
     }
     if (state === "toggle-and-save" && pathname === `/api/channels/${channelId}/modules/${moduleId}` && request.method() === "PATCH") {
+      pendingEnabled = (JSON.parse(request.postData() ?? "{}") as { enabled: boolean }).enabled;
+      toggleCommitted = false;
       resolveToggleRequestStarted?.();
       await new Promise<void>((resolve) => { releaseToggleRequest = resolve; });
-      const body = JSON.parse(request.postData() ?? "{}") as { enabled: boolean };
-      moduleEnabled = body.enabled;
-      settingsRevision += 1;
+      commitToggleRequest();
       return route.fulfill(json({ module: currentModule() }));
     }
     if (moduleId === "ads" && pathname === `/api/channels/${channelId}/modules/ads/schedule`) {
@@ -121,12 +135,14 @@ const installModule = async (page: Page, moduleId: ModuleId, state: State, width
     return route.fulfill(json({}));
   });
   await page.setViewportSize({ width, height });
-  await page.goto(`/channels/${channelId}/modules/${moduleId}`);
+  await page.goto(startAtModules ? `/channels/${channelId}/modules` : `/channels/${channelId}/modules/${moduleId}`);
   return {
     scheduleRequests: () => scheduleRequests,
     submittedRevision: () => submittedRevision,
     settingsReadRevisions: () => settingsReadRevisions,
+    moduleRevision: () => rowRevision,
     toggleRequestStarted: () => toggleRequestStarted,
+    commitToggleRequest,
     releaseToggleRequest: () => { releaseToggleRequest?.(); },
   };
 };
@@ -308,7 +324,7 @@ test("a mobile Ads success toast leaves the textarea fixed until the toast disap
   expect(await measure()).toEqual(before);
 });
 
-test("a module toggle refreshes the shared settings revision without discarding its draft", async ({ page }) => {
+test("Save and switch accepts the draft while a module toggle response is pending", async ({ page }) => {
   const fixture = await installModule(page, "ads", "toggle-and-save", 1920, 1080);
   const message = page.getByRole("textbox", { name: "Automatische Werbepause" });
   await message.fill("Entwurf bleibt nach dem Umschalten erhalten.");
@@ -316,47 +332,39 @@ test("a module toggle refreshes the shared settings revision without discarding 
   const enabled = page.getByRole("switch", { name: /Werbung/u });
   await enabled.click();
   await fixture.toggleRequestStarted();
-  await expect(enabled).toBeDisabled();
-  const save = page.getByRole("button", { name: "Speichern" });
+  fixture.commitToggleRequest();
+  expect(fixture.moduleRevision()).toBe(2);
+  await page.getByRole("link", { name: "Module verwalten", exact: true }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByRole("button", { name: "Speichern und wechseln", exact: true }).click();
   try {
-    await expect(save).toBeDisabled();
+    await expect(page.getByRole("heading", { level: 1, name: "Module" })).toBeVisible();
+    await expect.poll(fixture.submittedRevision).toBe(1);
   } finally {
     fixture.releaseToggleRequest();
   }
-  await expect(enabled).toBeChecked();
-  await expect.poll(() => fixture.settingsReadRevisions().at(-1)).toBe(2);
-  await expect(enabled).not.toBeChecked();
-  await expect(message).toHaveValue("Entwurf bleibt nach dem Umschalten erhalten.");
-
-  await expect(save).toBeEnabled();
-  await save.click();
-  await expect.poll(fixture.submittedRevision).toBe(2);
-  await expect(message).toHaveValue("Entwurf bleibt nach dem Umschalten erhalten.");
 });
 
-test("a command palette module toggle keeps Save disabled until settings refresh", async ({ page }) => {
-  const fixture = await installModule(page, "ads", "toggle-and-save", 1920, 1080);
-  const message = page.getByRole("textbox", { name: "Automatische Werbepause" });
-  await message.fill("Entwurf bleibt nach dem Paletten-Umschalten erhalten.");
-
-  await page.locator(".dashboard-header__palette-trigger").click();
-  const palette = page.getByRole("dialog");
-  await palette.getByRole("combobox").fill("Werbung aus");
-  await palette.locator('[data-command-palette-item-id="action:ads-off"]').click();
-  await expect(palette).toBeHidden();
+test("a pending Modules-list toggle does not stale an editor draft", async ({ page }) => {
+  const fixture = await installModule(page, "ads", "toggle-and-save", 1920, 1080, true);
+  const moduleList = page.locator(".state-list");
+  await moduleList.getByRole("switch", { name: /Werbung/u }).click();
   await fixture.toggleRequestStarted();
-
-  const save = page.getByRole("button", { name: "Speichern" });
+  await moduleList.getByRole("link", { name: /Werbung/u }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Werbung" })).toBeVisible();
+  const message = page.getByRole("textbox", { name: "Automatische Werbepause" });
+  await message.fill("Entwurf bleibt nach dem Modulelisten-Umschalten erhalten.");
+  expect(fixture.settingsReadRevisions()).toContain(1);
+  fixture.commitToggleRequest();
+  expect(fixture.moduleRevision()).toBe(2);
+  const save = page.getByRole("button", { name: "Speichern", exact: true });
+  await save.click();
   try {
-    await expect(save).toBeDisabled();
+    await expect.poll(fixture.submittedRevision).toBe(1);
   } finally {
     fixture.releaseToggleRequest();
   }
-  await expect.poll(() => fixture.settingsReadRevisions().at(-1)).toBe(2);
-  await expect(message).toHaveValue("Entwurf bleibt nach dem Paletten-Umschalten erhalten.");
-  await expect(save).toBeEnabled();
-  await save.click();
-  await expect.poll(fixture.submittedRevision).toBe(2);
+  await expect(message).toHaveValue("Entwurf bleibt nach dem Modulelisten-Umschalten erhalten.");
 });
 
 test("Ads refresh explains when its read permission is missing", async ({ page }) => {
