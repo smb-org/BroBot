@@ -1751,11 +1751,11 @@ describe("text library", () => {
     expect(document.querySelector(".text-library__read-only-properties")).toHaveTextContent("Hello");
     expect(screen.queryByRole("textbox", { name: "Name" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByText("Categories"));
-    expect(screen.queryAllByRole("note")).toHaveLength(0);
+    expect(screen.getByRole("note")).toHaveTextContent("Only broadcasters and managers may add text blocks.");
     expect(document.querySelectorAll(".text-library__read-only-properties")).toHaveLength(2);
     const addButton = screen.getByRole("button", { name: "Add text block" });
     expect(addButton).toBeDisabled();
-    expect(addButton.getAttribute("aria-describedby")).toBeNull();
+    expect(addButton.getAttribute("aria-describedby")).not.toBeNull();
   });
 
   it("guards close, Escape, and row changes when a text draft is dirty", async () => {

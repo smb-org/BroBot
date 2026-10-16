@@ -4,7 +4,7 @@ import type { ModulePanelProperties } from "../../contract";
 import { TEXT_BLOCK_MAXIMUMS } from "../contracts";
 import type { TextBlock, TextBlockCategory, TextBlockConditions, TextBlockUsage, TextBlockVariant, TwitchGame } from "../contracts";
 import { firstMatchingTextBlockVariant, validTextBlockConditions, validTextBlockName } from "../domain";
-import { blockReferencesInText, textBlockPreviewDependencies } from "../../contracts/text-block-references";
+import { blockReferencesInText } from "../../contracts/text-block-references";
 import { PanelApiError } from "../../../contracts/panel-error";
 import { ActionMenu, Badge, Button, ChatPreview, CollectionPage, ConfirmDialog, Dialog, EmptyState, Field, GameMultiSelect, InspectorFieldRow, ListToolbar, LoadState, LoadStateLines, PageHeader, registeredModuleTemplateGroup, registerDashboardNavigationGuard, RuleNote, Section, Select, TemplateTextField, notify, useDraftGuard, useTemplatePreview } from "../../../dashboard/ui";
 import { templateVariableNames } from "../../contract";
@@ -245,16 +245,6 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
     ...(data.dataConditionValues === undefined ? {} : { dataConditions: data.dataConditionValues }),
   });
   const previewTemplate = matchingVariant?.texts[0] ?? "";
-  const previewBlockDependencies = textBlockPreviewDependencies(previewTemplate, data?.blocks ?? []);
-  const previewSourceTexts = [
-    previewTemplate,
-    ...previewBlockDependencies.flatMap((dependency) => dependency.missing ? [] : dependency.variants.flatMap((variant) => variant.texts)),
-  ];
-  const previewVariableNames = new Set(previewSourceTexts.flatMap((text) => templateVariableNames(text)));
-  const previewVariables = (data?.templateVariables ?? []).filter((variable) => previewVariableNames.has(variable.name)).map((variable) => ({
-    name: variable.name,
-    sample: variable.sample,
-  })).sort((left, right) => left.name.localeCompare(right.name));
   const previewChatStatus: ("viewer" | "subscriber" | "vip" | "moderator" | "broadcaster")[] | null = simulatedContext === "command"
     ? [simulatedTier === "everyone" ? "viewer" : simulatedTier as "subscriber" | "vip" | "moderator" | "broadcaster"]
     : null;
@@ -266,15 +256,9 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
     chatStatus: previewChatStatus,
   };
   const preview = useTemplatePreview({
-    inputs: {
-      channelId,
-      ...previewInput,
-      textBlocks: previewBlockDependencies,
-      variables: previewVariables,
-      timeZone: data?.channelSettings.timeZone ?? null,
-      dataConditionValues: data?.dataConditionValues ?? null,
-      now: previewNow,
-    },
+    text: previewTemplate,
+    refreshKey: libraryQuery.dataUpdatedAt,
+    requestKey: `${simulatedContext}:${simulatedStream}:${simulatedGameId ?? ""}:${simulatedTier}`,
     enabled: data !== null && previewTemplate.length > 0,
     render: () => renderTextLibraryPreview(channelId, previewInput).then((result) => result.text),
   });
@@ -692,7 +676,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
               <GameMultiSelect searchGames={searchGames} lookupGames={lookupGames} value={gameFilter} onChange={setGameFilter}
                 messages={{ ...labels.gameMultiSelect, label: labels.gameFilter }} compact />
             </>}
-            create={{ label: labels.addBlock, onClick: openCreate, disabled: pending || createReason !== undefined, ...(!canManage || createReason === undefined ? {} : { reason: createReason }) }}
+            create={{ label: labels.addBlock, onClick: openCreate, disabled: pending || createReason !== undefined, ...(createReason === undefined ? {} : { reason: createReason }) }}
             usage={{ count: data.blocks.length, maximum: TEXT_BLOCK_MAXIMUMS.blocksPerChannel, ...(activeFilters.length === 0 ? {} : { filteredCount: visibleBlocks.length }), copy: { countSuffix: labels.countSuffix, filteredInfix: common.of, filteredSuffix: labels.filteredSuffix, limitInfix: common.of, limitSuffix: labels.limitSuffix, loadedSuffix: common.loaded } }}
             {...(activeFilters.length === 0 ? {} : { activeFilters: activeFilters.join(" · "), activeFiltersLabel: labels.activeFilters, resetLabel: labels.resetFilters, onReset: () => { setSearch(""); setCategoryFilter(""); setGameFilter([]); } })}
           />}

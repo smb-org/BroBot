@@ -1,8 +1,9 @@
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { jsonResponse } from "../unit/fixtures";
+import { moduleQueryKey } from "../../src/dashboard/data";
 import { renderWithQuery } from "../query-test-utils";
 import TextLibraryPanel from "../../src/modules/text_library/panel";
 
@@ -65,15 +66,18 @@ describe("Text library panel layout slots", () => {
     expect(document.querySelector(".list-toolbar__usage")).toHaveTextContent(usage);
   });
 
-  it("keeps creation visible and disabled without a truncated operator reason", async () => {
+  it("shows the operator reason for disabled text block creation", async () => {
     vi.stubGlobal("fetch", libraryFetcher());
     renderWithQuery(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" canManage={false} /></MantineProvider>);
     await waitForLibraryLoad();
 
     const addButton = await screen.findByRole("button", { name: "Add text block" });
     expect(addButton).toBeDisabled();
-    expect(addButton).not.toHaveAttribute("aria-describedby");
-    expect(document.querySelector(".list-toolbar__reason")).not.toBeInTheDocument();
+    const reasonId = addButton.getAttribute("aria-describedby");
+    expect(reasonId).not.toBeNull();
+    const reason = document.getElementById(reasonId as string);
+    expect(reason).toBeVisible();
+    expect(reason).toHaveTextContent("Only broadcasters and managers may add text blocks.");
   });
 
   it("keeps the create action before the filters in the list toolbar", async () => {
@@ -139,7 +143,7 @@ describe("Text library panel layout slots", () => {
     });
   });
 
-  it("keeps a resolved text-block preview when an unrelated name edit is discarded", async () => {
+  it("keeps a resolved preview through unrelated edits until the next successful panel refresh", async () => {
     const block = {
       name: "welcome",
       categoryId: "social",
@@ -157,7 +161,7 @@ describe("Text library panel layout slots", () => {
       }
       return fallback(input, init);
     }));
-    renderWithQuery(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" /></MantineProvider>);
+    const { queryClient } = renderWithQuery(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" /></MantineProvider>);
 
     const nameField = await screen.findByRole("textbox", { name: "Name" });
     expect(await screen.findByText("Hello Alice")).toBeInTheDocument();
@@ -169,6 +173,12 @@ describe("Text library panel layout slots", () => {
     await waitFor(() => expect(nameField).toHaveValue("welcome"));
     expect(screen.getByText("Hello Alice")).toBeInTheDocument();
     expect(previewCalls).toBe(1);
+
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: moduleQueryKey("channel-a", "text_library", "library"), exact: true });
+    });
+    await waitFor(() => expect(previewCalls).toBe(2));
+    expect(screen.getByText("Hello Alice")).toBeInTheDocument();
   });
 
   it("shows the selected text block as read-only properties for operators", async () => {
@@ -191,7 +201,7 @@ describe("Text library panel layout slots", () => {
     fireEvent.click(screen.getByRole("button", { name: "More actions" }));
     const deleteItem = screen.getByRole("menuitem", { name: "Delete" });
     expect(deleteItem).toHaveAttribute("aria-disabled", "true");
-    expect(deleteItem).toHaveAccessibleDescription("Broadcasters and managers only");
+    expect(deleteItem).toHaveAccessibleDescription("Only broadcasters and managers may delete.");
   });
 
   it("guards deleting a text block while its draft has unsaved changes", async () => {

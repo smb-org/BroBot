@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
@@ -188,7 +188,7 @@ describe("Timers panel", () => {
     fireEvent.change(nameField, { target: { value: "Greeting timer" } });
 
     queryClient.setQueryData<TimersPanelData>(moduleQueryKey("channel-a", "timers", "panel"), {
-      timers: [{ ...timer, name: "Updated elsewhere", revision: 2 }], sources: [], variables: [], textBlocks: [],
+      timers: [{ ...timer, name: "Updated elsewhere", revision: 2 }], sources: [], variables: [],
     });
 
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Updated elsewhere"));
@@ -219,13 +219,13 @@ describe("Timers panel", () => {
       { gcTime: 600_000, staleTime: 600_000 },
     );
     expect(await screen.findByText("Greeting timer")).toBeInTheDocument();
-    expect(fetcher).toHaveBeenCalledTimes(5);
+    expect(fetcher).toHaveBeenCalledTimes(4);
 
     view.rerender(<UiProvider>{null}</UiProvider>);
     view.rerender(<UiProvider><TimersPanel channelId="channel-a" language="en" /></UiProvider>);
 
     expect(screen.getByText("Greeting timer")).toBeInTheDocument();
-    expect(fetcher).toHaveBeenCalledTimes(5);
+    expect(fetcher).toHaveBeenCalledTimes(4);
   });
 
   it("keeps a committed timer revision when the post-save refresh fails and offers retry", async () => {
@@ -328,7 +328,7 @@ describe("Timers panel", () => {
     expect(timerReads).toBeGreaterThan(2);
   });
 
-  it("keeps the create action visible and disabled for operators", () => {
+  it("keeps the create action visible, disabled, and explained for operators", () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>((input) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/timers")) return Promise.resolve(jsonResponse({ timers: [] }));
@@ -340,7 +340,7 @@ describe("Timers panel", () => {
     renderWithQuery(<UiProvider><TimersPanel channelId="channel-a" language="en" canManage={false} /></UiProvider>);
 
     expect(toolbarButton("Create timer")).toBeDisabled();
-    expect(document.querySelector(".list-toolbar__reason")).not.toBeInTheDocument();
+    expect(document.querySelector(".list-toolbar__reason")).toHaveTextContent("Only broadcasters and managers can edit timers.");
   });
 
   it("shows timer field errors after an invalid create attempt", async () => {
@@ -443,7 +443,7 @@ describe("Timers panel", () => {
     expect(screen.queryByText("This timer has changed. Reload the current version before continuing.")).not.toBeInTheDocument();
   });
 
-  it("keeps a resolved preview when only the timer revision changes", async () => {
+  it("refreshes a timer preview after a successful panel refresh with the same message", async () => {
     const originalTimer: Timer = {
       id: "timer-preview", name: "Preview timer", enabled: true, messageText: "{text.welcome}", chatTarget: "source_only",
       trigger: { type: "interval", live: { minutes: 30 } }, revision: 1, nextRunAt: null, nextRunState: null,
@@ -457,7 +457,7 @@ describe("Timers panel", () => {
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
       if (url.pathname.endsWith("/template-preview")) {
         previewCalls += 1;
-        return Promise.resolve(jsonResponse({ text: "Resolved welcome message", diagnostics: [] }));
+        return Promise.resolve(jsonResponse({ text: previewCalls === 1 ? "Resolved welcome message" : "Refreshed welcome message", diagnostics: [] }));
       }
       if (url.pathname.endsWith("/timers/timer-preview/enabled") && method === "PATCH") {
         currentTimer = { ...currentTimer, enabled: false, revision: 2 };
@@ -486,27 +486,24 @@ describe("Timers panel", () => {
 
     await waitFor(() => expect(within(document.querySelector(".timer-list") as HTMLElement)
       .getByRole("switch", { name: "Preview timer: Disabled" })).toBeInTheDocument());
-    expect(within(preview).getByText("Resolved welcome message")).toBeInTheDocument();
-    expect(previewCalls).toBe(1);
+    await within(preview).findByText("Refreshed welcome message");
+    expect(previewCalls).toBe(2);
   });
 
-  it("refreshes a timer preview when a referenced nested text block changes", async () => {
+  it("refreshes a nested text block preview after panel data refresh", async () => {
     const timer: Timer = {
       id: "timer-dependency-preview", name: "Dependency preview", enabled: true, messageText: "{text.welcome}", chatTarget: "source_only",
       trigger: { type: "interval", live: { minutes: 30 } }, revision: 1, nextRunAt: null, nextRunState: null,
       lastRunAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
     };
-    const welcome = {
-      name: "welcome", revision: 1, games: [],
-      variants: [{ id: "default", conditions: {}, texts: ["Hello {text.greeting}"] }],
-    };
-    const greeting = { name: "greeting", revision: 1, games: [], variants: [{ id: "default", conditions: {}, texts: ["old"] }] };
+    let greetingText = "old";
     let previewCalls = 0;
     const fetcher = vi.fn<typeof fetch>((input) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
       if (url.pathname.endsWith("/template-preview")) {
         previewCalls += 1;
-        return Promise.resolve(jsonResponse({ text: previewCalls === 1 ? "Hello old" : "Hello refreshed", diagnostics: [] }));
+        return Promise.resolve(jsonResponse({ text: `Hello ${greetingText}`, diagnostics: [] }));
       }
       if (url.pathname.endsWith("/timers")) return Promise.resolve(jsonResponse({ timers: [timer] }));
       if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({
@@ -515,8 +512,6 @@ describe("Timers panel", () => {
       }));
       if (url.pathname.endsWith("/event-time-sources")) return Promise.resolve(jsonResponse({ sources: [] }));
       if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
-      if (url.pathname.endsWith("/modules/text_library/library")) return Promise.resolve(jsonResponse({ blocks: [welcome, greeting] }));
-      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
       return Promise.resolve(jsonResponse({}, 404));
     });
     vi.stubGlobal("fetch", fetcher);
@@ -528,14 +523,76 @@ describe("Timers panel", () => {
     await within(preview).findByText("Hello old");
     expect(previewCalls).toBe(1);
 
-    queryClient.setQueryData<TimersPanelData>(moduleQueryKey("channel-a", "timers", "panel"), {
-      timers: [timer],
-      sources: [],
-      variables: [],
-      textBlocks: [welcome, { ...greeting, revision: 2, variants: [{ id: "default", conditions: {}, texts: ["refreshed"] }] }],
+    greetingText = "refreshed";
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: moduleQueryKey("channel-a", "timers", "panel"), exact: true });
     });
 
     await within(preview).findByText("Hello refreshed");
+    expect(previewCalls).toBe(2);
+  });
+
+  it("refreshes a sun-conditioned timer preview after panel data refresh", async () => {
+    const timer: Timer = {
+      id: "timer-sun-preview", name: "Sun preview", enabled: true, messageText: "{text.sun_greeting}", chatTarget: "source_only",
+      trigger: { type: "interval", live: { minutes: 30 } }, revision: 1, nextRunAt: null, nextRunState: null,
+      lastRunAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
+    };
+    const sunGreeting = {
+      name: "sun_greeting", revision: 1, games: [],
+      variants: [
+        { id: "day", conditions: { "sun.phase": "day" }, texts: ["Day greeting"] },
+        { id: "night", conditions: { "sun.phase": "night" }, texts: ["Night greeting"] },
+        { id: "default", conditions: {}, texts: ["Fallback greeting"] },
+      ],
+    };
+    let sunPhase: "day" | "night" = "day";
+    const sunPreviewText: Record<"day" | "night", string> = { day: "Day greeting", night: "Night greeting" };
+    let previewCalls = 0;
+    let resolveNightPreview: ((response: Response) => void) | null = null;
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+      if (url.pathname.endsWith("/template-preview")) {
+        previewCalls += 1;
+        if (sunPhase === "night") return new Promise<Response>((resolve) => { resolveNightPreview = resolve; });
+        return Promise.resolve(jsonResponse({ text: sunPreviewText[sunPhase], diagnostics: [] }));
+      }
+      if (url.pathname.endsWith("/timers")) return Promise.resolve(jsonResponse({ timers: [timer] }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({
+        timeZone: "UTC", revision: 1, location: null, locationRevision: 1,
+        defaultChatTarget: "source_only", defaultChatTargetRevision: 1,
+      }));
+      if (url.pathname.endsWith("/event-time-sources")) return Promise.resolve(jsonResponse({ sources: [] }));
+      if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
+      if (url.pathname.endsWith("/modules/text_library/library")) return Promise.resolve(jsonResponse({ blocks: [sunGreeting] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const { queryClient } = renderWithQuery(<UiProvider><TimersPanel channelId="channel-a" language="en" /></UiProvider>);
+    await screen.findByRole("textbox", { name: "Message" });
+    const preview = document.querySelector(".timer-editor__preview");
+    if (!(preview instanceof HTMLElement)) throw new Error("The timer preview is missing.");
+    await within(preview).findByText("Day greeting");
+    expect(previewCalls).toBe(1);
+    expect(fetcher.mock.calls.filter(([input]) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      return url.pathname.endsWith("/modules/text_library/library");
+    })).toHaveLength(0);
+
+    sunPhase = "night";
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: moduleQueryKey("channel-a", "timers", "panel"), exact: true });
+    });
+
+    await waitFor(() => expect(previewCalls).toBe(2));
+    expect(within(preview).getByText("Day greeting")).toBeInTheDocument();
+    await act(async () => {
+      resolveNightPreview?.(jsonResponse({ text: "Night greeting", diagnostics: [] }));
+      await Promise.resolve();
+    });
+    await within(preview).findByText("Night greeting");
     expect(previewCalls).toBe(2);
   });
 
@@ -563,7 +620,7 @@ describe("Timers panel", () => {
     fireEvent.click(screen.getByRole("button", { name: "More actions" }));
     const deleteItem = screen.getByRole("menuitem", { name: "Delete" });
     expect(deleteItem).toHaveAttribute("aria-disabled", "true");
-    expect(deleteItem).toHaveAccessibleDescription("Broadcasters and managers only");
+    expect(deleteItem).toHaveAccessibleDescription("Only broadcasters and managers may delete.");
   });
 
   it("summarises interval parts and the next run state per language", () => {

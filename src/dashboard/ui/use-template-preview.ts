@@ -1,31 +1,27 @@
 import { useEffect, useRef, useState } from "react";
 
-interface PreviewState {
-  cacheKey: string;
-  value: string | null;
-}
-
 interface UseTemplatePreviewOptions {
-  inputs: unknown;
+  text: string;
+  refreshKey: number;
+  requestKey?: string;
   enabled?: boolean;
   delayMilliseconds?: number;
   render: () => Promise<string>;
 }
 
-const maximumCachedPreviews = 40;
-
-/** Shares resolved previews while keeping each result tied to all expansion inputs. */
+/** Refreshes server-expanded previews when their text or panel data changes. */
 export const useTemplatePreview = ({
-  inputs,
+  text,
+  refreshKey,
+  requestKey,
   enabled = true,
   delayMilliseconds = 300,
   render,
 }: UseTemplatePreviewOptions): { value: string | null; pending: boolean } => {
-  const cacheKey = JSON.stringify([inputs]);
   const renderRef = useRef(render);
-  const cache = useRef(new Map<string, string>());
   const requestId = useRef(0);
-  const [state, setState] = useState<PreviewState | null>(null);
+  const [value, setValue] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
 
   useEffect(() => {
     renderRef.current = render;
@@ -39,32 +35,19 @@ export const useTemplatePreview = ({
 
     const currentRequestId = ++requestId.current;
     let cancelled = false;
-    const cached = cache.current.get(cacheKey);
-    if (cached !== undefined) {
-      void Promise.resolve().then(() => {
-        if (!cancelled && requestId.current === currentRequestId) {
-          setState({ cacheKey, value: cached });
-        }
-      });
-      return () => {
-        cancelled = true;
-        if (requestId.current === currentRequestId) requestId.current += 1;
-      };
-    }
+    queueMicrotask(() => {
+      if (!cancelled && requestId.current === currentRequestId) setPending(true);
+    });
 
     const timeout = window.setTimeout(() => {
       void Promise.resolve().then(() => renderRef.current()).then((value) => {
         if (cancelled || requestId.current !== currentRequestId) return;
-        cache.current.set(cacheKey, value);
-        while (cache.current.size > maximumCachedPreviews) {
-          const oldestKey = cache.current.keys().next().value;
-          if (oldestKey === undefined) break;
-          cache.current.delete(oldestKey);
-        }
-        setState({ cacheKey, value });
+        setValue(value);
+        setPending(false);
       }).catch(() => {
         if (!cancelled && requestId.current === currentRequestId) {
-          setState({ cacheKey, value: null });
+          setValue(null);
+          setPending(false);
         }
       });
     }, delayMilliseconds);
@@ -74,12 +57,10 @@ export const useTemplatePreview = ({
       window.clearTimeout(timeout);
       if (requestId.current === currentRequestId) requestId.current += 1;
     };
-  }, [cacheKey, delayMilliseconds, enabled]);
+  }, [delayMilliseconds, enabled, refreshKey, requestKey, text]);
 
-  const matchesKey = enabled && state?.cacheKey === cacheKey;
   return {
-    // Keep the last resolved preview visible while a different key refreshes.
-    value: enabled ? state?.value ?? null : null,
-    pending: enabled && !matchesKey,
+    value: enabled ? value : null,
+    pending: enabled && pending,
   };
 };

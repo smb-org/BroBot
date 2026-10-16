@@ -218,7 +218,7 @@ test("operators see disabled timer and text block delete actions with reasons", 
     const deleteAction = menu.getByRole("menuitem", { name: "Delete", exact: true });
     await expect(deleteAction).toBeVisible();
     await expect(deleteAction).toBeDisabled();
-    await expect(menu.locator(".ui-action-menu__item-description")).toHaveText("Broadcasters and managers only");
+    await expect(menu.locator(".ui-action-menu__item-description")).toHaveText("Only broadcasters and managers may delete.");
     await page.goto("about:blank");
   }
 });

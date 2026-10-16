@@ -29,8 +29,7 @@ import {
 import { formatRelativeTime } from "../../../dashboard/ui/format-relative-time";
 import { formatTimerRunLabel } from "./format-timer-run-label";
 import { Switch as SwitchPrimitive } from "../../../dashboard/ui/primitives/switch";
-import { templateVariableNames, type ModulePanelProperties } from "../../contract";
-import { textBlockPreviewDependencies } from "../../contracts/text-block-references";
+import { type ModulePanelProperties } from "../../contract";
 import { TIMER_MAXIMUM_COUNT, type Timer, type TimerTrigger } from "../contracts";
 import { inputFromDraft, type TimerDraft } from "./draft";
 import { timersTexts } from "./locale";
@@ -99,12 +98,9 @@ const cloneDraft = (draft: TimerDraft): TimerDraft => ({
 const timersPanelDataFrom = (value: unknown): TimersPanelData => {
   if (typeof value === "object" && value !== null && "timers" in value && "sources" in value && "variables" in value &&
       Array.isArray(value.timers) && Array.isArray(value.sources) && Array.isArray(value.variables)) {
-    const textBlocks = "textBlocks" in value && Array.isArray(value.textBlocks)
-      ? value.textBlocks as TimersPanelData["textBlocks"]
-      : [];
-    return { ...value, textBlocks } as TimersPanelData;
+    return value as TimersPanelData;
   }
-  return { timers: [], sources: [], variables: [], textBlocks: [] };
+  return { timers: [], sources: [], variables: [] };
 };
 
 const withTimer = (current: unknown, timer: Timer): TimersPanelData => {
@@ -167,25 +163,9 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
   const dirty = draft !== null && (editing === null || (baselineDraft !== null && JSON.stringify(draft) !== JSON.stringify(baselineDraft)));
   const input = draft === null ? null : inputFromDraft(draft);
   const previewMessage = draft?.messageText ?? "";
-  const previewBlockDependencies = textBlockPreviewDependencies(previewMessage, data?.textBlocks ?? []);
-  const previewVariableNames = new Set([
-    ...templateVariableNames(previewMessage),
-    ...previewBlockDependencies.flatMap((dependency) => dependency.missing ? [] : dependency.variants.flatMap((variant) => variant.texts.flatMap((text) => templateVariableNames(text)))),
-  ]);
-  const previewVariables = (data?.variables ?? []).filter((variable) => previewVariableNames.has(variable.name)).map((variable) => ({
-    name: variable.name,
-    sample: variable.sample,
-    isTextBlock: variable.isTextBlock ?? false,
-  })).sort((left, right) => left.name.localeCompare(right.name));
-  const previewInput = {
-    text: previewMessage,
-    templateContext: "event" as const,
-    streamState: "online" as const,
-    game: null,
-    chatStatus: null,
-  };
   const preview = useTemplatePreview({
-    inputs: { channelId, ...previewInput, variables: previewVariables, textBlocks: previewBlockDependencies },
+    text: previewMessage,
+    refreshKey: query.dataUpdatedAt,
     enabled: draft !== null && previewMessage.trim().length > 0,
     render: () => previewTimerText(channelId, previewMessage),
   });
@@ -454,6 +434,7 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
     : data !== undefined && data.timers.length >= TIMER_MAXIMUM_COUNT ? labels.limitReached : undefined;
   const activeTimerFilters = search.trim().length === 0 ? undefined : search.trim();
   const listToolbar = <ListToolbar
+    className="timers-panel__list-toolbar"
     {...(language === undefined ? {} : { language })}
     searchLabel={labels.search}
     searchPlaceholder={labels.search}
@@ -461,7 +442,7 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
     searchValue={search}
     onSearchChange={setSearch}
     filtersLabel={labels.title}
-    create={{ label: labels.add, onClick: openCreate, disabled: editorPending || createReason !== undefined, ...(!canManage || createReason === undefined ? {} : { reason: createReason }) }}
+    create={{ label: labels.add, onClick: openCreate, disabled: editorPending || createReason !== undefined, ...(createReason === undefined ? {} : { reason: createReason }) }}
     usage={{
       count: data?.timers.length ?? 0,
       maximum: TIMER_MAXIMUM_COUNT,

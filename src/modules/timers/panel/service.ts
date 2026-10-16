@@ -3,7 +3,6 @@ import { isEventTemplateVariableAvailable } from "../../../contracts/event-templ
 import type { TemplateTextFieldVariable } from "../../../dashboard/ui";
 import type { ModuleLanguage, TemplateVariable } from "../../contract";
 import type { Timer, TimerMutationInput } from "../contracts";
-import type { TextBlockPreviewSource } from "../../contracts/text-block-references";
 
 interface TimerEventTimeSource {
   id: string;
@@ -14,7 +13,6 @@ export interface TimersPanelData {
   timers: Timer[];
   sources: TimerEventTimeSource[];
   variables: TemplateTextFieldVariable[];
-  textBlocks: TextBlockPreviewSource[];
 }
 
 const basePath = (channelId: string): string => `/api/channels/${encodeURIComponent(channelId)}/modules/timers`;
@@ -32,14 +30,10 @@ const csrf = async (): Promise<string> => (await readJson<{ token: string }>(awa
 
 export const loadTimersPanel = async (channelId: string, signal?: AbortSignal): Promise<TimersPanelData> => {
   const encoded = encodeURIComponent(channelId);
-  const [timersResponse, sourcesResponse, variablesResponse, textBlocksPromise] = await Promise.all([
+  const [timersResponse, sourcesResponse, variablesResponse] = await Promise.all([
     fetch(`${basePath(channelId)}/timers`, signal === undefined ? undefined : { signal }),
     fetch(`${basePath(channelId)}/event-time-sources`, signal === undefined ? undefined : { signal }),
     fetch(`/api/channels/${encoded}/template-variables`, signal === undefined ? undefined : { signal }),
-    fetch(`/api/channels/${encoded}/modules/text_library/library`, signal === undefined ? undefined : { signal })
-      .then((response) => response.status === 404
-        ? []
-        : readJson<{ blocks: TextBlockPreviewSource[] }>(response).then(({ blocks }) => blocks)),
   ]);
   const [timers, sources, variables] = await Promise.all([
     readJson<{ timers: Timer[] }>(timersResponse),
@@ -49,7 +43,6 @@ export const loadTimersPanel = async (channelId: string, signal?: AbortSignal): 
   return {
     timers: timers.timers,
     sources: sources.sources,
-    textBlocks: textBlocksPromise,
     variables: variables.variables.filter(isEventTemplateVariableAvailable).map((variable) => ({
       name: variable.name,
       description: variable.description ?? variable.name,
