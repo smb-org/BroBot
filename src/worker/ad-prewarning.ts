@@ -174,8 +174,11 @@ const scopeMissing = async (
   }
 };
 
+const isScopeMissingReason = (reason: string | null): boolean =>
+  reason === "unauthorized" || reason === "scope_missing";
+
 const scheduleFailureDiagnostic = (result: AdScheduleResult): ModuleDiagnostic => ({
-  code: (result.reason === "unauthorized"
+  code: (isScopeMissingReason(result.reason)
     ? "ads.prewarning.scope_missing"
     : "ads.prewarning.schedule_error") satisfies EventCode,
   detail: { reason: result.reason, ...result.detail },
@@ -270,7 +273,7 @@ export const refreshAdPrewarning = async (
     fetcher,
   );
   if (!result.fetched || result.schedule === null) {
-    if (prewarningEnabled && result.reason === "unauthorized") {
+    if (prewarningEnabled && isScopeMissingReason(result.reason)) {
       await scopeMissing(environment, channelId, triggerId, now, scheduler, shouldWriteDiagnostics);
     } else if (prewarningEnabled) {
       if (shouldWriteDiagnostics) {
@@ -325,7 +328,7 @@ export const processAdPrewarning = async (
     fetcher,
   );
   if (!result.fetched || result.schedule === null) {
-    if (result.reason === "unauthorized") {
+    if (isScopeMissingReason(result.reason)) {
       await scopeMissing(environment, channelId, triggerId, now, scheduler);
     } else {
       await writeDiagnostics(environment, channelId, triggerId, now, [scheduleFailureDiagnostic(result)]);

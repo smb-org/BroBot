@@ -17,6 +17,7 @@ vi.mock("../../src/worker/db/bot-identity", () => ({ getBotIdentity: mocks.getBo
 vi.mock("../../src/worker/app-token", () => ({ getAppAccessToken: mocks.getAppAccessToken }));
 
 import type { AdSchedule } from "../../src/modules/ads/adapters/ad-schedule";
+import { refreshAdPrewarning } from "../../src/worker/ad-prewarning";
 import { ChannelObject } from "../../src/worker/durable/ChannelObject";
 import { AUTOMATED_CHAT_OUTPUT_LAST_ATTEMPT_STORAGE_KEY } from "../../src/worker/durable/automated-chat-output";
 
@@ -186,6 +187,97 @@ describe("ad prewarning retry through ChannelObject.alarm()", () => {
     } finally {
       errorLog.mockRestore();
     }
+  });
+
+  it("clears the due warning when the schedule adapter reports a missing read scope", async () => {
+    vi.useFakeTimers();
+    const dueAt = Date.parse("2026-09-24T12:03:00.000Z");
+    vi.setSystemTime(dueAt);
+    mocks.getChannelModuleForChannel.mockResolvedValue({
+      channelId: "kanal-a",
+      moduleId: "ads",
+      enabled: true,
+      revision: 1,
+      settings: JSON.stringify({
+        automatic: "Automatic ad message",
+        manual: "Manual ad message",
+        prewarning: true,
+        leadSeconds: 60,
+        prewarningText: "Ad in {ads.seconds}",
+      }),
+    });
+    mocks.moduleBroadcasterScopeState.mockResolvedValue({ required: ["channel:read:ads"], missing: [] });
+    mocks.getAdSchedule.mockResolvedValue({ fetched: false, reason: "scope_missing", detail: { status: 403 }, schedule: null });
+    mocks.writeModuleDiagnostics.mockResolvedValue([]);
+    vi.stubGlobal("fetch", vi.fn());
+
+    const object = objectFor("kanal-a");
+    const storage = storageOf(object);
+    await object.scheduleAdPrewarning(dueAt);
+
+    await object.alarm();
+
+    expect(mocks.getAdSchedule).toHaveBeenCalledOnce();
+    expect(storage.values.get("channel:alarm_schedule") ?? {}).not.toHaveProperty("ad_prewarning");
+    expect(mocks.writeModuleDiagnostics.mock.calls.at(-1)?.[5]).toMatchObject([
+      { code: "ads.prewarning.scope_missing", detail: { scope: "channel:read:ads" } },
+    ]);
+  });
+
+  it("clears an EventSub warning and records scope_missing when a refresh fetch loses consent", async () => {
+    const now = "2026-09-24T12:00:00.000Z";
+    const clearAdPrewarning = vi.fn().mockResolvedValue(undefined);
+    const channelObject = {
+      scheduleAdPrewarning: vi.fn().mockResolvedValue(undefined),
+      clearAdPrewarning,
+      storeAdSchedule: vi.fn().mockResolvedValue({}),
+      getAdScheduleGeneration: vi.fn().mockResolvedValue(0),
+      getCachedAdSchedule: vi.fn().mockResolvedValue(null),
+    };
+    const environment = {
+      DB: {} as D1Database,
+      TWITCH_CLIENT_ID: "client",
+      TWITCH_CLIENT_SECRET: "secret",
+      CHANNEL: {
+        idFromName: vi.fn(() => "kanal-a"),
+        get: vi.fn(() => channelObject),
+      } as unknown as Env["CHANNEL"],
+    } as Env;
+    mocks.getChannelModuleForChannel.mockResolvedValue({
+      channelId: "kanal-a",
+      moduleId: "ads",
+      enabled: true,
+      revision: 1,
+      settings: JSON.stringify({
+        automatic: "Automatic ad message",
+        manual: "Manual ad message",
+        prewarning: true,
+        leadSeconds: 60,
+        prewarningText: "Ad in {ads.seconds}",
+      }),
+    });
+    mocks.moduleBroadcasterScopeState.mockResolvedValue({ required: ["channel:read:ads"], missing: [] });
+    mocks.writeModuleDiagnostics.mockResolvedValue([]);
+
+    await refreshAdPrewarning(
+      environment,
+      "kanal-a",
+      "eventsub-online",
+      now,
+      vi.fn<typeof fetch>(),
+      { fetched: false, reason: "scope_missing", detail: { status: 403 }, schedule: null },
+    );
+
+    expect(clearAdPrewarning).toHaveBeenCalledOnce();
+    expect(mocks.writeModuleDiagnostics).toHaveBeenCalledWith(
+      environment.DB,
+      "kanal-a",
+      "ads",
+      "eventsub-online",
+      null,
+      [{ code: "ads.prewarning.scope_missing", detail: { scope: "channel:read:ads" } }],
+      now,
+    );
   });
 
   it("retries an app-token failure during the schedule fetch at a short delay and still sends before the ad", async () => {

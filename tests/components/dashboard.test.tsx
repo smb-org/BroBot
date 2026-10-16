@@ -2788,6 +2788,80 @@ describe("Dashboard skeleton", () => {
     await waitFor(() => expect(channelRequests).toBe(2));
   });
 
+  it("waits for ad settings to save before a command palette module toggle", async () => {
+    Object.defineProperty(window.navigator, "language", { configurable: true, value: "en-US" });
+    let toggleRequests = 0;
+    let resolveSettingsPatch: ((response: Response) => void) | undefined;
+    const mutationOrder: string[] = [];
+    const channel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      modules: [{ id: "ads", enabled: true, settings: "{}" }],
+    };
+    const settings = {
+      automatic: "Automatic ad break",
+      manual: "Manual ad break",
+      prewarning: false,
+      leadSeconds: 60,
+      prewarningText: "Ad break in {ads.seconds} seconds.",
+    };
+    const schedule = {
+      schedule: { nextAdAt: null, duration: null, lastAdAt: null, prerollFreeTime: null, snoozeCount: 0, snoozeRefreshAt: null },
+      snoozeScopeAvailable: true,
+      recentAdBreaks: [],
+    };
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overview") {
+        return Promise.resolve(jsonResponse({ ...overview(channel), activeModules: [{ moduleId: "ads", settings: "{}" }] }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/modules/ads/settings" && init?.method === "PATCH") {
+        mutationOrder.push("settings");
+        return new Promise<Response>((resolve) => { resolveSettingsPatch = resolve; });
+      }
+      if (url.pathname === "/api/channels/kanal-a/modules/ads/settings") {
+        return Promise.resolve(jsonResponse({ settings, revision: 1, variables: [] }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/modules/ads/schedule") return Promise.resolve(jsonResponse(schedule));
+      if (url.pathname === "/api/channels/kanal-a/modules/ads" && init?.method === "PATCH") {
+        toggleRequests += 1;
+        mutationOrder.push("toggle");
+        return Promise.resolve(jsonResponse({ module: { id: "ads", enabled: false, settings: "{}" } }));
+      }
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/modules/ads");
+
+    render(<DashboardApp />);
+
+    fireEvent.change(await screen.findByRole("textbox", { name: "Automatic ad break" }), { target: { value: "Draft announcement" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mutationOrder).toEqual(["settings"]));
+
+    const moduleSwitch = document.querySelector(".module-detail__switch [role='switch']");
+    expect(moduleSwitch).not.toBeNull();
+    expect(moduleSwitch).toBeDisabled();
+    fireEvent.keyDown(document.body, platformPaletteShortcut());
+    const palette = await screen.findByRole("dialog");
+    fireEvent.change(screen.getByPlaceholderText("Search or run action …"), { target: { value: "ads off" } });
+    fireEvent.click(await within(palette).findByText("Ads off"));
+    await act(async () => {
+      for (let index = 0; index < 10; index += 1) await Promise.resolve();
+    });
+    expect(toggleRequests).toBe(0);
+
+    act(() => {
+      resolveSettingsPatch?.(toggleRequests === 0
+        ? jsonResponse({ settings, revision: 2, warnings: [] })
+        : jsonResponse({ error: "module_settings_changed_concurrently" }, 409));
+    });
+    await waitFor(() => expect(toggleRequests).toBe(1));
+    expect(mutationOrder).toEqual(["settings", "toggle"]);
+    expect(screen.queryByRole("button", { name: "Reload server version" })).not.toBeInTheDocument();
+  });
+
   it("reloads the channel overview after enabling and shows the module view", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "broadcaster" as const };
     let overviewAufrufe = 0;

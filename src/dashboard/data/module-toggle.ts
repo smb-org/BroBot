@@ -2,6 +2,29 @@ import type { QueryClient, QueryFilters } from "@tanstack/react-query";
 
 import { queryKeys } from "./keys";
 
+const moduleWriteQueues = new Map<string, Promise<void>>();
+
+/** Serialize settings saves and enabled-state changes for one channel module. */
+export const withModuleWriteLock = async <Value,>(
+  channelId: string,
+  moduleId: string,
+  operation: () => Promise<Value>,
+): Promise<Value> => {
+  const key = JSON.stringify([channelId, moduleId]);
+  const previous = moduleWriteQueues.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  moduleWriteQueues.set(key, current);
+
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (moduleWriteQueues.get(key) === current) moduleWriteQueues.delete(key);
+  }
+};
+
 /**
  * The single owner of "a module's enabled state changed for this channel". Every successful
  * enable/disable (module list, header switch, command palette) calls it with the mutation's own channelId.
