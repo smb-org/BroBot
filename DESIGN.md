@@ -434,7 +434,7 @@ Der aktuelle Check führt `tests/unit/theme-color-lint.test.ts` und `tests/unit/
 - [ ] **Kopf-Reihenfolge** eingehalten (Titel, Schalter, Badges / Cluster, Aktionen, „…“)? Zerstörendes im „…“-Menü mit Bestätigung?
 - [ ] **Layoutsprung** bei Laden, Fehler, Erfolg, Meldung, aufklappendem Teil? Fehlerzeilen reserviert? Toast statt Einschub?
 - [ ] **Autosave?** (nicht erlaubt, außer Module an/aus mit Rückgängig)
-- [ ] **Zustandsrahmen** nur an lebendigen Blöcken, keine Seitenleiste außer Toast und Speicherfehler?
+- [ ] **Zustandsrahmen** nur an lebendigen Blöcken, keine Seitenleiste außer Toast, Speicherfehler und Kategoriemarke im Ereignis-Feed?
 - [ ] **Eyebrow-Zeile**, mehr als drei Textebenen, Text < 11px, Emoji?
 - [ ] **Spalten** zeilenweise ausgerichtet, Feldlabels vorhanden?
 - [ ] **StepDialog:** höchstens zwei verschachtelte Rahmen, stabile Höhe, ein Goldbutton?
