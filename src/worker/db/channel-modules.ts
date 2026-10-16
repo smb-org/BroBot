@@ -1,5 +1,6 @@
 import { actorGuard, bindActorGuard, type ActorContext } from "./guards";
 import { MANAGING_ROLES, type AuditWriteAction } from "../../contracts/values";
+import { prepareChannelModuleSettingsWrite } from "../../modules/repository/channel-module-storage";
 import { prepareModuleAudit as prepareHostModuleAudit } from "../module-audit";
 
 export interface ChannelModuleRecord {
@@ -9,6 +10,7 @@ export interface ChannelModuleRecord {
   initialized: boolean;
   settings: string;
   revision: number;
+  settingsRevision: number;
 }
 
 interface ChannelModuleRow {
@@ -18,6 +20,7 @@ interface ChannelModuleRow {
   initialized: number;
   settings: string;
   revision: number;
+  settings_revision: number;
 }
 
 const mapChannelModule = (row: ChannelModuleRow): ChannelModuleRecord => ({
@@ -27,6 +30,7 @@ const mapChannelModule = (row: ChannelModuleRow): ChannelModuleRecord => ({
   initialized: row.initialized === 1,
   settings: row.settings,
   revision: row.revision,
+  settingsRevision: row.settings_revision,
 });
 
 const moduleAuditValue = (module: Pick<ChannelModuleRecord, "channelId" | "moduleId" | "enabled" | "settings">) => ({
@@ -36,13 +40,19 @@ const moduleAuditValue = (module: Pick<ChannelModuleRecord, "channelId" | "modul
   settings: module.settings,
 });
 
+const moduleSettingsAuditValue = (module: Pick<ChannelModuleRecord, "channelId" | "moduleId" | "settings">) => ({
+  channelId: module.channelId,
+  moduleId: module.moduleId,
+  settings: module.settings,
+});
+
 const getChannelModule = async (
   db: D1Database,
   channelId: string,
   moduleId: string,
 ): Promise<ChannelModuleRecord | null> => {
   const row = await db.prepare(
-    `SELECT channel_id, module_id, enabled, initialized, settings, revision
+    `SELECT channel_id, module_id, enabled, initialized, settings, revision, settings_revision
        FROM channel_modules
       WHERE channel_id = ? AND module_id = ?`,
   ).bind(channelId, moduleId).first<ChannelModuleRow>();
@@ -69,8 +79,8 @@ export const createChannelModuleWithAudit = async (
   dependentMutations: readonly D1PreparedStatement[] = [],
 ): Promise<boolean> => {
   const mutation = db.prepare(
-    `INSERT INTO channel_modules (channel_id, module_id, enabled, settings, initialized)
-     SELECT ?, ?, ?, ?, ?
+    `INSERT INTO channel_modules (channel_id, module_id, enabled, settings, initialized, revision, settings_revision)
+     SELECT ?, ?, ?, ?, ?, 1, 1
       WHERE NOT EXISTS (
         SELECT 1 FROM channel_modules
          WHERE channel_id = ? AND module_id = ?
@@ -97,49 +107,87 @@ export const createChannelModuleWithAudit = async (
   return (results[0]?.meta.changes ?? 0) > 0;
 };
 
-export const updateChannelModuleWithAudit = async (
+export const updateChannelModuleSettingsWithAudit = async (
   db: D1Database,
   actor: ActorContext,
   channelId: string,
   moduleId: string,
-  enabled: boolean,
   settings: string,
   action: AuditWriteAction,
   changedAt: string,
   dependentMutations: readonly D1PreparedStatement[] = [],
-  expectedRevision?: number,
-  markInitialized = false,
-  textBlockGuard?: { sql: string; values: readonly (string | number)[] },
+  expectedSettingsRevision: number,
+  textBlockGuard?: { sql: string; values: readonly unknown[] },
   requireEnabled = false,
 ): Promise<boolean> => {
   const before = await getChannelModule(db, channelId, moduleId);
   if (before === null) return false;
   const after: ChannelModuleRecord = {
+    ...before,
+    settings,
+    revision: before.revision + 1,
+    settingsRevision: before.settingsRevision + 1,
+  };
+  const mutation = prepareChannelModuleSettingsWrite(
+    db,
     channelId,
     moduleId,
+    "?",
+    [after.settings],
+    `AND settings_revision = ?
+       AND (? = 0 OR enabled = 1)
+       ${textBlockGuard?.sql ?? ""}
+       ${actorGuard(MANAGING_ROLES)}`,
+    [
+      expectedSettingsRevision,
+      requireEnabled ? 1 : 0,
+      ...(textBlockGuard?.values ?? []),
+      ...bindActorGuard(actor, channelId, changedAt),
+    ],
+  );
+  const audit = prepareHostModuleAudit(db, actor.userId, changedAt, {
+    channelId,
+    moduleId,
+    action,
+    before: moduleSettingsAuditValue(before),
+    after: moduleSettingsAuditValue(after),
+  });
+  const results = await db.batch([mutation, audit, ...dependentMutations]);
+  return (results[0]?.meta.changes ?? 0) > 0;
+};
+
+export const updateChannelModuleEnabledStateWithAudit = async (
+  db: D1Database,
+  actor: ActorContext,
+  channelId: string,
+  moduleId: string,
+  enabled: boolean,
+  action: AuditWriteAction,
+  changedAt: string,
+  dependentMutations: readonly D1PreparedStatement[] = [],
+  expectedRevision?: number,
+  markInitialized = false,
+): Promise<boolean> => {
+  const before = await getChannelModule(db, channelId, moduleId);
+  if (before === null) return false;
+  const after: ChannelModuleRecord = {
+    ...before,
     enabled,
     initialized: before.initialized || markInitialized,
-    settings,
     revision: before.revision + 1,
   };
   const mutation = db.prepare(
     `UPDATE channel_modules
-        SET enabled = ?, settings = ?, initialized = ?, revision = revision + 1
-      WHERE channel_id = ? AND module_id = ?
-        AND revision = ?
-        AND (? = 0 OR enabled = 1)
-        ${textBlockGuard?.sql ?? ""}
-      ${actorGuard(MANAGING_ROLES)}`,
+        SET enabled = ?, initialized = ?, revision = revision + 1
+      WHERE channel_id = ? AND module_id = ? AND revision = ?
+        ${actorGuard(MANAGING_ROLES)}`,
   ).bind(
     after.enabled ? 1 : 0,
-    after.settings,
     after.initialized ? 1 : 0,
-    after.channelId,
-    after.moduleId,
+    channelId,
+    moduleId,
     expectedRevision ?? before.revision,
-    requireEnabled ? 1 : 0,
-    ...(textBlockGuard?.values ?? []),
-    ...bindActorGuard(actor, after.channelId, changedAt),
+    ...bindActorGuard(actor, channelId, changedAt),
   );
   const audit = prepareHostModuleAudit(db, actor.userId, changedAt, {
     channelId,

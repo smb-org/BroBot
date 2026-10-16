@@ -4,6 +4,7 @@ import type { z } from "zod";
 import type { AuditWriteAction, ChannelRole, ChannelStreamState, ChannelVariableOperation, ChatOutputTarget } from "../contracts/values";
 import type { TemplateContext, TemplateFields, TemplateVariable } from "../template";
 import type { SettingsEditorDefinition } from "../dashboard/ui";
+import { prepareChannelModuleSettingsWrite } from "./repository/channel-module-storage";
 import type { ModerationResult, ModerationTimeoutExpectation } from "./contracts/moderation";
 import { templateTextLength } from "../contracts/template-text-length";
 export type { PanelTemplateWarning } from "../panel-contract";
@@ -1131,13 +1132,17 @@ export const settingsVariableReferences = (
     const oldToken = `{var.${from}}`;
     const nextToken = `{var.${to}}`;
     const target = moduleVariableRenameTarget(channelId, to, guard);
-    return [db.prepare(
-      `UPDATE channel_modules
-          SET settings = replace(settings, ?, ?), revision = revision + 1
-        WHERE channel_id = ? AND module_id = ? AND instr(settings, ?) > 0
-          AND ${target.sql}
-          AND NOT EXISTS (SELECT 1 FROM channel_variables WHERE channel_id = ? AND name = ?)`,
-    ).bind(oldToken, nextToken, channelId, moduleId, oldToken, ...target.values, channelId, from)];
+    return [prepareChannelModuleSettingsWrite(
+      db,
+      channelId,
+      moduleId,
+      "replace(settings, ?, ?)",
+      [oldToken, nextToken],
+      `AND instr(settings, ?) > 0
+        AND ${target.sql}
+        AND NOT EXISTS (SELECT 1 FROM channel_variables WHERE channel_id = ? AND name = ?)`,
+      [oldToken, ...target.values, channelId, from],
+    )];
   },
 });
 
@@ -1277,6 +1282,8 @@ export interface ModulePanelProperties {
   canManage?: boolean;
   /** May the view execute operational controls available to every channel role? */
   canOperate?: boolean;
+  /** Active state used by settings surfaces that also mount a module panel. */
+  moduleActive?: boolean;
   /** Generic data-source conditions available to text-block editors. */
   textBlockConditions?: readonly ModuleTextBlockConditionDefinition[];
   /** Last known status of the bot's moderator role in this channel. */

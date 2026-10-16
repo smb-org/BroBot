@@ -11,6 +11,7 @@ import { colors } from "./theme";
 export interface SaveStatusProps {
   dirty: boolean;
   pending?: boolean;
+  saveDisabled?: boolean;
   error?: string;
   saved?: boolean;
   invalid?: boolean;
@@ -37,6 +38,7 @@ export interface SaveStatusProps {
 export function SaveStatus({
   dirty,
   pending = false,
+  saveDisabled = false,
   error,
   saved = false,
   invalid = false,
@@ -89,8 +91,8 @@ export function SaveStatus({
             : dirty
               ? warningStatus
               : null;
-  const invalidAction = persistent && invalid && dirty && !pending && conflict === undefined;
-  const saveDisabled = pending || conflict !== undefined || !dirty;
+  const invalidAction = persistent && invalid && dirty && !pending && !saveDisabled && conflict === undefined;
+  const isSaveDisabled = pending || saveDisabled || conflict !== undefined || !dirty;
   const showButtons = dirty || persistent;
   const footerOnly = statusText === null && footer !== undefined && conflict === undefined;
   return (
@@ -111,7 +113,7 @@ export function SaveStatus({
               className="ui-save-bar__save"
               variant={persistent && invalid ? "neutral" : "primary"}
               onClick={invalidAction && onInvalidSave !== undefined ? onInvalidSave : onSave}
-              disabled={saveDisabled && !invalidAction}
+              disabled={isSaveDisabled && !invalidAction}
               ariaDisabled={invalidAction}
               ariaLabel={saveLabel}
               title={saveTitle ?? saveLabel}

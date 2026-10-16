@@ -128,8 +128,12 @@ describe("Channel variable routes", () => {
        VALUES ('channel-a', 'increment', '', '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z', 'score', 'add', 1)`,
     ).run();
     await database.prepare(
-      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
-       VALUES ('channel-a', 'ads', 1, '{"prewarningText":"Score {var.score}"}')`,
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision, settings_revision)
+       VALUES ('channel-a', 'ads', 1, '{"automatic":"Automatic","manual":"Manual","prewarningText":"Score {var.score}"}', 1, 1)`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision, settings_revision)
+       VALUES ('channel-a', 'raid', 1, '{"textThreshold":3,"shoutoutEnabled":true,"shoutoutThreshold":3,"textLong":"Score {var.score}","textShort":"Score {var.score}"}', 1, 1)`,
     ).run();
     await database.prepare(
       `INSERT INTO faq_entries
@@ -168,8 +172,26 @@ describe("Channel variable routes", () => {
       "SELECT response_text, variable_name, revision FROM text_commands WHERE channel_id = 'channel-a' AND command_name = 'points'",
     ).first()).resolves.toEqual({ response_text: "Score: {var.points}", variable_name: "points", revision: 2 });
     await expect(database.prepare(
-      "SELECT settings, revision FROM channel_modules WHERE channel_id = 'channel-a' AND module_id = 'ads'",
-    ).first()).resolves.toEqual({ settings: '{"prewarningText":"Score {var.points}"}', revision: 2 });
+      "SELECT settings, revision, settings_revision FROM channel_modules WHERE channel_id = 'channel-a' AND module_id = 'ads'",
+    ).first()).resolves.toEqual({ settings: '{"automatic":"Automatic","manual":"Manual","prewarningText":"Score {var.points}"}', revision: 2, settings_revision: 2 });
+    const staleRaidDraft = await fetchPanel("manager-a", "/api/channels/channel-a/modules/raid/settings", "PATCH", {
+      revision: 1,
+      settings: {
+        textThreshold: 3,
+        shoutoutEnabled: true,
+        shoutoutThreshold: 3,
+        textLong: "Score {var.score}",
+        textShort: "Score {var.score}",
+      },
+    });
+    expect(staleRaidDraft.status).toBe(409);
+    await expect(database.prepare(
+      "SELECT settings, revision, settings_revision FROM channel_modules WHERE channel_id = 'channel-a' AND module_id = 'raid'",
+    ).first()).resolves.toEqual({
+      settings: '{"textThreshold":3,"shoutoutEnabled":true,"shoutoutThreshold":3,"textLong":"Score {var.points}","textShort":"Score {var.points}"}',
+      revision: 2,
+      settings_revision: 2,
+    });
     await expect(database.prepare(
       "SELECT variable_name, revision FROM text_commands WHERE channel_id = 'channel-a' AND command_name = 'increment'",
     ).first()).resolves.toEqual({ variable_name: "points", revision: 2 });

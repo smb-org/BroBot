@@ -34,11 +34,12 @@ export function processRaid(
   }
 
   const template = decision.aboveThreshold ? event.settings.textLong : event.settings.textShort;
-  const chatTarget = (decision.aboveThreshold ? event.settings.textLongTarget : event.settings.textShortTarget) ?? "source_only";
+  const configuredTarget = (decision.aboveThreshold ? event.settings.textLongTarget : event.settings.textShortTarget) ?? "source_only";
+  const chatTarget = configuredTarget === "channel_default" ? undefined : configuredTarget;
   const moduleValues = { channel: decision.sourceChannelName, viewers: decision.viewers };
   const makeResult = (chatText: string, templateDiagnostics: readonly ModuleDiagnostic[] = []): ModuleResult => {
     const shoutoutPossible = event.settings.shoutoutEnabled && decision.viewers >= event.settings.shoutoutThreshold;
-    const chatAction = hasChatMessage(chatText) ? [{ kind: "chat" as const, text: chatText, target: chatTarget }] : [];
+    const chatAction = hasChatMessage(chatText) ? [{ kind: "chat" as const, text: chatText, ...(chatTarget === undefined ? {} : { target: chatTarget }) }] : [];
     if (!shoutoutPossible) {
       return {
         actions: chatAction,

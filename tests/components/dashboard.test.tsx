@@ -2773,7 +2773,7 @@ describe("Dashboard skeleton", () => {
     expect(betaAnnouncement).not.toBe(announcement);
 
     fireEvent.change(betaAnnouncement, { target: { value: "Updated beta announcement" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save announcements" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(settingsPatches).toEqual([{ channelId: "kanal-b", revision: 8 }]));
 
     const moduleToggle = document.querySelector(".module-detail__switch [role='switch']");

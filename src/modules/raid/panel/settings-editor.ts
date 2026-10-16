@@ -7,15 +7,13 @@ const spec: SettingsEditorSpec<RaidSettings> = {
   sections: [
     { id: "messages", icon: "tabMessages", fields: [
       { kind: "number", key: "textThreshold", min: 0, max: 100000, step: 1 },
-      { kind: "template", key: "textLong", optional: true, preview: (template, values) => template.trim().length === 0 ? "" : renderRaidText(template, values) },
-      { kind: "chatTarget", key: "textLongTarget" },
-      { kind: "template", key: "textShort", optional: true, preview: (template, values) => template.trim().length === 0 ? "" : renderRaidText(template, values) },
-      { kind: "chatTarget", key: "textShortTarget" },
+      { kind: "message", key: "textLong", targetKey: "textLongTarget", allowedTargets: ["all_chats", "source_only", "channel_default"], preview: (template, values) => template.trim().length === 0 ? "" : renderRaidText(template, values) },
     ] },
     { id: "shoutout", icon: "shoutout", fields: [
       { kind: "switchCard", key: "shoutoutEnabled", children: [
         { kind: "number", key: "shoutoutThreshold", min: 0, max: 100000, step: 1 },
       ] },
+      { kind: "message", key: "textShort", targetKey: "textShortTarget", allowedTargets: ["all_chats", "source_only", "channel_default"], preview: (template, values) => template.trim().length === 0 ? "" : renderRaidText(template, values) },
     ] },
   ],
 };

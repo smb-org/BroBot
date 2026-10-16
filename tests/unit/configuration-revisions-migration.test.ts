@@ -8,7 +8,7 @@ const migrationsDirectory = resolve(import.meta.dirname, "../../migrations");
 const migration = (name: string): string => readFileSync(resolve(migrationsDirectory, name), "utf8");
 
 describe("configuration revisions and channel variables migrations", () => {
-  it("applies 0000 through 0009 to seeded data and retires legacy command kinds", () => {
+  it("backfills independent module settings revisions while migrating seeded data", () => {
     const database = new DatabaseSync(":memory:");
     try {
       database.exec("PRAGMA foreign_keys = ON");
@@ -59,6 +59,8 @@ describe("configuration revisions and channel variables migrations", () => {
       database.prepare("UPDATE text_commands SET template_fields_json = ? WHERE channel_id = ? AND command_name = ?")
         .run('{"notFollowingText":"Not following","unavailableText":"Unavailable"}', "channel-a", "follow");
       database.exec(migration("0009_channel_variables.sql"));
+      database.prepare("UPDATE channel_modules SET revision = 4 WHERE channel_id = 'channel-a' AND module_id = 'editor'").run();
+      database.exec(migration("0067_channel_module_settings_revision.sql"));
 
       expect(database.prepare(
         `SELECT response_text, cooldown_seconds, aliases_json, user_cooldown_seconds,
@@ -76,8 +78,8 @@ describe("configuration revisions and channel variables migrations", () => {
         "SELECT aliases_json FROM text_commands WHERE channel_id = 'channel-a' AND command_name = 'zebra'",
       ).get()).toEqual({ aliases_json: '["zebra-only"]' });
       expect(database.prepare(
-        "SELECT settings, revision FROM channel_modules WHERE channel_id = 'channel-a' AND module_id = 'editor'",
-      ).get()).toEqual({ settings: '{"marker":"keep"}', revision: 1 });
+        "SELECT settings, revision, settings_revision FROM channel_modules WHERE channel_id = 'channel-a' AND module_id = 'editor'",
+      ).get()).toEqual({ settings: '{"marker":"keep"}', revision: 4, settings_revision: 4 });
       expect(database.prepare(
         "SELECT alias, command_name FROM text_command_aliases ORDER BY alias",
       ).all()).toEqual([

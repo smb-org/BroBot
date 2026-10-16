@@ -214,6 +214,23 @@ describe("ad routes", () => {
       .resolves.toEqual({ count: 0 });
   });
 
+  it("denies snoozing when the Ads module is inactive", async () => {
+    const environment = await setup("manager");
+    await database.prepare("UPDATE channel_modules SET enabled = 0 WHERE channel_id = 'kanal-a' AND module_id = 'ads'").run();
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/snooze", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "ad_snooze_denied" });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(schedule).not.toHaveBeenCalled();
+  });
+
   it("denies a manager downgraded during app-token refresh before snoozing", async () => {
     const environment = await setup("manager");
     await expireAppAccessToken(database);
@@ -593,6 +610,22 @@ describe("start commercial", () => {
       .resolves.toEqual({ count: 0 });
     await expect(database.prepare("SELECT COUNT(*) AS count FROM event_log WHERE channel_id = 'kanal-a'").first())
       .resolves.toEqual({ count: 0 });
+  });
+
+  it("denies starting a commercial when the Ads module is inactive", async () => {
+    const environment = await setup("manager");
+    await database.prepare("UPDATE channel_modules SET enabled = 0 WHERE channel_id = 'kanal-a' AND module_id = 'ads'").run();
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/commercial", "POST", { length: 90 }),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "commercial_start_denied" });
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("rechecks the manager role in D1 after reading the commercial request", async () => {

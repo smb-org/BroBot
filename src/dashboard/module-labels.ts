@@ -19,7 +19,7 @@ const moduleNames: LocaleCatalog<ModuleNames> = {
     channel_events: "Kanalereignisse",
     ads: "Werbung",
     chat_voting: "Chat-Abstimmung",
-    raid: "Shoutout",
+    raid: "Raid-Ankündigungen & Shoutout",
     clips: "Clips",
     sun: "Sonne",
     moon: "Mond",
@@ -34,7 +34,7 @@ const moduleNames: LocaleCatalog<ModuleNames> = {
     channel_events: "Channel events",
     ads: "Ad breaks",
     chat_voting: "Chat voting",
-    raid: "Shoutout",
+    raid: "Raid announcements & shoutout",
     clips: "Clips",
     sun: "Sun times",
     moon: "Moon data",
@@ -45,6 +45,11 @@ const moduleNames: LocaleCatalog<ModuleNames> = {
   },
 };
 
+const moduleNavigationNames: LocaleCatalog<ModuleNames> = {
+  de: { raid: "Raid & Shoutout" },
+  en: { raid: "Raid & shoutout" },
+};
+
 const moduleText = (catalog: Record<string, string>, moduleId: string): string | null =>
   catalogString(catalog, moduleId) ?? null;
 
@@ -52,6 +57,9 @@ export const moduleName = (moduleId: string, language: DashboardLanguage = dashb
   const registered = MODULES.find((module) => module.id === moduleId)?.navigationEntries?.[0]?.label[language];
   return registered ?? moduleText(moduleNames[language], moduleId) ?? moduleId;
 };
+
+export const moduleNavigationName = (moduleId: string, language: DashboardLanguage = dashboardLanguage()): string =>
+  moduleText(moduleNavigationNames[language], moduleId) ?? moduleName(moduleId, language);
 
 interface EventSubscriptionNames {
   chatMessages: string;

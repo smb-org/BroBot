@@ -41,6 +41,7 @@ const overlayEditorImportBoundaryPattern = {
 const moduleSharedImportPattern = [
   "(?:\\.\\./)+dashboard/(?:locale|ui|data)(?:\\.[^/]+)?",
   "(?:\\.\\./)+contracts",
+  "(?:\\.\\./)+repository",
   "(?:\\.\\./)+contract",
   "contract",
   "contracts",

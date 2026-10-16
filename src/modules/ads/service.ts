@@ -1,7 +1,7 @@
 import type { EventCode } from "../../contracts/values";
 import { hasChatMessage, templateVariableNames, type ModuleDiagnostic, type ModuleEvent, type ModuleLanguage, type ModuleResult } from "../contract";
 import type { AdsSettings } from "./contracts";
-import { decideAdBreak, renderAdBreakText } from "./domain";
+import { decideAdBreak, localizeAdDurationGrammar, renderAdBreakText } from "./domain";
 import { adsChatLanguage } from "./contracts/language";
 
 const diagnoseDetail = (
@@ -55,9 +55,11 @@ export function processAdBreak(
   if (render !== undefined) {
     return render(template, { "ads.duration": decision.event.durationSeconds }).then(({ text, diagnostics }) => {
       const hasDuration = templateVariableNames(template.trim()).includes("ads.duration");
-      const completed = hasDuration ? text : `${text} (${String(decision.event.durationSeconds)} ${adsChatLanguage[language].seconds})`;
+      const duration = decision.event.durationSeconds;
+      const suffix = duration === 1 ? adsChatLanguage[language].second : adsChatLanguage[language].seconds;
+      const completed = localizeAdDurationGrammar(hasDuration ? text : `${text} (${String(duration)} ${suffix})`, duration, language);
       return makeResult(completed, diagnostics);
     });
   }
-  return makeResult(renderAdBreakText(template, decision.event.durationSeconds));
+  return makeResult(renderAdBreakText(template, decision.event.durationSeconds, language));
 }

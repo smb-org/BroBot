@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ComponentType, type ReactElement, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ComponentType, type ReactElement, type ReactNode } from "react";
 
 import { MODULES } from "../modules/registry";
 import type { ModulePanelProperties, ModuleRegisteredTemplateVariable } from "../modules/contract";
@@ -18,6 +18,8 @@ import { modulePermissionsAreMissing } from "./channel-health";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { effectivePanelTemplateVariables, panelTemplateOptions, registeredModuleTemplateGroup, type PanelChannelVariable } from "./ui/template-variable-options";
 import { ChatCommandsHelp, ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, SettingsPage, StatusLed, LockedReason, Tabs, mapServerFieldErrors, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
+import { useDraft } from "./ui/useDraft";
+import { useChannelSettings } from "./data/channel-settings";
 import { Switch as SwitchPrimitive } from "./ui/primitives/switch";
 import { runDashboardNavigationGuards } from "./ui/navigation-guard";
 import { worstCaseTemplateLength } from "../template";
@@ -191,12 +193,25 @@ interface ModulePanelMountProperties {
   chatVotingTab?: "votes" | "settings";
 }
 
-const ModuleSettingsEditor = ({ module, channelId, canManageContent, language, settingsSaveTarget }: {
+interface ModuleSettingsPageOptions {
+  title: string;
+  subtitle: string;
+  icon: ReactNode;
+  active: boolean;
+  onToggle: (active: boolean) => void;
+  switchDisabled: boolean;
+  switchBusy: boolean;
+  lockHint?: string;
+  onNavigate: (route: DashboardRoute) => void;
+}
+
+const ModuleSettingsEditor = ({ module, channelId, canManageContent, language, settingsSaveTarget, page }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
   language: DashboardLanguage;
   settingsSaveTarget?: HTMLElement | null;
+  page?: ModuleSettingsPageOptions;
 }): ReactElement | null => module.settingsEditor === undefined ? null : <ModuleSettingsEditorQuery
   key={`${channelId}:${module.id}`}
   module={module}
@@ -204,14 +219,16 @@ const ModuleSettingsEditor = ({ module, channelId, canManageContent, language, s
   canManageContent={canManageContent}
   language={language}
   {...(settingsSaveTarget === undefined ? {} : { settingsSaveTarget })}
+  {...(page === undefined ? {} : { page })}
 />;
 
-const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, language, settingsSaveTarget }: {
+const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, language, settingsSaveTarget, page }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
   language: DashboardLanguage;
   settingsSaveTarget?: HTMLElement | null;
+  page?: ModuleSettingsPageOptions;
 }): ReactElement => {
   const [generation, setGeneration] = useState(0);
   const queryClient = useDashboardQueryClient();
@@ -243,7 +260,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
     else void settingsQuery.refetch();
   };
   if (loaded === undefined) {
-    return <LoadState
+    const state = <LoadState
       variant="panel-320"
       status={settingsQuery.isPending || settingsQuery.isFetching ? "loading" : "error"}
       loading={<LoadStateLines rows={3} height={34} />}
@@ -252,6 +269,19 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: loadError, onRetry: retrySettingsQuery }}
       refreshError={false}
     >{null}</LoadState>;
+    return page === undefined ? state : <SettingsPage
+      kind="modules"
+      title={page.title}
+      subtitle={page.subtitle}
+      icon={page.icon}
+      active={page.active}
+      onToggle={page.onToggle}
+      switchDisabled={page.switchDisabled}
+      switchBusy={page.switchBusy}
+      {...(page.lockHint === undefined ? {} : { lockHint: page.lockHint })}
+      overflow={<ModuleListLink channelId={channelId} onNavigate={page.onNavigate} />}
+      columns={[state]}
+    />;
   }
   const copy = loaded.definition.locales[language];
   return <LoadState
@@ -277,6 +307,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       registeredTemplateVariables={loaded.registeredTemplateVariables}
       initial={loaded.settings}
       initialRevision={loaded.revision}
+      {...(page === undefined ? {} : { page })}
       onReload={async () => {
         try {
           await refetchModuleQueryData(queryClient, channelId, module.id, "settings");
@@ -290,7 +321,32 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
   </LoadState>;
 };
 
-const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, language, definition, copy, retryLabel, channelVariables, registeredTemplateVariables, initial, initialRevision, settingsSaveTarget, onReload }: {
+const AdsSettingsPanelMount = ({ module, channelId, language, canManageContent, moduleActive }: {
+  module: (typeof MODULES)[number];
+  channelId: string;
+  language: DashboardLanguage;
+  canManageContent: boolean;
+  moduleActive: boolean;
+}): ReactElement => {
+  const loadPanel = useCallback(() => loadModulePanel(module) as Promise<{ default: ComponentType<ModulePanelProperties> }>, [module]);
+  return <RetryableLazy
+    instanceKey="ads:settings-panel"
+    load={loadPanel}
+    properties={{ channelId, language, canManage: canManageContent, canOperate: true, moduleActive }}
+    loadingFallback={<LoadStateLines rows={5} height={34} />}
+    renderError={(retry) => <LoadState
+      variant="panel-320"
+      status="error"
+      loading={null}
+      empty={null}
+      error={null}
+      queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: dashboardTexts().module.componentLoadError, onRetry: retry }}
+    >{null}</LoadState>}
+    onRetry={retryModuleChunkLoad}
+  />;
+};
+
+const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, language, definition, copy, retryLabel, channelVariables, registeredTemplateVariables, initial, initialRevision, settingsSaveTarget, onReload, page }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
@@ -304,22 +360,34 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   initialRevision: number;
   settingsSaveTarget?: HTMLElement | null;
   onReload: () => Promise<boolean>;
+  page?: ModuleSettingsPageOptions;
 }): ReactElement => {
   const queryClient = useDashboardQueryClient();
-  const [value, setValue] = useState(initial);
-  const [baseline, setBaseline] = useState({ settings: initial, revision: initialRevision });
-  const [dirty, setDirty] = useState(false);
-  const currentValue = dirty ? value : initial;
-  const currentBaseline = dirty ? baseline : { settings: initial, revision: initialRevision };
+  const channelSettings = useChannelSettings(channelId);
+  const { value: currentValue, setValue, dirty, reset, accept } = useDraft(initial);
+  const baselineRevision = useRef(initialRevision);
+  const baselineSettings = useRef(initial);
   const [saved, setSaved] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const saveInFlight = useRef<Promise<string | null> | null>(null);
   const [serverFieldErrors, setServerFieldErrors] = useState<Readonly<Record<string, string>>>({});
   const [conflict, setConflict] = useState(false);
   const [touchedFields, setTouchedFields] = useState<ReadonlySet<string>>(() => new Set());
   const [validationAttempted, setValidationAttempted] = useState(false);
   const [serverWarnings, setServerWarnings] = useState<readonly PanelTemplateWarning[]>([]);
   const [localIssues, setLocalIssues] = useState<Readonly<Record<string, { unknown: readonly string[]; worstCaseExceeded: boolean }>>>({});
+  useEffect(() => {
+    if (initialRevision <= baselineRevision.current) return;
+    if (!dirty) {
+      baselineRevision.current = initialRevision;
+      baselineSettings.current = initial;
+      accept(initial);
+    } else if (JSON.stringify(initial) === JSON.stringify(baselineSettings.current)) {
+      baselineRevision.current = initialRevision;
+    }
+  }, [accept, dirty, initial, initialRevision]);
+  const effectiveDefaultChatTarget = channelSettings.data?.defaultChatTarget;
   const reportTemplateIssues = useCallback((key: string, issues: { unknown: readonly string[]; worstCaseExceeded: boolean }): void => {
     setLocalIssues((current) => {
       const previous = current[key];
@@ -368,10 +436,9 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       sectionId={sectionId}
       settings={currentValue}
       onChange={(key, next) => {
-        if (!dirty) setBaseline(currentBaseline);
         setValue({ ...currentValue, [key]: next });
         setTouchedFields((current) => new Set(current).add(key));
-        setDirty(true); setSaved(false); setConflict(false); setError(undefined);
+        setSaved(false); setConflict(false); setError(undefined);
         setServerFieldErrors((current) => Object.fromEntries(Object.entries(current).filter(([field]) => field !== key)));
       }}
       texts={copy}
@@ -380,11 +447,31 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       templateMessages={copy.templateMessages}
       fieldErrors={fieldErrors}
       disabled={pending}
+      readOnly={page !== undefined && !canManageContent}
+      readOnlySectionOnly={page !== undefined}
       enabledLabel={copy.enabledLabel}
       disabledLabel={copy.disabledLabel}
+      {...(effectiveDefaultChatTarget === undefined ? {} : { effectiveDefaultChatTarget })}
       onIssuesChange={reportTemplateIssues}
     />
   );
+  const readOnly = page === undefined && !canManageContent ? {
+    ...(module.id === "chat_voting" ? {} : { reason: copy.readOnlyReason }),
+    content: <SettingsEditor
+      spec={spec}
+      sectionId={spec.sections[0]?.id ?? ""}
+      settings={currentValue}
+      onChange={() => undefined}
+      texts={copy}
+      variables={templateVariableOptions}
+      templateMetadata={templateMetadata}
+      templateMessages={copy.templateMessages}
+      readOnly
+      enabledLabel={copy.enabledLabel}
+      disabledLabel={copy.disabledLabel}
+      {...(effectiveDefaultChatTarget === undefined ? {} : { effectiveDefaultChatTarget })}
+    />,
+  } : undefined;
   const collectErrors = (includeUntouched = false): Record<string, string> => {
     const errors: Record<string, string> = {};
     const collect = (fields: SettingsEditorSpec<Record<string, unknown>>["sections"][number]["fields"]): void => {
@@ -401,15 +488,15 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
           if (range === null || !Number.isInteger(range.minSeconds) || !Number.isInteger(range.maxSeconds) ||
               (range.minSeconds as number) < field.min || (range.minSeconds as number) > (range.maxSeconds as number) ||
               (range.maxSeconds as number) > field.max) errors[field.key] = copy.invalidMessage;
-        } else if (field.kind === "text" || field.kind === "template") {
-          if (typeof current !== "string" || (!field.optional && current.trim().length === 0)) {
+        } else if (field.kind === "text" || field.kind === "template" || field.kind === "message") {
+          if (typeof current !== "string" || (field.kind !== "message" && !field.optional && current.trim().length === 0)) {
             errors[field.key] = copy.fields[field.key]?.requiredError ?? copy.invalidMessage;
           } else if (field.kind === "text" && field.maxLength !== undefined && textFieldLength(field, current) > field.maxLength) {
             errors[field.key] = copy.invalidMessage;
           } else if (field.kind === "text" && field.validate !== undefined &&
               (includeUntouched || validationAttempted || touchedFields.has(field.key)) && !field.validate(current)) {
             errors[field.key] = copy.fields[field.key]?.invalidError ?? copy.invalidMessage;
-          } else if (field.kind === "template" && templateTextLength(current) > 500) {
+          } else if ((field.kind === "template" || field.kind === "message") && templateTextLength(current) > 500) {
             errors[field.key] = copy.invalidMessage;
           }
         }
@@ -477,7 +564,9 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       ...(hasError ? { issue: "error" as const } : hasWarning ? { issue: "warning" as const } : {}),
     };
   });
-  const save = async (): Promise<string | null> => {
+  const save = (): Promise<string | null> => {
+    if (saveInFlight.current !== null) return saveInFlight.current;
+    const operation = (async (): Promise<string | null> => {
     if (Object.keys(collectErrors(true)).length > 0) {
       setValidationAttempted(true);
       return copy.invalidMessage;
@@ -490,21 +579,21 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
         channelId,
         module.id,
         "settings",
-        (baselineRevision) => {
-          if (baselineRevision === null) throw new Error("Module settings require a baseline revision.");
-          return saveChannelModuleSettings(channelId, module.id, baselineRevision, currentValue);
+        (revision) => {
+          if (revision === null) throw new Error("Module settings require a baseline revision.");
+          return saveChannelModuleSettings(channelId, module.id, revision, currentValue);
         },
         {
-          baselineRevision: currentBaseline.revision,
+          baselineRevision: baselineRevision.current,
           updateCache: (current, result) => typeof current === "object" && current !== null
             ? { ...current, ...result }
             : current,
           relatedParts: (module.settingsEditorRelatedParts ?? []).map((part) => ({ moduleId: module.id, part })),
         },
       );
-      setValue(response.settings);
-      setBaseline({ settings: response.settings, revision: response.revision });
-      setDirty(false);
+      baselineSettings.current = response.settings;
+      accept(response.settings);
+      baselineRevision.current = response.revision;
       setSaved(true);
       setValidationAttempted(false);
       setServerWarnings(response.warnings);
@@ -512,6 +601,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     } catch (caught) {
       if (caught instanceof PanelApiError && caught.status === 409 && caught.code === "module_settings_changed_concurrently") {
         setConflict(true);
+        notify({ tone: "error", message: copy.conflictMessage });
         return copy.conflictMessage;
       }
       const message = caught instanceof PanelApiError ? apiErrorText(caught.code, copy.saveError) : copy.saveError;
@@ -519,17 +609,74 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       setError(message);
       return message;
     } finally { setPending(false); }
+    })();
+    const tracked = operation.finally(() => {
+      if (saveInFlight.current === tracked) saveInFlight.current = null;
+    });
+    saveInFlight.current = tracked;
+    return tracked;
   };
   const discard = (): void => {
-    setValue(currentBaseline.settings); setBaseline(currentBaseline); setTouchedFields(new Set()); setValidationAttempted(false);
-    setDirty(false); setSaved(false); setConflict(false); setError(undefined); setServerWarnings([]); setLocalIssues({}); setServerFieldErrors({});
+    reset(); setTouchedFields(new Set()); setValidationAttempted(false);
+    setSaved(false); setConflict(false); setError(undefined); setServerWarnings([]); setLocalIssues({}); setServerFieldErrors({});
   };
   const navigationGuard = useDraftGuard(dirty, save, discard);
   useEffect(() => registerDashboardNavigationGuard(navigationGuard.guardSwitch), [navigationGuard.guardSwitch]);
-  const readOnly = !canManageContent ? { ...(module.id === "chat_voting" ? {} : { reason: copy.readOnlyReason }),
-    content: <SettingsEditor spec={spec} sectionId={spec.sections[0]?.id ?? ""} settings={currentValue} onChange={() => undefined} texts={copy} variables={templateVariableOptions} templateMetadata={templateMetadata} templateMessages={copy.templateMessages} readOnly enabledLabel={copy.enabledLabel} disabledLabel={copy.disabledLabel} /> } : undefined;
+  const notifyPageSaveError = page !== undefined;
+  useEffect(() => {
+    if (notifyPageSaveError && error !== undefined) notify({ tone: "error", message: error });
+  }, [error, notifyPageSaveError]);
+  const pageSave = page === undefined || !canManageContent ? undefined : {
+    persistent: true,
+    dirty,
+    pending,
+    saveDisabled: pending,
+    saved,
+    ...(error === undefined ? {} : { error }),
+    invalid,
+    invalidMessage: copy.invalidMessage,
+    invalidStatus: `× ${copy.invalidMessage}`,
+    warnings,
+    warningStatusLabel: (items: readonly string[], justSaved: boolean) => justSaved ? `✓ ${copy.savedLabel} ${items.join(" ")}` : items.join(" "),
+    ...(conflict ? { conflict: {
+      message: error === undefined ? copy.conflictMessage : `${copy.conflictMessage} ${dashboardTexts().module.settingsLoadError}`,
+      reloadLabel: error === undefined ? copy.reloadLabel : retryLabel,
+      onReload: () => {
+        setError(undefined);
+        void onReload().then((succeeded) => { if (!succeeded) setError(dashboardTexts().module.settingsLoadError); });
+      },
+    } } : {}),
+    onSave: () => { void save(); },
+    onInvalidSave: () => { setValidationAttempted(true); },
+    onDiscard: discard,
+    saveLabel: copy.saveLabel,
+    discardLabel: copy.discardLabel,
+    savedLabel: copy.savedLabel,
+    pendingLabel: copy.pendingLabel,
+  };
+  const pageContent = page === undefined ? null : <SettingsPage
+    kind="modules"
+    title={page.title}
+    subtitle={page.subtitle}
+    icon={page.icon}
+    active={page.active}
+    onToggle={page.onToggle}
+    switchDisabled={page.switchDisabled || pending}
+    switchBusy={page.switchBusy}
+    {...(page.lockHint === undefined ? {} : { lockHint: page.lockHint })}
+    {...(pageSave === undefined ? {} : { save: pageSave })}
+    overflow={<ModuleListLink channelId={channelId} onNavigate={page.onNavigate} />}
+    columns={module.id === "ads"
+      ? [
+        <AdsSettingsPanelMount key="ads-panel" module={module} channelId={channelId} language={language} canManageContent={canManageContent} moduleActive={page.active} />,
+        settingsEditor("announcements", fieldErrors),
+        settingsEditor("prewarning", fieldErrors),
+      ]
+      : sections.map(({ id }) => settingsEditor(id, fieldErrors))}
+  />;
   return <>
-    <EditorShell
+    {pageContent}
+    {page === undefined ? <EditorShell
     ariaLabel={copy.ariaLabel}
       showTitle={definition.showTitle ?? true}
       {...(definition.savePosition === "page-header" ? { saveTarget: settingsSaveTarget ?? null } : {})}
@@ -567,8 +714,8 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     discardLabel={copy.discardLabel}
     savedLabel={copy.savedLabel}
     pendingLabel={copy.pendingLabel}
-      issueLabels={copy.issueLabels}
-    />
+    issueLabels={copy.issueLabels}
+  /> : null}
     <ConfirmDialog
       opened={navigationGuard.confirmOpen}
       title={dashboardTexts().module.unsavedChangesTitle}
@@ -585,7 +732,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
           onClick: () => { void navigationGuard.saveAndSwitch(); },
         },
       })}
-      pending={navigationGuard.saving}
+      pending={pending || navigationGuard.saving}
       danger
     />
   </>;
@@ -908,6 +1055,28 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   useEffect(() => {
     if (error !== null) notify({ tone: "error", message: error });
   }, [error]);
+
+  if ((moduleId === "ads" || moduleId === "raid") && registered?.settingsEditor !== undefined && !permissionsMissing) {
+    return <section className="module-detail module-detail--settings-page" aria-label={details.name}>
+      <ModuleSettingsEditor
+        module={registered}
+        channelId={channelId}
+        canManageContent={ownRole !== "operator"}
+        language={dashboardLanguage()}
+        page={{
+          title: details.name,
+          subtitle: details.description,
+          icon: iconFor(moduleId, "module-heading-glyph"),
+          active: enabled,
+          onToggle: (nextEnabled) => { if (nextEnabled !== enabled) onToggle(); },
+          switchDisabled: !manageable || switchDisabled || busy || mandatory,
+          switchBusy: busy,
+          ...(disabledReason === null ? {} : { lockHint: disabledReason }),
+          onNavigate,
+        }}
+      />
+    </section>;
+  }
 
   return (
     <>

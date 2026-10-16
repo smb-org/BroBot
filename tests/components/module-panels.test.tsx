@@ -40,6 +40,7 @@ const editorFixture = vi.hoisted(() => {
       mode: { label: language === "de" ? "Modus" : "Mode", hint: language === "de" ? "Wähle einen Modus." : "Choose a mode.", options: { automatic: { label: language === "de" ? "Automatisch" : "Automatic", description: "Runs automatically." }, manual: { label: language === "de" ? "Von Hand" : "Manual", description: "Runs by hand." } } },
       enabled: { label: language === "de" ? "Zusatzaktion" : "Extra action", hint: language === "de" ? "Schaltet die Zusatzaktion ein." : "Turns on the extra action.", description: language === "de" ? "Zusätzliche Aktion ausführen." : "Run an extra action." },
       threshold: { label: language === "de" ? "Schwelle" : "Threshold", hint: language === "de" ? "Mindestmenge." : "Minimum amount.", unit: "Stück", disabledReason: language === "de" ? "Zusatzaktion ist ausgeschaltet." : "Extra action is off." },
+      extraMessage: { label: language === "de" ? "Zusatznachricht" : "Extra message", hint: language === "de" ? "Zusätzlicher Inhalt." : "Additional content." },
     },
   });
   const definition = {
@@ -52,7 +53,9 @@ const editorFixture = vi.hoisted(() => {
         { kind: "segment", key: "mode", options: [{ value: "automatic" }, { value: "manual" }] },
         { kind: "switchCard", key: "enabled", children: [{ kind: "number", key: "threshold", min: 0, max: 10, step: 1 }] },
       ] },
-      { id: "extra", icon: "tabSettings", fields: [] },
+      { id: "extra", icon: "tabSettings", fields: [
+        { kind: "text", key: "extraMessage", optional: true },
+      ] },
     ] },
     locales: { de: catalog("de"), en: catalog("en") },
   };
@@ -96,23 +99,23 @@ vi.mock("../../src/modules/registry", () => ({
     {
       id: "editor-fixture",
       navigationCategory: "chat",
-      settingsSchema: { shape: { amount: {}, handle: {}, labels: {}, message: {}, mode: {}, enabled: {}, threshold: {} } },
-      defaultSettings: { amount: 2, handle: "", labels: "", message: "Hello {viewer}", mode: "automatic", enabled: true, threshold: 4 },
+      settingsSchema: { shape: { amount: {}, handle: {}, labels: {}, message: {}, mode: {}, enabled: {}, threshold: {}, extraMessage: {} } },
+      defaultSettings: { amount: 2, handle: "", labels: "", message: "Hello {viewer}", mode: "automatic", enabled: true, threshold: 4, extraMessage: "Extra value" },
       templateFields: { message: [{ name: "viewer", sample: "Ada", maxLength: 40 }] },
       settingsEditor: editorFixture.loader,
     },
     {
       id: "editor-lazy-fixture",
-      settingsSchema: { shape: { amount: {}, handle: {}, labels: {}, message: {}, mode: {}, enabled: {}, threshold: {} } },
-      defaultSettings: { amount: 2, handle: "", labels: "", message: "Hello {viewer}", mode: "automatic", enabled: true, threshold: 4 },
+      settingsSchema: { shape: { amount: {}, handle: {}, labels: {}, message: {}, mode: {}, enabled: {}, threshold: {}, extraMessage: {} } },
+      defaultSettings: { amount: 2, handle: "", labels: "", message: "Hello {viewer}", mode: "automatic", enabled: true, threshold: 4, extraMessage: "Extra value" },
       templateFields: { message: [{ name: "viewer", sample: "Ada", maxLength: 40 }] },
       settingsEditor: editorFixture.loader,
     },
     {
       id: "editor-before-fixture",
       navigationCategory: "chat",
-      settingsSchema: { shape: { amount: {}, handle: {}, labels: {}, message: {}, mode: {}, enabled: {}, threshold: {} } },
-      defaultSettings: { amount: 2, handle: "", labels: "", message: "Hello {viewer}", mode: "automatic", enabled: true, threshold: 4 },
+      settingsSchema: { shape: { amount: {}, handle: {}, labels: {}, message: {}, mode: {}, enabled: {}, threshold: {}, extraMessage: {} } },
+      defaultSettings: { amount: 2, handle: "", labels: "", message: "Hello {viewer}", mode: "automatic", enabled: true, threshold: 4, extraMessage: "Extra value" },
       templateFields: { message: [{ name: "viewer", sample: "Ada", maxLength: 40 }] },
       panel: relatedPanelLoader,
       settingsEditor: editorFixture.loader,
@@ -147,7 +150,7 @@ relatedPanelLoader.mockImplementation(() => Promise.resolve({ default: ActivePan
 
 const renderWithMantine = (element: ReactElement, queryOptions: { gcTime?: number; staleTime?: number } = {}): ReturnType<typeof renderWithQuery> =>
   renderWithQuery(<UiProvider>{element}</UiProvider>, undefined, queryOptions);
-const editorFixtureSettings = { amount: 2, handle: "ada", labels: "", message: "Hello {viewer}", mode: "automatic", enabled: true, threshold: 4 };
+const editorFixtureSettings = { amount: 2, handle: "ada", labels: "", message: "Hello {viewer}", mode: "automatic", enabled: true, threshold: 4, extraMessage: "Extra value" };
 
 const renderSettingsFixture = (
   fetcher: typeof fetch,
@@ -688,7 +691,13 @@ describe("Module panel loader", () => {
       ["Modus", "Runs automatically."],
       ["Schwelle", "Mindestmenge."],
     ];
-    for (const [label, help] of fieldHelp) expect(screen.getByRole("button", { name: `${label}: ${help}` })).toHaveAttribute("title", help);
+    for (const [label, help] of fieldHelp) {
+      if (label === "Menge" || label === "Schwelle") {
+        expect(screen.getByText(help, { selector: ".unit-input__description" })).toBeVisible();
+      } else {
+        expect(screen.getByRole("button", { name: `${label}: ${help}` })).toHaveAttribute("title", help);
+      }
+    }
     expect(screen.queryByText("Zusätzliche Aktion ausführen.")).not.toBeInTheDocument();
 
     fireEvent.change(handle, { target: { value: "@Ada" } });
@@ -707,6 +716,7 @@ describe("Module panel loader", () => {
       revision: 1,
       settings: {
         amount: 3,
+          extraMessage: "Extra value",
         handle: "Ada",
         labels: "",
         message: "Willkommen {viewer}!",
@@ -740,8 +750,44 @@ describe("Module panel loader", () => {
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Nachricht" })).toHaveValue("Serverstand {viewer}"));
   });
 
-  it("keeps a dirty module settings draft when a newer revision arrives in the background", async () => {
+  it("keeps a dirty module settings draft and advances its baseline when only the revision changes", async () => {
     let submittedRevision: number | undefined;
+    let serverRevision = 1;
+    const serverSettings = editorFixtureSettings;
+    const view = renderSettingsFixture(vi.fn<typeof fetch>((input, init) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      if (path.endsWith("/modules/editor-fixture/settings") && init?.method === "PATCH") {
+        if (typeof init.body === "string") submittedRevision = (JSON.parse(init.body) as { revision: number }).revision;
+        const savedSettings = typeof init.body === "string"
+          ? (JSON.parse(init.body) as { settings: typeof editorFixtureSettings }).settings
+          : editorFixtureSettings;
+        return Promise.resolve(Response.json({ settings: savedSettings, revision: 3, warnings: [] }));
+      }
+      return Promise.resolve(path.endsWith("/modules/editor-fixture/settings")
+        ? Response.json({ settings: serverSettings, revision: serverRevision, variables: [] })
+        : Response.json({}));
+    }));
+    const message = await screen.findByRole("textbox", { name: "Nachricht" });
+    fireEvent.change(message, { target: { value: "Local draft {viewer}" } });
+    const key = moduleQueryKey("kanal-a", "editor-fixture", "settings");
+    serverRevision = 2;
+    await act(async () => {
+      await view.queryClient.invalidateQueries({ queryKey: key, exact: true });
+    });
+
+    await waitFor(() => expect(view.queryClient.getQueryData<{ revision: number }>(key)?.revision).toBe(2));
+    expect(message).toHaveValue("Local draft {viewer}");
+    fireEvent.change(screen.getByRole("textbox", { name: "Konto" }), { target: { value: "local-handle" } });
+    fireEvent.click(screen.getByRole("button", { name: "Fixture speichern" }));
+    await waitFor(() => expect(submittedRevision).toBe(2));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Nachricht" })).toHaveValue("Local draft {viewer}"));
+    expect(message).toHaveValue("Local draft {viewer}");
+  });
+
+  it("keeps the old baseline when settings change remotely during a dirty draft", async () => {
+    let submittedRevision: number | undefined;
+    let serverRevision = 1;
+    let serverSettings = editorFixtureSettings;
     const view = renderSettingsFixture(vi.fn<typeof fetch>((input, init) => {
       const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
       if (path.endsWith("/modules/editor-fixture/settings") && init?.method === "PATCH") {
@@ -749,24 +795,24 @@ describe("Module panel loader", () => {
         return Promise.resolve(Response.json({ error: "module_settings_changed_concurrently" }, { status: 409 }));
       }
       return Promise.resolve(path.endsWith("/modules/editor-fixture/settings")
-        ? Response.json({ settings: editorFixtureSettings, revision: 1, variables: [] })
+        ? Response.json({ settings: serverSettings, revision: serverRevision, variables: [] })
         : Response.json({}));
     }));
     const message = await screen.findByRole("textbox", { name: "Nachricht" });
     fireEvent.change(message, { target: { value: "Local draft {viewer}" } });
     const key = moduleQueryKey("kanal-a", "editor-fixture", "settings");
-    const cached = view.queryClient.getQueryData<{ definition: unknown; settings: typeof editorFixtureSettings; revision: number; variables: [] }>(key);
-    expect(cached).toBeDefined();
-
-    act(() => {
-      view.queryClient.setQueryData(key, { ...cached, settings: { ...editorFixtureSettings, message: "Remote {viewer}" }, revision: 2 });
+    serverRevision = 2;
+    serverSettings = { ...editorFixtureSettings, message: "Remote {viewer}" };
+    await act(async () => {
+      await view.queryClient.invalidateQueries({ queryKey: key, exact: true });
     });
 
+    await waitFor(() => expect(view.queryClient.getQueryData<{ revision: number }>(key)?.revision).toBe(2));
     expect(message).toHaveValue("Local draft {viewer}");
-    fireEvent.change(screen.getByRole("textbox", { name: "Konto" }), { target: { value: "local-handle" } });
     fireEvent.click(screen.getByRole("button", { name: "Fixture speichern" }));
-    await waitFor(() => expect(submittedRevision).toBe(1));
+
     expect(await screen.findByRole("status")).toHaveTextContent("Fixture wurde inzwischen geändert.");
+    expect(submittedRevision).toBe(1);
     expect(message).toHaveValue("Local draft {viewer}");
   });
 
@@ -1032,6 +1078,8 @@ describe("Module panel loader", () => {
     expect(within(properties as HTMLElement).getByText("Modus")).toBeInTheDocument();
     expect(within(properties as HTMLElement).getByText("Zusatzaktion")).toBeInTheDocument();
     expect(within(properties as HTMLElement).getByText("Schwelle")).toBeInTheDocument();
+    expect(within(properties as HTMLElement).getByText("Zusatznachricht")).toBeInTheDocument();
+    expect(within(properties as HTMLElement).getByText("Extra value")).toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(properties?.closest(".ui-editor-shell")?.querySelector("form")).toBeNull();
     expect(screen.queryByRole("button", { name: "Fixture speichern" })).not.toBeInTheDocument();

@@ -75,8 +75,8 @@ describe("module settings editor declarations", () => {
         hasPanel: module.panel !== undefined,
         panelManagesSettings: module.panelManagesSettings === true,
         schemaKeys,
-        declaredKeys: fields.map((field) => field.key),
-        templateKeys: fields.filter((field) => field.kind === "template").map((field) => field.key),
+        declaredKeys: fields.flatMap((field) => field.kind === "message" ? [field.key, field.targetKey] : [field.key]),
+        templateKeys: fields.filter((field) => field.kind === "template" || field.kind === "message").map((field) => field.key),
         templateFieldKeys: Object.keys(module.templateFields ?? {}),
         locales,
       };

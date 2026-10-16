@@ -87,12 +87,13 @@ describe("BELABOX alert settings", () => {
           now: "2026-10-05T12:00:00.000Z",
         }, channelId);
         for (const statement of statements) await statement.run();
-        const row = await database.prepare("SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = 'belabox'")
-          .bind(channelId).first<{ settings: string }>();
+        const row = await database.prepare("SELECT settings, revision, settings_revision FROM channel_modules WHERE channel_id = ? AND module_id = 'belabox'")
+          .bind(channelId).first<{ settings: string; revision: number; settings_revision: number }>();
         const saved = JSON.parse(row?.settings ?? "{}") as Record<string, unknown>;
         expect(saved.lowText).toBe(belaboxDefaultAlertTexts(language).lowText);
         expect(saved.disconnectText).toBe(belaboxDefaultAlertTexts(language).disconnectText);
         expect(saved.recoveryText).toBe(belaboxDefaultAlertTexts(language).recoveryText);
+        expect(row).toMatchObject({ revision: 2, settings_revision: 2 });
       }
     } finally {
       database.close();

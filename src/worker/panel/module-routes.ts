@@ -4,7 +4,8 @@ import { z } from "zod";
 import {
   createChannelModuleWithAudit,
   getChannelModuleForChannel,
-  updateChannelModuleWithAudit,
+  updateChannelModuleEnabledStateWithAudit,
+  updateChannelModuleSettingsWithAudit,
 } from "../db/channel-modules";
 import {
   requireChannelAuthorization,
@@ -780,7 +781,7 @@ moduleRouter.get("/api/channels/:channelId/modules/:moduleId/settings", async (c
   if (!settings.success) return context.json({ error: "module_settings_invalid" }, 500);
   const channelId = context.req.param("channelId");
   const variables = (await listChannelVariables(context.env.DB, channelId)).map(({ name, value, description }) => ({ name, value, description }));
-  return context.json({ settings: settings.data, revision: stored.revision, variables });
+  return context.json({ settings: settings.data, revision: stored.settingsRevision, variables });
 });
 
 moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async (context) => {
@@ -859,18 +860,16 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
     const effective = effectiveTemplateVariables(module.templateContext ?? "event", (variables ?? []) as readonly TemplateVariable[], channelVariables, SYSTEM_TEMPLATE_VARIABLE_LIST);
     return templateWarnings(field, value, effective, registeredVariables);
   });
-  const changed = await updateChannelModuleWithAudit(
+  const changed = await updateChannelModuleSettingsWithAudit(
     context.env.DB,
     actorOf(context),
     channelId,
     module.id,
-    stored.enabled,
     JSON.stringify(settings.data),
     `${module.id}.settings_changed`,
     nowIso(),
     [],
     expectedRevision,
-    false,
     blockGuard.references.length === 0 ? undefined : blockGuard,
     module.id === "clips",
   );
@@ -888,7 +887,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
     }
     return context.json({
       error: "module_settings_changed_concurrently",
-      current: current === null ? null : { settings: currentSettings, revision: current.revision },
+      current: current === null ? null : { settings: currentSettings, revision: current.settingsRevision },
     }, 409);
   }
   if (module.settingsChangedAlarm !== undefined) {
@@ -949,13 +948,12 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       dependentMutations,
     );
   } else if (existing !== null) {
-    changed = await updateChannelModuleWithAudit(
+    changed = await updateChannelModuleEnabledStateWithAudit(
       context.env.DB,
       actor,
       channelId,
       moduleId,
       enabled,
-      settings,
       action,
       now,
       dependentMutations,

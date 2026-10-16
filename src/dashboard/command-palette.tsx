@@ -6,9 +6,8 @@ import type { TextCommand } from "../modules/text_commands/contracts";
 import { loadTextCommands } from "../modules/text_commands/panel/service";
 import { canManage, hasRequiredChannelRole, type ChannelRole } from "../contracts/values";
 import type { PanelChannelControls, PanelModuleState } from "../panel-contract";
-import { PanelApiError, createClip, fetchChannelVariables, sendManualShoutout, setChannelControl, setChannelModuleEnabled, startCommercial, type PanelChannelVariable } from "./api";
+import { PanelApiError, createClip, fetchChannelVariables, sendManualShoutout, setChannelControl, startCommercial, type PanelChannelVariable } from "./api";
 import { dispatchDashboardAuthenticationRequired } from "./data/events";
-import { refreshAfterModuleToggle } from "./data/module-toggle";
 import { queryKeys } from "./data/keys";
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
 import { apiErrorText, channelVariablesTexts, dashboardLanguage, dashboardTexts, immediateActionUnavailableReasonText } from "./locale";
@@ -68,6 +67,7 @@ interface ChannelCommandPaletteProperties {
   streamState?: "online" | "offline" | null | undefined;
   channelControls?: PanelChannelControls;
   onRefreshChannelState?: () => Promise<void>;
+  onToggleModule: (channelId: string, moduleId: string, enabled: boolean) => Promise<void>;
   modules: PanelModuleState[];
   onNavigate: (route: DashboardRoute, onNavigated?: () => void) => void;
   /** Set after navigation succeeds, so its panel can pre-select the command. */
@@ -91,7 +91,7 @@ const recentTargetPathForRoute = (route: DashboardRoute, channelId: string | nul
 };
 
 /** Cmd/Ctrl+K finds navigation, text commands, variables, and channel actions. */
-export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, viewerUserId = null, route, isPlatformAdmin = false, botSignedIn, streamState, channelControls, onRefreshChannelState, modules, onNavigate, onOpenCommand, onOpenVariable }: ChannelCommandPaletteProperties): ReactElement => {
+export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, viewerUserId = null, route, isPlatformAdmin = false, botSignedIn, streamState, channelControls, onRefreshChannelState, onToggleModule, modules, onNavigate, onOpenCommand, onOpenVariable }: ChannelCommandPaletteProperties): ReactElement => {
   const texts = dashboardTexts();
   const manageable = ownRole !== null && canManage(ownRole);
   const [commands, setCommands] = useState<TextCommand[]>([]);
@@ -212,18 +212,8 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
   }, [channelControls, channelId, onRefreshChannelState, queryClient]);
   const toggleAds = useCallback(async (enabled: boolean): Promise<void> => {
     if (channelId === null) return;
-    try {
-      await setChannelModuleEnabled(channelId, "ads", enabled);
-    } catch (error) {
-      // Same reporting as the other module toggles; a 401 also needs the
-      // sign-in recovery that the QueryCache would trigger for queries.
-      const fallback = dashboardTexts().errors.changeFailed;
-      notify({ tone: "error", message: error instanceof PanelApiError ? apiErrorText(error.code, fallback) : fallback });
-      if (error instanceof PanelApiError && error.status === 401) dispatchDashboardAuthenticationRequired();
-      return;
-    }
-    await refreshAfterModuleToggle(queryClient, channelId);
-  }, [channelId, queryClient]);
+    await onToggleModule(channelId, "ads", enabled);
+  }, [channelId, onToggleModule]);
   const actionItems = useMemo<CommandPaletteItem[]>(() => {
     if (channelId === null) return [];
     const managementLockReason = manageable ? undefined : texts.module.managementLocked;

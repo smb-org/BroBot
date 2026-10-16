@@ -57,8 +57,13 @@ const hasManagementAuthorization = async (
     context.get("actor"),
     nowIso(),
   );
-  const row = await context.env.DB.prepare(`SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`)
-    .bind(...authorization.values)
+  const row = await context.env.DB.prepare(`SELECT 1 AS authorized
+       FROM channel_modules
+      WHERE channel_id = ?
+        AND module_id = 'ads'
+        AND enabled = 1
+        AND 1 = 1 ${authorization.sql}`)
+    .bind(channelId, ...authorization.values)
     .first<{ authorized: number }>();
   return row !== null;
 };

@@ -1467,7 +1467,10 @@ describe("Module management in the panel", () => {
     await expect(savedA.json()).resolves.toMatchObject({ settings: { betrag: 41 }, revision: 2 });
 
     const savedB = await panelRouter.fetch(
-      await requestFor("user-1", path, "PATCH", { revision: loaded.revision, settings: { betrag: 40 } }),
+      await requestFor("user-1", path, "PATCH", {
+        revision: loaded.revision,
+        settings: { betrag: 40 },
+      }),
       environment,
     );
     expect(savedB.status).toBe(409);
@@ -1478,6 +1481,42 @@ describe("Module management in the panel", () => {
     await expect(database.prepare(
       "SELECT settings, revision FROM channel_modules WHERE channel_id = 'kanal-a' AND module_id = 'test-modul'",
     ).first()).resolves.toEqual({ settings: '{"betrag":41}', revision: 2 });
+  });
+
+  it("saves a settings draft after a module toggle advances only the row revision", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+       VALUES ('kanal-a', 'test-modul', 1, '{"betrag":42}')`,
+    ).run();
+    const settingsPath = "/api/channels/kanal-a/modules/test-modul/settings";
+    const loadedResponse = await panelRouter.fetch(await requestFor("user-1", settingsPath), environment);
+    const loaded = await loadedResponse.json<{ settings: { betrag: number }; revision: number }>();
+
+    const toggled = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/test-modul", "PATCH", { enabled: false }),
+      environment,
+    );
+    expect(toggled.status).toBe(200);
+
+    const saved = await panelRouter.fetch(
+      await requestFor("user-1", settingsPath, "PATCH", {
+        revision: loaded.revision,
+        settings: { betrag: 41 },
+      }),
+      environment,
+    );
+
+    expect(saved.status).toBe(200);
+    await expect(database.prepare(
+      "SELECT revision, settings_revision FROM channel_modules WHERE channel_id = 'kanal-a' AND module_id = 'test-modul'",
+    ).first()).resolves.toEqual({ revision: 3, settings_revision: 2 });
+    await expect(saved.json()).resolves.toMatchObject({ settings: { betrag: 41 }, revision: 2 });
+    await expect(database.prepare(
+      "SELECT enabled, settings, revision, settings_revision FROM channel_modules WHERE channel_id = 'kanal-a' AND module_id = 'test-modul'",
+    ).first()).resolves.toEqual({ enabled: 0, settings: '{"betrag":41}', revision: 3, settings_revision: 2 });
   });
 
   it("returns the revision written by this save when a later save interleaves before the response", async () => {
@@ -1493,7 +1532,8 @@ describe("Module management in the panel", () => {
       batch: async (statements: TestPreparedStatement[]) => {
         const result = await database.batch(statements);
         await database.prepare(
-          `UPDATE channel_modules SET settings = '{"betrag":99}', revision = revision + 1
+          `UPDATE channel_modules SET settings = '{"betrag":99}', revision = revision + 1,
+                  settings_revision = settings_revision + 1
             WHERE channel_id = 'kanal-a' AND module_id = 'test-modul'`,
         ).run();
         return result;
@@ -1510,8 +1550,8 @@ describe("Module management in the panel", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ settings: { betrag: 41 }, revision: 2, warnings: [] });
     await expect(database.prepare(
-      "SELECT settings, revision FROM channel_modules WHERE channel_id = 'kanal-a' AND module_id = 'test-modul'",
-    ).first()).resolves.toEqual({ settings: '{"betrag":99}', revision: 3 });
+      "SELECT settings, revision, settings_revision FROM channel_modules WHERE channel_id = 'kanal-a' AND module_id = 'test-modul'",
+    ).first()).resolves.toEqual({ settings: '{"betrag":99}', revision: 3, settings_revision: 3 });
   });
 
   describe("Template preview", () => {
