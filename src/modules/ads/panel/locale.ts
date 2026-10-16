@@ -33,6 +33,7 @@ export interface AdsPanelTexts {
   refreshReadOnly: string;
   refreshSuccess: string;
   refreshError: string;
+  refreshScopeMissing: string;
 }
 
 const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
@@ -53,7 +54,7 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     snoozeButton: (count) => `Snooze · ${count} verfügbar`,
     snoozeRefresh: (timestamp) => `Aufladung: ${timestamp}`,
     snoozeScopeMissing: "Snooze braucht die Berechtigung channel:manage:ads. Autorisiere Ads für diesen Kanal erneut und erteile diese Berechtigung.",
-    rateLimited: (seconds) => `Twitch begrenzt die Anfragen gerade. Versuche es in ${String(seconds)} Sekunden erneut.`,
+    rateLimited: (seconds) => `Twitch begrenzt die Anfragen gerade. Versuche es in ${String(seconds)} ${seconds === 1 ? "Sekunde" : "Sekunden"} erneut.`,
     snoozeReadOnly: "Nur Broadcaster und Verwalter dürfen Werbepausen verschieben.",
     snoozeNone: "Snooze ist deaktiviert: keine Verschiebung mehr verfügbar.",
     snoozeUnknown: "Snooze ist deaktiviert: der Twitch-Zähler ist nicht verfügbar.",
@@ -68,6 +69,7 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     refreshReadOnly: "Nur Broadcaster und Verwalter dürfen den Werbeplan aktualisieren.",
     refreshSuccess: "Der Werbeplan wurde aktualisiert.",
     refreshError: "Der Werbeplan konnte nicht aktualisiert werden.",
+    refreshScopeMissing: "Zum Aktualisieren des Werbeplans fehlt channel:read:ads. Autorisiere Ads für diesen Kanal erneut und erteile diese Berechtigung.",
   },
   en: {
     title: "Announcements",
@@ -86,7 +88,7 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     snoozeButton: (count) => `Snooze · ${count} available`,
     snoozeRefresh: (timestamp) => `Refreshes: ${timestamp}`,
     snoozeScopeMissing: "Snooze needs the channel:manage:ads permission. Reauthorize Ads for this channel and grant this permission.",
-    rateLimited: (seconds) => `Twitch is rate limiting requests. Try again in ${String(seconds)} seconds.`,
+    rateLimited: (seconds) => `Twitch is rate limiting requests. Try again in ${String(seconds)} ${seconds === 1 ? "second" : "seconds"}.`,
     snoozeReadOnly: "Only broadcasters and managers may snooze ad breaks.",
     snoozeNone: "Snooze is disabled: no postponements remain.",
     snoozeUnknown: "Snooze is disabled: Twitch did not provide a counter.",
@@ -101,6 +103,7 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     refreshReadOnly: "Only broadcasters and managers may refresh the ad schedule.",
     refreshSuccess: "The ad schedule was refreshed.",
     refreshError: "The ad schedule could not be refreshed.",
+    refreshScopeMissing: "Refreshing the ad schedule needs channel:read:ads. Reauthorize Ads for this channel and grant this permission.",
   },
 };
 
@@ -145,7 +148,7 @@ const editorCatalog: LocaleCatalog<SettingsEditorCatalog> = {
   de: {
     title: "Ansagen-Einstellungen", ariaLabel: "Ansagen-Einstellungen",
     readOnlyReason: "Nur Broadcaster und Verwalter dürfen Ansagen-Einstellungen ändern.",
-    saveLabel: "Ansagen speichern", discardLabel: "Verwerfen", savedLabel: "Ansagen gespeichert.", pendingLabel: "Wird gespeichert …",
+    saveLabel: "Speichern", discardLabel: "Verwerfen", savedLabel: "Ansagen gespeichert.", pendingLabel: "Wird gespeichert …",
     invalidMessage: "Bitte korrigiere die markierten Felder.", numberMissing: "Zahl eingeben",
     issueLabels: { error: "Fehler", warning: "Hinweis" },
     saveError: "Die Ansagen-Einstellungen konnten nicht gespeichert werden.",
@@ -186,7 +189,7 @@ const editorCatalog: LocaleCatalog<SettingsEditorCatalog> = {
   en: {
     title: "Announcement settings", ariaLabel: "Announcement settings",
     readOnlyReason: "Only broadcasters and managers may change announcement settings.",
-    saveLabel: "Save announcements", discardLabel: "Discard", savedLabel: "Announcements saved.", pendingLabel: "Saving …",
+    saveLabel: "Save", discardLabel: "Discard", savedLabel: "Announcements saved.", pendingLabel: "Saving …",
     invalidMessage: "Please correct the marked fields.", numberMissing: "Enter a number",
     issueLabels: { error: "Error", warning: "Warning" },
     saveError: "Announcement settings could not be saved.",

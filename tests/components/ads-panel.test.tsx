@@ -76,7 +76,7 @@ describe("Ad settings editor declaration", () => {
     expect(document.querySelector(".settings-page__columns--3")).not.toBeNull();
     expect(await screen.findByText("Letzte Werbung")).toBeInTheDocument();
     expect(screen.getAllByText("Nächste Werbung")).toHaveLength(2);
-    expect(screen.getByRole("button", { name: "Ansagen speichern" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Speichern" })).toBeDisabled();
     expect(document.querySelector(".page-header__save .ui-save-bar")).not.toBeNull();
   });
 
@@ -102,7 +102,7 @@ describe("Ad settings editor declaration", () => {
     renderAds(fetcher);
     const field = await screen.findByRole("textbox", { name: "Automatische Werbepause" });
     fireEvent.change(field, { target: { value: "Mein Entwurf {ads.duration}" } });
-    fireEvent.click(screen.getByRole("button", { name: "Ansagen speichern" }));
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
     await waitFor(() => expect(document.querySelector(".page-header__save [role=status]")).toHaveTextContent("Ansagen-Einstellungen wurden inzwischen geändert."));
     expect(field).toHaveValue("Mein Entwurf {ads.duration}");
 
@@ -120,7 +120,7 @@ describe("Ad settings editor declaration", () => {
     expect(within(properties[1] as HTMLElement).getByText("Aus")).toBeInTheDocument();
     expect(document.querySelectorAll(".page-header__lock")).toHaveLength(1);
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Ansagen speichern" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Speichern" })).not.toBeInTheDocument();
   });
 
   it("reuses a pending settings save when navigation asks to save and switch", async () => {
@@ -131,7 +131,7 @@ describe("Ad settings editor declaration", () => {
 
     const automatic = await screen.findByRole("textbox", { name: "Automatische Werbepause" });
     fireEvent.change(automatic, { target: { value: "Gespeicherter Entwurf {ads.duration}" } });
-    fireEvent.click(screen.getByRole("button", { name: "Ansagen speichern" }));
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
     await waitFor(() => expect(fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1));
 
     let navigated = false;
@@ -168,7 +168,7 @@ describe("Ad settings editor declaration", () => {
 
     const automatic = await screen.findByRole("textbox", { name: "Automatische Werbepause" });
     fireEvent.change(automatic, { target: { value: "Mein Entwurf {ads.duration}" } });
-    fireEvent.click(screen.getByRole("button", { name: "Ansagen speichern" }));
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
     await screen.findByRole("button", { name: "Serverstand laden" });
     fireEvent.click(screen.getByRole("button", { name: "Serverstand laden" }));
 
@@ -205,7 +205,7 @@ describe("Ad settings editor declaration", () => {
     renderAds(fetcher);
 
     expect(await screen.findByRole("button", { name: /Snooze · 0 verfügbar/ })).toBeDisabled();
-    expect(screen.getByText(/autorisiere ads für diesen kanal erneut und erteile diese berechtigung/i)).toBeInTheDocument();
+    expect(screen.getByTestId("ads-snooze-result-slot")).toHaveTextContent(/autorisiere ads für diesen kanal erneut und erteile diese berechtigung/i);
   });
 
   it("shows the remaining Twitch wait when snooze returns a rate-limit reset", async () => {
@@ -238,7 +238,7 @@ describe("Ad settings editor declaration", () => {
     });
     renderAds(fetcher);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/versuche es in \d+ sekunden erneut/i);
+    await waitFor(() => expect(toastsSnapshot().some((toast) => /versuche es in \d+ sekunden erneut/i.test(toast.message))).toBe(true));
   });
 
   it("preserves the cached schedule and limits load notifications to one per outage", async () => {
@@ -263,9 +263,8 @@ describe("Ad settings editor declaration", () => {
     expect(fetcher.mock.calls.filter(([input]) => requestPath(input).endsWith("/schedule"))).toHaveLength(3);
     expect(view.queryClient.getQueryState(key.queryKey)?.status).toBe("error");
     expect(screen.getByText(/Derzeit ist keine Werbung geplant\./u)).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent("Der Werbeplan konnte nicht geladen werden.");
-    expect(screen.getByRole("button", { name: "Erneut versuchen" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Erneut versuchen" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Erneut versuchen" })).not.toBeInTheDocument();
     expect(toastsSnapshot().filter((toast) => toast.message === "Der Werbeplan konnte nicht geladen werden.")).toHaveLength(1);
 
     scheduleReadFails = false;
@@ -281,7 +280,7 @@ describe("Ad settings editor declaration", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Snooze · 2 verfügbar/ }));
 
     await waitFor(() => expect(toastsSnapshot().some((toast) => toast.tone === "error" && toast.message === "Die nächste Werbepause konnte nicht verschoben werden.")).toBe(true));
-    expect(screen.getByRole("button", { name: "Ansagen speichern" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Speichern" })).toBeDisabled();
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
   });
 
@@ -376,7 +375,7 @@ describe("Ad settings editor declaration", () => {
     const field = screen.getByRole("spinbutton", { name: "Vorlaufzeit" });
     fireEvent.change(field, { target: { value: "" } });
     expect(field).toHaveValue(null);
-    fireEvent.click(screen.getByRole("button", { name: "Ansagen speichern" }));
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
 
     expect(await screen.findByText(/Zahl eingeben/u)).toBeInTheDocument();
     expect(field).toHaveAttribute("aria-invalid", "true");

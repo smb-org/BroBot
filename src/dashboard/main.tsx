@@ -43,7 +43,7 @@ import { channelPanelTexts } from "./labels";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatTimestamp as formatTimestampBase, formatNumber, maintenanceReasonText } from "./locale";
 import { CHANNEL_CONTROL_DURATIONS, canManage, type ChannelControlDuration, type ChannelRole } from "../contracts/values";
 import { MODULES } from "../modules/registry";
-import { eventSubName, moduleName, statusWord } from "./module-labels";
+import { eventSubName, moduleNavigationName, statusWord } from "./module-labels";
 import { dashboardModeForRoute, dashboardRoutePath, dashboardRouteRequiresBot, routeForDashboardMode, routeForSelectedChannel, replaceDashboardRoute, useDashboardRoute, type DashboardMode, type DashboardRoute } from "./router";
 import { dashboardNavigationGroups, visibleModuleNavigationIds } from "./nav-pages";
 import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, LoadStateLines, notify, PageHeader, Select as UiSelect, Shell, Sidebar, StatusLed, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type StatusLedState } from "./ui";
@@ -238,7 +238,7 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
     moduleStates ?? [],
     memberRole,
     dashboardLanguage(),
-    (moduleId) => moduleName(moduleId),
+    (moduleId) => moduleNavigationName(moduleId),
   );
   const groups: SidebarGroup[] = navigationGroups.flatMap(({ category, heading, entries }) => {
     const sidebarEntries = entries.filter((entry) => entry.area === "setup" && entry.sidebarVisible).map((entry): SidebarEntry => ({

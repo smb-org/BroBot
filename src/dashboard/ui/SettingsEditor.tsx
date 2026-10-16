@@ -96,6 +96,7 @@ export interface SettingsEditorProps<Settings extends object> {
   templateMetadata?: Readonly<Partial<Record<keyof Settings & string, readonly (TemplateTextFieldVariable & { maxLength: number; fallbackWhenAbsent?: number })[]>>>;
   templateMessages: TemplateTextFieldMessages;
   readOnly?: boolean;
+  readOnlySectionOnly?: boolean;
   disabled?: boolean;
   enabledLabel?: string;
   disabledLabel?: string;
@@ -118,6 +119,7 @@ export function SettingsEditor<Settings extends object>({
   templateMetadata,
   templateMessages,
   readOnly = false,
+  readOnlySectionOnly = false,
   disabled = false,
   enabledLabel,
   disabledLabel,
@@ -172,22 +174,20 @@ export function SettingsEditor<Settings extends object>({
       const unit = typeof fieldValue === "number" && fieldValue === 0
         ? copy.zeroValueLabel ?? copy.unit ?? field.unit
         : copy.unit ?? field.unit;
-      return (
-        <InspectorFieldRow key={field.key} label={copy.label} help={copy.hint}>
-          <UnitInput
-            id={id}
-            label={copy.label}
-            {...(unit === undefined ? {} : { unit })}
-            {...(error === undefined ? {} : { error })}
-            min={field.min}
-            max={field.max}
-            step={field.step}
-            value={typeof fieldValue === "number" ? fieldValue : ""}
-            disabled={disabled}
-            onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
-          />
-        </InspectorFieldRow>
-      );
+      return <UnitInput
+        key={field.key}
+        id={id}
+        label={copy.label}
+        {...(unit === undefined ? {} : { unit })}
+        hint={copy.hint}
+        {...(error === undefined ? {} : { error })}
+        min={field.min}
+        max={field.max}
+        step={field.step}
+        value={typeof fieldValue === "number" ? fieldValue : ""}
+        disabled={disabled}
+        onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
+      />;
     }
     if (field.kind === "timeoutDurationRange") {
       const range = fieldValue !== null && typeof fieldValue === "object"
@@ -289,6 +289,7 @@ export function SettingsEditor<Settings extends object>({
           {...(copy.previewLabel === undefined ? {} : { previewLabel: copy.previewLabel })}
           {...(copy.previewSpeaker === undefined ? {} : { previewSpeaker: copy.previewSpeaker })}
           {...(copy.previewEmptyText === undefined ? {} : { previewEmptyText: copy.previewEmptyText })}
+          minRows={2}
           messages={templateMessages}
         />
         {targetCopy === undefined ? null : <ChatTargetField
@@ -377,7 +378,7 @@ export function SettingsEditor<Settings extends object>({
     return (
       <InspectorSection title={section === undefined ? "" : texts.sections[section.id]}>
         <dl className="properties ui-settings-editor__properties">
-          {flattenFields(section?.fields ?? []).map((field) => {
+          {flattenFields(readOnlySectionOnly ? section?.fields ?? [] : spec.sections.flatMap((candidate) => candidate.fields)).map((field) => {
             const copy = texts.fields[field.key];
             if (copy === undefined) return null;
             if (field.kind === "message") {

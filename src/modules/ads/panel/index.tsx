@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 
 import type { DashboardLanguage } from "../../../dashboard/locale";
 import { PanelApiError } from "../../../contracts/panel-error";
@@ -21,10 +21,10 @@ const formatTimestamp = (value: string | null, language: DashboardLanguage): str
   }).format(date);
 };
 
-const formatDueIn = (value: string, language: DashboardLanguage): string => {
+const formatDueIn = (value: string, language: DashboardLanguage, now: number): string => {
   const timestamp = Date.parse(value);
   if (!Number.isFinite(timestamp)) return "—";
-  const minutes = Math.round((timestamp - Date.now()) / 60_000);
+  const minutes = Math.round((timestamp - now) / 60_000);
   const unit = Math.abs(minutes) < 60 ? "minute" : Math.abs(minutes) < 1_440 ? "hour" : "day";
   const amount = unit === "minute" ? minutes : unit === "hour" ? Math.round(minutes / 60) : Math.round(minutes / 1_440);
   return new Intl.RelativeTimeFormat(language === "de" ? "de-DE" : "en-US", { numeric: "auto" }).format(amount, unit);
@@ -55,6 +55,14 @@ const AdsPanel = ({ channelId, language = "de", canManage = false, moduleActive 
   });
   const schedule = scheduleQuery.data ?? null;
   const scheduleLoadFailed = scheduleError !== null;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (schedule?.schedule.nextAdAt === null || schedule?.schedule.nextAdAt === undefined) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, [schedule?.schedule.nextAdAt]);
+  const scheduleAsOf = schedule?.asOf === undefined ? Number.NaN : Date.parse(schedule.asOf);
+  const effectiveNow = Math.max(now, scheduleQuery.dataUpdatedAt, Number.isFinite(scheduleAsOf) ? scheduleAsOf : 0);
   const loadStatus = schedule === null
     ? scheduleQuery.isPending ? "loading" : scheduleLoadFailed ? "error" : "loading"
     : "success";
@@ -113,8 +121,11 @@ const AdsPanel = ({ channelId, language = "de", canManage = false, moduleActive 
         updateCache: (_current, result) => result,
       });
       notify({ tone: "success", message: labels.refreshSuccess });
-    } catch {
-      notify({ tone: "error", message: labels.refreshError });
+    } catch (error: unknown) {
+      const message = adFailureReason(error) === "scope_missing"
+        ? labels.refreshScopeMissing
+        : rateLimitWaitMessage(error, labels) ?? labels.refreshError;
+      notify({ tone: "error", message });
     } finally {
       setRefreshBusy(false);
     }
@@ -125,10 +136,10 @@ const AdsPanel = ({ channelId, language = "de", canManage = false, moduleActive 
       <div className="section-heading">
         <h2>{labels.scheduleSection}</h2>
         <Button variant="secondary" disabled={!canManage || refreshBusy} describedBy="ads-schedule-refresh-reason"
+          {...(canManage ? {} : { title: labels.refreshReadOnly })}
           onClick={() => { void refreshSchedule(); }}>{labels.refreshSchedule}</Button>
       </div>
-      <p id="ads-schedule-refresh-reason" className="lock-reason" data-testid="ads-schedule-refresh-reason"
-        style={{ height: "var(--s6)", overflow: "hidden", margin: 0 }} aria-live="polite">
+      <p id="ads-schedule-refresh-reason" className="sr-only" data-testid="ads-schedule-refresh-reason" aria-live="polite">
         {canManage ? "" : labels.refreshReadOnly}
       </p>
       <LoadState variant="panel-0" status={loadStatus}
@@ -139,36 +150,37 @@ const AdsPanel = ({ channelId, language = "de", canManage = false, moduleActive 
         </div>}
         empty={null}
         error={<p role="alert">{loadError}</p>}
-        queryError={{ message: loadError, onRetry: () => { void scheduleQuery.refetch({ throwOnError: true }).catch(() => undefined); } }}
-        refreshError={schedule !== null && scheduleLoadFailed}>
+        queryError={{ message: loadError, onRetry: () => { void scheduleQuery.refetch({ throwOnError: true }).catch(() => undefined); } }}>
       {schedule === null ? null : <>
       <section className="config-section" aria-label={labels.scheduleSection}>
-        <p className="muted mono" title={schedule.asOf === undefined ? undefined : labels.asOf(formatTimestamp(schedule.asOf, language))}
+        <p className="muted" title={schedule.asOf === undefined ? undefined : labels.asOf(formatTimestamp(schedule.asOf, language))}
           style={{ height: "var(--s6)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", margin: 0 }}>
           {schedule.asOf === undefined ? "" : labels.asOf(formatTimestamp(schedule.asOf, language))}
         </p>
         <dl className="ads-schedule-summary" aria-label={labels.scheduleSection}>
           <div><dt>{labels.lastAd}</dt><dd>{schedule.schedule.lastAdAt === null ? labels.noValue : formatTimestamp(schedule.schedule.lastAdAt, language)}</dd></div>
           <div><dt>{labels.nextAd}</dt><dd>{schedule.schedule.nextAdAt === null ? labels.noAdBreak : formatTimestamp(schedule.schedule.nextAdAt, language)}</dd></div>
-          <div><dt>{labels.dueIn}</dt><dd>{schedule.schedule.nextAdAt === null ? labels.noValue : formatDueIn(schedule.schedule.nextAdAt, language)}</dd></div>
+          <div><dt>{labels.dueIn}</dt><dd>{schedule.schedule.nextAdAt === null ? labels.noValue : formatDueIn(schedule.schedule.nextAdAt, language, effectiveNow)}</dd></div>
           <div><dt>{labels.prerollFree}</dt><dd>{schedule.schedule.prerollFreeTime === null ? labels.noValue : `${String(schedule.schedule.prerollFreeTime)} s`}</dd></div>
         </dl>
       </section>
       <section className="config-section" aria-label={labels.snoozeSection}>
         <div className="section-heading"><h2>{labels.snoozeSection}</h2></div>
-        <Button variant="secondary" icon="ad" disabled={snoozeButtonDisabled} onClick={() => { void snooze(); }}>{snoozeLabel}</Button>
+        <span className="sr-only" id="ads-snooze-reason">{snoozeReason}</span>
+        <Button variant="secondary" icon="ad" disabled={snoozeButtonDisabled} describedBy="ads-snooze-reason"
+          {...(snoozeReason.length === 0 ? {} : { title: snoozeReason })} onClick={() => { void snooze(); }}>{snoozeLabel}</Button>
         <p className="lock-reason lock-reason--with-icon" data-testid="ads-snooze-result-slot"
           title={[snoozeReason, snoozeRefresh].filter(Boolean).join("\n") || undefined}
-          style={{ minHeight: "calc(var(--s6) * 2)", margin: 0, alignItems: "flex-start", flexWrap: "wrap" }} aria-live="polite">
-          {snoozeReason.length > 0 ? <><Icon name="lock" size={16} />{snoozeReason}</> : snoozeResult === null ? null : <span role="alert" className="ads-snooze-result">{snoozeResult}</span>}
+          style={{ height: "calc(var(--s10) * 2)", margin: 0, alignItems: "flex-start", flexWrap: "wrap" }} aria-live="polite">
+          {canManage && snoozeReason.length > 0 ? <><Icon name="lock" size={16} />{snoozeReason}</> : snoozeResult === null ? null : <span role="alert" className="ads-snooze-result">{snoozeResult}</span>}
           {snoozeRefresh === null ? null : <span className="ads-snooze-refresh">{snoozeRefresh}</span>}
         </p>
       </section>
       <section className="config-section" aria-label={labels.recentSection}>
         <div className="section-heading"><h2>{labels.recentSection}</h2></div>
-        <div data-testid="ads-recent-list-slot" style={{ height: "calc(var(--s10) * 3)", overflowY: "auto" }}>
-          {schedule.recentAdBreaks.length === 0 ? <p className="empty-state" style={{ height: "calc(var(--s10) * 3)", margin: 0 }}>{labels.noRecent}</p> : (
-          <div className="table-wrap" style={{ height: "calc(var(--s10) * 3)", overflowY: "auto" }}>
+        <div className="ads-recent-list-slot" data-testid="ads-recent-list-slot">
+          {schedule.recentAdBreaks.length === 0 ? <p className="empty-state">{labels.noRecent}</p> : (
+          <div className="table-wrap ads-recent-list-slot__table">
             <table className="table" aria-label={labels.recentSection}>
               <thead><tr><th scope="col">{labels.scheduledTime}</th><th scope="col">{labels.duration}</th></tr></thead>
               <tbody>{schedule.recentAdBreaks.map((breakItem) => <tr key={`${breakItem.timestamp}-${String(breakItem.durationSeconds)}`}>

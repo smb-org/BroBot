@@ -389,6 +389,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       fieldErrors={fieldErrors}
       disabled={pending}
       readOnly={page !== undefined && !canManageContent}
+      readOnlySectionOnly={page !== undefined}
       enabledLabel={copy.enabledLabel}
       disabledLabel={copy.disabledLabel}
       {...(effectiveDefaultChatTarget === undefined ? {} : { effectiveDefaultChatTarget })}
@@ -560,6 +561,10 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   };
   const navigationGuard = useDraftGuard(dirty, save, discard);
   useEffect(() => registerDashboardNavigationGuard(navigationGuard.guardSwitch), [navigationGuard.guardSwitch]);
+  const notifyPageSaveError = page !== undefined;
+  useEffect(() => {
+    if (notifyPageSaveError && error !== undefined) notify({ tone: "error", message: error });
+  }, [error, notifyPageSaveError]);
   const pageSave = page === undefined || !canManageContent ? undefined : {
     persistent: true,
     dirty,
@@ -972,7 +977,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
     if (error !== null) notify({ tone: "error", message: error });
   }, [error]);
 
-  if ((moduleId === "ads" || moduleId === "raid") && registered?.settingsEditor !== undefined) {
+  if ((moduleId === "ads" || moduleId === "raid") && registered?.settingsEditor !== undefined && !permissionsMissing) {
     return <section className="module-detail module-detail--settings-page" aria-label={details.name}>
       <ModuleSettingsEditor
         module={registered}
