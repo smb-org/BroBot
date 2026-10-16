@@ -35,36 +35,38 @@ const moduleSettings = {
   recoveryText: "Eigener Entwarnungstext",
 };
 
-const sampleTimestamp = new Date().toISOString();
-const connectedStatus = {
-  configured: true,
-  updatedAt: sampleTimestamp,
-  mode: "interval",
-  sample: {
-    at: sampleTimestamp,
-    connected: true,
-    bitrateKbps: 4_200,
-    rttMs: 42,
-    latencyMs: 108,
-    network: 2,
-    droppedPackets: 0,
-  },
-  errorCode: null,
-  polling: true,
-  pollingDesired: true,
-  intervalSeconds: 15,
-  streamId: "stream-belabox-page",
-  belaboxStreamId: "stream-belabox-page",
-  alertNotice: null,
-  fetchFailureNotice: false,
+const createConnectedStatus = () => {
+  const sampleTimestamp = new Date().toISOString();
+  return {
+    configured: true,
+    updatedAt: sampleTimestamp,
+    mode: "interval",
+    sample: {
+      at: sampleTimestamp,
+      connected: true,
+      bitrateKbps: 4_200,
+      rttMs: 42,
+      latencyMs: 108,
+      network: 2,
+      droppedPackets: 0,
+    },
+    errorCode: null,
+    polling: true,
+    pollingDesired: true,
+    intervalSeconds: 15,
+    streamId: "stream-belabox-page",
+    belaboxStreamId: "stream-belabox-page",
+    alertNotice: null,
+    fetchFailureNotice: false,
+  };
 };
 
 interface MockOptions {
   role?: "manager" | "operator";
   settings?: Partial<typeof moduleSettings>;
-  status?: Omit<typeof connectedStatus, "errorCode" | "sample"> & {
+  status?: Omit<ReturnType<typeof createConnectedStatus>, "errorCode" | "sample"> & {
     errorCode: string | null;
-    sample: typeof connectedStatus.sample | null;
+    sample: ReturnType<typeof createConnectedStatus>["sample"] | null;
   };
   settingsWriteError?: boolean;
 }
@@ -79,7 +81,7 @@ const installMocks = async (page: Page, options: MockOptions = {}): Promise<{
   let latestWrite: Record<string, unknown> | null = null;
   const channelState = { ...channel, role: options.role ?? channel.role };
   const savedSettings = { ...moduleSettings, ...options.settings };
-  const responseStatus = options.status ?? connectedStatus;
+  const responseStatus = options.status ?? createConnectedStatus();
   const modules = [{ id: "belabox", enabled: true, settings: JSON.stringify(savedSettings) }];
   await page.route("**/api/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
@@ -296,7 +298,8 @@ test("BELABOX settings page scrolls its overview and messages together on narrow
 
 test("BELABOX reports a disconnected encoder in the connection state", async ({ page }) => {
   await page.setViewportSize({ width: 1_280, height: 800 });
-  await installMocks(page, { status: { ...connectedStatus, sample: { ...connectedStatus.sample, connected: false } } });
+  const status = createConnectedStatus();
+  await installMocks(page, { status: { ...status, sample: { ...status.sample, connected: false } } });
   await page.goto(`/channels/${channelId}/modules/belabox`);
   await expect(page.locator(".belabox-connection-state")).toContainText("Getrennt");
 });
@@ -504,14 +507,14 @@ test("BELABOX operator can test the stored connection", async ({ page }) => {
 
 test("BELABOX stale samples are shown as stale when the relay reports an error", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await installMocks(page, { status: { ...connectedStatus, sample: null, errorCode: "network" } });
+  await installMocks(page, { status: { ...createConnectedStatus(), sample: null, errorCode: "network" } });
   await page.goto(`/channels/${channelId}/modules/belabox`);
   await expect(page.locator(".belabox-connection-state")).toContainText("Veraltet");
 });
 
 test("BELABOX stale samples are shown as stale after their polling window", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await installMocks(page, { status: { ...connectedStatus, updatedAt: "2026-10-14T18:00:00.000Z", sample: { ...connectedStatus.sample, at: "2026-10-14T18:00:00.000Z" } } });
+  await installMocks(page, { status: { ...createConnectedStatus(), updatedAt: "2026-10-14T18:00:00.000Z", sample: { ...createConnectedStatus().sample, at: "2026-10-14T18:00:00.000Z" } } });
   await page.goto(`/channels/${channelId}/modules/belabox`);
   await expect(page.locator(".belabox-connection-state")).toContainText("Veraltet");
 });

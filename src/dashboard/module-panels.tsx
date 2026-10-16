@@ -443,7 +443,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       sectionId={sectionId}
       settings={currentValue}
       onChange={(key, next) => {
-        setValue({ ...currentValue, [key]: next });
+        setValue((current) => ({ ...current, [key]: next }));
         setTouchedFields((current) => new Set(current).add(key));
         setSaved(false); setConflict(false); setError(undefined);
         setServerFieldErrors((current) => Object.fromEntries(Object.entries(current).filter(([field]) => field !== key)));
@@ -702,7 +702,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       recoverBitrateKbps={typeof currentValue.recoverBitrateKbps === "number" ? currentValue.recoverBitrateKbps : 2_000}
       statsUrlDraft={typeof currentValue.belaboxStatsUrl === "string" ? currentValue.belaboxStatsUrl : ""}
       onStatsUrlDraftChange={(value) => {
-        setValue({ ...currentValue, belaboxStatsUrl: value });
+        setValue((current) => ({ ...current, belaboxStatsUrl: value }));
         setSaved(false); setConflict(false); setError(undefined);
       }}
       settingsRevision={settingsRevision}
