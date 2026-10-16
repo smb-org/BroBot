@@ -653,11 +653,12 @@ export const saveChannelModuleSettings = <Settings extends object>(
   moduleId: string,
   revision: number,
   settings: Settings,
+  belaboxMutation?: { statsUrl?: string },
 ): Promise<{ settings: Settings; revision: number; warnings: PanelTemplateWarningResponse["warnings"] }> => requestJson<{ token: string }>("/api/csrf")
   .then(({ token }) => requestJson<{ settings: Settings; revision: number; warnings: PanelTemplateWarningResponse["warnings"] }>(`${modulePath(channelId, moduleId)}/settings`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json", "X-CSRF-Token": token },
-    body: JSON.stringify({ revision, settings }),
+    body: JSON.stringify({ revision, settings, ...belaboxMutation }),
   }));
 
 export const refreshModeratorStatus = (

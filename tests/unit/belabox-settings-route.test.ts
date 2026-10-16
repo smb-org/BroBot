@@ -2,10 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
-import { BELABOX_POLL_ALARM_KEY } from "../../src/modules/belabox/contracts";
+import { BELABOX_POLL_ALARM_KEY, BELABOX_STATS_URL_SECRET } from "../../src/modules/belabox/contracts";
 import { handleBelaboxPollAlarm } from "../../src/modules/belabox/service";
 import { panelRouter } from "../../src/worker/panel/routes";
 import { BELABOX_DEFAULT_SETTINGS } from "../../src/modules/belabox/contracts";
+import { createModuleSecretAccess } from "../../src/worker/module-secrets";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -52,6 +53,141 @@ describe("BELABOX settings route", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     database.close();
+  });
+
+  const statsUrlSecrets = () => createModuleSecretAccess({
+    DB: database as unknown as D1Database,
+    TOKEN_ENCRYPTION_KEYS,
+  }, CHANNEL_ID, "belabox");
+
+  const writeStatsUrl = async (url: string): Promise<void> => {
+    const statement = await statsUrlSecrets().prepareWrite(
+      BELABOX_STATS_URL_SECRET,
+      url,
+      { userId: MANAGER_ID },
+      "2026-10-16T10:00:00.000Z",
+    );
+    await statement.run();
+  };
+
+  it("saves the stats URL and settings in one revision-checked patch", async () => {
+    const url = "http://relay.belabox.net:8080/publisher-key";
+    const response = await panelRouter.fetch(await requestFor({
+      revision: 1,
+      settings: UPDATED_SETTINGS,
+      statsUrl: url,
+    }), {
+      DB: database as unknown as D1Database,
+      SESSION_COOKIE_KEYS,
+      TOKEN_ENCRYPTION_KEYS,
+      CHANNEL: { idFromName: (channelId: string) => channelId, get: () => ({ runModuleAlarm: vi.fn(() => Promise.resolve()) }) },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ revision: 2, settings: UPDATED_SETTINGS });
+    await expect(statsUrlSecrets().read(BELABOX_STATS_URL_SECRET)).resolves.toBe(url);
+    await expect(database.prepare(
+      "SELECT revision, settings_revision FROM channel_modules WHERE channel_id = ? AND module_id = 'belabox'",
+    ).bind(CHANNEL_ID).first()).resolves.toEqual({ revision: 2, settings_revision: 2 });
+  });
+
+  it("coordinates URL replacement and removal with sample reset and polling ensure", async () => {
+    const runModuleAlarm = vi.fn(() => Promise.resolve());
+    const environment = {
+      DB: database as unknown as D1Database,
+      SESSION_COOKIE_KEYS,
+      TOKEN_ENCRYPTION_KEYS,
+      CHANNEL: {
+        idFromName: (channelId: string) => channelId,
+        get: () => ({ runModuleAlarm }),
+      },
+    } as unknown as Env;
+
+    const replacement = await panelRouter.fetch(await requestFor({
+      revision: 1,
+      settings: BELABOX_DEFAULT_SETTINGS,
+      statsUrl: "http://relay.belabox.net:8080/replacement-key",
+    }), environment);
+    expect(replacement.status).toBe(200);
+    await expect(replacement.json()).resolves.toMatchObject({ revision: 2 });
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(1, "belabox", BELABOX_POLL_ALARM_KEY, BELABOX_POLL_ALARM_KEY, {
+      reason: "configuration_changed",
+    });
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(2, "belabox", "ensure", BELABOX_POLL_ALARM_KEY);
+
+    const removal = await panelRouter.fetch(await requestFor({ revision: 2, removeStatsUrl: true }), environment);
+    expect(removal.status).toBe(200);
+    await expect(removal.json()).resolves.toMatchObject({ revision: 3 });
+    await expect(statsUrlSecrets().read(BELABOX_STATS_URL_SECRET)).resolves.toBeNull();
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(3, "belabox", BELABOX_POLL_ALARM_KEY, BELABOX_POLL_ALARM_KEY, {
+      reason: "configuration_changed",
+    });
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(4, "belabox", "ensure", BELABOX_POLL_ALARM_KEY);
+  });
+
+  it("writes nothing when a stats URL and settings patch has a stale revision", async () => {
+    await writeStatsUrl("http://relay.belabox.net:8080/original-key");
+    await database.prepare(
+      "UPDATE channel_modules SET settings_revision = 2, revision = 2 WHERE channel_id = ? AND module_id = 'belabox'",
+    ).bind(CHANNEL_ID).run();
+    const beforeModule = await database.prepare(
+      "SELECT settings, revision, settings_revision FROM channel_modules WHERE channel_id = ? AND module_id = 'belabox'",
+    ).bind(CHANNEL_ID).first();
+    const beforeSecret = await database.prepare(
+      "SELECT ciphertext, revision FROM module_secrets WHERE channel_id = ? AND module_id = 'belabox' AND name = ?",
+    ).bind(CHANNEL_ID, BELABOX_STATS_URL_SECRET).first();
+    const beforeAudit = await database.prepare(
+      "SELECT COUNT(*) AS count FROM audit_log WHERE channel_id = ? AND module_id = 'belabox'",
+    ).bind(CHANNEL_ID).first<{ count: number }>();
+
+    const response = await panelRouter.fetch(await requestFor({
+      revision: 1,
+      settings: UPDATED_SETTINGS,
+      statsUrl: "http://relay.belabox.net:8080/replacement-key",
+    }), {
+      DB: database as unknown as D1Database,
+      SESSION_COOKIE_KEYS,
+      TOKEN_ENCRYPTION_KEYS,
+      CHANNEL: { idFromName: (channelId: string) => channelId, get: () => ({ runModuleAlarm: vi.fn(() => Promise.resolve()) }) },
+    });
+
+    expect(response.status).toBe(409);
+    await expect(database.prepare(
+      "SELECT settings, revision, settings_revision FROM channel_modules WHERE channel_id = ? AND module_id = 'belabox'",
+    ).bind(CHANNEL_ID).first()).resolves.toEqual(beforeModule);
+    await expect(database.prepare(
+      "SELECT ciphertext, revision FROM module_secrets WHERE channel_id = ? AND module_id = 'belabox' AND name = ?",
+    ).bind(CHANNEL_ID, BELABOX_STATS_URL_SECRET).first()).resolves.toEqual(beforeSecret);
+    await expect(database.prepare(
+      "SELECT COUNT(*) AS count FROM audit_log WHERE channel_id = ? AND module_id = 'belabox'",
+    ).bind(CHANNEL_ID).first()).resolves.toEqual(beforeAudit);
+  });
+
+  it("does not let a delayed settings save recreate a URL after confirmed removal", async () => {
+    const originalUrl = "http://relay.belabox.net:8080/original-key";
+    await writeStatsUrl(originalUrl);
+    const environment = {
+      DB: database as unknown as D1Database,
+      SESSION_COOKIE_KEYS,
+      TOKEN_ENCRYPTION_KEYS,
+      CHANNEL: { idFromName: (channelId: string) => channelId, get: () => ({ runModuleAlarm: vi.fn(() => Promise.resolve()) }) },
+    } as unknown as Env;
+
+    const removal = await panelRouter.fetch(await requestFor({ revision: 1, removeStatsUrl: true }), environment);
+    expect(removal.status).toBe(200);
+    await expect(statsUrlSecrets().read(BELABOX_STATS_URL_SECRET)).resolves.toBeNull();
+
+    const delayedSave = await panelRouter.fetch(await requestFor({
+      revision: 1,
+      settings: UPDATED_SETTINGS,
+      statsUrl: "http://relay.belabox.net:8080/replacement-key",
+    }), environment);
+
+    expect(delayedSave.status).toBe(409);
+    await expect(statsUrlSecrets().read(BELABOX_STATS_URL_SECRET)).resolves.toBeNull();
+    await expect(database.prepare(
+      "SELECT revision, settings_revision FROM channel_modules WHERE channel_id = ? AND module_id = 'belabox'",
+    ).bind(CHANNEL_ID).first()).resolves.toEqual({ revision: 2, settings_revision: 2 });
   });
 
   it("runs the declared poll alarm immediately after a successful settings save", async () => {

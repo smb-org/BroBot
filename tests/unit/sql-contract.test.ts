@@ -129,6 +129,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["MAXIMUM_VALUE_SQL", "999999999"],
   ["prepareModuleAudit === undefined ? \"\" : \"AND changes() > 0\"", "AND changes() > 0"],
   ["variableChange === null ? \"\" : \"AND changes() > 0\"", "AND changes() > 0"],
+  ["requirePreviousChange ? \"AND changes() > 0\" : \"\"", "AND changes() > 0"],
   ["actorGuard(overlayTokenRoles)", actorGuard(overlayTokenRoles)],
   ["overlayTokenSelectColumns", overlayTokenSelectColumns],
   ["overlayTokenReturningColumns", overlayTokenReturningColumns],

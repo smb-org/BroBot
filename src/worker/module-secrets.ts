@@ -53,7 +53,7 @@ export const createModuleSecretAccess = (
   };
   const read: ModuleSecretAccess["read"] = async (name) => (await readWithVersion(name))?.value ?? null;
 
-  const prepareWrite: ModuleSecretAccess["prepareWrite"] = async (name, value, actor, now) => {
+  const prepareWrite: ModuleSecretAccess["prepareWrite"] = async (name, value, actor, now, requirePreviousChange = false) => {
     const keys = encryptionKeys();
     let ciphertext: string;
     try {
@@ -65,7 +65,7 @@ export const createModuleSecretAccess = (
     return environment.DB.prepare(
       `INSERT INTO module_secrets
         (channel_id, module_id, name, ciphertext, key_id, revision, updated_at, updated_by)
-       SELECT ?, ?, ?, ?, ?, 1, ?, ? WHERE 1 = 1 ${authorization.sql}
+       SELECT ?, ?, ?, ?, ?, 1, ?, ? WHERE 1 = 1 ${requirePreviousChange ? "AND changes() > 0" : ""} ${authorization.sql}
        ON CONFLICT (channel_id, module_id, name) DO UPDATE SET
          ciphertext = excluded.ciphertext,
          key_id = excluded.key_id,
@@ -75,11 +75,11 @@ export const createModuleSecretAccess = (
     ).bind(channelId, moduleId, name, ciphertext, keys.active.id, now, actor.userId, ...authorization.values);
   };
 
-  const prepareDelete: ModuleSecretAccess["prepareDelete"] = (name, actor, now) => {
+  const prepareDelete: ModuleSecretAccess["prepareDelete"] = (name, actor, now, requirePreviousChange = false) => {
     const authorization = authorizeModuleManagementMutation(channelId, actor, now);
     return environment.DB.prepare(
       `DELETE FROM module_secrets
-        WHERE channel_id = ? AND module_id = ? AND name = ? ${authorization.sql}`,
+        WHERE channel_id = ? AND module_id = ? AND name = ? ${requirePreviousChange ? "AND changes() > 0" : ""} ${authorization.sql}`,
     ).bind(channelId, moduleId, name, ...authorization.values);
   };
 

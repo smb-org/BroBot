@@ -59,11 +59,45 @@ const editorFixture = vi.hoisted(() => {
     ] },
     locales: { de: catalog("de"), en: catalog("en") },
   };
-  return { definition, loader: vi.fn(() => Promise.resolve({ default: definition })) };
+  const belaboxCatalog = (language: "de" | "en") => {
+    const base = catalog(language);
+    return {
+      ...base,
+      sections: {
+        ...base.sections,
+        polling: language === "de" ? "Abfrage" : "Polling",
+        alerts: language === "de" ? "Meldungen" : "Alerts",
+      },
+      fields: {
+        ...base.fields,
+        chatCooldownSeconds: {
+          label: language === "de" ? "Chat-Abkühlzeit" : "Chat cooldown",
+          hint: language === "de" ? "Wartezeit zwischen Chatmeldungen." : "Wait time between chat messages.",
+          unit: "s",
+        },
+      },
+    };
+  };
+  const belaboxDefinition = {
+    spec: { sections: [
+      { id: "polling", icon: "tabSettings", fields: [
+        { kind: "number", key: "chatCooldownSeconds", min: 0, max: 86_400, step: 1 },
+      ] },
+      { id: "alerts", icon: "tabSettings", fields: [] },
+    ] },
+    locales: { de: belaboxCatalog("de"), en: belaboxCatalog("en") },
+  };
+  return {
+    definition,
+    loader: vi.fn(() => Promise.resolve({ default: definition })),
+    belaboxDefinition,
+    belaboxLoader: vi.fn(() => Promise.resolve({ default: belaboxDefinition })),
+  };
 });
 
 const activeLoader = vi.hoisted(() => vi.fn(() => Promise.resolve({ default: () => <p>Panel geladen</p> })));
 const relatedPanelLoader = vi.hoisted(() => vi.fn());
+const belaboxPanelLoader = vi.hoisted(() => vi.fn());
 
 vi.mock("../../src/modules/registry", () => ({
   MODULES: [
@@ -122,6 +156,14 @@ vi.mock("../../src/modules/registry", () => ({
       settingsEditorPlacement: "before-panel",
       settingsEditorRelatedParts: ["panel"],
     },
+    {
+      id: "belabox",
+      navigationCategory: "chat",
+      settingsSchema: { shape: { chatCooldownSeconds: {} } },
+      defaultSettings: { chatCooldownSeconds: 300 },
+      panel: belaboxPanelLoader,
+      settingsEditor: editorFixture.belaboxLoader,
+    },
     { id: "channel_events", mandatory: true, mandatoryReason: { de: "Ereignisdaten sind immer verfügbar.", en: "Event data is always available." }, settingsSchema: {}, defaultSettings: {} },
   ],
 }));
@@ -152,6 +194,25 @@ const renderWithMantine = (element: ReactElement, queryOptions: { gcTime?: numbe
   renderWithQuery(<UiProvider>{element}</UiProvider>, undefined, queryOptions);
 const editorFixtureSettings = { amount: 2, handle: "ada", labels: "", message: "Hello {viewer}", mode: "automatic", enabled: true, threshold: 4, extraMessage: "Extra value" };
 
+let completeBelaboxRemoval: (() => void) | undefined;
+
+const BelaboxRemovalProbe = ({
+  onStatsUrlDraftChange,
+  onSettingsRevisionChange,
+}: {
+  onStatsUrlDraftChange?: (value: string) => void;
+  onSettingsRevisionChange?: (revision: number) => void;
+}): ReactElement | null => onStatsUrlDraftChange === undefined
+  ? null
+  : <button type="button" onClick={() => {
+    const updateDraft = onStatsUrlDraftChange;
+    const updateRevision = onSettingsRevisionChange;
+    void new Promise<void>((resolve) => { completeBelaboxRemoval = resolve; }).then(() => {
+      updateRevision?.(2);
+      updateDraft("");
+    });
+  }}>Remove BELABOX URL</button>;
+
 const renderSettingsFixture = (
   fetcher: typeof fetch,
   ownRole: "manager" | "operator" = "manager",
@@ -175,6 +236,9 @@ describe("Module panel loader", () => {
     cleanup();
     vi.unstubAllGlobals();
     editorFixture.loader.mockClear();
+    editorFixture.belaboxLoader.mockClear();
+    belaboxPanelLoader.mockClear();
+    completeBelaboxRemoval = undefined;
   });
 
   it("links active modules to their own subpage", () => {
@@ -325,7 +389,8 @@ describe("Module panel loader", () => {
     expect(status.closest(".module-locked-status")).toHaveAttribute("title", "Ereignisdaten sind immer verfügbar.");
     expect(status.closest(".module-locked-status")).toHaveAttribute("aria-description", "Ereignisdaten sind immer verfügbar.");
     expect(status.closest(".module-locked-status")).toHaveAttribute("aria-label", "Läuft · immer aktiv: Ereignisdaten sind immer verfügbar.");
-    expect(screen.getByText("Ereignisdaten sind immer verfügbar.")).toBeVisible();
+    expect(screen.queryByText("Ereignisdaten sind immer verfügbar.")).not.toBeInTheDocument();
+    expect(document.querySelector(".module-detail-heading .page-header__meta")).toBeNull();
     expect(screen.queryByText("Module werden geladen …")).not.toBeInTheDocument();
   });
 
@@ -782,6 +847,48 @@ describe("Module panel loader", () => {
     await waitFor(() => expect(submittedRevision).toBe(2));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Nachricht" })).toHaveValue("Local draft {viewer}"));
     expect(message).toHaveValue("Local draft {viewer}");
+  });
+
+  it("keeps the refreshed BELABOX cooldown when URL removal completes late", async () => {
+    let serverRevision = 1;
+    let serverSettings = { chatCooldownSeconds: 300 };
+    belaboxPanelLoader.mockImplementation(() => Promise.resolve({ default: BelaboxRemovalProbe }));
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      return Promise.resolve(path.endsWith("/modules/belabox/settings")
+        ? Response.json({ settings: serverSettings, revision: serverRevision, variables: [], warnings: [] })
+        : Response.json({}));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const view = renderWithMantine(<ModulePage
+      channelId="kanal-a"
+      moduleId="belabox"
+      ownRole="manager"
+      modules={[{ id: "belabox", enabled: true, settings: "{}" }]}
+      activeModules={[{ moduleId: "belabox", settings: "{}" }]}
+      onNavigate={vi.fn()}
+      onToggle={vi.fn()}
+    />);
+
+    const cooldown = await screen.findByRole("spinbutton", { name: "Chat-Abkühlzeit" });
+    expect(cooldown).toHaveValue(300);
+    fireEvent.click(await screen.findByRole("button", { name: "Remove BELABOX URL" }));
+    expect(completeBelaboxRemoval).toBeTypeOf("function");
+
+    serverRevision = 3;
+    serverSettings = { chatCooldownSeconds: 600 };
+    const key = moduleQueryKey("kanal-a", "belabox", "settings");
+    await act(async () => {
+      await view.queryClient.invalidateQueries({ queryKey: key, exact: true });
+    });
+    await waitFor(() => expect(view.queryClient.getQueryData<{ revision: number }>(key)?.revision).toBe(3));
+    await waitFor(() => expect(cooldown).toHaveValue(600));
+
+    await act(async () => {
+      completeBelaboxRemoval?.();
+      await Promise.resolve();
+    });
+    expect(cooldown).toHaveValue(600);
   });
 
   it("keeps the old baseline when settings change remotely during a dirty draft", async () => {

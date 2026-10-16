@@ -27,7 +27,7 @@ export const RealtimeHarness = ({ children }: { children: ReactNode }) => {
   return <>{children}</>;
 };
 
-const panel = panelName === "api_source" ? <ApiSourcePanel channelId={channelId} language={language} canManage />
+const panel = panelName === "api_source" ? <ApiSourcePanel channelId={channelId} language={language} canManage={canManage} />
   : panelName === "belabox" ? <BelaboxPanel channelId={channelId} language={language} canManage />
   : panelName === "chat_voting" ? <ChatVotingPanel channelId={channelId} language={language} canOperate />
       : panelName === "faq" ? <FaqPanel channelId={channelId} language={language} />
@@ -40,7 +40,7 @@ createRoot(document.getElementById("root") as HTMLElement).render(
   <DashboardDataProvider>
     <RealtimeHarness>
       <UiProvider>
-        <main className="main-content" style={panelName === "faq" || panelName === "text_library" || panelName === "timers"
+        <main className="main-content" style={panelName === "api_source" || panelName === "faq" || panelName === "text_library" || panelName === "timers"
           ? { display: "flex", flexDirection: "column", width: "min(1400px, 100%)", height: "100dvh", minHeight: 0, padding: "16px" }
           : { width: "min(1400px, 100%)", padding: "16px" }}>
           {panel}

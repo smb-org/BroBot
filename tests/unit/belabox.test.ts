@@ -110,6 +110,23 @@ const createBelaboxRouteHarness = async (testDatabase: TestD1Database, role: "br
   return { app, db, secrets, runModuleAlarm, send };
 };
 
+const writeTestStatsUrl = async (testDatabase: TestD1Database, url = STATS_URL): Promise<void> => {
+  const secrets = createModuleSecretAccess({
+    DB: testDatabase as unknown as D1Database,
+    TOKEN_ENCRYPTION_KEYS,
+  }, CHANNEL_ID, "belabox");
+  const statement = await secrets.prepareWrite(BELABOX_STATS_URL_SECRET, url, { userId: MANAGER_ID }, new Date().toISOString());
+  await statement.run();
+};
+
+const removeTestStatsUrl = async (testDatabase: TestD1Database): Promise<void> => {
+  const secrets = createModuleSecretAccess({
+    DB: testDatabase as unknown as D1Database,
+    TOKEN_ENCRYPTION_KEYS,
+  }, CHANNEL_ID, "belabox");
+  await secrets.prepareDelete(BELABOX_STATS_URL_SECRET, { userId: MANAGER_ID }, new Date().toISOString()).run();
+};
+
 const renderConsoleValue = (value: unknown, seen = new Set<object>()): string => {
   if (typeof value === "string") return value;
   if (typeof value !== "object" || value === null) return String(value);
@@ -173,8 +190,8 @@ describe("BELABOX stats URL", () => {
     expect(recoveryThreshold.validate?.(1_000, BELABOX_DEFAULT_SETTINGS)).toBe(false);
     const chatCard = alertCard.children?.find(({ key }) => key === "chatEnabled");
     if (chatCard?.kind !== "switchCard") throw new Error("BELABOX chat settings card is missing.");
-    expect(chatCard.children?.map(({ key }) => key)).toEqual([
-      "chatCooldownSeconds", "lowText", "lowTarget", "disconnectText", "disconnectTarget", "recoveryText", "recoveryTarget",
+    expect(chatCard.children?.map((field) => field.kind === "message" ? [field.key, field.targetKey] : [field.key])).toEqual([
+      ["chatCooldownSeconds"], ["lowText", "lowTarget"], ["disconnectText", "disconnectTarget"], ["recoveryText", "recoveryTarget"],
     ]);
   });
 
@@ -411,16 +428,8 @@ describe("BELABOX secret and route redaction", () => {
       }
     };
 
-    const stored = await send("/stats-url", "PUT", { url: STATS_URL });
-    expect(stored.status).toBe(200);
-    expect(await stored.text()).not.toContain(SENTINEL_KEY);
+    await writeTestStatsUrl(testDatabase);
     await assertDatabaseRedacted();
-
-    const invalid = await send("/stats-url", "PUT", { url: `http://not-bbelabox.example:8080/${SENTINEL_KEY}` });
-    const invalidBody = await invalid.text();
-    expect(invalid.status).toBe(400);
-    expect(invalidBody).not.toContain(SENTINEL_KEY);
-    expect(JSON.parse(invalidBody) as unknown).toEqual({ error: "belabox_stats_url_invalid_host" });
 
     const attempts: readonly [string, () => Promise<Response>][] = [
       ["network", () => Promise.reject(new TypeError(`Failed to fetch ${STATS_URL}`))],
@@ -457,96 +466,9 @@ describe("BELABOX secret and route redaction", () => {
     expect(statusBody).toContain('"sample":null');
     await assertDatabaseRedacted();
 
-    const removed = await send("/stats-url", "DELETE");
-    expect(removed.status).toBe(200);
-    expect(await removed.text()).not.toContain(SENTINEL_KEY);
-    const auditRows = await testDatabase.prepare(
-      "SELECT action, before_json, after_json FROM audit_log ORDER BY rowid",
-    ).all<{ action: string; before_json: string; after_json: string }>();
-    expect(auditRows.results).toEqual([
-      { action: "module.secret.replaced", before_json: "null", after_json: JSON.stringify({ statsUrl: "replaced" }) },
-      { action: "module.secret.removed", before_json: JSON.stringify({ statsUrl: "configured" }), after_json: JSON.stringify({ statsUrl: "removed" }) },
-    ]);
-
+    await removeTestStatsUrl(testDatabase);
     await assertDatabaseRedacted();
     expectConsoleCallsRedacted(consoleSpies.flatMap((spy) => spy.mock.calls));
-  });
-
-  it("resets samples through the poll routine and then ensures the alarm after stats URL changes", async () => {
-    const testDatabase = new TestD1Database();
-    database = testDatabase;
-    const { runModuleAlarm, send } = await createBelaboxRouteHarness(testDatabase);
-    await testDatabase.prepare(
-      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'belabox', 1, ?)",
-    ).bind(CHANNEL_ID, JSON.stringify({ mode: "on_demand", intervalSeconds: 15 })).run();
-    const sampledAt = new Date().toISOString();
-    await testDatabase.prepare(
-      `INSERT INTO belabox_status
-        (channel_id, sampled_at, sample_json, stream_id, stream_session_key, belabox_stream_id,
-         fetch_phase_json, recent_json, revision)
-       VALUES (?, ?, ?, 'stream-s1', 'stream:stream-s1', 'stream-s1', '{}', '[]', 1)`,
-    ).bind(CHANNEL_ID, sampledAt, JSON.stringify({
-      at: sampledAt,
-      connected: true,
-      bitrateKbps: 3_200,
-      rttMs: 40,
-      latencyMs: 100,
-      network: 2,
-      droppedPackets: 0,
-    })).run();
-
-    expect((await send("/stats-url", "PUT", { url: STATS_URL })).status).toBe(200);
-    expect(runModuleAlarm).toHaveBeenNthCalledWith(1, CHANNEL_ID, "belabox", "poll", "poll", {
-      reason: "configuration_changed",
-    });
-    expect(runModuleAlarm).toHaveBeenNthCalledWith(2, CHANNEL_ID, "belabox", "ensure", "poll");
-    await expect(testDatabase.prepare(
-      "SELECT sample_json, stream_session_key FROM belabox_status WHERE channel_id = ?",
-    ).bind(CHANNEL_ID).first()).resolves.toEqual({ sample_json: null, stream_session_key: null });
-
-    expect((await send("/stats-url", "DELETE")).status).toBe(200);
-    expect(runModuleAlarm).toHaveBeenCalledTimes(4);
-    expect(runModuleAlarm).toHaveBeenNthCalledWith(3, CHANNEL_ID, "belabox", "poll", "poll", {
-      reason: "configuration_changed",
-    });
-    expect(runModuleAlarm).toHaveBeenNthCalledWith(4, CHANNEL_ID, "belabox", "ensure", "poll");
-  });
-
-  it("returns success after URL mutations commit when poll maintenance fails", async () => {
-    const testDatabase = new TestD1Database();
-    database = testDatabase;
-    const { runModuleAlarm, send, secrets } = await createBelaboxRouteHarness(testDatabase);
-    runModuleAlarm.mockRejectedValue(new Error("storage details must stay hidden"));
-    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-
-    const saved = await send("/stats-url", "PUT", { url: STATS_URL });
-    expect(saved.status).toBe(200);
-    await expect(saved.json()).resolves.toEqual({ configured: true });
-    await expect(secrets.status(BELABOX_STATS_URL_SECRET)).resolves.toMatchObject({ configured: true });
-
-    const removed = await send("/stats-url", "DELETE");
-    expect(removed.status).toBe(200);
-    await expect(removed.json()).resolves.toEqual({ configured: false });
-    await expect(secrets.status(BELABOX_STATS_URL_SECRET)).resolves.toMatchObject({ configured: false });
-    expect(runModuleAlarm).toHaveBeenCalledTimes(4);
-    expect(runModuleAlarm).toHaveBeenNthCalledWith(1, CHANNEL_ID, "belabox", "poll", "poll", {
-      reason: "configuration_changed",
-    });
-    expect(runModuleAlarm).toHaveBeenNthCalledWith(2, CHANNEL_ID, "belabox", "ensure", "poll");
-    expect(runModuleAlarm).toHaveBeenNthCalledWith(3, CHANNEL_ID, "belabox", "poll", "poll", {
-      reason: "configuration_changed",
-    });
-    expect(runModuleAlarm).toHaveBeenNthCalledWith(4, CHANNEL_ID, "belabox", "ensure", "poll");
-    expect(warning).not.toHaveBeenCalled();
-    const diagnostics = await testDatabase.prepare(
-      "SELECT code FROM event_log WHERE channel_id = ? ORDER BY rowid",
-    ).bind(CHANNEL_ID).all<{ code: string }>();
-    expect(diagnostics.results).toEqual([
-      { code: "belabox.polling_ensure_failed" },
-      { code: "belabox.polling_ensure_failed" },
-      { code: "belabox.polling_ensure_failed" },
-      { code: "belabox.polling_ensure_failed" },
-    ]);
   });
 
   it("shows inactive desired polling after a committed save and lets a manager retry ensure", async () => {
@@ -561,9 +483,7 @@ describe("BELABOX secret and route redaction", () => {
     ).bind(CHANNEL_ID, new Date().toISOString()).run();
     runModuleAlarm.mockRejectedValueOnce(new Error(`secret details ${STATS_URL}`));
 
-    const saved = await send("/stats-url", "PUT", { url: STATS_URL });
-    expect(saved.status).toBe(200);
-    await expect(saved.json()).resolves.toEqual({ configured: true });
+    await writeTestStatsUrl(testDatabase);
 
     const status = await send("/status", "GET");
     await expect(status.json()).resolves.toMatchObject({
@@ -574,11 +494,7 @@ describe("BELABOX secret and route redaction", () => {
     const retried = await send("/polling/retry", "POST");
     expect(retried.status).toBe(200);
     await expect(retried.json()).resolves.toEqual({ ensured: true });
-    expect(runModuleAlarm).toHaveBeenNthCalledWith(1, CHANNEL_ID, "belabox", "poll", "poll", {
-      reason: "configuration_changed",
-    });
-    expect(runModuleAlarm).toHaveBeenNthCalledWith(2, CHANNEL_ID, "belabox", "ensure", "poll");
-    expect(runModuleAlarm).toHaveBeenNthCalledWith(3, CHANNEL_ID, "belabox", "poll", "poll", { reason: "check_now" });
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(1, CHANNEL_ID, "belabox", "poll", "poll", { reason: "check_now" });
     const diagnostics = await testDatabase.prepare(
       "SELECT code FROM event_log WHERE channel_id = ? ORDER BY rowid",
     ).bind(CHANNEL_ID).all<{ code: string }>();
@@ -592,7 +508,7 @@ describe("BELABOX secret and route redaction", () => {
     await testDatabase.prepare(
       "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'belabox', 1, ?)",
     ).bind(CHANNEL_ID, JSON.stringify({ mode: "on_demand", intervalSeconds: 15 })).run();
-    expect((await send("/stats-url", "PUT", { url: STATS_URL })).status).toBe(200);
+    await writeTestStatsUrl(testDatabase);
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(relayPayload(SENTINEL_KEY)));
     vi.stubGlobal("fetch", fetcher);
 
@@ -618,7 +534,7 @@ describe("BELABOX secret and route redaction", () => {
     await testDatabase.prepare(
       "INSERT INTO channel_stream_state (channel_id, state, changed_at, source, stream_id) VALUES (?, 'online', ?, 'eventsub', 'stream-routine')",
     ).bind(CHANNEL_ID, new Date().toISOString()).run();
-    expect((await send("/stats-url", "PUT", { url: STATS_URL })).status).toBe(200);
+    await writeTestStatsUrl(testDatabase);
     vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse(relayPayload(SENTINEL_KEY)))));
 
     expect((await send("/status", "GET")).status).toBe(200);
@@ -626,10 +542,8 @@ describe("BELABOX secret and route redaction", () => {
     expect((await send("/test", "POST", {})).status).toBe(200);
 
     expect(runModuleAlarm).not.toHaveBeenCalledWith(CHANNEL_ID, "belabox", "poll", "poll", { reason: "on_demand" });
-    expect(runModuleAlarm).toHaveBeenNthCalledWith(1, CHANNEL_ID, "belabox", "poll", "poll", { reason: "configuration_changed" });
-    expect(runModuleAlarm).toHaveBeenNthCalledWith(2, CHANNEL_ID, "belabox", "ensure", "poll");
-    expect(runModuleAlarm).toHaveBeenNthCalledWith(3, CHANNEL_ID, "belabox", "poll", "poll", { reason: "check_now" });
-    expect(runModuleAlarm).toHaveBeenNthCalledWith(4, CHANNEL_ID, "belabox", "poll", "poll", {
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(1, CHANNEL_ID, "belabox", "poll", "poll", { reason: "check_now" });
+    expect(runModuleAlarm).toHaveBeenNthCalledWith(2, CHANNEL_ID, "belabox", "poll", "poll", {
       reason: "connection_test",
       statsUrl: STATS_URL,
     });
@@ -690,7 +604,7 @@ describe("BELABOX secret and route redaction", () => {
     await testDatabase.prepare(
       "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'belabox', 1, ?)",
     ).bind(CHANNEL_ID, JSON.stringify({ mode, intervalSeconds: 15 })).run();
-    expect((await send("/stats-url", "PUT", { url: STATS_URL })).status).toBe(200);
+    await writeTestStatsUrl(testDatabase);
 
     const streamChangedAt = new Date(Date.now() - 90_000).toISOString();
     await testDatabase.prepare(
@@ -750,7 +664,7 @@ describe("BELABOX secret and route redaction", () => {
     await testDatabase.prepare(
       "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'belabox', 1, ?)",
     ).bind(CHANNEL_ID, JSON.stringify({ mode: "on_demand", intervalSeconds: 15 })).run();
-    expect((await send("/stats-url", "PUT", { url: STATS_URL })).status).toBe(200);
+    await writeTestStatsUrl(testDatabase);
     const streamChangedAt = "2026-10-05T11:59:00.000Z";
     await testDatabase.prepare(
       `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, started_at, stream_id)
@@ -824,7 +738,7 @@ describe("BELABOX secret and route redaction", () => {
     await testDatabase.prepare(
       "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'belabox', 1, ?)",
     ).bind(CHANNEL_ID, JSON.stringify({ mode: "on_demand", intervalSeconds: 15 })).run();
-    expect((await send("/stats-url", "PUT", { url: STATS_URL })).status).toBe(200);
+    await writeTestStatsUrl(testDatabase);
     const oldAt = "2026-10-05T11:59:00.000Z";
     const newStartedAt = "2026-10-05T12:00:05.000Z";
     await testDatabase.prepare(
@@ -935,14 +849,12 @@ describe("BELABOX secret and route redaction", () => {
     const testPending = send("/test", "POST", {});
     await fetchStarted;
 
-    if (change === "delete-then-recreate") {
-      expect((await send("/stats-url", "DELETE")).status).toBe(200);
-      expect((await send("/stats-url", "PUT", { url: STATS_URL })).status).toBe(200);
+    if (change === "remove" || change === "delete-then-recreate") await removeTestStatsUrl(testDatabase);
+    if (change !== "remove") {
+      await writeTestStatsUrl(testDatabase, change === "replace"
+        ? "http://relay.belabox.net:8080/replacement-publisher-key"
+        : STATS_URL);
     }
-    const changed = change === "remove"
-      ? await send("/stats-url", "DELETE")
-      : change === "delete-then-recreate" ? { status: 200 } : await send("/stats-url", "PUT", { url: "http://relay.belabox.net:8080/replacement-publisher-key" });
-    expect(changed.status).toBe(200);
     finishFetch(jsonResponse(relayPayload(SENTINEL_KEY)));
     const tested = await testPending;
     expect(tested.status).toBe(200);

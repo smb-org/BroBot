@@ -543,10 +543,10 @@ export interface ModuleSecretAccess {
    * delete and recreate), reveals no plaintext, and is only for equality guards. Never log or return it.
    */
   readWithVersion: (name: string) => Promise<{ value: string; version: string } | null>;
-  /** The returned statement carries the management-role guard and belongs in the same batch as its audit statement. */
-  prepareWrite: (name: string, value: string, actor: ModuleMutationActor, now: string) => Promise<D1PreparedStatement>;
-  /** The returned statement carries the management-role guard and belongs in the same batch as its audit statement. */
-  prepareDelete: (name: string, actor: ModuleMutationActor, now: string) => D1PreparedStatement;
+  /** The returned statement carries the management-role guard and can depend on the preceding batched mutation. */
+  prepareWrite: (name: string, value: string, actor: ModuleMutationActor, now: string, requirePreviousChange?: boolean) => Promise<D1PreparedStatement>;
+  /** The returned statement carries the management-role guard and can depend on the preceding batched mutation. */
+  prepareDelete: (name: string, actor: ModuleMutationActor, now: string, requirePreviousChange?: boolean) => D1PreparedStatement;
 }
 
 /** Read-only view for resolving module template values, including version-guarded dependent writes. */

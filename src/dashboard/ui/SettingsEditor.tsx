@@ -69,6 +69,7 @@ export interface SettingsEditorCatalog extends SettingsEditorTexts {
   title: string;
   ariaLabel: string;
   readOnlyReason: string;
+  urlSaveError?: string;
   saveLabel: string;
   discardLabel: string;
   savedLabel: string;
@@ -104,6 +105,7 @@ export interface SettingsEditorProps<Settings extends object> {
   variables?: Readonly<Partial<Record<keyof Settings & string, readonly TemplateTextFieldVariable[]>>>;
   templateMetadata?: Readonly<Partial<Record<keyof Settings & string, readonly (TemplateTextFieldVariable & { maxLength: number; fallbackWhenAbsent?: number })[]>>>;
   templateMessages: TemplateTextFieldMessages;
+  messagePreviewLayout?: "stacked" | "side-by-side";
   readOnly?: boolean;
   readOnlySectionOnly?: boolean;
   disabled?: boolean;
@@ -124,6 +126,7 @@ export function SettingsEditor<Settings extends object>({
   variables,
   templateMetadata,
   templateMessages,
+  messagePreviewLayout = "stacked",
   readOnly = false,
   readOnlySectionOnly = false,
   disabled = false,
@@ -308,6 +311,7 @@ export function SettingsEditor<Settings extends object>({
           {...(metadata === undefined ? {} : { worstCaseLength: worstCaseTemplateLength(template, metadata) })}
           {...(fieldVariables === undefined ? {} : { variables: fieldVariables })}
           preview={field.preview}
+          previewLayout={messagePreviewLayout}
           required={false}
           onIssuesChange={(issues) => { onIssuesChange?.(field.key, issues); }}
           {...(copy.previewLabel === undefined ? {} : { previewLabel: copy.previewLabel })}

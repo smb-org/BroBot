@@ -142,7 +142,7 @@ export function ExpressionField({ id, label, value, onChange, maxLength, languag
               aria-expanded={pickerOpen}
               aria-controls={pickerOpen ? listboxId : undefined}
               aria-activedescendant={pickerOpen ? activeOptionId : undefined}
-              className="ui-expression-field__input"
+              className="ui-expression-field__input mono"
               rows={14}
               maxLength={maxLength}
               spellCheck={false}

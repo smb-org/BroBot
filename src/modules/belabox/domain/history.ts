@@ -1,7 +1,6 @@
 import type { BelaboxSample } from "../contracts";
 
 export const BELABOX_LOW_BITRATE_KBPS = 1_000;
-export const BELABOX_RECOVER_BITRATE_KBPS = 2_000;
 
 export const minuteAtForSample = (at: string): string | null => {
   const timestamp = Date.parse(at);

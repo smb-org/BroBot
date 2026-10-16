@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type ComponentType, type ReactElement, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactElement, type ReactNode } from "react";
 
 import { MODULES } from "../modules/registry";
 import type { ModulePanelProperties, ModuleRegisteredTemplateVariable } from "../modules/contract";
+import type { BelaboxSettings } from "../modules/belabox/contracts";
+import type { BelaboxStatusResponse } from "../modules/belabox/contracts";
 import { textCommandListChatCommand } from "../modules/text_commands/contracts/chat-commands";
 import type { TextCommandPanelData } from "../modules/text_commands/panel/service";
 import { loadModulePanel, loadModuleSettingsEditor, ModuleChunkLoadError, retryModuleChunkLoad } from "./module-panel-loaders";
@@ -47,6 +49,15 @@ const registeredTemplateFieldVariable = (
     ...(variable.parameters === "currency_pair" ? { parameter: { value: variable.parameterDefault ?? "USD EUR" } } : {}),
     ...(variable.isTextBlock ? { isTextBlock: true } : {}),
   };
+};
+
+type BelaboxSettingsPanelProperties = ModulePanelProperties & Pick<BelaboxSettings, "lowBitrateKbps" | "recoverBitrateKbps"> & {
+  statsUrlDraft: string;
+  onStatsUrlDraftChange: (value: string) => void;
+  settingsRevision: number;
+  onSettingsRevisionChange: (revision: number) => void;
+  onRemovePendingChange: (pending: boolean) => void;
+  savingSettings: boolean;
 };
 
 const moduleDetails = (moduleId: string, language: DashboardLanguage = dashboardLanguage()): { name: string; description: string } => ({
@@ -222,6 +233,16 @@ const ModuleSettingsEditor = ({ module, channelId, canManageContent, language, s
   {...(page === undefined ? {} : { page })}
 />;
 
+const withModuleDraftFields = (moduleId: string, settings: Record<string, unknown>): Record<string, unknown> =>
+  moduleId === "belabox" ? { ...settings, belaboxStatsUrl: "" } : settings;
+
+const persistedSettings = (moduleId: string, settings: Record<string, unknown>): Record<string, unknown> => {
+  if (moduleId !== "belabox") return settings;
+  const persisted = { ...settings };
+  delete persisted.belaboxStatsUrl;
+  return persisted;
+};
+
 const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, language, settingsSaveTarget, page }: {
   module: (typeof MODULES)[number];
   channelId: string;
@@ -274,6 +295,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       title={page.title}
       subtitle={page.subtitle}
       icon={page.icon}
+      {...(module.id === "belabox" ? { className: "settings-page--belabox" } : {})}
       active={page.active}
       onToggle={page.onToggle}
       switchDisabled={page.switchDisabled}
@@ -346,6 +368,40 @@ const AdsSettingsPanelMount = ({ module, channelId, language, canManageContent, 
   />;
 };
 
+const BelaboxSettingsPanelMount = ({ module, channelId, language, canManageContent, lowBitrateKbps, recoverBitrateKbps,
+  statsUrlDraft, onStatsUrlDraftChange, settingsRevision, onSettingsRevisionChange, onRemovePendingChange, savingSettings }: {
+  module: (typeof MODULES)[number];
+  channelId: string;
+  language: DashboardLanguage;
+  canManageContent: boolean;
+  lowBitrateKbps: number;
+  recoverBitrateKbps: number;
+  statsUrlDraft: string;
+  onStatsUrlDraftChange: (value: string) => void;
+  settingsRevision: number;
+  onSettingsRevisionChange: (revision: number) => void;
+  onRemovePendingChange: (pending: boolean) => void;
+  savingSettings: boolean;
+}): ReactElement => {
+  const loadPanel = useCallback(() => loadModulePanel(module) as Promise<{ default: ComponentType<BelaboxSettingsPanelProperties> }>, [module]);
+  return <RetryableLazy
+    instanceKey="belabox:settings-panel"
+    load={loadPanel}
+    properties={{ channelId, language, canManage: canManageContent, canOperate: true, lowBitrateKbps, recoverBitrateKbps,
+      statsUrlDraft, onStatsUrlDraftChange, settingsRevision, onSettingsRevisionChange, onRemovePendingChange, savingSettings }}
+    loadingFallback={<LoadStateLines rows={5} height={34} />}
+    renderError={(retry) => <LoadState
+      variant="panel-320"
+      status="error"
+      loading={null}
+      empty={null}
+      error={null}
+      queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: dashboardTexts().module.componentLoadError, onRetry: retry }}
+    >{null}</LoadState>}
+    onRetry={retryModuleChunkLoad}
+  />;
+};
+
 const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, language, definition, copy, retryLabel, channelVariables, registeredTemplateVariables, initial, initialRevision, settingsSaveTarget, onReload, page }: {
   module: (typeof MODULES)[number];
   channelId: string;
@@ -364,11 +420,15 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
 }): ReactElement => {
   const queryClient = useDashboardQueryClient();
   const channelSettings = useChannelSettings(channelId);
-  const { value: currentValue, setValue, dirty, reset, accept } = useDraft(initial);
+  const initialDraft = useMemo(() => withModuleDraftFields(module.id, initial), [initial, module.id]);
+  const { value: currentValue, setValue, dirty, reset, accept } = useDraft(initialDraft);
   const baselineRevision = useRef(initialRevision);
-  const baselineSettings = useRef(initial);
+  const [latestSettingsRevision, setLatestSettingsRevision] = useState(initialRevision);
+  const settingsRevision = Math.max(initialRevision, latestSettingsRevision);
+  const baselineSettings = useRef(initialDraft);
   const [saved, setSaved] = useState(false);
   const [pending, setPending] = useState(false);
+  const [urlRemovalPending, setUrlRemovalPending] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const saveInFlight = useRef<Promise<string | null> | null>(null);
   const [serverFieldErrors, setServerFieldErrors] = useState<Readonly<Record<string, string>>>({});
@@ -381,12 +441,12 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     if (initialRevision <= baselineRevision.current) return;
     if (!dirty) {
       baselineRevision.current = initialRevision;
-      baselineSettings.current = initial;
-      accept(initial);
-    } else if (JSON.stringify(initial) === JSON.stringify(baselineSettings.current)) {
+      baselineSettings.current = initialDraft;
+      accept(initialDraft);
+    } else if (JSON.stringify(initialDraft) === JSON.stringify(baselineSettings.current)) {
       baselineRevision.current = initialRevision;
     }
-  }, [accept, dirty, initial, initialRevision]);
+  }, [accept, dirty, initialDraft, initialRevision]);
   const effectiveDefaultChatTarget = channelSettings.data?.defaultChatTarget;
   const reportTemplateIssues = useCallback((key: string, issues: { unknown: readonly string[]; worstCaseExceeded: boolean }): void => {
     setLocalIssues((current) => {
@@ -436,7 +496,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       sectionId={sectionId}
       settings={currentValue}
       onChange={(key, next) => {
-        setValue({ ...currentValue, [key]: next });
+        setValue((current) => ({ ...current, [key]: next }));
         setTouchedFields((current) => new Set(current).add(key));
         setSaved(false); setConflict(false); setError(undefined);
         setServerFieldErrors((current) => Object.fromEntries(Object.entries(current).filter(([field]) => field !== key)));
@@ -445,6 +505,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       variables={templateVariableOptions}
       templateMetadata={templateMetadata}
       templateMessages={copy.templateMessages}
+      messagePreviewLayout={page === undefined ? "stacked" : "side-by-side"}
       fieldErrors={fieldErrors}
       disabled={pending}
       readOnly={page !== undefined && !canManageContent}
@@ -571,32 +632,49 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       setValidationAttempted(true);
       return copy.invalidMessage;
     }
-    if (pending || conflict || !canManageContent) return copy.saveError;
+    if (pending || urlRemovalPending || conflict || !canManageContent) return copy.saveError;
     setPending(true); setError(undefined); setSaved(false); setServerFieldErrors({});
+    const settingsToSave = persistedSettings(module.id, currentValue);
+    const baselineToSave = persistedSettings(module.id, baselineSettings.current);
+    const settingsChanged = JSON.stringify(settingsToSave) !== JSON.stringify(baselineToSave);
+    const statsUrlDraft = module.id === "belabox" && typeof currentValue.belaboxStatsUrl === "string"
+      ? currentValue.belaboxStatsUrl
+      : "";
+    const shouldReplaceStatsUrl = statsUrlDraft.trim().length > 0;
     try {
-      const response = await runModuleQueryWrite(
-        queryClient,
-        channelId,
-        module.id,
-        "settings",
-        (revision) => {
-          if (revision === null) throw new Error("Module settings require a baseline revision.");
-          return saveChannelModuleSettings(channelId, module.id, revision, currentValue);
-        },
-        {
-          baselineRevision: baselineRevision.current,
-          updateCache: (current, result) => typeof current === "object" && current !== null
-            ? { ...current, ...result }
-            : current,
-          relatedParts: (module.settingsEditorRelatedParts ?? []).map((part) => ({ moduleId: module.id, part })),
-        },
-      );
-      baselineSettings.current = response.settings;
-      accept(response.settings);
-      baselineRevision.current = response.revision;
+      let acceptedSettings = settingsToSave;
+      if (settingsChanged || shouldReplaceStatsUrl) {
+        const response = await runModuleQueryWrite(
+          queryClient,
+          channelId,
+          module.id,
+          "settings",
+          (revision) => {
+            if (revision === null) throw new Error("Module settings require a baseline revision.");
+            return saveChannelModuleSettings(channelId, module.id, revision, settingsToSave,
+              shouldReplaceStatsUrl ? { statsUrl: statsUrlDraft } : undefined);
+          },
+          {
+            baselineRevision: baselineRevision.current,
+            updateCache: (current, result) => typeof current === "object" && current !== null
+              ? { ...current, ...result }
+              : current,
+            relatedParts: (module.settingsEditorRelatedParts ?? []).map((part) => ({ moduleId: module.id, part })),
+          },
+        );
+        acceptedSettings = response.settings;
+        baselineRevision.current = response.revision;
+        setLatestSettingsRevision(response.revision);
+        setServerWarnings(response.warnings);
+        if (shouldReplaceStatsUrl) {
+          void refetchModuleQueryData<BelaboxStatusResponse>(queryClient, channelId, "belabox", "status").catch(() => undefined);
+        }
+      }
+      const acceptedDraft = withModuleDraftFields(module.id, acceptedSettings);
+      baselineSettings.current = acceptedDraft;
+      accept(acceptedDraft);
       setSaved(true);
       setValidationAttempted(false);
-      setServerWarnings(response.warnings);
       return null;
     } catch (caught) {
       if (caught instanceof PanelApiError && caught.status === 409 && caught.code === "module_settings_changed_concurrently") {
@@ -604,8 +682,12 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
         notify({ tone: "error", message: copy.conflictMessage });
         return copy.conflictMessage;
       }
-      const message = caught instanceof PanelApiError ? apiErrorText(caught.code, copy.saveError) : copy.saveError;
-      setServerFieldErrors(mapServerFieldErrors(caught, fieldPathMap, (reasonCode) => serverFieldErrorText(reasonCode, language)));
+      const message = shouldReplaceStatsUrl
+        ? copy.urlSaveError ?? copy.saveError
+        : caught instanceof PanelApiError ? apiErrorText(caught.code, copy.saveError) : copy.saveError;
+      setServerFieldErrors(shouldReplaceStatsUrl
+        ? {}
+        : mapServerFieldErrors(caught, fieldPathMap, (reasonCode) => serverFieldErrorText(reasonCode, language)));
       setError(message);
       return message;
     } finally { setPending(false); }
@@ -624,13 +706,13 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   useEffect(() => registerDashboardNavigationGuard(navigationGuard.guardSwitch), [navigationGuard.guardSwitch]);
   const notifyPageSaveError = page !== undefined;
   useEffect(() => {
-    if (notifyPageSaveError && error !== undefined) notify({ tone: "error", message: error });
+    if (notifyPageSaveError && error !== undefined && error.length < 80) notify({ tone: "error", message: error });
   }, [error, notifyPageSaveError]);
   const pageSave = page === undefined || !canManageContent ? undefined : {
     persistent: true,
     dirty,
-    pending,
-    saveDisabled: pending,
+    pending: pending || urlRemovalPending,
+    saveDisabled: pending || urlRemovalPending,
     saved,
     ...(error === undefined ? {} : { error }),
     invalid,
@@ -659,19 +741,38 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     title={page.title}
     subtitle={page.subtitle}
     icon={page.icon}
+    {...(module.id === "belabox" ? { className: "settings-page--belabox" } : {})}
     active={page.active}
     onToggle={page.onToggle}
-    switchDisabled={page.switchDisabled || pending}
+    switchDisabled={page.switchDisabled || pending || urlRemovalPending}
     switchBusy={page.switchBusy}
     {...(page.lockHint === undefined ? {} : { lockHint: page.lockHint })}
     {...(pageSave === undefined ? {} : { save: pageSave })}
     overflow={<ModuleListLink channelId={channelId} onNavigate={page.onNavigate} />}
+    {...(module.id === "belabox" ? { topContent: <BelaboxSettingsPanelMount key="belabox-panel" module={module} channelId={channelId}
+      language={language} canManageContent={canManageContent}
+      lowBitrateKbps={typeof currentValue.lowBitrateKbps === "number" ? currentValue.lowBitrateKbps : 1_000}
+      recoverBitrateKbps={typeof currentValue.recoverBitrateKbps === "number" ? currentValue.recoverBitrateKbps : 2_000}
+      statsUrlDraft={typeof currentValue.belaboxStatsUrl === "string" ? currentValue.belaboxStatsUrl : ""}
+      onStatsUrlDraftChange={(value) => {
+        setValue((current) => ({ ...current, belaboxStatsUrl: value }));
+        setSaved(false); setConflict(false); setError(undefined);
+      }}
+      settingsRevision={settingsRevision}
+      onSettingsRevisionChange={setLatestSettingsRevision}
+      onRemovePendingChange={setUrlRemovalPending}
+      savingSettings={pending || urlRemovalPending} /> } : {})}
     columns={module.id === "ads"
       ? [
         <AdsSettingsPanelMount key="ads-panel" module={module} channelId={channelId} language={language} canManageContent={canManageContent} moduleActive={page.active} />,
         settingsEditor("announcements", fieldErrors),
         settingsEditor("prewarning", fieldErrors),
       ]
+      : module.id === "belabox"
+        ? [
+          settingsEditor("polling", fieldErrors),
+          settingsEditor("alerts", fieldErrors),
+        ]
       : sections.map(({ id }) => settingsEditor(id, fieldErrors))}
   />;
   return <>
@@ -1031,6 +1132,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   const mandatoryReason = registered?.mandatoryReason?.[dashboardLanguage()] ?? labels.mandatoryReason;
   const enabled = mandatory || moduleState?.enabled === true;
   const manageable = canManageModules(ownRole);
+  const headerLockHint = manageable ? null : texts.module.managementLocked;
   const disabledReason = mandatory ? mandatoryReason : manageable ? null : texts.module.managementLocked;
   const switchDisabled = mandatory || registered === undefined || moduleState === undefined;
   const missingScopes = moduleState?.missingBroadcasterScopes ?? [];
@@ -1056,7 +1158,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
     if (error !== null) notify({ tone: "error", message: error });
   }, [error]);
 
-  if ((moduleId === "ads" || moduleId === "raid") && registered?.settingsEditor !== undefined && !permissionsMissing) {
+  if ((moduleId === "ads" || moduleId === "raid" || moduleId === "belabox") && registered?.settingsEditor !== undefined && !permissionsMissing) {
     return <section className="module-detail module-detail--settings-page" aria-label={details.name}>
       <ModuleSettingsEditor
         module={registered}
@@ -1100,7 +1202,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
             switchDisabled: !manageable || switchDisabled || busy || mandatory,
             switchBusy: busy,
             ...(mandatory ? { moduleSwitch: <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} /> } : {}),
-            ...(disabledReason === null || (registered?.settingsEditor !== undefined && showActiveView && moduleId !== "chat_voting") || (registered?.panelManagesSettings && moduleState?.enabled !== false && moduleId !== "clips") ? {} : { lockHint: disabledReason }),
+            ...(headerLockHint === null || (registered?.settingsEditor !== undefined && showActiveView && moduleId !== "chat_voting") || (registered?.panelManagesSettings && moduleState?.enabled !== false && moduleId !== "clips") ? {} : { lockHint: headerLockHint }),
           })}
           {...(moduleId === "chat_voting" ? {
             pageActions: <>

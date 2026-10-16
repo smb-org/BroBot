@@ -750,6 +750,7 @@ export interface DashboardTexts {
     streamUnknown: string;
     streamChecked: (relativeTime: string) => string;
     locationMenu: {
+      locationFallback: string;
       openIn: string;
       openStreetMap: string;
       googleMaps: string;
@@ -1254,6 +1255,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       streamUnknown: "Status unbekannt",
       streamChecked: (relativeTime) => `Zustand geprüft ${relativeTime}`,
       locationMenu: {
+        locationFallback: "Unbekannter Standort",
         openIn: "Öffnen in",
         openStreetMap: "OpenStreetMap",
         googleMaps: "Google Maps",
@@ -1690,6 +1692,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       streamUnknown: "Status unknown",
       streamChecked: (relativeTime) => `State checked ${relativeTime}`,
       locationMenu: {
+        locationFallback: "Unknown location",
         openIn: "Open in",
         openStreetMap: "OpenStreetMap",
         googleMaps: "Google Maps",

@@ -94,7 +94,7 @@ export function Field({ label, ariaLabel, labelHidden = false, hint, error, erro
         spellCheck={spellCheck}
         required={required}
         name={name}
-        className={["ui-field__input", mono ? "ui-field__input--mono" : undefined, leading === null && !searchVariant ? undefined : "ui-field__input--with-leading", leadingLabel === undefined ? undefined : "ui-field__input--with-prefix", searchVariant ? "ui-field__input--search" : undefined].filter(Boolean).join(" ")}
+        className={["ui-field__input", mono ? "mono" : undefined, leading === null && !searchVariant ? undefined : "ui-field__input--with-leading", leadingLabel === undefined ? undefined : "ui-field__input--with-prefix", searchVariant ? "ui-field__input--search" : undefined].filter(Boolean).join(" ")}
       />
       {searchVariant ? <button
         type="button"

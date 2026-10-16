@@ -34,6 +34,33 @@ describe("BELABOX settings editor", () => {
     expect(latest).toMatchObject({ mode: "on_demand", intervalSeconds: 30 });
   });
 
+  it("shows empty alert templates as off using the shared message pattern", () => {
+    const copy = belaboxSettingsEditorCatalog("en");
+    render(<UiProvider><SettingsEditor
+      spec={settingsEditor.spec}
+      sectionId="alerts"
+      settings={{
+        ...BELABOX_DEFAULT_SETTINGS,
+        chatEnabled: true,
+        lowText: "",
+        disconnectText: "",
+        recoveryText: "",
+      }}
+      onChange={() => undefined}
+      texts={copy}
+      templateMessages={copy.templateMessages}
+      enabledLabel={copy.enabledLabel}
+      disabledLabel={copy.disabledLabel}
+    /></UiProvider>);
+
+    expect(document.querySelectorAll(".ui-settings-editor__message")).toHaveLength(3);
+    expect(Array.from(document.querySelectorAll(".ui-settings-editor__message-heading span"), (element) => element.textContent))
+      .toEqual(["Off", "Off", "Off"]);
+    expect(screen.getByText("Low bitrate target")).toBeInTheDocument();
+    expect(screen.getByText("Disconnect target")).toBeInTheDocument();
+    expect(screen.getByText("Recovery target")).toBeInTheDocument();
+  });
+
   it("shows nested chat alert settings in operator properties", () => {
     const copy = belaboxSettingsEditorCatalog("en");
     render(<UiProvider><SettingsEditor
@@ -53,14 +80,18 @@ describe("BELABOX settings editor", () => {
     const nestedRows = [
       ["Chat cooldown", "300 s"],
       ["Low bitrate text", BELABOX_DEFAULT_SETTINGS.lowText],
-      ["Low bitrate target", "source_only"],
+      ["Low bitrate target", "Our chat only"],
       ["Disconnect text", BELABOX_DEFAULT_SETTINGS.disconnectText],
-      ["Disconnect target", "source_only"],
+      ["Disconnect target", "Our chat only"],
       ["Recovery text", BELABOX_DEFAULT_SETTINGS.recoveryText],
-      ["Recovery target", "source_only"],
+      ["Recovery target", "Our chat only"],
     ] as const;
     for (const [label, value] of nestedRows) {
-      const row = within(properties as HTMLElement).getByText(label).closest("div");
+      const labelNode = within(properties as HTMLElement).getByText((_, element) => element !== null && (
+        element.tagName === "DT"
+          ? element.textContent === label
+          : element.tagName === "SPAN" && element.textContent.startsWith(`${label}:`)));
+      const row = labelNode.closest("div");
       expect(row).not.toBeNull();
       expect(row).toHaveTextContent(value);
     }

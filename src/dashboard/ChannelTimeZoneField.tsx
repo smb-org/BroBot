@@ -10,6 +10,7 @@ interface ChannelTimeZoneFieldProperties {
   onChange: (value: string) => void;
   canEdit: boolean;
   disabled: boolean;
+  describedBy?: string;
 }
 
 const supportedTimeZones = typeof Intl.supportedValuesOf === "function"
@@ -21,7 +22,7 @@ const timeZoneOptions: SelectOption[] = [
 ];
 const timeZoneValues = new Set(timeZoneOptions.map((option) => option.value));
 
-export const ChannelTimeZoneField = ({ label, hint, value, onChange, canEdit, disabled }: ChannelTimeZoneFieldProperties): ReactElement => {
+export const ChannelTimeZoneField = ({ label, hint, value, onChange, canEdit, disabled, describedBy }: ChannelTimeZoneFieldProperties): ReactElement => {
   const [search, setSearch] = useState("");
   const trimmedSearch = search.trim();
   const customValueOption: SelectOption | null = value.length > 0 && !timeZoneValues.has(value)
@@ -49,5 +50,6 @@ export const ChannelTimeZoneField = ({ label, hint, value, onChange, canEdit, di
     searchValue={search}
     onSearchChange={setSearch}
     disabled={disabled || !canEdit}
+    {...(describedBy === undefined ? {} : { describedBy })}
   />;
 };

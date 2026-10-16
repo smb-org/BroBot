@@ -19,7 +19,8 @@ const coordinatesForDisplay = (location: PanelChannelLocation): string =>
 // United States"); the header shows only the first segment, keeps the full
 // name as the title and menu heading, and (see below) folds it into the
 // accessible name too when it was shortened.
-const shortLocationName = (name: string): string => name.split(",")[0]?.trim() || name;
+const displayLocationName = (name: string, fallback: string): string => name.trim() || fallback;
+const shortLocationName = (name: string, fallback: string): string => displayLocationName(name, fallback).split(",")[0]?.trim() || fallback;
 
 export function ChannelLocationMenu({ location, messages }: {
   location: PanelChannelLocation;
@@ -27,7 +28,9 @@ export function ChannelLocationMenu({ location, messages }: {
 }): ReactElement {
   const [opened, setOpened] = useState(false);
   const [copyStatus, setCopyStatus] = useState<"copied" | "failed" | null>(null);
-  const shortName = shortLocationName(location.name);
+  const fullName = displayLocationName(location.name, messages.locationFallback);
+  const shortName = shortLocationName(location.name, messages.locationFallback);
+  const namedLocation = { ...location, name: fullName };
 
   useEffect(() => {
     if (copyStatus === null) return undefined;
@@ -73,30 +76,29 @@ export function ChannelLocationMenu({ location, messages }: {
             variant="subtle"
             ariaHasPopup="menu"
             ariaExpanded={opened}
-            title={location.name}
+            title={fullName}
             onClick={() => setCopyStatus(null)}
           >
             <span className="dashboard-header__location-label">
               <span className="dashboard-header__location-name">{shortName}</span>
-              <span className="dashboard-header__location-coordinates mono"> · {coordinatesForDisplay(location)}</span>
             </span>
             {/* No aria-label override: the accessible name is derived from
                 this content, so it starts with the visible label (WCAG
                 2.5.3). The full name is appended only when it was actually
                 shortened -- visually hidden, never duplicating a name that's
                 already fully visible. */}
-            {shortName === location.name ? null : <span className="sr-only">, {location.name}</span>}
+            {shortName === fullName ? null : <span className="sr-only">, {fullName}</span>}
           </Button>
         </Menu.Target>
         <Menu.Dropdown data-ui="">
-          <Menu.Label>{location.name}</Menu.Label>
+          <Menu.Label>{fullName}</Menu.Label>
           <Menu.Label className="mono">{coordinatesForDisplay(location)}</Menu.Label>
           <Menu.Divider />
           <Menu.Label>{messages.openIn}</Menu.Label>
           {externalTargets.map((target) => <Menu.Item
             key={target.label}
             component="a"
-            href={target.href(location)}
+            href={target.href(namedLocation)}
             target="_blank"
             rel="noopener noreferrer"
           >{target.label}</Menu.Item>)}
