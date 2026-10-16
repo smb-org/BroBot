@@ -4,8 +4,9 @@ import type { BelaboxFetchFailureReason, BelaboxStatsUrlError } from "../contrac
 export interface BelaboxPanelTexts {
   title: string;
   connection: string;
-  configured: string;
   notConfigured: string;
+  loading: string;
+  awaitingSample: string;
   updatedAt: string;
   latestSample: string;
   pollingInactive: string;
@@ -13,6 +14,7 @@ export interface BelaboxPanelTexts {
   retryPollingFailed: string;
   connected: string;
   disconnected: string;
+  stale: string;
   bitrate: string;
   history: string;
   liveRange: string;
@@ -28,11 +30,10 @@ export interface BelaboxPanelTexts {
   p10Bitrate: string;
   disconnects: string;
   droppedPackets: string;
-  replace: string;
   statsUrl: string;
-  save: string;
-  saved: string;
-  saveFailed: string;
+  statsUrlHint: string;
+  statsUrlConfigured: string;
+  statsUrlNotConfigured: string;
   removed: string;
   removeFailed: string;
   refreshFailed: string;
@@ -68,14 +69,16 @@ export interface BelaboxPanelTexts {
   fetchFailureNotice: string;
   checkNow: string;
   statusUnavailable: string;
+  connectionActions: string;
 }
 
 const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
   de: {
     title: "BELABOX-Verbindung",
     connection: "Verbindung",
-    configured: "Statistik-URL hinterlegt",
     notConfigured: "Keine Statistik-URL hinterlegt",
+    loading: "Wird geladen",
+    awaitingSample: "Warte auf erste Messung",
     updatedAt: "Geändert am",
     latestSample: "Letzte Messung",
     pollingInactive: "Abfrage nicht aktiv – erneut versuchen",
@@ -83,6 +86,7 @@ const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
     retryPollingFailed: "Der Abruf konnte nicht erneut gestartet werden.",
     connected: "Verbunden",
     disconnected: "Getrennt",
+    stale: "Veraltet",
     bitrate: "Bitrate",
     history: "Bitrate-Verlauf",
     liveRange: "Live · 10 Min.",
@@ -98,11 +102,10 @@ const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
     p10Bitrate: "P10",
     disconnects: "Trennungen",
     droppedPackets: "Verlorene Pakete",
-    replace: "URL ersetzen",
     statsUrl: "Statistik-URL",
-    save: "Ersetzen",
-    saved: "Die Statistik-URL wurde ersetzt.",
-    saveFailed: "Die Statistik-URL konnte nicht gespeichert werden.",
+    statsUrlHint: "Leer lassen, um die hinterlegte URL beizubehalten.",
+    statsUrlConfigured: "Hinterlegt",
+    statsUrlNotConfigured: "Nicht hinterlegt",
     removed: "Die Statistik-URL wurde entfernt.",
     removeFailed: "Die Statistik-URL konnte nicht entfernt werden.",
     refreshFailed: "Der Status konnte nicht aktualisiert werden.",
@@ -130,7 +133,7 @@ const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
     tooLarge: "Die Antwort des Relay-Dienstes ist zu groß.",
     malformed: "Die Antwort des Relay-Dienstes ist ungültig.",
     budgetExhausted: "Das Abruflimit wurde erreicht. Bitte später erneut versuchen.",
-    readOnly: "Nur Broadcaster und Manager können diese Verbindung ändern oder testen.",
+    readOnly: "Nur Broadcaster und Verwalter können diese Verbindung ändern.",
     alertLow: "Niedrige BELABOX-Bitrate",
     alertDisconnect: "BELABOX-Encoder getrennt",
     alertRecovering: "BELABOX-Verbindung erholt sich",
@@ -138,12 +141,14 @@ const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
     fetchFailureNotice: "BELABOX-Status konnte dreimal nicht abgerufen werden.",
     checkNow: "Jetzt prüfen",
     statusUnavailable: "BELABOX-Status noch nicht verfügbar.",
+    connectionActions: "Weitere Verbindungsaktionen",
   },
   en: {
     title: "BELABOX connection",
     connection: "Connection",
-    configured: "Stats URL stored",
     notConfigured: "No stats URL stored",
+    loading: "Loading",
+    awaitingSample: "Waiting for first sample",
     updatedAt: "Changed",
     latestSample: "Latest sample",
     pollingInactive: "Polling inactive – try again",
@@ -151,6 +156,7 @@ const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
     retryPollingFailed: "Polling could not be restarted.",
     connected: "Connected",
     disconnected: "Disconnected",
+    stale: "Stale",
     bitrate: "Bitrate",
     history: "Bitrate history",
     liveRange: "Live · 10 min",
@@ -166,11 +172,10 @@ const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
     p10Bitrate: "P10",
     disconnects: "Disconnects",
     droppedPackets: "Dropped packets",
-    replace: "Replace URL",
     statsUrl: "Stats URL",
-    save: "Replace",
-    saved: "The stats URL was replaced.",
-    saveFailed: "The stats URL could not be saved.",
+    statsUrlHint: "Leave blank to keep the stored URL.",
+    statsUrlConfigured: "Stored",
+    statsUrlNotConfigured: "Not stored",
     removed: "The stats URL was removed.",
     removeFailed: "The stats URL could not be removed.",
     refreshFailed: "The status could not be refreshed.",
@@ -198,7 +203,7 @@ const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
     tooLarge: "The relay response is too large.",
     malformed: "The relay response is invalid.",
     budgetExhausted: "The fetch limit was reached. Try again later.",
-    readOnly: "Only broadcasters and managers can change or test this connection.",
+    readOnly: "Only broadcasters and managers can change this connection.",
     alertLow: "BELABOX bitrate is low",
     alertDisconnect: "BELABOX encoder disconnected",
     alertRecovering: "BELABOX connection is recovering",
@@ -206,6 +211,7 @@ const texts: Readonly<Record<ModuleLanguage, BelaboxPanelTexts>> = {
     fetchFailureNotice: "BELABOX status could not be fetched three times.",
     checkNow: "Check now",
     statusUnavailable: "BELABOX status is not available yet.",
+    connectionActions: "More connection actions",
   },
 };
 

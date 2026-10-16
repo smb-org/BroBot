@@ -13,11 +13,17 @@ const mocks = vi.hoisted(() => ({
   loadBelaboxStatus: vi.fn(),
   retryBelaboxPolling: vi.fn(),
   removeBelaboxStatsUrl: vi.fn(),
-  replaceBelaboxStatsUrl: vi.fn(),
   testBelaboxConnection: vi.fn(),
   loadBelaboxHistory: vi.fn(),
   loadBelaboxStreams: vi.fn(),
 }));
+
+const openRemoveAction = async () => {
+  const menuButton = await screen.findByRole("button", { name: "More connection actions" });
+  await waitFor(() => { expect(menuButton).toBeEnabled(); });
+  fireEvent.click(menuButton);
+  return screen.findByRole("menuitem", { name: "Remove stats URL" });
+};
 
 vi.mock("../../src/modules/belabox/panel/service", () => mocks);
 
@@ -35,7 +41,6 @@ describe("BELABOX panel", () => {
     });
     mocks.retryBelaboxPolling.mockReset().mockResolvedValue(undefined);
     mocks.removeBelaboxStatsUrl.mockReset();
-    mocks.replaceBelaboxStatsUrl.mockReset();
     mocks.testBelaboxConnection.mockReset();
     mocks.loadBelaboxHistory.mockReset().mockResolvedValue([]);
     mocks.loadBelaboxStreams.mockReset().mockResolvedValue([]);
@@ -52,8 +57,8 @@ describe("BELABOX panel", () => {
   it("shows a failed stats URL deletion inside its confirmation dialog", async () => {
     mocks.removeBelaboxStatsUrl.mockRejectedValue(new Error("D1 DELETE failed"));
 
-    render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage /></></UiProvider>);
-    const removeButton = await screen.findByRole("button", { name: "Remove stats URL" });
+    render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage settingsRevision={1} /></></UiProvider>);
+    const removeButton = await openRemoveAction();
     await waitFor(() => { expect(removeButton).toBeEnabled(); });
     fireEvent.click(removeButton);
 
@@ -67,11 +72,24 @@ describe("BELABOX panel", () => {
     expect(within(dialog).getByRole("button", { name: "Remove stats URL" })).toBeEnabled();
   });
 
-  it("reflects a successful removal even when the status refresh fails", async () => {
-    mocks.removeBelaboxStatsUrl.mockResolvedValue(undefined);
+  it("does not report an aborted status read as a connection failure", async () => {
+    mocks.loadBelaboxStatus.mockImplementation((_channelId: string, signal: AbortSignal) => new Promise((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(new DOMException("Request was aborted.", "AbortError")), { once: true });
+    }));
 
-    render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage /></></UiProvider>);
-    const removeButton = await screen.findByRole("button", { name: "Remove stats URL" });
+    const view = render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage /></></UiProvider>);
+    await waitFor(() => { expect(mocks.loadBelaboxStatus).toHaveBeenCalledOnce(); });
+    view.unmount();
+
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(toastsSnapshot()).toHaveLength(0);
+  });
+
+  it("reflects a successful removal even when the status refresh fails", async () => {
+    mocks.removeBelaboxStatsUrl.mockResolvedValue({ revision: 2 });
+
+    render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage settingsRevision={1} /></></UiProvider>);
+    const removeButton = await openRemoveAction();
     await waitFor(() => { expect(removeButton).toBeEnabled(); });
     fireEvent.click(removeButton);
     mocks.loadBelaboxStatus.mockRejectedValue(new Error("refresh failed"));
@@ -108,12 +126,13 @@ describe("BELABOX panel", () => {
     });
   });
 
-  it("reserves the test result and live status rows before values are available", async () => {
+  it("shows compact connection property rows before the test result is available", async () => {
     render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage /></></UiProvider>);
 
-    expect(await screen.findByText("Stats URL stored")).toBeInTheDocument();
-    expect(screen.getByTestId("belabox-updated-at-slot")).toBeInTheDocument();
-    expect(screen.getByTestId("belabox-sample-slot")).toBeInTheDocument();
+    expect(await screen.findByText("Waiting for first sample")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Stats URL")).not.toBeInTheDocument();
+    expect(screen.getByText("Changed")).toBeInTheDocument();
+    expect(screen.getByText("Latest sample")).toBeInTheDocument();
     expect(screen.getByTestId("belabox-test-result-slot")).toBeInTheDocument();
   });
 
@@ -134,7 +153,7 @@ describe("BELABOX panel", () => {
     render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage /></></UiProvider>);
 
     expect(await screen.findByText(/On-demand mode does not store history/)).toBeInTheDocument();
-    expect(screen.getByTestId("belabox-sample-slot")).toHaveTextContent("2400 kbps");
+    expect(screen.getByText("Latest sample").parentElement).toHaveTextContent("2400 kbps");
     expect(mocks.loadBelaboxHistory).not.toHaveBeenCalled();
     expect(mocks.loadBelaboxStreams).not.toHaveBeenCalled();
   });
@@ -236,6 +255,34 @@ describe("BELABOX panel", () => {
     await waitFor(() => {
       expect(mocks.loadBelaboxHistory).toHaveBeenCalledWith("channel-a", "stream", "stream-42", expect.any(AbortSignal));
     });
+  });
+
+  it("uses the saved bitrate thresholds for chart lines and labels", async () => {
+    mocks.loadBelaboxStatus.mockResolvedValue({
+      configured: true,
+      updatedAt: null,
+      mode: "interval",
+      sample: null,
+      errorCode: null,
+      polling: true,
+      pollingDesired: true,
+      intervalSeconds: 15,
+      streamId: "stream-42",
+      belaboxStreamId: "stream-42",
+    });
+
+    render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage lowBitrateKbps={700} recoverBitrateKbps={3_500} /></></UiProvider>);
+
+    const chart = await screen.findByRole("img", { name: "Bitrate history" });
+    const historySection = chart.closest("section[aria-label='Bitrate history']");
+    expect(historySection).not.toBeNull();
+    await waitFor(() => {
+      expect(historySection).toHaveTextContent("Low threshold: 700 kbps");
+      expect(historySection).toHaveTextContent("Recovery threshold: 3,500 kbps");
+    });
+    const thresholdLines = chart.querySelectorAll('line[stroke-dasharray]');
+    expect(Number(thresholdLines[0]?.getAttribute("y1"))).toBeCloseTo(142.9, 1);
+    expect(Number(thresholdLines[1]?.getAttribute("y1"))).toBeCloseTo(26.5, 1);
   });
 
   it("caps the stream history at twenty rows inside a bounded scroll region", async () => {

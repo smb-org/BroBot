@@ -33,4 +33,31 @@ describe("BELABOX settings editor", () => {
 
     expect(latest).toMatchObject({ mode: "on_demand", intervalSeconds: 30 });
   });
+
+  it("shows empty alert templates as off using the shared message pattern", () => {
+    const copy = belaboxSettingsEditorCatalog("en");
+    render(<UiProvider><SettingsEditor
+      spec={settingsEditor.spec}
+      sectionId="alerts"
+      settings={{
+        ...BELABOX_DEFAULT_SETTINGS,
+        chatEnabled: true,
+        lowText: "",
+        disconnectText: "",
+        recoveryText: "",
+      }}
+      onChange={() => undefined}
+      texts={copy}
+      templateMessages={copy.templateMessages}
+      enabledLabel={copy.enabledLabel}
+      disabledLabel={copy.disabledLabel}
+    /></UiProvider>);
+
+    expect(document.querySelectorAll(".ui-settings-editor__message")).toHaveLength(3);
+    expect(Array.from(document.querySelectorAll(".ui-settings-editor__message-heading span"), (element) => element.textContent))
+      .toEqual(["Off", "Off", "Off"]);
+    expect(screen.getByText("Low bitrate target")).toBeInTheDocument();
+    expect(screen.getByText("Disconnect target")).toBeInTheDocument();
+    expect(screen.getByText("Recovery target")).toBeInTheDocument();
+  });
 });
