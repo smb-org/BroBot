@@ -204,6 +204,9 @@ for (const viewport of viewports) {
         labelBottom: label.getBoundingClientRect().bottom,
         inputTop: input.getBoundingClientRect().top,
         headerCenterDifference: Math.abs((titleBox.top + titleBox.bottom) / 2 - (actionBox.top + actionBox.bottom) / 2),
+        headerOverlap: titleBox.left < actionBox.right && titleBox.right > actionBox.left && titleBox.top < actionBox.bottom && titleBox.bottom > actionBox.top,
+        titleBottom: titleBox.bottom,
+        actionsTop: actionBox.top,
         saveBars: element.querySelectorAll(".ui-save-bar").length,
       };
     });
@@ -211,7 +214,12 @@ for (const viewport of viewports) {
     expect(settingsGeometry.borderTopWidth).toBe("0px");
     expect(settingsGeometry.backgroundColor).toBe("rgba(0, 0, 0, 0)");
     expect(settingsGeometry.labelBottom).toBeLessThanOrEqual(settingsGeometry.inputTop + 1);
-    expect(settingsGeometry.headerCenterDifference).toBeLessThanOrEqual(12);
+    expect(settingsGeometry.headerOverlap).toBe(false);
+    if (viewport.width <= 600) {
+      expect(settingsGeometry.titleBottom).toBeLessThanOrEqual(settingsGeometry.actionsTop + 1);
+    } else {
+      expect(settingsGeometry.headerCenterDifference).toBeLessThanOrEqual(12);
+    }
     expect(settingsGeometry.saveBars).toBe(1);
 
     await votingSettings.getByRole("tab", { name: "Nachrichten" }).click();

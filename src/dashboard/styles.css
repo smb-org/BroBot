@@ -1935,6 +1935,9 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
   .ui-dialog__body > form:has(.live-cockpit-broadcast__form) > .ui-form-dialog__footer > .ui-confirm-dialog__actions { grid-row: 1; }
   .ui-confirm-dialog__actions { flex-direction: column; align-items: stretch; }
   .ui-confirm-dialog__actions > .ui-button { width: 100%; }
+  .chat-voting-settings-editor { grid-template-columns: minmax(0, 1fr); row-gap: var(--s2); align-items: start; }
+  .chat-voting-settings-editor > .inspector-section__heading { grid-column: 1; grid-row: 1; }
+  .chat-voting-settings-editor > .ui-editor-shell__header-save { grid-column: 1; grid-row: 2; width: 100%; }
 }
 
 @media (max-width: 600px) {
