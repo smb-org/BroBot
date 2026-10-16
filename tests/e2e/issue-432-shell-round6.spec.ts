@@ -173,8 +173,11 @@ test("the main shell scroller receives PageDown before the members page is click
   }
   await page.getByRole("link", { name: "Ereignisse" }).click();
   await expect(page).toHaveURL(new RegExp(`/channels/${channelId}/events$`));
+  await expect(page.getByRole("heading", { name: "Ereignisse", level: 1 })).toBeVisible();
   await page.getByRole("link", { name: "Mitglieder" }).click();
   await expect(page).toHaveURL(new RegExp(`/channels/${channelId}/members$`));
+  await expect(page.getByRole("heading", { name: "Mitglieder", level: 1 })).toBeVisible();
+  await expect(page.locator(".members-table tbody tr")).toHaveCount(100);
   await expect(main).toBeFocused();
   await main.evaluate((element) => { element.scrollTop = 0; });
   await page.keyboard.press("PageDown");
