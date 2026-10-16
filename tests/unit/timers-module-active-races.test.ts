@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { ModuleRouteEnvironment } from "../../src/modules/contract";
 import { timerRoutes } from "../../src/modules/timers/routes";
 import { authorizeModuleMutation } from "../../src/worker/module-authorization";
-import { insertChannel, insertMember } from "./fixtures";
+import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { createReadInterleavingDatabase, TestD1Database } from "./test-d1";
 
 const channelId = "timers-module-active-race";
@@ -16,6 +16,7 @@ const createDatabase = async (): Promise<TestD1Database> => {
   const database = new TestD1Database();
   databases.push(database);
   await insertChannel(database, channelId);
+  await insertLoginIdentityAndSession(database, actorId);
   await insertMember(database, channelId, actorId, "operator");
   await database.prepare(
     "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'timers', 1, '{}')",
@@ -33,7 +34,7 @@ const appFor = (database: D1Database): Hono<ModuleRouteEnvironment> => {
   const app = new Hono<ModuleRouteEnvironment>();
   app.use("*", async (context, next) => {
     context.set("channelRole", "operator");
-    context.set("actor", { userId: actorId, sessionId: "session-431" });
+    context.set("actor", { userId: actorId, sessionId: `session-${actorId}` });
     context.set("authorizeMutation", authorizeModuleMutation);
     context.set("prepareModuleAudit", () => database.prepare("SELECT 1"));
     await next();
@@ -67,6 +68,17 @@ afterEach(() => {
 });
 
 describe("timer activation checks module and membership in the mutation", () => {
+  it("allows an authenticated operator to activate a timer while the module is active", async () => {
+    const database = await createDatabase();
+    const databaseApi = database as unknown as D1Database;
+
+    const response = await enableTimer(appFor(databaseApi), databaseApi);
+
+    expect(response.status).toBe(200);
+    await expect(database.prepare("SELECT enabled, revision FROM timers WHERE timer_id = 'timer-race'").first())
+      .resolves.toEqual({ enabled: 1, revision: 2 });
+  });
+
   it.each(["module deactivation", "membership removal"])("rejects an enable request raced by %s", async (race) => {
     const database = await createDatabase();
     const interleavedDatabase = createReadInterleavingDatabase(

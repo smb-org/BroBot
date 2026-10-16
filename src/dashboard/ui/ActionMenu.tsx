@@ -4,7 +4,7 @@ import { useId, useState } from "react";
 import { Button, type ButtonSize } from "./Button";
 
 export type ActionMenuItem =
-  | { label: string; onSelect: () => void; disabled?: boolean; danger?: boolean }
+  | { label: string; onSelect: () => void; disabled?: boolean; danger?: boolean; description?: string }
   | { divider: true };
 
 export function ActionMenu({ label, items, size = "compact" }: { label: string; items: readonly ActionMenuItem[]; size?: ButtonSize }) {
@@ -21,10 +21,15 @@ export function ActionMenu({ label, items, size = "compact" }: { label: string; 
             ? <MenuPrimitive.Separator data-ui="" className="ui-action-menu__divider" key={`divider-${String(index)}`} />
             : <MenuPrimitive.Item
               key={item.label}
+              aria-label={item.label}
               disabled={item.disabled ?? false}
+              {...(item.description === undefined ? {} : { "aria-describedby": `${dropdownId}-description-${String(index)}` })}
               className={item.danger ? "ui-action-menu__item ui-action-menu__danger" : "ui-action-menu__item"}
               onClick={item.onSelect}
-            >{item.label}</MenuPrimitive.Item>)}
+            >
+              <span className="ui-action-menu__item-label">{item.label}</span>
+              {item.description === undefined ? null : <span id={`${dropdownId}-description-${String(index)}`} className="ui-action-menu__item-description">{item.description}</span>}
+            </MenuPrimitive.Item>)}
         </MenuPrimitive.Popup>
       </MenuPrimitive.Positioner>
     </MenuPrimitive.Portal>

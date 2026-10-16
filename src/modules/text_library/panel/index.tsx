@@ -6,10 +6,10 @@ import type { TextBlock, TextBlockCategory, TextBlockConditions, TextBlockUsage,
 import { firstMatchingTextBlockVariant, validTextBlockConditions, validTextBlockName } from "../domain";
 import { blockReferencesInText } from "../../contracts/text-block-references";
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Badge, Button, ChatPreview, CollectionPage, ConfirmDialog, Dialog, EmptyState, Field, GameMultiSelect, InspectorFieldRow, ListToolbar, LoadState, LoadStateLines, PageHeader, registeredModuleTemplateGroup, registerDashboardNavigationGuard, RuleNote, Section, Select, TemplateTextField, notify, useDraftGuard } from "../../../dashboard/ui";
+import { ActionMenu, Badge, Button, ChatPreview, CollectionPage, ConfirmDialog, Dialog, EmptyState, Field, GameMultiSelect, InspectorFieldRow, ListToolbar, LoadState, LoadStateLines, PageHeader, registeredModuleTemplateGroup, registerDashboardNavigationGuard, RuleNote, Section, Select, TemplateTextField, notify, useDraftGuard } from "../../../dashboard/ui";
 import { templateVariableNames } from "../../contract";
 import { dashboardCommonTexts, systemTemplateVariableLocale } from "../../../dashboard/locale";
-import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { templateTextLength } from "../../../contracts/template-text-length";
 import { textLibraryTexts } from "./locale";
 import { estimateEmbeddedBlockOverflow } from "./embedded-block-overflow";
@@ -401,7 +401,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
           : code === "text_library_template_usage_invalid" && contentIssues.length > 0 ? contentIssues.join(" ")
             : code === null ? labels.saveError : labels.errors[code] ?? (caught instanceof PanelApiError && caught.status === 409 ? labels.conflict : labels.saveError);
       setSaveError(message);
-      if (caught instanceof PanelApiError && caught.status === 409) setServerConflict(true);
+      if (code === "text_library_block_conflict") setServerConflict(true);
       return message;
     } finally {
       setPending(false);
@@ -502,20 +502,29 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
   }, [data, dirty, revision, selectedName]);
 
   const reloadCurrent = (): void => {
-    previewRequestId.current += 1;
-    setPreviewResult(null);
-    const latest = data?.blocks.find((block) => block.name === selectedName);
-    if (latest === undefined) {
-      closeEditorNow();
-      return;
-    }
-    const next = draftFromBlock(latest);
-    setDraft(next);
-    setBaselineDraft(next);
-    setRevision(latest.revision);
-    setSaveError(null);
-    setServerConflict(false);
-    setAttemptedSave(false);
+    if (selectedName === null) return;
+    const startedSwitch = editorSwitch.current;
+    const blockName = selectedName;
+    setPending(true);
+    void refetchModuleQueryData<TextLibraryPanelData>(queryClient, channelId, "text_library", "library").then((latestData) => {
+      if (editorSwitch.current !== startedSwitch) return;
+      const latest = latestData.blocks.find((block) => block.name === blockName);
+      if (latest === undefined) {
+        closeEditorNow();
+        return;
+      }
+      const next = draftFromBlock(latest);
+      setDraft(next);
+      setBaselineDraft(next);
+      setRevision(latest.revision);
+      setSaveError(null);
+      setServerConflict(false);
+      setAttemptedSave(false);
+    }).catch(() => {
+      notify({ tone: "error", message: labels.loadError });
+    }).finally(() => {
+      setPending(false);
+    });
   };
 
   const removeBlock = async (): Promise<void> => {
@@ -636,6 +645,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
             messages={{ ...labels.gameMultiSelect, label: labels.gameFilter }} compact disabled />
         </>}
         create={{ label: labels.addBlock, onClick: openCreate, disabled: true, ...(!canManage ? { reason: labels.managementLocked } : {}) }}
+        createPlacement="after-search"
         usage={{ count: 0, maximum: TEXT_BLOCK_MAXIMUMS.blocksPerChannel, copy: {
           countSuffix: labels.countSuffix,
           filteredInfix: common.of,
@@ -685,6 +695,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
             searchClearLabel={common.clearSearch}
             searchValue={search}
             onSearchChange={setSearch}
+            createPlacement="after-search"
             filtersLabel={labels.library}
             filters={<>
               <Select label={labels.categoryFilter} value={categoryFilter} onChange={(value) => setCategoryFilter(value ?? "")} options={[{ value: "", label: labels.allCategories }, ...categories]} />
@@ -728,15 +739,21 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
               title={isCreate ? labels.addBlock : `{text.${draft.name}}`}
               meta={isCreate ? labels.nameHint : labels.usesCount(blockUsages.length)}
               {...(!canManage ? { lockHint: labels.operatorReason } : {})}
-              {...(!isCreate ? { actions: <div className="text-library__delete-actions">
-                <Button icon="remove" iconOnly ariaLabel={labels.delete} title={labels.delete} variant="subtle" danger="subtle" disabled={!canManage || pending || blockUsages.length > 0} onClick={() => { if (canManage) openDelete(); }} />
-                {!canManage ? <span className="lock-reason text-library__delete-reason--role"><span aria-hidden="true">{labels.deleteOperatorReason}</span><span className="sr-only">{labels.operatorReason}</span></span>
-                  : blockUsages.length > 0 ? <>
-                    <span className="lock-reason" role="note">{labels.deleteBlockedReason(blockUsages.length)}</span>
-                    <Button icon="cause" iconOnly ariaLabel={labels.uses} title={labels.uses} variant="neutral" size="compact" onClick={() => { setDeleteBlockedResult({ name: selectedName ?? draft.name, usages: [...blockUsages] }); }} />
-                  </>
-                    : pending ? <span className="lock-reason" role="note">{common.saving}</span> : null}
-              </div> } : {})}
+              {...(!isCreate ? { actions: <ActionMenu label={common.moreActions} items={[
+                  {
+                    label: labels.deleteMenuLabel,
+                    onSelect: () => { if (canManage) openDelete(); },
+                    disabled: !canManage || pending || blockUsages.length > 0,
+                    danger: true,
+                    ...(!canManage ? { description: labels.operatorReason }
+                      : blockUsages.length > 0 ? { description: labels.deleteBlockedReason(blockUsages.length) }
+                        : pending ? { description: common.saving } : {}),
+                  },
+                  {
+                    label: labels.viewUsages,
+                    onSelect: () => { setDeleteBlockedResult({ name: selectedName ?? draft.name, usages: [...blockUsages] }); },
+                  },
+                ]} /> } : {})}
               {...(canManage ? { save: {
                 dirty,
                 pending,

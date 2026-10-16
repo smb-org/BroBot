@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
-import { runModuleQueryWrite, useChannelSettings, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { refetchModuleQueryData, runModuleQueryWrite, useChannelSettings, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { dashboardCommonTexts } from "../../../dashboard/locale";
 import {
   Button,
@@ -154,8 +154,8 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
   const [serverConflict, setServerConflict] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Timer | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [previewText, setPreviewText] = useState<string | null>(null);
-  const [previewBusy, setPreviewBusy] = useState(false);
+  const [previewResult, setPreviewResult] = useState<{ messageText: string; text: string } | null>(null);
+  const [previewRequest, setPreviewRequest] = useState<{ messageText: string; requestId: number } | null>(null);
   const [debouncedMessage, setDebouncedMessage] = useState("");
   const editorSwitch = useRef(0);
   const previewRequestId = useRef(0);
@@ -165,6 +165,8 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
 
   const dirty = draft !== null && (editing === null || (baselineDraft !== null && JSON.stringify(draft) !== JSON.stringify(baselineDraft)));
   const input = draft === null ? null : inputFromDraft(draft);
+  const previewText = draft === null || previewResult?.messageText !== draft.messageText ? null : previewResult.text;
+  const previewBusy = draft !== null && previewRequest?.messageText === draft.messageText;
   const sourceOptions = useMemo(() => (data?.sources ?? []).map((source) => ({
     value: source.id,
     label: source.label[language ?? "de"],
@@ -182,7 +184,6 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
 
   const closeEditorNow = (): void => {
     editorSwitch.current += 1;
-    previewRequestId.current += 1;
     dirtyRef.current = false;
     setSelectedId(null);
     setDraft(null);
@@ -194,13 +195,10 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
     setError(null);
     setAttemptedSave(false);
     setServerConflict(false);
-    setPreviewText(null);
-    setPreviewBusy(false);
   };
 
   const openCreateNow = (): void => {
     editorSwitch.current += 1;
-    previewRequestId.current += 1;
     dirtyRef.current = true;
     const next = emptyDraft(data?.sources ?? []);
     setSelectedId("__new__");
@@ -211,13 +209,10 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
     setError(null);
     setAttemptedSave(false);
     setServerConflict(false);
-    setPreviewText(null);
-    setPreviewBusy(false);
   };
 
   const selectTimerNow = (timer: Timer): void => {
     editorSwitch.current += 1;
-    previewRequestId.current += 1;
     dirtyRef.current = false;
     const next = draftFromTimer(timer);
     setSelectedId(timer.id);
@@ -228,8 +223,6 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
     setError(null);
     setAttemptedSave(false);
     setServerConflict(false);
-    setPreviewText(null);
-    setPreviewBusy(false);
   };
 
   const discardDraft = (): void => {
@@ -238,11 +231,6 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
       return;
     }
     const next = draftFromTimer(editing);
-    if (draft?.messageText !== next.messageText) {
-      previewRequestId.current += 1;
-      setPreviewText(null);
-      setPreviewBusy(false);
-    }
     dirtyRef.current = false;
     setDraft(cloneDraft(next));
     setBaselineDraft(cloneDraft(next));
@@ -318,11 +306,6 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
   const closeEditor = (): void => { if (!editorPending) guardSwitch(closeEditorNow); };
 
   const patchDraft = (change: Partial<TimerDraft>): void => {
-    if ("messageText" in change) {
-      previewRequestId.current += 1;
-      setPreviewText(null);
-      setPreviewBusy(false);
-    }
     const next = draft === null ? null : { ...draft, ...change };
     dirtyRef.current = next !== null && (editing === null || baselineDraft === null || JSON.stringify(next) !== JSON.stringify(baselineDraft));
     setDraft(next);
@@ -365,9 +348,6 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
         return;
       }
       const next = draftFromTimer(latest);
-      previewRequestId.current += 1;
-      setPreviewText(null);
-      setPreviewBusy(false);
       setEditing(latest);
       setDraft(cloneDraft(next));
       setBaselineDraft(cloneDraft(next));
@@ -391,13 +371,13 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
     if (currentMessage.trim().length === 0 || debouncedMessage !== currentMessage) return;
     const requestId = ++previewRequestId.current;
     const timer = window.setTimeout(() => {
-      setPreviewBusy(true);
+      setPreviewRequest({ messageText: debouncedMessage, requestId });
       previewTimerText(channelId, debouncedMessage).then((text) => {
-        if (previewRequestId.current === requestId) setPreviewText(text);
+        if (previewRequestId.current === requestId) setPreviewResult({ messageText: debouncedMessage, text });
       }).catch(() => {
-        if (previewRequestId.current === requestId) setPreviewText(null);
+        // Keep the last resolved result; it remains valid for its original message text.
       }).finally(() => {
-        if (previewRequestId.current === requestId) setPreviewBusy(false);
+        if (previewRequestId.current === requestId) setPreviewRequest(null);
       });
     });
     return () => {
@@ -438,22 +418,30 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
   };
 
   const reloadCurrent = (): void => {
-    const latest = data?.timers.find((timer) => timer.id === editing?.id);
-    if (latest === undefined) {
-      closeEditorNow();
-      return;
-    }
-    previewRequestId.current += 1;
-    const next = draftFromTimer(latest);
-    dirtyRef.current = false;
-    setEditing(latest);
-    setDraft(cloneDraft(next));
-    setBaselineDraft(cloneDraft(next));
-    setError(null);
-    setServerConflict(false);
-    setAttemptedSave(false);
-    setPreviewText(null);
-    setPreviewBusy(false);
+    if (editing === null) return;
+    const startedSwitch = editorSwitch.current;
+    setPending(true);
+    void refetchModuleQueryData<TimersPanelData>(queryClient, channelId, "timers", "panel").then((latestData) => {
+      if (editorSwitch.current !== startedSwitch) return;
+      const latest = latestData.timers.find((timer) => timer.id === editing.id);
+      if (latest === undefined) {
+        closeEditorNow();
+        return;
+      }
+      const next = draftFromTimer(latest);
+      dirtyRef.current = false;
+      setEditing(latest);
+      setDraft(cloneDraft(next));
+      setBaselineDraft(cloneDraft(next));
+      setError(null);
+      setServerConflict(false);
+      setAttemptedSave(false);
+    }).catch(() => {
+      // Keep the rejected draft and conflict visible so the user can retry the reload.
+      notify({ tone: "error", message: labels.loadError });
+    }).finally(() => {
+      setPending(false);
+    });
   };
 
   const triggerOptions = [
@@ -574,7 +562,7 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
       />
 
       {canManage ? <div className="timer-editor__body">
-        <Section title={labels.name}>
+        <Section title={labels.general}>
           <Field label={labels.name} value={draft.name} onChange={(name) => patchDraft({ name })} maxLength={60} countLabel={(count, max) => `${String(count)}/${String(max)}`} disabled={editorPending}
             {...(attemptedSave && draft.name.trim().length === 0 ? { error: labels.nameRequired } : {})} />
         </Section>
@@ -610,13 +598,13 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
             <SwitchSection title={labels.live} hint={labels.liveRule} checked={draft.live !== null} onChange={(enabled) => patchDraft({ live: enabled ? emptyIntervalDraft() : null })} pending={editorPending}>
               <div className="timer-editor__unit-grid">
                 <UnitInput label={labels.minutes} value={draft.live?.minutes ?? ""} onChange={(minutes) => patchDraft({ live: draft.live === null ? null : { ...draft.live, minutes } })} min={1} max={1_440} unit={labels.minutesUnit} required />
-                <UnitInput label={labels.messageCount} hint={labels.minimumMessagesHint} value={draft.live?.minimumMessages ?? ""} onChange={(minimumMessages) => patchDraft({ live: draft.live === null ? null : { ...draft.live, minimumMessages } })} min={1} max={100_000} unit={labels.messagesUnit} />
+                <UnitInput label={labels.messageCount} hint={labels.minimumMessagesHint} placeholder={labels.minimumMessagesPlaceholder} value={draft.live?.minimumMessages ?? ""} onChange={(minimumMessages) => patchDraft({ live: draft.live === null ? null : { ...draft.live, minimumMessages } })} min={1} max={100_000} unit={labels.messagesUnit} />
               </div>
             </SwitchSection>
             <SwitchSection title={labels.offline} hint={labels.offlineRule} checked={draft.offline !== null} onChange={(enabled) => patchDraft({ offline: enabled ? emptyIntervalDraft() : null })} pending={editorPending}>
               <div className="timer-editor__unit-grid">
                 <UnitInput label={labels.minutes} value={draft.offline?.minutes ?? ""} onChange={(minutes) => patchDraft({ offline: draft.offline === null ? null : { ...draft.offline, minutes } })} min={1} max={1_440} unit={labels.minutesUnit} required />
-                <UnitInput label={labels.messageCount} hint={labels.minimumMessagesHint} value={draft.offline?.minimumMessages ?? ""} onChange={(minimumMessages) => patchDraft({ offline: draft.offline === null ? null : { ...draft.offline, minimumMessages } })} min={1} max={100_000} unit={labels.messagesUnit} />
+                <UnitInput label={labels.messageCount} hint={labels.minimumMessagesHint} placeholder={labels.minimumMessagesPlaceholder} value={draft.offline?.minimumMessages ?? ""} onChange={(minimumMessages) => patchDraft({ offline: draft.offline === null ? null : { ...draft.offline, minimumMessages } })} min={1} max={100_000} unit={labels.messagesUnit} />
               </div>
             </SwitchSection>
           </div> : null}

@@ -166,13 +166,8 @@ test("a raced blocked block deletion shows the response usages when refetch fail
   await installApi(page, { failLibraryRefetch: true });
   await gotoPanel(page, "text_library");
   await openFirstRow(page, "text_library");
-  const overflowTrigger = page.locator(".page-header__overflow-trigger");
-  if (await overflowTrigger.isVisible()) {
-    await overflowTrigger.click();
-    await page.locator(".page-header__overflow").getByRole("button", { name: /Delete/u }).click();
-  } else {
-    await page.getByRole("button", { name: "Delete text block", exact: true }).click();
-  }
+  await page.getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: "Delete", exact: true }).click();
   await page.getByRole("button", { name: "Delete text block: welcome", exact: true }).click();
   const result = page.getByRole("dialog").filter({ hasText: "!welcome" });
   await expect(result).toContainText("Welcome reminder");
@@ -218,16 +213,17 @@ test("operators see disabled timer and text block delete actions with reasons", 
   for (const panel of ["text_library", "timers"] as const) {
     await gotoPanel(page, panel, true);
     await openFirstRow(page, panel);
-    const overflowTrigger = page.locator(".page-header__overflow-trigger");
-    const hasOverflow = await overflowTrigger.isVisible();
-    if (hasOverflow) await overflowTrigger.click();
-    const menu = page.locator(".page-header__overflow");
+    const menu = panel === "text_library"
+      ? page.getByRole("menu")
+      : page.locator(".page-header__overflow");
+    if (panel === "text_library") await page.getByRole("button", { name: "More actions" }).click();
+    else await page.locator(".page-header__overflow-trigger").click();
     const deleteAction = panel === "text_library"
-      ? page.getByRole("button", { name: "Delete text block", exact: true })
-      : menu.getByRole("button", { name: /Delete/u });
+      ? menu.getByRole("menuitem", { name: "Delete", exact: true })
+      : menu.getByRole("button", { name: "Delete", exact: true });
     await expect(deleteAction).toBeVisible();
     await expect(deleteAction).toBeDisabled();
-    if (panel === "text_library") await expect(page.locator(".text-library__delete-actions .lock-reason")).toBeVisible();
+    if (panel === "text_library") await expect(menu.locator(".ui-action-menu__item-description")).toContainText("Only broadcasters and managers");
     else await expect(menu.locator(".lock-reason")).toBeVisible();
     await page.goto("about:blank");
   }

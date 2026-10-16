@@ -4,6 +4,7 @@ import type { TemplateTextFieldMessages } from "../../../dashboard/ui";
 export interface TimersTexts {
   title: string;
   add: string;
+  general: string;
   name: string;
   message: string;
   messageHint: string;
@@ -28,6 +29,7 @@ export interface TimersTexts {
   minutesBeforeEvent: (minutes: number) => string;
   messageCount: string;
   minimumMessagesHint: string;
+  minimumMessagesPlaceholder: string;
   time: string;
   weekdays: string;
   everyDay: string;
@@ -87,6 +89,7 @@ const catalog: LocaleCatalog<TimersTexts> = {
   de: {
     title: "Timer",
     add: "Timer anlegen",
+    general: "Allgemein",
     name: "Name",
     message: "Nachricht",
     messageHint: "Freitext mit Variablen und Textbausteinen im Format {text.name}.",
@@ -111,6 +114,7 @@ const catalog: LocaleCatalog<TimersTexts> = {
     minutesBeforeEvent: (minutes) => `${String(minutes)} Min. vor einem Ereignis`,
     messageCount: "Mindestanzahl Chatnachrichten",
     minimumMessagesHint: "Leer bedeutet: keine Mindestzahl.",
+    minimumMessagesPlaceholder: "keine",
     time: "Uhrzeit im Kanal",
     weekdays: "Wochentage",
     everyDay: "Täglich",
@@ -181,6 +185,7 @@ const catalog: LocaleCatalog<TimersTexts> = {
   en: {
     title: "Timers",
     add: "Create timer",
+    general: "General",
     name: "Name",
     message: "Message",
     messageHint: "Free text with variables and text blocks in the {text.name} format.",
@@ -205,6 +210,7 @@ const catalog: LocaleCatalog<TimersTexts> = {
     minutesBeforeEvent: (minutes) => `${String(minutes)} min before an event`,
     messageCount: "Minimum chat messages",
     minimumMessagesHint: "Leave blank to set no minimum.",
+    minimumMessagesPlaceholder: "none",
     time: "Time in channel time zone",
     weekdays: "Weekdays",
     everyDay: "Every day",

@@ -41,6 +41,8 @@ describe("Timers panel", () => {
     renderWithQuery(<UiProvider><TimersPanel channelId="channel-a" language="en" /></UiProvider>);
     fireEvent.click(toolbarButton("Create timer"));
 
+    expect(screen.getByRole("heading", { name: "General" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Name" })).not.toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Live" })).toBeChecked();
     expect(screen.getByRole("switch", { name: "Offline" })).not.toBeChecked();
     expect(screen.getByText(/An enabled offline interval runs separately/u)).toBeInTheDocument();
@@ -52,6 +54,7 @@ describe("Timers panel", () => {
     expect(screen.getByText(/An enabled offline interval runs separately/u)).toBeInTheDocument();
     expect(screen.getAllByRole("spinbutton", { name: "Minutes" })).toHaveLength(2);
     expect(screen.getAllByRole("spinbutton", { name: "Minimum chat messages" })).toHaveLength(2);
+    expect(screen.getAllByRole("spinbutton", { name: "Minimum chat messages" })[1]).toHaveAttribute("placeholder", "none");
   });
 
   it("saves valid interval parts after a hidden trigger's minutes field was cleared", () => {
@@ -282,6 +285,49 @@ describe("Timers panel", () => {
     expect(timerReads).toBeGreaterThan(2);
   });
 
+  it("reloads the timer from the server after the automatic conflict refresh fails", async () => {
+    const originalTimer: Timer = {
+      id: "timer-conflict", name: "Original timer", enabled: true, messageText: "Hello", chatTarget: "source_only",
+      trigger: { type: "interval", live: { minutes: 30 } }, revision: 1, nextRunAt: null, nextRunState: null,
+      lastRunAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
+    };
+    const updatedTimer = { ...originalTimer, name: "Updated on the server", revision: 2 };
+    let currentTimer = originalTimer;
+    let timerReads = 0;
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      const method = init?.method ?? "GET";
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({
+        timeZone: "UTC", revision: 1, location: null, locationRevision: 1,
+        defaultChatTarget: "source_only", defaultChatTargetRevision: 1,
+      }));
+      if (url.pathname.endsWith("/event-time-sources")) return Promise.resolve(jsonResponse({ sources: [] }));
+      if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
+      if (url.pathname.endsWith("/timers/timer-conflict") && method === "PATCH") {
+        currentTimer = updatedTimer;
+        return Promise.resolve(jsonResponse({ error: "timer_conflict" }, 409));
+      }
+      if (url.pathname.endsWith("/timers")) {
+        timerReads += 1;
+        if (timerReads === 2) return Promise.resolve(jsonResponse({ error: "temporarily unavailable" }, 503));
+        return Promise.resolve(jsonResponse({ timers: [currentTimer] }));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    renderWithQuery(<UiProvider><TimersPanel channelId="channel-a" language="en" /></UiProvider>, {}, { staleTime: 60_000 });
+    const nameField = await screen.findByRole("textbox", { name: "Name" });
+    fireEvent.change(nameField, { target: { value: "Rejected draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Reload" }));
+
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Updated on the server"));
+    expect(timerReads).toBeGreaterThan(2);
+  });
+
   it("keeps the create action visible and disabled for operators", () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>((input) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
@@ -395,6 +441,53 @@ describe("Timers panel", () => {
     await waitFor(() => expect(screen.getAllByRole("switch", { name: "Enablement check: Disabled" }).length).toBeGreaterThan(0));
     expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Enablement check");
     expect(screen.queryByText("This timer has changed. Reload the current version before continuing.")).not.toBeInTheDocument();
+  });
+
+  it("keeps a resolved preview when only the timer revision changes", async () => {
+    const originalTimer: Timer = {
+      id: "timer-preview", name: "Preview timer", enabled: true, messageText: "{text.welcome}", chatTarget: "source_only",
+      trigger: { type: "interval", live: { minutes: 30 } }, revision: 1, nextRunAt: null, nextRunState: null,
+      lastRunAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
+    };
+    let currentTimer = originalTimer;
+    let previewCalls = 0;
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      const method = init?.method ?? "GET";
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+      if (url.pathname.endsWith("/template-preview")) {
+        previewCalls += 1;
+        return Promise.resolve(jsonResponse({ text: "Resolved welcome message", diagnostics: [] }));
+      }
+      if (url.pathname.endsWith("/timers/timer-preview/enabled") && method === "PATCH") {
+        currentTimer = { ...currentTimer, enabled: false, revision: 2 };
+        return Promise.resolve(jsonResponse({ timer: currentTimer }));
+      }
+      if (url.pathname.endsWith("/timers")) return Promise.resolve(jsonResponse({ timers: [currentTimer] }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({
+        timeZone: "UTC", revision: 1, location: null, locationRevision: 1,
+        defaultChatTarget: "source_only", defaultChatTargetRevision: 1,
+      }));
+      if (url.pathname.endsWith("/event-time-sources")) return Promise.resolve(jsonResponse({ sources: [] }));
+      if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    renderWithQuery(<UiProvider><TimersPanel channelId="channel-a" language="en" /></UiProvider>);
+    await screen.findByRole("textbox", { name: "Message" });
+    const preview = document.querySelector(".timer-editor__preview");
+    if (!(preview instanceof HTMLElement)) throw new Error("The timer preview is missing.");
+    await within(preview).findByText("Resolved welcome message");
+    expect(previewCalls).toBe(1);
+
+    fireEvent.click(within(document.querySelector(".timer-list") as HTMLElement)
+      .getByRole("switch", { name: "Preview timer: Enabled" }));
+
+    await waitFor(() => expect(within(document.querySelector(".timer-list") as HTMLElement)
+      .getByRole("switch", { name: "Preview timer: Disabled" })).toBeInTheDocument());
+    expect(within(preview).getByText("Resolved welcome message")).toBeInTheDocument();
+    expect(previewCalls).toBe(1);
   });
 
   it("shows timer details as a read-only property list for operators", async () => {

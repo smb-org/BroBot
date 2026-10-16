@@ -31,6 +31,7 @@ export interface ListToolbarProperties {
   onSearchKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
   filters?: ReactNode;
   filtersLabel?: string;
+  createPlacement?: "after-search" | "after-filters";
   create?: {
     label: string;
     ariaLabel?: string;
@@ -78,6 +79,7 @@ export function ListToolbar({
   onSearchKeyDown,
   filters,
   filtersLabel,
+  createPlacement = "after-filters",
   create,
   usage,
   queryError,
@@ -94,6 +96,19 @@ export function ListToolbar({
   const warning = usage?.maximum !== undefined && usage.maximum > 0 && usage.count >= usage.maximum * 0.9;
   const hasSearch = searchLabel !== undefined && searchPlaceholder !== undefined && searchClearLabel !== undefined &&
     searchValue !== undefined && onSearchChange !== undefined;
+  const createAction = create === undefined ? null : (
+    <div className="list-toolbar__create">
+      <Button
+        variant="primary"
+        icon="add"
+        {...(create.ariaLabel === undefined ? {} : { ariaLabel: create.ariaLabel })}
+        {...(create.ref === undefined ? {} : { ref: create.ref })}
+        disabled={create.disabled === true || createReason !== undefined}
+        {...(createReason === undefined ? {} : { describedBy: createReasonId })}
+        onClick={create.onClick}
+      >{create.label}</Button>
+    </div>
+  );
 
   return (
     <div data-ui="" className={["list-toolbar", className].filter(Boolean).join(" ")}>
@@ -110,24 +125,13 @@ export function ListToolbar({
             {...(onSearchKeyDown === undefined ? {} : { onKeyDown: onSearchKeyDown })}
           />
         </div> : null}
+        {createPlacement === "after-search" ? createAction : null}
         {filters === undefined ? null : (
           <div className="list-toolbar__filters" role="group" aria-label={filtersLabel}>
             {filters}
           </div>
         )}
-        {create === undefined ? null : (
-          <div className="list-toolbar__create">
-            <Button
-              variant="primary"
-              icon="add"
-              {...(create.ariaLabel === undefined ? {} : { ariaLabel: create.ariaLabel })}
-              {...(create.ref === undefined ? {} : { ref: create.ref })}
-              disabled={create.disabled === true || createReason !== undefined}
-              {...(createReason === undefined ? {} : { describedBy: createReasonId })}
-              onClick={create.onClick}
-            >{create.label}</Button>
-          </div>
-        )}
+        {createPlacement === "after-filters" ? createAction : null}
       </div>
       <LoadState
         variant="status-row"

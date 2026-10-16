@@ -102,8 +102,10 @@ export interface TextLibraryTexts {
   cycle: (path: readonly string[]) => string;
   depth: (path: readonly string[]) => string;
   saveError: string;
+  deleteMenuLabel: string;
   templateInputDependent: (consumerName: string) => string;
   uses: string;
+  viewUsages: string;
   usesCount: (count: number) => string;
   noUsages: string;
   usageKind: Record<TextBlockUsage["kind"], string>;
@@ -226,8 +228,10 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     cycle: (path) => `Zirkuläre Einbettung: ${path.join(" → ")}.`,
     depth: (path) => `Die Einbettung überschreitet die maximale Tiefe von 3: ${path.join(" → ")}.`,
     saveError: "Der Textbaustein konnte nicht gespeichert werden.",
+    deleteMenuLabel: "Löschen",
     templateInputDependent: (consumerName) => `Diese Änderung würde „${consumerName}“ von Chatbefehl-Eingaben abhängig machen.`,
     uses: "Verwendet in",
+    viewUsages: "Verwendungen anzeigen",
     usesCount: (count) => `${String(count)} ${count === 1 ? "Verwendung" : "Verwendungen"}`,
     noUsages: "Noch keine Verwendungen.",
     usageKind: { block: "Textbaustein", command: "Befehl", faq: "FAQ", timer: "Timer", overlay: "Overlay", event: "Ereignis" },
@@ -375,8 +379,10 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     cycle: (path) => `Circular reference: ${path.join(" → ")}.`,
     depth: (path) => `Nesting exceeds the maximum depth of 3: ${path.join(" → ")}.`,
     saveError: "The text block could not be saved.",
+    deleteMenuLabel: "Delete",
     templateInputDependent: (consumerName) => `This change would make “${consumerName}” depend on chat command input.`,
     uses: "Used in",
+    viewUsages: "Show usage",
     usesCount: (count) => `${String(count)} ${count === 1 ? "use" : "uses"}`,
     noUsages: "No usages yet.",
     usageKind: { block: "Text block", command: "Command", faq: "FAQ", timer: "Timer", overlay: "Overlay", event: "Event" },

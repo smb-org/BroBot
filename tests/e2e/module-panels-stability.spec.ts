@@ -1482,15 +1482,18 @@ test("text-library filters fit the shared list and track mobile chip growth", as
       expect(pickerBox?.width ?? 0).toBeGreaterThanOrEqual((toolbarBox?.width ?? 0) - 1);
     }
     else {
-      // At 700px the category and game filters shrink within the toolbar row.
+      // At 700px the category and game filters share a row below the search and create controls.
       expect(pickerBox?.y ?? 0).toBeGreaterThanOrEqual(filtersBox?.y ?? 0);
       expect((pickerBox?.y ?? 0) + (pickerBox?.height ?? 0)).toBeLessThanOrEqual((filtersBox?.y ?? 0) + (filtersBox?.height ?? 0) + 0.5);
-      expect(createBox?.x ?? 0).toBeGreaterThanOrEqual((filtersBox?.x ?? 0) + (filtersBox?.width ?? 0) - 0.5);
     }
     if (width === 700) {
       const filterOverflow = await filters.evaluate((element) => element.scrollWidth > element.clientWidth);
       expect(filterOverflow).toBe(false);
-      expect((pickerBox?.x ?? 0) + (pickerBox?.width ?? 0)).toBeLessThanOrEqual((createBox?.x ?? 0) + 0.5);
+      const searchBox = await toolbar.locator(".list-toolbar__search").boundingBox();
+      expect(createBox?.x ?? 0).toBeGreaterThanOrEqual((searchBox?.x ?? 0) + (searchBox?.width ?? 0) - 0.5);
+      expect(createBox?.y ?? 0).toBeGreaterThanOrEqual(searchBox?.y ?? 0);
+      expect((createBox?.y ?? 0) + (createBox?.height ?? 0)).toBeLessThanOrEqual((searchBox?.y ?? 0) + (searchBox?.height ?? 0) + 0.5);
+      expect(filtersBox?.y ?? 0).toBeGreaterThanOrEqual((searchBox?.y ?? 0) + (searchBox?.height ?? 0) - 0.5);
       const pageOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
       expect(pageOverflow).toBe(false);
     }

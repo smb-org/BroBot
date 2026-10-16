@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -8,8 +8,12 @@ import TextLibraryPanel from "../../src/modules/text_library/panel";
 
 const initialLanguage = Object.getOwnPropertyDescriptor(window.navigator, "language");
 
-const libraryFetcher = (blocks: readonly Record<string, unknown>[] = []): ReturnType<typeof vi.fn<typeof fetch>> => vi.fn<typeof fetch>((input) => {
+const libraryFetcher = (
+  blocks: readonly Record<string, unknown>[] = [],
+  usages: Record<string, unknown> = {},
+): ReturnType<typeof vi.fn<typeof fetch>> => vi.fn<typeof fetch>((input) => {
   const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+  if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
   if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
   if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({ timeZone: "UTC", revision: 1 }));
   if (url.pathname.endsWith("/template-preview")) return Promise.resolve(jsonResponse({ text: "", diagnostics: [] }));
@@ -17,7 +21,7 @@ const libraryFetcher = (blocks: readonly Record<string, unknown>[] = []): Return
     blocks,
     categories: [{ id: "social", catalogKey: "social", customName: null, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }],
     settings: { revision: 1, graphRevision: 1, updatedAt: "2026-01-01T00:00:00.000Z" },
-    usages: {},
+    usages,
     reservedNames: [],
   }));
 });
@@ -74,6 +78,20 @@ describe("Text library panel layout slots", () => {
     expect(reason).toBeVisible();
     expect(reason).toHaveTextContent("Only broadcasters and managers may add text blocks.");
     expect(reason).not.toHaveAttribute("aria-hidden");
+  });
+
+  it("keeps the create action before the filters in the list toolbar", async () => {
+    vi.stubGlobal("fetch", libraryFetcher());
+    renderWithQuery(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" /></MantineProvider>);
+    await waitForLibraryLoad();
+
+    const row = document.querySelector(".text-library__list-toolbar .list-toolbar__row");
+    expect(row).not.toBeNull();
+    expect(Array.from(row?.children ?? []).map((child) => child.classList[0])).toEqual([
+      "list-toolbar__search",
+      "list-toolbar__create",
+      "list-toolbar__filters",
+    ]);
   });
 
   it("disables creation at the block limit with a visible reason", async () => {
@@ -158,7 +176,8 @@ describe("Text library panel layout slots", () => {
     fireEvent.click(screen.getByRole("button", { name: /\{text\.welcome\}/u }));
     expect(screen.queryByRole("heading", { name: "Unsaved changes" })).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("welcome_updated");
-    fireEvent.click(screen.getByRole("button", { name: "Delete text block" }));
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
 
     expect(await screen.findByRole("heading", { name: "Unsaved changes" })).toBeInTheDocument();
     expect(screen.getByText("This text block has unsaved changes. What would you like to do?")).toBeInTheDocument();
@@ -168,5 +187,111 @@ describe("Text library panel layout slots", () => {
     fireEvent.click(screen.getByRole("button", { name: "Continue editing" }));
     expect(screen.queryByRole("heading", { name: "Unsaved changes" })).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("welcome_updated");
+  });
+
+  it("shows blocked deletion details in the overflow menu and opens the usage dialog", async () => {
+    vi.stubGlobal("fetch", libraryFetcher([{
+      name: "welcome",
+      categoryId: "social",
+      games: [],
+      variants: [{ id: "default", conditions: {}, texts: ["Welcome to chat"] }],
+      revision: 1,
+    }], { welcome: [{ kind: "timer", label: "Welcome timer" }, { kind: "faq", label: "Welcome FAQ" }] }));
+    renderWithQuery(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" /></MantineProvider>);
+
+    await screen.findByRole("textbox", { name: "Name" });
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+
+    const deleteItem = screen.getByRole("menuitem", { name: "Delete" });
+    expect(deleteItem).toHaveAttribute("aria-disabled", "true");
+    expect(deleteItem).toHaveAccessibleDescription("Used in 2 places");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Show usage" }));
+
+    expect(await screen.findByRole("heading", { name: "Uses of “welcome” prevent deletion" })).toBeInTheDocument();
+    const usageDialog = screen.getByRole("dialog");
+    expect(within(usageDialog).getAllByText("Welcome timer").length).toBeGreaterThan(0);
+    expect(within(usageDialog).getAllByText("Welcome FAQ").length).toBeGreaterThan(0);
+  });
+
+  it("does not treat a rename collision as a revision conflict", async () => {
+    const block = {
+      name: "welcome",
+      categoryId: "social",
+      games: [],
+      variants: [{ id: "default", conditions: {}, texts: ["Welcome to chat"] }],
+      revision: 1,
+    };
+    const fallback = libraryFetcher([block]);
+    const fetchMock = vi.fn<typeof fetch>((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      const method = init?.method ?? "GET";
+      if (url.pathname.endsWith("/blocks/welcome") && method === "PATCH") {
+        return Promise.resolve(jsonResponse({ error: "text_library_block_exists" }, 409));
+      }
+      return fallback(input);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithQuery(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" /></MantineProvider>);
+
+    const nameField = await screen.findByRole("textbox", { name: "Name" });
+    fireEvent.change(nameField, { target: { value: "another_name" } });
+    const saveButton = screen.getByRole("button", { name: "Save changes" });
+    await waitFor(() => expect(saveButton).toBeEnabled());
+    fireEvent.click(saveButton);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/blocks/welcome"), expect.objectContaining({ method: "PATCH" })));
+
+    await waitFor(() => expect(saveButton).toBeEnabled());
+    expect(saveButton).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Discard" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reload" })).not.toBeInTheDocument();
+  });
+
+  it("reloads a revision conflict from the server after the automatic refresh fails", async () => {
+    const originalBlock = {
+      name: "welcome",
+      categoryId: "social",
+      games: [],
+      variants: [{ id: "default", conditions: {}, texts: ["Welcome to chat"] }],
+      revision: 1,
+    };
+    const updatedBlock = {
+      ...originalBlock,
+      variants: [{ id: "default", conditions: {}, texts: ["Welcome from the server"] }],
+      revision: 2,
+    };
+    let currentBlock = originalBlock;
+    let libraryReads = 0;
+    const fallback = libraryFetcher([originalBlock]);
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      const method = init?.method ?? "GET";
+      if (url.pathname.endsWith("/blocks/welcome") && method === "PATCH") {
+        currentBlock = updatedBlock;
+        return Promise.resolve(jsonResponse({ error: "text_library_block_conflict" }, 409));
+      }
+      if (url.pathname.endsWith("/library")) {
+        libraryReads += 1;
+        if (libraryReads === 2) return Promise.resolve(jsonResponse({ error: "temporarily unavailable" }, 503));
+        return Promise.resolve(jsonResponse({
+          blocks: [currentBlock],
+          categories: [{ id: "social", catalogKey: "social", customName: null, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }],
+          settings: { revision: currentBlock.revision, graphRevision: 1, updatedAt: "2026-01-01T00:00:00.000Z" },
+          usages: {},
+          reservedNames: [],
+        }));
+      }
+      return fallback(input, init);
+    }));
+    renderWithQuery(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" /></MantineProvider>, {}, { staleTime: 60_000 });
+
+    const nameField = await screen.findByRole("textbox", { name: "Name" });
+    const textField = screen.getByRole("textbox", { name: "Text" });
+    expect(textField).toHaveValue("Welcome to chat");
+    fireEvent.change(nameField, { target: { value: "rejected_draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Reload" }));
+
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Text" })).toHaveValue("Welcome from the server"));
+    expect(libraryReads).toBeGreaterThan(2);
   });
 });
