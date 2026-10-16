@@ -799,6 +799,33 @@ test("the saved vote inspector keeps its draft while leaving vote starts to the 
 
   const createButton = page.getByRole("button", { name: "Create vote" });
   const firstVote = page.locator(".chat-voting-template-list .list-row__link").first();
+  const toolbarRow = page.locator(".chat-voting-collection__toolbar .list-toolbar__row");
+  const toolbarSearch = page.locator(".chat-voting-collection__toolbar .list-toolbar__search");
+  const toolbarCreate = page.locator(".chat-voting-collection__toolbar .list-toolbar__create");
+  const toolbarRowBounds = await box(toolbarRow);
+  const toolbarSearchBounds = await box(toolbarSearch);
+  const toolbarSearchInputBounds = await box(toolbarSearch.locator(".ui-field__input"));
+  const toolbarCreateBounds = await box(toolbarCreate);
+  expect(toolbarSearchBounds.x).toBeCloseTo(toolbarRowBounds.x, 0);
+  expect(toolbarSearchBounds.width).toBeCloseTo(toolbarRowBounds.width, 0);
+  expect(toolbarSearchInputBounds.width).toBeCloseTo(toolbarRowBounds.width, 0);
+  expect(toolbarCreateBounds.x).toBeCloseTo(toolbarRowBounds.x, 0);
+  expect(toolbarCreateBounds.y).toBeGreaterThan(toolbarSearchBounds.y);
+  const titleStyle = await firstVote.locator(".list-row__title").evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      display: style.display,
+      whiteSpace: style.whiteSpace,
+      lineClamp: style.getPropertyValue("-webkit-line-clamp"),
+      boxOrient: style.getPropertyValue("-webkit-box-orient"),
+      lineHeight: Number.parseFloat(style.lineHeight),
+      height: element.getBoundingClientRect().height,
+    };
+  });
+  expect(titleStyle.whiteSpace).toBe("normal");
+  expect(titleStyle.lineClamp).toBe("2");
+  expect(titleStyle.boxOrient).toBe("vertical");
+  expect(titleStyle.height).toBeLessThanOrEqual(titleStyle.lineHeight * 2 + 1);
   const createBounds = await box(createButton);
   const firstVoteBounds = await box(firstVote);
   expect(firstVoteBounds.y - createBounds.y - createBounds.height).toBeLessThanOrEqual(24);
