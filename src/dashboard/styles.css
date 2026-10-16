@@ -742,7 +742,7 @@ form.content-section { display: grid; gap: var(--s4); }
 .text-library__editor > .page-header .page-header__meta,
 .timer-editor > .page-header .page-header__meta { margin-top: 2px; font-size: 11px; }
 .text-library__editor > .page-header .page-header__right,
-.timer-editor > .page-header .page-header__right { flex-wrap: nowrap; gap: 0; }
+.timer-editor > .page-header .page-header__right { flex-wrap: nowrap; }
 .text-library__editor > .page-header .page-header__save,
 .timer-editor > .page-header .page-header__save { flex: 0 1 430px; }
 .text-library__editor > .page-header .page-header__save { width: auto; flex: 0 1 auto; }
