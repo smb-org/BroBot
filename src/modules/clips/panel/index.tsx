@@ -95,7 +95,7 @@ function ClipsSettingsView({ settings, refreshFailed, labels }: ClipsSettingsVie
       </Section>
 
       <Section title={labels.automaticSection}>
-        <p className="clips-panel__locked-note">{labels.automaticLaterVersion}</p>
+        <p className="clips-panel__locked-note">{labels.lockedLaterVersion}</p>
         <SwitchRow
           label={labels.automatic}
           checked={settings.automaticClipsEnabled}

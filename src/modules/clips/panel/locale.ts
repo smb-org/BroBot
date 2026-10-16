@@ -24,7 +24,6 @@ export interface ClipsPanelTexts {
   lockedLaterVersion: string;
   automatic: string;
   automaticSection: string;
-  automaticLaterVersion: string;
   threshold: string;
   thresholdUnit: string;
   automaticCooldown: string;
@@ -59,7 +58,6 @@ const catalog: LocaleCatalog<ClipsPanelTexts> = {
     lockedLaterVersion: "Kommt in einer späteren Version.",
     automatic: "Automatische Clips",
     automaticSection: "Automatische Clip-Einstellungen",
-    automaticLaterVersion: "Automatische Clips kommen in einer späteren Version.",
     threshold: "Schwelle gegenüber Streamdurchschnitt",
     thresholdUnit: "fach",
     automaticCooldown: "Abklingzeit zwischen automatischen Clips",
@@ -92,7 +90,6 @@ const catalog: LocaleCatalog<ClipsPanelTexts> = {
     lockedLaterVersion: "Coming in a later version.",
     automatic: "Automatic clips",
     automaticSection: "Automatic clip settings",
-    automaticLaterVersion: "Automatic clips are coming in a later version.",
     threshold: "Threshold relative to stream average",
     thresholdUnit: "times",
     automaticCooldown: "Cooldown between automatic clips",

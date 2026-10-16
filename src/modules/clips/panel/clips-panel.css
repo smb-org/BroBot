@@ -9,6 +9,10 @@
   width: 100%;
   max-width: none;
   grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 0;
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: 0;
 }
 
 .module-detail:has(.clips-panel) {
@@ -34,7 +38,9 @@
 }
 
 .clips-panel__settings { gap: 0; }
-.clips-panel__settings > .ui-section:first-of-type { margin-top: 0; }
+
+/* The fields are permanently locked, so their reserved description, error and reason rows stay empty. */
+.clips-panel__settings :is(.ui-select__description, .unit-input__description, .ui-field-error, .ui-locked-reason--reserved) { display: none; }
 
 .clips-panel__locked-note {
   margin: 0;
@@ -113,8 +119,8 @@
 }
 
 .clips-panel__settings-refresh-message [role="alert"] { overflow-wrap: anywhere; }
-.clips-panel__settings-load-state { --clips-panel-settings-reserve-height: 800px; }
-.clips-panel__settings-load-state .ui-load-state__reserved-lines > span:nth-child(n + 15) { display: none; }
+.clips-panel__settings-load-state { --clips-panel-settings-reserve-height: 658px; }
+.clips-panel__settings-load-state .ui-load-state__reserved-lines > span:nth-child(n + 13) { display: none; }
 
 .clips-panel .ui-load-state__inline-error {
   grid-template-columns: minmax(0, 1fr) auto;
@@ -181,8 +187,9 @@
 .clips-panel__clip-link:hover { border-color: var(--color-accent); color: var(--color-accent); }
 
 @media (max-width: 600px) {
-  .clips-panel__settings-load-state { --clips-panel-settings-reserve-height: 1080px; }
-  .clips-panel__settings-load-state .ui-load-state__reserved-lines > span:nth-child(n + 15) { display: block; }
+  .clips-panel__settings-load-state { --clips-panel-settings-reserve-height: 850px; }
+  .clips-panel__settings-load-state .ui-load-state__reserved-lines > span:nth-child(n + 13) { display: block; }
+  .clips-panel__settings-load-state .ui-load-state__reserved-lines > span:nth-child(n + 16) { display: none; }
   .clips-panel .page-header.module-detail-heading { grid-template-columns: minmax(0, 1fr); }
   .clips-panel__clips-section > .ui-section__heading { align-items: flex-start; flex-wrap: wrap; }
   .clips-panel__refresh-actions { width: 100%; flex-wrap: wrap; justify-content: flex-start; }

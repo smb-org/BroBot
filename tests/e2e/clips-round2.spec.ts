@@ -96,8 +96,7 @@ test("manager and operator see the same locked settings without save or restore 
     await expect(page.getByRole("heading", { name: "Chatbefehl !clip", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Clip-Link im Chat posten", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Automatische Clip-Einstellungen", exact: true })).toBeVisible();
-    await expect(page.getByText("Kommt in einer späteren Version.", { exact: true })).toHaveCount(2);
-    await expect(page.getByText("Automatische Clips kommen in einer späteren Version.", { exact: true })).toBeVisible();
+    await expect(page.getByText("Kommt in einer späteren Version.", { exact: true })).toHaveCount(3);
     await expect(page.locator("#clips-command-cooldown")).toBeDisabled();
     await expect(page.locator("#clips-chat-message")).toBeDisabled();
     await expect(page.locator("#clips-auto-threshold")).toBeDisabled();
@@ -203,7 +202,7 @@ for (const width of [1920, 1280, 390, 2560]) {
 
     const automaticSection = page.locator(".ui-section").filter({ has: page.getByRole("heading", { name: "Automatische Clip-Einstellungen", exact: true }) });
     const automaticHeading = await automaticSection.locator(".ui-section__heading").boundingBox();
-    const notice = await automaticSection.getByText("Automatische Clips kommen in einer späteren Version.", { exact: true }).boundingBox();
+    const notice = await automaticSection.getByText("Kommt in einer späteren Version.", { exact: true }).boundingBox();
     expect(automaticHeading).not.toBeNull();
     expect(notice).not.toBeNull();
     expect((notice?.y ?? 0) - ((automaticHeading?.y ?? 0) + (automaticHeading?.height ?? 0))).toBeLessThanOrEqual(20);
@@ -222,10 +221,10 @@ for (const width of [1920, 1280, 390, 2560]) {
     const loadStateBefore = await page.locator(".clips-panel__settings-load-state").boundingBox();
     const listBefore = await page.locator(".clips-panel__clips-section").boundingBox();
     await expect(page.getByRole("heading", { name: "Clip-Einstellungen", exact: true })).toBeVisible();
-    const reservedHeight = width < 600 ? 1080 : 800;
+    const reservedHeight = width < 600 ? 850 : 658;
     expect(await page.locator(".clips-panel__settings-load-state").evaluate((element) => getComputedStyle(element).minHeight)).toBe(`${String(reservedHeight)}px`);
     expect(await page.locator(".clips-panel__settings-load-state .ui-load-state__reserved-lines > span").nth(14).evaluate((element) => getComputedStyle(element).display)).toBe(width < 600 ? "block" : "none");
-    expect(await page.locator(".clips-panel__settings-load-state .ui-load-state__reserved-lines > span").nth(18).evaluate((element) => getComputedStyle(element).display)).toBe(width < 600 ? "block" : "none");
+    expect(await page.locator(".clips-panel__settings-load-state .ui-load-state__reserved-lines > span").nth(18).evaluate((element) => getComputedStyle(element).display)).toBe("none");
     expect(loadStateBefore?.height).toBe(reservedHeight);
     mock.releaseSettings();
     await expect(page.locator("#clips-auto-threshold")).toBeVisible();

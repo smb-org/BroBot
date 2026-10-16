@@ -53,8 +53,7 @@ describe("clips panel", () => {
     expect(await screen.findByRole("heading", { name: "Chatbefehl !clip", level: 2 })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Clip-Link im Chat posten", level: 2 })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Automatische Clip-Einstellungen", level: 2 })).toBeInTheDocument();
-    expect(screen.getAllByText("Kommt in einer späteren Version.", { exact: true })).toHaveLength(2);
-    expect(screen.getByText("Automatische Clips kommen in einer späteren Version.", { exact: true })).toBeInTheDocument();
+    expect(screen.getAllByText("Kommt in einer späteren Version.", { exact: true })).toHaveLength(3);
 
     for (const id of ["clips-command-role", "clips-command-cooldown", "clips-chat-message", "clips-auto-threshold", "clips-auto-cooldown"]) {
       expect(document.getElementById(id)).toBeDisabled();

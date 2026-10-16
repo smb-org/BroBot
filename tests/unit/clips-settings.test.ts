@@ -29,8 +29,6 @@ describe("clips settings", () => {
   it("keeps unreleased clip settings visible with neutral bilingual copy", () => {
     expect(clipsPanelTexts("de").lockedLaterVersion).toBe("Kommt in einer späteren Version.");
     expect(clipsPanelTexts("en").lockedLaterVersion).toBe("Coming in a later version.");
-    expect(clipsPanelTexts("de").automaticLaterVersion).toBe("Automatische Clips kommen in einer späteren Version.");
-    expect(clipsPanelTexts("en").automaticLaterVersion).toBe("Automatic clips are coming in a later version.");
     for (const language of ["de", "en"] as const) {
       const labels = clipsPanelTexts(language);
       const copy = Object.values(labels).flatMap((value) => typeof value === "string" ? [value] : []);
