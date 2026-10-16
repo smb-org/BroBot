@@ -28,6 +28,7 @@ export interface ShellProps {
   mode: "live" | "setup";
   commandPaletteOpen: boolean;
   onCommandPaletteOpenChange: (open: boolean) => void;
+  focusKey?: string;
   children: ReactNode;
 }
 
@@ -41,13 +42,18 @@ export function Shell({
   mode,
   commandPaletteOpen,
   onCommandPaletteOpenChange,
+  focusKey,
   children,
 }: ShellProps) {
   const [navRequested, setMobileNavOpen] = useState(false);
   const [returnFocusOnClose, setReturnFocusOnClose] = useState(false);
   const mobileBurgerRef = useRef<HTMLButtonElement>(null);
   const mobileDrawerRef = useRef<HTMLElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
   const wasMobileNavOpenRef = useRef(false);
+  const focusMainAfterMobileCloseRef = useRef(false);
+  const previousFocusKeyRef = useRef(focusKey);
+  const initialRouteFocusHandledRef = useRef(false);
   const isSetup = mode === "setup";
   // Derived: the drawer only exists in setup mode, so `inert` can never outlive it.
   const isMobileLayout = useSyncExternalStore(subscribeMobileLayout, getMobileLayout, () => false);
@@ -105,6 +111,26 @@ export function Shell({
   }, [closeMobileNav, commandPaletteOpen, mobileNavOpen, onCommandPaletteOpenChange]);
 
   useLayoutEffect(() => {
+    const routeChanged = previousFocusKeyRef.current !== focusKey;
+    previousFocusKeyRef.current = focusKey;
+    if (!initialRouteFocusHandledRef.current) {
+      initialRouteFocusHandledRef.current = true;
+      if (!mobileNavOpen) mainRef.current?.focus({ preventScroll: true });
+      return;
+    }
+    if (routeChanged) {
+      if (mobileNavOpen || wasMobileNavOpenRef.current) {
+        focusMainAfterMobileCloseRef.current = true;
+        setReturnFocusOnClose(false);
+        if (mobileNavOpen) queueMicrotask(() => setMobileNavOpen(false));
+        return;
+      }
+      mainRef.current?.focus({ preventScroll: true });
+      return;
+    }
+  }, [focusKey, mobileNavOpen]);
+
+  useLayoutEffect(() => {
     if (mobileNavOpen) {
       wasMobileNavOpenRef.current = true;
       const drawer = mobileDrawerRef.current;
@@ -116,7 +142,12 @@ export function Shell({
     }
     if (wasMobileNavOpenRef.current) {
       wasMobileNavOpenRef.current = false;
-      if (returnFocusOnClose) mobileBurgerRef.current?.focus({ preventScroll: true });
+      if (focusMainAfterMobileCloseRef.current) {
+        focusMainAfterMobileCloseRef.current = false;
+        mainRef.current?.focus({ preventScroll: true });
+      } else if (returnFocusOnClose) {
+        mobileBurgerRef.current?.focus({ preventScroll: true });
+      }
     }
   }, [mobileNavOpen, returnFocusOnClose]);
 
@@ -163,7 +194,7 @@ export function Shell({
             </aside>
           </>
         ) : null}
-        <main className="dashboard-shell__main" inert={mobileNavOpen}>{children}</main>
+        <main className="dashboard-shell__main" inert={mobileNavOpen} ref={mainRef} tabIndex={-1}>{children}</main>
       </div>
       <ToastHost />
     </div>

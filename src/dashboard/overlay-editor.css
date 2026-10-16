@@ -119,6 +119,7 @@
 
 @media (max-width: 1120px) {
   .overlay-editor__preview-panel { position: sticky; top: calc(var(--app-shell-header-height, 56px) + var(--s3)); z-index: 1; }
+  .dashboard-shell__main .overlay-editor__preview-panel { top: var(--s3); }
   .overlay-editor__workspace { grid-template-columns: minmax(150px, .7fr) minmax(300px, 1.5fr); grid-template-areas: "elements preview" "properties properties"; }
 }
 

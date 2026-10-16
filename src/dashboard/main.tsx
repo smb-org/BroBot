@@ -44,7 +44,7 @@ import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, 
 import { CHANNEL_CONTROL_DURATIONS, canManage, type ChannelControlDuration, type ChannelRole } from "../contracts/values";
 import { MODULES } from "../modules/registry";
 import { eventSubName, moduleNavigationName, statusWord } from "./module-labels";
-import { dashboardModeForRoute, dashboardRoutePath, dashboardRouteRequiresBot, routeForDashboardMode, routeForSelectedChannel, replaceDashboardRoute, useDashboardRoute, type DashboardMode, type DashboardRoute } from "./router";
+import { dashboardModeForRoute, dashboardRouteFocusKey, dashboardRoutePath, dashboardRouteRequiresBot, routeForDashboardMode, routeForSelectedChannel, replaceDashboardRoute, useDashboardRoute, type DashboardMode, type DashboardRoute } from "./router";
 import { dashboardNavigationGroups, visibleModuleNavigationIds } from "./nav-pages";
 import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, LoadStateLines, notify, PageHeader, Select as UiSelect, Shell, Sidebar, StatusLed, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type StatusLedState } from "./ui";
 import { readPalette, writePalette, type Palette } from "./ui/palette";
@@ -1469,6 +1469,7 @@ export const DashboardApp = (): ReactElement => {
           mode={dashboardMode}
           commandPaletteOpen={commandPaletteOpen}
           onCommandPaletteOpenChange={setCommandPaletteOpen}
+          focusKey={dashboardRouteFocusKey(route)}
         >
           <div className="main-content">
         {!showBotBlocking && route.kind === "overview" ? <OverviewPage channelState={channels} onNavigate={navigate} /> : null}
