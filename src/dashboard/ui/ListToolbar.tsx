@@ -39,6 +39,7 @@ export interface ListToolbarProperties {
     ref?: Ref<HTMLButtonElement>;
     disabled?: boolean;
     reason?: string;
+    reasonId?: string;
   };
   usage?: ListToolbarUsage;
   queryError?: QueryError;
@@ -89,7 +90,8 @@ export function ListToolbar({
   onReset,
   className,
 }: ListToolbarProperties) {
-  const createReasonId = useId();
+  const generatedCreateReasonId = useId();
+  const createReasonId = create?.reasonId ?? generatedCreateReasonId;
   const createReason = create?.reason;
   const activeFilterText = activeFilters?.trim() ?? "";
   const hasActiveFilters = activeFilterText.length > 0;

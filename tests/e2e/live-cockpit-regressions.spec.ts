@@ -344,10 +344,12 @@ test("the location warning opens Ort & Wetter and both time zone and chat defaul
   await page.getByRole("button", { name: "Standort ändern" }).click();
   await page.getByRole("textbox", { name: "Ort suchen" }).fill("Berlin");
   await page.getByRole("button", { name: "Suchen" }).click();
-  const locationSaved = page.waitForResponse((response) => response.url().endsWith(`/api/channels/${channelId}/settings/location`) && response.request().method() === "PATCH");
   await page.getByRole("option", { name: /Berlin/u }).click();
-  await locationSaved;
   await expect(page.locator(".channel-location-field__current")).toContainText("Berlin, Berlin, Deutschland");
+  expect(mocks.settingsState().location).toBeNull();
+  const locationSaved = page.waitForResponse((response) => response.url().endsWith(`/api/channels/${channelId}/settings/location`) && response.request().method() === "PATCH");
+  await page.getByRole("button", { name: "Speichern", exact: true }).click();
+  await locationSaved;
   expect(mocks.settingsState().location).toMatchObject({ name: "Berlin, Berlin, Deutschland", latitude: 52.52, longitude: 13.405 });
 
   const timeZone = page.getByRole("combobox", { name: "Kanalzeitzone" });

@@ -41,13 +41,13 @@ describe("channel location page", () => {
     expect(screen.getByText("Standort fehlt")).toBeInTheDocument();
   });
 
-  it("gives operators one visible reason for disabled location and time zone controls", async () => {
+  it("shows read-only time-zone properties and one reason for disabled location actions to operators", async () => {
     const labels = channelSettingsTexts("de");
     renderPage("operator");
 
     const locationChange = await screen.findByRole("button", { name: labels.locationChange });
-    const timeZone = screen.getByRole("combobox", { name: labels.timeZone });
-    expect(timeZone).toBeDisabled();
+    expect(screen.queryByRole("combobox", { name: labels.timeZone })).not.toBeInTheDocument();
+    expect(screen.getByText("Europe/Berlin")).toBeInTheDocument();
     expect(locationChange).toBeDisabled();
     expect(screen.getAllByText(labels.readOnly)).toHaveLength(1);
   });
@@ -92,6 +92,8 @@ describe("channel location page", () => {
     });
 
     expect(timeZone).toHaveValue("Europe/Paris");
+    fireEvent.change(timeZone, { target: { value: "Europe/Amsterdam" } });
+    fireEvent.click(await screen.findByRole("option", { name: "Europe/Amsterdam", hidden: true }));
     await waitFor(() => {
       expect(screen.getAllByRole("status").some((status) => status.textContent.includes("Die Einstellungen wurden zwischenzeitlich geändert."))).toBe(true);
       expect(screen.queryByRole("button", { name: "Speichern" })).not.toBeInTheDocument();

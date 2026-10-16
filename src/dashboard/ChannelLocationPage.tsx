@@ -1,9 +1,9 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 
 import type { ChannelRole } from "../contracts/values";
 import { canManage } from "../contracts/values";
-import { PanelApiError, saveChannelTimeZone, type PanelChannelLocation, type PanelChannelSettings } from "./api";
+import { PanelApiError, saveChannelLocation, saveChannelTimeZone, type PanelChannelLocation, type PanelChannelSettings } from "./api";
 import { ChannelLocationField } from "./ChannelLocationField";
 import { ChannelTimeZoneField } from "./ChannelTimeZoneField";
 import { mergeChannelSettingsResponse } from "./channel-settings-cache";
@@ -24,10 +24,12 @@ import {
   useDraftGuard,
 } from "./ui";
 
-interface TimeZoneDraft {
+interface ChannelSettingsDraft {
   channelId: string;
   baseRevision: number;
-  value: string;
+  locationBaseRevision: number;
+  timeZone: string;
+  location: PanelChannelLocation | null;
 }
 
 export const ChannelLocationPage = ({ channelId, role }: { channelId: string; role: ChannelRole }): ReactElement => {
@@ -36,80 +38,118 @@ export const ChannelLocationPage = ({ channelId, role }: { channelId: string; ro
   const dashboard = dashboardTexts();
   const common = dashboardCommonTexts();
   const queryClient = useQueryClient();
-  const queryKey = queryKeys.channel(channelId, "settings");
+  const queryKey = useMemo(() => queryKeys.channel(channelId, "settings"), [channelId]);
   const settingsQuery = useChannelSettings(channelId);
+  const refetchSettings = settingsQuery.refetch;
   const settings = settingsQuery.data;
   const settingsReady = settings !== undefined && typeof settings.timeZone === "string" && Number.isSafeInteger(settings.revision) &&
     Number.isSafeInteger(settings.locationRevision);
   const canEdit = canManage(role);
-  const [draftState, setDraftState] = useState<TimeZoneDraft | null>(null);
+  const [draftState, setDraftState] = useState<ChannelSettingsDraft | null>(null);
   const [pending, setPending] = useState(false);
   const [saveError, setSaveError] = useState<string | undefined>();
   const [saved, setSaved] = useState(false);
   const hasDraft = draftState?.channelId === channelId;
-  const timeZone = settings === undefined ? "" : hasDraft ? draftState.value : settings.timeZone;
-  const dirty = settingsReady && timeZone !== settings.timeZone;
-  const hasRevisionConflict = dirty && hasDraft && draftState.baseRevision !== settings.revision;
+  const timeZone = !settingsReady ? "" : hasDraft ? draftState.timeZone : settings.timeZone;
+  const location = !settingsReady ? null : hasDraft ? draftState.location : settings.location;
+  const timeZoneDirty = settingsReady && timeZone !== settings.timeZone;
+  const locationDirty = settingsReady && !sameLocation(location, settings.location);
+  const dirty = settingsReady && hasDraft && (timeZoneDirty || locationDirty);
+  const hasRevisionConflict = dirty && (
+    (timeZoneDirty && draftState.baseRevision !== settings.revision) ||
+    (locationDirty && draftState.locationBaseRevision !== settings.locationRevision)
+  );
   const readOnlyReasonId = `channel-location-read-only-${channelId}`;
 
-  const writeTimeZoneDraft = (value: string): void => {
+  const writeDraft = (update: Partial<Pick<ChannelSettingsDraft, "timeZone" | "location">>): void => {
     if (!settingsReady || !canEdit) return;
-    setDraftState(value === settings.timeZone ? null : { channelId, baseRevision: settings.revision, value });
+    const current = hasDraft ? draftState : {
+      channelId,
+      baseRevision: settings.revision,
+      locationBaseRevision: settings.locationRevision,
+      timeZone: settings.timeZone,
+      location: settings.location,
+    };
+    const next = { ...current, ...update };
+    const hasChanges = next.timeZone !== settings.timeZone || !sameLocation(next.location, settings.location);
+    setDraftState(hasChanges ? next : null);
     setSaveError(undefined);
     setSaved(false);
   };
 
-  const updateSettingsCache = async (update: Partial<PanelChannelSettings>): Promise<void> => {
+  const updateSettingsCache = useCallback(async (update: Partial<PanelChannelSettings>): Promise<void> => {
     await queryClient.cancelQueries({ queryKey, exact: true });
     queryClient.setQueryData<PanelChannelSettings>(queryKey, (current) => current === undefined ? current : mergeChannelSettingsResponse(current, update));
-  };
-  const locationSaved = async (location: PanelChannelLocation | null, revision: number): Promise<void> => {
-    await updateSettingsCache({ location, locationRevision: revision });
-  };
+  }, [queryClient, queryKey]);
 
-  const saveDraft = async (): Promise<string | null> => {
+  const saveDraft = useCallback(async (): Promise<string | null> => {
     if (!settingsReady || !canEdit || pending) return labels.saveError;
-    if (timeZone.trim().length === 0) return labels.invalid;
+    if (!dirty) return null;
+    if (!validTimeZoneDraft(timeZone)) return labels.invalid;
     if (hasRevisionConflict) return labels.settingsConflict;
+
+    const draft = draftState;
     setPending(true);
     setSaveError(undefined);
+    let savingLocation = false;
     try {
-      const revision = hasDraft ? draftState.baseRevision : settings.revision;
-      const result = await saveChannelTimeZone(channelId, revision, timeZone.trim());
-      await updateSettingsCache({ timeZone: result.timeZone, revision: result.revision });
+      if (timeZoneDirty) {
+        const result = await saveChannelTimeZone(channelId, draft.baseRevision, timeZone.trim());
+        await updateSettingsCache({ timeZone: result.timeZone, revision: result.revision });
+        setDraftState((current) => current?.channelId === channelId
+          ? { ...current, baseRevision: result.revision, timeZone: result.timeZone }
+          : current);
+      }
+      if (locationDirty) {
+        savingLocation = true;
+        const result = await saveChannelLocation(channelId, draft.locationBaseRevision, location);
+        await updateSettingsCache({ location: result.location, locationRevision: result.locationRevision });
+      }
       setDraftState(null);
       setSaved(true);
       return null;
     } catch (failure: unknown) {
-      const fallback = labels.saveError;
       const code = failure instanceof PanelApiError ? failure.code : null;
-      const message = code === "channel_settings_conflict" ? labels.settingsConflict : apiErrorText(code, fallback);
+      const message = code === "channel_settings_conflict" || code === "channel_location_conflict"
+        ? labels.settingsConflict
+        : savingLocation ? labels.locationSaveFailed : apiErrorText(code, labels.saveError);
       setSaveError(message);
-      if (code === "channel_settings_conflict") await settingsQuery.refetch();
+      if (code === "channel_settings_conflict" || code === "channel_location_conflict") await refetchSettings();
       return message;
     } finally {
       setPending(false);
     }
-  };
+  }, [canEdit, channelId, dirty, draftState, hasRevisionConflict, labels.invalid, labels.locationSaveFailed,
+    labels.saveError, labels.settingsConflict, location, locationDirty, pending, refetchSettings, settingsReady,
+    timeZone, timeZoneDirty, updateSettingsCache]);
 
-  const discardDraft = (): void => {
+  const discardDraft = useCallback((): void => {
     setDraftState(null);
     setSaveError(undefined);
     setSaved(false);
-  };
+  }, []);
   const navigationGuard = useDraftGuard(dirty, saveDraft, discardDraft);
 
   useEffect(() => registerDashboardNavigationGuard(navigationGuard.guardSwitch), [navigationGuard.guardSwitch]);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if ((!event.metaKey && !event.ctrlKey) || event.key.toLowerCase() !== "s" || !canEdit || !dirty) return;
+      event.preventDefault();
+      void saveDraft();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => { window.removeEventListener("keydown", onKeyDown); };
+  }, [canEdit, dirty, saveDraft]);
 
   const loadError = settingsQuery.error instanceof PanelApiError
     ? apiErrorText(settingsQuery.error.code, labels.loadError)
     : labels.loadError;
-  const saveCluster = !canEdit || !settingsReady ? undefined : <SaveStatus
+  const saveCluster = !canEdit ? undefined : <SaveStatus
     dirty={dirty}
     pending={pending}
     persistent
     saved={saved}
-    saveDisabled={!validTimeZoneDraft(timeZone)}
+    saveDisabled={!settingsReady || !validTimeZoneDraft(timeZone)}
     {...(saveError === undefined ? {} : { error: saveError })}
     {...(hasRevisionConflict ? {
       conflict: {
@@ -128,14 +168,17 @@ export const ChannelLocationPage = ({ channelId, role }: { channelId: string; ro
 
   return <div className="channel-location-page">
     <SettingsPage
+      kind="weather"
       title={labels.pageTitle}
       meta={labels.pageDescription}
       {...(saveCluster === undefined ? {} : { saveStatus: saveCluster })}
       columns={[
         <Section key="time-zone" title={labels.timeZoneSection}>
-          <ChannelTimeZoneField label={labels.timeZone} hint={labels.timeZoneHint} value={timeZone}
-            onChange={writeTimeZoneDraft} canEdit disabled={!canEdit || !settingsReady || settingsQuery.isFetching || pending}
-            {...(!canEdit ? { describedBy: readOnlyReasonId } : {})} />
+          {!canEdit ? <dl className="channel-location-page__properties">
+            <div><dt>{labels.timeZone}</dt><dd>{settingsReady ? timeZone : "—"}</dd></div>
+          </dl> : <ChannelTimeZoneField label={labels.timeZone} hint={labels.timeZoneHint} value={timeZone}
+            onChange={(value) => { writeDraft({ timeZone: value }); }} canEdit disabled={!settingsReady || settingsQuery.isFetching || pending} />}
+          <LockedReason id={readOnlyReasonId} {...(!canEdit ? { reason: labels.readOnly } : {})} />
         </Section>,
         <Section key="location" title={labels.location}>
           <LoadState variant="panel-260"
@@ -145,17 +188,14 @@ export const ChannelLocationPage = ({ channelId, role }: { channelId: string; ro
             error={<p role="alert">{loadError}</p>}
             queryError={{ title: dashboard.errors.dataLoadFailed, message: loadError, onRetry: () => { void settingsQuery.refetch(); } }}>
             {!settingsReady ? null : <>
-              <div className="channel-location-page__notice-slot" aria-live="polite">
-                {settings.location === null ? <div className="channel-location-page__warning" role="status">
-                  <StatusLed state="warn" label={labels.locationMissingWarning} dotOnly />
-                  <div><strong>{labels.locationMissing}</strong><span>{labels.locationMissingWarning}</span></div>
-                </div> : null}
-                <LockedReason id={readOnlyReasonId} {...(!canEdit ? { reason: labels.readOnly } : {})} />
-              </div>
-              <ChannelLocationField channelId={channelId} language={language} value={settings.location}
-                revision={settings.locationRevision} onSaved={locationSaved} channelTimeZone={settings.timeZone}
-                onSelectChannelTimeZone={writeTimeZoneDraft} canEdit={canEdit}
-                disabled={settingsQuery.isFetching || pending} readOnlyReasonId={readOnlyReasonId} renderReadOnlyReason={false} />
+              {location === null ? <div className="channel-location-page__warning" role="status">
+                <StatusLed state="warn" label={labels.locationMissingWarning} dotOnly />
+                <div><strong>{labels.locationMissing}</strong><span>{labels.locationMissingWarning}</span></div>
+              </div> : null}
+              <ChannelLocationField channelId={channelId} language={language} value={location}
+                onChange={(value) => { writeDraft({ location: value }); }} channelTimeZone={timeZone}
+                onSelectChannelTimeZone={(value) => { writeDraft({ timeZone: value }); }} canEdit={canEdit}
+                disabled={settingsQuery.isFetching || pending} readOnlyReasonId={readOnlyReasonId} />
             </>}
           </LoadState>
         </Section>,
@@ -167,5 +207,9 @@ export const ChannelLocationPage = ({ channelId, role }: { channelId: string; ro
       onCancel={navigationGuard.continueEditing} onConfirm={navigationGuard.discardAndSwitch} danger />
   </div>;
 };
+
+const sameLocation = (left: PanelChannelLocation | null, right: PanelChannelLocation | null): boolean =>
+  left === null ? right === null : right !== null && left.name === right.name && left.latitude === right.latitude &&
+    left.longitude === right.longitude && left.timeZone === right.timeZone;
 
 const validTimeZoneDraft = (timeZone: string): boolean => timeZone.trim().length > 0;

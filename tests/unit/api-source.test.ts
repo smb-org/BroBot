@@ -717,8 +717,8 @@ describe("API source JSONata", () => {
     const aliasedDisallowedFunction = "($join := $pad; $join('x', 10000000))";
     expect(inspectApiSourceExpression(aliasedDisallowedFunction)).toEqual({ kind: "construct_not_allowed", constructName: "block expression" });
     await expect(evaluateApiSourceExpression(aliasedDisallowedFunction, {})).rejects.toThrow("JSONata construct block expression is not allowed");
-    expect(apiSourcePanelTexts("de").constructNotAllowed("$eval")).toBe("Das JSONata-Konstrukt $eval ist nicht erlaubt.");
-    expect(apiSourcePanelTexts("en").constructNotAllowed("$eval")).toBe("The JSONata construct $eval is not allowed.");
+    expect(apiSourcePanelTexts("de").constructNotAllowed("$eval")).toBe("Dieser Teil des Ausdrucks ist nicht erlaubt: $eval.");
+    expect(apiSourcePanelTexts("en").constructNotAllowed("$eval")).toBe("This part of the expression is not allowed: $eval.");
   });
 
   it("rejects function-reference predicates, nested constructors, and range predicates", async () => {
@@ -1180,7 +1180,7 @@ describe("API source Node-side template CPU measurement", () => {
     const result = await createTemplateRenderer(event, "event", [], sources)(placeholders.join("|"), {}, undefined, "preview");
 
     expect(result.text.split("payload")).toHaveLength(21);
-    expect(result.text).toContain("unavailable");
+    expect(result.text).toContain("The value cannot be loaded right now.");
     expect(fetcher).toHaveBeenCalledOnce();
     expect(budget.count()).toBe(1);
   });

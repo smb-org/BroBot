@@ -12,10 +12,11 @@ interface StepDialogProps {
   footer?: ReactNode;
   description?: ReactNode;
   pending?: boolean;
+  size?: "fixed" | "content";
 }
 
-/** Fixed-height dialog surface for guided flows whose content changes by step. */
-export function StepDialog({ opened, title, children, onClose, footer, description, pending = false }: StepDialogProps): ReactElement {
+/** Guided dialog surface for flows that change content by step. */
+export function StepDialog({ opened, title, children, onClose, footer, description, pending = false, size = "fixed" }: StepDialogProps): ReactElement {
   const closeLabel = dashboardCommonTexts().close;
   const handleOpenChange: NonNullable<ComponentProps<typeof DialogPrimitive.Root>["onOpenChange"]> = (nextOpen, eventDetails) => {
     if (!nextOpen && pending) {
@@ -27,8 +28,10 @@ export function StepDialog({ opened, title, children, onClose, footer, descripti
 
   return <DialogPrimitive.Root open={opened} onOpenChange={handleOpenChange}>
     <DialogContent
-      className="ui-step-dialog"
-      style={{ height: "min(760px, calc(100dvh - 32px))" }}
+      className={`ui-step-dialog${size === "content" ? " ui-step-dialog--content" : ""}`}
+      style={size === "content"
+        ? { height: "auto", maxHeight: "calc(100dvh - 32px)" }
+        : { height: "min(760px, calc(100dvh - 32px))" }}
     >
       <DialogHeader className="ui-dialog__header">
         <DialogTitle>{title}</DialogTitle>

@@ -75,7 +75,7 @@ describe("API source panel query lifecycle", () => {
     expect(await screen.findByRole("button", { name: "sunset" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "sunset" }));
     fireEvent.click(screen.getByRole("button", { name: "Edit source" }));
-    fireEvent.change(await screen.findByRole("textbox", { name: "HTTPS URL" }), {
+    fireEvent.change(await screen.findByRole("textbox", { name: "Web address" }), {
       target: { value: "https://api.example.test/changed" },
     });
 
@@ -83,7 +83,7 @@ describe("API source panel query lifecycle", () => {
     await act(async () => {
       await view.queryClient.invalidateQueries({ queryKey: moduleQueryKey("kanal-a", "api_source", "sources") });
     });
-    expect(screen.getByRole("textbox", { name: "JSONata expression (optional)" })).toHaveValue("$.original");
+    expect(screen.getByRole("textbox", { name: "Value from the response" })).toHaveValue("$.original");
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
@@ -93,7 +93,7 @@ describe("API source panel query lifecycle", () => {
       revision: 1,
     }));
     expect(await screen.findByText(apiSourcePanelTexts("en").conflict)).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "JSONata expression (optional)" })).toHaveValue("$.original");
+    expect(screen.getByRole("textbox", { name: "Value from the response" })).toHaveValue("$.original");
     expect(view.queryClient.getQueryData<ApiSource[]>(moduleQueryKey("kanal-a", "api_source", "sources"))?.[0]).toMatchObject({
       expression: "$.remote",
       revision: 2,
@@ -127,10 +127,10 @@ describe("API source panel query lifecycle", () => {
     fireEvent.click(screen.getByRole("button", { name: "sunset" }));
     fireEvent.click(screen.getByRole("button", { name: "Edit source" }));
 
-    expect(await screen.findByRole("textbox", { name: "HTTPS URL" })).toHaveValue(
+    expect(await screen.findByRole("textbox", { name: "Web address" })).toHaveValue(
       "https://recreated.example.test/recreated-generation",
     );
-    expect(screen.getByRole("textbox", { name: "JSONata expression (optional)" })).toHaveValue("$.recreated");
+    expect(screen.getByRole("textbox", { name: "Value from the response" })).toHaveValue("$.recreated");
     expect(view.queryClient.getQueryData<ApiSource[]>(moduleQueryKey("kanal-a", "api_source", "sources"))?.[0])
       .toMatchObject({ revision: 1, expression: "$.recreated" });
   });
@@ -152,12 +152,12 @@ describe("API source panel query lifecycle", () => {
     });
     renderPanel(fetcher);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Add source" }));
-    fireEvent.change(await screen.findByRole("textbox", { name: "HTTPS URL" }), {
+    fireEvent.click(await screen.findByRole("button", { name: "Create source" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Web address" }), {
       target: { value: "https://api.example.test/weather" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "JSONata expression (optional)" }), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Value from the response" }), {
       target: { value: "$.temperature" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
@@ -189,13 +189,13 @@ describe("API source panel query lifecycle", () => {
     });
     renderPanel(fetcher);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Add source" }));
-    const dialog = await screen.findByRole("dialog", { name: "Create source" });
-    fireEvent.change(within(dialog).getByRole("textbox", { name: "HTTPS URL" }), {
+    fireEvent.click(await screen.findByRole("button", { name: "Create source" }));
+    const dialog = await screen.findByRole("dialog", { name: "Create data source" });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Web address" }), {
       target: { value: "https://api.example.test/weather" },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "Continue" }));
-    fireEvent.change(within(dialog).getByRole("textbox", { name: "JSONata expression (optional)" }), {
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Value from the response" }), {
       target: { value: "$.temperature" },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "Continue" }));
@@ -216,7 +216,10 @@ describe("API source panel query lifecycle", () => {
     })]);
     renderPanel(fetcher);
 
+    expect(await screen.findByRole("button", { name: "sunset" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "sunset" }));
+
     expect(await screen.findByText("The response is not valid JSON.")).toBeInTheDocument();
-    expect(document.querySelector(".status-led[data-status=error]")).toBeInTheDocument();
+    expect(document.querySelector(".api-source-panel__row-status")).toBeInTheDocument();
   });
 });

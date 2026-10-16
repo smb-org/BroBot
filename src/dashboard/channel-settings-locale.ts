@@ -25,10 +25,7 @@ export interface ChannelSettingsTexts {
   locationRemove: string;
   locationRemoveTitle: string;
   locationRemoveDescription: string;
-  locationNotSet: string;
-  locationRemoved: string;
   cancel: string;
-  locationSaved: string;
   locationSaveFailed: string;
   locationSearchFailed: string;
   locationTimeZoneSuggestion: (timeZone: string) => string;
@@ -41,7 +38,7 @@ const texts: Readonly<Record<"de" | "en", ChannelSettingsTexts>> = {
   de: {
     section: "Kanaleinstellungen",
     pageTitle: "Ort & Wetter",
-    pageDescription: "Standort für standortabhängige Kanalmodule",
+    pageDescription: "Standort für Wetter, Sonnenzeiten und Mondphase",
     timeZone: "Kanalzeitzone",
     timeZoneHint: "Gültige IANA-Zeitzone. Sie wird für Datum, Uhrzeit und zeitabhängige Textbausteine verwendet.",
     timeZoneSection: "Zeitzone",
@@ -53,7 +50,7 @@ const texts: Readonly<Record<"de" | "en", ChannelSettingsTexts>> = {
     settingsConflict: "Die Einstellungen wurden zwischenzeitlich geändert. Bitte neu laden.",
     invalid: "Bitte eine gültige IANA-Zeitzone eingeben.",
     location: "Standort",
-    locationHint: "Wird von Wetter-, Sonnen- und Mondmodulen für standortabhängige Daten verwendet.",
+    locationHint: "Gilt für Wetter, Sonnenzeiten und Mondphase. Änderungen mit Speichern übernehmen.",
     locationSearch: "Ort suchen",
     locationSearchButton: "Suchen",
     locationSearching: "Orte werden gesucht …",
@@ -64,11 +61,8 @@ const texts: Readonly<Record<"de" | "en", ChannelSettingsTexts>> = {
     locationChange: "Standort ändern",
     locationRemove: "Standort entfernen",
     locationRemoveTitle: "Standort entfernen?",
-    locationRemoveDescription: "Der gespeicherte Standort wird dauerhaft aus den Kanaleinstellungen entfernt.",
-    locationNotSet: "Es ist kein Standort zum Entfernen gespeichert.",
-    locationRemoved: "Der Standort wurde entfernt.",
+    locationRemoveDescription: "Der Standort wird nach dem Speichern aus den Kanaleinstellungen entfernt.",
     cancel: "Abbrechen",
-    locationSaved: "Der Standort wurde gespeichert.",
     locationSaveFailed: "Der Standort konnte nicht gespeichert werden.",
     locationSearchFailed: "Orte konnten nicht gesucht werden.",
     locationTimeZoneSuggestion: (timeZone) => `Kanalzeitzone auf ${timeZone} setzen?`,
@@ -79,7 +73,7 @@ const texts: Readonly<Record<"de" | "en", ChannelSettingsTexts>> = {
   en: {
     section: "Channel settings",
     pageTitle: "Location & weather",
-    pageDescription: "Location for channel modules that use local data",
+    pageDescription: "Location for weather, sunrise, sunset, and moon phase",
     timeZone: "Channel time zone",
     timeZoneHint: "A valid IANA time zone used for date, time, and time based text block conditions.",
     timeZoneSection: "Time zone",
@@ -91,7 +85,7 @@ const texts: Readonly<Record<"de" | "en", ChannelSettingsTexts>> = {
     settingsConflict: "Settings changed in another session. Reload before saving.",
     invalid: "Enter a valid IANA time zone.",
     location: "Location",
-    locationHint: "Used by weather, sun, and moon modules for location based data.",
+    locationHint: "Used for weather, sunrise, sunset, and moon phase. Save to apply your change.",
     locationSearch: "Search for a place",
     locationSearchButton: "Search",
     locationSearching: "Searching locations …",
@@ -102,11 +96,8 @@ const texts: Readonly<Record<"de" | "en", ChannelSettingsTexts>> = {
     locationChange: "Change location",
     locationRemove: "Remove location",
     locationRemoveTitle: "Remove location?",
-    locationRemoveDescription: "The saved location will be permanently removed from channel settings.",
-    locationNotSet: "There is no saved location to remove.",
-    locationRemoved: "Location removed.",
+    locationRemoveDescription: "The location will be removed from channel settings when you save.",
     cancel: "Cancel",
-    locationSaved: "Location saved.",
     locationSaveFailed: "Location could not be saved.",
     locationSearchFailed: "Locations could not be searched.",
     locationTimeZoneSuggestion: (timeZone) => `Set channel time zone to ${timeZone}?`,

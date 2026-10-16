@@ -78,23 +78,23 @@ test("API source editor and expression hint keep their boxes stable", async ({ p
   await routeJson(page, "/api/channels/channel-a/modules/api_source/sources", { sources });
   await gotoPanel(page, "api_source");
   const panel = page.locator(".api-source-panel");
-  await expect(page.getByRole("button", { name: "Add source" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create source" })).toBeVisible();
   const listSlot = page.locator(".collection-page__list-content");
   const listBefore = await box(listSlot);
   expect(await listSlot.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
   const panelBefore = await box(panel);
 
-  await page.getByRole("button", { name: "Add source" }).click();
-  const dialog = page.getByRole("dialog", { name: "Create source" });
+  await page.getByRole("button", { name: "Create source" }).click();
+  const dialog = page.getByRole("dialog", { name: "Create data source" });
   await expect(dialog).toBeVisible();
   await dialog.evaluate(async (element) => {
     await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => undefined)));
   });
-  const dialogBefore = await box(dialog);
-  await dialog.getByRole("textbox", { name: "HTTPS URL" }).fill("https://example.com");
+  await dialog.getByRole("textbox", { name: "Web address" }).fill("https://example.com");
   await dialog.getByRole("button", { name: "Continue" }).click();
-  const expression = page.getByRole("textbox", { name: "JSONata expression (optional)" });
+  const expression = page.getByRole("textbox", { name: "Value from the response" });
   await expect(expression).toBeVisible();
+  const dialogBefore = await box(dialog);
   await expression.fill("$.status & $from");
   const functionPicker = page.locator(".ui-template-text-field__suggestions-dropdown");
   await expect(functionPicker).toBeVisible();

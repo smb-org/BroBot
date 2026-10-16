@@ -25,7 +25,7 @@ const moduleNames: LocaleCatalog<ModuleNames> = {
     moon: "Mond",
     weather: "Wetter",
     currency: "Währung",
-    api_source: "API-Quellen",
+    api_source: "Datenquellen",
     belabox: "BELABOX",
   },
   en: {
@@ -40,7 +40,7 @@ const moduleNames: LocaleCatalog<ModuleNames> = {
     moon: "Moon data",
     weather: "Weather",
     currency: "Currency",
-    api_source: "API sources",
+    api_source: "Data sources",
     belabox: "BELABOX",
   },
 };
@@ -152,7 +152,7 @@ const moduleDescriptions: LocaleCatalog<ModuleDescriptions> = {
     moon: "Berechnet Mondphase, Beleuchtung sowie Mondauf- und -untergang für den Kanalstandort.",
     weather: "Zeigt aktuelles Wetter für den Kanalstandort oder einen Ort im Chatbefehl.",
     currency: "Wandelt Beträge mit dem aktuellen Wechselkurs um.",
-    api_source: "Liest benannte HTTPS-JSON-Quellen aus und wertet ihre Daten aus.",
+    api_source: "Liest öffentliche Webadressen aus und stellt ihre Werte für Chatbefehle bereit.",
     belabox: "Verwaltet die BELABOX-Relay-Statistikverbindung.",
   },
   en: {
@@ -166,7 +166,7 @@ const moduleDescriptions: LocaleCatalog<ModuleDescriptions> = {
     moon: "Calculates lunar phase, illumination, moonrise, and moonset for the channel location.",
     weather: "Shows current weather for the channel location or a place in the chat command.",
     currency: "Converts amounts using the current exchange rate.",
-    api_source: "Reads named HTTPS JSON sources and evaluates their data.",
+    api_source: "Reads public web addresses and makes their values available to chat commands.",
     belabox: "Manages the BELABOX relay stats connection.",
   },
 };

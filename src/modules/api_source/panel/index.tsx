@@ -1,9 +1,10 @@
-import { useState, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { apiSourceFailureText } from "../../../dashboard/locale";
+import { apiSourceFailureText, dashboardTexts } from "../../../dashboard/locale";
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import {
+  Badge,
   Button,
   CollectionPage,
   ConfirmDialog,
@@ -13,12 +14,13 @@ import {
   InspectorSection,
   LoadState,
   LoadStateLines,
-  LockedReason,
+  ListToolbar,
   PageHeader,
-  StatusLed,
   StepDialog,
   TokenChip,
   notify,
+  registerDashboardNavigationGuard,
+  useDraftGuard,
 } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { ApiSource, ApiSourceTestResult } from "../contracts";
@@ -33,6 +35,8 @@ interface SourceDraft {
 }
 
 const emptyDraft = (): SourceDraft => ({ name: "", url: "", expression: "" });
+const sameDraft = (left: SourceDraft, right: SourceDraft): boolean =>
+  left.name === right.name && left.url === right.url && left.expression === right.expression;
 
 const apiErrorCode = (error: unknown): string | null =>
   error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : null;
@@ -50,6 +54,7 @@ export default function ApiSourcePanel(properties: ModulePanelProperties): React
 function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelProperties): ReactElement {
   const locale = language ?? "de";
   const labels = apiSourcePanelTexts(locale);
+  const dashboard = dashboardTexts();
   const canEdit = canManage ?? false;
   const queryClient = useDashboardQueryClient();
   const query = useModuleQuery(channelId, "api_source", "sources", (signal) => loadApiSources(channelId, signal));
@@ -57,8 +62,10 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [editingName, setEditingName] = useState<string | null>(null);
   const [draft, setDraft] = useState<SourceDraft | null>(null);
+  const [draftOriginal, setDraftOriginal] = useState<SourceDraft | null>(null);
   const [draftBaselineRevision, setDraftBaselineRevision] = useState<number | null>(null);
   const [creationStep, setCreationStep] = useState(0);
+  const [searchTerm, setSearchTerm] = useState("");
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<ApiSourceTestResult>();
@@ -68,8 +75,10 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
   const [deleteError, setDeleteError] = useState<string | undefined>();
   const selectedSource = selectedName === null ? undefined : sources.find((source) => source.name === selectedName);
 
-  const closeEditor = (): void => {
+  const sourceDraftDirty = draft !== null && draftOriginal !== null && !sameDraft(draft, draftOriginal);
+  const discardEditor = (): void => {
     setDraft(null);
+    setDraftOriginal(null);
     setEditingName(null);
     setDraftBaselineRevision(null);
     setCreationStep(0);
@@ -80,11 +89,18 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
     setTestRequestError(undefined);
   };
 
+  const editorGuard = useDraftGuard(sourceDraftDirty, () => Promise.resolve(labels.saveFailed), discardEditor);
+  useEffect(() => registerDashboardNavigationGuard(editorGuard.guardSwitch), [editorGuard.guardSwitch]);
+
+  const requestCloseEditor = (): void => { editorGuard.guardSwitch(discardEditor); };
+
   const startCreate = (): void => {
     setSelectedName(null);
     setEditingName(null);
     setDraftBaselineRevision(null);
-    setDraft(emptyDraft());
+    const initialDraft = emptyDraft();
+    setDraft(initialDraft);
+    setDraftOriginal(initialDraft);
     setCreationStep(0);
     setFormError(undefined);
     setTestResult(undefined);
@@ -95,7 +111,9 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
     setSelectedName(source.name);
     setEditingName(source.name);
     setDraftBaselineRevision(source.revision);
-    setDraft({ name: source.name, url: source.url, expression: source.expression });
+    const initialDraft = { name: source.name, url: source.url, expression: source.expression };
+    setDraft(initialDraft);
+    setDraftOriginal(initialDraft);
     setFormError(undefined);
     setTestResult(undefined);
     setTestRequestError(undefined);
@@ -125,8 +143,8 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
     }
   };
 
-  const save = async (): Promise<void> => {
-    if (draft === null || !canEdit || busy || (editingName === null && creationStep !== 3)) return;
+  const save = async (): Promise<string | null> => {
+    if (draft === null || !canEdit || busy || (editingName === null && creationStep !== 3)) return labels.saveFailed;
     const normalized = { ...draft, name: draft.name.trim(), url: draft.url.trim(), expression: draft.expression.trim() };
     setBusy(true);
     setFormError(undefined);
@@ -162,16 +180,19 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
           },
         );
       }
-      closeEditor();
+      discardEditor();
       notify({ tone: "success", message: editingName === null ? labels.created : labels.saved });
+      return null;
     } catch (failure: unknown) {
       const code = apiErrorCode(failure);
       const constructName = disallowedConstructName(failure);
-      setFormError(code === "api_source_construct_not_allowed" && constructName !== null ? labels.constructNotAllowed(constructName)
+      const errorText = code === "api_source_construct_not_allowed" && constructName !== null ? labels.constructNotAllowed(constructName)
         : code === "api_source_invalid" ? labels.invalid
         : code === "api_source_conflict" ? labels.conflict
           : code === "api_source_management_denied" ? labels.denied
-            : code === "api_source_limit_or_conflict" ? labels.limit : labels.saveFailed);
+            : code === "api_source_limit_or_conflict" ? labels.limit : labels.saveFailed;
+      setFormError(errorText);
+      return errorText;
     } finally {
       setBusy(false);
     }
@@ -196,7 +217,7 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
         },
       );
       setSelectedName(null);
-      closeEditor();
+      discardEditor();
       notify({ tone: "success", message: labels.deleted });
     } catch (failure: unknown) {
       const code = apiErrorCode(failure);
@@ -209,14 +230,14 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
 
   const testAttempted = testResult !== undefined || testRequestError !== undefined;
   const loadStatus = query.data === undefined ? query.isPending ? "loading" : "error" : sources.length === 0 ? "empty" : "success";
-  const statusFor = (source: ApiSource): { label: string; state: "ok" | "error" | "off" } => {
-    if (source.lastStatus === null) return { label: labels.notTested, state: "off" };
-    if (source.lastStatus === "error") return {
-      label: apiSourceFailureText(source.lastError ?? "unreachable", locale),
-      state: "error",
-    };
-    return { label: labels.statusOk, state: "ok" };
+  const statusFor = (source: ApiSource): { label: string; tone: "neutral" | "green" | "red" } => {
+    if (source.lastStatus === null) return { label: labels.statusUntested, tone: "neutral" };
+    if (source.lastStatus === "error") return { label: labels.statusError, tone: "red" };
+    return { label: labels.statusOk, tone: "green" };
   };
+  const normalizedSearch = searchTerm.trim().toLocaleLowerCase(locale);
+  const visibleSources = sources.filter((source) => normalizedSearch.length === 0 || source.name.toLocaleLowerCase(locale).includes(normalizedSearch) ||
+    new URL(source.url).hostname.toLocaleLowerCase(locale).includes(normalizedSearch));
   const list = <LoadState
     variant="panel-0"
     status={loadStatus}
@@ -226,8 +247,8 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
     queryError={{ message: labels.loadFailed, onRetry: () => { void query.refetch(); } }}
     refreshError={query.isRefetchError}
   >
-    {sources.length === 0 ? null : <ul className="api-source-panel__list">
-      {sources.map((source) => {
+    {sources.length === 0 ? null : visibleSources.length === 0 ? <p className="api-source-panel__empty muted">{labels.noSearchResults}</p> : <ul className="api-source-panel__list">
+      {visibleSources.map((source) => {
         const status = statusFor(source);
         return <li className="api-source-panel__row" key={source.name}>
           <Button
@@ -238,10 +259,10 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
             onClick={() => { setSelectedName(source.name); }}
           >
             <span className="api-source-panel__source-copy">
-              <code>{source.name}</code>
+              <strong className="mono">{source.name}</strong>
               <span className="muted api-source-panel__host">{new URL(source.url).hostname}</span>
             </span>
-            <StatusLed state={status.state} label={status.label} />
+            <span className="api-source-panel__row-status" aria-hidden="true"><Badge tone={status.tone}>{status.label}</Badge></span>
           </Button>
         </li>;
       })}
@@ -251,10 +272,14 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
   const detail = selectedSource === undefined ? <p className="muted">{labels.selectSource}</p> : <>
     <PageHeader
       title={selectedSource.name}
+      titleContent={<span className="mono">{selectedSource.name}</span>}
       icon={null}
+      headingLevel="h2"
       meta={new URL(selectedSource.url).hostname}
       actions={<TokenChip token={`{api.${selectedSource.name}}`} />}
-      {...(canEdit ? { pageActions: <Button size="compact" onClick={() => { startEdit(selectedSource); }}>{labels.editSource}</Button> } : {})}
+      pageActions={<Button size="compact" disabled={!canEdit}
+        {...(!canEdit ? { title: labels.readOnlyReason, describedBy: "api-source-read-only-reason" } : {})}
+        onClick={() => { startEdit(selectedSource); }}>{labels.editSource}</Button>}
     />
     <div className="api-source-panel__detail-content">
       <InspectorFieldRow label={labels.url} help={labels.urlHint}>
@@ -264,8 +289,9 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
         <pre className="api-source-panel__expression">{selectedSource.expression || labels.noExpression}</pre>
       </InspectorSection>
       <div className="api-source-panel__status-detail">
-        <StatusLed {...statusFor(selectedSource)} />
+        <Badge tone={statusFor(selectedSource).tone}>{statusFor(selectedSource).label}</Badge>
         <span className="muted" title={selectedSource.lastFetchedAt ?? undefined}>{selectedSource.lastFetchedAt ?? labels.notTested}</span>
+        {selectedSource.lastStatus === "error" ? <p className="api-source-panel__failure-detail" role="note">{apiSourceFailureText(selectedSource.lastError ?? "unreachable", locale)}</p> : null}
       </div>
     </div>
   </>;
@@ -276,12 +302,13 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
   const stepDialog = <StepDialog
     opened={draft !== null && editingName === null}
     title={labels.createSource}
+    size="content"
     description={labels.stepCounter(creationStep + 1, 4)}
     pending={busy || testing}
-    onClose={closeEditor}
+    onClose={requestCloseEditor}
     footer={<div className="form-actions api-source-panel__step-actions">
       {creationStep === 0
-        ? <Button variant="subtle" disabled={testing || busy} onClick={closeEditor}>{labels.cancel}</Button>
+        ? <Button variant="subtle" disabled={testing || busy} onClick={requestCloseEditor}>{labels.cancel}</Button>
         : <Button variant="neutral" disabled={testing || busy} onClick={() => { setCreationStep((step) => Math.max(0, step - 1)); }}>{labels.back}</Button>}
       {creationStep < 3 ? <Button variant="primary"
         disabled={testing || busy || (creationStep === 0 && (draft?.url.trim().length ?? 0) === 0) || (creationStep === 2 && !testAttempted)}
@@ -289,24 +316,29 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
         : <Button variant="primary" disabled={busy || draft?.name.trim().length === 0} onClick={() => { void save(); }}>{labels.save}</Button>}
     </div>}
   >
-    {draft === null ? null : <div className="api-source-panel__step" data-step={String(creationStep + 1)}>
+    {draft === null ? null : <div className="api-source-panel__step" data-step={String(creationStep + 1)} onKeyDown={(event) => {
+      if (creationStep !== 0 || event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+      event.preventDefault();
+      setCreationStep(1);
+    }}>
       <h3>{stepTitle}</h3>
-      {creationStep === 0 ? <InspectorFieldRow label={labels.url} help={labels.urlHint}>
-        <Field label={labels.url} value={draft.url} onChange={(url) => updateDraft({ url })} disabled={busy || testing} mono />
+      {creationStep === 0 ? <InspectorFieldRow className="inspector-field-row--stacked" label={labels.url} help={labels.urlHint}>
+        <Field label={labels.url} labelHidden value={draft.url} onChange={(url) => updateDraft({ url })} disabled={busy || testing} mono />
       </InspectorFieldRow> : null}
-      {creationStep === 1 ? <InspectorFieldRow label={labels.expression} help={labels.expressionHint}>
+      {creationStep === 1 ? <InspectorFieldRow className="inspector-field-row--stacked" label={labels.expression} help={labels.expressionHint}>
         <ExpressionField id="api-source-expression" label={labels.expression} value={draft.expression}
           onChange={(expression) => updateDraft({ expression })} maxLength={512} language={locale}
           messages={labels.expressionPicker} disabled={busy || testing} />
       </InspectorFieldRow> : null}
       {creationStep === 2 ? <>
-        <p className="muted">{labels.url}: <code>{draft.url || "—"}</code></p>
-        <p className="muted">{labels.expression}: <code>{draft.expression || labels.noExpression}</code></p>
-        <Button type="button" disabled={busy || testing || draft.url.trim().length === 0} onClick={() => { void testDraft(); }}>
+        <div className="api-source-panel__test-summary">
+          <p className="muted"><span>{labels.url}</span><code>{draft.url || "—"}</code></p>
+          <p className="muted"><span>{labels.expression}</span><code>{draft.expression || labels.noExpression}</code></p>
+        </div>
+        <Button className="api-source-panel__test-button" variant="secondary" type="button" disabled={busy || testing || draft.url.trim().length === 0} onClick={() => { void testDraft(); }}>
           {testing ? labels.testing : labels.test}
         </Button>
-        <div data-testid="api-source-test-result" aria-live="polite" className="api-source-panel__test-result"
-          style={{ height: "calc(var(--s10) * 5)", overflowY: "auto", boxSizing: "border-box", margin: 0 }}>
+        <div data-testid="api-source-test-result" aria-live="polite" className="api-source-panel__test-result">
           {testRequestError === undefined ? null : <p className="api-source-test-result__error" role="alert">{testRequestError}</p>}
           {testResult?.status === "error" ? <p className="api-source-test-result__error" role="alert">
             {apiSourceFailureText(testResult.reason, locale, testResult.retryAfter)}
@@ -319,8 +351,8 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
           </> : null}
         </div>
       </> : null}
-      {creationStep === 3 ? <InspectorFieldRow label={labels.name} help={labels.nameHint}>
-        <Field label={labels.name} value={draft.name}
+      {creationStep === 3 ? <InspectorFieldRow className="inspector-field-row--stacked" label={labels.name} help={labels.nameHint}>
+        <Field label={labels.name} labelHidden value={draft.name}
           onChange={(name) => { updateDraft({ name: name.toLowerCase().replace(/[^a-z0-9_]/gu, "").slice(0, 32) }); }}
           disabled={busy || testing} />
       </InspectorFieldRow> : null}
@@ -331,11 +363,19 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
   return <section className="api-source-panel" aria-label={labels.title}>
     <CollectionPage
       title={labels.title}
-      toolbar={<div className="api-source-panel__toolbar">
-        <p className="muted">{labels.explanation}</p>
-        <Button disabled={!canEdit || busy} onClick={startCreate}>{labels.addSource}</Button>
-        <LockedReason {...(!canEdit ? { reason: labels.readOnlyReason } : {})} />
-      </div>}
+      headingLevel="h2"
+      toolbar={<ListToolbar
+          className="api-source-panel__list-toolbar"
+          language={locale}
+          searchLabel={labels.searchLabel}
+          searchPlaceholder={labels.searchPlaceholder}
+          searchClearLabel={labels.searchClearLabel}
+          searchValue={searchTerm}
+          onSearchChange={setSearchTerm}
+          createPlacement="after-search"
+          create={{ label: labels.addSource, onClick: startCreate, disabled: busy || !canEdit,
+            ...(!canEdit ? { reason: labels.readOnlyReason, reasonId: "api-source-read-only-reason" } : {}) }}
+        />}
       list={list}
       detail={detail}
       detailOpen={selectedSource !== undefined}
@@ -349,7 +389,7 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
       confirmLabel={labels.save}
       cancelLabel={labels.cancel}
       onConfirm={() => { void save(); }}
-      onCancel={closeEditor}
+      onCancel={requestCloseEditor}
       pending={busy || testing}
       confirmDisabled={draft === null || draft.name.trim().length === 0 || draft.url.trim().length === 0 || testing}
       {...(formError === undefined ? {} : { error: formError })}
@@ -366,18 +406,14 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
             onChange={(expression) => updateDraft({ expression })} maxLength={512} language={locale}
             messages={labels.expressionPicker} disabled={busy || testing} />
         </InspectorFieldRow>
-        <p className="muted" title={draft.expression.trim().length === 0 ? labels.noExpression : undefined}
-          style={{ height: "var(--s6)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", margin: 0 }} aria-live="polite">
-          {draft.expression.trim().length === 0 ? labels.noExpression : ""}
-        </p>
+        {draft.expression.trim().length === 0 ? <p className="api-source-panel__whole-response muted" aria-live="polite">{labels.noExpression}</p> : null}
         <div className="form-actions">
           <Button type="button" disabled={busy || testing || draft.url.trim().length === 0} onClick={() => { void testDraft(); }}>
             {testing ? labels.testing : labels.test}
           </Button>
           <Button type="button" danger="subtle" disabled={busy || testing} onClick={() => { setDeleteError(undefined); setConfirmDeleteOpen(true); }}>{labels.delete}</Button>
         </div>
-        <div data-testid="api-source-test-result" aria-live="polite" className="api-source-panel__test-result"
-          style={{ height: "calc(var(--s10) * 5)", overflowY: "auto", boxSizing: "border-box", margin: 0 }}>
+        <div data-testid="api-source-test-result" aria-live="polite" className="api-source-panel__test-result">
           {testRequestError === undefined ? null : <p className="api-source-test-result__error" role="alert">{testRequestError}</p>}
           {testResult?.status === "error" ? <p className="api-source-test-result__error" role="alert">
             {apiSourceFailureText(testResult.reason, locale, testResult.retryAfter)}
@@ -391,6 +427,10 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
         </div>
       </div>}
     </FormDialog>
+    <ConfirmDialog opened={editorGuard.confirmOpen} title={dashboard.module.unsavedChangesTitle}
+      description={dashboard.module.unsavedChangesDescription}
+      confirmLabel={dashboard.module.discardAndSwitch} cancelLabel={dashboard.module.continueEditing}
+      onCancel={editorGuard.continueEditing} onConfirm={editorGuard.discardAndSwitch} danger />
     <ConfirmDialog
       opened={confirmDeleteOpen}
       title={labels.deleteTitle}

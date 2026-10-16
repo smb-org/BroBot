@@ -16,9 +16,9 @@ describe("API source panel", () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse({ sources: [] }))));
     renderWithQuery(<UiProvider><ApiSourcePanel channelId="channel-a" language="en" canManage /></UiProvider>);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Add source" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Create source" }));
 
-    expect(await screen.findByRole("dialog", { name: "Create source" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Create data source" })).toBeInTheDocument();
   });
 
   it("shows operators why API sources are read-only and keeps edit actions unavailable", async () => {
@@ -30,9 +30,9 @@ describe("API source panel", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /weather/u }));
 
-    expect(screen.getByText("Operators can read API sources but cannot define them.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add source" })).toBeDisabled();
-    expect(screen.queryByRole("button", { name: "Edit source" })).not.toBeInTheDocument();
+    expect(screen.getByText("Operators can view data sources but cannot change them.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create source" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Edit source" })).toBeDisabled();
   });
 
   it("shows cached API sources immediately when the panel is mounted again", async () => {
