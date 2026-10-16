@@ -100,9 +100,17 @@ for (const viewport of viewports) {
     await expect(collection).toBeVisible();
     await expect(settingsEditor).toBeVisible();
     await expect(inspector).toBeVisible();
+    const editorBody = inspector.locator(".chat-voting-editor__body");
+    const editorBodyLayout = await editorBody.evaluate((element) => ({
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+      inspectorBottom: (element.parentElement?.getBoundingClientRect().bottom ?? 0) + window.scrollY,
+    }));
+    expect(editorBodyLayout.scrollHeight).toBeLessThanOrEqual(editorBodyLayout.clientHeight + 1);
     const collectionBottom = await collection.evaluate((element) => element.getBoundingClientRect().bottom + window.scrollY);
     const settingsTop = await settingsEditor.evaluate((element) => element.getBoundingClientRect().top + window.scrollY);
     expect(settingsTop).toBeGreaterThanOrEqual(collectionBottom - 1);
+    expect(settingsTop).toBeGreaterThanOrEqual(editorBodyLayout.inspectorBottom - 1);
     const editorOverlap = await page.evaluate(() => {
       const settings = document.querySelector(".ui-editor-shell")?.getBoundingClientRect();
       const inspector = document.querySelector(".chat-voting-template-inspector")?.getBoundingClientRect();

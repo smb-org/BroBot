@@ -1026,6 +1026,13 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .module-detail__content:has(.collection-page):has(.ui-editor-shell) { display: block; min-height: 0; }
 .module-detail__content:has(.collection-page):has(.ui-editor-shell) .module-stack,
 .module-detail__content:has(.collection-page):has(.ui-editor-shell) .module-view { display: block; min-height: 0; }
+.module-detail:has(.chat-voting-collection):has(.ui-editor-shell) .collection-page { min-height: 0; }
+.module-detail:has(.chat-voting-collection):has(.ui-editor-shell) .collection-page__body { flex: none; min-height: auto; grid-template-rows: auto; overflow: visible; }
+.module-detail:has(.chat-voting-collection):has(.ui-editor-shell) .collection-page__detail { min-height: auto; overflow: visible; }
+.module-detail:has(.chat-voting-collection):has(.ui-editor-shell) .chat-voting-template-inspector { height: auto; max-height: none; overflow: visible; }
+.module-detail:has(.chat-voting-collection):has(.ui-editor-shell) .chat-voting-template-inspector .chat-voting-editor__body { flex: none; min-height: auto; overflow: visible; overscroll-behavior: auto; scrollbar-gutter: auto; }
+.module-detail:has(.chat-voting-collection):has(.ui-editor-shell) .collection-page[data-single-column="true"] .collection-page__body { min-height: auto; grid-template-rows: auto; overflow: visible; }
+.module-detail:has(.chat-voting-collection):has(.ui-editor-shell) .collection-page[data-single-column="true"][data-detail-open="true"] .collection-page__detail { min-height: auto; overflow: visible; }
 .command-panel .collection-page__heading { display: none; }
 .command-panel .collection-page__body { padding-top: 0; }
 .timers-panel .collection-page__heading,
