@@ -78,26 +78,32 @@ export const helixRequest: HelixRequest = async <Data = unknown>(
   // own if the fetcher never looks at the signal at all -- true of some test
   // doubles, and the reason this can't be Twitch's problem to solve either.
   let response: Response;
+  let rawBody: unknown;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
     const fetcher = options.fetcher ?? fetch;
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timeoutId = setTimeout(() => {
         controller.abort();
         reject(Object.assign(new Error("The Helix request timed out."), { name: "TimeoutError" }));
       }, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     });
-    try {
-      response = await Promise.race([fetcher(url.toString(), init), timeout]);
-    } finally {
-      if (timeoutId !== undefined) clearTimeout(timeoutId);
-    }
+    const responseAndBody = await Promise.race([
+      Promise.resolve(fetcher(url.toString(), init)).then(async (fetchedResponse) => ({
+        response: fetchedResponse,
+        rawBody: await readJson(fetchedResponse),
+      })),
+      timeout,
+    ]);
+    response = responseAndBody.response;
+    rawBody = responseAndBody.rawBody;
   } catch (error: unknown) {
     const timedOut = error instanceof Error && error.name === "TimeoutError";
     return { ok: false, status: null, reason: timedOut ? "timeout" : "network_error", message: null, body: {} };
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
   }
 
-  const rawBody = await readJson(response);
   const body = isRecord(rawBody) ? rawBody : {};
   if (!response.ok) {
     const reason: HelixErrorReason = response.status === 429 ? "rate_limited" : `http_${String(response.status)}`;

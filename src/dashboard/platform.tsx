@@ -610,11 +610,11 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
                         <tbody>{overview.data.map((channel) => {
                           const roleCountsTitle = `${texts.broadcaster} · ${texts.manager} · ${texts.operator}`;
                           return <tr key={channel.channelId} ref={channelRowRef(channel.channelId)} tabIndex={0} aria-selected={channel.channelId === selectedChannelId} onClick={() => { setChannelReleaseOpen(false); selectChannel(channel.channelId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setChannelReleaseOpen(false); selectChannel(channel.channelId); } }}>
-                            <th scope="row" title={inspectorOpen ? channel.channelId : channel.login}>{channel.login}</th>
-                            {inspectorOpen ? null : <td className="mono" title={channel.channelId}>{channel.channelId}</td>}
-                            <td>{channel.fullConsent ? texts.yes : texts.no}</td>
-                            <td className="number" title={roleCountsTitle}>{[channel.memberCounts.broadcaster, channel.memberCounts.manager, channel.memberCounts.operator].map((count) => formatNumber(count)).join(" · ")}</td>
-                            <td><span className="led" data-status={connectionTone(channel) === "healthy" ? "green" : connectionTone(channel) === "warning" ? "amber" : "off"}><span className="led__dot" aria-hidden="true" /><span>{connectionWord(channel, inspectorOpen)}</span></span></td>
+                            <th scope="row" data-field="login" data-label={texts.login} title={inspectorOpen ? channel.channelId : channel.login}>{channel.login}</th>
+                            {inspectorOpen ? null : <td className="mono" data-field="identifier" data-label={texts.identifier} title={channel.channelId}>{channel.channelId}</td>}
+                            <td data-field="consent" data-label={texts.fullConsentColumn}>{channel.fullConsent ? texts.yes : texts.no}</td>
+                            <td className="number" data-field="members" data-label={texts.members} title={roleCountsTitle}>{[channel.memberCounts.broadcaster, channel.memberCounts.manager, channel.memberCounts.operator].map((count) => formatNumber(count)).join(" · ")}</td>
+                            <td data-field="identity" data-label={inspectorOpen ? texts.identityShort : texts.identity}><span className="led" data-status={connectionTone(channel) === "healthy" ? "green" : connectionTone(channel) === "warning" ? "amber" : "off"}><span className="led__dot" aria-hidden="true" /><span>{connectionWord(channel, inspectorOpen)}</span></span></td>
                           </tr>;
                         })}</tbody>
                       </table>

@@ -6,6 +6,8 @@ import type { SettingsEditorSpec, SettingsFieldSpec } from "../../src/dashboard/
 interface DeclarationProbe {
   id: string;
   hasEditor: boolean;
+  hasPanel: boolean;
+  panelManagesSettings: boolean;
   schemaKeys: readonly string[];
   declaredKeys: readonly string[];
   templateKeys: readonly string[];
@@ -18,7 +20,10 @@ const flatten = <Settings,>(fields: readonly SettingsFieldSpec<Settings>[]): Set
 
 const declarationProblems = (probe: DeclarationProbe): string[] => {
   if (probe.schemaKeys.length === 0) return [];
-  if (!probe.hasEditor) return [`${probe.id} is missing settingsEditor`];
+  if (!probe.hasEditor && !probe.panelManagesSettings) return [`${probe.id} is missing settingsEditor`];
+  if (probe.panelManagesSettings && !probe.hasPanel) return [`${probe.id} manages settings without a panel`];
+  if (probe.panelManagesSettings && probe.hasEditor) return [`${probe.id} declares both a settings panel and settingsEditor`];
+  if (probe.panelManagesSettings) return [];
   const problems: string[] = [];
   const schemaKeys = [...probe.schemaKeys].sort((a, b) => a.localeCompare(b));
   const declaredKeys = [...new Set(probe.declaredKeys)].sort((a, b) => a.localeCompare(b));
@@ -47,6 +52,8 @@ describe("module settings editor declarations", () => {
         expect(declarationProblems({
           id: module.id,
           hasEditor: false,
+          hasPanel: module.panel !== undefined,
+          panelManagesSettings: module.panelManagesSettings === true,
           schemaKeys,
           declaredKeys: [],
           templateKeys: [],
@@ -65,6 +72,8 @@ describe("module settings editor declarations", () => {
       const probe: DeclarationProbe = {
         id: module.id,
         hasEditor: true,
+        hasPanel: module.panel !== undefined,
+        panelManagesSettings: module.panelManagesSettings === true,
         schemaKeys,
         declaredKeys: fields.flatMap((field) => field.kind === "message" ? [field.key, field.targetKey] : [field.key]),
         templateKeys: fields.filter((field) => field.kind === "template" || field.kind === "message").map((field) => field.key),
@@ -79,6 +88,8 @@ describe("module settings editor declarations", () => {
     const base: DeclarationProbe = {
       id: "counter-probe",
       hasEditor: true,
+      hasPanel: false,
+      panelManagesSettings: false,
       schemaKeys: ["value"],
       declaredKeys: ["value"],
       templateKeys: [],
@@ -89,6 +100,9 @@ describe("module settings editor declarations", () => {
       },
     };
     expect(declarationProblems({ ...base, hasEditor: false })).toContain("counter-probe is missing settingsEditor");
+    expect(declarationProblems({ ...base, hasEditor: false, panelManagesSettings: true })).toContain("counter-probe manages settings without a panel");
+    expect(declarationProblems({ ...base, hasEditor: false, hasPanel: true, panelManagesSettings: true })).toEqual([]);
+    expect(declarationProblems({ ...base, hasPanel: true, panelManagesSettings: true })).toContain("counter-probe declares both a settings panel and settingsEditor");
     expect(declarationProblems({ ...base, declaredKeys: ["invented"] })).toContain("counter-probe declaration keys do not match settingsSchema");
     expect(declarationProblems({ ...base, declaredKeys: ["value", "invented"] })).toContain("counter-probe declaration keys do not match settingsSchema");
   });
@@ -97,6 +111,8 @@ describe("module settings editor declarations", () => {
     const base: DeclarationProbe = {
       id: "counter-probe",
       hasEditor: true,
+      hasPanel: false,
+      panelManagesSettings: false,
       schemaKeys: ["message"],
       declaredKeys: ["message"],
       templateKeys: ["message"],
@@ -117,6 +133,8 @@ describe("module settings editor declarations", () => {
     expect(declarationProblems({
       id: "empty-module",
       hasEditor: false,
+      hasPanel: false,
+      panelManagesSettings: false,
       schemaKeys: [],
       declaredKeys: [],
       templateKeys: [],

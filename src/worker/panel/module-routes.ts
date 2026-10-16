@@ -790,6 +790,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
   const channelId = context.req.param("channelId");
   const stored = await getChannelModuleForChannel(context.env.DB, channelId, module.id);
   if (stored === null) return context.json({ error: "module_not_configured" }, 404);
+  if (module.id === "clips" && !stored.enabled) return context.json({ error: "module_disabled" }, 409);
   const body = await readJsonBody(context.req.raw);
   if (body === null || typeof body !== "object" || Array.isArray(body)) return context.json({
     error: "module_settings_invalid",
@@ -817,6 +818,29 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
       reasonCode: issue === undefined ? "settings_invalid" : issue.code === "custom" && templateField ? "template_text_invalid" : issue.code,
       reason: issue?.message ?? "Settings do not match the module schema.",
     }, 400);
+  }
+  if (module.id === "clips") {
+    let rawStoredSettings: unknown;
+    try {
+      rawStoredSettings = JSON.parse(stored.settings);
+    } catch {
+      return context.json({ error: "module_settings_invalid" }, 500);
+    }
+    const storedSettings = module.settingsSchema.safeParse(rawStoredSettings);
+    if (!storedSettings.success) return context.json({ error: "module_settings_invalid" }, 500);
+    const lockedFields = [
+      "commandMinimumRole",
+      "commandCooldownSeconds",
+      "postClipLinkInChat",
+      "chatLinkTemplate",
+      "automaticClipsEnabled",
+      "automaticThresholdMultiplier",
+      "automaticCooldownSeconds",
+    ] as const;
+    const storedRecord = storedSettings.data as Readonly<Record<string, unknown>>;
+    const submittedRecord = settings.data as Readonly<Record<string, unknown>>;
+    const changedLockedFields = lockedFields.filter((field) => !Object.is(storedRecord[field], submittedRecord[field]));
+    if (changedLockedFields.length > 0) return context.json({ error: "clip_settings_locked", fields: changedLockedFields }, 409);
   }
   const graphRevision = await readTextBlockGraphRevision(context.env.DB, channelId);
   const settingsRecord = settings.data as Readonly<Record<string, unknown>>;
@@ -848,6 +872,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
     expectedRevision,
     false,
     blockGuard.references.length === 0 ? undefined : blockGuard,
+    module.id === "clips",
   );
   if (!changed) {
     const current = await getChannelModuleForChannel(context.env.DB, channelId, module.id);
