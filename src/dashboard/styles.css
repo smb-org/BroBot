@@ -2767,3 +2767,11 @@ p.lock-reason { margin-bottom: 1em; }
   .live-cockpit-reserve { min-height: 112px; padding: var(--s3); }
   .live-cockpit__status { justify-content: flex-start; flex-wrap: wrap; padding-top: var(--s2); }
 }
+
+@media (max-width: 1399px) {
+  /* Keep the BELABOX overview above the settings while letting the whole page scroll. */
+  .module-detail--settings-page:has(.belabox-overview) .settings-page { overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
+  .module-detail--settings-page:has(.belabox-overview) .settings-page > .page-header { position: sticky; top: 0; z-index: var(--layer-inspector); background: var(--background); }
+  .module-detail--settings-page:has(.belabox-overview) .settings-page__columns { flex: none; min-height: auto; overflow: visible; }
+  .module-detail--settings-page:has(.belabox-overview) .settings-page__column { min-height: auto; overflow: visible; }
+}

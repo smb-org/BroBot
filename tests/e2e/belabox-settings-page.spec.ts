@@ -261,6 +261,41 @@ test("BELABOX settings page stays within the viewport at supported widths", asyn
   }
 });
 
+test("BELABOX settings page scrolls its overview and messages together on narrow screens", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await installMocks(page);
+  await page.goto(`/channels/${channelId}/modules/belabox`);
+  const message = page.locator('.settings-page__column [data-section="alerts"] .ui-settings-editor__message').first();
+  await expect(page.locator(".belabox-overview")).toBeVisible();
+  await message.scrollIntoViewIfNeeded();
+  await expect(message).toBeInViewport({ ratio: 1 });
+  const layout = await page.evaluate(() => {
+    const page = document.querySelector<HTMLElement>(".settings-page");
+    const header = document.querySelector<HTMLElement>(".settings-page > .page-header");
+    const columns = document.querySelector<HTMLElement>(".settings-page__columns");
+    const message = document.querySelector<HTMLElement>('.settings-page__column [data-section="alerts"] .ui-settings-editor__message');
+    if (page === null || header === null || columns === null || message === null) throw new Error("The BELABOX narrow settings layout is incomplete.");
+    const headerBox = header.getBoundingClientRect();
+    const pageBox = page.getBoundingClientRect();
+    const columnsBox = columns.getBoundingClientRect();
+    const messageBox = message.getBoundingClientRect();
+    return {
+      overflowY: getComputedStyle(page).overflowY,
+      scrollTop: page.scrollTop,
+      columnsHeight: columnsBox.height,
+      headerBottom: headerBox.bottom,
+      pageBottom: pageBox.bottom,
+      messageTop: messageBox.top,
+      messageBottom: messageBox.bottom,
+    };
+  });
+  expect(layout.overflowY).toBe("auto");
+  expect(layout.scrollTop).toBeGreaterThan(0);
+  expect(layout.columnsHeight).toBeGreaterThan(300);
+  expect(layout.messageTop).toBeGreaterThanOrEqual(layout.headerBottom - 1);
+  expect(layout.messageBottom).toBeLessThanOrEqual(layout.pageBottom + 1);
+});
+
 test("BELABOX reports a disconnected encoder in the connection state", async ({ page }) => {
   await page.setViewportSize({ width: 1_280, height: 800 });
   await installMocks(page, { status: { ...connectedStatus, sample: { ...connectedStatus.sample, connected: false } } });
