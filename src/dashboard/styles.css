@@ -2488,7 +2488,8 @@ p.lock-reason { margin-bottom: 1em; }
   .live-cockpit { grid-template-rows: auto 120px minmax(0, 1fr) 36px; min-height: calc(100dvh - 76px); gap: var(--s2); }
   .live-cockpit-header { grid-template-columns: minmax(0, 1fr); align-items: flex-start; gap: var(--s3); padding: var(--s3); }
   .live-cockpit-header__summary { grid-column: 1; grid-row: 1; flex-wrap: wrap; gap: var(--s3); }
-  .live-cockpit-header__title-slot { grid-column: 1; grid-row: 2; width: 100%; }
+  .live-cockpit-header__title-slot { grid-column: 1; grid-row: 2; grid-template-rows: 46px 28px auto; width: 100%; height: auto; min-height: 90px; max-height: none; overflow: visible; }
+  .live-cockpit-broadcast__reason-slot { height: auto; min-height: 16px; overflow: visible; line-height: 14px; text-overflow: clip; white-space: normal; }
   .live-cockpit-header__indicators { grid-column: 1; grid-row: 3; justify-content: flex-start; gap: var(--s3); }
   .live-cockpit__wall { grid-template-columns: minmax(0, 1fr); gap: var(--s2); }
   .live-cockpit__warning-slot { grid-template-columns: minmax(0, 1fr); height: 120px; }
