@@ -19,6 +19,12 @@ export const votekickSettingsSchema = z.object({
   channelCooldownSeconds: z.number().int().min(60).max(86_400),
   targetCooldownSeconds: z.number().int().min(60).max(86_400),
   chatTarget: z.enum(["all_chats", "source_only"]),
+  startTextEnabled: z.boolean().default(true),
+  passTextEnabled: z.boolean().default(true),
+  failTextEnabled: z.boolean().default(true),
+  expiredTextEnabled: z.boolean().default(true),
+  protectedTextEnabled: z.boolean().default(true),
+  busyTextEnabled: z.boolean().default(true),
   startText: z.string().refine((text) => templateTextLength(text) <= 500),
   passText: z.string().refine((text) => templateTextLength(text) <= 500),
   failText: z.string().refine((text) => templateTextLength(text) <= 500),
@@ -37,8 +43,19 @@ export const DEFAULT_VOTEKICK_SETTINGS: VotekickSettings = {
   channelCooldownSeconds: 300,
   targetCooldownSeconds: 1800,
   chatTarget: "source_only",
+  startTextEnabled: true,
+  passTextEnabled: true,
+  failTextEnabled: true,
+  expiredTextEnabled: true,
+  protectedTextEnabled: true,
+  busyTextEnabled: true,
   ...VOTEKICK_DEFAULT_TEXTS.en,
 };
+
+export const votekickDefaultSettingsForLanguage = (language: "de" | "en"): VotekickSettings => ({
+  ...DEFAULT_VOTEKICK_SETTINGS,
+  ...VOTEKICK_DEFAULT_TEXTS[language],
+});
 
 export type VotekickStatus = "running" | "passed" | "expired" | "cancelled" | "failed";
 

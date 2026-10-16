@@ -891,7 +891,11 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   if (module.mandatory === true && !enabled) return context.json({ error: "module_mandatory" }, 400);
 
   const channelId = context.req.param("channelId");
-  const defaultSettingsJson = JSON.stringify(module.defaultSettings);
+  const channelLanguage = module.defaultSettingsForLanguage === undefined
+    ? "en"
+    : (await context.env.DB.prepare("SELECT language FROM channels WHERE channel_id = ?")
+      .bind(context.req.param("channelId")).first<{ language: ModuleLanguage }>())?.language ?? "de";
+  const defaultSettingsJson = JSON.stringify(module.defaultSettingsForLanguage?.(channelLanguage) ?? module.defaultSettings);
   const now = nowIso();
   const action: AuditAction = enabled ? "module.enabled" : "module.disabled";
   const actor = actorOf(context);

@@ -212,8 +212,6 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
       return { message: chatVotingImmediateActionTexts.endSucceeded };
     },
   }],
-  settingsEditor: () => import("./panel/settings-editor"),
-  settingsEditorRelatedParts: ["panel"],
   eventSubTypes: ["channel.chat.message"],
   alarms: [chatVotingAlarmDefinition, chatVotingStartAnnouncementAlarmDefinition],
   overlayElements: chatVotingOverlayElements.map((element) => ({

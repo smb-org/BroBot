@@ -108,8 +108,8 @@ describe("Ad settings editor declaration", () => {
     expect(screen.getByText("Nur Broadcaster und Verwalter dürfen Werbepausen verschieben.")).toBeInTheDocument();
     const properties = document.querySelector("dl.ui-settings-editor__properties");
     expect(properties).not.toBeNull();
-    expect(within(properties as HTMLElement).getByText("Vorwarnung vor der Werbung")).toBeInTheDocument();
-    expect(within(properties as HTMLElement).getByText("Aus")).toBeInTheDocument();
+    expect(within(properties as HTMLElement).getByText("Automatische Werbepause")).toBeInTheDocument();
+    expect(within(properties as HTMLElement).getByText("Werbepause beginnt")).toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Ansagen speichern" })).not.toBeInTheDocument();
   });

@@ -33,8 +33,5 @@ export const isActiveVotekickTarget = (lastSeenAt: string | null, now: number, w
 export const wasActiveBeforeVotekick = (firstSeenAt: string | null, startedAt: string): boolean =>
   firstSeenAt !== null && Number.isFinite(Date.parse(firstSeenAt)) && Date.parse(firstSeenAt) < Date.parse(startedAt);
 
-export const remainingVotekickSeconds = (endsAt: string, now: number): number =>
-  Math.max(0, Math.ceil((Date.parse(endsAt) - now) / 1000));
-
 export const votekickTimeoutReason = (yesVotes: number, noVotes: number, votekickId: string): string =>
   `Votekick (${String(yesVotes)}:${String(noVotes)}) · ${votekickId}`;

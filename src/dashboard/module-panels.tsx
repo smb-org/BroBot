@@ -472,10 +472,17 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   };
   const navigationGuard = useDraftGuard(dirty, save, discard);
   useEffect(() => registerDashboardNavigationGuard(navigationGuard.guardSwitch), [navigationGuard.guardSwitch]);
-  const readOnly = !canManageContent ? { reason: copy.readOnlyReason, content: <SettingsEditor spec={spec} sectionId={spec.sections[0]?.id ?? ""} settings={currentValue} onChange={() => undefined} texts={copy} variables={templateVariableOptions} templateMetadata={templateMetadata} templateMessages={copy.templateMessages} readOnly enabledLabel={copy.enabledLabel} disabledLabel={copy.disabledLabel} /> } : undefined;
+  const readOnly = !canManageContent ? { reason: copy.readOnlyReason, content: definition.layout === "columns"
+    ? <div className="ui-editor-shell__readonly-sections">
+      {spec.sections.map((section) => <div className="ui-editor-shell__readonly-section" key={section.id}>
+        <SettingsEditor spec={spec} sectionId={section.id} settings={currentValue} onChange={() => undefined} texts={copy} variables={templateVariableOptions} templateMetadata={templateMetadata} templateMessages={copy.templateMessages} readOnly enabledLabel={copy.enabledLabel} disabledLabel={copy.disabledLabel} />
+      </div>)}
+    </div>
+    : <SettingsEditor spec={spec} sectionId={spec.sections[0]?.id ?? ""} settings={currentValue} onChange={() => undefined} texts={copy} variables={templateVariableOptions} templateMetadata={templateMetadata} templateMessages={copy.templateMessages} readOnly enabledLabel={copy.enabledLabel} disabledLabel={copy.disabledLabel} /> } : undefined;
   return <>
     <EditorShell
     ariaLabel={copy.ariaLabel}
+    {...(definition.layout === undefined ? {} : { layout: definition.layout })}
     title={copy.title}
     sections={sections}
     {...(readOnly === undefined ? {} : { readOnly })}

@@ -7,7 +7,7 @@ const dateText = (value: string | null, language: DashboardLanguage): string => 
   return new Intl.DateTimeFormat(localeFor(language), { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
 };
 
-export const timeText = (value: string, language: DashboardLanguage): string =>
+const timeText = (value: string, language: DashboardLanguage): string =>
   Number.isFinite(Date.parse(value))
     ? new Intl.DateTimeFormat(language, { timeStyle: "short" }).format(new Date(value))
     : "—";

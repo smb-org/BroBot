@@ -65,6 +65,7 @@ export interface ChatVote {
   optionCount: number;
   labels: readonly string[];
   title: string | null;
+  resultText?: string | null;
   textMode?: ChatVotingTextMode | null;
   termFilterReady?: boolean | null;
   status: "open" | "closing" | "closed";
@@ -96,6 +97,7 @@ export interface ChatVoteTemplate {
   channelId: string;
   shortcut: string | null;
   title: string;
+  resultText?: string;
   labels: readonly string[];
   freeTextMode: ChatVotingTextMode | null;
   durationSeconds: number;
@@ -109,6 +111,7 @@ export interface ChatVoteTemplate {
 export interface ChatVoteTemplateDraft {
   shortcut: string | null;
   title: string;
+  resultText?: string;
   labels: readonly string[];
   freeTextMode: ChatVotingTextMode | null;
   durationSeconds: number;

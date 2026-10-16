@@ -118,6 +118,12 @@ describe("Votekick module", () => {
     });
   });
 
+  it("uses the settings editor in the panel and keeps live operations in the cockpit", () => {
+    expect(votekickModule.settingsEditor).toBeTypeOf("function");
+    expect(votekickModule.panel).toBeUndefined();
+    expect(votekickModule.liveTile?.load).toBeTypeOf("function");
+  });
+
   it("localizes the moderator lookup scope", () => {
     expect(moduleScopePurpose("votekick", "moderation:read", "de")).toBe("Moderatoren vor Votekicks schützen");
     expect(moduleScopePurpose("votekick", "moderation:read", "en")).toBe("Protect moderators from votekicks");

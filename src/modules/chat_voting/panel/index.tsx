@@ -1,537 +1,239 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 
-import { PanelApiError } from "../../../contracts/panel-error";
-import { EmptyState, ListDetail, ListRow, ListToolbar, LoadState, SegmentChoice, Section, SubInspector, notify } from "../../../dashboard/ui";
-import { dashboardTexts } from "../../../dashboard/locale";
+import { CollectionPage, EmptyState, ListToolbar, LoadState, LoadStateLines } from "../../../dashboard/ui";
+import { dashboardCommonTexts } from "../../../dashboard/locale";
+import { moduleQueryKey, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import type { ModulePanelProperties } from "../../contract";
-import { CHAT_VOTE_TEMPLATE_MAXIMUM, type ChatVote, type ChatVoteTemplate } from "../contracts";
-import { rankVoteTerms } from "../domain";
+import { CHAT_VOTE_TEMPLATE_MAXIMUM, type ChatVoteTemplate } from "../contracts";
 import { chatVoteDurationText, chatVotingSavedPanelTexts } from "./locale-saved";
-import { ChatVoteTemplateList } from "./template-list";
 import { ChatVoteTemplateInspector } from "./template-inspector";
 import type { TemplateInspectorActions } from "./template-inspector";
-import type { ChatVotingPanelState } from "./service";
-import { approveChatVotingTerm, closeChatVoting, deleteChatVoteTemplate, loadChatVotingState, loadChatVoteTemplates, loadRecentChatVotes, mergeChatVoteTemplateLists } from "./service";
+import { ChatVoteTemplateList } from "./template-list";
 import type { ChatVoteTemplateListState } from "./service";
-import { compactDateRange, timeText } from "./date-range";
-import { ChatVotingLiveBlock } from "./live-block";
-import { moduleQueryKey, refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useManualQueryFailure, useModuleQuery } from "../../../dashboard/data";
-import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
+import { deleteChatVoteTemplate, loadChatVoteTemplates, mergeChatVoteTemplateLists } from "./service";
 
-type ListMode = "saved" | "recent";
-type Announcement = { key: number; text: string };
 const EMPTY_TEMPLATES: readonly ChatVoteTemplate[] = [];
-const voteTotal = (vote: ChatVote): number => vote.kind === "free_text"
-  ? vote.voterCount ?? (vote.textResults ?? []).reduce((sum, term) => sum + term.count, 0)
-  : vote.voterCount ?? (vote.counts ?? []).reduce((sum, count) => sum + count, 0);
-const isAbortedRequest = (failure: unknown): boolean => typeof failure === "object" && failure !== null &&
-  "name" in failure && (failure.name === "AbortError" || failure.name === "CancelledError");
-
-const winnerFor = (vote: ChatVote, labels: ReturnType<typeof chatVotingSavedPanelTexts>): string => {
-  if (vote.kind === "free_text") {
-    const leader = rankVoteTerms((vote.textResults ?? []).filter((term) => term.approved), 1)[0];
-    if (leader === undefined) return labels.noWinner;
-    const total = (vote.textResults ?? []).reduce((sum, term) => sum + term.count, 0);
-    return labels.winner(leader.term, total === 0 ? 0 : Math.round(leader.count * 100 / total));
-  }
-  const counts = vote.counts ?? [];
-  const maximum = Math.max(0, ...counts);
-  if (maximum === 0) return labels.noWinner;
-  const index = counts.findIndex((count) => count === maximum);
-  const answer = vote.labels[index] ?? String(index + 1);
-  const total = counts.reduce((sum, count) => sum + count, 0);
-  return labels.winner(answer, total === 0 ? 0 : Math.round(maximum * 100 / total));
-};
-
-const lockReason = (
-  state: ChatVotingPanelState | null,
-  canOperate: boolean,
-  labels: ReturnType<typeof chatVotingSavedPanelTexts>,
-  unavailableReason: string | null,
-): string | null => {
-  if (!canOperate) return labels.operatorLocked;
-  if (unavailableReason !== null) return unavailableReason;
-  if (state === null) return labels.loading;
-  if (state.vote?.status === "open" || state.vote?.status === "closing") return labels.runningLocked;
-  if (state.hasOpenBallot) return labels.votekickLocked;
-  return null;
-};
+const DEFAULT_TEMPLATE_DURATION_SECONDS = 120;
 
 const ChatVotingPanel = (properties: ModulePanelProperties): ReactElement =>
-  <ChatVotingPanelForChannel key={properties.channelId} {...properties} />;
+  <ChatVotingCollection key={properties.channelId} {...properties} />;
 
-const ChatVotingPanelForChannel = ({ channelId, language = "de", canOperate = true }: ModulePanelProperties): ReactElement => {
+const ChatVotingCollection = ({ channelId, language = "de", canManage = true, onCloseInspector }: ModulePanelProperties): ReactElement => {
   const labels = chatVotingSavedPanelTexts(language);
-  const realtimeStatus = useDashboardRealtimeStatus(channelId);
+  const common = dashboardCommonTexts(language);
   const queryClient = useDashboardQueryClient();
-  const fallbackRefetchInterval = realtimeStatus === "connected" ? false : 2_000;
-  const [mode, setMode] = useState<ListMode>("saved");
-  const stateQuery = useModuleQuery(channelId, "chat_voting", "panel", (signal) => loadChatVotingState(channelId, signal), { refetchInterval: fallbackRefetchInterval });
-  const templatesQuery = useModuleQuery(channelId, "chat_voting", "templates", async (signal) => {
-    return mergeChatVoteTemplateLists(
-      queryClient.getQueryData<ChatVoteTemplateListState>(moduleQueryKey(channelId, "chat_voting", "templates")) ?? null,
-      await loadChatVoteTemplates(channelId, signal),
-    );
-  }, { refetchInterval: fallbackRefetchInterval });
-  const recentQuery = useModuleQuery(channelId, "chat_voting", "recent", (signal) => loadRecentChatVotes(channelId, signal), { enabled: mode === "recent", refetchInterval: fallbackRefetchInterval });
-  const voteState = stateQuery.data ?? null;
-  const templateList = templatesQuery.data ?? null;
-  const recentState = recentQuery.data ?? null;
-  const recentVotes = recentState?.votes ?? null;
-  const { clear: clearVoteFailure, failedAt: voteFailedAt, markFailed: markVoteFailure } = useManualQueryFailure();
-  const { clear: clearTemplateFailure, failedAt: templateFailedAt, markFailed: markTemplateFailure } = useManualQueryFailure();
-  const { clear: clearRecentFailure, failedAt: recentFailedAt, markFailed: markRecentFailure } = useManualQueryFailure();
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
-  const [templateSnapshot, setTemplateSnapshot] = useState<ChatVoteTemplate | null>(null);
+  const templatesQuery = useModuleQuery(channelId, "chat_voting", "templates", async (signal) => mergeChatVoteTemplateLists(
+    queryClient.getQueryData<ChatVoteTemplateListState>(moduleQueryKey(channelId, "chat_voting", "templates")) ?? null,
+    await loadChatVoteTemplates(channelId, signal),
+  ));
+  const templateState = templatesQuery.data ?? null;
+  const templates = templateState?.templates ?? EMPTY_TEMPLATES;
+  const count = templateState?.count ?? templates.length;
+  const [search, setSearch] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedSnapshot, setSelectedSnapshot] = useState<ChatVoteTemplate | null>(null);
   const [templateInspectorKey, setTemplateInspectorKey] = useState<string | null>(null);
-  const [templateInspectorGeneration, setTemplateInspectorGeneration] = useState(0);
   const [newTemplateDraft, setNewTemplateDraft] = useState<ChatVoteTemplate | null>(null);
   const [savedTemplateId, setSavedTemplateId] = useState<string | null>(null);
-  const [selectedRecentId, setSelectedRecentId] = useState<string | null>(null);
   const [selectionCleared, setSelectionCleared] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [announcement, setAnnouncement] = useState<Announcement | null>(null);
-  const announcementSequence = useRef(0);
-  const selectedTemplateIdRef = useRef<string | null>(null);
-  const templateSnapshotRef = useRef<ChatVoteTemplate | null>(null);
-  const templateInspectorKeyRef = useRef<string | null>(null);
-  const templateInspectorGenerationRef = useRef(0);
-  const selectionClearedRef = useRef(selectionCleared);
-  const previousVote = useRef<{ id: string; status: ChatVote["status"]; title: string | null } | null>(null);
-  const newDraftSequence = useRef(0);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [wide, setWide] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1200);
+  const [inspectorGeneration, setInspectorGeneration] = useState(0);
+  const selectedIdRef = useRef<string | null>(null);
+  const selectedSnapshotRef = useRef<ChatVoteTemplate | null>(null);
+  const inspectorKeyRef = useRef<string | null>(null);
   const inspectorActions = useRef<TemplateInspectorActions | null>(null);
-  const [wide, setWide] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1280);
-  const templates = templateList?.templates ?? EMPTY_TEMPLATES;
 
-  const updateTemplateSelection = useCallback((id: string | null, snapshot: ChatVoteTemplate | null, inspectorKey = id): void => {
-    if (templateInspectorKeyRef.current !== inspectorKey) {
-      const generation = templateInspectorGenerationRef.current + 1;
-      templateInspectorGenerationRef.current = generation;
-      setTemplateInspectorGeneration(generation);
-    }
-    selectedTemplateIdRef.current = id;
-    templateSnapshotRef.current = snapshot;
-    templateInspectorKeyRef.current = inspectorKey;
-    setSelectedTemplateId(id);
-    setTemplateSnapshot(snapshot);
-    setTemplateInspectorKey(inspectorKey);
+  const updateSelection = useCallback((id: string | null, snapshot: ChatVoteTemplate | null, key = id): void => {
+    if (inspectorKeyRef.current !== key) setInspectorGeneration((generation) => generation + 1);
+    selectedIdRef.current = id;
+    selectedSnapshotRef.current = snapshot;
+    inspectorKeyRef.current = key;
+    setSelectedId(id);
+    setSelectedSnapshot(snapshot);
+    setTemplateInspectorKey(key);
   }, []);
+
   const requestInspectorSwitch = useCallback((proceed: () => void): void => {
-    const guardSwitch = inspectorActions.current?.guardSwitch;
-    if (guardSwitch === undefined) proceed();
-    else guardSwitch(proceed);
-  }, []);
-  const registerInspectorActions = useCallback((actions: TemplateInspectorActions | null): void => {
-    inspectorActions.current = actions;
+    const guard = inspectorActions.current?.guardSwitch;
+    if (guard === undefined) proceed();
+    else guard(proceed);
   }, []);
 
-  useEffect(() => {
-    if (mode !== "saved" || !wide || selectionCleared || selectedTemplateId !== null || templateSnapshot !== null || newTemplateDraft !== null) return;
-    const firstTemplate = templates[0];
-    if (firstTemplate === undefined) return;
+  const clearSelection = useCallback((): void => {
+    updateSelection(null, null);
+    setNewTemplateDraft(null);
+    setSavedTemplateId(null);
+    setSelectionCleared(true);
+    setDetailOpen(false);
+  }, [updateSelection]);
+
+  const closeInspector = useCallback((): void => {
     requestInspectorSwitch(() => {
-      if (selectedTemplateIdRef.current !== null || selectionClearedRef.current) return;
-      updateTemplateSelection(firstTemplate.id, firstTemplate);
+      clearSelection();
+      onCloseInspector?.();
     });
-  }, [mode, newTemplateDraft, requestInspectorSwitch, selectedTemplateId, selectionCleared, templateSnapshot, templates, updateTemplateSelection, wide]);
-
-  const refreshVote = useCallback(async (): Promise<void> => {
-    try {
-      await refetchModuleQueryData<ChatVotingPanelState>(queryClient, channelId, "chat_voting", "panel");
-      clearVoteFailure();
-    } catch (failure: unknown) {
-      if (isAbortedRequest(failure)) return;
-      markVoteFailure(queryClient.getQueryState(moduleQueryKey(channelId, "chat_voting", "panel"))?.dataUpdatedAt ?? stateQuery.dataUpdatedAt);
-    }
-  }, [channelId, clearVoteFailure, markVoteFailure, queryClient, stateQuery.dataUpdatedAt]);
-
-  const refreshTemplates = useCallback(async (): Promise<void> => {
-    try {
-      await refetchModuleQueryData<ChatVoteTemplateListState>(queryClient, channelId, "chat_voting", "templates");
-      clearTemplateFailure();
-    } catch (failure: unknown) {
-      if (isAbortedRequest(failure)) return;
-      markTemplateFailure(queryClient.getQueryState(moduleQueryKey(channelId, "chat_voting", "templates"))?.dataUpdatedAt ?? templatesQuery.dataUpdatedAt);
-    }
-  }, [channelId, clearTemplateFailure, markTemplateFailure, queryClient, templatesQuery.dataUpdatedAt]);
-
-  const refreshRecent = useCallback(async (): Promise<void> => {
-    try {
-      await refetchModuleQueryData<{ votes: readonly ChatVote[] }>(queryClient, channelId, "chat_voting", "recent");
-      clearRecentFailure();
-    } catch (failure: unknown) {
-      if (isAbortedRequest(failure)) return;
-      markRecentFailure(queryClient.getQueryState(moduleQueryKey(channelId, "chat_voting", "recent"))?.dataUpdatedAt ?? recentQuery.dataUpdatedAt);
-    }
-  }, [channelId, clearRecentFailure, markRecentFailure, queryClient, recentQuery.dataUpdatedAt]);
+  }, [clearSelection, onCloseInspector, requestInspectorSwitch]);
 
   useEffect(() => {
-    const resize = (): void => {
-      const nextWide = window.innerWidth >= 1280;
-      setWide(nextWide);
-    };
+    const resize = (): void => { setWide(window.innerWidth >= 1200); };
     window.addEventListener("resize", resize);
     return () => { window.removeEventListener("resize", resize); };
   }, []);
 
-  useEffect(() => {
-    if (voteState === null) return;
-    const current = voteState.vote;
-    const previous = previousVote.current;
-    const currentActive = current?.status === "open" || current?.status === "closing";
-    const previousActive = previous?.status === "open" || previous?.status === "closing";
-    if (previous === null && current?.status === "open") {
-      announcementSequence.current += 1;
-      setAnnouncement({ key: announcementSequence.current, text: labels.startAnnouncement(current.title || labels.untitled) });
-    } else if (previous !== null && !previousActive && current?.status === "open") {
-      announcementSequence.current += 1;
-      setAnnouncement({ key: announcementSequence.current, text: labels.startAnnouncement(current.title || labels.untitled) });
-    } else if (previousActive && !currentActive) {
-      announcementSequence.current += 1;
-      setAnnouncement({ key: announcementSequence.current, text: labels.endAnnouncement(previous.title || labels.untitled) });
-    }
-    const voteClosedOrReplaced = previousActive && (!currentActive || current.id !== previous.id);
-    const newlyObservedClosedVote = current?.status === "closed" && (previous === null || current.id !== previous.id);
-    if (voteClosedOrReplaced || newlyObservedClosedVote) {
-      if (mode === "recent") void refreshRecent();
-    }
-    previousVote.current = current === null ? null : { id: current.id, status: current.status, title: current.title };
-  }, [labels, mode, refreshRecent, voteState]);
-
-  const voteError = stateQuery.isError || (voteFailedAt !== null && voteFailedAt === stateQuery.dataUpdatedAt);
-  const templateError = templatesQuery.isError || (templateFailedAt !== null && templateFailedAt === templatesQuery.dataUpdatedAt);
-  const recentError = recentQuery.isError || (recentFailedAt !== null && recentFailedAt === recentQuery.dataUpdatedAt);
-  const activeLockReason = lockReason(voteState, canOperate, labels,
-    voteError ? labels.liveLoadError : voteState === null ? labels.loading : null);
-  const selectedTemplate = mode === "saved"
-    ? newTemplateDraft ?? (templateSnapshot !== null && (selectedTemplateId === null || templateSnapshot.id === selectedTemplateId)
-      ? templateSnapshot
-      : wide && !selectionCleared && selectedTemplateId === null ? templates[0] ?? null : null)
-    : null;
-  const selectedRecent = mode === "recent"
-    ? recentVotes?.find((vote) => vote.id === selectedRecentId) ?? (wide && !selectionCleared ? recentVotes?.[0] ?? null : null)
-    : null;
-  const count = templateList?.count ?? templates.length;
-  const defaultDuration = voteState?.defaultDurationSeconds ?? 120;
-  const createBlocked = count >= CHAT_VOTE_TEMPLATE_MAXIMUM;
+  const createTemplate = (): void => {
+    if (!canManage || count >= CHAT_VOTE_TEMPLATE_MAXIMUM) return;
+    requestInspectorSwitch(() => {
+      const timestamp = new Date().toISOString();
+      const id = `new-${crypto.randomUUID()}`;
+      const template: ChatVoteTemplate = {
+        id,
+        channelId,
+        shortcut: null,
+        title: "",
+        resultText: "{vote.result}",
+        labels: [],
+        freeTextMode: null,
+        durationSeconds: DEFAULT_TEMPLATE_DURATION_SECONDS,
+        revision: 0,
+        legacyAlias: null,
+        lastUsedAt: null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      setSelectionCleared(false);
+      setNewTemplateDraft(template);
+      setSavedTemplateId(null);
+      updateSelection(id, null);
+      setDetailOpen(true);
+    });
+  };
 
   const selectTemplate = (template: ChatVoteTemplate): void => {
     requestInspectorSwitch(() => {
       const latest = queryClient.getQueryData<ChatVoteTemplateListState>(moduleQueryKey(channelId, "chat_voting", "templates"));
-      const selectedSnapshot = latest?.templates.find((entry) => entry.id === template.id) ?? template;
-      const reselecting = selectedTemplateIdRef.current === template.id;
-      const refreshed = reselecting && templateSnapshotRef.current?.revision !== selectedSnapshot.revision;
-      selectionClearedRef.current = false;
+      const snapshot = latest?.templates.find((entry) => entry.id === template.id) ?? template;
+      const sameItem = selectedIdRef.current === template.id;
+      const refreshed = sameItem && selectedSnapshotRef.current?.revision !== snapshot.revision;
       setSelectionCleared(false);
-      setSelectedRecentId(null);
-      const inspectorKey = reselecting
-        ? templateInspectorKeyRef.current ?? template.id
-        : template.id;
-      updateTemplateSelection(template.id, selectedSnapshot, inspectorKey);
-      if (refreshed) inspectorActions.current?.acceptTemplate(selectedSnapshot);
       setNewTemplateDraft(null);
       setSavedTemplateId(null);
+      updateSelection(template.id, snapshot, sameItem ? inspectorKeyRef.current ?? template.id : template.id);
+      if (refreshed) inspectorActions.current?.acceptTemplate(snapshot);
+      setDetailOpen(true);
     });
-  };
-
-  const selectRecent = (vote: ChatVote): void => {
-    requestInspectorSwitch(() => {
-      selectionClearedRef.current = false;
-      setSelectionCleared(false);
-      updateTemplateSelection(null, null);
-      setNewTemplateDraft(null);
-      setSavedTemplateId(null);
-      setSelectedRecentId(vote.id);
-    });
-  };
-
-  const clearInspector = (): void => {
-    selectionClearedRef.current = true;
-    setSelectionCleared(true);
-    updateTemplateSelection(null, null);
-    setNewTemplateDraft(null);
-    setSavedTemplateId(null);
-    setSelectedRecentId(null);
-  };
-
-  const closeInspector = (): void => { requestInspectorSwitch(clearInspector); };
-
-  const changeMode = (value: string): void => {
-    requestInspectorSwitch(() => {
-      const next = value as ListMode;
-      if (next === "recent") void refreshRecent();
-      setSelectionCleared(false);
-      selectionClearedRef.current = false;
-      setMode(next);
-      const firstTemplate = next === "saved" && wide ? templates[0] ?? null : null;
-      updateTemplateSelection(firstTemplate?.id ?? null, firstTemplate);
-      setNewTemplateDraft(null);
-      setSavedTemplateId(null);
-      setSelectedRecentId(next === "recent" && wide ? recentVotes?.[0]?.id ?? null : null);
-    });
-  };
-
-  const createTemplate = (): void => {
-    if (count >= CHAT_VOTE_TEMPLATE_MAXIMUM) return;
-    requestInspectorSwitch(() => {
-      const now = new Date().toISOString();
-      const id = `new-${String(++newDraftSequence.current)}`;
-      const template: ChatVoteTemplate = {
-        id, channelId, shortcut: null, title: "", labels: [], freeTextMode: null,
-        durationSeconds: defaultDuration, revision: 0, legacyAlias: null, lastUsedAt: null,
-        createdAt: now, updatedAt: now,
-      };
-      selectionClearedRef.current = false;
-      setMode("saved");
-      setSelectedRecentId(null);
-      updateTemplateSelection(id, null);
-      setNewTemplateDraft(template);
-      setSavedTemplateId(null);
-      setSelectionCleared(false);
-    });
-  };
-
-  const closeVote = async (pollId: string): Promise<void> => {
-    if (busy || !canOperate) return;
-    setBusy(true);
-    try {
-      await closeChatVoting(channelId, pollId);
-      await refreshVote();
-    } catch {
-      notify({ tone: "error", message: labels.endError });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const approveTerm = async (pollId: string, term: string): Promise<void> => {
-    if (busy || !canOperate) return;
-    setBusy(true);
-    try {
-      await approveChatVotingTerm(channelId, pollId, term);
-      notify({ tone: "success", message: labels.approvalSaved });
-      await refreshVote();
-    } catch (error: unknown) {
-      const message = error instanceof PanelApiError && error.code === "chat_voting_blocked_terms_unavailable"
-        ? labels.termsUnavailable : labels.approvalFailed;
-      notify({ tone: "error", message });
-    } finally {
-      setBusy(false);
-    }
   };
 
   const removeTemplate = async (template: ChatVoteTemplate): Promise<void> => {
-    try {
-      const nextSelection: { template: ChatVoteTemplate | null } = { template: null };
-      await runModuleQueryWrite(queryClient, channelId, "chat_voting", "templates", () => deleteChatVoteTemplate(channelId, template), {
-        baselineRevision: template.revision,
-        updateCache: (current) => {
-          if (current === undefined) return current;
-          const previous = current as ChatVoteTemplateListState;
-          const position = previous.templates.findIndex((entry) => entry.id === template.id);
-          const remaining = previous.templates.filter((entry) => entry.id !== template.id);
-          nextSelection.template = remaining[position < 0 ? 0 : position] ?? remaining.at(-1) ?? null;
-          return {
-            ...previous,
-            templates: remaining,
-            count: Math.max(0, previous.count - (position < 0 ? 0 : 1)),
-          };
-        },
-      });
-      if (selectedTemplateIdRef.current === template.id) {
-        requestInspectorSwitch(() => {
-          if (selectedTemplateIdRef.current !== template.id) return;
-          updateTemplateSelection(nextSelection.template?.id ?? null, nextSelection.template);
-          setNewTemplateDraft(null);
-          setSavedTemplateId(null);
-          selectionClearedRef.current = nextSelection.template === null;
-          setSelectionCleared(nextSelection.template === null);
-        });
-      }
-    } catch {
-      notify({ tone: "error", message: labels.deleteError });
-      throw new Error(labels.deleteError);
-    }
+    const nextTemplate: { value: ChatVoteTemplate | null } = { value: null };
+    await runModuleQueryWrite(queryClient, channelId, "chat_voting", "templates", () => deleteChatVoteTemplate(channelId, template), {
+      baselineRevision: template.revision,
+      updateCache: (current) => {
+        const previous = current as ChatVoteTemplateListState | undefined;
+        if (previous === undefined) return current;
+        const position = previous.templates.findIndex((entry) => entry.id === template.id);
+        const remaining = previous.templates.filter((entry) => entry.id !== template.id);
+        nextTemplate.value = remaining[position < 0 ? 0 : position] ?? remaining.at(-1) ?? null;
+        return { ...previous, templates: remaining, count: Math.max(0, previous.count - (position < 0 ? 0 : 1)) };
+      },
+    });
+    if (selectedIdRef.current !== template.id) return;
+    const next = nextTemplate.value;
+    setNewTemplateDraft(null);
+    setSavedTemplateId(null);
+    setSelectionCleared(next === null);
+    updateSelection(next?.id ?? null, next);
+    setDetailOpen(next !== null);
   };
 
   const onTemplateSaved = (template: ChatVoteTemplate, originGeneration: number): void => {
-    if (originGeneration !== templateInspectorGenerationRef.current) return;
-    const inspectorKey = templateInspectorKeyRef.current ?? template.id;
-    updateTemplateSelection(template.id, template, inspectorKey);
+    if (originGeneration !== inspectorGeneration) return;
+    const key = inspectorKeyRef.current ?? template.id;
+    updateSelection(template.id, template, key);
     setNewTemplateDraft(null);
     setSavedTemplateId(template.id);
-    selectionClearedRef.current = false;
     setSelectionCleared(false);
   };
 
-  const discardNewTemplate = (): void => { clearInspector(); };
+  const visibleTemplates = templates.filter((template) => {
+    const query = search.trim().toLocaleLowerCase();
+    return query.length === 0 || [template.title, template.shortcut ?? "", ...template.labels]
+      .some((value) => value.toLocaleLowerCase().includes(query));
+  });
+  const automaticSelection = wide && !selectionCleared && selectedId === null && newTemplateDraft === null
+    ? templates[0] ?? null
+    : null;
+  const selectedTemplate = newTemplateDraft ?? selectedSnapshot ?? templates.find((template) => template.id === selectedId) ?? automaticSelection;
+  const listStatus = templateState === null ? templatesQuery.isPending ? "loading" : "error"
+    : visibleTemplates.length === 0 ? "empty" : "success";
+  const createDisabledReason = !canManage ? labels.operatorLocked : count >= CHAT_VOTE_TEMPLATE_MAXIMUM ? labels.templateLimit : undefined;
 
-  const liveStatus = voteState === null ? voteError ? "error" : "loading" : "success";
-  const listStatus = mode === "saved"
-    ? templateList === null ? templateError ? "error" : "loading" : templates.length === 0 ? "empty" : "success"
-    : recentVotes === null ? recentError ? "error" : "loading" : recentVotes.length === 0 ? "empty" : "success";
+  const toolbar = <div className="chat-voting-collection__toolbar">
+    <h3>{labels.saved}</h3>
+    <ListToolbar
+      language={language}
+      searchLabel={labels.search}
+      searchPlaceholder={labels.search}
+      searchClearLabel={common.clearSearch}
+      searchValue={search}
+      onSearchChange={setSearch}
+      create={{
+        label: labels.create,
+        onClick: createTemplate,
+        disabled: !canManage || templateState === null || count >= CHAT_VOTE_TEMPLATE_MAXIMUM,
+        ...(createDisabledReason === undefined ? {} : { reason: createDisabledReason }),
+      }}
+    />
+  </div>;
 
-  const liveLoading = <div className="chat-voting-live__load-text">{labels.loading}</div>;
-  const liveEmpty = <div className="chat-voting-live__empty"><EmptyState title={labels.noVoteYet} description="" /></div>;
-  const listLoading = <div className="chat-voting-list__load-text">{labels.loading}</div>;
-  const emptySaved = <EmptyState title={labels.emptySaved} description={labels.emptySavedDescription} action={{ label: labels.create, onClick: createTemplate }} />;
-  const emptyRecent = <EmptyState title={labels.emptyRecent} description="" />;
-  const activeListError = mode === "saved" ? templateError : recentError;
-  const activeListHasData = mode === "saved" ? templateList !== null : recentState !== null;
-  const liveQueryError = {
-    title: dashboardTexts().errors.dataLoadFailed,
-    message: labels.liveLoadError,
-    onRetry: () => { void refreshVote(); },
-  };
-  const listQueryError = {
-    title: dashboardTexts().errors.dataLoadFailed,
-    message: mode === "saved" ? labels.templatesError : labels.recentError,
-    onRetry: () => { void (mode === "saved" ? refreshTemplates() : refreshRecent()); },
-  };
+  const list = <LoadState
+    variant="panel-600"
+    status={listStatus}
+    loading={<LoadStateLines rows={7} height={48} />}
+    empty={<EmptyState title={templates.length === 0 ? labels.emptySaved : common.noMatches} description={templates.length === 0 ? labels.emptySavedDescription : ""} {...(templates.length === 0 && canManage ? { action: { label: labels.create, onClick: createTemplate } } : {})} />}
+    error={<p role="alert">{labels.templatesError}</p>}
+    queryError={{ title: labels.loadError, message: labels.templatesError, onRetry: () => { void templatesQuery.refetch(); } }}
+    refreshError={templatesQuery.isRefetchError}
+  >
+    <div className={templatesQuery.isRefetchError ? "stale" : undefined}>
+      <ChatVoteTemplateList
+        templates={visibleTemplates}
+        selectedId={selectedTemplate?.id ?? null}
+        labels={labels}
+        durationText={(seconds) => chatVoteDurationText(seconds, language)}
+        onSelect={selectTemplate}
+      />
+    </div>
+  </LoadState>;
 
-  const templateInspector = selectedTemplate === null ? null : <ChatVoteTemplateInspector
-    key={templateInspectorKey ?? selectedTemplate.id}
+  const inspector = selectedTemplate === null ? <EmptyState title={labels.selectionPrompt} description={labels.selectionDescription} /> : <ChatVoteTemplateInspector
+    key={`${templateInspectorKey ?? selectedTemplate.id}:${String(inspectorGeneration)}`}
     channelId={channelId}
     template={selectedTemplate}
     templates={templates}
     isNew={newTemplateDraft?.id === selectedTemplate.id}
     initiallySaved={savedTemplateId === selectedTemplate.id}
     language={language}
-    isRunning={(voteState?.vote?.status === "open" || voteState?.vote?.status === "closing") && (templates.find((entry) => entry.id === selectedTemplate.id)?.lastUsedAt ?? selectedTemplate.lastUsedAt) === voteState.vote.openedAt}
-    onRegisterActions={registerInspectorActions}
-    onTemplateSaved={(template) => { onTemplateSaved(template, templateInspectorGeneration); }}
-    onClose={clearInspector}
-    onDiscardNew={discardNewTemplate}
+    canManageContent={canManage}
+    onRegisterActions={(actions) => { inspectorActions.current = actions; }}
+    onTemplateSaved={(template) => { onTemplateSaved(template, inspectorGeneration); }}
+    onClose={closeInspector}
+    onDiscardNew={clearSelection}
     onDelete={removeTemplate}
   />;
 
-  const recentInspector = selectedRecent === null ? null : <SubInspector
-    ariaLabel={labels.recent}
-    title={selectedRecent.title || labels.untitled}
-    closeLabel={labels.cancel}
-    onClose={closeInspector}
-    className="chat-voting-recent-inspector"
-  >
-    <InspectorSectionView title={labels.answers}>
-      {selectedRecent.kind === "free_text"
-        ? rankVoteTerms((selectedRecent.textResults ?? []).filter((term) => term.approved)).map((term) => {
-          const total = (selectedRecent.textResults ?? []).reduce((sum, item) => sum + item.count, 0);
-          const percent = total === 0 ? 0 : Math.round(term.count * 100 / total);
-          return <ResultBar key={term.term} label={term.term} count={term.count} percent={percent} leader={false} />;
-        })
-        : (selectedRecent.labels).map((answer, index) => {
-          const counts = selectedRecent.counts ?? [];
-          const total = counts.reduce((sum, value) => sum + value, 0);
-          const amount = counts[index] ?? 0;
-          const percent = total === 0 ? 0 : Math.round(amount * 100 / total);
-          return <ResultBar key={String(index)} label={answer} count={amount} percent={percent} leader={amount === Math.max(0, ...counts)} />;
-        })}
-    </InspectorSectionView>
-    {(() => {
-      const [started, ended] = compactDateRange(selectedRecent.openedAt, selectedRecent.closedAt ?? selectedRecent.closesAt, language, labels.nextDay);
-      return <p className="chat-voting-recent-inspector__meta">{labels.closeReason(selectedRecent.closeReason)} · {started} – {ended}</p>;
-    })()}
-  </SubInspector>;
-
-  const inspector = mode === "saved" ? templateInspector : recentInspector;
-
-  return <section className="module-stack chat-voting-panel" aria-label={labels.title}>
-    <div className={voteError && voteState !== null ? "stale" : undefined}>
-      <LoadState
-        variant="panel-320"
-        status={liveStatus}
-        loading={liveLoading}
-        empty={liveEmpty}
-        error={<p role="alert">{labels.liveLoadError}</p>}
-        queryError={liveQueryError}
-        refreshError={voteError && voteState !== null}
-      >
-        <ChatVotingLiveBlock
-          state={voteState}
-          language={language}
-          busy={busy}
-          canOperate={canOperate}
-          onClose={(pollId) => { void closeVote(pollId); }}
-          onApprove={(pollId, term) => { void approveTerm(pollId, term); }}
-        />
-      </LoadState>
-    </div>
-
-    <ListDetail list={
-      <section className="chat-voting-list" aria-label={labels.title}>
-        <ListToolbar
-          filters={<SegmentChoice
-            label={labels.title}
-            value={mode}
-            onChange={changeMode}
-            options={[{ value: "saved", label: labels.saved }, { value: "recent", label: labels.recent }]}
-            size="form"
-          />}
-          filtersLabel={labels.title}
-          create={{
-            label: labels.create,
-            disabled: createBlocked || busy,
-            ...(createBlocked ? { reason: labels.templateLimit } : {}),
-            onClick: createTemplate,
-          }}
-          usage={{
-            count,
-            maximum: CHAT_VOTE_TEMPLATE_MAXIMUM,
-            copy: { countSuffix: "", filteredInfix: "", filteredSuffix: "", limitInfix: "/", limitSuffix: "", loadedSuffix: "" },
-          }}
-          activeFilters={activeLockReason ?? ""}
-          {...(activeListError && activeListHasData ? { queryError: listQueryError } : {})}
-        />
-        <LoadState
-          variant="panel-320"
-          status={listStatus}
-          loading={listLoading}
-          empty={mode === "saved" ? emptySaved : emptyRecent}
-          error={<p role="alert">{mode === "saved" ? labels.templatesError : labels.recentError}</p>}
-          queryError={listQueryError}
-        >
-          {mode === "saved" ? <div className={templateError ? "stale" : undefined}><ChatVoteTemplateList
-            templates={templates}
-            selectedId={selectedTemplate?.id ?? null}
-            vote={voteState?.vote ?? null}
-            labels={labels}
-            durationText={(seconds) => chatVoteDurationText(seconds, language)}
-            onSelect={selectTemplate}
-          /></div> : <div className={recentError ? "stale" : undefined}><div className="chat-voting-recent-list">
-            {(recentVotes ?? []).map((vote) => {
-              const title = vote.title || labels.untitled;
-              const time = timeText(vote.closedAt ?? vote.openedAt, language);
-              const total = voteTotal(vote);
-              const winner = winnerFor(vote, labels);
-              return <ListRow
-                key={vote.id}
-                href={"#recent-" + encodeURIComponent(vote.id)}
-                onNavigate={() => { selectRecent(vote); }}
-                title={title}
-                description={<span><span className="mono">{time} · {String(total)}</span> {labels.voteWord} · {winner}</span>}
-                action={null}
-                selected={vote.id === selectedRecent?.id}
-                status={null}
-              />;
-            })}
-          </div></div>}
-        </LoadState>
-      </section>
-    } inspector={inspector} onCloseInspector={closeInspector} />
-
-    <div className="sr-only" aria-live="polite" key={announcement?.key ?? 0}>{announcement?.text ?? ""}</div>
-  </section>;
-};
-
-const InspectorSectionView = ({ title, children }: { title: string; children: ReactNode }): ReactElement =>
-  <Section title={title} headingLevel="h3" variant="inspector">{children}</Section>;
-
-const ResultBar = ({ label, count, percent, leader }: { label: string; count: number; percent: number; leader: boolean }): ReactElement =>
-  <div className="chat-voting-results__row" data-leading={leader || undefined} role="group" aria-label={label + ": " + String(count) + ", " + String(percent) + "%"}>
-    <span className="chat-voting-results__label" title={label}>{label}</span>
-    <span className="chat-voting-results__track" aria-hidden="true"><span style={{ width: String(percent) + "%" }} /></span>
-    <span className="number">{String(count)}</span>
-    <span className="number">{String(percent)}%</span>
+  return <div className="chat-voting-collection" aria-label={labels.title}>
+    <CollectionPage
+      headingLevel="h2"
+      title={labels.title}
+      toolbar={toolbar}
+      list={list}
+      detail={inspector}
+      detailOpen={detailOpen}
+      backLabel={labels.back}
+      onCloseDetail={() => { requestInspectorSwitch(clearSelection); }}
+    />
   </div>;
+};
 
 export default ChatVotingPanel;

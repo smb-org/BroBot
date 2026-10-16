@@ -307,7 +307,7 @@ test("a failed idle settings preload can recover through the module Retry action
 
 const lazyModuleViews = [
   "text_commands", "faq", "chat_voting", "text_library", "timers", "sun", "moon",
-  "weather", "api_source", "belabox", "ads", "votekick",
+  "weather", "api_source", "belabox", "ads",
 ] as const;
 const lazyOverlayEditors = [
   { kind: "chat_voting.tally", moduleId: "chat_voting", chunk: "editor" },

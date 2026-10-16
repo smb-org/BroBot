@@ -15,6 +15,7 @@ export interface StartChatVoteInput {
   durationSeconds: number;
   labels?: readonly string[];
   title?: string | null;
+  resultText?: string;
   textMode?: ChatVotingTextMode;
   blockedTerms?: readonly string[] | null;
   settings: ChatVotingSettings;
@@ -75,6 +76,7 @@ export const startChatVote = async (
     optionCount: input.optionCount,
     labels: voteLabels,
     title,
+    resultText: input.resultText ?? input.settings.resultText,
     textMode: kind === "free_text" ? input.textMode ?? "first_word" : null,
     termFilterReady: kind === "free_text" ? input.blockedTerms != null : null,
     openedAt: new Date(openedAt).toISOString(),
@@ -377,6 +379,7 @@ export const processChatVotingMessage = async (
         ...(previous.kind === "free_text" ? {} : { labels: previous.labels }),
         ...(previous.kind === "free_text" ? { textMode: previous.textMode ?? "first_word" } : {}),
         title: previous.title,
+        ...(previous.resultText == null ? {} : { resultText: previous.resultText }),
         durationSeconds: previous.requestedDurationSeconds ?? event.settings.autoCloseSeconds,
       };
     }
@@ -395,6 +398,7 @@ export const processChatVotingMessage = async (
         durationSeconds: startCommand.durationSeconds ?? event.settings.autoCloseSeconds,
         ...(startCommand.labels === undefined ? {} : { labels: startCommand.labels }),
         title: startCommand.title,
+        ...(startCommand.resultText === undefined ? {} : { resultText: startCommand.resultText }),
         ...(startCommand.textMode === undefined ? {} : { textMode: startCommand.textMode }),
         ...(startCommand.voteKind === "free_text" ? { blockedTerms } : {}),
         settings: event.settings,
@@ -722,11 +726,12 @@ export const closeChatVoteFromAlarm = async (
       )
       : formatVoteResult(closedVote.labels, closedVote.counts ?? snapshot.counts);
     const rendered = await context.renderTemplate(
-      settings.resultText,
+      closedVote.resultText ?? settings.resultText,
       Date.parse(closedVote.closedAt ?? new Date().toISOString()),
       chatVotingTemplateValues(closedVote, language, result),
     );
-    const announcement = settings.resultText === DEFAULT_CHAT_VOTING_SETTINGS.resultText
+    const resultText = closedVote.resultText ?? settings.resultText;
+    const announcement = resultText === DEFAULT_CHAT_VOTING_SETTINGS.resultText
       ? closedVote.title === null ? result
         : chatVotingChatText(language, "result", undefined, undefined, undefined, closedVote.title, result)
       : rendered.text;

@@ -22,6 +22,7 @@ describe("chat voting repository mutation guards", () => {
       await insertChannel(database, "fictional-channel");
       await insertLoginIdentityAndSession(database, "fictional-operator");
       await insertMember(database, "fictional-channel", "fictional-operator", "operator");
+      await setChatVotingEnabled(database, true);
       const repository = createChatVotingRepository(database as unknown as D1Database);
       const authorization = authorizeModuleMutation(
         "fictional-channel",
@@ -60,6 +61,7 @@ describe("chat voting repository mutation guards", () => {
       await insertChannel(database, "fictional-channel");
       await insertLoginIdentityAndSession(database, "fictional-operator");
       await insertMember(database, "fictional-channel", "fictional-operator", "operator");
+      await setChatVotingEnabled(database, true);
       const repository = createChatVotingRepository(database as unknown as D1Database);
       const authorization = authorizeModuleMutation(
         "fictional-channel",
@@ -85,6 +87,7 @@ describe("chat voting repository mutation guards", () => {
       await insertChannel(database, "fictional-channel");
       await insertLoginIdentityAndSession(database, "fictional-operator");
       await insertMember(database, "fictional-channel", "fictional-operator", "operator");
+      await setChatVotingEnabled(database, true);
       const repository = createChatVotingRepository(database as unknown as D1Database);
       const authorization = authorizeModuleMutation(
         "fictional-channel",
@@ -104,12 +107,44 @@ describe("chat voting repository mutation guards", () => {
     }
   });
 
+  it("checks module activation and member permission in every saved-template mutation", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "fictional-channel");
+      await insertLoginIdentityAndSession(database, "fictional-operator");
+      await insertMember(database, "fictional-channel", "fictional-operator", "operator");
+      await setChatVotingEnabled(database, true);
+      const repository = createChatVotingRepository(database as unknown as D1Database);
+      const authorization = authorizeModuleMutation(
+        "fictional-channel",
+        { userId: "fictional-operator", sessionId: "session-fictional-operator" },
+        "2026-10-04T10:00:00.000Z",
+      );
+      const draft = { shortcut: null, title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120 } as const;
+      await expect(repository.templates.createTemplate("fictional-channel", "template-guard", draft, "2026-10-04T10:00:00.000Z", authorization))
+        .resolves.toBe("created");
+
+      await setChatVotingEnabled(database, false);
+      await expect(repository.templates.createTemplate("fictional-channel", "template-disabled", draft, "2026-10-04T10:00:00.000Z", authorization))
+        .resolves.toBe("unauthorized");
+      await expect(repository.templates.saveTemplate("fictional-channel", "template-guard", 1, { ...draft, title: "Edited" }, "2026-10-04T10:00:00.000Z", authorization))
+        .resolves.toMatchObject({ status: "unauthorized" });
+      await expect(repository.templates.deleteTemplate("fictional-channel", "template-guard", 1, authorization))
+        .resolves.toBe("unauthorized");
+      await expect(repository.templates.template("fictional-channel", "template-guard"))
+        .resolves.toMatchObject({ title: "Dinner" });
+    } finally {
+      database.close();
+    }
+  });
+
   it("returns the PATCH acknowledgement from its UPDATE batch during a concurrent write", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "fictional-channel");
       await insertLoginIdentityAndSession(database, "fictional-operator");
       await insertMember(database, "fictional-channel", "fictional-operator", "operator");
+      await setChatVotingEnabled(database, true);
       const base = database as unknown as D1Database;
       const authorization = authorizeModuleMutation(
         "fictional-channel",

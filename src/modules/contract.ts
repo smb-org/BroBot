@@ -1570,6 +1570,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   needsActiveChatters?: boolean;
   settingsSchema: SettingsSchema;
   defaultSettings: z.output<SettingsSchema>;
+  /** Optional channel-language defaults for modules whose initial messages are localized. */
+  defaultSettingsForLanguage?: (language: ModuleLanguage) => z.output<SettingsSchema>;
   /** Template fields and variables used by both panel validation and worker rendering. */
   templateFields?: TemplateFields<z.output<SettingsSchema>>;
   /** Static declarations for variables exposed through a dynamic provider. */

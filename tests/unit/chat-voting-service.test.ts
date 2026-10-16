@@ -43,6 +43,7 @@ const savedTemplate: ChatVoteTemplate = {
   channelId: "fictional-channel",
   shortcut: "essen",
   title: "Dinner",
+  resultText: "Danke {vote.result}",
   labels: ["Pizza", "Burger"],
   freeTextMode: null,
   durationSeconds: 300,
@@ -142,7 +143,7 @@ describe("chat voting event service", () => {
     const result = await processChatVotingMessage(eventWithText("!vote essen", ["moderator"]), repository, context);
 
     expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({
-      kind: "options", labels: ["Pizza", "Burger"], title: "Dinner", requestedDurationSeconds: 300,
+      kind: "options", labels: ["Pizza", "Burger"], title: "Dinner", resultText: "Danke {vote.result}", requestedDurationSeconds: 300,
     }), undefined);
     const inserted = insertOpen.mock.calls[0]?.[0];
     expect(markTemplateUsed).toHaveBeenCalledWith("fictional-channel", "saved-template", inserted?.openedAt);

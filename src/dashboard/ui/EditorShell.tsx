@@ -25,6 +25,7 @@ export interface EditorInvalidField {
 
 export interface EditorShellProps {
   className?: string;
+  layout?: "tabs" | "columns";
   ariaLabel: string;
   title: ReactNode;
   identifier?: string;
@@ -175,6 +176,7 @@ const focusInvalidTarget = (field: HTMLElement, errorKey: string): void => {
 
 export function EditorShell({
   className,
+  layout = "tabs",
   ariaLabel,
   title,
   identifier,
@@ -370,7 +372,7 @@ export function EditorShell({
     <FormDensity.Provider value="form">
       <section data-ui="" className={`ui-editor-shell${className === undefined ? "" : ` ${className}`}`} aria-label={ariaLabel} onKeyDown={handleEditorKeyDown}>
         <InspectorHeading level="h3" title={title} {...(identifier === undefined ? {} : { identifier })} {...(meta === undefined ? {} : { meta })} {...(closeAction === undefined ? {} : { action: closeAction })} />
-        {sections.length < 2 ? null : (
+        {layout === "columns" || sections.length < 2 ? null : (
           <div className="ui-editor-shell__tabs" role="tablist" aria-label={ariaLabel} onKeyDown={handleTabKeyDown}>
             {sections.map((candidate) => {
               const active = candidate.id === activeSection?.id;
@@ -399,7 +401,9 @@ export function EditorShell({
         )}
         <form className="ui-editor-shell__form" onSubmit={handleSubmit}>
           <div className="ui-editor-shell__body" ref={contentRef}>
-            {activeSection === undefined ? null : (
+            {layout === "columns" ? <div className={`ui-editor-shell__columns ui-editor-shell__columns--${String(Math.max(1, Math.min(sections.length, 4)))}`}>
+              {sections.map((candidate) => <div className="ui-editor-shell__column" key={candidate.id}>{candidate.content}</div>)}
+            </div> : activeSection === undefined ? null : (
               <div
                 className="ui-editor-shell__panel"
                 id={`editor-panel-${activeSection.id}`}

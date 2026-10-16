@@ -6,6 +6,7 @@ import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_L
 import type { ChatVote, ChatVotePreset, ChatVoteTemplateDraft, ChatVotingKind } from "./contracts";
 import { createChatVotingRepository } from "./repository";
 import { requestChatVoteClose, requestChatVoteExtension, startChatVote } from "./service";
+import { templateTextLength } from "../../contracts/template-text-length";
 import { chatVoteTemplateConfiguration, configuredLabels, isBlockedFreeTextVote, isValidTemplateShortcut, isValidVoteTitle, labelsForVote, normalizeBlockedVoteTerm, normalizeVoteTitle, templateStartProblem, voteLabelLength } from "./domain";
 
 const readBody = async (request: Request): Promise<unknown> => request.json().catch(() => null);
@@ -15,6 +16,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const templateAuditSnapshot = (template: {
   id: string;
   title: string;
+  resultText?: string;
   shortcut: string | null;
   labels: readonly string[];
   freeTextMode: "first_word" | "whole_message" | null;
@@ -23,6 +25,7 @@ const templateAuditSnapshot = (template: {
 }) => ({
   id: template.id,
   name: template.title,
+  resultText: template.resultText ?? "{vote.result}",
   shortcut: template.shortcut,
   labels: [...template.labels],
   freeTextMode: template.freeTextMode,
@@ -46,6 +49,7 @@ const templateDraftFromBody = (body: unknown): ChatVoteTemplateDraft | null => {
       typeof body.title !== "string" || voteLabelLength(body.title) > 80 ||
       !Array.isArray(body.labels) || body.labels.length > 9 ||
       body.labels.some((label) => typeof label !== "string" || voteLabelLength(label) > 32) ||
+      (body.resultText !== undefined && (typeof body.resultText !== "string" || templateTextLength(body.resultText) > 500)) ||
       (body.freeTextMode !== null && body.freeTextMode !== "first_word" && body.freeTextMode !== "whole_message") ||
       typeof body.durationSeconds !== "number" || !Number.isSafeInteger(body.durationSeconds) || body.durationSeconds < 0 || body.durationSeconds > 14_400) return null;
   const shortcut = body.shortcut;
@@ -53,6 +57,7 @@ const templateDraftFromBody = (body: unknown): ChatVoteTemplateDraft | null => {
   return {
     shortcut,
     title: body.title,
+    resultText: typeof body.resultText === "string" ? body.resultText : "{vote.result}",
     labels: body.labels,
     freeTextMode: body.freeTextMode,
     durationSeconds: body.durationSeconds,
@@ -149,7 +154,7 @@ chatVotingRoutes.post("/templates", async (context) => {
   const draft = templateDraftFromBody(body);
   if (draft === null || isBlankTemplateDraft(draft)) return context.json({ error: "chat_vote_template_request_invalid" }, 400);
   const now = new Date().toISOString();
-  const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
+  const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
   const repository = createChatVotingRepository(context.env.DB);
   const id = crypto.randomUUID();
   const audit = context.get("prepareModuleAudit")({
@@ -180,7 +185,7 @@ chatVotingRoutes.patch("/templates/:id", async (context) => {
     return context.json({ error: "chat_vote_template_request_invalid" }, 400);
   }
   const now = new Date().toISOString();
-  const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
+  const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
   const repository = createChatVotingRepository(context.env.DB);
   const before = await repository.templates.template(channelId, id);
   const audit = context.get("prepareModuleAudit")({
@@ -206,7 +211,7 @@ chatVotingRoutes.delete("/templates/:id", async (context) => {
     return context.json({ error: "chat_vote_template_request_invalid" }, 400);
   }
   const now = new Date().toISOString();
-  const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
+  const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
   const repository = createChatVotingRepository(context.env.DB);
   const before = await repository.templates.template(channelId, id);
   const audit = context.get("prepareModuleAudit")({
@@ -298,6 +303,7 @@ chatVotingRoutes.post("/start", async (context) => {
       optionCount: optionCount as number,
       durationSeconds: durationSeconds as number,
       title,
+      ...(templateToMarkUsed === null || typeof startBody.resultText !== "string" ? {} : { resultText: startBody.resultText }),
       ...(voteLabels === undefined ? {} : { labels: voteLabels }),
       ...(kind === "free_text" ? { textMode: textMode ?? "first_word", blockedTerms } : {}),
       settings,

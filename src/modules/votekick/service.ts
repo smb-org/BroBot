@@ -114,8 +114,8 @@ const preparePass = async (
     "votekick.window": window,
   };
   const [pass, fail] = await Promise.all([
-    renderTemplate(settings.passText, values),
-    renderTemplate(settings.failText, values),
+    renderTemplate(settings.passTextEnabled ? settings.passText : "", values),
+    renderTemplate(settings.failTextEnabled ? settings.failText : "", values),
   ]);
   return {
     action: {
@@ -243,7 +243,7 @@ const commandResult = async (
   let window = "";
   const reject = (reason: string, target?: string, includeProtectedText = false, displayTarget = login): Promise<ModuleResult> => {
     if (!includeProtectedText) return Promise.resolve(rejection(reason, target));
-    return renderChat(context, event.settings.protectedText, {
+    return renderChat(context, event.settings.protectedTextEnabled ? event.settings.protectedText : "", {
       "votekick.target": displayTarget,
       "votekick.yes": 0,
       "votekick.no": 0,
@@ -285,7 +285,7 @@ const commandResult = async (
     const endsAtMs = startedAtMs + event.settings.windowSeconds * 1000;
     const endsAt = new Date(endsAtMs).toISOString();
     id = crypto.randomUUID();
-    const startMessage = await renderChat(context, event.settings.startText, {
+    const startMessage = await renderChat(context, event.settings.startTextEnabled ? event.settings.startText : "", {
       "votekick.target": lookup.login,
       "votekick.yes": 1,
       "votekick.no": 0,
@@ -301,7 +301,7 @@ const commandResult = async (
     const opened = await context.ballots.open(id, 2, endsAtMs, finalizeRule(threshold));
     if (opened.status === "busy") {
       await bestEffortClear(context, `close:${id}`);
-      const busy = await renderChat(context, event.settings.busyText, {
+      const busy = await renderChat(context, event.settings.busyTextEnabled ? event.settings.busyText : "", {
         "votekick.target": lookup.login,
         "votekick.yes": 0,
         "votekick.no": 0,
@@ -352,7 +352,7 @@ const commandResult = async (
       ballotOpened = false;
       alarmScheduled = false;
       if (admitted === "busy") {
-        const busy = await renderChat(context, event.settings.busyText, {
+        const busy = await renderChat(context, event.settings.busyTextEnabled ? event.settings.busyText : "", {
           "votekick.target": lookup.login,
           "votekick.yes": 0,
           "votekick.no": 0,
@@ -441,7 +441,7 @@ export const processVotekickMessage = async (
     }
     if (attempt.outcome === "expired") {
       await bestEffortClose(context, running.id);
-      if (event.settings.expiredText.length === 0) await bestEffortClear(context, `close:${running.id}`);
+      if (!event.settings.expiredTextEnabled || event.settings.expiredText.length === 0) await bestEffortClear(context, `close:${running.id}`);
       else await context.scheduleAlarm("close", `close:${running.id}`, Date.now());
       let expired: Votekick | null = null;
       try { expired = await repository.byId(event.channelId, running.id); } catch { /* Overlay presentation is best-effort. */ }
@@ -571,7 +571,7 @@ export const closeExpiredVotekick = async (
     return;
   }
   const settings = votekickSettingsSchema.parse(JSON.parse(stored.settings));
-  if (settings.expiredText.length === 0) {
+  if (!settings.expiredTextEnabled || settings.expiredText.length === 0) {
     await bestEffortCloseAlarm(context, id);
     try { await context.clear(`close:${id}`); } catch { /* A stale alarm observes the terminal D1 row. */ }
     return;

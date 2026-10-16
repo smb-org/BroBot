@@ -5,7 +5,7 @@ import type { ChatVoteTemplate, ChatVoteTerm, ChatVotingKind, ChatVotingPreset, 
 import { chatVotingFreeTextOptionText } from "../contracts/chat-defaults";
 
 export type VoteCommand =
-  | { kind: "start"; voteKind: ChatVotingKind; preset: ChatVotingPreset; optionCount: number; labels?: readonly string[]; textMode?: ChatVotingTextMode; title: string | null; durationSeconds?: number }
+  | { kind: "start"; voteKind: ChatVotingKind; preset: ChatVotingPreset; optionCount: number; labels?: readonly string[]; textMode?: ChatVotingTextMode; title: string | null; durationSeconds?: number; resultText?: string }
   | { kind: "template"; shortcut: string }
   | { kind: "legacyAlias"; alias: "yesno" | "scale" | "zeroOne" | "oneTwo"; title: string | null }
   | { kind: "again" }
@@ -66,6 +66,7 @@ export const chatVoteTemplateConfiguration = (
     ...(voteKind === "free_text" ? { textMode: template.freeTextMode ?? "first_word" } : { labels: template.labels }),
     title: normalizeVoteTitle(titleOverride ?? template.title),
     durationSeconds: template.durationSeconds,
+    resultText: template.resultText ?? "{vote.result}",
   };
 };
 

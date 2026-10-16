@@ -5,7 +5,7 @@ import type { ModuleBallotAccess, ModuleRouteEnvironment } from "../../src/modul
 import { CHAT_VOTING_ELEMENT_KIND, DEFAULT_CHAT_VOTING_SETTINGS, type ChatVoteDraft, type ChatVoteTemplate } from "../../src/modules/chat_voting/contracts";
 import { chatVotingRoutes } from "../../src/modules/chat_voting/routes";
 import { createChatVotingRepository } from "../../src/modules/chat_voting/repository";
-import { authorizeModuleMutation } from "../../src/worker/module-authorization";
+import { authorizeModuleManagementMutation, authorizeModuleMutation } from "../../src/worker/module-authorization";
 import { prepareModuleAudit } from "../../src/worker/module-audit";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { createReadInterleavingDatabase, TestD1Database } from "./test-d1";
@@ -29,7 +29,7 @@ const openTextVote: ChatVoteDraft = {
   closeReason: "limit",
 };
 
-const createDatabase = async (): Promise<TestD1Database> => {
+const createDatabase = async (role: "broadcaster" | "manager" | "operator" = "operator"): Promise<TestD1Database> => {
   const database = new TestD1Database();
   databases.push(database);
   await insertChannel(database, CHANNEL_ID);
@@ -37,7 +37,7 @@ const createDatabase = async (): Promise<TestD1Database> => {
     "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'chat_voting', 1, ?)",
   ).bind(CHANNEL_ID, JSON.stringify({ ...DEFAULT_CHAT_VOTING_SETTINGS, autoCloseSeconds: 120 })).run();
   await insertLoginIdentityAndSession(database, ACTOR_ID);
-  await insertMember(database, CHANNEL_ID, ACTOR_ID, "operator");
+  await insertMember(database, CHANNEL_ID, ACTOR_ID, role);
   await createChatVotingRepository(database as unknown as D1Database).insertOpen(openTextVote);
   return database;
 };
@@ -57,12 +57,14 @@ const appFor = (
   publish = vi.fn(() => Promise.resolve()),
   authorize = authorizeModuleMutation,
   writeAudit = vi.fn(() => Promise.resolve()),
+  authorizeManagement = authorizeModuleManagementMutation,
 ): Hono<ModuleRouteEnvironment> => {
   const app = new Hono<ModuleRouteEnvironment>();
   app.use("*", async (context, next) => {
     context.set("channelRole", "operator");
     context.set("actor", { userId: ACTOR_ID, sessionId: `session-${ACTOR_ID}` });
     context.set("authorizeMutation", authorize);
+    context.set("authorizeManagementMutation", authorizeManagement);
     context.set("ballots", () => ballots);
     context.set("readChannelBlockedTerms", readBlockedTerms);
     context.set("publishModuleOverlayMessage", publish);
@@ -85,7 +87,7 @@ afterEach(() => {
 
 describe("chat voting routes", () => {
   it("creates and revision-saves templates, retains invalid drafts, and rejects shortcuts and stale writes", async () => {
-    const database = await createDatabase();
+    const database = await createDatabase("manager");
     const app = appFor(ballotAccess(), () => Promise.resolve([]));
     const templatesPath = `/channels/${CHANNEL_ID}/modules/chat_voting/templates`;
     const blankResponse = await app.fetch(new Request(`https://brobot.example${templatesPath}`, {
@@ -99,13 +101,13 @@ describe("chat voting routes", () => {
     expect(whitespaceLabelResponse.status).toBe(400);
     const createdResponse = await app.fetch(new Request(`https://brobot.example${templatesPath}`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ shortcut: null, title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120 }),
+      body: JSON.stringify({ shortcut: null, title: "Dinner", resultText: "Danke {vote.result}", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120 }),
     }), {
       DB: database as unknown as D1Database,
     });
     expect(createdResponse.status).toBe(201);
     const created = await createdResponse.json<{ template: ChatVoteTemplate }>();
-    expect(created.template).toMatchObject({ title: "Dinner", labels: ["Pizza", "Burger"], durationSeconds: 120, revision: 1 });
+    expect(created.template).toMatchObject({ title: "Dinner", resultText: "Danke {vote.result}", labels: ["Pizza", "Burger"], durationSeconds: 120, revision: 1 });
     const entryPath = `${templatesPath}/${encodeURIComponent(created.template.id)}`;
     const savedResponse = await app.fetch(new Request(`https://brobot.example${entryPath}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -184,7 +186,7 @@ describe("chat voting routes", () => {
     expect(scheduleModuleAlarm).toHaveBeenCalled();
   });
 
-  it.each(["broadcaster", "manager", "operator"] as const)("allows template CRUD for the %s channel member role", async (role) => {
+  it.each(["broadcaster", "manager", "operator"] as const)("applies the management threshold when creating templates for the %s role", async (role) => {
     const database = await createDatabase();
     await database.prepare("UPDATE channel_members SET role = ? WHERE channel_id = ? AND user_id = ?")
       .bind(role, CHANNEL_ID, ACTOR_ID).run();
@@ -193,7 +195,53 @@ describe("chat voting routes", () => {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ shortcut: null, title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120 }),
     }), { DB: database as unknown as D1Database });
+    expect(response.status).toBe(role === "operator" ? 403 : 201);
+    await expect(createChatVotingRepository(database as unknown as D1Database).templates.templates(CHANNEL_ID))
+      .resolves.toHaveLength(role === "operator" ? 0 : 1);
+  });
+
+  it("denies operator edits and deletes without changing the saved template", async () => {
+    const database = await createDatabase("manager");
+    const app = appFor(ballotAccess(), () => Promise.resolve([]));
+    const templatesPath = `/channels/${CHANNEL_ID}/modules/chat_voting/templates`;
+    const createResponse = await app.fetch(new Request(`https://brobot.example${templatesPath}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shortcut: null, title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120 }),
+    }), { DB: database as unknown as D1Database });
+    const created = await createResponse.json<{ template: ChatVoteTemplate }>();
+    await database.prepare("UPDATE channel_members SET role = 'operator' WHERE channel_id = ? AND user_id = ?")
+      .bind(CHANNEL_ID, ACTOR_ID).run();
+
+    const entryPath = `${templatesPath}/${encodeURIComponent(created.template.id)}`;
+    const editResponse = await app.fetch(new Request(`https://brobot.example${entryPath}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shortcut: null, title: "Changed", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120, revision: 1 }),
+    }), { DB: database as unknown as D1Database });
+    const deleteResponse = await app.fetch(new Request(`https://brobot.example${entryPath}`, {
+      method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ revision: 1 }),
+    }), { DB: database as unknown as D1Database });
+
+    expect(createResponse.status).toBe(201);
+    expect(editResponse.status).toBe(403);
+    expect(deleteResponse.status).toBe(403);
+    await expect(createChatVotingRepository(database as unknown as D1Database).templates.template(CHANNEL_ID, created.template.id))
+      .resolves.toMatchObject({ title: "Dinner", revision: 1 });
+    await expect(database.prepare("SELECT action FROM audit_log WHERE channel_id = ? AND action LIKE 'chat_voting.template.%'")
+      .bind(CHANNEL_ID).all()).resolves.toMatchObject({ results: [{ action: "chat_voting.template.created" }] });
+  });
+
+  it("persists logically valid templated result text beyond 500 raw characters", async () => {
+    const database = await createDatabase("manager");
+    const app = appFor(ballotAccess(), () => Promise.resolve([]));
+    const resultText = "{text.foo}".repeat(100);
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/modules/chat_voting/templates`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shortcut: null, title: "Long result", resultText, labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120 }),
+    }), { DB: database as unknown as D1Database });
+
+    expect(resultText.length).toBeGreaterThan(500);
     expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({ template: { resultText } });
   });
 
   it.each([

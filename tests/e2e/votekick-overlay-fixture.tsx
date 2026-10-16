@@ -69,7 +69,7 @@ const App = () => {
       }))}>Close as passed</button>
       <SettingsEditor
         spec={settingsEditor.spec}
-        sectionId="thresholds"
+        sectionId="starter"
         settings={settings}
         onChange={(key, next) => { setSettings((current) => ({ ...current, [key]: next })); }}
         texts={copy}
