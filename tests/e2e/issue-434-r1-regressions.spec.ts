@@ -119,13 +119,25 @@ const expectToastBelowPageHeader = async (page: Page): Promise<void> => {
     if (header === undefined || actions === undefined || toast === undefined || host === null) return null;
     const overlaps = (first: DOMRect, second: DOMRect): boolean => first.left < second.right && first.right > second.left && first.top < second.bottom && first.bottom > second.top;
     const style = getComputedStyle(host);
-    return { overlapsHeader: overlaps(toast, header), overlapsActions: overlaps(toast, actions), bottom: style.bottom, position: style.position };
+    return { overlapsHeader: overlaps(toast, header), overlapsActions: overlaps(toast, actions), bottom: style.bottom, expectedBottom: window.innerWidth <= 768 ? "4px" : "16px", position: style.position };
   });
   expect(layout).not.toBeNull();
   expect(layout?.overlapsHeader).toBe(false);
   expect(layout?.overlapsActions).toBe(false);
-  expect(layout?.bottom).toBe("16px");
+  expect(layout?.bottom).toBe(layout?.expectedBottom);
   expect(layout?.position).toBe("fixed");
+};
+
+const expectMobileToastOutsidePageContent = async (page: Page): Promise<void> => {
+  const layout = await page.evaluate(() => {
+    const toast = document.querySelector(".ui-toast")?.getBoundingClientRect();
+    const columns = document.querySelector(".settings-page__columns")?.getBoundingClientRect();
+    return toast === undefined || columns === undefined
+      ? null
+      : { toastTop: toast.top, columnsBottom: columns.bottom };
+  });
+  expect(layout).not.toBeNull();
+  expect(layout?.toastTop ?? 0, JSON.stringify(layout)).toBeGreaterThanOrEqual(layout?.columnsBottom ?? Number.POSITIVE_INFINITY);
 };
 
 test("Ads settings keep the header aligned and columns scrolling inside the page", async ({ page }) => {
@@ -157,7 +169,7 @@ test("Ads settings keep the header aligned and columns scrolling inside the page
   expect(adsLayout?.standFont).not.toMatch(/mono/iu);
   expect(adsLayout?.standGap ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(48);
   expect(adsLayout?.snoozeSectionGap).toBe("20px");
-  expect(adsLayout?.recentSectionGap).toBe("20px");
+  expect(adsLayout?.recentSectionGap).toBe("12px");
   expect(adsLayout?.refreshIndent).toBe("0px");
   expect(adsLayout?.recentSlotHeight).toBe("120px");
   const scrollColumn = page.locator(".settings-page__column").first();
@@ -209,6 +221,7 @@ test("Ads refresh explains Twitch rate limits and keeps the snooze result slot s
   await page.getByRole("button", { name: "Werbeplan aktualisieren" }).click();
   await expect(page.locator(".ui-toast")).toContainText(/Versuche es in 90 Sekunden erneut/u);
   await expectToastBelowPageHeader(page);
+  await expectMobileToastOutsidePageContent(page);
 
   const result = page.getByTestId("ads-snooze-result-slot");
   const recent = page.getByTestId("ads-recent-list-slot");
@@ -221,7 +234,18 @@ test("Ads refresh explains Twitch rate limits and keeps the snooze result slot s
   await expect(result).toContainText(/Versuche es in 90 Sekunden erneut/u);
   const after = await Promise.all([measure(result), measure(recent)]);
   expect(after[0].height).toBe(before[0].height);
+  expect(after[0].height).toBe(48);
   expect(after[1].top).toBe(before[1].top);
+  const resultChildren = await result.evaluate((element) => {
+    const slot = element.getBoundingClientRect();
+    return {
+      slot: { top: slot.top, bottom: slot.bottom, height: slot.height },
+      children: Array.from(element.querySelectorAll<HTMLElement>(".ads-snooze-result, .ads-snooze-refresh"))
+        .map((child) => ({ text: child.textContent, top: child.getBoundingClientRect().top, bottom: child.getBoundingClientRect().bottom, height: child.getBoundingClientRect().height })),
+    };
+  });
+  expect(resultChildren.children.every((child) => child.bottom <= resultChildren.slot.bottom + 1), JSON.stringify(resultChildren)).toBe(true);
+  await expectMobileToastOutsidePageContent(page);
   const recentToSettingsGap = await page.evaluate(() => {
     const table = document.querySelector(".ads-recent-list-slot__table");
     const nextColumn = document.querySelectorAll(".settings-page__column")[1];
@@ -263,6 +287,7 @@ test("mobile Ads save failures stay visible without moving the header", async ({
   await page.getByRole("button", { name: "Speichern" }).click();
   await expect(page.locator(".ui-toast")).toContainText("Die Ansagen-Einstellungen konnten nicht gespeichert werden.");
   await expectToastBelowPageHeader(page);
+  await expectMobileToastOutsidePageContent(page);
   const after = await header.evaluate((element) => element.getBoundingClientRect().height);
   expect(after).toBe(before);
 });

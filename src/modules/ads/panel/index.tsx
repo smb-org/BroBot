@@ -169,14 +169,14 @@ const AdsPanel = ({ channelId, language = "de", canManage = false, moduleActive 
         <span className="sr-only" id="ads-snooze-reason">{snoozeReason}</span>
         <Button variant="secondary" icon="ad" disabled={snoozeButtonDisabled} describedBy="ads-snooze-reason"
           {...(snoozeReason.length === 0 ? {} : { title: snoozeReason })} onClick={() => { void snooze(); }}>{snoozeLabel}</Button>
-        <p className="lock-reason lock-reason--with-icon" data-testid="ads-snooze-result-slot"
+        <p className="lock-reason lock-reason--with-icon ads-snooze-result-slot" data-testid="ads-snooze-result-slot"
           title={[snoozeReason, snoozeRefresh].filter(Boolean).join("\n") || undefined}
-          style={{ height: "calc(var(--s10) * 2)", margin: 0, alignItems: "flex-start", flexWrap: "wrap" }} aria-live="polite">
+          aria-live="polite">
           {canManage && snoozeReason.length > 0 ? <><Icon name="lock" size={16} />{snoozeReason}</> : snoozeResult === null ? null : <span role="alert" className="ads-snooze-result">{snoozeResult}</span>}
           {snoozeRefresh === null ? null : <span className="ads-snooze-refresh">{snoozeRefresh}</span>}
         </p>
       </section>
-      <section className="config-section" aria-label={labels.recentSection}>
+      <section className="config-section ads-recent-section" aria-label={labels.recentSection}>
         <div className="section-heading"><h2>{labels.recentSection}</h2></div>
         <div className="ads-recent-list-slot" data-testid="ads-recent-list-slot">
           {schedule.recentAdBreaks.length === 0 ? <p className="empty-state">{labels.noRecent}</p> : (

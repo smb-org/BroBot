@@ -1550,7 +1550,10 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ads-schedule-summary dd { min-width: 0; margin: 0; color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
 .ads-snooze-refresh { flex-basis: 100%; padding-left: 0; color: var(--text-3); }
 .ads-snooze-result { flex-basis: 100%; color: var(--error-text); }
+.ads-snooze-result-slot { box-sizing: border-box; height: 48px; gap: var(--s1); align-items: flex-start; flex-wrap: wrap; margin: 0; line-height: 14px; }
+.module-stack .ads-snooze-result-slot { row-gap: 2px; }
 .module-stack .ui-load-state__content > .config-section + .config-section { margin-top: var(--s5); }
+.module-stack .ui-load-state__content > .config-section.ads-recent-section { margin-top: var(--s3); }
 .ads-recent-list-slot { box-sizing: border-box; height: calc(var(--s10) * 3); overflow-y: auto; }
 .ads-recent-list-slot > .empty-state { box-sizing: border-box; height: 100%; min-height: 0; margin: 0; }
 .ads-recent-list-slot__table { height: 100%; overflow-y: auto; }
@@ -2510,7 +2513,10 @@ p.lock-reason { margin-bottom: 1em; }
   .module-detail--settings-page .page-header__save .ui-save-bar--error.ui-save-bar--persistent .ui-save-bar__actions { grid-column: 2; grid-row: 1; }
   .module-detail--settings-page .page-header__save .ui-save-bar__buttons > .ui-button { padding-inline: 8px; }
   .module-detail--settings-page .settings-page__columns { display: flex; flex: 1 1 auto; flex-direction: column; gap: 16px; min-height: 0; overflow: auto; padding: 8px 0; }
+  body:has(.module-detail--settings-page):has(.ui-toast) .module-detail--settings-page .settings-page__columns { max-height: calc(100dvh - 288px); }
+  body:has(.module-detail--settings-page):has(.ui-toast:nth-child(2)) .module-detail--settings-page .settings-page__columns { max-height: calc(100dvh - 360px); }
   .module-detail--settings-page .settings-page__column { flex: none; width: 100%; min-height: 0; overflow: visible; }
+  body:has(.module-detail--settings-page) .ui-toast-host { bottom: var(--s1); }
   .module-detail--settings-page .ads-recent-list-slot { height: calc(var(--s10) * 2); }
   .header-action { justify-items: start; }
   .inspector-result, .form-row { flex-direction: column; align-items: stretch; }
