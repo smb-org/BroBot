@@ -14,7 +14,7 @@ import {
 } from "../../src/worker/db/channel-members";
 import {
   createChannelModuleWithAudit,
-  updateChannelModuleWithAudit,
+  updateChannelModuleSettingsWithAudit,
 } from "../../src/worker/db/channel-modules";
 import { revokeOverlayToken } from "../../src/worker/auth/overlay-token-repository";
 import { createTextCommandRepository } from "../../src/modules/text_commands/adapters/d1";
@@ -231,22 +231,23 @@ const actions: readonly RoleAction[] = [
   },
   {
     name: "Change module settings",
-    source: "db/channel-modules.ts:updateChannelModuleWithAudit + db/guards.ts:actorGuard",
+    source: "db/channel-modules.ts:updateChannelModuleSettingsWithAudit + db/guards.ts:actorGuard",
     expected: allowed(true, true, false, false),
     execute: async (database) => {
       await database.prepare(
         `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
          VALUES ('kanal-a', 'raid', 1, '{}')`,
       ).run();
-      return updateChannelModuleWithAudit(
+      return updateChannelModuleSettingsWithAudit(
         database as unknown as D1Database,
         actor,
         "kanal-a",
         "raid",
-        true,
         '{"textSchwelle":5}',
         "raid.settings_changed",
         timestamp,
+        [],
+        1,
       );
     },
   },

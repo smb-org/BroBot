@@ -58,6 +58,7 @@ import { validateBelaboxStatsUrl } from "./domain/stats-url";
 import { enrichBelaboxSample, resolvedBelaboxPhase } from "./domain/presentation";
 import { formatTemplateValues } from "./template-values";
 import { BELABOX_TEMPLATE_VARIABLES } from "./contracts/catalog";
+import { prepareChannelModuleSettingsWrite } from "../repository/channel-module-storage";
 
 const LIVE_BUFFER_MS = 10 * 60_000;
 const LIVE_BUFFER_MAX_POINTS = 120;
@@ -78,9 +79,11 @@ export const belaboxAlertDefaultsOnEnable = async (
   const englishDefaults = belaboxDefaultAlertTexts("en");
   const authorization = context.authorizeMutation(channelId, context.actor, context.now);
   // The host audit precedes this statement in the activation batch and only writes after row creation.
-  return [context.DB.prepare(
-    `UPDATE channel_modules
-        SET settings = json_set(
+  return [prepareChannelModuleSettingsWrite(
+    context.DB,
+    channelId,
+    "belabox",
+    `json_set(
               settings,
               '$.lowText', CASE
                 WHEN json_type(settings, '$.lowText') IS NULL
@@ -94,15 +97,14 @@ export const belaboxAlertDefaultsOnEnable = async (
                 WHEN json_type(settings, '$.recoveryText') IS NULL
                   OR json_extract(settings, '$.recoveryText') IN (?, ?)
                 THEN ? ELSE json_extract(settings, '$.recoveryText') END
-            ),
-            revision = revision + 1
-      WHERE channel_id = ? AND module_id = 'belabox' AND enabled = 1
-        AND changes() > 0 ${authorization.sql}`,
-  ).bind(
-    germanDefaults.lowText, englishDefaults.lowText, defaults.lowText,
-    germanDefaults.disconnectText, englishDefaults.disconnectText, defaults.disconnectText,
-    germanDefaults.recoveryText, englishDefaults.recoveryText, defaults.recoveryText,
-    channelId, ...authorization.values,
+            )`,
+    [
+      germanDefaults.lowText, englishDefaults.lowText, defaults.lowText,
+      germanDefaults.disconnectText, englishDefaults.disconnectText, defaults.disconnectText,
+      germanDefaults.recoveryText, englishDefaults.recoveryText, defaults.recoveryText,
+    ],
+    `AND enabled = 1 AND changes() > 0 ${authorization.sql}`,
+    authorization.values,
   )];
 };
 

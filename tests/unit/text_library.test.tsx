@@ -983,8 +983,8 @@ describe("text library", () => {
       .bind("faq-rename").first()).toMatchObject({ answer_text: "FAQ {text.greeting}", revision: 2 });
     const refreshedFaqMatchers = await faqRepository.matchers(CHANNEL_ID, NOW + 1);
     expect(refreshedFaqMatchers[0]?.entry.revision).toBe(2);
-    expect(await database.prepare("SELECT settings, revision FROM channel_modules WHERE channel_id = ? AND module_id = ?")
-      .bind(CHANNEL_ID, "ads").first()).toMatchObject({ settings: '{"automatic":"Ad {text.greeting}"}', revision: 2 });
+    expect(await database.prepare("SELECT settings, revision, settings_revision FROM channel_modules WHERE channel_id = ? AND module_id = ?")
+      .bind(CHANNEL_ID, "ads").first()).toMatchObject({ settings: '{"automatic":"Ad {text.greeting}"}', revision: 2, settings_revision: 2 });
     expect(await database.prepare("SELECT text, config_json FROM overlay_elements WHERE element_id = ?")
       .bind("element-rename").first()).toEqual({ text: "Overlay {text.greeting}", config_json: '{"content":"{text.greeting}"}' });
     expect(await database.prepare("SELECT config_json FROM overlay_elements WHERE element_id = ?")

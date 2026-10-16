@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createChannelModuleWithAudit,
   getChannelModuleForChannel,
-  updateChannelModuleWithAudit,
+  updateChannelModuleEnabledStateWithAudit,
   type ChannelModuleRecord,
 } from "../../src/worker/db/channel-modules";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
@@ -122,13 +122,12 @@ describe("module activation in the repository", () => {
       NOW,
     );
 
-    const changed = await updateChannelModuleWithAudit(
+    const changed = await updateChannelModuleEnabledStateWithAudit(
       asD1(database),
       actorFor("user-1"),
       "kanal-a",
       "test-modul",
       false,
-      SETTINGS,
       "module.disabled",
       NOW,
     );
@@ -153,13 +152,12 @@ describe("module activation in the repository", () => {
     await insertLoginIdentityAndSession(database, "user-2");
     await insertMember(database, "kanal-a", "user-2", "operator");
 
-    const changed = await updateChannelModuleWithAudit(
+    const changed = await updateChannelModuleEnabledStateWithAudit(
       asD1(database),
       actorFor("user-2"),
       "kanal-a",
       "test-modul",
       false,
-      SETTINGS,
       "module.disabled",
       NOW,
     );
@@ -185,13 +183,12 @@ describe("module activation in the repository", () => {
       NOW,
     );
 
-    const changed = await updateChannelModuleWithAudit(
+    const changed = await updateChannelModuleEnabledStateWithAudit(
       asD1(database),
       actorFor("user-1"),
       "kanal-b",
       "test-modul",
       false,
-      SETTINGS,
       "module.disabled",
       NOW,
     );

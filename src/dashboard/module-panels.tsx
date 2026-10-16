@@ -548,6 +548,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     } catch (caught) {
       if (caught instanceof PanelApiError && caught.status === 409 && caught.code === "module_settings_changed_concurrently") {
         setConflict(true);
+        notify({ tone: "error", message: copy.conflictMessage });
         return copy.conflictMessage;
       }
       const message = caught instanceof PanelApiError ? apiErrorText(caught.code, copy.saveError) : copy.saveError;

@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ModulePage } from "../../src/dashboard/module-panels";
 import { UiProvider } from "../../src/dashboard/ui";
 import { runDashboardNavigationGuards } from "../../src/dashboard/ui/navigation-guard";
-import { toastsSnapshot } from "../../src/dashboard/ui/toast-store";
+import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import type { AdsScheduleResponse } from "../../src/modules/ads/contracts";
 import { moduleQueryKey } from "../../src/dashboard/data/module-query";
 import { reconcileDashboardPanelResourceRevisions, setDashboardRealtimeStatus } from "../../src/dashboard/data/realtime";
@@ -105,6 +105,11 @@ describe("Ad settings editor declaration", () => {
     fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
     await waitFor(() => expect(document.querySelector(".page-header__save [role=status]")).toHaveTextContent("Ansagen-Einstellungen wurden inzwischen geändert."));
     expect(field).toHaveValue("Mein Entwurf {ads.duration}");
+    expect(toastsSnapshot()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ tone: "error", message: "Ansagen-Einstellungen wurden inzwischen geändert." }),
+    ]));
+    const conflictToast = toastsSnapshot().find(({ message }) => message === "Ansagen-Einstellungen wurden inzwischen geändert.");
+    if (conflictToast !== undefined) dismissToast(conflictToast.id);
 
     cleanup();
     renderAds(adsFetch(), "operator");
