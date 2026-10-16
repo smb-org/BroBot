@@ -141,7 +141,21 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 .live-cockpit-header { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(280px, 1fr) minmax(0, .95fr); align-items: center; gap: var(--s4); min-height: 94px; padding: var(--s3) var(--s4); border: 1px solid var(--line); border-radius: var(--r-container); background: var(--surface); }
 .live-cockpit-header__summary { display: flex; align-items: center; gap: var(--s4); min-width: 0; }
 .live-cockpit-header__role { flex: none; color: var(--text-3); font-size: 11px; white-space: nowrap; }
-.live-cockpit-header__title-slot { display: flex; align-items: center; min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--text-3); font-size: 12px; }
+.live-cockpit-header__title-slot { box-sizing: border-box; display: grid; grid-template-rows: 46px 28px 16px; gap: 0; height: 90px; min-height: 90px; max-height: 90px; min-width: 0; overflow: hidden; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--text-3); font-size: 12px; }
+.live-cockpit-broadcast__copy { display: grid; grid-template-rows: 28px 16px; gap: 2px; min-width: 0; }
+.live-cockpit-broadcast__title-row { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+.live-cockpit-broadcast__title-row > strong { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--text); font-size: 14px; font-weight: 600; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.live-cockpit-broadcast__title-row > .ui-button { flex: none; min-height: 28px; }
+.live-cockpit-broadcast__copy:has(.live-cockpit-broadcast__title-row > strong[role="alert"]) { grid-template-rows: 46px 0; gap: 0; }
+.live-cockpit-broadcast__title-row > strong[role="alert"] { display: -webkit-box; max-height: 36px; overflow: hidden; overflow-wrap: normal; text-overflow: clip; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.live-cockpit-broadcast__title-row > .live-cockpit-broadcast__edit { width: 28px; min-width: 28px; height: 28px; padding: 0; }
+.live-cockpit-broadcast__button-slot { display: block; width: 28px; height: 28px; flex: none; visibility: hidden; }
+.live-cockpit-broadcast__copy > span { min-width: 0; overflow: hidden; color: var(--text-2); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.live-cockpit-broadcast__actions { display: flex; align-items: center; gap: var(--s2); min-width: 0; min-height: 28px; overflow: hidden; }
+.live-cockpit-broadcast__reason-slot { display: block; min-width: 0; height: 16px; overflow: hidden; color: var(--text-3); font-size: 11px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.live-cockpit-broadcast__reason-slot.is-warning { color: var(--warn); }
+.live-cockpit-broadcast__form { display: grid; width: min(520px, 100%); gap: var(--s2); min-width: 0; }
+.live-cockpit-broadcast__scope-warning { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2); color: var(--text-2); font-size: 12px; line-height: 1.4; }
 .live-cockpit-header__indicators { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--s4); min-width: 0; }
 .live-cockpit-header__stream { display: inline-flex; align-items: center; justify-content: center; gap: var(--s2); flex: none; min-height: 36px; padding: 0 var(--s3); border: 1px solid var(--line); border-radius: var(--r-control); font-weight: 600; line-height: 1; }
 .live-cockpit-header__stream-dot { display: block; width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: var(--text-3); }
@@ -226,6 +240,8 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 .live-cockpit-next-item__copy strong { color: var(--text-2); font-size: 11px; }
 .live-cockpit-next-item__copy small { color: var(--text-3); font-size: 10px; }
 .live-cockpit-next-item__time { color: var(--text-3); font-size: 10px; white-space: nowrap; }
+.live-cockpit-next-item__reason { box-sizing: border-box; grid-column: 2 / -1; grid-row: 2; height: 16px; min-height: 16px; max-height: 16px; overflow: hidden; color: var(--text-3); font-size: 10px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.live-cockpit-next-item__reason.is-warning { color: var(--warn); }
 .live-cockpit-next-item .ui-button { min-height: 28px; padding-inline: var(--s2); font-size: 10px; }
 .live-cockpit-event-feed { display: flex; gap: var(--s2); }
 .live-cockpit-event-feed__heading { display: flex; align-items: center; justify-content: space-between; min-height: 22px; }
@@ -581,14 +597,12 @@ form.content-section { display: grid; gap: var(--s4); }
 .chat-voting-editor__duration-slot .unit-input__error { display: none; }
 .chat-voting-editor__chat-hint { min-height: 20px; margin: 0 0 var(--s3); color: var(--text-3); font-size: 12px; }
 .chat-voting-template-inspector .chat-voting-editor__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
-.chat-voting-template-inspector .chat-voting-editor__footer { box-sizing: border-box; display: flex; height: 106px; min-height: 106px; flex: none; flex-direction: column; margin: 0 -16px -18px; padding: 0 16px; border-top: 1px solid var(--line); background: var(--surface-inspector); }
-.chat-voting-editor__start-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--s2); height: 41px; min-height: 41px; min-width: 0; border-bottom: 1px solid var(--line); }
+.chat-voting-template-inspector .chat-voting-editor__footer { box-sizing: border-box; display: flex; height: 64px; min-height: 64px; flex: none; flex-direction: column; margin: 0 -16px -18px; padding: 0 16px; border-top: 1px solid var(--line); background: var(--surface-inspector); }
 .chat-voting-template-inspector .chat-voting-editor__footer .ui-save-bar { height: 64px; min-height: 64px; margin-top: 0; border-top: 0; }
 .chat-voting-template-inspector .ui-save-bar__buttons { gap: 4px; }
 .chat-voting-template-inspector .ui-save-bar__buttons > .ui-button { padding-inline: 12px; }
 @container inspector (max-width: 480px) {
-  .chat-voting-template-inspector .chat-voting-editor__footer { height: auto; min-height: 106px; }
-  .chat-voting-template-inspector .chat-voting-editor__start-reason { height: auto; max-height: none; overflow: visible; line-height: 16px; text-overflow: clip; white-space: normal; overflow-wrap: break-word; }
+  .chat-voting-template-inspector .chat-voting-editor__footer { height: auto; min-height: 64px; }
   .chat-voting-template-inspector .chat-voting-editor__footer .ui-save-bar {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto 44px;
@@ -602,12 +616,8 @@ form.content-section { display: grid; gap: var(--s4); }
   .chat-voting-template-inspector .chat-voting-editor__footer .ui-save-bar--error { grid-template-rows: auto 44px; }
   .chat-voting-template-inspector .ui-save-bar__actions { grid-column: 1; grid-row: 2; width: 100%; justify-content: flex-end; }
 }
-.chat-voting-editor__start-reason { display: block; box-sizing: border-box; min-width: 0; min-height: 16px; max-height: 16px; margin: 0; overflow: hidden; color: var(--text-3); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
 .chat-voting-template-inspector .ui-section--inspector .segment-choice-field__label { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.chat-voting-template-inspector .chat-voting-editor__start-button { flex: none; white-space: nowrap; }
-.chat-voting-template-inspector .chat-voting-editor__start-button:disabled { opacity: 1 !important; color: var(--text-2); background: var(--surface-well); border-color: var(--line-strong); }
 .chat-voting-recent-inspector__meta { color: var(--text-3); font-size: 12px; }
-.chat-voting-recent-inspector__footer { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); }
 .chat-voting-recent-inspector .chat-voting-results__row { grid-template-columns: minmax(0, 1fr) minmax(2rem, 2fr) 3rem 3.5rem; }
 .chat-voting-recent-inspector .chat-voting-results__row > :nth-child(n + 3) { text-align: right; }
 .ui-toast .ui-toast__message { display: inline; }
@@ -644,6 +654,12 @@ form.content-section { display: grid; gap: var(--s4); }
 .ui-game-multi-select__label { color: var(--text); font-size: 12px; font-weight: 500; }
 .ui-game-multi-select__hint, .ui-game-multi-select__status { margin: 0; color: var(--text-3); font-size: 12px; }
 .ui-game-multi-select__selected { display: flex; flex-wrap: wrap; gap: var(--s1); min-width: 0; }
+.ui-game-multi-select--single-value .ui-game-multi-select__selected { box-sizing: border-box; min-height: 32px; align-items: center; }
+.ui-game-multi-select__single-value { display: flex; box-sizing: border-box; min-width: 0; min-height: 32px; align-items: center; gap: var(--s1); padding: 2px var(--s1) 2px 4px; border: 1px solid var(--line-strong); border-radius: var(--r-control); color: var(--text-2); background: var(--surface-well); font-size: 12px; }
+.ui-game-multi-select__single-value-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-game-multi-select__single-value > button { display: grid; width: 26px; height: 26px; flex: none; place-items: center; padding: 0; border: 0; border-radius: var(--r-control); color: var(--text-2); background: transparent; cursor: pointer; font-size: 16px; line-height: 1; }
+.ui-game-multi-select__single-value > button:hover:not(:disabled) { color: var(--error); background: var(--error-surface); }
+.ui-game-multi-select__single-value > button:disabled { cursor: not-allowed; }
 .ui-game-multi-select__chip { display: inline-flex; min-width: 0; min-height: 31px; align-items: center; gap: var(--s1); padding: 2px var(--s1) 2px 4px; border: 1px solid var(--line); border-radius: var(--r-control); color: var(--text-2); background: var(--surface-well); font-size: 12px; }
 .ui-game-multi-select__chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ui-game-multi-select__cover, .ui-game-multi-select__cover-placeholder { display: block; flex: none; border-radius: var(--r-control); object-fit: cover; }
@@ -1801,6 +1817,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-chat-preview__speaker { color: var(--brand-text); }
 .ui-chat-preview__colon { color: var(--text-2); }
 .ui-chat-preview__text { overflow-wrap: anywhere; }
+.ui-chat-preview__text--empty { color: var(--text-3); }
 .ui-chat-preview__count { align-self: end; grid-column: 2; grid-row: 1 / 3; }
 .ui-load-state { display: flow-root; min-width: 0; }
 .ui-load-state--compact { display: flex; min-width: 0; align-items: center; overflow: hidden; }
@@ -1889,6 +1906,11 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-dialog__close:disabled { cursor: not-allowed; opacity: .55; }
 .ui-dialog__body { container: dialog-body / inline-size; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .ui-dialog__body > form { display: grid; gap: var(--s3); }
+.ui-dialog__body > form:has(.live-cockpit-broadcast__form) { align-content: start; gap: var(--s2); }
+.ui-dialog__body > form:has(.live-cockpit-broadcast__form) > .ui-form-dialog__footer { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--s2); }
+.ui-dialog__body > form:has(.live-cockpit-broadcast__form) > .ui-form-dialog__footer > .ui-dialog__error-slot { margin-top: 0; }
+.ui-dialog__body > form:has(.live-cockpit-broadcast__form) > .ui-form-dialog__footer > .ui-confirm-dialog__actions { display: flex; flex-wrap: nowrap; flex-direction: row; width: auto; }
+.ui-dialog__body > form:has(.live-cockpit-broadcast__form) > .ui-form-dialog__footer > .ui-confirm-dialog__actions > .ui-button { width: auto; }
 @container dialog-body (max-width: 600px) {
   .ui-dialog__body .inspector-field-row { grid-template-columns: minmax(0, 1fr); align-items: start; gap: 0; }
 }
@@ -1938,6 +1960,9 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-editor-shell--readonly { display: block; max-height: none; }
 
 @media (max-width: 600px) {
+  .ui-dialog__body > form:has(.live-cockpit-broadcast__form) > .ui-form-dialog__footer { grid-template-columns: minmax(0, 1fr); gap: var(--s1); padding-block: var(--s1); }
+  .ui-dialog__body > form:has(.live-cockpit-broadcast__form) > .ui-form-dialog__footer > .ui-dialog__error-slot { grid-row: 2; }
+  .ui-dialog__body > form:has(.live-cockpit-broadcast__form) > .ui-form-dialog__footer > .ui-confirm-dialog__actions { grid-row: 1; }
   .ui-confirm-dialog__actions { flex-direction: column; align-items: stretch; }
   .ui-confirm-dialog__actions > .ui-button { width: 100%; }
 }

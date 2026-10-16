@@ -275,6 +275,7 @@ export const AUDIT_ACTIONS = [
   "channel.time_zone.updated",
   "channel.default_chat_target.updated",
   "channel.location.updated",
+  "channel.broadcast.updated",
   "member.added",
   "member.role_changed",
   "member.removed",

@@ -37,8 +37,13 @@ votekickRoutes.post("/votekicks/:id/cancel", async (context) => {
   const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
     `UPDATE votekicks SET status = 'cancelled', ended_at = ?
-      WHERE channel_id = ? AND votekick_id = ? AND status = 'running' ${authorization.sql}`,
-  ).bind(now, channelId, id, ...authorization.values);
+      WHERE channel_id = ? AND votekick_id = ? AND status = 'running'
+        AND EXISTS (
+          SELECT 1 FROM channel_modules
+           WHERE channel_modules.channel_id = votekicks.channel_id
+             AND channel_modules.module_id = ? AND channel_modules.enabled = 1
+        ) ${authorization.sql}`,
+  ).bind(now, channelId, id, VOTEKICK_MODULE_ID, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
     channelId,
     moduleId: VOTEKICK_MODULE_ID,
@@ -88,8 +93,14 @@ votekickRoutes.post("/votekicks/:id/lift", async (context) => {
   const now = new Date().toISOString();
   const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
   const authorized = await context.env.DB.prepare(
-    `SELECT channel_id FROM channels WHERE channel_id = ? ${authorization.sql}`,
-  ).bind(channelId, ...authorization.values).first<{ channel_id: string }>();
+    `SELECT channel_id FROM channels
+      WHERE channel_id = ?
+        AND EXISTS (
+          SELECT 1 FROM channel_modules
+           WHERE channel_modules.channel_id = channels.channel_id
+             AND channel_modules.module_id = ? AND channel_modules.enabled = 1
+        ) ${authorization.sql}`,
+  ).bind(channelId, VOTEKICK_MODULE_ID, ...authorization.values).first<{ channel_id: string }>();
   if (authorized === null) return context.json({ error: "votekick_timeout_unavailable" }, 403);
 
   const result = await context.get("liftModerationBan")(channelId, existing.targetUserId, {
@@ -109,8 +120,13 @@ votekickRoutes.post("/votekicks/:id/lift", async (context) => {
   const update = await context.env.DB.prepare(
     `UPDATE votekicks SET lifted_at = ?
       WHERE channel_id = ? AND votekick_id = ? AND status = 'passed' AND lifted_at IS NULL
-        AND target_user_id IS NOT NULL ${authorization.sql}`,
-  ).bind(now, channelId, id, ...authorization.values).run();
+        AND target_user_id IS NOT NULL
+        AND EXISTS (
+          SELECT 1 FROM channel_modules
+           WHERE channel_modules.channel_id = votekicks.channel_id
+             AND channel_modules.module_id = ? AND channel_modules.enabled = 1
+        ) ${authorization.sql}`,
+  ).bind(now, channelId, id, VOTEKICK_MODULE_ID, ...authorization.values).run();
   if (update.meta.changes === 0) return context.json({ error: "votekick_timeout_unavailable" }, 409);
   try {
     const lifted = await repository.byId(channelId, id);

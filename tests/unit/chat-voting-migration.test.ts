@@ -9,6 +9,7 @@ const requestedDurationMigration = readFileSync(resolve(import.meta.dirname, "..
 const textPresetMigration = readFileSync(resolve(import.meta.dirname, "../../migrations/0038_chat_voting_text_presets.sql"), "utf8");
 const termApprovalsMigration = readFileSync(resolve(import.meta.dirname, "../../migrations/0039_chat_voting_term_approvals.sql"), "utf8");
 const titleMigration = readFileSync(resolve(import.meta.dirname, "../../migrations/0045_chat_voting_title.sql"), "utf8");
+const defaultDurationMigration = readFileSync(resolve(import.meta.dirname, "../../migrations/0065_chat_voting_default_duration.sql"), "utf8");
 
 describe("chat voting migration", () => {
   it("backfills requested timer durations without treating the four-hour hard limit as a request", () => {
@@ -69,19 +70,27 @@ describe("chat voting migration", () => {
           UNIQUE (channel_id, module_id),
           FOREIGN KEY (channel_id) REFERENCES channels(channel_id) ON DELETE CASCADE
         );
-        INSERT INTO channels (channel_id) VALUES ('fictional-channel');
+        INSERT INTO channels (channel_id) VALUES ('fictional-channel'), ('custom-channel');
       `);
       database.exec(migration);
       database.exec(requestedDurationMigration);
       database.exec(textPresetMigration);
       database.exec(termApprovalsMigration);
       database.exec(titleMigration);
+      database.prepare(
+        "UPDATE channel_modules SET settings = '{\"autoCloseSeconds\":300}' WHERE channel_id = 'custom-channel' AND module_id = 'chat_voting'",
+      ).run();
+      database.exec(defaultDurationMigration);
 
-      const moduleRow = database.prepare(
-        "SELECT enabled, settings FROM channel_modules WHERE channel_id = 'fictional-channel' AND module_id = 'chat_voting'",
-      ).get() as { enabled: number; settings: string };
-      expect(moduleRow.enabled).toBe(1);
-      expect(JSON.parse(moduleRow.settings)).toMatchObject({ autoCloseSeconds: 0, announceResult: true, resultText: "{vote.result}" });
+      const moduleRows = database.prepare(
+        "SELECT channel_id, enabled, settings FROM channel_modules WHERE module_id = 'chat_voting' ORDER BY channel_id",
+      ).all() as { channel_id: string; enabled: number; settings: string }[];
+      expect(moduleRows.map(({ channel_id, enabled }) => ({ channel_id, enabled }))).toEqual([
+        { channel_id: "custom-channel", enabled: 1 },
+        { channel_id: "fictional-channel", enabled: 1 },
+      ]);
+      expect(JSON.parse(moduleRows[0]?.settings ?? "{}")).toMatchObject({ autoCloseSeconds: 300 });
+      expect(JSON.parse(moduleRows[1]?.settings ?? "{}")).toMatchObject({ autoCloseSeconds: 120, announceResult: true, resultText: "{vote.result}" });
 
       const insertOpen = database.prepare(`
         INSERT INTO chat_votes

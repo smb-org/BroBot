@@ -20,6 +20,9 @@ import { getPanelModuleStates } from "./module-repository";
 import { actorOf, readJsonBody } from "./member-routes";
 import { broadcasterHasScope, broadcasterScopesForChannel } from "../broadcaster-scope";
 import { getAppAccessToken } from "../app-token";
+import { getLoginIdentity, type LoginIdentityRecord } from "../db/login-identity";
+import { decryptLoginIdentityAccessToken, refreshLoginIdentityTokens } from "../auth/login-token-refresh";
+import { recordAudit } from "../db/audit";
 import { writeModuleDiagnostics } from "../event-log";
 import { helixRequest } from "../twitch/helix";
 import { readChannelBlockedTerms } from "../twitch/blocked-terms";
@@ -182,6 +185,23 @@ const previewSchema = z.object({
   game: z.object({ id: z.string().regex(/^[0-9]{1,20}$/u), name: z.string().trim().max(100) }).nullable(),
   chatStatus: z.array(z.enum(["viewer", "subscriber", "vip", "moderator", "broadcaster"])).nullable(),
 });
+
+const broadcastUpdateSchema = z.object({
+  title: z.string().trim().min(1).max(140).optional(),
+  gameId: z.string().regex(/^[0-9]{1,20}$/u).or(z.literal("")).optional(),
+}).strict().refine((update) => update.title !== undefined || update.gameId !== undefined);
+
+const BROADCAST_MANAGE_SCOPE = "channel:manage:broadcast";
+
+const loginIdentityHasBroadcastScope = (identity: LoginIdentityRecord | null): boolean => {
+  if (identity === null || identity.status !== "connected") return false;
+  try {
+    const scopes: unknown = JSON.parse(identity.tokenScopesJson);
+    return Array.isArray(scopes) && scopes.includes(BROADCAST_MANAGE_SCOPE);
+  } catch {
+    return false;
+  }
+};
 
 const canManageModules = canManage;
 
@@ -426,6 +446,7 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
 });
 
 moduleRouter.use("/api/channels/:channelId/games", requireChannelAuthorization());
+moduleRouter.use("/api/channels/:channelId/broadcast", requireChannelAuthorization());
 moduleRouter.use("/api/channels/:channelId/template-variables", requireChannelAuthorization());
 moduleRouter.use("/api/channels/:channelId/template-preview", requireChannelAuthorization());
 
@@ -514,6 +535,103 @@ moduleRouter.get("/api/channels/:channelId/games", async (context) => {
   } catch {
     return context.json({ error: "games_unavailable" }, 503);
   }
+});
+
+moduleRouter.get("/api/channels/:channelId/broadcast", async (context) => {
+  const channelId = context.req.param("channelId");
+  const now = Date.now();
+  try {
+    const token = await context.get("measureServerTiming")("helix", () =>
+      context.get("getAppAccessToken")(context.env, new Date(now).toISOString()),
+    );
+    const result = await context.get("measureServerTiming")("helix", () => context.get("helixRequest")<{ data?: unknown }>({
+      url: "https://api.twitch.tv/helix/channels",
+      query: { broadcaster_id: channelId },
+      accessToken: token,
+      clientId: context.env.TWITCH_CLIENT_ID,
+    }));
+    if (!result.ok || !Array.isArray(result.data.data)) return context.json({ error: "broadcast_unavailable" }, 503);
+    const row = result.data.data.find(isRecord);
+    if (row === undefined || typeof row.title !== "string") return context.json({ error: "broadcast_unavailable" }, 503);
+    return context.json({
+      title: row.title,
+      game: parseTwitchGame({ id: row.game_id, name: row.game_name }),
+      manageScopeAvailable: loginIdentityHasBroadcastScope(await getLoginIdentity(context.env.DB, channelId)),
+    });
+  } catch {
+    return context.json({ error: "broadcast_unavailable" }, 503);
+  }
+});
+
+moduleRouter.patch("/api/channels/:channelId/broadcast", async (context) => {
+  const channelId = context.req.param("channelId");
+  const parsed = broadcastUpdateSchema.safeParse(await readJsonBody(context.req.raw));
+  if (!parsed.success) return context.json({ error: "broadcast_invalid" }, 400);
+
+  const managementStillAuthorized = async (): Promise<boolean> => {
+    const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), nowIso());
+    const authorized = await context.env.DB.prepare(
+      `SELECT channel_id FROM channels WHERE channel_id = ? ${authorization.sql}`,
+    ).bind(channelId, ...authorization.values).first<{ channel_id: string }>();
+    return authorized !== null;
+  };
+  if (!await managementStillAuthorized()) return context.json({ error: "broadcast_manage_denied" }, 403);
+
+  let identity = await getLoginIdentity(context.env.DB, channelId);
+  if (identity === null || identity.status !== "connected") return context.json({ error: "broadcast_identity_missing" }, 409);
+  if (!loginIdentityHasBroadcastScope(identity)) return context.json({ error: "broadcast_scope_missing" }, 403);
+  let accessToken: string | null;
+  try {
+    accessToken = await decryptLoginIdentityAccessToken(identity, context.env);
+  } catch {
+    return context.json({ error: "broadcast_identity_missing" }, 409);
+  }
+  if (accessToken === null) {
+    return context.json({ error: "broadcast_identity_missing" }, 409);
+  }
+
+  const twitchUpdate = {
+    ...(parsed.data.title === undefined ? {} : { title: parsed.data.title }),
+    ...(parsed.data.gameId === undefined ? {} : { game_id: parsed.data.gameId }),
+  };
+  const updateBroadcast = (token: string) => context.get("measureServerTiming")("helix", () => context.get("helixRequest")({
+    url: "https://api.twitch.tv/helix/channels",
+    query: { broadcaster_id: channelId },
+    accessToken: token,
+    clientId: context.env.TWITCH_CLIENT_ID,
+    method: "PATCH",
+    body: twitchUpdate,
+  }));
+  if (!await managementStillAuthorized()) return context.json({ error: "broadcast_manage_denied" }, 403);
+  let result = await updateBroadcast(accessToken);
+  if (!result.ok) {
+    if (result.status === 401) {
+      try {
+        const refreshedIdentity = await refreshLoginIdentityTokens(context.env, identity, nowIso());
+        if (refreshedIdentity === null || refreshedIdentity.status !== "connected") {
+          return context.json({ error: "broadcast_identity_missing" }, 409);
+        }
+        identity = refreshedIdentity;
+        if (!loginIdentityHasBroadcastScope(identity)) return context.json({ error: "broadcast_scope_missing" }, 403);
+        const refreshedToken = await decryptLoginIdentityAccessToken(identity, context.env);
+        if (refreshedToken === null) return context.json({ error: "broadcast_identity_missing" }, 409);
+        if (!await managementStillAuthorized()) return context.json({ error: "broadcast_manage_denied" }, 403);
+        result = await updateBroadcast(refreshedToken);
+      } catch {
+        return context.json({ error: "broadcast_update_failed" }, 502);
+      }
+    }
+    if (!result.ok) {
+      if (result.status === 403) return context.json({ error: "broadcast_scope_missing" }, 403);
+      return context.json({ error: "broadcast_update_failed" }, 502);
+    }
+  }
+
+  const actor = context.get("actor");
+  const updatedAt = nowIso();
+  const changed = parsed.data;
+  await recordAudit(context.env.DB, actor.userId, updatedAt, channelId, null, "channel.broadcast.updated", null, changed);
+  return context.body(null, 204);
 });
 
 moduleRouter.get("/api/channels/:channelId/template-variables", async (context) => {

@@ -602,7 +602,7 @@ test("Belabox history keeps its latest twenty streams inside a bounded list", as
   }))).toEqual({ maxHeight: "320px", overflowY: "auto", scrolls: true });
 });
 
-test("saved chat voting changes stay local until an explicit Save and keep the action slots stable", async ({ page }) => {
+test("saved chat voting changes stay local until Save and templates have no play controls", async ({ page }) => {
   const timestamp = "2030-01-01T12:00:00.000Z";
   let template: ChatVoteTemplate = {
     id: "template-dinner", channelId: "channel-a", shortcut: "dinner", title: "Dinner",
@@ -663,25 +663,9 @@ test("saved chat voting changes stay local until an explicit Save and keep the a
   const live = page.locator(".chat-voting-live");
   const list = page.locator(".chat-voting-list");
   const row = page.locator(".chat-voting-template-list .list-row").first();
-  const geometry = async () => ({
-    live: await box(live),
-    action: await box(live.locator(".chat-voting-live__action-slot")),
-    list: await box(list),
-    playSlot: await box(row.locator(".list-row__action")),
-  });
-  await expect(page.locator(".chat-voting-template-list .list-row__action button")).toBeEnabled();
-  const baseline = await geometry();
-  expect(baseline.action.width).toBe(88);
-  expect(baseline.playSlot.width).toBe(36);
-
-  await page.locator(".chat-voting-template-list .list-row__action button").click();
-  await expect(page.getByRole("button", { name: "End vote" })).toBeVisible();
-  await expect.poll(async () => (await box(row.locator(".list-row__action"))).width).toBe(36);
-  expect(await geometry()).toEqual(baseline);
-
-  await page.getByRole("button", { name: "End vote" }).click();
-  await expect(page.getByRole("button", { name: "End vote" })).toHaveCount(0);
-  expect(await geometry()).toEqual(baseline);
+  await expect(page.locator(".chat-voting-template-list .list-row__action button")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Start vote", exact: true })).toHaveCount(0);
+  const baseline = { live: await box(live), list: await box(list) };
 
   failNextSave = true;
   await page.getByRole("textbox", { name: "Question" }).fill("Dinner changed");
@@ -690,13 +674,12 @@ test("saved chat voting changes stay local until an explicit Save and keep the a
   await expect(page.locator(".ui-save-bar__status")).toContainText("Not saved – retry", { timeout: 5_000 });
   expect(saveRequests).toBe(1);
   await expect(page.getByRole("textbox", { name: "Question" })).toHaveValue("Dinner changed");
-  expect(await geometry()).toEqual(baseline);
+  expect({ live: await box(live), list: await box(list) }).toEqual(baseline);
 
   await page.getByRole("button", { name: "Remove answer 2" }).click();
   await expect(row).toContainText("2 answers");
-  await expect(row.locator(".list-row__action button")).toBeEnabled();
-  await expect(page.getByRole("button", { name: "Start vote", exact: true })).toBeDisabled();
-  expect(await geometry()).toEqual(baseline);
+  await expect(row.locator(".list-row__action button")).toHaveCount(0);
+  expect({ live: await box(live), list: await box(list) }).toEqual(baseline);
 
   const addAnswer = page.getByRole("button", { name: "Answer", exact: true });
   for (let index = 0; index < 8; index += 1) await addAnswer.click();
@@ -704,23 +687,22 @@ test("saved chat voting changes stay local until an explicit Save and keep the a
   await expect(addAnswer).toBeDisabled();
   await expect(row).toContainText("2 answers");
   expect(saveRequests).toBe(1);
-  expect(await geometry()).toEqual(baseline);
+  expect({ live: await box(live), list: await box(list) }).toEqual(baseline);
 });
 
-test("starting a dirty saved vote saves first and does not start after a failed save", async ({ page }) => {
+test("saving a dirty saved vote retries after a failed explicit save", async ({ page }) => {
   const timestamp = "2030-01-01T12:00:00.000Z";
   let template: ChatVoteTemplate = {
     id: "template-start-save", channelId: "channel-a", shortcut: "dinner", title: "Dinner",
     labels: ["Pizza", "Pasta"], freeTextMode: null, durationSeconds: 60, revision: 1,
     legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
   };
-  let vote: Record<string, unknown> | null = null;
   let failNextSave = true;
   const operations: string[] = [];
   await routeJson(page, "/api/csrf", { token: "csrf" });
   await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
-      vote, counts: vote?.counts ?? null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 60,
+      vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 60,
     }) });
   });
   await page.route("**/api/channels/channel-a/modules/chat_voting/templates**", async (route) => {
@@ -743,31 +725,20 @@ test("starting a dirty saved vote saves first and does not start after a failed 
     }
     await route.fallback();
   });
-  await page.route("**/api/channels/channel-a/modules/chat_voting/start", async (route) => {
-    operations.push("start");
-    expect(template.title).toBe("Dinner after edit");
-    vote = {
-      id: "vote-start-save", channelId: "channel-a", kind: "options", optionCount: template.labels.length,
-      labels: [...template.labels], title: template.title, status: "open", openedAt: "2030-01-01T12:01:00.000Z",
-      closesAt: "2030-01-01T12:02:00.000Z", requestedDurationSeconds: 60, closedAt: null, closeReason: null,
-      counts: Array<number>(template.labels.length).fill(0), voterCount: 0,
-    };
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ vote }) });
-  });
-
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoPanel(page, "chat_voting", "en");
   const question = page.getByRole("textbox", { name: "Question" });
   await question.fill("Dinner after edit");
-  const start = page.getByRole("button", { name: "Start vote", exact: true });
-  await start.click();
+  await expect(page.getByRole("button", { name: "Start vote", exact: true })).toHaveCount(0);
+  const save = page.getByRole("button", { name: "Save", exact: true });
+  await save.click();
   await expect(page.locator(".ui-save-bar__status")).toContainText("Not saved – retry");
   expect(operations).toEqual(["save-failed"]);
   await expect(question).toHaveValue("Dinner after edit");
 
-  await start.click();
-  await expect(page.getByRole("button", { name: "End vote" })).toBeVisible();
-  expect(operations).toEqual(["save-failed", "save", "start"]);
+  await save.click();
+  await expect(page.locator(".ui-save-bar__status")).toContainText("Saved");
+  expect(operations).toEqual(["save-failed", "save"]);
   await expect(question).toHaveValue("Dinner after edit");
 });
 
@@ -1155,48 +1126,30 @@ test("discard confirmation cancels selection, close, and dashboard navigation wi
   await expect(page).toHaveURL(/module-panels-stability-fixture\?panel=chat_voting/u);
 });
 
-test("the running notice keeps the question field position when a saved vote starts and ends", async ({ page }) => {
+test("the saved vote inspector keeps its draft while leaving vote starts to the live cockpit", async ({ page }) => {
   const timestamp = "2030-01-01T12:00:00.000Z";
   const template: ChatVoteTemplate = {
     id: "template-running-note", channelId: "channel-a", shortcut: "running", title: "Stable field",
     labels: ["Yes", "No"], freeTextMode: null, durationSeconds: 60, revision: 1,
     legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
   };
-  let vote: Record<string, unknown> | null = null;
   await routeJson(page, "/api/csrf", { token: "csrf" });
   await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
-      vote, counts: vote?.counts ?? null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 60,
+      vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 60,
     }) });
   });
   await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates: [template], count: 1, maximum: 100 });
-  await page.route("**/api/channels/channel-a/modules/chat_voting/start", async (route) => {
-    vote = {
-      id: "vote-running-note", channelId: "channel-a", kind: "options", optionCount: 2, labels: ["Yes", "No"],
-      title: template.title, status: "open", openedAt: timestamp, closesAt: "2030-01-01T12:01:00.000Z",
-      requestedDurationSeconds: 60, closedAt: null, closeReason: null, counts: [0, 0], voterCount: 0,
-    };
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ vote }) });
-  });
-  await page.route("**/api/channels/channel-a/modules/chat_voting/close", async (route) => {
-    vote = { ...(vote ?? {}), status: "closed", closedAt: "2030-01-01T12:01:00.000Z", closeReason: "manual" };
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ closing: true, pollId: "vote-running-note" }) });
-  });
-
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoPanel(page, "chat_voting", "en");
   const inspector = page.locator(".chat-voting-template-inspector");
-  const note = inspector.locator(".chat-voting-editor__running-note");
   const question = page.getByRole("textbox", { name: "Question" });
-  await expect(note).toHaveCount(1);
+  await expect(inspector.getByRole("button", { name: "Start vote", exact: true })).toHaveCount(0);
+  await expect(page.locator(".chat-voting-template-list .list-row__action button")).toHaveCount(0);
   const before = await box(question);
-  await page.getByRole("button", { name: "Start vote", exact: true }).click();
-  await expect(note).toHaveText("Changes apply from the next start.");
+  await question.fill("A saved draft");
   expect(await box(question)).toEqual(before);
-
-  await page.getByRole("button", { name: "End vote" }).click();
-  await expect(note).toHaveText(" ");
-  expect(await box(question)).toEqual(before);
+  await expect(question).toHaveValue("A saved draft");
 });
 
 test("saved voting inspector stays open at desktop, overlay, and compact widths", async ({ page }) => {
@@ -1260,11 +1213,12 @@ test("saved voting inspector stays open at desktop, overlay, and compact widths"
     expect(headerControlGeometry.controlsGap).toBeGreaterThanOrEqual(0);
     expect(headerControlGeometry.controlsGap).toBeLessThanOrEqual(4.5);
     expect(headerControlGeometry.rightInset).toBeLessThanOrEqual(1);
-    const startButton = inspector.getByRole("button", { name: "Abstimmung starten", exact: true });
     const saveButton = inspector.getByRole("button", { name: "Speichern", exact: true });
     const discardButton = inspector.getByRole("button", { name: "Verwerfen", exact: true });
+    await expect(inspector.getByRole("button", { name: "Abstimmung starten", exact: true })).toHaveCount(0);
+    await expect(row.locator(".list-row__action button")).toHaveCount(0);
     const expectFooterActionsVisible = async (): Promise<void> => {
-      for (const button of [startButton, saveButton, discardButton]) {
+      for (const button of [saveButton, discardButton]) {
         const geometry = await button.evaluate((element) => {
           const bounds = element.getBoundingClientRect();
           const label = element;
@@ -1688,7 +1642,7 @@ test("free-text voting always renders five fixed result rows at desktop and mobi
   }
 });
 
-test("a timer-closed vote leaves the panel draft unchanged", async ({ page }) => {
+test("the saved vote panel preserves its draft and does not expose a start action", async ({ page }) => {
   const timestamp = "2030-01-01T12:00:00.000Z";
   const labels = ["First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth"];
   const template: ChatVoteTemplate = {
@@ -1696,12 +1650,11 @@ test("a timer-closed vote leaves the panel draft unchanged", async ({ page }) =>
     labels, freeTextMode: null, durationSeconds: 90, revision: 1,
     legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
   };
-  let vote = null as Record<string, unknown> | null;
   await routeJson(page, "/api/csrf", { token: "csrf" });
   await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
-      vote, counts: vote === null ? null : vote.counts, revision: vote?.status === "open" ? 2 : 1,
-      terms: null, moreTerms: null, hasOpenBallot: vote?.status === "open", defaultDurationSeconds: 120,
+      vote: null, counts: null, revision: 1,
+      terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120,
     }) });
   });
   await page.route("**/api/channels/channel-a/modules/chat_voting/templates**", async (route) => {
@@ -1717,17 +1670,6 @@ test("a timer-closed vote leaves the panel draft unchanged", async ({ page }) =>
     }
     await route.fallback();
   });
-  await page.route("**/api/channels/channel-a/modules/chat_voting/start", async (route) => {
-    const body = await route.request().postDataJSON() as { templateId: string };
-    expect(body.templateId).toBe(template.id);
-    vote = {
-      id: "timer-vote", channelId: "channel-a", kind: "options", optionCount: labels.length, labels: [...labels],
-      title: template.title, status: "open", openedAt: timestamp, closesAt: "2030-01-01T12:01:30.000Z",
-      requestedDurationSeconds: 90, closedAt: null, closeReason: null, counts: Array<number>(labels.length).fill(0), voterCount: 0,
-    };
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ vote }) });
-  });
-
   await page.setViewportSize({ width: 390, height: 844 });
   await gotoPanel(page, "chat_voting", "en");
   await page.locator(".chat-voting-template-list .list-row__link").first().click();
@@ -1738,17 +1680,8 @@ test("a timer-closed vote leaves the panel draft unchanged", async ({ page }) =>
   await expect(firstAnswer).toHaveValue("First");
   await expect(seconds).toHaveValue("90");
 
-  await page.getByRole("button", { name: "Start vote" }).click();
-  await expect(page.locator(".chat-voting-live__action-slot button")).toBeVisible();
-  await expect(question).toHaveValue("Draft question?");
-  await expect(firstAnswer).toHaveValue("First");
-  await expect(seconds).toHaveValue("90");
-  vote = { ...(vote ?? {}), status: "closed", closedAt: "2030-01-01T12:01:30.000Z", closeReason: "timer" };
-  await expect(page.getByText("Ended", { exact: true })).toBeVisible({ timeout: 5_000 });
-  await expect(question).toHaveValue("Draft question?");
-  await expect(firstAnswer).toHaveValue("First");
-  await expect(seconds).toHaveValue("90");
-  await expect(page.getByRole("button", { name: "Start vote" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Start vote", exact: true })).toHaveCount(0);
+  await expect(page.locator(".chat-voting-template-list .list-row__action button")).toHaveCount(0);
 });
 
 test("an overnight chat voting result keeps its closing time fully visible at 390px", async ({ page }) => {
@@ -1801,12 +1734,12 @@ test("Escape closes the desktop recent-vote inspector", async ({ page }) => {
 
   const inspector = page.locator(".chat-voting-recent-inspector");
   await expect(inspector).toBeVisible();
-  await page.getByRole("button", { name: "Again", exact: true }).focus();
+  await inspector.locator(".inspector-close").focus();
   await page.keyboard.press("Escape");
   await expect(inspector).toHaveCount(0);
 });
 
-test("the mobile live vote block keeps its height when the first vote starts", async ({ page }) => {
+test("the mobile live vote block keeps its height without a saved-template start control", async ({ page }) => {
   const timestamp = "2030-01-01T12:00:00.000Z";
   const title = "A deliberately long live question that must wrap to only two lines on a narrow screen";
   const template: ChatVoteTemplate = {
@@ -1814,24 +1747,14 @@ test("the mobile live vote block keeps its height when the first vote starts", a
     labels: ["First", "Second"], freeTextMode: null, durationSeconds: 60, revision: 1,
     legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
   };
-  let vote: Record<string, unknown> | null = null;
   await routeJson(page, "/api/csrf", { token: "csrf" });
   await page.route("**/api/channels/channel-a/modules/chat_voting/current", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
-      vote, counts: vote?.counts ?? null, revision: 1, terms: null, moreTerms: null,
-      hasOpenBallot: vote?.status === "open", defaultDurationSeconds: 60,
+      vote: null, counts: null, revision: 1, terms: null, moreTerms: null,
+      hasOpenBallot: false, defaultDurationSeconds: 60,
     }) });
   });
   await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates: [template], count: 1, maximum: 100 });
-  await page.route("**/api/channels/channel-a/modules/chat_voting/start", async (route) => {
-    vote = {
-      id: "mobile-vote", channelId: "channel-a", kind: "options", optionCount: 2, labels: ["First", "Second"],
-      title, status: "open", openedAt: timestamp, closesAt: "2030-01-01T12:01:00.000Z",
-      requestedDurationSeconds: 60, closedAt: null, closeReason: null, counts: [0, 0], voterCount: 0,
-    };
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ vote }) });
-  });
-
   await page.setViewportSize({ width: 390, height: 844 });
   await gotoPanel(page, "chat_voting", "en");
   const live = page.locator(".chat-voting-live");
@@ -1840,20 +1763,12 @@ test("the mobile live vote block keeps its height when the first vote starts", a
   const layout = async () => ({ live: await box(live), toolbar: await box(toolbar), list: await box(list) });
   await expect(page.getByText("No vote yet")).toBeVisible();
   const before = await layout();
-  await page.getByRole("button", { name: `Start “${title}”` }).click();
-  await expect(page.getByRole("button", { name: "End vote" })).toBeVisible();
+  await expect(page.locator(".chat-voting-template-list .list-row__action button")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: `Start “${title}”` })).toHaveCount(0);
   expect(await layout()).toEqual(before);
-  const question = page.locator(".chat-voting-live__question");
-  await expect(question).toHaveText(title);
-  const questionLayout = await question.evaluate((element) => ({
-    height: element.getBoundingClientRect().height,
-    lineClamp: getComputedStyle(element).webkitLineClamp,
-  }));
-  expect(questionLayout.lineClamp).toBe("2");
-  expect(questionLayout.height).toBeLessThanOrEqual(42);
 });
 
-test("the mobile live state reserves the same height while loading, failed, empty, and populated", async ({ page }) => {
+test("the mobile live state reserves the same height while loading, failed, and empty", async ({ page }) => {
   const timestamp = "2030-01-01T12:00:00.000Z";
   const title = "A stable mobile vote";
   const template: ChatVoteTemplate = {
@@ -1861,7 +1776,6 @@ test("the mobile live state reserves the same height while loading, failed, empt
     labels: ["First", "Second"], freeTextMode: null, durationSeconds: 60, revision: 1,
     legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
   };
-  let vote: Record<string, unknown> | null = null;
   let releaseFirstRequest: () => void = () => undefined;
   const firstRequestGate = new Promise<void>((resolve) => { releaseFirstRequest = resolve; });
   let currentRequests = 0;
@@ -1879,20 +1793,11 @@ test("the mobile live state reserves the same height while loading, failed, empt
       return;
     }
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
-      vote, counts: vote?.counts ?? null, revision: 1, terms: null, moreTerms: null,
-      hasOpenBallot: vote?.status === "open", defaultDurationSeconds: 60,
+      vote: null, counts: null, revision: 1, terms: null, moreTerms: null,
+      hasOpenBallot: false, defaultDurationSeconds: 60,
     }) });
   });
   await routeJson(page, "/api/channels/channel-a/modules/chat_voting/templates", { templates: [template], count: 1, maximum: 100 });
-  await page.route("**/api/channels/channel-a/modules/chat_voting/start", async (route) => {
-    vote = {
-      id: "stable-mobile-vote", channelId: "channel-a", kind: "options", optionCount: 2, labels: ["First", "Second"],
-      title, status: "open", openedAt: timestamp, closesAt: "2030-01-01T12:01:00.000Z",
-      requestedDurationSeconds: 60, closedAt: null, closeReason: null, counts: [0, 0], voterCount: 0,
-    };
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ vote }) });
-  });
-
   await page.setViewportSize({ width: 390, height: 844 });
   await gotoPanel(page, "chat_voting", "en", true);
   await realtime.waitForSocket();
@@ -1905,11 +1810,9 @@ test("the mobile live state reserves the same height while loading, failed, empt
   await page.getByRole("button", { name: "Retry" }).click();
   await expect(page.getByText("No vote yet")).toBeVisible();
   const emptyHeight = (await box(liveState)).height;
-  await page.getByRole("button", { name: `Start “${title}”` }).click();
-  await expect(page.getByRole("button", { name: "End vote" })).toBeVisible();
-  const populatedHeight = (await box(liveState)).height;
+  await expect(page.getByRole("button", { name: `Start “${title}”` })).toHaveCount(0);
+  await expect(page.locator(".chat-voting-template-list .list-row__action button")).toHaveCount(0);
 
   expect(errorHeight).toBe(loadingHeight);
   expect(emptyHeight).toBe(loadingHeight);
-  expect(populatedHeight).toBe(loadingHeight);
 });

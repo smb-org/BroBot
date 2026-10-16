@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import { chatVotingModule } from "../../src/modules/chat_voting";
+import { DEFAULT_CHAT_VOTING_SETTINGS } from "../../src/modules/chat_voting/contracts";
 import { parseVoteCommand } from "../../src/modules/chat_voting/domain";
 
 describe("chat voting module", () => {
+  it("defaults new votes to two minutes", () => {
+    expect(DEFAULT_CHAT_VOTING_SETTINGS.autoCloseSeconds).toBe(120);
+  });
+
   it("declares the built-in vote command accepted by its parser", () => {
     const command = chatVotingModule.chatCommands?.find(({ name }) => name === "!vote");
 

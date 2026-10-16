@@ -60,6 +60,7 @@ interface TemplateTextFieldProps {
   preview?: (template: string, values: Readonly<Record<string, string>>) => string;
   previewLabel?: string;
   previewSpeaker?: string;
+  previewEmptyText?: string;
   insertVariableLabel?: string;
   onIssuesChange?: (issues: { unknown: readonly string[]; worstCaseExceeded: boolean }) => void;
   disabled?: boolean;
@@ -142,6 +143,7 @@ export function TemplateTextField({
   preview,
   previewLabel,
   previewSpeaker,
+  previewEmptyText,
   insertVariableLabel,
   onIssuesChange,
   disabled = false,
@@ -388,7 +390,9 @@ export function TemplateTextField({
           ) : null}
       </div>
       {preview === undefined || previewLabel === undefined || previewSpeaker === undefined ? null : (
-        <ChatPreview label={previewLabel} speaker={previewSpeaker} text={previewText ?? ""} countLabel={messages.previewCountLabel(previewCount)} />
+        <ChatPreview label={previewLabel} speaker={previewSpeaker} text={previewText ?? ""}
+          {...(previewEmptyText === undefined ? {} : { emptyText: previewEmptyText })}
+          countLabel={messages.previewCountLabel(previewCount)} />
       )}
     </div>
   );

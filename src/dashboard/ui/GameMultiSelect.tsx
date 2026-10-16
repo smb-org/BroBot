@@ -25,7 +25,9 @@ export interface GameMultiSelectMessages {
   remove: (name: string) => string;
 }
 
-const MAX_GAMES = 10;
+export type GameSingleValueMessages = Omit<GameMultiSelectMessages, "limitReached" | "selectedCount">;
+
+const DEFAULT_MAXIMUM = 10;
 const GAME_LOOKUP_RETRY_DELAY_MS = 30_000;
 
 const coverUrl = (game: GameMultiSelectGame, width: number, height: number): string | null => {
@@ -67,15 +69,17 @@ export interface GameMultiSelectProps {
   lookupGames?: (ids: readonly string[]) => Promise<readonly GameMultiSelectGame[]>;
   value: readonly GameMultiSelectGame[];
   onChange: (games: GameMultiSelectGame[]) => void;
-  messages: GameMultiSelectMessages;
+  messages: GameMultiSelectMessages | GameSingleValueMessages;
   disabled?: boolean;
   visuallyHiddenLabel?: boolean;
   compact?: boolean;
+  maximum?: number;
+  singleValue?: boolean;
   error?: string;
 }
 
-/** Async Twitch game search with channel suggestions and a ten-game cap. */
-export function GameMultiSelect({ searchGames, lookupGames, value, onChange, messages, disabled = false, visuallyHiddenLabel = false, compact = false, error }: GameMultiSelectProps): ReactElement {
+/** Async Twitch game search with channel suggestions and a configurable selection cap. */
+export function GameMultiSelect({ searchGames, lookupGames, value, onChange, messages, disabled = false, visuallyHiddenLabel = false, compact = false, maximum = DEFAULT_MAXIMUM, singleValue = false, error }: GameMultiSelectProps): ReactElement {
   const id = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
@@ -169,7 +173,7 @@ export function GameMultiSelect({ searchGames, lookupGames, value, onChange, mes
   const results = currentSearch?.status === "ready" ? currentSearch.results : [];
   const selectedIds = new Set(value.map(({ id: gameId }) => gameId));
   const availableResults = results;
-  const atLimit = value.length >= MAX_GAMES;
+  const atLimit = value.length >= maximum;
 
   const displayedGame = (game: GameMultiSelectGame): GameMultiSelectGame => {
     const boxArtUrlTemplate = artworkById.get(game.id);
@@ -177,8 +181,8 @@ export function GameMultiSelect({ searchGames, lookupGames, value, onChange, mes
   };
 
   const add = (game: GameMultiSelectGame): void => {
-    if (disabled || atLimit || selectedIds.has(game.id)) return;
-    onChange([...value, game]);
+    if (disabled || (!singleValue && atLimit) || selectedIds.has(game.id)) return;
+    onChange(singleValue ? [game] : [...value, game]);
     setQuery("");
     setActiveIndex(0);
     inputRef.current?.focus();
@@ -228,23 +232,32 @@ export function GameMultiSelect({ searchGames, lookupGames, value, onChange, mes
   const status = currentSearch?.status === "error" ? "error"
     : currentSearch?.status === "ready" ? results.length === 0 ? "empty" : "ready"
       : search.length === 1 ? "short-query" : "loading";
+  const singleValueGame = value[0];
 
   return (
     <PopoverPrimitive.Root open={resultsOpen} onOpenChange={setResultsOpen}>
-      <div data-ui="" className={`ui-game-multi-select${compact ? " ui-game-multi-select--compact" : ""}`} ref={rootRef}>
+      <div data-ui="" className={`ui-game-multi-select${compact ? " ui-game-multi-select--compact" : ""}${singleValue ? " ui-game-multi-select--single-value" : ""}`} ref={rootRef}>
         <label className={`ui-game-multi-select__label${visuallyHiddenLabel ? " sr-only" : ""}`} htmlFor={id}>{messages.label}</label>
         <p className="ui-game-multi-select__hint">{messages.hint}</p>
         <div className="ui-game-multi-select__selected" aria-live="polite">
-          {value.map((game) => {
-            const gameForDisplay = displayedGame(game);
-            return (
-              <span className="ui-game-multi-select__chip" key={game.id}>
-                <GameCover game={gameForDisplay} width={compact ? 16 : 20} height={compact ? 21 : 27} />
-                <span className="ui-game-multi-select__chip-name">{game.name}</span>
-                <button type="button" disabled={disabled} aria-label={messages.remove(game.name)} onClick={() => remove(game.id)}>×</button>
+          {singleValue
+            ? singleValueGame === undefined ? null : (
+              <span className="ui-game-multi-select__single-value">
+                <GameCover game={displayedGame(singleValueGame)} width={20} height={27} />
+                <span className="ui-game-multi-select__single-value-name">{singleValueGame.name}</span>
+                <button type="button" disabled={disabled} aria-label={messages.remove(singleValueGame.name)} onClick={() => remove(singleValueGame.id)}>×</button>
               </span>
-            );
-          })}
+            )
+            : value.map((game) => {
+              const gameForDisplay = displayedGame(game);
+              return (
+                <span className="ui-game-multi-select__chip" key={game.id}>
+                  <GameCover game={gameForDisplay} width={compact ? 16 : 20} height={compact ? 21 : 27} />
+                  <span className="ui-game-multi-select__chip-name">{game.name}</span>
+                  <button type="button" disabled={disabled} aria-label={messages.remove(game.name)} onClick={() => remove(game.id)}>×</button>
+                </span>
+              );
+            })}
         </div>
         <div className="ui-game-multi-select__search">
           <input
@@ -253,16 +266,19 @@ export function GameMultiSelect({ searchGames, lookupGames, value, onChange, mes
             ref={inputRef}
             id={id}
             type="search"
+            {...(singleValue ? { "aria-autocomplete": "list" as const } : {})}
             autoComplete="off"
             value={query}
-            placeholder={atLimit ? messages.selectedCount(value.length, MAX_GAMES) : value.length === 0 ? messages.allGames : messages.search}
+            placeholder={singleValue ? value.length === 0 ? messages.allGames : messages.search
+              : atLimit ? ("selectedCount" in messages ? messages.selectedCount(value.length, maximum) : "")
+                : value.length === 0 ? messages.allGames : messages.search}
             aria-describedby={`${id}-hint${error === undefined ? "" : ` ${id}-error`}`}
             aria-invalid={error === undefined ? undefined : true}
             aria-label={messages.label}
             aria-controls={`${id}-results`}
             aria-expanded={resultsOpen}
             aria-haspopup="listbox"
-            disabled={disabled || atLimit}
+            disabled={disabled || (atLimit && !singleValue)}
             onFocus={() => {
               if (ignoreNextInputFocusRef.current) {
                 ignoreNextInputFocusRef.current = false;
@@ -275,7 +291,7 @@ export function GameMultiSelect({ searchGames, lookupGames, value, onChange, mes
             onChange={(event) => { setQuery(event.currentTarget.value); setActiveIndex(0); setResultsOpen(true); }}
           />
         </div>
-        <p className="ui-game-multi-select__limit-message" aria-live="polite">{atLimit ? messages.limitReached : ""}</p>
+        <p className="ui-game-multi-select__limit-message" aria-live="polite">{atLimit && !singleValue && "limitReached" in messages ? messages.limitReached : ""}</p>
         {error === undefined ? null : <FieldError id={`${id}-error`} className="ui-game-multi-select__error" message={error} />}
         <span className="ui-game-multi-select__sr-hint sr-only" id={`${id}-hint`}>{messages.searchHint}</span>
         <PopoverPrimitive.Portal>
@@ -305,7 +321,7 @@ export function GameMultiSelect({ searchGames, lookupGames, value, onChange, mes
                     key={game.id}
                     ref={(element) => { optionRefs.current[index] = element; }}
                     tabIndex={0}
-                    disabled={disabled || (atLimit && !selectedIds.has(game.id)) || selectedIds.has(game.id)}
+                    disabled={disabled || (!singleValue && atLimit && !selectedIds.has(game.id)) || selectedIds.has(game.id)}
                     onKeyDown={(event) => handleOptionKeyDown(event, index)}
                     onClick={() => add(game)}
                   >
@@ -316,7 +332,7 @@ export function GameMultiSelect({ searchGames, lookupGames, value, onChange, mes
               </div>
               <div className="ui-game-multi-select__footer">
                 <span>{messages.hint}</span>
-                <span aria-live="polite">{messages.selectedCount(value.length, MAX_GAMES)}</span>
+                {singleValue || !("selectedCount" in messages) ? null : <span aria-live="polite">{messages.selectedCount(value.length, maximum)}</span>}
               </div>
             </PopoverPrimitive.Popup>
           </PopoverPrimitive.Positioner>

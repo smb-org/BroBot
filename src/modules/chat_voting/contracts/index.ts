@@ -24,7 +24,7 @@ export const CHAT_VOTING_HARD_LIMIT_MS = 4 * 60 * 60 * 1_000;
 export const CHAT_VOTING_BALLOT_RETENTION_MS = 24 * 60 * 60 * 1_000 - 60_000;
 
 export const chatVotingSettingsSchema = z.object({
-  autoCloseSeconds: z.number().int().min(0).max(CHAT_VOTING_HARD_LIMIT_MS / 1_000).default(0),
+  autoCloseSeconds: z.number().int().min(0).max(CHAT_VOTING_HARD_LIMIT_MS / 1_000).default(120),
   startText: z.string().refine((text) => templateTextLength(text) <= 500).default(DEFAULT_CHAT_VOTING_START_TEXT),
   announceResult: z.boolean().default(true),
   resultText: z.string().refine((text) => templateTextLength(text) <= 500).default("{vote.result}"),
@@ -34,7 +34,7 @@ export const chatVotingSettingsSchema = z.object({
 export type ChatVotingSettings = z.output<typeof chatVotingSettingsSchema>;
 
 export const DEFAULT_CHAT_VOTING_SETTINGS: ChatVotingSettings = {
-  autoCloseSeconds: 0,
+  autoCloseSeconds: 120,
   startText: DEFAULT_CHAT_VOTING_START_TEXT,
   announceResult: true,
   resultText: "{vote.result}",

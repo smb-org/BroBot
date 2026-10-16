@@ -25,6 +25,9 @@ const databaseFor = async (): Promise<TestD1Database> => {
   databases.push(database);
   await insertChannel(database, "channel-a");
   await insertChannel(database, "channel-b");
+  await database.prepare(
+    "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'votekick', 1, '{}'), (?, 'votekick', 1, '{}')",
+  ).bind("channel-a", "channel-b").run();
   return database;
 };
 
@@ -138,6 +141,23 @@ describe("Votekick routes", () => {
     expect(row).toEqual({ status: "cancelled" });
   });
 
+  it("requires the Votekick module to remain enabled when cancelling", async () => {
+    const database = await databaseFor();
+    await insertLoginIdentityAndSession(database, "operator-a");
+    await insertMember(database, "channel-a", "operator-a", "operator");
+    await insertRunning(database, "channel-a", "ballot-a");
+    await database.prepare("UPDATE channel_modules SET enabled = 0 WHERE channel_id = 'channel-a' AND module_id = 'votekick'").run();
+
+    const response = await panelRouter.fetch(
+      await requestFor("operator-a", "/api/channels/channel-a/modules/votekick/votekicks/ballot-a/cancel", "POST"),
+      environmentFor(database),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(database.prepare("SELECT status FROM votekicks WHERE channel_id = 'channel-a' AND votekick_id = 'ballot-a'")
+      .first()).resolves.toEqual({ status: "running" });
+  });
+
   it("reports a replacement votekick when cancellation loses its guarded update race", async () => {
     const database = await databaseFor();
     await insertLoginIdentityAndSession(database, "operator-a");
@@ -167,7 +187,7 @@ describe("Votekick routes", () => {
   it("publishes a votekick tally hint after an operator lifts its timeout", async () => {
     const database = await databaseFor();
     await insertLoginIdentityAndSession(database, "operator-a");
-    await insertMember(database, "channel-a", "operator-a", "manager");
+    await insertMember(database, "channel-a", "operator-a", "operator");
     const id = "ballot-lift";
     const { startedAt, endedAt, expiresAt } = await insertPassed(database, id);
     const ciphertext = await encryptJson({ token: "fictional-bot-token" }, parseKeyRing(tokenKeys));
@@ -223,6 +243,26 @@ describe("Votekick routes", () => {
       "SELECT revision FROM panel_resource_revisions WHERE channel_id = 'channel-a' AND resource = 'module:votekick:panel'",
     ).first<{ revision: number }>();
     expect(revision?.revision).toBeGreaterThan(0);
+  });
+
+  it("checks both operator access and module activation before lifting a timeout", async () => {
+    const database = await databaseFor();
+    await insertLoginIdentityAndSession(database, "operator-a");
+    await insertMember(database, "channel-a", "operator-a", "operator");
+    await insertPassed(database, "ballot-lift-disabled");
+    await database.prepare("UPDATE channel_modules SET enabled = 0 WHERE channel_id = 'channel-a' AND module_id = 'votekick'").run();
+    const twitchFetch = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const response = await panelRouter.fetch(
+      await requestFor("operator-a", "/api/channels/channel-a/modules/votekick/votekicks/ballot-lift-disabled/lift", "POST"),
+      environmentFor(database),
+    );
+
+    expect(response.status).toBe(403);
+    expect(twitchFetch).not.toHaveBeenCalled();
+    await expect(database.prepare("SELECT lifted_at FROM votekicks WHERE channel_id = 'channel-a' AND votekick_id = 'ballot-lift-disabled'")
+      .first()).resolves.toEqual({ lifted_at: null });
   });
 
   it("reads a running votekick without invoking its alarm handler", async () => {

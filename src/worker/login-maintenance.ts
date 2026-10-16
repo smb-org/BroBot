@@ -9,11 +9,10 @@ import {
   setLoginIdentityTokenScopes,
   setLoginIdentityStatusIfCurrent,
 } from "./db/login-identity";
-import { encryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
+import { getTokenEncryptionKeys } from "./auth/crypto";
 import {
   confirmIdentityAuthorization,
   decryptStoredToken,
-  refreshBotToken,
   shouldRefreshBotToken,
   TwitchApiError,
   validateBotToken,
@@ -21,6 +20,7 @@ import {
 } from "./bot-maintenance";
 import { revokeRealtimeUserFromAllChannels } from "./realtime";
 import { notifyCommittedResources } from "./panel-resources";
+import { refreshLoginIdentityTokens } from "./auth/login-token-refresh";
 
 const markLoginRevoked = async (
   env: Env,
@@ -201,37 +201,10 @@ const maintainLoginIdentity = async (env: Env, identity: Awaited<ReturnType<type
 
   if (tokenIsExpiring || validateReturned401) {
     try {
-      const refreshed = await refreshBotToken(fetch, env, refreshToken);
-      const accessTokenCiphertext = await encryptJson(
-        { token: refreshed.accessToken },
-        parseKeyRing(encryptionKeys),
-      );
-      const refreshTokenCiphertext = await encryptJson(
-        { token: refreshed.refreshToken },
-        parseKeyRing(encryptionKeys),
-      );
-      const replaced = await rotateLoginTokensWithRetry(
-        env.DB,
-        identity.userId,
-        identity.accessTokenCiphertext,
-        identity.refreshTokenCiphertext,
-        accessTokenCiphertext,
-        refreshTokenCiphertext,
-        new Date(Date.parse(now) + refreshed.expiresIn * 1000).toISOString(),
-        now,
-        identity.updatedAt,
-      );
-      if (!replaced) return;
-      await setLoginIdentityTokenScopes(
-        env.DB,
-        identity.userId,
-        JSON.stringify(refreshed.scopes),
-        now,
-        accessTokenCiphertext,
-        refreshTokenCiphertext,
-      );
-      statusExpectedAccessTokenCiphertext = accessTokenCiphertext;
-      statusExpectedRefreshTokenCiphertext = refreshTokenCiphertext;
+      const refreshedIdentity = await refreshLoginIdentityTokens(env, identity, now);
+      if (refreshedIdentity === null) return;
+      statusExpectedAccessTokenCiphertext = refreshedIdentity.accessTokenCiphertext;
+      statusExpectedRefreshTokenCiphertext = refreshedIdentity.refreshTokenCiphertext;
     } catch (error: unknown) {
       logMaintenanceError({ channelId: identity.userId, subscriptionType: "login-identity", variant: "refresh" }, error, refreshFailureReason(error));
       if (isInvalidGrant(error)) {
