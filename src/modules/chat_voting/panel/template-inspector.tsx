@@ -10,6 +10,7 @@ import type { ChatVoteTemplate, ChatVoteTemplateDraft } from "../contracts";
 import { CHAT_VOTE_TEMPLATE_MAXIMUM, CHAT_VOTING_TITLE_MAX_LENGTH } from "../contracts";
 import { isValidTemplateShortcut, normalizeFreeTextVoteForMatching, voteLabelLength } from "../domain";
 import { chatVoteDurationText, chatVotingSavedPanelTexts } from "./locale-saved";
+import { chatVoteResultPreview } from "./result-preview";
 import { createChatVoteTemplate, loadChatVotingTemplateVariables, saveChatVoteTemplate } from "./service";
 import type { ChatVoteTemplateListState } from "./service";
 
@@ -133,13 +134,13 @@ export function ChatVoteTemplateInspector({
     && draft.value.labels.every((label, index) => label.trim().toLocaleLowerCase() === yesNoLabels[index]?.toLocaleLowerCase());
   const previewOptions = draft.value.freeTextMode === null ? draft.value.labels : [];
   const previewText = `${draft.value.title.trim() || labels.previewQuestion}${previewOptions.length === 0 ? "" : ` — ${previewOptions.map((option, index) => `${String(index + 1)}. ${option}`).join(" · ")}`}`;
-  const previewResultText = (text: string, values: Readonly<Record<string, string>>): string => text.replace(/\{([^{}]+)\}/gu, (token, name: string) => values[name] ?? token);
-  const previewResult = labels.resultPreview(draft.value.title.trim() || labels.previewQuestion, previewResultText(draft.value.resultText ?? "{vote.result}", {
-    "vote.result": language === "de" ? "Pizza: 8 (67%) · Burger: 4 (33%)" : "Pizza: 8 (67%) · Burger: 4 (33%)",
+  const resultVoteResult = "Pizza: 8 (67%) · Burger: 4 (33%)";
+  const previewResult = chatVoteResultPreview(language, draft.value.resultText ?? "{vote.result}", draft.value.title.trim() || null, resultVoteResult, {
+    "vote.result": resultVoteResult,
     "vote.title": draft.value.title.trim() || labels.previewQuestion,
     "vote.options": draft.value.labels.map((answer, index) => `${String(index + 1)} = ${answer}`).join(", "),
     "vote.duration": chatVoteDurationText(draft.value.durationSeconds, language),
-  }));
+  });
 
   useEffect(() => {
     const inferredMode = durationPreset(draft.value.durationSeconds);
@@ -509,6 +510,7 @@ export function ChatVoteTemplateInspector({
           label={labels.preview}
           speaker={labels.bot}
           text={previewResult}
+          emptyText={labels.resultPreviewOff}
           countLabel={labels.previewCountLabel(voteLabelLength(previewResult))}
         />
       </div>

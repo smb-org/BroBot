@@ -67,6 +67,15 @@ test("five upcoming timers and an ad keep the snooze action reachable in the nex
     const snoozeActions = list.getByRole("button", { name: "Verschieben" });
     await expect(snoozeActions).toHaveCount(1);
 
+    const widths = await tile.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const content = element.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight);
+      const lists = [...element.querySelectorAll<HTMLElement>(".live-cockpit-next-list")];
+      return { content, lists: lists.map((entry) => entry.getBoundingClientRect().width), row: lists.at(-1)?.querySelector(".live-cockpit-next-item")?.getBoundingClientRect().width ?? 0, rowContainer: lists.at(-1)?.clientWidth ?? 0 };
+    });
+    for (const width of widths.lists) expect(Math.abs(width - widths.content), JSON.stringify(widths)).toBeLessThanOrEqual(2);
+    expect(Math.abs(widths.row - widths.rowContainer), JSON.stringify(widths)).toBeLessThanOrEqual(2);
+
     const scrollState = await list.evaluate((element) => ({
       clientHeight: element.clientHeight,
       scrollHeight: element.scrollHeight,
