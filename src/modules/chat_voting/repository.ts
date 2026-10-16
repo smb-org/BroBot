@@ -135,6 +135,8 @@ type ChatVoteTemplateSaveResult =
 
 type ChatVoteOpenInsertStatus = "inserted" | "busy" | "reference_conflict";
 
+const NO_BLOCK_GUARD: TextBlockWriteGuard = { sql: "", values: [], references: [] };
+
 const writeGuardPassed = async (db: D1Database, guard: TextBlockWriteGuard): Promise<boolean> => {
   if (guard.references.length === 0) return true;
   const row = await db.prepare(`SELECT 1 AS valid WHERE 1 = 1 ${guard.sql}`)
@@ -234,7 +236,7 @@ const templateRepository = (db: D1Database): ChatVoteTemplateRepository => ({
     ).bind(channelId, alias).first<ChatVoteTemplateRow>();
     return row === null ? null : mapTemplateRow(row);
   },
-  async createTemplate(channelId, id, draft, createdAt, authorization, audit, blockGuard = { sql: "", values: [], references: [] }) {
+  async createTemplate(channelId, id, draft, createdAt, authorization, audit, blockGuard = NO_BLOCK_GUARD) {
     const mutation = db.prepare(
       `INSERT INTO chat_vote_templates
          (id, channel_id, shortcut, title, result_text, labels, free_text_mode, duration_seconds, revision,
@@ -262,7 +264,7 @@ const templateRepository = (db: D1Database): ChatVoteTemplateRepository => ({
       .bind(channelId).first<{ count: number }>();
     return (count?.count ?? 0) >= 100 ? "limit" : "conflict";
   },
-  async saveTemplate(channelId, id, revision, draft, updatedAt, authorization, audit, blockGuard = { sql: "", values: [], references: [] }) {
+  async saveTemplate(channelId, id, revision, draft, updatedAt, authorization, audit, blockGuard = NO_BLOCK_GUARD) {
     const existed = await db.prepare(
       "SELECT 1 AS present FROM chat_vote_templates WHERE channel_id = ? AND id = ? LIMIT 1",
     ).bind(channelId, id).first<{ present: number }>() !== null;
@@ -380,7 +382,7 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
       changed: (result?.meta.changes ?? 0) > 0,
     };
   },
-  async insertOpen(vote, authorization, resultTextTemplate, blockGuard = { sql: "", values: [], references: [] }) {
+  async insertOpen(vote, authorization, resultTextTemplate, blockGuard = NO_BLOCK_GUARD) {
     const guard = authorization?.sql ?? "";
     const statement = db.prepare(
       `INSERT INTO chat_votes
