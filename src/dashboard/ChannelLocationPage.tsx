@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import type { ChannelRole } from "../contracts/values";
 import { canManage } from "../contracts/values";
@@ -49,6 +49,7 @@ export const ChannelLocationPage = ({ channelId, role }: { channelId: string; ro
   const [pending, setPending] = useState(false);
   const [saveError, setSaveError] = useState<string | undefined>();
   const [saved, setSaved] = useState(false);
+  const draftVersion = useRef(0);
   const hasDraft = draftState?.channelId === channelId;
   const timeZone = !settingsReady ? "" : hasDraft ? draftState.timeZone : settings.timeZone;
   const location = !settingsReady ? null : hasDraft ? draftState.location : settings.location;
@@ -62,7 +63,7 @@ export const ChannelLocationPage = ({ channelId, role }: { channelId: string; ro
   const readOnlyReasonId = `channel-location-read-only-${channelId}`;
 
   const writeDraft = (update: Partial<Pick<ChannelSettingsDraft, "timeZone" | "location">>): void => {
-    if (!settingsReady || !canEdit) return;
+    if (!settingsReady || !canEdit || pending) return;
     const current = hasDraft ? draftState : {
       channelId,
       baseRevision: settings.revision,
@@ -71,6 +72,7 @@ export const ChannelLocationPage = ({ channelId, role }: { channelId: string; ro
       location: settings.location,
     };
     const next = { ...current, ...update };
+    draftVersion.current += 1;
     const hasChanges = next.timeZone !== settings.timeZone || !sameLocation(next.location, settings.location);
     setDraftState(hasChanges ? next : null);
     setSaveError(undefined);
@@ -89,6 +91,7 @@ export const ChannelLocationPage = ({ channelId, role }: { channelId: string; ro
     if (hasRevisionConflict) return labels.settingsConflict;
 
     const draft = draftState;
+    const draftVersionAtStart = draftVersion.current;
     setPending(true);
     setSaveError(undefined);
     let savingLocation = false;
@@ -97,16 +100,27 @@ export const ChannelLocationPage = ({ channelId, role }: { channelId: string; ro
         const result = await saveChannelTimeZone(channelId, draft.baseRevision, timeZone.trim());
         await updateSettingsCache({ timeZone: result.timeZone, revision: result.revision });
         setDraftState((current) => current?.channelId === channelId
-          ? { ...current, baseRevision: result.revision, timeZone: result.timeZone }
+          ? {
+            ...current,
+            baseRevision: result.revision,
+            ...(draftVersion.current === draftVersionAtStart ? { timeZone: result.timeZone } : {}),
+          }
           : current);
       }
       if (locationDirty) {
         savingLocation = true;
         const result = await saveChannelLocation(channelId, draft.locationBaseRevision, location);
         await updateSettingsCache({ location: result.location, locationRevision: result.locationRevision });
+        setDraftState((current) => current?.channelId === channelId
+          ? { ...current, locationBaseRevision: result.locationRevision }
+          : current);
       }
-      setDraftState(null);
-      setSaved(true);
+      if (draftVersion.current === draftVersionAtStart) {
+        setDraftState(null);
+        setSaved(true);
+      } else {
+        setSaved(false);
+      }
       return null;
     } catch (failure: unknown) {
       const code = failure instanceof PanelApiError ? failure.code : null;
@@ -124,10 +138,12 @@ export const ChannelLocationPage = ({ channelId, role }: { channelId: string; ro
     timeZone, timeZoneDirty, updateSettingsCache]);
 
   const discardDraft = useCallback((): void => {
+    if (pending) return;
+    draftVersion.current += 1;
     setDraftState(null);
     setSaveError(undefined);
     setSaved(false);
-  }, []);
+  }, [pending]);
   const navigationGuard = useDraftGuard(dirty, saveDraft, discardDraft);
 
   useEffect(() => registerDashboardNavigationGuard(navigationGuard.guardSwitch), [navigationGuard.guardSwitch]);
@@ -204,7 +220,8 @@ export const ChannelLocationPage = ({ channelId, role }: { channelId: string; ro
     <ConfirmDialog opened={navigationGuard.confirmOpen} title={dashboard.module.unsavedChangesTitle}
       description={dashboard.module.unsavedChangesDescription}
       confirmLabel={dashboard.module.discardAndSwitch} cancelLabel={dashboard.module.continueEditing}
-      onCancel={navigationGuard.continueEditing} onConfirm={navigationGuard.discardAndSwitch} danger />
+      onCancel={navigationGuard.continueEditing} onConfirm={navigationGuard.discardAndSwitch} danger
+      pending={navigationGuard.saving || pending} />
   </div>;
 };
 

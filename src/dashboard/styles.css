@@ -437,8 +437,7 @@ form.content-section { display: grid; gap: var(--s4); }
 .channel-location-page { display: flex; width: 100%; min-width: 0; min-height: 0; flex: 1 1 auto; flex-direction: column; }
 .channel-location-page .settings-page { width: 100%; max-width: none; min-height: 0; }
 .channel-location-page .settings-page > .page-header { width: 100%; max-width: none; }
-.channel-location-page .settings-page__columns { align-items: start; padding-top: 0; }
-.channel-location-page .settings-page__column > .ui-section:first-child { margin-top: 0; }
+.channel-location-page .settings-page__columns { align-items: start; padding-top: 12px; }
 .channel-location-page .settings-page__column { min-width: 0; }
 .channel-location-page .page-header__save .ui-save-bar--persistent { min-height: var(--control-height); margin: 0; padding: 0; border: 0; background: transparent; }
 .channel-location-page__properties { display: grid; gap: var(--s2); margin: 0; }
@@ -2064,15 +2063,15 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-confirm-dialog__actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .ui-confirm-dialog__actions > .ui-button { flex: 0 0 auto; white-space: nowrap; }
 
-.channel-location-page .settings-page > .page-header { margin: 0; padding-bottom: 0; }
-.channel-location-page .settings-page__columns { padding-top: 0; }
-.channel-location-page .settings-page__column > .ui-section:first-child { margin-top: 0; }
+.channel-location-page .settings-page > .page-header { margin: 0; padding-bottom: 16px; }
 .api-source-panel .api-source-panel__list-toolbar { margin-bottom: 0; }
 .ui-confirm-dialog__error-slot:empty { display: none; margin: 0; }
 .ui-editor-shell details[data-editor-error] > summary::after { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; margin-left: var(--s2); padding: 0 var(--s1); border: 1px solid var(--error); border-radius: var(--r-control); color: var(--error-text); background: var(--error-surface); content: "×"; font-size: 12px; font-weight: 600; line-height: 1; }
 .ui-editor-shell--readonly { display: block; max-height: none; }
 
 @media (max-width: 600px) {
+  .channel-location-page .settings-page > .page-header { margin-bottom: 8px; padding-bottom: 8px; }
+  .channel-location-page .settings-page__columns { padding: 8px 0; }
   .ui-dialog__body > form:has(.live-cockpit-broadcast__form) > .ui-form-dialog__footer { grid-template-columns: minmax(0, 1fr); gap: var(--s1); padding-block: var(--s1); }
   .ui-dialog__body > form:has(.live-cockpit-broadcast__form) > .ui-form-dialog__footer > .ui-dialog__error-slot { grid-row: 2; }
   .ui-dialog__body > form:has(.live-cockpit-broadcast__form) > .ui-form-dialog__footer > .ui-confirm-dialog__actions { grid-row: 1; }

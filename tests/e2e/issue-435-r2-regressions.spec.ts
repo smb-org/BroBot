@@ -162,7 +162,7 @@ test("operators get one module permission reason below the description", async (
   await expect(heading.locator(".page-header__main > p")).toContainText("öffentliche Webadressen");
 });
 
-test("location page closes the header gap and aligns the saved place above its actions", async ({ page }) => {
+test("location page uses the settings-page header gap and aligns the saved place above its actions", async ({ page }) => {
   for (const viewport of viewports) {
     await page.setViewportSize(viewport);
     await installLiveCockpitMocks(page, {
@@ -172,11 +172,15 @@ test("location page closes the header gap and aligns the saved place above its a
     await page.goto(`/channels/${locationChannelId}/location-weather`);
 
     const headerBox = await page.locator(".channel-location-page .settings-page > .page-header").boundingBox();
+    const header = page.locator(".channel-location-page .settings-page > .page-header");
     const firstSectionHeading = await page.locator(".channel-location-page .settings-page__column:first-child .ui-section__heading").boundingBox();
+    const headerBorder = await header.evaluate((element) => Number.parseFloat(getComputedStyle(element).borderBottomWidth));
     expect(headerBox).not.toBeNull();
     expect(firstSectionHeading).not.toBeNull();
     if (headerBox !== null && firstSectionHeading !== null) {
-      expect(Math.abs(firstSectionHeading.y - (headerBox.y + headerBox.height))).toBeLessThanOrEqual(1);
+      const dividerY = headerBox.y + headerBox.height - headerBorder / 2;
+      const expectedGap = viewport.width <= 600 ? 36.5 : 32.5;
+      expect(Math.abs(firstSectionHeading.y - dividerY - expectedGap)).toBeLessThanOrEqual(1);
     }
 
     const current = page.locator(".channel-location-field__current");

@@ -141,8 +141,8 @@ export const ChannelLocationField = ({
       </Dialog>
       <ConfirmDialog opened={removeConfirmation} title={labels.locationRemoveTitle} description={labels.locationRemoveDescription}
         confirmLabel={labels.locationRemove} cancelLabel={labels.cancel} danger
-        onConfirm={() => { onChange(null); setRemoveConfirmation(false); }}
-        onCancel={() => { setRemoveConfirmation(false); }} />
+        onConfirm={() => { if (actionsDisabled) return; onChange(null); setRemoveConfirmation(false); }}
+        onCancel={() => { if (actionsDisabled) return; setRemoveConfirmation(false); }} pending={actionsDisabled} />
     </div>
   );
 };
