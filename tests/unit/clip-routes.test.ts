@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
+import { clipsSettingsSchema } from "../../src/modules/clips/contracts";
 import { panelRouter } from "../../src/worker/panel/routes";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { upsertBotIdentity } from "../../src/worker/db/bot-identity";
@@ -20,7 +21,7 @@ const environmentFor = (database: TestD1Database): Env => ({
   ...environmentKeys,
 } as unknown as Env);
 
-const requestFor = async (userId: string, path: string, method = "POST"): Promise<Request> => {
+const requestFor = async (userId: string, path: string, method = "POST", body?: unknown): Promise<Request> => {
   const sessionId = `session-${userId}`;
   const cookie = await createSessionCookie({ sessionId }, environmentKeys.SESSION_COOKIE_KEYS, environmentKeys.TOKEN_ENCRYPTION_KEYS);
   const csrf = await createCsrfToken(sessionId, environmentKeys.SESSION_COOKIE_KEYS, new Date().toISOString());
@@ -29,7 +30,9 @@ const requestFor = async (userId: string, path: string, method = "POST"): Promis
     headers: {
       Cookie: `__Host-brobot_session=${cookie}; __Host-brobot_csrf=${csrf}`,
       "X-CSRF-Token": csrf,
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
     },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 };
 
@@ -176,5 +179,78 @@ describe("create clip", () => {
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({ error: "channel_access_denied" });
     expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("returns only clip links created during the current live session", async () => {
+    const environment = await asMember("operator");
+    const streamStartedAt = "2026-10-16T08:00:00.000Z";
+    await database.prepare(
+      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, started_at)
+       VALUES ('kanal-a', 'online', ?, 'eventsub', ?)`,
+    ).bind(streamStartedAt, streamStartedAt).run();
+    await database.prepare(
+      `INSERT INTO audit_log
+        (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json, module_id, actor_kind)
+       VALUES ('old-clip', 'user-1', '2026-10-15T20:00:00.000Z', 'kanal-a', 'clip.created', 'null', '{"clipId":"old"}', NULL, 'member'),
+              ('current-clip', 'user-1', '2026-10-16T08:05:00.000Z', 'kanal-a', 'clip.created', 'null', '{"clipId":"current"}', NULL, 'member')`,
+    ).run();
+
+    const response = await panelRouter.fetch(await requestFor("user-1", "/api/channels/kanal-a/clips", "GET"), environment);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      streamStartedAt,
+      clips: [{ clipId: "current", createdAt: "2026-10-16T08:05:00.000Z" }],
+    });
+  });
+
+  it("saves clip settings only for managers while the module is active", async () => {
+    const environment = await asMember("manager");
+    const settings = clipsSettingsSchema.parse({
+      commandMinimumRole: "vip",
+      commandCooldownSeconds: 120,
+      automaticClipsEnabled: true,
+      automaticThresholdMultiplier: 3,
+    });
+
+    const response = await panelRouter.fetch(await requestFor(
+      "user-1",
+      "/api/channels/kanal-a/modules/clips/settings",
+      "PATCH",
+      { revision: 1, settings },
+    ), environment);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ settings, revision: 2 });
+    const row = await database.prepare(
+      "SELECT settings, revision FROM channel_modules WHERE channel_id = 'kanal-a' AND module_id = 'clips'",
+    ).first<{ settings: string; revision: number }>();
+    expect(row).toEqual({ settings: JSON.stringify(settings), revision: 2 });
+  });
+
+  it("rejects operator settings writes and writes after clips are disabled", async () => {
+    const operatorEnvironment = await asMember("operator");
+    const settings = clipsSettingsSchema.parse({});
+    const denied = await panelRouter.fetch(await requestFor(
+      "user-1",
+      "/api/channels/kanal-a/modules/clips/settings",
+      "PATCH",
+      { revision: 1, settings },
+    ), operatorEnvironment);
+    expect(denied.status).toBe(403);
+
+    await database.prepare("UPDATE channel_members SET role = 'manager' WHERE channel_id = 'kanal-a' AND user_id = 'user-1'").run();
+    await database.prepare("UPDATE channel_modules SET enabled = 0 WHERE channel_id = 'kanal-a' AND module_id = 'clips'").run();
+    const disabled = await panelRouter.fetch(await requestFor(
+      "user-1",
+      "/api/channels/kanal-a/modules/clips/settings",
+      "PATCH",
+      { revision: 1, settings },
+    ), operatorEnvironment);
+    expect(disabled.status).toBe(409);
+    await expect(disabled.json()).resolves.toEqual({ error: "module_disabled" });
+    await expect(database.prepare(
+      "SELECT revision, enabled FROM channel_modules WHERE channel_id = 'kanal-a' AND module_id = 'clips'",
+    ).first()).resolves.toEqual({ revision: 1, enabled: 0 });
   });
 });

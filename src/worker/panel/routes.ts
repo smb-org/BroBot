@@ -58,6 +58,7 @@ import { isChannelControlInput, setChannelControl, type ChannelControlKind } fro
 import { actorGuard, bindActorGuard } from "../db/guards";
 import { prepareAudit } from "../db/audit";
 import { getChannelModuleForChannel } from "../db/channel-modules";
+import { clipsModuleIsActiveForActor, listCurrentSessionClips } from "../db/clips";
 import { readChannelStreamState } from "../db/stream-state";
 import { measureServerTiming } from "../server-timing";
 import { DEFAULT_CHANNEL_TIME_ZONE, validChannelTimeZone } from "../../modules/contract";
@@ -517,8 +518,12 @@ panelRouter.post(
     const clipsModule = await getChannelModuleForChannel(context.env.DB, channelId, "clips");
     if (clipsModule === null) return context.json({ error: "module_not_configured" }, 404);
     if (!clipsModule.enabled) return context.json({ error: "module_disabled" }, 409);
-    const triggerId = `clip:${crypto.randomUUID()}`;
+    const actor = context.get("actor");
     const now = nowIso();
+    if (!await clipsModuleIsActiveForActor(context.env.DB, channelId, actor, now)) {
+      return context.json({ error: "module_disabled" }, 409);
+    }
+    const triggerId = `clip:${crypto.randomUUID()}`;
     const credentials = await readBotCredentials(context.env);
     const result: CreateClipResult = credentials === null
       ? { created: false, reason: "bot_identity_missing", detail: {}, clipId: null, editUrl: null }
@@ -544,6 +549,20 @@ panelRouter.post(
     });
 
     return context.json({ clipId: result.clipId, editUrl: result.editUrl });
+  },
+);
+
+panelRouter.get(
+  "/api/channels/:channelId/clips",
+  requireChannelAuthorization(),
+  async (context) => {
+    const channelId = context.req.param("channelId");
+    const clips = await listCurrentSessionClips(context.env.DB, channelId, context.get("actor"), nowIso());
+    if (clips !== null) return context.json(clips);
+    const module = await getChannelModuleForChannel(context.env.DB, channelId, "clips");
+    return module === null
+      ? context.json({ error: "module_not_configured" }, 404)
+      : context.json({ error: "module_disabled" }, 409);
   },
 );
 

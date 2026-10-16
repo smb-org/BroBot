@@ -790,6 +790,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
   const channelId = context.req.param("channelId");
   const stored = await getChannelModuleForChannel(context.env.DB, channelId, module.id);
   if (stored === null) return context.json({ error: "module_not_configured" }, 404);
+  if (module.id === "clips" && !stored.enabled) return context.json({ error: "module_disabled" }, 409);
   const body = await readJsonBody(context.req.raw);
   if (body === null || typeof body !== "object" || Array.isArray(body)) return context.json({
     error: "module_settings_invalid",
@@ -848,6 +849,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
     expectedRevision,
     false,
     blockGuard.references.length === 0 ? undefined : blockGuard,
+    module.id === "clips",
   );
   if (!changed) {
     const current = await getChannelModuleForChannel(context.env.DB, channelId, module.id);
