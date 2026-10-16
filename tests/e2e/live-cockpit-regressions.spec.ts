@@ -333,7 +333,7 @@ test("a failed refresh clears an obsolete running-vote lock", async ({ page }) =
   expect(mocks.currentStateRequestCount()).toBeGreaterThan(2);
 });
 
-test("the location warning opens Ort & Wetter and both channel defaults save from System", async ({ page }) => {
+test("the location warning opens Ort & Wetter and both time zone and chat defaults save explicitly", async ({ page }) => {
   const channelId = "kanal-settings-moved";
   const mocks = await installLiveCockpitMocks(page, { channelId });
 
@@ -344,35 +344,36 @@ test("the location warning opens Ort & Wetter and both channel defaults save fro
   await page.getByRole("button", { name: "Standort ändern" }).click();
   await page.getByRole("textbox", { name: "Ort suchen" }).fill("Berlin");
   await page.getByRole("button", { name: "Suchen" }).click();
-  const locationSaved = page.waitForResponse((response) => response.url().endsWith(`/api/channels/${channelId}/settings/location`) && response.request().method() === "PATCH");
   await page.getByRole("option", { name: /Berlin/u }).click();
-  await locationSaved;
   await expect(page.locator(".channel-location-field__current")).toContainText("Berlin, Berlin, Deutschland");
+  expect(mocks.settingsState().location).toBeNull();
+  const locationSaved = page.waitForResponse((response) => response.url().endsWith(`/api/channels/${channelId}/settings/location`) && response.request().method() === "PATCH");
+  await page.getByRole("button", { name: "Speichern", exact: true }).click();
+  await locationSaved;
   expect(mocks.settingsState().location).toMatchObject({ name: "Berlin, Berlin, Deutschland", latitude: 52.52, longitude: 13.405 });
+
+  const timeZone = page.getByRole("combobox", { name: "Kanalzeitzone" });
+  await timeZone.fill("UTC");
+  await page.getByRole("option", { name: "UTC" }).click();
+  const timeZoneSaved = page.waitForResponse((response) => response.url().endsWith(`/api/channels/${channelId}/settings`) && response.request().method() === "PATCH");
+  await page.getByRole("button", { name: "Speichern" }).click();
+  await timeZoneSaved;
+  await expect(page.locator(".ui-save-bar__status")).toContainText("Gespeichert.");
+  expect(mocks.settingsState()).toMatchObject({ timeZone: "UTC" });
 
   await page.getByRole("link", { name: "System" }).click();
   await expect(page.getByRole("heading", { name: "System" })).toBeVisible();
-  const timeZone = page.getByRole("combobox", { name: "Kanalzeitzone" });
-  await expect(timeZone).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Kanalzeitzone" })).toHaveCount(0);
   const chatTarget = page.getByRole("button", { name: "Standard-Chat-Ziel", exact: true });
   await expect(chatTarget).toBeVisible();
   const save = page.getByRole("button", { name: "Speichern" });
   await expect(save).toBeVisible();
   await expect(save).toBeDisabled();
-  const controlHeights = await Promise.all([timeZone, chatTarget].map(async (control) => (await control.boundingBox())?.height ?? 0));
-  expect(Math.abs((controlHeights[0] ?? 0) - (controlHeights[1] ?? 0))).toBeLessThanOrEqual(1);
-  const hintPositions = await Promise.all([
-    page.locator(".channel-defaults-editor .ui-select__description").first(),
-    page.locator(".channel-defaults-editor__hint"),
-  ].map(async (hint) => (await hint.boundingBox())?.y ?? Number.NaN));
-  expect(Math.abs((hintPositions[0] ?? 0) - (hintPositions[1] ?? 0))).toBeLessThanOrEqual(1);
   const sectionBox = await page.locator(".channel-defaults-editor").boundingBox();
   const sectionBottom = sectionBox === null ? 0 : sectionBox.y + sectionBox.height;
   const statusTop = (await page.locator(".state-list").first().boundingBox())?.y ?? 0;
   expect(statusTop - sectionBottom).toBeLessThanOrEqual(48);
   expect(statusTop - sectionBottom).toBeGreaterThanOrEqual(0);
-  await timeZone.fill("UTC");
-  await page.getByRole("option", { name: "UTC" }).click();
   await chatTarget.click();
   await page.getByRole("radio", { name: /Alle Chats/u }).click();
   await expect(save).toBeEnabled();

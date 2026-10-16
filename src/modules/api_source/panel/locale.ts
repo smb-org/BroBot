@@ -3,11 +3,19 @@ import type { ExpressionFieldMessages } from "./ExpressionField";
 
 export interface ApiSourcePanelTexts {
   title: string;
-  explanation: string;
-  sourceList: string;
   addSource: string;
   editSource: string;
   createSource: string;
+  steps: { url: string; expression: string; test: string; name: string };
+  stepCounter: (current: number, total: number) => string;
+  continue: string;
+  back: string;
+  searchLabel: string;
+  searchPlaceholder: string;
+  searchClearLabel: string;
+  noSearchResults: string;
+  selectSource: string;
+  sourceExpression: string;
   name: string;
   nameHint: string;
   url: string;
@@ -20,7 +28,10 @@ export interface ApiSourcePanelTexts {
   testSucceeded: (httpStatus: number, bytes: number) => string;
   testRequestFailed: string;
   notTested: string;
+  lastQueried: string;
   statusOk: string;
+  statusError: string;
+  statusUntested: string;
   save: string;
   cancel: string;
   delete: string;
@@ -44,20 +55,28 @@ export interface ApiSourcePanelTexts {
 
 const texts: Readonly<Record<ModuleLanguage, ApiSourcePanelTexts>> = {
   de: {
-    title: "Benannte API-Quellen",
-    explanation: "Nur öffentlich erreichbare HTTPS-JSON-Endpunkte. Werte stehen als {api.<name>} bereit; ein boolescher JSONata-Ausdruck kann zusätzlich als Textblock-Bedingung dienen.",
-    sourceList: "Quellen",
-    addSource: "Quelle hinzufügen",
+    title: "Datenquellen",
+    addSource: "Quelle anlegen",
     editSource: "Quelle bearbeiten",
-    createSource: "Quelle anlegen",
+    createSource: "Datenquelle anlegen",
+    steps: { url: "Webadresse", expression: "Wert auswählen", test: "Quelle testen", name: "Namen vergeben" },
+    stepCounter: (current, total) => `Schritt ${String(current)} von ${String(total)}`,
+    continue: "Weiter",
+    back: "Zurück",
+    searchLabel: "Datenquellen suchen",
+    searchPlaceholder: "Name oder Webadresse suchen",
+    searchClearLabel: "Suche leeren",
+    noSearchResults: "Keine passenden Datenquellen gefunden.",
+    selectSource: "Wähle eine Datenquelle aus, um ihre Angaben zu sehen.",
+    sourceExpression: "Ausdruck",
     name: "Name",
-    nameHint: "Kleinbuchstaben, Ziffern und Unterstriche; beginnt mit einem Buchstaben.",
-    url: "HTTPS-URL",
-    urlHint: "Keine Zugangsdaten in der URL. Anfragen senden keine Cookies oder Zugangsdaten.",
-    expression: "JSONata-Ausdruck (optional)",
-    expressionHint: "Erlaubt: Feldpfade mit [nichtnegativem Ganzzahlindex], String-/Zahlen-/Boolesche-/Null-Literale, + - * / %, Vergleiche, and/or, &, ?: und direkte Funktionsaufrufe aus dem Picker. Keine freien Prädikate oder Array-/Objektkonstruktoren. Beispiele: $fromMillis($toMillis($.daily.sunset[0]), '[H01]:[m01]') · $formatNumber($.rates.EUR * $.amount, '#,##0.00') & ' EUR'.",
+    nameHint: "Kleinbuchstaben, Zahlen und Unterstriche; der Name beginnt mit einem Buchstaben.",
+    url: "Webadresse",
+    urlHint: "Verwende eine öffentliche HTTPS-Adresse. Anmeldedaten gehören nicht in die Adresse.",
+    expression: "Wert aus der Antwort",
+    expressionHint: "Gib ein Feld aus der Antwort ein oder wähle eine Funktion. Beispiel: $.temperature oder $round($.price, 2).",
     expressionPicker: {
-      picker: { title: "Funktionen einfügen", noResults: "Keine passende Funktion.", keyHints: { navigate: "Navigieren", insert: "Einfügen", close: "Schließen" } },
+      picker: { title: "Funktion einfügen", noResults: "Keine passende Funktion.", keyHints: { navigate: "Navigieren", insert: "Einfügen", close: "Schließen" } },
       groupLabels: { text: "Text", number: "Zahlen", logic: "Logik", list: "Listen", date: "Datum" },
       signatureLabel: "Funktionssignatur",
       insertionLimit: "Einfügen würde das Zeichenlimit überschreiten.",
@@ -67,40 +86,51 @@ const texts: Readonly<Record<ModuleLanguage, ApiSourcePanelTexts>> = {
     testSucceeded: (httpStatus, bytes) => `Erfolgreich · HTTP ${String(httpStatus)} · ${String(bytes)} Bytes`,
     testRequestFailed: "Der Test konnte nicht ausgeführt werden.",
     notTested: "Noch nicht abgerufen",
-    statusOk: "Erfolgreich",
+    lastQueried: "Zuletzt abgefragt",
+    statusOk: "OK",
+    statusError: "Fehler",
+    statusUntested: "Neu",
     save: "Speichern",
     cancel: "Abbrechen",
     delete: "Quelle löschen",
-    deleteTitle: "API-Quelle löschen?",
-    deleteConsequence: "Die Quelle steht danach nicht mehr für Vorlagen und Bedingungen bereit.",
-    inUse: "Diese Quelle wird noch in gespeicherten Vorlagen oder Textbaustein-Bedingungen verwendet.",
-    deleted: "Die API-Quelle wurde gelöscht.",
-    saved: "Die API-Quelle wurde gespeichert.",
-    created: "Die API-Quelle wurde angelegt.",
-    loadFailed: "Die API-Quellen konnten nicht geladen werden.",
-    saveFailed: "Die API-Quelle konnte nicht gespeichert werden.",
-    invalid: "Name, HTTPS-URL oder JSONata-Ausdruck ist ungültig oder nicht erlaubt.",
-    constructNotAllowed: (constructName) => `Das JSONata-Konstrukt ${constructName} ist nicht erlaubt.`,
-    conflict: "Die Quelle wurde zwischenzeitlich geändert. Bitte neu laden.",
-    denied: "Nur Broadcaster und Verwalter dürfen API-Quellen ändern.",
-    limit: "Pro Kanal sind höchstens 20 API-Quellen erlaubt.",
-    empty: "Noch keine API-Quellen angelegt.",
-    readOnlyReason: "Operatoren können API-Quellen lesen, aber nicht definieren.",
-    noExpression: "Die gesamte JSON-Antwort verwenden",
+    deleteTitle: "Datenquelle löschen?",
+    deleteConsequence: "Danach stehen ihre Werte nicht mehr in Chattexten oder Bedingungen zur Verfügung.",
+    inUse: "Diese Datenquelle wird noch in gespeicherten Chattexten oder Bedingungen verwendet.",
+    deleted: "Die Datenquelle wurde gelöscht.",
+    saved: "Die Datenquelle wurde gespeichert.",
+    created: "Die Datenquelle wurde angelegt.",
+    loadFailed: "Die Datenquellen konnten nicht geladen werden.",
+    saveFailed: "Die Datenquelle konnte nicht gespeichert werden.",
+    invalid: "Der Name, die Webadresse oder der Ausdruck ist ungültig.",
+    constructNotAllowed: (constructName) => `Dieser Teil des Ausdrucks ist nicht erlaubt: ${constructName}.`,
+    conflict: "Die Datenquelle wurde zwischenzeitlich geändert. Bitte neu laden.",
+    denied: "Nur Broadcaster und Verwalter dürfen Datenquellen ändern.",
+    limit: "Pro Kanal sind höchstens 20 Datenquellen erlaubt.",
+    empty: "Noch keine Datenquellen angelegt.",
+    readOnlyReason: "Operatoren können Datenquellen ansehen, aber nicht ändern.",
+    noExpression: "Die gesamte Antwort verwenden",
   },
   en: {
-    title: "Named API sources",
-    explanation: "Only publicly reachable HTTPS JSON endpoints. Values are available as {api.<name>}; a boolean JSONata expression can also be used as a text-block condition.",
-    sourceList: "Sources",
-    addSource: "Add source",
+    title: "Data sources",
+    addSource: "Create source",
     editSource: "Edit source",
-    createSource: "Create source",
+    createSource: "Create data source",
+    steps: { url: "Web address", expression: "Choose a value", test: "Test source", name: "Name the value" },
+    stepCounter: (current, total) => `Step ${String(current)} of ${String(total)}`,
+    continue: "Continue",
+    back: "Back",
+    searchLabel: "Search data sources",
+    searchPlaceholder: "Search by name or web address",
+    searchClearLabel: "Clear search",
+    noSearchResults: "No matching data sources found.",
+    selectSource: "Select a data source to see its details.",
+    sourceExpression: "Expression",
     name: "Name",
-    nameHint: "Lowercase letters, digits and underscores; must start with a letter.",
-    url: "HTTPS URL",
-    urlHint: "Do not put credentials in the URL. Requests send no cookies or credentials.",
-    expression: "JSONata expression (optional)",
-    expressionHint: "Allowed: field paths with [non-negative integer indexes], string/number/boolean/null literals, + - * / %, comparisons, and/or, &, ?:, and direct function calls from the picker. No free predicates or array/object constructors. Examples: $fromMillis($toMillis($.daily.sunset[0]), '[H01]:[m01]') · $formatNumber($.rates.EUR * $.amount, '#,##0.00') & ' EUR'.",
+    nameHint: "Use lowercase letters, digits, and underscores. Start with a letter.",
+    url: "Web address",
+    urlHint: "Use a public HTTPS address. Do not include sign-in details.",
+    expression: "Value from the response",
+    expressionHint: "Enter a field from the response or choose a function. For example: $.temperature or $round($.price, 2).",
     expressionPicker: {
       picker: { title: "Insert function", noResults: "No matching function.", keyHints: { navigate: "Navigate", insert: "Insert", close: "Close" } },
       groupLabels: { text: "Text", number: "Number", logic: "Logic", list: "Lists", date: "Date" },
@@ -112,26 +142,29 @@ const texts: Readonly<Record<ModuleLanguage, ApiSourcePanelTexts>> = {
     testSucceeded: (httpStatus, bytes) => `Success · HTTP ${String(httpStatus)} · ${String(bytes)} bytes`,
     testRequestFailed: "The test request could not be completed.",
     notTested: "Not fetched yet",
-    statusOk: "Success",
+    lastQueried: "Last fetched",
+    statusOk: "OK",
+    statusError: "Error",
+    statusUntested: "New",
     save: "Save",
     cancel: "Cancel",
     delete: "Delete source",
-    deleteTitle: "Delete API source?",
-    deleteConsequence: "The source will no longer be available to templates or conditions.",
-    inUse: "This source is still used by saved templates or text block conditions.",
-    deleted: "The API source was deleted.",
-    saved: "The API source was saved.",
-    created: "The API source was created.",
-    loadFailed: "API sources could not be loaded.",
-    saveFailed: "The API source could not be saved.",
-    invalid: "The name, HTTPS URL, or JSONata expression is invalid or not allowed.",
-    constructNotAllowed: (constructName) => `The JSONata construct ${constructName} is not allowed.`,
-    conflict: "The source changed in another session. Reload and try again.",
-    denied: "Only the broadcaster and managers may change API sources.",
-    limit: "A channel can define at most 20 API sources.",
-    empty: "No API sources have been defined yet.",
-    readOnlyReason: "Operators can read API sources but cannot define them.",
-    noExpression: "Use the complete JSON response",
+    deleteTitle: "Delete data source?",
+    deleteConsequence: "Its values will no longer be available to saved chat text or conditions.",
+    inUse: "This data source is still used in saved chat text or conditions.",
+    deleted: "The data source was deleted.",
+    saved: "The data source was saved.",
+    created: "The data source was created.",
+    loadFailed: "Data sources could not be loaded.",
+    saveFailed: "The data source could not be saved.",
+    invalid: "The name, web address, or expression is invalid.",
+    constructNotAllowed: (constructName) => `This part of the expression is not allowed: ${constructName}.`,
+    conflict: "The data source changed in another session. Reload and try again.",
+    denied: "Only the broadcaster and managers may change data sources.",
+    limit: "A channel can define at most 20 data sources.",
+    empty: "No data sources have been created yet.",
+    readOnlyReason: "Operators can view data sources but cannot change them.",
+    noExpression: "Use the complete response",
   },
 };
 

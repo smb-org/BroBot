@@ -51,8 +51,8 @@ export const apiSourceTemplateVariable = (name: string): TemplateVariable => ({
   sample: "18:42",
   external: true,
   picker: {
-    de: { label: `API-Quelle: ${name}`, description: `Gibt den Beispielwert der API-Quelle ${name} aus. Beispiel: {api.${name}}`, sample: "18:42" },
-    en: { label: `API source: ${name}`, description: `Outputs the example value from API source ${name}. Example: {api.${name}}`, sample: "18:42" },
+    de: { label: `Datenquelle: ${name}`, description: `Gibt den Beispielwert der Datenquelle ${name} aus. Beispiel: {api.${name}}`, sample: "18:42" },
+    en: { label: `Data source: ${name}`, description: `Outputs the example value from data source ${name}. Example: {api.${name}}`, sample: "18:42" },
   },
 });
 
@@ -67,23 +67,23 @@ export const apiSourceModuleCatalog: Readonly<Record<ModuleLanguage, {
   mandatoryReason: string;
 }>> = {
   de: {
-    label: "API-Quellen",
-    description: "Eigene HTTPS-JSON-Quellen mit JSONata-Ausdrücken.",
-    variableGroup: "API-Quellen",
-    unavailableText: "Die API-Quelle ist derzeit nicht verfügbar.",
-    conditionLabel: (name) => `API-Quelle: ${name}`,
+    label: "Datenquellen",
+    description: "Liest Werte von öffentlichen Webadressen für Chatbefehle aus.",
+    variableGroup: "Datenquellen",
+    unavailableText: "Der Wert kann gerade nicht geladen werden.",
+    conditionLabel: (name) => `Datenquelle: ${name}`,
     trueValue: "Wahr",
     falseValue: "Falsch",
-    mandatoryReason: "API-Quellen stellen benannte externe Werte für Vorlagen bereit.",
+    mandatoryReason: "Datenquellen stellen Werte von öffentlichen Webadressen für Chatbefehle bereit.",
   },
   en: {
-    label: "API sources",
-    description: "Custom HTTPS JSON sources with JSONata expressions.",
-    variableGroup: "API sources",
-    unavailableText: "The API source is currently unavailable.",
-    conditionLabel: (name) => `API source: ${name}`,
+    label: "Data sources",
+    description: "Reads values from public web addresses for chat commands.",
+    variableGroup: "Data sources",
+    unavailableText: "The value cannot be loaded right now.",
+    conditionLabel: (name) => `Data source: ${name}`,
     trueValue: "True",
     falseValue: "False",
-    mandatoryReason: "API sources provide named external values for templates.",
+    mandatoryReason: "Data sources provide values from public web addresses to chat commands.",
   },
 };

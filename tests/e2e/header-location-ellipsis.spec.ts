@@ -3,10 +3,9 @@ import { expect, test } from "@playwright/test";
 test.use({ locale: "de-DE" });
 
 // Regression for #279: the header location button used to show the full
-// geocoded name and clip it hard once it overflowed its cell, with no
-// ellipsis and no coordinates. It now shows only the first name segment
-// plus coordinates, truncated with an ellipsis instead of a hard cut, while
-// the full name stays the accessible name/title and the menu heading.
+// geocoded name and clip it hard once it overflowed its cell. It now shows
+// only the first name segment, truncated with an ellipsis, while the full
+// name and exact coordinates stay available in the menu.
 
 const longName = "Sankt Ulrich am Pillersee bei Kitzbühel, Tirol, Österreich";
 const shortName = "Sankt Ulrich am Pillersee bei Kitzbühel";
@@ -64,8 +63,7 @@ test("the header location button shows the short name with an ellipsis instead o
   const checkTruncation = async (): Promise<void> => {
     await expect(locationButton).toBeVisible();
     // The full name never appears verbatim in the *visible* label -- only
-    // the short first segment (plus coordinates, where the breakpoint keeps
-    // them). It does now appear a second time in the button's full text
+    // the short first segment. It does now appear a second time in the button's full text
     // content, folded in via a visually hidden suffix for the accessible
     // name (checked below), so this must scope to the visible label only.
     const visibleText = (await label.textContent()) ?? "";
@@ -75,7 +73,7 @@ test("the header location button shows the short name with an ellipsis instead o
     // is content-derived (no aria-label override), so it must contain both
     // the always-visible short name and the full name folded in afterwards
     // (WCAG 2.5.3 Label in Name) -- not an exact match, since the
-    // coordinates segment is only part of the name while visible.
+    // coordinates are available from the menu instead of the header chip.
     await expect(locationButton).toHaveAttribute("title", longName);
     await expect(locationButton).toHaveAccessibleName(asPattern(shortName));
     await expect(locationButton).toHaveAccessibleName(asPattern(longName));
@@ -105,30 +103,13 @@ test("the header location button shows the short name with an ellipsis instead o
   await page.goto(`/channels/${channel.channelId}/overview`);
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   await checkTruncation();
-  // At this width the coordinates stay visible next to the short name.
-  // (`textContent` includes hidden descendants, so visibility -- not text
-  // presence -- is what actually distinguishes the two breakpoints.)
-  await expect(coordinates).toBeVisible();
-  await expect(coordinates).toContainText("48.78, 9.18");
-
-  // Playwright's visibility check doesn't account for CSS clipping, so
-  // confirm with real geometry that the ellipsis on the name span never eats
-  // into the coordinates: the whole coordinates box stays inside the
-  // button's box, not just "visible" per Playwright's actionability check.
-  const buttonBox = await locationButton.boundingBox();
-  const coordinatesBox = await coordinates.boundingBox();
-  expect(buttonBox).not.toBeNull();
-  expect(coordinatesBox).not.toBeNull();
-  if (buttonBox !== null && coordinatesBox !== null) {
-    expect(coordinatesBox.x).toBeGreaterThanOrEqual(buttonBox.x);
-    expect(coordinatesBox.x + coordinatesBox.width).toBeLessThanOrEqual(buttonBox.x + buttonBox.width);
-    expect(coordinatesBox.y).toBeGreaterThanOrEqual(buttonBox.y);
-    expect(coordinatesBox.y + coordinatesBox.height).toBeLessThanOrEqual(buttonBox.y + buttonBox.height);
-  }
+  await expect(coordinates).toHaveCount(0);
+  await locationButton.click();
+  await expect(page.getByText("48.78, 9.18")).toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 844 });
   // The compact shell keeps the channel selector and mode controls visible;
   // the header location action is omitted at phone widths.
   await expect(locationButton).toBeHidden();
-  await expect(coordinates).toBeHidden();
+  await expect(coordinates).toHaveCount(0);
 });

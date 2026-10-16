@@ -13,6 +13,7 @@ const location: PanelChannelLocation = {
 };
 
 const messages = {
+  locationFallback: "Location",
   openIn: "Open in",
   openStreetMap: "OpenStreetMap",
   googleMaps: "Google Maps",
@@ -43,8 +44,10 @@ describe("ChannelLocationMenu", () => {
     const trigger = screen.getByRole("button", { name: /Regensburg/ });
     expect(trigger).toHaveAttribute("aria-haspopup", "menu");
     expect(trigger).toHaveAttribute("title", "Regensburg");
-    expect(trigger).toHaveTextContent("Regensburg · 49.01, 12.10");
+    expect(trigger).toHaveTextContent("Regensburg");
+    expect(trigger).not.toHaveTextContent("49.01, 12.10");
     fireEvent.click(trigger);
+    expect(await screen.findByText("49.01, 12.10")).toBeInTheDocument();
 
     const openStreetMap = await screen.findByRole("menuitem", { name: "OpenStreetMap", hidden: true });
     const googleMaps = await screen.findByRole("menuitem", { name: "Google Maps", hidden: true });
@@ -73,7 +76,8 @@ describe("ChannelLocationMenu", () => {
     // afterwards, via a visually hidden suffix.
     const trigger = screen.getByRole("button", { name: /^Stuttgart/ });
     expect(trigger).toHaveAttribute("title", "Stuttgart, Baden-Württemberg, Deutschland");
-    expect(trigger).toHaveTextContent("Stuttgart · 49.01, 12.10");
+    expect(trigger).toHaveTextContent("Stuttgart");
+    expect(trigger).not.toHaveTextContent("49.01, 12.10");
     expect(trigger.querySelector(".dashboard-header__location-label")).not.toHaveTextContent("Baden-Württemberg");
     expect(screen.getByRole("button", { name: /Baden-Württemberg, Deutschland$/ })).toBe(trigger);
 
@@ -85,6 +89,13 @@ describe("ChannelLocationMenu", () => {
     const plainName: PanelChannelLocation = { ...location, name: "Regensburg" };
     render(<UiProvider><ChannelLocationMenu location={plainName} messages={messages} /></UiProvider>);
 
-    expect(screen.getByRole("button", { name: /Regensburg/ })).toHaveTextContent("Regensburg · 49.01, 12.10");
+    expect(screen.getByRole("button", { name: /Regensburg/ })).toHaveTextContent("Regensburg");
+  });
+
+  it("shows a readable fallback when a stored location has no name", () => {
+    render(<UiProvider><ChannelLocationMenu location={{ ...location, name: "  " }} messages={messages} /></UiProvider>);
+
+    expect(screen.getByRole("button", { name: "Location" })).toHaveTextContent("Location");
+    expect(screen.getByRole("button", { name: "Location" })).not.toHaveTextContent("49.01, 12.10");
   });
 });
