@@ -175,7 +175,7 @@ describe("chat voting repository mutation guards", () => {
         resultText: "Result: {var.score}",
       });
 
-      await expect(insertAtTemplateRevision).resolves.toBe(false);
+      await expect(insertAtTemplateRevision).resolves.toBe("busy");
       await expect(database.prepare("SELECT poll_id FROM chat_votes WHERE channel_id = ? AND poll_id = ?")
         .bind("fictional-channel", vote.id).first()).resolves.toBeNull();
     } finally {
@@ -437,7 +437,7 @@ describe("chat voting repository mutation guards", () => {
         closeReason: "timer",
       };
 
-      await expect(repository.insertOpen(vote)).resolves.toBe(false);
+      await expect(repository.insertOpen(vote)).resolves.toBe("busy");
       await expect(repository.open("fictional-channel")).resolves.toBeNull();
     } finally {
       database.close();
@@ -462,7 +462,7 @@ describe("chat voting repository mutation guards", () => {
         requestedDurationSeconds: 120,
         closeReason: "timer",
       };
-      await expect(repository.insertOpen(vote)).resolves.toBe(true);
+      await expect(repository.insertOpen(vote)).resolves.toBe("inserted");
       await setChatVotingEnabled(database, false);
 
       await expect(repository.requestManualClose("fictional-channel", vote.id, vote.closesAt)).resolves.toBe(false);

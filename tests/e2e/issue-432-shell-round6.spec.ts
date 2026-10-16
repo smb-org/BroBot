@@ -41,6 +41,66 @@ test("the upcoming ad remains visible below the recent timeout reservation", asy
   }
 });
 
+test("five upcoming timers and an ad keep the snooze action reachable in the next-up scroll area", async ({ page }) => {
+  const channelId = "issue-432-cockpit-upcoming-scroll";
+  const now = Date.now();
+  const upcomingTimers = Array.from({ length: 5 }, (_, index) => ({
+    id: `timer-${String(index + 1)}`,
+    name: `Zeitplan ${String(index + 1)}`,
+    enabled: true,
+    nextRunAt: new Date(now + (index + 1) * 60_000).toISOString(),
+  }));
+  await installLiveCockpitMocks(page, {
+    channelId,
+    role: "manager",
+    modules: [{ id: "ads", enabled: true, settings: "{}" }, { id: "timers", enabled: true, settings: "{}" }],
+    upcomingAd: true,
+    upcomingTimers,
+  });
+
+  for (const viewport of [{ width: 1440, height: 800 }, { width: 1280, height: 800 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto(`/channels/${channelId}`);
+    const tile = page.locator('[data-slot="next-up"]');
+    const list = tile.locator(".live-cockpit-next-list").last();
+    await expect(list.locator(".live-cockpit-next-item")).toHaveCount(6);
+    const snoozeActions = list.getByRole("button", { name: "Verschieben" });
+    await expect(snoozeActions).toHaveCount(1);
+
+    const scrollState = await list.evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+      overflowY: getComputedStyle(element).overflowY,
+    }));
+    expect(scrollState.overflowY).toBe("auto");
+
+    if (scrollState.scrollHeight > scrollState.clientHeight) {
+      await list.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+    }
+    const geometry = await snoozeActions.evaluate((button) => {
+      const listElement = button.closest<HTMLElement>(".live-cockpit-next-list");
+      const tileElement = button.closest<HTMLElement>("[data-slot='next-up']");
+      if (listElement === null || tileElement === null) throw new Error("The ad action must stay in the upcoming list and tile.");
+      const buttonBox = button.getBoundingClientRect();
+      const listBox = listElement.getBoundingClientRect();
+      const tileBox = tileElement.getBoundingClientRect();
+      return {
+        buttonInsideList: buttonBox.top >= listBox.top && buttonBox.bottom <= listBox.bottom,
+        buttonInsideTile: buttonBox.top >= tileBox.top && buttonBox.bottom <= tileBox.bottom,
+        buttonTop: buttonBox.top,
+        buttonBottom: buttonBox.bottom,
+        listTop: listBox.top,
+        listBottom: listBox.bottom,
+        scrollTop: listElement.scrollTop,
+        scrollHeight: listElement.scrollHeight,
+        clientHeight: listElement.clientHeight,
+      };
+    });
+    expect(geometry, JSON.stringify({ viewport, ...geometry })).toMatchObject({ buttonInsideList: true, buttonInsideTile: true });
+    await snoozeActions.click();
+  }
+});
+
 const overlayChannelId = "issue-432-overlay-focus";
 const overlayId = "issue-432-overlay";
 const installOverlayFixture = async (page: Page): Promise<void> => {

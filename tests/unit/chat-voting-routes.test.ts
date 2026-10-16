@@ -42,6 +42,26 @@ const createDatabase = async (role: "broadcaster" | "manager" | "operator" = "op
   return database;
 };
 
+const insertTextBlock = async (database: TestD1Database, blockName = "greeting"): Promise<void> => {
+  const timestamp = "2026-10-04T10:00:00.000Z";
+  await database.prepare("INSERT INTO text_library_settings (channel_id, graph_revision) VALUES (?, 1)")
+    .bind(CHANNEL_ID).run();
+  await database.prepare(
+    "INSERT INTO text_library_categories (channel_id, category_id, created_at, updated_at) VALUES (?, 'general', ?, ?)",
+  ).bind(CHANNEL_ID, timestamp, timestamp).run();
+  await database.prepare(
+    `INSERT INTO text_blocks (channel_id, block_name, category_id, revision, created_at, updated_at)
+     VALUES (?, ?, 'general', 1, ?, ?)`,
+  ).bind(CHANNEL_ID, blockName, timestamp, timestamp).run();
+};
+
+const deleteTextBlock = async (database: TestD1Database): Promise<void> => {
+  await database.prepare("DELETE FROM text_blocks WHERE channel_id = ? AND block_name = 'greeting'")
+    .bind(CHANNEL_ID).run();
+  await database.prepare("UPDATE text_library_settings SET graph_revision = graph_revision + 1 WHERE channel_id = ?")
+    .bind(CHANNEL_ID).run();
+};
+
 const ballotAccess = (overrides: Partial<ModuleBallotAccess> = {}): ModuleBallotAccess => ({
   open: vi.fn(() => Promise.resolve({ status: "opened" as const })),
   cast: vi.fn(() => Promise.resolve({ status: "not_open" as const, counts: [], revision: 0 })),
@@ -86,6 +106,83 @@ afterEach(() => {
 });
 
 describe("chat voting routes", () => {
+  it.each(["create", "update"] as const)("rejects a saved vote %s when its text block is deleted after the graph revision read", async (operation) => {
+    const database = await createDatabase("manager");
+    const repository = createChatVotingRepository(database as unknown as D1Database);
+    if (operation === "update") {
+      await repository.templates.createTemplate(CHANNEL_ID, "reference-race-template", {
+        shortcut: null, title: "Dinner", resultText: "{vote.result}", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120,
+      }, "2026-10-04T10:00:00.000Z", authorizeModuleManagementMutation(
+        CHANNEL_ID,
+        { userId: ACTOR_ID, sessionId: `session-${ACTOR_ID}` },
+        "2026-10-04T10:00:00.000Z",
+      ));
+    }
+    await insertTextBlock(database);
+    const interleavedDatabase = createReadInterleavingDatabase(
+      database,
+      (sql) => sql.includes("SELECT graph_revision FROM text_library_settings"),
+      async () => deleteTextBlock(database),
+    );
+    const app = appFor(ballotAccess(), () => Promise.resolve([]));
+    const path = operation === "create"
+      ? `/channels/${CHANNEL_ID}/modules/chat_voting/templates`
+      : `/channels/${CHANNEL_ID}/modules/chat_voting/templates/reference-race-template`;
+    const response = await app.fetch(new Request(`https://brobot.example${path}`, {
+      method: operation === "create" ? "POST" : "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        shortcut: null,
+        title: "Dinner",
+        resultText: "Danke {text.greeting}",
+        labels: ["Pizza", "Burger"],
+        freeTextMode: null,
+        durationSeconds: 120,
+        ...(operation === "update" ? { revision: 1 } : {}),
+      }),
+    }), { DB: interleavedDatabase });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "chat_voting_result_text_reference_conflict", field: "resultText" });
+    await expect(repository.templates.templates(CHANNEL_ID)).resolves.toHaveLength(operation === "create" ? 0 : 1);
+    if (operation === "update") {
+      await expect(repository.templates.template(CHANNEL_ID, "reference-race-template"))
+        .resolves.toMatchObject({ resultText: "{vote.result}", revision: 1 });
+    }
+  });
+
+  it("rejects an ad-hoc start when its settings result text references a block deleted after the graph read", async () => {
+    const database = await createDatabase("manager");
+    const repository = createChatVotingRepository(database as unknown as D1Database);
+    await repository.finish(CHANNEL_ID, openTextVote.id, "manual", "2026-10-04T10:01:00.000Z", [], [], 0, true);
+    await insertTextBlock(database);
+    await database.prepare("UPDATE channel_modules SET settings = ? WHERE channel_id = ? AND module_id = 'chat_voting'")
+      .bind(JSON.stringify({ ...DEFAULT_CHAT_VOTING_SETTINGS, resultText: "Result: {text.greeting}" }), CHANNEL_ID).run();
+    const interleavedDatabase = createReadInterleavingDatabase(
+      database,
+      (sql) => sql.includes("SELECT graph_revision FROM text_library_settings"),
+      async () => deleteTextBlock(database),
+    );
+    const ballots = ballotAccess();
+    const app = appFor(ballots, () => Promise.resolve([]));
+    const scheduleModuleAlarm = vi.fn(() => Promise.resolve());
+    const namespace = {
+      idFromName: vi.fn(() => ({})),
+      get: vi.fn(() => ({ scheduleModuleAlarm })),
+    } as unknown as Env["CHANNEL"];
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/modules/chat_voting/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "yes_no", durationSeconds: 120 }),
+    }), { DB: interleavedDatabase, CHANNEL: namespace });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "chat_voting_result_text_reference_conflict", field: "resultText" });
+    expect(scheduleModuleAlarm).not.toHaveBeenCalled();
+    await expect(repository.open(CHANNEL_ID)).resolves.toBeNull();
+  });
+
   it("creates and revision-saves templates, retains invalid drafts, and rejects shortcuts and stale writes", async () => {
     const database = await createDatabase("manager");
     const app = appFor(ballotAccess(), () => Promise.resolve([]));
@@ -232,6 +329,7 @@ describe("chat voting routes", () => {
 
   it("persists logically valid templated result text beyond 500 raw characters", async () => {
     const database = await createDatabase("manager");
+    await insertTextBlock(database, "foo");
     const app = appFor(ballotAccess(), () => Promise.resolve([]));
     const resultText = "{text.foo}".repeat(100);
     const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/modules/chat_voting/templates`, {

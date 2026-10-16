@@ -1,4 +1,4 @@
-import type { ModuleChannelInfo, ModuleExternalFetchBudget, ModuleLanguage, ModuleStreamState, ModuleTemplateValueContext } from "../modules/contract";
+import type { ModuleChannelInfo, ModuleDiagnostic, ModuleExternalFetchBudget, ModuleLanguage, ModuleStreamState, ModuleTemplateValueContext } from "../modules/contract";
 import { MODULES, validateModuleTemplateVariable, variablesForModuleTemplateContext } from "../modules/registry";
 import { createTemplateRenderer, type TemplateChannelDetails, type TemplateStreamDetails, type TemplateValueProvider } from "./template-resolver";
 import { readChannelLocation } from "./db/channel-settings";
@@ -32,7 +32,7 @@ export const renderScheduledTemplate = async (
   externalFetchBudget?: ModuleExternalFetchBudget,
   moduleValues: Readonly<Record<string, string | number>> = {},
   runModuleAlarm?: ModuleTemplateValueContext["runModuleAlarm"],
-): Promise<{ text: string; attributions?: readonly string[] }> => {
+): Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[]; attributions?: readonly string[] }> => {
   const receivedAt = new Date(now).toISOString();
   const event = {
     channelId,
@@ -162,6 +162,7 @@ export const renderScheduledTemplate = async (
   const result = await render(text, moduleValues, undefined, "chat");
   return {
     text: result.text,
+    diagnostics: result.diagnostics,
     ...(result.attributions === undefined ? {} : { attributions: result.attributions }),
   };
 };

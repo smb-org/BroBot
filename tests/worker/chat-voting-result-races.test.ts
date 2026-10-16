@@ -69,7 +69,7 @@ const insertClosedPendingVote = async (channelId: string, pollId: string): Promi
     requestedDurationSeconds: 120,
     closeReason: "timer",
     status: "open",
-  })).resolves.toBe(true);
+  })).resolves.toBe("inserted");
   await expect(repository.finish(
     channelId,
     pollId,
@@ -175,7 +175,7 @@ describe("chat voting result races in the worker runtime", () => {
     });
   });
 
-  it("suppresses a renamed result snapshot at send time and retries with the current template", async () => {
+  it("sends a renamed result snapshot without the unresolved reference", async () => {
     const channelId = `vote-result-${crypto.randomUUID()}`;
     await insertChannel(channelId);
     await database.prepare(
@@ -196,10 +196,11 @@ describe("chat voting result races in the worker runtime", () => {
       closeReason: "timer",
       status: "open",
     };
-    await expect(repository.insertOpen(vote)).resolves.toBe(true);
+    await expect(repository.insertOpen(vote)).resolves.toBe("inserted");
     const stored = new Map<string, unknown>();
     const finalSnapshot = { counts: [7, 3], revision: 4 } satisfies BallotSnapshot;
     const announcements: string[] = [];
+    const writeDiagnostics = vi.fn(() => Promise.resolve());
     let overlayRenamed = false;
     let renderCount = 0;
     const context = {
@@ -227,6 +228,7 @@ describe("chat voting result races in the worker runtime", () => {
         ).bind(channelId).run();
       },
       channelLanguage: () => Promise.resolve("en" as const),
+      writeDiagnostics,
       renderTemplate: async (text: string) => {
         renderCount += 1;
         if (renderCount === 1) {
@@ -254,16 +256,19 @@ describe("chat voting result races in the worker runtime", () => {
       streamStartedAt: () => Promise.resolve({ streamId: null, startedAt: null }),
     } as unknown as ModuleAlarmContext;
 
-    await expect(closeChatVoteFromAlarm(context, repository, "poll"))
-      .rejects.toThrow("changed before it could be sent");
+    await closeChatVoteFromAlarm(context, repository, "poll");
     await expect(repository.byId(channelId, "poll")).resolves.toMatchObject({
       resultText: "Result: {text.new}",
-      resultDeliveryPending: true,
+      resultDeliveryPending: false,
     });
 
-    await closeChatVoteFromAlarm(context, repository, "poll");
-
-    expect(announcements).toEqual(["Result: {text.new}"]);
+    expect(announcements).toEqual(["Result: "]);
+    expect(renderCount).toBe(1);
+    expect(writeDiagnostics).toHaveBeenCalledWith(
+      "chat-voting:poll:result",
+      [{ code: "template.chat_reference_dropped", detail: { name: "text.middle" } }],
+      expect.any(String),
+    );
     await expect(repository.byId(channelId, "poll")).resolves.toMatchObject({ resultDeliveryPending: false });
   });
 

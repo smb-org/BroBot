@@ -302,6 +302,29 @@ describe("Votekick module", () => {
     });
   });
 
+  it("omits unresolved references from a Votekick start announcement and records them", async () => {
+    const event = {
+      ...eventFor("!votekick sampleviewer"),
+      settings: {
+        ...settings,
+        startText: "Start: {votekick.target}|{var.old_score}|{text.old_greeting}|{api.old_source}",
+      },
+    };
+    const renderTemplate = vi.fn((template: string, values: Readonly<Record<string, string | number>>) => Promise.resolve({
+      text: template.replace("{votekick.target}", String(values["votekick.target"] ?? "")),
+      diagnostics: [],
+    }));
+    const result = await processVotekickMessage(event, repositoryFor(), contextFor({ renderTemplate }));
+    const announcement = result.actions.find((action) => action.kind === "chat");
+
+    expect(announcement).toMatchObject({ kind: "chat", text: "Start: sampleviewer|||" });
+    expect(result.diagnostics).toEqual([
+      { code: "template.chat_reference_dropped", detail: { name: "var.old_score" } },
+      { code: "template.chat_reference_dropped", detail: { name: "text.old_greeting" } },
+      { code: "template.chat_reference_dropped", detail: { name: "api.old_source" } },
+    ]);
+  });
+
   it("starts a ballot while offline", async () => {
     const admit = vi.fn(() => Promise.resolve("admitted" as const));
     const context = contextFor({ streamState: vi.fn(() => Promise.resolve("offline" as const)) });
@@ -340,7 +363,7 @@ describe("Votekick module", () => {
       renderTemplate: vi.fn((template: string, values: Readonly<Record<string, string | number>>) => {
         order.push("template");
         return Promise.resolve({
-          text: template.replace(/\{([^{}]+)\}/gu, (_token, name: string) => String(values[name] ?? "")),
+          text: template.replace(/\{([^{}]+)\}/gu, (token, name: string) => name in values ? String(values[name]) : token),
           diagnostics: [],
         });
       }),
@@ -353,7 +376,14 @@ describe("Votekick module", () => {
         finalize: vi.fn(() => Promise.resolve({ outcome: "passed" as const, counts: [3, 0], revision: 4 })),
       },
     });
-    const result = await processVotekickMessage(eventFor("1", ["viewer"], "voter-user"), repository, context);
+    const result = await processVotekickMessage({
+      ...eventFor("1", ["viewer"], "voter-user"),
+      settings: {
+        ...settings,
+        passText: "Passed {votekick.target}|{text.deleted_result}",
+        failText: "Failed {votekick.target}|{api.deleted_source}",
+      },
+    }, repository, context);
 
     expect(finalize).toHaveBeenCalledWith("channel-a", "ballot-1", "passed", 3, 0, 4, 120, expect.any(String));
     expect(order).toEqual(["language", "template", "template", "finalize", "close"]);
@@ -363,9 +393,13 @@ describe("Votekick module", () => {
       userId: "sampleviewer-id",
       durationSeconds: 120,
       reason: "Votekick (3:0) · ballot-1",
-      onSuccess: { kind: "chat", text: "Votekick passed: sampleviewer receives a 2 min timeout.", target: "source_only", automated: false },
-      onFailure: { kind: "chat", text: "The timeout for sampleviewer could not be applied.", target: "source_only", automated: false },
+      onSuccess: { kind: "chat", text: "Passed sampleviewer|", target: "source_only", automated: false },
+      onFailure: { kind: "chat", text: "Failed sampleviewer|", target: "source_only", automated: false },
     }, expect.objectContaining({ kind: "overlay", type: "tally", elementKind: "votekick.tally" })]);
+    expect(result.diagnostics).toEqual([
+      { code: "template.chat_reference_dropped", detail: { name: "text.deleted_result" } },
+      { code: "template.chat_reference_dropped", detail: { name: "api.deleted_source" } },
+    ]);
   });
 
   it("does not pass when an opposing Durable Object vote commits before the D1 snapshot update", async () => {

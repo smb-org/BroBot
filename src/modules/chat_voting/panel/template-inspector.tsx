@@ -113,6 +113,7 @@ export function ChatVoteTemplateInspector({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(initiallySaved);
   const [saveError, setSaveError] = useState<string | undefined>();
+  const [resultTextError, setResultTextError] = useState<string | undefined>();
   const [serverShortcutError, setServerShortcutError] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -172,7 +173,9 @@ export function ChatVoteTemplateInspector({
     }
     setSaving(true);
     setSaveError(undefined);
+    setResultTextError(undefined);
     setSaved(false);
+    const submittedResultText = submitted.resultText ?? "{vote.result}";
     try {
       const baselineRevision = isNew ? null : baseRevision.current;
       const next = await runModuleQueryWrite(queryClient, channelId, "chat_voting", "templates", (revision) => {
@@ -219,6 +222,11 @@ export function ChatVoteTemplateInspector({
         setServerShortcutError(labels.shortcutDuplicate);
         setSaveError(labels.shortcutUnavailable);
         return labels.shortcutUnavailable;
+      } else if (error instanceof PanelApiError && error.status === 409 && error.code === "chat_voting_result_text_reference_conflict") {
+        if ((draftValue.current.resultText ?? "{vote.result}") !== submittedResultText) return labels.unsaved;
+        setResultTextError(labels.referenceMissing);
+        setSaveError(undefined);
+        return labels.referenceMissing;
       } else if (error instanceof PanelApiError && error.code === "chat_vote_template_limit") {
         setSaveError(labels.templateLimit);
         return labels.templateLimit;
@@ -238,6 +246,7 @@ export function ChatVoteTemplateInspector({
     draft.accept(baselineDraft.current);
     draftValue.current = baselineDraft.current;
     setSaveError(undefined);
+    setResultTextError(undefined);
     setServerShortcutError(null);
     setConflict(false);
     setSaved(false);
@@ -256,6 +265,7 @@ export function ChatVoteTemplateInspector({
     setCustomDurationSelected(false);
     setSaved(false);
     setSaveError(undefined);
+    setResultTextError(undefined);
     setServerShortcutError(null);
     setConflict(false);
   };
@@ -291,6 +301,7 @@ export function ChatVoteTemplateInspector({
       setCustomDurationSelected(false);
       setConflict(false);
       setSaveError(undefined);
+      setResultTextError(undefined);
       setSaved(false);
       onTemplateSaved(latest, template.id);
     } catch {
@@ -487,11 +498,12 @@ export function ChatVoteTemplateInspector({
           label={resultTextCopy.label}
           hint={resultTextCopy.hint}
           value={draft.value.resultText ?? "{vote.result}"}
-          onChange={(resultText) => { updateDraft({ resultText }); }}
+          onChange={(resultText) => { setResultTextError(undefined); updateDraft({ resultText }); }}
           maxLength={500}
           variables={resultTextVariables}
           minRows={2}
           messages={resultTextCopy.templateMessages}
+          {...(resultTextError === undefined ? {} : { error: resultTextError })}
         />
         <ChatPreview
           label={labels.preview}

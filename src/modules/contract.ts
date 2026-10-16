@@ -723,7 +723,7 @@ export interface ModuleAlarmContext {
     text: string,
     moduleValuesOrNow?: Readonly<Record<string, string | number>> | number,
     nowOrModuleValues?: number | Readonly<Record<string, string | number>>,
-  ) => Promise<{ text: string; attributions?: readonly string[] }>;
+  ) => Promise<{ text: string; diagnostics?: readonly ModuleDiagnostic[]; attributions?: readonly string[] }>;
   /** Publishes a module-owned overlay message to enabled elements in this channel. */
   publishModuleOverlayMessage: (
     type: string,

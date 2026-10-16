@@ -16,13 +16,17 @@ describe("Votekick language defaults", () => {
     try {
       database.exec(`
         CREATE TABLE channels (channel_id TEXT PRIMARY KEY, language TEXT NOT NULL);
-        CREATE TABLE channel_modules (channel_id TEXT NOT NULL, module_id TEXT NOT NULL, settings TEXT NOT NULL);
-        INSERT INTO channels VALUES ('de-default', 'de'), ('de-custom', 'de'), ('en-default', 'en');
+        CREATE TABLE channel_modules (
+          channel_id TEXT NOT NULL, module_id TEXT NOT NULL, settings TEXT NOT NULL,
+          revision INTEGER NOT NULL DEFAULT 1, settings_revision INTEGER NOT NULL DEFAULT 1
+        );
+        INSERT INTO channels VALUES ('de-default', 'de'), ('de-custom', 'de'), ('de-localized', 'de'), ('en-default', 'en');
       `);
       const defaults = VOTEKICK_DEFAULT_TEXTS.en;
-      const insert = database.prepare("INSERT INTO channel_modules VALUES (?, 'votekick', ?)");
+      const insert = database.prepare("INSERT INTO channel_modules (channel_id, module_id, settings) VALUES (?, 'votekick', ?)");
       insert.run("de-default", JSON.stringify(defaults));
       insert.run("de-custom", JSON.stringify({ ...defaults, startText: "Custom start" }));
+      insert.run("de-localized", JSON.stringify(VOTEKICK_DEFAULT_TEXTS.de));
       insert.run("en-default", JSON.stringify(defaults));
 
       database.exec(migration);
@@ -36,6 +40,15 @@ describe("Votekick language defaults", () => {
       }
       expect(settings.get("de-custom")?.startText).toBe("Custom start");
       expect(settings.get("de-custom")?.passText).toBe(VOTEKICK_DEFAULT_TEXTS.de.passText);
+
+      const revisions = new Map((database.prepare(
+        "SELECT channel_id, revision, settings_revision FROM channel_modules ORDER BY channel_id",
+      ).all() as { channel_id: string; revision: number; settings_revision: number }[])
+        .map((row) => [row.channel_id, { revision: row.revision, settingsRevision: row.settings_revision }]));
+      expect(revisions.get("de-default")).toEqual({ revision: 2, settingsRevision: 2 });
+      expect(revisions.get("de-custom")).toEqual({ revision: 2, settingsRevision: 2 });
+      expect(revisions.get("de-localized")).toEqual({ revision: 1, settingsRevision: 1 });
+      expect(revisions.get("en-default")).toEqual({ revision: 1, settingsRevision: 1 });
     } finally {
       database.close();
     }

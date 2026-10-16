@@ -5,6 +5,7 @@ import { VOTEKICK_WINDOW_MS, votekickSettingsSchema, type Votekick, type Votekic
 import { canStartVotekick, isActiveVotekickTarget, votekickThreshold, votekickTimeoutReason, VOTEKICK_COMMAND_PATTERN, wasActiveBeforeVotekick } from "./domain";
 import type { VotekickRepository, VotekickStart } from "./repository";
 import { VOTEKICK_ELEMENT_KIND } from "./overlay/kinds";
+import { omitUnresolvedChatTemplateReferences } from "../../contracts/chat-template-references";
 
 const emptyResult = (): ModuleResult => ({ actions: [], diagnostics: [] });
 const textFromEvent = (event: ModuleEvent): string | null => {
@@ -63,9 +64,10 @@ const renderChat = async (
   target: VotekickSettings["chatTarget"],
 ): Promise<{ action: ModuleAction | null; diagnostics: readonly ModuleDiagnostic[]; attributions?: readonly string[] }> => {
   const rendered = await context.renderTemplate(template, values);
+  const safe = omitUnresolvedChatTemplateReferences(rendered.text);
   return {
-    action: chatAction(rendered.text, target),
-    diagnostics: rendered.diagnostics,
+    action: chatAction(safe.text, target),
+    diagnostics: [...rendered.diagnostics, ...safe.diagnostics],
     ...(rendered.attributions === undefined ? {} : { attributions: rendered.attributions }),
   };
 };
@@ -113,9 +115,14 @@ const preparePass = async (
     "votekick.duration": duration,
     "votekick.window": window,
   };
+  const renderChatMessage = async (text: string) => {
+    const rendered = await renderTemplate(text, values);
+    const safe = omitUnresolvedChatTemplateReferences(rendered.text);
+    return { ...safe, diagnostics: [...(rendered.diagnostics ?? []), ...safe.diagnostics] };
+  };
   const [pass, fail] = await Promise.all([
-    renderTemplate(settings.passTextEnabled ? settings.passText : "", values),
-    renderTemplate(settings.failTextEnabled ? settings.failText : "", values),
+    renderChatMessage(settings.passTextEnabled ? settings.passText : ""),
+    renderChatMessage(settings.failTextEnabled ? settings.failText : ""),
   ]);
   return {
     action: {
@@ -126,7 +133,7 @@ const preparePass = async (
       ...(pass.text.length === 0 ? {} : { onSuccess: { kind: "chat", text: pass.text, target: settings.chatTarget, automated: false } }),
       ...(fail.text.length === 0 ? {} : { onFailure: { kind: "chat", text: fail.text, target: settings.chatTarget, automated: false } }),
     },
-    diagnostics: [...(pass.diagnostics ?? []), ...(fail.diagnostics ?? [])],
+    diagnostics: [...pass.diagnostics, ...fail.diagnostics],
   };
 };
 
@@ -586,8 +593,11 @@ export const closeExpiredVotekick = async (
     "votekick.duration": "",
     "votekick.window": formatTimeoutDuration(storedWindowSeconds(running, settings.windowSeconds), await context.channelLanguage()),
   }, Date.parse(running.endedAt ?? running.endsAt));
-  if (rendered.text.length > 0) {
-    const result = await context.sendChat(rendered.text, `votekick:${id}:expired`, rendered.attributions, async () =>
+  const safe = omitUnresolvedChatTemplateReferences(rendered.text);
+  const diagnostics = [...(rendered.diagnostics ?? []), ...safe.diagnostics];
+  if (diagnostics.length > 0) await context.writeDiagnostics?.(`votekick:${id}:expired`, diagnostics, new Date().toISOString());
+  if (safe.text.length > 0) {
+    const result = await context.sendChat(safe.text, `votekick:${id}:expired`, rendered.attributions, async () =>
       (await repository.byId(context.channelId, id))?.status === "expired", settings.chatTarget);
     if (!result.sent && result.retryable) throw new Error(`Votekick expiry chat failed: ${result.reason ?? "unknown"}.`);
   }

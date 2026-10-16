@@ -1,5 +1,6 @@
 import type { ModuleMutationAuthorization } from "../contract";
 import type { ChatVote, ChatVoteCloseReason, ChatVoteDraft, ChatVoteTemplate, ChatVoteTemplateDraft, ChatVoteTerm, ChatVotingKind, ChatVotingTextMode } from "./contracts";
+import type { TextBlockWriteGuard } from "../contracts/text-block-write-guard";
 
 interface ChatVoteRow {
   channel_id: string;
@@ -123,21 +124,31 @@ const mapTemplateRow = (row: ChatVoteTemplateRow): ChatVoteTemplate => ({
 export const chatVoteTemplateSelectColumns = `id, channel_id, shortcut, title, result_text, labels, free_text_mode, duration_seconds,
                                              revision, legacy_alias, last_used_at, created_at, updated_at`;
 
-type ChatVoteTemplateWriteStatus = "saved" | "created" | "limit" | "conflict" | "shortcut_conflict" | "missing" | "unauthorized";
+type ChatVoteTemplateWriteStatus = "saved" | "created" | "limit" | "conflict" | "shortcut_conflict" | "missing" | "unauthorized" | "reference_conflict";
 type ChatVoteTemplateSaveResult =
   | { status: "saved"; template: ChatVoteTemplate }
   | { status: "shortcut_conflict" }
   | { status: "conflict" }
   | { status: "missing" }
-  | { status: "unauthorized" };
+  | { status: "unauthorized" }
+  | { status: "reference_conflict" };
+
+type ChatVoteOpenInsertStatus = "inserted" | "busy" | "reference_conflict";
+
+const writeGuardPassed = async (db: D1Database, guard: TextBlockWriteGuard): Promise<boolean> => {
+  if (guard.references.length === 0) return true;
+  const row = await db.prepare(`SELECT 1 AS valid WHERE 1 = 1 ${guard.sql}`)
+    .bind(...guard.values).first<{ valid: number }>();
+  return row !== null;
+};
 
 export interface ChatVoteTemplateRepository {
   templates(channelId: string): Promise<ChatVoteTemplate[]>;
   template(channelId: string, id: string): Promise<ChatVoteTemplate | null>;
   templateByShortcut(channelId: string, shortcut: string): Promise<ChatVoteTemplate | null>;
   templateByLegacyAlias(channelId: string, alias: NonNullable<ChatVoteTemplate["legacyAlias"]>): Promise<ChatVoteTemplate | null>;
-  createTemplate(channelId: string, id: string, draft: ChatVoteTemplateDraft, createdAt: string, authorization: ModuleMutationAuthorization, audit?: D1PreparedStatement): Promise<ChatVoteTemplateWriteStatus>;
-  saveTemplate(channelId: string, id: string, revision: number, draft: ChatVoteTemplateDraft, updatedAt: string, authorization: ModuleMutationAuthorization, audit?: D1PreparedStatement): Promise<ChatVoteTemplateSaveResult>;
+  createTemplate(channelId: string, id: string, draft: ChatVoteTemplateDraft, createdAt: string, authorization: ModuleMutationAuthorization, audit?: D1PreparedStatement, blockGuard?: TextBlockWriteGuard): Promise<ChatVoteTemplateWriteStatus>;
+  saveTemplate(channelId: string, id: string, revision: number, draft: ChatVoteTemplateDraft, updatedAt: string, authorization: ModuleMutationAuthorization, audit?: D1PreparedStatement, blockGuard?: TextBlockWriteGuard): Promise<ChatVoteTemplateSaveResult>;
   deleteTemplate(channelId: string, id: string, revision: number, authorization: ModuleMutationAuthorization, audit?: D1PreparedStatement): Promise<ChatVoteTemplateWriteStatus>;
   markTemplateUsed(channelId: string, id: string, usedAt: string): Promise<void>;
 }
@@ -165,7 +176,7 @@ export interface ChatVotingRepository {
     approvedBy: string,
     authorization: ModuleMutationAuthorization,
   ): Promise<{ authorized: boolean; changed: boolean }>;
-  insertOpen(vote: ChatVoteDraft, authorization?: ModuleMutationAuthorization, resultTextTemplate?: ChatVoteResultTextTemplateSnapshot): Promise<boolean>;
+  insertOpen(vote: ChatVoteDraft, authorization?: ModuleMutationAuthorization, resultTextTemplate?: ChatVoteResultTextTemplateSnapshot, blockGuard?: TextBlockWriteGuard): Promise<ChatVoteOpenInsertStatus>;
   requestManualClose(channelId: string, pollId: string, expectedClosesAt: string, authorization?: ModuleMutationAuthorization): Promise<boolean>;
   claimAlarmClose(channelId: string, pollId: string, expectedClosesAt: string, claimedAt: string): Promise<boolean>;
   extendClose(
@@ -223,7 +234,7 @@ const templateRepository = (db: D1Database): ChatVoteTemplateRepository => ({
     ).bind(channelId, alias).first<ChatVoteTemplateRow>();
     return row === null ? null : mapTemplateRow(row);
   },
-  async createTemplate(channelId, id, draft, createdAt, authorization, audit) {
+  async createTemplate(channelId, id, draft, createdAt, authorization, audit, blockGuard = { sql: "", values: [], references: [] }) {
     const mutation = db.prepare(
       `INSERT INTO chat_vote_templates
          (id, channel_id, shortcut, title, result_text, labels, free_text_mode, duration_seconds, revision,
@@ -233,10 +244,10 @@ const templateRepository = (db: D1Database): ChatVoteTemplateRepository => ({
           AND EXISTS (
             SELECT 1 FROM channel_modules
              WHERE channel_id = ? AND module_id = 'chat_voting' AND enabled = 1
-          ) ${authorization.sql}
+          ) ${authorization.sql} ${blockGuard.sql}
        ON CONFLICT (channel_id, shortcut) WHERE shortcut IS NOT NULL DO NOTHING`,
     ).bind(id, channelId, draft.shortcut, draft.title, draft.resultText ?? "{vote.result}", JSON.stringify(draft.labels), draft.freeTextMode,
-      draft.durationSeconds, createdAt, createdAt, channelId, channelId, ...authorization.values);
+      draft.durationSeconds, createdAt, createdAt, channelId, channelId, ...authorization.values, ...blockGuard.values);
     const result = audit === undefined ? await mutation.run() : (await db.batch([mutation, audit]))[0];
     if (result === undefined) throw new Error("Template creation mutation returned no D1 result.");
     if (result.meta.changes > 0) return "created";
@@ -246,11 +257,12 @@ const templateRepository = (db: D1Database): ChatVoteTemplateRepository => ({
        ) ${authorization.sql}`,
     ).bind(channelId, ...authorization.values).first<{ authorized: number }>();
     if (authorized === null) return "unauthorized";
+    if (!await writeGuardPassed(db, blockGuard)) return "reference_conflict";
     const count = await db.prepare("SELECT COUNT(*) AS count FROM chat_vote_templates WHERE channel_id = ?")
       .bind(channelId).first<{ count: number }>();
     return (count?.count ?? 0) >= 100 ? "limit" : "conflict";
   },
-  async saveTemplate(channelId, id, revision, draft, updatedAt, authorization, audit) {
+  async saveTemplate(channelId, id, revision, draft, updatedAt, authorization, audit, blockGuard = { sql: "", values: [], references: [] }) {
     const existed = await db.prepare(
       "SELECT 1 AS present FROM chat_vote_templates WHERE channel_id = ? AND id = ? LIMIT 1",
     ).bind(channelId, id).first<{ present: number }>() !== null;
@@ -265,11 +277,11 @@ const templateRepository = (db: D1Database): ChatVoteTemplateRepository => ({
               SELECT 1 FROM channel_modules
                WHERE channel_modules.channel_id = chat_vote_templates.channel_id
                  AND channel_modules.module_id = 'chat_voting' AND channel_modules.enabled = 1
-            )
+            ) ${blockGuard.sql}
           RETURNING ${chatVoteTemplateSelectColumns}
         `,
       ).bind(draft.shortcut, draft.title, draft.resultText ?? "{vote.result}", JSON.stringify(draft.labels), draft.freeTextMode,
-        draft.durationSeconds, updatedAt, channelId, id, revision, ...authorization.values);
+        draft.durationSeconds, updatedAt, channelId, id, revision, ...authorization.values, ...blockGuard.values);
       const result = audit === undefined ? await mutation.run() : (await db.batch([mutation, audit]))[0];
       if (result === undefined) throw new Error("Template save mutation returned no D1 result.");
       const row = result.results[0] as ChatVoteTemplateRow | undefined;
@@ -287,6 +299,7 @@ const templateRepository = (db: D1Database): ChatVoteTemplateRepository => ({
        ) ${authorization.sql}`,
     ).bind(channelId, ...authorization.values).first<{ authorized: number }>();
     if (authorized === null) return { status: "unauthorized" };
+    if (!await writeGuardPassed(db, blockGuard)) return { status: "reference_conflict" };
     return existed ? { status: "conflict" } : { status: "missing" };
   },
   async deleteTemplate(channelId, id, revision, authorization, audit) {
@@ -367,7 +380,7 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
       changed: (result?.meta.changes ?? 0) > 0,
     };
   },
-  async insertOpen(vote, authorization, resultTextTemplate) {
+  async insertOpen(vote, authorization, resultTextTemplate, blockGuard = { sql: "", values: [], references: [] }) {
     const guard = authorization?.sql ?? "";
     const statement = db.prepare(
       `INSERT INTO chat_votes
@@ -380,7 +393,7 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
         ) AND (? IS NULL OR EXISTS (
           SELECT 1 FROM chat_vote_templates
            WHERE channel_id = ? AND id = ? AND revision = ? AND result_text = ?
-        )) ${guard}`,
+        )) ${guard} ${blockGuard.sql}`,
     ).bind(
       vote.channelId,
       vote.id,
@@ -402,9 +415,19 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
       resultTextTemplate?.revision ?? null,
       resultTextTemplate?.resultText ?? null,
       ...(authorization?.values ?? []),
+      ...blockGuard.values,
     );
     const result = await statement.run();
-    return result.meta.changes > 0;
+    if (result.meta.changes > 0) return "inserted";
+    if (blockGuard.references.length > 0) {
+      const authorized = await db.prepare(
+        `SELECT 1 AS authorized WHERE EXISTS (
+           SELECT 1 FROM channel_modules WHERE channel_id = ? AND module_id = 'chat_voting' AND enabled = 1
+         ) ${guard}`,
+      ).bind(vote.channelId, ...(authorization?.values ?? [])).first<{ authorized: number }>();
+      if (authorized !== null && !await writeGuardPassed(db, blockGuard)) return "reference_conflict";
+    }
+    return "busy";
   },
   async requestManualClose(channelId, pollId, expectedClosesAt, authorization) {
     const guard = authorization?.sql ?? "";
