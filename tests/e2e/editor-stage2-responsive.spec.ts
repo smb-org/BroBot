@@ -262,4 +262,6 @@ test("events page cause icon: hover shows it, Escape hides it, tap opens it", as
 
   // The click on the icon must not have opened the inspector.
   await expect(page.getByText("Vorgang")).toHaveCount(0);
+  await page.getByRole("heading", { name: "Ereignisse" }).click();
+  await expect(page.getByText("Twitch-Abklingzeit aktiv")).toBeHidden();
 });

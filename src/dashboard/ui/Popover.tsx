@@ -42,7 +42,10 @@ export function Popover({ triggerLabel, icon, children }: PopoverProps): ReactEl
     return () => document.removeEventListener("keydown", closeOnEscape, true);
   }, [opened]);
 
-  return <PopoverPrimitive.Root open={opened} onOpenChange={setOpened}>
+  return <PopoverPrimitive.Root open={opened} onOpenChange={(next, eventDetails) => {
+    if (!next && eventDetails.reason === "trigger-press") return;
+    setOpened(next);
+  }}>
     <div data-ui="" className="ui-popover">
       <PopoverPrimitive.Trigger
         data-ui=""
