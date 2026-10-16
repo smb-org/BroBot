@@ -115,7 +115,11 @@ test("manager and operator see the same locked settings without save or restore 
     await expect(page.getByText("nicht implementiert", { exact: false })).toHaveCount(0);
     await expect(page.getByText("Helix", { exact: false })).toHaveCount(0);
 
-    await expect(page.getByText("Nur Broadcaster und Verwalter dürfen Clip-Einstellungen ändern.", { exact: true })).toHaveCount(0);
+    if (role === "operator") {
+      await expect(page.getByText("Nur Broadcaster und Verwalter dürfen Module ändern.", { exact: true })).toHaveCount(1);
+    } else {
+      await expect(page.getByText("Nur Broadcaster und Verwalter dürfen Module ändern.", { exact: true })).toHaveCount(0);
+    }
     await page.goto("about:blank");
   }
 });
@@ -134,6 +138,15 @@ test("disabled module switch keeps the operator permission reason visible", asyn
   await page.goto(`/channels/${CHANNEL_ID}/modules/clips`);
 
   await expect(page.locator(".module-detail-heading .page-header__lock")).toContainText("Nur Broadcaster und Verwalter dürfen Module ändern.");
+  await expect(page.getByRole("switch").first()).toBeDisabled();
+});
+
+test("enabled clips switch gives operators one management reason", async ({ page }) => {
+  await mockDashboard(page, { role: "operator", moduleEnabled: true });
+  await page.goto(`/channels/${CHANNEL_ID}/modules/clips`);
+
+  await expect(page.locator(".module-detail-heading .page-header__lock")).toContainText("Nur Broadcaster und Verwalter dürfen Module ändern.");
+  await expect(page.locator(".module-detail-heading .page-header__lock")).toHaveCount(1);
   await expect(page.getByRole("switch").first()).toBeDisabled();
 });
 
@@ -245,6 +258,9 @@ for (const width of [1920, 1280, 390, 2560]) {
     await page.goto(`/channels/${CHANNEL_ID}/modules/clips`);
     await expect(page.getByText("Clip ConfirmedSessionClip001", { exact: true })).toBeVisible();
     await expect(page.getByText("Clip ConfirmedSessionClip100", { exact: true })).toBeVisible();
+    const clipsSectionBefore = await page.locator(".clips-panel__clips-section").boundingBox();
+    const clipListBefore = await page.locator(".clips-panel__list").boundingBox();
+    const scrollYBefore = await page.evaluate(() => window.scrollY);
 
     mock.failRefresh();
     await page.getByRole("button", { name: "Clips aktualisieren" }).click();
@@ -268,6 +284,13 @@ for (const width of [1920, 1280, 390, 2560]) {
     expect(await alert.evaluate((element) => getComputedStyle(element).fontSize)).toBe("12px");
     expect(await alert.locator(".ui-button").evaluate((element) => getComputedStyle(element).flex)).toBe("0 0 auto");
     if (width < 600) {
+      const clipsSectionAfter = await page.locator(".clips-panel__clips-section").boundingBox();
+      const clipListAfter = await page.locator(".clips-panel__list").boundingBox();
+      const scrollYAfter = await page.evaluate(() => window.scrollY);
+      expect(clipsSectionBefore).not.toBeNull();
+      expect(clipListBefore).not.toBeNull();
+      expect(Math.abs((clipsSectionAfter?.y ?? 0) + scrollYAfter - (clipsSectionBefore?.y ?? 0) - scrollYBefore)).toBeLessThanOrEqual(1);
+      expect(Math.abs((clipListAfter?.y ?? 0) + scrollYAfter - (clipListBefore?.y ?? 0) - scrollYBefore)).toBeLessThanOrEqual(1);
       expect(await heading.evaluate((element) => getComputedStyle(element).flexWrap)).toBe("wrap");
       expect(await page.locator(".clips-panel__refresh-error").evaluate((element) => getComputedStyle(element).flexBasis)).toBe("100%");
     }

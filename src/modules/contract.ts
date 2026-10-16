@@ -1271,6 +1271,8 @@ export interface ModulePanelProperties {
   channelId: string;
   /** The panel language resolved by the host; optional for legacy modules. */
   language?: ModuleLanguage;
+  /** Changes when the channel goes online/offline or a new stream session starts. */
+  streamSessionIdentity?: string;
   /** May the view execute management controls? */
   canManage?: boolean;
   /** May the view execute operational controls available to every channel role? */

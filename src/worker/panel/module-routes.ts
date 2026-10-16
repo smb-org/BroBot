@@ -819,6 +819,29 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
       reason: issue?.message ?? "Settings do not match the module schema.",
     }, 400);
   }
+  if (module.id === "clips") {
+    let rawStoredSettings: unknown;
+    try {
+      rawStoredSettings = JSON.parse(stored.settings);
+    } catch {
+      return context.json({ error: "module_settings_invalid" }, 500);
+    }
+    const storedSettings = module.settingsSchema.safeParse(rawStoredSettings);
+    if (!storedSettings.success) return context.json({ error: "module_settings_invalid" }, 500);
+    const lockedFields = [
+      "commandMinimumRole",
+      "commandCooldownSeconds",
+      "postClipLinkInChat",
+      "chatLinkTemplate",
+      "automaticClipsEnabled",
+      "automaticThresholdMultiplier",
+      "automaticCooldownSeconds",
+    ] as const;
+    const storedRecord = storedSettings.data as Readonly<Record<string, unknown>>;
+    const submittedRecord = settings.data as Readonly<Record<string, unknown>>;
+    const changedLockedFields = lockedFields.filter((field) => !Object.is(storedRecord[field], submittedRecord[field]));
+    if (changedLockedFields.length > 0) return context.json({ error: "clip_settings_locked", fields: changedLockedFields }, 409);
+  }
   const graphRevision = await readTextBlockGraphRevision(context.env.DB, channelId);
   const settingsRecord = settings.data as Readonly<Record<string, unknown>>;
   const templateTexts = Object.keys(module.templateFields ?? {}).flatMap((field) => {

@@ -209,14 +209,17 @@ describe("create clip", () => {
     });
   });
 
-  it("saves clip settings only for managers while the module is active", async () => {
+  it.each([
+    ["commandMinimumRole", { commandMinimumRole: "subscriber" }],
+    ["commandCooldownSeconds", { commandCooldownSeconds: 120 }],
+    ["postClipLinkInChat", { postClipLinkInChat: false }],
+    ["chatLinkTemplate", { chatLinkTemplate: "Neuer Clip: {clip.url}" }],
+    ["automaticClipsEnabled", { automaticClipsEnabled: true }],
+    ["automaticThresholdMultiplier", { automaticThresholdMultiplier: 3.5 }],
+    ["automaticCooldownSeconds", { automaticCooldownSeconds: 1200 }],
+  ] as const)("rejects changes to locked clip setting %s and keeps its stored value readable", async (_field, change) => {
     const environment = await asMember("manager");
-    const settings = clipsSettingsSchema.parse({
-      commandMinimumRole: "vip",
-      commandCooldownSeconds: 120,
-      automaticClipsEnabled: true,
-      automaticThresholdMultiplier: 3,
-    });
+    const settings = { ...clipsSettingsSchema.parse({}), ...change };
 
     const response = await panelRouter.fetch(await requestFor(
       "user-1",
@@ -225,12 +228,16 @@ describe("create clip", () => {
       { revision: 1, settings },
     ), environment);
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({ settings, revision: 2 });
-    const row = await database.prepare(
-      "SELECT settings, revision FROM channel_modules WHERE channel_id = 'kanal-a' AND module_id = 'clips'",
-    ).first<{ settings: string; revision: number }>();
-    expect(row).toEqual({ settings: JSON.stringify(settings), revision: 2 });
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: "clip_settings_locked", fields: [_field] });
+
+    const readable = await panelRouter.fetch(await requestFor(
+      "user-1",
+      "/api/channels/kanal-a/modules/clips/settings",
+      "GET",
+    ), environment);
+    expect(readable.status).toBe(200);
+    await expect(readable.json()).resolves.toMatchObject({ settings: clipsSettingsSchema.parse({}), revision: 1 });
   });
 
   it("rejects operator settings writes and writes after clips are disabled", async () => {

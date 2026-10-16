@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { moduleQueryKey } from "../../src/dashboard/data";
 import { UiProvider } from "../../src/dashboard/ui";
 import ClipsPanel from "../../src/modules/clips/panel";
-import type { ClipsSettings } from "../../src/modules/clips/contracts";
+import type { ClipsSettings, SessionClipList } from "../../src/modules/clips/contracts";
 import { jsonResponse } from "../unit/fixtures";
 import { renderWithQuery } from "../query-test-utils";
 
@@ -34,10 +34,10 @@ const baseFetch = vi.fn<typeof fetch>((input) => {
   return Promise.resolve(jsonResponse({}));
 });
 
-const renderPanel = (fetcher: typeof fetch = baseFetch) => {
+const renderPanel = (fetcher: typeof fetch = baseFetch, streamSessionIdentity?: string) => {
   vi.stubGlobal("fetch", fetcher);
   return renderWithQuery(
-    <UiProvider><ClipsPanel channelId={channelId} language="de" /></UiProvider>,
+    <UiProvider><ClipsPanel channelId={channelId} language="de" {...(streamSessionIdentity === undefined ? {} : { streamSessionIdentity })} /></UiProvider>,
   );
 };
 
@@ -93,6 +93,35 @@ describe("clips panel", () => {
     await queryClient.invalidateQueries({ queryKey, exact: true });
     await waitFor(() => expect(screen.queryByText("Die Clip-Einstellungen konnten nicht geladen werden.", { selector: '[role="alert"]' })).not.toBeInTheDocument());
     expect(screen.getByRole("heading", { name: "Clip-Einstellungen", level: 2 })).toBeInTheDocument();
+  });
+
+  it("refetches clips when the stream changes offline and starts a new session", async () => {
+    let clipResponse: SessionClipList = {
+      streamStartedAt: "2026-10-16T08:00:00.000Z",
+      clips: [{ clipId: "session-one", createdAt: "2026-10-16T08:01:00.000Z" }],
+    };
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const path = requestPath(input);
+      if (path === settingsUrl) return Promise.resolve(jsonResponse({ settings, revision: 1 }));
+      if (path === clipsUrl) return Promise.resolve(jsonResponse(clipResponse));
+      return Promise.resolve(jsonResponse({}));
+    });
+    const view = renderPanel(fetcher, "online:session-one");
+    expect(await screen.findByText("Clip session-one")).toBeInTheDocument();
+
+    clipResponse = { streamStartedAt: null, clips: [] };
+    view.rerender(<UiProvider><ClipsPanel channelId={channelId} language="de" streamSessionIdentity="offline" /></UiProvider>);
+    await waitFor(() => expect(fetcher.mock.calls.filter(([input]) => requestPath(input) === clipsUrl)).toHaveLength(2));
+    expect(await screen.findByText("Die Liste zeigt Clips, sobald der Stream live ist.")).toBeInTheDocument();
+    expect(screen.queryByText("Clip session-one")).not.toBeInTheDocument();
+
+    clipResponse = {
+      streamStartedAt: "2026-10-16T09:00:00.000Z",
+      clips: [{ clipId: "session-two", createdAt: "2026-10-16T09:01:00.000Z" }],
+    };
+    view.rerender(<UiProvider><ClipsPanel channelId={channelId} language="de" streamSessionIdentity="online:session-two" /></UiProvider>);
+    await waitFor(() => expect(fetcher.mock.calls.filter(([input]) => requestPath(input) === clipsUrl)).toHaveLength(3));
+    expect(await screen.findByText("Clip session-two")).toBeInTheDocument();
   });
 
   it("keeps clip refresh errors in the list header and clears them on retry", async () => {

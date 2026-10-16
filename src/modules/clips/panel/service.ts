@@ -34,20 +34,6 @@ export const loadSessionClips = (
   signal === undefined ? undefined : { signal },
 ).then((response) => readJson<SessionClipList>(response));
 
-export const saveClipsSettings = async (
-  channelId: string,
-  revision: number,
-  settings: ClipsSettings,
-): Promise<{ settings: ClipsSettings; revision: number; warnings: readonly unknown[] }> => {
-  const { token } = await readJson<{ token: string }>(await fetch("/api/csrf"));
-  const result = await readJson<{ settings: unknown; revision: number; warnings: readonly unknown[] }>(await fetch(`${modulePath(channelId)}/settings`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json", "X-CSRF-Token": token },
-    body: JSON.stringify({ revision, settings }),
-  }));
-  return { ...result, settings: clipsSettingsSchema.parse(result.settings) };
-};
-
 export const createClip = async (channelId: string): Promise<{ clipId: string | null; editUrl: string | null }> => {
   const { token } = await readJson<{ token: string }>(await fetch("/api/csrf"));
   return readJson(await fetch(`/api/channels/${encodeURIComponent(channelId)}/clips`, {

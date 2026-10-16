@@ -278,6 +278,7 @@ const invalidatePanelResource = (
       return;
     case "channel.audit":
       invalidate(queryClient, queryKeys.channel(channelId, "audit-log"), scheduledQueryRefreshes, resourceRefreshes, channelId);
+      invalidate(queryClient, queryKeys.module(channelId, "clips", "session-clips"), scheduledQueryRefreshes, resourceRefreshes, channelId);
       return;
     case "channel.variables":
       invalidate(queryClient, dashboardDataKeys.variables(channelId), scheduledQueryRefreshes, resourceRefreshes, channelId);

@@ -156,6 +156,7 @@ export const ModuleNavigation = ({ channelId, activeModules, onNavigate }: {
 interface ModulePanelMountProperties {
   channelId: string;
   activeModules: PanelActiveModule[];
+  streamSessionIdentity?: string;
   suspendModuleId?: string;
   canManage?: boolean;
   canOperate?: boolean;
@@ -531,7 +532,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   </>;
 };
 
-export const ModulePanelMount = ({ channelId, activeModules, suspendModuleId, canManage = true, canOperate = true, botIsModerator = null, initialSelection }: ModulePanelMountProperties): ReactElement => {
+export const ModulePanelMount = ({ channelId, activeModules, streamSessionIdentity, suspendModuleId, canManage = true, canOperate = true, botIsModerator = null, initialSelection }: ModulePanelMountProperties): ReactElement => {
   const registeredViews = activeModules.flatMap((activeModule) => {
     const module = MODULES.find((candidate) => candidate.id === activeModule.moduleId);
     if (module === undefined) return [];
@@ -554,6 +555,7 @@ export const ModulePanelMount = ({ channelId, activeModules, suspendModuleId, ca
           key={`${channelId}:${id}`}
           module={module}
           channelId={channelId}
+          {...(streamSessionIdentity === undefined ? {} : { streamSessionIdentity })}
           canManage={canManage}
           canOperate={canOperate}
           botIsModerator={botIsModerator}
@@ -564,9 +566,10 @@ export const ModulePanelMount = ({ channelId, activeModules, suspendModuleId, ca
   );
 };
 
-const MountedModuleView = ({ module, channelId, canManage, canOperate, botIsModerator, suspendToParent, initialSelection }: {
+const MountedModuleView = ({ module, channelId, streamSessionIdentity, canManage, canOperate, botIsModerator, suspendToParent, initialSelection }: {
   module: (typeof MODULES)[number];
   channelId: string;
+  streamSessionIdentity?: string;
   canManage: boolean;
   canOperate: boolean;
   botIsModerator: boolean | null;
@@ -589,6 +592,7 @@ const MountedModuleView = ({ module, channelId, canManage, canOperate, botIsMode
       onRetry={retryModuleChunkLoad}
       properties={{
         channelId,
+        ...(streamSessionIdentity === undefined ? {} : { streamSessionIdentity }),
         language: dashboardLanguage(),
         canManage,
         canOperate,
@@ -786,6 +790,7 @@ const ModuleListLink = ({ channelId, onNavigate }: { channelId: string; onNaviga
 interface ModulePageProperties {
   channelId: string;
   moduleId: string;
+  streamSessionIdentity?: string;
   ownRole: ChannelRole;
   modules: PanelModuleState[];
   activeModules: PanelActiveModule[];
@@ -801,7 +806,7 @@ interface ModulePageProperties {
   suspendPanelUntilReady?: boolean;
 }
 
-export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModules, loading = false, error = null, busy = false, botIsModerator = null, onNavigate, onToggle, initialSelection, suspendPanelUntilReady = false }: ModulePageProperties): ReactElement => {
+export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModules, streamSessionIdentity, loading = false, error = null, busy = false, botIsModerator = null, onNavigate, onToggle, initialSelection, suspendPanelUntilReady = false }: ModulePageProperties): ReactElement => {
   const texts = dashboardTexts();
   const labels = workspaceTexts();
   const details = moduleDetails(moduleId);
@@ -854,7 +859,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
             switchDisabled: !manageable || switchDisabled || busy || mandatory,
             switchBusy: busy,
             ...(mandatory ? { moduleSwitch: <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} /> } : {}),
-            ...(disabledReason === null || (registered?.panelManagesSettings && moduleState?.enabled !== false) ? {} : { lockHint: disabledReason }),
+            ...(disabledReason === null || (registered?.panelManagesSettings && moduleState?.enabled !== false && moduleId !== "clips") ? {} : { lockHint: disabledReason }),
           })}
           {...(moduleId === "text_commands" ? {
             pageActions: <TextCommandChatCommandHelp channelId={channelId} />,
@@ -886,7 +891,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
         {stateMessage === null ? (
           registered?.panel === undefined && registered?.settingsEditor === undefined ? (showActiveView ? <p className="module-state">{texts.module.noView}</p> : null) : !showActiveView ? null : (
             <section className={`module-detail__content${viewLoading ? " stale" : ""}`} aria-label={labels.content}>
-              <ModulePanelMount key={`${channelId}:${moduleId}`} channelId={channelId} activeModules={[activeModule]} {...(suspendPanelUntilReady ? { suspendModuleId: moduleId } : {})} canManage={ownRole !== "operator"} canOperate={true} botIsModerator={botIsModerator} {...(initialSelection === undefined ? {} : { initialSelection })} />
+              <ModulePanelMount key={`${channelId}:${moduleId}`} channelId={channelId} activeModules={[activeModule]} {...(streamSessionIdentity === undefined ? {} : { streamSessionIdentity })} {...(suspendPanelUntilReady ? { suspendModuleId: moduleId } : {})} canManage={ownRole !== "operator"} canOperate={true} botIsModerator={botIsModerator} {...(initialSelection === undefined ? {} : { initialSelection })} />
             </section>
           )
         ) : (

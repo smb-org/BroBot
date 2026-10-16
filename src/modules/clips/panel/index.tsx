@@ -1,7 +1,7 @@
-import { useMemo, type ReactElement } from "react";
+import { useEffect, useMemo, useRef, type ReactElement } from "react";
 
 import { dashboardLanguage } from "../../../dashboard/locale";
-import { useModuleQuery } from "../../../dashboard/data";
+import { moduleQueryKey, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import {
   Button, EmptyState, Field, FieldPair, LoadState, LoadStateLines, PageHeader, RoleThreshold,
   Section, SwitchRow, UnitInput,
@@ -135,9 +135,10 @@ function ClipsSettingsView({ settings, refreshFailed, labels }: ClipsSettingsVie
   </>;
 }
 
-export default function ClipsPanel({ channelId, language }: ModulePanelProperties): ReactElement {
+export default function ClipsPanel({ channelId, language, streamSessionIdentity }: ModulePanelProperties): ReactElement {
   const resolvedLanguage = language ?? dashboardLanguage();
   const labels = useMemo(() => clipsPanelTexts(resolvedLanguage), [resolvedLanguage]);
+  const queryClient = useDashboardQueryClient();
   const settingsQuery = useModuleQuery<ClipsSettingsData>(
     channelId,
     "clips",
@@ -150,6 +151,16 @@ export default function ClipsPanel({ channelId, language }: ModulePanelPropertie
     "session-clips",
     (signal) => loadSessionClips(channelId, signal),
   );
+  const refetchClips = clipsQuery.refetch;
+  const previousStreamSessionIdentity = useRef(streamSessionIdentity);
+  useEffect(() => {
+    if (previousStreamSessionIdentity.current === streamSessionIdentity) return;
+    previousStreamSessionIdentity.current = streamSessionIdentity;
+    const queryKey = moduleQueryKey(channelId, "clips", "session-clips");
+    void queryClient.cancelQueries({ queryKey, exact: true }).then(() => {
+      if (previousStreamSessionIdentity.current === streamSessionIdentity) void refetchClips();
+    });
+  }, [channelId, queryClient, refetchClips, streamSessionIdentity]);
 
   const reloadClips = (): void => { void clipsQuery.refetch(); };
   const settingsLoadStatus = settingsQuery.data !== undefined ? "success" : settingsQuery.isError ? "error" : "loading";
@@ -182,10 +193,12 @@ export default function ClipsPanel({ channelId, language }: ModulePanelPropertie
       title={labels.sessionClips}
       className="clips-panel__clips-section"
       headingAction={<div className="clips-panel__refresh-actions">
-        {clipsRefreshFailed ? <div className="clips-panel__refresh-error" role="alert">
-          <span>{labels.clipsLoadError}</span>
-          <Button size="compact" variant="neutral" icon="reload" onClick={reloadClips} disabled={clipsQuery.isFetching}>{labels.retryClips}</Button>
-        </div> : null}
+        <div className="clips-panel__refresh-error" {...(clipsRefreshFailed ? { role: "alert" as const } : { "aria-hidden": true })}>
+          {clipsRefreshFailed ? <>
+            <span>{labels.clipsLoadError}</span>
+            <Button size="compact" variant="neutral" icon="reload" onClick={reloadClips} disabled={clipsQuery.isFetching}>{labels.retryClips}</Button>
+          </> : null}
+        </div>
         <Button
           size="compact"
           variant="subtle"
