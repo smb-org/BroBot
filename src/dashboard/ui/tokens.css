@@ -63,7 +63,7 @@
   --color-orange-border: #76502F;
   --color-orange-text: #FF8A3D;
   --color-selection-border: #4C9AFF;
-  --color-selection-surface: #1C222B;
+  --color-selection-surface: color-mix(in srgb, var(--color-brand) 14%, var(--color-surface));
   --color-focus: #4C9AFF;
   --color-error-surface: #281719;
   --color-error-border: #63353A;
@@ -260,7 +260,7 @@
   --color-orange-border: #76502F;
   --color-orange-text: #FF8A3D;
   --color-selection-border: #4C9AFF;
-  --color-selection-surface: #1C222B;
+  --color-selection-surface: color-mix(in srgb, var(--color-brand) 14%, var(--color-surface));
   --color-focus: #4C9AFF;
   --color-error-surface: #281719;
   --color-error-border: #63353A;
@@ -310,7 +310,7 @@
   --color-orange-border: #94502E;
   --color-orange-text: #FFAA83;
   --color-selection-border: #6a84ff;
-  --color-selection-surface: #1e2a5c;
+  --color-selection-surface: color-mix(in srgb, var(--color-brand) 20%, var(--color-surface));
   --color-focus: #a9b9ff;
   --color-error-surface: #2e1520;
   --color-error-border: #7a2b36;

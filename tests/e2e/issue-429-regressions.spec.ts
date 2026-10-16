@@ -307,7 +307,7 @@ test("operator command settings render as properties and keep the operational sw
   const editor = page.getByRole("region", { name: "Eigenschaften von !hallo" });
   await expect(editor).toBeVisible();
   const row = page.locator(".text-command-row").filter({ hasText: "!hallo" });
-  await expect(row).toHaveCSS("border-left-width", "4px");
+  await expect(row).toHaveCSS("border-left-width", "1px");
   await expect(editor.locator("dl.properties")).toBeVisible();
   await expect(editor.getByText("Hallo {user}! Willkommen im Kanal.", { exact: true })).toBeVisible();
   const chatTarget = editor.locator("dl.properties > div").filter({ hasText: "Chat-Ziel" }).locator("dd");
@@ -362,7 +362,7 @@ test("selected command rows keep their visual highlight after focus leaves", asy
     await expect(row).toHaveAttribute("aria-current", "true");
     await expect(row).not.toHaveAttribute("aria-selected");
     await page.getByRole("textbox", { name: "Antworttext" }).focus();
-    await expect(row).toHaveCSS("border-left-width", "4px");
+    await expect(row).toHaveCSS("border-left-width", "1px");
     const selectedStyle = await row.evaluate((element) => getComputedStyle(element).backgroundColor);
     expect(selectedStyle).not.toBe("rgba(0, 0, 0, 0)");
   }
