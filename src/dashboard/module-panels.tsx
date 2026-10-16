@@ -967,6 +967,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   const mandatoryReason = registered?.mandatoryReason?.[dashboardLanguage()] ?? labels.mandatoryReason;
   const enabled = mandatory || moduleState?.enabled === true;
   const manageable = canManageModules(ownRole);
+  const headerLockHint = manageable ? null : texts.module.managementLocked;
   const disabledReason = mandatory ? mandatoryReason : manageable ? null : texts.module.managementLocked;
   const switchDisabled = mandatory || registered === undefined || moduleState === undefined;
   const missingScopes = moduleState?.missingBroadcasterScopes ?? [];
@@ -1029,7 +1030,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
             switchDisabled: !manageable || switchDisabled || busy || mandatory,
             switchBusy: busy,
             ...(mandatory ? { moduleSwitch: <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} /> } : {}),
-            ...(disabledReason === null || (registered?.panelManagesSettings && moduleState?.enabled !== false && moduleId !== "clips") ? {} : { lockHint: disabledReason }),
+            ...(headerLockHint === null || (registered?.panelManagesSettings && moduleState?.enabled !== false && moduleId !== "clips") ? {} : { lockHint: headerLockHint }),
           })}
           {...(moduleId === "text_commands" ? {
             pageActions: <TextCommandChatCommandHelp channelId={channelId} />,

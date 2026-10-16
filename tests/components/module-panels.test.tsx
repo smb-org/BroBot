@@ -325,7 +325,8 @@ describe("Module panel loader", () => {
     expect(status.closest(".module-locked-status")).toHaveAttribute("title", "Ereignisdaten sind immer verfügbar.");
     expect(status.closest(".module-locked-status")).toHaveAttribute("aria-description", "Ereignisdaten sind immer verfügbar.");
     expect(status.closest(".module-locked-status")).toHaveAttribute("aria-label", "Läuft · immer aktiv: Ereignisdaten sind immer verfügbar.");
-    expect(screen.getByText("Ereignisdaten sind immer verfügbar.")).toBeVisible();
+    expect(screen.queryByText("Ereignisdaten sind immer verfügbar.")).not.toBeInTheDocument();
+    expect(document.querySelector(".module-detail-heading .page-header__meta")).toBeNull();
     expect(screen.queryByText("Module werden geladen …")).not.toBeInTheDocument();
   });
 

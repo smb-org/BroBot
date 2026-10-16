@@ -1,7 +1,7 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useState, type KeyboardEvent, type ReactElement, type SyntheticEvent } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { apiSourceFailureText, dashboardTexts } from "../../../dashboard/locale";
+import { apiSourceFailureText, dashboardTexts, formatTimestamp } from "../../../dashboard/locale";
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import {
   Badge,
@@ -14,6 +14,7 @@ import {
   InspectorSection,
   LoadState,
   LoadStateLines,
+  LockedReason,
   ListToolbar,
   PageHeader,
   StepDialog,
@@ -74,6 +75,7 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | undefined>();
   const selectedSource = selectedName === null ? undefined : sources.find((source) => source.name === selectedName);
+  const editorReadOnlyReasonId = `api-source-editor-read-only-${channelId}`;
 
   const sourceDraftDirty = draft !== null && draftOriginal !== null && !sameDraft(draft, draftOriginal);
   const discardEditor = (): void => {
@@ -144,7 +146,7 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
   };
 
   const save = async (): Promise<string | null> => {
-    if (draft === null || !canEdit || busy || (editingName === null && creationStep !== 3)) return labels.saveFailed;
+    if (draft === null || !canEdit || busy || (editingName === null && (creationStep !== 3 || draft.name.trim().length === 0))) return labels.saveFailed;
     const normalized = { ...draft, name: draft.name.trim(), url: draft.url.trim(), expression: draft.expression.trim() };
     setBusy(true);
     setFormError(undefined);
@@ -229,6 +231,30 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
   };
 
   const testAttempted = testResult !== undefined || testRequestError !== undefined;
+  const submitCreationStep = (event: SyntheticEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    if (draft === null || !canEdit || busy || testing) return;
+    if (creationStep === 0) {
+      if (draft.url.trim().length > 0) setCreationStep(1);
+      return;
+    }
+    if (creationStep === 1) {
+      setCreationStep(2);
+      return;
+    }
+    if (creationStep === 2) {
+      if (testAttempted) setCreationStep(3);
+      else void testDraft();
+      return;
+    }
+    if (draft.name.trim().length === 0) return;
+    void save();
+  };
+  const submitWizardOnShortcut = (event: KeyboardEvent<HTMLFormElement>): void => {
+    if (event.defaultPrevented || (!event.ctrlKey && !event.metaKey) || event.key !== "Enter" || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    event.currentTarget.requestSubmit();
+  };
   const loadStatus = query.data === undefined ? query.isPending ? "loading" : "error" : sources.length === 0 ? "empty" : "success";
   const statusFor = (source: ApiSource): { label: string; tone: "neutral" | "green" | "red" } => {
     if (source.lastStatus === null) return { label: labels.statusUntested, tone: "neutral" };
@@ -254,7 +280,7 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
           <Button
             className="api-source-panel__select"
             variant={selectedName === source.name ? "secondary" : "subtle"}
-            ariaLabel={source.name}
+            ariaLabel={`${source.name}, ${status.label}`}
             ariaPressed={selectedName === source.name}
             onClick={() => { setSelectedName(source.name); }}
           >
@@ -262,7 +288,7 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
               <strong className="mono">{source.name}</strong>
               <span className="muted api-source-panel__host">{new URL(source.url).hostname}</span>
             </span>
-            <span className="api-source-panel__row-status" aria-hidden="true"><Badge tone={status.tone}>{status.label}</Badge></span>
+            <span className="api-source-panel__row-status"><Badge tone={status.tone}>{status.label}</Badge></span>
           </Button>
         </li>;
       })}
@@ -282,15 +308,15 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
         onClick={() => { startEdit(selectedSource); }}>{labels.editSource}</Button>}
     />
     <div className="api-source-panel__detail-content">
-      <InspectorFieldRow label={labels.url} help={labels.urlHint}>
-        <a className="api-source-panel__url" href={selectedSource.url} target="_blank" rel="noreferrer">{selectedSource.url}</a>
+      <InspectorFieldRow className="inspector-field-row--stacked" label={labels.url} help={labels.urlHint}>
+        <a className="api-source-panel__url mono" href={selectedSource.url} target="_blank" rel="noreferrer">{selectedSource.url}</a>
       </InspectorFieldRow>
       <InspectorSection title={labels.sourceExpression}>
-        <pre className="api-source-panel__expression">{selectedSource.expression || labels.noExpression}</pre>
+        <pre className="api-source-panel__expression mono">{selectedSource.expression || labels.noExpression}</pre>
       </InspectorSection>
       <div className="api-source-panel__status-detail">
         <Badge tone={statusFor(selectedSource).tone}>{statusFor(selectedSource).label}</Badge>
-        <span className="muted" title={selectedSource.lastFetchedAt ?? undefined}>{selectedSource.lastFetchedAt ?? labels.notTested}</span>
+        <span className="muted">{selectedSource.lastFetchedAt === null ? labels.notTested : <time dateTime={selectedSource.lastFetchedAt}>{labels.lastQueried} {formatTimestamp(selectedSource.lastFetchedAt)}</time>}</span>
         {selectedSource.lastStatus === "error" ? <p className="api-source-panel__failure-detail" role="note">{apiSourceFailureText(selectedSource.lastError ?? "unreachable", locale)}</p> : null}
       </div>
     </div>
@@ -306,36 +332,34 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
     description={labels.stepCounter(creationStep + 1, 4)}
     pending={busy || testing}
     onClose={requestCloseEditor}
+    onSubmit={submitCreationStep}
+    onKeyDown={submitWizardOnShortcut}
     footer={<div className="form-actions api-source-panel__step-actions">
       {creationStep === 0
         ? <Button variant="subtle" disabled={testing || busy} onClick={requestCloseEditor}>{labels.cancel}</Button>
         : <Button variant="neutral" disabled={testing || busy} onClick={() => { setCreationStep((step) => Math.max(0, step - 1)); }}>{labels.back}</Button>}
-      {creationStep < 3 ? <Button variant="primary"
-        disabled={testing || busy || (creationStep === 0 && (draft?.url.trim().length ?? 0) === 0) || (creationStep === 2 && !testAttempted)}
-        onClick={() => { setCreationStep((step) => Math.min(3, step + 1)); }}>{labels.continue}</Button>
-        : <Button variant="primary" disabled={busy || draft?.name.trim().length === 0} onClick={() => { void save(); }}>{labels.save}</Button>}
+      {creationStep < 3 ? <Button type="submit" variant="primary"
+        disabled={!canEdit || testing || busy || (creationStep === 0 && (draft?.url.trim().length ?? 0) === 0) || (creationStep === 2 && !testAttempted)}>{labels.continue}</Button>
+        : <Button type="submit" variant="primary" disabled={!canEdit || busy || draft?.name.trim().length === 0}>{labels.save}</Button>}
     </div>}
   >
-    {draft === null ? null : <div className="api-source-panel__step" data-step={String(creationStep + 1)} onKeyDown={(event) => {
-      if (creationStep !== 0 || event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
-      event.preventDefault();
-      setCreationStep(1);
-    }}>
+    {draft === null ? null : <div className="api-source-panel__step" data-step={String(creationStep + 1)}>
+      {!canEdit ? <LockedReason id={editorReadOnlyReasonId} reason={labels.readOnlyReason} /> : null}
       <h3>{stepTitle}</h3>
       {creationStep === 0 ? <InspectorFieldRow className="inspector-field-row--stacked" label={labels.url} help={labels.urlHint}>
-        <Field label={labels.url} labelHidden value={draft.url} onChange={(url) => updateDraft({ url })} disabled={busy || testing} mono />
+        <Field label={labels.url} labelHidden value={draft.url} onChange={(url) => updateDraft({ url })} disabled={!canEdit || busy || testing} mono />
       </InspectorFieldRow> : null}
       {creationStep === 1 ? <InspectorFieldRow className="inspector-field-row--stacked" label={labels.expression} help={labels.expressionHint}>
         <ExpressionField id="api-source-expression" label={labels.expression} value={draft.expression}
           onChange={(expression) => updateDraft({ expression })} maxLength={512} language={locale}
-          messages={labels.expressionPicker} disabled={busy || testing} />
+          messages={labels.expressionPicker} disabled={!canEdit || busy || testing} />
       </InspectorFieldRow> : null}
       {creationStep === 2 ? <>
         <div className="api-source-panel__test-summary">
-          <p className="muted"><span>{labels.url}</span><code>{draft.url || "—"}</code></p>
-          <p className="muted"><span>{labels.expression}</span><code>{draft.expression || labels.noExpression}</code></p>
+          <p className="muted"><span>{labels.url}</span><code className="mono">{draft.url || "—"}</code></p>
+          <p className="muted"><span>{labels.expression}</span><code className="mono">{draft.expression || labels.noExpression}</code></p>
         </div>
-        <Button className="api-source-panel__test-button" variant="secondary" type="button" disabled={busy || testing || draft.url.trim().length === 0} onClick={() => { void testDraft(); }}>
+        <Button className="api-source-panel__test-button" variant="secondary" type="button" disabled={!canEdit || busy || testing || draft.url.trim().length === 0} onClick={() => { void testDraft(); }}>
           {testing ? labels.testing : labels.test}
         </Button>
         <div data-testid="api-source-test-result" aria-live="polite" className="api-source-panel__test-result">
@@ -347,14 +371,14 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
           </p> : null}
           {testResult?.status === "ok" ? <>
             <p role="status">{labels.testSucceeded(testResult.httpStatus, testResult.bytes)}</p>
-            <pre>{JSON.stringify({ json: testResult.json, value: testResult.value }, null, 2)}</pre>
+            <pre className="mono">{JSON.stringify({ json: testResult.json, value: testResult.value }, null, 2)}</pre>
           </> : null}
         </div>
       </> : null}
       {creationStep === 3 ? <InspectorFieldRow className="inspector-field-row--stacked" label={labels.name} help={labels.nameHint}>
         <Field label={labels.name} labelHidden value={draft.name}
           onChange={(name) => { updateDraft({ name: name.toLowerCase().replace(/[^a-z0-9_]/gu, "").slice(0, 32) }); }}
-          disabled={busy || testing} />
+          disabled={!canEdit || busy || testing} required />
       </InspectorFieldRow> : null}
       {formError === undefined ? null : <p className="api-source-test-result__error" role="alert">{formError}</p>}
     </div>}
@@ -374,7 +398,7 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
           onSearchChange={setSearchTerm}
           createPlacement="after-search"
           create={{ label: labels.addSource, onClick: startCreate, disabled: busy || !canEdit,
-            ...(!canEdit ? { reason: labels.readOnlyReason, reasonId: "api-source-read-only-reason" } : {}) }}
+            ...(!canEdit && draft === null ? { reason: labels.readOnlyReason, reasonId: "api-source-read-only-reason", reasonVisible: false } : {}) }}
         />}
       list={list}
       detail={detail}
@@ -391,27 +415,28 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
       onConfirm={() => { void save(); }}
       onCancel={requestCloseEditor}
       pending={busy || testing}
-      confirmDisabled={draft === null || draft.name.trim().length === 0 || draft.url.trim().length === 0 || testing}
+      confirmDisabled={!canEdit || draft === null || draft.name.trim().length === 0 || draft.url.trim().length === 0 || testing}
       {...(formError === undefined ? {} : { error: formError })}
     >
       {draft === null || editingName === null ? null : <div className="module-stack">
+        {!canEdit ? <LockedReason id={editorReadOnlyReasonId} reason={labels.readOnlyReason} /> : null}
         <InspectorFieldRow label={labels.name} help={labels.nameHint}>
           <Field label={labels.name} value={draft.name} onChange={() => {}} disabled readOnly />
         </InspectorFieldRow>
         <InspectorFieldRow label={labels.url} help={labels.urlHint}>
-          <Field label={labels.url} value={draft.url} onChange={(url) => updateDraft({ url })} disabled={busy || testing} mono />
+          <Field label={labels.url} value={draft.url} onChange={(url) => updateDraft({ url })} disabled={!canEdit || busy || testing} mono />
         </InspectorFieldRow>
         <InspectorFieldRow label={labels.expression} help={labels.expressionHint}>
           <ExpressionField id="api-source-expression" label={labels.expression} value={draft.expression}
             onChange={(expression) => updateDraft({ expression })} maxLength={512} language={locale}
-            messages={labels.expressionPicker} disabled={busy || testing} />
+            messages={labels.expressionPicker} disabled={!canEdit || busy || testing} />
         </InspectorFieldRow>
         {draft.expression.trim().length === 0 ? <p className="api-source-panel__whole-response muted" aria-live="polite">{labels.noExpression}</p> : null}
         <div className="form-actions">
-          <Button type="button" disabled={busy || testing || draft.url.trim().length === 0} onClick={() => { void testDraft(); }}>
+          <Button type="button" disabled={!canEdit || busy || testing || draft.url.trim().length === 0} onClick={() => { void testDraft(); }}>
             {testing ? labels.testing : labels.test}
           </Button>
-          <Button type="button" danger="subtle" disabled={busy || testing} onClick={() => { setDeleteError(undefined); setConfirmDeleteOpen(true); }}>{labels.delete}</Button>
+          <Button type="button" danger="subtle" disabled={!canEdit || busy || testing} onClick={() => { setDeleteError(undefined); setConfirmDeleteOpen(true); }}>{labels.delete}</Button>
         </div>
         <div data-testid="api-source-test-result" aria-live="polite" className="api-source-panel__test-result">
           {testRequestError === undefined ? null : <p className="api-source-test-result__error" role="alert">{testRequestError}</p>}
@@ -422,7 +447,7 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
           </p> : null}
           {testResult?.status === "ok" ? <>
             <p role="status">{labels.testSucceeded(testResult.httpStatus, testResult.bytes)}</p>
-            <pre>{JSON.stringify({ json: testResult.json, value: testResult.value }, null, 2)}</pre>
+            <pre className="mono">{JSON.stringify({ json: testResult.json, value: testResult.value }, null, 2)}</pre>
           </> : null}
         </div>
       </div>}

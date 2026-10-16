@@ -236,7 +236,7 @@ test("data sources use one shell heading, shared collection layout, mono names, 
     return Math.abs(rowBounds.top + rowBounds.height / 2 - (badgeBounds.top + badgeBounds.height / 2)) <= 1;
   });
   expect(badgeAlignment).toBe(true);
-  await expect(page.getByRole("button", { name: "wechselkurs" })).toContainText("Fehler");
+  await expect(page.getByRole("button", { name: /wechselkurs/u })).toContainText("Fehler");
   const nameStyle = await page.locator(".api-source-panel__row .mono").first().evaluate((element) => {
     const style = getComputedStyle(element);
     return { family: style.fontFamily, weight: style.fontWeight };
@@ -244,7 +244,7 @@ test("data sources use one shell heading, shared collection layout, mono names, 
   expect(nameStyle.family).toContain("IBM Plex Mono");
   expect(nameStyle.weight).toBe("700");
 
-  await page.getByRole("button", { name: "wetter" }).click();
+  await page.getByRole("button", { name: /wetter/u }).click();
   const tokenChip = page.locator(".collection-page__detail .ui-token-chip");
   await expect(tokenChip).toContainText("{api.wetter}");
   await expect(tokenChip).toHaveAccessibleName(/\{api\.wetter\} kopieren/u);
@@ -269,20 +269,27 @@ test("operators can read source properties and see a disabled edit action with o
   await installSourceRoute(page, "operator");
   await page.goto(`/channels/${channelId}/modules/api_source`);
 
-  await page.getByRole("button", { name: "wetter" }).click();
+  await page.getByRole("button", { name: /wetter/u }).click();
   await expect(page.getByRole("button", { name: "Quelle bearbeiten" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Quelle anlegen" })).toBeDisabled();
+  const headerReason = page.locator(".module-detail-heading .page-header__meta .page-header__lock");
+  await expect(headerReason).toHaveCount(1);
+  await expect(headerReason).toContainText("Nur Broadcaster und Verwalter dürfen Module ändern.");
   const reason = page.locator(".api-source-panel .list-toolbar__reason");
   await expect(reason).toHaveCount(1);
+  await expect(reason).toHaveClass(/sr-only/u);
   await expect(page.getByRole("button", { name: "Quelle bearbeiten" })).toHaveAttribute("aria-describedby", "api-source-read-only-reason");
   await expect(page.getByText("https://wetter.example.test/current")).toBeVisible();
-  const reasonBounds = await reason.boundingBox();
-  const statusBounds = await page.locator(".api-source-panel__list-toolbar .list-toolbar__status").boundingBox();
-  expect(reasonBounds).not.toBeNull();
-  expect(statusBounds).not.toBeNull();
-  if (reasonBounds !== null && statusBounds !== null) {
-    expect(reasonBounds.y).toBeGreaterThanOrEqual(statusBounds.y);
-    expect(reasonBounds.y + reasonBounds.height).toBeLessThanOrEqual(statusBounds.y + statusBounds.height + 1);
+  const status = page.locator(".api-source-panel__list-toolbar .list-toolbar__status");
+  expect(await status.evaluate((element) => getComputedStyle(element).display)).toBe("none");
+  const toolbarBounds = await page.locator(".api-source-panel__list-toolbar").boundingBox();
+  const rowBounds = await page.locator(".api-source-panel__row").first().boundingBox();
+  expect(toolbarBounds).not.toBeNull();
+  expect(rowBounds).not.toBeNull();
+  if (toolbarBounds !== null && rowBounds !== null) {
+    const gap = rowBounds.y - (toolbarBounds.y + toolbarBounds.height);
+    expect(gap).toBeGreaterThanOrEqual(0);
+    expect(gap).toBeLessThanOrEqual(14);
   }
 });
 
@@ -384,7 +391,7 @@ test("source wizard displays typed test failures inside its bounded result panel
 test("editing a source guards both dialog close and dashboard navigation", async ({ page }) => {
   await installSourceRoute(page);
   await page.goto(`/channels/${channelId}/modules/api_source`);
-  await page.getByRole("button", { name: "wetter" }).click();
+  await page.getByRole("button", { name: /wetter/u }).click();
   await page.getByRole("button", { name: "Quelle bearbeiten" }).click();
   const editor = page.getByRole("dialog", { name: "Quelle bearbeiten" });
   const url = editor.getByRole("textbox", { name: "Webadresse" });

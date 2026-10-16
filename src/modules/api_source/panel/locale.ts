@@ -28,6 +28,7 @@ export interface ApiSourcePanelTexts {
   testSucceeded: (httpStatus: number, bytes: number) => string;
   testRequestFailed: string;
   notTested: string;
+  lastQueried: string;
   statusOk: string;
   statusError: string;
   statusUntested: string;
@@ -85,6 +86,7 @@ const texts: Readonly<Record<ModuleLanguage, ApiSourcePanelTexts>> = {
     testSucceeded: (httpStatus, bytes) => `Erfolgreich · HTTP ${String(httpStatus)} · ${String(bytes)} Bytes`,
     testRequestFailed: "Der Test konnte nicht ausgeführt werden.",
     notTested: "Noch nicht abgerufen",
+    lastQueried: "Zuletzt abgefragt",
     statusOk: "OK",
     statusError: "Fehler",
     statusUntested: "Neu",
@@ -140,6 +142,7 @@ const texts: Readonly<Record<ModuleLanguage, ApiSourcePanelTexts>> = {
     testSucceeded: (httpStatus, bytes) => `Success · HTTP ${String(httpStatus)} · ${String(bytes)} bytes`,
     testRequestFailed: "The test request could not be completed.",
     notTested: "Not fetched yet",
+    lastQueried: "Last fetched",
     statusOk: "OK",
     statusError: "Error",
     statusUntested: "New",
