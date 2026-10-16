@@ -33,4 +33,38 @@ describe("BELABOX settings editor", () => {
 
     expect(latest).toMatchObject({ mode: "on_demand", intervalSeconds: 30 });
   });
+
+  it("shows nested chat alert settings in operator properties", () => {
+    const copy = belaboxSettingsEditorCatalog("en");
+    render(<UiProvider><SettingsEditor
+      spec={settingsEditor.spec}
+      sectionId="alerts"
+      settings={BELABOX_DEFAULT_SETTINGS}
+      onChange={() => undefined}
+      texts={copy}
+      templateMessages={copy.templateMessages}
+      readOnly
+      enabledLabel={copy.enabledLabel}
+      disabledLabel={copy.disabledLabel}
+    /></UiProvider>);
+
+    const properties = document.querySelector(".ui-settings-editor__readonly-sections");
+    expect(properties).not.toBeNull();
+    const nestedRows = [
+      ["Chat cooldown", "300 s"],
+      ["Low bitrate text", BELABOX_DEFAULT_SETTINGS.lowText],
+      ["Low bitrate target", "source_only"],
+      ["Disconnect text", BELABOX_DEFAULT_SETTINGS.disconnectText],
+      ["Disconnect target", "source_only"],
+      ["Recovery text", BELABOX_DEFAULT_SETTINGS.recoveryText],
+      ["Recovery target", "source_only"],
+    ] as const;
+    for (const [label, value] of nestedRows) {
+      const row = within(properties as HTMLElement).getByText(label).closest("div");
+      expect(row).not.toBeNull();
+      expect(row).toHaveTextContent(value);
+    }
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
+  });
 });

@@ -1070,7 +1070,7 @@ describe("Module panel loader", () => {
     renderSettingsFixture(fetcher, "operator");
 
     expect(await screen.findByText("Nur Verwalter dürfen Fixture-Einstellungen ändern.")).toBeInTheDocument();
-    const properties = document.querySelector("dl.ui-settings-editor__properties");
+    const properties = document.querySelector(".ui-settings-editor__readonly-sections");
     expect(properties).not.toBeNull();
     expect(within(properties as HTMLElement).getByText("Menge")).toBeInTheDocument();
     expect(within(properties as HTMLElement).getByText("Konto")).toBeInTheDocument();
