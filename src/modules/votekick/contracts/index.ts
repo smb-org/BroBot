@@ -9,6 +9,7 @@ export const VOTEKICK_WINDOW_MS = 10 * 60 * 1000;
 const VOTEKICK_MAX_WINDOW_SECONDS = 180;
 const VOTEKICK_MIN_WINDOW_SECONDS = 30;
 export const VOTEKICK_HISTORY_DAYS = 14;
+export const VOTEKICK_LIFT_CLAIM_LEASE_MS = 5 * 60 * 1_000;
 
 export const votekickSettingsSchema = z.object({
   starterMinRole: z.enum(["viewer", "subscriber", "vip", "moderator", "broadcaster"]).default("vip"),
@@ -74,4 +75,5 @@ export interface Votekick {
   endsAt: string;
   endedAt: string | null;
   liftedAt: string | null;
+  liftClaimedAt: string | null;
 }

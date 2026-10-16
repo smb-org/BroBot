@@ -241,3 +241,35 @@ export const createReadInterleavingDatabase = (
     batch: database.batch.bind(database),
   } as unknown as D1Database;
 };
+
+/** Runs an interleaved mutation immediately before one selected write executes. */
+export const createWriteInterleavingDatabase = (
+  database: TestD1Database,
+  identify: (sql: string) => boolean,
+  beforeWrite: () => Promise<void>,
+): D1Database => {
+  let triggered = false;
+  return {
+    prepare: (sql: string) => {
+      const statement = database.prepare(sql);
+      if (triggered || !identify(sql)) return statement;
+      const wrapped = {
+        bind: (...values: Parameters<TestPreparedStatement["bind"]>) => {
+          statement.bind(...values);
+          return wrapped;
+        },
+        first: <T>() => statement.first<T>(),
+        all: <T>(...typeHint: readonly T[]) => statement.all<T>(...typeHint),
+        run: async () => {
+          if (!triggered) {
+            triggered = true;
+            await beforeWrite();
+          }
+          return statement.run();
+        },
+      };
+      return wrapped;
+    },
+    batch: database.batch.bind(database),
+  } as unknown as D1Database;
+};

@@ -19,15 +19,16 @@ export interface TimeoutDurationRangeFieldsProperties {
   unit?: string;
   disabled?: boolean;
   error?: string;
+  showLabels?: boolean;
   idPrefix: string;
 }
 
 /** The shared fixed-or-random timeout duration editor. */
 export function TimeoutDurationRangeFields({
-  value, onChange, min, max, minimumLabel, maximumLabel, hint,
+  value, onChange, min, max, minimumLabel, maximumLabel, hint, showLabels = false,
   unit = "s", disabled = false, error, idPrefix,
 }: TimeoutDurationRangeFieldsProperties): ReactElement {
-  return <FieldPair>
+  const fields = <FieldPair>
     <UnitInput
       id={`${idPrefix}-minimum`} label={minimumLabel} hint={hint} unit={unit}
       min={min} max={max} step={1} value={value.minSeconds}
@@ -41,4 +42,5 @@ export function TimeoutDurationRangeFields({
       onChange={(maxSeconds) => onChange({ ...value, maxSeconds })}
     />
   </FieldPair>;
+  return showLabels ? <div className="timeout-duration-range-fields timeout-duration-range-fields--visible-labels">{fields}</div> : fields;
 }

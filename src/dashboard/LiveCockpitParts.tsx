@@ -5,8 +5,8 @@ import { canManage, hasRequiredChannelRole, type ChannelRole, type ChannelStream
 import type { PanelEventEntry } from "../panel-contract";
 import { MODULES } from "../modules/registry";
 import type { ModuleLiveTileSnapshot } from "../modules/contract";
-import { cancelVotekick } from "../modules/votekick/panel/service";
-import { closeChatVoting, extendChatVoting } from "../modules/chat_voting/panel/service";
+import { cancelVotekick, liftVotekickTimeout } from "../modules/votekick/panel/service";
+import { approveChatVotingTerm, closeChatVoting, extendChatVoting } from "../modules/chat_voting/panel/service";
 import { snoozeAds } from "../modules/ads/panel/service";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, formatNumber, immediateActionUnavailableReasonText } from "./locale";
 import { moduleName } from "./module-labels";
@@ -67,9 +67,12 @@ export const LiveCockpitTiles = ({
     .filter((snapshot): snapshot is Extract<ModuleLiveTileSnapshot, { kind: "upcoming" }> => snapshot.kind === "upcoming" && Date.parse(snapshot.at) > now)
     .sort((left, right) => Date.parse(left.at) - Date.parse(right.at))
     .slice(0, 12);
+  const recentVotekicks = snapshots.filter((snapshot): snapshot is Extract<ModuleLiveTileSnapshot, { kind: "votekick_recent" }> => snapshot.kind === "votekick_recent");
   const [busy, setBusy] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<{ id: string; target: string } | null>(null);
   const [cancelError, setCancelError] = useState<string | undefined>();
+  const [liftTarget, setLiftTarget] = useState<{ id: string; target: string } | null>(null);
+  const [liftError, setLiftError] = useState<string | undefined>();
   const [snoozeFeedback, setSnoozeFeedback] = useState<{ itemId: string; text: string } | null>(null);
   const roleCanManage = hasRequiredChannelRole(role, "operator");
   const roleCanSnooze = canManage(role);
@@ -115,6 +118,21 @@ export const LiveCockpitTiles = ({
     }
   };
 
+  const approveTerm = async (pollId: string, term: string): Promise<void> => {
+    if (busy || !roleCanManage) return;
+    setBusy(true);
+    try {
+      await approveChatVotingTerm(channelId, pollId, term);
+      onMessage(labels.voteTermApproved);
+      onRefresh();
+    } catch {
+      onMessage(labels.voteTermApprovalFailed);
+      onRefresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const doCancelVotekick = async (): Promise<void> => {
     if (cancelTarget === null || busy) return;
     setBusy(true);
@@ -132,6 +150,22 @@ export const LiveCockpitTiles = ({
         return;
       }
       setCancelError(labels.votekickCancelFailed);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doLiftVotekick = async (): Promise<void> => {
+    if (liftTarget === null || busy || !roleCanManage) return;
+    setBusy(true);
+    setLiftError(undefined);
+    try {
+      await liftVotekickTimeout(channelId, liftTarget.id);
+      setLiftTarget(null);
+      onMessage(labels.votekickLifted);
+      onRefresh();
+    } catch {
+      setLiftError(labels.votekickLiftFailed);
     } finally {
       setBusy(false);
     }
@@ -176,6 +210,7 @@ export const LiveCockpitTiles = ({
               return <div className="live-vote-tile__option" key={`${option.label}-${String(index)}`}>
                 <div className="live-vote-tile__option-label"><strong>{option.label}</strong><span>{labels.voteOptionCount(formatNumber(option.count), String(percent))}</span></div>
                 <div className="live-vote-tile__track"><span style={{ width: `${String(percent)}%` }} /></div>
+                {option.approved === false ? <Button size="compact" variant="subtle" disabled={busy || !roleCanManage} onClick={() => { void approveTerm(running.id, option.label); }}>{labels.approveVoteTerm(option.label)}</Button> : null}
               </div>;
             })}
           </div>
@@ -193,6 +228,16 @@ export const LiveCockpitTiles = ({
         </div>}
     </section>
     <section className="live-cockpit-reserve live-cockpit-next-tile" data-slot="next-up" aria-label={labels.nextUp}>
+      <h2>{labels.recentVotekicks}</h2>
+      {recentVotekicks.length === 0 ? <p>{loading ? labels.liveDataLoading : failed ? labels.liveDataUnavailable : labels.noRecentVotekicks}</p> : <div className="live-cockpit-next-list live-cockpit-next-list--recent">
+        {recentVotekicks.slice(0, 3).map((item) => <div className="live-cockpit-next-item" key={item.id}>
+          <span className="live-cockpit-next-item__icon"><Icon name="vote" size={16} /></span>
+          <span className="live-cockpit-next-item__copy"><strong>{item.target}</strong></span>
+          <time className="live-cockpit-next-item__time" dateTime={item.endedAt}>{formatRelativeTime(item.endedAt, new Date(now), dashboardLanguage(), timeZone).label}</time>
+          <Button size="compact" variant="subtle" disabled={busy || !roleCanManage} onClick={() => { setLiftTarget({ id: item.id, target: item.target }); setLiftError(undefined); }}>{labels.votekickLift}</Button>
+        </div>)}
+      </div>}
+      <ConfirmDialog opened={liftTarget !== null} title={labels.votekickLiftTitle} description={labels.votekickLiftDescription(liftTarget?.target ?? "")} confirmLabel={labels.votekickLift} cancelLabel={dashboardCommonTexts().cancel} onConfirm={() => { void doLiftVotekick(); }} onCancel={() => { if (!busy) setLiftTarget(null); }} pending={busy} danger {...(liftError === undefined ? {} : { error: liftError })} />
       <h2>{labels.nextUp}</h2>
       {upcoming.length === 0 ? <p>{loading ? labels.liveDataLoading : failed ? labels.liveDataUnavailable : labels.noUpcomingItems}</p> : <div className="live-cockpit-next-list">
         {upcoming.map((item) => {

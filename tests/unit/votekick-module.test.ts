@@ -41,6 +41,7 @@ const runningVotekick = (overrides: Partial<Votekick> = {}): Votekick => ({
   endsAt: new Date(Date.now() + 30_000).toISOString(),
   endedAt: null,
   liftedAt: null,
+  liftClaimedAt: null,
   ...overrides,
 });
 
@@ -122,6 +123,49 @@ describe("Votekick module", () => {
     expect(votekickModule.settingsEditor).toBeTypeOf("function");
     expect(votekickModule.panel).toBeUndefined();
     expect(votekickModule.liveTile?.load).toBeTypeOf("function");
+  });
+
+  it.each([3_600_000, -3_600_000])(
+    "uses server time to decide whether a timeout is liftable when the client clock is skewed by %i ms",
+    async (clockOffset) => {
+    const panelService = await import("../../src/modules/votekick/panel/service");
+    const serverNow = now();
+    const serverNowMs = Date.parse(serverNow);
+    const endedRecently = new Date(serverNowMs - 30_000).toISOString();
+    const passed = (overrides: Partial<Votekick> = {}): Votekick => runningVotekick({
+      status: "passed", durationSeconds: 120, endedAt: endedRecently, ...overrides,
+    });
+    const load = vi.spyOn(panelService, "loadVotekickPanel").mockResolvedValue({
+      running: null,
+      now: serverNow,
+      votekicks: [
+        passed({ id: "liftable" }),
+        passed({ id: "no-target", targetUserId: null }),
+        passed({ id: "no-duration", durationSeconds: null }),
+        passed({ id: "no-end", endedAt: null }),
+        passed({ id: "expired", endedAt: new Date(Date.now() - 121_000).toISOString() }),
+        passed({ id: "already-lifted", liftedAt: now() }),
+        passed({
+          id: "in-progress",
+          liftClaimedAt: new Date(Date.parse(serverNow) - 1_000).toISOString(),
+        }),
+        passed({
+          id: "expired-recovery",
+          endedAt: new Date(Date.parse(serverNow) - 180_000).toISOString(),
+          liftClaimedAt: new Date(Date.parse(serverNow) - 5 * 60_000 - 1_000).toISOString(),
+        }),
+        passed({ id: "not-passed", status: "expired" }),
+      ],
+    });
+    const localClock = vi.spyOn(Date, "now").mockReturnValue(serverNowMs + clockOffset);
+
+    try {
+      const snapshots = await votekickModule.liveTile?.load("channel-a", new AbortController().signal);
+      expect(snapshots?.map(({ id }) => id)).toEqual(["liftable", "expired-recovery"]);
+    } finally {
+      localClock.mockRestore();
+      load.mockRestore();
+    }
   });
 
   it("localizes the moderator lookup scope", () => {

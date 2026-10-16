@@ -7,16 +7,14 @@ const preview = (template: string, samples: Readonly<Record<string, string>>): s
 
 const spec: SettingsEditorSpec<VotekickSettings> = {
   sections: [
-    { id: "starter", icon: "tabSettings", fields: [
+    { id: "settings", icon: "tabSettings", note: "thresholdRule", fields: [
       { kind: "roleThreshold", key: "starterMinRole", options: [
         { value: "viewer" }, { value: "subscriber" }, { value: "vip" }, { value: "moderator" }, { value: "broadcaster" },
       ] },
-    ] },
-    { id: "thresholds", icon: "tabSettings", note: "thresholdRule", fields: [
       { kind: "number", key: "minNetVotes", min: 3, max: 100_000, step: 1 },
       { kind: "number", key: "percent", min: 5, max: 100, step: 1, unit: "%" },
       { kind: "number", key: "windowSeconds", min: 30, max: 180, step: 1, unit: "s" },
-      { kind: "timeoutDurationRange", key: "duration", min: 1, max: 3600 },
+      { kind: "timeoutDurationRange", key: "duration", min: 1, max: 3600, showLabels: true },
       { kind: "number", key: "channelCooldownSeconds", min: 60, max: 86400, step: 1, unit: "s" },
       { kind: "number", key: "targetCooldownSeconds", min: 60, max: 86400, step: 1, unit: "s" },
     ] },
@@ -35,6 +33,8 @@ const spec: SettingsEditorSpec<VotekickSettings> = {
 const definition: SettingsEditorDefinition<VotekickSettings> = {
   spec,
   layout: "columns",
+  savePosition: "header",
+  className: "votekick-settings-editor",
   locales: { de: votekickSettingsEditorCatalog("de"), en: votekickSettingsEditorCatalog("en") },
 };
 

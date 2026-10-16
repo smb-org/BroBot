@@ -246,7 +246,7 @@ const isCurrentExpectedTimeout = async (
   userId: string,
   expected: ModerationTimeoutExpectation,
   fetcher: typeof fetch,
-): Promise<boolean | null> => {
+): Promise<boolean | "absent" | null> => {
   if (!Number.isSafeInteger(expected.durationSeconds) || expected.durationSeconds < 1 || expected.durationSeconds > MODERATION_TIMEOUT_MAX_SECONDS) return null;
   const expectedStart = Date.parse(expected.startedAt);
   if (!Number.isFinite(expectedStart)) return null;
@@ -262,7 +262,8 @@ const isCurrentExpectedTimeout = async (
   });
   if (!result.ok || !isTwitchModerationBanRows(result.data.data)) return null;
   const current = result.data.data.find((row) => row.user_id === userId);
-  if (current === undefined || current.moderator_id !== bot.userId || current.reason !== expected.reason) return false;
+  if (current === undefined) return "absent";
+  if (current.moderator_id !== bot.userId || current.reason !== expected.reason) return false;
   const createdAt = Date.parse(current.created_at as string);
   const expiresAt = Date.parse(current.expires_at as string);
   if (!Number.isFinite(createdAt) || !Number.isFinite(expiresAt) || expiresAt <= Date.now() ||
@@ -282,7 +283,9 @@ export const liftModerationBan = (
 ): Promise<ModerationResult> => isCurrentExpectedTimeout(environment, channelId, userId, expected, fetcher)
   .then((matches): Promise<ModerationResult> => matches === true
     ? executeModeration(environment, channelId, { userId, durationSeconds: null, reason: "" }, "DELETE", fetcher)
-    : Promise.resolve(failure(matches === null ? "twitch_error" : "conflict", { target: userId })));
+    : matches === "absent"
+      ? Promise.resolve({ outcome: "applied", reason: null, detail: { target: userId, alreadyAbsent: true } })
+      : Promise.resolve(failure(matches === null ? "twitch_error" : "conflict", { target: userId })));
 
 /** Checks one user against Twitch's channel moderator list; null means lookup failure. */
 export const isTwitchChannelModerator = async (

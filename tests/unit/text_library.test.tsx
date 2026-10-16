@@ -7,6 +7,7 @@ import type { ModuleEvent } from "../../src/modules/contract";
 import { textLibraryModule } from "../../src/modules/text_library";
 import { adsModule } from "../../src/modules/ads";
 import { raidModule } from "../../src/modules/raid";
+import { chatVotingModule } from "../../src/modules/chat_voting";
 import { createFaqRepository } from "../../src/modules/faq/adapters/d1";
 import { createTextCommandRepository } from "../../src/modules/text_commands/adapters/d1";
 import { processTextCommandMessage } from "../../src/modules/text_commands/service";
@@ -581,6 +582,35 @@ describe("text library", () => {
       { kind: "event", label: "ads.automatic" },
       { kind: "event", label: "raid.textLong" },
     ]);
+  });
+
+  it("tracks and rewrites text block references in saved vote result text", async () => {
+    const created = await createBlock("answer", [variant("default", "A reusable answer")]);
+    if (!created.ok) throw new Error("Could not create the saved vote result test block.");
+    const now = new Date(NOW).toISOString();
+    await database.prepare(
+      `INSERT INTO chat_vote_templates
+        (id, channel_id, shortcut, title, labels, free_text_mode, duration_seconds, revision, legacy_alias, last_used_at, created_at, updated_at, result_text)
+       VALUES ('template-dinner', ?, NULL, 'Dinner vote', '["Pizza","Burger"]', NULL, 120, 1, NULL, NULL, ?, ?, 'Result: {text.answer}')`,
+    ).bind(CHANNEL_ID, now, now).run();
+    const sources = await chatVotingModule.templateUsageSources?.(database as unknown as D1Database, CHANNEL_ID) ?? [];
+    const snapshot = await service.list(CHANNEL_ID, sources);
+    expect(snapshot.usages.answer).toEqual([{ kind: "event", label: "chat_voting.Dinner vote" }]);
+
+    const result = await repository.rename({
+      channelId: CHANNEL_ID,
+      name: "response",
+      categoryId: created.block.categoryId,
+      games: [],
+      variants: [variant("default", "A reusable answer")],
+      expectedRevision: created.block.revision,
+      expectedGraphRevision: snapshot.settings.graphRevision,
+      now,
+    }, "answer", ACTOR);
+
+    expect(result).toMatchObject({ ok: true, block: { name: "response" } });
+    expect(await database.prepare("SELECT result_text, revision FROM chat_vote_templates WHERE id = 'template-dinner'").first())
+      .toEqual({ result_text: "Result: {text.response}", revision: 2 });
   });
 
   it("silently ignores a text command when its Twitch game filter does not match", async () => {

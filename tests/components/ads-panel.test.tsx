@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ModulePage } from "../../src/dashboard/module-panels";
@@ -106,10 +106,14 @@ describe("Ad settings editor declaration", () => {
     expect(screen.getByText("Nur Broadcaster und Verwalter dürfen den Werbeplan aktualisieren.")).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: /Snooze · 2 verfügbar/ })).toBeDisabled();
     expect(screen.getByText("Nur Broadcaster und Verwalter dürfen Werbepausen verschieben.")).toBeInTheDocument();
-    const properties = document.querySelector("dl.ui-settings-editor__properties");
-    expect(properties).not.toBeNull();
-    expect(within(properties as HTMLElement).getByText("Automatische Werbepause")).toBeInTheDocument();
-    expect(within(properties as HTMLElement).getByText("Werbepause beginnt")).toBeInTheDocument();
+    const properties = document.querySelectorAll("dl.ui-settings-editor__properties");
+    expect(properties.length).toBeGreaterThan(1);
+    const allProperties = [...properties].map((list) => list.textContent).join(" ");
+    expect(allProperties).toContain("Automatische Werbepause");
+    expect(allProperties).toContain("Werbepause beginnt");
+    expect(allProperties).toContain("Vorwarnung vor der Werbung");
+    expect(allProperties).toContain("Aus");
+    expect(allProperties).toContain("Vorlaufzeit");
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Ansagen speichern" })).not.toBeInTheDocument();
   });

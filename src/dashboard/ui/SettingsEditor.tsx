@@ -23,7 +23,7 @@ import { RuleNote } from "./RuleNote";
 
 export type SettingsFieldSpec<Settings> =
   | { kind: "number"; key: keyof Settings & string; unit?: string; min: number; max: number; step: number; validate?: (value: number, settings: Settings) => boolean }
-  | { kind: "timeoutDurationRange"; key: keyof Settings & string; min: number; max: number }
+  | { kind: "timeoutDurationRange"; key: keyof Settings & string; min: number; max: number; showLabels?: boolean }
   | { kind: "text"; key: keyof Settings & string; prefix?: string; maxLength?: number; lengthUnit?: "utf16" | "codePoints"; optional?: boolean; validate?: (value: string) => boolean }
   | { kind: "template"; key: keyof Settings & string; minRows?: number; optional?: boolean; preview: (template: string, samples: Readonly<Record<string, string>>) => string }
   | { kind: "chatTarget"; key: keyof Settings & string; allowed?: readonly (ChatOutputTarget | "channel_default")[] }
@@ -88,6 +88,8 @@ export interface SettingsEditorDefinition<Settings> {
   spec: SettingsEditorSpec<Settings>;
   locales: Readonly<Record<"de" | "en", SettingsEditorCatalog>>;
   layout?: "tabs" | "columns";
+  savePosition?: "header" | "footer";
+  className?: string;
 }
 
 export interface SettingsEditorProps<Settings extends object> {
@@ -107,9 +109,6 @@ export interface SettingsEditorProps<Settings extends object> {
   onIssuesChange?: (key: keyof Settings & string, issues: { unknown: readonly string[]; worstCaseExceeded: boolean }) => void;
   idPrefix?: string;
 }
-
-const flattenFields = <Settings,>(fields: readonly SettingsFieldSpec<Settings>[]): SettingsFieldSpec<Settings>[] =>
-  fields.flatMap((field) => [field, ...(field.kind === "switchCard" && field.children !== undefined ? flattenFields(field.children) : [])]);
 
 export function SettingsEditor<Settings extends object>({
   spec,
@@ -222,6 +221,7 @@ export function SettingsEditor<Settings extends object>({
             minimumLabel={copy.minimumLabel ?? copy.label}
             maximumLabel={copy.maximumLabel ?? copy.label}
             hint={copy.hint}
+            {...(field.showLabels === undefined ? {} : { showLabels: field.showLabels })}
             disabled={disabled}
             {...(copy.unit === undefined ? {} : { unit: copy.unit })}
             {...(error === undefined ? {} : { error })}
@@ -349,16 +349,33 @@ export function SettingsEditor<Settings extends object>({
 
   if (readOnly) {
     return (
-      <InspectorSection title={section === undefined ? "" : texts.sections[section.id]}>
-        {section?.note === undefined || texts.notes?.[section.note] === undefined ? null : <RuleNote>{texts.notes[section.note]}</RuleNote>}
-        <dl className="properties ui-settings-editor__properties">
-          {flattenFields(section?.fields ?? spec.sections.flatMap((candidate) => candidate.fields)).map((field) => {
-            const copy = texts.fields[field.key];
-            if (copy === undefined) return null;
-            return <div key={field.key}><dt>{copy.label}</dt><dd>{renderReadOnlyField(field, copy, settings[field.key], enabledLabel, disabledLabel)}</dd></div>;
-          })}
-        </dl>
-      </InspectorSection>
+      <div className="ui-settings-editor__readonly-sections">
+        {spec.sections.map((candidate) => <InspectorSection title={texts.sections[candidate.id]} key={candidate.id}>
+          {candidate.note === undefined || texts.notes?.[candidate.note] === undefined ? null : <RuleNote>{texts.notes[candidate.note]}</RuleNote>}
+          <dl className="properties ui-settings-editor__properties">
+            {candidate.fields.map((field) => {
+              const copy = texts.fields[field.key];
+              if (copy === undefined) return null;
+              const value = settings[field.key];
+              return <div key={field.key}>
+                <dt>{copy.label}</dt>
+                <dd>{field.kind === "switchCard" && field.children !== undefined ? <>
+                  <span className="ui-settings-editor__readonly-switch">{value === true ? enabledLabel : disabledLabel}</span>
+                  <dl className="ui-settings-editor__readonly-children">
+                    {field.children.map((child) => {
+                      const childCopy = texts.fields[child.key];
+                      return childCopy === undefined ? null : <div key={child.key}>
+                        <dt>{childCopy.label}</dt>
+                        <dd>{renderReadOnlyField(child, childCopy, settings[child.key], enabledLabel, disabledLabel)}</dd>
+                      </div>;
+                    })}
+                  </dl>
+                </> : renderReadOnlyField(field, copy, value, enabledLabel, disabledLabel)}</dd>
+              </div>;
+            })}
+          </dl>
+        </InspectorSection>)}
+      </div>
     );
   }
 

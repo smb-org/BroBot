@@ -1121,6 +1121,16 @@ export interface DashboardTexts {
     voteChanged: string;
     voteEnded: string;
     voteEndFailed: string;
+    approveVoteTerm: (term: string) => string;
+    voteTermApproved: string;
+    voteTermApprovalFailed: string;
+    recentVotekicks: string;
+    noRecentVotekicks: string;
+    votekickLift: string;
+    votekickLiftTitle: string;
+    votekickLiftDescription: (target: string) => string;
+    votekickLifted: string;
+    votekickLiftFailed: string;
     votekickVotes: (yes: string, no: string, threshold: string) => string;
     votekickCancel: string;
     votekickCancelTitle: string;
@@ -1552,6 +1562,16 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       voteChanged: "Die Abstimmung wurde inzwischen ersetzt. Bitte prüfe den aktuellen Stand.",
       voteEnded: "Abstimmung beendet.",
       voteEndFailed: "Abstimmung konnte nicht beendet werden.",
+      approveVoteTerm: (term) => `Begriff freigeben: ${term}`,
+      voteTermApproved: "Begriff freigegeben.",
+      voteTermApprovalFailed: "Begriff konnte nicht freigegeben werden.",
+      recentVotekicks: "Kürzlich beendete Votekicks",
+      noRecentVotekicks: "Keine offenen Timeouts aus Votekicks.",
+      votekickLift: "Timeout aufheben",
+      votekickLiftTitle: "Timeout aufheben?",
+      votekickLiftDescription: (target) => `Der Timeout für ${target} wird aufgehoben.`,
+      votekickLifted: "Timeout aufgehoben.",
+      votekickLiftFailed: "Timeout konnte nicht aufgehoben werden.",
       votekickVotes: (yes, no, threshold) => `Ja ${yes} · Nein ${no} · Schwelle ${threshold}`,
       votekickCancel: "Votekick abbrechen",
       votekickCancelTitle: "Votekick abbrechen?",
@@ -1970,6 +1990,16 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       voteChanged: "This vote has been replaced. Check the current vote and try again.",
       voteEnded: "Vote ended.",
       voteEndFailed: "The vote could not be ended.",
+      approveVoteTerm: (term) => `Approve term: ${term}`,
+      voteTermApproved: "Term approved.",
+      voteTermApprovalFailed: "The term could not be approved.",
+      recentVotekicks: "Recently completed votekicks",
+      noRecentVotekicks: "No active votekick timeouts to lift.",
+      votekickLift: "Lift timeout",
+      votekickLiftTitle: "Lift timeout?",
+      votekickLiftDescription: (target) => `The timeout for ${target} will be lifted.`,
+      votekickLifted: "Timeout lifted.",
+      votekickLiftFailed: "The timeout could not be lifted.",
       votekickVotes: (yes, no, threshold) => `Yes ${yes} · No ${no} · Threshold ${threshold}`,
       votekickCancel: "Cancel votekick",
       votekickCancelTitle: "Cancel votekick?",

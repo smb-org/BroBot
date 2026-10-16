@@ -448,7 +448,6 @@ describe("moderation actions", () => {
   });
 
   it.each([
-    ["timeout not applied", null],
     ["natural expiry", "expired"],
     ["replacement by a different moderator", "different_moderator"],
     ["replacement by a different sanction", "different_reason"],
@@ -459,7 +458,7 @@ describe("moderation actions", () => {
       await seedBroadcasterIdentity(database);
       const { environment } = environmentFor(database);
       const startedAt = new Date(Date.now() - 5_000).toISOString();
-      const currentBan = variant === null ? [] : [{
+      const currentBan = [{
         user_id: TARGET_USER_ID,
         moderator_id: variant === "different_moderator" ? "4000004" : BOT_USER_ID,
         reason: variant === "different_reason" ? "Different sanction" : "Votekick (3:0) · ballot-1",
@@ -477,6 +476,43 @@ describe("moderation actions", () => {
         reason: "Votekick (3:0) · ballot-1", durationSeconds: 120, startedAt,
       }, fetcher)).resolves.toMatchObject({ outcome: "rejected", reason: "conflict" });
       expect(fetcher).toHaveBeenCalledTimes(1);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("treats a Votekick timeout already absent from Twitch as an idempotent lift", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedChannel(database);
+      await seedBroadcasterIdentity(database);
+      const { environment } = environmentFor(database);
+      const startedAt = new Date(Date.now() - 5_000).toISOString();
+      const fetcher = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{
+          user_id: TARGET_USER_ID,
+          moderator_id: BOT_USER_ID,
+          reason: "Votekick (3:0) · ballot-1",
+          created_at: startedAt,
+          expires_at: new Date(Date.parse(startedAt) + 120_000).toISOString(),
+        }] }), { status: 200, headers: { "content-type": "application/json" } }))
+        .mockResolvedValueOnce(new Response(null, { status: 204 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }));
+      const expectation = {
+        reason: "Votekick (3:0) · ballot-1",
+        durationSeconds: 120,
+        startedAt,
+      };
+
+      const firstLift = await liftModerationBan(environment, CHANNEL_ID, TARGET_USER_ID, expectation, fetcher);
+      expect(firstLift).toMatchObject({ outcome: "applied" });
+      expect(firstLift.detail).not.toHaveProperty("alreadyAbsent");
+      await expect(liftModerationBan(environment, CHANNEL_ID, TARGET_USER_ID, expectation, fetcher))
+        .resolves.toMatchObject({ outcome: "applied", detail: { alreadyAbsent: true } });
+      expect(fetcher).toHaveBeenCalledTimes(3);
     } finally {
       database.close();
     }

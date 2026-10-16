@@ -16,6 +16,7 @@ interface VotekickRow {
   expires_at: string;
   ended_at: string | null;
   lifted_at: string | null;
+  lift_claimed_at: string | null;
 }
 
 const mapRow = (row: VotekickRow): Votekick => ({
@@ -33,10 +34,11 @@ const mapRow = (row: VotekickRow): Votekick => ({
   endsAt: row.expires_at,
   endedAt: row.ended_at,
   liftedAt: row.lifted_at,
+  liftClaimedAt: row.lift_claimed_at,
 });
 
 const rowColumns = `votekick_id, target_user_id, target_login, initiator_user_id, status, threshold,
-  yes_votes, no_votes, ballot_revision, duration_seconds, started_at, expires_at, ended_at, lifted_at`;
+  yes_votes, no_votes, ballot_revision, duration_seconds, started_at, expires_at, ended_at, lifted_at, lift_claimed_at`;
 
 export const createVotekickRepository = (db: D1Database): VotekickRepository => ({
   async admit(channelId, input, checkedAt, channelCooldownSeconds, targetCooldownSeconds): Promise<VotekickAdmissionResult> {
@@ -142,7 +144,7 @@ export const createVotekickRepository = (db: D1Database): VotekickRepository => 
 
   async markLifted(channelId, id, now): Promise<boolean> {
     const result = await db.prepare(
-      `UPDATE votekicks SET lifted_at = ?
+      `UPDATE votekicks SET lifted_at = ?, lift_claim_id = NULL, lift_claimed_at = NULL
         WHERE channel_id = ? AND votekick_id = ? AND status = 'passed' AND lifted_at IS NULL AND target_user_id IS NOT NULL`,
     ).bind(now, channelId, id).run();
     return result.meta.changes > 0;

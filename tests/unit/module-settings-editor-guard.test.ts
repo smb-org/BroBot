@@ -39,10 +39,6 @@ const declarationProblems = (probe: DeclarationProbe): string[] => {
 describe("module settings editor declarations", () => {
   it("covers schema keys, templates, and bilingual labels and hints", async () => {
     for (const module of MODULES) {
-      if (module.id === "chat_voting") {
-        expect(module.settingsEditor).toBeUndefined();
-        continue;
-      }
       const schemaShape = "shape" in module.settingsSchema && typeof module.settingsSchema.shape === "object"
         ? module.settingsSchema.shape as Record<string, unknown>
         : {};

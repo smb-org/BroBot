@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElemen
 import { PanelApiError } from "../../../contracts/panel-error";
 import { ActionMenu, Button, ChatPreview, ConfirmDialog, Field, InspectorSection, PageHeader, RuleNote, SaveStatus, SegmentChoice, SwitchSection, TemplateTextField, UnitInput, registerDashboardNavigationGuard, useDraft, useDraftGuard } from "../../../dashboard/ui";
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient } from "../../../dashboard/data";
-import { dashboardCommonTexts } from "../../../dashboard/locale";
+import { dashboardCommonTexts, dashboardTexts } from "../../../dashboard/locale";
 import type { ChatVoteTemplate, ChatVoteTemplateDraft } from "../contracts";
 import { CHAT_VOTE_TEMPLATE_MAXIMUM, CHAT_VOTING_TITLE_MAX_LENGTH } from "../contracts";
 import { isValidTemplateShortcut, normalizeFreeTextVoteForMatching, voteLabelLength } from "../domain";
@@ -25,7 +25,7 @@ export interface ChatVoteTemplateInspectorProperties {
   language: "de" | "en";
   canManageContent: boolean;
   onRegisterActions: (actions: TemplateInspectorActions | null) => void;
-  onTemplateSaved: (template: ChatVoteTemplate) => void;
+  onTemplateSaved: (template: ChatVoteTemplate, originId: string) => void;
   onClose: () => void;
   onDiscardNew: () => void;
   onDelete: (template: ChatVoteTemplate) => Promise<void>;
@@ -127,12 +127,12 @@ export function ChatVoteTemplateInspector({
     if ("shortcut" in update) setServerShortcutError(null);
   };
 
-  const saveDraft = async (): Promise<ChatVoteTemplate | null> => {
-    if (!canManageContent || saving || conflict) return null;
+  const saveDraft = async (): Promise<string | null> => {
+    if (!canManageContent || saving || conflict) return labels.saveError;
     const submitted = { ...draftValue.current, labels: [...draftValue.current.labels] };
     if (blankDraft(submitted)) {
       setSaveError(labels.emptyDraftError);
-      return null;
+      return labels.emptyDraftError;
     }
     setSaving(true);
     setSaveError(undefined);
@@ -172,30 +172,30 @@ export function ChatVoteTemplateInspector({
       setServerShortcutError(null);
       setConflict(false);
       setSaved(true);
-      onTemplateSaved(next);
-      return next;
+      onTemplateSaved(next, template.id);
+      return null;
     } catch (error: unknown) {
       if (error instanceof PanelApiError && error.status === 409 && error.code === "chat_vote_template_conflict") {
         setConflict(true);
         setSaveError(undefined);
+        return labels.saveConflict;
       } else if (error instanceof PanelApiError && error.status === 409 && error.code === "chat_vote_template_shortcut_conflict") {
         setServerShortcutError(labels.shortcutDuplicate);
         setSaveError(labels.shortcutUnavailable);
+        return labels.shortcutUnavailable;
       } else if (error instanceof PanelApiError && error.code === "chat_vote_template_limit") {
         setSaveError(labels.templateLimit);
+        return labels.templateLimit;
       } else {
         setSaveError(labels.saveError);
+        return labels.saveError;
       }
-      return null;
     } finally {
       setSaving(false);
     }
   };
 
-  const saveForGuard = async (): Promise<string | null> => {
-    const result = await saveDraft();
-    return result === null ? saveError ?? labels.saveError : null;
-  };
+  const saveForGuard = (): Promise<string | null> => saveDraft();
   const resetDraft = (): void => {
     draftGeneration.current += 1;
     invalidateReload();
@@ -256,7 +256,7 @@ export function ChatVoteTemplateInspector({
       setConflict(false);
       setSaveError(undefined);
       setSaved(false);
-      onTemplateSaved(latest);
+      onTemplateSaved(latest, template.id);
     } catch {
       if (isCurrentRequest()) setSaveError(labels.conflictReloadError);
     } finally {
@@ -308,9 +308,9 @@ export function ChatVoteTemplateInspector({
           savedLabel={labels.savedLabel}
           pendingLabel={labels.saving}
         /> } : {})}
-        {...(canManageContent && !isNew ? { actions: <ActionMenu
+        {...(!isNew ? { actions: <ActionMenu
           label={common.moreActions}
-          items={[{ label: labels.delete, danger: true, onSelect: () => {
+          items={[{ label: labels.delete, danger: canManageContent, disabled: !canManageContent, ...(!canManageContent ? { reason: labels.operatorLocked } : {}), onSelect: () => {
             draftGuard.guardSwitch(() => { setDeleteError(undefined); setDeleteOpen(true); });
           } }]}
         /> } : {})}
@@ -501,7 +501,9 @@ export function ChatVoteTemplateInspector({
       cancelLabel={labels.continueEditing}
       onConfirm={draftGuard.discardAndSwitch}
       onCancel={draftGuard.continueEditing}
+      {...(saveInvalidReason === null && canManageContent ? { alternative: { label: dashboardTexts(language).module.saveAndSwitch, onClick: () => { void draftGuard.saveAndSwitch(); } } } : {})}
       pending={draftGuard.saving || saving}
+      {...(draftGuard.saveError === undefined ? {} : { error: draftGuard.saveError })}
       danger
     />
     <ConfirmDialog

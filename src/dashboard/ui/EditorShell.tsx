@@ -26,6 +26,7 @@ export interface EditorInvalidField {
 export interface EditorShellProps {
   className?: string;
   layout?: "tabs" | "columns";
+  savePosition?: "header" | "footer";
   ariaLabel: string;
   title: ReactNode;
   identifier?: string;
@@ -177,6 +178,7 @@ const focusInvalidTarget = (field: HTMLElement, errorKey: string): void => {
 export function EditorShell({
   className,
   layout = "tabs",
+  savePosition = "footer",
   ariaLabel,
   title,
   identifier,
@@ -360,7 +362,7 @@ export function EditorShell({
 
   if (readOnly !== undefined) {
     return (
-      <section data-ui="" className="ui-editor-shell ui-editor-shell--readonly" aria-label={ariaLabel} onKeyDown={handleEditorKeyDown}>
+      <section data-ui="" className={`ui-editor-shell ui-editor-shell--readonly${className === undefined ? "" : ` ${className}`}`} aria-label={ariaLabel} onKeyDown={handleEditorKeyDown}>
         <InspectorHeading level="h3" title={title} {...(identifier === undefined ? {} : { identifier })} {...(meta === undefined ? {} : { meta })} {...(closeAction === undefined ? {} : { action: closeAction })} />
         <div className="ui-editor-shell__readonly-reason"><Icon name="lock" size={16} /><span>{readOnly.reason}</span></div>
         {readOnly.content}
@@ -372,6 +374,28 @@ export function EditorShell({
     <FormDensity.Provider value="form">
       <section data-ui="" className={`ui-editor-shell${className === undefined ? "" : ` ${className}`}`} aria-label={ariaLabel} onKeyDown={handleEditorKeyDown}>
         <InspectorHeading level="h3" title={title} {...(identifier === undefined ? {} : { identifier })} {...(meta === undefined ? {} : { meta })} {...(closeAction === undefined ? {} : { action: closeAction })} />
+        {savePosition === "header" ? <div className="ui-editor-shell__header-save"><SaveStatus
+          persistent
+          dirty={dirty}
+          pending={pending}
+          saved={saved}
+          {...(error === undefined ? {} : { error })}
+          invalid={hasInvalid}
+          {...(invalidMessage === undefined ? {} : { invalidMessage })}
+          {...(invalidStatus === undefined ? {} : { invalidStatus })}
+          {...(warnings === undefined ? {} : { warnings })}
+          {...(warningStatusLabel === undefined ? {} : { warningStatusLabel })}
+          {...(conflict === undefined ? {} : { conflict })}
+          {...(footer === undefined ? {} : { footer })}
+          {...(destructive === undefined ? {} : { destructive })}
+          onSave={handleSaveAttempt}
+          onInvalidSave={handleInvalidSave}
+          onDiscard={onDiscard}
+          saveLabel={saveLabel}
+          discardLabel={discardLabel}
+          savedLabel={savedLabel}
+          pendingLabel={pendingLabel}
+        /></div> : null}
         {layout === "columns" || sections.length < 2 ? null : (
           <div className="ui-editor-shell__tabs" role="tablist" aria-label={ariaLabel} onKeyDown={handleTabKeyDown}>
             {sections.map((candidate) => {
@@ -416,7 +440,7 @@ export function EditorShell({
             )}
           </div>
         </form>
-        <SaveStatus
+        {savePosition === "footer" ? <SaveStatus
           persistent
           dirty={dirty}
           pending={pending}
@@ -437,7 +461,7 @@ export function EditorShell({
           discardLabel={discardLabel}
           savedLabel={savedLabel}
           pendingLabel={pendingLabel}
-        />
+        /> : null}
       </section>
     </FormDensity.Provider>
   );

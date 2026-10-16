@@ -1,5 +1,5 @@
-import { settingsVariableReferences } from "../contract";
-import type { BotModule, JsonObject, ModuleOverlayElementContext } from "../contract";
+import { columnVariableReferences, settingsVariableReferences } from "../contract";
+import type { BotModule, JsonObject, ModuleOverlayElementContext, ModuleTemplateUsageSource } from "../contract";
 import { createChatVotingRepository } from "./repository";
 import { CHAT_VOTING_CHAT_COMMANDS } from "./contracts/chat-commands";
 import { chatVotingDurationVariableCatalog, chatVotingOptionsVariableCatalog, chatVotingResultVariableCatalog, chatVotingTitleVariableCatalog } from "./contracts/template-variable-catalog";
@@ -38,6 +38,31 @@ const durationVariable = {
   sample: "2 minutes",
   picker: chatVotingDurationVariableCatalog,
 } as const;
+
+const templateVariableReferences = columnVariableReferences({
+  moduleId: CHAT_VOTING_MODULE_ID,
+  tableName: "chat_vote_templates",
+  idColumn: "id",
+  itemNameColumn: "title",
+  textColumn: "result_text",
+  maxTextLength: 500,
+});
+const settingsReferences = settingsVariableReferences(CHAT_VOTING_MODULE_ID, ["startText", "resultText"]);
+const variableReferences = {
+  ...templateVariableReferences,
+  async usages(db: D1Database, channelId: string, name: string) {
+    return [...await settingsReferences.usages(db, channelId, name), ...await templateVariableReferences.usages(db, channelId, name)];
+  },
+  rename(db: D1Database, channelId: string, from: string, to: string, guard?: Parameters<typeof settingsReferences.rename>[4]) {
+    return [...settingsReferences.rename(db, channelId, from, to, guard), ...templateVariableReferences.rename(db, channelId, from, to, guard)];
+  },
+};
+
+const templateUsageSources = async (db: D1Database, channelId: string): Promise<readonly ModuleTemplateUsageSource[]> => {
+  const rows = await db.prepare("SELECT id, title, result_text FROM chat_vote_templates WHERE channel_id = ? ORDER BY title, id")
+    .bind(channelId).all<{ id: string; title: string; result_text: string }>();
+  return rows.results.map((row) => ({ text: row.result_text, kind: "event", label: `chat_voting.${row.title || row.id}` }));
+};
 
 const initialTallyState = async (
   db: D1Database,
@@ -101,7 +126,10 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
     startText: [titleVariable, optionsVariable, durationVariable],
     resultText: [resultVariable, titleVariable, optionsVariable, durationVariable],
   },
-  variableReferences: settingsVariableReferences(CHAT_VOTING_MODULE_ID, ["startText", "resultText"]),
+  templateUsageSources,
+  variableReferences,
+  settingsEditor: () => import("./panel/settings-editor"),
+  settingsEditorRelatedParts: ["panel"],
   templateVariableGroup: {
     label: { de: "Abstimmung", en: "Voting" },
     icon: { paths: ["M4 5h16v14H4z", "M7 9h3", "M14 9h3", "M7 13h3", "M14 13h3"] },
@@ -114,7 +142,7 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
       const vote = state.vote;
       if (vote === null || vote.status === "closed") return [];
       const options = vote.kind === "free_text"
-        ? (state.terms ?? []).map(({ term, count }) => ({ label: term, count }))
+        ? (state.terms ?? []).map(({ term, count, approved }) => ({ label: term, count, approved }))
         : vote.labels.map((label, index) => ({ label, count: state.counts?.[index] ?? 0 }));
       const totalVotes = options.reduce((total, option) => total + option.count, 0);
       const openedAt = Date.parse(vote.openedAt);

@@ -472,17 +472,14 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   };
   const navigationGuard = useDraftGuard(dirty, save, discard);
   useEffect(() => registerDashboardNavigationGuard(navigationGuard.guardSwitch), [navigationGuard.guardSwitch]);
-  const readOnly = !canManageContent ? { reason: copy.readOnlyReason, content: definition.layout === "columns"
-    ? <div className="ui-editor-shell__readonly-sections">
-      {spec.sections.map((section) => <div className="ui-editor-shell__readonly-section" key={section.id}>
-        <SettingsEditor spec={spec} sectionId={section.id} settings={currentValue} onChange={() => undefined} texts={copy} variables={templateVariableOptions} templateMetadata={templateMetadata} templateMessages={copy.templateMessages} readOnly enabledLabel={copy.enabledLabel} disabledLabel={copy.disabledLabel} />
-      </div>)}
-    </div>
-    : <SettingsEditor spec={spec} sectionId={spec.sections[0]?.id ?? ""} settings={currentValue} onChange={() => undefined} texts={copy} variables={templateVariableOptions} templateMetadata={templateMetadata} templateMessages={copy.templateMessages} readOnly enabledLabel={copy.enabledLabel} disabledLabel={copy.disabledLabel} /> } : undefined;
+  const readOnly = !canManageContent ? { reason: copy.readOnlyReason,
+    content: <SettingsEditor spec={spec} sectionId={spec.sections[0]?.id ?? ""} settings={currentValue} onChange={() => undefined} texts={copy} variables={templateVariableOptions} templateMetadata={templateMetadata} templateMessages={copy.templateMessages} readOnly enabledLabel={copy.enabledLabel} disabledLabel={copy.disabledLabel} /> } : undefined;
   return <>
     <EditorShell
     ariaLabel={copy.ariaLabel}
+    {...(definition.className === undefined ? {} : { className: definition.className })}
     {...(definition.layout === undefined ? {} : { layout: definition.layout })}
+    {...(definition.savePosition === undefined ? {} : { savePosition: definition.savePosition })}
     title={copy.title}
     sections={sections}
     {...(readOnly === undefined ? {} : { readOnly })}
@@ -846,7 +843,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
 
   return (
     <>
-      <section className="module-detail" aria-label={details.name}>
+      <section className={`module-detail module-detail--${moduleId}`} aria-label={details.name}>
         <PageHeader
           kind="modules"
           icon={navigationPage === undefined
@@ -861,7 +858,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
             switchDisabled: !manageable || switchDisabled || busy || mandatory,
             switchBusy: busy,
             ...(mandatory ? { moduleSwitch: <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} /> } : {}),
-            ...(disabledReason === null ? {} : { lockHint: disabledReason }),
+            ...(disabledReason === null || (registered?.settingsEditor !== undefined && showActiveView) ? {} : { lockHint: disabledReason }),
           })}
           {...(moduleId === "text_commands" ? {
             pageActions: <TextCommandChatCommandHelp channelId={channelId} />,

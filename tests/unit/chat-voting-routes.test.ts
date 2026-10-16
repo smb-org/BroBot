@@ -633,4 +633,26 @@ describe("chat voting routes", () => {
       "SELECT approved_by FROM chat_vote_term_approvals WHERE channel_id = ? AND poll_id = ? AND term = ?",
     ).bind(CHANNEL_ID, openTextVote.id, "alpha").first()).resolves.toEqual({ approved_by: ACTOR_ID });
   });
+
+  it("does not approve a term when the voting module is inactive at the guarded write", async () => {
+    const database = await createDatabase();
+    await database.prepare("UPDATE channel_modules SET enabled = 0 WHERE channel_id = ? AND module_id = 'chat_voting'")
+      .bind(CHANNEL_ID).run();
+    const snapshot = { counts: [], terms: [{ term: "alpha", count: 1, approved: false }], more: 0, termFilterReady: true, revision: 1 };
+    const publish = vi.fn(() => Promise.resolve());
+    const app = appFor(ballotAccess({
+      read: vi.fn(() => Promise.resolve(snapshot)),
+      setBlockedTerms: vi.fn(() => Promise.resolve(snapshot)),
+      approveTerm: vi.fn(() => Promise.resolve({ status: "approved" as const, snapshot: { ...snapshot, revision: 2 } })),
+    }), () => Promise.resolve([]), publish);
+
+    const response = await app.fetch(approveRequest(openTextVote.id, "alpha"), { DB: database as unknown as D1Database });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "chat_voting_not_running" });
+    await expect(database.prepare(
+      "SELECT term FROM chat_vote_term_approvals WHERE channel_id = ? AND poll_id = ?",
+    ).bind(CHANNEL_ID, openTextVote.id).all()).resolves.toMatchObject({ results: [] });
+    expect(publish).not.toHaveBeenCalled();
+  });
 });

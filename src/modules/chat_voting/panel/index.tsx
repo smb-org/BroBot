@@ -38,14 +38,13 @@ const ChatVotingCollection = ({ channelId, language = "de", canManage = true, on
   const [selectionCleared, setSelectionCleared] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [wide, setWide] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1200);
-  const [inspectorGeneration, setInspectorGeneration] = useState(0);
   const selectedIdRef = useRef<string | null>(null);
   const selectedSnapshotRef = useRef<ChatVoteTemplate | null>(null);
   const inspectorKeyRef = useRef<string | null>(null);
   const inspectorActions = useRef<TemplateInspectorActions | null>(null);
+  const automaticSelectionApplied = useRef(false);
 
   const updateSelection = useCallback((id: string | null, snapshot: ChatVoteTemplate | null, key = id): void => {
-    if (inspectorKeyRef.current !== key) setInspectorGeneration((generation) => generation + 1);
     selectedIdRef.current = id;
     selectedSnapshotRef.current = snapshot;
     inspectorKeyRef.current = key;
@@ -80,6 +79,16 @@ const ChatVotingCollection = ({ channelId, language = "de", canManage = true, on
     window.addEventListener("resize", resize);
     return () => { window.removeEventListener("resize", resize); };
   }, []);
+
+  useEffect(() => {
+    if (templateState === null || !wide || selectionCleared || selectedId !== null || newTemplateDraft !== null || automaticSelectionApplied.current) return;
+    const first = templates[0];
+    if (first === undefined) return;
+    automaticSelectionApplied.current = true;
+    requestInspectorSwitch(() => {
+      if (selectedIdRef.current === null) updateSelection(first.id, first);
+    });
+  }, [newTemplateDraft, requestInspectorSwitch, selectedId, selectionCleared, templateState, templates, updateSelection, wide]);
 
   const createTemplate = (): void => {
     if (!canManage || count >= CHAT_VOTE_TEMPLATE_MAXIMUM) return;
@@ -146,9 +155,9 @@ const ChatVotingCollection = ({ channelId, language = "de", canManage = true, on
     setDetailOpen(next !== null);
   };
 
-  const onTemplateSaved = (template: ChatVoteTemplate, originGeneration: number): void => {
-    if (originGeneration !== inspectorGeneration) return;
-    const key = inspectorKeyRef.current ?? template.id;
+  const onTemplateSaved = (template: ChatVoteTemplate, originId: string): void => {
+    if (selectedIdRef.current !== originId) return;
+    const key = inspectorKeyRef.current ?? originId;
     updateSelection(template.id, template, key);
     setNewTemplateDraft(null);
     setSavedTemplateId(template.id);
@@ -160,10 +169,7 @@ const ChatVotingCollection = ({ channelId, language = "de", canManage = true, on
     return query.length === 0 || [template.title, template.shortcut ?? "", ...template.labels]
       .some((value) => value.toLocaleLowerCase().includes(query));
   });
-  const automaticSelection = wide && !selectionCleared && selectedId === null && newTemplateDraft === null
-    ? templates[0] ?? null
-    : null;
-  const selectedTemplate = newTemplateDraft ?? selectedSnapshot ?? templates.find((template) => template.id === selectedId) ?? automaticSelection;
+  const selectedTemplate = newTemplateDraft ?? selectedSnapshot ?? templates.find((template) => template.id === selectedId) ?? null;
   const listStatus = templateState === null ? templatesQuery.isPending ? "loading" : "error"
     : visibleTemplates.length === 0 ? "empty" : "success";
   const createDisabledReason = !canManage ? labels.operatorLocked : count >= CHAT_VOTE_TEMPLATE_MAXIMUM ? labels.templateLimit : undefined;
@@ -207,7 +213,7 @@ const ChatVotingCollection = ({ channelId, language = "de", canManage = true, on
   </LoadState>;
 
   const inspector = selectedTemplate === null ? <EmptyState title={labels.selectionPrompt} description={labels.selectionDescription} /> : <ChatVoteTemplateInspector
-    key={`${templateInspectorKey ?? selectedTemplate.id}:${String(inspectorGeneration)}`}
+    key={templateInspectorKey ?? selectedTemplate.id}
     channelId={channelId}
     template={selectedTemplate}
     templates={templates}
@@ -216,7 +222,7 @@ const ChatVotingCollection = ({ channelId, language = "de", canManage = true, on
     language={language}
     canManageContent={canManage}
     onRegisterActions={(actions) => { inspectorActions.current = actions; }}
-    onTemplateSaved={(template) => { onTemplateSaved(template, inspectorGeneration); }}
+    onTemplateSaved={onTemplateSaved}
     onClose={closeInspector}
     onDiscardNew={clearSelection}
     onDelete={removeTemplate}

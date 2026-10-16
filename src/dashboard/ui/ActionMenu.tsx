@@ -4,7 +4,7 @@ import { useId, useState } from "react";
 import { Button, type ButtonSize } from "./Button";
 
 export type ActionMenuItem =
-  | { label: string; onSelect: () => void; disabled?: boolean; danger?: boolean }
+  | { label: string; onSelect: () => void; disabled?: boolean; danger?: boolean; reason?: string }
   | { divider: true };
 
 export function ActionMenu({ label, items, size = "compact" }: { label: string; items: readonly ActionMenuItem[]; size?: ButtonSize }) {
@@ -22,9 +22,9 @@ export function ActionMenu({ label, items, size = "compact" }: { label: string; 
             : <MenuPrimitive.Item
               key={item.label}
               disabled={item.disabled ?? false}
-              className={item.danger ? "ui-action-menu__item ui-action-menu__danger" : "ui-action-menu__item"}
+              className={`${item.danger ? "ui-action-menu__danger " : ""}ui-action-menu__item${item.reason === undefined ? "" : " ui-action-menu__item--with-reason"}`}
               onClick={item.onSelect}
-            >{item.label}</MenuPrimitive.Item>)}
+            ><span>{item.label}</span>{item.reason === undefined ? null : <small>{item.reason}</small>}</MenuPrimitive.Item>)}
         </MenuPrimitive.Popup>
       </MenuPrimitive.Positioner>
     </MenuPrimitive.Portal>

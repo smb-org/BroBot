@@ -1,7 +1,8 @@
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
+import { moduleQueryKey } from "../../src/dashboard/data";
 import ChatVotingPanel from "../../src/modules/chat_voting/panel";
 import type { ChatVoteTemplate } from "../../src/modules/chat_voting/contracts";
 import { chatVotingSavedPanelTexts } from "../../src/modules/chat_voting/panel/locale-saved";
@@ -30,16 +31,25 @@ const requestUrl = (input: RequestInfo | URL): URL => {
   return new URL(input, "https://brobot.example");
 };
 
-const mount = (options: { templates?: ChatVoteTemplate[]; canManage?: boolean; waitForTemplates?: Promise<Response> } = {}) => {
+const mount = (options: {
+  templates?: ChatVoteTemplate[];
+  canManage?: boolean;
+  waitForTemplates?: Promise<Response>;
+  templateResponses?: ChatVoteTemplate[][];
+  patchResponse?: (updated: ChatVoteTemplate) => Promise<Response>;
+} = {}) => {
   const saved: string[] = [];
   let currentTemplates = [...(options.templates ?? [template])];
+  let templateRead = 0;
   const requests = vi.fn<typeof fetch>((input, init) => {
     const url = requestUrl(input);
     const method = init?.method ?? "GET";
     if (url.pathname === "/api/channels/channel-432/modules/chat_voting/templates" && method === "GET") {
+      const responseTemplates = options.templateResponses?.[templateRead] ?? currentTemplates;
+      templateRead += 1;
       return options.waitForTemplates ?? Promise.resolve(jsonResponse({
-        templates: currentTemplates,
-        count: currentTemplates.length,
+        templates: responseTemplates,
+        count: responseTemplates.length,
         maximum: 100,
       }));
     }
@@ -57,8 +67,11 @@ const mount = (options: { templates?: ChatVoteTemplate[]; canManage?: boolean; w
       const current = currentTemplates.find((entry) => entry.id === id);
       if (current === undefined) return Promise.resolve(jsonResponse({ error: "not_found" }, 404));
       const updated = { ...current, ...body, revision: current.revision + 1, updatedAt: "2026-10-15T10:01:00.000Z" };
-      currentTemplates = currentTemplates.map((entry) => entry.id === id ? updated : entry);
-      return Promise.resolve(jsonResponse({ template: updated }));
+      const response = options.patchResponse?.(updated) ?? Promise.resolve(jsonResponse({ template: updated }));
+      return response.then((result) => {
+        if (result.ok) currentTemplates = currentTemplates.map((entry) => entry.id === id ? updated : entry);
+        return result;
+      });
     }
     if (url.pathname.startsWith("/api/channels/channel-432/modules/chat_voting/templates/") && method === "DELETE") {
       const id = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
@@ -136,6 +149,98 @@ describe("saved chat voting collection", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("keeps the automatically selected desktop draft guarded when the window narrows", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    mount({ templates: [template, { ...template, id: "template-weekend", title: "Wochenende" }] });
+
+    const question = await screen.findByRole("textbox", { name: "Frage" });
+    fireEvent.change(question, { target: { value: "Entwurf der automatischen Auswahl" } });
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1100 });
+    fireEvent(window, new Event("resize"));
+
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Frage" })).toHaveValue("Entwurf der automatischen Auswahl"));
+    expect(screen.queryByRole("dialog", { name: "Änderungen verwerfen?" })).not.toBeInTheDocument();
+  });
+
+  it("auto-selects a template when a later refresh changes an empty collection to populated", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    const rendered = mount({ templateResponses: [[], [template]] });
+    expect(await screen.findByText("Noch keine gespeicherten Abstimmungen")).toBeInTheDocument();
+
+    await act(async () => {
+      await rendered.queryClient.invalidateQueries({ queryKey: moduleQueryKey("channel-432", "chat_voting", "templates") });
+    });
+
+    expect(await screen.findByRole("textbox", { name: "Frage" })).toHaveValue("Abendessen");
+  });
+
+  it("offers save-and-switch in the dirty draft guard and keeps it open after a failed save", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    let failFirstSave = true;
+    mount({
+      templates: [{ ...template, id: "template-a", title: "Vote A" }, { ...template, id: "template-b", title: "Vote B" }],
+      patchResponse: (updated) => {
+        if (failFirstSave) {
+          failFirstSave = false;
+          return Promise.resolve(jsonResponse({ error: "internal" }, 500));
+        }
+        return Promise.resolve(jsonResponse({ template: updated }));
+      },
+    });
+
+    fireEvent.change(await screen.findByRole("textbox", { name: "Frage" }), { target: { value: "Vote A changed" } });
+    fireEvent.click(screen.getByRole("link", { name: /Vote B/u }));
+    const dialog = await screen.findByRole("dialog", { name: "Änderungen verwerfen?" });
+    const saveAndSwitch = within(dialog).getByRole("button", { name: "Speichern und wechseln" });
+
+    fireEvent.click(saveAndSwitch);
+    expect(await within(dialog).findByText("Nicht gespeichert – erneut versuchen")).toBeInTheDocument();
+    expect(document.querySelector<HTMLInputElement>('input[aria-label="Frage"]')).toHaveValue("Vote A changed");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Speichern und wechseln" }));
+    expect(await screen.findByRole("textbox", { name: "Frage" })).toHaveValue("Vote B");
+  });
+
+  it("does not let a late save from the old vote replace the current vote draft", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    const first = { ...template, id: "template-a", title: "Vote A" };
+    const second = { ...template, id: "template-b", title: "Vote B" };
+    let releaseFirstSave: (() => void) | undefined;
+    let markFirstSaveStarted: (() => void) | undefined;
+    const firstSaveGate = new Promise<void>((resolve) => { releaseFirstSave = resolve; });
+    const firstSaveStarted = new Promise<void>((resolve) => { markFirstSaveStarted = resolve; });
+    const { requests } = mount({
+      templates: [first, second],
+      patchResponse: async (updated) => {
+        if (updated.id === "template-a") {
+          markFirstSaveStarted?.();
+          await firstSaveGate;
+        }
+        return jsonResponse({ template: updated });
+      },
+    });
+
+    const question = await screen.findByRole("textbox", { name: "Frage" });
+    fireEvent.change(question, { target: { value: "Vote A edited" } });
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+    await firstSaveStarted;
+    fireEvent.change(question, { target: { value: "Vote A" } });
+    fireEvent.click(screen.getByRole("link", { name: /Vote B/u }));
+    const secondQuestion = await screen.findByRole("textbox", { name: "Frage" });
+    fireEvent.change(secondQuestion, { target: { value: "Vote B draft" } });
+
+    releaseFirstSave?.();
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Frage" })).toHaveValue("Vote B draft"));
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+    await waitFor(() => expect(requests.mock.calls.some(([input, init]) =>
+      requestUrl(input).pathname.endsWith("/templates/template-b") && init?.method === "PATCH")).toBe(true));
+
+    const secondSave = requests.mock.calls.find(([input, init]) =>
+      requestUrl(input).pathname.endsWith("/templates/template-b") && init?.method === "PATCH")?.[1]?.body;
+    expect(typeof secondSave).toBe("string");
+    expect(JSON.parse(secondSave as string)).toMatchObject({ title: "Vote B draft", revision: 1 });
+  });
+
   it("shows saved vote properties without edit controls to operators", async () => {
     mount({ canManage: false });
     expect(await screen.findByRole("link", { name: /Abendessen/u })).toBeInTheDocument();
@@ -146,6 +251,16 @@ describe("saved chat voting collection", () => {
     expect(screen.queryByRole("textbox", { name: "Frage" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Speichern" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Abstimmung anlegen" })).toBeDisabled();
+  });
+
+  it("keeps the delete action visible and explains why operators cannot use it", async () => {
+    mount({ canManage: false });
+    await screen.findByRole("link", { name: /Abendessen/u });
+    fireEvent.click(screen.getByRole("button", { name: "Weitere Aktionen" }));
+
+    const deleteItem = await screen.findByRole("menuitem", { name: /Abstimmung löschen/u });
+    expect(deleteItem).toHaveAttribute("aria-disabled", "true");
+    expect(deleteItem).toHaveTextContent("Nur Broadcaster und Verwalter dürfen Abstimmungen bearbeiten.");
   });
 
   it("accepts the saved vote edit response after an explicit save", async () => {

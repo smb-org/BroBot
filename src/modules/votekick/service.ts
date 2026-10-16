@@ -403,6 +403,7 @@ const commandResult = async (
         durationSeconds: null,
         endedAt: rollbackEndedAt,
         liftedAt: null,
+        liftClaimedAt: null,
       }
       : null;
     return {
