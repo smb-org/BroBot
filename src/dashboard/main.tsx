@@ -1522,6 +1522,7 @@ export const DashboardApp = (): ReactElement => {
           <Suspense fallback={<div className="module-view-fallback" aria-hidden="true"><LoadStateLines rows={3} height={58} /></div>}>
             {!showChannelNotReleased && !showBotBlocking && selectedChannel !== null ? <UiLoadState
               variant="panel-720"
+              reserveHeight="calc(100dvh - var(--app-shell-header-height) - var(--dashboard-main-gutters))"
               status={overviewPageStatus}
               loading={<LoadStateLines rows={8} height={58} />}
               empty={<LoadStateLines rows={8} height={58} />}

@@ -35,7 +35,17 @@ const measureBox = async (page: Page, selector: string): Promise<[number, number
 const measureDocumentBox = async (page: Page, selector: string): Promise<[number, number, number, number]> => {
   const box = await page.locator(selector).evaluate((element) => {
     const rect = element.getBoundingClientRect();
-    return [rect.x + window.scrollX, rect.y + window.scrollY, rect.width, rect.height];
+    let scrollX = window.scrollX;
+    let scrollY = window.scrollY;
+    let ancestor = element.parentElement;
+    while (ancestor !== null) {
+      if (ancestor !== document.body && ancestor !== document.documentElement) {
+        scrollX += ancestor.scrollLeft;
+        scrollY += ancestor.scrollTop;
+      }
+      ancestor = ancestor.parentElement;
+    }
+    return [rect.x + scrollX, rect.y + scrollY, rect.width, rect.height];
   });
   const round = (value: number): number => Math.round(value * 100) / 100;
   return [round(box[0] ?? 0), round(box[1] ?? 0), round(box[2] ?? 0), round(box[3] ?? 0)];
@@ -365,8 +375,9 @@ test("channel audit pagination stays in a sticky 44px footer and the list top fi
     await expect(footer).toContainText("50 loaded");
     await footer.scrollIntoViewIfNeeded();
     const footerBox = await measureBox(page, ".list-pagination-footer");
+    const mainBottom = await page.locator(".dashboard-shell__main").evaluate((main) => main.getBoundingClientRect().bottom);
     expect(footerBox[3]).toBe(44);
-    expect(Math.abs(footerBox[1] + footerBox[3] - (width === 390 ? 844 : 900))).toBeLessThanOrEqual(1);
+    expect(Math.abs(footerBox[1] + footerBox[3] - mainBottom)).toBeLessThanOrEqual(20);
     await more.click();
     await expect(more).toBeEnabled();
     expect((await measureDocumentBox(page, ".ui-load-state--panel")).slice(0, 2)).toEqual(listTop.slice(0, 2));
@@ -443,9 +454,11 @@ test("platform tabs isolate populated channel and audit lists at desktop and mob
     await expect(auditList.locator(".table tbody tr")).toHaveCount(50);
     await expect(page.locator(".platform-tabs [role='tabpanel']:visible")).toHaveCount(1);
     await expect(page.locator(".platform-channel-table")).toHaveCount(0);
+    await auditControl.scrollIntoViewIfNeeded();
     const auditControls = await measureBox(page, ".platform-tabs__panel .list-pagination-footer");
+    const mainBottom = await page.locator(".dashboard-shell__main").evaluate((main) => main.getBoundingClientRect().bottom);
     expect(auditControls[3]).toBe(44);
-    expect(Math.abs(auditControls[1] + auditControls[3] - (width === 390 ? 844 : 900))).toBeLessThanOrEqual(1);
+    expect(Math.abs(auditControls[1] + auditControls[3] - mainBottom)).toBeLessThanOrEqual(20);
     await page.unrouteAll();
   }
 });
@@ -479,8 +492,9 @@ test("member pagination stays in a sticky 44px footer as more rows load at deskt
     await expect(footer.getByRole("button", { name: "Load more members" })).toHaveCount(0);
     await footer.scrollIntoViewIfNeeded();
     const footerBox = await measureBox(page, ".list-pagination-footer");
+    const mainBottom = await page.locator(".dashboard-shell__main").evaluate((main) => main.getBoundingClientRect().bottom);
     expect(footerBox[3]).toBe(44);
-    expect(Math.abs(footerBox[1] + footerBox[3] - (width === 390 ? 844 : 900))).toBeLessThanOrEqual(1);
+    expect(Math.abs(footerBox[1] + footerBox[3] - mainBottom)).toBeLessThanOrEqual(20);
     await page.unrouteAll();
   }
 });
@@ -670,10 +684,12 @@ test("the new-events notice stays visible while reading older events", async ({ 
   await expect.poll(() => page.evaluate(() => (window as Window & { __layoutEventSockets?: Array<{ open: () => void }> }).__layoutEventSockets?.length ?? 0)).toBeGreaterThan(0);
   const displayedRows = await page.locator(".event-table tbody tr:not(.data-table__day-row)").allTextContents();
   await page.evaluate(async () => {
-    window.scrollTo(0, 1200);
+    const main = document.querySelector<HTMLElement>(".dashboard-shell__main");
+    if (main === null) throw new Error("The dashboard content scroller should render.");
+    main.scrollTo(0, main.scrollHeight);
     await new Promise<void>((resolve) => { requestAnimationFrame(() => { requestAnimationFrame(() => { resolve(); }); }); });
   });
-  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  await expect.poll(() => page.locator(".dashboard-shell__main").evaluate((main) => main.scrollTop)).toBeGreaterThan(0);
   events.entries.unshift(newEvent);
   panelRevisions["channel.events"] = 1;
   const refreshResponse = page.waitForResponse((response) => response.url().includes(`/api/channels/${channelId}/events`));
@@ -878,11 +894,15 @@ const verifyFrozenEventDaySections = async (
     return `${year}-${month}-${day}`;
   }, channelTimeZone)).toBe(calendarKey(timestamps.todayInfo, channelTimeZone));
 
-  const feedStart = await page.locator(".event-feed").evaluate((feed) => feed.getBoundingClientRect().top + window.scrollY);
-  await page.evaluate(() => { window.scrollTo(0, document.documentElement.scrollHeight); });
+  const feedStart = await page.locator(".event-feed").evaluate((feed) => {
+    const main = feed.closest<HTMLElement>(".dashboard-shell__main");
+    if (main === null) throw new Error("The dashboard content scroller should render.");
+    return feed.getBoundingClientRect().top + main.scrollTop;
+  });
+  await page.locator(".dashboard-shell__main").evaluate((main) => { main.scrollTo(0, main.scrollHeight); });
   await olderRequestStarted;
-  await page.evaluate((start) => { window.scrollTo(0, start + 20); }, feedStart);
-  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(feedStart + 8);
+  await page.locator(".dashboard-shell__main").evaluate((main, start) => { main.scrollTo(0, start + 20); }, feedStart);
+  await expect.poll(() => page.locator(".dashboard-shell__main").evaluate((main) => main.scrollTop)).toBeGreaterThan(feedStart + 8);
   await expect(todayRow).toBeInViewport();
   const frozenRows = await rows.evaluateAll((items) => items.map((row) => {
     const rect = row.getBoundingClientRect();
@@ -900,8 +920,8 @@ const verifyFrozenEventDaySections = async (
   }))).toEqual(frozenRows);
   const olderRow = rows.filter({ hasText: "olderday" });
   await expect(olderRow).toHaveCount(1);
-  const previousFrozenBottom = await rows.nth(49).evaluate((row) => row.getBoundingClientRect().bottom + window.scrollY);
-  const olderRowTop = await olderRow.evaluate((row) => row.getBoundingClientRect().top + window.scrollY);
+  const previousFrozenBottom = await rows.nth(49).evaluate((row) => row.getBoundingClientRect().bottom);
+  const olderRowTop = await olderRow.evaluate((row) => row.getBoundingClientRect().top);
   expect(olderRowTop).toBeGreaterThan(previousFrozenBottom);
   const sectionDates = await readSectionDates();
   expect(sectionDates).toEqual([

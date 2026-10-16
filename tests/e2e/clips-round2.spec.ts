@@ -260,7 +260,7 @@ for (const width of [1920, 1280, 390, 2560]) {
     await expect(page.getByText("Clip ConfirmedSessionClip100", { exact: true })).toBeVisible();
     const clipsSectionBefore = await page.locator(".clips-panel__clips-section").boundingBox();
     const clipListBefore = await page.locator(".clips-panel__list").boundingBox();
-    const scrollYBefore = await page.evaluate(() => window.scrollY);
+    const scrollYBefore = await page.locator(".dashboard-shell__main").evaluate((main) => main.scrollTop);
 
     mock.failRefresh();
     await page.getByRole("button", { name: "Clips aktualisieren" }).click();
@@ -286,7 +286,7 @@ for (const width of [1920, 1280, 390, 2560]) {
     if (width < 600) {
       const clipsSectionAfter = await page.locator(".clips-panel__clips-section").boundingBox();
       const clipListAfter = await page.locator(".clips-panel__list").boundingBox();
-      const scrollYAfter = await page.evaluate(() => window.scrollY);
+      const scrollYAfter = await page.locator(".dashboard-shell__main").evaluate((main) => main.scrollTop);
       expect(clipsSectionBefore).not.toBeNull();
       expect(clipListBefore).not.toBeNull();
       expect(Math.abs((clipsSectionAfter?.y ?? 0) + scrollYAfter - (clipsSectionBefore?.y ?? 0) - scrollYBefore)).toBeLessThanOrEqual(1);

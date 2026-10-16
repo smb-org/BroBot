@@ -244,19 +244,24 @@ const EventFeedEnd = ({
   }, [loadingNextPage, nextCursor, onNextPage]);
   useEffect(() => {
     if (nextCursor === null) return;
+    const scrollRoot = document.querySelector<HTMLElement>(".dashboard-shell__main");
     const onScroll = (): void => {
-      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 1) loadNextPage();
+      const scrollTop = scrollRoot?.scrollTop ?? window.scrollY;
+      const clientHeight = scrollRoot?.clientHeight ?? window.innerHeight;
+      const scrollHeight = scrollRoot?.scrollHeight ?? document.documentElement.scrollHeight;
+      if (clientHeight + scrollTop >= scrollHeight - 1) loadNextPage();
     };
-    window.addEventListener("scroll", onScroll, { passive: true });
+    const scrollTarget: HTMLElement | Window = scrollRoot ?? window;
+    scrollTarget.addEventListener("scroll", onScroll, { passive: true });
     const end = feedEndRef.current;
     if (end !== null && "IntersectionObserver" in window) {
       const observer = new IntersectionObserver(([entry]) => {
         if (entry?.isIntersecting) loadNextPage();
-      });
+      }, { root: scrollRoot });
       observer.observe(end);
-      return () => { observer.disconnect(); window.removeEventListener("scroll", onScroll); };
+      return () => { observer.disconnect(); scrollTarget.removeEventListener("scroll", onScroll); };
     }
-    return () => { window.removeEventListener("scroll", onScroll); };
+    return () => { scrollTarget.removeEventListener("scroll", onScroll); };
   }, [loadNextPage, nextCursor]);
   return <span
     ref={feedEndRef}
@@ -366,20 +371,31 @@ const EventsPageContent = (properties: EventsPageContentProperties): ReactElemen
   const atBeginning = useCallback((): boolean => {
     const feed = feedRef.current;
     if (feed === null) return true;
-    const feedStart = feed.getBoundingClientRect().top + window.scrollY;
-    return window.scrollY <= feedStart + 8;
+    const scrollRoot = feed.closest<HTMLElement>(".dashboard-shell__main");
+    if (scrollRoot === null) return window.scrollY <= feed.getBoundingClientRect().top + window.scrollY + 8;
+    const feedStart = feed.getBoundingClientRect().top - scrollRoot.getBoundingClientRect().top + scrollRoot.scrollTop;
+    return scrollRoot.scrollTop <= feedStart + 8;
   }, []);
   useEffect(() => {
     const updateReaderPosition = (): void => { setReaderAtTop(atBeginning()); };
     updateReaderPosition();
-    window.addEventListener("scroll", updateReaderPosition, { passive: true });
-    return () => { window.removeEventListener("scroll", updateReaderPosition); };
+    const scrollRoot = document.querySelector<HTMLElement>(".dashboard-shell__main") ??
+      feedRef.current?.closest<HTMLElement>(".dashboard-shell__main") ?? null;
+    const scrollTarget: HTMLElement | Window = scrollRoot ?? window;
+    scrollTarget.addEventListener("scroll", updateReaderPosition, { passive: true });
+    return () => { scrollTarget.removeEventListener("scroll", updateReaderPosition); };
   }, [atBeginning]);
   const scrollToBeginning = useCallback((): void => {
     const feed = feedRef.current;
     if (feed === null) return;
-    const feedStart = feed.getBoundingClientRect().top + window.scrollY;
-    window.scrollTo({ top: Math.max(0, feedStart), behavior: "auto" });
+    const scrollRoot = feed.closest<HTMLElement>(".dashboard-shell__main");
+    if (scrollRoot === null) {
+      const feedStart = feed.getBoundingClientRect().top + window.scrollY;
+      window.scrollTo({ top: Math.max(0, feedStart), behavior: "auto" });
+    } else {
+      const feedStart = feed.getBoundingClientRect().top - scrollRoot.getBoundingClientRect().top + scrollRoot.scrollTop;
+      scrollRoot.scrollTo({ top: Math.max(0, feedStart), behavior: "auto" });
+    }
     setReaderAtTop(true);
   }, []);
   const realtime = useRealtimeEventFeed({
