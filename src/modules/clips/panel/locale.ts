@@ -8,6 +8,7 @@ interface ClipRoleOption {
 }
 
 export interface ClipsPanelTexts {
+  settingsTitle: string;
   sessionClips: string;
   refreshClips: string;
   openClip: string;
@@ -19,6 +20,7 @@ export interface ClipsPanelTexts {
   commandCooldown: string;
   commandCooldownHint: string;
   chatLink: string;
+  chatLinkEnabled: string;
   chatLinkHint: string;
   chatMessage: string;
   chatMessageHint: string;
@@ -33,9 +35,12 @@ export interface ClipsPanelTexts {
   automaticHint: string;
   automaticDisabledHint: string;
   threshold: string;
+  thresholdUnit: string;
   thresholdHint: string;
   automaticCooldown: string;
   automaticCooldownHint: string;
+  enabledValue: string;
+  disabledValue: string;
   thresholdRule: string;
   helixRule: string;
   clipsLoading: string;
@@ -43,6 +48,7 @@ export interface ClipsPanelTexts {
   settingsLoadError: string;
   clipsLoadError: string;
   saveError: string;
+  conflictMessage: string;
   save: string;
   discard: string;
   saved: string;
@@ -65,6 +71,7 @@ export interface ClipsPanelTexts {
 
 const catalog: LocaleCatalog<ClipsPanelTexts> = {
   de: {
+    settingsTitle: "Clip-Einstellungen",
     sessionClips: "Clips dieser Stream-Sitzung",
     refreshClips: "Clips aktualisieren",
     openClip: "Clip öffnen",
@@ -82,6 +89,7 @@ const catalog: LocaleCatalog<ClipsPanelTexts> = {
     commandCooldown: "Abklingzeit",
     commandCooldownHint: "Für den ganzen Kanal. 0 schaltet die Abklingzeit aus.",
     chatLink: "Clip-Link im Chat posten",
+    chatLinkEnabled: "Aktiviert",
     chatLinkHint: "Postet nach der Erstellung die Nachricht im Chat und führt den Clip in der Sitzungsliste.",
     chatMessage: "Chatnachricht",
     chatMessageHint: "Verfügbare Werte: {clip.title} und {clip.url}.",
@@ -93,19 +101,23 @@ const catalog: LocaleCatalog<ClipsPanelTexts> = {
     previewClipUrl: "https://clips.twitch.tv/Beispielclip",
     automatic: "Automatische Clips",
     automaticSection: "Automatische Clip-Einstellungen",
-    automaticHint: "Erstelle Clips manuell mit !clip oder über die Schaltfläche im Cockpit.",
+    automaticHint: "Speichert die Automatik-Einstellung; die Auslösung ist in dieser Version noch nicht implementiert.",
     automaticDisabledHint: "Aktiviere automatische Clips, um diese Werte zu bearbeiten.",
     threshold: "Schwelle gegenüber Streamdurchschnitt",
-    thresholdHint: "Faktor des rollierenden Durchschnitts",
+    thresholdUnit: "fach",
+    thresholdHint: "Dieser Wert wird derzeit von keiner automatischen Erkennung ausgewertet.",
     automaticCooldown: "Abklingzeit",
     automaticCooldownHint: "Mindestabstand zwischen automatischen Clips.",
-    thresholdRule: "Die Schwelle bezieht sich auf den rollierenden Zuschauer-Durchschnitt dieses Streams. Ein Faktor von 2,5 löst bei 2,5-mal so vielen gleichzeitigen Zuschauer:innen aus.",
-    helixRule: "Twitch erstellt Clips asynchron. Sie können bis zu etwa 15 Sekunden benötigen, bis sie verfügbar sind. Ohne Ergebnis nach 15 Sekunden wird kein Clip-Link angezeigt. Das globale Helix-Limit gilt kanalübergreifend.",
+    enabledValue: "Aktiviert",
+    disabledValue: "Deaktiviert",
+    thresholdRule: "Die automatische Auslösung ist in dieser Codeversion nicht implementiert. Deshalb wertet derzeit kein Signal diesen Schwellenwert aus.",
+    helixRule: "Twitch nimmt die Clip-Anfrage zuerst an und stellt den Clip asynchron bereit. Wir prüfen bis zu 15 Sekunden auf Verfügbarkeit; ohne bestätigtes Ergebnis wird kein Clip-Link angezeigt. Das globale Helix-Limit gilt kanalübergreifend.",
     clipsLoading: "Clips dieser Stream-Sitzung werden geladen.",
     settingsLoading: "Clip-Einstellungen werden geladen.",
     settingsLoadError: "Die Clip-Einstellungen konnten nicht geladen werden.",
     clipsLoadError: "Die Clips dieser Sitzung konnten nicht geladen werden.",
     saveError: "Die Clip-Einstellungen konnten nicht gespeichert werden.",
+    conflictMessage: "Die Clip-Einstellungen wurden zwischenzeitlich geändert.",
     save: "Speichern",
     discard: "Verwerfen",
     saved: "Clip-Einstellungen gespeichert.",
@@ -126,6 +138,7 @@ const catalog: LocaleCatalog<ClipsPanelTexts> = {
     saveAndLeave: "Speichern und verlassen",
   },
   en: {
+    settingsTitle: "Clip settings",
     sessionClips: "Clips from this stream session",
     refreshClips: "Refresh clips",
     openClip: "Open clip",
@@ -143,6 +156,7 @@ const catalog: LocaleCatalog<ClipsPanelTexts> = {
     commandCooldown: "Cooldown",
     commandCooldownHint: "Applies to the whole channel. 0 disables the cooldown.",
     chatLink: "Post the clip link in chat",
+    chatLinkEnabled: "Enabled",
     chatLinkHint: "Posts a chat message after creation and adds the clip to the session list.",
     chatMessage: "Chat message",
     chatMessageHint: "Available values: {clip.title} and {clip.url}.",
@@ -154,19 +168,23 @@ const catalog: LocaleCatalog<ClipsPanelTexts> = {
     previewClipUrl: "https://clips.twitch.tv/Exampleclip",
     automatic: "Automatic clips",
     automaticSection: "Automatic clip settings",
-    automaticHint: "Create clips manually with !clip or the button in the cockpit.",
+    automaticHint: "Stores the automatic setting; triggering is not implemented in this version.",
     automaticDisabledHint: "Enable automatic clips to edit these values.",
     threshold: "Threshold relative to stream average",
-    thresholdHint: "Factor of the rolling average",
+    thresholdUnit: "times",
+    thresholdHint: "No automatic detection currently evaluates this value.",
     automaticCooldown: "Cooldown",
     automaticCooldownHint: "Minimum time between automatic clips.",
-    thresholdRule: "The threshold uses this stream's rolling average viewer count. A factor of 2.5 triggers at 2.5 times as many concurrent viewers.",
-    helixRule: "Twitch creates clips asynchronously. They can take about 15 seconds to become available. If no result arrives within 15 seconds, no clip link is shown. The global Helix limit applies across channels.",
+    enabledValue: "Enabled",
+    disabledValue: "Disabled",
+    thresholdRule: "Automatic triggering is not implemented in this code version, so no signal currently evaluates this threshold.",
+    helixRule: "Twitch accepts the clip request first and makes the clip available asynchronously. We check for availability for up to 15 seconds; no clip link is shown without a confirmed result. The global Helix limit applies across channels.",
     clipsLoading: "Loading clips from this stream session.",
     settingsLoading: "Loading clip settings.",
     settingsLoadError: "Clip settings could not be loaded.",
     clipsLoadError: "Clips for this session could not be loaded.",
     saveError: "Clip settings could not be saved.",
+    conflictMessage: "Clip settings have changed since they were loaded.",
     save: "Save",
     discard: "Discard",
     saved: "Clip settings saved.",

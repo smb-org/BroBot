@@ -21,7 +21,16 @@ describe("clips settings", () => {
     expect(clipsSettingsSchema.safeParse({ commandMinimumRole: "everyone" }).success).toBe(false);
     expect(clipsSettingsSchema.safeParse({ commandCooldownSeconds: -1 }).success).toBe(false);
     expect(clipsSettingsSchema.safeParse({ automaticCooldownSeconds: 86401 }).success).toBe(false);
+    expect(clipsSettingsSchema.safeParse({ automaticClipsEnabled: true, automaticCooldownSeconds: 0 }).success).toBe(false);
+    expect(clipsSettingsSchema.safeParse({ automaticClipsEnabled: false, automaticCooldownSeconds: 0 }).success).toBe(true);
     expect(clipsSettingsSchema.safeParse({ automaticThresholdMultiplier: 0 }).success).toBe(false);
+  });
+
+  it("explains that this version does not evaluate an automatic clip trigger", () => {
+    for (const language of ["de", "en"] as const) {
+      const expected = language === "de" ? "nicht implementiert" : "not implemented";
+      expect(clipsPanelTexts(language).thresholdRule.toLocaleLowerCase()).toContain(expected);
+    }
   });
 
   it("owns its settings in the custom panel with bilingual labels and hints", () => {

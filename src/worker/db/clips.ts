@@ -50,6 +50,7 @@ export const listCurrentSessionClips = async (
       LEFT JOIN audit_log AS audit
         ON audit.channel_id = clip_session.channel_id
        AND audit.action = 'clip.created'
+       AND json_extract(audit.after_json, '$.availabilityConfirmed') = 1
        AND clip_session.stream_started_at IS NOT NULL
        AND audit.created_at >= clip_session.stream_started_at
      ORDER BY audit.created_at DESC

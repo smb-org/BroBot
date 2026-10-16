@@ -4,14 +4,92 @@
   min-width: 0;
 }
 
-.clips-panel__save-bar,
+.clips-panel .page-header.module-detail-heading {
+  width: 100%;
+  max-width: none;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .clips-panel__settings,
+.clips-panel__readonly,
 .clips-panel__message-fields,
 .clips-panel__list {
   display: grid;
   gap: var(--s4);
   min-width: 0;
 }
+
+.clips-panel__settings { gap: var(--s5); }
+
+.clips-panel__loading-status {
+  margin: 0 0 var(--s3);
+  color: var(--color-text-2);
+  font-size: 13px;
+}
+
+.clips-panel__settings-load-state .ui-load-state__reserved-lines span {
+  align-self: center;
+  width: min(100%, 38rem);
+  height: 12px;
+  border-radius: var(--radius-md);
+  background: var(--color-border);
+}
+
+.clips-panel__settings-load-state .ui-load-state__reserved-lines span:nth-child(3n + 2) { width: min(72%, 30rem); }
+.clips-panel__settings-load-state .ui-load-state__reserved-lines span:nth-child(3n) { width: min(86%, 34rem); }
+
+.clips-panel .ui-load-state__inline-error {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  overflow: visible;
+}
+
+.clips-panel .ui-load-state__inline-message {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.clips-panel__group-hint {
+  margin: 0;
+  color: var(--color-text-3);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.clips-panel__properties {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  margin: 0;
+}
+
+.clips-panel__property {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  align-items: start;
+  gap: var(--s4);
+  min-width: 0;
+  padding: var(--s3) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.clips-panel__property dt {
+  color: var(--color-text-3);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.clips-panel__property dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--color-text);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.clips-panel__property code { overflow-wrap: anywhere; }
 
 .clips-panel__clip {
   display: grid;
@@ -65,6 +143,8 @@
 .clips-panel__clip-link:hover { border-color: var(--color-accent); color: var(--color-accent); }
 
 @media (max-width: 600px) {
+  .clips-panel .page-header.module-detail-heading { grid-template-columns: minmax(0, 1fr); }
   .clips-panel__clip { grid-template-columns: minmax(0, 1fr); align-items: start; gap: var(--s2); }
   .clips-panel__clip-link { justify-self: start; }
+  .clips-panel__property { grid-template-columns: minmax(0, 1fr); gap: var(--s1); }
 }

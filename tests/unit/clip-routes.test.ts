@@ -72,18 +72,22 @@ describe("create clip", () => {
   // "Betrieblich" per 0006: an immediate action open to every channel role.
   it("lets an operator create a clip and writes an audit entry", async () => {
     const environment = await asMember("operator");
-    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(
-      JSON.stringify({ data: [{ id: "clip-1", edit_url: "https://clips.twitch.tv/clip-1/edit" }] }),
-      { status: 202 },
-    )));
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ data: [{ id: "clip-1", edit_url: "https://clips.twitch.tv/clip-1/edit" }] }),
+        { status: 202 },
+      ))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "clip-1" }] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetcher);
 
     const response = await panelRouter.fetch(await requestFor("user-1", "/api/channels/kanal-a/clips"), environment);
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ clipId: "clip-1", editUrl: "https://clips.twitch.tv/clip-1/edit" });
+    expect(fetcher).toHaveBeenCalledTimes(2);
     await expect(database.prepare(
-      "SELECT action, module_id FROM audit_log WHERE channel_id = 'kanal-a'",
-    ).first()).resolves.toEqual({ action: "clip.created", module_id: null });
+      "SELECT action, module_id, json_extract(after_json, '$.availabilityConfirmed') AS availability_confirmed FROM audit_log WHERE channel_id = 'kanal-a'",
+    ).first()).resolves.toEqual({ action: "clip.created", module_id: null, availability_confirmed: 1 });
   });
 
   it("rejects clip creation after the clips module is disabled", async () => {
@@ -181,7 +185,7 @@ describe("create clip", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("returns only clip links created during the current live session", async () => {
+  it("returns only availability-confirmed clips from the current live session", async () => {
     const environment = await asMember("operator");
     const streamStartedAt = "2026-10-16T08:00:00.000Z";
     await database.prepare(
@@ -191,8 +195,9 @@ describe("create clip", () => {
     await database.prepare(
       `INSERT INTO audit_log
         (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json, module_id, actor_kind)
-       VALUES ('old-clip', 'user-1', '2026-10-15T20:00:00.000Z', 'kanal-a', 'clip.created', 'null', '{"clipId":"old"}', NULL, 'member'),
-              ('current-clip', 'user-1', '2026-10-16T08:05:00.000Z', 'kanal-a', 'clip.created', 'null', '{"clipId":"current"}', NULL, 'member')`,
+       VALUES ('old-clip', 'user-1', '2026-10-15T20:00:00.000Z', 'kanal-a', 'clip.created', 'null', '{"clipId":"old","availabilityConfirmed":true}', NULL, 'member'),
+              ('current-unconfirmed', 'user-1', '2026-10-16T08:04:00.000Z', 'kanal-a', 'clip.created', 'null', '{"clipId":"pending"}', NULL, 'member'),
+              ('current-confirmed', 'user-1', '2026-10-16T08:05:00.000Z', 'kanal-a', 'clip.created', 'null', '{"clipId":"current","availabilityConfirmed":true}', NULL, 'member')`,
     ).run();
 
     const response = await panelRouter.fetch(await requestFor("user-1", "/api/channels/kanal-a/clips", "GET"), environment);

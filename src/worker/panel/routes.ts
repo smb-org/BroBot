@@ -220,7 +220,7 @@ const clipStatusFor = (reason: string | null): 400 | 401 | 429 | 502 | 503 => {
   if (reason === "not_live") return 400;
   if (reason === "scope_missing" || reason === "bot_identity_missing") return 401;
   if (reason === "rate_limited") return 429;
-  if (reason === "network_error") return 503;
+  if (reason === "network_error" || reason === "timeout" || reason === "availability_timeout" || reason === "availability_check_failed") return 503;
   return 502;
 };
 
@@ -545,7 +545,7 @@ panelRouter.post(
       moduleId: null,
       action: "clip.created",
       before: null,
-      after: { clipId: result.clipId },
+      after: { clipId: result.clipId, availabilityConfirmed: true },
     });
 
     return context.json({ clipId: result.clipId, editUrl: result.editUrl });
