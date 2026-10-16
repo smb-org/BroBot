@@ -444,6 +444,8 @@ test("BELABOX chart stays within its grid column at desktop and mobile sizes", a
       const history = document.querySelector<HTMLElement>(".belabox-history-section");
       const content = document.querySelector<HTMLElement>(".settings-page__top");
       if (chart === null || history === null || content === null) throw new Error("The BELABOX chart layout is incomplete.");
+      const emptyMessage = chart.querySelector<HTMLElement>(".belabox-chart__empty");
+      if (emptyMessage === null) throw new Error("The BELABOX empty-history message is missing.");
       const bounds = (element: HTMLElement) => {
         const rect = element.getBoundingClientRect();
         return { left: rect.left, right: rect.right, width: rect.width };
@@ -453,6 +455,12 @@ test("BELABOX chart stays within its grid column at desktop and mobile sizes", a
         chart: bounds(chart),
         history: bounds(history),
         content: bounds(content),
+        emptyMessage: {
+          ...bounds(emptyMessage),
+          backgroundColor: getComputedStyle(emptyMessage).backgroundColor,
+          clientWidth: emptyMessage.clientWidth,
+          scrollWidth: emptyMessage.scrollWidth,
+        },
         axisFontSizes: axisLabels.map((label) => Number.parseFloat(getComputedStyle(label).fontSize)),
         axisText: axisLabels.map((label) => label.textContent.trim()),
       };
@@ -463,6 +471,10 @@ test("BELABOX chart stays within its grid column at desktop and mobile sizes", a
     expect(layout.history.right, `chart column fits the content at ${String(viewport.width)}px`).toBeLessThanOrEqual(layout.content.right + 1);
     expect(layout.axisFontSizes.every((size) => size >= 10)).toBe(true);
     expect(layout.axisText.every((label) => label.length > 0)).toBe(true);
+    expect(layout.emptyMessage.left).toBeGreaterThanOrEqual(layout.chart.left - 1);
+    expect(layout.emptyMessage.right).toBeLessThanOrEqual(layout.chart.right + 1);
+    expect(layout.emptyMessage.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+    expect(layout.emptyMessage.scrollWidth).toBeLessThanOrEqual(layout.emptyMessage.clientWidth + 1);
   }
 });
 
