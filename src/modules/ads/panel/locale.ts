@@ -159,7 +159,7 @@ const editorCatalog: LocaleCatalog<SettingsEditorCatalog> = {
       : warning.code === "template_parameters_invalid"
         ? `Ungültige Variablenparameter: ${warning.invalidVariables.join(", ")}`
         : `Vorlage kann ${String(warning.worstCaseLength)} Zeichen lang sein.`,
-    sections: { announcements: "Ansagen", prewarning: "Vorwarnung" },
+    sections: { announcements: "Ansagen", prewarning: "Vorlaufzeit & Nachricht" },
     fields: {
       automatic: {
         label: "Automatische Werbepause", hint: "Geht raus, wenn eine geplante Werbung beginnt. Leer lassen, um diese Nachricht auszuschalten. Ohne {ads.duration} ergänzt die Vorschau (N Sekunden).",
@@ -200,7 +200,7 @@ const editorCatalog: LocaleCatalog<SettingsEditorCatalog> = {
       : warning.code === "template_parameters_invalid"
         ? `Invalid variable parameters: ${warning.invalidVariables.join(", ")}`
         : `Template can be ${String(warning.worstCaseLength)} characters long.`,
-    sections: { announcements: "Announcements", prewarning: "Prewarning" },
+    sections: { announcements: "Announcements", prewarning: "Lead time & message" },
     fields: {
       automatic: {
         label: "Automatic ad break", hint: "Sent when a scheduled ad break starts. Leave blank to turn this message off. If {ads.duration} is missing, the preview adds (N seconds).", requiredError: "Enter text",

@@ -2062,6 +2062,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
   .ui-field__clear { width: 36px; height: 36px; }
 }
 .ui-toast-host { position: fixed; z-index: var(--layer-toast); top: calc(var(--app-shell-header-height, 56px) + var(--s4)); right: var(--s4); display: grid; width: min(40rem, calc(100vw - var(--s4) - var(--s4))); max-height: calc(100vh - var(--s4) - var(--s4)); align-content: start; gap: var(--s2); overflow: auto; pointer-events: none; }
+body:has(.module-detail--settings-page) .ui-toast-host { top: auto; bottom: var(--s4); align-content: end; }
 .ui-toast-host > * { pointer-events: auto; }
 .ui-toast { display: flex; align-items: center; gap: var(--s2); min-height: 40px; margin: 0; padding: var(--s2) var(--s3); border: 1px solid var(--line-strong); border-radius: var(--r-container); background: var(--surface); box-shadow: var(--mantine-shadow-xs); }
 .ui-toast__message { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
