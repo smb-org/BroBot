@@ -21,7 +21,15 @@ const template: ChatVoteTemplate = {
   createdAt: timestamp,
   updatedAt: timestamp,
 };
-const settings = DEFAULT_CHAT_VOTING_SETTINGS;
+const settings = {
+  ...DEFAULT_CHAT_VOTING_SETTINGS,
+  resultText: "{vote.result} {var.score} {text.summary} {api.score}",
+};
+const registeredTemplateVariables = [
+  { name: "var.score", moduleId: "host", isTextBlock: false, description: "Punktzahl", group: "channel", maxLength: 10, sample: "8", source: "channel", contexts: ["event"] },
+  { name: "text.summary", moduleId: "text_library", isTextBlock: true, description: "Zusammenfassung", maxLength: 500, sample: "Zusammenfassung", contexts: ["event"] },
+  { name: "api.score", moduleId: "api_source", isTextBlock: false, description: "Punktzahl", group: "api", maxLength: 100, sample: "8", source: "module", contexts: ["event"] },
+];
 const channel = {
   channelId,
   login: "musterkanal",
@@ -68,11 +76,11 @@ for (const viewport of viewports) {
       } else if (pathname === `/api/channels/${channelId}/modules/chat_voting/current`) {
         await fulfillJson(route, { vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120 });
       } else if (pathname === `/api/channels/${channelId}/modules/chat_voting/settings`) {
-        await fulfillJson(route, { settings, revision: 1, variables: [] });
+        await fulfillJson(route, { settings, revision: 1, variables: [{ name: "score", value: 8, description: "Punktzahl" }] });
       } else if (pathname === `/api/channels/${channelId}/settings`) {
         await fulfillJson(route, { timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 1, defaultChatTarget: "source_only", defaultChatTargetRevision: 1 });
       } else if (pathname === `/api/channels/${channelId}/template-variables`) {
-        await fulfillJson(route, { variables: [] });
+        await fulfillJson(route, { variables: registeredTemplateVariables });
       } else if (pathname === `/api/channels/${channelId}/template-preview`) {
         await fulfillJson(route, { text: "" });
       } else if (pathname === `/api/channels/${channelId}/overlays`) {
@@ -132,8 +140,87 @@ for (const viewport of viewports) {
       const current = answerLayouts[index];
       const next = answerLayouts[index + 1];
       if (current === undefined || next === undefined) throw new Error("An answer row is missing.");
-      expect(next.inputTop - current.inputBottom).toBeLessThanOrEqual(12);
+      expect(next.inputTop - current.inputBottom).toBeLessThanOrEqual(28);
     }
+
+    const duration = inspector.locator(".chat-voting-editor__duration-control");
+    const durationSlot = duration.locator(".chat-voting-editor__duration-slot");
+    await expect(durationSlot.locator(".unit-input")).toHaveCount(0);
+    const reservedDurationHeight = await durationSlot.evaluate((element) => element.getBoundingClientRect().height);
+    await page.getByRole("button", { name: "Eigene", exact: true }).click();
+    const customDuration = durationSlot.locator(".unit-input");
+    await expect(customDuration).toBeVisible();
+    const durationGap = await duration.evaluate((element) => {
+      const segment = element.querySelector(".segment-choice");
+      const input = element.querySelector(".unit-input");
+      if (!(segment instanceof HTMLElement) || !(input instanceof HTMLElement)) throw new Error("The custom duration controls are missing.");
+      return input.getBoundingClientRect().top - segment.getBoundingClientRect().bottom;
+    });
+    expect(durationGap).toBeLessThanOrEqual(12);
+    expect(await durationSlot.evaluate((element) => element.getBoundingClientRect().height)).toBe(reservedDurationHeight);
+
+    const answerRows = inspector.locator(".chat-voting-editor__answer");
+    const duplicateRow = answerRows.nth(1);
+    const duplicateInput = duplicateRow.getByRole("textbox", { name: "Antwort 2" });
+    const beforeDuplicate = await duplicateRow.boundingBox();
+    if (beforeDuplicate === null) throw new Error("The second answer row is not measurable.");
+    await duplicateInput.fill("Pizza");
+    await expect(duplicateRow.locator(".ui-field__error[role=alert]")).toBeVisible();
+    const afterDuplicate = await duplicateRow.evaluate((row) => {
+      const input = row.querySelector(".ui-field__input");
+      const remove = row.querySelector("button");
+      if (!(input instanceof HTMLElement) || !(remove instanceof HTMLElement)) throw new Error("The answer input or remove button is missing.");
+      const inputBox = input.getBoundingClientRect();
+      const removeBox = remove.getBoundingClientRect();
+      return {
+        height: row.getBoundingClientRect().height,
+        inputCenter: (inputBox.top + inputBox.bottom) / 2,
+        removeCenter: (removeBox.top + removeBox.bottom) / 2,
+      };
+    });
+    expect(Math.abs(afterDuplicate.height - beforeDuplicate.height)).toBeLessThanOrEqual(1);
+    expect(Math.abs(afterDuplicate.removeCenter - afterDuplicate.inputCenter)).toBeLessThanOrEqual(2);
+
+    const votingSettings = page.locator(".chat-voting-settings-editor");
+    await expect(votingSettings).toBeVisible();
+    await expect(votingSettings.getByRole("button", { name: "Speichern", exact: true })).toHaveCount(1);
+    const settingsGeometry = await votingSettings.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const row = element.querySelector(".inspector-field-row");
+      const label = row?.querySelector<HTMLElement>(".inspector-field-row__label");
+      const input = row?.querySelector<HTMLElement>("input");
+      const title = element.querySelector<HTMLElement>(".inspector-section__heading");
+      const actions = element.querySelector<HTMLElement>(".ui-editor-shell__header-save .ui-save-bar__actions");
+      if (row === null || label === null || label === undefined || input === null || input === undefined || title === null || actions === null) {
+        throw new Error("The voting settings header or duration field is missing.");
+      }
+      const titleBox = title.getBoundingClientRect();
+      const actionBox = actions.getBoundingClientRect();
+      return {
+        width: element.getBoundingClientRect().width,
+        contentWidth: element.closest(".module-detail__content")?.getBoundingClientRect().width ?? 0,
+        borderTopWidth: style.borderTopWidth,
+        backgroundColor: style.backgroundColor,
+        labelBottom: label.getBoundingClientRect().bottom,
+        inputTop: input.getBoundingClientRect().top,
+        headerCenterDifference: Math.abs((titleBox.top + titleBox.bottom) / 2 - (actionBox.top + actionBox.bottom) / 2),
+        saveBars: element.querySelectorAll(".ui-save-bar").length,
+      };
+    });
+    expect(settingsGeometry.width).toBeGreaterThanOrEqual(settingsGeometry.contentWidth - 2);
+    expect(settingsGeometry.borderTopWidth).toBe("0px");
+    expect(settingsGeometry.backgroundColor).toBe("rgba(0, 0, 0, 0)");
+    expect(settingsGeometry.labelBottom).toBeLessThanOrEqual(settingsGeometry.inputTop + 1);
+    expect(settingsGeometry.headerCenterDifference).toBeLessThanOrEqual(12);
+    expect(settingsGeometry.saveBars).toBe(1);
+
+    await votingSettings.getByRole("tab", { name: "Nachrichten" }).click();
+    const globalResultText = votingSettings.getByRole("textbox", { name: "Ergebnistext" });
+    const globalWarnings = votingSettings.locator("#settings-resultText-warnings");
+    await expect(globalResultText).toHaveValue(settings.resultText);
+    await expect(globalWarnings).not.toContainText("Unbekannte Variable");
+    await globalResultText.fill("{api.");
+    await expect(page.getByRole("option", { name: /\{api\.score\}/u })).toBeVisible();
 
     const documentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(documentWidth).toBeLessThanOrEqual(viewport.width + 1);

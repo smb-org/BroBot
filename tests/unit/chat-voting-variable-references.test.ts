@@ -71,6 +71,17 @@ describe("chat voting template variable references", () => {
     expect(database.sqlite.prepare(
       "SELECT result_text FROM chat_votes WHERE channel_id = 'fictional-channel' AND poll_id = 'poll-closed'",
     ).get()).toEqual({ result_text: "Closed result: {var.score}" });
+
+    await database.prepare(
+      "UPDATE chat_votes SET status = 'closed', closed_at = ?, counts_json = '[0,0]', voter_count = 0 WHERE channel_id = ? AND poll_id = ?",
+    ).bind("2026-10-04T10:03:00.000Z", "fictional-channel", "poll-open").run();
+    await expect(references?.usages(database as unknown as D1Database, "fictional-channel", "points"))
+      .resolves.toEqual([
+        { moduleId: "chat_voting", itemName: "startText", kind: "template" },
+        { moduleId: "chat_voting", itemName: "resultText", kind: "template" },
+        { moduleId: "chat_voting", itemName: "Dinner vote", kind: "template" },
+        { moduleId: "chat_voting", itemName: "Running vote", kind: "template" },
+      ]);
   });
 
   it("supplies saved result text to text block reference tracking", async () => {

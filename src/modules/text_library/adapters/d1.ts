@@ -7,6 +7,11 @@ import type { ModuleTemplateUsageSource } from "../../contract";
 import { blockReferencesInText } from "../domain";
 import { templateTextLength } from "../../../contracts/template-text-length";
 import { timerScheduleReconciliationMutation } from "../../contracts/timer-schedule-reconciliation";
+import {
+  CHAT_VOTE_RESULT_TEXT_REFERENCE_EXISTS_SQL,
+  findChatVoteResultTextReferences,
+  prepareChatVoteResultTextReferenceRewrite,
+} from "../../contracts/chat-vote-result-text-references";
 
 const MODULE_ID = "text_library";
 
@@ -63,6 +68,7 @@ export const blockUsageExistsSql = `(
               WHERE element.channel_id = ? AND (
                 instr(element.text, ?) > 0 OR instr(element.config_json, ?) > 0 OR
                 (element.kind = 'text_library.block' AND json_extract(element.config_json, '$.blockName') = ?)))
+  OR ${CHAT_VOTE_RESULT_TEXT_REFERENCE_EXISTS_SQL}
 )`;
 
 const blockUsageValues = (channelId: string, name: string): string[] => {
@@ -74,6 +80,7 @@ const blockUsageValues = (channelId: string, name: string): string[] => {
     channelId, token, token, token, token,
     channelId, token,
     channelId, token, token, name,
+    channelId, token,
   ];
 };
 
@@ -116,7 +123,7 @@ const stringsFromJson = (raw: string): string[] => {
 const textBlockRenameWouldOverflow = async (db: D1Database, channelId: string, from: string, to: string): Promise<boolean> => {
   const oldToken = `{text.${from}}`;
   const nextToken = `{text.${to}}`;
-  const [variants, commands, timers, faqEntries, modules, voteTemplates, overlayElements] = await Promise.all([
+  const [variants, commands, timers, faqEntries, modules, voteResultTexts, overlayElements] = await Promise.all([
     db.prepare("SELECT texts_json FROM text_block_variants WHERE channel_id = ? AND instr(texts_json, ?) > 0")
       .bind(channelId, oldToken).all<{ texts_json: string }>(),
     db.prepare(`SELECT response_text, template_fields_json, timeout_fallback_text, timeout_reason
@@ -131,8 +138,7 @@ const textBlockRenameWouldOverflow = async (db: D1Database, channelId: string, f
       .bind(channelId, oldToken).all<{ answer_text: string }>(),
     db.prepare("SELECT settings FROM channel_modules WHERE channel_id = ? AND instr(settings, ?) > 0")
       .bind(channelId, oldToken).all<{ settings: string }>(),
-    db.prepare("SELECT result_text FROM chat_vote_templates WHERE channel_id = ? AND instr(result_text, ?) > 0")
-      .bind(channelId, oldToken).all<{ result_text: string }>(),
+    findChatVoteResultTextReferences(db, channelId, oldToken),
     db.prepare("SELECT text, config_json FROM overlay_elements WHERE channel_id = ? AND (instr(text, ?) > 0 OR instr(config_json, ?) > 0)")
       .bind(channelId, oldToken, oldToken).all<{ text: string; config_json: string }>(),
   ]);
@@ -147,7 +153,7 @@ const textBlockRenameWouldOverflow = async (db: D1Database, channelId: string, f
     ...timers.results.map((row) => row.message_text),
     ...faqEntries.results.map((row) => row.answer_text),
     ...modules.results.flatMap((row) => stringsFromJson(row.settings)),
-    ...voteTemplates.results.map((row) => row.result_text),
+    ...voteResultTexts.map((row) => row.result_text),
   ];
   if (templateTexts.some((text) => text.includes(oldToken) && templateTextLength(text.replaceAll(oldToken, nextToken)) > 500)) return true;
   return overlayElements.results.some((row) =>
@@ -471,11 +477,14 @@ export const createTextBlockRepository = (
         `UPDATE channel_modules SET settings = replace(settings, ? , ?), revision = revision + 1
           WHERE channel_id = ? AND instr(settings, ?) > 0 AND ${renamedBlockGuard}`,
       ).bind(`{text.${fromName}}`, `{text.${input.name}}`, input.channelId, `{text.${fromName}}`, ...renamedBlockValues);
-      const rewriteChatVoteTemplates = db.prepare(
-        `UPDATE chat_vote_templates
-            SET result_text = replace(result_text, ?, ?), revision = revision + 1, updated_at = ?
-          WHERE channel_id = ? AND instr(result_text, ?) > 0 AND ${renamedBlockGuard}`,
-      ).bind(`{text.${fromName}}`, `{text.${input.name}}`, input.now, input.channelId, `{text.${fromName}}`, ...renamedBlockValues);
+      const rewriteChatVoteResultTexts = prepareChatVoteResultTextReferenceRewrite(db, {
+        channelId: input.channelId,
+        fromToken: `{text.${fromName}}`,
+        toToken: `{text.${input.name}}`,
+        updatedAt: input.now,
+        conditionSql: renamedBlockGuard,
+        conditionValues: renamedBlockValues,
+      });
       const updateOverlayRevisions = db.prepare(
         `UPDATE overlays SET revision = revision + 1, updated_at = ?
           WHERE channel_id = ? AND EXISTS (
@@ -520,7 +529,7 @@ export const createTextBlockRepository = (
       statements.push(rewriteParentRevisions, rewriteVariants,
         rewriteCommands, rewriteTimers,
         timerScheduleReconciliationMutation(db, input.channelId, scheduleMutationId, input.now, true),
-        rewriteFaq, rewriteModuleSettings, rewriteChatVoteTemplates);
+        rewriteFaq, rewriteModuleSettings, ...rewriteChatVoteResultTexts);
       const overlayUpdateIndex = statements.length;
       statements.push(updateOverlayRevisions, rewriteOverlayElements);
       let results: Awaited<ReturnType<typeof db.batch>>;

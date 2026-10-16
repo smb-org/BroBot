@@ -8,6 +8,7 @@ import { getApiSource, listApiSources } from "./adapters/d1";
 import { inspectApiSourceExpression } from "./domain";
 import { isValidApiSourceUrl } from "./domain/url";
 import { testApiSource } from "./test-source";
+import { CHAT_VOTE_RESULT_TEXT_REFERENCE_SOURCE_SQL } from "../contracts/chat-vote-result-text-references";
 
 const createSchema = z.object({
   name: z.string().regex(API_SOURCE_NAME_PATTERN),
@@ -102,6 +103,13 @@ export const apiSourceReferenceQuery = (channelId: string, name: string): { sql:
               FROM chat_vote_templates AS template
              WHERE template.channel_id = ? AND (${textPredicate("template.title")} OR ${textPredicate("template.labels")})`,
       values: [channelId, ...textValues(), ...textValues()],
+    },
+    {
+      sql: `SELECT 9 AS site_order, 'event' AS kind,
+                   'chat_voting.' || COALESCE(NULLIF(result.item_name, ''), result.source_id) AS label
+              FROM (${CHAT_VOTE_RESULT_TEXT_REFERENCE_SOURCE_SQL}) AS result
+             WHERE result.channel_id = ? AND ${textPredicate("result.result_text")}`,
+      values: [channelId, ...textValues()],
     },
   ];
 

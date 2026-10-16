@@ -584,7 +584,7 @@ describe("text library", () => {
     ]);
   });
 
-  it("tracks and rewrites text block references in saved vote result text", async () => {
+  it("tracks and rewrites text block references in saved, running, and replayable vote result text", async () => {
     const created = await createBlock("answer", [variant("default", "A reusable answer")]);
     if (!created.ok) throw new Error("Could not create the saved vote result test block.");
     const now = new Date(NOW).toISOString();
@@ -593,9 +593,23 @@ describe("text library", () => {
         (id, channel_id, shortcut, title, labels, free_text_mode, duration_seconds, revision, legacy_alias, last_used_at, created_at, updated_at, result_text)
        VALUES ('template-dinner', ?, NULL, 'Dinner vote', '["Pizza","Burger"]', NULL, 120, 1, NULL, NULL, ?, ?, 'Result: {text.answer}')`,
     ).bind(CHANNEL_ID, now, now).run();
+    await database.prepare(
+      `INSERT INTO chat_votes
+        (channel_id, poll_id, kind, option_count, labels_json, status, opened_at, closes_at, close_reason, title, result_text)
+       VALUES (?, 'poll-open', 'yes_no', 2, '["Yes","No"]', 'open', ?, ?, 'timer', 'Running vote', 'Running: {text.answer}')`,
+    ).bind(CHANNEL_ID, now, new Date(NOW + 120_000).toISOString()).run();
+    await database.prepare(
+      `INSERT INTO chat_votes
+        (channel_id, poll_id, kind, option_count, labels_json, status, opened_at, closes_at, closed_at, close_reason, counts_json, voter_count, title, result_text)
+       VALUES (?, 'poll-closed', 'yes_no', 2, '["Yes","No"]', 'closed', ?, ?, ?, 'timer', '[1,0]', 1,
+         'Closed vote', 'Closed: {text.answer}')`,
+    ).bind(CHANNEL_ID, new Date(NOW - 60_000).toISOString(), now, now).run();
     const sources = await chatVotingModule.templateUsageSources?.(database as unknown as D1Database, CHANNEL_ID) ?? [];
     const snapshot = await service.list(CHANNEL_ID, sources);
-    expect(snapshot.usages.answer).toEqual([{ kind: "event", label: "chat_voting.Dinner vote" }]);
+    expect(snapshot.usages.answer).toEqual([
+      { kind: "event", label: "chat_voting.Dinner vote" },
+      { kind: "event", label: "chat_voting.Running vote" },
+    ]);
 
     const result = await repository.rename({
       channelId: CHANNEL_ID,
@@ -611,6 +625,72 @@ describe("text library", () => {
     expect(result).toMatchObject({ ok: true, block: { name: "response" } });
     expect(await database.prepare("SELECT result_text, revision FROM chat_vote_templates WHERE id = 'template-dinner'").first())
       .toEqual({ result_text: "Result: {text.response}", revision: 2 });
+    expect(await database.prepare("SELECT result_text FROM chat_votes WHERE poll_id = 'poll-open'").first())
+      .toEqual({ result_text: "Running: {text.response}" });
+    expect(await database.prepare("SELECT result_text FROM chat_votes WHERE poll_id = 'poll-closed'").first())
+      .toEqual({ result_text: "Closed: {text.answer}" });
+
+    if (!result.ok) throw new Error("Could not rename the referenced text block.");
+    await database.prepare(
+      "UPDATE chat_votes SET status = 'closed', closed_at = ?, counts_json = '[0,0]', voter_count = 0 WHERE poll_id = 'poll-open'",
+    ).bind(now).run();
+    const replaySources = await chatVotingModule.templateUsageSources?.(database as unknown as D1Database, CHANNEL_ID) ?? [];
+    expect(replaySources).toEqual([
+      { text: "Result: {text.response}", kind: "event", label: "chat_voting.Dinner vote" },
+      { text: "Running: {text.response}", kind: "event", label: "chat_voting.Running vote" },
+    ]);
+    const replaySnapshot = await service.list(CHANNEL_ID, replaySources);
+    const replayRename = await repository.rename({
+      channelId: CHANNEL_ID,
+      name: "outcome",
+      categoryId: result.block.categoryId,
+      games: [],
+      variants: [variant("default", "A reusable answer")],
+      expectedRevision: result.block.revision,
+      expectedGraphRevision: replaySnapshot.settings.graphRevision,
+      now,
+    }, "response", ACTOR);
+
+    expect(replayRename).toMatchObject({ ok: true, block: { name: "outcome" } });
+    expect(await database.prepare("SELECT result_text FROM chat_votes WHERE poll_id = 'poll-open'").first())
+      .toEqual({ result_text: "Running: {text.outcome}" });
+    expect(await database.prepare("SELECT result_text FROM chat_votes WHERE poll_id = 'poll-closed'").first())
+      .toEqual({ result_text: "Closed: {text.answer}" });
+  });
+
+  it("blocks deleting a text block saved into a vote after the usage scan", async () => {
+    const created = await createBlock("answer", [variant("default", "A reusable answer")]);
+    if (!created.ok) throw new Error("Could not create the vote reference test block.");
+    const snapshot = await service.list(CHANNEL_ID);
+    let inserted = false;
+    const interleavedDatabase = {
+      prepare: (sql: string) => database.prepare(sql),
+      batch: async (statements: Parameters<TestD1Database["batch"]>[0]) => {
+        if (!inserted) {
+          inserted = true;
+          const now = new Date(NOW).toISOString();
+          await database.prepare(
+            `INSERT INTO chat_vote_templates
+              (id, channel_id, shortcut, title, labels, free_text_mode, duration_seconds, revision, legacy_alias, last_used_at, created_at, updated_at, result_text)
+             VALUES ('template-race', ?, NULL, 'Concurrent vote', '["Yes","No"]', NULL, 120, 1, NULL, NULL, ?, ?, 'Result: {text.answer}')`,
+          ).bind(CHANNEL_ID, now, now).run();
+        }
+        return database.batch(statements);
+      },
+    } as unknown as D1Database;
+    const interleavedRepository = createTextBlockRepository(interleavedDatabase, authorize);
+
+    const result = await interleavedRepository.delete(
+      CHANNEL_ID,
+      "answer",
+      created.block.revision,
+      snapshot.settings.graphRevision,
+      ACTOR,
+      new Date(NOW).toISOString(),
+    );
+
+    expect(result).toMatchObject({ ok: false, reason: "in_use" });
+    await expect(service.find(CHANNEL_ID, "answer")).resolves.not.toBeNull();
   });
 
   it("silently ignores a text command when its Twitch game filter does not match", async () => {

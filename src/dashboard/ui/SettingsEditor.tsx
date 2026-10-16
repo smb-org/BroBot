@@ -87,6 +87,7 @@ export interface SettingsEditorCatalog extends SettingsEditorTexts {
 export interface SettingsEditorDefinition<Settings> {
   spec: SettingsEditorSpec<Settings>;
   locales: Readonly<Record<"de" | "en", SettingsEditorCatalog>>;
+  registeredTemplateVariableFields?: readonly (keyof Settings & string)[];
   layout?: "tabs" | "columns";
   savePosition?: "header" | "footer" | "page-header";
   showTitle?: boolean;

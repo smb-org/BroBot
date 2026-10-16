@@ -44,7 +44,7 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
   de: {
     title: "Abstimmungseinstellungen", ariaLabel: "Abstimmungseinstellungen",
     readOnlyReason: "Nur Broadcaster und Verwalter dürfen die Einstellungen ändern.",
-    saveLabel: "Einstellungen speichern", discardLabel: "Verwerfen", savedLabel: "Einstellungen gespeichert.", pendingLabel: "Wird gespeichert …",
+    saveLabel: "Speichern", discardLabel: "Verwerfen", savedLabel: "Einstellungen gespeichert.", pendingLabel: "Wird gespeichert …",
     invalidMessage: "Bitte korrigiere die markierten Felder.", numberMissing: "Zahl eingeben",
     issueLabels: { error: "Fehler", warning: "Hinweis" }, saveError: "Die Einstellungen konnten nicht gespeichert werden.",
     conflictMessage: "Die Einstellungen wurden inzwischen geändert.", reloadLabel: "Serverstand laden", enabledLabel: "An", disabledLabel: "Aus",
@@ -64,7 +64,7 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
   en: {
     title: "Voting settings", ariaLabel: "Voting settings",
     readOnlyReason: "Only broadcasters and managers may change these settings.",
-    saveLabel: "Save settings", discardLabel: "Discard", savedLabel: "Settings saved.", pendingLabel: "Saving …",
+    saveLabel: "Save", discardLabel: "Discard", savedLabel: "Settings saved.", pendingLabel: "Saving …",
     invalidMessage: "Please correct the marked fields.", numberMissing: "Enter a number",
     issueLabels: { error: "Error", warning: "Note" }, saveError: "Settings could not be saved.",
     conflictMessage: "Settings have changed since they were loaded.", reloadLabel: "Load server version", enabledLabel: "On", disabledLabel: "Off",

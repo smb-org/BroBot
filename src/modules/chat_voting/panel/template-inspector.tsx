@@ -1,14 +1,16 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { ActionMenu, Button, ChatPreview, ConfirmDialog, Field, InspectorSection, PageHeader, RuleNote, SaveStatus, SegmentChoice, SwitchSection, TemplateTextField, UnitInput, registerDashboardNavigationGuard, useDraft, useDraftGuard } from "../../../dashboard/ui";
+import { ActionMenu, Button, ChatPreview, ConfirmDialog, Field, InspectorSection, PageHeader, RuleNote, SaveStatus, SegmentChoice, SwitchSection, TemplateTextField, UnitInput, panelTemplateOptions, registeredModuleTemplateGroup, registerDashboardNavigationGuard, useDraft, useDraftGuard } from "../../../dashboard/ui";
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient } from "../../../dashboard/data";
+import { useModuleQuery } from "../../../dashboard/data";
+import { isEventTemplateVariableAvailable } from "../../../contracts/event-template-variables";
 import { dashboardCommonTexts, dashboardTexts } from "../../../dashboard/locale";
 import type { ChatVoteTemplate, ChatVoteTemplateDraft } from "../contracts";
 import { CHAT_VOTE_TEMPLATE_MAXIMUM, CHAT_VOTING_TITLE_MAX_LENGTH } from "../contracts";
 import { isValidTemplateShortcut, normalizeFreeTextVoteForMatching, voteLabelLength } from "../domain";
 import { chatVoteDurationText, chatVotingSavedPanelTexts } from "./locale-saved";
-import { createChatVoteTemplate, saveChatVoteTemplate } from "./service";
+import { createChatVoteTemplate, loadChatVotingTemplateVariables, saveChatVoteTemplate } from "./service";
 import type { ChatVoteTemplateListState } from "./service";
 
 export interface TemplateInspectorActions {
@@ -64,6 +66,40 @@ export function ChatVoteTemplateInspector({
   const resultTextCopy = labels.resultText;
   const common = dashboardCommonTexts(language);
   const queryClient = useDashboardQueryClient();
+  const registeredVariablesQuery = useModuleQuery(channelId, "chat_voting", "template-variables", (signal) =>
+    loadChatVotingTemplateVariables(channelId, signal));
+  const registeredVariables = (registeredVariablesQuery.data ?? []).filter(isEventTemplateVariableAvailable);
+  const channelVariables = registeredVariables.filter((variable) => variable.source === "channel" && variable.name.startsWith("var.") && !variable.isTextBlock)
+    .map((variable) => ({ name: variable.name.slice("var.".length), value: Number(variable.sample) || 0, description: variable.description ?? "" }));
+  const systemVariables = panelTemplateOptions("event", [], channelVariables, language);
+  const textBlocks = registeredVariables.filter((variable) => variable.isTextBlock).map((variable) => ({
+    name: variable.name,
+    label: variable.name,
+    description: variable.description ?? variable.name,
+    sample: variable.sample,
+    group: variable.group ?? "channel" as const,
+    kind: "module" as const,
+    isTextBlock: true,
+  }));
+  const moduleVariables = registeredVariables.filter((variable) => !variable.isTextBlock && variable.source !== "system" && variable.source !== "channel")
+    .map((variable) => {
+      const pickerCopy = variable.picker?.[language];
+      const sourceGroup = registeredModuleTemplateGroup(variable, language);
+      return {
+        name: variable.name,
+        label: pickerCopy?.label ?? variable.name,
+        description: pickerCopy?.description ?? variable.description ?? variable.name,
+        sample: variable.sample,
+        ...(pickerCopy?.sample === undefined ? {} : { pickerSample: pickerCopy.sample }),
+        group: variable.group ?? "channel" as const,
+        kind: "module" as const,
+        ...(sourceGroup === undefined ? {} : { sourceGroup }),
+        ...(variable.external === undefined ? {} : { external: variable.external }),
+        ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
+        ...(variable.parameters === "currency_pair" ? { parameter: { value: variable.parameterDefault ?? "USD EUR" } } : {}),
+      };
+    });
+  const resultTextVariables = [...resultTextCopy.variables, ...systemVariables, ...textBlocks, ...moduleVariables];
   const initialDraft = useMemo(() => draftFromTemplate(template), [template]);
   const draft = useDraft(initialDraft);
   const draftValue = useRef(draft.value);
@@ -430,7 +466,7 @@ export function ChatVoteTemplateInspector({
             size="compact"
           />
           <div className="chat-voting-editor__duration-slot">
-            <UnitInput
+            {durationMode === "custom" ? <UnitInput
               label={labels.seconds}
               ariaLabel={labels.seconds}
               value={draft.value.durationSeconds}
@@ -438,11 +474,10 @@ export function ChatVoteTemplateInspector({
               max={14_400}
               step={30}
               unit="s"
-              {...(durationMode === "custom" ? { hint: labels.durationHint } : {})}
-              disabled={durationMode !== "custom"}
+              hint={labels.durationHint}
               id={"chat-vote-duration-" + template.id}
               onChange={(value) => { updateDraft({ durationSeconds: typeof value === "number" ? value : 0 }); }}
-            />
+            /> : null}
           </div>
         </div>
       </InspectorSection>
@@ -454,7 +489,7 @@ export function ChatVoteTemplateInspector({
           value={draft.value.resultText ?? "{vote.result}"}
           onChange={(resultText) => { updateDraft({ resultText }); }}
           maxLength={500}
-          variables={resultTextCopy.variables}
+          variables={resultTextVariables}
           minRows={2}
           messages={resultTextCopy.templateMessages}
         />

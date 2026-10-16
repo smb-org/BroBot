@@ -37,6 +37,7 @@ const mount = (options: {
   waitForTemplates?: Promise<Response>;
   templateResponses?: ChatVoteTemplate[][];
   patchResponse?: (updated: ChatVoteTemplate) => Promise<Response>;
+  templateVariables?: unknown[];
 } = {}) => {
   const saved: string[] = [];
   let currentTemplates = [...(options.templates ?? [template])];
@@ -52,6 +53,9 @@ const mount = (options: {
         count: responseTemplates.length,
         maximum: 100,
       }));
+    }
+    if (url.pathname === "/api/channels/channel-432/template-variables" && method === "GET") {
+      return Promise.resolve(jsonResponse({ variables: options.templateVariables ?? [] }));
     }
     if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-432" }));
     if (url.pathname === "/api/channels/channel-432/modules/chat_voting/templates" && method === "POST") {
@@ -120,6 +124,8 @@ describe("saved chat voting collection", () => {
     if (createButton === undefined) throw new Error("The create vote button is missing.");
     fireEvent.click(createButton);
 
+    expect(screen.queryByRole("spinbutton", { name: "Sekunden" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Eigene$/u }));
     expect(screen.getByRole("spinbutton", { name: "Sekunden" })).toHaveValue(120);
     fireEvent.change(screen.getByRole("textbox", { name: "Frage" }), { target: { value: "Abendessen" } });
     fireEvent.click(screen.getByRole("button", { name: "Antwort hinzufügen" }));
@@ -287,6 +293,27 @@ describe("saved chat voting collection", () => {
     if (typeof update !== "string") throw new Error("The template update body is missing.");
     expect(JSON.parse(update)).toMatchObject({ title: "Neue Frage", resultText: "Vielen Dank! {vote.result}", revision: 1 });
     expect(screen.getByRole("button", { name: "Verwerfen" })).toBeDisabled();
+  });
+
+  it("offers channel variables, text blocks, and API sources in result text", async () => {
+    mount({
+      templates: [{ ...template, resultText: "{vote.result} {var.score} {text.summary} {api.score}" }],
+      templateVariables: [
+        { name: "var.score", moduleId: "host", isTextBlock: false, description: "Punktzahl", group: "channel", maxLength: 10, sample: "8", source: "channel", contexts: ["event"] },
+        { name: "text.summary", moduleId: "text_library", isTextBlock: true, maxLength: 500, sample: "Zusammenfassung", contexts: ["event"] },
+        { name: "api.score", moduleId: "api_source", isTextBlock: false, description: "Punktzahl", group: "api", maxLength: 100, sample: "8", source: "module", contexts: ["event"] },
+      ],
+    });
+    const resultText = await screen.findByRole("textbox", { name: "Ergebnistext" });
+    await waitFor(() => expect(resultText.closest(".ui-template-text-field")?.querySelector(".ui-template-text-field__warnings"))
+      .not.toHaveTextContent("Unbekannte Variable"));
+
+    fireEvent.change(resultText, { target: { value: "{var." } });
+    expect(await screen.findByRole("option", { name: /\{var\.score\}/u })).toBeInTheDocument();
+    fireEvent.change(resultText, { target: { value: "{text." } });
+    expect(await screen.findByRole("option", { name: /\{text\.summary\}/u })).toBeInTheDocument();
+    fireEvent.change(resultText, { target: { value: "{api." } });
+    expect(await screen.findByRole("option", { name: /\{api\.score\}/u })).toBeInTheDocument();
   });
 
   it("confirms a manager delete and removes the saved vote from the collection", async () => {

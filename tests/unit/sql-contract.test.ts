@@ -38,6 +38,13 @@ import {
   belaboxStreamSessionGuard,
 } from "../../src/modules/belabox/adapters/d1";
 import { MANAGING_ROLES } from "../../src/contracts/values";
+import {
+  CHAT_VOTE_RESULT_TEXT_REFERENCE_CURRENT_VOTE_WHERE_SQL,
+  CHAT_VOTE_RESULT_TEXT_REFERENCE_DEFAULT_UPDATED_AT_SQL,
+  CHAT_VOTE_RESULT_TEXT_REFERENCE_EXISTS_SQL,
+  CHAT_VOTE_RESULT_TEXT_REFERENCE_SOURCE_SQL,
+  CHAT_VOTE_RESULT_TEXT_REFERENCE_TOKEN_PREDICATE_SQL,
+} from "../../src/modules/contracts/chat-vote-result-text-references";
 import { textBlockWriteGuard } from "../../src/modules/contracts/text-block-write-guard";
 import { columnVariableReferences, moduleVariableRenameTarget } from "../../src/modules/contract";
 import { textLibraryModule } from "../../src/modules/text_library";
@@ -102,6 +109,14 @@ const sourceFiles = (directory: string): string[] => readdirSync(directory, { wi
 const sqlGetFixtures = new Map<string, string>([
   ["authorization.sql", authorizeModuleMutation("channel-id", actor, now).sql],
   ["referenceQuery.sql", apiSourceReferenceQuery("channel-id", "sunset").sql],
+  ["CHAT_VOTE_RESULT_TEXT_REFERENCE_EXISTS_SQL", CHAT_VOTE_RESULT_TEXT_REFERENCE_EXISTS_SQL],
+  ["CHAT_VOTE_RESULT_TEXT_REFERENCE_SOURCE_SQL", CHAT_VOTE_RESULT_TEXT_REFERENCE_SOURCE_SQL],
+  ["CHAT_VOTE_RESULT_TEXT_REFERENCE_CURRENT_VOTE_WHERE_SQL", CHAT_VOTE_RESULT_TEXT_REFERENCE_CURRENT_VOTE_WHERE_SQL],
+  ["CHAT_VOTE_RESULT_TEXT_REFERENCE_TOKEN_PREDICATE_SQL", CHAT_VOTE_RESULT_TEXT_REFERENCE_TOKEN_PREDICATE_SQL],
+  ["CHAT_VOTE_RESULT_TEXT_REFERENCE_DEFAULT_UPDATED_AT_SQL", CHAT_VOTE_RESULT_TEXT_REFERENCE_DEFAULT_UPDATED_AT_SQL],
+  ["tokenPredicate", CHAT_VOTE_RESULT_TEXT_REFERENCE_TOKEN_PREDICATE_SQL],
+  ["updatedAtSql", CHAT_VOTE_RESULT_TEXT_REFERENCE_DEFAULT_UPDATED_AT_SQL],
+  ["conditionSql", "1 = 1"],
   ["sessionGuard.sql", belaboxStreamSessionGuard("channel-id", {
     state: "online",
     changedAt: now,

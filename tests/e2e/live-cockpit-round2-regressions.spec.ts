@@ -110,7 +110,7 @@ test("broadcast errors wrap without clipping their message at mobile width", asy
   expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth);
 });
 
-test("all active Votekick timeouts remain reachable in a fixed-height list", async ({ page }) => {
+test("five active Votekick timeouts remain reachable with a visible scroll edge", async ({ page }) => {
   const channelId = "round2-all-votekick-timeouts";
   const now = new Date().toISOString();
   const endedAt = new Date(Date.now() - 30_000).toISOString();
@@ -122,7 +122,7 @@ test("all active Votekick timeouts remain reachable in a fixed-height list", asy
   await page.route(`**/api/channels/${channelId}/modules/votekick/votekicks`, (route) => route.fulfill(json({
     running: null,
     now,
-    votekicks: Array.from({ length: 6 }, (_, index) => ({
+    votekicks: Array.from({ length: 5 }, (_, index) => ({
       id: `passed-${String(index + 1)}`,
       targetUserId: `viewer-${String(index + 1)}`,
       targetLogin: `viewer_${String(index + 1)}`,
@@ -144,20 +144,22 @@ test("all active Votekick timeouts remain reachable in a fixed-height list", asy
   await page.goto(`/channels/${channelId}`);
 
   const list = page.locator(".live-cockpit-next-list--recent");
-  await expect(list.locator(".live-cockpit-next-item")).toHaveCount(6);
-  await expect(list.getByRole("button", { name: /Timeout aufheben|Lift timeout/u })).toHaveCount(6);
+  await expect(list.locator(".live-cockpit-next-item")).toHaveCount(5);
+  await expect(list.getByRole("button", { name: /Timeout aufheben|Lift timeout/u })).toHaveCount(5);
   const initialGeometry = await list.evaluate((element) => ({
     height: element.getBoundingClientRect().height,
     scrollHeight: element.scrollHeight,
     clientHeight: element.clientHeight,
     paddingBottom: Number.parseFloat(getComputedStyle(element).paddingBottom),
+    maskImage: getComputedStyle(element).maskImage,
     scrollbarWidth: getComputedStyle(element).scrollbarWidth,
     scrollbarColor: getComputedStyle(element).scrollbarColor,
     nextHeadingTop: element.parentElement?.querySelector(":scope > h2:last-of-type")?.getBoundingClientRect().top,
   }));
   expect(initialGeometry.height).toBe(224);
   expect(initialGeometry.scrollHeight).toBeGreaterThan(initialGeometry.clientHeight);
-  expect(initialGeometry.paddingBottom).toBeGreaterThanOrEqual(8);
+  expect(initialGeometry.paddingBottom).toBeGreaterThanOrEqual(16);
+  expect(initialGeometry.maskImage).not.toBe("none");
   expect(initialGeometry.scrollbarWidth).toBe("thin");
   expect(initialGeometry.scrollbarColor).not.toBe("auto");
   const liftButton = list.getByRole("button", { name: /Timeout aufheben|Lift timeout/u }).first();
@@ -186,7 +188,8 @@ test("all active Votekick timeouts remain reachable in a fixed-height list", asy
   });
   expect(finalItem.itemName).toMatch(/Lift timeout|Timeout aufheben/u);
   expect(finalItem.buttonBottom).toBeLessThanOrEqual(finalItem.listBottom + 0.5);
-  expect(finalItem.listBottom - (finalItem.itemBottom ?? finalItem.listBottom)).toBeGreaterThanOrEqual(8);
+  expect(finalItem.listBottom - (finalItem.itemBottom ?? finalItem.listBottom)).toBeGreaterThanOrEqual(16);
+  expect(finalItem.nextHeadingTop - (finalItem.itemBottom ?? finalItem.nextHeadingTop)).toBeGreaterThanOrEqual(24);
   expect(finalItem.nextHeadingTop).toBeCloseTo(initialGeometry.nextHeadingTop ?? 0, 0);
 });
 

@@ -1,27 +1,50 @@
 import { useCallback, useEffect, useState, type ComponentType, type ReactElement, type ReactNode } from "react";
 
 import { MODULES } from "../modules/registry";
-import type { ModulePanelProperties } from "../modules/contract";
+import type { ModulePanelProperties, ModuleRegisteredTemplateVariable } from "../modules/contract";
 import { textCommandListChatCommand } from "../modules/text_commands/contracts/chat-commands";
 import type { TextCommandPanelData } from "../modules/text_commands/panel/service";
 import { loadModulePanel, loadModuleSettingsEditor, ModuleChunkLoadError, retryModuleChunkLoad } from "./module-panel-loaders";
 import { RetryableLazy } from "./RetryableLazy";
 import { canManage, type ChannelRole } from "../contracts/values";
+import { isEventTemplateVariableAvailable } from "../contracts/event-template-variables";
 import type { PanelActiveModule, PanelModuleState, PanelTemplateWarning } from "../panel-contract";
-import { PanelApiError, getChannelModuleSettings, saveChannelModuleSettings, setChannelModuleEnabled } from "./api";
+import { PanelApiError, getChannelModuleSettings, getChannelTemplateVariables, saveChannelModuleSettings, setChannelModuleEnabled } from "./api";
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "./data";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber, serverFieldErrorText, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
 import { templateTextLength } from "../template";
 import { modulePermissionsAreMissing } from "./channel-health";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
-import { effectivePanelTemplateVariables, panelTemplateOptions, type PanelChannelVariable } from "./ui/template-variable-options";
+import { effectivePanelTemplateVariables, panelTemplateOptions, registeredModuleTemplateGroup, type PanelChannelVariable } from "./ui/template-variable-options";
 import { ChatCommandsHelp, ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, SettingsPage, StatusLed, LockedReason, mapServerFieldErrors, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
 import { Switch as SwitchPrimitive } from "./ui/primitives/switch";
 import { worstCaseTemplateLength } from "../template";
 import type { TemplateVariable } from "../template";
 
 const workspaceTexts = moduleWorkspaceTexts;
+
+const registeredTemplateFieldVariable = (
+  variable: ModuleRegisteredTemplateVariable,
+  language: DashboardLanguage,
+): TemplateTextFieldVariable => {
+  const picker = variable.picker?.[language];
+  const sourceGroup = registeredModuleTemplateGroup(variable, language);
+  return {
+    name: variable.name,
+    label: picker?.label ?? variable.name,
+    description: picker?.description ?? variable.description ?? variable.name,
+    sample: picker?.sample ?? variable.sample,
+    group: variable.group ?? "context",
+    kind: "module",
+    ...(sourceGroup === undefined ? {} : { sourceGroup }),
+    ...(variable.external === undefined ? {} : { external: variable.external }),
+    ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
+    ...(variable.parameters === "choices" ? { parameter: { value: variable.parameterDefault ?? "a|b|c" } } : {}),
+    ...(variable.parameters === "currency_pair" ? { parameter: { value: variable.parameterDefault ?? "USD EUR" } } : {}),
+    ...(variable.isTextBlock ? { isTextBlock: true } : {}),
+  };
+};
 
 const moduleDetails = (moduleId: string, language: DashboardLanguage = dashboardLanguage()): { name: string; description: string } => ({
   name: moduleName(moduleId, language),
@@ -197,7 +220,16 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       definitionPromise,
       getChannelModuleSettings(channelId, module.id, signal),
     ]);
-    return { definition: definition.default, settings: response.settings, revision: response.revision, variables: response.variables };
+    const registeredTemplateVariables = definition.default.registeredTemplateVariableFields?.length
+      ? await getChannelTemplateVariables(channelId, signal)
+      : [];
+    return {
+      definition: definition.default,
+      settings: response.settings,
+      revision: response.revision,
+      variables: response.variables,
+      registeredTemplateVariables,
+    };
   });
   const loaded = settingsQuery.data;
   const loadError = settingsQuery.error instanceof PanelApiError
@@ -239,6 +271,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       copy={copy}
       retryLabel={dashboardCommonTexts(language).retry}
       channelVariables={loaded.variables}
+      registeredTemplateVariables={loaded.registeredTemplateVariables}
       initial={loaded.settings}
       initialRevision={loaded.revision}
       onReload={async () => {
@@ -254,7 +287,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
   </LoadState>;
 };
 
-const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, language, definition, copy, retryLabel, channelVariables, initial, initialRevision, settingsSaveTarget, onReload }: {
+const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, language, definition, copy, retryLabel, channelVariables, registeredTemplateVariables, initial, initialRevision, settingsSaveTarget, onReload }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
@@ -263,6 +296,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   copy: SettingsEditorDefinition<Record<string, unknown>>["locales"]["de"];
   retryLabel: string;
   channelVariables: readonly PanelChannelVariable[];
+  registeredTemplateVariables: readonly ModuleRegisteredTemplateVariable[];
   initial: Record<string, unknown>;
   initialRevision: number;
   settingsSaveTarget?: HTMLElement | null;
@@ -294,8 +328,17 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   const templateFields = (module.templateFields ?? {}) as Readonly<Record<string, readonly TemplateVariable[] | undefined>>;
   const templateMetadata = Object.fromEntries(Object.entries(templateFields).map(([key, variables]) => {
     const context = module.templateContext ?? "event";
-    const declared = effectivePanelTemplateVariables(context, variables ?? [], channelVariables);
-    const localized = panelTemplateOptions(
+    const includesRegistered = definition.registeredTemplateVariableFields?.includes(key) === true;
+    const registered = includesRegistered
+      ? registeredTemplateVariables.filter((variable) => variable.source !== "system" && variable.source !== "channel" && (
+        context === "event"
+          ? isEventTemplateVariableAvailable(variable)
+          : variable.contexts === undefined || variable.contexts.includes(context)
+      ))
+      : [];
+    const declarations = [...(variables ?? []), ...registered];
+    const declared = effectivePanelTemplateVariables(context, declarations, channelVariables);
+    const localizedStatic = panelTemplateOptions(
       context,
       variables ?? [],
       channelVariables,
@@ -303,6 +346,8 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       copy.fields[key]?.variables ?? [],
       module.templateVariableGroup === undefined ? undefined : { id: module.id, definition: module.templateVariableGroup },
     );
+    const localizedRegistered = registered.map((variable) => registeredTemplateFieldVariable(variable, language));
+    const localized = [...new Map([...localizedRegistered, ...localizedStatic].map((variable) => [variable.name, variable])).values()];
     const byName = new Map(declared.map((variable) => [variable.name, variable]));
     return [key, localized.flatMap((option) => {
       const variable = byName.get(option.name);
