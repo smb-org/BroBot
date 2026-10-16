@@ -1275,6 +1275,8 @@ export interface ModulePanelProperties {
   canManage?: boolean;
   /** May the view execute operational controls available to every channel role? */
   canOperate?: boolean;
+  /** Active state used by settings surfaces that also mount a module panel. */
+  moduleActive?: boolean;
   /** Generic data-source conditions available to text-block editors. */
   textBlockConditions?: readonly ModuleTextBlockConditionDefinition[];
   /** Last known status of the bot's moderator role in this channel. */

@@ -9,13 +9,13 @@ export const raidSettingsSchema = z.object({
   textThreshold: z.number().int().min(0).max(100000).default(3),
   textLong: z.string().trim().refine((text) => templateTextLength(text) <= 500),
   textShort: z.string().trim().refine((text) => templateTextLength(text) <= 500),
-  textLongTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
-  textShortTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
+  textLongTarget: z.enum(["all_chats", "source_only", "channel_default"]).default("channel_default"),
+  textShortTarget: z.enum(["all_chats", "source_only", "channel_default"]).default("channel_default"),
 });
 
 export type RaidSettings = Omit<z.output<typeof raidSettingsSchema>, "textLongTarget" | "textShortTarget"> & {
-  textLongTarget?: "all_chats" | "source_only";
-  textShortTarget?: "all_chats" | "source_only";
+  textLongTarget?: "all_chats" | "source_only" | "channel_default";
+  textShortTarget?: "all_chats" | "source_only" | "channel_default";
 };
 
 const RAID_VARIABLES = {

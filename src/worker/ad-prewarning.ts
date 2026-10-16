@@ -202,7 +202,7 @@ const settingRecord = async (
 
 // Not typed `EventCode`: `decision.reason` includes `"disabled"`, which the
 // caller always guards against before `decideAdPrewarning` runs (see
-// `settingRecord`'s `!configured.settings.prewarning` checks below), so
+// `settingRecord`'s blank-message checks below), so
 // `ads.prewarning.disabled` is unreachable and was never a real code. The
 // five reachable suffixes are each in `EVENT_CODES`, checked by
 // `tests/unit/event-codes.test.ts` matching this function's real outputs.
@@ -257,7 +257,8 @@ export const refreshAdPrewarning = async (
     await clear(scheduler);
     return;
   }
-  if (!configured.settings.prewarning) await clear(scheduler);
+  const prewarningEnabled = configured.settings.prewarningText.trim().length > 0;
+  if (!prewarningEnabled) await clear(scheduler);
 
   const scheduleGeneration = await scheduler?.readScheduleGeneration?.();
   const result = alreadyFetchedSchedule ?? await getAdSchedule(
@@ -269,9 +270,9 @@ export const refreshAdPrewarning = async (
     fetcher,
   );
   if (!result.fetched || result.schedule === null) {
-    if (configured.settings.prewarning && result.reason === "unauthorized") {
+    if (prewarningEnabled && result.reason === "unauthorized") {
       await scopeMissing(environment, channelId, triggerId, now, scheduler, shouldWriteDiagnostics);
-    } else if (configured.settings.prewarning) {
+    } else if (prewarningEnabled) {
       if (shouldWriteDiagnostics) {
         await writeDiagnostics(environment, channelId, triggerId, now, [scheduleFailureDiagnostic(result)]);
       }
@@ -290,13 +291,13 @@ export const refreshAdPrewarning = async (
   if (currentSchedule === null) return;
   if (currentSchedule.nextAdAt === null) {
     if (!storedByChannelObject) await clear(scheduler);
-    if (configured.settings.prewarning && shouldWriteDiagnostics) {
+    if (prewarningEnabled && shouldWriteDiagnostics) {
       await writeOne(environment, channelId, triggerId, now, "ads.prewarning.no_schedule");
     }
     return;
   }
 
-  if (!configured.settings.prewarning) return;
+  if (!prewarningEnabled) return;
   if (!storedByChannelObject) await replanFromSchedule(scheduler, configured.settings, currentSchedule.nextAdAt);
 };
 
@@ -312,7 +313,7 @@ export const processAdPrewarning = async (
 ): Promise<void> => {
   const scheduler = schedulerFor(environment, channelId, ownScheduler);
   const configured = await settingRecord(environment, channelId, triggerId, now, scheduler);
-  if (configured === null || !configured.settings.prewarning) return;
+  if (configured === null || configured.settings.prewarningText.trim().length === 0) return;
 
   const scheduleGeneration = await scheduler?.readScheduleGeneration?.();
   const result = await getAdSchedule(

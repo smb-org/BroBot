@@ -8,18 +8,24 @@ import { templateTextLength } from "../../../contracts/template-text-length";
 /** Consent for control actions during a live stream; does not block the subscription. */
 export const ADS_OPTIONAL_BROADCASTER_SCOPES = ["channel:manage:ads", "channel:edit:commercial"] as const;
 
-export const adsSettingsSchema = z.object({
+const adsSettingsObjectSchema = z.object({
   automatic: z.string().trim().refine((text) => templateTextLength(text) <= 500),
   manual: z.string().trim().refine((text) => templateTextLength(text) <= 500),
   automaticTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
   manualTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
-  prewarning: z.boolean().default(true),
   leadSeconds: z.number().int().min(30).max(300).default(60),
-  prewarningText: z.string().trim().min(1).refine((text) => templateTextLength(text) <= 500).default(DEFAULT_PREWARNING_TEXT),
+  prewarningText: z.string().trim().refine((text) => templateTextLength(text) <= 500).default(DEFAULT_PREWARNING_TEXT),
   prewarningTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
 });
 
+export const adsSettingsSchema = z.preprocess((input) => {
+  if (typeof input !== "object" || input === null || Array.isArray(input) || Reflect.get(input, "prewarning") !== false) return input;
+  return { ...input, prewarningText: "" };
+}, adsSettingsObjectSchema);
+
 export type AdsSettings = Omit<z.output<typeof adsSettingsSchema>, "automaticTarget" | "manualTarget" | "prewarningTarget"> & {
+  /** Accepted only while older persisted settings are upgraded; blank text is the sole runtime switch. */
+  prewarning?: boolean;
   automaticTarget?: "all_chats" | "source_only";
   manualTarget?: "all_chats" | "source_only";
   prewarningTarget?: "all_chats" | "source_only";

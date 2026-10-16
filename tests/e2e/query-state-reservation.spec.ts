@@ -216,7 +216,7 @@ test("compact, panel, toolbar, and module settings retries keep their declared b
     await routeDashboardApi(page, () => allowSettingsRecovery, () => { settingsRequests += 1; });
     await page.goto(`/channels/${channelId}/modules/ads`);
     await expect(page.getByRole("heading", { name: "Ad breaks", level: 1 })).toBeVisible();
-    const settingsState = page.locator(".module-view > .ui-load-state").last();
+    const settingsState = page.getByRole("region", { name: "Ad breaks" }).locator(".ui-load-state").last();
     await expect(settingsState).toHaveAttribute("data-status", "loading");
     const settingsLoadingSize = await size(settingsState);
     await expect(settingsState).toHaveAttribute("data-status", "error");

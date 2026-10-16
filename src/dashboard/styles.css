@@ -1519,6 +1519,31 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .settings-page__columns--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .settings-page__columns--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .settings-page__column { min-width: 0; min-height: 0; overflow: auto; overflow-wrap: anywhere; scrollbar-width: thin; }
+.module-detail--settings-page { display: flex; width: min(var(--page-width), 100%); height: 100%; min-height: 0; flex-direction: column; }
+.module-detail--settings-page > .settings-page { flex: 1 1 auto; min-height: 0; }
+.module-detail--settings-page > .settings-page > .page-header { width: 100%; max-width: none; margin: 0; padding-bottom: 16px; }
+.module-detail--settings-page .page-header__right { flex-wrap: nowrap; }
+.module-detail--settings-page .page-header__save { flex: 0 1 auto; width: auto; max-width: min(430px, 100%); }
+.module-detail--settings-page .page-header__save .ui-save-bar--persistent { min-height: var(--control-height); margin: 0; padding: 0; border-top: 0; background: transparent; }
+.module-detail--settings-page .page-header__save .ui-save-bar__buttons { flex-wrap: nowrap; gap: 4px; }
+.module-detail--settings-page .settings-page__columns { padding-top: 12px; }
+.ui-settings-editor__message { display: grid; gap: var(--s3); min-width: 0; padding: var(--s3); border: 1px solid var(--line); border-radius: var(--r-container); background: color-mix(in srgb, var(--tint-1) 34%, var(--surface)); }
+.ui-settings-editor__message-heading { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: var(--s2); }
+.ui-settings-editor__message-heading strong { min-width: 0; overflow-wrap: anywhere; }
+.ui-settings-editor__message-heading span { flex: none; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--text-2); background: var(--surface); font-size: 11px; }
+.ui-settings-editor__message[data-enabled="true"] .ui-settings-editor__message-heading span { border-color: color-mix(in srgb, var(--brand) 36%, var(--line)); color: var(--brand-text); background: var(--tint-1); }
+.ui-settings-editor__readonly-message dd { display: grid; gap: var(--s2); }
+.ui-settings-editor__readonly-message dd > strong { color: var(--text-2); font-size: 12px; }
+.ui-settings-editor__readonly-message dd > span { color: var(--text-3); font-size: 12px; }
+.ads-schedule-summary { display: grid; gap: 0; margin: 0; border-top: 1px solid var(--line); }
+.ads-schedule-summary > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: var(--s2); min-width: 0; padding: var(--s2) 0; border-bottom: 1px solid var(--line); }
+.ads-schedule-summary dt { color: var(--text-3); font-size: 12px; }
+.ads-schedule-summary dd { min-width: 0; margin: 0; color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
+.ads-snooze-refresh { flex-basis: 100%; padding-left: 24px; color: var(--text-3); }
+.ads-snooze-result { flex-basis: 100%; color: var(--error-text); }
+.module-detail--settings-page .ui-template-text-field__helper-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 2px 8px; height: auto; min-height: 18px; }
+.module-detail--settings-page .ui-template-text-field__helper-copy { flex: 1 1 140px; align-items: flex-start; overflow: visible; }
+.module-detail--settings-page .ui-template-text-field__count { flex: 0 0 auto; margin-left: auto; white-space: nowrap; }
 .tool-page__body { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: visible; padding-top: 16px; }
 
 .chat-command-popover { display: grid; width: min(440px, calc(100vw - 24px)); max-height: min(75vh, 640px); gap: 10px; overflow: auto; padding: 14px; }
@@ -1829,6 +1854,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-load-state--retry { display: grid; grid-template-rows: minmax(var(--ui-load-state-content-min-height), 1fr) var(--s10); }
 .ui-load-state--retry > .ui-load-state__content { min-width: 0; min-height: 0; }
 .ui-load-state__retry-slot { display: flex; align-items: center; gap: var(--s2); min-width: 0; height: var(--s10); overflow: hidden; }
+.ui-load-state__reserved-lines > span { display: block; width: 100%; border-radius: var(--r-control); background: var(--surface-well); }
 .ui-load-state--status-row { display: block; box-sizing: border-box; height: var(--s5); min-height: var(--s5); margin-top: var(--s1); margin-bottom: var(--s4); }
 .ui-load-state--status-row > .ui-load-state__content { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: var(--s2); width: 100%; height: 100%; min-width: 0; }
 .ui-load-state--status-row .ui-load-state__inline-error { grid-column: 1 / -1; }
@@ -1880,7 +1906,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-editor-shell__readonly-reason { display: flex; align-items: center; gap: 8px; margin: 0 0 16px; color: var(--text-3); font-size: 11px; }
 .ui-editor-shell__readonly-reason .ui-icon { flex: none; }
 .ui-settings-editor { display: grid; gap: 16px; min-width: 0; container-type: inline-size; container-name: settings-editor; }
-.ui-settings-editor__properties { grid-template-columns: 1fr; }
+.properties.ui-settings-editor__properties { grid-template-columns: minmax(0, 1fr); }
 .ui-settings-editor__properties dd { overflow-wrap: anywhere; white-space: normal; }
 @container settings-editor (max-width: 600px) {
   .ui-settings-editor .inspector-field-row { grid-template-columns: minmax(0, 1fr); align-items: start; gap: 0; }
@@ -2457,6 +2483,17 @@ p.lock-reason { margin-bottom: 1em; }
   .text-command-trigger-section .ui-field-pair { gap: var(--s2); }
   .text-command-row { min-height: 68px; }
   .settings-page__columns, .settings-page__columns--2, .settings-page__columns--3, .settings-page__columns--4 { grid-template-columns: minmax(0, 1fr); }
+  .module-detail--settings-page { height: 100%; min-height: 0; }
+  .module-detail--settings-page .settings-page > .page-header { grid-template-columns: 40px minmax(0, 1fr) auto; gap: 8px; margin-bottom: 8px; padding-bottom: 8px; }
+  .module-detail--settings-page .settings-page > .page-header .page-header__icon { width: 40px; height: 40px; }
+  .module-detail--settings-page .settings-page > .page-header .page-header__title-row :is(h1, h2, h3) { font-size: 16px; }
+  .module-detail--settings-page .settings-page > .page-header .page-header__right { grid-column: 1 / -1; justify-self: stretch; justify-content: flex-end; width: 100%; }
+  .module-detail--settings-page .page-header__save { flex: none; width: auto; }
+  .module-detail--settings-page .page-header__save .ui-save-bar { min-height: var(--control-height); gap: 2px; }
+  .module-detail--settings-page .page-header__save .ui-save-bar__status { display: none; }
+  .module-detail--settings-page .page-header__save .ui-save-bar__buttons > .ui-button { padding-inline: 8px; }
+  .module-detail--settings-page .settings-page__columns { display: flex; flex: 1 1 auto; flex-direction: column; gap: 16px; min-height: 0; overflow: auto; padding: 8px 0; }
+  .module-detail--settings-page .settings-page__column { flex: none; width: 100%; min-height: 0; overflow: visible; }
   .header-action { justify-items: start; }
   .inspector-result, .form-row { flex-direction: column; align-items: stretch; }
   .inspector-result .button { width: 100%; }
@@ -2493,6 +2530,7 @@ p.lock-reason { margin-bottom: 1em; }
   .inspector-section--open > .sub-inspector { position: sticky; top: 16px; width: auto; max-height: calc(100vh - 32px); overflow: auto; }
 }
 @media (max-width: 639px) {
+  .module-detail--settings-page .ui-template-text-field__helper-row { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(18px, auto) auto; height: auto; min-height: 40px; gap: 4px; }
   .ui-template-text-field__helper-row { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(18px, auto) auto; height: auto; min-height: 40px; gap: 4px; }
   .channel-defaults-editor__fields { grid-template-columns: minmax(0, 1fr); gap: var(--s4); }
   .live-cockpit { grid-template-rows: auto auto minmax(0, 1fr) auto; height: auto; min-height: calc(100dvh - 132px); max-height: none; overflow: visible; }

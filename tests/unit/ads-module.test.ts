@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { adsModule, processAdBreak } from "../../src/modules/ads";
+import { renderAdBreakText } from "../../src/modules/ads/domain";
 import { adsSettingsSchema, type AdsSettings } from "../../src/modules/ads/contracts";
 import type { ModuleEvent } from "../../src/modules/contract";
 
@@ -16,6 +17,11 @@ const event = (payload: Record<string, unknown>, settings: AdsSettings = adsModu
 });
 
 describe("ads module", () => {
+  it("adds a grammatical duration label in the selected dashboard language", () => {
+    expect(renderAdBreakText("Werbung läuft", 90, "de")).toBe("Werbung läuft (90 Sekunden)");
+    expect(renderAdBreakText("Ads running", 90, "en")).toBe("Ads running (90 seconds)");
+  });
+
   it("declares both ad events with version 1 and channel:read:ads", () => {
     expect(adsModule.eventSubTypes).toEqual(["stream.online", "channel.ad_break.begin"]);
     expect(adsModule.broadcasterScopes).toEqual(["channel:read:ads"]);

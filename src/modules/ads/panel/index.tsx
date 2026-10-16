@@ -3,7 +3,7 @@ import { useRef, useState, type ReactElement } from "react";
 import type { DashboardLanguage } from "../../../dashboard/locale";
 import { PanelApiError } from "../../../contracts/panel-error";
 import type { AdsScheduleResponse } from "../contracts";
-import { Button, EmptyCellValue, Icon, LoadState, LoadStateLines, notify } from "../../../dashboard/ui";
+import { Button, Icon, LoadState, LoadStateLines, notify } from "../../../dashboard/ui";
 import { loadAdsSchedule, refreshAdsSchedule, snoozeAds } from "./service";
 import { adsPanelTexts } from "./locale";
 import { adFailureReason, rateLimitWaitMessage } from "./errors";
@@ -21,7 +21,16 @@ const formatTimestamp = (value: string | null, language: DashboardLanguage): str
   }).format(date);
 };
 
-const AdsPanel = ({ channelId, language = "de", canManage = false }: { channelId: string; language?: DashboardLanguage; canManage?: boolean }): ReactElement => {
+const formatDueIn = (value: string, language: DashboardLanguage): string => {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return "—";
+  const minutes = Math.round((timestamp - Date.now()) / 60_000);
+  const unit = Math.abs(minutes) < 60 ? "minute" : Math.abs(minutes) < 1_440 ? "hour" : "day";
+  const amount = unit === "minute" ? minutes : unit === "hour" ? Math.round(minutes / 60) : Math.round(minutes / 1_440);
+  return new Intl.RelativeTimeFormat(language === "de" ? "de-DE" : "en-US", { numeric: "auto" }).format(amount, unit);
+};
+
+const AdsPanel = ({ channelId, language = "de", canManage = false, moduleActive = true }: { channelId: string; language?: DashboardLanguage; canManage?: boolean; moduleActive?: boolean }): ReactElement => {
   const labels = adsPanelTexts(language);
   const realtimeStatus = useDashboardRealtimeStatus(channelId);
   const queryClient = useDashboardQueryClient();
@@ -50,13 +59,16 @@ const AdsPanel = ({ channelId, language = "de", canManage = false }: { channelId
     ? scheduleQuery.isPending ? "loading" : scheduleLoadFailed ? "error" : "loading"
     : "success";
   const [snoozeBusy, setSnoozeBusy] = useState(false);
+  const [snoozeResult, setSnoozeResult] = useState<string | null>(null);
   const [refreshBusy, setRefreshBusy] = useState(false);
 
   const snoozeCount = schedule?.schedule.snoozeCount ?? null;
-  const snoozeButtonDisabled = schedule === null || !canManage || snoozeBusy || !schedule.snoozeScopeAvailable || snoozeCount === null || snoozeCount <= 0;
+  const snoozeButtonDisabled = schedule === null || !canManage || !moduleActive || snoozeBusy || !schedule.snoozeScopeAvailable || snoozeCount === null || snoozeCount <= 0;
   const snoozeReason = schedule === null ? ""
     : !canManage
     ? labels.snoozeReadOnly
+    : !moduleActive
+    ? labels.moduleInactive
     : !schedule.snoozeScopeAvailable
     ? labels.snoozeScopeMissing
     : snoozeCount === null
@@ -64,10 +76,13 @@ const AdsPanel = ({ channelId, language = "de", canManage = false }: { channelId
       : snoozeCount <= 0 ? labels.snoozeNone : "";
   const snoozeLabel = labels.snoozeButton(
     snoozeCount === null ? "—" : String(snoozeCount),
-    formatTimestamp(schedule?.schedule.snoozeRefreshAt ?? null, language),
   );
+  const snoozeRefresh = schedule?.schedule.snoozeRefreshAt === null || schedule?.schedule.snoozeRefreshAt === undefined
+    ? null
+    : labels.snoozeRefresh(formatTimestamp(schedule.schedule.snoozeRefreshAt, language));
   const snooze = async (): Promise<void> => {
-    if (!canManage || schedule === null) return;
+    if (!canManage || !moduleActive || schedule === null) return;
+    setSnoozeResult(null);
     setSnoozeBusy(true);
     try {
       await runModuleQueryWrite(queryClient, channelId, "ads", "schedule", () => snoozeAds(channelId), {
@@ -76,16 +91,15 @@ const AdsPanel = ({ channelId, language = "de", canManage = false }: { channelId
       });
       notify({ tone: "success", message: labels.snoozeSuccess });
     } catch (error: unknown) {
-      notify({
-        tone: "error",
-        message: error instanceof PanelApiError && error.code === "ad_snooze_denied"
-          ? labels.snoozeReadOnly
-          : adFailureReason(error) === "scope_missing"
-            ? labels.snoozeScopeMissing
-            : adFailureReason(error) === "snoozes_exhausted"
-              ? labels.snoozeNone
-            : rateLimitWaitMessage(error, labels) ?? labels.snoozeError,
-      });
+      const message = error instanceof PanelApiError && error.code === "ad_snooze_denied"
+        ? labels.snoozeReadOnly
+        : adFailureReason(error) === "scope_missing"
+          ? labels.snoozeScopeMissing
+          : adFailureReason(error) === "snoozes_exhausted"
+            ? labels.snoozeNone
+            : rateLimitWaitMessage(error, labels) ?? labels.snoozeError;
+      setSnoozeResult(message);
+      notify({ tone: "error", message });
     } finally {
       setSnoozeBusy(false);
     }
@@ -107,7 +121,7 @@ const AdsPanel = ({ channelId, language = "de", canManage = false }: { channelId
   };
 
   return (
-    <section className="module-stack" aria-label={labels.title} style={{ minHeight: "calc(var(--s10) * 24)" }}>
+    <section className="module-stack" aria-label={labels.title}>
       <div className="section-heading">
         <h2>{labels.scheduleSection}</h2>
         <Button variant="secondary" disabled={!canManage || refreshBusy} describedBy="ads-schedule-refresh-reason"
@@ -117,13 +131,13 @@ const AdsPanel = ({ channelId, language = "de", canManage = false }: { channelId
         style={{ height: "var(--s6)", overflow: "hidden", margin: 0 }} aria-live="polite">
         {canManage ? "" : labels.refreshReadOnly}
       </p>
-      <LoadState variant="panel-960" status={loadStatus}
+      <LoadState variant="panel-0" status={loadStatus}
         loading={<div className="module-stack" aria-label={labels.loading}>
           <LoadStateLines rows={4} height={34} />
           <LoadStateLines rows={3} height={34} />
           <LoadStateLines rows={4} height={34} />
         </div>}
-        empty={<div style={{ minHeight: "calc(var(--s10) * 24)" }} />}
+        empty={null}
         error={<p role="alert">{loadError}</p>}
         queryError={{ message: loadError, onRetry: () => { void scheduleQuery.refetch({ throwOnError: true }).catch(() => undefined); } }}
         refreshError={schedule !== null && scheduleLoadFailed}>
@@ -133,33 +147,28 @@ const AdsPanel = ({ channelId, language = "de", canManage = false }: { channelId
           style={{ height: "var(--s6)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", margin: 0 }}>
           {schedule.asOf === undefined ? "" : labels.asOf(formatTimestamp(schedule.asOf, language))}
         </p>
-        <div data-testid="ads-next-schedule-slot" style={{ height: "calc(var(--s10) * 3)", overflowY: "auto" }}>
-          {schedule.schedule.nextAdAt === null ? <p className="empty-state" style={{ height: "calc(var(--s10) * 3)", margin: 0 }}>{labels.noAdBreak} <EmptyCellValue language={language} /></p> : (
-          <div className="table-wrap" style={{ height: "calc(var(--s10) * 3)", overflowY: "auto" }}>
-            <table className="table" aria-label={labels.scheduleSection}>
-              <thead><tr><th scope="col">{labels.scheduledTime}</th><th scope="col">{labels.duration}</th></tr></thead>
-              <tbody><tr>
-                <td className="number">{formatTimestamp(schedule.schedule.nextAdAt, language)}</td>
-                <td className="number">{schedule.schedule.duration === null ? <EmptyCellValue language={language} /> : `${String(schedule.schedule.duration)} s`}</td>
-              </tr></tbody>
-            </table>
-          </div>
-          )}
-        </div>
+        <dl className="ads-schedule-summary" aria-label={labels.scheduleSection}>
+          <div><dt>{labels.lastAd}</dt><dd>{schedule.schedule.lastAdAt === null ? labels.noValue : formatTimestamp(schedule.schedule.lastAdAt, language)}</dd></div>
+          <div><dt>{labels.nextAd}</dt><dd>{schedule.schedule.nextAdAt === null ? labels.noAdBreak : formatTimestamp(schedule.schedule.nextAdAt, language)}</dd></div>
+          <div><dt>{labels.dueIn}</dt><dd>{schedule.schedule.nextAdAt === null ? labels.noValue : formatDueIn(schedule.schedule.nextAdAt, language)}</dd></div>
+          <div><dt>{labels.prerollFree}</dt><dd>{schedule.schedule.prerollFreeTime === null ? labels.noValue : `${String(schedule.schedule.prerollFreeTime)} s`}</dd></div>
+        </dl>
       </section>
       <section className="config-section" aria-label={labels.snoozeSection}>
         <div className="section-heading"><h2>{labels.snoozeSection}</h2></div>
         <Button variant="secondary" icon="ad" disabled={snoozeButtonDisabled} onClick={() => { void snooze(); }}>{snoozeLabel}</Button>
         <p className="lock-reason lock-reason--with-icon" data-testid="ads-snooze-result-slot"
-          title={snoozeReason || undefined} style={{ height: "calc(var(--s6) * 2)", overflow: "hidden", margin: 0 }} aria-live="polite">
-          {snoozeReason.length === 0 ? null : <><Icon name="lock" size={16} />{snoozeReason}</>}
+          title={[snoozeReason, snoozeRefresh].filter(Boolean).join("\n") || undefined}
+          style={{ minHeight: "calc(var(--s6) * 2)", margin: 0, alignItems: "flex-start", flexWrap: "wrap" }} aria-live="polite">
+          {snoozeReason.length > 0 ? <><Icon name="lock" size={16} />{snoozeReason}</> : snoozeResult === null ? null : <span role="alert" className="ads-snooze-result">{snoozeResult}</span>}
+          {snoozeRefresh === null ? null : <span className="ads-snooze-refresh">{snoozeRefresh}</span>}
         </p>
       </section>
       <section className="config-section" aria-label={labels.recentSection}>
         <div className="section-heading"><h2>{labels.recentSection}</h2></div>
-        <div data-testid="ads-recent-list-slot" style={{ height: "calc(var(--s10) * 6)", overflowY: "auto" }}>
-          {schedule.recentAdBreaks.length === 0 ? <p className="empty-state" style={{ height: "calc(var(--s10) * 6)", margin: 0 }}>{labels.noRecent}</p> : (
-          <div className="table-wrap" style={{ height: "calc(var(--s10) * 6)", overflowY: "auto" }}>
+        <div data-testid="ads-recent-list-slot" style={{ height: "calc(var(--s10) * 3)", overflowY: "auto" }}>
+          {schedule.recentAdBreaks.length === 0 ? <p className="empty-state" style={{ height: "calc(var(--s10) * 3)", margin: 0 }}>{labels.noRecent}</p> : (
+          <div className="table-wrap" style={{ height: "calc(var(--s10) * 3)", overflowY: "auto" }}>
             <table className="table" aria-label={labels.recentSection}>
               <thead><tr><th scope="col">{labels.scheduledTime}</th><th scope="col">{labels.duration}</th></tr></thead>
               <tbody>{schedule.recentAdBreaks.map((breakItem) => <tr key={`${breakItem.timestamp}-${String(breakItem.durationSeconds)}`}>

@@ -83,7 +83,9 @@ describe("Module navigation in the sidebar", () => {
     fireEvent.click(await within(nav).findByRole("link", { name: "Werbung · Läuft" }));
 
     expect(await screen.findByRole("heading", { name: "Werbung", level: 1 })).toBeInTheDocument();
-    expect(document.querySelector(".main-content .page-header")).toBe(pageHeader);
+    const settingsPageHeader = document.querySelector(".main-content .settings-page > .page-header");
+    expect(settingsPageHeader).not.toBeNull();
+    expect(settingsPageHeader).not.toBe(pageHeader);
     expect(window.location.pathname).toBe("/channels/kanal-a/modules/ads");
   });
 

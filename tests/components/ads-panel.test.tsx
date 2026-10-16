@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ModulePage } from "../../src/dashboard/module-panels";
 import { UiProvider } from "../../src/dashboard/ui";
+import { runDashboardNavigationGuards } from "../../src/dashboard/ui/navigation-guard";
 import { toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import type { AdsScheduleResponse } from "../../src/modules/ads/contracts";
 import { moduleQueryKey } from "../../src/dashboard/data/module-query";
@@ -13,9 +14,8 @@ import { jsonResponse } from "../unit/fixtures";
 const settings = {
   automatic: "Werbepause beginnt",
   manual: "Manuell gestartete Werbung",
-  prewarning: false,
   leadSeconds: 60,
-  prewarningText: "Werbung in {ads.seconds} Sekunden.",
+  prewarningText: "",
 };
 const schedule: AdsScheduleResponse = {
   schedule: { nextAdAt: null, duration: null, lastAdAt: null, prerollFreeTime: null, snoozeCount: 2, snoozeRefreshAt: null },
@@ -45,14 +45,15 @@ const renderAds = (
 };
 
 const adsFetch = (
-  patch: () => Response = () => jsonResponse({ settings, warnings: [] }),
+  patch: () => Response | Promise<Response> = () => jsonResponse({ settings, warnings: [] }),
   scheduleValue: AdsScheduleResponse = schedule,
   snooze: () => Response = () => jsonResponse(scheduleValue),
 ) =>
   vi.fn<typeof fetch>((input, init) => {
     const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
     if (path.endsWith("/settings") && init?.method === "PATCH") return Promise.resolve(patch());
-    if (path.endsWith("/settings")) return Promise.resolve(jsonResponse({ settings, revision: 1, variables: [] }));
+    if (path.includes("/modules/ads/") && path.endsWith("/settings")) return Promise.resolve(jsonResponse({ settings, revision: 1, variables: [] }));
+    if (path === "/api/channels/kanal-a/settings") return Promise.resolve(jsonResponse({ defaultChatTarget: "source_only", defaultChatTargetRevision: 1, timeZone: "Europe/Berlin", revision: 1 }));
     if (path.endsWith("/schedule")) return Promise.resolve(jsonResponse(scheduleValue));
     if (path.endsWith("/snooze") && init?.method === "POST") return Promise.resolve(snooze());
     if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
@@ -67,27 +68,33 @@ describe("Ad settings editor declaration", () => {
     if (initialLanguage !== undefined) Object.defineProperty(window.navigator, "language", initialLanguage);
   });
 
-  it("previews the duration fallback, counts its 15 characters, and hides prewarning fields when off", async () => {
+  it("renders the schedule and announcement settings in the page columns", async () => {
     renderAds(adsFetch());
 
-    const announcementsTab = await screen.findByRole("tab", { name: "Ansagen" });
-    const prewarningTab = screen.getByRole("tab", { name: "Vorwarnung" });
-    expect(announcementsTab.querySelector("svg[aria-hidden='true']")).not.toBeNull();
-    expect(prewarningTab.querySelector("svg[aria-hidden='true']")).not.toBeNull();
-    expect(screen.getByText("Werbepause beginnt (90 Sekunden)")).toBeInTheDocument();
-    const durationHints = screen.getAllByRole("button", { name: /Ohne \{ads\.duration\} ergänzt die Vorschau \(N Sekunden\)\./ });
-    expect(durationHints).toHaveLength(2);
-    for (const hint of durationHints) expect(hint).toHaveAttribute("title", expect.stringContaining("Ohne {ads.duration}"));
+    expect(await screen.findByRole("heading", { level: 1, name: "Werbung" })).toBeInTheDocument();
+    expect(await screen.findByRole("textbox", { name: "Automatische Werbepause" })).toBeInTheDocument();
+    expect(document.querySelector(".settings-page__columns--3")).not.toBeNull();
+    expect(await screen.findByText("Letzte Werbung")).toBeInTheDocument();
+    expect(screen.getAllByText("Nächste Werbung")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Ansagen speichern" })).toBeDisabled();
+    expect(document.querySelector(".page-header__save .ui-save-bar")).not.toBeNull();
+  });
 
+  it("previews the duration fallback and uses blank text as the only message switch", async () => {
+    renderAds(adsFetch());
+
+    await screen.findByRole("textbox", { name: "Automatische Werbepause" });
+    expect(screen.getByText("Werbepause beginnt (90 Sekunden)")).toBeInTheDocument();
     const automatic = screen.getByRole("textbox", { name: "Automatische Werbepause" });
     fireEvent.change(automatic, { target: { value: "x".repeat(486) } });
     expect(await screen.findByText(/bis zu 501 Zeichen/)).toBeInTheDocument();
 
-    fireEvent.click(prewarningTab);
-    expect(screen.getByRole("switch", { name: /Vorwarnung vor der Werbung/ })).not.toBeChecked();
-    expect(screen.queryByRole("spinbutton", { name: "Vorlaufzeit" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("textbox", { name: "Vorwarnungstext" })).not.toBeInTheDocument();
-    expect(screen.getByText("Kündigt die nächste Werbung vorher im Chat an.")).toBeInTheDocument();
+    const prewarning = screen.getByRole("textbox", { name: "Vorwarnung" });
+    expect(prewarning).toHaveValue("");
+    expect(screen.getByText("Nachricht ausgeschaltet")).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: /Vorwarnung/ })).not.toBeInTheDocument();
+    fireEvent.change(prewarning, { target: { value: "Werbung in {ads.seconds} Sekunden." } });
+    expect(document.querySelector('.ui-settings-editor__message[data-enabled="true"]')).toHaveTextContent("An");
   });
 
   it("keeps the announcement draft after a 409 and lists settings for operators", async () => {
@@ -96,39 +103,92 @@ describe("Ad settings editor declaration", () => {
     const field = await screen.findByRole("textbox", { name: "Automatische Werbepause" });
     fireEvent.change(field, { target: { value: "Mein Entwurf {ads.duration}" } });
     fireEvent.click(screen.getByRole("button", { name: "Ansagen speichern" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Ansagen-Einstellungen wurden inzwischen geändert.");
+    await waitFor(() => expect(document.querySelector(".page-header__save [role=status]")).toHaveTextContent("Ansagen-Einstellungen wurden inzwischen geändert."));
     expect(field).toHaveValue("Mein Entwurf {ads.duration}");
 
     cleanup();
     renderAds(adsFetch(), "operator");
-    expect(await screen.findByText("Nur Broadcaster und Verwalter dürfen Ansagen-Einstellungen ändern.")).toBeInTheDocument();
+    expect(await screen.findByText("Nur Broadcaster und Verwalter dürfen Module ändern.")).toBeInTheDocument();
+    await waitFor(() => expect(document.querySelectorAll("dl.ui-settings-editor__properties")).toHaveLength(2));
     expect(await screen.findByRole("button", { name: "Werbeplan aktualisieren" })).toBeDisabled();
     expect(screen.getByText("Nur Broadcaster und Verwalter dürfen den Werbeplan aktualisieren.")).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: /Snooze · 2 verfügbar/ })).toBeDisabled();
     expect(screen.getByText("Nur Broadcaster und Verwalter dürfen Werbepausen verschieben.")).toBeInTheDocument();
-    const properties = document.querySelector("dl.ui-settings-editor__properties");
-    expect(properties).not.toBeNull();
-    expect(within(properties as HTMLElement).getByText("Vorwarnung vor der Werbung")).toBeInTheDocument();
-    expect(within(properties as HTMLElement).getByText("Aus")).toBeInTheDocument();
+    const properties = document.querySelectorAll("dl.ui-settings-editor__properties");
+    expect(properties).toHaveLength(2);
+    expect(within(properties[1] as HTMLElement).getByText("Vorwarnung")).toBeInTheDocument();
+    expect(within(properties[1] as HTMLElement).getByText("Aus")).toBeInTheDocument();
+    expect(document.querySelectorAll(".page-header__lock")).toHaveLength(1);
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Ansagen speichern" })).not.toBeInTheDocument();
+  });
+
+  it("reuses a pending settings save when navigation asks to save and switch", async () => {
+    let resolvePatch: ((response: Response) => void) | undefined;
+    const pendingPatch = new Promise<Response>((resolve) => { resolvePatch = resolve; });
+    const fetcher = adsFetch(() => pendingPatch);
+    renderAds(fetcher);
+
+    const automatic = await screen.findByRole("textbox", { name: "Automatische Werbepause" });
+    fireEvent.change(automatic, { target: { value: "Gespeicherter Entwurf {ads.duration}" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ansagen speichern" }));
+    await waitFor(() => expect(fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1));
+
+    let navigated = false;
+    act(() => runDashboardNavigationGuards(() => { navigated = true; }, () => undefined));
+    const dialog = await screen.findByRole("dialog", { name: "Ungespeicherte Änderungen" });
+    expect(within(dialog).getByRole("button", { name: "Speichern und wechseln" })).toBeDisabled();
+    expect(navigated).toBe(false);
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1);
+
+    resolvePatch?.(jsonResponse({ settings: { ...settings, automatic: "Gespeicherter Entwurf {ads.duration}" }, revision: 2, warnings: [] }));
+    await waitFor(() => expect(navigated).toBe(true));
+    expect(screen.queryByRole("dialog", { name: "Ungespeicherte Änderungen" })).not.toBeInTheDocument();
+    expect(automatic).toHaveValue("Gespeicherter Entwurf {ads.duration}");
+  });
+
+  it("loads the server version after an explicit conflict reload", async () => {
+    let settingsReads = 0;
+    const serverSettings = { ...settings, automatic: "Serverstand {ads.duration}" };
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+      if (path.endsWith("/modules/ads/settings") && init?.method === "PATCH") {
+        return Promise.resolve(jsonResponse({ error: "module_settings_changed_concurrently" }, 409));
+      }
+      if (path.endsWith("/modules/ads/settings")) {
+        settingsReads += 1;
+        return Promise.resolve(jsonResponse({ settings: settingsReads === 1 ? settings : serverSettings, revision: settingsReads, variables: [] }));
+      }
+      if (path === "/api/channels/kanal-a/settings") return Promise.resolve(jsonResponse({ defaultChatTarget: "source_only", defaultChatTargetRevision: 1, timeZone: "Europe/Berlin", revision: 1 }));
+      if (path.endsWith("/schedule")) return Promise.resolve(jsonResponse(schedule));
+      return Promise.resolve(jsonResponse({}));
+    });
+    renderAds(fetcher);
+
+    const automatic = await screen.findByRole("textbox", { name: "Automatische Werbepause" });
+    fireEvent.change(automatic, { target: { value: "Mein Entwurf {ads.duration}" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ansagen speichern" }));
+    await screen.findByRole("button", { name: "Serverstand laden" });
+    fireEvent.click(screen.getByRole("button", { name: "Serverstand laden" }));
+
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Automatische Werbepause" })).toHaveValue("Serverstand {ads.duration}"));
+    expect(screen.queryByRole("button", { name: "Serverstand laden" })).not.toBeInTheDocument();
+    expect(settingsReads).toBe(3);
   });
 
   it("keeps snooze as an immediate panel action above the declaration editor", async () => {
     const fetcher = adsFetch();
     renderAds(fetcher);
-    await screen.findByRole("region", { name: "Ansagen-Einstellungen" });
+    await screen.findByRole("textbox", { name: "Automatische Werbepause" });
     await screen.findByRole("button", { name: /Snooze · 2 verfügbar/ });
-    const view = document.querySelector(".module-view");
-    const panel = view?.querySelector(":scope > section[aria-label='Ansagen']");
-    const editor = view?.querySelector("section[aria-label='Ansagen-Einstellungen']");
+    const columns = document.querySelector(".settings-page__columns--3");
+    const panel = columns?.querySelector(".settings-page__column:first-child section[aria-label='Ansagen']");
+    const editor = columns?.querySelector(".settings-page__column:nth-child(2) .ui-settings-editor");
     if (panel === null || panel === undefined || editor === null || editor === undefined) {
       throw new Error("The ads panel and settings editor should both be mounted.");
     }
     expect(panel.compareDocumentPosition(editor) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
-    const editorLoadState = view?.lastElementChild;
-    expect(editorLoadState).toHaveClass("ui-load-state");
-    expect(editorLoadState?.firstElementChild?.firstElementChild).toBe(editor);
 
     fireEvent.click(await screen.findByRole("button", { name: /Snooze · 2 verfügbar/ }));
     await waitFor(() => expect(toastsSnapshot().some((toast) => toast.message === "Die nächste Werbepause wurde verschoben.")).toBe(true));
@@ -160,6 +220,7 @@ describe("Ad settings editor declaration", () => {
 
     await waitFor(() => expect(toastsSnapshot().some((toast) =>
       toast.tone === "error" && /Versuche es in \d+ Sekunden erneut/u.test(toast.message))).toBe(true));
+    expect(await screen.findByTestId("ads-snooze-result-slot")).toHaveTextContent(/Versuche es in \d+ Sekunden erneut/u);
   });
 
   it("shows the remaining Twitch rate limit wait when the schedule request includes retryAfter", async () => {
@@ -171,7 +232,8 @@ describe("Ad settings editor declaration", () => {
         reason: "rate_limited",
         detail: { retryAfter },
       }, 429));
-      if (path.endsWith("/settings")) return Promise.resolve(jsonResponse({ settings, revision: 1, variables: [] }));
+      if (path.includes("/modules/ads/") && path.endsWith("/settings")) return Promise.resolve(jsonResponse({ settings, revision: 1, variables: [] }));
+      if (path === "/api/channels/kanal-a/settings") return Promise.resolve(jsonResponse({ defaultChatTarget: "source_only", defaultChatTargetRevision: 1, timeZone: "Europe/Berlin", revision: 1 }));
       return Promise.resolve(jsonResponse({}, 404));
     });
     renderAds(fetcher);
@@ -231,8 +293,7 @@ describe("Ad settings editor declaration", () => {
     }));
 
     expect(await screen.findByText(/Derzeit ist keine Werbung geplant\./u)).toBeInTheDocument();
-    expect(screen.getByText("kein Wert")).toHaveClass("sr-only");
-    expect(screen.getByText("—")).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getAllByText("Nicht verfügbar").length).toBeGreaterThan(0);
     expect(await screen.findByRole("cell", { name: "90 Sekunden" })).toBeInTheDocument();
     expect(screen.getByText(/11:00/)).toBeInTheDocument();
   });
@@ -311,8 +372,7 @@ describe("Ad settings editor declaration", () => {
   it("keeps a cleared prewarning lead time empty and blocks the save", async () => {
     const fetcher = adsFetch();
     renderAds(fetcher);
-    fireEvent.click(await screen.findByRole("tab", { name: "Vorwarnung" }));
-    fireEvent.click(screen.getByRole("switch", { name: /Vorwarnung vor der Werbung/ }));
+    await screen.findByRole("textbox", { name: "Vorwarnung" });
     const field = screen.getByRole("spinbutton", { name: "Vorlaufzeit" });
     fireEvent.change(field, { target: { value: "" } });
     expect(field).toHaveValue(null);

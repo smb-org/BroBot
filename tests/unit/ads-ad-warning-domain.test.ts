@@ -23,6 +23,11 @@ const input = (overrides: Partial<Parameters<typeof decideAdPrewarning>[0]> = {}
 });
 
 describe("ad prewarning decision", () => {
+  it("treats a blank prewarning message as switched off", () => {
+    expect(decideAdPrewarning(input({ settings: { ...settings, prewarningText: "   " } })))
+      .toMatchObject({ kind: "skip", reason: "disabled" });
+  });
+
   it("announces the unchanged schedule with the placeholder", () => {
     expect(decideAdPrewarning(input())).toEqual({
       kind: "announce",

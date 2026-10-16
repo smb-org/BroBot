@@ -5,11 +5,18 @@ export interface AdsPanelTexts {
   title: string;
   scheduleSection: string;
   noAdBreak: string;
+  lastAd: string;
+  nextAd: string;
+  dueIn: string;
+  prerollFree: string;
+  noValue: string;
+  moduleInactive: string;
   scheduledTime: string;
   asOf: (timestamp: string) => string;
   duration: string;
   snoozeSection: string;
-  snoozeButton: (count: string, refresh: string) => string;
+  snoozeButton: (count: string) => string;
+  snoozeRefresh: (timestamp: string) => string;
   snoozeScopeMissing: string;
   rateLimited: (seconds: number) => string;
   snoozeReadOnly: string;
@@ -33,11 +40,18 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     title: "Ansagen",
     scheduleSection: "Nächste Werbung",
     noAdBreak: "Derzeit ist keine Werbung geplant.",
+    lastAd: "Letzte Werbung",
+    nextAd: "Nächste Werbung",
+    dueIn: "Fällig in",
+    prerollFree: "Werbung frei bis",
+    noValue: "Nicht verfügbar",
+    moduleInactive: "Aktiviere zuerst das Werbemodul.",
     scheduledTime: "Zeitpunkt",
     asOf: (timestamp) => `Stand ${timestamp}`,
     duration: "Dauer",
     snoozeSection: "Werbung verschieben",
-    snoozeButton: (count, refresh) => `Snooze · ${count} verfügbar · Aufladung ${refresh}`,
+    snoozeButton: (count) => `Snooze · ${count} verfügbar`,
+    snoozeRefresh: (timestamp) => `Aufladung: ${timestamp}`,
     snoozeScopeMissing: "Snooze braucht die Berechtigung channel:manage:ads. Autorisiere Ads für diesen Kanal erneut und erteile diese Berechtigung.",
     rateLimited: (seconds) => `Twitch begrenzt die Anfragen gerade. Versuche es in ${String(seconds)} Sekunden erneut.`,
     snoozeReadOnly: "Nur Broadcaster und Verwalter dürfen Werbepausen verschieben.",
@@ -59,11 +73,18 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     title: "Announcements",
     scheduleSection: "Next ad break",
     noAdBreak: "No ad break is currently scheduled.",
+    lastAd: "Last ad break",
+    nextAd: "Next ad break",
+    dueIn: "Due in",
+    prerollFree: "Ad free until",
+    noValue: "Unavailable",
+    moduleInactive: "Turn on the Ads module first.",
     scheduledTime: "Time",
     asOf: (timestamp) => `As of ${timestamp}`,
     duration: "Duration",
     snoozeSection: "Postpone an ad break",
-    snoozeButton: (count, refresh) => `Snooze · ${count} available · refresh ${refresh}`,
+    snoozeButton: (count) => `Snooze · ${count} available`,
+    snoozeRefresh: (timestamp) => `Refreshes: ${timestamp}`,
     snoozeScopeMissing: "Snooze needs the channel:manage:ads permission. Reauthorize Ads for this channel and grant this permission.",
     rateLimited: (seconds) => `Twitch is rate limiting requests. Try again in ${String(seconds)} seconds.`,
     snoozeReadOnly: "Only broadcasters and managers may snooze ad breaks.",
@@ -153,10 +174,9 @@ const editorCatalog: LocaleCatalog<SettingsEditorCatalog> = {
         variables: [{ name: "ads.duration", description: "Dauer der Werbepause in Sekunden", sample: "90" }],
       },
       manualTarget: { label: "Ziel der manuell gestarteten Werbepause", hint: "Wirkt nur während eines Shared Chats.", options: { all_chats: { label: "Alle Chats" }, source_only: { label: "Nur unser Chat" } } },
-      prewarning: { label: "Vorwarnung vor der Werbung", hint: "Kündigt die nächste Werbung vorher im Chat an.", description: "Kündigt die nächste Werbung vorher im Chat an." },
-      leadSeconds: { label: "Vorlaufzeit", hint: "So lange vor der Werbung. 30 bis 300.", unit: "s", disabledReason: "Vorwarnung ist ausgeschaltet." },
+      leadSeconds: { label: "Vorlaufzeit", hint: "So lange vor der Werbung. 30 bis 300.", unit: "s" },
       prewarningText: {
-        label: "Vorwarnungstext", hint: "Was der Bot vor der Werbung schreibt.", requiredError: "Text eingeben",
+        label: "Vorwarnung", hint: "Was der Bot vor der Werbung schreibt. Leer lassen, um diese Nachricht auszuschalten.", optionalHint: "Leer lassen, um diese Nachricht auszuschalten.", previewEmptyText: "Nachricht ausgeschaltet",
         previewLabel: "Vorschau", previewSpeaker: "Bot",
         variables: [{ name: "ads.seconds", description: "Verbleibende Sekunden bis zur Werbung", sample: "60" }],
       },
@@ -195,10 +215,9 @@ const editorCatalog: LocaleCatalog<SettingsEditorCatalog> = {
         variables: [{ name: "ads.duration", description: "Ad break duration in seconds", sample: "90" }],
       },
       manualTarget: { label: "Manually started ad break target", hint: "Only affects output during Shared Chat.", options: { all_chats: { label: "All chats" }, source_only: { label: "Only our chat" } } },
-      prewarning: { label: "Warn before an ad break", hint: "Announces the next ad break in chat beforehand.", description: "Announces the next ad break in chat beforehand." },
-      leadSeconds: { label: "Lead time", hint: "How long before the ad break. 30 to 300.", unit: "s", disabledReason: "Prewarning is turned off." },
+      leadSeconds: { label: "Lead time", hint: "How long before the ad break. 30 to 300.", unit: "s" },
       prewarningText: {
-        label: "Prewarning text", hint: "What the bot says before the ad break.", requiredError: "Enter text",
+        label: "Prewarning", hint: "What the bot says before the ad break. Leave blank to turn this message off.", optionalHint: "Leave blank to turn this message off.", previewEmptyText: "Message is off",
         previewLabel: "Preview", previewSpeaker: "Bot",
         variables: [{ name: "ads.seconds", description: "Seconds remaining until the ad break", sample: "60" }],
       },

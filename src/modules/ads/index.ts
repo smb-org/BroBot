@@ -43,7 +43,6 @@ export const adsModule: BotModule<typeof adsSettingsSchema> = {
     manual: DEFAULT_MANUAL_TEXT,
     automaticTarget: "source_only",
     manualTarget: "source_only",
-    prewarning: true,
     leadSeconds: 60,
     prewarningText: DEFAULT_PREWARNING_TEXT,
     prewarningTarget: "source_only",

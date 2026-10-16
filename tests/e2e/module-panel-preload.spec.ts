@@ -293,14 +293,14 @@ test("a failed idle settings preload can recover through the module Retry action
     element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
   });
   await expect(page).toHaveURL(`/channels/${channelId}/modules/ads`);
-  const settings = page.locator(".module-view");
+  const settings = page.getByRole("region", { name: "Ad breaks" });
   const retryButton = settings.getByRole("button", { name: "Retry" });
   await expect(retryButton).toBeVisible();
   await expect.poll(() => settingsChunkRequests).toBe(1);
 
   await retryButton.click();
 
-  await expect(settings.locator(".ui-settings-editor")).toBeVisible();
+  await expect(settings.locator(".ui-settings-editor").first()).toBeVisible();
   await expect.poll(() => settingsChunkRequests).toBe(2);
   await expect(retryButton).toHaveCount(0);
 });

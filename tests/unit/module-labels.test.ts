@@ -49,9 +49,9 @@ describe("Module labels", () => {
     expect(moduleName("host", "en")).toBe("System");
   });
 
-  it("uses the Shoutout name for the existing raid module id in both catalogues", () => {
-    expect(moduleName("raid", "de")).toBe("Shoutout");
-    expect(moduleName("raid", "en")).toBe("Shoutout");
+  it("uses the raid announcements and shoutout name for the existing raid module id in both catalogues", () => {
+    expect(moduleName("raid", "de")).toBe("Raid-Ankündigungen & Shoutout");
+    expect(moduleName("raid", "en")).toBe("Raid announcements & shoutout");
     expect(moduleDescription("raid", "de")).toContain("Raids");
     expect(moduleDescription("raid", "de")).toContain("manuelle Shoutouts");
     expect(moduleDescription("raid", "en")).toContain("incoming raids");
