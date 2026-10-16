@@ -544,6 +544,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
   />;
   const chatTargetEditor = <ChatTargetField
     label={labels.chatTarget}
+    language={resolvedLanguage}
     value={draft.chatTarget}
     {...(channelDefaultChatTarget === undefined ? {} : { effectiveDefault: channelDefaultChatTarget })}
     allowed={["all_chats", "source_only", "channel_default", "where_asked"]}

@@ -310,7 +310,7 @@ export function ChatVoteTemplateInspector({
         /> } : {})}
         {...(!isNew ? { actions: <ActionMenu
           label={common.moreActions}
-          items={[{ label: labels.delete, danger: canManageContent, disabled: !canManageContent, ...(!canManageContent ? { reason: labels.operatorLocked } : {}), onSelect: () => {
+          items={[{ label: labels.delete, danger: canManageContent, disabled: !canManageContent, ...(!canManageContent ? { description: labels.operatorLocked } : {}), onSelect: () => {
             draftGuard.guardSwitch(() => { setDeleteError(undefined); setDeleteOpen(true); });
           } }]}
         /> } : {})}

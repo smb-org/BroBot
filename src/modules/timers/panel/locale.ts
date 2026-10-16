@@ -4,13 +4,15 @@ import type { TemplateTextFieldMessages } from "../../../dashboard/ui";
 export interface TimersTexts {
   title: string;
   add: string;
+  general: string;
   name: string;
   message: string;
   messageHint: string;
   trigger: string;
   chatTarget: string;
-  chatTargetDefault: string;
   chatTargetLabels: Record<"all_chats" | "source_only", string>;
+  chatTargetInherited: (target: string) => string;
+  automatic: string;
   interval: string;
   streamStart: string;
   timeOfDay: string;
@@ -26,6 +28,8 @@ export interface TimersTexts {
   afterMessages: (count: number) => string;
   minutesBeforeEvent: (minutes: number) => string;
   messageCount: string;
+  minimumMessagesHint: string;
+  minimumMessagesPlaceholder: string;
   time: string;
   weekdays: string;
   everyDay: string;
@@ -40,11 +44,12 @@ export interface TimersTexts {
   create: string;
   edit: string;
   save: string;
-  cancel: string;
   delete: string;
+  deleteOperatorReason: string;
   deleteConfirm: string;
+  deleteNeedsSaved: string;
   preview: string;
-  previewTitle: string;
+  previewLoading: string;
   previewBot: string;
   characterCount: (count: number) => string;
   empty: string;
@@ -58,19 +63,43 @@ export interface TimersTexts {
   roleLocked: string;
   noNextRun: string;
   weekdaysNames: readonly string[];
+  timerCount: (count: number) => string;
+  emptyTitle: string;
+  selectTimer: string;
+  selectTimerDescription: string;
+  back: string;
+  when: string;
+  lastRun: string;
+  neverRun: string;
+  nameRequired: string;
+  messageRequired: string;
+  liveRule: string;
+  offlineRule: string;
+  messagesUnit: string;
+  draftGuardTitle: string;
+  draftGuardDescription: string;
+  continueEditing: string;
+  discardAndSwitch: string;
+  saveAndSwitch: string;
+  conflict: string;
+  reload: string;
+  search: string;
+  noSearchResults: string;
 }
 
 const catalog: LocaleCatalog<TimersTexts> = {
   de: {
     title: "Timer",
     add: "Timer anlegen",
+    general: "Allgemein",
     name: "Name",
     message: "Nachricht",
     messageHint: "Freitext mit Variablen und Textbausteinen im Format {text.name}.",
     trigger: "Auslöser",
     chatTarget: "Chat-Ziel",
-    chatTargetDefault: "Kanaleinstellung",
     chatTargetLabels: { all_chats: "Alle Chats", source_only: "Nur unser Chat" },
+    chatTargetInherited: (target) => `Kanalstandard (${target})`,
+    automatic: "Automatisch",
     interval: "Intervall",
     streamStart: "Nach Streamstart",
     timeOfDay: "Uhrzeit",
@@ -83,9 +112,11 @@ const catalog: LocaleCatalog<TimersTexts> = {
     minutesUnit: "Min.",
     liveEvery: (minutes) => `Live alle ${String(minutes)} Min.`,
     offlineEvery: (minutes) => `Offline alle ${String(minutes)} Min.`,
-    afterMessages: (count) => `ab ${String(count)} Nachrichten`,
+    afterMessages: (count) => `ab ${String(count)} ${count === 1 ? "Nachricht" : "Nachrichten"}`,
     minutesBeforeEvent: (minutes) => `${String(minutes)} Min. vor einem Ereignis`,
     messageCount: "Mindestanzahl Chatnachrichten",
+    minimumMessagesHint: "Leer bedeutet: keine Mindestzahl.",
+    minimumMessagesPlaceholder: "keine",
     time: "Uhrzeit im Kanal",
     weekdays: "Wochentage",
     everyDay: "Täglich",
@@ -100,11 +131,12 @@ const catalog: LocaleCatalog<TimersTexts> = {
     create: "Anlegen",
     edit: "Bearbeiten",
     save: "Speichern",
-    cancel: "Abbrechen",
-    delete: "Entfernen",
+    delete: "Löschen",
+    deleteOperatorReason: "Nur Broadcaster und Verwalter dürfen löschen.",
     deleteConfirm: "Diesen Timer wirklich entfernen?",
+    deleteNeedsSaved: "Speichere oder verwerfe deine Änderungen, bevor du den Timer entfernst.",
     preview: "Vorschau",
-    previewTitle: "Chatvorschau",
+    previewLoading: "Vorschau wird aktualisiert …",
     previewBot: "Bot",
     characterCount: (count) => `${String(count)} Zeichen`,
     empty: "Noch keine Timer angelegt.",
@@ -131,17 +163,41 @@ const catalog: LocaleCatalog<TimersTexts> = {
     roleLocked: "Nur Broadcaster und Verwalter dürfen Timer bearbeiten.",
     noNextRun: "Kein Lauf geplant",
     weekdaysNames: ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"],
+    timerCount: () => "Timer",
+    emptyTitle: "Noch keine Timer",
+    selectTimer: "Timer auswählen",
+    selectTimerDescription: "Wähle links einen Timer aus oder lege einen neuen an.",
+    back: "Zur Timerübersicht",
+    when: "Zeitplan",
+    lastRun: "Zuletzt",
+    neverRun: "Noch nie ausgeführt",
+    nameRequired: "Gib einen Namen ein.",
+    messageRequired: "Gib eine Nachricht ein.",
+    liveRule: "Timer-Intervalle laufen nur während der Live-Übertragung. Wird die Mindestzahl an Chatnachrichten nicht erreicht, entfällt dieser Lauf.",
+    offlineRule: "Ein aktiviertes Offline-Intervall läuft separat, solange der Stream offline ist.",
+    messagesUnit: "Nachrichten",
+    draftGuardTitle: "Ungespeicherte Änderungen",
+    draftGuardDescription: "Dieser Timer hat ungespeicherte Änderungen. Was möchtest du tun?",
+    continueEditing: "Weiter bearbeiten",
+    discardAndSwitch: "Verwerfen und wechseln",
+    saveAndSwitch: "Speichern und wechseln",
+    conflict: "Dieser Timer wurde geändert. Lade den aktuellen Stand, bevor du weiterarbeitest.",
+    reload: "Neu laden",
+    search: "Timer suchen",
+    noSearchResults: "Keine Timer passen zur Suche.",
   },
   en: {
     title: "Timers",
     add: "Create timer",
+    general: "General",
     name: "Name",
     message: "Message",
     messageHint: "Free text with variables and text blocks in the {text.name} format.",
     trigger: "Trigger",
     chatTarget: "Chat target",
-    chatTargetDefault: "Channel default",
     chatTargetLabels: { all_chats: "All chats", source_only: "Only our chat" },
+    chatTargetInherited: (target) => `Channel default (${target})`,
+    automatic: "Automatic",
     interval: "Interval",
     streamStart: "After stream start",
     timeOfDay: "Time of day",
@@ -154,9 +210,11 @@ const catalog: LocaleCatalog<TimersTexts> = {
     minutesUnit: "min",
     liveEvery: (minutes) => `Live every ${String(minutes)} min`,
     offlineEvery: (minutes) => `Offline every ${String(minutes)} min`,
-    afterMessages: (count) => `after ${String(count)} messages`,
+    afterMessages: (count) => `after ${String(count)} ${count === 1 ? "message" : "messages"}`,
     minutesBeforeEvent: (minutes) => `${String(minutes)} min before an event`,
     messageCount: "Minimum chat messages",
+    minimumMessagesHint: "Leave blank to set no minimum.",
+    minimumMessagesPlaceholder: "none",
     time: "Time in channel time zone",
     weekdays: "Weekdays",
     everyDay: "Every day",
@@ -171,13 +229,14 @@ const catalog: LocaleCatalog<TimersTexts> = {
     create: "Create",
     edit: "Edit",
     save: "Save",
-    cancel: "Cancel",
     delete: "Delete",
+    deleteOperatorReason: "Only broadcasters and managers may delete.",
     deleteConfirm: "Remove this timer?",
+    deleteNeedsSaved: "Save or discard your changes before deleting this timer.",
     preview: "Preview",
-    previewTitle: "Chat preview",
+    previewLoading: "Updating preview …",
     previewBot: "Bot",
-    characterCount: (count) => `${String(count)} characters`,
+    characterCount: (count) => `${String(count)} ${count === 1 ? "character" : "characters"}`,
     empty: "No timers yet.",
     loadError: "Timers could not be loaded.",
     saveError: "The timer could not be saved.",
@@ -202,6 +261,28 @@ const catalog: LocaleCatalog<TimersTexts> = {
     roleLocked: "Only broadcasters and managers can edit timers.",
     noNextRun: "No run scheduled",
     weekdaysNames: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+    timerCount: (count) => count === 1 ? "timer" : "timers",
+    emptyTitle: "No timers yet",
+    selectTimer: "Select a timer",
+    selectTimerDescription: "Choose a timer on the left or create a new one.",
+    back: "Back to timers",
+    when: "Schedule",
+    lastRun: "Last run",
+    neverRun: "Never run",
+    nameRequired: "Enter a name.",
+    messageRequired: "Enter a message.",
+    liveRule: "Timer intervals run only while the stream is live. If the minimum number of chat messages is not reached, that run is skipped.",
+    offlineRule: "An enabled offline interval runs separately while the stream is offline.",
+    messagesUnit: "messages",
+    draftGuardTitle: "Unsaved changes",
+    draftGuardDescription: "This timer has unsaved changes. What would you like to do?",
+    continueEditing: "Continue editing",
+    discardAndSwitch: "Discard and switch",
+    saveAndSwitch: "Save and switch",
+    conflict: "This timer has changed. Reload the current version before continuing.",
+    reload: "Reload",
+    search: "Search timers",
+    noSearchResults: "No timers match your search.",
   },
 };
 
