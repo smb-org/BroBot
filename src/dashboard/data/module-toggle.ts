@@ -13,10 +13,16 @@ export const refreshAfterModuleToggle = async (queryClient: QueryClient, channel
   const overview: QueryFilters = { queryKey: queryKeys.channel(channelId, "overview"), exact: true };
   const modules: QueryFilters = { queryKey: queryKeys.channel(channelId, "modules"), exact: true };
   const channels: QueryFilters = { queryKey: queryKeys.channels(), exact: true };
-  await Promise.all([overview, modules, channels].map((filter) => queryClient.cancelQueries(filter)));
+  const moduleSettings = queryClient.getQueryCache()
+    .findAll({ queryKey: ["channel", channelId, "module"] })
+    .filter((query) => query.queryKey[4] === "settings")
+    .map(({ queryKey }) => ({ queryKey, exact: true }));
+  const refreshes = [overview, modules, channels, ...moduleSettings];
+  await Promise.all(refreshes.map((filter) => queryClient.cancelQueries(filter)));
   await Promise.all([
     queryClient.invalidateQueries({ ...overview, refetchType: "all" }),
     queryClient.invalidateQueries(modules),
     queryClient.invalidateQueries(channels),
+    ...moduleSettings.map((filter) => queryClient.invalidateQueries(filter)),
   ]);
 };

@@ -2513,8 +2513,6 @@ p.lock-reason { margin-bottom: 1em; }
   .module-detail--settings-page .page-header__save .ui-save-bar--error.ui-save-bar--persistent .ui-save-bar__actions { grid-column: 2; grid-row: 1; }
   .module-detail--settings-page .page-header__save .ui-save-bar__buttons > .ui-button { padding-inline: 8px; }
   .module-detail--settings-page .settings-page__columns { display: flex; flex: 1 1 auto; flex-direction: column; gap: 16px; min-height: 0; overflow: auto; padding: 8px 0; }
-  body:has(.module-detail--settings-page):has(.ui-toast) .module-detail--settings-page .settings-page__columns { max-height: calc(100dvh - 288px); }
-  body:has(.module-detail--settings-page):has(.ui-toast:nth-child(2)) .module-detail--settings-page .settings-page__columns { max-height: calc(100dvh - 360px); }
   .module-detail--settings-page .settings-page__column { flex: none; width: 100%; min-height: 0; overflow: visible; }
   body:has(.module-detail--settings-page) .ui-toast-host { bottom: var(--s1); }
   .module-detail--settings-page .ads-recent-list-slot { height: calc(var(--s10) * 2); }

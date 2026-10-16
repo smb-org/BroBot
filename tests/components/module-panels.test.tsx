@@ -750,8 +750,44 @@ describe("Module panel loader", () => {
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Nachricht" })).toHaveValue("Serverstand {viewer}"));
   });
 
-  it("keeps a dirty module settings draft when a newer revision arrives in the background", async () => {
+  it("keeps a dirty module settings draft and advances its baseline when only the revision changes", async () => {
     let submittedRevision: number | undefined;
+    let serverRevision = 1;
+    const serverSettings = editorFixtureSettings;
+    const view = renderSettingsFixture(vi.fn<typeof fetch>((input, init) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      if (path.endsWith("/modules/editor-fixture/settings") && init?.method === "PATCH") {
+        if (typeof init.body === "string") submittedRevision = (JSON.parse(init.body) as { revision: number }).revision;
+        const savedSettings = typeof init.body === "string"
+          ? (JSON.parse(init.body) as { settings: typeof editorFixtureSettings }).settings
+          : editorFixtureSettings;
+        return Promise.resolve(Response.json({ settings: savedSettings, revision: 3, warnings: [] }));
+      }
+      return Promise.resolve(path.endsWith("/modules/editor-fixture/settings")
+        ? Response.json({ settings: serverSettings, revision: serverRevision, variables: [] })
+        : Response.json({}));
+    }));
+    const message = await screen.findByRole("textbox", { name: "Nachricht" });
+    fireEvent.change(message, { target: { value: "Local draft {viewer}" } });
+    const key = moduleQueryKey("kanal-a", "editor-fixture", "settings");
+    serverRevision = 2;
+    await act(async () => {
+      await view.queryClient.invalidateQueries({ queryKey: key, exact: true });
+    });
+
+    await waitFor(() => expect(view.queryClient.getQueryData<{ revision: number }>(key)?.revision).toBe(2));
+    expect(message).toHaveValue("Local draft {viewer}");
+    fireEvent.change(screen.getByRole("textbox", { name: "Konto" }), { target: { value: "local-handle" } });
+    fireEvent.click(screen.getByRole("button", { name: "Fixture speichern" }));
+    await waitFor(() => expect(submittedRevision).toBe(2));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Nachricht" })).toHaveValue("Local draft {viewer}"));
+    expect(message).toHaveValue("Local draft {viewer}");
+  });
+
+  it("keeps the old baseline when settings change remotely during a dirty draft", async () => {
+    let submittedRevision: number | undefined;
+    let serverRevision = 1;
+    let serverSettings = editorFixtureSettings;
     const view = renderSettingsFixture(vi.fn<typeof fetch>((input, init) => {
       const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
       if (path.endsWith("/modules/editor-fixture/settings") && init?.method === "PATCH") {
@@ -759,24 +795,24 @@ describe("Module panel loader", () => {
         return Promise.resolve(Response.json({ error: "module_settings_changed_concurrently" }, { status: 409 }));
       }
       return Promise.resolve(path.endsWith("/modules/editor-fixture/settings")
-        ? Response.json({ settings: editorFixtureSettings, revision: 1, variables: [] })
+        ? Response.json({ settings: serverSettings, revision: serverRevision, variables: [] })
         : Response.json({}));
     }));
     const message = await screen.findByRole("textbox", { name: "Nachricht" });
     fireEvent.change(message, { target: { value: "Local draft {viewer}" } });
     const key = moduleQueryKey("kanal-a", "editor-fixture", "settings");
-    const cached = view.queryClient.getQueryData<{ definition: unknown; settings: typeof editorFixtureSettings; revision: number; variables: [] }>(key);
-    expect(cached).toBeDefined();
-
-    act(() => {
-      view.queryClient.setQueryData(key, { ...cached, settings: { ...editorFixtureSettings, message: "Remote {viewer}" }, revision: 2 });
+    serverRevision = 2;
+    serverSettings = { ...editorFixtureSettings, message: "Remote {viewer}" };
+    await act(async () => {
+      await view.queryClient.invalidateQueries({ queryKey: key, exact: true });
     });
 
+    await waitFor(() => expect(view.queryClient.getQueryData<{ revision: number }>(key)?.revision).toBe(2));
     expect(message).toHaveValue("Local draft {viewer}");
-    fireEvent.change(screen.getByRole("textbox", { name: "Konto" }), { target: { value: "local-handle" } });
     fireEvent.click(screen.getByRole("button", { name: "Fixture speichern" }));
-    await waitFor(() => expect(submittedRevision).toBe(1));
+
     expect(await screen.findByRole("status")).toHaveTextContent("Fixture wurde inzwischen geändert.");
+    expect(submittedRevision).toBe(1);
     expect(message).toHaveValue("Local draft {viewer}");
   });
 

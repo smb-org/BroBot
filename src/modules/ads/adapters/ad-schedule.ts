@@ -73,8 +73,8 @@ const twitchErrorStatus = (error: unknown): number | null => {
 };
 
 /** The status-to-reason mapping is this endpoint's own business meaning, not `helixRequest`'s. */
-const scheduleReasonFor = (status: number): string =>
-  status === 429 ? "rate_limited" : status === 401 ? "unauthorized" : `http_${String(status)}`;
+const scheduleReasonFor = (status: number, message: string | null): string =>
+  status === 429 ? "rate_limited" : status === 401 ? missingScopeMessage(message) ? "scope_missing" : "unauthorized" : `http_${String(status)}`;
 
 /** Fetches Get Ad Schedule using the app token; an empty schedule counts as success. */
 export const getAdSchedule = async (
@@ -108,7 +108,11 @@ export const getAdSchedule = async (
     if (result.reason === "timeout" || result.reason === "network_error") {
       return failure(result.reason, { status: null, twitchMessage: result.message });
     }
-    return failure(scheduleReasonFor(result.status ?? 0), { status: result.status, twitchMessage: result.message });
+    return failure(scheduleReasonFor(result.status ?? 0, result.message), {
+      status: result.status,
+      twitchMessage: result.message,
+      ...(result.status === 429 && result.retryAfter != null ? { retryAfter: result.retryAfter } : {}),
+    });
   }
 
   const body = isRecord(result.data) ? result.data : {};

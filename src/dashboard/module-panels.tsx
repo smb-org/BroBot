@@ -323,6 +323,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   const channelSettings = useChannelSettings(channelId);
   const { value: currentValue, setValue, dirty, reset, accept } = useDraft(initial);
   const baselineRevision = useRef(initialRevision);
+  const baselineSettings = useRef(initial);
   const [saved, setSaved] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -334,9 +335,13 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   const [serverWarnings, setServerWarnings] = useState<readonly PanelTemplateWarning[]>([]);
   const [localIssues, setLocalIssues] = useState<Readonly<Record<string, { unknown: readonly string[]; worstCaseExceeded: boolean }>>>({});
   useEffect(() => {
-    if (!dirty && initialRevision > baselineRevision.current) {
+    if (initialRevision <= baselineRevision.current) return;
+    if (!dirty) {
       baselineRevision.current = initialRevision;
+      baselineSettings.current = initial;
       accept(initial);
+    } else if (JSON.stringify(initial) === JSON.stringify(baselineSettings.current)) {
+      baselineRevision.current = initialRevision;
     }
   }, [accept, dirty, initial, initialRevision]);
   const effectiveDefaultChatTarget = channelSettings.data?.defaultChatTarget;
@@ -512,7 +517,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       setValidationAttempted(true);
       return copy.invalidMessage;
     }
-    if (pending || conflict || !canManageContent) return copy.saveError;
+    if (pending || conflict || !canManageContent || page?.switchBusy === true) return copy.saveError;
     setPending(true); setError(undefined); setSaved(false); setServerFieldErrors({});
     try {
       const response = await runModuleQueryWrite(
@@ -532,6 +537,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
           relatedParts: (module.settingsEditorRelatedParts ?? []).map((part) => ({ moduleId: module.id, part })),
         },
       );
+      baselineSettings.current = response.settings;
       accept(response.settings);
       baselineRevision.current = response.revision;
       setSaved(true);
@@ -569,6 +575,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     persistent: true,
     dirty,
     pending,
+    saveDisabled: page.switchBusy,
     saved,
     ...(error === undefined ? {} : { error }),
     invalid,

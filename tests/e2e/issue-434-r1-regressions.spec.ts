@@ -3,7 +3,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 test.use({ locale: "de-DE", timezoneId: "Europe/Berlin" });
 
 type ModuleId = "ads" | "raid";
-type State = "ready" | "operator" | "missing-scope" | "raid-message-off" | "refresh-429" | "refresh-and-snooze-429" | "refresh-scope-missing" | "snooze-429" | "save-error";
+type State = "ready" | "operator" | "missing-scope" | "raid-message-off" | "refresh-429" | "refresh-and-snooze-429" | "refresh-scope-missing" | "snooze-429" | "save-error" | "toggle-and-save";
 type Role = "broadcaster" | "manager" | "operator";
 
 const json = (value: unknown, status = 200) => ({ status, contentType: "application/json", body: JSON.stringify(value) });
@@ -26,7 +26,7 @@ const raidSettings = {
   textShortTarget: "channel_default",
 };
 
-const installModule = async (page: Page, moduleId: ModuleId, state: State, width: number, height: number): Promise<{ scheduleRequests: () => number }> => {
+const installModule = async (page: Page, moduleId: ModuleId, state: State, width: number, height: number): Promise<{ scheduleRequests: () => number; submittedRevision: () => number | undefined; settingsReadRevisions: () => readonly number[]; toggleRequestStarted: () => Promise<void>; releaseToggleRequest: () => void }> => {
   const channelId = `issue-434-${moduleId}-${state}-${String(width)}`;
   const role: Role = state === "operator" ? "operator" : state === "missing-scope" ? "broadcaster" : "manager";
   const module = {
@@ -34,6 +34,22 @@ const installModule = async (page: Page, moduleId: ModuleId, state: State, width
     enabled: true,
     settings: "{}",
     ...(state === "missing-scope" ? { missingBroadcasterScopes: ["channel:read:ads"] } : {}),
+  };
+  let moduleEnabled = true;
+  let settingsRevision = 1;
+  let submittedRevision: number | undefined;
+  let resolveToggleRequestStarted: (() => void) | undefined;
+  let releaseToggleRequest: (() => void) | undefined;
+  const toggleRequestStarted = new Promise<void>((resolve) => { resolveToggleRequestStarted = resolve; });
+  const settingsReadRevisions: number[] = [];
+  const currentModule = () => ({ ...module, enabled: moduleEnabled });
+  const readySchedule = () => {
+    const now = Date.now();
+    return {
+      schedule: { nextAdAt: new Date(now + 10 * 60_000).toISOString(), duration: 90, lastAdAt: new Date(now - 38 * 60_000).toISOString(), prerollFreeTime: 240, snoozeCount: 2, snoozeRefreshAt: new Date(now + 18 * 60 * 60_000).toISOString() },
+      snoozeScopeAvailable: true,
+      recentAdBreaks: [{ timestamp: new Date(now - 38 * 60_000).toISOString(), durationSeconds: 90 }],
+    };
   };
   const channel = {
     channelId,
@@ -49,7 +65,7 @@ const installModule = async (page: Page, moduleId: ModuleId, state: State, width
     moderator: { isModerator: true, checkedAt: "2030-01-01T11:45:00.000Z", reason: null },
     chatSubscription: { status: "enabled", subscriptionId: "issue-434", reason: null, updatedAt: "2030-01-01T11:45:00.000Z" },
     chatSubscriptionNeeded: false,
-    modules: [module],
+    modules: [currentModule()],
     tokens: { botExpiresAt: "2099-01-01T00:00:00.000Z", loginStatus: "connected", loginReason: null, loginExpiresAt: "2099-01-01T00:00:00.000Z" },
     lastError: null,
   };
@@ -57,31 +73,46 @@ const installModule = async (page: Page, moduleId: ModuleId, state: State, width
   await page.route("**/api/**", async (route: Route) => {
     const request = route.request();
     const { pathname } = new URL(request.url());
-    if (pathname === "/api/channels") return route.fulfill(json({ channels: [channel], viewerUserId: "issue-434-viewer", bot: channel.bot, platformAdmin: false, viewerIsBot: false }));
-    if (pathname === `/api/channels/${channelId}/overview`) return route.fulfill(json({ ...channel, activeModules: [{ moduleId, settings: "{}" }] }));
-    if (pathname === `/api/channels/${channelId}/modules`) return route.fulfill(json({ modules: [module] }));
+    if (pathname === "/api/channels") return route.fulfill(json({ channels: [{ ...channel, modules: [currentModule()] }], viewerUserId: "issue-434-viewer", bot: channel.bot, platformAdmin: false, viewerIsBot: false }));
+    if (pathname === `/api/channels/${channelId}/overview`) return route.fulfill(json({ ...channel, modules: [currentModule()], activeModules: moduleEnabled ? [{ moduleId, settings: "{}" }] : [] }));
+    if (pathname === `/api/channels/${channelId}/modules`) return route.fulfill(json({ modules: [currentModule()] }));
     if (pathname === `/api/channels/${channelId}/settings`) return route.fulfill(json({ defaultChatTarget: "source_only", defaultChatTargetRevision: 1, timeZone: "Europe/Berlin", revision: 1 }));
     if (pathname === `/api/channels/${channelId}/revisions`) return route.fulfill(json({ revisions: {} }));
+    if (pathname === `/api/channels/${channelId}/modules/text_commands/commands`) return route.fulfill(json({ commands: [], variables: [] }));
+    if (pathname === `/api/channels/${channelId}/variables`) return route.fulfill(json({ variables: [], count: 0, maximum: 100 }));
     if (pathname === "/api/csrf") return route.fulfill(json({ token: "issue-434-csrf" }));
     if (pathname === `/api/channels/${channelId}/modules/${moduleId}/settings`) {
-      if (request.method() === "PATCH" && state === "save-error") return route.fulfill(json({ error: "settings_write_failed" }, 500));
       const settings = moduleId === "ads" ? adsSettings : state === "raid-message-off" ? { ...raidSettings, textShort: "" } : raidSettings;
-      return route.fulfill(json({ settings, revision: 1, variables: [], warnings: [] }));
+      if (request.method() === "PATCH" && state === "save-error") return route.fulfill(json({ error: "settings_write_failed" }, 500));
+      if (request.method() === "PATCH" && state === "toggle-and-save") {
+        const body = JSON.parse(request.postData() ?? "{}") as { revision: number; settings: Record<string, unknown> };
+        submittedRevision = body.revision;
+        settingsRevision += 1;
+        return route.fulfill(json({ settings: body.settings, revision: settingsRevision, variables: [], warnings: [] }));
+      }
+      if (request.method() === "PATCH") return route.fulfill(json({ settings, revision: settingsRevision + 1, variables: [], warnings: [] }));
+      settingsReadRevisions.push(settingsRevision);
+      return route.fulfill(json({ settings, revision: settingsRevision, variables: [], warnings: [] }));
+    }
+    if (state === "toggle-and-save" && pathname === `/api/channels/${channelId}/modules/${moduleId}` && request.method() === "PATCH") {
+      resolveToggleRequestStarted?.();
+      await new Promise<void>((resolve) => { releaseToggleRequest = resolve; });
+      const body = JSON.parse(request.postData() ?? "{}") as { enabled: boolean };
+      moduleEnabled = body.enabled;
+      settingsRevision += 1;
+      return route.fulfill(json({ module: currentModule() }));
     }
     if (moduleId === "ads" && pathname === `/api/channels/${channelId}/modules/ads/schedule`) {
       scheduleRequests += 1;
-      const now = Date.now();
       return route.fulfill(json({
-        asOf: new Date(now).toISOString(),
-        schedule: { nextAdAt: new Date(now + 10 * 60_000).toISOString(), duration: 90, lastAdAt: new Date(now - 38 * 60_000).toISOString(), prerollFreeTime: 240, snoozeCount: 2, snoozeRefreshAt: new Date(now + 18 * 60 * 60_000).toISOString() },
-        snoozeScopeAvailable: true,
-        recentAdBreaks: [{ timestamp: new Date(now - 38 * 60_000).toISOString(), durationSeconds: 90 }],
+        asOf: new Date(Date.now()).toISOString(),
+        ...readySchedule(),
       }));
     }
     if (moduleId === "ads" && pathname === `/api/channels/${channelId}/modules/ads/schedule/refresh` && request.method() === "POST") {
       if (state === "refresh-429" || state === "refresh-and-snooze-429") return route.fulfill(json({ error: "ad_schedule_refresh_failed", reason: "rate_limited", detail: { retryAfter: Date.now() + 90_000 } }, 429));
       if (state === "refresh-scope-missing") return route.fulfill(json({ error: "ad_schedule_refresh_failed", reason: "scope_missing" }, 403));
-      return route.fulfill(json({ schedule: {}, recentAdBreaks: [], snoozeScopeAvailable: true }));
+      return route.fulfill(json(readySchedule()));
     }
     if (moduleId === "ads" && pathname === `/api/channels/${channelId}/modules/ads/snooze` && request.method() === "POST") {
       if (state === "snooze-429" || state === "refresh-and-snooze-429") return route.fulfill(json({ error: "ad_snooze_failed", reason: "rate_limited", detail: { retryAfter: Date.now() + 90_000 } }, 429));
@@ -91,7 +122,13 @@ const installModule = async (page: Page, moduleId: ModuleId, state: State, width
   });
   await page.setViewportSize({ width, height });
   await page.goto(`/channels/${channelId}/modules/${moduleId}`);
-  return { scheduleRequests: () => scheduleRequests };
+  return {
+    scheduleRequests: () => scheduleRequests,
+    submittedRevision: () => submittedRevision,
+    settingsReadRevisions: () => settingsReadRevisions,
+    toggleRequestStarted: () => toggleRequestStarted,
+    releaseToggleRequest: () => { releaseToggleRequest?.(); },
+  };
 };
 
 const expectHeaderAndColumnsToAlign = async (page: Page): Promise<void> => {
@@ -128,16 +165,9 @@ const expectToastBelowPageHeader = async (page: Page): Promise<void> => {
   expect(layout?.position).toBe("fixed");
 };
 
-const expectMobileToastOutsidePageContent = async (page: Page): Promise<void> => {
-  const layout = await page.evaluate(() => {
-    const toast = document.querySelector(".ui-toast")?.getBoundingClientRect();
-    const columns = document.querySelector(".settings-page__columns")?.getBoundingClientRect();
-    return toast === undefined || columns === undefined
-      ? null
-      : { toastTop: toast.top, columnsBottom: columns.bottom };
-  });
-  expect(layout).not.toBeNull();
-  expect(layout?.toastTop ?? 0, JSON.stringify(layout)).toBeGreaterThanOrEqual(layout?.columnsBottom ?? Number.POSITIVE_INFINITY);
+const expectMobileToastOverlay = async (page: Page): Promise<void> => {
+  const position = await page.locator(".ui-toast-host").evaluate((host) => getComputedStyle(host).position);
+  expect(position).toBe("fixed");
 };
 
 test("Ads settings keep the header aligned and columns scrolling inside the page", async ({ page }) => {
@@ -221,7 +251,7 @@ test("Ads refresh explains Twitch rate limits and keeps the snooze result slot s
   await page.getByRole("button", { name: "Werbeplan aktualisieren" }).click();
   await expect(page.locator(".ui-toast")).toContainText(/Versuche es in 90 Sekunden erneut/u);
   await expectToastBelowPageHeader(page);
-  await expectMobileToastOutsidePageContent(page);
+  await expectMobileToastOverlay(page);
 
   const result = page.getByTestId("ads-snooze-result-slot");
   const recent = page.getByTestId("ads-recent-list-slot");
@@ -245,7 +275,7 @@ test("Ads refresh explains Twitch rate limits and keeps the snooze result slot s
     };
   });
   expect(resultChildren.children.every((child) => child.bottom <= resultChildren.slot.bottom + 1), JSON.stringify(resultChildren)).toBe(true);
-  await expectMobileToastOutsidePageContent(page);
+  await expectMobileToastOverlay(page);
   const recentToSettingsGap = await page.evaluate(() => {
     const table = document.querySelector(".ads-recent-list-slot__table");
     const nextColumn = document.querySelectorAll(".settings-page__column")[1];
@@ -254,6 +284,79 @@ test("Ads refresh explains Twitch rate limits and keeps the snooze result slot s
   });
   expect(recentToSettingsGap).not.toBeNull();
   expect(recentToSettingsGap ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(80);
+});
+
+test("a mobile Ads success toast leaves the textarea fixed until the toast disappears", async ({ page }) => {
+  await page.clock.install();
+  await installModule(page, "ads", "ready", 390, 844);
+  const message = page.getByRole("textbox", { name: "Vorwarnung" });
+  const columns = page.locator(".settings-page__columns");
+  const measure = async () => ({ textarea: await message.boundingBox(), columns: await columns.boundingBox() });
+  await message.scrollIntoViewIfNeeded();
+  await expect(message).toBeInViewport();
+  const before = await measure();
+
+  await page.getByRole("button", { name: "Werbeplan aktualisieren" }).evaluate((element) => {
+    (element as HTMLButtonElement).click();
+  });
+  const toast = page.locator(".ui-toast--success");
+  await expect(toast).toBeVisible();
+  expect(await measure()).toEqual(before);
+
+  await page.clock.fastForward(4_001);
+  await expect(toast).toHaveCount(0);
+  expect(await measure()).toEqual(before);
+});
+
+test("a module toggle refreshes the shared settings revision without discarding its draft", async ({ page }) => {
+  const fixture = await installModule(page, "ads", "toggle-and-save", 1920, 1080);
+  const message = page.getByRole("textbox", { name: "Automatische Werbepause" });
+  await message.fill("Entwurf bleibt nach dem Umschalten erhalten.");
+
+  const enabled = page.getByRole("switch", { name: /Werbung/u });
+  await enabled.click();
+  await fixture.toggleRequestStarted();
+  await expect(enabled).toBeDisabled();
+  const save = page.getByRole("button", { name: "Speichern" });
+  try {
+    await expect(save).toBeDisabled();
+  } finally {
+    fixture.releaseToggleRequest();
+  }
+  await expect(enabled).toBeChecked();
+  await expect.poll(() => fixture.settingsReadRevisions().at(-1)).toBe(2);
+  await expect(enabled).not.toBeChecked();
+  await expect(message).toHaveValue("Entwurf bleibt nach dem Umschalten erhalten.");
+
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect.poll(fixture.submittedRevision).toBe(2);
+  await expect(message).toHaveValue("Entwurf bleibt nach dem Umschalten erhalten.");
+});
+
+test("a command palette module toggle keeps Save disabled until settings refresh", async ({ page }) => {
+  const fixture = await installModule(page, "ads", "toggle-and-save", 1920, 1080);
+  const message = page.getByRole("textbox", { name: "Automatische Werbepause" });
+  await message.fill("Entwurf bleibt nach dem Paletten-Umschalten erhalten.");
+
+  await page.locator(".dashboard-header__palette-trigger").click();
+  const palette = page.getByRole("dialog");
+  await palette.getByRole("combobox").fill("Werbung aus");
+  await palette.locator('[data-command-palette-item-id="action:ads-off"]').click();
+  await expect(palette).toBeHidden();
+  await fixture.toggleRequestStarted();
+
+  const save = page.getByRole("button", { name: "Speichern" });
+  try {
+    await expect(save).toBeDisabled();
+  } finally {
+    fixture.releaseToggleRequest();
+  }
+  await expect.poll(() => fixture.settingsReadRevisions().at(-1)).toBe(2);
+  await expect(message).toHaveValue("Entwurf bleibt nach dem Paletten-Umschalten erhalten.");
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect.poll(fixture.submittedRevision).toBe(2);
 });
 
 test("Ads refresh explains when its read permission is missing", async ({ page }) => {
@@ -287,7 +390,7 @@ test("mobile Ads save failures stay visible without moving the header", async ({
   await page.getByRole("button", { name: "Speichern" }).click();
   await expect(page.locator(".ui-toast")).toContainText("Die Ansagen-Einstellungen konnten nicht gespeichert werden.");
   await expectToastBelowPageHeader(page);
-  await expectMobileToastOutsidePageContent(page);
+  await expectMobileToastOverlay(page);
   const after = await header.evaluate((element) => element.getBoundingClientRect().height);
   expect(after).toBe(before);
 });
