@@ -74,18 +74,18 @@ Regeln:
 - Grün steht nie ohne Wort. Rot und Orange nie als einziger Hinweis.
 - Gold ist nie Auswahl, nie Status, nie Link.
 
-### 3.1 Zustandsleiste (State Bar)
+### 3.1 Zustandsrahmen (State Border)
 
-3px-Leiste links (`box-shadow: inset 3px 0 <farbe>`) **nur** an Blöcken mit lebendigem Zustand:
+Seitenleisten gibt es nicht; Ausnahmen sind nur Toasts (Abschnitt 10), die rote Leiste des Speicher-Clusters und die Kategoriekodierung im Ereignis-Feed (Kategorie, weder Auswahl noch Zustand). Lebendiger Zustand zeigt sich über Rahmenfarbe, Fläche und die LED mit Wort, **nur** an Blöcken mit lebendigem Zustand:
 
-| Leiste | Zustand | Token |
+| Rahmen | Zustand | Token |
 |---|---|---|
 | grün | läuft (`is-running`) | `--color-success` |
 | orange | jetzt handeln (`is-imminent`) | `--color-orange` |
 | rot | defekt (`is-error`) | `--color-error` |
 | blau/Brand | Einrichtungshinweis | `--color-brand` |
 
-Ruhende Blöcke haben keine Leiste. Die Ortsleiste an gewähltem Listenelement und aktivem Navigationspunkt bedeutet „hier bist du“, nie Zustand.
+Ruhende Blöcke haben neutralen Rahmen. Gewähltes Listenelement und aktiver Navigationspunkt bedeuten „hier bist du“, nie Zustand: 1px Brand-Rahmen rundum plus `--color-selection-surface` (dezente Brand-Tönung), keine Leiste.
 
 ## 4. Inhaltsfarben (`--content-*`)
 
@@ -144,7 +144,7 @@ Beide Paletten verwenden die Flächen-Tokens `--color-depth`, `--color-well`, `-
 | `--color-brand-text` | `#4C9AFF` | `#9DB0FF` | Links, aktiver Text | |
 | `--color-brand-border` | `#4C9AFF` | `#6A84FF` | Brand-Rand | |
 | `--color-focus` | `#4C9AFF` | `#A9B9FF` | Fokusring (Ziel: 2px, Offset 2px) | |
-| `--color-selection-border` / `--color-selection-surface` | `#4C9AFF` / `#1C222B` | `#6A84FF` / `#1E2A5C` | gewähltes Element | |
+| `--color-selection-border` / `--color-selection-surface` | `#4C9AFF` / Markenfarbe 10 % über `--color-surface` | `#6A84FF` / Markenfarbe 20 % über `--color-surface` | gewähltes Element (Tönung per `color-mix`, Textkontrast ≥ 4,5:1) | |
 | `--color-gold`, `--color-gold-hover`, `--color-gold-press` | `#E8B93C`, `#F2CA59`, `#D4A72C` | `#E3B341`, `#F0C75B`, `#D2A12F` | Primärbutton | |
 | `--color-on-gold` | `#06080B` | `#11131A` | Text auf Gold | |
 | `--color-gold-soft` / `--color-gold-text` | `#2B2414` / `#E8B93C` | `#342B17` / `#F2C75C` | weiche Goldfläche | |
@@ -233,7 +233,7 @@ Links: Marke, Kanalwahl (`kanal_demo`, Popover „Kanal wechseln“). Mitte: Mod
 
 ### 9.3 Aufgabenbasierte Navigation (Einrichten, `.setup-nav`, 256px)
 
-Sechs Gruppen, je Gruppe ein Badge-Farbton (Abschnitt 6). Aktiver Punkt: Ortsfarbe + linke Leiste (Nachtschicht: `taste`-Fläche + `inset 2px` Ort).
+Sechs Gruppen, je Gruppe ein Badge-Farbton (Abschnitt 6). Aktiver Punkt: 1px Brand-Rahmen rundum + `--color-selection-surface`, keine Leiste. Hover immer `--surface-hover`, nie ein literales Warmgrau.
 
 | Gruppe | geplante Seiten (Route unter `/setup/`) |
 |---|---|
@@ -281,7 +281,7 @@ rechts: Speicher-Cluster | Seitenaktionen | „…“ (Weitere Aktionen)
 - Badges dürfen Modulname in Palettenfarbe, neutrale Art oder Zustand benennen. Pro Zeile sind höchstens zwei davon sichtbar.
 - FAQ-Zeilen sind 52px hoch: Griff, Positionsnummer, Titel und genau eine Metazeile. Nur „Regex“ und „Pausiert“ erscheinen als Badges. Drag oder Alt+↑/↓ ordnet sofort um; ein Toast bietet „Rückgängig“.
 - Variablen zeigen das Modul-Badge in derselben Titelzeile wie den Variablennamen; eigene Variablen heißen „Eigene“.
-- Gewähltes Element: Rahmen/Fläche + linke Ortsleiste, `aria-current="true"`.
+- Gewähltes Element: 1px Brand-Rahmen rundum + `--color-selection-surface`, keine Leiste, `aria-current="true"`.
 - Filter, Suche und ein rechts stehendes goldenes, beschriftetes „Neu“ in einer Werkzeugzeile, nie unter der Liste.
 - Leere Liste: Hinweis in festem Bereich, kein Layoutsprung.
 
@@ -333,7 +333,7 @@ Die Namen in der Tabelle bezeichnen gewünschte UI-Rollen, keine vorhandenen Dat
 | **StatusLed** | Punkt (8px) + Wort | Zustände `ok`/`loading`/`warn`/`error`/`off`; Wort immer | Kategorie-Badges |
 | **FieldError** | reservierte Fehlerzeile | immer gerendert | seitenweite Fehler |
 | **LockedReason** | Sperrgrund mit Schloss | reserviert Platz auch ohne Sperre | allgemeine Hinweise |
-| **RuleNote** | Regelhinweis (Info-Symbol, neutrale linke Leiste) | neutral, keine Zustandsfarbe | Warnungen, Fehler |
+| **RuleNote** | Regelhinweis (Info-Symbol, neutraler 1px-Rahmen rundum, einheitlicher Radius, keine Leiste) | neutral, keine Zustandsfarbe | Warnungen, Fehler |
 | **TwitchReconnectDialog** | geführte Wiederverbindung (Berechtigungen, Bestätigung, Ergebnis) | erreichbar aus System und aus gesperrter Werbung | andere Verbindungen |
 
 ### 11.1 StepDialog
@@ -362,8 +362,8 @@ Das Zielsystem sieht Sofortaktionen (`ImmediateAction`) und Live-Kacheln (`LiveT
 |---|---|---|
 | **ActionGrid** | Raster der Sofortaktionen (3 Spalten) mit Rollenanzeige | Rolle/Sperre/Zustand ergeben `reason`; Zähler „n Aktionen“ |
 | **ActionFrame** | Rahmen einer Aktion (Karte + Popover/Dialog) | Kopf, Inhalt, reservierte Fehlerzeile, Fuß „Abbrechen“ + ein Goldbutton; Esc schließt und gibt den Fokus zurück |
-| **LiveTiles** | Kacheln für laufende Vorgänge | Zustandsleiste nach 3.1; Kachelpositionen bleiben stabil |
-| **EventFeed** | Ereignisliste | Kategorieleiste je Ereignis; Nutzername fett |
+| **LiveTiles** | Kacheln für laufende Vorgänge | Zustandsrahmen nach 3.1; Kachelpositionen bleiben stabil |
+| **EventFeed** | Ereignisliste | Kategorieleiste je Ereignis (Ausnahme laut 3.1: Kategoriekodierung); Nutzername fett |
 | **CockpitHeader** | Live-Pille, Laufzeit, Zuschauer, Streamtitel/Kategorie, Gesundheits-LEDs | Streamtitel nur für Verwalter änderbar; Offline zeigt „Twitch neu verbinden“ an fester Stelle |
 | **Statuszeile** | `aria-live="polite"` Systemmeldung am Seitenende | fester Platz, kein Einschub |
 
@@ -378,7 +378,7 @@ Das Zielsystem sieht Sofortaktionen (`ImmediateAction`) und Live-Kacheln (`LiveT
 
 ### 13.2 Befehlspalette (geplant)
 
-Cmd/Strg+K, Dialog „Seite suchen“, genau ein Suchsymbol, Fokusring 2px/Offset 2px, filtert Seiten, Pfeile + Enter öffnen. Auswahl: Rahmen + linke Ortsleiste. Nicht für Aktionen (dafür Sofortaktionen).
+Cmd/Strg+K, Dialog „Seite suchen“, genau ein Suchsymbol, Fokusring 2px/Offset 2px, filtert Seiten, Pfeile + Enter öffnen. Auswahl: 1px Brand-Rahmen + Tönung, keine Leiste. Nicht für Aktionen (dafür Sofortaktionen).
 
 ### 13.3 Bestätigungsdialog
 
@@ -412,7 +412,7 @@ Die folgenden Prüfungen sind **künftige Anforderungen** und werden derzeit nic
 Weitere geplante Pflichten:
 
 - **Fokus:** sichtbar, 2px, Offset 2px (Suchfelder: Ring am Wrapper); Fokus kehrt nach Popover/Dialog an den Auslöser zurück.
-- **Farbe nie allein:** LED mit Wort, Zustands-Badge mit Wort, Gewählt mit Rahmen/Leiste/Haken, Fehler mit Text + Symbol, Abstimmung mit Beschriftung.
+- **Farbe nie allein:** LED mit Wort, Zustands-Badge mit Wort, Gewählt mit Rahmen/Tönung/Haken, Fehler mit Text + Symbol, Abstimmung mit Beschriftung.
 - **Tastatur:** Picker (`{`, Pfeile, Enter, Esc), `GameMultiSelect`, `StepDialog` (Enter/Esc), Strg/Cmd+S, Cmd/Strg+K.
 - **Trefferfläche:** Bedienelemente ≥ 24px; geplantes Ziel: Button und Eingabe 32px, `sm` 28px nur in Listenzeilen; bei `(pointer: coarse)` mindestens 40px.
 - `aria-live="polite"` für Fehlerzeilen, Statuszeile, Speicherstatus; `aria-busy` beim Laden; `aria-pressed`, `aria-current`, `role="switch"` nach Rolle.
@@ -434,7 +434,7 @@ Der aktuelle Check führt `tests/unit/theme-color-lint.test.ts` und `tests/unit/
 - [ ] **Kopf-Reihenfolge** eingehalten (Titel, Schalter, Badges / Cluster, Aktionen, „…“)? Zerstörendes im „…“-Menü mit Bestätigung?
 - [ ] **Layoutsprung** bei Laden, Fehler, Erfolg, Meldung, aufklappendem Teil? Fehlerzeilen reserviert? Toast statt Einschub?
 - [ ] **Autosave?** (nicht erlaubt, außer Module an/aus mit Rückgängig)
-- [ ] **Zustandsleiste** nur an lebendigen Blöcken?
+- [ ] **Zustandsrahmen** nur an lebendigen Blöcken, keine Seitenleiste außer Toast, Speicherfehler und Kategoriemarke im Ereignis-Feed?
 - [ ] **Eyebrow-Zeile**, mehr als drei Textebenen, Text < 11px, Emoji?
 - [ ] **Spalten** zeilenweise ausgerichtet, Feldlabels vorhanden?
 - [ ] **StepDialog:** höchstens zwei verschachtelte Rahmen, stabile Höhe, ein Goldbutton?

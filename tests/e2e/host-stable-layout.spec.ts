@@ -1099,3 +1099,16 @@ test("a channel control error appears as a toast without changing header boxes",
   const after = await measureBox(page, ".dashboard-header__controls");
   expect(after).toEqual(before);
 });
+
+test("a focused selected table row keeps the 2px focus ring", async ({ page }) => {
+  await installChannelMocks(page, {}, { members: { members: fullMemberPage.slice(0, 3), nextCursor: null } });
+  await page.goto(`/channels/${channelId}/members`);
+  const row = page.locator(".members-table tbody tr").first();
+  await row.click();
+  await expect(row).toHaveAttribute("aria-selected", "true");
+  // Tab away and back so :focus-visible applies to the already selected row.
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+  await expect(row).toBeFocused();
+  await expect(row).toHaveCSS("outline-width", "2px");
+});

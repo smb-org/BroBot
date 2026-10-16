@@ -234,7 +234,7 @@ describe("text library", () => {
     );
     fireEvent.click(await screen.findByRole("button", { name: /\{text\.welcome\}/u }));
     fireEvent.change(screen.getByRole("textbox", { name: "Text" }), { target: { value: "Client draft" } });
-    fireEvent.click(within(screen.getByRole("region", { name: "Name" })).getByRole("button", { name: "Save changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Text" })).toHaveValue("New generation"));
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
@@ -880,10 +880,10 @@ describe("text library", () => {
 
     renderTextLibraryPanel();
     fireEvent.click(await screen.findByRole("button", { name: /\{text\.welcome\}/u }));
-    const nameField = within(screen.getByRole("region", { name: "Name" })).getByRole("textbox", { name: "Name" });
+    const nameField = screen.getByRole("textbox", { name: "Name" });
     expect(nameField).toBeEnabled();
     fireEvent.change(nameField, { target: { value: "greeting" } });
-    fireEvent.click(within(screen.getByRole("region", { name: "Name" })).getByRole("button", { name: "Save changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(patchStatus).toBe(200));
     expect(patchBody).toMatchObject({ name: "greeting", revision: created.block.revision });
@@ -996,6 +996,126 @@ describe("text library", () => {
     expect(audit?.action).toBe("text_library.block.renamed");
     expect(audit?.before_json).toContain("welcome");
     expect(audit?.after_json).toContain("greeting");
+  });
+
+  it("rewrites only references owned by the channel whose block was renamed", async () => {
+    const created = await createBlock("welcome", [variant("default", "Hello")]);
+    if (!created.ok) throw new Error("Could not create the channel-scoped rename block.");
+    const otherChannelId = "other-channel-rename";
+    await insertChannel(database, otherChannelId);
+    const otherSnapshot = await service.list(otherChannelId);
+    const otherBlock = await service.create({
+      channelId: otherChannelId,
+      name: "welcome",
+      categoryId: "social",
+      games: [],
+      variants: [variant("default", "Other channel hello")],
+      expectedGraphRevision: otherSnapshot.settings.graphRevision,
+      now: new Date(NOW).toISOString(),
+    }, ACTOR, otherSnapshot);
+    if (!otherBlock.ok) throw new Error("Could not create the same-named block in the other channel.");
+    const now = new Date(NOW).toISOString();
+    await database.prepare(
+      `INSERT INTO timers (timer_id, channel_id, name, enabled, trigger_type, trigger_json, message_text, created_at, updated_at)
+       VALUES (?, ?, ?, 1, 'interval', '{}', ?, ?, ?)`,
+    ).bind("timer-other-channel-rename", otherChannelId, "Other reminder", "Timer {text.welcome}", now, now).run();
+    await insertLoginIdentityAndSession(database, "manager-channel-scoped-rename");
+    await insertMember(database, CHANNEL_ID, "manager-channel-scoped-rename", "manager");
+    const sessionCookie = await createSessionCookie(
+      { sessionId: "session-manager-channel-scoped-rename" },
+      TEST_SESSION_KEYS,
+      TEST_ENCRYPTION_KEYS,
+    );
+    const csrf = await createCsrfToken("session-manager-channel-scoped-rename", TEST_SESSION_KEYS, new Date().toISOString());
+    const environment = {
+      DB: database as unknown as D1Database,
+      TWITCH_CLIENT_ID: "client-id",
+      SESSION_COOKIE_KEYS: TEST_SESSION_KEYS,
+      SESSION_ENCRYPTION_KEYS: TEST_ENCRYPTION_KEYS,
+    } as unknown as Env;
+
+    const response = await panelRouter.fetch(new Request(
+      `https://brobot.example/api/channels/${CHANNEL_ID}/modules/text_library/blocks/welcome`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrf,
+          Cookie: `__Host-brobot_session=${sessionCookie}; __Host-brobot_csrf=${csrf}`,
+        },
+        body: JSON.stringify({
+          name: "greeting",
+          categoryId: "social",
+          games: [],
+          variants: [variant("default", "Hello again")],
+          revision: created.block.revision,
+        }),
+      },
+    ), environment);
+
+    expect(response.status).toBe(200);
+    await expect(database.prepare("SELECT message_text FROM timers WHERE timer_id = ?")
+      .bind("timer-other-channel-rename").first()).resolves.toEqual({ message_text: "Timer {text.welcome}" });
+    await expect(database.prepare("SELECT block_name FROM text_blocks WHERE channel_id = ? AND block_name = ?")
+      .bind(otherChannelId, "welcome").first()).resolves.toEqual({ block_name: "welcome" });
+    await expect(database.prepare("SELECT block_name FROM text_blocks WHERE channel_id = ? AND block_name = ?")
+      .bind(CHANNEL_ID, "greeting").first()).resolves.toEqual({ block_name: "greeting" });
+  });
+
+  it("keeps a used block and its reference consistent during concurrent rename and delete requests", async () => {
+    const created = await createBlock("welcome", [variant("default", "Hello")]);
+    if (!created.ok) throw new Error("Could not create the concurrent rename/delete block.");
+    const now = new Date(NOW).toISOString();
+    await database.prepare(
+      `INSERT INTO timers (timer_id, channel_id, name, enabled, trigger_type, trigger_json, message_text, created_at, updated_at)
+       VALUES (?, ?, ?, 1, 'interval', '{}', ?, ?, ?)`,
+    ).bind("timer-concurrent-rename-delete", CHANNEL_ID, "Reminder", "Timer {text.welcome}", now, now).run();
+    await insertLoginIdentityAndSession(database, "manager-concurrent-rename-delete");
+    await insertMember(database, CHANNEL_ID, "manager-concurrent-rename-delete", "manager");
+    const sessionCookie = await createSessionCookie(
+      { sessionId: "session-manager-concurrent-rename-delete" },
+      TEST_SESSION_KEYS,
+      TEST_ENCRYPTION_KEYS,
+    );
+    const csrf = await createCsrfToken("session-manager-concurrent-rename-delete", TEST_SESSION_KEYS, new Date().toISOString());
+    const headers = {
+      "Content-Type": "application/json",
+      "X-CSRF-Token": csrf,
+      Cookie: `__Host-brobot_session=${sessionCookie}; __Host-brobot_csrf=${csrf}`,
+    };
+    const environment = {
+      DB: database as unknown as D1Database,
+      TWITCH_CLIENT_ID: "client-id",
+      SESSION_COOKIE_KEYS: TEST_SESSION_KEYS,
+      SESSION_ENCRYPTION_KEYS: TEST_ENCRYPTION_KEYS,
+    } as unknown as Env;
+    const rename = panelRouter.fetch(new Request(
+      `https://brobot.example/api/channels/${CHANNEL_ID}/modules/text_library/blocks/welcome`,
+      {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          name: "greeting",
+          categoryId: "social",
+          games: [],
+          variants: [variant("default", "Hello again")],
+          revision: created.block.revision,
+        }),
+      },
+    ), environment);
+    const remove = panelRouter.fetch(new Request(
+      `https://brobot.example/api/channels/${CHANNEL_ID}/modules/text_library/blocks/welcome?revision=${String(created.block.revision)}`,
+      { method: "DELETE", headers: { "X-CSRF-Token": csrf, Cookie: headers.Cookie } },
+    ), environment);
+    const [renamed, deleted] = await Promise.all([rename, remove]);
+
+    expect(renamed.status).toBe(200);
+    expect([404, 409]).toContain(deleted.status);
+    if (deleted.status === 409) await expect(deleted.json()).resolves.toMatchObject({ error: "text_library_block_in_use" });
+    await expect(database.prepare("SELECT block_name FROM text_blocks WHERE channel_id = ?")
+      .bind(CHANNEL_ID).all()).resolves.toMatchObject({ results: [{ block_name: "greeting" }] });
+    await expect(database.prepare("SELECT message_text FROM timers WHERE timer_id = ?")
+      .bind("timer-concurrent-rename-delete").first()).resolves.toEqual({ message_text: "Timer {text.greeting}" });
   });
 
   it("rejects a rename when a timer is committed after consumer compatibility validation", async () => {
@@ -1624,22 +1744,21 @@ describe("text library", () => {
     expect(await screen.findByRole("heading", { name: "Text blocks" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Category" })).toHaveTextContent("All categories");
     const welcomeRow = screen.getByRole("button", { name: /\{(?:text\.)?welcome\}/u });
-    const welcomeTableRow = welcomeRow.closest("tr");
-    expect(welcomeTableRow).toHaveTextContent("1 variant");
-    expect(welcomeTableRow).toHaveTextContent("0 uses");
+    expect(welcomeRow).toHaveTextContent("1 variant");
+    expect(welcomeRow).toHaveTextContent("0 uses");
     fireEvent.click(screen.getByRole("button", { name: /\{text\.welcome\}/u }));
-    expect(screen.getAllByText("Only broadcasters and managers can change text blocks and categories.")).toHaveLength(2);
+    expect(screen.getAllByText("Only broadcasters and managers can change text blocks and categories.")).toHaveLength(1);
     expect(document.querySelector(".text-library__read-only-properties")).toHaveTextContent("Hello");
     expect(screen.queryByRole("textbox", { name: "Name" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByText("Categories"));
-    expect(screen.getAllByRole("note")).toHaveLength(3);
+    expect(screen.getByRole("note")).toHaveTextContent("Only broadcasters and managers may add text blocks.");
     expect(document.querySelectorAll(".text-library__read-only-properties")).toHaveLength(2);
     const addButton = screen.getByRole("button", { name: "Add text block" });
     expect(addButton).toBeDisabled();
     expect(addButton.getAttribute("aria-describedby")).not.toBeNull();
   });
 
-  it("guards close, Escape, backdrop, and row changes when a text draft is dirty", async () => {
+  it("guards close, Escape, and row changes when a text draft is dirty", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     const timestamp = new Date(NOW).toISOString();
     let blocks = ["welcome", "faq"].map((name, index) => ({
@@ -1688,22 +1807,15 @@ describe("text library", () => {
     guard = await screen.findByRole("dialog", { name: "Unsaved changes" });
     fireEvent.click(within(guard).getByRole("button", { name: "Continue editing" }));
 
-    const backdrop = document.querySelector(".list-detail__backdrop");
-    if (!(backdrop instanceof HTMLElement)) throw new Error("Text library backdrop is missing.");
-    fireEvent.click(backdrop);
-    guard = await screen.findByRole("dialog", { name: "Unsaved changes" });
-    fireEvent.click(within(guard).getByRole("button", { name: "Continue editing" }));
-
     fireEvent.click(screen.getByRole("button", { name: /\{text\.faq\}/u }));
     guard = await screen.findByRole("dialog", { name: "Unsaved changes" });
     fireEvent.click(within(guard).getByRole("button", { name: "Save and switch" }));
     await waitFor(() => expect(patchBodies).toHaveLength(1));
     expect(patchBodies[0]).toMatchObject({ name: "welcome", variants: [{ texts: ["Updated"] }] });
-    expect(await screen.findByRole("heading", { name: "Name: faq" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "{text.faq}" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    await waitFor(() => expect(document.querySelector(".list-detail__inspector")).not.toBeInTheDocument());
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: /\{text\.faq\}/u }));
+    await waitFor(() => expect(document.querySelector(".collection-page")).toHaveAttribute("data-detail-open", "false"));
   });
 
   it("registers its dirty-draft guard with the dashboard router so router-driven navigation is blocked", async () => {
@@ -1772,10 +1884,9 @@ describe("text library", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "system" } });
 
     expect(screen.getByText("This name is reserved for a template variable.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Create" })).toHaveAttribute("aria-disabled", "true");
 
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Discard and switch" }));
     fireEvent.click(screen.getByRole("button", { name: /\{(?:text\.)?user\}/u }));
     fireEvent.change(screen.getByRole("textbox", { name: "Text" }), { target: { value: "{us" } });
     expect(screen.queryByText("Text block {user}")).not.toBeInTheDocument();

@@ -11,18 +11,19 @@ interface ListToolbarUsage {
   filteredCount?: number;
   loaded?: boolean;
   copy: {
-    countSuffix: string;
+    countSuffix: string | ((count: number) => string);
     filteredInfix: string;
-    filteredSuffix: string;
+    filteredSuffix: string | ((count: number) => string);
     limitInfix: string;
-    limitSuffix: string;
-    loadedSuffix: string;
+    limitSuffix: string | ((count: number) => string);
+    loadedSuffix: string | ((count: number) => string);
   };
 }
 
 export interface ListToolbarProperties {
   language?: DashboardLanguage;
   searchLabel?: string;
+  searchLabelVisible?: boolean;
   searchPlaceholder?: string;
   searchClearLabel?: string;
   searchValue?: string;
@@ -30,6 +31,7 @@ export interface ListToolbarProperties {
   onSearchKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
   filters?: ReactNode;
   filtersLabel?: string;
+  createPlacement?: "after-search" | "after-filters";
   create?: {
     label: string;
     ariaLabel?: string;
@@ -48,26 +50,28 @@ export interface ListToolbarProperties {
 }
 
 const numberValue = (value: number, language?: DashboardLanguage) => <span className="mono">{formatNumber(value, language)}</span>;
+const usageCopy = (copy: string | ((count: number) => string), count: number): string => typeof copy === "function" ? copy(count) : copy;
 
 const usageText = (usage: ListToolbarUsage, language?: DashboardLanguage): ReactNode => {
   const { copy } = usage;
   if (usage.maximum !== undefined) {
     return <>
-      {usage.filteredCount === undefined ? null : <>{numberValue(usage.filteredCount, language)} {copy.filteredInfix} {numberValue(usage.count, language)} {copy.filteredSuffix} · </>}
-      {numberValue(usage.count, language)} {copy.limitInfix} {numberValue(usage.maximum, language)} {copy.limitSuffix}
+      {usage.filteredCount === undefined ? null : <>{numberValue(usage.filteredCount, language)} {copy.filteredInfix} {numberValue(usage.count, language)} {usageCopy(copy.filteredSuffix, usage.count)} · </>}
+      {numberValue(usage.count, language)} {copy.limitInfix} {numberValue(usage.maximum, language)} {usageCopy(copy.limitSuffix, usage.maximum)}
     </>;
   }
   if (usage.filteredCount !== undefined) {
-    return <>{numberValue(usage.filteredCount, language)} {copy.filteredInfix} {numberValue(usage.count, language)} {copy.filteredSuffix}</>;
+    return <>{numberValue(usage.filteredCount, language)} {copy.filteredInfix} {numberValue(usage.count, language)} {usageCopy(copy.filteredSuffix, usage.count)}</>;
   }
-  if (usage.loaded === true) return <>{numberValue(usage.count, language)} {copy.loadedSuffix}</>;
-  return <>{numberValue(usage.count, language)} {copy.countSuffix}</>;
+  if (usage.loaded === true) return <>{numberValue(usage.count, language)} {usageCopy(copy.loadedSuffix, usage.count)}</>;
+  return <>{numberValue(usage.count, language)} {usageCopy(copy.countSuffix, usage.count)}</>;
 };
 
 /** A fixed-height search/filter/action row with a permanently reserved status line. */
 export function ListToolbar({
   language,
   searchLabel,
+  searchLabelVisible = false,
   searchPlaceholder,
   searchClearLabel,
   searchValue,
@@ -75,6 +79,7 @@ export function ListToolbar({
   onSearchKeyDown,
   filters,
   filtersLabel,
+  createPlacement = "after-filters",
   create,
   usage,
   queryError,
@@ -91,11 +96,25 @@ export function ListToolbar({
   const warning = usage?.maximum !== undefined && usage.maximum > 0 && usage.count >= usage.maximum * 0.9;
   const hasSearch = searchLabel !== undefined && searchPlaceholder !== undefined && searchClearLabel !== undefined &&
     searchValue !== undefined && onSearchChange !== undefined;
+  const createAction = create === undefined ? null : (
+    <div className="list-toolbar__create">
+      <Button
+        variant="primary"
+        icon="add"
+        {...(create.ariaLabel === undefined ? {} : { ariaLabel: create.ariaLabel })}
+        {...(create.ref === undefined ? {} : { ref: create.ref })}
+        disabled={create.disabled === true || createReason !== undefined}
+        {...(createReason === undefined ? {} : { describedBy: createReasonId })}
+        onClick={create.onClick}
+      >{create.label}</Button>
+    </div>
+  );
 
   return (
     <div data-ui="" className={["list-toolbar", className].filter(Boolean).join(" ")}>
       <div className={`list-toolbar__row${hasSearch ? "" : " list-toolbar__row--no-search"}`}>
-        {hasSearch ? <div className="list-toolbar__search">
+        {hasSearch ? <div className={`list-toolbar__search${searchLabelVisible ? " list-toolbar__search--labeled" : ""}`}>
+          {searchLabelVisible ? <span className="list-toolbar__search-label">{searchLabel}</span> : null}
           <Field
             variant="search"
             label={searchLabel}
@@ -106,24 +125,13 @@ export function ListToolbar({
             {...(onSearchKeyDown === undefined ? {} : { onKeyDown: onSearchKeyDown })}
           />
         </div> : null}
+        {createPlacement === "after-search" ? createAction : null}
         {filters === undefined ? null : (
           <div className="list-toolbar__filters" role="group" aria-label={filtersLabel}>
             {filters}
           </div>
         )}
-        {create === undefined ? null : (
-          <div className="list-toolbar__create">
-            <Button
-              variant="primary"
-              icon="add"
-              {...(create.ariaLabel === undefined ? {} : { ariaLabel: create.ariaLabel })}
-              {...(create.ref === undefined ? {} : { ref: create.ref })}
-              disabled={create.disabled === true || createReason !== undefined}
-              {...(createReason === undefined ? {} : { describedBy: createReasonId })}
-              onClick={create.onClick}
-            >{create.label}</Button>
-          </div>
-        )}
+        {createPlacement === "after-filters" ? createAction : null}
       </div>
       <LoadState
         variant="status-row"

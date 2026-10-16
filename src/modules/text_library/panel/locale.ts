@@ -5,11 +5,12 @@ import type { GameMultiSelectMessages, TemplateTextFieldPickerMessages } from ".
 export interface TextLibraryTexts {
   library: string;
   search: string;
+  searchPlaceholder: string;
   activeFilters: string;
   resetFilters: string;
-  countSuffix: string;
-  limitSuffix: string;
-  filteredSuffix: string;
+  countSuffix: (count: number) => string;
+  limitSuffix: (count: number) => string;
+  filteredSuffix: (count: number) => string;
   categoryFilter: string;
   gameFilter: string;
   allCategories: string;
@@ -18,7 +19,6 @@ export interface TextLibraryTexts {
   loadError: string;
   save: string;
   create: string;
-  discard: string;
   draftGuardTitle: string;
   draftGuardDescription: string;
   continueEditing: string;
@@ -29,6 +29,11 @@ export interface TextLibraryTexts {
   deleteTitle: (name: string) => string;
   deleteConsequence: (name: string) => string;
   deleteBlocked: string;
+  deleteBlockedReason: (count: number) => string;
+  deleteBlockedTitle: (name: string) => string;
+  deleteOperatorReason: string;
+  usageDialogTitle: (name: string) => string;
+  usageDialogDescription: string;
   deleteConfirm: (name: string) => string;
   name: string;
   nameHint: string;
@@ -96,11 +101,14 @@ export interface TextLibraryTexts {
   previewTooLong: (blockNames: readonly string[]) => string;
   operatorReason: string;
   conflict: string;
+  reload: string;
   cycle: (path: readonly string[]) => string;
   depth: (path: readonly string[]) => string;
   saveError: string;
+  deleteMenuLabel: string;
   templateInputDependent: (consumerName: string) => string;
   uses: string;
+  viewUsages: string;
   usesCount: (count: number) => string;
   noUsages: string;
   usageKind: Record<TextBlockUsage["kind"], string>;
@@ -118,11 +126,12 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
   de: {
     library: "Textbausteine",
     search: "Textbausteine suchen",
+    searchPlaceholder: "Suchen …",
     activeFilters: "Aktive Filter:",
     resetFilters: "Zurücksetzen",
-    countSuffix: "Textbausteine",
-    limitSuffix: "Textbausteine belegt",
-    filteredSuffix: "Textbausteine",
+    countSuffix: (count) => count === 1 ? "Textbaustein" : "Textbausteine",
+    limitSuffix: (count) => `${count === 1 ? "Textbaustein" : "Textbausteinen"} belegt`,
+    filteredSuffix: (count) => count === 1 ? "Textbaustein" : "Textbausteine",
     categoryFilter: "Kategorie",
     allCategories: "Alle Kategorien",
     gameFilter: "Spiel",
@@ -131,7 +140,6 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     loadError: "Die Textbibliothek konnte nicht geladen werden.",
     save: "Änderungen speichern",
     create: "Anlegen",
-    discard: "Verwerfen",
     draftGuardTitle: "Ungespeicherte Änderungen",
     draftGuardDescription: "Dieser Textbaustein enthält ungespeicherte Änderungen. Was möchtest du tun?",
     continueEditing: "Weiter bearbeiten",
@@ -142,6 +150,11 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     deleteTitle: (name) => `Textbaustein „${name}“ löschen?`,
     deleteConsequence: (name) => `Textbaustein „${name}“ kann nur gelöscht werden, wenn er nicht verwendet wird.`,
     deleteBlocked: "Dieser Textbaustein wird verwendet und kann erst gelöscht werden, wenn alle Verwendungen entfernt sind.",
+    deleteBlockedReason: (count) => `Wird an ${String(count)} ${count === 1 ? "Stelle" : "Stellen"} verwendet`,
+    deleteBlockedTitle: (name) => `Verwendungen von „${name}“ verhindern das Löschen`,
+    deleteOperatorReason: "Nur Broadcaster und Verwalter dürfen löschen.",
+    usageDialogTitle: (name) => `Verwendungen von „${name}“`,
+    usageDialogDescription: "Hier findest du die Stellen, an denen dieser Textbaustein verwendet wird.",
     deleteConfirm: (name) => `Textbaustein löschen: ${name}`,
     name: "Name",
     nameHint: "Kleinbuchstaben, Zahlen und Unterstrich; wird als {text.name} eingesetzt.",
@@ -217,11 +230,14 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     },
     operatorReason: "Nur Broadcaster und Verwalter dürfen Textbausteine und Kategorien ändern.",
     conflict: "Dieser Textbaustein wurde inzwischen geändert. Lade den Serverstand neu.",
+    reload: "Neu laden",
     cycle: (path) => `Zirkuläre Einbettung: ${path.join(" → ")}.`,
     depth: (path) => `Die Einbettung überschreitet die maximale Tiefe von 3: ${path.join(" → ")}.`,
     saveError: "Der Textbaustein konnte nicht gespeichert werden.",
+    deleteMenuLabel: "Löschen",
     templateInputDependent: (consumerName) => `Diese Änderung würde „${consumerName}“ von Chatbefehl-Eingaben abhängig machen.`,
     uses: "Verwendet in",
+    viewUsages: "Verwendungen anzeigen",
     usesCount: (count) => `${String(count)} ${count === 1 ? "Verwendung" : "Verwendungen"}`,
     noUsages: "Noch keine Verwendungen.",
     usageKind: { block: "Textbaustein", command: "Befehl", faq: "FAQ", timer: "Timer", overlay: "Overlay", event: "Ereignis" },
@@ -264,11 +280,12 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
   en: {
     library: "Text blocks",
     search: "Search text blocks",
+    searchPlaceholder: "Search …",
     activeFilters: "Active filters:",
     resetFilters: "Reset",
-    countSuffix: "text blocks",
-    limitSuffix: "text blocks used",
-    filteredSuffix: "text blocks",
+    countSuffix: (count) => count === 1 ? "text block" : "text blocks",
+    limitSuffix: (count) => `${count === 1 ? "text block" : "text blocks"} used`,
+    filteredSuffix: (count) => count === 1 ? "text block" : "text blocks",
     categoryFilter: "Category",
     allCategories: "All categories",
     gameFilter: "Game",
@@ -277,7 +294,6 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     loadError: "The text library could not be loaded.",
     save: "Save changes",
     create: "Create",
-    discard: "Discard",
     draftGuardTitle: "Unsaved changes",
     draftGuardDescription: "This text block has unsaved changes. What would you like to do?",
     continueEditing: "Continue editing",
@@ -288,6 +304,11 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     deleteTitle: (name) => `Delete text block “${name}”?`,
     deleteConsequence: (name) => `Text block “${name}” can only be deleted when it is unused.`,
     deleteBlocked: "This text block is in use. Remove all listed uses before deleting it.",
+    deleteBlockedReason: (count) => `Used in ${String(count)} ${count === 1 ? "place" : "places"}`,
+    deleteBlockedTitle: (name) => `Uses of “${name}” prevent deletion`,
+    deleteOperatorReason: "Only broadcasters and managers may delete.",
+    usageDialogTitle: (name) => `Usage of “${name}”`,
+    usageDialogDescription: "This lists the places where the text block is used.",
     deleteConfirm: (name) => `Delete text block: ${name}`,
     name: "Name",
     nameHint: "Lowercase letters, numbers, and underscores; insert it as {text.name}.",
@@ -363,11 +384,14 @@ const catalog: LocaleCatalog<TextLibraryTexts> = {
     },
     operatorReason: "Only broadcasters and managers can change text blocks and categories.",
     conflict: "This text block has changed since you opened it. Reload the server version.",
+    reload: "Reload",
     cycle: (path) => `Circular reference: ${path.join(" → ")}.`,
     depth: (path) => `Nesting exceeds the maximum depth of 3: ${path.join(" → ")}.`,
     saveError: "The text block could not be saved.",
+    deleteMenuLabel: "Delete",
     templateInputDependent: (consumerName) => `This change would make “${consumerName}” depend on chat command input.`,
     uses: "Used in",
+    viewUsages: "Show usage",
     usesCount: (count) => `${String(count)} ${count === 1 ? "use" : "uses"}`,
     noUsages: "No usages yet.",
     usageKind: { block: "Text block", command: "Command", faq: "FAQ", timer: "Timer", overlay: "Overlay", event: "Event" },
