@@ -105,8 +105,7 @@ export const votekickModule: BotModule<typeof votekickSettingsSchema> = {
           && Number.isFinite(serverNow)
           && Number.isFinite(timeoutExpiresAt)
           && (staleClaim || (item.liftClaimedAt === null && timeoutExpiresAt > serverNow));
-        })
-          .slice(0, 5).map((item) => ({
+        }).map((item) => ({
           kind: "votekick_recent" as const,
           id: item.id,
           target: item.targetLogin ?? item.targetUserId ?? "—",

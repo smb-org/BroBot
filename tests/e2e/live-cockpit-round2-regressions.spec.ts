@@ -110,6 +110,70 @@ test("broadcast errors wrap without clipping their message at mobile width", asy
   expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth);
 });
 
+test("all active Votekick timeouts remain reachable in a fixed-height list", async ({ page }) => {
+  const channelId = "round2-all-votekick-timeouts";
+  const now = new Date().toISOString();
+  const endedAt = new Date(Date.now() - 30_000).toISOString();
+  await installLiveCockpitMocks(page, {
+    channelId,
+    role: "manager",
+    modules: [{ id: "votekick", enabled: true, settings: "{}" }],
+  });
+  await page.route(`**/api/channels/${channelId}/modules/votekick/votekicks`, (route) => route.fulfill(json({
+    running: null,
+    now,
+    votekicks: Array.from({ length: 6 }, (_, index) => ({
+      id: `passed-${String(index + 1)}`,
+      targetUserId: `viewer-${String(index + 1)}`,
+      targetLogin: `viewer_${String(index + 1)}`,
+      initiatorUserId: "manager-1",
+      status: "passed",
+      threshold: 5,
+      yesVotes: 7,
+      noVotes: 1,
+      ballotRevision: 1,
+      durationSeconds: 3600,
+      startedAt: endedAt,
+      endsAt: endedAt,
+      endedAt,
+      liftedAt: null,
+      liftClaimedAt: null,
+    })),
+  })));
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`/channels/${channelId}`);
+
+  const list = page.locator(".live-cockpit-next-list--recent");
+  await expect(list.locator(".live-cockpit-next-item")).toHaveCount(6);
+  await expect(list.getByRole("button", { name: /Timeout aufheben|Lift timeout/u })).toHaveCount(6);
+  const initialGeometry = await list.evaluate((element) => ({
+    height: element.getBoundingClientRect().height,
+    scrollHeight: element.scrollHeight,
+    clientHeight: element.clientHeight,
+    nextHeadingTop: element.parentElement?.querySelector(":scope > h2:last-of-type")?.getBoundingClientRect().top,
+  }));
+  expect(initialGeometry.height).toBe(224);
+  expect(initialGeometry.scrollHeight).toBeGreaterThan(initialGeometry.clientHeight);
+
+  const finalItem = await list.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    const button = element.querySelector(".live-cockpit-next-item:last-child button");
+    const nextHeading = element.parentElement?.querySelector(":scope > h2:last-of-type");
+    if (!(button instanceof HTMLElement) || !(nextHeading instanceof HTMLElement)) {
+      throw new Error("The final timeout or following heading is missing.");
+    }
+    return {
+      itemName: button.getAttribute("aria-label") ?? button.innerText.trim(),
+      buttonBottom: button.getBoundingClientRect().bottom,
+      listBottom: element.getBoundingClientRect().bottom,
+      nextHeadingTop: nextHeading.getBoundingClientRect().top,
+    };
+  });
+  expect(finalItem.itemName).toMatch(/Lift timeout|Timeout aufheben/u);
+  expect(finalItem.buttonBottom).toBeLessThanOrEqual(finalItem.listBottom + 0.5);
+  expect(finalItem.nextHeadingTop).toBeCloseTo(initialGeometry.nextHeadingTop ?? 0, 0);
+});
+
 test("two managers can save title and category without restoring the stale field", async ({ page }) => {
   const channelId = "round2-two-managers";
   let broadcast: { title: string; game: { id: string; name: string } | null } = {

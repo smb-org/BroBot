@@ -762,7 +762,7 @@ test("a second save preserves edits made while a newly created vote is being ack
 test("the saved vote inspector keeps its draft while leaving vote starts to the live cockpit", async ({ page }) => {
   const timestamp = "2030-01-01T12:00:00.000Z";
   const template: ChatVoteTemplate = {
-    id: "template-running-note", channelId: "channel-a", shortcut: "running", title: "Stable field",
+    id: "template-running-note", channelId: "channel-a", shortcut: "running", title: "A deliberately long saved question that needs room to wrap clearly",
     labels: ["Yes", "No"], freeTextMode: null, durationSeconds: 60, revision: 1,
     legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
   };
@@ -779,10 +779,59 @@ test("the saved vote inspector keeps its draft while leaving vote starts to the 
   const question = page.getByRole("textbox", { name: "Question" });
   await expect(inspector.getByRole("button", { name: "Start vote", exact: true })).toHaveCount(0);
   await expect(page.locator(".chat-voting-template-list .list-row__action button")).toHaveCount(0);
+  const header = inspector.locator(":scope > .page-header");
+  const headerColumns = await header.evaluate((element) => getComputedStyle(element).gridTemplateColumns);
+  expect(headerColumns).not.toMatch(/^56px/u);
+  const titleBounds = await box(header.locator(".page-header__main"));
+  expect(titleBounds.width).toBeGreaterThan(200);
+  const headerRight = await box(header.locator(".page-header__right"));
+  const headerBounds = await box(header);
+  expect(headerRight.x + headerRight.width).toBeCloseTo(headerBounds.x + headerBounds.width, 0);
+  await expect(header.locator(".page-header__save .ui-save-bar")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+
+  const selectedLink = page.locator(".chat-voting-template-list .list-row--selected .list-row__link");
+  const selectedStyles = await selectedLink.evaluate((element) => ({
+    boxShadow: getComputedStyle(element).boxShadow,
+    backgroundColor: getComputedStyle(element).backgroundColor,
+  }));
+  expect(selectedStyles.boxShadow).not.toBe("none");
+  expect(selectedStyles.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+
+  const createButton = page.getByRole("button", { name: "Create vote" });
+  const firstVote = page.locator(".chat-voting-template-list .list-row__link").first();
+  const createBounds = await box(createButton);
+  const firstVoteBounds = await box(firstVote);
+  expect(firstVoteBounds.y - createBounds.y - createBounds.height).toBeLessThanOrEqual(24);
+
   const before = await box(question);
   await question.fill("A saved draft");
   expect(await box(question)).toEqual(before);
   await expect(question).toHaveValue("A saved draft");
+
+  const questionInputBounds = await box(question);
+  const questionCount = inspector.locator(".chat-voting-editor__counted-field--question .ui-field__count");
+  const questionCountBounds = await box(questionCount);
+  expect(questionCountBounds.y).toBeGreaterThanOrEqual(questionInputBounds.y + questionInputBounds.height);
+  expect(questionCountBounds.x + questionCountBounds.width).toBeCloseTo(questionInputBounds.x + questionInputBounds.width, 0);
+
+  const firstAnswer = page.getByRole("textbox", { name: "Answer 1" });
+  const firstAnswerNumber = inspector.locator(".chat-voting-editor__answer-key").first();
+  const answerBounds = await box(firstAnswer);
+  const answerNumberBounds = await box(firstAnswerNumber);
+  expect(answerNumberBounds.height).toBeCloseTo(answerBounds.height, 0);
+  expect(answerNumberBounds.y + answerNumberBounds.height / 2).toBeCloseTo(answerBounds.y + answerBounds.height / 2, 0);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(inspector).toBeVisible();
+  const mobileHeader = inspector.locator(":scope > .page-header");
+  const mobileMain = await box(mobileHeader.locator(".page-header__main"));
+  const mobileRight = await box(mobileHeader.locator(".page-header__right"));
+  const mobileHeaderBounds = await box(mobileHeader);
+  expect(mobileRight.y).toBeGreaterThanOrEqual(mobileMain.y + mobileMain.height - 0.5);
+  expect(mobileRight.x).toBeGreaterThanOrEqual(mobileHeaderBounds.x - 0.5);
+  expect(mobileRight.x + mobileRight.width).toBeLessThanOrEqual(mobileHeaderBounds.x + mobileHeaderBounds.width + 0.5);
+  await expect(mobileHeader.locator(".page-header__title-row :is(h1, h2, h3)")).toHaveCSS("font-size", "18px");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
 
 test("text command slash help stays stable and optional variable fields mount only when enabled", async ({ page }) => {

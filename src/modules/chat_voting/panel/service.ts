@@ -17,10 +17,6 @@ export interface ChatVoteTemplateListState {
   maximum: number;
 }
 
-export interface ChatVoteRecentState {
-  votes: readonly ChatVote[];
-}
-
 export const laterUsageTime = (current: string | null, incoming: string | null): string | null => {
   if (current === null) return incoming;
   if (incoming === null) return current;
@@ -115,9 +111,6 @@ export const startChatVoting = async (channelId: string, options: StartChatVotin
 
 export const loadChatVoteTemplates = async (channelId: string, signal?: AbortSignal): Promise<ChatVoteTemplateListState> =>
   readJson<ChatVoteTemplateListState>(await fetch(route(channelId, "/templates"), signal === undefined ? {} : { signal }));
-
-export const loadRecentChatVotes = async (channelId: string, signal?: AbortSignal): Promise<ChatVoteRecentState> =>
-  readJson<ChatVoteRecentState>(await fetch(route(channelId, "/recent"), signal === undefined ? {} : { signal }));
 
 export const createChatVoteTemplate = async (channelId: string, draft: ChatVoteTemplateDraft): Promise<ChatVoteTemplate> => {
   return csrfMutation(async (token) => (await readJson<{ template: ChatVoteTemplate }>(await fetch(route(channelId, "/templates"), {

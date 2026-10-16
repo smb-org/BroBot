@@ -86,7 +86,10 @@ const ChatVotingCollection = ({ channelId, language = "de", canManage = true, on
     if (first === undefined) return;
     automaticSelectionApplied.current = true;
     requestInspectorSwitch(() => {
-      if (selectedIdRef.current === null) updateSelection(first.id, first);
+      if (selectedIdRef.current === null) {
+        updateSelection(first.id, first);
+        setDetailOpen(true);
+      }
     });
   }, [newTemplateDraft, requestInspectorSwitch, selectedId, selectionCleared, templateState, templates, updateSelection, wide]);
 

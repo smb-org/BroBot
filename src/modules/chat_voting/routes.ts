@@ -140,11 +140,6 @@ chatVotingRoutes.get("/templates", async (context) => {
   return context.json({ templates, count: templates.length, maximum: CHAT_VOTE_TEMPLATE_MAXIMUM });
 });
 
-chatVotingRoutes.get("/recent", async (context) => {
-  const channelId = context.req.param("channelId") ?? "";
-  return context.json({ votes: await createChatVotingRepository(context.env.DB).recent(channelId) });
-});
-
 chatVotingRoutes.post("/templates", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
   const body = await readBody(context.req.raw);

@@ -25,10 +25,17 @@ test("the automatically opened desktop vote keeps its guarded draft across respo
   const question = page.getByRole("textbox", { name: "Question" });
   await expect(question).toHaveValue("Automatically opened");
   await question.fill("Draft from the implicit selection");
-  await page.setViewportSize({ width: 1100, height: 900 });
+  await page.setViewportSize({ width: 390, height: 844 });
   await expect(inspector).toBeVisible();
   await expect(question).toHaveValue("Draft from the implicit selection");
   await expect(page.getByRole("dialog", { name: "Discard changes?" })).toHaveCount(0);
+
+  await page.locator(".collection-page__detail-back").click();
+  const mobileDialog = page.getByRole("dialog", { name: "Discard changes?" });
+  await expect(mobileDialog).toBeVisible();
+  await mobileDialog.getByRole("button", { name: "Continue editing" }).click();
+  await expect(inspector).toBeVisible();
+  await expect(question).toHaveValue("Draft from the implicit selection");
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(question).toHaveValue("Draft from the implicit selection");

@@ -148,7 +148,6 @@ export const chatVoteSelectColumns = `channel_id, poll_id, kind, option_count, l
 export interface ChatVotingRepository {
   open(channelId: string): Promise<ChatVote | null>;
   latest(channelId: string): Promise<ChatVote | null>;
-  recent(channelId: string, limit?: number): Promise<ChatVote[]>;
   byId(channelId: string, pollId: string): Promise<ChatVote | null>;
   approveTerm(
     channelId: string,
@@ -327,14 +326,6 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
         ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END, opened_at DESC LIMIT 1`,
     ).bind(channelId).first<ChatVoteRow>();
     return row === null ? null : mapRow(row);
-  },
-  async recent(channelId, limit = 50) {
-    const boundedLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
-    const result = await db.prepare(
-      `SELECT ${chatVoteSelectColumns} FROM chat_votes WHERE channel_id = ? AND status = 'closed'
-        ORDER BY closed_at DESC, opened_at DESC LIMIT ?`,
-    ).bind(channelId, boundedLimit).all<ChatVoteRow>();
-    return result.results.map(mapRow);
   },
   async byId(channelId, pollId) {
     const row = await db.prepare(

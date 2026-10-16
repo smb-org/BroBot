@@ -229,14 +229,14 @@ export const LiveCockpitTiles = ({
     </section>
     <section className="live-cockpit-reserve live-cockpit-next-tile" data-slot="next-up" aria-label={labels.nextUp}>
       <h2>{labels.recentVotekicks}</h2>
-      {recentVotekicks.length === 0 ? <p>{loading ? labels.liveDataLoading : failed ? labels.liveDataUnavailable : labels.noRecentVotekicks}</p> : <div className="live-cockpit-next-list live-cockpit-next-list--recent">
-        {recentVotekicks.slice(0, 3).map((item) => <div className="live-cockpit-next-item" key={item.id}>
+      <div className="live-cockpit-next-list live-cockpit-next-list--recent">
+        {recentVotekicks.length === 0 ? <p>{loading ? labels.liveDataLoading : failed ? labels.liveDataUnavailable : labels.noRecentVotekicks}</p> : recentVotekicks.map((item) => <div className="live-cockpit-next-item" key={item.id}>
           <span className="live-cockpit-next-item__icon"><Icon name="vote" size={16} /></span>
           <span className="live-cockpit-next-item__copy"><strong>{item.target}</strong></span>
           <time className="live-cockpit-next-item__time" dateTime={item.endedAt}>{formatRelativeTime(item.endedAt, new Date(now), dashboardLanguage(), timeZone).label}</time>
           <Button size="compact" variant="subtle" disabled={busy || !roleCanManage} onClick={() => { setLiftTarget({ id: item.id, target: item.target }); setLiftError(undefined); }}>{labels.votekickLift}</Button>
         </div>)}
-      </div>}
+      </div>
       <ConfirmDialog opened={liftTarget !== null} title={labels.votekickLiftTitle} description={labels.votekickLiftDescription(liftTarget?.target ?? "")} confirmLabel={labels.votekickLift} cancelLabel={dashboardCommonTexts().cancel} onConfirm={() => { void doLiftVotekick(); }} onCancel={() => { if (!busy) setLiftTarget(null); }} pending={busy} danger {...(liftError === undefined ? {} : { error: liftError })} />
       <h2>{labels.nextUp}</h2>
       {upcoming.length === 0 ? <p>{loading ? labels.liveDataLoading : failed ? labels.liveDataUnavailable : labels.noUpcomingItems}</p> : <div className="live-cockpit-next-list">
