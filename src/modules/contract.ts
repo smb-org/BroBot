@@ -1271,6 +1271,8 @@ export interface ModulePanelProperties {
   channelId: string;
   /** The panel language resolved by the host; optional for legacy modules. */
   language?: ModuleLanguage;
+  /** Changes when the channel goes online/offline or a new stream session starts. */
+  streamSessionIdentity?: string;
   /** May the view execute management controls? */
   canManage?: boolean;
   /** May the view execute operational controls available to every channel role? */
@@ -1682,6 +1684,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
    * direct import.
    */
   panel?: () => Promise<{ default: ComponentType<ModulePanelProperties> }>;
+  /** The custom panel owns this module's settings form and save lifecycle. */
+  panelManagesSettings?: boolean;
   /** Lazily loaded editor declaration for this module's settings. */
   settingsEditor?: () => Promise<{ default: SettingsEditorDefinition<z.output<SettingsSchema>> }>;
   /** Module query parts that depend on settings edited by this editor. */

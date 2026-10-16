@@ -102,6 +102,11 @@ describe("Platform level", () => {
     expect(table).toHaveClass("platform-channel-table");
     expect(within(table).getByRole("columnheader", { name: "Kennung" })).toBeInTheDocument();
     expect(within(table).getAllByRole("columnheader")).toHaveLength(5);
+    expect(within(channelRow).getByRole("rowheader")).toHaveAttribute("data-label", "Login");
+    expect(within(channelRow).getByText("123")).toHaveAttribute("data-label", "Kennung");
+    const identityCell = channelRow.querySelector('[data-field="identity"]');
+    expect(identityCell).not.toBeNull();
+    expect(identityCell).toHaveAttribute("data-label", "Broadcaster-Identität");
     const membersHeader = within(table).getByRole("columnheader", { name: "Mitglieder" });
     const consentHeader = within(table).getByRole("columnheader", { name: "Zustimmung" });
     const counts = within(channelRow).getByText("1 · 1 · 0");

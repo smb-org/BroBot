@@ -1,6 +1,10 @@
 import { PanelApiError } from "../../../contracts/panel-error";
+import { clipsSettingsSchema, type ClipsSettings, type SessionClipList } from "../contracts";
 
-const readJson = async <T>(response: Response): Promise<T> => {
+const modulePath = (channelId: string): string =>
+  `/api/channels/${encodeURIComponent(channelId)}/modules/clips`;
+
+const readJson = async <Value,>(response: Response): Promise<Value> => {
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     const code = typeof body === "object" && body !== null && "error" in body && typeof body.error === "string"
@@ -8,14 +12,32 @@ const readJson = async <T>(response: Response): Promise<T> => {
       : null;
     throw new PanelApiError(response.status, code, body);
   }
-  return body as T;
+  return body as Value;
 };
 
+export const loadClipsSettings = (
+  channelId: string,
+  signal?: AbortSignal,
+): Promise<{ settings: ClipsSettings; revision: number }> => fetch(
+  `${modulePath(channelId)}/settings`,
+  signal === undefined ? undefined : { signal },
+).then(async (response) => {
+  const result = await readJson<{ settings: unknown; revision: number }>(response);
+  return { ...result, settings: clipsSettingsSchema.parse(result.settings) };
+});
+
+export const loadSessionClips = (
+  channelId: string,
+  signal?: AbortSignal,
+): Promise<SessionClipList> => fetch(
+  `/api/channels/${encodeURIComponent(channelId)}/clips`,
+  signal === undefined ? undefined : { signal },
+).then((response) => readJson<SessionClipList>(response));
+
 export const createClip = async (channelId: string): Promise<{ clipId: string | null; editUrl: string | null }> => {
-  const csrf = await readJson<{ token: string }>(await fetch("/api/csrf"));
-  const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/clips`, {
+  const { token } = await readJson<{ token: string }>(await fetch("/api/csrf"));
+  return readJson(await fetch(`/api/channels/${encodeURIComponent(channelId)}/clips`, {
     method: "POST",
-    headers: { "X-CSRF-Token": csrf.token },
-  });
-  return readJson<{ clipId: string | null; editUrl: string | null }>(response);
+    headers: { "X-CSRF-Token": token },
+  }));
 };

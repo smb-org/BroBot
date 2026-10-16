@@ -207,6 +207,13 @@ test("editor stage 2 pages fit at 1280px and 390px and produce review screenshot
   const platformRow = page.getByRole("row", { name: /brotkrumen-kanal/ });
   await expect(platformRow).toBeVisible();
   await capture(page, testInfo, "12-platform");
+  for (const field of ["login", "identifier", "consent", "members", "identity"]) {
+    const cell = page.locator(`.platform-channel-table [data-field="${field}"]`);
+    await expect(cell).toBeVisible();
+    const box = await cell.boundingBox();
+    if (box === null) throw new Error(`Platform ${field} cell has no visible box at 390px.`);
+    expect(box.x + box.width, `platform ${field} cell should fit at 390px`).toBeLessThanOrEqual(390);
+  }
   await page.setViewportSize({ width: 1280, height: 900 });
   await platformRow.click();
   await expect(page.getByRole("region", { name: "Kanal bearbeiten: Brotkrumen-Kanal" })).toBeVisible();

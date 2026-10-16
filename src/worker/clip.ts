@@ -1,6 +1,9 @@
 import { helixRequest } from "./twitch/helix";
 
 const CREATE_CLIP_URL = "https://api.twitch.tv/helix/clips";
+const CONFIRM_CLIP_URL = "https://api.twitch.tv/helix/clips";
+const DEFAULT_CONFIRMATION_TIMEOUT_MS = 15_000;
+const DEFAULT_CONFIRMATION_INTERVAL_MS = 2_000;
 
 export interface CreateClipResult {
   created: boolean;
@@ -9,6 +12,13 @@ export interface CreateClipResult {
   detail: Readonly<Record<string, string | number | boolean | null>>;
   clipId: string | null;
   editUrl: string | null;
+}
+
+export interface ClipAvailabilityOptions {
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+  now?: () => number;
+  sleep?: (milliseconds: number) => Promise<void>;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -21,6 +31,13 @@ const failure = (
   reason: string,
   detail: Readonly<Record<string, string | number | boolean | null>> = {},
 ): CreateClipResult => ({ created: false, reason, detail, clipId: null, editUrl: null });
+
+const sleep = (milliseconds: number): Promise<void> => new Promise((resolve) => { setTimeout(resolve, milliseconds); });
+
+const clipIsAvailable = (value: unknown, clipId: string): boolean => {
+  if (!isRecord(value) || !Array.isArray(value.data)) return false;
+  return value.data.some((clip) => isRecord(clip) && clip.id === clipId);
+};
 
 /** The status-to-reason mapping is this endpoint's own business meaning, not `helixRequest`'s. */
 const clipReasonFor = (status: number): string => {
@@ -41,6 +58,7 @@ export const createClip = async (
   accessToken: string,
   channelId: string,
   fetcher: typeof fetch = fetch,
+  availabilityOptions: ClipAvailabilityOptions = {},
 ): Promise<CreateClipResult> => {
   const result = await helixRequest<Record<string, unknown>>({
     method: "POST",
@@ -59,11 +77,52 @@ export const createClip = async (
 
   const body = isRecord(result.data) ? result.data : {};
   const first = Array.isArray(body.data) && isRecord(body.data[0]) ? body.data[0] : {};
-  return {
-    created: true,
-    reason: null,
-    detail: { status: result.status },
-    clipId: textOrNull(first.id),
-    editUrl: textOrNull(first.edit_url),
-  };
+  const clipId = textOrNull(first.id);
+  if (clipId === null) return failure("missing_clip_id", { status: result.status });
+
+  const timeoutMs = availabilityOptions.timeoutMs ?? DEFAULT_CONFIRMATION_TIMEOUT_MS;
+  const pollIntervalMs = availabilityOptions.pollIntervalMs ?? DEFAULT_CONFIRMATION_INTERVAL_MS;
+  const now = availabilityOptions.now ?? Date.now;
+  const wait = availabilityOptions.sleep ?? sleep;
+  const deadline = now() + timeoutMs;
+  const availabilityTimeout = (): CreateClipResult => failure("availability_timeout", {
+    status: result.status,
+    waitedMs: timeoutMs,
+  });
+  for (;;) {
+    const requestTimeoutMs = deadline - now();
+    if (requestTimeoutMs <= 0) return availabilityTimeout();
+    const availability = await helixRequest<Record<string, unknown>>({
+      method: "GET",
+      url: CONFIRM_CLIP_URL,
+      query: { id: clipId },
+      accessToken,
+      clientId: environment.TWITCH_CLIENT_ID,
+      timeoutMs: requestTimeoutMs,
+      fetcher,
+    });
+    if (now() > deadline) return availabilityTimeout();
+    if (!availability.ok) {
+      if (availability.reason === "timeout") return availabilityTimeout();
+      const reason = availability.reason === "rate_limited"
+        ? "rate_limited"
+        : availability.reason === "network_error"
+          ? availability.reason
+          : "availability_check_failed";
+      return failure(reason, { status: availability.status, twitchMessage: availability.message });
+    }
+    if (clipIsAvailable(availability.data, clipId)) {
+      return {
+        created: true,
+        reason: null,
+        detail: { status: result.status, confirmationStatus: availability.status },
+        clipId,
+        editUrl: textOrNull(first.edit_url),
+      };
+    }
+
+    const remaining = deadline - now();
+    if (remaining <= 0) return availabilityTimeout();
+    await wait(Math.min(pollIntervalMs, remaining));
+  }
 };

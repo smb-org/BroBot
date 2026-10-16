@@ -575,4 +575,35 @@ describe("dashboard realtime messages", () => {
     writer.clear();
     reader.clear();
   });
+
+  it("refetches the session clip list after a clip creation audit revision", async () => {
+    const revisionChannel = "clip-created-session-refresh";
+    const reader = new QueryClient();
+    const clipsKey = moduleQueryKey(revisionChannel, "clips", "session-clips");
+    let clipReads = 0;
+    reader.setQueryData(clipsKey, { streamStartedAt: "2026-10-16T08:00:00.000Z", clips: [] });
+    const observer = new QueryObserver(reader, {
+      queryKey: clipsKey,
+      queryFn: () => {
+        clipReads += 1;
+        return Promise.resolve({ streamStartedAt: "2026-10-16T08:00:00.000Z", clips: [{ clipId: "new-clip" }] });
+      },
+      staleTime: Infinity,
+    });
+    const unsubscribe = observer.subscribe(() => undefined);
+    let auditRevision = 0;
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ revisions: { "channel.audit": auditRevision } }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }))));
+
+    await reconcileDashboardPanelResourceRevisions(reader, revisionChannel);
+    auditRevision = 1;
+    await reconcileDashboardPanelResourceRevisions(reader, revisionChannel);
+
+    await vi.waitFor(() => { expect(reader.getQueryData(clipsKey)).toMatchObject({ clips: [{ clipId: "new-clip" }] }); });
+    expect(clipReads).toBe(1);
+    unsubscribe();
+    reader.clear();
+  });
 });
