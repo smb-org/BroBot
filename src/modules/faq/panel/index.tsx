@@ -548,6 +548,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
               </FieldPair>
               <ChatTargetField
                 label={labels.chatTarget}
+                language={language ?? "de"}
                 value={draft.chatTarget}
                 {...(channelSettings.data?.defaultChatTarget === undefined ? {} : { effectiveDefault: channelSettings.data.defaultChatTarget })}
                 onChange={(chatTarget) => { patchDraft({ chatTarget }); }}
