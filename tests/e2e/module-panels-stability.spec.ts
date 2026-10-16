@@ -799,13 +799,19 @@ test("the saved vote inspector keeps its draft while leaving vote starts to the 
 
   const createButton = page.getByRole("button", { name: "Create vote" });
   const firstVote = page.locator(".chat-voting-template-list .list-row__link").first();
+  const listToolbarContainer = page.locator(".collection-page__list-toolbar");
+  const votingToolbar = page.locator(".chat-voting-collection__toolbar");
   const toolbarRow = page.locator(".chat-voting-collection__toolbar .list-toolbar__row");
   const toolbarSearch = page.locator(".chat-voting-collection__toolbar .list-toolbar__search");
   const toolbarCreate = page.locator(".chat-voting-collection__toolbar .list-toolbar__create");
+  const listToolbarContainerBounds = await box(listToolbarContainer);
+  const votingToolbarBounds = await box(votingToolbar);
   const toolbarRowBounds = await box(toolbarRow);
   const toolbarSearchBounds = await box(toolbarSearch);
   const toolbarSearchInputBounds = await box(toolbarSearch.locator(".ui-field__input"));
   const toolbarCreateBounds = await box(toolbarCreate);
+  expect(votingToolbarBounds.x).toBeCloseTo(listToolbarContainerBounds.x, 0);
+  expect(votingToolbarBounds.width).toBeCloseTo(listToolbarContainerBounds.width, 0);
   expect(toolbarSearchBounds.x).toBeCloseTo(toolbarRowBounds.x, 0);
   expect(toolbarSearchBounds.width).toBeCloseTo(toolbarRowBounds.width, 0);
   expect(toolbarSearchInputBounds.width).toBeCloseTo(toolbarRowBounds.width, 0);

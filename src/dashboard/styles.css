@@ -491,6 +491,7 @@ form.content-section { display: grid; gap: var(--s4); }
 .module-view-fallback { min-height: calc(var(--s10) * 8); }
 .module-view-fallback--rows { display: grid; grid-template-rows: repeat(3, 58px); align-content: start; gap: var(--s3); }
 .module-view-fallback__row { border-radius: var(--r-control); background: var(--surface); }
+.chat-voting-collection__toolbar { width: 100%; min-width: 0; }
 .chat-voting-collection__toolbar .list-toolbar { margin-bottom: 0; }
 .chat-voting-collection .chat-voting-collection__toolbar .list-toolbar .list-toolbar__row { grid-template-columns: minmax(0, 1fr); height: auto; }
 .chat-voting-collection .chat-voting-collection__toolbar .list-toolbar__search { grid-column: 1; }
