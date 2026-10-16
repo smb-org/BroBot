@@ -902,7 +902,7 @@ pre {
 .sidebar__group[data-category="stream"] .sidebar__category-marker { background: var(--badge-stream); }
 .sidebar-nav-link { display: flex; box-sizing: border-box; align-items: center; gap: 10px; width: 100%; min-width: 0; height: var(--sidebar-row-height); min-height: var(--sidebar-row-height); max-height: var(--sidebar-row-height); overflow: hidden; padding: 0 9px; border: 1px solid transparent; border-radius: var(--r-control); color: var(--text-2); text-decoration: none; }
 .sidebar-nav-link:hover { color: var(--text); background: var(--surface-hover); }
-.sidebar-nav-link.is-active { border-color: var(--brand); color: var(--text); background: var(--surface); font-weight: 600; }
+.sidebar-nav-link.is-active { border-color: var(--brand); color: var(--text); background: var(--tint-1); font-weight: 600; }
 .sidebar-nav-link__icon { display: flex; flex: none; align-items: center; justify-content: center; width: 20px; height: 20px; }
 .sidebar-nav-link__icon .sidebar-nav-icon { width: 18px; height: 18px; }
 .sidebar-nav-link__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -981,7 +981,7 @@ pre {
 .command-palette__list { min-height: 64px; max-height: min(420px, calc(100dvh - 140px)); overflow-x: hidden; overflow-y: auto; padding: 8px; overscroll-behavior: contain; }
 .command-palette__list [cmdk-group-heading] { padding: 10px 8px 5px; color: var(--text-3); font-size: 11px; font-weight: 700; letter-spacing: .045em; text-transform: uppercase; }
 .command-palette__list [cmdk-item] { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 6px 9px; border: 1px solid transparent; border-radius: var(--r-control); color: var(--text-2); cursor: pointer; }
-.command-palette__list [cmdk-item][data-selected="true"] { border-color: var(--brand); color: var(--text); background: var(--surface-hover); }
+.command-palette__list [cmdk-item][data-selected="true"] { border-color: var(--brand); color: var(--text); background: var(--tint-1); }
 .command-palette__list [cmdk-item][aria-disabled="true"] { color: var(--text-3); cursor: not-allowed; }
 .command-palette__item-icon { display: flex; flex: none; align-items: center; justify-content: center; width: 20px; height: 20px; color: var(--text-3); }
 .command-palette__item-copy { display: grid; flex: 1; min-width: 0; gap: 2px; }
@@ -1264,6 +1264,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .overlay-tokens-table tbody tr:focus-visible { outline: 2px solid var(--brand-text); outline-offset: -2px; }
 .overlay-tokens-table tbody tr[aria-selected="true"] { background: var(--tint-1); }
 .overlay-tokens-table tbody tr[aria-selected="true"] { outline: 1px solid var(--brand); outline-offset: -1px; }
+.overlay-tokens-table tbody tr[aria-selected="true"]:focus-visible { outline: 2px solid var(--brand-text); outline-offset: -2px; }
 .overlay-token-one-time { display: grid; gap: 8px; }
 .overlay-token-one-time h3 { margin: 0; color: var(--text-2); font-size: 14px; }
 .overlay-token-one-time p { margin: 0; }
@@ -1951,6 +1952,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .table tbody tr:focus-visible { outline: 2px solid var(--brand-text); outline-offset: -2px; }
 .table tbody tr[aria-selected="true"] { background: var(--tint-1); }
 .table tbody tr[aria-selected="true"] { outline: 1px solid var(--brand); outline-offset: -1px; }
+.table tbody tr[aria-selected="true"]:focus-visible { outline: 2px solid var(--brand-text); outline-offset: -2px; }
 .table tbody tr:last-child > * { border-bottom: 0; }
 .table select, .table .button { width: auto; min-height: 34px; padding: 6px 12px; }
 .table__action { text-align: right; }
@@ -1979,6 +1981,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .data-table tbody tr[tabindex]:focus-visible { outline: 2px solid var(--brand-text); outline-offset: -2px; }
 .data-table tbody tr[aria-selected="true"] { background: var(--tint-1); }
 .data-table tbody tr[aria-selected="true"] { outline: 1px solid var(--brand); outline-offset: -1px; }
+.data-table tbody tr[aria-selected="true"]:focus-visible { outline: 2px solid var(--brand-text); outline-offset: -2px; }
 
 @container data-table (max-width: 640px) {
   .data-table__column--mobile-hidden,

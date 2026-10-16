@@ -63,7 +63,7 @@
   --color-orange-border: #76502F;
   --color-orange-text: #FF8A3D;
   --color-selection-border: #4C9AFF;
-  --color-selection-surface: color-mix(in srgb, var(--color-brand) 14%, var(--color-surface));
+  --color-selection-surface: color-mix(in srgb, var(--color-brand) 10%, var(--color-surface));
   --color-focus: #4C9AFF;
   --color-error-surface: #281719;
   --color-error-border: #63353A;
@@ -260,7 +260,7 @@
   --color-orange-border: #76502F;
   --color-orange-text: #FF8A3D;
   --color-selection-border: #4C9AFF;
-  --color-selection-surface: color-mix(in srgb, var(--color-brand) 14%, var(--color-surface));
+  --color-selection-surface: color-mix(in srgb, var(--color-brand) 10%, var(--color-surface));
   --color-focus: #4C9AFF;
   --color-error-surface: #281719;
   --color-error-border: #63353A;
