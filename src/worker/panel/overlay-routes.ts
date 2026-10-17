@@ -139,6 +139,34 @@ const legacyOverlayImportSchema = z.object({
   text: z.string().refine((value) => templateTextLength(value) <= 100),
 }).strict();
 
+const invalidVariableReferenceResponse = (
+  elements: readonly Pick<OverlayDraftElement, "variableName">[],
+  invalidVariableNames: readonly string[],
+) => {
+  const invalidNames = new Set(invalidVariableNames);
+  const fieldErrors: Record<string, string> = {};
+  elements.forEach((element, index) => {
+    if (element.variableName !== null && invalidNames.has(element.variableName)) {
+      fieldErrors[`elements.${String(index)}.variableName`] = "invalid_variable_reference";
+    }
+  });
+  return { error: "overlay_variable_reference_invalid" satisfies ApiErrorCode, fieldErrors };
+};
+
+const missingVariableNames = async (
+  db: D1Database,
+  channelId: string,
+  elements: readonly Pick<OverlayDraftElement, "variableName">[],
+): Promise<string[]> => {
+  const referencedNames = [...new Set(elements.flatMap((element) =>
+    element.variableName === null ? [] : [element.variableName]))];
+  const missing: string[] = [];
+  for (const variableName of referencedNames) {
+    if (!await hasChannelVariableForOverlay(db, channelId, variableName)) missing.push(variableName);
+  }
+  return missing;
+};
+
 const managementDenied = (context: { json: (body: { error: string }, status: 403) => Response }): Response =>
   context.json({ error: "overlay_management_denied" }, 403);
 
@@ -169,11 +197,9 @@ overlayRouter.post("/api/channels/:channelId/overlays", async (context) => {
     const registered = moduleOverlayElementForKind(element.kind, MODULES);
     return registered === null || registered.module.mandatory === true ? [] : [registered.module.id];
   }))];
-  const referencedVariables = [...new Set(elements.flatMap((element) => element.variableName === null ? [] : [element.variableName]))];
-  for (const variableName of referencedVariables) {
-    if (!await hasChannelVariableForOverlay(context.env.DB, channelId, variableName)) {
-      return context.json({ error: "overlay_data_invalid" satisfies ApiErrorCode }, 400);
-    }
+  const invalidVariableNames = await missingVariableNames(context.env.DB, channelId, elements);
+  if (invalidVariableNames.length > 0) {
+    return context.json(invalidVariableReferenceResponse(elements, invalidVariableNames), 400);
   }
   const now = nowIso();
   const id = crypto.randomUUID();
@@ -191,6 +217,10 @@ overlayRouter.post("/api/channels/:channelId/overlays", async (context) => {
     if (overlay === null) throw new Error("Created overlay could not be read back.");
     await publishOverlayChanged(context.env.CHANNEL, channelId, [{ overlayId: id, revision: overlay.revision }]);
     return context.json({ overlay }, 201);
+  }
+  const missingCreatedVariableNames = await missingVariableNames(context.env.DB, channelId, elements);
+  if (missingCreatedVariableNames.length > 0) {
+    return context.json(invalidVariableReferenceResponse(elements, missingCreatedVariableNames), 400);
   }
   if (!await isOverlayManagementAllowed(context.env.DB, actorOf(context), channelId, now)) {
     return managementDenied(context);
@@ -292,7 +322,9 @@ overlayRouter.put("/api/channels/:channelId/overlays/:overlayId", async (context
   if (result.outcome === "not_found") return context.json({ error: "overlay_not_found" }, 404);
   if (result.outcome === "forbidden") return managementDenied(context);
   if (result.outcome === "element_limit") return context.json({ error: "overlay_element_limit_reached" }, 409);
-  if (result.outcome === "invalid_reference") return context.json({ error: "overlay_data_invalid" }, 400);
+  if (result.outcome === "invalid_reference") {
+    return context.json(invalidVariableReferenceResponse(draft.elements, result.variableNames), 400);
+  }
   if (result.outcome === "element_id_conflict") return context.json({ error: "overlay_element_id_conflict" }, 409);
   if (result.outcome === "reconnect_conflict") return context.json({
     error: "overlay_changed_concurrently",

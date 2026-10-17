@@ -36,7 +36,7 @@ export type SaveOverlayDraftResult =
   | { outcome: "forbidden" }
   | { outcome: "conflict"; current: OverlayRecord | null }
   | { outcome: "element_limit" }
-  | { outcome: "invalid_reference" }
+  | { outcome: "invalid_reference"; variableNames: readonly string[] }
   | { outcome: "element_id_conflict" }
   | { outcome: "reconnect_conflict"; current: OverlayRecord }
   | { outcome: "unchanged"; overlay: OverlayRecord; rowsWritten: 0 }
@@ -66,9 +66,11 @@ export const saveOverlayDraft = async (
   if (baseRevision !== before.revision) return { outcome: "conflict", current: before };
   const variableNames = [...new Set(draft.elements.flatMap((element) =>
     element.variableName === null ? [] : [element.variableName]))];
+  const invalidVariableNames: string[] = [];
   for (const variableName of variableNames) {
-    if (!await hasChannelVariableForOverlay(db, channelId, variableName)) return { outcome: "invalid_reference" };
+    if (!await hasChannelVariableForOverlay(db, channelId, variableName)) invalidVariableNames.push(variableName);
   }
+  if (invalidVariableNames.length > 0) return { outcome: "invalid_reference", variableNames: invalidVariableNames };
 
   const beforeById = new Map(before.elements.map((element) => [element.id, element]));
   const draftById = new Map(draft.elements.map((element) => [element.id, element]));
@@ -87,9 +89,11 @@ export const saveOverlayDraft = async (
   if (mutation.changes === 0) {
     const current = await getOverlayForChannel(db, channelId, overlayId);
     if (current === null) return { outcome: "not_found" };
+    invalidVariableNames.length = 0;
     for (const variableName of variableNames) {
-      if (!await hasChannelVariableForOverlay(db, channelId, variableName)) return { outcome: "invalid_reference" };
+      if (!await hasChannelVariableForOverlay(db, channelId, variableName)) invalidVariableNames.push(variableName);
     }
+    if (invalidVariableNames.length > 0) return { outcome: "invalid_reference", variableNames: invalidVariableNames };
     if (!await isOverlayManagementAllowed(db, actor, channelId, changedAt)) return { outcome: "forbidden" };
     for (const element of added) {
       const collision = await db.prepare(

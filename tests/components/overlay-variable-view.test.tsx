@@ -18,6 +18,12 @@ describe("VariableValueView", () => {
     expect(container.querySelector(".brobot-variable__value")).toHaveTextContent("1,234");
   });
 
+  it("replaces every repeated {value} placeholder", () => {
+    const { container } = render(<VariableValueView name="score" text="Score {value} and {value}" value={42} language="en" />);
+
+    expect(container.querySelector(".brobot-variable")?.textContent).toBe("Score 42 and 42");
+  });
+
   it("keeps an inherited object property token literal when no channel variable exists", () => {
     const { container } = render(<VariableValueView name="score" text="{var.constructor}" value={42} language="en" />);
 

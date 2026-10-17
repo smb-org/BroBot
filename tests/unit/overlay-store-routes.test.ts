@@ -202,6 +202,47 @@ describe("stored overlay routes", () => {
       .resolves.toEqual({ count: 2 });
   });
 
+  it("returns a variable field error when the variable is deleted between create validation and the atomic insert", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    await database.prepare(
+      `INSERT INTO channel_variables (channel_id, name, created_at, updated_at)
+       VALUES ('channel-a', 'score', '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z')`,
+    ).run();
+
+    let raced = false;
+    database.prepare = (sql) => {
+      if (!raced && sql.includes("INSERT INTO overlays")) {
+        raced = true;
+        database.sqlite.prepare(
+          "DELETE FROM channel_variables WHERE channel_id = 'channel-a' AND name = 'score'",
+        ).run();
+      }
+      return originalPrepare(sql);
+    };
+
+    const response = await fetchPanel("manager-a", "/api/channels/channel-a/overlays", "POST", {
+      name: "Gameplay",
+      width: 1920,
+      height: 1080,
+      elements: [{ ...element("element-a"), variableName: "score" }],
+    });
+
+    expect(raced).toBe(true);
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "overlay_variable_reference_invalid",
+      fieldErrors: { "elements.0.variableName": "invalid_variable_reference" },
+    });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM overlays WHERE channel_id = 'channel-a'").first())
+      .resolves.toEqual({ count: 0 });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM overlay_elements WHERE channel_id = 'channel-a'").first())
+      .resolves.toEqual({ count: 0 });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log WHERE action = 'overlay.created'").first())
+      .resolves.toEqual({ count: 0 });
+  });
+
   it("checks module activity in the atomic overlay create mutation", async () => {
     await insertChannel(database, "channel-a");
     await insertLoginIdentityAndSession(database, "manager-a");
@@ -498,7 +539,10 @@ describe("stored overlay routes", () => {
       elements: [{ ...element("missing-variable"), variableName: "missing" }],
     });
     expect(invalidReference.status).toBe(400);
-    await expect(invalidReference.json()).resolves.toEqual({ error: "overlay_data_invalid" });
+    await expect(invalidReference.json()).resolves.toEqual({
+      error: "overlay_variable_reference_invalid",
+      fieldErrors: { "elements.0.variableName": "invalid_variable_reference" },
+    });
 
     const oversizedConfig = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${overlayId}`, "PUT", {
       baseRevision: 1,
@@ -633,7 +677,7 @@ describe("stored overlay routes", () => {
     ).bind(secondOverlayId).first()).resolves.toEqual({ count: 0 });
   });
 
-  it("returns a conflict instead of a 500 when a referenced variable is deleted mid-save", async () => {
+  it("returns a variable field error instead of a 500 when a referenced variable is deleted mid-save", async () => {
     await insertChannel(database, "channel-a");
     await insertLoginIdentityAndSession(database, "manager-a");
     await insertMember(database, "channel-a", "manager-a", "manager");
@@ -666,7 +710,10 @@ describe("stored overlay routes", () => {
 
     expect(raced).toBe(true);
     expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({ error: "overlay_data_invalid" });
+    await expect(response.json()).resolves.toEqual({
+      error: "overlay_variable_reference_invalid",
+      fieldErrors: { "elements.0.variableName": "invalid_variable_reference" },
+    });
     expect(sqliteChanges).toBe(0);
     await expect(database.prepare(
       "SELECT revision FROM overlays WHERE channel_id = 'channel-a' AND overlay_id = ?",

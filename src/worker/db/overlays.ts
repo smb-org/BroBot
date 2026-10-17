@@ -229,6 +229,17 @@ export const overlayElementIdCollisionGuard = (elementCount: number): string => 
             AND NOT (conflicting_element.channel_id = ? AND conflicting_element.overlay_id = ?)
        )`;
 
+/** Checks all referenced channel variables in the same statement as the overlay mutation. */
+export const referencedVariablesGuard = `
+        AND NOT EXISTS (
+          SELECT 1
+            FROM json_each(?) AS referenced_variable
+           WHERE NOT EXISTS (
+             SELECT 1 FROM channel_variables
+              WHERE channel_id = ? AND name = referenced_variable.value
+           )
+        )`;
+
 export const createOverlayWithAudit = async (
   db: D1Database,
   actor: ActorContext,
@@ -243,10 +254,13 @@ export const createOverlayWithAudit = async (
   },
   changedAt: string,
 ): Promise<{ changes: number; rowsWritten: number }> => {
+  const referencedVariableNames = [...new Set((input.elements ?? []).flatMap((element) =>
+    element.variableName === null ? [] : [element.variableName]))];
   const mutation = db.prepare(
     `INSERT INTO overlays (overlay_id, channel_id, name, width, height, revision, created_at, updated_at)
      SELECT ?, ?, ?, ?, ?, 1, ?, ?
       WHERE (SELECT COUNT(*) FROM overlays WHERE channel_id = ?) < ?
+        ${referencedVariablesGuard}
         AND NOT EXISTS (
           SELECT 1 FROM json_each(?) AS required_module
            WHERE NOT EXISTS (
@@ -257,6 +271,7 @@ export const createOverlayWithAudit = async (
         ${actorGuard(MANAGING_ROLES)}`,
   ).bind(input.id, input.channelId, input.name, input.width, input.height, changedAt, changedAt,
     input.channelId, OVERLAY_MAXIMUM_COUNT,
+    JSON.stringify(referencedVariableNames), input.channelId,
     JSON.stringify([...new Set(input.requiredModuleIds ?? [])]), input.channelId,
     ...bindActorGuard(actor, input.channelId, changedAt));
   const elements = input.elements ?? [];
@@ -404,25 +419,6 @@ export const isOverlayManagementAllowed = async (
     .bind(channelId, ...bindActorGuard(actor, channelId, now)).first<{ allowed: number }>();
   return row !== null;
 };
-
-/**
- * A manager can delete a channel variable between the pre-check in the
- * service and this batch. Folding the check into the CAS guard -- instead
- * of only checking before the batch -- means a variable removed in that
- * window fails the UPDATE the same way a stale revision does, so the
- * dependent element INSERT (which would otherwise violate its foreign key
- * and roll back the whole batch) is skipped via `changes() > 0` like the
- * other guard failures.
- */
-export const referencedVariablesGuard = `
-        AND NOT EXISTS (
-          SELECT 1
-            FROM json_each(?) AS referenced_variable
-           WHERE NOT EXISTS (
-             SELECT 1 FROM channel_variables
-              WHERE channel_id = ? AND name = referenced_variable.value
-           )
-        )`;
 
 export const updateOverlayDraftWithAudit = async (
   db: D1Database,

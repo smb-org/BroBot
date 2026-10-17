@@ -455,6 +455,7 @@ export type ApiErrorCode =
   | "overlay_management_denied"
   | "overlay_css_invalid"
   | "overlay_data_invalid"
+  | "overlay_variable_reference_invalid"
   | "overlay_not_found"
   | "overlay_token_already_bound"
   | "overlay_limit_reached"
