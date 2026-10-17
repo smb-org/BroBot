@@ -2736,6 +2736,8 @@ p.lock-reason { margin-bottom: 1em; }
   .channel-location-field__current { justify-items: start; text-align: left; }
   .module-workspace__groups { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .module-workspace .module-workspace__group .list-row { align-items: center; }
+  .module-workspace .module-workspace__group .list-row:has(.module-locked-status) .list-row__link { grid-template-columns: 20px minmax(0, 1fr); align-items: start; }
+  .module-workspace .module-workspace__group .list-row:has(.module-locked-status) .list-row__status { grid-column: 2; grid-row: 2; justify-self: start; }
   .ui-toast-host { top: auto; bottom: var(--s1); align-content: end; }
   .ui-switch-section__heading { box-sizing: border-box; padding-inline-end: var(--s1); }
   .ui-chat-target-field__trigger { grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--s1); padding-inline: var(--s2); }

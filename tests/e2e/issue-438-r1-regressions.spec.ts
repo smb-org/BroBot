@@ -207,7 +207,9 @@ test("issue 438 layout regressions stay aligned at the requested viewports", asy
 
     await freshRoute(page, viewport, `/channels/${channelId}/modules`);
     const groups = page.locator(".module-workspace__groups");
-    const groupCount = await groups.locator(":scope > .module-workspace__group").count();
+    const moduleGroups = groups.locator(":scope > .module-workspace__group");
+    await expect.poll(() => moduleGroups.count()).toBeGreaterThan(1);
+    const groupCount = await moduleGroups.count();
     expect(groupCount).toBeGreaterThan(1);
     expect(await groups.evaluate((element) => getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/u).length)).toBe(1);
     const groupBoxes = await groups.locator(":scope > .module-workspace__group").evaluateAll((elements) => elements.map((element) => {
@@ -235,6 +237,11 @@ test("issue 438 layout regressions stay aligned at the requested viewports", asy
     if (viewport.width <= 640) expect((await box(moduleLockReason)).width).toBeGreaterThan(140);
     const mandatoryModuleRow = page.locator(".module-workspace .list-row").filter({ hasText: "Die Textbibliothek ist immer verfügbar." }).first();
     await expect(mandatoryModuleRow.locator(".module-workspace__lock-reason")).toHaveCount(0);
+    if (viewport.width <= 640) {
+      const mandatoryDescription = await box(mandatoryModuleRow.locator(".list-row__description"));
+      const mandatoryStatus = await box(mandatoryModuleRow.locator(".module-locked-status"));
+      expect(mandatoryStatus.y).toBeGreaterThanOrEqual(mandatoryDescription.y + mandatoryDescription.height - 1);
+    }
     const operatorRowBox = await box(operatorModuleRow);
     const operatorSwitchBox = await box(operatorModuleSwitch);
     expect(Math.abs((operatorRowBox.y + operatorRowBox.height / 2) - (operatorSwitchBox.y + operatorSwitchBox.height / 2))).toBeLessThanOrEqual(2);
