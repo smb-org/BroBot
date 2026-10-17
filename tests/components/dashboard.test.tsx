@@ -424,7 +424,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    expect(await screen.findByRole("heading", { name: "Ereignisse", level: 1 })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Kanalereignisse", level: 1 })).toBeInTheDocument();
     expect(await screen.findByText(/aktualisiert vor/)).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Zeit" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Ereignis" })).toBeInTheDocument();
@@ -600,9 +600,9 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
     await openSetupNavigation();
 
-    const eventsLink = await screen.findByRole("link", { name: "Ereignisse" });
+    const eventsLink = await screen.findByRole("link", { name: "Kanalereignisse" });
     fireEvent.click(eventsLink);
-    expect(await screen.findByRole("heading", { name: "Ereignisse", level: 1 })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Kanalereignisse", level: 1 })).toBeInTheDocument();
     expect(await screen.findByText("neu")).toBeInTheDocument();
 
     const scrollRoot = document.querySelector<HTMLElement>(".dashboard-shell__main");
@@ -1561,7 +1561,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    expect(await screen.findByRole("heading", { name: "Audit-Log", level: 1 })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Protokoll", level: 1 })).toBeInTheDocument();
     expect(fetcher.mock.calls.some(([input]) => requestUrl(input).pathname.endsWith("/audit-log"))).toBe(true);
     expect(fetcher.mock.calls.some(([input]) => requestUrl(input).pathname.endsWith("/system"))).toBe(false);
   });
@@ -3579,9 +3579,9 @@ describe("Dashboard skeleton", () => {
       { path: "/channels/kanal-a", heading: "Alpha", currentLink: "Kanal" },
       { path: "/channels/kanal-a/system", heading: "System", currentLink: "System" },
       { path: "/channels/kanal-a/members", heading: "Mitglieder", currentLink: "Mitglieder" },
-      { path: "/channels/kanal-a/audit", heading: "Audit-Log", currentLink: "Protokoll" },
+      { path: "/channels/kanal-a/audit", heading: "Protokoll", currentLink: "Protokoll" },
       { path: "/channels/kanal-a/modules", heading: "Module", currentLink: "Module verwalten" },
-      { path: "/channels/kanal-a/events", heading: "Ereignisse", currentLink: "Ereignisse" },
+      { path: "/channels/kanal-a/events", heading: "Kanalereignisse", currentLink: "Kanalereignisse" },
       { path: "/channels/kanal-a/modules/text_commands", heading: "Textbefehle", currentLink: "Textbefehle · Läuft" },
     ];
 
@@ -3595,7 +3595,7 @@ describe("Dashboard skeleton", () => {
         continue;
       }
       const nav = await openSetupNavigation();
-      for (const label of ["Ereignisse", "System", "Mitglieder", "Protokoll"]) {
+      for (const label of ["Kanalereignisse", "System", "Mitglieder", "Protokoll"]) {
         expect(within(nav).getByRole("link", { name: label })).toBeInTheDocument();
       }
       expect(within(nav).getByRole("link", { name: "Module verwalten" })).toBeInTheDocument();
@@ -4074,7 +4074,7 @@ describe("Dashboard skeleton", () => {
     window.history.replaceState({}, "", "/channels/kanal-a/events");
 
     render(<DashboardApp />);
-    await screen.findByRole("heading", { name: "Ereignisse", level: 1 });
+    await screen.findByRole("heading", { name: "Kanalereignisse", level: 1 });
     await waitFor(() => expect(resolveEvents).toBeTypeOf("function"));
     const socket = TestWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime socket was not created.");
@@ -4291,7 +4291,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    const list = await screen.findByRole("region", { name: "Audit-Log" });
+    const list = await screen.findByRole("region", { name: "Protokoll" });
     expect(screen.queryByRole("region", { name: "Änderungsdaten" })).not.toBeInTheDocument();
 
     const sentence = await screen.findByText(/Alice aktivierte das Modul Werbung/, { selector: ".audit-sentence" });
@@ -4424,7 +4424,7 @@ describe("Dashboard skeleton", () => {
     if (!(row instanceof HTMLTableRowElement)) throw new Error("Event row is missing.");
     fireEvent.click(row);
     expect(await screen.findByRole("region", { name: "Detail" })).toBeInTheDocument();
-    fireEvent.click(await screen.findByRole("link", { name: "Ereignisse" }));
+    fireEvent.click(await screen.findByRole("link", { name: "Kanalereignisse" }));
     expect(eventRequests).toBe(1);
 
     const restoredRow = (await screen.findAllByRole("row", { name: /Befehl !wiki ausgeführt/ }))[0];

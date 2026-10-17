@@ -70,7 +70,7 @@ describe("Module navigation in the sidebar", () => {
     expect(textCommandsLink.querySelector(".status-led")).toBeInTheDocument();
     expect(within(textCommandsLink).queryByText("Läuft", { exact: true })).toBeNull();
     expect(within(nav).getByRole("link", { name: "Werbung · Läuft" })).toBeInTheDocument();
-    expect(within(nav).queryByRole("link", { name: /Kanalereignisse/ })).not.toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: "Kanalereignisse" })).toBeInTheDocument();
   });
 
   it("switches straight from the sidebar to the selected module's detail page", async () => {
