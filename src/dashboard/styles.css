@@ -964,11 +964,11 @@ pre {
 .module-workspace__group .list-row__link { grid-template-columns: 20px minmax(0, 1fr) auto; }
 .module-workspace__group .list-row__status { grid-column: auto; justify-self: end; }
 .module-workspace__group .list-row__action { align-self: center; padding-top: 0; }
-.module-workspace__group .module-switch-control { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: center; justify-items: start; gap: 8px; width: 44px; }
-.module-workspace__group .module-switch-control:has(.ui-locked-reason:not(.ui-locked-reason--reserved)) { width: min(220px, 100%); }
+.module-workspace__group .module-switch-control { display: grid; grid-template-columns: 44px; align-items: center; justify-items: start; width: 44px; }
 .module-workspace__group .module-switch-control .ui-locked-reason--reserved { display: none; }
-.module-workspace__group .module-switch-control .ui-locked-reason:not(.ui-locked-reason--reserved) { max-width: none; margin: 0; }
-.module-workspace__group :is(.list-row__title, .list-row__description) { overflow: visible; overflow-wrap: anywhere; text-overflow: clip; white-space: normal; }
+.module-workspace__group .list-row__description .module-workspace__lock-reason { display: block; margin-top: 4px; }
+.module-workspace__group .list-row__description .module-workspace__lock-reason .ui-locked-reason { max-width: none; margin: 0; }
+.module-workspace__group :is(.list-row__title, .list-row__description) { overflow: visible; overflow-wrap: break-word; text-overflow: clip; white-space: normal; }
 .module-grid { display: grid; grid-template-columns: repeat(4, 132px); gap: 12px; align-content: start; }
 .module-tile {
   display: grid; grid-template-rows: 1fr auto auto; align-items: center; justify-items: center; gap: 9px;
@@ -2735,12 +2735,7 @@ p.lock-reason { margin-bottom: 1em; }
   .channel-location-field__heading { grid-template-columns: minmax(0, 1fr); align-items: start; gap: var(--s2); }
   .channel-location-field__current { justify-items: start; text-align: left; }
   .module-workspace__groups { grid-template-columns: minmax(0, 1fr); gap: 16px; }
-  .module-workspace .module-workspace__group .list-row { position: relative; display: block; }
-  .module-workspace .module-workspace__group .list-row__link { box-sizing: border-box; width: 100%; padding-right: 60px; }
-  .module-workspace .module-workspace__group .list-row:has(.module-switch-control .ui-locked-reason:not(.ui-locked-reason--reserved)) .list-row__link { padding-right: 176px; }
-  .module-workspace .module-workspace__group .list-row__action { position: absolute; top: 50%; right: 0; width: 44px; align-self: center; padding-top: 0; transform: translateY(-50%); }
-  .module-workspace .module-workspace__group .list-row:has(.module-switch-control .ui-locked-reason:not(.ui-locked-reason--reserved)) .list-row__action { width: min(168px, calc(100% - 176px)); }
-  .module-workspace .module-workspace__group .module-switch-control { width: 100%; min-width: 44px; }
+  .module-workspace .module-workspace__group .list-row { align-items: center; }
   .ui-toast-host { top: auto; bottom: var(--s1); align-content: end; }
   .ui-switch-section__heading { box-sizing: border-box; padding-inline-end: var(--s1); }
   .ui-chat-target-field__trigger { grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--s1); padding-inline: var(--s2); }

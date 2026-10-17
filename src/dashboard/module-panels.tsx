@@ -974,7 +974,7 @@ const ModuleWorkspaceRow = ({
   const effectiveEnabled = (rawEnabled || mandatory) && !permissionsMissing;
   const state = permissionsMissing ? labels.disabled : statusWord(effectiveEnabled);
   const route: DashboardRoute = { kind: "module", channelId, moduleId };
-  const lockedReason = mandatory ? mandatoryReason : manageable ? undefined : texts.module.managementLocked;
+  const lockedReason = mandatory || manageable ? undefined : texts.module.managementLocked;
 
   return (
     <ListRow
@@ -982,13 +982,15 @@ const ModuleWorkspaceRow = ({
       onNavigate={() => { onNavigate(route); }}
       icon={<ModuleIcon moduleId={moduleId} className="scope-row__icon" />}
       title={details.name}
-      description={details.description}
+      description={<>
+        {details.description}
+        {lockedReason === undefined ? null : <span className="module-workspace__lock-reason"><LockedReason id={`module-lock-${moduleId}`} reason={lockedReason} /></span>}
+      </>}
       status={mandatory
         ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} showReason />
         : <StatusLed state={permissionsMissing ? "warn" : effectiveEnabled ? "ok" : "off"} label={state} />}
       action={mandatory ? null : <div className="module-switch-control">
         <SwitchPrimitive aria-label={`${details.name}: ${statusWord(rawEnabled)}`} aria-describedby={lockedReason === undefined ? undefined : `module-lock-${moduleId}`} aria-busy={busy} checked={rawEnabled} disabled={!manageable || busy} onCheckedChange={onToggle} />
-        <LockedReason id={`module-lock-${moduleId}`} {...(lockedReason === undefined ? {} : { reason: lockedReason })} />
       </div>}
     />
   );

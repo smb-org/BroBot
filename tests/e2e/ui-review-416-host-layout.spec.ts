@@ -57,11 +57,13 @@ test("operator module names and centered lock controls fit at 390px", async ({ p
     names.every((name) => name.scrollWidth <= name.clientWidth + 1));
   expect(namesFit).toBe(true);
 
-  const reason = page.locator(".module-workspace .module-switch-control .ui-locked-reason").first();
+  const reason = page.locator(".module-workspace .module-workspace__lock-reason .ui-locked-reason").first();
   await expect(reason).toBeVisible();
   const row = reason.locator("xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' list-row ')]");
+  const descriptionBox = await row.locator(".list-row__description").boundingBox();
   const rowBox = await row.boundingBox();
   const switchBox = await row.getByRole("switch").boundingBox();
+  expect(descriptionBox?.width ?? 0).toBeGreaterThan(140);
   expect(rowBox).not.toBeNull();
   expect(switchBox).not.toBeNull();
   expect(Math.abs((rowBox?.y ?? 0) + (rowBox?.height ?? 0) / 2 - ((switchBox?.y ?? 0) + (switchBox?.height ?? 0) / 2))).toBeLessThanOrEqual(2);

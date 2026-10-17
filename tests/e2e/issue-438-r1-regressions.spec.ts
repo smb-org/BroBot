@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
+import type { ChannelRole } from "../../src/contracts/values";
 import { installLiveCockpitMocks } from "./live-cockpit-regression-fixtures";
 
 test.use({ locale: "de-DE", timezoneId: "Europe/Berlin" });
@@ -29,7 +30,8 @@ interface MockControls {
   releaseSettings: () => void;
 }
 
-const installIssue438Mocks = async (page: Page, options: { settingsLoading?: boolean } = {}): Promise<MockControls> => {
+const installIssue438Mocks = async (page: Page, options: { settingsLoading?: boolean; role?: ChannelRole } = {}): Promise<MockControls> => {
+  const role = options.role ?? "manager";
   const patchRequests: MockControls["patchRequests"] = [];
   const moduleState = new Map<string, Array<{ id: string; enabled: boolean; settings: string }>>([
     [channelId, initialModules.map((module) => ({ ...module }))],
@@ -43,7 +45,7 @@ const installIssue438Mocks = async (page: Page, options: { settingsLoading?: boo
   const settingsStarted = new Promise<void>((resolve) => { markSettingsStarted = resolve; });
   const settingsGate = options.settingsLoading ? new Promise<void>((resolve) => { releaseSettings = resolve; }) : Promise.resolve();
 
-  await installLiveCockpitMocks(page, { channelId, role: "manager", modules: initialModules });
+  await installLiveCockpitMocks(page, { channelId, role, modules: initialModules });
   await page.route("**/api/**", async (route: Route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
@@ -56,7 +58,7 @@ const installIssue438Mocks = async (page: Page, options: { settingsLoading?: boo
       login: id === channelId ? "demo-kanal" : "zweiter-kanal",
       displayName: id === channelId ? "Demo Kanal" : "Zweiter Kanal",
       language: "de",
-      role: "manager",
+      role,
       streamState: "online",
       streamStartedAt: "2026-10-16T07:59:00.000Z",
       viewerCount: 42,
@@ -144,7 +146,7 @@ const installIssue438Mocks = async (page: Page, options: { settingsLoading?: boo
   };
 };
 
-const freshRoute = async (page: Page, viewport: { width: number; height: number }, path: string, options: { settingsLoading?: boolean } = {}) => {
+const freshRoute = async (page: Page, viewport: { width: number; height: number }, path: string, options: { settingsLoading?: boolean; role?: ChannelRole } = {}) => {
   await page.unrouteAll({ behavior: "wait" });
   await page.setViewportSize(viewport);
   const controls = await installIssue438Mocks(page, options);
@@ -218,6 +220,24 @@ test("issue 438 layout regressions stay aligned at the requested viewports", asy
       const switchBox = await box(row.getByRole("switch"));
       expect(Math.abs((rowBox.y + rowBox.height / 2) - (switchBox.y + switchBox.height / 2))).toBeLessThanOrEqual(2);
     }
+    if (viewport.width <= 640) {
+      const description = page.locator(".module-workspace .list-row").filter({ hasText: "Textbefehle" }).first().locator(".list-row__description");
+      expect((await box(description)).width).toBeGreaterThan(140);
+      expect(await description.evaluate((element) => getComputedStyle(element).overflowWrap)).toBe("break-word");
+    }
+
+    await freshRoute(page, viewport, `/channels/${channelId}/modules`, { role: "operator" });
+    const operatorModuleRow = page.locator(".module-workspace .list-row").filter({ hasText: "Textbefehle" }).first();
+    const operatorModuleSwitch = operatorModuleRow.getByRole("switch");
+    await expect(operatorModuleSwitch).toBeDisabled();
+    const moduleLockReason = operatorModuleRow.locator(".module-workspace__lock-reason .ui-locked-reason");
+    await expect(moduleLockReason).toBeVisible();
+    if (viewport.width <= 640) expect((await box(moduleLockReason)).width).toBeGreaterThan(140);
+    const mandatoryModuleRow = page.locator(".module-workspace .list-row").filter({ hasText: "Die Textbibliothek ist immer verfügbar." }).first();
+    await expect(mandatoryModuleRow.locator(".module-workspace__lock-reason")).toHaveCount(0);
+    const operatorRowBox = await box(operatorModuleRow);
+    const operatorSwitchBox = await box(operatorModuleSwitch);
+    expect(Math.abs((operatorRowBox.y + operatorRowBox.height / 2) - (operatorSwitchBox.y + operatorSwitchBox.height / 2))).toBeLessThanOrEqual(2);
 
     await freshRoute(page, viewport, `/channels/${channelId}/system`);
     await expect(page.locator(".system-page__status-list .state-row").first()).toBeVisible();
