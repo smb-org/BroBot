@@ -43,14 +43,16 @@ const renderPage = (entries: readonly PanelAuditEntry[]) => {
   const response: PanelAuditResponse = { entries: [...entries], nextCursor: null };
   return renderWithQuery(
     <UiProvider>
-      <AuditPage
-        channelId="channel-a"
-        filters={emptyAuditFilter}
-        onFiltersChange={() => undefined}
-      />
+      <div className="dashboard-shell__main">
+        <AuditPage
+          channelId="channel-a"
+          filters={emptyAuditFilter}
+          onFiltersChange={() => undefined}
+        />
+      </div>
     </UiProvider>,
     undefined,
-    { initialData: [{ queryKey: dashboardDataKeys.audit("channel-a", emptyAuditFilter), data: { pages: [response], pageParams: [null] } }] },
+    { staleTime: 30_000, initialData: [{ queryKey: dashboardDataKeys.audit("channel-a", emptyAuditFilter), data: { pages: [response], pageParams: [null] } }] },
   );
 };
 
@@ -63,6 +65,117 @@ afterEach(() => {
 });
 
 describe("AuditPage diff list", () => {
+  it("keeps pagination and filters above the growing audit table", () => {
+    const { container } = renderPage([entry({}), entry({ auditId: "audit-2", createdAt: "2026-09-25T10:00:00.000Z" })]);
+    const filters = container.querySelector(".audit-filter");
+    const pagination = container.querySelector(".audit-pagination");
+    const table = container.querySelector(".audit-sentence-list");
+
+    expect(filters).not.toBeNull();
+    expect(pagination).not.toBeNull();
+    expect(table).not.toBeNull();
+    expect(filters?.compareDocumentPosition(pagination as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(pagination?.compareDocumentPosition(table as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("holds newly arriving rows outside the reader's current position until they jump to the latest entries", async () => {
+    const current = [entry({}), entry({ auditId: "audit-2", createdAt: "2026-09-25T10:00:00.000Z" })];
+    const rendered = renderPage(current);
+    const scroller = rendered.container.querySelector<HTMLElement>(".dashboard-shell__main");
+    const feed = rendered.container.querySelector<HTMLElement>(".audit-page-list");
+    if (scroller === null || feed === null) throw new Error("The dashboard scroll container and audit feed should render.");
+    vi.spyOn(feed, "getBoundingClientRect").mockReturnValue({ top: -60, bottom: 700, left: 0, right: 800, width: 800, height: 760, x: 0, y: -60, toJSON: () => ({}) });
+
+    act(() => {
+      scroller.scrollTop = 560;
+      fireEvent.scroll(scroller);
+      rendered.queryClient.setQueryData(dashboardDataKeys.audit("channel-a", emptyAuditFilter), {
+        pages: [{ entries: [entry({ auditId: "audit-new", actorDisplayName: "Zoe", createdAt: "2026-09-26T11:00:00.000Z" }), ...current], nextCursor: null }],
+        pageParams: [null],
+      });
+    });
+    const newEntriesButton = await screen.findByRole("button", { name: /^1 neuer Eintrag/u });
+
+    const rows = rendered.container.querySelectorAll(".audit-sentence-list tbody tr:not(.data-table__day-row)");
+    expect(rows[0]).toHaveTextContent("Alice");
+    expect(scroller.scrollTop).toBe(560);
+    fireEvent.click(newEntriesButton);
+
+    await waitFor(() => expect(rendered.container.querySelector(".audit-sentence-list tbody tr:not(.data-table__day-row)")).toHaveTextContent("Zoe"));
+  });
+
+  it("holds a realtime insertion while the reader is at the top of the log", async () => {
+    const current = [entry({}), entry({ auditId: "audit-2", createdAt: "2026-09-25T10:00:00.000Z" })];
+    const rendered = renderPage(current);
+    const result = rendered.queryClient.getQueryData<{ pages: Array<{ entries: PanelAuditEntry[]; nextCursor: null }>; pageParams: [null] }>(dashboardDataKeys.audit("channel-a", emptyAuditFilter));
+    if (result === undefined) throw new Error("Audit query data is missing.");
+    act(() => {
+      rendered.queryClient.setQueryData(dashboardDataKeys.audit("channel-a", emptyAuditFilter), {
+        ...result,
+        pages: [{ ...result.pages[0]!, entries: [entry({ auditId: "audit-new", actorDisplayName: "Zoe", createdAt: "2026-09-26T11:00:00.000Z" }), ...current] }],
+      });
+    });
+
+    expect(rendered.container.querySelector(".audit-sentence-list tbody tr:not(.data-table__day-row)")).toHaveTextContent("Alice");
+    expect(await screen.findByRole("button", { name: /^1 neuer Eintrag/u })).toBeVisible();
+  });
+
+  it("appends audit pages with equal cursor timestamps without dropping boundary rows", async () => {
+    const latest = entry({ auditId: "audit-latest", createdAt: "2026-09-26T11:00:00.000Z", actorDisplayName: "Mira" });
+    const boundary = entry({ auditId: "audit-z", createdAt: "2026-09-26T10:00:00.000Z", actorDisplayName: "Bea" });
+    const sameTimestampOlderId = entry({ auditId: "audit-a", createdAt: boundary.createdAt, actorDisplayName: "Cara" });
+    const rendered = renderPage([latest, boundary]);
+    const scroller = rendered.container.querySelector<HTMLElement>(".dashboard-shell__main");
+    const feed = rendered.container.querySelector<HTMLElement>(".audit-page-list");
+    if (scroller === null || feed === null) throw new Error("The dashboard scroll container and audit feed should render.");
+    vi.spyOn(feed, "getBoundingClientRect").mockReturnValue({ top: -60, bottom: 700, left: 0, right: 800, width: 800, height: 760, x: 0, y: -60, toJSON: () => ({}) });
+    act(() => {
+      scroller.scrollTop = 560;
+      fireEvent.scroll(scroller);
+      rendered.queryClient.setQueryData(dashboardDataKeys.audit("channel-a", emptyAuditFilter), {
+        pages: [
+          { entries: [latest, boundary], nextCursor: "cursor-older" },
+          { entries: [sameTimestampOlderId], nextCursor: null },
+        ],
+        pageParams: [null, "cursor-older"],
+      });
+    });
+
+    await waitFor(() => expect(rendered.container.querySelectorAll(".audit-sentence-list tbody tr:not(.data-table__day-row)")).toHaveLength(3));
+    expect(rendered.container.querySelector(".audit-sentence-list tbody tr:last-child")).toHaveTextContent("Cara");
+  });
+
+  it("keeps newly arrived entries pending when an older page includes them ahead of the snapshot boundary", async () => {
+    const latest = entry({ auditId: "audit-latest", createdAt: "2026-09-26T11:00:00.000Z", actorDisplayName: "Mira" });
+    const boundary = entry({ auditId: "audit-z", createdAt: "2026-09-26T10:00:00.000Z", actorDisplayName: "Bea" });
+    const pendingNewer = entry({ auditId: "audit-newer", createdAt: "2026-09-26T10:30:00.000Z", actorDisplayName: "Nora" });
+    const equalTimestampOlderId = entry({ auditId: "audit-a", createdAt: boundary.createdAt, actorDisplayName: "Cara" });
+    const older = entry({ auditId: "audit-old", createdAt: "2026-09-26T09:00:00.000Z", actorDisplayName: "Otto" });
+    const rendered = renderPage([latest, boundary]);
+    const scroller = rendered.container.querySelector<HTMLElement>(".dashboard-shell__main");
+    const feed = rendered.container.querySelector<HTMLElement>(".audit-page-list");
+    if (scroller === null || feed === null) throw new Error("The dashboard scroll container and audit feed should render.");
+    vi.spyOn(feed, "getBoundingClientRect").mockReturnValue({ top: -60, bottom: 700, left: 0, right: 800, width: 800, height: 760, x: 0, y: -60, toJSON: () => ({}) });
+    act(() => {
+      scroller.scrollTop = 560;
+      fireEvent.scroll(scroller);
+      rendered.queryClient.setQueryData(dashboardDataKeys.audit("channel-a", emptyAuditFilter), {
+        pages: [
+          { entries: [latest, boundary], nextCursor: "cursor-older" },
+          { entries: [pendingNewer, boundary, equalTimestampOlderId, older], nextCursor: null },
+        ],
+        pageParams: [null, "cursor-older"],
+      });
+    });
+
+    await waitFor(() => expect(rendered.container.querySelectorAll(".audit-sentence-list tbody tr:not(.data-table__day-row)")).toHaveLength(4));
+    const sentences = [...rendered.container.querySelectorAll(".audit-sentence")].map((sentence) => sentence.textContent);
+    expect(sentences.some((sentence) => sentence?.includes("Nora"))).toBe(false);
+    expect(sentences.some((sentence) => sentence?.includes("Cara"))).toBe(true);
+    expect(sentences.some((sentence) => sentence?.includes("Otto"))).toBe(true);
+    expect(await screen.findByRole("button", { name: /^1 neuer Eintrag/u })).toBeVisible();
+  });
+
   it("localizes a member's role values in the expanded diff, not just the feed sentence (#254 review)", async () => {
     renderPage([entry({})]);
 
@@ -81,6 +194,7 @@ describe("AuditPage diff list", () => {
 
   it("keeps the person search focused when the filter query changes", async () => {
     const initialEntry = entry({});
+    const filteredEntry = entry({ auditId: "audit-filtered", actorDisplayName: "Bea", subjectDisplayName: "Cara" });
     const response: PanelAuditResponse = { entries: [initialEntry], nextCursor: null };
     let releaseFilteredResponse: ((response: Response) => void) | undefined;
     const fetcher = vi.fn(() => new Promise<Response>((resolve) => { releaseFilteredResponse = resolve; }));
@@ -105,12 +219,12 @@ describe("AuditPage diff list", () => {
 
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1), { timeout: 2_000 });
     expect(document.activeElement).toBe(personSearch);
-    expect(screen.getByText(/Alice.*Bob/u, { selector: ".audit-sentence" })).toBeVisible();
-    expect(document.querySelector(".audit-sentence-list")?.closest("[aria-busy]")).toHaveAttribute("aria-busy", "true");
-    releaseFilteredResponse?.(new Response(JSON.stringify({ entries: [], nextCursor: null }), {
+    expect(screen.queryByText(/Alice.*Bob/u, { selector: ".audit-sentence" })).not.toBeInTheDocument();
+    releaseFilteredResponse?.(new Response(JSON.stringify({ entries: [filteredEntry], nextCursor: null }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     }));
+    expect(await screen.findByText(/Bea.*Cara/u, { selector: ".audit-sentence" })).toBeVisible();
   });
 
   it("restores a warm filter cache before requesting again", async () => {
@@ -205,12 +319,13 @@ describe("AuditPage diff list", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(rendered.queryClient.getQueryState(dashboardDataKeys.audit("channel-a", emptyAuditFilter))?.status).toBe("error");
     expect(screen.getByText(/Alice.*Bob/u, { selector: ".audit-sentence" })).toBeVisible();
-    await waitFor(() => expect(rendered.container.querySelector(".ui-load-state--status-row .ui-load-state__inline-message")).not.toBeNull());
-    expect(screen.getByRole("button", { name: "Erneut versuchen" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Erneut versuchen" }));
+    await waitFor(() => expect(rendered.container.querySelector(".audit-request-error")).not.toBeNull());
+    const retry = rendered.container.querySelector<HTMLButtonElement>(".audit-request-error button");
+    expect(retry).toBeVisible();
+    fireEvent.click(retry as HTMLButtonElement);
 
     expect(await screen.findByText(/Bea.*Cara/u, { selector: ".audit-sentence" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Erneut versuchen" })).not.toBeInTheDocument();
+    expect(rendered.container.querySelector(".audit-request-error")).toBeNull();
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 });

@@ -15,12 +15,19 @@ import {
   type PanelOverlayElement,
 } from "./api";
 import { apiErrorText, channelVariablesTexts, dashboardCommonTexts, dashboardLanguage, dashboardTexts } from "./locale";
-import { Button, ConfirmDialog, EmptyCellValue, Field, Icon, InspectorActions, InspectorFieldRow, InspectorSection, ListDetail, ListToolbar, LoadState, LoadStateLines, notify, UnitInput, PageHeader, Select, SubInspector, LockedReason } from "./ui";
+import { Button, CollectionPage, ConfirmDialog, EmptyCellValue, Field, Icon, InspectorFieldRow, InspectorSection, ListToolbar, LoadState, LoadStateLines, notify, UnitInput, PageHeader, Select, useDraftGuard } from "./ui";
 import { Switch as SwitchPrimitive } from "./ui/primitives/switch";
 import { CHANNEL_VARIABLE_MAXIMUM_COUNT, CHANNEL_VARIABLE_MAXIMUM_VALUE, CHANNEL_VARIABLE_MINIMUM_VALUE } from "../contracts/values";
 import { dashboardDataKeys } from "./data/keys";
 import { useDashboardQueryClient } from "./data";
 import { useChannelVariablesQuery, useLegacyOverlayTokensQuery, useOverlaysQuery } from "./data/lists";
+import { registerDashboardNavigationGuard } from "./ui/navigation-guard";
+
+interface VariableDefinitionDraft {
+  name: string;
+  description: string;
+  resetOnStreamStart: boolean;
+}
 
 interface ChannelVariablesPageProperties {
   channelId: string;
@@ -64,6 +71,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const loadFailed = variablesQuery.isError;
   const [search, setSearch] = useState("");
   const [selectedName, setSelectedName] = useState<string | null>(null);
+  const [selectedSnapshot, setSelectedSnapshot] = useState<PanelChannelVariable | null>(null);
   const [creating, setCreating] = useState(false);
   const [draftName, setDraftName] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
@@ -74,6 +82,9 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const editValueButtonRef = useRef<HTMLButtonElement>(null);
   const wasEditingValue = useRef(false);
   const [pending, setPending] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | undefined>(undefined);
+  const [definitionBaseline, setDefinitionBaseline] = useState<VariableDefinitionDraft | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [useOverlayOpen, setUseOverlayOpen] = useState(false);
   const overlaysQuery = useOverlaysQuery(channelId, useOverlayOpen);
@@ -87,6 +98,11 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const [newOverlayName, setNewOverlayName] = useState("");
   const [overlayPending, setOverlayPending] = useState(false);
   const lastInitialSelection = useRef<string | undefined>(undefined);
+  const selectedNameRef = useRef(selectedName);
+  const setSelectedVariableName = (name: string | null): void => {
+    selectedNameRef.current = name;
+    setSelectedName(name);
+  };
 
   const refresh = useCallback(async (): Promise<void> => {
     const result = await refetchVariables({ throwOnError: true });
@@ -125,24 +141,50 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   }, [variablesLoadError, variablesQuery.isError]);
 
   const selected = useMemo(() => variables.find((variable) => variable.name === selectedName) ?? null, [selectedName, variables]);
+  const selectedForDisplay = selected ?? (selectedSnapshot?.name === selectedName ? selectedSnapshot : null);
+  const definitionConflict = !creating && selectedName !== null && selected === null && definitionBaseline !== null;
+  const draftDirty = creating || (definitionBaseline !== null && (
+    normalizedVariableName(draftName) !== definitionBaseline.name ||
+    draftDescription !== definitionBaseline.description ||
+    draftReset !== definitionBaseline.resetOnStreamStart
+  ));
+  useEffect(() => {
+    if (selected === null || creating || draftDirty) return;
+    const nextBaseline = { name: selected.name, description: selected.description, resetOnStreamStart: selected.resetOnStreamStart };
+    if (definitionBaseline !== null && definitionBaseline.name === nextBaseline.name &&
+      definitionBaseline.description === nextBaseline.description &&
+      definitionBaseline.resetOnStreamStart === nextBaseline.resetOnStreamStart) return;
+    setDefinitionBaseline(nextBaseline);
+    setDraftName(nextBaseline.name);
+    setDraftDescription(nextBaseline.description);
+    setDraftReset(nextBaseline.resetOnStreamStart);
+  }, [creating, definitionBaseline, draftDirty, selected]);
+  useEffect(() => {
+    if (selected !== null) setSelectedSnapshot(selected);
+  }, [selected]);
   useLayoutEffect(() => {
     if (editingValue) document.getElementById("channel-variable-inline-value")?.focus();
     else if (wasEditingValue.current) editValueButtonRef.current?.focus();
     wasEditingValue.current = editingValue;
   }, [editingValue]);
+  useLayoutEffect(() => { selectedNameRef.current = selectedName; }, [selectedName]);
   const hasLegacyLinks = hasTokens(legacyTokensQuery.data?.pages[0]);
-  const selectedUsages = selected?.usages ?? [];
+  const selectedUsages = selectedForDisplay?.usages ?? [];
   const overlayUsageLabel = (usage: PanelChannelVariable["usages"][number]): string =>
     usage.elementLabel === undefined ? usage.itemName : `${usage.itemName} → ${usage.elementLabel}`;
   const usageNames = selectedUsages.map((usage) => usage.moduleId === "overlays"
     ? overlayUsageLabel(usage)
     : labels.usageLine(usage.moduleId, usage.itemName, usage.kind));
   const nameInvalid = !variableNamePattern.test(normalizedVariableName(draftName));
-  const createDisabled = !canManageContent || variables.length >= maximum;
-  const createReason = !canManageContent ? labels.managementLocked : variables.length >= maximum ? labels.limitReached : undefined;
+  const createDisabled = !canManageContent || variables.length >= maximum || pending || overlayPending;
+  const draftInvalid = nameInvalid || (creating && (typeof draftSetValue !== "number" || !Number.isInteger(draftSetValue) || draftSetValue < CHANNEL_VARIABLE_MINIMUM_VALUE || draftSetValue > CHANNEL_VARIABLE_MAXIMUM_VALUE));
   const beginCreate = (): void => {
     setCreating(true);
-    setSelectedName(null);
+    setSelectedVariableName(null);
+    setSelectedSnapshot(null);
+    setDefinitionBaseline(null);
+    setSaved(false);
+    setSaveError(undefined);
     setEditingValue(false);
     setDraftName("");
     setDraftDescription("");
@@ -156,10 +198,14 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const selectVariable = (variable: PanelChannelVariable): void => {
     setCreating(false);
     setEditingValue(false);
-    setSelectedName(variable.name);
+    setSelectedVariableName(variable.name);
+    setSelectedSnapshot(variable);
     setDraftName(variable.name);
     setDraftDescription(variable.description);
     setDraftReset(variable.resetOnStreamStart);
+    setDefinitionBaseline({ name: variable.name, description: variable.description, resetOnStreamStart: variable.resetOnStreamStart });
+    setSaved(false);
+    setSaveError(undefined);
     setDraftSetValue(variable.value);
     setUseOverlayOpen(false);
     setOverlaySelection("");
@@ -172,7 +218,6 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   // to the linter, the same way `text_commands`'s `initialSelection` effect
   // goes through a hook-returned setter instead of a local helper.
   const selectVariableRef = useRef(selectVariable);
-  useEffect(() => { selectVariableRef.current = selectVariable; });
   useEffect(() => {
     if (initialSelection === undefined) {
       lastInitialSelection.current = undefined;
@@ -186,13 +231,20 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   }, [initialSelection, loading, onInitialSelectionConsumed, variables]);
   const closeInspector = (): void => {
     setCreating(false);
-    setSelectedName(null);
+    setSelectedVariableName(null);
+    setSelectedSnapshot(null);
     setEditingValue(false);
+    setDefinitionBaseline(null);
+    setSaved(false);
+    setSaveError(undefined);
   };
-  const save = async (): Promise<void> => {
+  const save = async (): Promise<string | null> => {
     const name = normalizedVariableName(draftName);
-    if (!canManageContent || nameInvalid || draftSetValue === "" || !Number.isInteger(draftSetValue)) return;
+    if (pending) return null;
+    if (!creating && selected === null) return labels.definitionConflict;
+    if (!canManageContent || nameInvalid || draftSetValue === "" || !Number.isInteger(draftSetValue)) return labels.nameInvalid;
     setPending(true);
+    setSaveError(undefined);
     try {
       if (creating) {
         const response = await createChannelVariable(channelId, {
@@ -203,7 +255,9 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
         });
         commitVariable(null, response.variable, response.usages);
         setCreating(false);
-        setSelectedName(response.variable.name);
+        setSelectedVariableName(response.variable.name);
+        setSelectedSnapshot({ ...response.variable, usages: response.usages ?? [] });
+        setDefinitionBaseline({ name: response.variable.name, description: response.variable.description, resetOnStreamStart: response.variable.resetOnStreamStart });
         refreshBestEffort();
       } else if (selected !== null) {
         const response = await updateChannelVariable(channelId, selected.name, {
@@ -212,24 +266,68 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
           resetOnStreamStart: draftReset,
         });
         commitVariable(selected.name, response.variable, response.usages);
-        setSelectedName(response.variable.name);
+        setSelectedVariableName(response.variable.name);
+        setSelectedSnapshot({ ...response.variable, usages: response.usages ?? selectedUsages });
         setDraftName(response.variable.name);
+        setDefinitionBaseline({ name: response.variable.name, description: response.variable.description, resetOnStreamStart: response.variable.resetOnStreamStart });
         if (response.variable.name !== selected.name) setUseOverlayOpen(false);
         refreshBestEffort();
       }
+      setSaved(true);
+      return null;
     } catch (caught) {
-      notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.saveError) : labels.saveError });
+      const message = caught instanceof PanelApiError ? apiErrorText(caught.code, labels.saveError) : labels.saveError;
+      setSaveError(message);
+      notify({ tone: "error", message });
+      return message;
     } finally {
       setPending(false);
     }
   };
+  const discardDraft = (): void => {
+    setCreating(false);
+    setEditingValue(false);
+    setUseOverlayOpen(false);
+    setOverlaySelection("");
+    setCreatingOverlay(false);
+    setNewOverlayName("");
+    if (selected !== null && definitionBaseline !== null) {
+      setDraftName(definitionBaseline.name);
+      setDraftDescription(definitionBaseline.description);
+      setDraftReset(definitionBaseline.resetOnStreamStart);
+    } else if (selected === null) {
+      setSelectedVariableName(null);
+      setSelectedSnapshot(null);
+      setDefinitionBaseline(null);
+    }
+    setSaved(false);
+    setSaveError(undefined);
+  };
+  const navigationGuard = useDraftGuard(draftDirty, save, discardDraft);
+  useEffect(() => registerDashboardNavigationGuard(navigationGuard.guardSwitch), [navigationGuard.guardSwitch]);
+  const requestSelectVariable = (variable: PanelChannelVariable): void => {
+    if (pending || overlayPending) return;
+    if (!creating && variable.name === selectedName) return;
+    navigationGuard.guardSwitch(() => { selectVariable(variable); });
+  };
+  const requestCloseInspector = (): void => {
+    if (pending || overlayPending) return;
+    navigationGuard.guardSwitch(closeInspector);
+  };
+  const requestBeginCreate = (): void => {
+    if (creating || pending || overlayPending) return;
+    navigationGuard.guardSwitch(beginCreate);
+  };
+  useLayoutEffect(() => { selectVariableRef.current = requestSelectVariable; });
   const changeValue = async (operation: "add" | "subtract" | "set", amount: number): Promise<boolean> => {
     if (selected === null || pending) return false;
+    const selectedNameAtStart = selected.name;
     setPending(true);
     try {
-      const response = await changeChannelVariableValue(channelId, selected.name, operation, amount);
-      commitVariable(selected.name, response.variable);
-      setDraftSetValue(response.variable.value);
+      const response = await changeChannelVariableValue(channelId, selectedNameAtStart, operation, amount);
+      commitVariable(selectedNameAtStart, response.variable);
+      setSelectedSnapshot((current) => current?.name === selectedNameAtStart ? { ...current, ...response.variable } : current);
+      if (selectedNameRef.current === selectedNameAtStart) setDraftSetValue(response.variable.value);
       refreshBestEffort();
       return true;
     } catch (caught) {
@@ -249,17 +347,20 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   };
   const beginUseInOverlay = async (): Promise<void> => {
     if (selected === null || !canManageContent || overlayPending) return;
+    const selectedNameAtStart = selected.name;
     setOverlayPending(true);
     try {
       const result = await queryClient.query({
         queryKey: dashboardDataKeys.overlays(channelId),
         queryFn: ({ signal }) => fetchOverlays(channelId, signal),
       });
+      if (selectedNameRef.current !== selectedNameAtStart) return;
       setOverlaySelection(result.overlays[0]?.id ?? "");
       setCreatingOverlay(result.overlays.length === 0);
-      setNewOverlayName(labels.defaultOverlayName(selected.name));
+      setNewOverlayName(labels.defaultOverlayName(selectedNameAtStart));
       setUseOverlayOpen(true);
     } catch (caught) {
+      if (selectedNameRef.current !== selectedNameAtStart) return;
       notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.saveError) : labels.saveError });
     } finally {
       setOverlayPending(false);
@@ -267,15 +368,14 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   };
   const addVariableElement = (): void => {
     if (selected === null || !canManageContent || overlayPending) return;
-    if (creatingOverlay) {
-      if (newOverlayName.trim().length === 0) return;
+    if (creatingOverlay ? newOverlayName.trim().length === 0 : overlaySelection.length === 0) return;
+    navigationGuard.guardSwitch(() => {
       setUseOverlayOpen(false);
-      onOpenOverlay?.("new", selected.name, newOverlayName.trim());
-    } else {
-      if (overlaySelection.length === 0) return;
-      setUseOverlayOpen(false);
-      onOpenOverlay?.(overlaySelection, selected.name);
-    }
+      const destinationName = selectedNameRef.current;
+      if (destinationName === null) return;
+      if (creatingOverlay) onOpenOverlay?.("new", destinationName, newOverlayName.trim());
+      else onOpenOverlay?.(overlaySelection, destinationName);
+    });
   };
   const reconnectElement = async (usage: PanelChannelVariable["usages"][number]): Promise<void> => {
     if (selected === null || usage.overlayId === undefined || usage.elementId === undefined || !canManageContent || overlayPending) return;
@@ -322,14 +422,20 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const listStatus = loading && variables.length === 0 ? "loading"
     : variables.length === 0 ? loadFailed ? "error" : "empty"
       : visibleVariables.length === 0 ? "empty" : "success";
-  const list = <section className="channel-variables-page config-section" aria-label={labels.list}>
+  const toolbar = <>
     <ListToolbar
       searchLabel={labels.search}
       searchPlaceholder={labels.search}
       searchClearLabel={dashboardCommonTexts().clearSearch}
       searchValue={search}
       onSearchChange={setSearch}
-      create={{ label: labels.create, onClick: beginCreate, disabled: createDisabled, ...(createReason === undefined ? {} : { reason: createReason }) }}
+      create={{
+        label: labels.create,
+        onClick: requestBeginCreate,
+        disabled: createDisabled,
+        ...(!canManageContent ? { reason: labels.managementLocked } : variables.length >= maximum ? { reason: labels.limitReached } : {}),
+        reasonVisible: false,
+      }}
       usage={{ count: variables.length, maximum, ...(query.length === 0 ? {} : { filteredCount: visibleVariables.length }), copy: { countSuffix: labels.countSuffix, filteredInfix: dashboardCommonTexts().of, filteredSuffix: labels.filteredSuffix, limitInfix: dashboardCommonTexts().of, limitSuffix: labels.limitSuffix, loadedSuffix: dashboardCommonTexts().loaded } }}
       {...(loadFailed && variables.length > 0 ? { queryError: {
         title: dashboardTexts().errors.dataLoadFailed,
@@ -338,6 +444,9 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
       } } : {})}
       {...(query.length === 0 ? {} : { activeFilters: `${labels.search}: ${search.trim()}`, activeFiltersLabel: dashboardCommonTexts().activeFilters, resetLabel: dashboardCommonTexts().reset, onReset: () => { setSearch(""); } })}
     />
+    {!canManageContent && !creating && selectedForDisplay === null ? <p className="muted channel-variables-permission-note" role="note">{labels.managementLocked}</p> : null}
+  </>;
+  const list = <section className="channel-variables-list" aria-label={labels.list}>
     <LoadState
       variant="panel-360"
       status={listStatus}
@@ -354,8 +463,8 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
           <th scope="col" className="channel-variables-table__reset-heading"><span className="sr-only">{labels.resetOnStreamStart}</span><Icon name="reload" size={16} /></th>
         </tr></thead>
         <tbody>{visibleVariables.map((variable) => (
-          <tr key={variable.name} tabIndex={0} aria-selected={variable.name === selectedName} onClick={() => { selectVariable(variable); }} onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectVariable(variable); }
+          <tr key={variable.name} tabIndex={0} aria-selected={variable.name === selectedName} onClick={() => { requestSelectVariable(variable); }} onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") { event.preventDefault(); requestSelectVariable(variable); }
           }}>
             <th scope="row" className="mono">{`{var.${variable.name}}`}</th>
             <td className="channel-variables-table__description" title={variable.description || labels.noDescription}>{variable.description || <EmptyCellValue />}</td>
@@ -367,43 +476,69 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
         ))}</tbody>
       </table>
     </div>}</LoadState>
-    {!canManageContent ? <p className="muted" role="note">{labels.managementLocked}</p> : null}
   </section>;
 
-  const inspector = creating || selected !== null ? (
-    <SubInspector
-      ariaLabel={creating ? labels.newVariable : labels.title}
-      title={creating ? labels.newVariable : <span className="mono">{`{var.${selected?.name ?? ""}}`}</span>}
-      identifier={creating ? undefined : selected?.name}
-      closeLabel={labels.close}
-      onClose={closeInspector}
-    >
-      <div className="channel-variable-editor">
+  const editor = creating || selectedForDisplay !== null ? (
+    <div className="channel-variable-editor" aria-label={creating ? labels.newVariable : labels.title}>
+      <div className="channel-variable-editor__header">
+        <PageHeader
+          kind="variable"
+          headingLevel="h2"
+          titleContent={creating ? labels.newVariable : <span className="mono">{`{var.${draftName || selectedForDisplay?.name || "variable"}}`}</span>}
+          title={creating ? labels.newVariable : draftName || selectedForDisplay?.name || labels.name}
+          subtitle={!canManageContent ? labels.managementLocked : undefined}
+          pageActions={<Button variant="neutral" icon="close" iconOnly ariaLabel={labels.close} onClick={requestCloseInspector} disabled={pending || overlayPending} />}
+          save={{
+            persistent: true,
+            dirty: draftDirty,
+            pending,
+            saveDisabled: draftInvalid || !canManageContent || definitionConflict,
+            saved,
+            ...(saveError === undefined ? {} : { error: saveError }),
+            onSave: () => { void save(); },
+            onDiscard: discardDraft,
+            saveLabel: labels.save,
+            discardLabel: labels.discard,
+            savedLabel: dashboardCommonTexts().saved,
+            pendingLabel: dashboardCommonTexts().saving,
+          }}
+          {...(selected === null || !canManageContent ? {} : { overflow: <Button danger="subtle" disabled={pending || draftDirty || selectedUsages.some((usage) => usage.kind === "action")} onClick={() => { setConfirmDelete(true); }}>{labels.delete}</Button> })}
+        />
+      </div>
+      <div className="channel-variable-editor__scroll">
+        {definitionConflict ? <p className="channel-variable-conflict" role="status">{labels.definitionConflict}</p> : null}
         <InspectorSection title={labels.generalSection}>
-          <InspectorFieldRow label={labels.name} help={creating ? labels.nameHint : labels.renameHint}>
-            <Field id="channel-variable-name" label={labels.name} value={draftName} normalize={normalizedVariableName} maxLength={32} countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={!canManageContent || pending} onChange={setDraftName} {...(nameInvalid ? { error: labels.nameInvalid } : {})} />
-          </InspectorFieldRow>
+          {canManageContent ? <InspectorFieldRow label={labels.name} help={creating ? labels.nameHint : labels.renameHint}>
+            <Field id="channel-variable-name" label={labels.name} value={draftName} normalize={normalizedVariableName} maxLength={32} countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={pending || definitionConflict} onChange={(value) => { setDraftName(value); setSaved(false); setSaveError(undefined); }} {...(nameInvalid ? { error: labels.nameInvalid } : {})} />
+          </InspectorFieldRow> : <dl className="properties channel-variable-definition-properties">
+            <div><dt>{labels.name}</dt><dd className="mono">{selectedForDisplay?.name ?? draftName}</dd></div>
+            <div><dt>{labels.description}</dt><dd>{selectedForDisplay?.description || labels.noDescription}</dd></div>
+            <div><dt>{labels.resetOnStreamStart}</dt><dd>{labels.resetValue(selectedForDisplay?.resetOnStreamStart ?? draftReset)}</dd></div>
+          </dl>}
           <div className="channel-variable-legacy-slot" aria-live="polite">
-            {selected !== null && hasLegacyLinks && normalizedVariableName(draftName) !== selected.name
+            {canManageContent && selected !== null && hasLegacyLinks && normalizedVariableName(draftName) !== selected.name
               ? <p className="muted" role="note" title={labels.legacyRenameWarning}>{labels.legacyRenameWarning}</p> : null}
           </div>
-          <InspectorFieldRow label={labels.description} help={labels.descriptionHint}>
-            <Field id="channel-variable-description" label={labels.description} value={draftDescription} maxLength={80} countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={!canManageContent || pending} onChange={setDraftDescription} />
-          </InspectorFieldRow>
-          <InspectorFieldRow label={labels.resetOnStreamStart} help={labels.resetHint}>
-            <div className="channel-variable-switch-control">
-              <SwitchPrimitive aria-label={labels.resetOnStreamStart} aria-describedby={!canManageContent ? "channel-variable-reset-locked" : undefined} checked={draftReset} disabled={!canManageContent || pending} onCheckedChange={setDraftReset} />
-              <LockedReason id="channel-variable-reset-locked" {...(!canManageContent ? { reason: labels.managementLocked } : {})} />
-            </div>
-          </InspectorFieldRow>
+          {canManageContent ? <>
+            <InspectorFieldRow label={labels.description} help={labels.descriptionHint}>
+              <Field id="channel-variable-description" label={labels.description} value={draftDescription} maxLength={80} countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={pending || definitionConflict} onChange={(value) => { setDraftDescription(value); setSaved(false); setSaveError(undefined); }} />
+            </InspectorFieldRow>
+            <InspectorFieldRow label={labels.resetOnStreamStart} help={labels.resetHint}>
+              <div className="channel-variable-switch-control">
+                <SwitchPrimitive aria-label={labels.resetOnStreamStart} checked={draftReset} disabled={pending || definitionConflict} onCheckedChange={(value) => { setDraftReset(value); setSaved(false); setSaveError(undefined); }} />
+              </div>
+            </InspectorFieldRow>
+          </> : null}
           {creating ? <InspectorFieldRow label={labels.value} help={labels.valueHint}>
-            <UnitInput id="channel-variable-initial-value" label={labels.value} min={CHANNEL_VARIABLE_MINIMUM_VALUE} max={CHANNEL_VARIABLE_MAXIMUM_VALUE} step={1} value={draftSetValue} disabled={!canManageContent || pending} onChange={setDraftSetValue} />
+            <UnitInput id="channel-variable-initial-value" label={labels.value} min={CHANNEL_VARIABLE_MINIMUM_VALUE} max={CHANNEL_VARIABLE_MAXIMUM_VALUE} step={1} value={draftSetValue} disabled={!canManageContent || pending} onChange={(value) => { setDraftSetValue(value); setSaved(false); setSaveError(undefined); }} />
           </InspectorFieldRow> : null}
         </InspectorSection>
-        {selected === null ? null : <>
+        {selectedForDisplay === null ? null : <>
           <InspectorSection title={labels.valueSection}>
             <InspectorFieldRow className="inspector-field-row--variable-value" label={labels.value} help={labels.valueHint}>
-              <div className="channel-variable-value-controls">
+              <div className={`channel-variable-value-controls${editingValue ? " channel-variable-value-controls--editing" : ""}`}>
+                {definitionConflict ? <strong className="channel-variable-value-controls__value number">{new Intl.NumberFormat(language).format(selectedForDisplay.value)}</strong> : null}
+                {!definitionConflict && selected !== null ? <>
                 {editingValue ? <>
                   <UnitInput
                     id="channel-variable-inline-value"
@@ -445,6 +580,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
                     onClick={() => { setInlineValue(selected.value); setEditingValue(true); }}
                   />
                 </>}
+                </> : null}
               </div>
             </InspectorFieldRow>
           </InspectorSection>
@@ -465,7 +601,6 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
                 {usage.reconnect ? <div className="channel-variable-usage-reconnect">
                   <span className="muted">{labels.variableMissing}</span>
                   <Button variant="neutral" disabled={!canManageContent || overlayPending}
-                    {...(!canManageContent ? { title: labels.managementLocked } : {})}
                     onClick={() => { void reconnectElement(usage); }}>{labels.reconnect}</Button>
                 </div> : null}
               </li>
@@ -475,7 +610,6 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
         </>}
         {selected === null ? null : <InspectorSection title={labels.useInOverlay} help={labels.useOverlayHint}>
           <Button variant="neutral" disabled={!canManageContent || overlayPending}
-            {...(!canManageContent ? { title: labels.managementLocked } : {})}
             onClick={() => { void beginUseInOverlay(); }}>{labels.useInOverlay}</Button>
           {useOverlayOpen ? <div className="channel-variable-use-overlay__chooser">
             {overlayOptions.length > 0 ? <Select id="channel-variable-overlay-choice" label={labels.chooseOverlay} value={creatingOverlay ? "__new__" : overlaySelection}
@@ -489,18 +623,33 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
             </div>
           </div> : null}
         </InspectorSection>}
-        {!canManageContent ? <p className="muted" role="note">{labels.managementLocked}</p> : null}
-        <InspectorActions destructive={selected === null ? undefined : <Button danger="subtle" disabled={!canManageContent || pending || selectedUsages.some((usage) => usage.kind === "action")} onClick={() => { setConfirmDelete(true); }}>{labels.delete}</Button>}>
-          <Button variant="primary" disabled={!canManageContent || pending || nameInvalid || draftSetValue === ""} {...(!canManageContent ? { title: labels.managementLocked } : {})} onClick={() => { void save(); }}>{labels.save}</Button>
-          <Button variant="subtle" disabled={pending} onClick={closeInspector}>{labels.discard}</Button>
-        </InspectorActions>
       </div>
-    </SubInspector>
+    </div>
   ) : null;
 
-  return <>
-    <PageHeader kind="variable" title={labels.title} subtitle="" />
-    <ListDetail list={list} inspector={inspector} onCloseInspector={closeInspector} />
+  return <div className="channel-variables-page">
+    <CollectionPage
+      title={labels.title}
+      toolbar={toolbar}
+      list={list}
+      detail={editor}
+      detailOpen={creating || selectedForDisplay !== null}
+      backLabel={labels.backToList}
+      closeDetailDisabled={pending || overlayPending}
+      onCloseDetail={requestCloseInspector}
+    />
     <ConfirmDialog opened={confirmDelete} title={labels.deleteTitle(selected?.name ?? "")} description={labels.deleteDescription(selected?.name ?? "", usageNames.join(", "), selectedUsages.filter((usage) => usage.moduleId === "overlays" && usage.reconnect !== true).length)} confirmLabel={labels.deleteConfirm(selected?.name ?? "")} cancelLabel={labels.deleteCancel} onCancel={() => { setConfirmDelete(false); }} onConfirm={() => { void remove(); }} pending={pending} danger />
-  </>;
+    <ConfirmDialog
+      opened={navigationGuard.confirmOpen}
+      title={dashboardTexts().module.unsavedChangesTitle}
+      description={navigationGuard.saveError === undefined ? dashboardTexts().module.unsavedChangesDescription : `${dashboardTexts().module.unsavedChangesDescription} ${navigationGuard.saveError}`}
+      confirmLabel={dashboardTexts().module.discardAndSwitch}
+      cancelLabel={dashboardTexts().module.continueEditing}
+      onCancel={navigationGuard.continueEditing}
+      onConfirm={navigationGuard.discardAndSwitch}
+      {...(draftInvalid || !canManageContent || definitionConflict ? {} : { alternative: { label: dashboardTexts().module.saveAndSwitch, onClick: () => { void navigationGuard.saveAndSwitch(); } } })}
+      pending={pending || navigationGuard.saving}
+      danger
+    />
+  </div>;
 }

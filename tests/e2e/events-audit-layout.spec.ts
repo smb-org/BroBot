@@ -29,6 +29,25 @@ const audit = [
   { auditId: "audit-recent", actorUserId: "member-1", actorLogin: null, actorDisplayName: "Mira Fox", actorKind: "member", createdAt: at(0, 5), moduleId: null, action: "member.role_changed", before: JSON.stringify({ role: "manager" }), after: JSON.stringify({ role: "operator" }), subjectUserId: "member-2", subjectLogin: "otto_owl", subjectDisplayName: "Otto Owl" },
   { auditId: "audit-older", actorUserId: "member-2", actorLogin: null, actorDisplayName: "Mira Fox", actorKind: "member", createdAt: at(3, 10), moduleId: null, action: "member.role_changed", before: JSON.stringify({ role: "manager" }), after: JSON.stringify({ role: "operator" }), subjectUserId: "member-3", subjectLogin: "pixel_panda", subjectDisplayName: "Pixel Panda" },
 ];
+const manyAuditEntries = Array.from({ length: 48 }, (_, index) => ({
+  auditId: `scroll-audit-${String(index)}`,
+  actorUserId: "member-1",
+  actorLogin: null,
+  actorDisplayName: `Reader ${String(index)}`,
+  actorKind: "member",
+  createdAt: at(Math.floor(index / 12), index),
+  moduleId: index % 2 === 0 ? "members" : "votekick",
+  action: "member.role_changed",
+  before: JSON.stringify({ role: "manager" }),
+  after: JSON.stringify({ role: "operator" }),
+  subjectUserId: `subject-${String(index)}`,
+  subjectLogin: `person_${String(index)}`,
+  subjectDisplayName: `Person ${String(index)}`,
+}));
+const channelVariables = [
+  { channelId, name: "score", value: 1234, description: "Punkte im aktuellen Spiel", resetOnStreamStart: true, createdAt: at(10), updatedAt: at(1), usages: [] },
+  { channelId, name: "long_counter_name_123456789", value: -42, description: "Ein längerer Beschreibungstext für einen schmalen Bildschirm", resetOnStreamStart: false, createdAt: at(9), updatedAt: at(2), usages: [] },
+];
 
 interface SettingsGate {
   wait: Promise<void>;
@@ -38,14 +57,19 @@ interface SettingsGate {
 interface MockApiOptions {
   eventEntries?: readonly Record<string, unknown>[];
   auditEntries?: readonly Record<string, unknown>[];
+  variableEntries?: readonly Record<string, unknown>[];
+  legacyTokens?: readonly Record<string, unknown>[];
+  channelRole?: string;
+  revisionVector?: () => Readonly<Record<string, number>>;
   settingsGate?: SettingsGate;
   settingsStatus?: number;
 }
 
-const mockApi = async (page: Page, options: MockApiOptions = {}): Promise<void> => {
+const mockApi = async (page: Page, options: MockApiOptions = {}): Promise<{ revisionReads: () => number }> => {
+  let revisionReads = 0;
   await page.route("**/api/**", async (route) => {
     const { pathname } = new URL(route.request().url());
-    if (pathname === "/api/channels") return route.fulfill(json({ channels: [channel], bot: channel.bot }));
+    if (pathname === "/api/channels") return route.fulfill(json({ channels: [{ ...channel, role: options.channelRole ?? channel.role }], bot: channel.bot }));
     if (pathname === `/api/channels/${channelId}/overview`) return route.fulfill(json({ ...channel, activeModules: [] }));
     if (pathname === `/api/channels/${channelId}/settings`) {
       options.settingsGate?.started();
@@ -55,9 +79,17 @@ const mockApi = async (page: Page, options: MockApiOptions = {}): Promise<void> 
     if (pathname === `/api/channels/${channelId}/modules`) return route.fulfill(json({ modules: [{ id: "votekick", enabled: true, settings: "{}" }] }));
     if (pathname === `/api/channels/${channelId}/events`) return route.fulfill(json({ entries: options.eventEntries ?? events, nextCursor: null }));
     if (pathname === `/api/channels/${channelId}/audit-log` || pathname === `/api/channels/${channelId}/audit`) return route.fulfill(json({ entries: options.auditEntries ?? audit, nextCursor: null }));
+    if (pathname === `/api/channels/${channelId}/variables`) return route.fulfill(json({ variables: options.variableEntries ?? channelVariables, count: (options.variableEntries ?? channelVariables).length, maximum: 25 }));
+    if (pathname === `/api/channels/${channelId}/overlay-tokens`) return route.fulfill(json({ tokens: options.legacyTokens ?? [], nextOffset: null }));
+    if (pathname === `/api/channels/${channelId}/overlays`) return route.fulfill(json({ overlays: [], maximum: 20, elementMaximum: 20 }));
+    if (pathname === `/api/channels/${channelId}/revisions`) {
+      revisionReads += 1;
+      return route.fulfill(json({ revisions: options.revisionVector?.() ?? {} }));
+    }
     if (pathname === "/api/csrf") return route.fulfill(json({ token: "layout-token" }));
     return route.fulfill(json({}));
   });
+  return { revisionReads: () => revisionReads };
 };
 
 const manyEvents = Array.from({ length: 60 }, (_, index) => ({
@@ -98,8 +130,8 @@ const expectChipGroupsFit = async (groups: Locator): Promise<void> => {
 
 test("events and audit keep their table geometry across desktop and mobile widths", async ({ page }) => {
   await mockApi(page);
-  for (const width of [1920, 1280, 390]) {
-    await page.setViewportSize({ width, height: width === 1920 ? 1080 : width === 1280 ? 800 : 844 });
+  for (const [width, height] of [[1920, 1080], [1280, 800], [390, 844], [2560, 1440]]) {
+    await page.setViewportSize({ width, height });
 
     await page.goto(`/channels/${channelId}/events`);
     const eventTable = page.locator(".event-table");
@@ -143,13 +175,17 @@ test("events and audit keep their table geometry across desktop and mobile width
     const auditFilter = await box(auditToolbar);
     const auditGap = auditHeader.y - auditFilter.bottom;
     expect(auditGap).toBeGreaterThanOrEqual(0);
-    expect(auditGap).toBeLessThanOrEqual(24);
+    expect(auditGap).toBeLessThanOrEqual(72);
+    const auditPagination = await box(page.locator(".audit-pagination"));
+    expect(auditPagination.y).toBeGreaterThanOrEqual(auditFilter.bottom);
+    expect(auditPagination.bottom).toBeLessThanOrEqual(auditHeader.y + 1);
     expect(await auditTable.locator("time").evaluateAll((times) => times.every((time) => time.scrollWidth <= time.clientWidth))).toBe(true);
     await expectChipGroupsFit(page.locator(".dashboard-filter-bar.audit-filter .event-filter__chips"));
 
     const auditRows = auditTable.locator("tbody tr:not(.data-table__day-row)");
+    expect(await auditRows.locator(".audit-sentence-row__sentence").evaluateAll((sentences) => sentences.every((sentence) => sentence.scrollHeight <= sentence.clientHeight))).toBe(true);
     if (width > 639) {
-      expect(await auditRows.evaluateAll((rows) => rows.every((row) => Math.abs(row.getBoundingClientRect().height - 40) <= 1))).toBe(true);
+      expect(await auditRows.evaluateAll((rows) => rows.every((row) => row.getBoundingClientRect().height >= 40))).toBe(true);
     } else {
       const controls = page.locator(".dashboard-filter-bar.audit-filter .dashboard-filter-bar__controls");
       await expectStableHeight(page, controls, 132);
@@ -167,6 +203,182 @@ test("events and audit keep their table geometry across desktop and mobile width
       expect(await sentence.evaluate((element) => element.scrollHeight <= element.clientHeight)).toBe(true);
     }
   }
+});
+
+test("variables collection keeps the editor in its column without horizontal overflow", async ({ page }) => {
+  await mockApi(page, { variableEntries: channelVariables });
+  for (const [width, height] of [[1920, 1080], [1280, 800], [390, 844], [2560, 1440]]) {
+    await page.setViewportSize({ width, height });
+    await page.goto(`/channels/${channelId}/variables`);
+    const collection = page.locator(".channel-variables-page .collection-page");
+    await expect(collection).toHaveAttribute("data-single-column", width <= 935 ? "true" : "false");
+    const channelEventsLink = page.locator(".sidebar__group[data-category='admin'] .sidebar-nav-link[data-nav-page-id='events']");
+    await expect(channelEventsLink.locator("xpath=following-sibling::a[1]")).toHaveAttribute("data-nav-page-id", "audit");
+    const table = page.locator(".channel-variables-table");
+    await expect(table.locator("tbody tr")).toHaveCount(channelVariables.length);
+    const selectedRow = table.locator("tbody tr").first();
+    if (width <= 639) {
+      const descriptionBox = await box(selectedRow.locator(".channel-variables-table__description"));
+      const resetBox = await box(selectedRow.locator(".channel-variables-table__reset"));
+      expect(descriptionBox.right).toBeLessThanOrEqual(resetBox.x + 1);
+      const variableName = await box(selectedRow.locator("th[scope='row']"));
+      expect(variableName.width).toBeGreaterThanOrEqual(descriptionBox.width - 1);
+    }
+    await selectedRow.click();
+    const editor = page.locator(".channel-variable-editor");
+    await expect(editor).toBeVisible();
+    const editorBox = await box(editor);
+    const headerBox = await box(editor.locator(".channel-variable-editor__header .page-header"));
+    expect(headerBox.x).toBeGreaterThanOrEqual(editorBox.x - 1);
+    expect(headerBox.right).toBeLessThanOrEqual(editorBox.right + 1);
+    expect(await selectedRow.evaluate((row) => getComputedStyle(row).outlineWidth)).toBe("1px");
+    expect(await selectedRow.evaluate((row) => getComputedStyle(row).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    expect(await page.locator(".dashboard-shell__main").evaluate((main) => main.scrollWidth <= main.clientWidth)).toBe(true);
+  }
+});
+
+test("operators see one definition permission reason while live value controls stay enabled", async ({ page }) => {
+  await mockApi(page, { channelRole: "operator", variableEntries: channelVariables });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`/channels/${channelId}/variables`);
+  await page.locator(".channel-variables-table tbody tr").first().click();
+  const editor = page.locator(".channel-variable-editor");
+  await expect(editor).toBeVisible();
+  await expect(editor.getByText(/Nur Broadcaster und Verwalter dürfen Variablen/u)).toHaveCount(1);
+  await expect(editor.locator(".channel-variable-definition-properties")).toContainText("score");
+  await expect(editor.locator(".channel-variable-definition-properties")).toContainText("Punkte im aktuellen Spiel");
+  await expect(editor.getByRole("textbox", { name: "Name" })).toHaveCount(0);
+  await expect(editor.getByRole("switch", { name: "Bei Streamstart auf null setzen" })).toHaveCount(0);
+  await expect(editor.getByRole("button", { name: "Speichern" })).toBeDisabled();
+  await expect(editor.getByRole("button", { name: "+1" })).toBeEnabled();
+});
+
+test("legacy-link rename warning fits its reserved row without moving the editor", async ({ page }) => {
+  await mockApi(page, {
+    variableEntries: channelVariables,
+    legacyTokens: [{ id: "legacy-a", name: null, createdAt: at(1), createdBy: "Mira", lastUsedAt: null, expiresAt: null }],
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/channels/${channelId}/variables`);
+  await page.locator(".channel-variables-table tbody tr").first().click();
+  const editor = page.locator(".channel-variable-editor");
+  const warningSlot = editor.locator(".channel-variable-legacy-slot");
+  const before = await box(warningSlot);
+  await editor.getByRole("textbox", { name: "Name" }).fill("points");
+  await expect(editor.getByRole("note")).toContainText("Alte Links mit #var=…");
+  const after = await box(warningSlot);
+  expect(after.height).toBe(before.height);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test("new realtime audit entries do not shift the first row while the reader is at the top", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const mutableAudit = [...manyAuditEntries];
+  let revision = 1;
+  const revisions = await mockApi(page, {
+    auditEntries: mutableAudit,
+    revisionVector: () => ({ "channel.audit": revision }),
+  });
+  let announceSocketReady: (() => void) | undefined;
+  let socketSender: ((message: string) => void) | undefined;
+  const socketReady = new Promise<void>((resolve) => { announceSocketReady = resolve; });
+  await page.routeWebSocket(`**/ws/channels/${channelId}`, (socket) => {
+    socketSender = (message) => { socket.send(message); };
+    announceSocketReady?.();
+    socket.onMessage(() => undefined);
+  });
+
+  await page.goto(`/channels/${channelId}/audit`);
+  await expect(page.locator(".audit-sentence-list tbody tr:not(.data-table__day-row)")).toHaveCount(mutableAudit.length);
+  await socketReady;
+  await expect.poll(() => revisions.revisionReads()).toBeGreaterThan(0);
+
+  const main = page.locator(".dashboard-shell__main");
+  const table = page.locator(".audit-sentence-list");
+  const firstRow = table.locator("tbody tr:not(.data-table__day-row)").first();
+  await expect(firstRow).toBeInViewport();
+  const readingRowBefore = await box(firstRow);
+
+  const newEntry = {
+    ...manyAuditEntries[0],
+    auditId: "realtime-audit-new-at-top",
+    actorDisplayName: "Tessa Reimann",
+    createdAt: at(0, 1),
+  };
+  mutableAudit.unshift(newEntry);
+  revision = 2;
+  socketSender?.(JSON.stringify({
+    version: 1,
+    id: "realtime-audit-hint-at-top",
+    createdAt: newEntry.createdAt,
+    channelId,
+    type: "event_log.new",
+    payload: { entries: [{ eventId: newEntry.auditId, createdAt: newEntry.createdAt, moduleId: "members", code: "member.role_changed", actorUserId: newEntry.actorUserId }] },
+  }));
+
+  await expect(page.getByRole("button", { name: /^1 neuer Eintrag/u })).toBeVisible();
+  expect(await box(firstRow)).toEqual(readingRowBefore);
+  expect(await main.evaluate((element) => element.scrollTop)).toBe(0);
+  await expect(firstRow).not.toContainText("Tessa Reimann");
+});
+
+test("new realtime audit entries do not move the row being read", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const mutableAudit = [...manyAuditEntries];
+  let revision = 1;
+  const revisions = await mockApi(page, {
+    auditEntries: mutableAudit,
+    revisionVector: () => ({ "channel.audit": revision }),
+  });
+  let announceSocketReady: (() => void) | undefined;
+  let socketSender: ((message: string) => void) | undefined;
+  const socketReady = new Promise<void>((resolve) => { announceSocketReady = resolve; });
+  await page.routeWebSocket(`**/ws/channels/${channelId}`, (socket) => {
+    socketSender = (message) => { socket.send(message); };
+    announceSocketReady?.();
+    socket.onMessage(() => undefined);
+  });
+
+  await page.goto(`/channels/${channelId}/audit`);
+  await expect(page.locator(".audit-sentence-list tbody tr:not(.data-table__day-row)")).toHaveCount(mutableAudit.length);
+  await socketReady;
+  await expect.poll(() => revisions.revisionReads()).toBeGreaterThan(0);
+
+  const main = page.locator(".dashboard-shell__main");
+  const table = page.locator(".audit-sentence-list");
+  const readingRow = table.locator("tbody tr:not(.data-table__day-row)").nth(24);
+  await readingRow.scrollIntoViewIfNeeded();
+  await expect(readingRow).toBeInViewport();
+  const readingRowBefore = await box(readingRow);
+  const scrollTopBefore = await main.evaluate((element) => element.scrollTop);
+  expect(scrollTopBefore).toBeGreaterThan(0);
+
+  const newEntry = {
+    ...manyAuditEntries[0],
+    auditId: "realtime-audit-new",
+    actorDisplayName: "Mira Fox",
+    createdAt: at(0, 1),
+  };
+  mutableAudit.unshift(newEntry);
+  revision = 2;
+  socketSender?.(JSON.stringify({
+    version: 1,
+    id: "realtime-audit-hint",
+    createdAt: newEntry.createdAt,
+    channelId,
+    type: "event_log.new",
+    payload: { entries: [{ eventId: newEntry.auditId, createdAt: newEntry.createdAt, moduleId: "members", code: "member.role_changed", actorUserId: newEntry.actorUserId }] },
+  }));
+
+  const latestEntriesButton = page.getByRole("button", { name: /^1 neuer Eintrag/u });
+  await expect(latestEntriesButton).toBeVisible();
+  const readingRowAfter = await box(readingRow);
+  expect(readingRowAfter.y).toBe(readingRowBefore.y);
+  expect(await main.evaluate((element) => element.scrollTop)).toBe(scrollTopBefore);
+
+  await latestEntriesButton.click();
+  await expect(table.locator("tbody tr:not(.data-table__day-row)").first()).toContainText("Mira Fox");
 });
 
 test("event rows switch to the two-line layout when the inspector leaves a narrow list", async ({ page }) => {
@@ -216,13 +428,14 @@ test("day headers stay below the dashboard header on desktop and mobile", async 
   }
 });
 
-test("relative-time and day-label clock ticks keep event row geometry stable", async ({ page }) => {
+test("relative-time and day-label clock ticks keep event and audit row geometry stable", async ({ page }) => {
   const start = new Date("2026-10-13T21:59:45.000Z");
   // Install slightly earlier and pause at `start`, so the real runner speed cannot advance the page clock.
   await page.clock.install({ time: new Date(start.getTime() - 1000) });
   await page.clock.pauseAt(start);
   await mockApi(page, {
     eventEntries: [{ ...events[0], createdAt: start.toISOString() }],
+    auditEntries: [{ ...audit[0], createdAt: start.toISOString() }],
   });
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(`/channels/${channelId}/events`);
@@ -244,6 +457,21 @@ test("relative-time and day-label clock ticks keep event row geometry stable", a
   await expect(time).toHaveText("vor 30 Sek.");
   await expect(table.locator(".data-table__day-row")).toHaveText("Gestern");
   expect(await box(row)).toEqual(initial);
+
+  await page.goto(`/channels/${channelId}/audit`);
+  const auditTable = page.locator(".audit-sentence-list");
+  const auditRow = auditTable.locator("tbody tr:not(.data-table__day-row)").first();
+  const auditTime = auditRow.locator("time");
+  await expect(async () => {
+    await page.clock.runFor(10);
+    await expect(auditRow).toBeVisible({ timeout: 200 });
+  }).toPass();
+  await expect(auditTime).toHaveText("vor 30 Sek.");
+  await expect(auditTable.locator(".data-table__day-row")).toHaveText("Gestern");
+  const auditInitial = await box(auditRow);
+  await page.clock.fastForward(30_000);
+  await expect(auditTime).toHaveText("vor 1 Min.");
+  expect(await box(auditRow)).toEqual(auditInitial);
 });
 
 test("event and audit tables reserve their date rows until channel settings resolve", async ({ page }) => {

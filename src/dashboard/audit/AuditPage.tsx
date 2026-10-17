@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 
-import type { PanelAuditEntry, PanelAuditFilters } from "../../panel-contract";
+import type { PanelAuditEntry, PanelAuditFilters, PanelAuditResponse } from "../../panel-contract";
 import { AUDIT_AREAS } from "../../contracts/values";
-import { apiErrorText, auditFieldLabel, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber } from "../locale";
+import { apiErrorText, auditFieldLabel, dashboardCommonTexts, dashboardLanguage, dashboardTexts } from "../locale";
 import { useChannelSettings } from "../data/channel-settings";
 import { browserTimeZone } from "../ui/format-relative-time";
 import { ModuleHeading } from "../module-panels";
 import { loadModuleSettingsEditor } from "../module-panel-loaders";
 import { formatEventDetail } from "../events/model";
-import { AuditSentence, Badge, ChipGroup, DataTable, EmptyState, Field, FilterBar, InspectorSection, ListDetail, ListPaginationFooter, LoadState as UiLoadState, LoadStateLines, notify, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
+import { AuditSentence, Badge, Button, ChipGroup, DataTable, EmptyState, Field, FilterBar, InspectorSection, ListDetail, ListPaginationFooter, LoadState as UiLoadState, LoadStateLines, notify, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
 import { PanelApiError } from "../api";
 import { dashboardDataKeys } from "../data/keys";
 import { useAuditQuery } from "../data/lists";
@@ -26,6 +26,16 @@ import {
 } from "./model";
 
 const PERSON_FILTER_DEBOUNCE_MS = 300;
+
+const auditEntriesFromPages = (pages: readonly PanelAuditResponse[]): PanelAuditEntry[] => [
+  ...new Map(pages.flatMap((page) => page.entries).map((entry) => [entry.auditId, entry])).values(),
+];
+
+const isOlderAuditEntry = (entry: PanelAuditEntry, boundary: PanelAuditEntry): boolean => {
+  const entryTime = Date.parse(entry.createdAt);
+  const boundaryTime = Date.parse(boundary.createdAt);
+  return entryTime < boundaryTime || (entryTime === boundaryTime && entry.auditId < boundary.auditId);
+};
 
 const AuditFilterBar = ({
   filters,
@@ -163,30 +173,35 @@ export const AuditPage = ({ channelId, filters, onFiltersChange }: AuditPageProp
     notify({ tone: "error", message });
   }, [query.error, query.isError]);
   const pages = query.data?.pages ?? [];
-  const entries = [...new Map(pages.flatMap((page) => page.entries).map((entry) => [entry.auditId, entry])).values()];
+  const entries = auditEntriesFromPages(pages);
   const nextCursor = pages.at(-1)?.nextCursor ?? null;
   const error = query.error instanceof PanelApiError
     ? apiErrorText(query.error.code, dashboardTexts().errors.dataLoadFailed)
     : query.isError ? dashboardTexts().errors.dataLoadFailed : null;
   return <AuditPageContent
     identityKey={identityKey}
+    pages={pages}
     channelTimeZone={channelTimeZone}
     timeZoneFallback={timeZoneFallback}
     entries={entries}
-    nextCursor={query.isPlaceholderData ? null : nextCursor}
+    nextCursor={nextCursor}
     filters={filters}
     onFiltersChange={onFiltersChange}
     loading={query.isPending}
     fetching={query.isFetching && !query.isFetchingNextPage}
     error={error}
     loadingNextPage={query.isFetchingNextPage}
-    onNextPage={() => { void query.fetchNextPage(); }}
-    onRetry={() => { void query.refetch(); }}
+    onNextPage={() => { void query.fetchNextPage({ cancelRefetch: false }); }}
+    onRetry={async () => {
+      const result = await query.refetch();
+      return result.data?.pages;
+    }}
   />;
 };
 
-const AuditPageContent = ({ identityKey, channelTimeZone, timeZoneFallback, entries, nextCursor, filters, onFiltersChange, loading, fetching, error, onNextPage, onRetry, loadingNextPage }: {
+const AuditPageContent = ({ identityKey, pages, channelTimeZone, timeZoneFallback, entries, nextCursor, filters, onFiltersChange, loading, fetching, error, onNextPage, onRetry, loadingNextPage }: {
   identityKey: string;
+  pages: readonly PanelAuditResponse[];
   channelTimeZone: string | null;
   timeZoneFallback: boolean;
   entries: readonly PanelAuditEntry[];
@@ -197,12 +212,69 @@ const AuditPageContent = ({ identityKey, channelTimeZone, timeZoneFallback, entr
   fetching: boolean;
   error: string | null;
   onNextPage: () => void;
-  onRetry: () => void;
+  onRetry: () => Promise<readonly PanelAuditResponse[] | undefined>;
   loadingNextPage: boolean;
 }): ReactElement => {
   const texts = dashboardTexts();
+  const feedRef = useRef<HTMLElement>(null);
+  const identityKeyRef = useRef(identityKey);
+  identityKeyRef.current = identityKey;
+  const [snapshot, setSnapshot] = useState(() => ({ identityKey, entries, pageCount: pages.length, awaitingInitialPage: loading }));
+  let displaySnapshot = snapshot;
+  if (displaySnapshot.identityKey !== identityKey) {
+    displaySnapshot = { identityKey, entries, pageCount: pages.length, awaitingInitialPage: loading };
+    setSnapshot(displaySnapshot);
+  }
+  if (displaySnapshot.awaitingInitialPage && !loading) {
+    displaySnapshot = { ...displaySnapshot, entries, pageCount: pages.length, awaitingInitialPage: false };
+    setSnapshot(displaySnapshot);
+  } else if (!displaySnapshot.awaitingInitialPage && pages.length < displaySnapshot.pageCount) {
+    displaySnapshot = { ...displaySnapshot, pageCount: pages.length };
+    setSnapshot(displaySnapshot);
+  } else if (!displaySnapshot.awaitingInitialPage && pages.length > displaySnapshot.pageCount) {
+    const loadedOlderEntries = pages.slice(displaySnapshot.pageCount).flatMap((page) => page.entries);
+    const seenIds = new Set(displaySnapshot.entries.map((entry) => entry.auditId));
+    const boundary = displaySnapshot.entries.at(-1);
+    const appendedEntries: PanelAuditEntry[] = [];
+    for (const entry of loadedOlderEntries) {
+      if (seenIds.has(entry.auditId) || (boundary !== undefined && !isOlderAuditEntry(entry, boundary))) continue;
+      seenIds.add(entry.auditId);
+      appendedEntries.push(entry);
+    }
+    displaySnapshot = {
+      ...displaySnapshot,
+      entries: [...displaySnapshot.entries, ...appendedEntries],
+      pageCount: pages.length,
+    };
+    setSnapshot(displaySnapshot);
+  }
+
+  const displayedEntries = displaySnapshot.entries;
+  const displayedIds = new Set(displayedEntries.map((entry) => entry.auditId));
+  const pendingCount = displaySnapshot.awaitingInitialPage ? 0 : entries.filter((entry) => !displayedIds.has(entry.auditId)).length;
+  const refreshSnapshot = (): void => {
+    const requestedIdentity = identityKey;
+    void onRetry().then((freshPages) => {
+      if (identityKeyRef.current !== requestedIdentity) return;
+      if (freshPages === undefined) return;
+      setSnapshot({ identityKey, entries: auditEntriesFromPages(freshPages), pageCount: freshPages.length, awaitingInitialPage: false });
+    });
+  };
+  const jumpToLatest = (): void => {
+    const feed = feedRef.current;
+    const scrollRoot = document.querySelector<HTMLElement>(".dashboard-shell__main");
+    if (feed !== null && scrollRoot !== null) {
+      const feedStart = feed.getBoundingClientRect().top - scrollRoot.getBoundingClientRect().top + scrollRoot.scrollTop;
+      if (typeof scrollRoot.scrollTo === "function") scrollRoot.scrollTo({ top: Math.max(0, feedStart), behavior: "auto" });
+      else scrollRoot.scrollTop = Math.max(0, feedStart);
+    } else if (feed !== null && typeof window.scrollTo === "function") {
+      const feedStart = feed.getBoundingClientRect().top + window.scrollY;
+      window.scrollTo({ top: Math.max(0, feedStart), behavior: "auto" });
+    }
+    setSnapshot({ identityKey, entries, pageCount: pages.length, awaitingInitialPage: false });
+  };
   const { selectedKey: selectedAuditId, select: selectAudit, rowRef: auditRowRef, close: closeAudit } = useInspectorSelection<string>(identityKey);
-  const selectedAudit = entries.find((entry) => entry.auditId === selectedAuditId) ?? null;
+  const selectedAudit = displayedEntries.find((entry) => entry.auditId === selectedAuditId) ?? null;
   const moduleCatalog = useModuleFieldCatalog(selectedAudit);
   const selectedDiffRows = selectedAudit === null ? [] : auditDiffRows(selectedAudit.before, selectedAudit.after);
   const filterActive = auditFilterIsActive(filters);
@@ -211,42 +283,45 @@ const AuditPageContent = ({ identityKey, channelTimeZone, timeZoneFallback, entr
       <ModuleHeading
         kind="audit"
         title={texts.audit.title}
-        subtitle={loading && entries.length === 0
-          ? <span className="module-heading__subtitle-placeholder" aria-hidden="true"><span className="number">{formatNumber(0)}</span> {texts.audit.entries}</span>
-          : <><span className="number">{formatNumber(entries.length)}</span> {texts.audit.entries}</>}
+        subtitle={loading && displayedEntries.length === 0
+          ? <span className="module-heading__subtitle-placeholder" aria-hidden="true">{texts.audit.entries(0)}</span>
+          : texts.audit.entries(displayedEntries.length)}
+        actions={<Button variant="neutral" icon="reload" disabled={fetching} onClick={refreshSnapshot}>{texts.audit.refresh}</Button>}
       />
       <ListDetail
         onCloseInspector={closeAudit}
         list={
-          <section className="content-section" aria-label={texts.audit.title}>
+          <section ref={feedRef} className="content-section audit-page-list" aria-label={texts.audit.title}>
             <AuditFilterBar filters={filters} onChange={onFiltersChange} />
-            <UiLoadState
-              variant="status-row"
-              status={error !== null && entries.length > 0 ? "error" : "success"}
-              loading={null}
-              empty={null}
-              error={null}
-              {...(error !== null && entries.length > 0 ? { queryError: { title: texts.audit.loadError, message: error, onRetry } } : {})}
-            >{null}</UiLoadState>
+            <div className="audit-pagination" aria-label={texts.audit.olderEntries}>
+              <div className="audit-new-entries-slot" aria-live="polite">
+                {error !== null && displayedEntries.length > 0
+                  ? <div className="audit-request-error"><span role="alert">{error}</span><Button variant="neutral" icon="reload" iconOnly ariaLabel={texts.audit.refresh} disabled={fetching} onClick={refreshSnapshot} /></div>
+                  : pendingCount === 0 ? null : <Button variant="neutral" icon="jumpToTop" ariaLabel={`${texts.audit.newEntries(pendingCount)} · ${texts.audit.jumpToLatest}`} onClick={jumpToLatest}>{texts.audit.newEntries(pendingCount)}</Button>}
+              </div>
+              {displayedEntries.length === 0 && nextCursor === null ? null : <ListPaginationFooter loadedCount={displayedEntries.length} loadedLabel={texts.audit.loaded}>
+                {nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage || fetching}>{loadingNextPage ? texts.audit.loadingOlderEntries : texts.audit.olderEntries}</button>}
+              </ListPaginationFooter>}
+            </div>
             <UiLoadState
               variant="panel-420"
-              status={loading
+              status={loading && displayedEntries.length === 0
                 ? "loading"
-                : error !== null && entries.length === 0 ? "error"
-                : entries.length === 0 ? "empty" : "success"}
+                : error !== null && displayedEntries.length === 0 ? "error"
+                : displayedEntries.length === 0 ? "empty" : "success"}
               loading={<LoadStateLines rows={50} height={44} />}
               empty={filterActive
                 ? <EmptyState title={texts.audit.noMatches} description={texts.audit.activeFilters} action={{ label: texts.audit.resetFilters, onClick: () => { onFiltersChange(emptyAuditFilter); } }} />
                 : <p className="empty-state">{texts.audit.empty}</p>}
               error={<p role="alert">{error ?? texts.audit.load}</p>}
-              queryError={{ title: texts.audit.loadError, message: error ?? texts.audit.load, onRetry }}
+              queryError={{ title: texts.audit.loadError, message: error ?? texts.audit.load, onRetry: refreshSnapshot }}
             >
-              {entries.length > 0 ? <>
+              {displayedEntries.length > 0 ? <>
               <div key={identityKey} className={fetching ? "stale" : undefined} aria-busy={fetching}>
                 <DataTable
                   ariaLabel={texts.audit.title}
                   className="audit-sentence-list"
-                  rows={entries.map((entry) => ({
+                  rows={displayedEntries.map((entry) => ({
                     ...entry,
                     id: entry.auditId,
                     at: entry.createdAt,
@@ -280,9 +355,6 @@ const AuditPageContent = ({ identityKey, channelTimeZone, timeZoneFallback, entr
               </div>
             </> : null}
             </UiLoadState>
-            {entries.length === 0 && nextCursor === null ? null : <ListPaginationFooter loadedCount={entries.length} loadedLabel={texts.audit.loaded}>
-              {nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage || fetching}>{loadingNextPage ? texts.audit.loadingOlderEntries : texts.audit.olderEntries}</button>}
-            </ListPaginationFooter>}
           </section>
         }
         inspector={selectedAudit === null ? null : (

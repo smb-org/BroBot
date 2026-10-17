@@ -357,6 +357,7 @@ export interface ChannelVariablesTexts {
   maximumValueReached: string;
   resetOnStreamStart: string;
   resetHint: string;
+  resetValue: (enabled: boolean) => string;
   renameHint: string;
   usages: string;
   noUsages: string;
@@ -372,8 +373,10 @@ export interface ChannelVariablesTexts {
   deleteCancel: string;
   inUseReason: (usages: string) => string;
   managementLocked: string;
+  definitionConflict: string;
   limitReached: string;
   newVariable: string;
+  backToList: string;
   save: string;
   discard: string;
   close: string;
@@ -400,7 +403,7 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     value: "Wert", generalSection: "Allgemein", valueSection: "Aktueller Wert",
     valueHint: "Ganze Zahl von −999.999.999 bis 999.999.999.", editValue: "Wert bearbeiten", applyValue: "Übernehmen", cancelValueEdit: "Abbrechen",
     minimumValueReached: "Der Mindestwert ist erreicht.", maximumValueReached: "Der Höchstwert ist erreicht.",
-    resetOnStreamStart: "Bei Streamstart auf null setzen", resetHint: "Wird zurückgesetzt, wenn der nächste Stream startet.",
+    resetOnStreamStart: "Bei Streamstart auf null setzen", resetHint: "Wird zurückgesetzt, wenn der nächste Stream startet.", resetValue: (enabled) => enabled ? "Ja" : "Nein",
     renameHint: "Vorlagen und gespeicherte Overlay-Elemente werden angepasst.", usages: "Verwendet in", noUsages: "Noch nicht verwendet.",
     usageKindLabel: (kind) => kind === "action" ? "Aktion" : kind === "display" ? "Anzeige" : "Vorlage",
     usageModuleLabel: (moduleId) => moduleId === "text_commands" ? "Textbefehle" : moduleId === "overlays" ? "Overlays" : moduleId.replace(/[_-]+/gu, " "),
@@ -412,7 +415,8 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     deleteConfirm: (name) => `Variable löschen: ${name}`, deleteCancel: "Abbrechen",
     inUseReason: (usages) => `Wird von ${usages} verwendet. Entferne zuerst die Befehlsaktion.`,
     managementLocked: "Nur Broadcaster und Verwalter dürfen Variablen anlegen, umbenennen, beschreiben oder löschen.",
-    limitReached: "Die maximale Zahl der Kanalvariablen ist erreicht.", newVariable: "Neue Variable", save: "Speichern", discard: "Verwerfen", close: "Schließen",
+    definitionConflict: "Diese Variable wurde inzwischen umbenannt oder gelöscht. Verwirf die Änderungen, um den Editor zu schließen.",
+    limitReached: "Die maximale Zahl der Kanalvariablen ist erreicht.", newVariable: "Neue Variable", backToList: "Zurück zur Liste", save: "Speichern", discard: "Verwerfen", close: "Schließen",
     useInOverlay: "In Overlay verwenden", useOverlayHint: "Wähle ein Overlay. Die Variable wird im Editor als ungespeicherter Entwurf eingefügt.",
     chooseOverlay: "Overlay auswählen", createOverlay: "Neues Overlay", newOverlayName: "Name des neuen Overlays",
     defaultOverlayName: (variableName) => `Overlay ${variableName}`,
@@ -429,7 +433,7 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     value: "Value", generalSection: "General", valueSection: "Current value",
     valueHint: "Integer from −999,999,999 to 999,999,999.", editValue: "Edit value", applyValue: "Apply", cancelValueEdit: "Cancel",
     minimumValueReached: "The minimum value has been reached.", maximumValueReached: "The maximum value has been reached.",
-    resetOnStreamStart: "Reset to zero when the stream starts", resetHint: "Resets when the next stream starts.",
+    resetOnStreamStart: "Reset to zero when the stream starts", resetHint: "Resets when the next stream starts.", resetValue: (enabled) => enabled ? "Yes" : "No",
     renameHint: "Templates and saved overlay elements are updated.", usages: "Used in", noUsages: "Not used yet.",
     usageKindLabel: (kind) => kind === "action" ? "action" : kind === "display" ? "display" : "template",
     usageModuleLabel: (moduleId) => moduleId === "text_commands" ? "Text commands" : moduleId === "overlays" ? "Overlays" : moduleId.replace(/[_-]+/gu, " "),
@@ -441,7 +445,8 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     deleteConfirm: (name) => `Delete variable: ${name}`, deleteCancel: "Cancel",
     inUseReason: (usages) => `Used by ${usages}. Remove the command action first.`,
     managementLocked: "Only broadcasters and managers may create, rename, describe, or delete variables.",
-    limitReached: "The channel has reached its variable limit.", newVariable: "New variable", save: "Save", discard: "Discard", close: "Close",
+    definitionConflict: "This variable was renamed or deleted elsewhere. Discard your changes to close the editor.",
+    limitReached: "The channel has reached its variable limit.", newVariable: "New variable", backToList: "Back to list", save: "Save", discard: "Discard", close: "Close",
     useInOverlay: "Use in overlay", useOverlayHint: "Choose an overlay. The variable is added as an unsaved draft in the editor.",
     chooseOverlay: "Choose an overlay", createOverlay: "New overlay", newOverlayName: "New overlay name",
     defaultOverlayName: (variableName) => `${variableName} overlay`,
@@ -805,7 +810,6 @@ export interface DashboardTexts {
     module: string;
     manageModules: string;
     moduleCategories: Readonly<Record<ModuleNavigationCategory, string>>;
-    events: string;
     audit: string;
     selectChannel: string;
     accountMenu: string;
@@ -904,7 +908,7 @@ export interface DashboardTexts {
   };
   audit: {
     title: string;
-    entries: string;
+    entries: (count: number) => string;
     who: string;
     systemActor: string;
     load: string;
@@ -916,6 +920,9 @@ export interface DashboardTexts {
     olderEntries: string;
     loaded: string;
     loadingOlderEntries: string;
+    refresh: string;
+    newEntries: (count: number) => string;
+    jumpToLatest: string;
     yes: string;
     no: string;
     newValue: string;
@@ -1278,7 +1285,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     navigation: {
       mainNavigation: "Hauptnavigation", overview: "Übersicht", live: "Live", setup: "Einrichten", channel: "Kanal", system: "System", locationWeather: "Ort & Wetter",
-      members: "Mitglieder", variables: "Variablen", module: "Module", events: "Ereignisse", audit: "Protokoll", selectChannel: "Kanal auswählen",
+      members: "Mitglieder", variables: "Variablen", module: "Module", audit: "Protokoll", selectChannel: "Kanal auswählen",
       accountMenu: "Konto", appearance: "Darstellung", appearanceNightShift: "Nachtschicht", appearanceIndigoNight: "Indigo-Nacht",
       manageModules: "Module verwalten", moduleCategories: { chat: "Chat", participation: "Mitmachen", twitch: "Twitch", data: "Daten", stream: "Stream", admin: "Verwaltung" },
       overlays: "Overlays",
@@ -1336,9 +1343,10 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       twitchMessage: "Twitch-Meldung", httpStatus: "HTTP-Status", missingBotPermissions: "Fehlende Bot-Berechtigungen", missingScopes: "Fehlende Scopes",
     },
     audit: {
-      title: "Audit-Log", entries: "Einträge", who: "Wer", systemActor: "Automatisches System",
+      title: "Protokoll", entries: (count) => `${String(count)} ${count === 1 ? "Eintrag" : "Einträge"}`, who: "Wer", systemActor: "Automatisches System",
       load: "Audit-Log wird geladen …", loadError: "Der Audit-Log konnte nicht geladen werden.", empty: "Noch keine Audit-Einträge gespeichert.", changeData: "Änderungsdaten",
       before: "Vorher", after: "Nachher", olderEntries: "Ältere Einträge laden", loaded: "geladen", loadingOlderEntries: "Ältere Einträge werden geladen …",
+      refresh: "Aktualisieren", newEntries: (count) => `${String(count)} ${count === 1 ? "neuer Eintrag" : "neue Einträge"}`, jumpToLatest: "Zu den neuesten Einträgen springen",
       yes: "Ja", no: "Nein", newValue: "neu", removedValue: "entfernt",
       changedTruncated: "geändert (Text länger als die Vorschau)", changesHeading: "Änderungen",
       sentenceTemplates: {
@@ -1422,7 +1430,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       activeFilters: "Aktive Filter:", resetFilters: "Filter zurücksetzen", noMatches: "Keine Einträge passen zu den Filtern.",
     },
     events: {
-      title: "Ereignisse", count: (count) => `${count} Einträge`, log: "Ereignisprotokoll", time: "Zeit", event: "Ereignis",
+      title: "Kanalereignisse", count: (count) => `${count} ${count === 1 ? "Eintrag" : "Einträge"}`, log: "Ereignisprotokoll", time: "Zeit", event: "Ereignis",
       module: "Modul", who: "Wer", automatic: "Automatisch", info: "Info", error: "Fehler", notice: "Hinweis", unknown: "Unbekannt", timestamp: "Zeitstempel", operation: "Vorgang", history: "Verlauf",
       load: "Ereignisse werden geladen …",
       none: "Noch keine Ereignisse protokolliert.", detail: "Detail", loadOlder: "Ältere Ereignisse laden", loadingOlder: "Ältere Ereignisse werden geladen …",
@@ -1715,7 +1723,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     navigation: {
       mainNavigation: "Main navigation", overview: "Overview", live: "Live", setup: "Setup", channel: "Channel", system: "System", locationWeather: "Location & weather",
-      members: "Members", variables: "Variables", module: "Modules", events: "Events", audit: "Log", selectChannel: "Select channel",
+      members: "Members", variables: "Variables", module: "Modules", audit: "Log", selectChannel: "Select channel",
       accountMenu: "Account", appearance: "Appearance", appearanceNightShift: "Night shift", appearanceIndigoNight: "Indigo night",
       manageModules: "Manage modules", moduleCategories: { chat: "Chat", participation: "Participation", twitch: "Twitch", data: "Data", stream: "Stream", admin: "Administration" },
       overlays: "Overlays",
@@ -1768,9 +1776,10 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       twitchMessage: "Twitch message", httpStatus: "HTTP status", missingBotPermissions: "Missing bot permissions", missingScopes: "Missing scopes",
     },
     audit: {
-      title: "Audit log", entries: "entries", who: "Who", systemActor: "Automated system",
+      title: "Audit log", entries: (count) => `${String(count)} ${count === 1 ? "entry" : "entries"}`, who: "Who", systemActor: "Automated system",
       load: "Loading audit log …", loadError: "The audit log could not be loaded.", empty: "No audit entries saved yet.", changeData: "Change data",
       before: "Before", after: "After", olderEntries: "Load older entries", loaded: "loaded", loadingOlderEntries: "Loading older entries …",
+      refresh: "Refresh", newEntries: (count) => `${String(count)} new ${count === 1 ? "entry" : "entries"}`, jumpToLatest: "Jump to the latest entries",
       yes: "Yes", no: "No", newValue: "new", removedValue: "removed",
       changedTruncated: "changed (text longer than preview)", changesHeading: "Changes",
       sentenceTemplates: {
@@ -1854,7 +1863,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       activeFilters: "Active filters:", resetFilters: "Reset filters", noMatches: "No entries match the filters.",
     },
     events: {
-      title: "Events", count: (count) => `${count} entries`, log: "Event log", time: "Time", event: "Event", module: "Module",
+      title: "Channel events", count: (count) => `${count} ${count === 1 ? "entry" : "entries"}`, log: "Event log", time: "Time", event: "Event", module: "Module",
       who: "Who", automatic: "Automatic", info: "Info", error: "Error", notice: "Notice", unknown: "Unknown", timestamp: "Timestamp", operation: "Operation", history: "History", load: "Loading events …", none: "No events logged yet.", detail: "Detail",
       loadOlder: "Load older events", loadingOlder: "Loading older events …",
       filter: "Filters", origin: "Origin", moduleFilter: "Module", allModules: "All modules", tone: "Tone", person: "Person", all: "All",

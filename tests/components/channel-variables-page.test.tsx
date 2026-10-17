@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState, type ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -7,6 +7,7 @@ import { UiProvider } from "../../src/dashboard/ui";
 import { ToastHost } from "../../src/dashboard/ui/Toast";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import { reconcileDashboardRealtimeMessage } from "../../src/dashboard/data/realtime";
+import { dashboardDataKeys } from "../../src/dashboard/data/keys";
 import type { RealtimeMessage } from "../../src/realtime-contract";
 import { jsonResponse } from "../unit/fixtures";
 import { renderWithQuery as render } from "../query-test-utils";
@@ -35,6 +36,21 @@ describe("Channel variables page", () => {
     setBrowserLanguage("de-DE");
   });
 
+  it("keeps the variable save cluster in the fixed editor header", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({
+      variables: [variable], count: 1, maximum: 25,
+    }))));
+
+    const { container } = render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+
+    const header = container.querySelector(".channel-variable-editor__header .page-header");
+    expect(header).not.toBeNull();
+    expect(within(header as HTMLElement).getByRole("button", { name: "Verwerfen" })).toBeDisabled();
+    expect(within(header as HTMLElement).getByRole("button", { name: "Speichern" })).toBeDisabled();
+    expect(container.querySelector(".inspector-actions")).toBeNull();
+  });
+
   it("shows a spaced table and lets operators change values while management actions stay locked", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({
       variables: [variable], count: 1, maximum: 25,
@@ -55,19 +71,18 @@ describe("Channel variables page", () => {
     if (row === null) throw new Error("Channel variable row is missing.");
     fireEvent.click(row);
 
-    const inspector = document.querySelector(".list-detail__inspector");
-    if (!(inspector instanceof HTMLElement)) throw new Error("Variable inspector is missing.");
-    const controls = within(inspector);
-    const resetSwitch = controls.getByRole("switch", { name: "Bei Streamstart auf null setzen" });
-    const resetField = resetSwitch.closest(".channel-variable-switch-control");
-    if (!(resetField instanceof HTMLElement)) throw new Error("Reset switch field is missing.");
-    expect(resetSwitch.closest(".channel-variable-switch-control")).toBeInTheDocument();
-    expect(controls.getByRole("button", { name: "Bei Streamstart auf null setzen: Wird zurückgesetzt, wenn der nächste Stream startet." })).toHaveAttribute("title", "Wird zurückgesetzt, wenn der nächste Stream startet.");
-    const permissionNote = resetField.querySelector(".ui-locked-reason");
-    if (!(permissionNote instanceof HTMLElement)) throw new Error("Reset switch permission note is missing.");
-    expect(permissionNote).toHaveAttribute("role", "note");
-    expect(permissionNote).toHaveTextContent(/Nur Broadcaster und Verwalter dürfen Variablen/u);
-    expect(resetSwitch.getAttribute("aria-describedby")).toContain(permissionNote.id);
+    const editor = document.querySelector(".channel-variable-editor");
+    if (!(editor instanceof HTMLElement)) throw new Error("Variable editor is missing.");
+    const controls = within(editor);
+    expect(controls.queryByRole("switch", { name: "Bei Streamstart auf null setzen" })).not.toBeInTheDocument();
+    expect(controls.queryByRole("textbox", { name: "Name" })).not.toBeInTheDocument();
+    expect(editor.querySelector(".channel-variable-definition-properties")).toHaveTextContent("score");
+    expect(editor.querySelector(".channel-variable-definition-properties")).toHaveTextContent("Current score");
+    expect(editor.querySelector(".channel-variable-definition-properties")).toHaveTextContent("Ja");
+    const permissionNotes = within(editor).queryAllByText(/Nur Broadcaster und Verwalter dürfen Variablen/u);
+    expect(permissionNotes).toHaveLength(1);
+    expect(permissionNotes[0]).toHaveTextContent(/Nur Broadcaster und Verwalter dürfen Variablen/u);
+    expect(editor.querySelectorAll(".ui-locked-reason")).toHaveLength(0);
     const increase = await controls.findByRole("button", { name: "+1" });
     const decrease = controls.getByRole("button", { name: "−1" });
     const editValue = controls.getByRole("button", { name: "Wert bearbeiten" });
@@ -77,8 +92,61 @@ describe("Channel variables page", () => {
     expect(controls.queryByText("Nur Broadcaster und Verwalter dürfen Variablenwerte ändern.")).not.toBeInTheDocument();
     expect(controls.queryByRole("spinbutton", { name: "Setzen auf" })).not.toBeInTheDocument();
     expect(controls.getByRole("button", { name: "Speichern" })).toBeDisabled();
-    expect(controls.getByRole("button", { name: "Speichern" })).toHaveAttribute("title", expect.stringContaining("Nur Broadcaster"));
     expect(screen.queryByText("Overlay-Link")).not.toBeInTheDocument();
+  });
+
+  it("keeps a dirty definition draft visible and guarded after a remote removal", async () => {
+    let currentVariables = [variable];
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname.endsWith("/overlay-tokens")) return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.resolve(jsonResponse({ variables: currentVariables, count: currentVariables.length, maximum: 25 }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const rendered = render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Beschreibung" }), { target: { value: "Local draft" } });
+    currentVariables = [];
+    await act(async () => {
+      await rendered.queryClient.invalidateQueries({ queryKey: dashboardDataKeys.variables("kanal-a"), exact: true });
+    });
+    await screen.findByText(/umbenannt oder gelöscht/u);
+
+    const editor = document.querySelector(".channel-variable-editor");
+    expect(editor).toBeInTheDocument();
+    expect(within(editor as HTMLElement).getByRole("textbox", { name: "Beschreibung" })).toHaveValue("Local draft");
+    expect(editor).toHaveTextContent("Diese Variable wurde inzwischen umbenannt oder gelöscht.");
+    const beforeUnload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(beforeUnload);
+    expect(beforeUnload.defaultPrevented).toBe(true);
+
+    fireEvent.click(within(editor as HTMLElement).getByRole("button", { name: "Verwerfen" }));
+    expect(document.querySelector(".channel-variable-editor")).not.toBeInTheDocument();
+  });
+
+  it("shows only one management permission reason when an operator's selected variable is removed remotely", async () => {
+    let currentVariables = [variable];
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname.endsWith("/overlay-tokens")) return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.resolve(jsonResponse({ variables: currentVariables, count: currentVariables.length, maximum: 25 }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const rendered = render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage={false} onOpenCommand={() => {}} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+    const editor = document.querySelector(".channel-variable-editor");
+    if (!(editor instanceof HTMLElement)) throw new Error("Variable editor is missing.");
+
+    currentVariables = [];
+    await act(async () => {
+      await rendered.queryClient.invalidateQueries({ queryKey: dashboardDataKeys.variables("kanal-a"), exact: true });
+    });
+    await screen.findByText(/umbenannt oder gelöscht/u);
+
+    expect(document.querySelector(".channel-variables-permission-note")).toBeNull();
+    expect(within(editor).queryAllByText(/Nur Broadcaster und Verwalter dürfen Variablen/u)).toHaveLength(1);
   });
 
   it("edits the current value inline, confirms on Enter, cancels on Escape, and applies one-step changes immediately", async () => {
@@ -189,6 +257,40 @@ describe("Channel variables page", () => {
     expect(requests.some(({ path }) => path.endsWith("/overlays/overlay-a"))).toBe(false);
   });
 
+  it("uses the renamed variable when saving before opening the overlay editor", async () => {
+    const requests: Array<{ path: string; method: string; body?: string }> = [];
+    let savedVariable = variable;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      const method = init?.method ?? "GET";
+      requests.push({ path: url.pathname, method, ...(typeof init?.body === "string" ? { body: init.body } : {}) });
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/variables/score" && method === "PATCH") {
+        savedVariable = { ...variable, name: "wins" };
+        return Promise.resolve(jsonResponse({ variable: savedVariable, usages: [] }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [savedVariable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      if (url.pathname === "/api/channels/kanal-a/overlays") return Promise.resolve(jsonResponse({
+        overlays: [{ id: "overlay-a", name: "Gameplay", width: 1920, height: 1080, revision: 2, elementCount: 1 }],
+        maximum: 20,
+        elementMaximum: 20,
+      }));
+      return Promise.reject(new Error(`Unexpected request ${method} ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const onOpenOverlay = vi.fn();
+    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} onOpenOverlay={onOpenOverlay} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "wins" } });
+    fireEvent.click(screen.getByRole("button", { name: "In Overlay verwenden" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Editor öffnen" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Speichern und wechseln" }));
+
+    await waitFor(() => expect(onOpenOverlay).toHaveBeenCalledWith("overlay-a", "wins"));
+    expect(requests.find(({ method }) => method === "PATCH")?.body).toBe(JSON.stringify({ newName: "wins", description: "Current score", resetOnStreamStart: true }));
+  });
+
   it("shows text command usages with one leading bang", async () => {
     const usedVariable = { ...variable, usages: [{ moduleId: "text_commands", itemName: "!score", kind: "template" as const }] };
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({ variables: [usedVariable], count: 1, maximum: 25 }))));
@@ -277,7 +379,7 @@ describe("Channel variables page", () => {
     render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage={false} onOpenCommand={() => {}} /></UiProvider>);
     fireEvent.click(await screen.findByRole("row", { name: /score/i }));
     expect(screen.getByRole("button", { name: "Neu verbinden" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Neu verbinden" })).toHaveAttribute("title", expect.stringContaining("Nur Broadcaster"));
+    expect(within(document.querySelector(".channel-variable-editor") as HTMLElement).queryAllByText(/Nur Broadcaster und Verwalter dürfen Variablen/u)).toHaveLength(1);
   });
 
   it("refuses to reconnect an element that the latest overlay response already binds to another variable", async () => {
@@ -381,15 +483,14 @@ describe("Channel variables page", () => {
     render(<UiProvider><Harness /></UiProvider>);
 
     await screen.findByText("{var.score}");
-    const nameField = await screen.findByLabelText("Name");
-    expect(nameField).toHaveValue("score");
+    expect(document.querySelector(".channel-variable-definition-properties")).toHaveTextContent("score");
 
     fireEvent.click(screen.getByRole("button", { name: "Request other variable" }));
-    expect(await screen.findByLabelText("Name")).toHaveValue("other");
+    expect(await screen.findByText("other", { selector: ".channel-variable-definition-properties dd" })).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "Leave variables" }));
     fireEvent.click(screen.getByRole("button", { name: "Return to variables" }));
     await screen.findByRole("table");
-    expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
+    expect(document.querySelector(".channel-variable-definition-properties")).not.toBeInTheDocument();
   });
 });

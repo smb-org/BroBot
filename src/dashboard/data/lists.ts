@@ -19,8 +19,7 @@ export const useAuditQuery = (channelId: string, filters: PanelAuditFilters) => 
   initialPageParam: null as string | null,
   queryFn: ({ pageParam, signal }) => fetchAuditLog(channelId, pageParam, signal, filters),
   getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-  placeholderData: (previousData, previousQuery) =>
-    previousQuery?.queryKey[1] === channelId ? previousData : undefined,
+  placeholderData: () => undefined,
   refetchOnWindowFocus: false,
 });
 
