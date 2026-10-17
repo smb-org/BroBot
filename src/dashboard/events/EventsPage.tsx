@@ -9,7 +9,7 @@ import { useRealtimeEventFeed, type RealtimeFeedState, type RealtimeFeedStatus a
 import { useChannelSettings } from "../data/channel-settings";
 import { browserTimeZone } from "../ui/format-relative-time";
 import { Icon } from "../ui/Icon";
-import { ChipGroup, DataTable, EmptyState, InspectorSection, ListDetail, ListToolbar, LoadState as UiLoadState, LoadStateLines, notify, Popover, Select as UiSelect, StatusLed, SubInspector, useInspectorSelection, type QueryError, type SelectOption, type StatusLedState } from "../ui";
+import { ChipGroup, DataTable, EmptyState, InspectorSection, ListDetail, ListToolbar, LoadState as UiLoadState, LoadStateLines, Popover, Select as UiSelect, StatusLed, SubInspector, useInspectorSelection, type QueryError, type SelectOption, type StatusLedState } from "../ui";
 import { PanelApiError } from "../api";
 import { refreshQuery } from "../data/refresh";
 import { dashboardDataKeys } from "../data/keys";
@@ -310,12 +310,6 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
     if (query.isFetching || query.isPlaceholderData || !query.hasNextPage) return;
     void query.fetchNextPage({ cancelRefetch: false });
   }, [query]);
-  useEffect(() => {
-    if (!query.isError) return;
-    const fallback = dashboardTexts().errors.dataLoadFailed;
-    const message = query.error instanceof PanelApiError ? apiErrorText(query.error.code, fallback) : fallback;
-    notify({ tone: "error", message });
-  }, [query.error, query.isError]);
   const nextCursor = pages.at(-1)?.nextCursor ?? null;
   const error = query.error instanceof PanelApiError
     ? apiErrorText(query.error.code, dashboardTexts().errors.dataLoadFailed)

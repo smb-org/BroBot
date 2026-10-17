@@ -63,6 +63,9 @@ interface MockApiOptions {
   revisionVector?: () => Readonly<Record<string, number>>;
   settingsGate?: SettingsGate;
   settingsStatus?: number;
+  eventStatus?: number;
+  auditStatus?: number;
+  variableStatus?: number;
 }
 
 const mockApi = async (page: Page, options: MockApiOptions = {}): Promise<{ revisionReads: () => number }> => {
@@ -77,9 +80,9 @@ const mockApi = async (page: Page, options: MockApiOptions = {}): Promise<{ revi
       return route.fulfill(json({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 1, defaultChatTarget: "source_only", defaultChatTargetRevision: 1 }, options.settingsStatus));
     }
     if (pathname === `/api/channels/${channelId}/modules`) return route.fulfill(json({ modules: [{ id: "votekick", enabled: true, settings: "{}" }] }));
-    if (pathname === `/api/channels/${channelId}/events`) return route.fulfill(json({ entries: options.eventEntries ?? events, nextCursor: null }));
-    if (pathname === `/api/channels/${channelId}/audit-log` || pathname === `/api/channels/${channelId}/audit`) return route.fulfill(json({ entries: options.auditEntries ?? audit, nextCursor: null }));
-    if (pathname === `/api/channels/${channelId}/variables`) return route.fulfill(json({ variables: options.variableEntries ?? channelVariables, count: (options.variableEntries ?? channelVariables).length, maximum: 25 }));
+    if (pathname === `/api/channels/${channelId}/events`) return route.fulfill(json({ entries: options.eventEntries ?? events, nextCursor: null }, options.eventStatus));
+    if (pathname === `/api/channels/${channelId}/audit-log` || pathname === `/api/channels/${channelId}/audit`) return route.fulfill(json({ entries: options.auditEntries ?? audit, nextCursor: null }, options.auditStatus));
+    if (pathname === `/api/channels/${channelId}/variables`) return route.fulfill(json({ variables: options.variableEntries ?? channelVariables, count: (options.variableEntries ?? channelVariables).length, maximum: 25 }, options.variableStatus));
     if (pathname === `/api/channels/${channelId}/overlay-tokens`) return route.fulfill(json({ tokens: options.legacyTokens ?? [], nextOffset: null }));
     if (pathname === `/api/channels/${channelId}/overlays`) return route.fulfill(json({ overlays: [], maximum: 20, elementMaximum: 20 }));
     if (pathname === `/api/channels/${channelId}/revisions`) {
@@ -235,6 +238,24 @@ test("variables collection keeps the editor in its column without horizontal ove
     expect(await selectedRow.evaluate((row) => getComputedStyle(row).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     expect(await page.locator(".dashboard-shell__main").evaluate((main) => main.scrollWidth <= main.clientWidth)).toBe(true);
+  }
+});
+
+test("initial collection and feed errors stay inline without covering the page", async ({ page }) => {
+  await mockApi(page, { eventStatus: 500, auditStatus: 500, variableStatus: 500 });
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  for (const path of ["variables", "events", "audit"] as const) {
+    await page.goto(`/channels/${channelId}/${path}`);
+    const errorState = page.locator(".ui-load-state[data-status='error']");
+    await expect(errorState).toBeVisible();
+    await expect(errorState.locator("[role='alert']").first()).toBeVisible();
+    await expect(page.locator(".ui-toast-host .ui-toast")).toHaveCount(0);
+
+    const header = await box(page.locator(".dashboard-shell__header"));
+    const error = await box(errorState);
+    expect(error.y).toBeGreaterThanOrEqual(header.bottom);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   }
 });
 

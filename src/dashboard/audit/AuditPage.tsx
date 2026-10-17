@@ -8,7 +8,7 @@ import { browserTimeZone } from "../ui/format-relative-time";
 import { ModuleHeading } from "../module-panels";
 import { loadModuleSettingsEditor } from "../module-panel-loaders";
 import { formatEventDetail } from "../events/model";
-import { AuditSentence, Badge, Button, ChipGroup, DataTable, EmptyState, Field, FilterBar, InspectorSection, ListDetail, ListPaginationFooter, LoadState as UiLoadState, LoadStateLines, notify, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
+import { AuditSentence, Badge, Button, ChipGroup, DataTable, EmptyState, Field, FilterBar, InspectorSection, ListDetail, ListPaginationFooter, LoadState as UiLoadState, LoadStateLines, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
 import { PanelApiError } from "../api";
 import { dashboardDataKeys } from "../data/keys";
 import { useAuditQuery } from "../data/lists";
@@ -166,12 +166,6 @@ export const AuditPage = ({ channelId, filters, onFiltersChange }: AuditPageProp
   const channelTimeZone = timeZoneFallback ? browserTimeZone() : settingsQuery.data?.timeZone ?? null;
   const queryKey = dashboardDataKeys.audit(channelId, filters);
   const identityKey = JSON.stringify(queryKey);
-  useEffect(() => {
-    if (!query.isError) return;
-    const fallback = dashboardTexts().errors.dataLoadFailed;
-    const message = query.error instanceof PanelApiError ? apiErrorText(query.error.code, fallback) : fallback;
-    notify({ tone: "error", message });
-  }, [query.error, query.isError]);
   const pages = query.data?.pages ?? [];
   const entries = auditEntriesFromPages(pages);
   const nextCursor = pages.at(-1)?.nextCursor ?? null;

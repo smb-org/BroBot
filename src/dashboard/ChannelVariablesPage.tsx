@@ -135,11 +135,6 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   };
   const refreshBestEffort = (): void => { void refresh().catch(() => undefined); };
 
-  useEffect(() => {
-    if (!variablesQuery.isError) return;
-    notify({ tone: "error", message: variablesLoadError });
-  }, [variablesLoadError, variablesQuery.isError]);
-
   const selected = useMemo(() => variables.find((variable) => variable.name === selectedName) ?? null, [selectedName, variables]);
   const selectedForDisplay = selected ?? (selectedSnapshot?.name === selectedName ? selectedSnapshot : null);
   const definitionConflict = !creating && selectedName !== null && selected === null && definitionBaseline !== null;
