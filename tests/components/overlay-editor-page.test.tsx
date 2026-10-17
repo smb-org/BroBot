@@ -1007,13 +1007,13 @@ describe("Overlay composition editor", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
-    await waitFor(() => expect(document.querySelectorAll(".overlay-editor__element-list li")).toHaveLength(2));
+    await waitFor(() => expect(document.querySelectorAll(".overlay-editor__element-list tbody tr")).toHaveLength(2));
     expect(window.location.search).toBe("");
     expect(screen.getByRole("button", { name: "Speichern" })).toBeEnabled();
     expect(fetcher.mock.calls.filter(([input, init]) => requestUrl(input).pathname.endsWith("/overlays/overlay-a") && init?.method === "PUT")).toHaveLength(0);
   });
 
-  it("keeps a new overlay local until Save and drops it when discarded", async () => {
+  it("keeps a new overlay local while its creation dialog is open", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = requestUrl(input);
       if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
@@ -1031,16 +1031,19 @@ describe("Overlay composition editor", () => {
     fireEvent.click(await screen.findByText("{var.score}"));
     fireEvent.click(await screen.findByRole("button", { name: "In Overlay verwenden" }));
     fireEvent.click(await screen.findByRole("button", { name: "Editor öffnen" }));
-    expect(await screen.findByRole("heading", { name: "Overlay score", level: 1 })).toBeInTheDocument();
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("heading", { name: "Overlay erstellen" })).toBeInTheDocument();
     expect(fetcher.mock.calls.filter(([input, init]) => requestUrl(input).pathname === "/api/channels/kanal-a/overlays" && init?.method === "POST")).toHaveLength(0);
 
-    fireEvent.click(screen.getByRole("button", { name: "Entwurf verwerfen" }));
-    fireEvent.click(screen.getByRole("button", { name: "Zurück zu Overlays" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Schließen" }));
+    expect(await screen.findByRole("heading", { name: "Ungespeicherte Änderungen" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Verwerfen und verlassen" }));
     expect(await screen.findByRole("heading", { name: "Overlays", level: 1 })).toBeInTheDocument();
     expect(fetcher.mock.calls.filter(([input, init]) => requestUrl(input).pathname === "/api/channels/kanal-a/overlays" && init?.method === "POST")).toHaveLength(0);
   });
 
-  it("creates a new overlay only when Save is pressed", async () => {
+  it("creates an overlay and its OBS link in the creation dialog", async () => {
+    const createdOverlay: { current: typeof initialOverlay | null } = { current: null };
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = requestUrl(input);
       if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
@@ -1050,11 +1053,15 @@ describe("Overlay composition editor", () => {
       if (url.pathname === "/api/channels/kanal-a/overlays" && init?.method === "POST") {
         if (typeof init.body !== "string") throw new Error("Overlay create body must be JSON text.");
         const body = JSON.parse(init.body) as { name: string; width: number; height: number; initialElement?: typeof initialOverlay.elements[number] };
-        return Promise.resolve(jsonResponse({ overlay: {
+        createdOverlay.current = {
           ...initialOverlay,
           id: "overlay-new", name: body.name, width: body.width, height: body.height, css: "", revision: 1,
           elements: body.initialElement === undefined ? [] : [body.initialElement],
-        } }, 201));
+        };
+        return Promise.resolve(jsonResponse({ overlay: createdOverlay.current }, 201));
+      }
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-new/accesses" && init?.method === "POST") {
+        return Promise.resolve(jsonResponse({ tokenId: "access-new", overlayUrl: "https://brobot.example.test/overlay?token=secret", label: "OBS-Einbindung", expiresAt: null }));
       }
       return Promise.reject(new Error(`Unexpected request ${init?.method ?? "GET"} ${url.pathname}`));
     });
@@ -1062,10 +1069,22 @@ describe("Overlay composition editor", () => {
     window.history.replaceState({}, "", "/channels/kanal-a/overlays/new?name=Overlay+score&variable=score");
     render(<DashboardApp />);
 
-    expect(await screen.findByRole("heading", { name: "Overlay score", level: 1 })).toBeInTheDocument();
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("heading", { name: "Overlay erstellen" })).toBeInTheDocument();
     expect(fetcher.mock.calls.filter(([input, init]) => requestUrl(input).pathname === "/api/channels/kanal-a/overlays" && init?.method === "POST")).toHaveLength(0);
-    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+    fireEvent.click(within(dialog).getByRole("combobox", { name: "Breite × Höhe" }));
+    clickSelectOption(await screen.findByRole("option", { name: "Eigene Fläche", hidden: true }));
+    expect(within(dialog).getByRole("spinbutton", { name: "Breite" })).toBeVisible();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Weiter" }));
+    expect(within(dialog).getByRole("status")).toHaveTextContent("1 / 20");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Overlay anlegen und OBS-Link erstellen" }));
     await waitFor(() => expect(fetcher.mock.calls.filter(([input, init]) => requestUrl(input).pathname === "/api/channels/kanal-a/overlays" && init?.method === "POST")).toHaveLength(1));
+    expect(await within(dialog).findByText("https://brobot.example.test/overlay?token=secret")).toBeInTheDocument();
+    expect(fetcher.mock.calls.filter(([input, init]) => requestUrl(input).pathname === "/api/channels/kanal-a/overlays/overlay-new/accesses" && init?.method === "POST")).toHaveLength(1);
+    expect(createdOverlay.current?.elements).toHaveLength(1);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Zum Editor" }));
+    expect(await screen.findByRole("heading", { name: "Overlay score", level: 1 })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(fetcher.mock.calls.filter(([input, init]) => requestUrl(input).pathname === "/api/channels/kanal-a/overlays/overlay-new" && init?.method === "PUT")).toHaveLength(0);
   });
 
@@ -1091,7 +1110,7 @@ describe("Overlay composition editor", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
-    const reason = screen.getByText("Nur Verwalter und Broadcaster können die Komposition ändern.", { selector: "p" });
+    const reason = screen.getByText("Bediener können die Komposition ansehen, aber nicht ändern.", { selector: "p" });
     expect(reason).toHaveAttribute("id", "overlay-editor-readonly-reason");
     const addElement = screen.getByRole("button", { name: "Element hinzufügen" });
     const removeElement = screen.getByRole("button", { name: "Entfernen: Score" });
@@ -1104,8 +1123,9 @@ describe("Overlay composition editor", () => {
       expect(action).toBeDisabled();
       expect(action).toHaveAttribute("aria-describedby", "overlay-editor-readonly-reason");
     }
+    expect(screen.getAllByText("Bediener können die Komposition ansehen, aber nicht ändern.", { selector: "p" })).toHaveLength(1);
     fireEvent.click(screen.getByRole("tab", { name: "Stil-Editor" }));
-    expect(screen.getByText("Bediener dürfen den Overlay-Stil ansehen, aber nicht ändern.", { selector: "p" })).toBeInTheDocument();
+    expect(screen.getAllByText("Bediener können die Komposition ansehen, aber nicht ändern.", { selector: "p" })).toHaveLength(1);
     expect(screen.getByLabelText("Textfarbe")).toBeDisabled();
     const styleTarget = screen.getByRole("combobox", { name: "Stil anwenden auf" });
     expect(styleTarget).toBeEnabled();
@@ -1123,15 +1143,13 @@ describe("Overlay composition editor", () => {
     expect(shadowX).toBeDisabled();
     const shadowReasonId = shadowX.getAttribute("aria-describedby");
     expect(shadowReasonId).not.toBeNull();
-    expect(shadowReasonId?.split(" ")).toContain("overlay-style-disabled-reason");
-    expect(document.getElementById("overlay-style-disabled-reason")).toHaveTextContent("Bediener dürfen den Overlay-Stil ansehen, aber nicht ändern.");
+    expect(shadowReasonId?.split(" ")).toContain("overlay-editor-readonly-reason");
     const systemFont = screen.getByRole("combobox", { name: "Systemschrift auswählen" });
     expect(systemFont).toBeDisabled();
     const styleReasonId = systemFont.getAttribute("aria-describedby");
-    expect(styleReasonId?.split(" ")).toContain("overlay-style-disabled-reason");
-    expect(document.getElementById("overlay-style-disabled-reason")).toHaveTextContent("Bediener dürfen den Overlay-Stil ansehen, aber nicht ändern.");
+    expect(styleReasonId?.split(" ")).toContain("overlay-editor-readonly-reason");
     fireEvent.click(screen.getByRole("tab", { name: "CSS-Code" }));
-    expect(screen.getByText("Bediener können das Overlay-CSS kopieren, aber nicht ändern.", { selector: "p" })).toBeInTheDocument();
+    expect(screen.getAllByText("Bediener können die Komposition ansehen, aber nicht ändern.", { selector: "p" })).toHaveLength(1);
     expect(screen.getByRole("textbox", { name: "CSS-Code" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "CSS kopieren" })).toBeEnabled();
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "PUT")).toBe(false);

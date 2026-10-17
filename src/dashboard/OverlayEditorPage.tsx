@@ -27,6 +27,7 @@ import { Switch as SwitchPrimitive } from "./ui/primitives/switch";
 import {
   createOverlay,
   fetchModules,
+  issueOverlayAccess,
   PanelApiError,
   saveOverlay,
   type PanelChannelVariable,
@@ -39,7 +40,7 @@ import { moduleName } from "./module-labels";
 import { OverlayElementPalette, type OverlayElementPaletteOption } from "./OverlayElementPalette";
 import { useChannelVariablesQuery, useOverlayQuery } from "./data/lists";
 import { queryKeys } from "./data/keys";
-import { Button, CodeField, ColorField, ConfirmDialog, Field, Icon, LoadState, UnitInput, ToolPage, SaveStatus, Select, notify, type IconName, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
+import { Button, CodeField, ColorField, ConfirmDialog, Field, Icon, LoadState, UnitInput, ToolPage, Select, StepDialog, notify, type IconName, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
 import "./overlay-editor.css";
 
 interface OverlayEditorPageProperties {
@@ -218,7 +219,7 @@ const createVariableElement = (name: string, elements: readonly PanelOverlayElem
   kind: "variable",
   label: name,
   variableName: name,
-  text: `${name}: {value}`,
+  text: `${name}: {${name}}`,
   config: {},
   x: 0,
   y: 0,
@@ -348,22 +349,10 @@ export function OverlayEditorPage({ channelId, overlayId, canManage, language, i
   useEffect(() => {
     const sessionKey = `${channelId}:${overlayId}:${String(loadGeneration)}`;
     if (initializedSessionKey.current === sessionKey) return;
-    if (variablesQuery.isError && variablesQuery.data === undefined) {
-      const message = variablesQuery.error instanceof PanelApiError
-        ? apiErrorText(variablesQuery.error.code, labels.editorLoadError)
-        : labels.editorLoadError;
-      notify({ tone: "error", message });
-      return;
-    }
+    if (variablesQuery.isError && variablesQuery.data === undefined) return;
     if (variablesQuery.data === undefined) return;
     const variableData = variablesQuery.data;
-    if (overlayId !== "new" && overlayQuery.isError) {
-      const message = overlayQuery.error instanceof PanelApiError
-        ? apiErrorText(overlayQuery.error.code, labels.editorLoadError)
-        : labels.editorLoadError;
-      notify({ tone: "error", message });
-      return;
-    }
+    if (overlayId !== "new" && overlayQuery.isError) return;
     if (overlayId !== "new" && (overlayQuery.data === undefined || overlayQuery.isFetching)) return;
     const overlay = overlayId === "new"
       ? {
@@ -396,7 +385,6 @@ export function OverlayEditorPage({ channelId, overlayId, canManage, language, i
         ? apiErrorText(caught.code, labels.editorLoadError)
         : labels.editorLoadError;
       setLoadError(message);
-      notify({ tone: "error", message });
     });
   }, [labels.editorLoadError, overlayId, refetchOverlay, refetchVariables]);
 
@@ -462,6 +450,16 @@ function OverlayEditorWorkspace({
   const [error, setError] = useState<string | undefined>();
   const [conflictAtRevision, setConflictAtRevision] = useState<number | null>(null);
   const [persistedOverlayId, setPersistedOverlayId] = useState<string | null>(null);
+  const persistedOverlayIdRef = useRef<string | null>(null);
+  const [createDialogOpen, setCreateDialogOpen] = useState(overlayId === "new");
+  const [createStep, setCreateStep] = useState(0);
+  const [createPending, setCreatePending] = useState(false);
+  const createPendingRef = useRef(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [createLink, setCreateLink] = useState<string | null>(null);
+  const [createLinkCopied, setCreateLinkCopied] = useState(false);
+  const [createElementOptionId, setCreateElementOptionId] = useState("");
+  const [createCustomSize, setCreateCustomSize] = useState(false);
   const [previewZoom, setPreviewZoom] = useState(100);
   const [modulePreviewStates, setModulePreviewStates] = useState<Readonly<Record<string, JsonObject>>>({});
   const [editorTab, setEditorTab] = useState<"properties" | "style" | "css">("properties");
@@ -564,12 +562,18 @@ function OverlayEditorWorkspace({
     : effectiveStyleDocument.elements[effectiveStyleTargetId] ?? {};
   const elementHorizontalAnchor = (element: PanelOverlayElement): OverlayStyleAlignment =>
     effectiveStyleDocument.elements[element.id]?.textAlign ?? effectiveStyleDocument.overlay.textAlign ?? "left";
-  const styleLockedReason = !canManage ? labels.editorStyleReadOnlyReason : styleLocked ? labels.editorStyleLocked : "";
+  const styleLockedReason = styleLocked ? labels.editorStyleLocked : "";
   const fitScale = viewportSize.width === 0 || viewportSize.height === 0
     ? 1
     : Math.min(viewportSize.width / draft.width, viewportSize.height / draft.height);
   const canvasScale = fitScale * previewZoom / 100;
-  const textIsValid = draft.elements.every((element) => element.kind !== "variable" || element.text.match(/\{value\}/gu)?.length === 1);
+  const invalidTextElement = draft.elements.find((element) => element.kind === "variable" && element.variableName !== null &&
+    (element.text.split(`{${element.variableName}}`).length - 1) + (element.variableName === "value" ? 0 : element.text.split("{value}").length - 1) !== 1);
+  const textIsValid = invalidTextElement === undefined;
+  const textValidationHint = labels.editorTextHint(invalidTextElement?.variableName ?? "value");
+  const createElementOptions = paletteItems
+    .filter((option) => option.disabledReason === undefined)
+    .map((option) => ({ value: option.id, label: option.label, description: option.description }));
   const canvasSize = { width: draft.width, height: draft.height };
   useEffect(() => {
     const viewport = previewViewportRef.current;
@@ -835,11 +839,11 @@ function OverlayEditorWorkspace({
     setConflictAtRevision(null);
   }, [baseline.draft, setConflictAtRevision, setError]);
 
-  const save = useCallback(async (revision = baseline.revision): Promise<string | null> => {
+  const save = useCallback(async (revision = baseline.revision, options: { deferCreatedNavigation?: boolean } = {}): Promise<string | null> => {
     if (!canManage || saving) return labels.editorSaveError;
     if (!textIsValid) {
-      setError(labels.editorTextHint);
-      return labels.editorTextHint;
+      setError(textValidationHint);
+      return textValidationHint;
     }
     if (draft.css.length > 16_000) {
       setError(labels.editorStyleCssLimit);
@@ -861,14 +865,18 @@ function OverlayEditorWorkspace({
         });
         const createdDraft = overlayDraft(created.overlay);
         saveTargetId = created.overlay.id;
+        persistedOverlayIdRef.current = created.overlay.id;
         setPersistedOverlayId(created.overlay.id);
         setBaseline({ revision: created.overlay.revision, draft: createdDraft });
-        onOverlayCreated(created.overlay.id);
         if (JSON.stringify(createdDraft) === JSON.stringify(draft)) {
           setDraft(createdDraft);
           setSelectedElementId((current) => createdDraft.elements.some(({ id }) => id === current) ? current : createdDraft.elements[0]?.id ?? null);
           setSaved(true);
           setConflictAtRevision(null);
+          if (!options.deferCreatedNavigation) {
+            setCreateDialogOpen(false);
+            onOverlayCreated(created.overlay.id);
+          }
           return null;
         }
         revision = created.overlay.revision;
@@ -883,6 +891,10 @@ function OverlayEditorWorkspace({
       setSelectedElementId((current) => nextDraft.elements.some(({ id }) => id === current) ? current : nextDraft.elements[0]?.id ?? null);
       setSaved(true);
       setConflictAtRevision(null);
+      if (overlayId === "new" && !options.deferCreatedNavigation) {
+        setCreateDialogOpen(false);
+        onOverlayCreated(saveTargetId);
+      }
       return null;
     } catch (caught) {
       if (caught instanceof PanelApiError && caught.status === 409 && caught.code === "overlay_changed_concurrently") {
@@ -898,7 +910,7 @@ function OverlayEditorWorkspace({
     } finally {
       setSaving(false);
     }
-  }, [baseline.revision, canManage, channelId, draft, labels.editorConflictDescription, labels.editorSaveError, labels.editorStyleCssLimit, labels.editorTextHint, onOverlayCreated, overlayId, persistedOverlayId, saving, setConflictAtRevision, setError, textIsValid]);
+  }, [baseline.revision, canManage, channelId, draft, labels.editorConflictDescription, labels.editorSaveError, labels.editorStyleCssLimit, onOverlayCreated, overlayId, persistedOverlayId, saving, setConflictAtRevision, setError, textIsValid, textValidationHint]);
 
   const navigationGuard = useDraftGuard(dirty, save, discard);
   useEffect(() => registerDashboardNavigationGuard(navigationGuard.guardSwitch), [navigationGuard.guardSwitch]);
@@ -919,6 +931,72 @@ function OverlayEditorWorkspace({
     setSelectedElementId(element.id);
     setSaved(false);
     setError(undefined);
+  };
+
+  const addCreateElement = (): void => {
+    const optionId = createElementOptionId || createElementOptions[0]?.value;
+    const option = paletteItems.find(({ id }) => id === optionId);
+    if (option === undefined || !canEdit || draft.elements.length >= OVERLAY_ELEMENT_MAXIMUM_COUNT) return;
+    if (option.id.startsWith("variable:")) {
+      insertVariable(option.id.slice("variable:".length));
+    } else if (option.id.startsWith("module:")) {
+      const moduleOption = moduleElementOption(option.id.slice("module:".length));
+      if (moduleOption !== undefined) insertModuleElement(moduleOption);
+    }
+  };
+
+  const updateCreateSize = (width: number | "", height: number | ""): void => {
+    if (typeof width !== "number" || typeof height !== "number") return;
+    setDraft((current) => ({ ...current, width, height }));
+    setSaved(false);
+    setError(undefined);
+  };
+
+  const closeCreateDialog = (): void => {
+    setCreateDialogOpen(false);
+    const createdId = persistedOverlayIdRef.current;
+    if (createdId === null) onBack();
+    else onOverlayCreated(createdId);
+  };
+
+  const copyCreateLink = async (): Promise<void> => {
+    if (createLink === null) return;
+    try {
+      await navigator.clipboard.writeText(createLink);
+      setCreateLinkCopied(true);
+      setCreateError(null);
+    } catch {
+      setCreateError(labels.copyError);
+    }
+  };
+
+  const createObsLink = async (): Promise<void> => {
+    if (!canManage || createPendingRef.current) return;
+    createPendingRef.current = true;
+    setCreatePending(true);
+    setCreateError(null);
+    try {
+      const saveError = await save(baseline.revision, { deferCreatedNavigation: true });
+      if (saveError !== null) {
+        setCreateError(saveError);
+        return;
+      }
+      const createdId = persistedOverlayIdRef.current;
+      if (createdId === null) {
+        setCreateError(labels.editorCreateError);
+        return;
+      }
+      if (createLink === null) {
+        const issued = await issueOverlayAccess(channelId, createdId, labels.editorCreateObsTitle);
+        setCreateLink(issued.overlayUrl);
+      }
+      setCreateStep(2);
+    } catch (caught) {
+      setCreateError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.editorCreateError) : labels.editorCreateError);
+    } finally {
+      createPendingRef.current = false;
+      setCreatePending(false);
+    }
   };
 
   const removeElement = (elementId: string): void => {
@@ -1087,8 +1165,31 @@ function OverlayEditorWorkspace({
 
   const rendererMarkup = <OverlayCanvas overlay={rendererOverlay} language={language} variables={liveVariables} elementId={null} />;
 
-  return <ToolPage kind="overlays" title={overlay.name} subtitle={labels.editorReference(draft.width, draft.height)} actions={<Button variant="neutral" disabled={saving} onClick={onBack}>{labels.editorBack}</Button>}>
-    <div className="overlay-editor">
+  return <ToolPage kind="overlays"
+    title={overlayId === "new" && persistedOverlayId === null ? labels.editorCreateTitle : overlay.name}
+    subtitle={labels.editorReference(draft.width, draft.height)}
+    actions={<Button variant="neutral" disabled={saving || createPending} onClick={onBack}>{labels.editorBack}</Button>}
+    save={{
+      dirty,
+      pending: saving,
+      saveDisabled: !canManage,
+      ...(error === undefined ? {} : { error }),
+      saved,
+      invalid: !textIsValid || draft.css.length > 16_000,
+      invalidMessage: textIsValid ? labels.editorStyleCssLimit : textValidationHint,
+      persistent: true,
+      warnings: dirty ? [labels.editorUnsaved] : [],
+      warningStatusLabel: (_warnings, justSaved) => justSaved ? labels.editorSaved : labels.editorUnsaved,
+      ...(!dirty && !saved ? { footer: labels.editorClean } : {}),
+      ...(!canManage ? { saveDescribedBy: "overlay-editor-readonly-reason", saveTitle: labels.editorReadOnly } : {}),
+      onSave: () => { void save(); },
+      onDiscard: discard,
+      saveLabel: labels.editorSave,
+      discardLabel: labels.editorDiscard,
+      savedLabel: labels.editorSaved,
+      pendingLabel: labels.editorSaving,
+    }}>
+    <div className="overlay-editor" data-testid="overlay-editor" data-overlay-id={overlayId}>
     <div className="overlay-editor__workspace">
       <section className="overlay-editor__elements" aria-label={labels.editorElements}>
         <div className="overlay-editor__section-heading">
@@ -1126,25 +1227,24 @@ function OverlayEditorWorkspace({
           <span><span className="mono">{formatNumber(draft.elements.length, language)}</span> {dashboardCommonTexts(language).of} <span className="mono">{formatNumber(OVERLAY_ELEMENT_MAXIMUM_COUNT, language)}</span> {labels.editorElementUsage}</span>
           <span className="overlay-editor__element-limit">{draft.elements.length >= OVERLAY_ELEMENT_MAXIMUM_COUNT ? labels.editorElementLimit : ""}</span>
         </div>
-        {!canManage ? <p className="overlay-editor__locked-reason" id="overlay-editor-readonly-reason">{labels.editorLockedReason}</p> : null}
-        {orderedElements.length === 0 ? <p className="muted">{labels.editorNoElements}</p> : <ul className="overlay-editor__element-list">
-          {orderedElements.map((element) => <li className="overlay-editor__element-row" data-element-row={element.id} key={element.id}>
-            <button className="overlay-editor__element-select" type="button" aria-pressed={element.id === selectedElementId} onClick={() => { setSelectedElementId(element.id); }}>
+        {orderedElements.length === 0 ? <p className="muted">{labels.editorNoElements}</p> : <table className="overlay-editor__element-list" aria-label={labels.editorElements}>
+          <tbody>{orderedElements.map((element) => <tr className="overlay-editor__element-row" data-element-row={element.id} key={element.id} aria-selected={element.id === selectedElementId}>
+            <th scope="row"><button className="overlay-editor__element-select" type="button" aria-pressed={element.id === selectedElementId} onClick={() => { setSelectedElementId(element.id); }}>
               <span>{element.kind === "variable"
                 ? element.label || element.variableName || labels.editorVariable
                 : moduleElementOption(element.kind)?.label(language) ?? (element.label || element.kind)}</span>
               {element.kind === "variable"
-                ? <small>{element.variableName ?? element.missingVariableName ?? "—"}</small>
+                ? <small>{element.variableName === null ? element.missingVariableName ?? "—" : `{${element.variableName}}`}</small>
                 : <small role="note">{moduleElementOption(element.kind) !== undefined && !moduleIsEnabled(moduleElementOption(element.kind)?.moduleId ?? "")
                   ? labels.editorModuleDisabled(moduleElementOption(element.kind)?.moduleName(language) ?? element.kind)
                   : labels.editorModuleElement}</small>}
-            </button>
-            <button type="button" className="overlay-editor__element-remove"
+            </button></th>
+            <td><button type="button" className="overlay-editor__element-remove"
               aria-label={labels.editorRemoveElement(element.label || element.variableName || element.kind)}
               disabled={!canEdit} {...(canManage ? {} : { "aria-describedby": "overlay-editor-readonly-reason" })}
-              onClick={() => { removeElement(element.id); }}><Icon name="remove" size={16} /></button>
-          </li>)}
-        </ul>}
+              onClick={() => { removeElement(element.id); }}><Icon name="remove" size={16} /></button></td>
+          </tr>)}</tbody>
+        </table>}
       </section>
 
       <section className="overlay-editor__preview-panel overlay-editor__preview-panel--flow-on-mobile" aria-label={labels.editorPreview}>
@@ -1167,8 +1267,10 @@ function OverlayEditorWorkspace({
         <div className="overlay-editor__preview-foot"><span>{labels.editorReference(draft.width, draft.height)}</span><span>{labels.editorZoom}: 60–200%</span></div>
       </section>
 
+      <DisabledFieldReasonContext.Provider value={!canManage ? { id: "overlay-editor-readonly-reason", reason: labels.editorReadOnly } : null}>
       <section className="overlay-editor__properties" aria-label={labels.editorProperties}>
         <div className="overlay-editor__section-heading"><h2>{labels.editorProperties}</h2></div>
+        {!canManage ? <p className="overlay-editor__locked-reason" id="overlay-editor-readonly-reason" role="note">{labels.editorReadOnly}</p> : null}
         <div className="overlay-editor__editor-tabs" role="tablist" aria-label={labels.editorProperties}>
           <button type="button" role="tab" id="overlay-editor-tab-properties" data-editor-tab="properties" tabIndex={editorTab === "properties" ? 0 : -1}
             aria-selected={editorTab === "properties"} aria-controls="overlay-editor-panel-properties" onKeyDown={handleEditorTabKeyDown}
@@ -1206,7 +1308,7 @@ function OverlayEditorWorkspace({
           <Field id="overlay-editor-label" label={labels.editorLabel} value={selectedElement.label} maxLength={40}
             countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={!canEdit}
             onChange={(label) => { updateElement(selectedElement.id, { label }); }} />
-          {selectedElement.kind === "variable" ? <Field id="overlay-editor-text" label={labels.editorDisplayText} hint={labels.editorTextHint} value={selectedElement.text} maxLength={100} countLength={templateTextLength}
+          {selectedElement.kind === "variable" ? <Field id="overlay-editor-text" label={labels.editorDisplayText} hint={labels.editorTextHint(selectedElement.variableName ?? "value")} value={selectedElement.text} maxLength={100} countLength={templateTextLength}
             countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={!canEdit}
             onChange={(text) => { updateElement(selectedElement.id, { text }); }} /> : null}
           <div className="overlay-editor__numeric-fields">
@@ -1231,7 +1333,7 @@ function OverlayEditorWorkspace({
         </div>}
         </div>
         <div role="tabpanel" id="overlay-editor-panel-style" aria-labelledby="overlay-editor-tab-style" hidden={editorTab !== "style"}>
-          <DisabledFieldReasonContext.Provider value={styleLockedReason.length === 0 ? null : { id: "overlay-style-disabled-reason", reason: styleLockedReason }}>
+          <DisabledFieldReasonContext.Provider value={!canManage ? { id: "overlay-editor-readonly-reason", reason: labels.editorReadOnly } : styleLockedReason.length === 0 ? null : { id: "overlay-style-disabled-reason", reason: styleLockedReason }}>
             <div className="overlay-editor__style-fields">
               <Select id="overlay-editor-style-target" label={labels.editorStyleTarget} value={effectiveStyleTargetId}
                 options={[
@@ -1239,13 +1341,12 @@ function OverlayEditorWorkspace({
                   ...draft.elements.map((element) => ({ value: element.id, label: labels.editorStyleElementTarget(element.label || element.variableName || element.id) })),
                 ]}
                 onChange={(value) => { if (value !== null) setStyleTargetId(value); }} />
-              {!canManage ? <p className="muted" id="overlay-style-disabled-reason" role="note">{labels.editorStyleReadOnlyReason}</p> : null}
               <p className="form-hint">{labels.editorStyleOwnCssHint}</p>
               <div className="overlay-editor__style-lock" data-locked={styleLocked} {...(styleLocked ? { role: "status" } : { "aria-hidden": true })}>
                 {styleLocked ? <>
                   <p {...(canManage ? { id: "overlay-style-disabled-reason" } : {})}>{labels.editorStyleLocked}</p>
                   <Button variant="neutral" disabled={!canEdit || parsedStyleBlock.contentStart === null}
-                    {...(canManage ? {} : { title: labels.editorStyleReadOnlyReason, describedBy: "overlay-style-disabled-reason" })}
+                    {...(canManage ? {} : { title: labels.editorReadOnly, describedBy: "overlay-editor-readonly-reason" })}
                     onClick={rewriteStylesFromEditor}>{labels.editorStyleRewrite}</Button>
                 </> : null}
               </div>
@@ -1347,7 +1448,7 @@ function OverlayEditorWorkspace({
               </StyleDisclosureSection>
               <div className="overlay-editor__style-actions">
                 <Button variant="neutral" disabled={!canEdit || styleLocked}
-                  {...(canManage ? {} : { title: labels.editorStyleReadOnlyReason, describedBy: "overlay-style-disabled-reason" })}
+                  {...(canManage ? {} : { title: labels.editorReadOnly, describedBy: "overlay-editor-readonly-reason" })}
                   onClick={resetTargetStyle}>{labels.editorStyleReset}</Button>
               </div>
             </div>
@@ -1358,30 +1459,105 @@ function OverlayEditorWorkspace({
             <p className="form-hint">{labels.editorStyleCodeHint}</p>
             <Button variant="neutral" onClick={() => { void copyCss(); }}>{labels.editorStyleCopy}</Button>
           </div>
-          {!canManage ? <p className="muted" id="overlay-editor-css-readonly-reason" role="note">{labels.editorCssReadOnlyReason}</p> : null}
-          <DisabledFieldReasonContext.Provider value={!canManage ? { id: "overlay-editor-css-disabled-reason", reason: labels.editorCssReadOnlyReason } : null}>
+          <DisabledFieldReasonContext.Provider value={!canManage ? { id: "overlay-editor-readonly-reason", reason: labels.editorReadOnly } : null}>
             <CodeField id="overlay-editor-css-code" className="overlay-editor__css-code" label={labels.editorCssTab} value={draft.css} maxLength={16000}
               disabled={!canEdit} onChange={editCss} />
           </DisabledFieldReasonContext.Provider>
         </div>
       </section>
+      </DisabledFieldReasonContext.Provider>
     </div>
 
-    <SaveStatus dirty={dirty} pending={saving} saved={saved} persistent
-      {...(error === undefined ? {} : { error })}
-      invalid={!textIsValid || draft.css.length > 16_000}
-      invalidMessage={textIsValid ? labels.editorStyleCssLimit : labels.editorTextHint}
-      warnings={dirty ? [labels.editorUnsaved] : []}
-      warningStatusLabel={(_warnings, justSaved) => justSaved ? labels.editorSaved : labels.editorUnsaved}
-      // The status line already shows the "unsaved"/"saved" message (via `warnings`/`warningStatusLabel`
-      // above); the footer would otherwise repeat the exact same text next to the buttons. Only the
-      // clean, no-changes-yet state has nothing on the status line, so the footer fills that gap instead
-      // of duplicating it.
-      {...(dirty || saved ? {} : { footer: labels.editorClean })}
-      {...(canManage ? {} : { saveDescribedBy: "overlay-editor-readonly-reason", saveTitle: labels.editorReadOnly })}
-      onSave={() => { void save(); }} onDiscard={discard}
-      saveLabel={labels.editorSave} discardLabel={labels.editorDiscard} savedLabel={labels.editorSaved} pendingLabel={labels.editorSaving} />
     </div>
+
+    <StepDialog
+      opened={createDialogOpen}
+      title={labels.editorCreateTitle}
+      onClose={closeCreateDialog}
+      pending={createPending || saving}
+      size="content"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (createStep === 0) {
+          if (draft.name.trim().length > 0) setCreateStep(1);
+          return;
+        }
+        if (createStep === 1) void createObsLink();
+      }}
+      footer={<div className="overlay-editor__create-footer">
+        <span>{labels.editorCreateStepCount(createStep + 1, 3)}</span>
+        <div>
+          {createStep === 0 ? null : <Button variant="neutral" disabled={createPending || saving} onClick={() => {
+            setCreateError(null);
+            setCreateStep((current) => Math.max(0, current - 1));
+          }}>{labels.editorCreateBack}</Button>}
+          {createStep === 0 ? <Button variant="primary" disabled={!canManage || draft.name.trim().length === 0 || createPending}
+            onClick={() => { setCreateStep(1); }}>{labels.editorCreateNext}</Button>
+            : createStep === 1 ? <Button variant="primary" disabled={!canManage || createPending || saving || draft.name.trim().length === 0}
+              onClick={() => { void createObsLink(); }}>{labels.editorCreateBuildLink}</Button>
+              : <Button variant="primary" onClick={closeCreateDialog}>{labels.editorCreateFinish}</Button>}
+        </div>
+      </div>}
+    >
+      <div className="overlay-editor__create-step" data-create-step={createStep}>
+        {createStep === 0 ? <section className="overlay-editor__create-fields" aria-labelledby="overlay-editor-create-details-heading">
+          <h2 id="overlay-editor-create-details-heading">{labels.editorCreateDetailsTitle}</h2>
+          <p>{labels.editorCreateDetailsHint}</p>
+          <Field id="overlay-editor-create-name" label={labels.name} value={draft.name} maxLength={40}
+            countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={!canEdit}
+            onChange={(name) => { setDraft((current) => ({ ...current, name })); setSaved(false); setError(undefined); }} />
+          <Select id="overlay-editor-create-size" label={`${labels.width} × ${labels.height}`}
+            value={createCustomSize ? "custom" : draft.width === 1920 && draft.height === 1080 ? "1920x1080" : draft.width === 1280 && draft.height === 720 ? "1280x720" : "custom"}
+            disabled={!canEdit} options={[
+              { value: "1920x1080", label: labels.standardSize },
+              { value: "1280x720", label: labels.compactSize },
+              { value: "custom", label: labels.customSize },
+            ]}
+            onChange={(value) => {
+              if (value === "1920x1080") {
+                setCreateCustomSize(false);
+                updateCreateSize(1920, 1080);
+              } else if (value === "1280x720") {
+                setCreateCustomSize(false);
+                updateCreateSize(1280, 720);
+              } else if (value === "custom") setCreateCustomSize(true);
+            }} />
+          {createCustomSize || !(draft.width === 1920 && draft.height === 1080 || draft.width === 1280 && draft.height === 720) ? <div className="overlay-editor__create-size">
+            <UnitInput id="overlay-editor-create-width" label={labels.width} value={draft.width} min={64} max={3840} disabled={!canEdit}
+              onChange={(width) => { updateCreateSize(width, draft.height); }} />
+            <UnitInput id="overlay-editor-create-height" label={labels.height} value={draft.height} min={64} max={2160} disabled={!canEdit}
+              onChange={(height) => { updateCreateSize(draft.width, height); }} />
+          </div> : null}
+        </section> : null}
+        {createStep === 1 ? <section className="overlay-editor__create-fields" aria-labelledby="overlay-editor-create-element-heading">
+          <h2 id="overlay-editor-create-element-heading">{labels.editorCreateElementTitle}</h2>
+          <p>{labels.editorCreateElementHint}</p>
+          {createElementOptions.length === 0 ? <p className="muted">{labels.editorNoElements}</p> : <div className="overlay-editor__create-element-picker">
+            <Select id="overlay-editor-create-element" label={labels.editorAddElement}
+              value={createElementOptionId || createElementOptions[0]?.value || null}
+              options={createElementOptions} searchable disabled={!canEdit || draft.elements.length >= OVERLAY_ELEMENT_MAXIMUM_COUNT}
+              onChange={(value) => { setCreateElementOptionId(value ?? ""); }} />
+            <Button variant="neutral" disabled={!canEdit || draft.elements.length >= OVERLAY_ELEMENT_MAXIMUM_COUNT} onClick={addCreateElement}>{labels.editorPaletteChoose}</Button>
+          </div>}
+          <div className="overlay-editor__create-element-count" role="status">
+            <span>{formatNumber(draft.elements.length, language)}</span> / {formatNumber(OVERLAY_ELEMENT_MAXIMUM_COUNT, language)} {labels.editorElementUsage}
+          </div>
+        </section> : null}
+        {createStep === 2 ? <section className="overlay-editor__create-fields" aria-labelledby="overlay-editor-create-obs-heading">
+          <h2 id="overlay-editor-create-obs-heading">{labels.editorCreateObsTitle}</h2>
+          <p>{labels.editorCreateObsHint}</p>
+          <div className="overlay-editor__create-link">
+            <span>{labels.editorCreateLinkLabel}</span>
+            <code>{createLink}</code>
+            <Button variant="neutral" disabled={createLink === null} onClick={() => { void copyCreateLink(); }}>
+              {createLinkCopied ? labels.editorCreateCopied : labels.copyLink}
+            </Button>
+          </div>
+          <p className="overlay-editor__create-reference">{labels.size}: {draft.width} × {draft.height} px</p>
+        </section> : null}
+        {createError === null ? null : <p className="overlay-editor__create-error" role="alert">{createError}</p>}
+      </div>
+    </StepDialog>
 
     <ConfirmDialog opened={navigationGuard.confirmOpen} title={labels.editorUnsavedTitle}
       description={navigationGuard.saveError ?? labels.editorUnsavedDescription}

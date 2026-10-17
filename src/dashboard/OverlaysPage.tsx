@@ -5,7 +5,6 @@ import streamElementsHtml from "../../docs/embedding/streamelements/widget.html?
 import streamElementsJs from "../../docs/embedding/streamelements/widget.js?raw";
 
 import {
-  createOverlay,
   deleteOverlay,
   importLegacyOverlay,
   issueOverlayAccess,
@@ -22,7 +21,7 @@ import {
   type PanelOverlayToken,
 } from "./api";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, formatTimestamp, overlaysTexts } from "./locale";
-import { ActionMenu, Button, ConfirmDialog, EmptyCellValue, Field, FormDialog, InspectorActions, InspectorSection, StatusLed, ListDetail, ListPaginationFooter, ListToolbar, LoadState, LoadStateLines, notify, UnitInput, PageHeader, Select, SubInspector } from "./ui";
+import { ActionMenu, Button, ConfirmDialog, EmptyCellValue, Field, FormDialog, InspectorActions, InspectorSection, StatusLed, ListDetail, ListPaginationFooter, ListToolbar, LoadState, LoadStateLines, notify, PageHeader, Select, SubInspector } from "./ui";
 import { useLegacyOverlayTokensQuery, useOverlayAccessesQuery, useOverlayQuery, useOverlaysQuery } from "./data/lists";
 import { dashboardDataKeys } from "./data/keys";
 import { templateTextLength } from "../template";
@@ -35,7 +34,6 @@ interface OverlaysPageProperties {
   onOpenEditor?: (overlayId: string) => void;
 }
 
-const blankOverlayName = "";
 const EMPTY_OVERLAYS: readonly PanelOverlaySummary[] = [];
 const maskOverlaySecret = (overlayUrl: string): string => overlayUrl.replace(/([#&]token=)[^&]*/u, "$1••••••");
 const copyPromiseToClipboard = async (text: Promise<string>): Promise<void> => {
@@ -250,11 +248,6 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
   const selectedOverlayAccessesQuery = useOverlayAccessesQuery(channelId, selectedId ?? "", selectedId !== null);
   const legacyTokensQuery = useLegacyOverlayTokensQuery(channelId);
   const selectedOverlayError = useDashboardQueryError(dashboardDataKeys.overlay(channelId, selectedId ?? ""));
-  const [creating, setCreating] = useState(false);
-  const [draftName, setDraftName] = useState(blankOverlayName);
-  const [draftSize, setDraftSize] = useState("1920x1080");
-  const [draftWidth, setDraftWidth] = useState<number | "">(1920);
-  const [draftHeight, setDraftHeight] = useState<number | "">(1080);
   const [accessName, setAccessName] = useState("");
   const [secret, setSecret] = useState<ScopedOverlaySecret | null>(null);
   const [copiedAccessId, setCopiedAccessId] = useState<string | null>(null);
@@ -369,34 +362,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     ]);
   };
 
-  const beginCreate = (): void => {
-    setCreating(true);
-    changeSelection(null);
-    setDraftName("");
-    setDraftSize("1920x1080");
-    setDraftWidth(1920);
-    setDraftHeight(1080);
-    setError(null);
-  };
-
-  const create = async (): Promise<void> => {
-    if (!canManage || pending || draftName.trim().length < 1 || draftName.trim().length > 40 || draftWidth === "" || draftHeight === "") return;
-    setPending(true);
-    setError(null);
-    try {
-      const created = await createOverlay(channelId, { name: draftName.trim(), width: draftWidth, height: draftHeight });
-      setCreating(false);
-      changeSelection(created.overlay.id);
-      await load();
-    } catch (caught) {
-      notify({ tone: "error", message: caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError });
-    } finally {
-      setPending(false);
-    }
-  };
-
   const closeInspector = (): void => {
-    setCreating(false);
     changeSelection(null);
     setError(null);
   };
@@ -681,7 +647,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       searchClearLabel={dashboardCommonTexts().clearSearch}
       searchValue={search}
       onSearchChange={setSearch}
-      create={{ label: labels.create, onClick: beginCreate, disabled: !canManage || pending || overlays.length >= maximum, ...(createReason === undefined ? {} : { reason: createReason }) }}
+      create={{ label: labels.create, onClick: () => { onOpenEditor?.("new"); }, disabled: !canManage || pending || overlays.length >= maximum || onOpenEditor === undefined, ...(createReason === undefined ? {} : { reason: createReason }) }}
       usage={{ count: overlays.length, maximum, ...(query.length === 0 ? {} : { filteredCount: visibleOverlays.length }), copy: { countSuffix: labels.countSuffix, filteredInfix: dashboardCommonTexts().of, filteredSuffix: labels.filteredSuffix, limitInfix: dashboardCommonTexts().of, limitSuffix: labels.limitSuffix, loadedSuffix: dashboardCommonTexts().loaded } }}
       {...(loadFailed && overlays.length > 0 ? { queryError: {
         message: overlaysLoadError,
@@ -697,12 +663,12 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       error={<LoadStateLines rows={6} height={34} />}
       queryError={{ message: overlaysLoadError, onRetry: () => { void overlaysQuery.refetch({ throwOnError: true }).catch(() => undefined); } }}
     >
-      <div className={`table-wrap overlays-table-wrap${selectedId !== null || creating ? " overlays-table-wrap--inspector-open" : ""}`}>
+      <div className={`table-wrap overlays-table-wrap${selectedId !== null ? " overlays-table-wrap--inspector-open" : ""}`}>
         <table className="table overlays-table">
           <thead><tr><th scope="col">{labels.name}</th><th scope="col">{labels.elements}</th><th scope="col">{labels.accesses}</th><th scope="col">{labels.lastUsedAt}</th></tr></thead>
           <tbody>{visibleOverlays.map((overlay) => <tr key={overlay.id} tabIndex={0} aria-selected={overlay.id === selectedId}
-            onClick={() => { setCreating(false); changeSelection(overlay.id); }}
-            onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setCreating(false); changeSelection(overlay.id); } }}>
+            onClick={() => { changeSelection(overlay.id); }}
+            onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); changeSelection(overlay.id); } }}>
             <th scope="row">{overlay.name}</th>
             <td>{overlay.elementCount}</td>
             <td>{overlay.accessCount}</td>
@@ -751,26 +717,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     </section>
   </section>;
 
-  const inspector = creating ? <SubInspector ariaLabel={labels.createTitle} title={labels.createTitle} closeLabel={labels.close} onClose={closeInspector}>
-    <div className="overlay-create-form">
-      <Field id="overlay-name" label={labels.name} value={draftName} maxLength={40} countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={pending} onChange={setDraftName} />
-      <Select id="overlay-size" label={`${labels.width} × ${labels.height}`} value={draftSize} disabled={pending} options={[
-        { value: "1920x1080", label: labels.standardSize }, { value: "1280x720", label: labels.compactSize }, { value: "custom", label: labels.customSize },
-      ]} onChange={(value) => {
-          if (value === null) return;
-          setDraftSize(value);
-          if (value === "1920x1080") { setDraftWidth(1920); setDraftHeight(1080); }
-          else if (value === "1280x720") { setDraftWidth(1280); setDraftHeight(720); }
-        }} />
-      {draftSize === "custom" ? <div className="overlay-custom-size">
-        <UnitInput id="overlay-width" label={labels.width} value={draftWidth} min={64} max={3840} step={1} disabled={pending} onChange={setDraftWidth} />
-        <UnitInput id="overlay-height" label={labels.height} value={draftHeight} min={64} max={2160} step={1} disabled={pending} onChange={setDraftHeight} />
-      </div> : null}
-      {manageReason === undefined ? null : <p className="muted" role="note">{manageReason}</p>}
-      <InspectorActions><Button variant="primary" disabled={!canManage || pending || draftName.trim().length === 0} onClick={() => { void create(); }}>{labels.createSubmit}</Button>
-        <Button variant="subtle" disabled={pending} onClick={closeInspector}>{labels.cancel}</Button></InspectorActions>
-    </div>
-  </SubInspector> : selectedId === null ? null : <SubInspector ariaLabel={labels.title} title={selected?.name ?? labels.title}
+  const inspector = selectedId === null ? null : <SubInspector ariaLabel={labels.title} title={selected?.name ?? labels.title}
     identifier={selected?.id} closeLabel={labels.close} onClose={closeInspector}>
     <LoadState
       variant="panel-1000"

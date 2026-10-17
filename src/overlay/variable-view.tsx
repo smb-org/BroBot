@@ -14,11 +14,16 @@ interface VariableValueViewProperties {
 /** Renders a variable as text while keeping the public overlay classes stable. */
 export const VariableValueView = ({ name, text, value, language }: VariableValueViewProperties): ReactElement => {
   const formatted = formatCount(value, language);
-  const placeholderIndex = text.indexOf("{value}");
+  const placeholders = name === "value" ? ["{value}"] : [`{${name}}`, "{value}"];
+  const match = placeholders
+    .map((placeholder) => ({ placeholder, index: text.indexOf(placeholder) }))
+    .filter(({ index }) => index >= 0)
+    .sort((left, right) => left.index - right.index)[0];
+  const placeholderIndex = match?.index ?? -1;
   const before = placeholderIndex === -1
     ? text.length === 0 ? "" : `${text} `
     : text.slice(0, placeholderIndex);
-  const after = placeholderIndex === -1 ? "" : text.slice(placeholderIndex + "{value}".length);
+  const after = match === undefined ? "" : text.slice(placeholderIndex + match.placeholder.length);
 
   return <div className="brobot-variable" data-variable={name}>
     <span className="brobot-variable__text">{before}</span>
