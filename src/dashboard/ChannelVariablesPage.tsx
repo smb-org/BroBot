@@ -15,8 +15,7 @@ import {
   type PanelOverlayElement,
 } from "./api";
 import { apiErrorText, channelVariablesTexts, dashboardCommonTexts, dashboardLanguage, dashboardTexts } from "./locale";
-import { Button, CollectionPage, ConfirmDialog, EmptyCellValue, Field, Icon, InspectorFieldRow, InspectorSection, ListToolbar, LoadState, LoadStateLines, notify, UnitInput, PageHeader, Select, useDraftGuard } from "./ui";
-import { Switch as SwitchPrimitive } from "./ui/primitives/switch";
+import { Button, CollectionPage, ConfirmDialog, EmptyCellValue, Field, Icon, InspectorFieldRow, InspectorSection, ListToolbar, LoadState, LoadStateLines, notify, UnitInput, PageHeader, Select, SwitchRow, useDraftGuard } from "./ui";
 import { CHANNEL_VARIABLE_MAXIMUM_COUNT, CHANNEL_VARIABLE_MAXIMUM_VALUE, CHANNEL_VARIABLE_MINIMUM_VALUE } from "../contracts/values";
 import { dashboardDataKeys } from "./data/keys";
 import { useDashboardQueryClient } from "./data";
@@ -78,10 +77,12 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const [draftDescription, setDraftDescription] = useState("");
   const [draftReset, setDraftReset] = useState(false);
   const [draftSetValue, setDraftSetValue] = useState<number | "">(0);
+  const [valueEdited, setValueEdited] = useState(false);
   const [editingValue, setEditingValue] = useState(false);
   const [inlineValue, setInlineValue] = useState<number | "">(0);
   const editValueButtonRef = useRef<HTMLButtonElement>(null);
   const wasEditingValue = useRef(false);
+  const valueEditedBeforeInlineEdit = useRef(false);
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | undefined>(undefined);
@@ -139,6 +140,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const selected = useMemo(() => variables.find((variable) => variable.name === selectedName) ?? null, [selectedName, variables]);
   const selectedForDisplay = selected ?? (selectedSnapshot?.name === selectedName ? selectedSnapshot : null);
   const definitionConflict = !creating && selectedName !== null && selected === null && definitionBaseline !== null;
+  const legacyRenameWarning = canManageContent && selected !== null && hasTokens(legacyTokensQuery.data?.pages[0]) && normalizedVariableName(draftName) !== selected.name;
   const draftValue = editingValue ? inlineValue : draftSetValue;
   const draftDirty = creating || (definitionBaseline !== null && (
     normalizedVariableName(draftName) !== definitionBaseline.name ||
@@ -150,7 +152,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     if (selected === null || creating) return;
     const nextBaseline = { name: selected.name, value: selected.value, description: selected.description, resetOnStreamStart: selected.resetOnStreamStart };
     if (draftDirty) {
-      if (definitionBaseline !== null && draftValue === definitionBaseline.value && definitionBaseline.value !== selected.value) {
+      if (!valueEdited && definitionBaseline !== null && draftValue === definitionBaseline.value && definitionBaseline.value !== selected.value) {
         // Preserve metadata edits while advancing an untouched value draft with realtime updates.
         // eslint-disable-next-line react-hooks/set-state-in-effect -- this keeps a pristine value field aligned with its query-backed source.
         setDefinitionBaseline({ ...definitionBaseline, value: selected.value });
@@ -170,14 +172,23 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     setInlineValue(nextBaseline.value);
     setDraftDescription(nextBaseline.description);
     setDraftReset(nextBaseline.resetOnStreamStart);
-  }, [creating, definitionBaseline, draftDirty, draftValue, selected]);
+  }, [creating, definitionBaseline, draftDirty, draftValue, selected, valueEdited]);
+  const definitionConflictNotified = useRef(false);
+  useEffect(() => {
+    if (definitionConflict && !definitionConflictNotified.current) notify({ tone: "error", message: labels.definitionConflict });
+    definitionConflictNotified.current = definitionConflict;
+  }, [definitionConflict, labels.definitionConflict]);
+  const legacyWarningNotified = useRef(false);
+  useEffect(() => {
+    if (legacyRenameWarning && !legacyWarningNotified.current) notify({ tone: "info", message: labels.legacyRenameWarning });
+    legacyWarningNotified.current = legacyRenameWarning;
+  }, [labels.legacyRenameWarning, legacyRenameWarning]);
   useLayoutEffect(() => {
     if (editingValue) document.getElementById("channel-variable-inline-value")?.focus();
     else if (wasEditingValue.current) editValueButtonRef.current?.focus();
     wasEditingValue.current = editingValue;
   }, [editingValue]);
   useLayoutEffect(() => { selectedNameRef.current = selectedName; }, [selectedName]);
-  const hasLegacyLinks = hasTokens(legacyTokensQuery.data?.pages[0]);
   const selectedUsages = selectedForDisplay?.usages ?? [];
   const overlayUsageLabel = (usage: PanelChannelVariable["usages"][number]): string =>
     usage.elementLabel === undefined ? usage.itemName : `${usage.itemName} → ${usage.elementLabel}`;
@@ -201,6 +212,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     setDraftDescription("");
     setDraftReset(false);
     setDraftSetValue(0);
+    setValueEdited(false);
     setInlineValue(0);
     setUseOverlayOpen(false);
     setOverlaySelection("");
@@ -219,6 +231,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     setSaved(false);
     setSaveError(undefined);
     setDraftSetValue(variable.value);
+    setValueEdited(false);
     setInlineValue(variable.value);
     setUseOverlayOpen(false);
     setOverlaySelection("");
@@ -248,6 +261,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     setSelectedSnapshot(null);
     setEditingValue(false);
     setDefinitionBaseline(null);
+    setValueEdited(false);
     setSaved(false);
     setSaveError(undefined);
   };
@@ -275,6 +289,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
         setDraftName(baseline.name);
         setDraftSetValue(baseline.value);
         setInlineValue(baseline.value);
+        setValueEdited(false);
       } else if (selected !== null) {
         let savedVariable: PanelChannelVariableRecord = selected;
         let savedUsages = selected.usages;
@@ -301,7 +316,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
           setDefinitionBaseline(definition);
           if (savedVariable.name !== selected.name) setUseOverlayOpen(false);
         }
-        if (draftValue !== savedVariable.value) {
+        if (valueEdited) {
           const response = await changeChannelVariableValue(channelId, savedVariable.name, "set", draftValue);
           savedVariable = response.variable;
           commitVariable(savedVariable.name, savedVariable, savedUsages);
@@ -320,6 +335,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
         setDraftSetValue(baseline.value);
         setInlineValue(baseline.value);
         setDefinitionBaseline(baseline);
+        setValueEdited(false);
       }
       setEditingValue(false);
       setSaved(true);
@@ -337,6 +353,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const discardDraft = (): void => {
     setCreating(false);
     setEditingValue(false);
+    setValueEdited(false);
     setUseOverlayOpen(false);
     setOverlaySelection("");
     setCreatingOverlay(false);
@@ -373,6 +390,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   useLayoutEffect(() => { selectVariableRef.current = requestSelectVariable; });
   const stageValue = (value: number): void => {
     setDraftSetValue(value);
+    setValueEdited(true);
     setEditingValue(false);
     setSaved(false);
     setSaveError(undefined);
@@ -380,6 +398,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const cancelValueEdit = (): void => {
     setInlineValue(draftSetValue);
     setEditingValue(false);
+    setValueEdited(valueEditedBeforeInlineEdit.current);
   };
   const applyValueEdit = (): void => {
     if (typeof inlineValue !== "number" || !Number.isInteger(inlineValue) || inlineValue < CHANNEL_VARIABLE_MINIMUM_VALUE || inlineValue > CHANNEL_VARIABLE_MAXIMUM_VALUE) return;
@@ -506,7 +525,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
           <tr key={variable.name} tabIndex={0} aria-selected={variable.name === selectedName} onClick={() => { requestSelectVariable(variable); }} onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") { event.preventDefault(); requestSelectVariable(variable); }
           }}>
-            <th scope="row" className="mono">{`{var.`}{variable.name.split("_").map((segment, index, segments) => <Fragment key={`${variable.name}-${String(index)}`}>{segment}{index < segments.length - 1 ? <>_<wbr /></> : null}</Fragment>)}{"}"}</th>
+            <th scope="row" className="mono" aria-label={`{var.${variable.name}}`} title={`{var.${variable.name}}`}><span className="channel-variables-table__name">{`{var.${variable.name}}`}</span></th>
             <td className="channel-variables-table__description" title={variable.description || labels.noDescription}>{variable.description || <EmptyCellValue />}</td>
             <td className="number channel-variables-table__value">{new Intl.NumberFormat(language).format(variable.value)}</td>
             <td className="channel-variables-table__reset">
@@ -520,6 +539,10 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
 
   const editor = creating || selectedForDisplay !== null ? (
     <div className="channel-variable-editor" aria-label={creating ? labels.newVariable : labels.title}>
+      <div className="sr-only" aria-live="polite">
+        {definitionConflict ? <span role="status">{labels.definitionConflict}</span> : null}
+        {legacyRenameWarning ? <span role="note">{labels.legacyRenameWarning}</span> : null}
+      </div>
       <div className="channel-variable-editor__header">
         <PageHeader
           kind="variable"
@@ -545,31 +568,20 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
         />
       </div>
       <div className="channel-variable-editor__scroll">
-        <div className="channel-variable-conflict-slot" aria-live="polite">
-          {definitionConflict ? <p className="channel-variable-conflict" role="status">{labels.definitionConflict}</p> : null}
-        </div>
         <InspectorSection title={labels.generalSection}>
           {canManageContent ? <InspectorFieldRow className="inspector-field-row--stacked" label={labels.name} help={creating ? labels.nameHint : labels.renameHint}>
-            <Field id="channel-variable-name" label={labels.name} value={draftName} normalize={normalizedVariableName} maxLength={32} countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={pending || definitionConflict} onChange={(value) => { setDraftName(value); setSaved(false); setSaveError(undefined); }} {...(nameInvalid ? { error: labels.nameInvalid } : {})} />
+            <Field id="channel-variable-name" label={labels.name} value={draftName} normalize={normalizedVariableName} maxLength={32} countLabel={(count, max) => `${String(count)} / ${String(max)}`} errorInDescription disabled={pending || definitionConflict} onChange={(value) => { setDraftName(value); setSaved(false); setSaveError(undefined); }} {...(nameInvalid ? { error: labels.nameInvalid } : {})} />
           </InspectorFieldRow> : <dl className="properties channel-variable-definition-properties">
             <div><dt>{labels.name}</dt><dd className="mono">{selectedForDisplay?.name ?? draftName}</dd></div>
             <div><dt>{labels.description}</dt><dd>{selectedForDisplay?.description || labels.noDescription}</dd></div>
             <div><dt>{labels.resetOnStreamStart}</dt><dd>{labels.resetValue(selectedForDisplay?.resetOnStreamStart ?? draftReset)}</dd></div>
           </dl>}
           {!canManageContent && !creating ? <p className="muted channel-variable-management-note" role="note">{labels.managementLocked}</p> : null}
-          <div className="channel-variable-legacy-slot" aria-live="polite">
-            {canManageContent && selected !== null && hasLegacyLinks && normalizedVariableName(draftName) !== selected.name
-              ? <p className="muted" role="note" title={labels.legacyRenameWarning}>{labels.legacyRenameWarning}</p> : null}
-          </div>
           {canManageContent ? <>
             <InspectorFieldRow className="inspector-field-row--stacked" label={labels.description} help={labels.descriptionHint}>
               <Field id="channel-variable-description" label={labels.description} value={draftDescription} maxLength={80} countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={pending || definitionConflict} onChange={(value) => { setDraftDescription(value); setSaved(false); setSaveError(undefined); }} />
             </InspectorFieldRow>
-            <InspectorFieldRow className="inspector-field-row--stacked" label={labels.resetOnStreamStart} help={labels.resetHint}>
-              <div className="channel-variable-switch-control">
-                <SwitchPrimitive aria-label={labels.resetOnStreamStart} checked={draftReset} disabled={pending || definitionConflict} onCheckedChange={(value) => { setDraftReset(value); setSaved(false); setSaveError(undefined); }} />
-              </div>
-            </InspectorFieldRow>
+            <SwitchRow label={labels.resetOnStreamStart} hint={labels.resetHint} checked={draftReset} disabled={definitionConflict} pending={pending} onChange={(value) => { setDraftReset(value); setSaved(false); setSaveError(undefined); }} />
           </> : null}
           {creating ? <InspectorFieldRow className="inspector-field-row--stacked" label={labels.value} help={labels.valueHint}>
             <UnitInput id="channel-variable-initial-value" label={labels.value} min={CHANNEL_VARIABLE_MINIMUM_VALUE} max={CHANNEL_VARIABLE_MAXIMUM_VALUE} step={1} value={draftSetValue} disabled={!canManageContent || pending} onChange={(value) => { setDraftSetValue(value); setSaved(false); setSaveError(undefined); }} />
@@ -590,7 +602,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
                     max={CHANNEL_VARIABLE_MAXIMUM_VALUE}
                     value={inlineValue}
                     disabled={pending}
-                    onChange={(value) => { setInlineValue(value); setSaved(false); setSaveError(undefined); }}
+                    onChange={(value) => { setInlineValue(value); setValueEdited(true); setSaved(false); setSaveError(undefined); }}
                     onKeyDown={(event) => {
                       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); cancelValueEdit(); }
                       if (event.key === "Enter") { event.preventDefault(); applyValueEdit(); }
@@ -619,7 +631,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
                     ref={editValueButtonRef}
                     disabled={pending}
                     title={labels.editValue}
-                    onClick={() => { setInlineValue(draftSetValue); setEditingValue(true); }}
+                    onClick={() => { valueEditedBeforeInlineEdit.current = valueEdited; setInlineValue(draftSetValue); setEditingValue(true); }}
                   />
                 </>}
                 </> : null}

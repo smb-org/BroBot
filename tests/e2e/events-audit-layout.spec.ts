@@ -51,6 +51,7 @@ if (firstAuditEntry === undefined) throw new Error("The audit fixture should con
 const channelVariables = [
   { channelId, name: "score", value: 1234, description: "Punkte im aktuellen Spiel", resetOnStreamStart: true, createdAt: at(10), updatedAt: at(1), usages: [] },
   { channelId, name: "long_counter_name_123456789", value: -42, description: "Ein längerer Beschreibungstext für einen schmalen Bildschirm", resetOnStreamStart: false, createdAt: at(9), updatedAt: at(2), usages: [] },
+  { channelId, name: "abcdefghijklmnopqrstuvwxyzabcdef", value: -999999999, description: "Ein weiterer Zähler", resetOnStreamStart: false, createdAt: at(8), updatedAt: at(3), usages: [] },
 ];
 
 interface SettingsGate {
@@ -220,7 +221,7 @@ test("events and audit keep their table geometry across desktop and mobile width
     const auditFilter = await box(auditToolbar);
     const auditGap = auditHeader.y - auditFilter.bottom;
     expect(auditGap).toBeGreaterThanOrEqual(0);
-    expect(auditGap).toBeLessThanOrEqual(72);
+    expect(auditGap).toBeLessThanOrEqual(52);
     const auditPageHeader = await box(page.locator(".module-detail-heading"));
     expect(Math.abs(auditFilter.x - auditPageHeader.x)).toBeLessThanOrEqual(1);
     expect(Math.abs(auditFilter.right - auditPageHeader.right)).toBeLessThanOrEqual(1);
@@ -237,10 +238,12 @@ test("events and audit keep their table geometry across desktop and mobile width
     expect(auditPagination.y).toBeGreaterThanOrEqual(auditFilter.bottom);
     expect(auditPagination.bottom).toBeLessThanOrEqual(auditHeader.y + 1);
     const olderEntriesButton = page.getByRole("button", { name: "Ältere Einträge laden" });
+    await expect(olderEntriesButton).toBeVisible();
     const olderButtonBox = await box(olderEntriesButton);
     expect(await olderEntriesButton.evaluate((element) => getComputedStyle(element).marginTop)).toBe("0px");
     expect(olderButtonBox.y).toBeGreaterThanOrEqual(auditPagination.y);
     expect(olderButtonBox.bottom).toBeLessThanOrEqual(auditPagination.bottom + 1);
+    expect(Math.abs((olderButtonBox.y + olderButtonBox.height / 2) - (auditPagination.y + auditPagination.height / 2))).toBeLessThanOrEqual(2);
     expect(await auditTable.locator("time").evaluateAll((times) => times.every((time) => time.scrollWidth <= time.clientWidth))).toBe(true);
     await expectChipGroupsFit(page.locator(".dashboard-filter-bar.audit-filter .event-filter__chips"));
 
@@ -281,6 +284,7 @@ test("variables collection keeps the editor in its column without horizontal ove
     await expect(channelEventsLink.locator("xpath=following-sibling::a[1]")).toHaveAttribute("data-nav-page-id", "audit");
     const table = page.locator(".channel-variables-table");
     await expect(table.locator("tbody tr")).toHaveCount(channelVariables.length);
+    if (width > 640) expect(await table.evaluate((element) => getComputedStyle(element).tableLayout)).toBe("fixed");
     const pageHeader = page.locator(".channel-variables-page .collection-page__heading .page-header");
     await expect(pageHeader.locator(".page-header__icon")).toBeVisible();
     await expect(pageHeader.locator(".page-header__copy > p")).toBeVisible();
@@ -290,9 +294,13 @@ test("variables collection keeps the editor in its column without horizontal ove
     expect(Math.abs(toolbarSearch.height - toolbarCreate.height)).toBeLessThanOrEqual(1);
     const selectedRow = table.locator("tbody tr").first();
     const longNameCell = table.locator("tbody tr").filter({ hasText: "long_counter_name_123456789" }).locator("th[scope='row']");
-    await expect(longNameCell.locator("wbr")).toHaveCount(3);
+    await expect(longNameCell).toHaveAttribute("title", "{var.long_counter_name_123456789}");
+    await expect(longNameCell).toHaveAttribute("aria-label", "{var.long_counter_name_123456789}");
     expect(await longNameCell.evaluate((cell) => getComputedStyle(cell).overflowWrap)).toBe("normal");
     expect(await longNameCell.evaluate((cell) => getComputedStyle(cell).wordBreak)).toBe("normal");
+    const descriptionCells = table.locator(".channel-variables-table__description");
+    expect(await descriptionCells.evaluateAll((cells) => cells.every((cell) => getComputedStyle(cell).webkitLineClamp === "2"))).toBe(true);
+    expect((await box(descriptionCells.first())).width).toBeGreaterThan((await box(table.locator(".channel-variables-table__value").first())).width);
     if (width <= 639) {
       const descriptionBox = await box(selectedRow.locator(".channel-variables-table__description"));
       const resetBox = await box(selectedRow.locator(".channel-variables-table__reset"));
@@ -312,8 +320,6 @@ test("variables collection keeps the editor in its column without horizontal ove
     const overflowAction = await box(editor.getByRole("button", { name: "Weitere Aktionen" }));
     expect(Math.abs(saveCluster.y - closeAction.y)).toBeLessThanOrEqual(2);
     expect(Math.abs(saveCluster.y - overflowAction.y)).toBeLessThanOrEqual(2);
-    expect(await editor.locator(".channel-variable-conflict-slot").evaluate((element) => getComputedStyle(element).height)).toBe("40px");
-    expect((await box(editor.locator(".channel-variable-conflict-slot"))).height).toBe(40);
     const overlayButton = editor.getByRole("button", { name: "In Overlay verwenden" });
     await expect(overlayButton).toBeVisible();
     await expect(editor.getByRole("heading", { name: "In Overlay verwenden" })).toHaveCount(0);
@@ -322,6 +328,17 @@ test("variables collection keeps the editor in its column without horizontal ove
     const nameLabel = await box(nameRow.locator(".inspector-field-row__label"));
     const nameField = await box(nameRow.locator(".inspector-field-row__control"));
     expect(nameField.y).toBeGreaterThanOrEqual(nameLabel.bottom);
+    const generalHeading = await box(editor.locator(".ui-section--inspector").first().locator(".ui-section__heading"));
+    expect(generalHeading.y - headerBox.bottom).toBeGreaterThanOrEqual(0);
+    expect(generalHeading.y - headerBox.bottom).toBeLessThanOrEqual(48);
+    const nameCount = await box(nameRow.locator(".ui-field__description"));
+    const descriptionLabel = await box(editor.locator(".inspector-field-row:has(#channel-variable-description) .inspector-field-row__label"));
+    expect(descriptionLabel.y - nameCount.bottom).toBeGreaterThanOrEqual(0);
+    expect(descriptionLabel.y - nameCount.bottom).toBeLessThanOrEqual(20);
+    const resetRow = editor.locator(".ui-switch-row");
+    const resetLabel = await box(resetRow.locator(".ui-switch-row__copy strong"));
+    const resetSwitch = await box(resetRow.getByRole("switch", { name: "Bei Streamstart auf null setzen" }));
+    expect(Math.abs((resetLabel.y + resetLabel.height / 2) - (resetSwitch.y + resetSwitch.height / 2))).toBeLessThanOrEqual(3);
     const editorTitle = editor.locator(".channel-variable-editor__header .page-header__title-row .mono");
     await expect(editorTitle.locator("wbr")).toHaveCount(1);
     expect(await editorTitle.evaluate((element) => getComputedStyle(element).wordBreak)).toBe("normal");
@@ -335,11 +352,25 @@ test("variables collection keeps the editor in its column without horizontal ove
     if (width <= 935) await page.getByRole("button", { name: "Zurück zur Liste" }).click();
     await longNameCell.click();
     const longEditorTitle = editor.locator(".channel-variable-editor__header .page-header__title-row .mono");
-    await expect(longEditorTitle.locator("wbr")).toHaveCount(4);
     const longTitleBox = await box(longEditorTitle);
     expect(longTitleBox.x).toBeGreaterThanOrEqual(headerBox.x - 1);
     expect(longTitleBox.right).toBeLessThanOrEqual(headerBox.right + 1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    if (width === 1280) {
+      const unbrokenRow = table.locator("tbody tr").filter({ hasText: "abcdefghijklmnopqrstuvwxyzabcdef" });
+      const unbrokenNameCell = unbrokenRow.locator("th[scope='row']");
+      const unbrokenName = unbrokenNameCell.locator(".channel-variables-table__name");
+      const valueCell = unbrokenRow.locator(".channel-variables-table__value");
+      await expect(unbrokenNameCell).toHaveAttribute("title", "{var.abcdefghijklmnopqrstuvwxyzabcdef}");
+      await expect(unbrokenNameCell).toHaveAttribute("aria-label", "{var.abcdefghijklmnopqrstuvwxyzabcdef}");
+      expect(await unbrokenName.evaluate((element) => getComputedStyle(element).textOverflow)).toBe("ellipsis");
+      await expect(valueCell).toHaveText("-999.999.999");
+      expect(await page.locator(".channel-variables-table-wrap").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+      expect(await table.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      expect((await box(unbrokenNameCell)).right).toBeLessThanOrEqual((await box(table)).right + 1);
+      expect((await box(valueCell)).right).toBeLessThanOrEqual((await box(table)).right + 1);
+    }
   }
 });
 
@@ -386,7 +417,7 @@ test("operators see one definition permission reason while live value controls s
   await expect(editor.getByRole("button", { name: "+1" })).toBeEnabled();
 });
 
-test("legacy-link rename warning fits its reserved row without moving the editor", async ({ page }) => {
+test("legacy-link rename warning uses an overlay without moving editor fields", async ({ page }) => {
   await mockApi(page, {
     variableEntries: channelVariables,
     legacyTokens: [{ id: "legacy-a", name: null, createdAt: at(1), createdBy: "Mira", lastUsedAt: null, expiresAt: null }],
@@ -395,16 +426,20 @@ test("legacy-link rename warning fits its reserved row without moving the editor
   await page.goto(`/channels/${channelId}/variables`);
   await page.locator(".channel-variables-table tbody tr").first().click();
   const editor = page.locator(".channel-variable-editor");
-  const warningSlot = editor.locator(".channel-variable-legacy-slot");
-  const before = await box(warningSlot);
+  const descriptionRow = editor.locator(".inspector-field-row:has(#channel-variable-description)");
+  const before = await box(descriptionRow);
   await editor.getByRole("textbox", { name: "Name" }).fill("points");
   await expect(editor.getByRole("note")).toContainText("Alte Links mit #var=…");
-  const after = await box(warningSlot);
-  expect(after.height).toBe(before.height);
+  await expect(page.locator(".ui-toast-host .ui-toast")).toContainText("Alte Links mit #var=…");
+  const after = await box(descriptionRow);
+  expect(after).toEqual(before);
+  const toast = await box(page.locator(".ui-toast-host .ui-toast"));
+  expect(toast.x).toBeGreaterThanOrEqual(0);
+  expect(toast.right).toBeLessThanOrEqual(390);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
-test("a remote variable conflict stays in its reserved slot without moving editor fields", async ({ page }) => {
+test("a remote variable conflict uses an overlay without moving editor fields", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   let currentVariables = [...channelVariables];
   let variableRevision = 1;
@@ -428,10 +463,8 @@ test("a remote variable conflict stays in its reserved slot without moving edito
   const scoreRow = page.locator(".channel-variables-table tbody tr").filter({ hasText: "score" });
   await scoreRow.click();
   const editor = page.locator(".channel-variable-editor");
-  const conflictSlot = editor.locator(".channel-variable-conflict-slot");
   const generalSection = editor.locator(".ui-section--inspector").first();
   const sectionBefore = await box(generalSection);
-  expect((await box(conflictSlot)).height).toBe(40);
 
   currentVariables = currentVariables.filter((variable) => variable.name !== "score");
   variableRevision = 2;
@@ -445,7 +478,7 @@ test("a remote variable conflict stays in its reserved slot without moving edito
   }));
 
   await expect(editor.getByRole("status")).toContainText("umbenannt oder gelöscht");
-  expect((await box(conflictSlot)).height).toBe(40);
+  await expect(page.locator(".ui-toast-host .ui-toast")).toContainText("umbenannt oder gelöscht");
   expect(await box(generalSection)).toEqual(sectionBefore);
 });
 

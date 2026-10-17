@@ -3,6 +3,7 @@ import { useState, type ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChannelVariablesPage } from "../../src/dashboard/ChannelVariablesPage";
+import type { PanelChannelVariablesResponse } from "../../src/dashboard/api";
 import { UiProvider } from "../../src/dashboard/ui";
 import { ToastHost } from "../../src/dashboard/ui/Toast";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
@@ -90,6 +91,55 @@ describe("Channel variables page", () => {
       .toBe(JSON.stringify({ newName: "score", description: "Draft description", resetOnStreamStart: true }));
     expect(requests.find(({ method, path }) => method === "POST" && path.endsWith("/variables/score/value"))?.body)
       .toBe(JSON.stringify({ operation: "set", amount: 1600 }));
+  });
+
+  it("does not write an untouched value when a live counter update lands during a metadata save", async () => {
+    const requests: Array<{ path: string; method: string }> = [];
+    let currentVariable = variable;
+    let resolveDefinitionUpdate: ((response: Response) => void) | undefined;
+    const definitionUpdate = new Promise<Response>((resolve) => { resolveDefinitionUpdate = resolve; });
+    let definitionUpdateStarted = false;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      const method = init?.method ?? "GET";
+      requests.push({ path: url.pathname, method });
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/variables" && method === "GET") {
+        return Promise.resolve(jsonResponse({ variables: [currentVariable], count: 1, maximum: 25 }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/variables/score" && method === "PATCH") {
+        definitionUpdateStarted = true;
+        return definitionUpdate;
+      }
+      if (url.pathname === "/api/channels/kanal-a/variables/score/value" && method === "POST") {
+        return Promise.resolve(jsonResponse({ variable: { ...currentVariable, value: 10 } }));
+      }
+      return Promise.reject(new Error(`Unexpected request ${method} ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const rendered = render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Beschreibung" }), { target: { value: "Updated description" } });
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+    await waitFor(() => { expect(definitionUpdateStarted).toBe(true); });
+
+    currentVariable = { ...currentVariable, value: 1235, updatedAt: "2026-10-18T12:01:00.000Z" };
+    act(() => {
+      rendered.queryClient.setQueryData<PanelChannelVariablesResponse>(dashboardDataKeys.variables("kanal-a"), (current) => current === undefined
+        ? current
+        : { ...current, variables: current.variables.map((entry) => entry.name === "score" ? currentVariable : entry) });
+    });
+    await waitFor(() => { expect(screen.getByRole("row", { name: /score/u })).toHaveTextContent("1.235"); });
+    currentVariable = { ...currentVariable, description: "Updated description" };
+    await act(async () => {
+      resolveDefinitionUpdate?.(jsonResponse({ variable: { ...currentVariable, description: "Updated description" }, usages: [] }));
+      await definitionUpdate;
+    });
+    await waitFor(() => { expect(screen.getByRole("button", { name: "Speichern" })).toBeDisabled(); });
+
+    expect(requests.filter(({ path, method }) => method === "POST" && path.endsWith("/variables/score/value"))).toHaveLength(0);
+    expect(screen.getByRole("row", { name: /score/u })).toHaveTextContent("1.235");
   });
 
   it("discards staged inline and step value edits without sending a value mutation", async () => {
