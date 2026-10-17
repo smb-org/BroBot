@@ -46,7 +46,7 @@ import { MODULES } from "../modules/registry";
 import { eventSubName, moduleNavigationName, statusWord } from "./module-labels";
 import { dashboardModeForRoute, dashboardRouteFocusKey, dashboardRoutePath, dashboardRouteRequiresBot, routeForDashboardMode, routeForSelectedChannel, replaceDashboardRoute, useDashboardRoute, type DashboardMode, type DashboardRoute } from "./router";
 import { dashboardNavigationGroups, visibleModuleNavigationIds } from "./nav-pages";
-import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, LoadStateLines, notify, PageHeader, Select as UiSelect, Shell, Sidebar, StatusLed, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type StatusLedState } from "./ui";
+import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, LoadStateLines, notify, SettingsPage, Select as UiSelect, Shell, Sidebar, StatusLed, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type StatusLedState } from "./ui";
 import { readPalette, writePalette, type Palette } from "./ui/palette";
 import { EventsPage } from "./events/EventsPage";
 import { emptyEventFilter, eventFilterIsActive } from "./events/model";
@@ -946,6 +946,8 @@ interface SystemPageProperties {
 
 const SystemPage = ({ channelId, login, role, channelBotConsent, viewerUserId, moderator, system, error, loadedAt, onRetry, onModeratorRecheck }: SystemPageProperties): ReactElement => {
   const texts = dashboardTexts();
+  const [saveTarget, setSaveTarget] = useState<HTMLDivElement | null>(null);
+  const saveTargetRef = useCallback((element: HTMLDivElement | null): void => { setSaveTarget(element); }, []);
   const [recheckingModerator, setRecheckingModerator] = useState(false);
   const isCurrentPage = useMountedPageGuard();
   const canRecheckModerator = canManage(role);
@@ -976,34 +978,41 @@ const SystemPage = ({ channelId, login, role, channelBotConsent, viewerUserId, m
     node: <StateRow label={texts.statusCard.moderatorStatus} tone={moderatorTone} word={moderatorWord} detail={moderatorDetail} action={moderatorAction} />,
   };
   return (
-    <>
-      <PageHeader kind="system" title={texts.system.title} subtitle={texts.system.readOnly} />
-      <ChannelDefaultsEditor channelId={channelId} role={role} />
-      <UiLoadState
-        variant="status-row"
-        status={system !== undefined && error !== null ? "error" : "success"}
-        loading={null}
-        empty={null}
-        error={null}
-        {...(system !== undefined && error !== null ? { queryError: { title: texts.errors.dataLoadFailed, message: error, onRetry } } : {})}
-      >{null}</UiLoadState>
-      <UiLoadState
-        variant="panel-720"
-        status={system !== undefined ? "success" : error !== null ? "error" : "loading"}
-        loading={<LoadStateLines rows={8} height={58} />}
-        empty={<LoadStateLines rows={8} height={58} />}
-        error={<p role="alert">{error ?? texts.system.loadState}</p>}
-        queryError={{ title: texts.errors.dataLoadFailed, message: error ?? texts.system.loadState, onRetry }}
-      >
-        {system === undefined ? null : <>
-          <div className="state-list">{[broadcasterRow(system.broadcasterConnection), chatRow(system.chatSubscription, system.chatSubscriptionNeeded === true), botRow(system.bot), botPermissionsRow(system.botPermissions), channelBotConsentRow(channelId, channelBotConsent, viewerUserId), broadcasterPermissionsRow(system.broadcasterPermissions, login, role === "broadcaster"), moderatorStatusRow, tokenRow(system.tokens, system.bot, loadedAt)].filter((entry): entry is StatusEntry => entry !== null).map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
-          <BotPermissionsInspector permissions={system.botPermissions} />
-          <BroadcasterPermissionsInspector permissions={system.broadcasterPermissions} />
-          <SubscriptionsSection subscriptions={system.subscriptions ?? []} />
-          <SystemProperties system={system} />
-        </>}
-      </UiLoadState>
-    </>
+    <SettingsPage
+      kind="system"
+      title={texts.system.title}
+      subtitle={texts.system.readOnly}
+      saveTargetRef={saveTargetRef}
+      columns={[
+        <ChannelDefaultsEditor key="channel-defaults" channelId={channelId} role={role} saveTarget={saveTarget} />,
+        <div key="system-status" className="system-page__status">
+          <UiLoadState
+            variant="status-row"
+            status={system !== undefined && error !== null ? "error" : "success"}
+            loading={null}
+            empty={null}
+            error={null}
+            {...(system !== undefined && error !== null ? { queryError: { title: texts.errors.dataLoadFailed, message: error, onRetry } } : {})}
+          >{null}</UiLoadState>
+          <UiLoadState
+            variant="panel-720"
+            status={system !== undefined ? "success" : error !== null ? "error" : "loading"}
+            loading={<LoadStateLines rows={8} height={58} />}
+            empty={<LoadStateLines rows={8} height={58} />}
+            error={<p role="alert">{error ?? texts.system.loadState}</p>}
+            queryError={{ title: texts.errors.dataLoadFailed, message: error ?? texts.system.loadState, onRetry }}
+          >
+            {system === undefined ? null : <>
+              <div className="state-list">{[broadcasterRow(system.broadcasterConnection), chatRow(system.chatSubscription, system.chatSubscriptionNeeded === true), botRow(system.bot), botPermissionsRow(system.botPermissions), channelBotConsentRow(channelId, channelBotConsent, viewerUserId), broadcasterPermissionsRow(system.broadcasterPermissions, login, role === "broadcaster"), moderatorStatusRow, tokenRow(system.tokens, system.bot, loadedAt)].filter((entry): entry is StatusEntry => entry !== null).map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
+              <BotPermissionsInspector permissions={system.botPermissions} />
+              <BroadcasterPermissionsInspector permissions={system.broadcasterPermissions} />
+              <SubscriptionsSection subscriptions={system.subscriptions ?? []} />
+              <SystemProperties system={system} />
+            </>}
+          </UiLoadState>
+        </div>,
+      ]}
+    />
   );
 };
 

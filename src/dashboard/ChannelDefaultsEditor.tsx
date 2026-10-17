@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactElement } from "react";
+import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 
 import type { ChannelRole, ChatOutputTarget } from "../contracts/values";
@@ -16,6 +17,7 @@ import { ChatTargetField, ConfirmDialog, LoadState, LoadStateLines, SaveStatus, 
 interface ChannelDefaultsEditorProperties {
   channelId: string;
   role: ChannelRole;
+  saveTarget?: HTMLElement | null;
 }
 
 interface ChannelDefaultsDraft {
@@ -24,7 +26,7 @@ interface ChannelDefaultsDraft {
   chatTarget: ChatOutputTarget;
 }
 
-export const ChannelDefaultsEditor = ({ channelId, role }: ChannelDefaultsEditorProperties): ReactElement => {
+export const ChannelDefaultsEditor = ({ channelId, role, saveTarget }: ChannelDefaultsEditorProperties): ReactElement => {
   const labels = channelSettingsTexts(dashboardLanguage());
   const targetLabels = chatTargetFieldTexts[dashboardLanguage()];
   const common = dashboardCommonTexts();
@@ -93,6 +95,10 @@ export const ChannelDefaultsEditor = ({ channelId, role }: ChannelDefaultsEditor
   };
   const navigationGuard = useDraftGuard(dirty, saveDraft, discard);
 
+  const saveStatus = <SaveStatus dirty={dirty} pending={pending} persistent {...(saveError === undefined ? {} : { error: saveError })} saved={saved}
+    onSave={() => { void saveDraft(); }} onDiscard={discard}
+    saveLabel={common.save} discardLabel={common.discard} savedLabel={common.saved} pendingLabel={common.saving} />;
+
   useEffect(() => registerDashboardNavigationGuard(navigationGuard.guardSwitch), [navigationGuard.guardSwitch]);
 
   return <Section title={labels.section} className="channel-defaults-editor">
@@ -117,9 +123,7 @@ export const ChannelDefaultsEditor = ({ channelId, role }: ChannelDefaultsEditor
             <p className="muted channel-defaults-editor__hint">{labels.defaultChatTargetHint}</p>
           </div>
         </div>
-        <SaveStatus dirty={dirty} pending={pending} persistent {...(saveError === undefined ? {} : { error: saveError })} saved={saved}
-          onSave={() => { void saveDraft(); }} onDiscard={discard}
-          saveLabel={common.save} discardLabel={common.discard} savedLabel={common.saved} pendingLabel={common.saving} />
+        {saveTarget === undefined || saveTarget === null ? saveStatus : createPortal(saveStatus, saveTarget)}
       </>}
     </LoadState>
     <ConfirmDialog opened={navigationGuard.confirmOpen} title={dashboard.module.unsavedChangesTitle}

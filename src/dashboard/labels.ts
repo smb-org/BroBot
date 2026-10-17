@@ -313,13 +313,14 @@ export interface MembersTexts {
   searching: string;
   title: string;
   searchMembers: string;
-  countSuffix: string;
-  filteredSuffix: string;
+  countSuffix: (count: number) => string;
+  filteredSuffix: (count: number) => string;
   name: string;
   role: string;
   /** Hint under the role `ChoiceCards`, both when granting access and in the member inspector (3.0). */
   roleHint: string;
   accessSince: string;
+  memberRowDescription: (identity: string, date: string) => string;
   editMember: (name: string) => string;
   remove: string;
   removeConfirmTitle: (name: string) => string;
@@ -329,8 +330,6 @@ export interface MembersTexts {
   roleFor: (name: string) => string;
   removeAccessFor: (name: string) => string;
   empty: string;
-  grantAccess: string;
-  confirmationTitle: (name: string) => string;
   confirmationText: (role: string) => string;
   grantPermanently: string;
   membersWithAccess: string;
@@ -348,18 +347,28 @@ export interface MembersTexts {
   continueEditing: string;
   discardAndSwitch: string;
   saveAndSwitch: string;
+  inviteStepPerson: string;
+  inviteStepRole: string;
+  inviteStepConfirm: string;
+  inviteProgress: string;
+  inviteStepCounter: (current: number, total: number) => string;
+  inviteSearchDescription: string;
+  inviteRoleStepDescription: string;
+  inviteConfirmStepDescription: string;
+  inviteBack: string;
+  inviteNext: string;
+  selectMemberPrompt: string;
 }
 
 const membersCatalog: LocaleCatalog<MembersTexts> = {
   de: {
     managementLocked: "Nur Broadcaster und Verwalter dürfen Mitglieder ändern.", grantAccessTitle: "Zugriff vergeben",
-    twitchName: "Twitch-Name", twitchNameHint: "Genau wie auf Twitch, ohne @.", search: "Suchen", searching: "Suche läuft …", title: "Mitglieder", searchMembers: "Mitglieder suchen", countSuffix: "Mitglieder", filteredSuffix: "Mitglieder", name: "Name",
-    role: "Rolle", roleHint: "Bestimmt, was diese Person im Kanal darf.", accessSince: "Zugriff seit", editMember: (name) => `Mitglied bearbeiten: ${name}`, remove: "Entziehen",
+    twitchName: "Twitch-Name", twitchNameHint: "Genau wie auf Twitch, ohne @.", search: "Suchen", searching: "Suche läuft …", title: "Mitglieder", searchMembers: "Mitglieder suchen", countSuffix: (count) => count === 1 ? "Mitglied" : "Mitglieder", filteredSuffix: (count) => count === 1 ? "Mitglied" : "Mitglieder", name: "Name",
+    role: "Rolle", roleHint: "Bestimmt, was diese Person im Kanal darf.", accessSince: "Zugriff seit", memberRowDescription: (identity, date) => `${identity} · Zugriff seit ${date}`, editMember: (name) => `Mitglied bearbeiten: ${name}`, remove: "Entziehen",
     removeConfirmTitle: (name) => `Zugriff für ${name} entziehen?`,
     lastBroadcaster: "Der letzte Broadcaster kann nicht herabgestuft oder entfernt werden.", unresolvable: "Nicht auflösbar", twitchId: (userId) => `Twitch-ID ${userId}`,
     roleFor: (name) => `Rolle für ${name}`, removeAccessFor: (name) => `Zugriff für ${name} entziehen`,
-    empty: "Für diesen Kanal ist noch niemand zusätzlich freigegeben.", grantAccess: "Zugriff freigeben",
-    confirmationTitle: (name) => `Zugriff für ${name} freigeben?`,
+    empty: "Für diesen Kanal ist noch niemand zusätzlich freigegeben.",
     confirmationText: (role) => `Diese Person hat keinerlei Beziehung zum Kanal, die Twitch belegen würde. Mit der Rolle „${role}“ erhält sie Zugriff auf die Mitgliederliste und auf die kanalbezogenen Panel-Funktionen, die diese Rolle erlaubt.`,
     grantPermanently: "Zugriff endgültig freigeben", membersWithAccess: "Freigegebene Mitglieder",
     load: "Mitglieder werden geladen …", loadMore: "Weitere Mitglieder laden", loadingMore: "Weitere Mitglieder werden geladen …", loaded: "geladen",
@@ -369,15 +378,23 @@ const membersCatalog: LocaleCatalog<MembersTexts> = {
     unsavedRoleTitle: "Ungespeicherte Rollenänderung",
     unsavedRoleDescription: "Die neue Rolle ist noch nicht gespeichert.",
     continueEditing: "Weiter bearbeiten", discardAndSwitch: "Verwerfen und wechseln", saveAndSwitch: "Speichern und wechseln",
+    inviteStepPerson: "Person finden", inviteStepRole: "Rolle vergeben", inviteStepConfirm: "Zugriff prüfen",
+    inviteProgress: "Einladungsschritte",
+    inviteStepCounter: (current, total) => `Schritt ${String(current)} von ${String(total)}`,
+    inviteSearchDescription: "Gib den Twitch-Namen ohne @ ein, um das Konto zu finden.",
+    inviteRoleStepDescription: "Wähle die Rolle für den Zugriff auf diesen Kanal.",
+    inviteConfirmStepDescription: "Prüfe Konto und Rolle, bevor du den Zugriff freigibst.",
+    inviteBack: "Zurück", inviteNext: "Weiter",
+    selectMemberPrompt: "Wähle ein Mitglied aus, um den freigegebenen Zugriff und die Rolle zu prüfen.",
   },
   en: {
     managementLocked: "Only broadcasters and managers may change members.", grantAccessTitle: "Grant access", twitchName: "Twitch name",
-    twitchNameHint: "Exactly as on Twitch, without @.", search: "Search", searching: "Searching …", title: "Members", searchMembers: "Search members", countSuffix: "members", filteredSuffix: "members", name: "Name", role: "Role",
-    roleHint: "Determines what this person can do in the channel.", accessSince: "Access since",
+    twitchNameHint: "Exactly as on Twitch, without @.", search: "Search", searching: "Searching …", title: "Members", searchMembers: "Search members", countSuffix: (count) => count === 1 ? "member" : "members", filteredSuffix: (count) => count === 1 ? "member" : "members", name: "Name", role: "Role",
+    roleHint: "Determines what this person can do in the channel.", accessSince: "Access since", memberRowDescription: (identity, date) => `${identity} · access since ${date}`,
     editMember: (name) => `Edit member: ${name}`, remove: "Remove", removeConfirmTitle: (name) => `Remove access for ${name}?`, lastBroadcaster: "The last broadcaster cannot be demoted or removed.", unresolvable: "Unresolvable",
     twitchId: (userId) => `Twitch ID ${userId}`, roleFor: (name) => `Role for ${name}`, removeAccessFor: (name) => `Remove access for ${name}`,
-    empty: "No one else has access to this channel yet.", grantAccess: "Grant access",
-    confirmationTitle: (name) => `Grant access for ${name}?`, confirmationText: (role) => `This person has no Twitch relationship proving access to this channel. The ${role} role grants access to the member list and the channel features allowed by that role.`,
+    empty: "No one else has access to this channel yet.",
+    confirmationText: (role) => `This person has no Twitch relationship proving access to this channel. The ${role} role grants access to the member list and the channel features allowed by that role.`,
     grantPermanently: "Grant access permanently", membersWithAccess: "Members with access",
     load: "Loading members …", loadMore: "Load more members", loadingMore: "Loading more members …", loaded: "loaded",
     sessionInvalid: "Your session is no longer valid.", changeFailed: "The member change failed.",
@@ -386,6 +403,14 @@ const membersCatalog: LocaleCatalog<MembersTexts> = {
     unsavedRoleTitle: "Unsaved role change",
     unsavedRoleDescription: "The new role has not been saved yet.",
     continueEditing: "Continue editing", discardAndSwitch: "Discard and switch", saveAndSwitch: "Save and switch",
+    inviteStepPerson: "Find person", inviteStepRole: "Choose role", inviteStepConfirm: "Review access",
+    inviteProgress: "Invite steps",
+    inviteStepCounter: (current, total) => `Step ${String(current)} of ${String(total)}`,
+    inviteSearchDescription: "Enter the Twitch name without @ to find the account.",
+    inviteRoleStepDescription: "Choose the role for access to this channel.",
+    inviteConfirmStepDescription: "Review the account and role before granting access.",
+    inviteBack: "Back", inviteNext: "Next",
+    selectMemberPrompt: "Select a member to review their access and role.",
   },
 };
 

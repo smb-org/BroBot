@@ -476,25 +476,31 @@ test("member pagination stays in a sticky 44px footer as more rows load at deskt
     });
 
     await page.goto(`/channels/${channelId}/members`);
-    await expect(page.locator(".members-table tbody tr")).toHaveCount(100);
+    await expect(page.locator(".members-collection__rows .list-row")).toHaveCount(100);
     await expect(page.getByText("Member 1", { exact: true })).toBeVisible();
-    const listTop = await measureDocumentBox(page, ".members-table");
-    const footer = page.locator(".members-page__list-column .list-pagination-footer");
+    const collectionBox = await page.locator(".collection-page").boundingBox();
+    const mainContentBox = await page.locator(".main-content").boundingBox();
+    expect(collectionBox).not.toBeNull();
+    expect(mainContentBox).not.toBeNull();
+    expect(collectionBox?.height ?? 0).toBeGreaterThan((mainContentBox?.height ?? 0) * 0.8);
+    expect((collectionBox?.y ?? 0) + (collectionBox?.height ?? 0)).toBeLessThanOrEqual((mainContentBox?.y ?? 0) + (mainContentBox?.height ?? 0) + 1);
+    const listTop = await measureDocumentBox(page, ".members-collection__rows");
+    const footer = page.locator(".collection-page__list .list-pagination-footer");
     await expect(footer.getByRole("button", { name: "Load more members" })).toBeVisible();
     expect((await measureBox(page, ".list-pagination-footer"))[3]).toBe(44);
     await footer.getByRole("button", { name: "Load more members" }).click();
     await nextPageStarted;
-    expect((await measureDocumentBox(page, ".members-table")).slice(0, 2)).toEqual(listTop.slice(0, 2));
+    expect((await measureDocumentBox(page, ".members-collection__rows")).slice(0, 2)).toEqual(listTop.slice(0, 2));
     releaseNextPage();
-    await expect(page.locator(".members-table tbody tr")).toHaveCount(150);
-    expect((await measureDocumentBox(page, ".members-table")).slice(0, 2)).toEqual(listTop.slice(0, 2));
+    await expect(page.locator(".members-collection__rows .list-row")).toHaveCount(150);
+    expect((await measureDocumentBox(page, ".members-collection__rows")).slice(0, 2)).toEqual(listTop.slice(0, 2));
     await expect(footer).toContainText("150 loaded");
     await expect(footer.getByRole("button", { name: "Load more members" })).toHaveCount(0);
     await footer.scrollIntoViewIfNeeded();
     const footerBox = await measureBox(page, ".list-pagination-footer");
-    const mainBottom = await page.locator(".dashboard-shell__main").evaluate((main) => main.getBoundingClientRect().bottom);
+    const listContentBox = await measureBox(page, ".collection-page__list-content");
     expect(footerBox[3]).toBe(44);
-    expect(Math.abs(footerBox[1] + footerBox[3] - mainBottom)).toBeLessThanOrEqual(20);
+    expect(Math.abs(footerBox[1] + footerBox[3] - (listContentBox[1] + listContentBox[3]))).toBeLessThanOrEqual(1);
     await page.unrouteAll();
   }
 });
@@ -508,12 +514,12 @@ test("member list errors use a toast and keep the table top fixed at desktop and
     });
 
     await page.goto(`/channels/${channelId}/members`);
-    await expect(page.locator(".members-table tbody tr")).toHaveCount(100);
+    await expect(page.locator(".members-collection__rows .list-row")).toHaveCount(100);
     await expect(page.getByText("Member 1", { exact: true })).toBeVisible();
-    const listTop = await measureDocumentBox(page, ".members-table");
+    const listTop = await measureDocumentBox(page, ".members-collection__rows");
     await page.getByRole("button", { name: "Load more members" }).click();
     await expect(page.locator(".ui-toast").filter({ hasText: "The data could not be loaded." })).toBeVisible();
-    expect((await measureDocumentBox(page, ".members-table")).slice(0, 2)).toEqual(listTop.slice(0, 2));
+    expect((await measureDocumentBox(page, ".members-collection__rows")).slice(0, 2)).toEqual(listTop.slice(0, 2));
     await expect(page.locator(".content-section .form-error")).toHaveCount(0);
     await page.unrouteAll();
   }
@@ -993,10 +999,10 @@ test("module toggle and workspace failures use toasts without inserting error ro
   await page.goto(`/channels/${channelId}/modules`);
   const switches = page.locator(".module-workspace [role='switch']");
   await expect(switches.first()).toBeVisible();
-  const before = await measureBox(page, ".module-workspace .state-list");
+  const before = await measureBox(page, ".module-workspace__groups");
   await switches.first().click();
   await expect(page.locator(".ui-toast--error")).toBeVisible();
-  expect(await measureBox(page, ".module-workspace .state-list")).toEqual(before);
+  expect(await measureBox(page, ".module-workspace__groups")).toEqual(before);
   await expect(page.locator(".module-workspace .form-error")).toHaveCount(0);
   await page.unrouteAll();
 
@@ -1123,12 +1129,13 @@ test("a channel control error appears as a toast without changing header boxes",
 test("a focused selected table row keeps the 2px focus ring", async ({ page }) => {
   await installChannelMocks(page, {}, { members: { members: fullMemberPage.slice(0, 3), nextCursor: null } });
   await page.goto(`/channels/${channelId}/members`);
-  const row = page.locator(".members-table tbody tr").first();
-  await row.click();
-  await expect(row).toHaveAttribute("aria-selected", "true");
+  const row = page.locator(".members-collection__rows .list-row").first();
+  const link = row.getByRole("link");
+  await link.click();
+  await expect(row).toHaveClass(/list-row--selected/u);
   // Tab away and back so :focus-visible applies to the already selected row.
   await page.keyboard.press("Tab");
   await page.keyboard.press("Shift+Tab");
-  await expect(row).toBeFocused();
-  await expect(row).toHaveCSS("outline-width", "2px");
+  await expect(link).toBeFocused();
+  await expect(link).toHaveCSS("outline-width", "2px");
 });

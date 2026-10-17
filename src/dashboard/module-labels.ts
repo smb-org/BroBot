@@ -216,6 +216,10 @@ export interface ModuleWorkspaceTexts {
   mandatoryReason: string;
   alwaysActiveStatus: string;
   noDescription: string;
+  immediateDescription: string;
+  activeCount: (count: number) => string;
+  undo: string;
+  changed: (name: string, enabled: boolean) => string;
 }
 
 const workspaceCatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
@@ -227,6 +231,10 @@ const workspaceCatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
     mandatoryReason: "Dieses Modul ist immer aktiv.",
     alwaysActiveStatus: "Läuft · immer aktiv",
     noDescription: "Keine Beschreibung für dieses Modul.",
+    immediateDescription: "Änderungen gelten sofort. Ausgeschaltete Module behalten ihre Einstellungen.",
+    activeCount: (count) => `${String(count)} aktiv`,
+    undo: "Rückgängig",
+    changed: (name, enabled) => `${name} wurde ${enabled ? "eingeschaltet" : "ausgeschaltet"}.`,
   },
   en: {
     content: "Module content",
@@ -236,6 +244,10 @@ const workspaceCatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
     mandatoryReason: "This module is always active.",
     alwaysActiveStatus: "Running · always active",
     noDescription: "No description is available for this module.",
+    immediateDescription: "Changes take effect immediately. Switched off modules keep their settings.",
+    activeCount: (count) => `${String(count)} active`,
+    undo: "Undo",
+    changed: (name, enabled) => `${name} was turned ${enabled ? "on" : "off"}.`,
   },
 };
 

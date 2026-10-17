@@ -147,7 +147,7 @@ test("idle preload warms every registered chunk for enabled modules only", async
     if (pathname.includes("/src/modules/")) requestedPaths.push(pathname);
   });
   await page.goto(`/channels/${channelId}/modules`);
-  await expect(page.locator(".module-workspace .state-list")).toBeVisible();
+  await expect(page.locator(".module-workspace__groups")).toBeVisible();
   await expect(page.locator(`.sidebar a[href="/channels/${channelId}/modules/ads"]`)).toBeVisible();
 
   const chunkRequests = Promise.all([
@@ -196,7 +196,7 @@ test("idle preload skips an enabled module hidden by missing broadcaster scopes"
     if (pathname.includes("/src/modules/")) requestedPaths.push(pathname);
   });
   await page.goto(`/channels/${channelId}/modules`);
-  await expect(page.locator(".module-workspace .state-list")).toBeVisible();
+  await expect(page.locator(".module-workspace__groups")).toBeVisible();
   await expect(page.locator(`.sidebar a[href="/channels/${channelId}/modules/ads"]`)).toHaveCount(0);
 
   const visibleChunkRequests = Promise.all([
@@ -281,7 +281,7 @@ test("a failed idle settings preload can recover through the module Retry action
   });
 
   await page.goto(`/channels/${channelId}/modules`);
-  await expect(page.locator(".module-workspace .state-list")).toBeVisible();
+  await expect(page.locator(".module-workspace__groups")).toBeVisible();
   await page.evaluate(() => {
     type IdleTestWindow = Window & { __idleCallbacks?: Array<() => void> };
     const idleWindow = window as IdleTestWindow;

@@ -169,6 +169,8 @@ vi.mock("../../src/modules/registry", () => ({
 }));
 
 import { UiProvider } from "../../src/dashboard/ui";
+import { ToastHost } from "../../src/dashboard/ui/Toast";
+import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import { ModuleNavigation, ModulePanelMount, ModulePage, ModuleWorkspace } from "../../src/dashboard/module-panels";
 import { moduleQueryKey } from "../../src/dashboard/data";
 import { useModuleQuery } from "../../src/dashboard/data";
@@ -234,6 +236,7 @@ const renderSettingsFixture = (
 describe("Module panel loader", () => {
   afterEach(() => {
     cleanup();
+    for (const toast of toastsSnapshot()) dismissToast(toast.id);
     vi.unstubAllGlobals();
     editorFixture.loader.mockClear();
     editorFixture.belaboxLoader.mockClear();
@@ -368,6 +371,7 @@ describe("Module panel loader", () => {
     expect(screen.queryByRole("switch", { name: "Kanalereignisse" })).not.toBeInTheDocument();
     const row = screen.getByText("Kanalereignisse").closest(".list-row");
     const status = within(row as HTMLElement).getByText("Läuft · immer aktiv");
+    expect(within(row as HTMLElement).getByRole("note")).toHaveTextContent("Ereignisdaten sind immer verfügbar.");
     expect(status.closest(".module-locked-status")).toHaveAttribute("title", "Ereignisdaten sind immer verfügbar.");
     expect(status.closest(".module-locked-status")).toHaveAttribute("aria-description", "Ereignisdaten sind immer verfügbar.");
     expect(status.closest(".module-locked-status")).toHaveAttribute("aria-label", "Läuft · immer aktiv: Ereignisdaten sind immer verfügbar.");
@@ -625,6 +629,50 @@ describe("Module panel loader", () => {
     const [url, init] = fetcher.mock.calls.find(([, requestInit]) => requestInit?.method === "PATCH") ?? [];
     expect(url instanceof URL ? url.pathname : url).toBe("/api/channels/kanal-a/modules/aktiv");
     expect(init?.body).toBe(JSON.stringify({ enabled: false }));
+  });
+
+  it("offers an undo action and reverses the module through the toggle endpoint", async () => {
+    const patchBodies: string[] = [];
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const pathname = input instanceof Request
+        ? new URL(input.url).pathname
+        : new URL(String(input), "https://brobot.example").pathname;
+      if (pathname === "/api/csrf") return Promise.resolve(Response.json({ token: "csrf-token" }));
+      if (init?.method === "PATCH") {
+        if (typeof init.body !== "string") throw new Error("The module toggle should send a JSON string body.");
+        patchBodies.push(init.body);
+        const enabled = (JSON.parse(init.body) as { enabled: boolean }).enabled;
+        return Promise.resolve(Response.json({ module: { id: "aktiv", enabled, settings: "{}", revision: 2 } }));
+      }
+      return Promise.resolve(Response.json({}));
+    });
+    const onChanged = vi.fn(() => Promise.resolve());
+    vi.stubGlobal("fetch", fetcher);
+    renderWithMantine(<><ToastHost /><ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onChanged={onChanged} /></>);
+
+    fireEvent.click(screen.getByRole("switch", { name: /aktiv/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "Rückgängig" }));
+
+    await waitFor(() => { expect(patchBodies).toEqual(['{"enabled":false}', '{"enabled":true}']); });
+    expect(onChanged).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the undo action when refreshing the module list fails after the toggle succeeds", async () => {
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const pathname = input instanceof Request
+        ? new URL(input.url).pathname
+        : new URL(String(input), "https://brobot.example").pathname;
+      if (pathname === "/api/csrf") return Promise.resolve(Response.json({ token: "csrf-token" }));
+      if (init?.method === "PATCH") return Promise.resolve(Response.json({ module: { id: "aktiv", enabled: false, settings: "{}", revision: 2 } }));
+      return Promise.resolve(Response.json({}));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    renderWithMantine(<><ToastHost /><ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onChanged={() => Promise.reject(new Error("Refresh failed"))} /></>);
+
+    fireEvent.click(screen.getByRole("switch", { name: /aktiv/i }));
+
+    expect(await screen.findByRole("button", { name: "Rückgängig" })).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toBeVisible();
   });
 
   it("sends exactly one PATCH for two rapid clicks on the same switch", async () => {

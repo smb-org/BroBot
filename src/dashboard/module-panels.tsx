@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactElement, type ReactNode } from "react";
 
 import { MODULES } from "../modules/registry";
+import { MODULE_NAVIGATION_CATEGORIES } from "../modules/contract";
 import type { ModulePanelProperties, ModuleRegisteredTemplateVariable } from "../modules/contract";
 import type { BelaboxSettings } from "../modules/belabox/contracts";
 import type { BelaboxStatusResponse } from "../modules/belabox/contracts";
@@ -19,7 +20,7 @@ import { templateTextLength } from "../template";
 import { modulePermissionsAreMissing } from "./channel-health";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { effectivePanelTemplateVariables, panelTemplateOptions, registeredModuleTemplateGroup, type PanelChannelVariable } from "./ui/template-variable-options";
-import { ChatCommandsHelp, ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, SettingsPage, StatusLed, LockedReason, Tabs, mapServerFieldErrors, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
+import { ChatCommandsHelp, ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, Section, SettingsEditor, SettingsPage, StatusLed, LockedReason, Tabs, mapServerFieldErrors, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
 import { useDraft } from "./ui/useDraft";
 import { useChannelSettings } from "./data/channel-settings";
 import { Switch as SwitchPrimitive } from "./ui/primitives/switch";
@@ -121,10 +122,11 @@ export const StateRow = ({ label, tone, word, detail, action, icon }: {
   );
 };
 
-const LockedModuleStatus = ({ status, reason }: { status: string; reason: string }): ReactElement => (
+const LockedModuleStatus = ({ status, reason, showReason = false }: { status: string; reason: string; showReason?: boolean }): ReactElement => (
   <span className="module-locked-status" aria-label={`${status}: ${reason}`} aria-description={reason} title={reason}>
     <Icon name="lock" size={16} className="module-locked-status__icon" />
     <span>{status}</span>
+    {showReason ? <span className="module-locked-status__reason" role="note">{reason}</span> : null}
   </span>
 );
 
@@ -983,7 +985,7 @@ const ModuleWorkspaceRow = ({
       title={details.name}
       description={details.description}
       status={mandatory
-        ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} />
+        ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} showReason />
         : <StatusLed state={permissionsMissing ? "warn" : effectiveEnabled ? "ok" : "off"} label={state} />}
       action={mandatory ? null : <div className="module-switch-control">
         <SwitchPrimitive aria-label={`${details.name}: ${statusWord(rawEnabled)}`} aria-describedby={lockedReason === undefined ? undefined : `module-lock-${moduleId}`} aria-busy={busy} checked={rawEnabled} disabled={!manageable || busy} onCheckedChange={onToggle} />
@@ -1009,25 +1011,32 @@ interface ModuleToggleListProperties {
  */
 const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onChanged }: ModuleToggleListProperties): ReactElement => {
   const texts = dashboardTexts();
+  const labels = workspaceTexts();
   const manageable = canManageModules(ownRole);
-  // Holds the clicked value only while the request is in flight; afterwards
-  // the caller reloads `modules`, so the list, sidebar and overview agree.
   const [pendingEnabled, setPendingEnabled] = useState<Record<string, boolean>>({});
-  const [busyModuleId, setBusyModuleId] = useState<string | null>(null);
+  const [committedEnabled, setCommittedEnabled] = useState<Record<string, { enabled: boolean; source: PanelModuleState[] }>>({});
+  const busyModulesRef = useRef(new Set<string>());
+  const [busyModules, setBusyModules] = useState<ReadonlySet<string>>(new Set());
+  const operationGeneration = useRef<Record<string, number>>({});
 
-  const toggle = async (moduleId: string, nextEnabled: boolean): Promise<void> => {
-    // The seam `Switch` already disables itself while `pending`, but that
-    // guard lives in a prop the caller could ignore -- ignore an in-flight
-    // click here too, so two toggles for the same module never race.
-    if (busyModuleId === moduleId) return;
-    setBusyModuleId(moduleId);
+  const toggle = async (moduleId: string, nextEnabled: boolean, offerUndo = true): Promise<void> => {
+    if (busyModulesRef.current.has(moduleId)) return;
+    busyModulesRef.current.add(moduleId);
+    setBusyModules(new Set(busyModulesRef.current));
     setPendingEnabled((current) => ({ ...current, [moduleId]: nextEnabled }));
+    const generation = (operationGeneration.current[moduleId] ?? 0) + 1;
+    operationGeneration.current[moduleId] = generation;
+    let mutationSucceeded = false;
     try {
       await setChannelModuleEnabled(channelId, moduleId, nextEnabled);
+      mutationSucceeded = true;
+      setCommittedEnabled((current) => ({ ...current, [moduleId]: { enabled: nextEnabled, source: modules } }));
       await onChanged();
     } catch (toggleFailure: unknown) {
       if (toggleFailure instanceof PanelApiError && toggleFailure.status === 401) {
         notify({ tone: "error", message: texts.errors.sessionInvalid });
+      } else if (mutationSucceeded) {
+        notify({ tone: "error", message: texts.errors.dataLoadFailed });
       } else {
         notify({ tone: "error", message: toggleFailure instanceof PanelApiError
           ? apiErrorText(toggleFailure.code, texts.errors.changeFailed)
@@ -1035,17 +1044,43 @@ const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onChanged }
       }
     } finally {
       setPendingEnabled((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== moduleId)));
-      setBusyModuleId(null);
+      busyModulesRef.current.delete(moduleId);
+      setBusyModules(new Set(busyModulesRef.current));
+      if (mutationSucceeded && offerUndo) {
+        const details = moduleDetails(moduleId);
+        notify({
+          tone: "success",
+          message: labels.changed(details.name, nextEnabled),
+          action: {
+            label: labels.undo,
+            onClick: () => {
+              if (operationGeneration.current[moduleId] !== generation) return;
+              void toggle(moduleId, !nextEnabled, false);
+            },
+          },
+        });
+      }
     }
   };
 
+  type WorkspaceModule = Omit<(typeof MODULES)[number], "navigationCategory"> & { navigationCategory?: (typeof MODULE_NAVIGATION_CATEGORIES)[number] };
+  const workspaceModules = MODULES as readonly WorkspaceModule[];
+  const groupedModules = MODULE_NAVIGATION_CATEGORIES.map((category) => ({
+    category,
+    modules: workspaceModules.filter((module) => (module.navigationCategory ?? "admin") === category),
+  })).filter(({ modules: group }) => group.length > 0);
   return (
     <>
-      <div className="state-list">
-        {MODULES.map((module) => {
+      <p className="module-workspace__hint">{labels.immediateDescription}</p>
+      <div className="module-workspace__groups">
+        {groupedModules.map(({ category, modules: group }) => <Section key={category} title={texts.navigation.moduleCategories[category]} className="module-workspace__group">
+          <div className="state-list">
+            {group.map((module) => {
           const state = modules.find((candidate) => candidate.id === module.id);
           const mandatory = state?.mandatory === true || module.mandatory === true;
-          const rawEnabled = mandatory || (pendingEnabled[module.id] ?? state?.enabled === true);
+          const committed = committedEnabled[module.id];
+          const committedOverride = committed?.source === modules ? committed.enabled : undefined;
+          const rawEnabled = mandatory || (pendingEnabled[module.id] ?? committedOverride ?? state?.enabled === true);
           return (
             <ModuleWorkspaceRow
               key={module.id}
@@ -1054,32 +1089,37 @@ const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onChanged }
               rawEnabled={rawEnabled}
               missingScopes={state?.missingBroadcasterScopes ?? []}
               manageable={manageable}
-              busy={busyModuleId === module.id}
+              busy={busyModules.has(module.id)}
               onToggle={(nextEnabled) => { void toggle(module.id, nextEnabled); }}
               onNavigate={onNavigate}
             />
           );
-        })}
+            })}
+          </div>
+        </Section>)}
       </div>
     </>
   );
 };
 
 export const ModuleWorkspace = ({ channelId, ownRole, modules, loading = false, error = null, onNavigate, onChanged }: ModuleWorkspaceProperties): ReactElement => {
+  const labels = workspaceTexts();
   useEffect(() => {
     if (error !== null) notify({ tone: "error", message: error });
   }, [error]);
 
   return (
     <section className="module-workspace" aria-label={dashboardTexts().navigation.module}>
-      <div className="module-workspace__main">
-        <SettingsPage
-          kind="modules"
-          title={dashboardTexts().navigation.module}
-          subtitle={loading ? dashboardTexts().module.load : dashboardTexts().module.available}
-          columns={[<ModuleToggleList key={channelId} channelId={channelId} ownRole={ownRole} modules={modules} onNavigate={onNavigate} onChanged={onChanged} />]}
-        />
-      </div>
+      <SettingsPage
+        kind="modules"
+        title={dashboardTexts().navigation.module}
+        subtitle={`${labels.activeCount(MODULES.filter((module) => {
+          const state = modules.find((candidate) => candidate.id === module.id);
+          return (state?.mandatory === true || module.mandatory === true || state?.enabled === true)
+            && !modulePermissionsAreMissing({ missingBroadcasterScopes: state?.missingBroadcasterScopes ?? [] });
+        }).length)}${loading ? ` · ${dashboardTexts().module.load}` : ""}`}
+        columns={[<ModuleToggleList key={channelId} channelId={channelId} ownRole={ownRole} modules={modules} onNavigate={onNavigate} onChanged={onChanged} />]}
+      />
     </section>
   );
 };

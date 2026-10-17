@@ -98,7 +98,7 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
     roleDescriptions: {
       broadcaster: "Vergibt und entzieht auch die Broadcaster-Rolle.",
       manager: "Verwaltet Mitglieder, Module und Moduleinstellungen.",
-      operator: "Sieht alles; darf Abstimmungen, Shoutouts, Clips und Votekicks bedienen, aber keine Werbung starten oder verschieben.",
+      operator: "Hilft im Stream: stummschalten, pausieren, Zähler ändern und einzelne Befehle an/aus schalten.",
     },
   },
   en: {
@@ -138,7 +138,7 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
     roleDescriptions: {
       broadcaster: "Also grants and revokes the broadcaster role.",
       manager: "Manages members, modules, and module settings.",
-      operator: "Sees everything; can run votes, shoutouts, clips, and votekicks, but cannot start or snooze ads.",
+      operator: "Helps during the stream: mute, pause, change counters, and switch individual commands on or off.",
     },
   },
 };

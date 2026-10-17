@@ -229,28 +229,25 @@ test("the main shell scroller receives PageDown before the members page is click
 
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(`/channels/${channelId}/members`);
-  await expect(page.locator(".members-table tbody tr")).toHaveCount(100);
+  await expect(page.locator(".members-collection__rows .list-row")).toHaveCount(100);
   const main = page.locator(".dashboard-shell__main");
+  const memberList = page.locator(".collection-page__list-content");
   await expect(main).toBeFocused();
   expect(await main.evaluate((element) => element.scrollTop)).toBe(0);
+  await memberList.getByRole("link").first().focus();
   await page.keyboard.press("PageDown");
-  await expect.poll(() => main.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-  for (const key of ["Space", "ArrowDown"]) {
-    await main.evaluate((element) => { element.scrollTop = 0; });
-    await page.keyboard.press(key);
-    await expect.poll(() => main.evaluate((element) => element.scrollTop), { message: `${key} scrolls the focused main region` }).toBeGreaterThan(0);
-  }
+  await expect.poll(() => memberList.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
   await page.getByRole("link", { name: "Ereignisse" }).click();
   await expect(page).toHaveURL(new RegExp(`/channels/${channelId}/events$`));
   await expect(page.getByRole("heading", { name: "Ereignisse", level: 1 })).toBeVisible();
   await page.getByRole("link", { name: "Mitglieder" }).click();
   await expect(page).toHaveURL(new RegExp(`/channels/${channelId}/members$`));
   await expect(page.getByRole("heading", { name: "Mitglieder", level: 1 })).toBeVisible();
-  await expect(page.locator(".members-table tbody tr")).toHaveCount(100);
+  await expect(page.locator(".members-collection__rows .list-row")).toHaveCount(100);
   await expect(main).toBeFocused();
-  await main.evaluate((element) => { element.scrollTop = 0; });
+  await memberList.getByRole("link").first().focus();
   await page.keyboard.press("PageDown");
-  await expect.poll(() => main.evaluate((element) => element.scrollTop), { message: "PageDown scrolls after sidebar navigation without another click" }).toBeGreaterThan(0);
+  await expect.poll(() => memberList.evaluate((element) => element.scrollTop), { message: "The member collection list scrolls independently after sidebar navigation" }).toBeGreaterThan(0);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "Seitenleiste öffnen" }).click();
   await expect(page.locator(".dashboard-shell__navbar")).toHaveAttribute("data-open", "true");

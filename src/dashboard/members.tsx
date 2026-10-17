@@ -5,12 +5,12 @@ import { CHANNEL_ROLES, canManage, type ChannelRole } from "../contracts/values"
 import type { PanelMember } from "../panel-contract";
 import { membersTexts, roleDescription, roleLabel } from "./labels";
 import { apiErrorText, dashboardCommonTexts, dashboardTexts, formatDate } from "./locale";
-import { ModuleHeading } from "./module-panels";
 import { MemberAvatar } from "./member-avatar";
-import { MemberGrantEditor } from "./member-grant-editor";
-import { Button, ChoiceCards, ConfirmDialog, EditorShell, Icon, ListDetail, ListPaginationFooter, ListToolbar, LoadState, LoadStateLines, notify, useDraftGuard, useInspectorSelection } from "./ui";
+import { Button, ChoiceCards, ConfirmDialog, EditorShell, Icon, Badge, CollectionPage, EmptyState, ListRow, ListPaginationFooter, ListToolbar, LoadState, LoadStateLines, notify, useDraftGuard, useInspectorSelection } from "./ui";
 import { dashboardDataKeys } from "./data/keys";
 import { useMembersQuery } from "./data/lists";
+import { dashboardRoutePath } from "./router";
+import { MemberInviteDialog } from "./member-invite-dialog";
 import {
   addChannelMember,
   PanelApiError,
@@ -25,7 +25,9 @@ interface MembersPageProperties {
   onAuthenticationRequired: () => void;
 }
 
-const manageableRoles = CHANNEL_ROLES;
+const manageableRoles = (ownRole: ChannelRole): readonly ChannelRole[] => ownRole === "broadcaster"
+  ? CHANNEL_ROLES
+  : CHANNEL_ROLES.filter((role) => role !== "broadcaster");
 const MEMBERS_PAGE_SIZE = 100;
 
 /** The join date is days to years in the past; the time of day adds nothing there. */
@@ -70,74 +72,50 @@ const selectableRoles = (
   member: PanelMember,
   ownUserId: string,
   broadcasterCount: number,
+  availableRoles: readonly ChannelRole[],
 ): readonly ChannelRole[] => {
   if (isLastBroadcaster(member, broadcasterCount)) return [member.role];
-  if (member.userId !== ownUserId) return manageableRoles;
+  if (member.userId !== ownUserId) return availableRoles;
   const rank: Record<ChannelRole, number> = { operator: 0, manager: 1, broadcaster: 2 };
-  return manageableRoles.filter((role) => rank[role] <= rank[member.role]);
+  return availableRoles.filter((role) => rank[role] <= rank[member.role]);
 };
 
 const memberLabel = (member: PanelMember): string =>
   member.displayName ?? (member.login === null ? membersTexts().unresolvable : `@${member.login}`);
 
 const MemberList = ({
+  channelId,
   members,
   broadcasterCount,
   selectedUserId,
   onSelect,
-  rowRef,
 }: {
+  channelId: string;
   members: PanelMember[];
   broadcasterCount: number;
   selectedUserId: string | null;
   onSelect: (userId: string) => void;
-  rowRef: (userId: string) => (row: HTMLTableRowElement | null) => void;
 }): ReactElement => {
   const texts = membersTexts();
-  if (members.length === 0) return <p className="muted">{texts.empty}</p>;
+  if (members.length === 0) return <EmptyState title={texts.membersWithAccess} description={texts.empty} />;
   return (
-    <div className="table-wrap">
-      <table className="table members-table">
-        <thead className="sr-only"><tr role="row"><th scope="col" role="columnheader">{texts.name}</th><th scope="col" role="columnheader">{texts.role}</th><th scope="col" role="columnheader" aria-sort="descending">{texts.accessSince}</th></tr></thead>
-        <tbody>
-          {members.map((member) => {
-            const selected = selectedUserId === member.userId;
-            const select = (): void => onSelect(member.userId);
-            return (
-              <tr
-                key={member.userId}
-                ref={rowRef(member.userId)}
-                role="row"
-                tabIndex={0}
-                aria-selected={selected}
-                onClick={select}
-                onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); select(); } }}
-              >
-                <th scope="row" role="rowheader">
-                  <div className="avatar-row">
-                    <MemberAvatar src={member.profileImageUrl} name={member.displayName ?? member.login ?? member.userId} />
-                    <div>
-                      <span>{memberLabel(member)}</span>
-                      {member.displayName !== null && member.login !== null ? (
-                        <a
-                          className="login-hint profile-link"
-                          href={`https://twitch.tv/${member.login}`}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                        >twitch.tv/{member.login}</a>
-                      ) : null}
-                      {member.displayName === null && member.login === null ? <span className="login-hint">{texts.twitchId(member.userId)}</span> : null}
-                    </div>
-                    {isLastBroadcaster(member, broadcasterCount) ? <span className="table-lock" role="img" aria-label={texts.lastBroadcaster} title={texts.lastBroadcaster}><Icon name="lock" size={16} /></span> : null}
-                  </div>
-                </th>
-                <td role="cell">{roleLabel(member.role)}</td>
-                <td className="number" role="cell">{formatJoinDate(member.joinedAt)}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <div className="members-collection__rows">
+      {members.map((member) => {
+        const selected = selectedUserId === member.userId;
+        const identity = member.login === null ? texts.twitchId(member.userId) : `@${member.login}`;
+        const description = texts.memberRowDescription(identity, formatJoinDate(member.joinedAt));
+        return <ListRow
+          key={member.userId}
+          href={dashboardRoutePath({ kind: "channel", channelId, section: "members" })}
+          onNavigate={() => { onSelect(member.userId); }}
+          icon={<MemberAvatar src={member.profileImageUrl} name={member.displayName ?? member.login ?? member.userId} />}
+          title={memberLabel(member)}
+          description={description}
+          status={<Badge tone={member.role === "broadcaster" ? "brand" : member.role === "manager" ? "green" : "neutral"}>{roleLabel(member.role)}</Badge>}
+          action={isLastBroadcaster(member, broadcasterCount) ? <span className="table-lock" role="img" aria-label={texts.lastBroadcaster} title={texts.lastBroadcaster}><Icon name="lock" size={16} /></span> : <span aria-hidden="true" />}
+          selected={selected}
+        />;
+      })}
     </div>
   );
 };
@@ -155,6 +133,7 @@ const MemberInspector = ({
   canManageMembers,
   broadcasterCount,
   ownUserId,
+  availableRoles,
   role,
   dirty,
   onRoleChange,
@@ -169,6 +148,7 @@ const MemberInspector = ({
   canManageMembers: boolean;
   broadcasterCount: number;
   ownUserId: string;
+  availableRoles: readonly ChannelRole[];
   role: ChannelRole;
   dirty: boolean;
   onRoleChange: (role: ChannelRole) => void;
@@ -182,7 +162,7 @@ const MemberInspector = ({
   const texts = membersTexts();
   const common = dashboardCommonTexts();
   const name = memberLabel(member);
-  const roles = selectableRoles(member, ownUserId, broadcasterCount);
+  const roles = selectableRoles(member, ownUserId, broadcasterCount, availableRoles);
   const locked = removalLocked(member, broadcasterCount);
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
 
@@ -303,7 +283,7 @@ const MembersPageContent = ({
   const [grantOpen, setGrantOpen] = useState(false);
   const grantButtonRef = useRef<HTMLButtonElement | null>(null);
   const [roleDraft, setRoleDraft] = useState<{ userId: string; role: ChannelRole } | null>(null);
-  const { selectedKey: selectedUserId, select: selectMember, rowRef, close: closeSelection } = useInspectorSelection<string>(channelId);
+  const { selectedKey: selectedUserId, select: selectMember, close: closeSelection } = useInspectorSelection<string>(channelId);
 
   useEffect(() => {
     if (selectedUserId !== null && !members.some((member) => member.userId === selectedUserId)) closeSelection();
@@ -377,99 +357,83 @@ const MembersPageContent = ({
     }
   };
 
+  const availableRoles = manageableRoles(ownRole);
+  const list = <div className={fetching ? "stale" : undefined} aria-busy={fetching}>
+    <LoadState
+      variant="panel-320"
+      status={members.length > 0 ? visibleMembers.length === 0 ? "empty" : "success" : error !== null ? "error" : loading ? "loading" : "empty"}
+      loading={<MemberListLoading />}
+      empty={members.length > 0
+        ? <p className="empty-state">{dashboardCommonTexts().noMatches}</p>
+        : <MemberList channelId={channelId} members={members} broadcasterCount={broadcasterCount} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} />}
+      error={<p role="alert">{error ?? texts.load}</p>}
+      queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: error ?? texts.load, onRetry: () => { void membersQuery.refetch(); } }}
+    >{members.length === 0 ? null : <MemberList channelId={channelId} members={visibleMembers} broadcasterCount={broadcasterCount} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} />}</LoadState>
+    {members.length === 0 && nextCursor === null ? null : <ListPaginationFooter loadedCount={members.length} loadedLabel={texts.loaded}>
+      {nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={() => { void membersQuery.fetchNextPage(); }} disabled={loading || membersQuery.isFetching || membersQuery.isPlaceholderData}>{membersQuery.isFetchingNextPage ? texts.loadingMore : texts.loadMore}</button>}
+    </ListPaginationFooter>}
+  </div>;
+  const selectedDetail = selectedMember === null ? <EmptyState title={texts.membersWithAccess} description={texts.selectMemberPrompt} /> : <MemberInspector
+    key={selectedMember.userId}
+    member={selectedMember}
+    canManageMembers={canManageMembers}
+    broadcasterCount={broadcasterCount}
+    ownUserId={ownUserId}
+    availableRoles={availableRoles}
+    role={draftRole}
+    dirty={roleDirty}
+    onRoleChange={(role) => { setRoleDraft({ userId: selectedMember.userId, role }); }}
+    pending={busyUserId === selectedMember.userId}
+    onSave={() => { void saveRoleDraft(); }}
+    onDiscard={() => { setRoleDraft(null); }}
+    onRemove={() => { void handleRemove(selectedMember); }}
+    onClose={closeFloating}
+  />;
+
   return (
     <>
-      <ModuleHeading kind="members" title={texts.title} subtitle="" />
-      <section className="content-section" aria-label={texts.membersWithAccess}>
-        <div className="section-heading">
-          <h2>{texts.membersWithAccess}</h2>
-        </div>
-        <div>
-          <ListDetail
-            list={<div className="members-page__list-column">
-              <ListToolbar
-                searchLabel={texts.searchMembers}
-                searchPlaceholder={texts.searchMembers}
-                searchClearLabel={dashboardCommonTexts().clearSearch}
-                searchValue={search}
-                onSearchChange={setSearch}
-                create={{ label: texts.grantAccessTitle, ref: grantButtonRef, onClick: openGrant, disabled: !canManageMembers, ...(!canManageMembers ? { reason: texts.managementLocked } : {}) }}
-                usage={{
-                  count: members.length,
-                  ...(query.length > 0 ? { filteredCount: visibleMembers.length } : { loaded: true }),
-                  copy: { countSuffix: texts.countSuffix, filteredInfix: dashboardCommonTexts().of, filteredSuffix: texts.filteredSuffix, limitInfix: dashboardCommonTexts().of, limitSuffix: "", loadedSuffix: dashboardCommonTexts().loaded },
-                }}
-                {...(error === null || members.length === 0 ? {} : { queryError: {
-                  title: dashboardTexts().errors.dataLoadFailed,
-                  message: error,
-                  onRetry: () => { void membersQuery.refetch(); },
-                } })}
-                {...(query.length === 0 ? {} : { activeFilters: `${texts.searchMembers}: ${search.trim()}`, activeFiltersLabel: dashboardCommonTexts().activeFilters, resetLabel: dashboardCommonTexts().reset, onReset: () => { setSearch(""); } })}
-              />
-              <div className={fetching ? "stale" : undefined} aria-busy={fetching}>
-              <LoadState
-                variant="panel-320"
-                status={members.length > 0 ? visibleMembers.length === 0 ? "empty" : "success" : error !== null ? "error" : loading ? "loading" : "empty"}
-                loading={<MemberListLoading />}
-                empty={members.length > 0 ? <p className="empty-state">{dashboardCommonTexts().noMatches}</p> : <MemberList members={members} broadcasterCount={broadcasterCount} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}
-                error={<p role="alert">{error ?? texts.load}</p>}
-                queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: error ?? texts.load, onRetry: () => { void membersQuery.refetch(); } }}
-              >{members.length === 0 ? null : <MemberList members={visibleMembers} broadcasterCount={broadcasterCount} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}</LoadState>
-              </div>
-              {members.length === 0 && nextCursor === null ? null : <ListPaginationFooter loadedCount={members.length} loadedLabel={texts.loaded}>
-                {nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={() => { void membersQuery.fetchNextPage(); }} disabled={loading || membersQuery.isFetching || membersQuery.isPlaceholderData}>{membersQuery.isFetchingNextPage ? texts.loadingMore : texts.loadMore}</button>}
-              </ListPaginationFooter>}
-            </div>}
-            inspector={selectedMember !== null ? (
-              <MemberInspector
-                key={selectedMember.userId}
-                member={selectedMember}
-                canManageMembers={canManageMembers}
-                broadcasterCount={broadcasterCount}
-                ownUserId={ownUserId}
-                role={draftRole}
-                dirty={roleDirty}
-                onRoleChange={(role) => { setRoleDraft({ userId: selectedMember.userId, role }); }}
-                pending={busyUserId === selectedMember.userId}
-                onSave={() => { void saveRoleDraft(); }}
-                onDiscard={() => { setRoleDraft(null); }}
-                onRemove={() => { void handleRemove(selectedMember); }}
-                onClose={closeFloating}
-              />
-            ) : grantOpen ? (
-              <MemberGrantEditor
-                roles={manageableRoles}
-                defaultRole="operator"
-                texts={{
-                  ariaLabel: texts.grantAccessTitle,
-                  title: texts.grantAccessTitle,
-                  searchLabel: texts.twitchName,
-                  searchHint: texts.twitchNameHint,
-                  searchButton: texts.search,
-                  searchingButton: texts.searching,
-                  roleLabel: texts.role,
-                  roleHint: texts.roleHint,
-                  saveLabel: texts.grantAccess,
-                  confirmTitle: texts.confirmationTitle,
-                  confirmDescription: (_name, role) => texts.confirmationText(role),
-                  confirmButton: texts.grantPermanently,
-                  closeLabel: dashboardCommonTexts().close,
-                }}
-                onSearch={(login) => searchTwitchUser(channelId, login).then((response) => response.user)}
-                onGrant={async (userId, role) => {
-                  await queryClient.cancelQueries(queryFilter);
-                  await addChannelMember(channelId, userId, role);
-                }}
-                errorText={errorMessage}
-                onGranted={() => { void refreshMembers(); }}
-                onAuthenticationRequired={onAuthenticationRequired}
-                onClose={closeGrant}
-              />
-            ) : null}
-            onCloseInspector={closeFloating}
-          />
-        </div>
-      </section>
+      <CollectionPage
+        title={texts.title}
+        toolbar={<ListToolbar
+          searchLabel={texts.searchMembers}
+          searchPlaceholder={texts.searchMembers}
+          searchClearLabel={dashboardCommonTexts().clearSearch}
+          searchValue={search}
+          onSearchChange={setSearch}
+          create={{ label: texts.grantAccessTitle, ref: grantButtonRef, onClick: openGrant, disabled: !canManageMembers, ...(!canManageMembers ? { reason: texts.managementLocked } : {}) }}
+          usage={{
+            count: members.length,
+            ...(query.length > 0 ? { filteredCount: visibleMembers.length } : { loaded: true }),
+            copy: { countSuffix: texts.countSuffix, filteredInfix: dashboardCommonTexts().of, filteredSuffix: texts.filteredSuffix, limitInfix: dashboardCommonTexts().of, limitSuffix: "", loadedSuffix: dashboardCommonTexts().loaded },
+          }}
+          {...(error === null || members.length === 0 ? {} : { queryError: {
+            title: dashboardTexts().errors.dataLoadFailed,
+            message: error,
+            onRetry: () => { void membersQuery.refetch(); },
+          } })}
+          {...(query.length === 0 ? {} : { activeFilters: `${texts.searchMembers}: ${search.trim()}`, activeFiltersLabel: dashboardCommonTexts().activeFilters, resetLabel: dashboardCommonTexts().reset, onReset: () => { setSearch(""); } })}
+        />}
+        list={list}
+        detail={selectedDetail}
+        detailOpen={selectedMember !== null}
+        backLabel={texts.inviteBack}
+        closeDetailDisabled={roleDirty && busyUserId !== null}
+        onCloseDetail={closeFloating}
+      />
+      <MemberInviteDialog
+        opened={grantOpen}
+        roles={availableRoles}
+        defaultRole="operator"
+        onSearch={(login) => searchTwitchUser(channelId, login).then((response) => response.user)}
+        onGrant={async (userId, role) => {
+          await queryClient.cancelQueries(queryFilter);
+          await addChannelMember(channelId, userId, role);
+        }}
+        errorText={errorMessage}
+        onGranted={() => { void refreshMembers(); }}
+        onAuthenticationRequired={onAuthenticationRequired}
+        onClose={closeGrant}
+      />
       <ConfirmDialog
         opened={draftGuard.confirmOpen}
         title={texts.unsavedRoleTitle}
