@@ -16,13 +16,14 @@ const environmentKeys = {
 
 let database: TestD1Database;
 let realtimePublish: ReturnType<typeof vi.fn<(messages: readonly RealtimeMessage[]) => Promise<void>>>;
+let reconcileLegacyChatVoteResultDeliveries: ReturnType<typeof vi.fn<() => Promise<void>>>;
 
 const environmentFor = (database: TestD1Database): Env => ({
   DB: database as unknown as D1Database,
   TWITCH_CLIENT_ID: "client-id",
   CHANNEL: {
     idFromName: (channelId: string) => channelId,
-    get: () => ({ publish: realtimePublish }),
+    get: () => ({ publish: realtimePublish, reconcileLegacyChatVoteResultDeliveries }),
   },
   ...environmentKeys,
 } as unknown as Env);
@@ -61,8 +62,31 @@ const fetchPanel = async (
 );
 
 describe("Channel variable routes", () => {
-  beforeEach(() => { database = new TestD1Database(); realtimePublish = vi.fn<(messages: readonly RealtimeMessage[]) => Promise<void>>().mockResolvedValue(undefined); });
+  beforeEach(() => {
+    database = new TestD1Database();
+    realtimePublish = vi.fn<(messages: readonly RealtimeMessage[]) => Promise<void>>().mockResolvedValue(undefined);
+    reconcileLegacyChatVoteResultDeliveries = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+  });
   afterEach(() => { vi.useRealTimers(); database.close(); });
+
+  it("reconciles retried vote results before reading or mutating variable references", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    await fetchPanel("manager-a", "/api/channels/channel-a/variables", "POST", {
+      name: "score", value: 0, description: "", resetOnStreamStart: false,
+    });
+    reconcileLegacyChatVoteResultDeliveries.mockClear();
+
+    const listed = await fetchPanel("manager-a", "/api/channels/channel-a/variables");
+    const renamed = await fetchPanel("manager-a", "/api/channels/channel-a/variables/score", "PATCH", { newName: "points" });
+    const deleted = await fetchPanel("manager-a", "/api/channels/channel-a/variables/points", "DELETE");
+
+    expect(listed.status).toBe(200);
+    expect(renamed.status).toBe(200);
+    expect(deleted.status).toBe(204);
+    expect(reconcileLegacyChatVoteResultDeliveries).toHaveBeenCalledTimes(3);
+  });
 
   it("lets operators change values while keeping variable management for managers", async () => {
     await insertChannel(database, "channel-a");

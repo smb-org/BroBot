@@ -5,6 +5,7 @@ import { VOTEKICK_WINDOW_MS, votekickSettingsSchema, type Votekick, type Votekic
 import { canStartVotekick, isActiveVotekickTarget, votekickThreshold, votekickTimeoutReason, VOTEKICK_COMMAND_PATTERN, wasActiveBeforeVotekick } from "./domain";
 import type { VotekickRepository, VotekickStart } from "./repository";
 import { VOTEKICK_ELEMENT_KIND } from "./overlay/kinds";
+import { omitUnresolvedChatTemplateReferences } from "../../contracts/chat-template-references";
 
 const emptyResult = (): ModuleResult => ({ actions: [], diagnostics: [] });
 const textFromEvent = (event: ModuleEvent): string | null => {
@@ -63,9 +64,10 @@ const renderChat = async (
   target: VotekickSettings["chatTarget"],
 ): Promise<{ action: ModuleAction | null; diagnostics: readonly ModuleDiagnostic[]; attributions?: readonly string[] }> => {
   const rendered = await context.renderTemplate(template, values);
+  const safe = omitUnresolvedChatTemplateReferences(rendered.text);
   return {
-    action: chatAction(rendered.text, target),
-    diagnostics: rendered.diagnostics,
+    action: chatAction(safe.text, target),
+    diagnostics: [...rendered.diagnostics, ...safe.diagnostics],
     ...(rendered.attributions === undefined ? {} : { attributions: rendered.attributions }),
   };
 };
@@ -113,9 +115,14 @@ const preparePass = async (
     "votekick.duration": duration,
     "votekick.window": window,
   };
+  const renderChatMessage = async (text: string) => {
+    const rendered = await renderTemplate(text, values);
+    const safe = omitUnresolvedChatTemplateReferences(rendered.text);
+    return { ...safe, diagnostics: [...(rendered.diagnostics ?? []), ...safe.diagnostics] };
+  };
   const [pass, fail] = await Promise.all([
-    renderTemplate(settings.passText, values),
-    renderTemplate(settings.failText, values),
+    renderChatMessage(settings.passTextEnabled ? settings.passText : ""),
+    renderChatMessage(settings.failTextEnabled ? settings.failText : ""),
   ]);
   return {
     action: {
@@ -126,7 +133,7 @@ const preparePass = async (
       ...(pass.text.length === 0 ? {} : { onSuccess: { kind: "chat", text: pass.text, target: settings.chatTarget, automated: false } }),
       ...(fail.text.length === 0 ? {} : { onFailure: { kind: "chat", text: fail.text, target: settings.chatTarget, automated: false } }),
     },
-    diagnostics: [...(pass.diagnostics ?? []), ...(fail.diagnostics ?? [])],
+    diagnostics: [...pass.diagnostics, ...fail.diagnostics],
   };
 };
 
@@ -243,7 +250,7 @@ const commandResult = async (
   let window = "";
   const reject = (reason: string, target?: string, includeProtectedText = false, displayTarget = login): Promise<ModuleResult> => {
     if (!includeProtectedText) return Promise.resolve(rejection(reason, target));
-    return renderChat(context, event.settings.protectedText, {
+    return renderChat(context, event.settings.protectedTextEnabled ? event.settings.protectedText : "", {
       "votekick.target": displayTarget,
       "votekick.yes": 0,
       "votekick.no": 0,
@@ -285,7 +292,7 @@ const commandResult = async (
     const endsAtMs = startedAtMs + event.settings.windowSeconds * 1000;
     const endsAt = new Date(endsAtMs).toISOString();
     id = crypto.randomUUID();
-    const startMessage = await renderChat(context, event.settings.startText, {
+    const startMessage = await renderChat(context, event.settings.startTextEnabled ? event.settings.startText : "", {
       "votekick.target": lookup.login,
       "votekick.yes": 1,
       "votekick.no": 0,
@@ -301,7 +308,7 @@ const commandResult = async (
     const opened = await context.ballots.open(id, 2, endsAtMs, finalizeRule(threshold));
     if (opened.status === "busy") {
       await bestEffortClear(context, `close:${id}`);
-      const busy = await renderChat(context, event.settings.busyText, {
+      const busy = await renderChat(context, event.settings.busyTextEnabled ? event.settings.busyText : "", {
         "votekick.target": lookup.login,
         "votekick.yes": 0,
         "votekick.no": 0,
@@ -352,7 +359,7 @@ const commandResult = async (
       ballotOpened = false;
       alarmScheduled = false;
       if (admitted === "busy") {
-        const busy = await renderChat(context, event.settings.busyText, {
+        const busy = await renderChat(context, event.settings.busyTextEnabled ? event.settings.busyText : "", {
           "votekick.target": lookup.login,
           "votekick.yes": 0,
           "votekick.no": 0,
@@ -403,6 +410,7 @@ const commandResult = async (
         durationSeconds: null,
         endedAt: rollbackEndedAt,
         liftedAt: null,
+        liftClaimedAt: null,
       }
       : null;
     return {
@@ -441,7 +449,7 @@ export const processVotekickMessage = async (
     }
     if (attempt.outcome === "expired") {
       await bestEffortClose(context, running.id);
-      if (event.settings.expiredText.length === 0) await bestEffortClear(context, `close:${running.id}`);
+      if (!event.settings.expiredTextEnabled || event.settings.expiredText.length === 0) await bestEffortClear(context, `close:${running.id}`);
       else await context.scheduleAlarm("close", `close:${running.id}`, Date.now());
       let expired: Votekick | null = null;
       try { expired = await repository.byId(event.channelId, running.id); } catch { /* Overlay presentation is best-effort. */ }
@@ -571,7 +579,7 @@ export const closeExpiredVotekick = async (
     return;
   }
   const settings = votekickSettingsSchema.parse(JSON.parse(stored.settings));
-  if (settings.expiredText.length === 0) {
+  if (!settings.expiredTextEnabled || settings.expiredText.length === 0) {
     await bestEffortCloseAlarm(context, id);
     try { await context.clear(`close:${id}`); } catch { /* A stale alarm observes the terminal D1 row. */ }
     return;
@@ -585,8 +593,11 @@ export const closeExpiredVotekick = async (
     "votekick.duration": "",
     "votekick.window": formatTimeoutDuration(storedWindowSeconds(running, settings.windowSeconds), await context.channelLanguage()),
   }, Date.parse(running.endedAt ?? running.endsAt));
-  if (rendered.text.length > 0) {
-    const result = await context.sendChat(rendered.text, `votekick:${id}:expired`, rendered.attributions, async () =>
+  const safe = omitUnresolvedChatTemplateReferences(rendered.text);
+  const diagnostics = [...(rendered.diagnostics ?? []), ...safe.diagnostics];
+  if (diagnostics.length > 0) await context.writeDiagnostics?.(`votekick:${id}:expired`, diagnostics, new Date().toISOString());
+  if (safe.text.length > 0) {
+    const result = await context.sendChat(safe.text, `votekick:${id}:expired`, rendered.attributions, async () =>
       (await repository.byId(context.channelId, id))?.status === "expired", settings.chatTarget);
     if (!result.sent && result.retryable) throw new Error(`Votekick expiry chat failed: ${result.reason ?? "unknown"}.`);
   }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactElement, type ReactNode } from "react";
 
 import { MODULES } from "../modules/registry";
-import type { ModulePanelProperties } from "../modules/contract";
+import type { ModulePanelProperties, ModuleRegisteredTemplateVariable } from "../modules/contract";
 import type { BelaboxSettings } from "../modules/belabox/contracts";
 import type { BelaboxStatusResponse } from "../modules/belabox/contracts";
 import { textCommandListChatCommand } from "../modules/text_commands/contracts/chat-commands";
@@ -9,23 +9,47 @@ import type { TextCommandPanelData } from "../modules/text_commands/panel/servic
 import { loadModulePanel, loadModuleSettingsEditor, ModuleChunkLoadError, retryModuleChunkLoad } from "./module-panel-loaders";
 import { RetryableLazy } from "./RetryableLazy";
 import { canManage, type ChannelRole } from "../contracts/values";
+import { isEventTemplateVariableAvailable } from "../contracts/event-template-variables";
 import type { PanelActiveModule, PanelModuleState, PanelTemplateWarning } from "../panel-contract";
-import { PanelApiError, getChannelModuleSettings, saveChannelModuleSettings, setChannelModuleEnabled } from "./api";
+import { PanelApiError, getChannelModuleSettings, getChannelTemplateVariables, saveChannelModuleSettings, setChannelModuleEnabled } from "./api";
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "./data";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber, serverFieldErrorText, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
 import { templateTextLength } from "../template";
 import { modulePermissionsAreMissing } from "./channel-health";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
-import { effectivePanelTemplateVariables, panelTemplateOptions, type PanelChannelVariable } from "./ui/template-variable-options";
-import { ChatCommandsHelp, ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, SettingsPage, StatusLed, LockedReason, mapServerFieldErrors, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
+import { effectivePanelTemplateVariables, panelTemplateOptions, registeredModuleTemplateGroup, type PanelChannelVariable } from "./ui/template-variable-options";
+import { ChatCommandsHelp, ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, SettingsPage, StatusLed, LockedReason, Tabs, mapServerFieldErrors, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
 import { useDraft } from "./ui/useDraft";
 import { useChannelSettings } from "./data/channel-settings";
 import { Switch as SwitchPrimitive } from "./ui/primitives/switch";
+import { runDashboardNavigationGuards } from "./ui/navigation-guard";
 import { worstCaseTemplateLength } from "../template";
 import type { TemplateVariable } from "../template";
 
 const workspaceTexts = moduleWorkspaceTexts;
+
+const registeredTemplateFieldVariable = (
+  variable: ModuleRegisteredTemplateVariable,
+  language: DashboardLanguage,
+): TemplateTextFieldVariable => {
+  const picker = variable.picker?.[language];
+  const sourceGroup = registeredModuleTemplateGroup(variable, language);
+  return {
+    name: variable.name,
+    label: picker?.label ?? variable.name,
+    description: picker?.description ?? variable.description ?? variable.name,
+    sample: picker?.sample ?? variable.sample,
+    group: variable.group ?? "context",
+    kind: "module",
+    ...(sourceGroup === undefined ? {} : { sourceGroup }),
+    ...(variable.external === undefined ? {} : { external: variable.external }),
+    ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
+    ...(variable.parameters === "choices" ? { parameter: { value: variable.parameterDefault ?? "a|b|c" } } : {}),
+    ...(variable.parameters === "currency_pair" ? { parameter: { value: variable.parameterDefault ?? "USD EUR" } } : {}),
+    ...(variable.isTextBlock ? { isTextBlock: true } : {}),
+  };
+};
 
 type BelaboxSettingsPanelProperties = ModulePanelProperties & Pick<BelaboxSettings, "lowBitrateKbps" | "recoverBitrateKbps"> & {
   statsUrlDraft: string;
@@ -169,6 +193,7 @@ export const ModuleNavigation = ({ channelId, activeModules, onNavigate }: {
 interface ModulePanelMountProperties {
   channelId: string;
   activeModules: PanelActiveModule[];
+  settingsSaveTarget?: HTMLElement | null;
   streamSessionIdentity?: string;
   suspendModuleId?: string;
   canManage?: boolean;
@@ -176,6 +201,7 @@ interface ModulePanelMountProperties {
   botIsModerator?: boolean | null;
   /** Deep-link target from the command palette (#164); passed through to the panel unchanged. */
   initialSelection?: string;
+  chatVotingTab?: "votes" | "settings";
 }
 
 interface ModuleSettingsPageOptions {
@@ -190,11 +216,12 @@ interface ModuleSettingsPageOptions {
   onNavigate: (route: DashboardRoute) => void;
 }
 
-const ModuleSettingsEditor = ({ module, channelId, canManageContent, language, page }: {
+const ModuleSettingsEditor = ({ module, channelId, canManageContent, language, settingsSaveTarget, page }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
   language: DashboardLanguage;
+  settingsSaveTarget?: HTMLElement | null;
   page?: ModuleSettingsPageOptions;
 }): ReactElement | null => module.settingsEditor === undefined ? null : <ModuleSettingsEditorQuery
   key={`${channelId}:${module.id}`}
@@ -202,6 +229,7 @@ const ModuleSettingsEditor = ({ module, channelId, canManageContent, language, p
   channelId={channelId}
   canManageContent={canManageContent}
   language={language}
+  {...(settingsSaveTarget === undefined ? {} : { settingsSaveTarget })}
   {...(page === undefined ? {} : { page })}
 />;
 
@@ -215,11 +243,12 @@ const persistedSettings = (moduleId: string, settings: Record<string, unknown>):
   return persisted;
 };
 
-const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, language, page }: {
+const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, language, settingsSaveTarget, page }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
   language: DashboardLanguage;
+  settingsSaveTarget?: HTMLElement | null;
   page?: ModuleSettingsPageOptions;
 }): ReactElement => {
   const [generation, setGeneration] = useState(0);
@@ -232,7 +261,16 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       definitionPromise,
       getChannelModuleSettings(channelId, module.id, signal),
     ]);
-    return { definition: definition.default, settings: response.settings, revision: response.revision, variables: response.variables };
+    const registeredTemplateVariables = definition.default.registeredTemplateVariableFields?.length
+      ? await getChannelTemplateVariables(channelId, signal)
+      : [];
+    return {
+      definition: definition.default,
+      settings: response.settings,
+      revision: response.revision,
+      variables: response.variables,
+      registeredTemplateVariables,
+    };
   });
   const loaded = settingsQuery.data;
   const loadError = settingsQuery.error instanceof PanelApiError
@@ -283,10 +321,12 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       channelId={channelId}
       canManageContent={canManageContent}
       language={language}
+      {...(settingsSaveTarget === undefined ? {} : { settingsSaveTarget })}
       definition={loaded.definition}
       copy={copy}
       retryLabel={dashboardCommonTexts(language).retry}
       channelVariables={loaded.variables}
+      registeredTemplateVariables={loaded.registeredTemplateVariables}
       initial={loaded.settings}
       initialRevision={loaded.revision}
       {...(page === undefined ? {} : { page })}
@@ -362,7 +402,7 @@ const BelaboxSettingsPanelMount = ({ module, channelId, language, canManageConte
   />;
 };
 
-const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, language, definition, copy, retryLabel, channelVariables, initial, initialRevision, onReload, page }: {
+const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, language, definition, copy, retryLabel, channelVariables, registeredTemplateVariables, initial, initialRevision, settingsSaveTarget, onReload, page }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
@@ -371,8 +411,10 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   copy: SettingsEditorDefinition<Record<string, unknown>>["locales"]["de"];
   retryLabel: string;
   channelVariables: readonly PanelChannelVariable[];
+  registeredTemplateVariables: readonly ModuleRegisteredTemplateVariable[];
   initial: Record<string, unknown>;
   initialRevision: number;
+  settingsSaveTarget?: HTMLElement | null;
   onReload: () => Promise<boolean>;
   page?: ModuleSettingsPageOptions;
 }): ReactElement => {
@@ -417,8 +459,17 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   const templateFields = (module.templateFields ?? {}) as Readonly<Record<string, readonly TemplateVariable[] | undefined>>;
   const templateMetadata = Object.fromEntries(Object.entries(templateFields).map(([key, variables]) => {
     const context = module.templateContext ?? "event";
-    const declared = effectivePanelTemplateVariables(context, variables ?? [], channelVariables);
-    const localized = panelTemplateOptions(
+    const includesRegistered = definition.registeredTemplateVariableFields?.includes(key) === true;
+    const registered = includesRegistered
+      ? registeredTemplateVariables.filter((variable) => variable.source !== "system" && variable.source !== "channel" && (
+        context === "event"
+          ? isEventTemplateVariableAvailable(variable)
+          : variable.contexts === undefined || variable.contexts.includes(context)
+      ))
+      : [];
+    const declarations = [...(variables ?? []), ...registered];
+    const declared = effectivePanelTemplateVariables(context, declarations, channelVariables);
+    const localizedStatic = panelTemplateOptions(
       context,
       variables ?? [],
       channelVariables,
@@ -426,6 +477,8 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       copy.fields[key]?.variables ?? [],
       module.templateVariableGroup === undefined ? undefined : { id: module.id, definition: module.templateVariableGroup },
     );
+    const localizedRegistered = registered.map((variable) => registeredTemplateFieldVariable(variable, language));
+    const localized = [...new Map([...localizedRegistered, ...localizedStatic].map((variable) => [variable.name, variable])).values()];
     const byName = new Map(declared.map((variable) => [variable.name, variable]));
     return [key, localized.flatMap((option) => {
       const variable = byName.get(option.name);
@@ -464,7 +517,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     />
   );
   const readOnly = page === undefined && !canManageContent ? {
-    reason: copy.readOnlyReason,
+    ...(module.id === "chat_voting" ? {} : { reason: copy.readOnlyReason }),
     content: <SettingsEditor
       spec={spec}
       sectionId={spec.sections[0]?.id ?? ""}
@@ -726,6 +779,11 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     {pageContent}
     {page === undefined ? <EditorShell
     ariaLabel={copy.ariaLabel}
+      showTitle={definition.showTitle ?? true}
+      {...(definition.savePosition === "page-header" ? { saveTarget: settingsSaveTarget ?? null } : {})}
+    {...(definition.className === undefined ? {} : { className: definition.className })}
+    {...(definition.layout === undefined ? {} : { layout: definition.layout })}
+    {...(definition.savePosition === undefined ? {} : { savePosition: definition.savePosition })}
     title={copy.title}
     sections={sections}
     {...(readOnly === undefined ? {} : { readOnly })}
@@ -781,7 +839,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   </>;
 };
 
-export const ModulePanelMount = ({ channelId, activeModules, streamSessionIdentity, suspendModuleId, canManage = true, canOperate = true, botIsModerator = null, initialSelection }: ModulePanelMountProperties): ReactElement => {
+export const ModulePanelMount = ({ channelId, activeModules, settingsSaveTarget = null, streamSessionIdentity, suspendModuleId, canManage = true, canOperate = true, botIsModerator = null, initialSelection, chatVotingTab = "votes" }: ModulePanelMountProperties): ReactElement => {
   const registeredViews = activeModules.flatMap((activeModule) => {
     const module = MODULES.find((candidate) => candidate.id === activeModule.moduleId);
     if (module === undefined) return [];
@@ -804,18 +862,20 @@ export const ModulePanelMount = ({ channelId, activeModules, streamSessionIdenti
           key={`${channelId}:${id}`}
           module={module}
           channelId={channelId}
+          settingsSaveTarget={settingsSaveTarget}
           {...(streamSessionIdentity === undefined ? {} : { streamSessionIdentity })}
           canManage={canManage}
           canOperate={canOperate}
           botIsModerator={botIsModerator}
           suspendToParent={module.id === suspendModuleId}
           {...(initialSelection === undefined ? {} : { initialSelection })}
+          {...(id === "chat_voting" ? { chatVotingTab } : {})}
         />)}
     </section>
   );
 };
 
-const MountedModuleView = ({ module, channelId, streamSessionIdentity, canManage, canOperate, botIsModerator, suspendToParent, initialSelection }: {
+const MountedModuleView = ({ module, channelId, streamSessionIdentity, canManage, canOperate, botIsModerator, suspendToParent, settingsSaveTarget, initialSelection, chatVotingTab }: {
   module: (typeof MODULES)[number];
   channelId: string;
   streamSessionIdentity?: string;
@@ -823,7 +883,9 @@ const MountedModuleView = ({ module, channelId, streamSessionIdentity, canManage
   canOperate: boolean;
   botIsModerator: boolean | null;
   suspendToParent: boolean;
+  settingsSaveTarget: HTMLElement | null;
   initialSelection?: string;
+  chatVotingTab?: "votes" | "settings";
 }): ReactElement => {
   const loadPanel = useCallback(() => loadModulePanel(module) as Promise<{ default: ComponentType<ModulePanelProperties> }>, [module]);
   const settingsEditor = <ModuleSettingsEditor
@@ -831,10 +893,12 @@ const MountedModuleView = ({ module, channelId, streamSessionIdentity, canManage
     channelId={channelId}
     canManageContent={canManage}
     language={dashboardLanguage()}
+    settingsSaveTarget={settingsSaveTarget}
   />;
+  const chatVotingView = module.id === "chat_voting";
   return <div className="module-view">
-    {module.settingsEditorPlacement === "before-panel" ? settingsEditor : null}
-    {module.panel === undefined ? null : <RetryableLazy
+    {chatVotingView ? chatVotingTab === "settings" ? settingsEditor : null : module.settingsEditorPlacement === "before-panel" ? settingsEditor : null}
+    {module.panel === undefined || chatVotingView && chatVotingTab === "settings" ? null : <RetryableLazy
       instanceKey={`${module.id}:panel`}
       load={loadPanel}
       suspendToParent={suspendToParent}
@@ -863,7 +927,7 @@ const MountedModuleView = ({ module, channelId, streamSessionIdentity, canManage
         queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: dashboardTexts().module.componentLoadError, onRetry: retry }}
       >{null}</LoadState>}
     />}
-    {module.settingsEditorPlacement === "before-panel" ? null : settingsEditor}
+    {!chatVotingView && module.settingsEditorPlacement !== "before-panel" ? settingsEditor : null}
   </div>;
 };
 
@@ -1076,6 +1140,8 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   const requiredScopes = moduleState?.requiredBroadcasterScopes ?? registered?.broadcasterScopes ?? [];
   const missingScopeSet = new Set(missingScopes);
   const effectiveEnabled = enabled && !permissionsMissing;
+  const [settingsSaveTarget, setSettingsSaveTarget] = useState<HTMLDivElement | null>(null);
+  const [chatVotingTab, setChatVotingTab] = useState<"votes" | "settings">("votes");
   const viewLoading = loading || moduleState === undefined || ((registered?.panel !== undefined || registered?.settingsEditor !== undefined) && enabled && activeModule === undefined);
   const showActiveView = activeModule !== undefined && (enabled || moduleState === undefined);
 
@@ -1116,7 +1182,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
 
   return (
     <>
-      <section className="module-detail" aria-label={details.name}>
+      <section className={`module-detail module-detail--${moduleId}`} aria-label={details.name}>
         <PageHeader
           kind="modules"
           icon={navigationPage === undefined
@@ -1124,16 +1190,34 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
             : <NavigationIcon kind={navigationPage.iconKind} className="module-heading-glyph module-glyph" />}
           title={details.name}
           subtitle={details.description}
+          saveTargetRef={setSettingsSaveTarget}
           {...(navigationPage?.showMainSwitch === false ? {} : {
             active: effectiveEnabled,
-            onToggle: (nextEnabled: boolean) => { if (nextEnabled !== effectiveEnabled) onToggle(); },
+            onToggle: (nextEnabled: boolean) => {
+              if (nextEnabled === effectiveEnabled) return;
+              if (moduleId === "chat_voting") runDashboardNavigationGuards(onToggle, () => undefined);
+              else onToggle();
+            },
             switchTitle: `${details.name}: ${statusWord(effectiveEnabled)}`,
             switchDisabled: !manageable || switchDisabled || busy || mandatory,
             switchBusy: busy,
             ...(mandatory ? { moduleSwitch: <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} /> } : {}),
-            ...(headerLockHint === null || (registered?.panelManagesSettings && moduleState?.enabled !== false && moduleId !== "clips") ? {} : { lockHint: headerLockHint }),
+            ...(headerLockHint === null || (registered?.settingsEditor !== undefined && showActiveView && moduleId !== "chat_voting") || (registered?.panelManagesSettings && moduleState?.enabled !== false && moduleId !== "clips") ? {} : { lockHint: headerLockHint }),
           })}
-          {...(moduleId === "text_commands" ? {
+          {...(moduleId === "chat_voting" ? {
+            pageActions: <>
+              <Tabs className="chat-voting-page-tabs" value={chatVotingTab} keepMounted={false} onChange={(value) => {
+                if (value !== "votes" && value !== "settings") return;
+                runDashboardNavigationGuards(() => { setChatVotingTab(value); }, () => undefined);
+              }}>
+                <Tabs.List className="chat-voting-page-tabs__list" aria-label={dashboardLanguage() === "de" ? "Abstimmungsseite" : "Voting page"}>
+                  <Tabs.Tab className="chat-voting-page-tabs__tab" value="votes">{dashboardLanguage() === "de" ? "Abstimmungen" : "Votes"}</Tabs.Tab>
+                  <Tabs.Tab className="chat-voting-page-tabs__tab" value="settings">{dashboardLanguage() === "de" ? "Einstellungen" : "Settings"}</Tabs.Tab>
+                </Tabs.List>
+              </Tabs>
+              {chatCommands.length === 0 ? null : <ChatCommandsHelp commands={chatCommands} language={dashboardLanguage()} />}
+            </>,
+          } : moduleId === "text_commands" ? {
             pageActions: <TextCommandChatCommandHelp channelId={channelId} />,
           } : chatCommands.length === 0 ? {} : {
             pageActions: <ChatCommandsHelp commands={chatCommands} language={dashboardLanguage()} />,
@@ -1163,7 +1247,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
         {stateMessage === null ? (
           registered?.panel === undefined && registered?.settingsEditor === undefined ? (showActiveView ? <p className="module-state">{texts.module.noView}</p> : null) : !showActiveView ? null : (
             <section className={`module-detail__content${viewLoading ? " stale" : ""}`} aria-label={labels.content}>
-              <ModulePanelMount key={`${channelId}:${moduleId}`} channelId={channelId} activeModules={[activeModule]} {...(streamSessionIdentity === undefined ? {} : { streamSessionIdentity })} {...(suspendPanelUntilReady ? { suspendModuleId: moduleId } : {})} canManage={ownRole !== "operator"} canOperate={true} botIsModerator={botIsModerator} {...(initialSelection === undefined ? {} : { initialSelection })} />
+              <ModulePanelMount key={`${channelId}:${moduleId}`} channelId={channelId} activeModules={[activeModule]} settingsSaveTarget={settingsSaveTarget} {...(streamSessionIdentity === undefined ? {} : { streamSessionIdentity })} {...(suspendPanelUntilReady ? { suspendModuleId: moduleId } : {})} canManage={ownRole !== "operator"} canOperate={true} botIsModerator={botIsModerator} {...(initialSelection === undefined ? {} : { initialSelection })} {...(moduleId === "chat_voting" ? { chatVotingTab } : {})} />
             </section>
           )
         ) : (

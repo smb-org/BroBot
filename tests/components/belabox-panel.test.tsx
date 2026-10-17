@@ -213,6 +213,24 @@ describe("BELABOX panel", () => {
     expect(toastsSnapshot().filter((toast) => toast.message === "The connection could not be tested.")).toHaveLength(2);
   });
 
+  it("does not report a failed connection when the status request is aborted on unmount", async () => {
+    let statusSignal: AbortSignal | undefined;
+    mocks.loadBelaboxStatus.mockImplementation((_channelId: string, signal: AbortSignal) => {
+      statusSignal = signal;
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+      });
+    });
+
+    const view = render(<UiProvider><><ToastHost /><BelaboxPanel channelId="channel-a" language="en" canManage /></></UiProvider>);
+    await waitFor(() => { expect(mocks.loadBelaboxStatus).toHaveBeenCalledOnce(); });
+    view.unmount();
+    await waitFor(() => { expect(statusSignal?.aborted).toBe(true); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+    expect(toastsSnapshot().filter((toast) => toast.message === "The connection could not be tested.")).toHaveLength(0);
+  });
+
   it("draws the history thresholds and disconnect gaps and can select a stream", async () => {
     mocks.loadBelaboxStatus.mockResolvedValue({
       configured: true,

@@ -343,3 +343,48 @@ test("shell captures the desktop and mobile layouts without horizontal overflow"
     if (width === 390) await expect(page.getByRole("navigation", { name: "Main navigation" })).toBeInViewport();
   }
 });
+
+test("the sidebar and top bar stay fixed while the long page content scrolls", async ({ page }) => {
+  await installDashboardFixture(page, true);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`/channels/${channelId}/modules`);
+
+  const geometry = async () => page.evaluate(() => {
+    const main = document.querySelector<HTMLElement>(".dashboard-shell__main");
+    const header = document.querySelector<HTMLElement>(".dashboard-shell__header");
+    const sidebar = document.querySelector<HTMLElement>(".dashboard-shell__navbar");
+    if (main === null || header === null || sidebar === null) throw new Error("The setup shell is incomplete.");
+    const rect = (element: HTMLElement) => {
+      const box = element.getBoundingClientRect();
+      return { x: box.x, y: box.y, width: box.width, height: box.height };
+    };
+    return {
+      main: rect(main),
+      header: rect(header),
+      sidebar: rect(sidebar),
+      mainOverflowY: getComputedStyle(main).overflowY,
+      mainClientHeight: main.clientHeight,
+      mainScrollHeight: main.scrollHeight,
+      pageScrollHeight: document.documentElement.scrollHeight,
+      viewportHeight: window.innerHeight,
+      windowScrollY: window.scrollY,
+    };
+  });
+
+  const before = await geometry();
+  expect(before.mainOverflowY).toBe("auto");
+  expect(before.mainScrollHeight).toBeGreaterThan(before.mainClientHeight);
+  expect(before.pageScrollHeight).toBeLessThanOrEqual(before.viewportHeight + 1);
+  expect(before.windowScrollY).toBe(0);
+
+  await page.locator(".dashboard-shell__main").evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect.poll(async () => page.locator(".dashboard-shell__main").evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+  const after = await geometry();
+  expect(after.header).toEqual(before.header);
+  expect(after.sidebar).toEqual(before.sidebar);
+  expect(after.main.y).toBe(before.main.y);
+  expect(after.windowScrollY).toBe(0);
+});

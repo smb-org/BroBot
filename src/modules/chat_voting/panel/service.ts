@@ -1,5 +1,6 @@
 import { PanelApiError } from "../../../contracts/panel-error";
 import type { ChatVote, ChatVoteTemplate, ChatVoteTemplateDraft, ChatVoteTerm, ChatVotingKind, ChatVotingTextMode } from "../contracts";
+import type { ModuleRegisteredTemplateVariable } from "../../contract";
 
 export interface ChatVotingPanelState {
   vote: ChatVote | null;
@@ -15,10 +16,6 @@ export interface ChatVoteTemplateListState {
   templates: readonly ChatVoteTemplate[];
   count: number;
   maximum: number;
-}
-
-export interface ChatVoteRecentState {
-  votes: readonly ChatVote[];
 }
 
 export const laterUsageTime = (current: string | null, incoming: string | null): string | null => {
@@ -116,8 +113,13 @@ export const startChatVoting = async (channelId: string, options: StartChatVotin
 export const loadChatVoteTemplates = async (channelId: string, signal?: AbortSignal): Promise<ChatVoteTemplateListState> =>
   readJson<ChatVoteTemplateListState>(await fetch(route(channelId, "/templates"), signal === undefined ? {} : { signal }));
 
-export const loadRecentChatVotes = async (channelId: string, signal?: AbortSignal): Promise<ChatVoteRecentState> =>
-  readJson<ChatVoteRecentState>(await fetch(route(channelId, "/recent"), signal === undefined ? {} : { signal }));
+export const loadChatVotingTemplateVariables = async (
+  channelId: string,
+  signal?: AbortSignal,
+): Promise<readonly ModuleRegisteredTemplateVariable[]> => {
+  const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/template-variables`, signal === undefined ? {} : { signal });
+  return (await readJson<{ variables: readonly ModuleRegisteredTemplateVariable[] }>(response)).variables;
+};
 
 export const createChatVoteTemplate = async (channelId: string, draft: ChatVoteTemplateDraft): Promise<ChatVoteTemplate> => {
   return csrfMutation(async (token) => (await readJson<{ template: ChatVoteTemplate }>(await fetch(route(channelId, "/templates"), {

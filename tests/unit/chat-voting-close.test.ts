@@ -7,6 +7,7 @@ import { prepareModuleOverlayRealtimeMessage } from "../../src/worker/module-ove
 import type { ChatVoteDraft } from "../../src/modules/chat_voting/contracts";
 import { createChatVotingRepository } from "../../src/modules/chat_voting/repository";
 import { announceChatVoteStartFromAlarm, closeChatVoteFromAlarm, requestChatVoteClose, requestChatVoteExtension } from "../../src/modules/chat_voting/service";
+import { findChatVoteResultTextReferences } from "../../src/modules/contracts/chat-vote-result-text-references";
 import { insertChannel } from "./fixtures";
 import { createReadBarrierDatabase, TestD1Database } from "./test-d1";
 
@@ -36,6 +37,7 @@ describe("chat voting close service", () => {
       requestedDurationSeconds: null,
       closeReason: "limit",
       status: "open",
+      ...(resultText === undefined ? {} : { resultText }),
     };
     await repository.insertOpen(vote);
     return repository;
@@ -46,7 +48,8 @@ describe("chat voting close service", () => {
     overrides: {
       put?: (key: string, value: unknown) => Promise<void>;
       schedule?: ModuleAlarmContext["schedule"];
-      sendChat?: () => Promise<{ sent: boolean; reason: string | null; retryable: boolean }>;
+      sendChat?: (...args: Parameters<ModuleAlarmContext["sendChat"]>) => Promise<{ sent: boolean; reason: string | null; retryable: boolean }>;
+      renderTemplate?: ModuleAlarmContext["renderTemplate"];
     } = {},
   ) => {
     const values = new Map<string, unknown>();
@@ -60,6 +63,7 @@ describe("chat voting close service", () => {
       () => { order.push("overlay"); return Promise.resolve(); },
     );
     const sendChat = vi.fn(overrides.sendChat ?? (() => Promise.resolve({ sent: true, reason: null, retryable: false })));
+    const writeDiagnostics = vi.fn<NonNullable<ModuleAlarmContext["writeDiagnostics"]>>(() => Promise.resolve());
     const storagePut = vi.fn((key: string, value: unknown) => {
       order.push("put");
       return put(key, value);
@@ -80,20 +84,20 @@ describe("chat voting close service", () => {
       },
       schedule: overrides.schedule ?? vi.fn(),
       clear: vi.fn(),
-      renderTemplate: vi.fn(() => Promise.resolve({ text: "Yes: 7 (70%) · No: 3 (30%)" })),
+      renderTemplate: overrides.renderTemplate ?? vi.fn(() => Promise.resolve({ text: "Yes: 7 (70%) · No: 3 (30%)" })),
       publishModuleOverlayMessage,
       sendChat: vi.fn((...args: Parameters<ModuleAlarmContext["sendChat"]>) => {
-        void args;
         order.push("chat");
-        return sendChat();
+        return sendChat(...args);
       }),
       chatActivityCount: vi.fn(() => Promise.resolve(0)),
       resolveEventTimes: vi.fn(() => Promise.resolve([])),
       streamState: vi.fn(() => Promise.resolve("unknown" as const)),
       streamStartedAt: vi.fn(() => Promise.resolve({ streamId: null, startedAt: null })),
       channelLanguage: vi.fn(() => Promise.resolve("en" as const)),
+      writeDiagnostics,
     } as unknown as ModuleAlarmContext;
-    return { context, values, close, read, publishModuleOverlayMessage, sendChat, storagePut };
+    return { context, values, close, read, publishModuleOverlayMessage, sendChat, storagePut, writeDiagnostics };
   };
 
   it("coalesces concurrent manual-close requests onto the same alarm key", async () => {
@@ -138,6 +142,54 @@ describe("chat voting close service", () => {
 
     expect(context.schedule).toHaveBeenCalledWith("fictional-poll", Date.parse(closesAt), 4);
     expect(close).not.toHaveBeenCalled();
+  });
+
+  it("keeps a closed vote in result references while its alarm retries delivery beside a newer open vote", async () => {
+    const repository = await seedOpenVote(true, "First dinner", "First result: {var.score}");
+    const firstOrder: string[] = [];
+    const failedDelivery = createAlarmContext(firstOrder, {
+      sendChat: () => Promise.resolve({ sent: false, reason: "output_limit", retryable: true }),
+    });
+
+    await expect(closeChatVoteFromAlarm(failedDelivery.context, repository, "fictional-poll"))
+      .rejects.toThrow("waiting for the automated output limit");
+    await expect(repository.byId("fictional-channel", "fictional-poll")).resolves.toMatchObject({
+      status: "closed",
+      resultDeliveryPending: true,
+    });
+
+    await repository.insertOpen({
+      id: "later-poll",
+      channelId: "fictional-channel",
+      kind: "yes_no",
+      optionCount: 2,
+      labels: ["Yes", "No"],
+      title: "Later dinner",
+      resultText: "Later result: {var.points}",
+      openedAt: "2026-10-16T10:00:00.000Z",
+      closesAt: "2026-10-16T10:02:00.000Z",
+      requestedDurationSeconds: 120,
+      closeReason: "timer",
+      status: "open",
+    });
+
+    const references = await findChatVoteResultTextReferences(database as unknown as D1Database, "fictional-channel");
+    expect(references.map(({ source_id }) => source_id)).toEqual(["later-poll", "fictional-poll"]);
+    expect(references.find(({ source_id }) => source_id === "fictional-poll")).toMatchObject({
+      source_kind: "pending_vote",
+      result_text: "First result: {var.score}",
+    });
+
+    const successfulRetry = createAlarmContext([], {
+      sendChat: () => Promise.resolve({ sent: true, reason: null, retryable: false }),
+    });
+    await closeChatVoteFromAlarm(successfulRetry.context, repository, "fictional-poll");
+    await expect(repository.byId("fictional-channel", "fictional-poll")).resolves.toMatchObject({
+      status: "closed",
+      resultDeliveryPending: false,
+    });
+    await expect(findChatVoteResultTextReferences(database as unknown as D1Database, "fictional-channel"))
+      .resolves.toHaveLength(1);
   });
 
   it("throws when a lost alarm claim cannot reread a concurrent manual close", async () => {
@@ -358,6 +410,60 @@ describe("chat voting close service", () => {
       .resolves.toMatchObject({ status: "closed", counts: [7, 3] });
   });
 
+  it("sends the rendered remainder when a text-block rename crosses alarm awaits", async () => {
+    const repository = await seedOpenVote(true, "Dinner", "Result: {text.old}");
+    const announcements: string[] = [];
+    const order: string[] = [];
+    const { context, publishModuleOverlayMessage } = createAlarmContext(order, {
+      sendChat: async (text, _idempotencyKey, _attributions, stillValid) => {
+        if (stillValid !== undefined && !await stillValid()) {
+          return { sent: false, reason: "stale_before_send", retryable: false };
+        }
+        announcements.push(text);
+        return { sent: true, reason: null, retryable: false };
+      },
+    });
+    let overlayRenamed = false;
+    publishModuleOverlayMessage.mockImplementation(async () => {
+      order.push("overlay");
+      if (overlayRenamed) return;
+      overlayRenamed = true;
+      await database.prepare(
+        "UPDATE chat_votes SET result_text = 'Result: {text.middle}' WHERE channel_id = ? AND poll_id = ?",
+      ).bind("fictional-channel", "fictional-poll").run();
+    });
+    let renderCount = 0;
+    (context as { renderTemplate: ModuleAlarmContext["renderTemplate"] }).renderTemplate = vi.fn(async (text: string) => {
+      renderCount += 1;
+      if (renderCount === 1) {
+        await database.prepare(
+          "UPDATE chat_votes SET result_text = 'Result: {text.new}' WHERE channel_id = ? AND poll_id = ?",
+        ).bind("fictional-channel", "fictional-poll").run();
+      }
+      return { text };
+    });
+
+    await closeChatVoteFromAlarm(context, repository, "fictional-poll");
+
+    expect(context.renderTemplate).toHaveBeenNthCalledWith(
+      1,
+      "Result: {text.middle}",
+      expect.any(Number),
+      expect.any(Object),
+    );
+    expect(context.renderTemplate).toHaveBeenCalledTimes(1);
+    expect(announcements).toEqual(["Result: "]);
+    expect(announcements.join(" ")).not.toContain("{text.");
+    expect(context.writeDiagnostics).toHaveBeenCalledWith(
+      "chat-voting:fictional-poll:result",
+      [{ code: "template.chat_reference_dropped", detail: { name: "text.middle" } }],
+      expect.any(String),
+    );
+    await expect(repository.byId("fictional-channel", "fictional-poll")).resolves.toMatchObject({
+      resultDeliveryPending: false,
+    });
+  });
+
   it("publishes a bounded panel hint when a large closed tally exceeds the overlay limit", async () => {
     const repository = await seedOpenVote(false);
     await database.prepare(
@@ -546,6 +652,71 @@ describe("chat voting close service", () => {
         "vote.options": "1 = Yes, 2 = No",
         "vote.duration": "",
       },
+    );
+  });
+
+  it.each([
+    ["a renamed text block", "{text.old_greeting}", "text.old_greeting"],
+    ["a deleted text block", "{text.deleted_greeting}", "text.deleted_greeting"],
+    ["a renamed channel variable", "{var.old_score}", "var.old_score"],
+    ["a deleted channel variable", "{var.deleted_score}", "var.deleted_score"],
+    ["a renamed API source", "{api.old_source}", "api.old_source"],
+    ["a deleted API source", "{api.deleted_source}", "api.deleted_source"],
+  ])("omits %s references from a vote result and records the dropped token", async (_case, token, name) => {
+    const repository = await seedOpenVote(true, null, `Result: ${token}`);
+    const renderTemplate = vi.fn<ModuleAlarmContext["renderTemplate"]>((text) => Promise.resolve({ text }));
+    const { context, sendChat, writeDiagnostics } = createAlarmContext([], { renderTemplate });
+
+    await closeChatVoteFromAlarm(context, repository, "fictional-poll");
+
+    expect(sendChat).toHaveBeenCalledWith(
+      "Result: ",
+      "chat-voting:fictional-poll:result",
+      undefined,
+      expect.any(Function),
+      "source_only",
+    );
+    expect(writeDiagnostics).toHaveBeenCalledWith(
+      "chat-voting:fictional-poll:result",
+      [{ code: "template.chat_reference_dropped", detail: { name } }],
+      expect.any(String),
+    );
+  });
+
+  it("omits unresolved references from the default result title", async () => {
+    const repository = await seedOpenVote(true, "Dinner {text.old_greeting}");
+    const { context, sendChat, writeDiagnostics } = createAlarmContext([]);
+
+    await closeChatVoteFromAlarm(context, repository, "fictional-poll");
+
+    const announcement = sendChat.mock.calls[0]?.[0] ?? "";
+    expect(announcement).not.toContain("{text.old_greeting}");
+    expect(announcement).toContain("Dinner ");
+    expect(writeDiagnostics).toHaveBeenCalledWith(
+      "chat-voting:fictional-poll:result",
+      [{ code: "template.chat_reference_dropped", detail: { name: "text.old_greeting" } }],
+      expect.any(String),
+    );
+  });
+
+  it("omits unresolved references from a vote start message and records the dropped token", async () => {
+    const repository = await seedOpenVote(true, null, undefined, "Start: {text.old_greeting}");
+    const renderTemplate = vi.fn<ModuleAlarmContext["renderTemplate"]>((text) => Promise.resolve({ text }));
+    const { context, sendChat, writeDiagnostics } = createAlarmContext([], { renderTemplate });
+
+    await announceChatVoteStartFromAlarm(context, repository, "fictional-poll");
+
+    expect(sendChat).toHaveBeenCalledWith(
+      "Start: ",
+      "chat-voting:fictional-poll:start",
+      undefined,
+      expect.any(Function),
+      "source_only",
+    );
+    expect(writeDiagnostics).toHaveBeenCalledWith(
+      "chat-voting:fictional-poll:start",
+      [{ code: "template.chat_reference_dropped", detail: { name: "text.old_greeting" } }],
+      expect.any(String),
     );
   });
 

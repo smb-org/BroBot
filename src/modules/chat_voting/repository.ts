@@ -1,5 +1,6 @@
 import type { ModuleMutationAuthorization } from "../contract";
 import type { ChatVote, ChatVoteCloseReason, ChatVoteDraft, ChatVoteTemplate, ChatVoteTemplateDraft, ChatVoteTerm, ChatVotingKind, ChatVotingTextMode } from "./contracts";
+import type { TextBlockWriteGuard } from "../contracts/text-block-write-guard";
 
 interface ChatVoteRow {
   channel_id: string;
@@ -8,6 +9,7 @@ interface ChatVoteRow {
   option_count: number;
   labels_json: string;
   title: string | null;
+  result_text: string | null;
   text_mode: ChatVotingTextMode | null;
   term_filter_ready: number | null;
   status: "open" | "closed";
@@ -22,6 +24,7 @@ interface ChatVoteRow {
   voter_count: number | null;
   text_results_json: string | null;
   more_terms: number | null;
+  result_delivery_pending: number;
 }
 
 interface ChatVoteTemplateRow {
@@ -29,6 +32,7 @@ interface ChatVoteTemplateRow {
   channel_id: string;
   shortcut: string | null;
   title: string;
+  result_text: string;
   labels: string;
   free_text_mode: ChatVotingTextMode | null;
   duration_seconds: number;
@@ -82,6 +86,7 @@ const mapRow = (row: ChatVoteRow): ChatVote => {
     optionCount: row.option_count,
     labels: parseStringArray(row.labels_json) ?? [],
     title: row.title,
+    resultText: row.result_text,
     textMode: row.text_mode,
     termFilterReady: row.term_filter_ready === null ? null : row.term_filter_ready === 1,
     status: row.status === "closed" ? "closed" : row.closing_at === null ? "open" : "closing",
@@ -96,6 +101,7 @@ const mapRow = (row: ChatVoteRow): ChatVote => {
     voterCount: row.voter_count,
     textResults: parseTermArray(row.text_results_json),
     moreTerms: row.more_terms,
+    resultDeliveryPending: row.result_delivery_pending === 1,
   };
 };
 
@@ -104,6 +110,7 @@ const mapTemplateRow = (row: ChatVoteTemplateRow): ChatVoteTemplate => ({
   channelId: row.channel_id,
   shortcut: row.shortcut,
   title: row.title,
+  resultText: row.result_text,
   labels: parseStringArray(row.labels) ?? [],
   freeTextMode: row.free_text_mode,
   durationSeconds: row.duration_seconds,
@@ -114,37 +121,54 @@ const mapTemplateRow = (row: ChatVoteTemplateRow): ChatVoteTemplate => ({
   updatedAt: row.updated_at,
 });
 
-export const chatVoteTemplateSelectColumns = `id, channel_id, shortcut, title, labels, free_text_mode, duration_seconds,
+export const chatVoteTemplateSelectColumns = `id, channel_id, shortcut, title, result_text, labels, free_text_mode, duration_seconds,
                                              revision, legacy_alias, last_used_at, created_at, updated_at`;
 
-type ChatVoteTemplateWriteStatus = "saved" | "created" | "limit" | "conflict" | "shortcut_conflict" | "missing" | "unauthorized";
+type ChatVoteTemplateWriteStatus = "saved" | "created" | "limit" | "conflict" | "shortcut_conflict" | "missing" | "unauthorized" | "reference_conflict";
 type ChatVoteTemplateSaveResult =
   | { status: "saved"; template: ChatVoteTemplate }
   | { status: "shortcut_conflict" }
   | { status: "conflict" }
   | { status: "missing" }
-  | { status: "unauthorized" };
+  | { status: "unauthorized" }
+  | { status: "reference_conflict" };
+
+type ChatVoteOpenInsertStatus = "inserted" | "busy" | "reference_conflict";
+
+const NO_BLOCK_GUARD: TextBlockWriteGuard = { sql: "", values: [], references: [] };
+
+const writeGuardPassed = async (db: D1Database, guard: TextBlockWriteGuard): Promise<boolean> => {
+  if (guard.references.length === 0) return true;
+  const row = await db.prepare(`SELECT 1 AS valid WHERE 1 = 1 ${guard.sql}`)
+    .bind(...guard.values).first<{ valid: number }>();
+  return row !== null;
+};
 
 export interface ChatVoteTemplateRepository {
   templates(channelId: string): Promise<ChatVoteTemplate[]>;
   template(channelId: string, id: string): Promise<ChatVoteTemplate | null>;
   templateByShortcut(channelId: string, shortcut: string): Promise<ChatVoteTemplate | null>;
   templateByLegacyAlias(channelId: string, alias: NonNullable<ChatVoteTemplate["legacyAlias"]>): Promise<ChatVoteTemplate | null>;
-  createTemplate(channelId: string, id: string, draft: ChatVoteTemplateDraft, createdAt: string, authorization: ModuleMutationAuthorization, audit?: D1PreparedStatement): Promise<ChatVoteTemplateWriteStatus>;
-  saveTemplate(channelId: string, id: string, revision: number, draft: ChatVoteTemplateDraft, updatedAt: string, authorization: ModuleMutationAuthorization, audit?: D1PreparedStatement): Promise<ChatVoteTemplateSaveResult>;
+  createTemplate(channelId: string, id: string, draft: ChatVoteTemplateDraft, createdAt: string, authorization: ModuleMutationAuthorization, audit?: D1PreparedStatement, blockGuard?: TextBlockWriteGuard): Promise<ChatVoteTemplateWriteStatus>;
+  saveTemplate(channelId: string, id: string, revision: number, draft: ChatVoteTemplateDraft, updatedAt: string, authorization: ModuleMutationAuthorization, audit?: D1PreparedStatement, blockGuard?: TextBlockWriteGuard): Promise<ChatVoteTemplateSaveResult>;
   deleteTemplate(channelId: string, id: string, revision: number, authorization: ModuleMutationAuthorization, audit?: D1PreparedStatement): Promise<ChatVoteTemplateWriteStatus>;
   markTemplateUsed(channelId: string, id: string, usedAt: string): Promise<void>;
 }
 
 export const chatVoteSelectColumns = `channel_id, poll_id, kind, option_count, labels_json, status,
-                                      title, opened_at, closes_at, closing_at, deadline_revision, requested_duration_seconds, closed_at,
+                                      title, result_text, opened_at, closes_at, closing_at, deadline_revision, requested_duration_seconds, closed_at,
                                       close_reason, counts_json, voter_count, text_mode, text_results_json, more_terms,
-                                      term_filter_ready`;
+                                      term_filter_ready, result_delivery_pending`;
+
+export interface ChatVoteResultTextTemplateSnapshot {
+  id: string;
+  revision: number;
+  resultText: string;
+}
 
 export interface ChatVotingRepository {
   open(channelId: string): Promise<ChatVote | null>;
   latest(channelId: string): Promise<ChatVote | null>;
-  recent(channelId: string, limit?: number): Promise<ChatVote[]>;
   byId(channelId: string, pollId: string): Promise<ChatVote | null>;
   approveTerm(
     channelId: string,
@@ -154,7 +178,7 @@ export interface ChatVotingRepository {
     approvedBy: string,
     authorization: ModuleMutationAuthorization,
   ): Promise<{ authorized: boolean; changed: boolean }>;
-  insertOpen(vote: ChatVoteDraft, authorization?: ModuleMutationAuthorization): Promise<boolean>;
+  insertOpen(vote: ChatVoteDraft, authorization?: ModuleMutationAuthorization, resultTextTemplate?: ChatVoteResultTextTemplateSnapshot, blockGuard?: TextBlockWriteGuard): Promise<ChatVoteOpenInsertStatus>;
   requestManualClose(channelId: string, pollId: string, expectedClosesAt: string, authorization?: ModuleMutationAuthorization): Promise<boolean>;
   claimAlarmClose(channelId: string, pollId: string, expectedClosesAt: string, claimedAt: string): Promise<boolean>;
   extendClose(
@@ -180,7 +204,9 @@ export interface ChatVotingRepository {
     textResults?: readonly ChatVoteTerm[] | null,
     moreTerms?: number,
     termFilterReady?: boolean | null,
+    resultDeliveryPending?: boolean,
   ): Promise<boolean>;
+  completeResultDelivery(channelId: string, pollId: string): Promise<boolean>;
   templates: ChatVoteTemplateRepository;
 }
 
@@ -210,27 +236,35 @@ const templateRepository = (db: D1Database): ChatVoteTemplateRepository => ({
     ).bind(channelId, alias).first<ChatVoteTemplateRow>();
     return row === null ? null : mapTemplateRow(row);
   },
-  async createTemplate(channelId, id, draft, createdAt, authorization, audit) {
+  async createTemplate(channelId, id, draft, createdAt, authorization, audit, blockGuard = NO_BLOCK_GUARD) {
     const mutation = db.prepare(
       `INSERT INTO chat_vote_templates
-         (id, channel_id, shortcut, title, labels, free_text_mode, duration_seconds, revision,
+         (id, channel_id, shortcut, title, result_text, labels, free_text_mode, duration_seconds, revision,
           legacy_alias, last_used_at, created_at, updated_at)
-       SELECT ?, ?, ?, ?, ?, ?, ?, 1, NULL, NULL, ?, ?
-        WHERE (SELECT COUNT(*) FROM chat_vote_templates WHERE channel_id = ?) < 100 ${authorization.sql}
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, NULL, ?, ?
+        WHERE (SELECT COUNT(*) FROM chat_vote_templates WHERE channel_id = ?) < 100
+          AND EXISTS (
+            SELECT 1 FROM channel_modules
+             WHERE channel_id = ? AND module_id = 'chat_voting' AND enabled = 1
+          ) ${authorization.sql} ${blockGuard.sql}
        ON CONFLICT (channel_id, shortcut) WHERE shortcut IS NOT NULL DO NOTHING`,
-    ).bind(id, channelId, draft.shortcut, draft.title, JSON.stringify(draft.labels), draft.freeTextMode,
-      draft.durationSeconds, createdAt, createdAt, channelId, ...authorization.values);
+    ).bind(id, channelId, draft.shortcut, draft.title, draft.resultText ?? "{vote.result}", JSON.stringify(draft.labels), draft.freeTextMode,
+      draft.durationSeconds, createdAt, createdAt, channelId, channelId, ...authorization.values, ...blockGuard.values);
     const result = audit === undefined ? await mutation.run() : (await db.batch([mutation, audit]))[0];
     if (result === undefined) throw new Error("Template creation mutation returned no D1 result.");
     if (result.meta.changes > 0) return "created";
-    const authorized = await db.prepare(`SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`)
-      .bind(...authorization.values).first<{ authorized: number }>();
+    const authorized = await db.prepare(
+      `SELECT 1 AS authorized WHERE EXISTS (
+         SELECT 1 FROM channel_modules WHERE channel_id = ? AND module_id = 'chat_voting' AND enabled = 1
+       ) ${authorization.sql}`,
+    ).bind(channelId, ...authorization.values).first<{ authorized: number }>();
     if (authorized === null) return "unauthorized";
+    if (!await writeGuardPassed(db, blockGuard)) return "reference_conflict";
     const count = await db.prepare("SELECT COUNT(*) AS count FROM chat_vote_templates WHERE channel_id = ?")
       .bind(channelId).first<{ count: number }>();
     return (count?.count ?? 0) >= 100 ? "limit" : "conflict";
   },
-  async saveTemplate(channelId, id, revision, draft, updatedAt, authorization, audit) {
+  async saveTemplate(channelId, id, revision, draft, updatedAt, authorization, audit, blockGuard = NO_BLOCK_GUARD) {
     const existed = await db.prepare(
       "SELECT 1 AS present FROM chat_vote_templates WHERE channel_id = ? AND id = ? LIMIT 1",
     ).bind(channelId, id).first<{ present: number }>() !== null;
@@ -238,13 +272,18 @@ const templateRepository = (db: D1Database): ChatVoteTemplateRepository => ({
     try {
       const mutation = db.prepare(
         `UPDATE chat_vote_templates
-            SET shortcut = ?, title = ?, labels = ?, free_text_mode = ?, duration_seconds = ?,
+            SET shortcut = ?, title = ?, result_text = ?, labels = ?, free_text_mode = ?, duration_seconds = ?,
                 revision = revision + 1, updated_at = ?
           WHERE channel_id = ? AND id = ? AND revision = ? ${authorization.sql}
+            AND EXISTS (
+              SELECT 1 FROM channel_modules
+               WHERE channel_modules.channel_id = chat_vote_templates.channel_id
+                 AND channel_modules.module_id = 'chat_voting' AND channel_modules.enabled = 1
+            ) ${blockGuard.sql}
           RETURNING ${chatVoteTemplateSelectColumns}
         `,
-      ).bind(draft.shortcut, draft.title, JSON.stringify(draft.labels), draft.freeTextMode,
-        draft.durationSeconds, updatedAt, channelId, id, revision, ...authorization.values);
+      ).bind(draft.shortcut, draft.title, draft.resultText ?? "{vote.result}", JSON.stringify(draft.labels), draft.freeTextMode,
+        draft.durationSeconds, updatedAt, channelId, id, revision, ...authorization.values, ...blockGuard.values);
       const result = audit === undefined ? await mutation.run() : (await db.batch([mutation, audit]))[0];
       if (result === undefined) throw new Error("Template save mutation returned no D1 result.");
       const row = result.results[0] as ChatVoteTemplateRow | undefined;
@@ -256,20 +295,33 @@ const templateRepository = (db: D1Database): ChatVoteTemplateRepository => ({
       throw error;
     }
     if (template !== null) return { status: "saved", template };
-    const authorized = await db.prepare(`SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`)
-      .bind(...authorization.values).first<{ authorized: number }>();
+    const authorized = await db.prepare(
+      `SELECT 1 AS authorized WHERE EXISTS (
+         SELECT 1 FROM channel_modules WHERE channel_id = ? AND module_id = 'chat_voting' AND enabled = 1
+       ) ${authorization.sql}`,
+    ).bind(channelId, ...authorization.values).first<{ authorized: number }>();
     if (authorized === null) return { status: "unauthorized" };
+    if (!await writeGuardPassed(db, blockGuard)) return { status: "reference_conflict" };
     return existed ? { status: "conflict" } : { status: "missing" };
   },
   async deleteTemplate(channelId, id, revision, authorization, audit) {
     const mutation = db.prepare(
-      `DELETE FROM chat_vote_templates WHERE channel_id = ? AND id = ? AND revision = ? ${authorization.sql}`,
+      `DELETE FROM chat_vote_templates
+        WHERE channel_id = ? AND id = ? AND revision = ? ${authorization.sql}
+          AND EXISTS (
+            SELECT 1 FROM channel_modules
+             WHERE channel_modules.channel_id = chat_vote_templates.channel_id
+               AND channel_modules.module_id = 'chat_voting' AND channel_modules.enabled = 1
+          )`,
     ).bind(channelId, id, revision, ...authorization.values);
     const result = audit === undefined ? await mutation.run() : (await db.batch([mutation, audit]))[0];
     if (result === undefined) throw new Error("Template deletion mutation returned no D1 result.");
     if (result.meta.changes > 0) return "saved";
-    const authorized = await db.prepare(`SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`)
-      .bind(...authorization.values).first<{ authorized: number }>();
+    const authorized = await db.prepare(
+      `SELECT 1 AS authorized WHERE EXISTS (
+         SELECT 1 FROM channel_modules WHERE channel_id = ? AND module_id = 'chat_voting' AND enabled = 1
+       ) ${authorization.sql}`,
+    ).bind(channelId, ...authorization.values).first<{ authorized: number }>();
     if (authorized === null) return "unauthorized";
     return await this.template(channelId, id) === null ? "missing" : "conflict";
   },
@@ -299,14 +351,6 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
         ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END, opened_at DESC LIMIT 1`,
     ).bind(channelId).first<ChatVoteRow>();
     return row === null ? null : mapRow(row);
-  },
-  async recent(channelId, limit = 50) {
-    const boundedLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
-    const result = await db.prepare(
-      `SELECT ${chatVoteSelectColumns} FROM chat_votes WHERE channel_id = ? AND status = 'closed'
-        ORDER BY closed_at DESC, opened_at DESC LIMIT ?`,
-    ).bind(channelId, boundedLimit).all<ChatVoteRow>();
-    return result.results.map(mapRow);
   },
   async byId(channelId, pollId) {
     const row = await db.prepare(
@@ -338,17 +382,20 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
       changed: (result?.meta.changes ?? 0) > 0,
     };
   },
-  async insertOpen(vote, authorization) {
+  async insertOpen(vote, authorization, resultTextTemplate, blockGuard = NO_BLOCK_GUARD) {
     const guard = authorization?.sql ?? "";
     const statement = db.prepare(
       `INSERT INTO chat_votes
-         (channel_id, poll_id, kind, option_count, labels_json, title, text_mode, term_filter_ready, status, opened_at, closes_at,
+         (channel_id, poll_id, kind, option_count, labels_json, title, result_text, text_mode, term_filter_ready, status, opened_at, closes_at,
           requested_duration_seconds, close_reason)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?
         WHERE EXISTS (
           SELECT 1 FROM channel_modules
            WHERE channel_id = ? AND module_id = 'chat_voting' AND enabled = 1
-        ) ${guard}`,
+        ) AND (? IS NULL OR EXISTS (
+          SELECT 1 FROM chat_vote_templates
+           WHERE channel_id = ? AND id = ? AND revision = ? AND result_text = ?
+        )) ${guard} ${blockGuard.sql}`,
     ).bind(
       vote.channelId,
       vote.id,
@@ -356,6 +403,7 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
       vote.optionCount,
       JSON.stringify(vote.labels),
       vote.title,
+      vote.resultText ?? null,
       vote.textMode ?? null,
       vote.termFilterReady === null || vote.termFilterReady === undefined ? null : Number(vote.termFilterReady),
       vote.openedAt,
@@ -363,10 +411,25 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
       vote.requestedDurationSeconds,
       vote.closeReason,
       vote.channelId,
+      resultTextTemplate?.id ?? null,
+      resultTextTemplate?.id === undefined ? null : vote.channelId,
+      resultTextTemplate?.id ?? null,
+      resultTextTemplate?.revision ?? null,
+      resultTextTemplate?.resultText ?? null,
       ...(authorization?.values ?? []),
+      ...blockGuard.values,
     );
     const result = await statement.run();
-    return result.meta.changes > 0;
+    if (result.meta.changes > 0) return "inserted";
+    if (blockGuard.references.length > 0) {
+      const authorized = await db.prepare(
+        `SELECT 1 AS authorized WHERE EXISTS (
+           SELECT 1 FROM channel_modules WHERE channel_id = ? AND module_id = 'chat_voting' AND enabled = 1
+         ) ${guard}`,
+      ).bind(vote.channelId, ...(authorization?.values ?? [])).first<{ authorized: number }>();
+      if (authorized !== null && !await writeGuardPassed(db, blockGuard)) return "reference_conflict";
+    }
+    return "busy";
   },
   async requestManualClose(channelId, pollId, expectedClosesAt, authorization) {
     const guard = authorization?.sql ?? "";
@@ -421,11 +484,11 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
     ).bind(closesAt, channelId, pollId, expectedClosesAt, expectedDeadlineRevision).run();
     return result.meta.changes > 0;
   },
-  async finish(channelId, pollId, closeReason, closedAt, counts, textResults = null, moreTerms = 0, termFilterReady = null) {
+  async finish(channelId, pollId, closeReason, closedAt, counts, textResults = null, moreTerms = 0, termFilterReady = null, resultDeliveryPending = false) {
     const statement = db.prepare(
       `UPDATE chat_votes
           SET status = 'closed', closed_at = ?, close_reason = ?, counts_json = ?, voter_count = ?,
-              text_results_json = ?, more_terms = ?, term_filter_ready = ?
+              text_results_json = ?, more_terms = ?, term_filter_ready = ?, result_delivery_pending = ?
         WHERE channel_id = ? AND poll_id = ? AND status = 'open'`,
     ).bind(
       closedAt,
@@ -436,10 +499,24 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
       textResults === null ? null : JSON.stringify(textResults),
       textResults === null ? null : moreTerms,
       textResults === null || termFilterReady === null ? null : Number(termFilterReady),
+      Number(resultDeliveryPending),
       channelId,
       pollId,
     );
     const result = await statement.run();
     return result.meta.changes > 0;
+  },
+  async completeResultDelivery(channelId, pollId) {
+    const [result] = await db.batch([
+      db.prepare(
+        `UPDATE chat_votes SET result_delivery_pending = 0
+          WHERE channel_id = ? AND poll_id = ? AND status = 'closed' AND result_delivery_pending = 1`,
+      ).bind(channelId, pollId),
+      db.prepare(
+        `DELETE FROM chat_vote_result_delivery_reconciliation
+          WHERE channel_id = ? AND poll_id = ?`,
+      ).bind(channelId, pollId),
+    ]);
+    return (result?.meta.changes ?? 0) > 0;
   },
 });

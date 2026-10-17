@@ -1,5 +1,11 @@
-import { settingsVariableReferences } from "../contract";
-import type { BotModule, JsonObject, ModuleOverlayElementContext } from "../contract";
+import { moduleVariableRenameTarget, settingsVariableReferences } from "../contract";
+import {
+  CHAT_VOTE_RESULT_TEXT_REFERENCE_SOURCE_SQL,
+  findChatVoteResultTextReferences,
+  prepareChatVoteResultTextReferenceRewrite,
+} from "../contracts/chat-vote-result-text-references";
+import type { BotModule, JsonObject, ModuleOverlayElementContext, ModuleTemplateUsageSource, ModuleVariableReferences } from "../contract";
+import { templateTextLength } from "../../contracts/template-text-length";
 import { createChatVotingRepository } from "./repository";
 import { CHAT_VOTING_CHAT_COMMANDS } from "./contracts/chat-commands";
 import { chatVotingDurationVariableCatalog, chatVotingOptionsVariableCatalog, chatVotingResultVariableCatalog, chatVotingTitleVariableCatalog } from "./contracts/template-variable-catalog";
@@ -38,6 +44,89 @@ const durationVariable = {
   sample: "2 minutes",
   picker: chatVotingDurationVariableCatalog,
 } as const;
+
+const settingsReferences = settingsVariableReferences(CHAT_VOTING_MODULE_ID, ["startText", "resultText"]);
+const resultTextVariableReferences: ModuleVariableReferences = {
+  async usages(db, channelId, name) {
+    const token = `{var.${name}}`;
+    const rows = await findChatVoteResultTextReferences(db, channelId, token);
+    return rows.map((row) => ({
+      moduleId: CHAT_VOTING_MODULE_ID,
+      itemName: row.item_name || row.source_id,
+      kind: "template" as const,
+    }));
+  },
+  async validateRename(db, channelId, from, to) {
+    const oldToken = `{var.${from}}`;
+    const nextToken = `{var.${to}}`;
+    const rows = await findChatVoteResultTextReferences(db, channelId, oldToken);
+    const snapshot = rows.map((row) => ({ sourceKind: row.source_kind, itemId: row.source_id, text: row.result_text }));
+    const usages = rows.filter((row) => templateTextLength(row.result_text.replaceAll(oldToken, nextToken)) > 500)
+      .map((row) => ({ moduleId: CHAT_VOTING_MODULE_ID, itemName: row.item_name || row.source_id, kind: "template" as const }));
+    const snapshotJson = JSON.stringify(snapshot);
+    const currentReferences = `
+      SELECT source.source_kind, source.source_id, source.result_text
+        FROM (${CHAT_VOTE_RESULT_TEXT_REFERENCE_SOURCE_SQL}) AS source
+       WHERE source.channel_id = ? AND instr(source.result_text, ?) > 0`;
+    return {
+      usages,
+      precondition: {
+        sql: `NOT EXISTS (
+          SELECT 1 FROM (
+            ${currentReferences}
+            EXCEPT
+            SELECT json_extract(snapshot.value, '$.sourceKind'), json_extract(snapshot.value, '$.itemId'), json_extract(snapshot.value, '$.text')
+              FROM json_each(?) AS snapshot
+          )
+        ) AND NOT EXISTS (
+          SELECT 1 FROM (
+            SELECT json_extract(snapshot.value, '$.sourceKind'), json_extract(snapshot.value, '$.itemId'), json_extract(snapshot.value, '$.text')
+              FROM json_each(?) AS snapshot
+            EXCEPT
+            ${currentReferences}
+          )
+        )`,
+        values: [channelId, oldToken, snapshotJson, snapshotJson, channelId, oldToken],
+      },
+    };
+  },
+  rename(db, channelId, from, to, guard) {
+    const target = moduleVariableRenameTarget(channelId, to, guard);
+    return prepareChatVoteResultTextReferenceRewrite(db, {
+      channelId,
+      fromToken: `{var.${from}}`,
+      toToken: `{var.${to}}`,
+      conditionSql: `${target.sql} AND NOT EXISTS (SELECT 1 FROM channel_variables WHERE channel_id = ? AND name = ?)`,
+      conditionValues: [...target.values, channelId, from],
+    });
+  },
+};
+const variableReferences: ModuleVariableReferences = {
+  ...resultTextVariableReferences,
+  async usages(db: D1Database, channelId: string, name: string) {
+    return [
+      ...await settingsReferences.usages(db, channelId, name),
+      ...await resultTextVariableReferences.usages(db, channelId, name),
+    ];
+  },
+  async validateRename(db, channelId, from, to) {
+    return await resultTextVariableReferences.validateRename?.(db, channelId, from, to) ?? {
+      usages: [],
+      precondition: { sql: "1 = 1", values: [] },
+    };
+  },
+  rename(db: D1Database, channelId: string, from: string, to: string, guard?: Parameters<typeof settingsReferences.rename>[4]) {
+    return [
+      ...settingsReferences.rename(db, channelId, from, to, guard),
+      ...resultTextVariableReferences.rename(db, channelId, from, to, guard),
+    ];
+  },
+};
+
+const templateUsageSources = async (db: D1Database, channelId: string): Promise<readonly ModuleTemplateUsageSource[]> => {
+  const rows = await findChatVoteResultTextReferences(db, channelId);
+  return rows.map((row) => ({ text: row.result_text, kind: "event", label: `chat_voting.${row.item_name || row.source_id}` }));
+};
 
 const initialTallyState = async (
   db: D1Database,
@@ -101,7 +190,10 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
     startText: [titleVariable, optionsVariable, durationVariable],
     resultText: [resultVariable, titleVariable, optionsVariable, durationVariable],
   },
-  variableReferences: settingsVariableReferences(CHAT_VOTING_MODULE_ID, ["startText", "resultText"]),
+  templateUsageSources,
+  variableReferences,
+  settingsEditor: () => import("./panel/settings-editor"),
+  settingsEditorRelatedParts: ["panel"],
   templateVariableGroup: {
     label: { de: "Abstimmung", en: "Voting" },
     icon: { paths: ["M4 5h16v14H4z", "M7 9h3", "M14 9h3", "M7 13h3", "M14 13h3"] },
@@ -114,7 +206,7 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
       const vote = state.vote;
       if (vote === null || vote.status === "closed") return [];
       const options = vote.kind === "free_text"
-        ? (state.terms ?? []).map(({ term, count }) => ({ label: term, count }))
+        ? (state.terms ?? []).map(({ term, count, approved }) => ({ label: term, count, approved }))
         : vote.labels.map((label, index) => ({ label, count: state.counts?.[index] ?? 0 }));
       const totalVotes = options.reduce((total, option) => total + option.count, 0);
       const openedAt = Date.parse(vote.openedAt);
@@ -212,8 +304,6 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
       return { message: chatVotingImmediateActionTexts.endSucceeded };
     },
   }],
-  settingsEditor: () => import("./panel/settings-editor"),
-  settingsEditorRelatedParts: ["panel"],
   eventSubTypes: ["channel.chat.message"],
   alarms: [chatVotingAlarmDefinition, chatVotingStartAnnouncementAlarmDefinition],
   overlayElements: chatVotingOverlayElements.map((element) => ({

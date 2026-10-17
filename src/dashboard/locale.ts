@@ -1122,6 +1122,16 @@ export interface DashboardTexts {
     voteChanged: string;
     voteEnded: string;
     voteEndFailed: string;
+    approveVoteTerm: (term: string) => string;
+    voteTermApproved: string;
+    voteTermApprovalFailed: string;
+    recentVotekicks: string;
+    noRecentVotekicks: string;
+    votekickLift: string;
+    votekickLiftTitle: string;
+    votekickLiftDescription: (target: string) => string;
+    votekickLifted: string;
+    votekickLiftFailed: string;
     votekickVotes: (yes: string, no: string, threshold: string) => string;
     votekickCancel: string;
     votekickCancelTitle: string;
@@ -1554,6 +1564,16 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       voteChanged: "Die Abstimmung wurde inzwischen ersetzt. Bitte prüfe den aktuellen Stand.",
       voteEnded: "Abstimmung beendet.",
       voteEndFailed: "Abstimmung konnte nicht beendet werden.",
+      approveVoteTerm: (term) => `Begriff freigeben: ${term}`,
+      voteTermApproved: "Begriff freigegeben.",
+      voteTermApprovalFailed: "Begriff konnte nicht freigegeben werden.",
+      recentVotekicks: "Aktive Votekick-Timeouts",
+      noRecentVotekicks: "Keine offenen Timeouts aus Votekicks.",
+      votekickLift: "Timeout aufheben",
+      votekickLiftTitle: "Timeout aufheben?",
+      votekickLiftDescription: (target) => `Der Timeout für ${target} wird aufgehoben.`,
+      votekickLifted: "Timeout aufgehoben.",
+      votekickLiftFailed: "Timeout konnte nicht aufgehoben werden.",
       votekickVotes: (yes, no, threshold) => `Ja ${yes} · Nein ${no} · Schwelle ${threshold}`,
       votekickCancel: "Votekick abbrechen",
       votekickCancelTitle: "Votekick abbrechen?",
@@ -1973,6 +1993,16 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       voteChanged: "This vote has been replaced. Check the current vote and try again.",
       voteEnded: "Vote ended.",
       voteEndFailed: "The vote could not be ended.",
+      approveVoteTerm: (term) => `Approve term: ${term}`,
+      voteTermApproved: "Term approved.",
+      voteTermApprovalFailed: "The term could not be approved.",
+      recentVotekicks: "Active Votekick timeouts",
+      noRecentVotekicks: "No active votekick timeouts to lift.",
+      votekickLift: "Lift timeout",
+      votekickLiftTitle: "Lift timeout?",
+      votekickLiftDescription: (target) => `The timeout for ${target} will be lifted.`,
+      votekickLifted: "Timeout lifted.",
+      votekickLiftFailed: "The timeout could not be lifted.",
       votekickVotes: (yes, no, threshold) => `Yes ${yes} · No ${no} · Threshold ${threshold}`,
       votekickCancel: "Cancel votekick",
       votekickCancelTitle: "Cancel votekick?",
@@ -2608,6 +2638,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     },
     "template_truncated": (detail) => `Chatnachricht auf 500 Zeichen gekürzt (ursprünglich ${detailNumber(detail, "current", "unbekannte Länge")})`,
     "template.lookup_unavailable": (detail) => `Vorlagenvariable ${detailText(detail, "name", "unbekannt")} ist gerade nicht verfügbar`,
+    "template.chat_reference_dropped": (detail) => `Chatnachricht: ${detailText(detail, "name", "unbekannt")} konnte nicht aufgelöst werden und wurde weggelassen`,
     "template_parameters_invalid": (detail) => `Ungültiger Variablenparameter: ${detailText(detail, "name", "unbekannt")}`,
     "host.module.error": "Modulfehler",
     "host.module.unknown": "Unbekanntes Modul",
@@ -2724,6 +2755,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     },
     "template_truncated": (detail) => `Chat message shortened to 500 characters (originally ${detailNumber(detail, "current", "unknown length")})`,
     "template.lookup_unavailable": (detail) => `Template variable ${detailText(detail, "name", "unknown")} is currently unavailable`,
+    "template.chat_reference_dropped": (detail) => `Chat message: ${detailText(detail, "name", "unknown")} could not be resolved and was omitted`,
     "template_parameters_invalid": (detail) => `Invalid variable parameter: ${detailText(detail, "name", "unknown")}`,
     "host.module.error": "Module error",
     "host.module.unknown": "Unknown module",
@@ -2844,6 +2876,7 @@ export const eventToneEntries: Record<EventCode, EventToneEntry> = {
   "host.announcement.sent": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
   "template_truncated": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
   "template.lookup_unavailable": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
+  "template.chat_reference_dropped": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
   "template_parameters_invalid": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
   "host.module.error": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
   "host.module.unknown": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },

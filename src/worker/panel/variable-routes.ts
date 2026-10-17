@@ -33,6 +33,10 @@ const NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
 const MINIMUM_VALUE_SQL = String(CHANNEL_VARIABLE_MINIMUM_VALUE);
 const MAXIMUM_VALUE_SQL = String(CHANNEL_VARIABLE_MAXIMUM_VALUE);
 const nowIso = (): string => new Date().toISOString();
+const reconcileLegacyChatVoteResults = async (channelNamespace: Env["CHANNEL"], channelId: string): Promise<void> => {
+  const object = channelNamespace.get(channelNamespace.idFromName(channelId));
+  await object.reconcileLegacyChatVoteResultDeliveries();
+};
 const bodyObject = z.object({
   name: z.string().regex(NAME_PATTERN),
   value: z.number().int().min(CHANNEL_VARIABLE_MINIMUM_VALUE).max(CHANNEL_VARIABLE_MAXIMUM_VALUE).default(0),
@@ -96,6 +100,7 @@ variableRouter.use("/api/channels/:channelId/variables/*", requireChannelAuthori
 
 variableRouter.get("/api/channels/:channelId/variables", async (context) => {
   const channelId = context.req.param("channelId");
+  await reconcileLegacyChatVoteResults(context.env.CHANNEL, channelId);
   const { variables, withUsages } = await measureServerTiming(context, "d1", async () => {
     const variables = await listChannelVariables(context.env.DB, channelId);
     const withUsages = await Promise.all(variables.map(async (variable) => ({
@@ -154,6 +159,7 @@ variableRouter.patch("/api/channels/:channelId/variables/:name", async (context)
   if (!canManage(context.get("channelRole"))) return context.json({ error: "variable_management_denied" }, 403);
   const channelId = context.req.param("channelId");
   const name = context.req.param("name");
+  await reconcileLegacyChatVoteResults(context.env.CHANNEL, channelId);
   const before = await findChannelVariable(context.env.DB, channelId, name);
   if (before === null) return context.json({ error: "variable_not_found" }, 404);
   const newName = parsed.data.newName ?? name;
@@ -340,6 +346,7 @@ variableRouter.delete("/api/channels/:channelId/variables/:name", async (context
   if (!canManage(context.get("channelRole"))) return context.json({ error: "variable_management_denied" }, 403);
   const channelId = context.req.param("channelId");
   const name = context.req.param("name");
+  await reconcileLegacyChatVoteResults(context.env.CHANNEL, channelId);
   const before = await findChannelVariable(context.env.DB, channelId, name);
   if (before === null) return context.json({ error: "variable_not_found" }, 404);
   const usages = await referencesFor(context.env.DB, channelId, name);

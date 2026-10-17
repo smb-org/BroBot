@@ -202,11 +202,13 @@ test("day headers stay below the dashboard header on desktop and mobile", async 
       if (header === null) throw new Error("The dashboard header should render.");
       return day.getBoundingClientRect().top - header.getBoundingClientRect().bottom + 40;
     });
-    await page.evaluate((distance) => { window.scrollBy(0, distance); }, scrollDistance);
+    await page.locator(".dashboard-shell__main").evaluate((main, distance) => { main.scrollBy(0, distance); }, scrollDistance);
 
     const geometry = await dayHeader.evaluate((day) => {
       const header = document.querySelector<HTMLElement>(".dashboard-shell__header");
+      const main = document.querySelector<HTMLElement>(".dashboard-shell__main");
       if (header === null) throw new Error("The dashboard header should render.");
+      if (main === null) throw new Error("The dashboard content scroller should render.");
       return { dayTop: day.getBoundingClientRect().top, headerBottom: header.getBoundingClientRect().bottom };
     });
     expect(geometry.dayTop).toBeGreaterThanOrEqual(geometry.headerBottom - 1);

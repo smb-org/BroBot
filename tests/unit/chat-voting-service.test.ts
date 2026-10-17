@@ -43,6 +43,7 @@ const savedTemplate: ChatVoteTemplate = {
   channelId: "fictional-channel",
   shortcut: "essen",
   title: "Dinner",
+  resultText: "Danke {vote.result}",
   labels: ["Pizza", "Burger"],
   freeTextMode: null,
   durationSeconds: 300,
@@ -68,15 +69,15 @@ const templateRepositoryWith = (overrides: Partial<ChatVoteTemplateRepository> =
 const repositoryWith = (overrides: Partial<ChatVotingRepository> = {}): ChatVotingRepository => ({
   open: vi.fn(() => Promise.resolve(null)),
   latest: vi.fn(() => Promise.resolve(null)),
-  recent: vi.fn(() => Promise.resolve([])),
   byId: vi.fn(() => Promise.resolve(null)),
   approveTerm: vi.fn(() => Promise.resolve({ authorized: true, changed: true })),
-  insertOpen: vi.fn(() => Promise.resolve(true)),
+  insertOpen: vi.fn(() => Promise.resolve("inserted" as const)),
   requestManualClose: vi.fn(() => Promise.resolve(true)),
   claimAlarmClose: vi.fn(() => Promise.resolve(true)),
   extendClose: vi.fn(() => Promise.resolve(true)),
   rollbackCloseExtension: vi.fn(() => Promise.resolve(false)),
   finish: vi.fn(() => Promise.resolve(true)),
+  completeResultDelivery: vi.fn(() => Promise.resolve(true)),
   templates: templateRepositoryWith(),
   ...overrides,
 });
@@ -130,7 +131,7 @@ describe("chat voting event service", () => {
   afterEach(() => vi.useRealTimers());
 
   it("starts a saved shortcut, snapshots its values, and records the start time", async () => {
-    const insertOpen = vi.fn<ChatVotingRepository["insertOpen"]>(() => Promise.resolve(true));
+    const insertOpen = vi.fn<ChatVotingRepository["insertOpen"]>(() => Promise.resolve("inserted"));
     const markTemplateUsed = vi.fn(() => Promise.resolve());
     const templates = templateRepositoryWith({
       templateByShortcut: vi.fn(() => Promise.resolve(savedTemplate)),
@@ -142,8 +143,12 @@ describe("chat voting event service", () => {
     const result = await processChatVotingMessage(eventWithText("!vote essen", ["moderator"]), repository, context);
 
     expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({
-      kind: "options", labels: ["Pizza", "Burger"], title: "Dinner", requestedDurationSeconds: 300,
-    }), undefined);
+      kind: "options", labels: ["Pizza", "Burger"], title: "Dinner", resultText: "Danke {vote.result}", requestedDurationSeconds: 300,
+    }), undefined, {
+      id: savedTemplate.id,
+      revision: savedTemplate.revision,
+      resultText: savedTemplate.resultText ?? "{vote.result}",
+    });
     const inserted = insertOpen.mock.calls[0]?.[0];
     expect(markTemplateUsed).toHaveBeenCalledWith("fictional-channel", "saved-template", inserted?.openedAt);
     const [action] = result.actions;
@@ -175,7 +180,7 @@ describe("chat voting event service", () => {
   });
 
   it("replies with an unknown-shortcut message and starts nothing", async () => {
-    const insertOpen = vi.fn(() => Promise.resolve(true));
+    const insertOpen = vi.fn(() => Promise.resolve("inserted" as const));
     const result = await processChatVotingMessage(
       eventWithText("!vote missing", ["moderator"]),
       repositoryWith({ insertOpen }),
@@ -187,7 +192,7 @@ describe("chat voting event service", () => {
   });
 
   it("resolves a migrated alias and applies its question only to this start", async () => {
-    const insertOpen = vi.fn(() => Promise.resolve(true));
+    const insertOpen = vi.fn(() => Promise.resolve("inserted" as const));
     const markTemplateUsed = vi.fn(() => Promise.resolve());
     const aliasLookup = vi.fn(() => Promise.resolve({ ...savedTemplate, shortcut: "janein", legacyAlias: "yesno" as const }));
     const templates = templateRepositoryWith({ templateByLegacyAlias: aliasLookup, markTemplateUsed });
@@ -197,7 +202,11 @@ describe("chat voting event service", () => {
     await processChatVotingMessage(eventWithText("!vote yesno Pizza tonight?", ["moderator"]), repository, context);
 
     expect(aliasLookup).toHaveBeenCalledWith("fictional-channel", "yesno");
-    expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({ title: "Pizza tonight?", labels: ["Pizza", "Burger"] }), undefined);
+    expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({ title: "Pizza tonight?", labels: ["Pizza", "Burger"] }), undefined, {
+      id: savedTemplate.id,
+      revision: savedTemplate.revision,
+      resultText: savedTemplate.resultText ?? "{vote.result}",
+    });
     expect(markTemplateUsed).toHaveBeenCalledOnce();
   });
 
@@ -207,7 +216,7 @@ describe("chat voting event service", () => {
     ["!vote 12", "options", ["1", "2"]],
     ["!vote scale", "options", ["1", "2", "3", "4", "5"]],
   ] as const)("uses the language defaults for an unmigrated alias %s", async (text, kind, labels) => {
-    const insertOpen = vi.fn<ChatVotingRepository["insertOpen"]>(() => Promise.resolve(true));
+    const insertOpen = vi.fn<ChatVotingRepository["insertOpen"]>(() => Promise.resolve("inserted"));
     const repository = repositoryWith({ insertOpen });
 
     await processChatVotingMessage(eventWithText(text, ["moderator"]), repository, executionContext());
@@ -224,7 +233,7 @@ describe("chat voting event service", () => {
       voterCount: 4,
       closeReason: "manual",
     };
-    const insertOpen = vi.fn<ChatVotingRepository["insertOpen"]>(() => Promise.resolve(true));
+    const insertOpen = vi.fn<ChatVotingRepository["insertOpen"]>(() => Promise.resolve("inserted"));
     const repository = repositoryWith({
       latest: vi.fn(() => Promise.resolve(previous)),
       insertOpen,
@@ -235,9 +244,27 @@ describe("chat voting event service", () => {
     expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({ requestedDurationSeconds: 120 }), undefined);
   });
 
+  it("replays the current closed vote result text through !vote again", async () => {
+    const previous: ChatVote = {
+      ...openVote,
+      status: "closed",
+      closedAt: "2026-10-04T10:30:00.000Z",
+      resultText: "Final score: {var.points}",
+      counts: [3, 1],
+      voterCount: 4,
+      closeReason: "manual",
+    };
+    const insertOpen = vi.fn<ChatVotingRepository["insertOpen"]>(() => Promise.resolve("inserted"));
+    const repository = repositoryWith({ latest: vi.fn(() => Promise.resolve(previous)), insertOpen });
+
+    await processChatVotingMessage(eventWithText("!vote again", ["moderator"]), repository, executionContext());
+
+    expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({ resultText: "Final score: {var.points}" }), undefined);
+  });
+
   it("uses the shared start-problem reason for an invalid saved template", async () => {
     const invalid = { ...savedTemplate, labels: ["Only one"] };
-    const insertOpen = vi.fn(() => Promise.resolve(true));
+    const insertOpen = vi.fn(() => Promise.resolve("inserted" as const));
     const templates = templateRepositoryWith({ templateByShortcut: vi.fn(() => Promise.resolve(invalid)) });
     const result = await processChatVotingMessage(
       eventWithText("!vote essen", ["moderator"]), repositoryWith({ insertOpen, templates }), executionContext(),
@@ -368,7 +395,7 @@ describe("chat voting event service", () => {
 
   it("starts the free-text chat command with the refreshed blocked-term filter", async () => {
     const open = vi.fn(() => Promise.resolve({ status: "opened" as const }));
-    const insertOpen = vi.fn(() => Promise.resolve(true));
+    const insertOpen = vi.fn(() => Promise.resolve("inserted" as const));
     const repository = repositoryWith({ insertOpen });
     const readChannelBlockedTerms = vi.fn(() => Promise.resolve(["ＰＯＧＣＨＡＭＰ!", "bad-term", "shoot*"]));
     const context = executionContext({
@@ -391,7 +418,7 @@ describe("chat voting event service", () => {
   });
 
   it("starts titled chat commands and schedules one automated announcement per vote", async () => {
-    const insertOpen = vi.fn(() => Promise.resolve(true));
+    const insertOpen = vi.fn(() => Promise.resolve("inserted" as const));
     const repository = repositoryWith({ insertOpen });
     const context = executionContext();
 
@@ -408,7 +435,7 @@ describe("chat voting event service", () => {
   });
 
   it("uses numeric option labels now that customizable defaults live in templates", async () => {
-    const insertOpen = vi.fn(() => Promise.resolve(true));
+    const insertOpen = vi.fn(() => Promise.resolve("inserted" as const));
     const event = eventWithText("!vote 3", ["moderator"]);
 
     await processChatVotingMessage(event, repositoryWith({ insertOpen }), executionContext());
@@ -428,7 +455,7 @@ describe("chat voting event service", () => {
   });
 
   it("answers with help and does not start a vote when the chat question is too long", async () => {
-    const insertOpen = vi.fn(() => Promise.resolve(true));
+    const insertOpen = vi.fn(() => Promise.resolve("inserted" as const));
     const repository = repositoryWith({ insertOpen });
     const context = executionContext();
 
@@ -442,7 +469,7 @@ describe("chat voting event service", () => {
   });
 
   it("names the length limit for an overlong custom question that ends in a question mark", async () => {
-    const insertOpen = vi.fn(() => Promise.resolve(true));
+    const insertOpen = vi.fn(() => Promise.resolve("inserted" as const));
 
     const result = await processChatVotingMessage(
       eventWithText(`!vote ${"x".repeat(81)}? | A | B`, ["moderator"]), repositoryWith({ insertOpen }), executionContext());
@@ -461,7 +488,7 @@ describe("chat voting event service", () => {
       close: vi.fn(() => Promise.resolve(null)),
       finalize: vi.fn(() => Promise.resolve({ outcome: "open" as const, counts: [0, 0], revision: 0 })),
     };
-    const insertOpen = vi.fn(() => Promise.resolve(true));
+    const insertOpen = vi.fn(() => Promise.resolve("inserted" as const));
     const openedAt = Date.parse("2026-10-04T10:00:00.000Z");
     const latestVote = { ...openVote, status: "closed" as const, openedAt: new Date(openedAt).toISOString() };
     const repository = repositoryWith({
@@ -495,7 +522,7 @@ describe("chat voting event service", () => {
 
   it("releases the close recovery snapshot when another open vote makes the insert busy", async () => {
     const ballots = executionContext().ballots;
-    const repository = repositoryWith({ insertOpen: vi.fn(() => Promise.resolve(false)) });
+    const repository = repositoryWith({ insertOpen: vi.fn(() => Promise.resolve("busy" as const)) });
 
     const result = await startChatVote(repository, {
       channelId: "fictional-channel",
@@ -512,7 +539,7 @@ describe("chat voting event service", () => {
   });
 
   it("stores a finite requested duration separately from the close reason", async () => {
-    const insertOpen = vi.fn(() => Promise.resolve(true));
+    const insertOpen = vi.fn(() => Promise.resolve("inserted" as const));
     const repository = repositoryWith({ insertOpen });
 
     const result = await startChatVote(repository, {
@@ -534,7 +561,7 @@ describe("chat voting event service", () => {
 
   it("opens a text ballot fail-closed when the blocked-term list could not be loaded", async () => {
     const ballots = executionContext().ballots;
-    const insertOpen = vi.fn(() => Promise.resolve(true));
+    const insertOpen = vi.fn(() => Promise.resolve("inserted" as const));
     const repository = repositoryWith({ insertOpen });
 
     await startChatVote(repository, {
@@ -557,7 +584,7 @@ describe("chat voting event service", () => {
     const acknowledgeClosed = vi.fn(() => Promise.resolve());
     const ballots = { ...executionContext().ballots, open: vi.fn(() => Promise.resolve({ status: "opened" as const })), close, acknowledgeClosed };
     const finish = vi.fn(() => Promise.resolve(true));
-    const repository = repositoryWith({ insertOpen: vi.fn(() => Promise.resolve(true)), finish });
+    const repository = repositoryWith({ insertOpen: vi.fn(() => Promise.resolve("inserted" as const)), finish });
 
     await expect(startChatVote(repository, {
       channelId: "fictional-channel",

@@ -605,10 +605,12 @@ describe("Dashboard skeleton", () => {
     expect(await screen.findByRole("heading", { name: "Ereignisse", level: 1 })).toBeInTheDocument();
     expect(await screen.findByText("neu")).toBeInTheDocument();
 
-    Object.defineProperty(window, "innerHeight", { configurable: true, value: 100 });
-    Object.defineProperty(window, "scrollY", { configurable: true, value: 900 });
-    Object.defineProperty(document.documentElement, "scrollHeight", { configurable: true, value: 1000 });
-    fireEvent.scroll(window);
+    const scrollRoot = document.querySelector<HTMLElement>(".dashboard-shell__main");
+    if (scrollRoot === null) throw new Error("Dashboard content scroller is missing");
+    Object.defineProperty(scrollRoot, "clientHeight", { configurable: true, value: 100 });
+    Object.defineProperty(scrollRoot, "scrollHeight", { configurable: true, value: 1000 });
+    Object.defineProperty(scrollRoot, "scrollTop", { configurable: true, value: 900 });
+    fireEvent.scroll(scrollRoot);
     expect(await screen.findByText("alt")).toBeInTheDocument();
     expect(screen.getAllByText("Alice").length).toBeGreaterThan(0);
     expect(screen.getByText(/aktualisiert vor/)).toBeInTheDocument();
@@ -712,9 +714,11 @@ describe("Dashboard skeleton", () => {
     expect(await screen.findByText("alt")).toBeInTheDocument();
     const feed = document.querySelector(".event-feed");
     if (feed === null) throw new Error("Ereignis-Feed fehlt");
+    const scrollRoot = feed.closest<HTMLElement>(".dashboard-shell__main");
+    if (scrollRoot === null) throw new Error("Dashboard content scroller is missing");
     Object.defineProperty(feed, "getBoundingClientRect", { configurable: true, value: () => ({ top: -200 }) });
-    Object.defineProperty(window, "scrollY", { configurable: true, value: 400 });
-    fireEvent.scroll(window);
+    Object.defineProperty(scrollRoot, "scrollTop", { configurable: true, value: 400 });
+    fireEvent.scroll(scrollRoot);
     const socket = TestWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime-Socket fehlt");
     socket.open();
@@ -730,8 +734,8 @@ describe("Dashboard skeleton", () => {
     expect(document.querySelectorAll(".event-table tbody tr:not(.data-table__day-row)")).toHaveLength(1);
 
     Object.defineProperty(feed, "getBoundingClientRect", { configurable: true, value: () => ({ top: 0 }) });
-    Object.defineProperty(window, "scrollY", { configurable: true, value: 0 });
-    fireEvent.scroll(window);
+    Object.defineProperty(scrollRoot, "scrollTop", { configurable: true, value: 0 });
+    fireEvent.scroll(scrollRoot);
     expect(await screen.findByText("Raid von unbekannt mit 8 Zuschauern")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /neue Ereignisse/u })).not.toBeInTheDocument();
   });
@@ -741,8 +745,6 @@ describe("Dashboard skeleton", () => {
     const alt = { eventId: "event-alt", createdAt: "2026-09-18T03:00:00.000Z", moduleId: "raid", code: "alt", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null };
     const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":9}', actorUserId: null, actorLogin: null, actorDisplayName: null };
     let eventRequests = 0;
-    const scrollTo = vi.fn();
-    Object.defineProperty(window, "scrollTo", { configurable: true, value: scrollTo });
     vi.stubGlobal("WebSocket", TestWebSocket);
     stubEventFeedFetch(() => {
       eventRequests += 1;
@@ -755,9 +757,13 @@ describe("Dashboard skeleton", () => {
     expect(await screen.findByText("alt")).toBeInTheDocument();
     const feed = document.querySelector(".event-feed");
     if (feed === null) throw new Error("Ereignis-Feed fehlt");
+    const scrollRoot = feed.closest<HTMLElement>(".dashboard-shell__main");
+    if (scrollRoot === null) throw new Error("Dashboard content scroller is missing");
+    const scrollTo = vi.fn();
+    Object.defineProperty(scrollRoot, "scrollTo", { configurable: true, value: scrollTo });
     Object.defineProperty(feed, "getBoundingClientRect", { configurable: true, value: () => ({ top: -200 }) });
-    Object.defineProperty(window, "scrollY", { configurable: true, value: 400 });
-    fireEvent.scroll(window);
+    Object.defineProperty(scrollRoot, "scrollTop", { configurable: true, value: 400 });
+    fireEvent.scroll(scrollRoot);
     const socket = TestWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime-Socket fehlt");
     socket.open();

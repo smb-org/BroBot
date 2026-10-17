@@ -9,7 +9,7 @@ import { votekickTimeoutReason } from "../../src/modules/votekick/domain";
 import type { RealtimeMessage } from "../../src/realtime-contract";
 import { panelRouter } from "../../src/worker/panel/routes";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey } from "./fixtures";
-import { createReadInterleavingDatabase, TestD1Database } from "./test-d1";
+import { createReadInterleavingDatabase, createWriteInterleavingDatabase, TestD1Database } from "./test-d1";
 
 const keys = {
   SESSION_COOKIE_KEYS: JSON.stringify({ active: { id: "cookie-v1", key: testKey(1) }, retired: [] }),
@@ -93,6 +93,38 @@ const insertPassed = async (database: TestD1Database, id: string): Promise<{ sta
      VALUES ('channel-a', ?, ?, 'viewer-a', 'starter-a', 'passed', 3, 3, 0, 2, 90, ?, ?, ?, NULL)`,
   ).bind(id, targetUserId, startedAt, expiresAt, endedAt).run();
   return { startedAt, endedAt, expiresAt };
+};
+
+const seedLiftModerationAccess = async (database: TestD1Database, createdAt: string): Promise<void> => {
+  const ciphertext = await encryptJson({ token: "fictional-bot-token" }, parseKeyRing(tokenKeys));
+  const broadcasterCiphertext = await encryptJson({ token: "fictional-broadcaster-token" }, parseKeyRing(tokenKeys));
+  await upsertLoginIdentity(database as unknown as D1Database, {
+    userId: "channel-a",
+    login: "channel-a",
+    scopesJson: '["moderation:read"]',
+    tokenScopesJson: '["moderation:read"]',
+    accessTokenCiphertext: broadcasterCiphertext,
+    refreshTokenCiphertext: broadcasterCiphertext,
+    expiresAt: "2099-10-09T00:00:00.000Z",
+    status: "connected",
+    reason: null,
+    createdAt,
+    updatedAt: createdAt,
+  });
+  await upsertBotIdentity(database as unknown as D1Database, {
+    id: 1,
+    userId: botUserId,
+    login: "fictional-bot",
+    scopesJson: '["moderator:manage:banned_users"]',
+    accessTokenCiphertext: ciphertext,
+    refreshTokenCiphertext: ciphertext,
+    expiresAt: "2099-10-09T00:00:00.000Z",
+    createdAt,
+    updatedAt: createdAt,
+  });
+  await database.prepare(
+    "INSERT INTO bot_channel_status (channel_id, is_moderator, checked_at, reason) VALUES ('channel-a', 1, ?, NULL)",
+  ).bind(createdAt).run();
 };
 
 describe("Votekick routes", () => {
@@ -184,85 +216,125 @@ describe("Votekick routes", () => {
       .first<{ status: string }>()).resolves.toEqual({ status: "running" });
   });
 
-  it("publishes a votekick tally hint after an operator lifts its timeout", async () => {
+  it("only lifts a timeout once when concurrent cockpit requests race", async () => {
     const database = await databaseFor();
     await insertLoginIdentityAndSession(database, "operator-a");
     await insertMember(database, "channel-a", "operator-a", "operator");
     const id = "ballot-lift";
-    const { startedAt, endedAt, expiresAt } = await insertPassed(database, id);
-    const ciphertext = await encryptJson({ token: "fictional-bot-token" }, parseKeyRing(tokenKeys));
-    const broadcasterCiphertext = await encryptJson({ token: "fictional-broadcaster-token" }, parseKeyRing(tokenKeys));
+    const { endedAt, expiresAt } = await insertPassed(database, id);
     const operatorAt = new Date().toISOString();
-    await upsertLoginIdentity(database as unknown as D1Database, {
-      userId: "channel-a",
-      login: "channel-a",
-      scopesJson: '["moderation:read"]',
-      tokenScopesJson: '["moderation:read"]',
-      accessTokenCiphertext: broadcasterCiphertext,
-      refreshTokenCiphertext: broadcasterCiphertext,
-      expiresAt: "2099-10-09T00:00:00.000Z",
-      status: "connected",
-      reason: null,
-      createdAt: operatorAt,
-      updatedAt: operatorAt,
-    });
-    await upsertBotIdentity(database as unknown as D1Database, {
-      id: 1,
-      userId: botUserId,
-      login: "fictional-bot",
-      scopesJson: '["moderator:manage:banned_users"]',
-      accessTokenCiphertext: ciphertext,
-      refreshTokenCiphertext: ciphertext,
-      expiresAt: "2099-10-09T00:00:00.000Z",
-      createdAt: startedAt,
-      updatedAt: startedAt,
-    });
-    await database.prepare(
-      "INSERT INTO bot_channel_status (channel_id, is_moderator, checked_at, reason) VALUES ('channel-a', 1, ?, NULL)",
-    ).bind(startedAt).run();
+    await seedLiftModerationAccess(database, operatorAt);
     const publish = vi.fn<(messages: readonly RealtimeMessage[]) => Promise<void>>(() => Promise.resolve());
-    const twitchFetch = vi.fn<typeof fetch>()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{
+    let deleteCount = 0;
+    const twitchFetch = vi.fn<typeof fetch>((input, init) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+      if (url.pathname.endsWith("/bans") && init?.method === "DELETE") {
+        deleteCount += 1;
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ data: [{
         user_id: targetUserId,
         moderator_id: botUserId,
         reason: votekickTimeoutReason(3, 0, id),
         created_at: endedAt,
         expires_at: expiresAt,
-      }] }), { status: 200, headers: { "content-type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+      }] }), { status: 200, headers: { "content-type": "application/json" } }));
+    });
     vi.stubGlobal("fetch", twitchFetch);
 
-    const response = await panelRouter.fetch(
+    const responses = await Promise.all([1, 2].map(async () => panelRouter.fetch(
       await requestFor("operator-a", `/api/channels/channel-a/modules/votekick/votekicks/${id}/lift`, "POST"),
       environmentFor(database, undefined, publish),
-    );
+    )));
 
-    expect(response.status).toBe(200);
+    expect(responses.map(({ status }) => status).sort((left, right) => left - right)).toEqual([200, 409]);
+    expect(twitchFetch).toHaveBeenCalledTimes(2);
+    expect(deleteCount).toBe(1);
     expect(publish).not.toHaveBeenCalled();
+    const lifted = await database.prepare(
+      "SELECT lifted_at FROM votekicks WHERE channel_id = 'channel-a' AND votekick_id = ?",
+    ).bind(id).first<{ lifted_at: string | null }>();
+    expect(lifted?.lifted_at).not.toBeNull();
     const revision = await database.prepare(
       "SELECT revision FROM panel_resource_revisions WHERE channel_id = 'channel-a' AND resource = 'module:votekick:panel'",
     ).first<{ revision: number }>();
     expect(revision?.revision).toBeGreaterThan(0);
   });
 
-  it("checks both operator access and module activation before lifting a timeout", async () => {
+  it("reconciles an ambiguous timeout lift after the timeout expires", async () => {
+    const database = await databaseFor();
+    await insertLoginIdentityAndSession(database, "operator-a");
+    await insertMember(database, "channel-a", "operator-a", "operator");
+    const id = "ballot-lift-retry";
+    const { endedAt, expiresAt } = await insertPassed(database, id);
+    await seedLiftModerationAccess(database, new Date().toISOString());
+    let reads = 0;
+    const twitchFetch = vi.fn<typeof fetch>((input, init) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+      if (url.pathname.endsWith("/bans") && init?.method === "DELETE") {
+        return Promise.reject(new TypeError("network failure"));
+      }
+      reads += 1;
+      return Promise.resolve(new Response(JSON.stringify({ data: reads === 1 ? [{
+        user_id: targetUserId,
+        moderator_id: botUserId,
+        reason: votekickTimeoutReason(3, 0, id),
+        created_at: endedAt,
+        expires_at: expiresAt,
+      }] : [] }), { status: 200, headers: { "content-type": "application/json" } }));
+    });
+    vi.stubGlobal("fetch", twitchFetch);
+    const path = `/api/channels/channel-a/modules/votekick/votekicks/${id}/lift`;
+
+    const ambiguous = await panelRouter.fetch(await requestFor("operator-a", path, "POST"), environmentFor(database));
+    expect(ambiguous.status).toBe(502);
+    const pending = await database.prepare(
+      "SELECT lift_claim_id, lifted_at FROM votekicks WHERE channel_id = 'channel-a' AND votekick_id = ?",
+    ).bind(id).first<{ lift_claim_id: string | null; lifted_at: string | null }>();
+    expect(pending?.lift_claim_id).not.toBeNull();
+    expect(pending?.lifted_at).toBeNull();
+
+    const expiredEndedAt = new Date(Date.now() - 120_000).toISOString();
+    await database.prepare(
+      `UPDATE votekicks SET ended_at = ?, lift_claimed_at = '2000-01-01T00:00:00.000Z'
+        WHERE channel_id = 'channel-a' AND votekick_id = ?`,
+    ).bind(expiredEndedAt, id).run();
+    const retry = await panelRouter.fetch(await requestFor("operator-a", path, "POST"), environmentFor(database));
+    const recovered = await database.prepare(
+      "SELECT lift_claim_id, lift_claimed_at, lifted_at FROM votekicks WHERE channel_id = 'channel-a' AND votekick_id = ?",
+    ).bind(id).first<{ lift_claim_id: string | null; lift_claimed_at: string | null; lifted_at: string | null }>();
+
+    expect(retry.status).toBe(200);
+    expect(twitchFetch).toHaveBeenCalledTimes(3);
+    expect(recovered).toMatchObject({ lift_claim_id: null, lift_claimed_at: null });
+    expect(recovered?.lifted_at).not.toBeNull();
+  });
+
+  it("rechecks module activation in the atomic timeout claim before calling Twitch", async () => {
     const database = await databaseFor();
     await insertLoginIdentityAndSession(database, "operator-a");
     await insertMember(database, "channel-a", "operator-a", "operator");
     await insertPassed(database, "ballot-lift-disabled");
-    await database.prepare("UPDATE channel_modules SET enabled = 0 WHERE channel_id = 'channel-a' AND module_id = 'votekick'").run();
+    await seedLiftModerationAccess(database, new Date().toISOString());
     const twitchFetch = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", twitchFetch);
+    const interleavedDatabase = createWriteInterleavingDatabase(
+      database,
+      (sql) => sql.includes("UPDATE votekicks SET lift_claim_id"),
+      async () => {
+        await database.prepare("UPDATE channel_modules SET enabled = 0 WHERE channel_id = 'channel-a' AND module_id = 'votekick'").run();
+      },
+    );
 
     const response = await panelRouter.fetch(
       await requestFor("operator-a", "/api/channels/channel-a/modules/votekick/votekicks/ballot-lift-disabled/lift", "POST"),
-      environmentFor(database),
+      environmentFor(interleavedDatabase),
     );
 
     expect(response.status).toBe(403);
     expect(twitchFetch).not.toHaveBeenCalled();
-    await expect(database.prepare("SELECT lifted_at FROM votekicks WHERE channel_id = 'channel-a' AND votekick_id = 'ballot-lift-disabled'")
-      .first()).resolves.toEqual({ lifted_at: null });
+    await expect(database.prepare("SELECT lifted_at, lift_claim_id FROM votekicks WHERE channel_id = 'channel-a' AND votekick_id = 'ballot-lift-disabled'")
+      .first()).resolves.toEqual({ lifted_at: null, lift_claim_id: null });
   });
 
   it("reads a running votekick without invoking its alarm handler", async () => {

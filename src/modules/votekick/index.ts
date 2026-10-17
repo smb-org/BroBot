@@ -1,9 +1,9 @@
-import type { BotModule, JsonObject, ModuleTemplateUsageSource } from "../contract";
+import type { BotModule, JsonObject, ModuleLiveTileSnapshot, ModuleTemplateUsageSource } from "../contract";
 import { settingsVariableReferences } from "../contract";
 import { VOTEKICK_TEMPLATE_FIELDS } from "./contracts/template-variable-catalog";
 import { votekickCatalog } from "./contracts/catalog";
 import { VOTEKICK_CHAT_COMMANDS } from "./contracts/chat-commands";
-import { DEFAULT_VOTEKICK_SETTINGS, VOTEKICK_HISTORY_DAYS, VOTEKICK_MODULE_ID, votekickSettingsSchema } from "./contracts";
+import { DEFAULT_VOTEKICK_SETTINGS, VOTEKICK_HISTORY_DAYS, VOTEKICK_LIFT_CLAIM_LEASE_MS, VOTEKICK_MODULE_ID, votekickDefaultSettingsForLanguage, votekickSettingsSchema } from "./contracts";
 import { createVotekickRepository, purgeExpiredVotekickUserIds } from "./adapters/d1";
 import { processVotekickMessage, closeExpiredVotekick, votekickOverlayPayload } from "./service";
 import { votekickRoutes } from "./routes";
@@ -43,6 +43,7 @@ export const votekickModule: BotModule<typeof votekickSettingsSchema> = {
   templateVariableGroup: { label: { de: votekickCatalog.de.name, en: votekickCatalog.en.name }, icon: votekickIcon, order: 74 },
   settingsSchema: votekickSettingsSchema,
   defaultSettings: DEFAULT_VOTEKICK_SETTINGS,
+  defaultSettingsForLanguage: votekickDefaultSettingsForLanguage,
   broadcasterScopes: ["moderation:read"],
   needsActiveChatters: true,
   eventSubTypes: ["channel.chat.message"],
@@ -70,14 +71,16 @@ export const votekickModule: BotModule<typeof votekickSettingsSchema> = {
     iconKind: "votekick",
     keywords: ["votekick", "voting", "abstimmung", "timeout"],
   }],
-  panel: () => import("./panel"),
   settingsEditor: () => import("./panel/settings-editor"),
   settingsEditorRelatedParts: ["panel"],
   liveTile: {
     load: async (channelId, signal) => {
       const state = await (await import("./panel/service")).loadVotekickPanel(channelId, signal);
       const running = state.running;
-      return running === null ? [] : [{
+      const serverNow = Date.parse(state.now);
+      const staleClaimBefore = serverNow - VOTEKICK_LIFT_CLAIM_LEASE_MS;
+      return [
+        ...(running === null ? [] : [{
         kind: "votekick",
         id: running.id,
         target: running.targetLogin ?? running.targetUserId ?? "—",
@@ -85,7 +88,30 @@ export const votekickModule: BotModule<typeof votekickSettingsSchema> = {
         yesVotes: running.yesVotes,
         noVotes: running.noVotes,
         threshold: running.threshold,
-      }];
+        } satisfies ModuleLiveTileSnapshot]),
+        ...state.votekicks.filter((item) => {
+          const timeoutExpiresAt = item.endedAt === null || item.durationSeconds === null
+            ? Number.NaN
+            : Date.parse(item.endedAt) + item.durationSeconds * 1_000;
+          const liftClaimedAt = item.liftClaimedAt === null ? Number.NaN : Date.parse(item.liftClaimedAt);
+          const staleClaim = Number.isFinite(liftClaimedAt) && liftClaimedAt <= staleClaimBefore;
+          return item.status === "passed"
+          && item.liftedAt === null
+          && item.targetUserId !== null
+          && item.durationSeconds !== null
+          && item.durationSeconds > 0
+          && item.endedAt !== null
+          && Number.isFinite(Date.parse(item.endedAt))
+          && Number.isFinite(serverNow)
+          && Number.isFinite(timeoutExpiresAt)
+          && (staleClaim || (item.liftClaimedAt === null && timeoutExpiresAt > serverNow));
+        }).map((item) => ({
+          kind: "votekick_recent" as const,
+          id: item.id,
+          target: item.targetLogin ?? item.targetUserId ?? "—",
+          endedAt: item.endedAt ?? item.endsAt,
+        })),
+      ];
     },
   },
   handleEvent: (event, context) => processVotekickMessage(event, createVotekickRepository(context.DB), context),

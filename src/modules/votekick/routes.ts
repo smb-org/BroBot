@@ -2,7 +2,7 @@ import { Hono } from "hono";
 
 import type { AuditAction } from "../../contracts/values";
 import type { ModuleRouteEnvironment } from "../contract";
-import { VOTEKICK_HISTORY_DAYS, VOTEKICK_MODULE_ID } from "./contracts";
+import { VOTEKICK_HISTORY_DAYS, VOTEKICK_LIFT_CLAIM_LEASE_MS, VOTEKICK_MODULE_ID } from "./contracts";
 import { VOTEKICK_ELEMENT_KIND } from "./overlay/kinds";
 import { createVotekickRepository } from "./adapters/d1";
 import { votekickTimeoutReason } from "./domain";
@@ -80,8 +80,9 @@ votekickRoutes.post("/votekicks/:id/cancel", async (context) => {
 votekickRoutes.post("/votekicks/:id/lift", async (context) => {
   const channelId = requiredParam(context.req.param("channelId"), "channelId");
   const id = requiredParam(context.req.param("id"), "id");
+  const now = new Date().toISOString();
   const repository = createVotekickRepository(context.env.DB);
-  const existing = (await repository.listRecent(channelId, recentCutoff(new Date().toISOString())))
+  const existing = (await repository.listRecent(channelId, recentCutoff(now)))
     .find((item) => item.id === id);
   if (existing === undefined || existing.status !== "passed" || existing.targetUserId === null || existing.liftedAt !== null) {
     return context.json({ error: "votekick_timeout_unavailable" }, 409);
@@ -89,19 +90,39 @@ votekickRoutes.post("/votekicks/:id/lift", async (context) => {
   if (existing.durationSeconds === null || existing.endedAt === null) {
     return context.json({ error: "votekick_timeout_unavailable" }, 409);
   }
-
-  const now = new Date().toISOString();
+  const claimId = crypto.randomUUID();
+  const claimRetryAfter = new Date(Date.parse(now) - VOTEKICK_LIFT_CLAIM_LEASE_MS).toISOString();
   const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
-  const authorized = await context.env.DB.prepare(
-    `SELECT channel_id FROM channels
-      WHERE channel_id = ?
+  const claim = await context.env.DB.prepare(
+    `UPDATE votekicks SET lift_claim_id = ?, lift_claimed_at = ?
+      WHERE channel_id = ? AND votekick_id = ? AND status = 'passed' AND lifted_at IS NULL
+        AND target_user_id = ? AND duration_seconds = ? AND ended_at = ? AND yes_votes = ? AND no_votes = ?
+        AND (lift_claimed_at IS NULL OR lift_claimed_at <= ?)
+        AND (
+          CAST(strftime('%s', ended_at) AS INTEGER) + duration_seconds > CAST(strftime('%s', ?) AS INTEGER)
+          OR lift_claimed_at <= ?
+        )
         AND EXISTS (
           SELECT 1 FROM channel_modules
-           WHERE channel_modules.channel_id = channels.channel_id
+           WHERE channel_modules.channel_id = votekicks.channel_id
              AND channel_modules.module_id = ? AND channel_modules.enabled = 1
         ) ${authorization.sql}`,
-  ).bind(channelId, VOTEKICK_MODULE_ID, ...authorization.values).first<{ channel_id: string }>();
-  if (authorized === null) return context.json({ error: "votekick_timeout_unavailable" }, 403);
+  ).bind(claimId, now, channelId, id, existing.targetUserId, existing.durationSeconds, existing.endedAt,
+    existing.yesVotes, existing.noVotes, claimRetryAfter, now, claimRetryAfter, VOTEKICK_MODULE_ID, ...authorization.values).run();
+  if (claim.meta.changes === 0) {
+    const authorized = await context.env.DB.prepare(
+      `SELECT channel_id FROM channels
+        WHERE channel_id = ?
+          AND EXISTS (
+            SELECT 1 FROM channel_modules
+             WHERE channel_modules.channel_id = channels.channel_id
+               AND channel_modules.module_id = ? AND channel_modules.enabled = 1
+          ) ${authorization.sql}`,
+    ).bind(channelId, VOTEKICK_MODULE_ID, ...authorization.values).first<{ channel_id: string }>();
+    return authorized === null
+      ? context.json({ error: "votekick_timeout_unavailable" }, 403)
+      : context.json({ error: "votekick_timeout_unavailable" }, 409);
+  }
 
   const result = await context.get("liftModerationBan")(channelId, existing.targetUserId, {
     reason: votekickTimeoutReason(existing.yesVotes, existing.noVotes, existing.id),
@@ -115,19 +136,24 @@ votekickRoutes.post("/votekicks/:id/lift", async (context) => {
     before: { status: existing.status, lifted: false },
     after: { outcome: result.outcome, reason: result.reason },
   }, now);
-  if (result.outcome !== "applied") return context.json({ error: "votekick_timeout_lift_failed", reason: result.reason }, 502);
+  if (result.outcome !== "applied") {
+    if (result.outcome === "rejected") {
+      await context.env.DB.prepare(
+        `UPDATE votekicks SET lift_claim_id = NULL, lift_claimed_at = NULL
+          WHERE channel_id = ? AND votekick_id = ? AND lift_claim_id = ? AND lifted_at IS NULL`,
+      ).bind(channelId, id, claimId).run();
+    }
+    return context.json({ error: "votekick_timeout_lift_failed", reason: result.reason }, 502);
+  }
 
   const update = await context.env.DB.prepare(
-    `UPDATE votekicks SET lifted_at = ?
+    `UPDATE votekicks SET lifted_at = ?, lift_claim_id = NULL, lift_claimed_at = NULL
       WHERE channel_id = ? AND votekick_id = ? AND status = 'passed' AND lifted_at IS NULL
-        AND target_user_id IS NOT NULL
-        AND EXISTS (
-          SELECT 1 FROM channel_modules
-           WHERE channel_modules.channel_id = votekicks.channel_id
-             AND channel_modules.module_id = ? AND channel_modules.enabled = 1
-        ) ${authorization.sql}`,
-  ).bind(now, channelId, id, VOTEKICK_MODULE_ID, ...authorization.values).run();
-  if (update.meta.changes === 0) return context.json({ error: "votekick_timeout_unavailable" }, 409);
+        AND lift_claim_id = ?`,
+  ).bind(new Date().toISOString(), channelId, id, claimId).run();
+  if (update.meta.changes === 0) {
+    return context.json({ error: "votekick_timeout_lift_pending" }, 502);
+  }
   try {
     const lifted = await repository.byId(channelId, id);
     if (lifted !== null) {

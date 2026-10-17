@@ -3,10 +3,13 @@ import { Hono } from "hono";
 import type { AuditAction } from "../../contracts/values";
 import type { BallotSnapshot, ModuleRouteEnvironment } from "../contract";
 import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, CHAT_VOTE_TEMPLATE_MAXIMUM, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingPresetForKind, chatVotingSettingsSchema, chatVotingStartAnnouncementAlarmKey } from "./contracts";
-import type { ChatVote, ChatVotePreset, ChatVoteTemplateDraft, ChatVotingKind } from "./contracts";
+import type { ChatVote, ChatVotePreset, ChatVoteTemplate, ChatVoteTemplateDraft, ChatVotingKind } from "./contracts";
 import { createChatVotingRepository } from "./repository";
 import { requestChatVoteClose, requestChatVoteExtension, startChatVote } from "./service";
+import { templateTextLength } from "../../contracts/template-text-length";
 import { chatVoteTemplateConfiguration, configuredLabels, isBlockedFreeTextVote, isValidTemplateShortcut, isValidVoteTitle, labelsForVote, normalizeBlockedVoteTerm, normalizeVoteTitle, templateStartProblem, voteLabelLength } from "./domain";
+import { blockReferencesInText } from "../contracts/text-block-references";
+import { readTextBlockGraphRevision, textBlockWriteGuard } from "../contracts/text-block-write-guard";
 
 const readBody = async (request: Request): Promise<unknown> => request.json().catch(() => null);
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -15,6 +18,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const templateAuditSnapshot = (template: {
   id: string;
   title: string;
+  resultText?: string;
   shortcut: string | null;
   labels: readonly string[];
   freeTextMode: "first_word" | "whole_message" | null;
@@ -23,6 +27,7 @@ const templateAuditSnapshot = (template: {
 }) => ({
   id: template.id,
   name: template.title,
+  resultText: template.resultText ?? "{vote.result}",
   shortcut: template.shortcut,
   labels: [...template.labels],
   freeTextMode: template.freeTextMode,
@@ -46,6 +51,7 @@ const templateDraftFromBody = (body: unknown): ChatVoteTemplateDraft | null => {
       typeof body.title !== "string" || voteLabelLength(body.title) > 80 ||
       !Array.isArray(body.labels) || body.labels.length > 9 ||
       body.labels.some((label) => typeof label !== "string" || voteLabelLength(label) > 32) ||
+      (body.resultText !== undefined && (typeof body.resultText !== "string" || templateTextLength(body.resultText) > 500)) ||
       (body.freeTextMode !== null && body.freeTextMode !== "first_word" && body.freeTextMode !== "whole_message") ||
       typeof body.durationSeconds !== "number" || !Number.isSafeInteger(body.durationSeconds) || body.durationSeconds < 0 || body.durationSeconds > 14_400) return null;
   const shortcut = body.shortcut;
@@ -53,6 +59,7 @@ const templateDraftFromBody = (body: unknown): ChatVoteTemplateDraft | null => {
   return {
     shortcut,
     title: body.title,
+    resultText: typeof body.resultText === "string" ? body.resultText : "{vote.result}",
     labels: body.labels,
     freeTextMode: body.freeTextMode,
     durationSeconds: body.durationSeconds,
@@ -135,11 +142,6 @@ chatVotingRoutes.get("/templates", async (context) => {
   return context.json({ templates, count: templates.length, maximum: CHAT_VOTE_TEMPLATE_MAXIMUM });
 });
 
-chatVotingRoutes.get("/recent", async (context) => {
-  const channelId = context.req.param("channelId") ?? "";
-  return context.json({ votes: await createChatVotingRepository(context.env.DB).recent(channelId) });
-});
-
 chatVotingRoutes.post("/templates", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
   const body = await readBody(context.req.raw);
@@ -149,8 +151,11 @@ chatVotingRoutes.post("/templates", async (context) => {
   const draft = templateDraftFromBody(body);
   if (draft === null || isBlankTemplateDraft(draft)) return context.json({ error: "chat_vote_template_request_invalid" }, 400);
   const now = new Date().toISOString();
-  const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
+  const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
   const repository = createChatVotingRepository(context.env.DB);
+  const blockGuard = blockReferencesInText(draft.resultText ?? "{vote.result}").length === 0
+    ? undefined
+    : textBlockWriteGuard(channelId, await readTextBlockGraphRevision(context.env.DB, channelId), [draft.resultText ?? "{vote.result}"]);
   const id = crypto.randomUUID();
   const audit = context.get("prepareModuleAudit")({
     channelId,
@@ -159,7 +164,10 @@ chatVotingRoutes.post("/templates", async (context) => {
     before: null,
     after: templateAuditSnapshot({ id, ...draft, revision: 1 }),
   }, now);
-  const status = await repository.templates.createTemplate(channelId, id, draft, now, authorization, audit);
+  const status = await repository.templates.createTemplate(channelId, id, draft, now, authorization, audit, blockGuard);
+  if (status === "reference_conflict") {
+    return context.json({ error: "chat_voting_result_text_reference_conflict", field: "resultText" }, 409);
+  }
   if (status === "limit") return context.json({ error: "chat_vote_template_limit" }, 409);
   if (status === "conflict") return context.json({ error: "chat_vote_template_shortcut_conflict" }, 409);
   if (status === "unauthorized") return context.json({ error: "chat_voting_not_authorized" }, 403);
@@ -180,8 +188,11 @@ chatVotingRoutes.patch("/templates/:id", async (context) => {
     return context.json({ error: "chat_vote_template_request_invalid" }, 400);
   }
   const now = new Date().toISOString();
-  const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
+  const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
   const repository = createChatVotingRepository(context.env.DB);
+  const blockGuard = blockReferencesInText(draft.resultText ?? "{vote.result}").length === 0
+    ? undefined
+    : textBlockWriteGuard(channelId, await readTextBlockGraphRevision(context.env.DB, channelId), [draft.resultText ?? "{vote.result}"]);
   const before = await repository.templates.template(channelId, id);
   const audit = context.get("prepareModuleAudit")({
     channelId,
@@ -190,8 +201,11 @@ chatVotingRoutes.patch("/templates/:id", async (context) => {
     before: before === null ? null : templateAuditSnapshot(before),
     after: templateAuditSnapshot({ id, ...draft, revision: (body.revision as number) + 1 }),
   }, now);
-  const result = await repository.templates.saveTemplate(channelId, id, body.revision as number, draft, now, authorization, audit);
+  const result = await repository.templates.saveTemplate(channelId, id, body.revision as number, draft, now, authorization, audit, blockGuard);
   if (result.status === "unauthorized") return context.json({ error: "chat_voting_not_authorized" }, 403);
+  if (result.status === "reference_conflict") {
+    return context.json({ error: "chat_voting_result_text_reference_conflict", field: "resultText" }, 409);
+  }
   if (result.status === "shortcut_conflict") return context.json({ error: "chat_vote_template_shortcut_conflict" }, 409);
   if (result.status === "conflict") return context.json({ error: "chat_vote_template_conflict" }, 409);
   if (result.status === "missing") return context.json({ error: "chat_vote_template_missing" }, 404);
@@ -206,7 +220,7 @@ chatVotingRoutes.delete("/templates/:id", async (context) => {
     return context.json({ error: "chat_vote_template_request_invalid" }, 400);
   }
   const now = new Date().toISOString();
-  const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
+  const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
   const repository = createChatVotingRepository(context.env.DB);
   const before = await repository.templates.template(channelId, id);
   const audit = context.get("prepareModuleAudit")({
@@ -230,7 +244,7 @@ chatVotingRoutes.post("/start", async (context) => {
     return context.json({ error: "chat_voting_request_invalid" }, 400);
   }
   let repository: ReturnType<typeof createChatVotingRepository> | null = null;
-  let templateToMarkUsed: string | null = null;
+  let templateToMarkUsed: ChatVoteTemplate | null = null;
   let startBody = body;
   if (typeof body.templateId === "string") {
     repository = createChatVotingRepository(context.env.DB);
@@ -239,7 +253,7 @@ chatVotingRoutes.post("/start", async (context) => {
     const problem = templateStartProblem(template);
     if (problem !== null) return context.json({ error: "chat_vote_template_invalid", problem }, 409);
     startBody = chatVoteTemplateConfiguration(template);
-    templateToMarkUsed = template.id;
+    templateToMarkUsed = template;
   }
   let kind: ChatVotingKind;
   const requestedKind = startBody.kind ?? startBody.voteKind;
@@ -283,6 +297,9 @@ chatVotingRoutes.post("/start", async (context) => {
   if (settings === null) return context.json({ error: "chat_voting_unavailable" }, 409);
   const now = new Date().toISOString();
   const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
+  const resultTextWriteGuard = templateToMarkUsed === null && blockReferencesInText(settings.resultText).length > 0
+    ? textBlockWriteGuard(channelId, await readTextBlockGraphRevision(context.env.DB, channelId), [settings.resultText])
+    : undefined;
   let blockedTerms: readonly string[] | null = null;
   if (kind === "free_text") {
     try {
@@ -298,8 +315,17 @@ chatVotingRoutes.post("/start", async (context) => {
       optionCount: optionCount as number,
       durationSeconds: durationSeconds as number,
       title,
+      ...(templateToMarkUsed === null ? {} : {
+        resultText: templateToMarkUsed.resultText ?? "{vote.result}",
+        resultTextTemplate: {
+          id: templateToMarkUsed.id,
+          revision: templateToMarkUsed.revision,
+          resultText: templateToMarkUsed.resultText ?? "{vote.result}",
+        },
+      }),
       ...(voteLabels === undefined ? {} : { labels: voteLabels }),
       ...(kind === "free_text" ? { textMode: textMode ?? "first_word", blockedTerms } : {}),
+      ...(resultTextWriteGuard === undefined ? {} : { resultTextWriteGuard }),
       settings,
       language: await channelLanguage(context.env.DB, channelId),
       authorization,
@@ -313,10 +339,13 @@ chatVotingRoutes.post("/start", async (context) => {
   } catch {
     return context.json({ error: "chat_voting_start_failed" }, 503);
   }
+  if (result.status === "reference_conflict") {
+    return context.json({ error: "chat_voting_result_text_reference_conflict", field: "resultText" }, 409);
+  }
   if (result.status === "busy") return context.json({ error: "chat_voting_busy" }, 409);
   if (templateToMarkUsed !== null) {
     try {
-      await repository.templates.markTemplateUsed(channelId, templateToMarkUsed, result.vote.openedAt);
+      await repository.templates.markTemplateUsed(channelId, templateToMarkUsed.id, result.vote.openedAt);
     } catch {
       // Usage ordering is secondary to the already opened vote.
     }

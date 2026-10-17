@@ -205,6 +205,16 @@ export const dashboardRoutePath = (route: DashboardRoute): string => {
   return path;
 };
 
+/** Stable page identity for shell focus; excludes query state managed within a page. */
+export const dashboardRouteFocusKey = (route: DashboardRoute): string => {
+  if (route.kind === "overview" || route.kind === "platform") return route.kind;
+  if (route.kind === "module") return `module:${route.channelId}:${route.moduleId}`;
+  const editor = route.section === "overlays" && route.editorOverlayId !== undefined
+    ? `:editor:${route.editorOverlayId}`
+    : "";
+  return `channel:${route.channelId}:${route.section}${editor}`;
+};
+
 const navigateToDashboardRoute = (route: DashboardRoute, onNavigated?: () => void): void => {
   const path = dashboardRoutePath(route);
   runDashboardNavigationGuards(() => {

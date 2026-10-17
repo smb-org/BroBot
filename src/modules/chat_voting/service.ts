@@ -3,10 +3,14 @@ import type { ModuleLanguage, ModuleAlarmContext } from "../contract";
 import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_BALLOT_RETENTION_MS, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, CHAT_VOTING_TITLE_MAX_LENGTH, DEFAULT_CHAT_VOTING_SETTINGS, DEFAULT_CHAT_VOTING_START_TEXT, DEFAULT_CHAT_VOTING_START_TEXT_EN, chatVotingPresetForKind, chatVotingSettingsSchema, chatVotingStartAnnouncementAlarmKey, chatVotingStartAnnouncementPollId } from "./contracts";
 import type { ChatVote, ChatVoteDraft, ChatVotePreset, ChatVoteTemplate, ChatVotingKind, ChatVotingSettings, ChatVotingTextMode } from "./contracts";
 import { chatVoteTemplateConfiguration, configuredLabels, formatFreeTextVoteResult, formatVoteOptions, formatVoteResult, labelsForVote, normalizeBlockedVoteTerm, normalizeFreeTextVote, normalizeFreeTextVoteForMatching, normalizeVoteTitle, parseVoteCommand, templateStartProblem, voteChoiceFromMessage, voteCloseDeadline, voteLabelLength } from "./domain";
-import type { ChatVotingRepository } from "./repository";
+import type { ChatVoteResultTextTemplateSnapshot, ChatVotingRepository } from "./repository";
 import type { VoteCommand } from "./domain";
 import { chatVotingChatText, chatVotingDurationText, DEFAULT_CHAT_VOTING_START_DURATION_SUFFIX, LEGACY_CHAT_VOTING_START_TEXT, LEGACY_CHAT_VOTING_START_TEXT_EN } from "./contracts/chat-defaults";
 import { createChatVotingRepository } from "./repository";
+import { blockReferencesInText } from "../contracts/text-block-references";
+import { readTextBlockGraphRevision, textBlockWriteGuard } from "../contracts/text-block-write-guard";
+import type { TextBlockWriteGuard } from "../contracts/text-block-write-guard";
+import { omitUnresolvedChatTemplateReferences } from "../../contracts/chat-template-references";
 
 export interface StartChatVoteInput {
   channelId: string;
@@ -15,6 +19,9 @@ export interface StartChatVoteInput {
   durationSeconds: number;
   labels?: readonly string[];
   title?: string | null;
+  resultText?: string;
+  resultTextTemplate?: ChatVoteResultTextTemplateSnapshot;
+  resultTextWriteGuard?: TextBlockWriteGuard;
   textMode?: ChatVotingTextMode;
   blockedTerms?: readonly string[] | null;
   settings: ChatVotingSettings;
@@ -25,7 +32,31 @@ export interface StartChatVoteInput {
 
 export type VoteStartResult =
   | { status: "started"; vote: ChatVoteDraft }
+  | { status: "reference_conflict" }
   | { status: "busy" };
+
+const renderVoteChatTemplate = async (
+  context: ModuleAlarmContext,
+  template: string,
+  now: number,
+  values: Readonly<Record<string, string | number>>,
+  triggerId: string,
+): Promise<{ text: string; attributions?: readonly string[] }> => {
+  const rendered = await context.renderTemplate(template, now, values);
+  const safe = omitUnresolvedChatTemplateReferences(rendered.text);
+  const diagnostics = [...(rendered.diagnostics ?? []), ...safe.diagnostics];
+  if (diagnostics.length > 0) await context.writeDiagnostics?.(triggerId, diagnostics, new Date().toISOString());
+  return { text: safe.text, ...(rendered.attributions === undefined ? {} : { attributions: rendered.attributions }) };
+};
+
+const textBlockWriteGuardFor = async (
+  db: D1Database,
+  channelId: string,
+  text: string,
+): Promise<TextBlockWriteGuard | undefined> => {
+  if (blockReferencesInText(text).length === 0) return undefined;
+  return textBlockWriteGuard(channelId, await readTextBlockGraphRevision(db, channelId), [text]);
+};
 
 export const chatVotingTemplateValues = (
   vote: Pick<ChatVote, "title" | "kind" | "optionCount" | "labels" | "textMode" | "requestedDurationSeconds">,
@@ -75,6 +106,7 @@ export const startChatVote = async (
     optionCount: input.optionCount,
     labels: voteLabels,
     title,
+    resultText: input.resultText ?? input.settings.resultText,
     textMode: kind === "free_text" ? input.textMode ?? "first_word" : null,
     termFilterReady: kind === "free_text" ? input.blockedTerms != null : null,
     openedAt: new Date(openedAt).toISOString(),
@@ -99,11 +131,16 @@ export const startChatVote = async (
 
   let inserted = false;
   try {
-    inserted = await repository.insertOpen(vote, input.authorization);
-    if (!inserted) {
+    const insertStatus = input.resultTextWriteGuard === undefined
+      ? input.resultTextTemplate === undefined
+        ? await repository.insertOpen(vote, input.authorization)
+        : await repository.insertOpen(vote, input.authorization, input.resultTextTemplate)
+      : await repository.insertOpen(vote, input.authorization, input.resultTextTemplate, input.resultTextWriteGuard);
+    inserted = insertStatus === "inserted";
+    if (insertStatus !== "inserted") {
       await ballots.close(vote.id);
       await ballots.acknowledgeClosed?.(vote.id);
-      return { status: "busy" };
+      return insertStatus === "reference_conflict" ? { status: "reference_conflict" } : { status: "busy" };
     }
     await scheduleClose(vote.id, deadline.closesAt, 0);
     if (input.settings.startText.trim().length > 0) {
@@ -377,6 +414,7 @@ export const processChatVotingMessage = async (
         ...(previous.kind === "free_text" ? {} : { labels: previous.labels }),
         ...(previous.kind === "free_text" ? { textMode: previous.textMode ?? "first_word" } : {}),
         title: previous.title,
+        ...(previous.resultText == null ? {} : { resultText: previous.resultText }),
         durationSeconds: previous.requestedDurationSeconds ?? event.settings.autoCloseSeconds,
       };
     }
@@ -388,6 +426,9 @@ export const processChatVotingMessage = async (
         try { blockedTerms = await context.readChannelBlockedTerms?.() ?? null; }
         catch { blockedTerms = null; }
       }
+      const resultTextWriteGuard = templateToMarkUsed === null && command.kind !== "again"
+        ? await textBlockWriteGuardFor(context.DB, event.channelId, startCommand.resultText ?? event.settings.resultText)
+        : undefined;
       const result = await startChatVote(repository, {
         channelId: event.channelId,
         kind: startCommand.voteKind,
@@ -395,6 +436,15 @@ export const processChatVotingMessage = async (
         durationSeconds: startCommand.durationSeconds ?? event.settings.autoCloseSeconds,
         ...(startCommand.labels === undefined ? {} : { labels: startCommand.labels }),
         title: startCommand.title,
+        ...(startCommand.resultText === undefined ? {} : { resultText: startCommand.resultText }),
+        ...(resultTextWriteGuard === undefined ? {} : { resultTextWriteGuard }),
+        ...(templateToMarkUsed === null ? {} : {
+          resultTextTemplate: {
+            id: templateToMarkUsed.id,
+            revision: templateToMarkUsed.revision,
+            resultText: templateToMarkUsed.resultText ?? "{vote.result}",
+          },
+        }),
         ...(startCommand.textMode === undefined ? {} : { textMode: startCommand.textMode }),
         ...(startCommand.voteKind === "free_text" ? { blockedTerms } : {}),
         settings: event.settings,
@@ -402,6 +452,9 @@ export const processChatVotingMessage = async (
       }, context.ballots, closeAlarmScheduler(context), startAnnouncementScheduler(context));
       if (result.status === "busy") {
         return { actions: [directChat(chatVotingChatText(language, "busy"))], diagnostics: [] };
+      }
+      if (result.status === "reference_conflict") {
+        return { actions: [directChat(chatVotingChatText(language, "startFailed"))], diagnostics: [] };
       }
       if (templateToMarkUsed !== null) {
         try {
@@ -568,10 +621,12 @@ export const announceChatVoteStartFromAlarm = async (
   const language = await context.channelLanguage();
   const values = chatVotingTemplateValues(vote, language);
   const template = startAnnouncementTemplate(settings.startText, vote.title, values["vote.duration"] ?? "", language);
-  const rendered = await context.renderTemplate(
+  const rendered = await renderVoteChatTemplate(
+    context,
     template,
     Date.parse(vote.openedAt),
     values,
+    `chat-voting:${pollId}:start`,
   );
   if (rendered.text.trim().length === 0) return;
   const delivery = await context.sendChat(
@@ -674,6 +729,10 @@ export const closeChatVoteFromAlarm = async (
     ? { counts: [...(vote.counts ?? [])], revision: 0, terms: [...(vote.textResults ?? [])], more: vote.moreTerms ?? 0 }
     : { counts: [...(vote.counts ?? Array.from({ length: vote.optionCount }, () => 0))], revision: 0 };
 
+  const settings = await alarmSettings(context);
+  const resultTextTemplate = vote.resultText ?? settings.resultText;
+  const resultDeliveryPending = settings.announceResult && resultTextTemplate.trim().length > 0;
+
   if (vote.status !== "closed") {
     await repository.finish(
       context.channelId,
@@ -684,6 +743,7 @@ export const closeChatVoteFromAlarm = async (
       snapshot.terms ?? null,
       snapshot.more ?? 0,
       snapshot.termFilterReady ?? vote.termFilterReady ?? false,
+      resultDeliveryPending,
     );
   }
   const closedVote = await repository.byId(context.channelId, pollId);
@@ -711,37 +771,59 @@ export const closeChatVoteFromAlarm = async (
     deadlineRevision: closedVote.deadlineRevision ?? 0,
   });
 
-  const settings = await alarmSettings(context);
-  if (settings.announceResult) {
+  if (settings.announceResult && closedVote.resultDeliveryPending) {
     const language = await context.channelLanguage();
-    const result = closedVote.kind === "free_text"
+    const deliveryVote = await repository.byId(context.channelId, pollId);
+    if (deliveryVote === null || deliveryVote.status !== "closed" || !deliveryVote.resultDeliveryPending) {
+      throw new Error("The chat vote result changed before it could be sent.");
+    }
+    const result = deliveryVote.kind === "free_text"
       ? formatFreeTextVoteResult(
-        closedVote.textResults ?? snapshot.terms ?? [],
-        closedVote.moreTerms ?? snapshot.more ?? 0,
+        deliveryVote.textResults ?? snapshot.terms ?? [],
+        deliveryVote.moreTerms ?? snapshot.more ?? 0,
         language === "de" ? "weitere" : "more",
       )
-      : formatVoteResult(closedVote.labels, closedVote.counts ?? snapshot.counts);
-    const rendered = await context.renderTemplate(
-      settings.resultText,
-      Date.parse(closedVote.closedAt ?? new Date().toISOString()),
-      chatVotingTemplateValues(closedVote, language, result),
+      : formatVoteResult(deliveryVote.labels, deliveryVote.counts ?? snapshot.counts);
+    const resultText = deliveryVote.resultText ?? settings.resultText;
+    const isDefaultResultText = resultText === DEFAULT_CHAT_VOTING_SETTINGS.resultText;
+    const rendered = isDefaultResultText ? null : await renderVoteChatTemplate(
+      context,
+      resultText,
+      Date.parse(deliveryVote.closedAt ?? new Date().toISOString()),
+      chatVotingTemplateValues(deliveryVote, language, result),
+      `chat-voting:${pollId}:result`,
     );
-    const announcement = settings.resultText === DEFAULT_CHAT_VOTING_SETTINGS.resultText
-      ? closedVote.title === null ? result
-        : chatVotingChatText(language, "result", undefined, undefined, undefined, closedVote.title, result)
-      : rendered.text;
-    if (announcement.trim().length > 0) {
-      const delivery = await context.sendChat(
-        announcement,
+    const announcement = isDefaultResultText
+      ? deliveryVote.title === null ? result
+        : chatVotingChatText(language, "result", undefined, undefined, undefined, deliveryVote.title, result)
+      : rendered?.text ?? "";
+    const safeAnnouncement = omitUnresolvedChatTemplateReferences(announcement);
+    if (safeAnnouncement.diagnostics.length > 0) {
+      await context.writeDiagnostics?.(
         `chat-voting:${pollId}:result`,
-        rendered.attributions,
-        async () => (await repository.byId(context.channelId, pollId))?.status === "closed",
+        safeAnnouncement.diagnostics,
+        new Date().toISOString(),
+      );
+    }
+    if (safeAnnouncement.text.trim().length > 0) {
+      const delivery = await context.sendChat(
+        safeAnnouncement.text,
+        `chat-voting:${pollId}:result`,
+        rendered?.attributions,
+        async () => {
+          const current = await repository.byId(context.channelId, pollId);
+          return current !== null && current.status === "closed" && current.resultDeliveryPending === true;
+        },
         settings.resultTarget,
       );
+      if (delivery.reason === "stale_before_send") {
+        throw new Error("The chat vote result changed before it could be sent.");
+      }
       if (delivery.retryable) throw new Error("The chat vote result is waiting for the automated output limit.");
     }
   }
 
+  await repository.completeResultDelivery(context.channelId, pollId);
   await context.ballots.acknowledgeClosed?.(pollId);
   await context.storage.delete(storageKey);
 };

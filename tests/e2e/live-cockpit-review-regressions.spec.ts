@@ -59,6 +59,19 @@ test("broadcast errors degrade footer health and keep retry styled", async ({ pa
   await expect(page.locator(".live-cockpit-broadcast__title-row > .ui-button")).toHaveAttribute("data-variant", "secondary");
 });
 
+test("operator broadcast reason wraps completely on mobile", async ({ page }) => {
+  const channelId = "review-broadcast-operator-reason";
+  await installLiveCockpitMocks(page, { channelId, role: "operator" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/channels/${channelId}`);
+
+  const reason = page.locator(".live-cockpit-broadcast__reason-slot");
+  await expect(reason).toHaveText("Only managers and broadcasters may change the stream title and category.");
+  await expect(reason).toHaveCSS("white-space", "normal");
+  const fits = await reason.evaluate((element) => element.scrollHeight <= element.clientHeight + 1);
+  expect(fits).toBe(true);
+});
+
 test("broadcast editor uses a styled single-value category search", async ({ page }) => {
   const channelId = "review-broadcast-editor";
   await installLiveCockpitMocks(page, { channelId, role: "manager" });

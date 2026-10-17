@@ -16,6 +16,7 @@ export interface LiveCockpitMockOptions {
   events?: readonly Record<string, unknown>[];
   eventsError?: boolean;
   upcomingAd?: boolean;
+  upcomingTimers?: readonly { id: string; name: string; enabled: boolean; nextRunAt: string | null }[];
   location?: { name: string; latitude: number; longitude: number; timeZone: string } | null;
   viewerCount?: number | null;
   nextViewerCount?: number | null;
@@ -199,6 +200,9 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
         snoozeScopeAvailable: true,
         recentAdBreaks: [],
       }));
+    }
+    if (pathname === `${channelPrefix}/modules/timers/timers` && method === "GET") {
+      return route.fulfill(json({ timers: options.upcomingTimers ?? [] }));
     }
     if (pathname === `${channelPrefix}/modules/belabox/test` && method === "POST") return route.fulfill(json({ ok: true, connected: false, bitrateKbps: 0 }));
     return route.fulfill(json({}));

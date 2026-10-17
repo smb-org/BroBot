@@ -194,7 +194,7 @@ export const ChannelLocationPage = ({ channelId, role }: { channelId: string; ro
             <div><dt>{labels.timeZone}</dt><dd>{settingsReady ? timeZone : "—"}</dd></div>
           </dl> : <ChannelTimeZoneField label={labels.timeZone} hint={labels.timeZoneHint} value={timeZone}
             onChange={(value) => { writeDraft({ timeZone: value }); }} canEdit disabled={!settingsReady || settingsQuery.isFetching || pending} />}
-          <LockedReason id={readOnlyReasonId} {...(!canEdit ? { reason: labels.readOnly } : {})} />
+          {!canEdit ? <LockedReason id={readOnlyReasonId} reason={labels.readOnly} /> : null}
         </Section>,
         <Section key="location" title={labels.location}>
           <LoadState variant="panel-260"

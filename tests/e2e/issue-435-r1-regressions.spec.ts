@@ -308,6 +308,100 @@ test("location operators see read-only properties and one permission reason", as
   await expect(page.locator(".channel-location-page .ui-locked-reason:not(.ui-locked-reason--reserved)")).toHaveCount(1);
 });
 
+test("location and data source pages scroll in the shell main with a fixed header", async ({ page }) => {
+  const viewports = [
+    { width: 1920, height: 1080 },
+    { width: 1280, height: 800 },
+    { width: 390, height: 844 },
+  ] as const;
+  const pages = [
+    { kind: "location", path: `/channels/${channelId}/location-weather` },
+    { kind: "data source", path: `/channels/${channelId}/modules/api_source` },
+  ] as const;
+
+  await installLiveCockpitMocks(page, { channelId });
+  await installSourceRoute(page);
+
+  for (const { kind, path } of pages) {
+    for (const viewport of viewports) {
+      await page.setViewportSize(viewport);
+      await page.goto(path);
+      await expect(page.locator(".dashboard-shell__main")).toBeVisible();
+      if (kind === "location") await expect(page.locator(".channel-location-page")).toBeVisible();
+      else await expect(page.locator(".api-source-panel .collection-page")).toBeVisible();
+
+      const before = await page.evaluate((pageKind) => {
+        const main = document.querySelector<HTMLElement>(".dashboard-shell__main");
+        const content = document.querySelector<HTMLElement>(".main-content");
+        const header = document.querySelector<HTMLElement>(".dashboard-shell__header");
+        const sidebar = document.querySelector<HTMLElement>(".dashboard-shell__navbar");
+        if (main === null || content === null || header === null) throw new Error("The dashboard shell is incomplete.");
+        const locationSections = Array.from(document.querySelectorAll<HTMLElement>(".channel-location-page .ui-section"));
+        const timeZoneHint = document.querySelector<HTMLElement>(".channel-location-page .ui-select__description");
+        const nextLocationHeading = locationSections[1]?.querySelector<HTMLElement>(".ui-section__heading") ?? null;
+        const locationColumnOverflowY = Array.from(document.querySelectorAll<HTMLElement>(".channel-location-page .settings-page__column"))
+          .map((element) => getComputedStyle(element).overflowY);
+        const innerScrollRegions = Array.from(content.querySelectorAll<HTMLElement>("*"))
+          .filter((element) => !element.matches("textarea, .ui-select__options, .ui-select__dropdown, .ui-template-text-field__suggestions"))
+          .filter((element) => {
+            const style = getComputedStyle(element);
+            return ["auto", "scroll"].includes(style.overflowY) && element.scrollHeight > element.clientHeight + 1;
+          })
+          .filter((element) => pageKind !== "data source" || !element.matches(".collection-page__list-content, .collection-page__detail"))
+          .map((element) => element.className);
+        const headerTop = header.getBoundingClientRect().top;
+        const sidebarTop = sidebar?.getBoundingClientRect().top ?? null;
+        const spacer = document.createElement("div");
+        spacer.setAttribute("aria-hidden", "true");
+        spacer.style.height = "1800px";
+        spacer.style.flex = "none";
+        content.appendChild(spacer);
+        return {
+          mainOverflowY: getComputedStyle(main).overflowY,
+          mainTabIndex: main.tabIndex,
+          headerTop,
+          sidebarTop,
+          locationColumnOverflowY,
+          locationSectionGap: timeZoneHint === null || nextLocationHeading === null
+            ? null
+            : nextLocationHeading.getBoundingClientRect().top - timeZoneHint.getBoundingClientRect().bottom,
+          innerScrollRegions,
+        };
+      }, kind);
+
+      expect(before.mainOverflowY, `${kind} main scrolls at ${String(viewport.width)}px`).toBe("auto");
+      expect(before.mainTabIndex).toBe(-1);
+      expect(before.innerScrollRegions, `${kind} has no unintended nested scroll regions`).toEqual([]);
+      if (kind === "location") expect(before.locationColumnOverflowY).toEqual(["visible", "visible"]);
+      if (kind === "location" && viewport.width === 390) {
+        expect(before.locationSectionGap, "location sections keep their natural mobile spacing").not.toBeNull();
+        expect(before.locationSectionGap ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(40);
+      }
+      await page.locator(".dashboard-shell__main").evaluate((element: HTMLElement) => { element.scrollTop = 240; });
+      await expect.poll(() => page.locator(".dashboard-shell__main").evaluate((element: HTMLElement) => element.scrollTop)).toBeGreaterThan(0);
+
+      const after = await page.evaluate(() => {
+        const main = document.querySelector<HTMLElement>(".dashboard-shell__main");
+        const header = document.querySelector<HTMLElement>(".dashboard-shell__header");
+        const sidebar = document.querySelector<HTMLElement>(".dashboard-shell__navbar");
+        if (main === null || header === null) throw new Error("The dashboard shell is incomplete.");
+        return {
+          mainScrollTop: main.scrollTop,
+          documentScrollTop: document.documentElement.scrollTop,
+          headerTop: header.getBoundingClientRect().top,
+          sidebarTop: sidebar?.getBoundingClientRect().top ?? null,
+        };
+      });
+      expect(after.mainScrollTop).toBeGreaterThan(0);
+      expect(after.documentScrollTop).toBe(0);
+      expect(Math.abs(after.headerTop - before.headerTop)).toBeLessThanOrEqual(1);
+      if (before.sidebarTop !== null && after.sidebarTop !== null) {
+        expect(Math.abs(after.sidebarTop - before.sidebarTop)).toBeLessThanOrEqual(1);
+      }
+    }
+  }
+});
+
 test("source wizard guards dirty drafts and keeps narrow summaries inside the dialog", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await installSourceRoute(page);

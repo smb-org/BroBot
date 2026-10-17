@@ -60,4 +60,42 @@ describe("BELABOX settings editor", () => {
     expect(screen.getByText("Disconnect target")).toBeInTheDocument();
     expect(screen.getByText("Recovery target")).toBeInTheDocument();
   });
+
+  it("shows nested chat alert settings in operator properties", () => {
+    const copy = belaboxSettingsEditorCatalog("en");
+    render(<UiProvider><SettingsEditor
+      spec={settingsEditor.spec}
+      sectionId="alerts"
+      settings={BELABOX_DEFAULT_SETTINGS}
+      onChange={() => undefined}
+      texts={copy}
+      templateMessages={copy.templateMessages}
+      readOnly
+      enabledLabel={copy.enabledLabel}
+      disabledLabel={copy.disabledLabel}
+    /></UiProvider>);
+
+    const properties = document.querySelector(".ui-settings-editor__readonly-sections");
+    expect(properties).not.toBeNull();
+    const nestedRows = [
+      ["Chat cooldown", "300 s"],
+      ["Low bitrate text", BELABOX_DEFAULT_SETTINGS.lowText],
+      ["Low bitrate target", "Our chat only"],
+      ["Disconnect text", BELABOX_DEFAULT_SETTINGS.disconnectText],
+      ["Disconnect target", "Our chat only"],
+      ["Recovery text", BELABOX_DEFAULT_SETTINGS.recoveryText],
+      ["Recovery target", "Our chat only"],
+    ] as const;
+    for (const [label, value] of nestedRows) {
+      const labelNode = within(properties as HTMLElement).getByText((_, element) => element !== null && (
+        element.tagName === "DT"
+          ? element.textContent === label
+          : element.tagName === "SPAN" && element.textContent.startsWith(`${label}:`)));
+      const row = labelNode.closest("div");
+      expect(row).not.toBeNull();
+      expect(row).toHaveTextContent(value);
+    }
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
+  });
 });

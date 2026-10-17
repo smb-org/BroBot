@@ -186,6 +186,23 @@ const expectMobileToastOverlay = async (page: Page): Promise<void> => {
   expect(position).toBe("fixed");
 };
 
+test("Ads template editors stack their preview when the column is narrow", async ({ page }) => {
+  await installModule(page, "ads", "ready", 860, 800);
+  await expect(page.getByRole("heading", { level: 1, name: "Werbung" })).toBeVisible();
+  const editors = page.locator(".ui-template-text-field-layout__pair");
+  await expect(editors.first()).toBeVisible();
+  const layouts = await editors.evaluateAll((pairs) => pairs.map((pair) => {
+    const textarea = pair.querySelector("textarea")?.getBoundingClientRect();
+    const preview = pair.querySelector(".ui-chat-preview")?.getBoundingClientRect();
+    const section = pair.closest(".ui-section--inspector, .config-section, section")?.getBoundingClientRect();
+    return { textareaWidth: textarea?.width ?? 0, previewRight: preview?.right ?? 0, sectionRight: section?.right ?? 0 };
+  }));
+  for (const layout of layouts) {
+    expect(layout.textareaWidth).toBeGreaterThanOrEqual(200);
+    expect(layout.previewRight).toBeLessThanOrEqual(layout.sectionRight + 1);
+  }
+});
+
 test("Ads settings keep the header aligned and columns scrolling inside the page", async ({ page }) => {
   await installModule(page, "ads", "ready", 1280, 800);
   await expect(page.getByRole("heading", { level: 1, name: "Werbung" })).toBeVisible();

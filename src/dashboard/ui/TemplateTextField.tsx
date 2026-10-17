@@ -508,7 +508,7 @@ export function TemplateTextField({
       </Input.Wrapper>
       );
       return previewLayout === "side-by-side"
-        ? <div className="ui-template-text-field-layout ui-template-text-field-layout--side-by-side">{inputWrapper}{previewNode}</div>
+        ? <div className="ui-template-text-field-layout"><div className="ui-template-text-field-layout__pair">{inputWrapper}{previewNode}</div></div>
         : inputWrapper;
       }}
     </InlineSuggestionPicker>

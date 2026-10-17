@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
     prepareWrite: () => Promise.reject(new Error("Not used in ChannelObject tests.")),
     prepareDelete: () => { throw new Error("Not used in ChannelObject tests."); },
   })),
+  reconcileLegacyChatVoteResultDeliveries: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../../src/worker/ad-prewarning", () => mocks);
@@ -28,6 +29,9 @@ vi.mock("../../src/worker/module-secrets", () => ({
     read: () => Promise.resolve("http://relay.belabox.net:8080/relay-key"),
     readWithVersion: () => Promise.resolve({ value: "http://relay.belabox.net:8080/relay-key", version: "belabox-secret-version" }),
   })),
+}));
+vi.mock("../../src/modules/chat_voting/result-delivery-reconciliation", () => ({
+  reconcileLegacyChatVoteResultDeliveries: mocks.reconcileLegacyChatVoteResultDeliveries,
 }));
 
 import type {

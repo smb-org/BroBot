@@ -22,6 +22,7 @@ describe("chat voting repository mutation guards", () => {
       await insertChannel(database, "fictional-channel");
       await insertLoginIdentityAndSession(database, "fictional-operator");
       await insertMember(database, "fictional-channel", "fictional-operator", "operator");
+      await setChatVotingEnabled(database, true);
       const repository = createChatVotingRepository(database as unknown as D1Database);
       const authorization = authorizeModuleMutation(
         "fictional-channel",
@@ -60,6 +61,7 @@ describe("chat voting repository mutation guards", () => {
       await insertChannel(database, "fictional-channel");
       await insertLoginIdentityAndSession(database, "fictional-operator");
       await insertMember(database, "fictional-channel", "fictional-operator", "operator");
+      await setChatVotingEnabled(database, true);
       const repository = createChatVotingRepository(database as unknown as D1Database);
       const authorization = authorizeModuleMutation(
         "fictional-channel",
@@ -85,6 +87,7 @@ describe("chat voting repository mutation guards", () => {
       await insertChannel(database, "fictional-channel");
       await insertLoginIdentityAndSession(database, "fictional-operator");
       await insertMember(database, "fictional-channel", "fictional-operator", "operator");
+      await setChatVotingEnabled(database, true);
       const repository = createChatVotingRepository(database as unknown as D1Database);
       const authorization = authorizeModuleMutation(
         "fictional-channel",
@@ -104,12 +107,89 @@ describe("chat voting repository mutation guards", () => {
     }
   });
 
+  it("checks module activation and member permission in every saved-template mutation", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "fictional-channel");
+      await insertLoginIdentityAndSession(database, "fictional-operator");
+      await insertMember(database, "fictional-channel", "fictional-operator", "operator");
+      await setChatVotingEnabled(database, true);
+      const repository = createChatVotingRepository(database as unknown as D1Database);
+      const authorization = authorizeModuleMutation(
+        "fictional-channel",
+        { userId: "fictional-operator", sessionId: "session-fictional-operator" },
+        "2026-10-04T10:00:00.000Z",
+      );
+      const draft = { shortcut: null, title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120 } as const;
+      await expect(repository.templates.createTemplate("fictional-channel", "template-guard", draft, "2026-10-04T10:00:00.000Z", authorization))
+        .resolves.toBe("created");
+
+      await setChatVotingEnabled(database, false);
+      await expect(repository.templates.createTemplate("fictional-channel", "template-disabled", draft, "2026-10-04T10:00:00.000Z", authorization))
+        .resolves.toBe("unauthorized");
+      await expect(repository.templates.saveTemplate("fictional-channel", "template-guard", 1, { ...draft, title: "Edited" }, "2026-10-04T10:00:00.000Z", authorization))
+        .resolves.toMatchObject({ status: "unauthorized" });
+      await expect(repository.templates.deleteTemplate("fictional-channel", "template-guard", 1, authorization))
+        .resolves.toBe("unauthorized");
+      await expect(repository.templates.template("fictional-channel", "template-guard"))
+        .resolves.toMatchObject({ title: "Dinner" });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("rejects a vote start when its saved result text template revision changed after it was read", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "fictional-channel");
+      await setChatVotingEnabled(database, true);
+      const repository = createChatVotingRepository(database as unknown as D1Database);
+      await repository.templates.createTemplate(
+        "fictional-channel",
+        "template-race",
+        { shortcut: "essen", title: "Dinner", resultText: "Result: {var.score}", labels: ["Yes", "No"], freeTextMode: null, durationSeconds: 120 },
+        "2026-10-04T10:00:00.000Z",
+        { sql: "", values: [] },
+      );
+      const vote: ChatVoteDraft = {
+        id: "vote-template-race",
+        channelId: "fictional-channel",
+        kind: "yes_no",
+        optionCount: 2,
+        labels: ["Yes", "No"],
+        title: "Dinner",
+        resultText: "Result: {var.score}",
+        openedAt: "2026-10-04T10:00:00.000Z",
+        closesAt: "2026-10-04T10:02:00.000Z",
+        requestedDurationSeconds: 120,
+        closeReason: "timer",
+        status: "open",
+      };
+
+      await database.prepare(
+        "UPDATE chat_vote_templates SET result_text = ?, revision = revision + 1 WHERE channel_id = ? AND id = ?",
+      ).bind("Result: {var.points}", "fictional-channel", "template-race").run();
+      const insertAtTemplateRevision = repository.insertOpen(vote, undefined, {
+        id: "template-race",
+        revision: 1,
+        resultText: "Result: {var.score}",
+      });
+
+      await expect(insertAtTemplateRevision).resolves.toBe("busy");
+      await expect(database.prepare("SELECT poll_id FROM chat_votes WHERE channel_id = ? AND poll_id = ?")
+        .bind("fictional-channel", vote.id).first()).resolves.toBeNull();
+    } finally {
+      database.close();
+    }
+  });
+
   it("returns the PATCH acknowledgement from its UPDATE batch during a concurrent write", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "fictional-channel");
       await insertLoginIdentityAndSession(database, "fictional-operator");
       await insertMember(database, "fictional-channel", "fictional-operator", "operator");
+      await setChatVotingEnabled(database, true);
       const base = database as unknown as D1Database;
       const authorization = authorizeModuleMutation(
         "fictional-channel",
@@ -357,7 +437,7 @@ describe("chat voting repository mutation guards", () => {
         closeReason: "timer",
       };
 
-      await expect(repository.insertOpen(vote)).resolves.toBe(false);
+      await expect(repository.insertOpen(vote)).resolves.toBe("busy");
       await expect(repository.open("fictional-channel")).resolves.toBeNull();
     } finally {
       database.close();
@@ -382,7 +462,7 @@ describe("chat voting repository mutation guards", () => {
         requestedDurationSeconds: 120,
         closeReason: "timer",
       };
-      await expect(repository.insertOpen(vote)).resolves.toBe(true);
+      await expect(repository.insertOpen(vote)).resolves.toBe("inserted");
       await setChatVotingEnabled(database, false);
 
       await expect(repository.requestManualClose("fictional-channel", vote.id, vote.closesAt)).resolves.toBe(false);

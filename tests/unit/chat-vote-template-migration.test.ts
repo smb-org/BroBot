@@ -4,10 +4,12 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 import { templateStartProblem } from "../../src/modules/chat_voting/domain";
+import { templateTextLength } from "../../src/contracts/template-text-length";
 
 const migration = readFileSync(resolve(import.meta.dirname, "../../migrations/0052_chat_vote_templates.sql"), "utf8");
+const resultTextMigration = readFileSync(resolve(import.meta.dirname, "../../migrations/0068_chat_vote_template_result_text.sql"), "utf8");
 
-const databaseWithLegacySettings = (): DatabaseSync => {
+const databaseWithLegacySettings = (resultText = "{vote.result}"): DatabaseSync => {
   const database = new DatabaseSync(":memory:");
   database.exec("PRAGMA foreign_keys = ON");
   database.exec(`
@@ -36,6 +38,7 @@ const databaseWithLegacySettings = (): DatabaseSync => {
   insertChannel.run("configured");
   insertSettings.run("configured", JSON.stringify({
     autoCloseSeconds: 120,
+    resultText,
     yesNoLabels: " Ja | Nein ",
     zeroOneLabels: "No|Yes",
     oneTwoLabels: "eins|zwei",
@@ -49,6 +52,7 @@ const databaseWithLegacySettings = (): DatabaseSync => {
     optionLabels: " Alpha || Gamma ",
   }));
   database.exec(migration);
+  database.exec(resultTextMigration);
   return database;
 };
 
@@ -58,7 +62,7 @@ describe("chat vote template migration", () => {
     try {
       expect(database.prepare("PRAGMA table_info(chat_vote_templates)").all().map((column) => (column as { name: string }).name)).toEqual([
         "id", "channel_id", "shortcut", "title", "labels", "free_text_mode", "duration_seconds", "revision",
-        "legacy_alias", "last_used_at", "created_at", "updated_at",
+        "legacy_alias", "last_used_at", "created_at", "updated_at", "result_text",
       ]);
       const rows = database.prepare(`
         SELECT channel_id, shortcut, title, labels, duration_seconds, legacy_alias
@@ -87,12 +91,26 @@ describe("chat vote template migration", () => {
       expect(database.prepare("SELECT settings FROM channel_modules WHERE channel_id = 'configured'").get())
         .toEqual({ settings: JSON.stringify({
           autoCloseSeconds: 120,
+          resultText: "{vote.result}",
           yesNoLabels: " Ja | Nein ",
           zeroOneLabels: "No|Yes",
           oneTwoLabels: "eins|zwei",
           scaleLabels: "Very low|Low|Mid|High|Very high",
           optionLabels: "Pizza|Burger|Kebab",
         }) });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("preserves logically valid templated result text that exceeds 500 raw characters", () => {
+    const resultText = "{text.foo}".repeat(100);
+    expect(resultText.length).toBeGreaterThan(500);
+    expect(templateTextLength(resultText)).toBeLessThanOrEqual(500);
+    const database = databaseWithLegacySettings(resultText);
+    try {
+      expect(database.prepare("SELECT result_text FROM chat_vote_templates WHERE channel_id = ? AND shortcut = ?")
+        .get("configured", "optionen")).toEqual({ result_text: resultText });
     } finally {
       database.close();
     }
@@ -113,6 +131,7 @@ describe("chat vote template migration", () => {
   it("registers template writes as chat-voting resource revisions", () => {
     const database = databaseWithLegacySettings();
     try {
+      database.prepare("DELETE FROM panel_resource_revisions").run();
       expect(database.prepare("SELECT resource FROM panel_resource_dependencies WHERE source_table = 'chat_vote_templates'").all())
         .toEqual([{ resource: "module:chat_voting:templates" }]);
       expect(database.prepare("SELECT resource FROM panel_resource_dependencies WHERE source_table = 'chat_votes'").all())

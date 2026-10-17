@@ -8,6 +8,7 @@ import { getApiSource, listApiSources } from "./adapters/d1";
 import { inspectApiSourceExpression } from "./domain";
 import { isValidApiSourceUrl } from "./domain/url";
 import { testApiSource } from "./test-source";
+import { CHAT_VOTE_RESULT_TEXT_REFERENCE_SOURCE_SQL } from "../contracts/chat-vote-result-text-references";
 
 const createSchema = z.object({
   name: z.string().regex(API_SOURCE_NAME_PATTERN),
@@ -103,6 +104,13 @@ export const apiSourceReferenceQuery = (channelId: string, name: string): { sql:
              WHERE template.channel_id = ? AND (${textPredicate("template.title")} OR ${textPredicate("template.labels")})`,
       values: [channelId, ...textValues(), ...textValues()],
     },
+    {
+      sql: `SELECT 9 AS site_order, 'event' AS kind,
+                   'chat_voting.' || COALESCE(NULLIF(result.item_name, ''), result.source_id) AS label
+              FROM (${CHAT_VOTE_RESULT_TEXT_REFERENCE_SOURCE_SQL}) AS result
+             WHERE result.channel_id = ? AND ${textPredicate("result.result_text")}`,
+      values: [channelId, ...textValues()],
+    },
   ];
 
   const sql = sites.map((site) => site.sql).join("\nUNION ALL\n");
@@ -119,6 +127,11 @@ const apiSourceUsages = async (db: D1Database, channelId: string, name: string):
   const usages = new Map<string, ApiSourceUsage>();
   for (const row of rows.results) usages.set(`${row.kind}\u0000${row.label}`, row);
   return [...usages.values()];
+};
+
+const reconcileLegacyChatVoteResults = async (channelNamespace: Env["CHANNEL"], channelId: string): Promise<void> => {
+  const object = channelNamespace.get(channelNamespace.idFromName(channelId));
+  await object.reconcileLegacyChatVoteResultDeliveries();
 };
 
 export const apiSourceRoutes = new Hono<ModuleRouteEnvironment>();
@@ -235,6 +248,7 @@ apiSourceRoutes.delete("/sources/:name", async (context) => {
   const before = await getApiSource(context.env.DB, channelId, name);
   if (before === null) return context.json({ error: "api_source_not_found" }, 404);
   if (parsed.data.revision !== before.revision) return context.json({ error: "api_source_conflict" }, 409);
+  await reconcileLegacyChatVoteResults(context.env.CHANNEL, channelId);
   const usages = await apiSourceUsages(context.env.DB, channelId, name);
   if (usages.length > 0) return context.json({ error: "api_source_in_use", usages }, 409);
   const now = new Date().toISOString();

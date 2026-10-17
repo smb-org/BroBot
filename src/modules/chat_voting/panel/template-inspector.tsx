@@ -1,13 +1,17 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { ActionMenu, Button, ConfirmDialog, Field, InspectorSection, UnitInput, SaveStatus, SegmentChoice, SubInspector, SwitchSection, registerDashboardNavigationGuard, useDraft, useDraftGuard } from "../../../dashboard/ui";
+import { ActionMenu, Button, ChatPreview, ConfirmDialog, Field, InspectorSection, PageHeader, SaveStatus, SegmentChoice, SwitchSection, TemplateTextField, UnitInput, panelTemplateOptions, registeredModuleTemplateGroup, registerDashboardNavigationGuard, useDraft, useDraftGuard } from "../../../dashboard/ui";
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient } from "../../../dashboard/data";
+import { useModuleQuery } from "../../../dashboard/data";
+import { isEventTemplateVariableAvailable } from "../../../contracts/event-template-variables";
+import { dashboardCommonTexts, dashboardTexts } from "../../../dashboard/locale";
 import type { ChatVoteTemplate, ChatVoteTemplateDraft } from "../contracts";
 import { CHAT_VOTE_TEMPLATE_MAXIMUM, CHAT_VOTING_TITLE_MAX_LENGTH } from "../contracts";
 import { isValidTemplateShortcut, normalizeFreeTextVoteForMatching, voteLabelLength } from "../domain";
-import { chatVotingSavedPanelTexts } from "./locale-saved";
-import { createChatVoteTemplate, saveChatVoteTemplate } from "./service";
+import { chatVoteDurationText, chatVotingSavedPanelTexts } from "./locale-saved";
+import { chatVoteResultPreview } from "./result-preview";
+import { createChatVoteTemplate, loadChatVotingTemplateVariables, saveChatVoteTemplate } from "./service";
 import type { ChatVoteTemplateListState } from "./service";
 
 export interface TemplateInspectorActions {
@@ -22,9 +26,9 @@ export interface ChatVoteTemplateInspectorProperties {
   isNew: boolean;
   initiallySaved?: boolean;
   language: "de" | "en";
-  isRunning: boolean;
+  canManageContent: boolean;
   onRegisterActions: (actions: TemplateInspectorActions | null) => void;
-  onTemplateSaved: (template: ChatVoteTemplate) => void;
+  onTemplateSaved: (template: ChatVoteTemplate, originId: string) => void;
   onClose: () => void;
   onDiscardNew: () => void;
   onDelete: (template: ChatVoteTemplate) => Promise<void>;
@@ -36,6 +40,7 @@ const durationPreset = (seconds: number): string => seconds === 0 ? "open"
 const draftFromTemplate = (template: ChatVoteTemplate): ChatVoteTemplateDraft => ({
   shortcut: template.shortcut,
   title: template.title,
+  resultText: template.resultText ?? "{vote.result}",
   labels: [...template.labels],
   freeTextMode: template.freeTextMode,
   durationSeconds: template.durationSeconds,
@@ -51,7 +56,7 @@ export function ChatVoteTemplateInspector({
   isNew,
   initiallySaved = false,
   language,
-  isRunning,
+  canManageContent,
   onRegisterActions,
   onTemplateSaved,
   onClose,
@@ -59,7 +64,43 @@ export function ChatVoteTemplateInspector({
   onDelete,
 }: ChatVoteTemplateInspectorProperties): ReactElement {
   const labels = chatVotingSavedPanelTexts(language);
+  const resultTextCopy = labels.resultText;
+  const common = dashboardCommonTexts(language);
   const queryClient = useDashboardQueryClient();
+  const registeredVariablesQuery = useModuleQuery(channelId, "chat_voting", "template-variables", (signal) =>
+    loadChatVotingTemplateVariables(channelId, signal));
+  const registeredVariables = (registeredVariablesQuery.data ?? []).filter(isEventTemplateVariableAvailable);
+  const channelVariables = registeredVariables.filter((variable) => variable.source === "channel" && variable.name.startsWith("var.") && !variable.isTextBlock)
+    .map((variable) => ({ name: variable.name.slice("var.".length), value: Number(variable.sample) || 0, description: variable.description ?? "" }));
+  const systemVariables = panelTemplateOptions("event", [], channelVariables, language);
+  const textBlocks = registeredVariables.filter((variable) => variable.isTextBlock).map((variable) => ({
+    name: variable.name,
+    label: variable.name,
+    description: variable.description ?? variable.name,
+    sample: variable.sample,
+    group: variable.group ?? "channel" as const,
+    kind: "module" as const,
+    isTextBlock: true,
+  }));
+  const moduleVariables = registeredVariables.filter((variable) => !variable.isTextBlock && variable.source !== "system" && variable.source !== "channel")
+    .map((variable) => {
+      const pickerCopy = variable.picker?.[language];
+      const sourceGroup = registeredModuleTemplateGroup(variable, language);
+      return {
+        name: variable.name,
+        label: pickerCopy?.label ?? variable.name,
+        description: pickerCopy?.description ?? variable.description ?? variable.name,
+        sample: variable.sample,
+        ...(pickerCopy?.sample === undefined ? {} : { pickerSample: pickerCopy.sample }),
+        group: variable.group ?? "channel" as const,
+        kind: "module" as const,
+        ...(sourceGroup === undefined ? {} : { sourceGroup }),
+        ...(variable.external === undefined ? {} : { external: variable.external }),
+        ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
+        ...(variable.parameters === "currency_pair" ? { parameter: { value: variable.parameterDefault ?? "USD EUR" } } : {}),
+      };
+    });
+  const resultTextVariables = [...resultTextCopy.variables, ...systemVariables, ...textBlocks, ...moduleVariables];
   const initialDraft = useMemo(() => draftFromTemplate(template), [template]);
   const draft = useDraft(initialDraft);
   const draftValue = useRef(draft.value);
@@ -73,12 +114,14 @@ export function ChatVoteTemplateInspector({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(initiallySaved);
   const [saveError, setSaveError] = useState<string | undefined>();
+  const [resultTextError, setResultTextError] = useState<string | undefined>();
   const [serverShortcutError, setServerShortcutError] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | undefined>();
   const deletingRef = useRef(false);
-  const dirty = isNew || draft.dirty;
+  const dirty = canManageContent && (isNew || draft.dirty);
   const shortcutError = serverShortcutError ?? (draft.value.shortcut === null ? null
     : !isValidTemplateShortcut(draft.value.shortcut) ? labels.shortcutInvalid
       : templates.some((entry) => entry.id !== template.id && entry.shortcut === draft.value.shortcut) ? labels.shortcutDuplicate
@@ -89,6 +132,15 @@ export function ChatVoteTemplateInspector({
   const isYesNoTemplate = draft.value.freeTextMode === null
     && draft.value.labels.length === 2
     && draft.value.labels.every((label, index) => label.trim().toLocaleLowerCase() === yesNoLabels[index]?.toLocaleLowerCase());
+  const previewOptions = draft.value.freeTextMode === null ? draft.value.labels : [];
+  const previewText = `${draft.value.title.trim() || labels.previewQuestion}${previewOptions.length === 0 ? "" : ` — ${previewOptions.map((option, index) => `${String(index + 1)}. ${option}`).join(" · ")}`}`;
+  const resultVoteResult = "Pizza: 8 (67%) · Burger: 4 (33%)";
+  const previewResult = chatVoteResultPreview(language, draft.value.resultText ?? "{vote.result}", draft.value.title.trim() || null, resultVoteResult, {
+    "vote.result": resultVoteResult,
+    "vote.title": draft.value.title.trim() || labels.previewQuestion,
+    "vote.options": draft.value.labels.map((answer, index) => `${String(index + 1)} = ${answer}`).join(", "),
+    "vote.duration": chatVoteDurationText(draft.value.durationSeconds, language),
+  });
 
   useEffect(() => {
     const inferredMode = durationPreset(draft.value.durationSeconds);
@@ -113,16 +165,18 @@ export function ChatVoteTemplateInspector({
     if ("shortcut" in update) setServerShortcutError(null);
   };
 
-  const saveDraft = async (): Promise<ChatVoteTemplate | null> => {
-    if (saving || conflict) return null;
+  const saveDraft = async (): Promise<string | null> => {
+    if (!canManageContent || saving || conflict) return labels.saveError;
     const submitted = { ...draftValue.current, labels: [...draftValue.current.labels] };
     if (blankDraft(submitted)) {
       setSaveError(labels.emptyDraftError);
-      return null;
+      return labels.emptyDraftError;
     }
     setSaving(true);
     setSaveError(undefined);
+    setResultTextError(undefined);
     setSaved(false);
+    const submittedResultText = submitted.resultText ?? "{vote.result}";
     try {
       const baselineRevision = isNew ? null : baseRevision.current;
       const next = await runModuleQueryWrite(queryClient, channelId, "chat_voting", "templates", (revision) => {
@@ -158,36 +212,42 @@ export function ChatVoteTemplateInspector({
       setServerShortcutError(null);
       setConflict(false);
       setSaved(true);
-      onTemplateSaved(next);
-      return next;
+      onTemplateSaved(next, template.id);
+      return null;
     } catch (error: unknown) {
       if (error instanceof PanelApiError && error.status === 409 && error.code === "chat_vote_template_conflict") {
         setConflict(true);
         setSaveError(undefined);
+        return labels.saveConflict;
       } else if (error instanceof PanelApiError && error.status === 409 && error.code === "chat_vote_template_shortcut_conflict") {
         setServerShortcutError(labels.shortcutDuplicate);
         setSaveError(labels.shortcutUnavailable);
+        return labels.shortcutUnavailable;
+      } else if (error instanceof PanelApiError && error.status === 409 && error.code === "chat_voting_result_text_reference_conflict") {
+        if ((draftValue.current.resultText ?? "{vote.result}") !== submittedResultText) return labels.unsaved;
+        setResultTextError(labels.referenceMissing);
+        setSaveError(undefined);
+        return labels.referenceMissing;
       } else if (error instanceof PanelApiError && error.code === "chat_vote_template_limit") {
         setSaveError(labels.templateLimit);
+        return labels.templateLimit;
       } else {
         setSaveError(labels.saveError);
+        return labels.saveError;
       }
-      return null;
     } finally {
       setSaving(false);
     }
   };
 
-  const saveForGuard = async (): Promise<string | null> => {
-    const result = await saveDraft();
-    return result === null ? saveError ?? labels.saveError : null;
-  };
+  const saveForGuard = (): Promise<string | null> => saveDraft();
   const resetDraft = (): void => {
     draftGeneration.current += 1;
     invalidateReload();
     draft.accept(baselineDraft.current);
     draftValue.current = baselineDraft.current;
     setSaveError(undefined);
+    setResultTextError(undefined);
     setServerShortcutError(null);
     setConflict(false);
     setSaved(false);
@@ -206,6 +266,7 @@ export function ChatVoteTemplateInspector({
     setCustomDurationSelected(false);
     setSaved(false);
     setSaveError(undefined);
+    setResultTextError(undefined);
     setServerShortcutError(null);
     setConflict(false);
   };
@@ -241,8 +302,9 @@ export function ChatVoteTemplateInspector({
       setCustomDurationSelected(false);
       setConflict(false);
       setSaveError(undefined);
+      setResultTextError(undefined);
       setSaved(false);
-      onTemplateSaved(latest);
+      onTemplateSaved(latest, template.id);
     } catch {
       if (isCurrentRequest()) setSaveError(labels.conflictReloadError);
     } finally {
@@ -262,24 +324,47 @@ export function ChatVoteTemplateInspector({
   };
 
   return <>
-    <SubInspector
-      ariaLabel={labels.question}
-      title={labels.editTitle(title)}
-      {...(isNew ? {} : { meta: <div className="chat-voting-template-inspector__header-actions"><ActionMenu
-        label={labels.templateActions(title)}
-        size="md"
-        items={[{
-          label: labels.delete,
-          danger: true,
-          onSelect: () => { draftGuard.guardSwitch(() => { setDeleteOpen(true); }); },
-        }]}
-      /></div> })}
-      closeLabel={labels.cancel}
-      onClose={() => { draftGuard.guardSwitch(onClose); }}
-      className="chat-voting-template-inspector"
-    >
+    <section className="chat-voting-template-inspector" role="region" aria-label={labels.question} onKeyDown={(event) => {
+      if (event.key === "Escape") { event.preventDefault(); onClose(); }
+      if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && canManageContent && dirty && !saving) {
+        event.preventDefault();
+        void saveDraft();
+      }
+    }}>
+      <PageHeader
+        kind="module"
+        icon={null}
+        title={labels.title}
+        titleContent={title}
+        headingLevel="h2"
+        {...(canManageContent ? { saveStatus: <SaveStatus
+          dirty={dirty}
+          pending={saving}
+          saved={saved || (!dirty && !isNew)}
+          persistent
+          warnings={dirty ? [labels.unsaved] : []}
+          warningStatusLabel={(_warnings, justSaved) => justSaved ? labels.saved : labels.unsaved}
+          {...(saveError === undefined ? {} : { error: saveError })}
+          invalid={saveInvalidReason !== null}
+          {...(saveInvalidReason === null ? {} : { invalidMessage: saveInvalidReason, onInvalidSave: () => { setSaveError(saveInvalidReason); } })}
+          {...(conflict ? { conflict: { message: labels.saveConflict, reloadLabel: labels.conflictReload, onReload: () => { void reloadConflict(); } } } : {})}
+          discardOnConflict
+          onSave={() => { void saveDraft(); }}
+          onDiscard={() => { if (isNew) onDiscardNew(); else resetDraft(); }}
+          saveLabel={labels.save}
+          discardLabel={labels.discard}
+          savedLabel={labels.savedLabel}
+          pendingLabel={labels.saving}
+        /> } : {})}
+        {...(!isNew ? { actions: <ActionMenu
+          label={common.moreActions}
+          items={[{ label: labels.delete, danger: canManageContent, disabled: !canManageContent, onSelect: () => {
+            draftGuard.guardSwitch(() => { setDeleteError(undefined); setDeleteOpen(true); });
+          } }]}
+        /> } : {})}
+      />
       <div className="chat-voting-editor__body">
-      <p className="chat-voting-editor__running-note" aria-live="polite">{isRunning ? labels.infoNextStart : " "}</p>
+      {canManageContent ? <>
       <InspectorSection title={labels.question}>
         <Field
           id={"chat-vote-title-" + template.id}
@@ -345,6 +430,7 @@ export function ChatVoteTemplateInspector({
         </div>
       </InspectorSection>
       <p className="chat-voting-editor__chat-hint">{isYesNoTemplate ? labels.chatHintYesNo : labels.chatHint}</p>
+      <ChatPreview label={labels.preview} speaker={labels.bot} text={previewText} countLabel={labels.previewCountLabel(voteLabelLength(previewText))} />
 
       <InspectorSection title={labels.quickTemplates}>
         <div className="chat-voting-editor__quick-templates">
@@ -392,7 +478,7 @@ export function ChatVoteTemplateInspector({
             size="compact"
           />
           <div className="chat-voting-editor__duration-slot">
-            <UnitInput
+            {durationMode === "custom" ? <UnitInput
               label={labels.seconds}
               ariaLabel={labels.seconds}
               value={draft.value.durationSeconds}
@@ -400,14 +486,34 @@ export function ChatVoteTemplateInspector({
               max={14_400}
               step={30}
               unit="s"
-              {...(durationMode === "custom" ? { hint: labels.durationHint } : {})}
-              disabled={durationMode !== "custom"}
+              hint={labels.durationHint}
               id={"chat-vote-duration-" + template.id}
               onChange={(value) => { updateDraft({ durationSeconds: typeof value === "number" ? value : 0 }); }}
-            />
+            /> : null}
           </div>
         </div>
       </InspectorSection>
+
+      <div className="chat-voting-editor__result-text">
+        <TemplateTextField
+          label={resultTextCopy.label}
+          hint={resultTextCopy.hint}
+          value={draft.value.resultText ?? "{vote.result}"}
+          onChange={(resultText) => { setResultTextError(undefined); updateDraft({ resultText }); }}
+          maxLength={500}
+          variables={resultTextVariables}
+          minRows={2}
+          messages={resultTextCopy.templateMessages}
+          {...(resultTextError === undefined ? {} : { error: resultTextError })}
+        />
+        <ChatPreview
+          label={labels.preview}
+          speaker={labels.bot}
+          text={previewResult}
+          emptyText={labels.resultPreviewOff}
+          countLabel={labels.previewCountLabel(voteLabelLength(previewResult))}
+        />
+      </div>
 
       <InspectorSection title={labels.shortcut}>
         <Field
@@ -424,29 +530,17 @@ export function ChatVoteTemplateInspector({
           onChange={(value) => { updateDraft({ shortcut: value.length === 0 ? null : value }); }}
         />
       </InspectorSection>
+      </> : <>
+        <dl className="properties chat-voting-template-inspector__properties">
+          <div><dt>{labels.question}</dt><dd>{template.title || labels.untitled}</dd></div>
+          <div><dt>{labels.answers}</dt><dd>{template.freeTextMode === null ? template.labels.join(", ") : labels.freeText}</dd></div>
+          <div><dt>{labels.duration}</dt><dd>{chatVoteDurationText(template.durationSeconds, language)}</dd></div>
+          <div><dt>{resultTextCopy.label}</dt><dd>{template.resultText ?? "{vote.result}"}</dd></div>
+          <div><dt>{labels.shortcut}</dt><dd>{template.shortcut === null ? "—" : `${labels.shortcutPrefix} ${template.shortcut}`}</dd></div>
+        </dl>
+      </>}
       </div>
-      <div className="chat-voting-editor__footer">
-        <SaveStatus
-          dirty={dirty}
-          pending={saving}
-          saved={saved || (!dirty && !isNew)}
-          persistent
-          warnings={dirty ? [labels.unsaved] : []}
-          warningStatusLabel={(_warnings, justSaved) => justSaved ? labels.saved : labels.unsaved}
-          {...(saveError === undefined ? {} : { error: saveError })}
-          invalid={saveInvalidReason !== null}
-          {...(saveInvalidReason === null ? {} : { invalidMessage: saveInvalidReason, onInvalidSave: () => { setSaveError(saveInvalidReason); } })}
-          {...(conflict ? { conflict: { message: labels.saveConflict, reloadLabel: labels.conflictReload, onReload: () => { void reloadConflict(); } } } : {})}
-          discardOnConflict
-          onSave={() => { void saveDraft(); }}
-          onDiscard={() => { if (isNew) onDiscardNew(); else resetDraft(); }}
-          saveLabel={labels.save}
-          discardLabel={labels.discard}
-          savedLabel={labels.saved}
-          pendingLabel={labels.saving}
-        />
-      </div>
-    </SubInspector>
+    </section>
     <ConfirmDialog
       opened={draftGuard.confirmOpen}
       title={labels.discardChangesTitle}
@@ -455,14 +549,16 @@ export function ChatVoteTemplateInspector({
       cancelLabel={labels.continueEditing}
       onConfirm={draftGuard.discardAndSwitch}
       onCancel={draftGuard.continueEditing}
+      {...(saveInvalidReason === null && canManageContent ? { alternative: { label: dashboardTexts(language).module.saveAndSwitch, onClick: () => { void draftGuard.saveAndSwitch(); } } } : {})}
       pending={draftGuard.saving || saving}
+      {...(draftGuard.saveError === undefined ? {} : { error: draftGuard.saveError })}
       danger
     />
     <ConfirmDialog
       opened={deleteOpen}
       danger
       title={labels.deleteTitle(title)}
-      description={labels.deleteDescription(title, isRunning, template.legacyAlias !== null)}
+      description={labels.deleteDescription(title, template.legacyAlias !== null)}
       confirmLabel={labels.confirmDelete}
       cancelLabel={labels.cancel}
       onConfirm={() => {
@@ -470,8 +566,8 @@ export function ChatVoteTemplateInspector({
         deletingRef.current = true;
         setDeleting(true);
         void onDelete(template)
-          .then(() => { setDeleteOpen(false); })
-          .catch(() => undefined)
+          .then(() => { setDeleteOpen(false); setDeleteError(undefined); })
+          .catch(() => { setDeleteError(labels.deleteError); })
           .finally(() => {
             deletingRef.current = false;
             setDeleting(false);
@@ -479,6 +575,7 @@ export function ChatVoteTemplateInspector({
       }}
       onCancel={() => { if (!deletingRef.current) setDeleteOpen(false); }}
       pending={deleting}
+      {...(deleteError === undefined ? {} : { error: deleteError })}
     />
   </>;
 }

@@ -979,10 +979,11 @@ describe("EditorShell and declaration renderer", () => {
     expect(onReload).toHaveBeenCalledOnce();
   });
 
-  it("renders read-only content as properties without a form, editable field, or SaveStatus", () => {
-    renderUi(<EditorShell {...baseProps} readOnly={{ reason: "Only managers can edit this command.", content: <dl className="properties"><div><dt>Name</dt><dd>hello</dd></div></dl> }} />);
+  it("renders read-only content as properties and preserves the editor class without a form, editable field, or SaveStatus", () => {
+    renderUi(<EditorShell {...baseProps} className="votekick-settings-editor" readOnly={{ reason: "Only managers can edit this command.", content: <dl className="properties"><div><dt>Name</dt><dd>hello</dd></div></dl> }} />);
     expect(screen.getAllByText("Only managers can edit this command.")).toHaveLength(1);
     expect(screen.getByRole("definition")).toHaveTextContent("hello");
+    expect(document.querySelector(".ui-editor-shell")).toHaveClass("votekick-settings-editor");
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(document.querySelector("form")).not.toBeInTheDocument();
     expect(document.querySelector(".ui-save-bar")).not.toBeInTheDocument();

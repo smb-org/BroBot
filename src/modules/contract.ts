@@ -723,7 +723,7 @@ export interface ModuleAlarmContext {
     text: string,
     moduleValuesOrNow?: Readonly<Record<string, string | number>> | number,
     nowOrModuleValues?: number | Readonly<Record<string, string | number>>,
-  ) => Promise<{ text: string; attributions?: readonly string[] }>;
+  ) => Promise<{ text: string; diagnostics?: readonly ModuleDiagnostic[]; attributions?: readonly string[] }>;
   /** Publishes a module-owned overlay message to enabled elements in this channel. */
   publishModuleOverlayMessage: (
     type: string,
@@ -1354,7 +1354,7 @@ export type ModuleLiveTileSnapshot =
     kind: "vote";
     id: string;
     title: string | null;
-    options: readonly { label: string; count: number }[];
+    options: readonly { label: string; count: number; approved?: boolean }[];
     totalVotes: number;
     closesAt: string;
     canExtend: boolean;
@@ -1367,6 +1367,12 @@ export type ModuleLiveTileSnapshot =
     yesVotes: number;
     noVotes: number;
     threshold: number;
+  }
+  | {
+    kind: "votekick_recent";
+    id: string;
+    target: string;
+    endedAt: string;
   }
   | {
     kind: "upcoming";
@@ -1579,6 +1585,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   needsActiveChatters?: boolean;
   settingsSchema: SettingsSchema;
   defaultSettings: z.output<SettingsSchema>;
+  /** Optional channel-language defaults for modules whose initial messages are localized. */
+  defaultSettingsForLanguage?: (language: ModuleLanguage) => z.output<SettingsSchema>;
   /** Template fields and variables used by both panel validation and worker rendering. */
   templateFields?: TemplateFields<z.output<SettingsSchema>>;
   /** Static declarations for variables exposed through a dynamic provider. */

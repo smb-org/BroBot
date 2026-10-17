@@ -19,7 +19,7 @@ test("votekick overlay shows its countdown, vote bars, close outcome, and hide t
 
 test("votekick starter role select saves its choice in the settings editor", async ({ page }) => {
   await page.goto("/tests/e2e/votekick-overlay-fixture.html");
-  const select = page.getByRole("combobox", { name: "Minimum role to start" });
+  const select = page.getByRole("combobox", { name: "Minimum role" });
   await expect(select).toContainText("VIP and higher");
   await select.click();
   await page.getByRole("option", { name: "Viewer and higher" }).click();

@@ -65,6 +65,7 @@ export interface ChatVote {
   optionCount: number;
   labels: readonly string[];
   title: string | null;
+  resultText?: string | null;
   textMode?: ChatVotingTextMode | null;
   termFilterReady?: boolean | null;
   status: "open" | "closing" | "closed";
@@ -79,6 +80,7 @@ export interface ChatVote {
   moreTerms?: number | null;
   closingAt?: string | null;
   deadlineRevision?: number;
+  resultDeliveryPending?: boolean;
 }
 
 export interface ChatVoteDraft extends Omit<ChatVote, "status" | "closedAt" | "counts" | "voterCount"> {
@@ -96,6 +98,7 @@ export interface ChatVoteTemplate {
   channelId: string;
   shortcut: string | null;
   title: string;
+  resultText?: string;
   labels: readonly string[];
   freeTextMode: ChatVotingTextMode | null;
   durationSeconds: number;
@@ -109,6 +112,7 @@ export interface ChatVoteTemplate {
 export interface ChatVoteTemplateDraft {
   shortcut: string | null;
   title: string;
+  resultText?: string;
   labels: readonly string[];
   freeTextMode: ChatVotingTextMode | null;
   durationSeconds: number;

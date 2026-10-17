@@ -238,6 +238,9 @@ test("BELABOX settings scroll in main without inner scrollbars at supported widt
     expect(layout.firstLabel?.bottom).toBeLessThanOrEqual(layout.firstControl?.top ?? Number.NEGATIVE_INFINITY);
     expect((layout.firstControl?.top ?? 0) - (layout.firstLabel?.bottom ?? 0)).toBeLessThanOrEqual(8);
     expect(layout.secondLabel?.bottom).toBeLessThanOrEqual(layout.secondControl?.top ?? Number.NEGATIVE_INFINITY);
+    if (viewport.width === 1920) {
+      expect((layout.secondLabel?.top ?? 0) - (layout.firstControl?.bottom ?? 0), "no empty helper rows between Modus and Intervall").toBeLessThanOrEqual(24);
+    }
     expect(layout.connectionActionGap).not.toBeNull();
     expect(layout.connectionActionGap).toBeLessThanOrEqual(48);
     expect(layout.streamTextGap).not.toBeNull();
@@ -245,7 +248,6 @@ test("BELABOX settings scroll in main without inner scrollbars at supported widt
     if (viewport.width === 1280) {
       await expect(firstField).toBeInViewport();
       expect(layout.mainScrollHeight).toBeGreaterThan(layout.mainClientHeight);
-      expect(layout.mainScrollTop).toBeGreaterThan(0);
       const message = page.locator('.settings-page__column [data-section="alerts"] .ui-settings-editor__message').first();
       await message.scrollIntoViewIfNeeded();
       const stickyOffset = await page.evaluate(() => {

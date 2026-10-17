@@ -1,4 +1,4 @@
-import type { ReactElement, ReactNode } from "react";
+import type { ReactElement, ReactNode, RefCallback } from "react";
 
 import { dashboardCommonTexts } from "../locale";
 import { NavigationIcon } from "./NavigationIcon";
@@ -42,6 +42,7 @@ export interface PageHeaderProps {
   badges?: ReactNode;
   saveStatus?: ReactNode;
   save?: SaveStatusProps;
+  saveTargetRef?: RefCallback<HTMLDivElement>;
   actions?: ReactNode;
   pageActions?: ReactNode;
   overflow?: ReactNode;
@@ -66,6 +67,7 @@ export function PageHeader({
   badges,
   saveStatus,
   save,
+  saveTargetRef,
   actions,
   pageActions,
   overflow,
@@ -97,6 +99,7 @@ export function PageHeader({
       <HeaderActions
         saveStatus={saveStatus}
         {...(save === undefined ? {} : { save })}
+        {...(saveTargetRef === undefined ? {} : { saveTargetRef })}
         {...(headerActions === undefined ? {} : { pageActions: headerActions })}
         {...(overflow === undefined ? {} : { overflow })}
         moreActionsLabel={common.moreActions}

@@ -41,6 +41,7 @@ const runningVotekick = (overrides: Partial<Votekick> = {}): Votekick => ({
   endsAt: new Date(Date.now() + 30_000).toISOString(),
   endedAt: null,
   liftedAt: null,
+  liftClaimedAt: null,
   ...overrides,
 });
 
@@ -116,6 +117,55 @@ describe("Votekick module", () => {
       kind: "votekick.tally",
       defaultConfig: { showCountdown: true, hideAfterCloseSeconds: 15 },
     });
+  });
+
+  it("uses the settings editor in the panel and keeps live operations in the cockpit", () => {
+    expect(votekickModule.settingsEditor).toBeTypeOf("function");
+    expect(votekickModule.panel).toBeUndefined();
+    expect(votekickModule.liveTile?.load).toBeTypeOf("function");
+  });
+
+  it.each([3_600_000, -3_600_000])(
+    "uses server time to decide whether a timeout is liftable when the client clock is skewed by %i ms",
+    async (clockOffset) => {
+    const panelService = await import("../../src/modules/votekick/panel/service");
+    const serverNow = now();
+    const serverNowMs = Date.parse(serverNow);
+    const endedRecently = new Date(serverNowMs - 30_000).toISOString();
+    const passed = (overrides: Partial<Votekick> = {}): Votekick => runningVotekick({
+      status: "passed", durationSeconds: 120, endedAt: endedRecently, ...overrides,
+    });
+    const load = vi.spyOn(panelService, "loadVotekickPanel").mockResolvedValue({
+      running: null,
+      now: serverNow,
+      votekicks: [
+        passed({ id: "liftable" }),
+        passed({ id: "no-target", targetUserId: null }),
+        passed({ id: "no-duration", durationSeconds: null }),
+        passed({ id: "no-end", endedAt: null }),
+        passed({ id: "expired", endedAt: new Date(Date.now() - 121_000).toISOString() }),
+        passed({ id: "already-lifted", liftedAt: now() }),
+        passed({
+          id: "in-progress",
+          liftClaimedAt: new Date(Date.parse(serverNow) - 1_000).toISOString(),
+        }),
+        passed({
+          id: "expired-recovery",
+          endedAt: new Date(Date.parse(serverNow) - 180_000).toISOString(),
+          liftClaimedAt: new Date(Date.parse(serverNow) - 5 * 60_000 - 1_000).toISOString(),
+        }),
+        passed({ id: "not-passed", status: "expired" }),
+      ],
+    });
+    const localClock = vi.spyOn(Date, "now").mockReturnValue(serverNowMs + clockOffset);
+
+    try {
+      const snapshots = await votekickModule.liveTile?.load("channel-a", new AbortController().signal);
+      expect(snapshots?.map(({ id }) => id)).toEqual(["liftable", "expired-recovery"]);
+    } finally {
+      localClock.mockRestore();
+      load.mockRestore();
+    }
   });
 
   it("localizes the moderator lookup scope", () => {
@@ -252,6 +302,29 @@ describe("Votekick module", () => {
     });
   });
 
+  it("omits unresolved references from a Votekick start announcement and records them", async () => {
+    const event = {
+      ...eventFor("!votekick sampleviewer"),
+      settings: {
+        ...settings,
+        startText: "Start: {votekick.target}|{var.old_score}|{text.old_greeting}|{api.old_source}",
+      },
+    };
+    const renderTemplate = vi.fn((template: string, values: Readonly<Record<string, string | number>>) => Promise.resolve({
+      text: template.replace("{votekick.target}", String(values["votekick.target"] ?? "")),
+      diagnostics: [],
+    }));
+    const result = await processVotekickMessage(event, repositoryFor(), contextFor({ renderTemplate }));
+    const announcement = result.actions.find((action) => action.kind === "chat");
+
+    expect(announcement).toMatchObject({ kind: "chat", text: "Start: sampleviewer|||" });
+    expect(result.diagnostics).toEqual([
+      { code: "template.chat_reference_dropped", detail: { name: "var.old_score" } },
+      { code: "template.chat_reference_dropped", detail: { name: "text.old_greeting" } },
+      { code: "template.chat_reference_dropped", detail: { name: "api.old_source" } },
+    ]);
+  });
+
   it("starts a ballot while offline", async () => {
     const admit = vi.fn(() => Promise.resolve("admitted" as const));
     const context = contextFor({ streamState: vi.fn(() => Promise.resolve("offline" as const)) });
@@ -290,7 +363,7 @@ describe("Votekick module", () => {
       renderTemplate: vi.fn((template: string, values: Readonly<Record<string, string | number>>) => {
         order.push("template");
         return Promise.resolve({
-          text: template.replace(/\{([^{}]+)\}/gu, (_token, name: string) => String(values[name] ?? "")),
+          text: template.replace(/\{([^{}]+)\}/gu, (token, name: string) => name in values ? String(values[name]) : token),
           diagnostics: [],
         });
       }),
@@ -303,7 +376,14 @@ describe("Votekick module", () => {
         finalize: vi.fn(() => Promise.resolve({ outcome: "passed" as const, counts: [3, 0], revision: 4 })),
       },
     });
-    const result = await processVotekickMessage(eventFor("1", ["viewer"], "voter-user"), repository, context);
+    const result = await processVotekickMessage({
+      ...eventFor("1", ["viewer"], "voter-user"),
+      settings: {
+        ...settings,
+        passText: "Passed {votekick.target}|{text.deleted_result}",
+        failText: "Failed {votekick.target}|{api.deleted_source}",
+      },
+    }, repository, context);
 
     expect(finalize).toHaveBeenCalledWith("channel-a", "ballot-1", "passed", 3, 0, 4, 120, expect.any(String));
     expect(order).toEqual(["language", "template", "template", "finalize", "close"]);
@@ -313,9 +393,13 @@ describe("Votekick module", () => {
       userId: "sampleviewer-id",
       durationSeconds: 120,
       reason: "Votekick (3:0) · ballot-1",
-      onSuccess: { kind: "chat", text: "Votekick passed: sampleviewer receives a 2 min timeout.", target: "source_only", automated: false },
-      onFailure: { kind: "chat", text: "The timeout for sampleviewer could not be applied.", target: "source_only", automated: false },
+      onSuccess: { kind: "chat", text: "Passed sampleviewer|", target: "source_only", automated: false },
+      onFailure: { kind: "chat", text: "Failed sampleviewer|", target: "source_only", automated: false },
     }, expect.objectContaining({ kind: "overlay", type: "tally", elementKind: "votekick.tally" })]);
+    expect(result.diagnostics).toEqual([
+      { code: "template.chat_reference_dropped", detail: { name: "text.deleted_result" } },
+      { code: "template.chat_reference_dropped", detail: { name: "api.deleted_source" } },
+    ]);
   });
 
   it("does not pass when an opposing Durable Object vote commits before the D1 snapshot update", async () => {

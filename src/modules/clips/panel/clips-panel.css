@@ -6,8 +6,6 @@
 }
 
 .clips-panel .page-header.module-detail-heading {
-  width: 100%;
-  max-width: none;
   grid-template-columns: minmax(0, 1fr) auto;
   min-height: 0;
   margin-bottom: 0;
@@ -16,11 +14,6 @@
 }
 
 .module-detail:has(.clips-panel) {
-  width: 100%;
-  max-width: none;
-}
-
-.module-detail:has(.clips-panel) > .module-detail-heading {
   width: 100%;
   max-width: none;
 }

@@ -235,6 +235,7 @@ export const EVENT_CODES = [
   "belabox.alert_escalated",
   "belabox.alert_recovered",
   "template.lookup_unavailable",
+  "template.chat_reference_dropped",
   "text_commands.cooldown",
   "text_commands.user_cooldown",
   "text_commands.stream_state",

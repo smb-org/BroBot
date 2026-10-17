@@ -46,7 +46,8 @@ import { sameTimerAlarmIdentity } from "../../modules/timers/identity";
 import { acceptsTimerAlarmClear, acceptsTimerAlarmSet } from "../../modules/timers/identity";
 import type { TimerIntervalState } from "../../modules/timers/contracts";
 import { mapTimerRow, type TimerRow } from "../../modules/timers/service";
-import { CHAT_VOTING_MODULE_ID } from "../../modules/chat_voting/contracts";
+import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_MODULE_ID } from "../../modules/chat_voting/contracts";
+import { reconcileLegacyChatVoteResultDeliveries as reconcileLegacyChatVoteResultDeliveriesInD1 } from "../../modules/chat_voting/result-delivery-reconciliation";
 import { OVERLAY_STREAM_DETAILS_CACHE_TTL_MS } from "../../modules/contract";
 import type {
   ActiveChatterActivity,
@@ -3338,6 +3339,32 @@ export class ChannelObject extends DurableObject<Env> {
     );
   }
 
+  /**
+   * Match one-time migration candidates to the exact chat-voting close alarms
+   * retained in this channel object's durable schedule.
+   */
+  private async retainedLegacyChatVoteResultPollIds(): Promise<string[]> {
+    const stored = await this.ctx.storage.get(ALARM_TABLE_KEY);
+    const prefix = `module:${CHAT_VOTING_MODULE_ID}:`;
+    const handler = `module:${CHAT_VOTING_MODULE_ID}:${CHAT_VOTING_ALARM_HANDLER}`;
+    return isRecord(stored)
+      ? Object.entries(stored).flatMap(([key, entry]) =>
+        key.startsWith(prefix) && validAlarmScheduleEntry(entry) && entry.handler === handler
+          ? [key.slice(prefix.length)]
+          : [])
+      : [];
+  }
+
+  private async reconcileLegacyChatVoteResultDeliveriesFor(retainedPollIds: readonly string[]): Promise<void> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return;
+    await reconcileLegacyChatVoteResultDeliveriesInD1(this.env.DB, channelId, retainedPollIds);
+  }
+
+  public async reconcileLegacyChatVoteResultDeliveries(): Promise<void> {
+    await this.reconcileLegacyChatVoteResultDeliveriesFor(await this.retainedLegacyChatVoteResultPollIds());
+  }
+
   /** Returns the current retry/execution time for one module alarm, if scheduled. */
   public async getModuleAlarmDeadline(moduleId: string, alarmKey: string): Promise<number | null> {
     if (!MODULES.some((module) => module.id === moduleId) || alarmKey.length === 0) return null;
@@ -3921,6 +3948,12 @@ export class ChannelObject extends DurableObject<Env> {
       const externalFetchBudget = createModuleExternalFetchBudget();
       await this.pruneRevokedTokenMarkers(now);
       await this.stopSecurityAlarmIfIdle();
+      // Only a retained close retry can change vote-result delivery state here.
+      // Reference reads reconcile orphaned migration candidates independently.
+      const retainedVoteResults = await this.retainedLegacyChatVoteResultPollIds();
+      if (retainedVoteResults.length > 0) {
+        await this.reconcileLegacyChatVoteResultDeliveriesFor(retainedVoteResults);
+      }
       await this.dispatchDueAlarmEntries(now, nowIso, this.alarmHandlers(MODULES, externalFetchBudget));
     }, () => this.notifyCommittedPanelResources());
   }

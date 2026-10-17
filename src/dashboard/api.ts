@@ -20,6 +20,7 @@ import type {
   PanelTwitchUser,
 } from "../panel-contract";
 import type { ChannelControlDuration, ChannelRole, ChatOutputTarget, OverlayElementKind } from "../contracts/values";
+import type { ModuleRegisteredTemplateVariable } from "../modules/contract";
 
 import { PanelApiError } from "../contracts/panel-error";
 
@@ -570,6 +571,17 @@ export const getChannelModuleSettings = (channelId: string, moduleId: string, si
   `${modulePath(channelId, moduleId)}/settings`,
   requestOptions(signal),
 );
+
+export const getChannelTemplateVariables = async (
+  channelId: string,
+  signal?: AbortSignal,
+): Promise<readonly ModuleRegisteredTemplateVariable[]> => {
+  const response = await requestJson<{ variables: readonly ModuleRegisteredTemplateVariable[] }>(
+    channelPath(channelId, "template-variables"),
+    requestOptions(signal),
+  );
+  return response.variables;
+};
 
 export interface PanelChannelVariableRecord {
   channelId: string;

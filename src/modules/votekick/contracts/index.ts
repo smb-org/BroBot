@@ -9,6 +9,7 @@ export const VOTEKICK_WINDOW_MS = 10 * 60 * 1000;
 const VOTEKICK_MAX_WINDOW_SECONDS = 180;
 const VOTEKICK_MIN_WINDOW_SECONDS = 30;
 export const VOTEKICK_HISTORY_DAYS = 14;
+export const VOTEKICK_LIFT_CLAIM_LEASE_MS = 5 * 60 * 1_000;
 
 export const votekickSettingsSchema = z.object({
   starterMinRole: z.enum(["viewer", "subscriber", "vip", "moderator", "broadcaster"]).default("vip"),
@@ -19,6 +20,12 @@ export const votekickSettingsSchema = z.object({
   channelCooldownSeconds: z.number().int().min(60).max(86_400),
   targetCooldownSeconds: z.number().int().min(60).max(86_400),
   chatTarget: z.enum(["all_chats", "source_only"]),
+  startTextEnabled: z.boolean().default(true),
+  passTextEnabled: z.boolean().default(true),
+  failTextEnabled: z.boolean().default(true),
+  expiredTextEnabled: z.boolean().default(true),
+  protectedTextEnabled: z.boolean().default(true),
+  busyTextEnabled: z.boolean().default(true),
   startText: z.string().refine((text) => templateTextLength(text) <= 500),
   passText: z.string().refine((text) => templateTextLength(text) <= 500),
   failText: z.string().refine((text) => templateTextLength(text) <= 500),
@@ -37,8 +44,19 @@ export const DEFAULT_VOTEKICK_SETTINGS: VotekickSettings = {
   channelCooldownSeconds: 300,
   targetCooldownSeconds: 1800,
   chatTarget: "source_only",
+  startTextEnabled: true,
+  passTextEnabled: true,
+  failTextEnabled: true,
+  expiredTextEnabled: true,
+  protectedTextEnabled: true,
+  busyTextEnabled: true,
   ...VOTEKICK_DEFAULT_TEXTS.en,
 };
+
+export const votekickDefaultSettingsForLanguage = (language: "de" | "en"): VotekickSettings => ({
+  ...DEFAULT_VOTEKICK_SETTINGS,
+  ...VOTEKICK_DEFAULT_TEXTS[language],
+});
 
 export type VotekickStatus = "running" | "passed" | "expired" | "cancelled" | "failed";
 
@@ -57,4 +75,5 @@ export interface Votekick {
   endsAt: string;
   endedAt: string | null;
   liftedAt: string | null;
+  liftClaimedAt: string | null;
 }
