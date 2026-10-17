@@ -2705,7 +2705,7 @@ p.lock-reason { margin-bottom: 1em; }
   .module-workspace .list-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
   .module-workspace .list-row__action { width: 100%; align-self: start; padding-top: 0; }
   .module-workspace .module-switch-control { width: 100%; min-width: 44px; }
-  body:has(.module-workspace) .ui-toast-host { top: auto; bottom: var(--s1); align-content: end; }
+  .ui-toast-host { top: auto; bottom: var(--s1); align-content: end; }
   .ui-switch-section__heading { box-sizing: border-box; padding-inline-end: var(--s1); }
   .ui-chat-target-field__trigger { grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--s1); padding-inline: var(--s2); }
   .ui-chat-target-field__value { overflow: hidden; overflow-wrap: normal; text-overflow: ellipsis; white-space: nowrap; line-height: normal; }
