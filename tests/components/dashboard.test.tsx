@@ -1170,16 +1170,16 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByText("Raid von unbekannt mit 21 Zuschauern")).toBeInTheDocument();
-    const herkunftGroup = screen.getByRole("group", { name: "Herkunft" });
-    let tonGroup = screen.getByRole("group", { name: "Ton" });
+    const eventTypeGroup = screen.getByRole("group", { name: "Art" });
+    let severityGroup = screen.getByRole("group", { name: "Stufe" });
     let module = screen.getByRole("combobox", { name: "Modul" });
     const person = screen.getByRole("textbox", { name: "Person" });
-    expect(herkunftGroup).toBeInTheDocument();
+    expect(eventTypeGroup).toBeInTheDocument();
     expect(module).toBeInTheDocument();
-    expect(tonGroup).toBeInTheDocument();
+    expect(severityGroup).toBeInTheDocument();
     expect(person).toBeInTheDocument();
 
-    fireEvent.click(within(herkunftGroup).getByRole("button", { name: "Kanalereignisse" }));
+    fireEvent.click(within(eventTypeGroup).getByRole("button", { name: "Kanalereignisse" }));
     expect(await screen.findByText("Raid von unbekannt mit 21 Zuschauern")).toBeInTheDocument();
     expect(screen.getByText(/Aktive Filter:/)).toHaveTextContent("Kanalereignisse");
 
@@ -1187,12 +1187,12 @@ describe("Dashboard skeleton", () => {
     module = screen.getByRole("combobox", { name: "Modul" });
     fireEvent.click(module);
     clickSelectOption(await screen.findByRole("option", { name: "Textbefehle", hidden: true }));
-    tonGroup = screen.getByRole("group", { name: "Ton" });
-    fireEvent.click(within(tonGroup).getByRole("button", { name: "Fehler" }));
+    severityGroup = screen.getByRole("group", { name: "Stufe" });
+    fireEvent.click(within(severityGroup).getByRole("button", { name: "Fehler" }));
     expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeInTheDocument();
     expect(screen.queryByText("Raid von unbekannt mit 21 Zuschauern")).not.toBeInTheDocument();
-    tonGroup = screen.getByRole("group", { name: "Ton" });
-    fireEvent.click(within(tonGroup).getByRole("button", { name: "Info" }));
+    severityGroup = screen.getByRole("group", { name: "Stufe" });
+    fireEvent.click(within(severityGroup).getByRole("button", { name: "Info" }));
     expect(await screen.findByText("Keine Ereignisse passen zu den Filtern.")).toBeInTheDocument();
     await waitFor(() => {
       const filters = new URLSearchParams(window.location.search);

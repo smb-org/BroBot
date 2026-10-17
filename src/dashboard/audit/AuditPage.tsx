@@ -2,13 +2,13 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactEl
 
 import type { PanelAuditEntry, PanelAuditFilters, PanelAuditResponse } from "../../panel-contract";
 import { AUDIT_AREAS } from "../../contracts/values";
-import { apiErrorText, auditFieldLabel, dashboardCommonTexts, dashboardLanguage, dashboardTexts } from "../locale";
+import { apiErrorText, auditFieldLabel, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber } from "../locale";
 import { useChannelSettings } from "../data/channel-settings";
 import { browserTimeZone } from "../ui/format-relative-time";
 import { ModuleHeading } from "../module-panels";
 import { loadModuleSettingsEditor } from "../module-panel-loaders";
 import { formatEventDetail } from "../events/model";
-import { AuditSentence, Badge, Button, ChipGroup, DataTable, EmptyState, Field, FilterBar, InspectorSection, ListDetail, ListPaginationFooter, LoadState as UiLoadState, LoadStateLines, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
+import { AuditSentence, Badge, Button, ChipGroup, DataTable, EmptyState, Field, FilterBar, InspectorSection, ListDetail, LoadState as UiLoadState, LoadStateLines, SubInspector, useInspectorSelection, type SettingsEditorCatalog } from "../ui";
 import { PanelApiError } from "../api";
 import { dashboardDataKeys } from "../data/keys";
 import { useAuditQuery } from "../data/lists";
@@ -40,9 +40,11 @@ const isOlderAuditEntry = (entry: PanelAuditEntry, boundary: PanelAuditEntry): b
 const AuditFilterBar = ({
   filters,
   onChange,
+  loadedCount,
 }: {
   filters: PanelAuditFilters;
   onChange: (filters: PanelAuditFilters) => void;
+  loadedCount: number;
 }): ReactElement => {
   const texts = dashboardTexts();
   const [personDraft, setPersonDraft] = useState(filters.person ?? "");
@@ -86,6 +88,7 @@ const AuditFilterBar = ({
         onChange={setPersonDraft}
         onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); commitPerson(personDraft); }}
       />
+      <span className="audit-filter__count" aria-live="polite">{formatNumber(loadedCount)} {texts.audit.loaded}</span>
   </FilterBar>;
 };
 
@@ -288,16 +291,14 @@ const AuditPageContent = ({ identityKey, pages, channelTimeZone, timeZoneFallbac
         onCloseInspector={closeAudit}
         list={
           <section ref={feedRef} className="content-section audit-page-list" aria-label={texts.audit.title}>
-            <AuditFilterBar filters={filters} onChange={onFiltersChange} />
+            <AuditFilterBar filters={filters} onChange={onFiltersChange} loadedCount={displayedEntries.length} />
             <div className="audit-pagination" aria-label={texts.audit.olderEntries}>
               <div className="audit-new-entries-slot" aria-live="polite">
                 {error !== null && displayedEntries.length > 0
                   ? <div className="audit-request-error"><span role="alert">{error}</span><Button variant="neutral" icon="reload" iconOnly ariaLabel={texts.audit.refresh} disabled={fetching} onClick={refreshSnapshot} /></div>
                   : pendingCount === 0 ? null : <Button variant="neutral" icon="jumpToTop" ariaLabel={`${texts.audit.newEntries(pendingCount)} · ${texts.audit.jumpToLatest}`} onClick={jumpToLatest}>{texts.audit.newEntries(pendingCount)}</Button>}
               </div>
-              {displayedEntries.length === 0 && nextCursor === null ? null : <ListPaginationFooter loadedCount={displayedEntries.length} loadedLabel={texts.audit.loaded}>
-                {nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage || fetching}>{loadingNextPage ? texts.audit.loadingOlderEntries : texts.audit.olderEntries}</button>}
-              </ListPaginationFooter>}
+              {nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage || fetching}>{loadingNextPage ? texts.audit.loadingOlderEntries : texts.audit.olderEntries}</button>}
             </div>
             <UiLoadState
               variant="panel-420"

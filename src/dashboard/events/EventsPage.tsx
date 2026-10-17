@@ -171,51 +171,57 @@ const EventFilterBar = ({
     onSearchKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); commitPerson(personDraft); }}
     filtersLabel={texts.events.filter}
     filters={<>
-      <ChipGroup
-        className="event-filter__chips"
-        ariaLabel={texts.events.origin}
-        value={filters.origin}
-        onChange={(value) => { onChange({ ...filters, origin: value === "channel" || value === "module" ? value : null }); }}
-        options={[
-          { value: "", label: texts.events.all },
-          { value: "channel", label: texts.events.channelEvents },
-          { value: "module", label: texts.events.moduleDiagnostics },
-        ]}
-      />
-      <ChipGroup
-        className="event-filter__chips"
-        ariaLabel={texts.events.tone}
-        {...(selectedTones.length > 1 ? {
-          value: null,
-          onChange: () => undefined,
-          selectedValues: selectedTones,
-          onSelectedValuesChange: (values: readonly string[]) => {
-            const tones = values.filter((tone): tone is EventTone => EVENT_TONES.includes(tone as EventTone));
-            const nextFilters = { ...filters, tone: tones.length === 1 ? tones[0] ?? null : null };
-            delete nextFilters.tones;
-            if (tones.length > 1) nextFilters.tones = tones;
-            onChange(nextFilters);
-          },
-          options: [
-            { value: "error", label: texts.events.error },
-            { value: "warning", label: texts.events.notice },
-            { value: "info", label: texts.events.info },
-          ],
-        } : {
-          value: filters.tone,
-          onChange: (value: string | null) => {
-            const nextFilters = { ...filters, tone: eventToneFromValue(value ?? "") };
-            delete nextFilters.tones;
-            onChange(nextFilters);
-          },
-          options: [
+      <div className="event-filter__group">
+        <span className="event-filter__group-label">{texts.events.type}</span>
+        <ChipGroup
+          className="event-filter__chips"
+          ariaLabel={texts.events.type}
+          value={filters.origin}
+          onChange={(value) => { onChange({ ...filters, origin: value === "channel" || value === "module" ? value : null }); }}
+          options={[
             { value: "", label: texts.events.all },
-            { value: "error", label: texts.events.error },
-            { value: "warning", label: texts.events.notice },
-            { value: "info", label: texts.events.info },
-          ],
-        })}
-      />
+            { value: "channel", label: texts.events.channelEvents },
+            { value: "module", label: texts.events.moduleDiagnostics },
+          ]}
+        />
+      </div>
+      <div className="event-filter__group">
+        <span className="event-filter__group-label">{texts.events.severity}</span>
+        <ChipGroup
+          className="event-filter__chips"
+          ariaLabel={texts.events.severity}
+          {...(selectedTones.length > 1 ? {
+            value: null,
+            onChange: () => undefined,
+            selectedValues: selectedTones,
+            onSelectedValuesChange: (values: readonly string[]) => {
+              const tones = values.filter((tone): tone is EventTone => EVENT_TONES.includes(tone as EventTone));
+              const nextFilters = { ...filters, tone: tones.length === 1 ? tones[0] ?? null : null };
+              delete nextFilters.tones;
+              if (tones.length > 1) nextFilters.tones = tones;
+              onChange(nextFilters);
+            },
+            options: [
+              { value: "error", label: texts.events.error },
+              { value: "warning", label: texts.events.notice },
+              { value: "info", label: texts.events.info },
+            ],
+          } : {
+            value: filters.tone,
+            onChange: (value: string | null) => {
+              const nextFilters = { ...filters, tone: eventToneFromValue(value ?? "") };
+              delete nextFilters.tones;
+              onChange(nextFilters);
+            },
+            options: [
+              { value: "", label: texts.events.all },
+              { value: "error", label: texts.events.error },
+              { value: "warning", label: texts.events.notice },
+              { value: "info", label: texts.events.info },
+            ],
+          })}
+        />
+      </div>
       <UiSelect
         label={texts.events.moduleFilter}
         value={filters.module ?? ""}
@@ -510,8 +516,7 @@ const EventsPageFilterState = ({
       <ListDetail
         onCloseInspector={closeGroup}
         list={
-          <section className="content-section" aria-label={texts.events.log}>
-            <div className="section-heading"><h2>{texts.events.log}</h2></div>
+          <section className="content-section events-page__content" aria-label={texts.events.log}>
             <EventFilterBar
               filters={filters}
               moduleOptions={moduleOptions}
@@ -628,7 +633,7 @@ const EventsPageFilterState = ({
               </div>
               <div className="events-page__pagination-slot">
                 {loading || eventEntries.length === 0 ? null : nextCursor === null
-                  ? <p className="empty-state">{texts.events.feedEnd}</p>
+                  ? <p className="events-page__feed-end">{texts.events.feedEnd}</p>
                   : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage || fetching}>{loadingNextPage ? texts.events.loadingOlder : texts.events.loadOlder}</button>}
               </div>
               </>

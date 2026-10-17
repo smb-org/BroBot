@@ -20,6 +20,7 @@ const contentInlineSize = (element: HTMLElement): number => {
 export interface CollectionPageProps {
   title: string;
   headingLevel?: "h1" | "h2" | "h3";
+  heading?: ReactNode;
   toolbar: ReactNode;
   list: ReactNode;
   detail: ReactNode;
@@ -33,6 +34,7 @@ export interface CollectionPageProps {
 export function CollectionPage({
   title,
   headingLevel = "h1",
+  heading,
   toolbar,
   list,
   detail,
@@ -109,7 +111,7 @@ export function CollectionPage({
 
   return (
     <div ref={collectionRef} data-ui="" className="collection-page" data-detail-open={detailOpen ? "true" : "false"} data-single-column={singleColumn ? "true" : "false"}>
-      <header className="collection-page__heading"><Heading>{title}</Heading></header>
+      <div className="collection-page__heading">{heading ?? <Heading>{title}</Heading>}</div>
       <div className="collection-page__body">
         <aside ref={listRef} aria-label={`${title}: ${texts.chooseCollection}`} className="collection-page__list">
           <div className="collection-page__list-toolbar">{toolbar}</div>

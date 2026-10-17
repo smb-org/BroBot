@@ -29,6 +29,8 @@ const audit = [
   { auditId: "audit-recent", actorUserId: "member-1", actorLogin: null, actorDisplayName: "Mira Fox", actorKind: "member", createdAt: at(0, 5), moduleId: null, action: "member.role_changed", before: JSON.stringify({ role: "manager" }), after: JSON.stringify({ role: "operator" }), subjectUserId: "member-2", subjectLogin: "otto_owl", subjectDisplayName: "Otto Owl" },
   { auditId: "audit-older", actorUserId: "member-2", actorLogin: null, actorDisplayName: "Mira Fox", actorKind: "member", createdAt: at(3, 10), moduleId: null, action: "member.role_changed", before: JSON.stringify({ role: "manager" }), after: JSON.stringify({ role: "operator" }), subjectUserId: "member-3", subjectLogin: "pixel_panda", subjectDisplayName: "Pixel Panda" },
 ];
+const secondAuditEntry = audit[1];
+if (secondAuditEntry === undefined) throw new Error("The audit fixture should contain a second entry.");
 const manyAuditEntries = Array.from({ length: 48 }, (_, index) => ({
   auditId: `scroll-audit-${String(index)}`,
   actorUserId: "member-1",
@@ -59,7 +61,7 @@ interface SettingsGate {
 interface MockApiOptions {
   eventEntries?: readonly Record<string, unknown>[];
   auditEntries?: readonly Record<string, unknown>[];
-  variableEntries?: readonly Record<string, unknown>[];
+  variableEntries?: readonly Record<string, unknown>[] | (() => readonly Record<string, unknown>[]);
   legacyTokens?: readonly Record<string, unknown>[];
   channelRole?: string;
   revisionVector?: () => Readonly<Record<string, number>>;
@@ -67,6 +69,7 @@ interface MockApiOptions {
   settingsStatus?: number;
   eventStatus?: number;
   auditStatus?: number;
+  auditNextCursor?: string | null;
   variableStatus?: number;
 }
 
@@ -83,8 +86,17 @@ const mockApi = async (page: Page, options: MockApiOptions = {}): Promise<{ revi
     }
     if (pathname === `/api/channels/${channelId}/modules`) return route.fulfill(json({ modules: [{ id: "votekick", enabled: true, settings: "{}" }] }));
     if (pathname === `/api/channels/${channelId}/events`) return route.fulfill(json({ entries: options.eventEntries ?? events, nextCursor: null }, options.eventStatus));
-    if (pathname === `/api/channels/${channelId}/audit-log` || pathname === `/api/channels/${channelId}/audit`) return route.fulfill(json({ entries: options.auditEntries ?? audit, nextCursor: null }, options.auditStatus));
-    if (pathname === `/api/channels/${channelId}/variables`) return route.fulfill(json({ variables: options.variableEntries ?? channelVariables, count: (options.variableEntries ?? channelVariables).length, maximum: 25 }, options.variableStatus));
+    if (pathname === `/api/channels/${channelId}/audit-log` || pathname === `/api/channels/${channelId}/audit`) {
+      const cursor = new URL(route.request().url()).searchParams.get("cursor");
+      const pageEntries = cursor === "cursor-older"
+        ? [{ ...secondAuditEntry, auditId: "audit-next-page", createdAt: at(5, 20) }]
+        : options.auditEntries ?? audit;
+      return route.fulfill(json({ entries: pageEntries, nextCursor: cursor === "cursor-older" ? null : options.auditNextCursor ?? null }, options.auditStatus));
+    }
+    if (pathname === `/api/channels/${channelId}/variables`) {
+      const variableEntries = typeof options.variableEntries === "function" ? options.variableEntries() : options.variableEntries ?? channelVariables;
+      return route.fulfill(json({ variables: variableEntries, count: variableEntries.length, maximum: 25 }, options.variableStatus));
+    }
     if (pathname === `/api/channels/${channelId}/overlay-tokens`) return route.fulfill(json({ tokens: options.legacyTokens ?? [], nextOffset: null }));
     if (pathname === `/api/channels/${channelId}/overlays`) return route.fulfill(json({ overlays: [], maximum: 20, elementMaximum: 20 }));
     if (pathname === `/api/channels/${channelId}/revisions`) {
@@ -134,7 +146,7 @@ const expectChipGroupsFit = async (groups: Locator): Promise<void> => {
 };
 
 test("events and audit keep their table geometry across desktop and mobile widths", async ({ page }) => {
-  await mockApi(page);
+  await mockApi(page, { auditEntries: manyAuditEntries, auditNextCursor: "cursor-older" });
   for (const [width, height] of [[1920, 1080], [1280, 800], [390, 844], [2560, 1440]] as const) {
     await page.setViewportSize({ width, height });
 
@@ -142,11 +154,34 @@ test("events and audit keep their table geometry across desktop and mobile width
     const eventTable = page.locator(".event-table");
     await expect(eventTable.locator("tbody tr:not(.data-table__day-row)")).toHaveCount(events.length);
     const eventToolbar = page.locator(".list-toolbar.event-filter");
+    const eventFilterControls = page.locator(".list-toolbar.event-filter .list-toolbar__filters");
     const eventHeader = await box(eventTable.locator("thead th").first());
     const eventFilter = await box(eventToolbar);
     const eventGap = eventHeader.y - eventFilter.bottom;
     expect(eventGap).toBeGreaterThanOrEqual(0);
     expect(eventGap).toBeLessThanOrEqual(32);
+    const eventPageHeader = await box(page.locator(".module-detail-heading"));
+    expect(Math.abs(eventFilter.x - eventPageHeader.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(eventFilter.right - eventPageHeader.right)).toBeLessThanOrEqual(1);
+    const eventTableBox = await box(eventTable);
+    expect(Math.abs(eventTableBox.x - eventFilter.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(eventTableBox.right - eventFilter.right)).toBeLessThanOrEqual(1);
+    await expect(page.getByRole("heading", { name: "Ereignisprotokoll" })).toHaveCount(0);
+    await expect(page.locator(".event-filter__group-label")).toHaveText(["Art", "Stufe"]);
+    const typeLabel = await box(page.locator(".event-filter__group-label").nth(0));
+    const severityLabel = await box(page.locator(".event-filter__group-label").nth(1));
+    const typeControl = await box(eventFilterControls.locator(".event-filter__chips").nth(0));
+    const severityControl = await box(eventFilterControls.locator(".event-filter__chips").nth(1));
+    const moduleControl = await box(eventFilterControls.locator(".ui-select__trigger"));
+    if (width > 639) {
+      expect(Math.abs(typeLabel.y - severityLabel.y)).toBeLessThanOrEqual(1);
+      expect(Math.abs(typeControl.bottom - severityControl.bottom)).toBeLessThanOrEqual(1);
+      expect(Math.abs(typeControl.bottom - moduleControl.bottom)).toBeLessThanOrEqual(1);
+    } else {
+      expect(typeLabel.bottom).toBeLessThanOrEqual(typeControl.y);
+      expect(severityLabel.bottom).toBeLessThanOrEqual(severityControl.y);
+      expect(typeLabel.y).toBeLessThan(severityLabel.y);
+    }
     expect(await eventTable.locator("time").evaluateAll((times) => times.every((time) => time.scrollWidth <= time.clientWidth))).toBe(true);
     await expectChipGroupsFit(page.locator(".list-toolbar.event-filter .event-filter__chips"));
 
@@ -155,7 +190,7 @@ test("events and audit keep their table geometry across desktop and mobile width
       expect(await eventRows.evaluateAll((rows) => rows.every((row) => Math.abs(row.getBoundingClientRect().height - 40) <= 1))).toBe(true);
     } else {
       const filters = page.locator(".list-toolbar.event-filter .list-toolbar__filters");
-      await expectStableHeight(page, filters, 132);
+      await expectStableHeight(page, filters, 190);
       const firstRow = eventRows.first();
       const time = await box(firstRow.locator("time"));
       const primary = await box(firstRow.locator(".event-table__primary"));
@@ -169,23 +204,48 @@ test("events and audit keep their table geometry across desktop and mobile width
     }
 
     const lastEventRow = await box(eventRows.last());
-    const feedEnd = await box(page.locator(".events-page__pagination-slot .empty-state"));
+    const feedEndLocator = page.locator(".events-page__pagination-slot .events-page__feed-end");
+    const feedEnd = await box(feedEndLocator);
     expect(feedEnd.y).toBeGreaterThanOrEqual(lastEventRow.y + lastEventRow.height - 1);
+    expect(Math.abs(feedEnd.x - eventTableBox.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(feedEnd.right - eventTableBox.right)).toBeLessThanOrEqual(1);
+    expect(await feedEndLocator.evaluate((element) => getComputedStyle(element).borderTopStyle)).toBe("none");
+    expect(await feedEndLocator.evaluate((element) => getComputedStyle(element).paddingTop)).toBe("0px");
 
     await page.goto(`/channels/${channelId}/audit`);
     const auditTable = page.locator(".audit-sentence-list");
-    await expect(auditTable.locator("tbody tr:not(.data-table__day-row)")).toHaveCount(audit.length);
+    await expect(auditTable.locator("tbody tr:not(.data-table__day-row)")).toHaveCount(manyAuditEntries.length);
     const auditToolbar = page.locator(".dashboard-filter-bar.audit-filter");
     const auditHeader = await box(auditTable.locator("thead th").first());
     const auditFilter = await box(auditToolbar);
     const auditGap = auditHeader.y - auditFilter.bottom;
     expect(auditGap).toBeGreaterThanOrEqual(0);
     expect(auditGap).toBeLessThanOrEqual(72);
+    const auditPageHeader = await box(page.locator(".module-detail-heading"));
+    expect(Math.abs(auditFilter.x - auditPageHeader.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(auditFilter.right - auditPageHeader.right)).toBeLessThanOrEqual(1);
+    const auditTableBox = await box(auditTable);
+    expect(Math.abs(auditTableBox.x - auditFilter.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(auditTableBox.right - auditFilter.right)).toBeLessThanOrEqual(1);
+    const loadedCount = page.locator(".audit-filter__count");
+    await expect(loadedCount).toContainText("geladen");
+    const loadedCountBox = await box(loadedCount);
+    expect(loadedCountBox.x).toBeGreaterThan(auditFilter.x + auditFilter.width / 2);
+    expect(loadedCountBox.y).toBeGreaterThanOrEqual(auditFilter.y);
+    expect(loadedCountBox.bottom).toBeLessThanOrEqual(auditFilter.bottom + 1);
     const auditPagination = await box(page.locator(".audit-pagination"));
     expect(auditPagination.y).toBeGreaterThanOrEqual(auditFilter.bottom);
     expect(auditPagination.bottom).toBeLessThanOrEqual(auditHeader.y + 1);
+    const olderEntriesButton = page.getByRole("button", { name: "Ältere Einträge laden" });
+    const olderButtonBox = await box(olderEntriesButton);
+    expect(await olderEntriesButton.evaluate((element) => getComputedStyle(element).marginTop)).toBe("0px");
+    expect(olderButtonBox.y).toBeGreaterThanOrEqual(auditPagination.y);
+    expect(olderButtonBox.bottom).toBeLessThanOrEqual(auditPagination.bottom + 1);
     expect(await auditTable.locator("time").evaluateAll((times) => times.every((time) => time.scrollWidth <= time.clientWidth))).toBe(true);
     await expectChipGroupsFit(page.locator(".dashboard-filter-bar.audit-filter .event-filter__chips"));
+
+    await olderEntriesButton.click();
+    await expect(auditTable.locator("tbody tr:not(.data-table__day-row)")).toHaveCount(manyAuditEntries.length + 1);
 
     const auditRows = auditTable.locator("tbody tr:not(.data-table__day-row)");
     expect(await auditRows.locator(".audit-sentence-row__sentence").evaluateAll((sentences) => sentences.every((sentence) => sentence.scrollHeight <= sentence.clientHeight))).toBe(true);
@@ -221,7 +281,18 @@ test("variables collection keeps the editor in its column without horizontal ove
     await expect(channelEventsLink.locator("xpath=following-sibling::a[1]")).toHaveAttribute("data-nav-page-id", "audit");
     const table = page.locator(".channel-variables-table");
     await expect(table.locator("tbody tr")).toHaveCount(channelVariables.length);
+    const pageHeader = page.locator(".channel-variables-page .collection-page__heading .page-header");
+    await expect(pageHeader.locator(".page-header__icon")).toBeVisible();
+    await expect(pageHeader.locator(".page-header__copy > p")).toBeVisible();
+    const toolbarSearch = await box(page.locator(".channel-variables-page .list-toolbar__search"));
+    const toolbarCreate = await box(page.locator(".channel-variables-page .list-toolbar__create"));
+    expect(Math.abs(toolbarSearch.y - toolbarCreate.y)).toBeLessThanOrEqual(1);
+    expect(Math.abs(toolbarSearch.height - toolbarCreate.height)).toBeLessThanOrEqual(1);
     const selectedRow = table.locator("tbody tr").first();
+    const longNameCell = table.locator("tbody tr").filter({ hasText: "long_counter_name_123456789" }).locator("th[scope='row']");
+    await expect(longNameCell.locator("wbr")).toHaveCount(3);
+    expect(await longNameCell.evaluate((cell) => getComputedStyle(cell).overflowWrap)).toBe("normal");
+    expect(await longNameCell.evaluate((cell) => getComputedStyle(cell).wordBreak)).toBe("normal");
     if (width <= 639) {
       const descriptionBox = await box(selectedRow.locator(".channel-variables-table__description"));
       const resetBox = await box(selectedRow.locator(".channel-variables-table__reset"));
@@ -236,6 +307,21 @@ test("variables collection keeps the editor in its column without horizontal ove
     const headerBox = await box(editor.locator(".channel-variable-editor__header .page-header"));
     expect(headerBox.x).toBeGreaterThanOrEqual(editorBox.x - 1);
     expect(headerBox.right).toBeLessThanOrEqual(editorBox.right + 1);
+    const saveCluster = await box(editor.locator(".page-header__save"));
+    const closeAction = await box(editor.getByRole("button", { name: "Schließen" }));
+    const overflowAction = await box(editor.getByRole("button", { name: "Weitere Aktionen" }));
+    expect(Math.abs(saveCluster.y - closeAction.y)).toBeLessThanOrEqual(2);
+    expect(Math.abs(saveCluster.y - overflowAction.y)).toBeLessThanOrEqual(2);
+    expect(await editor.locator(".channel-variable-conflict-slot").evaluate((element) => getComputedStyle(element).height)).toBe("40px");
+    expect((await box(editor.locator(".channel-variable-conflict-slot"))).height).toBe(40);
+    const overlayButton = editor.getByRole("button", { name: "In Overlay verwenden" });
+    await expect(overlayButton).toBeVisible();
+    await expect(editor.getByRole("heading", { name: "In Overlay verwenden" })).toHaveCount(0);
+    expect((await box(overlayButton)).width).toBeLessThan((await box(editor)).width);
+    const nameRow = editor.locator(".inspector-field-row:has(#channel-variable-name)");
+    const nameLabel = await box(nameRow.locator(".inspector-field-row__label"));
+    const nameField = await box(nameRow.locator(".inspector-field-row__control"));
+    expect(nameField.y).toBeGreaterThanOrEqual(nameLabel.bottom);
     expect(await selectedRow.evaluate((row) => getComputedStyle(row).outlineWidth)).toBe("1px");
     expect(await selectedRow.evaluate((row) => getComputedStyle(row).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -293,6 +379,51 @@ test("legacy-link rename warning fits its reserved row without moving the editor
   const after = await box(warningSlot);
   expect(after.height).toBe(before.height);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test("a remote variable conflict stays in its reserved slot without moving editor fields", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  let currentVariables = [...channelVariables];
+  let variableRevision = 1;
+  const revisions = await mockApi(page, {
+    variableEntries: () => currentVariables,
+    revisionVector: () => ({ "channel.variables": variableRevision }),
+  });
+  let announceSocketReady: (() => void) | undefined;
+  let socketSender: ((message: string) => void) | undefined;
+  const socketReady = new Promise<void>((resolve) => { announceSocketReady = resolve; });
+  await page.routeWebSocket(`**/ws/channels/${channelId}`, (socket) => {
+    socketSender = (message) => { socket.send(message); };
+    announceSocketReady?.();
+    socket.onMessage(() => undefined);
+  });
+
+  await page.goto(`/channels/${channelId}/variables`);
+  await expect(page.locator(".channel-variables-table tbody tr")).toHaveCount(channelVariables.length);
+  await socketReady;
+  await expect.poll(() => revisions.revisionReads()).toBeGreaterThan(0);
+  const scoreRow = page.locator(".channel-variables-table tbody tr").filter({ hasText: "score" });
+  await scoreRow.click();
+  const editor = page.locator(".channel-variable-editor");
+  const conflictSlot = editor.locator(".channel-variable-conflict-slot");
+  const generalSection = editor.locator(".ui-section--inspector").first();
+  const sectionBefore = await box(generalSection);
+  expect((await box(conflictSlot)).height).toBe(40);
+
+  currentVariables = currentVariables.filter((variable) => variable.name !== "score");
+  variableRevision = 2;
+  socketSender?.(JSON.stringify({
+    version: 1,
+    id: "remote-variable-deleted",
+    createdAt: at(0),
+    channelId,
+    type: "panel.resources.changed",
+    payload: { resources: ["channel.variables"], revisions: { "channel.variables": variableRevision } },
+  }));
+
+  await expect(editor.getByRole("status")).toContainText("umbenannt oder gelöscht");
+  expect((await box(conflictSlot)).height).toBe(40);
+  expect(await box(generalSection)).toEqual(sectionBefore);
 });
 
 test("new realtime audit entries do not shift the first row while the reader is at the top", async ({ page }) => {

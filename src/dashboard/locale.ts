@@ -330,6 +330,7 @@ export const channelVariableTemplateDescription: Readonly<Record<DashboardLangua
 
 export interface ChannelVariablesTexts {
   title: string;
+  pageDescription: string;
   list: string;
   search: string;
   countSuffix: string;
@@ -395,7 +396,7 @@ export interface ChannelVariablesTexts {
 
 const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
   de: {
-    title: "Kanalvariablen", list: "Variablen", search: "Variablen suchen", countSuffix: "Variablen", limitSuffix: "Variablen belegt", filteredSuffix: "Variablen", create: "Variable anlegen",
+    title: "Kanalvariablen", pageDescription: "Verwalte numerische Variablen, ihre aktuellen Werte und ihre Verwendungen.", list: "Variablen", search: "Variablen suchen", countSuffix: "Variablen", limitSuffix: "Variablen belegt", filteredSuffix: "Variablen", create: "Variable anlegen",
     empty: "Noch keine Kanalvariablen angelegt.", loadError: "Kanalvariablen konnten nicht geladen werden.",
     saveError: "Die Kanalvariable konnte nicht gespeichert werden.", deleteError: "Die Kanalvariable konnte nicht gelöscht werden.",
     name: "Name", nameHint: "Kleinbuchstaben, Zahlen und Unterstrich; höchstens 32 Zeichen.", nameInvalid: "Nur Kleinbuchstaben, Zahlen und Unterstrich.",
@@ -425,7 +426,7 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     legacyRenameWarning: "Alte Links mit #var=… zeigen diese Variable nach der Umbenennung nicht mehr an.",
   },
   en: {
-    title: "Channel variables", list: "Variables", search: "Search variables", countSuffix: "variables", limitSuffix: "variables used", filteredSuffix: "variables", create: "Create variable",
+    title: "Channel variables", pageDescription: "Manage numeric variables, their current values, and where they are used.", list: "Variables", search: "Search variables", countSuffix: "variables", limitSuffix: "variables used", filteredSuffix: "variables", create: "Create variable",
     empty: "No channel variables yet.", loadError: "Channel variables could not be loaded.",
     saveError: "The channel variable could not be saved.", deleteError: "The channel variable could not be deleted.",
     name: "Name", nameHint: "Lowercase letters, numbers, and underscores; up to 32 characters.", nameInvalid: "Use lowercase letters, numbers, and underscores only.",
@@ -969,10 +970,10 @@ export interface DashboardTexts {
     loadOlder: string;
     loadingOlder: string;
     filter: string;
-    origin: string;
+    type: string;
     moduleFilter: string;
     allModules: string;
-    tone: string;
+    severity: string;
     person: string;
     all: string;
     channelEvents: string;
@@ -1434,7 +1435,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       module: "Modul", who: "Wer", automatic: "Automatisch", info: "Info", error: "Fehler", notice: "Hinweis", unknown: "Unbekannt", timestamp: "Zeitstempel", operation: "Vorgang", history: "Verlauf",
       load: "Ereignisse werden geladen …",
       none: "Noch keine Ereignisse protokolliert.", detail: "Detail", loadOlder: "Ältere Ereignisse laden", loadingOlder: "Ältere Ereignisse werden geladen …",
-      filter: "Filter", origin: "Herkunft", moduleFilter: "Modul", allModules: "Alle Module", tone: "Ton", person: "Person", all: "Alle",
+      filter: "Filter", type: "Art", moduleFilter: "Modul", allModules: "Alle Module", severity: "Stufe", person: "Person", all: "Alle",
       channelEvents: "Kanalereignisse", moduleDiagnostics: "Moduldiagnosen", activeFilters: "Aktive Filter:", resetFilters: "Filter zurücksetzen",
       noMatches: "Keine Ereignisse passen zu den Filtern.",
       feedEnd: "Ende des Ereignisverlaufs erreicht.",
@@ -1866,7 +1867,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       title: "Channel events", count: (count) => `${count} ${count === "1" ? "entry" : "entries"}`, log: "Event log", time: "Time", event: "Event", module: "Module",
       who: "Who", automatic: "Automatic", info: "Info", error: "Error", notice: "Notice", unknown: "Unknown", timestamp: "Timestamp", operation: "Operation", history: "History", load: "Loading events …", none: "No events logged yet.", detail: "Detail",
       loadOlder: "Load older events", loadingOlder: "Loading older events …",
-      filter: "Filters", origin: "Origin", moduleFilter: "Module", allModules: "All modules", tone: "Tone", person: "Person", all: "All",
+      filter: "Filters", type: "Type", moduleFilter: "Module", allModules: "All modules", severity: "Severity", person: "Person", all: "All",
       channelEvents: "Channel events", moduleDiagnostics: "Module diagnostics", activeFilters: "Active filters:", resetFilters: "Reset filters",
       noMatches: "No events match the filters.",
       feedEnd: "End of the event history reached.",
