@@ -363,14 +363,23 @@ test("initial collection and feed errors stay inline without covering the page",
 
 test("operators see one definition permission reason while live value controls stay enabled", async ({ page }) => {
   await mockApi(page, { channelRole: "operator", variableEntries: channelVariables });
-  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/channels/${channelId}/variables`);
   await page.locator(".channel-variables-table tbody tr").first().click();
   const editor = page.locator(".channel-variable-editor");
   await expect(editor).toBeVisible();
+  const permissionNote = editor.locator(".channel-variable-management-note");
+  await expect(permissionNote).toContainText(/Nur Broadcaster und Verwalter dürfen Variablen/u);
   await expect(editor.getByText(/Nur Broadcaster und Verwalter dürfen Variablen/u)).toHaveCount(1);
-  await expect(editor.locator(".channel-variable-definition-properties")).toContainText("score");
-  await expect(editor.locator(".channel-variable-definition-properties")).toContainText("Punkte im aktuellen Spiel");
+  const properties = editor.locator(".channel-variable-definition-properties");
+  await expect(properties).toContainText("score");
+  await expect(properties).toContainText("Punkte im aktuellen Spiel");
+  const propertiesBox = await box(properties);
+  const permissionNoteBox = await box(permissionNote);
+  expect(permissionNoteBox.x).toBeGreaterThanOrEqual(propertiesBox.x);
+  expect(permissionNoteBox.right).toBeLessThanOrEqual(propertiesBox.right + 1);
+  expect(permissionNoteBox.y).toBeGreaterThanOrEqual(propertiesBox.bottom);
+  expect(await permissionNote.evaluate((element) => getComputedStyle(element).lineHeight)).toBe("16.8px");
   await expect(editor.getByRole("textbox", { name: "Name" })).toHaveCount(0);
   await expect(editor.getByRole("switch", { name: "Bei Streamstart auf null setzen" })).toHaveCount(0);
   await expect(editor.getByRole("button", { name: "Speichern" })).toBeDisabled();

@@ -526,7 +526,6 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
           headingLevel="h2"
           titleContent={creating ? labels.newVariable : <span className="mono">{`{var.`}<wbr />{(draftName || selectedForDisplay?.name || "variable").split("_").map((segment, index, segments) => <Fragment key={`${draftName}-${String(index)}`}>{segment}{index < segments.length - 1 ? <>_<wbr /></> : null}</Fragment>)}{"}"}</span>}
           title={creating ? labels.newVariable : draftName || selectedForDisplay?.name || labels.name}
-          subtitle={!canManageContent ? labels.managementLocked : undefined}
           pageActions={<Button variant="neutral" icon="close" iconOnly ariaLabel={labels.close} onClick={requestCloseInspector} disabled={pending || overlayPending} />}
           save={{
             persistent: true,
@@ -557,6 +556,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
             <div><dt>{labels.description}</dt><dd>{selectedForDisplay?.description || labels.noDescription}</dd></div>
             <div><dt>{labels.resetOnStreamStart}</dt><dd>{labels.resetValue(selectedForDisplay?.resetOnStreamStart ?? draftReset)}</dd></div>
           </dl>}
+          {!canManageContent && !creating ? <p className="muted channel-variable-management-note" role="note">{labels.managementLocked}</p> : null}
           <div className="channel-variable-legacy-slot" aria-live="polite">
             {canManageContent && selected !== null && hasLegacyLinks && normalizedVariableName(draftName) !== selected.name
               ? <p className="muted" role="note" title={labels.legacyRenameWarning}>{labels.legacyRenameWarning}</p> : null}

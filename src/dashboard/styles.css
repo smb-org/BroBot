@@ -1176,6 +1176,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .channel-variable-editor__header .page-header__page-actions { flex: none; }
 .channel-variable-editor__scroll { display: grid; gap: var(--s4); min-width: 0; padding-top: var(--s3); }
 .channel-variable-definition-properties { grid-template-columns: minmax(0, 1fr); }
+.channel-variable-management-note { margin: 0; font-size: 12px; line-height: 1.4; }
 .channel-variable-conflict-slot { box-sizing: border-box; height: 40px; min-height: 40px; overflow: hidden; }
 .channel-variable-conflict { display: -webkit-box; max-height: 36px; margin: 0; overflow: hidden; color: var(--error); line-height: 18px; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .channel-variables-list { min-width: 0; }
