@@ -965,6 +965,12 @@ pre {
 .module-workspace__group .list-row__status { grid-column: 2; justify-self: start; }
 .module-workspace__group .list-row__action { align-self: flex-start; padding-top: 8px; }
 .module-workspace__group :is(.list-row__title, .list-row__description) { overflow: visible; overflow-wrap: anywhere; text-overflow: clip; white-space: normal; }
+@media (min-width: 761px) and (max-width: 1400px) {
+  .module-workspace__group .list-row:has(.module-switch-control .ui-locked-reason) { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s1); }
+  .module-workspace__group .list-row:has(.module-switch-control .ui-locked-reason) .list-row__action { width: 100%; padding-top: 0; }
+  .module-workspace__group .module-switch-control:has(.ui-locked-reason) { grid-template-columns: 44px minmax(0, 1fr); align-items: start; justify-items: stretch; width: 100%; }
+  .module-workspace__group .module-switch-control:has(.ui-locked-reason) > [data-slot="switch"] { justify-self: start; }
+}
 .module-grid { display: grid; grid-template-columns: repeat(4, 132px); gap: 12px; align-content: start; }
 .module-tile {
   display: grid; grid-template-rows: 1fr auto auto; align-items: center; justify-items: center; gap: 9px;
