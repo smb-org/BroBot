@@ -322,10 +322,24 @@ test("variables collection keeps the editor in its column without horizontal ove
     const nameLabel = await box(nameRow.locator(".inspector-field-row__label"));
     const nameField = await box(nameRow.locator(".inspector-field-row__control"));
     expect(nameField.y).toBeGreaterThanOrEqual(nameLabel.bottom);
+    const editorTitle = editor.locator(".channel-variable-editor__header .page-header__title-row .mono");
+    await expect(editorTitle.locator("wbr")).toHaveCount(1);
+    expect(await editorTitle.evaluate((element) => getComputedStyle(element).wordBreak)).toBe("normal");
+    const editorTitleBox = await box(editorTitle);
+    expect(editorTitleBox.x).toBeGreaterThanOrEqual(headerBox.x - 1);
+    expect(editorTitleBox.right).toBeLessThanOrEqual(headerBox.right + 1);
     expect(await selectedRow.evaluate((row) => getComputedStyle(row).outlineWidth)).toBe("1px");
     expect(await selectedRow.evaluate((row) => getComputedStyle(row).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     expect(await page.locator(".dashboard-shell__main").evaluate((main) => main.scrollWidth <= main.clientWidth)).toBe(true);
+    if (width <= 935) await page.getByRole("button", { name: "Zurück zur Liste" }).click();
+    await longNameCell.click();
+    const longEditorTitle = editor.locator(".channel-variable-editor__header .page-header__title-row .mono");
+    await expect(longEditorTitle.locator("wbr")).toHaveCount(4);
+    const longTitleBox = await box(longEditorTitle);
+    expect(longTitleBox.x).toBeGreaterThanOrEqual(headerBox.x - 1);
+    expect(longTitleBox.right).toBeLessThanOrEqual(headerBox.right + 1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   }
 });
 

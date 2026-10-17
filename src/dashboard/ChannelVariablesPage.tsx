@@ -524,7 +524,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
         <PageHeader
           kind="variable"
           headingLevel="h2"
-          titleContent={creating ? labels.newVariable : <span className="mono">{`{var.${draftName || selectedForDisplay?.name || "variable"}}`}</span>}
+          titleContent={creating ? labels.newVariable : <span className="mono">{`{var.`}<wbr />{(draftName || selectedForDisplay?.name || "variable").split("_").map((segment, index, segments) => <Fragment key={`${draftName}-${String(index)}`}>{segment}{index < segments.length - 1 ? <>_<wbr /></> : null}</Fragment>)}{"}"}</span>}
           title={creating ? labels.newVariable : draftName || selectedForDisplay?.name || labels.name}
           subtitle={!canManageContent ? labels.managementLocked : undefined}
           pageActions={<Button variant="neutral" icon="close" iconOnly ariaLabel={labels.close} onClick={requestCloseInspector} disabled={pending || overlayPending} />}
