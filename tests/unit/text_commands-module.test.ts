@@ -217,8 +217,8 @@ describe("Text commands module", () => {
          VALUES ('overlay-a', 'kanal-a', 'Gameplay', ?, ?)`,
       ).bind(NOW, NOW).run();
       await database.prepare(
-        `INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, variable_name)
-         VALUES ('element-a', 'kanal-a', 'overlay-a', 'variable', 'score')`,
+        `INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, variable_name, text)
+         VALUES ('element-a', 'kanal-a', 'overlay-a', 'variable', NULL, 'Score {var.score}')`,
       ).run();
 
       const batches: number[] = [];

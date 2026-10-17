@@ -76,11 +76,14 @@ export const useOverlayQuery = (channelId: string, overlayId: string, enabled = 
   placeholderData: () => undefined,
 });
 
-export const useOverlayAccessesQuery = (channelId: string, overlayId: string, enabled = true) => useQuery({
+export const useOverlayAccessesQuery = (channelId: string, overlayId: string, enabled = true, refetchInterval?: number) => useQuery({
   queryKey: dashboardDataKeys.overlayAccesses(channelId, overlayId),
   queryFn: ({ signal }) => fetchOverlayAccesses(channelId, overlayId, signal),
   enabled,
-  refetchOnWindowFocus: false,
+  staleTime: 0,
+  refetchOnMount: "always",
+  refetchOnWindowFocus: true,
+  ...(refetchInterval === undefined ? {} : { refetchInterval }),
   placeholderData: () => undefined,
 });
 

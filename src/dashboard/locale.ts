@@ -463,7 +463,7 @@ export interface OverlaysTexts {
   editorCreateTitle: string; editorCreateDetailsTitle: string; editorCreateDetailsHint: string;
   editorCreateElementTitle: string; editorCreateElementHint: string; editorCreateObsTitle: string; editorCreateObsHint: string;
   editorCreateStepCount: (current: number, total: number) => string; editorCreateNext: string; editorCreateBack: string;
-  editorCreateBuildLink: string; editorCreateLinkLabel: string; editorCreateCopied: string; editorCreateFinish: string; editorCreateError: string;
+  editorCreateBuildLink: string; editorCreateRetryAccess: string; editorCreateLinkLabel: string; editorCreateCopied: string; editorCreateFinish: string; editorCreateError: string; editorCreateAccessError: string; editorCreateAccessInvalidated: string;
   editorElements: string; editorPreview: string; editorPreviewCanvas: string; editorProperties: string;
   editorPropertiesTab: string; editorStyleTab: string; editorCssTab: string;
   editorPropertiesTabShort: string; editorStyleTabShort: string; editorCssTabShort: string;
@@ -542,8 +542,8 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorCreateElementTitle: "Erstes Element hinzufügen", editorCreateElementHint: "Füge Variablen oder Modul-Elemente hinzu. Du kannst die Komposition später weiter bearbeiten.",
     editorCreateObsTitle: "In OBS einbinden", editorCreateObsHint: "Erstelle eine Browserquelle in OBS und füge den Link ein. Die Quelle verwendet die Referenzgröße des Overlays.",
     editorCreateStepCount: (current, total) => `Schritt ${String(current)} von ${String(total)}`, editorCreateNext: "Weiter", editorCreateBack: "Zurück",
-    editorCreateBuildLink: "Overlay anlegen und OBS-Link erstellen", editorCreateLinkLabel: "Browserquellen-Link", editorCreateCopied: "Link kopiert", editorCreateFinish: "Zum Editor",
-    editorCreateError: "Overlay oder OBS-Link konnten nicht erstellt werden. Versuche es erneut.",
+    editorCreateBuildLink: "Overlay anlegen und OBS-Link erstellen", editorCreateRetryAccess: "OBS-Link erneut erstellen", editorCreateLinkLabel: "Browserquellen-Link", editorCreateCopied: "Link kopiert", editorCreateFinish: "Zum Editor",
+    editorCreateError: "Overlay oder OBS-Link konnten nicht erstellt werden. Versuche es erneut.", editorCreateAccessError: "Das Overlay wurde erstellt, aber der OBS-Link fehlt. Erstelle einen neuen Link.", editorCreateAccessInvalidated: "Der OBS-Zugang ist nicht mehr aktiv. Erstelle einen neuen Link.",
     editorElements: "Elemente", editorPreview: "Live-Vorschau", editorPreviewCanvas: "Overlay-Vorschau", editorProperties: "Eigenschaften",
     editorPropertiesTab: "Position", editorStyleTab: "Stil-Editor", editorCssTab: "CSS-Code",
     editorPropertiesTabShort: "Position", editorStyleTabShort: "Stil", editorCssTabShort: "CSS",
@@ -575,9 +575,9 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorLabel: "Elementname", editorDisplayText: "Anzeigetext",
     editorVariable: "Kanalvariable", editorX: "X (px)", editorY: "Y (px)", editorScale: "Skalierung (%)", editorZ: "Ebene (z)",
     editorMoveForward: "Eine Ebene nach vorn", editorMoveBackward: "Eine Ebene nach hinten", editorInComposition: "In der Komposition anzeigen",
-    editorZoom: "Vorschau-Zoom", editorReference: (width, height) => `${String(width)} × ${String(height)} Referenz`, editorTextHint: (name) => `Verwende {${name}} für den Wert. {value} bleibt als Alias verfügbar.`,
+    editorZoom: "Vorschau-Zoom", editorReference: (width, height) => `${String(width)} × ${String(height)} Referenz`, editorTextHint: (name) => `Verwende {var.${name}} für die Kanalvariable. {value} bleibt als Alias verfügbar.`,
     editorElementLimit: "Pro Overlay sind höchstens 20 Elemente möglich.", editorElementUsage: "Elemente belegt", editorMissingPrefill: (name) => `Die Variable ${name} ist nicht mehr verfügbar.`, editorSave: "Speichern",
-    editorDiscard: "Entwurf verwerfen", editorSaved: "Gespeichert — verbundene Quellen übernehmen die Änderungen sofort.", editorClean: "Gespeicherte Komposition. Änderungen werden erst nach dem Speichern live.",
+    editorDiscard: "Verwerfen", editorSaved: "Gespeichert", editorClean: "Gespeicherte Komposition. Änderungen werden erst nach dem Speichern live.",
     editorUnsaved: "Ungespeicherte Änderungen", editorSaving: "Wird gespeichert …", editorSaveError: "Die Komposition konnte nicht gespeichert werden.",
     editorConflictTitle: "Overlay wurde geändert", editorConflictDescription: "Eine andere Person hat dieses Overlay geändert. Du kannst die aktuelle Fassung laden oder deinen Entwurf überschreiben.",
     editorConflictKeep: "Weiter bearbeiten", editorConflictReload: "Neu laden", editorConflictOverwrite: "Überschreiben",
@@ -652,8 +652,8 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorCreateElementTitle: "Add an initial element", editorCreateElementHint: "Add variables or module elements now. You can keep editing the composition later.",
     editorCreateObsTitle: "Embed in OBS", editorCreateObsHint: "Create a browser source in OBS and paste the link. The source uses the overlay reference size.",
     editorCreateStepCount: (current, total) => `Step ${String(current)} of ${String(total)}`, editorCreateNext: "Next", editorCreateBack: "Back",
-    editorCreateBuildLink: "Create overlay and OBS link", editorCreateLinkLabel: "Browser source link", editorCreateCopied: "Link copied", editorCreateFinish: "Open editor",
-    editorCreateError: "The overlay or OBS link could not be created. Try again.",
+    editorCreateBuildLink: "Create overlay and OBS link", editorCreateRetryAccess: "Retry OBS link", editorCreateLinkLabel: "Browser source link", editorCreateCopied: "Link copied", editorCreateFinish: "Open editor",
+    editorCreateError: "The overlay or OBS link could not be created. Try again.", editorCreateAccessError: "The overlay was created, but its OBS link is missing. Create a new link.", editorCreateAccessInvalidated: "The OBS access is no longer active. Create a new link.",
     editorElements: "Elements", editorPreview: "Live preview", editorPreviewCanvas: "Overlay preview", editorProperties: "Properties",
     editorPropertiesTab: "Layout", editorStyleTab: "Style editor", editorCssTab: "CSS code",
     editorPropertiesTabShort: "Layout", editorStyleTabShort: "Style", editorCssTabShort: "CSS",
@@ -685,9 +685,9 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorLabel: "Element label", editorDisplayText: "Display text",
     editorVariable: "Channel variable", editorX: "X (px)", editorY: "Y (px)", editorScale: "Scale (%)", editorZ: "Layer (z)",
     editorMoveForward: "Move one layer forward", editorMoveBackward: "Move one layer backward", editorInComposition: "Show in composition",
-    editorZoom: "Preview zoom", editorReference: (width, height) => `${String(width)} × ${String(height)} reference`, editorTextHint: (name) => `Use {${name}} for the value. {value} remains available as an alias.`,
+    editorZoom: "Preview zoom", editorReference: (width, height) => `${String(width)} × ${String(height)} reference`, editorTextHint: (name) => `Use {var.${name}} for the channel variable. {value} remains available as an alias.`,
     editorElementLimit: "An overlay can contain at most 20 elements.", editorElementUsage: "elements used", editorMissingPrefill: (name) => `Variable ${name} is no longer available.`, editorSave: "Save",
-    editorDiscard: "Discard draft", editorSaved: "Saved — connected sources use the changes immediately.", editorClean: "Saved composition. Changes go live after you save.",
+    editorDiscard: "Discard", editorSaved: "Saved", editorClean: "Saved composition. Changes go live after you save.",
     editorUnsaved: "Unsaved changes", editorSaving: "Saving …", editorSaveError: "The composition could not be saved.",
     editorConflictTitle: "Overlay changed", editorConflictDescription: "Someone else changed this overlay. Reload the latest version or overwrite it with your draft.",
     editorConflictKeep: "Keep editing", editorConflictReload: "Reload", editorConflictOverwrite: "Overwrite",
@@ -3323,6 +3323,7 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     variable_in_use: "Eine Textbefehlsaktion verwendet diese Variable.",
     variable_changed_concurrently: "Die Kanalvariable wurde inzwischen geändert.",
     variable_rename_template_too_long: "Die Umbenennung würde mindestens eine verwendete Vorlage über 500 Zeichen verlängern.",
+    variable_rename_overlay_text_too_long: "Die Umbenennung würde einen Overlay-Text über 100 Zeichen verlängern.",
     variable_management_denied: "Nur Broadcaster und Verwalter dürfen Variablen anlegen, umbenennen oder löschen.",
     variable_value_change_denied: "Du darfst den Variablenwert nicht ändern.",
     ad_schedule_read_failed: "Der Werbezeitplan konnte nicht gelesen werden.",
@@ -3419,6 +3420,7 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     variable_in_use: "A text command action uses this variable.",
     variable_changed_concurrently: "The channel variable has since changed.",
     variable_rename_template_too_long: "Renaming this variable would make at least one referencing template longer than 500 characters.",
+    variable_rename_overlay_text_too_long: "Renaming this variable would make an overlay text longer than 100 characters.",
     variable_management_denied: "Only broadcasters and managers may create, rename, or delete variables.",
     variable_value_change_denied: "You may not change the variable value.",
     ad_schedule_read_failed: "The ad schedule could not be read.",

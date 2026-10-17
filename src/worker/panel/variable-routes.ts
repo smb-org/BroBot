@@ -7,6 +7,8 @@ import {
   CHANNEL_VARIABLE_MINIMUM_VALUE,
   canManage,
 } from "../../contracts/values";
+import { templateTextLength } from "../../contracts/template-text-length";
+import { channelVariableTemplateToken, replaceChannelVariableTemplateToken } from "../../contracts/channel-variable-template";
 import type { ModuleVariableReferenceUsage } from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
 import { prepareAudit } from "../db/audit";
@@ -77,9 +79,10 @@ export const referencesFor = async (
          FROM overlay_elements AS element
          JOIN overlays AS overlay
            ON overlay.channel_id = element.channel_id AND overlay.overlay_id = element.overlay_id
-        WHERE element.channel_id = ? AND (element.variable_name = ? OR element.missing_variable_name = ?)
+        WHERE element.channel_id = ?
+          AND (element.variable_name = ? OR element.missing_variable_name = ? OR instr(element.text, ?) > 0)
         ORDER BY overlay.name, element.z, element.element_id`,
-    ).bind(name, channelId, name, name).all<{ overlay_name: string; element_label: string; element_id: string; overlay_id: string; reconnect: number }>(),
+    ).bind(name, channelId, name, name, channelVariableTemplateToken(name)).all<{ overlay_name: string; element_label: string; element_id: string; overlay_id: string; reconnect: number }>(),
   ]);
   const result: ModuleVariableReferenceUsage[] = moduleReferences.flat();
   result.push(...overlays.results.map((row) => ({
@@ -166,11 +169,45 @@ variableRouter.patch("/api/channels/:channelId/variables/:name", async (context)
   const description = parsed.data.description ?? before.description;
   const resetOnStreamStart = parsed.data.resetOnStreamStart ?? before.resetOnStreamStart;
   const referenceModules = newName === name ? [] : MODULES.filter((module) => module.variableReferences !== undefined);
+  const overlayTextToken = channelVariableTemplateToken(name);
+  const renamedOverlayTextToken = channelVariableTemplateToken(newName);
+  const overlayTextRows = newName === name ? [] : (await context.env.DB.prepare(
+    `SELECT element.element_id, element.text, overlay.name AS overlay_name
+       FROM overlay_elements AS element
+       JOIN overlays AS overlay
+         ON overlay.channel_id = element.channel_id AND overlay.overlay_id = element.overlay_id
+      WHERE element.channel_id = ? AND instr(element.text, ?)>0
+      ORDER BY overlay.name, element.element_id`,
+  ).bind(channelId, overlayTextToken).all<{ element_id: string; text: string; overlay_name: string }>()).results;
+  const invalidOverlayTextRows = overlayTextRows.filter(({ text }) =>
+    templateTextLength(replaceChannelVariableTemplateToken(text, name, newName)) > 100,
+  );
+  if (invalidOverlayTextRows.length > 0) {
+    return context.json({
+      error: "variable_rename_overlay_text_too_long",
+      usages: invalidOverlayTextRows.map((row) => ({ moduleId: "overlays", itemName: row.overlay_name, kind: "template" as const, elementId: row.element_id })),
+    }, 400);
+  }
+  const overlayTextSnapshot = JSON.stringify(overlayTextRows.map(({ element_id, text }) => ({ elementId: element_id, text })));
   const renameValidations = newName === name ? [] : await Promise.all(referenceModules.map((module) =>
     module.variableReferences?.validateRename?.(context.env.DB, channelId, name, newName) ?? Promise.resolve(null),
   ));
   const renamePreconditions = renameValidations.flatMap((validation) =>
     validation === null ? [] : [validation.precondition]);
+  if (newName !== name) renamePreconditions.push({
+    sql: `NOT EXISTS (
+      SELECT element_id, text FROM overlay_elements
+       WHERE channel_id = ? AND instr(text, ?) > 0
+      EXCEPT
+      SELECT json_extract(snapshot.value, '$.elementId'), json_extract(snapshot.value, '$.text') FROM json_each(?) AS snapshot
+    ) AND NOT EXISTS (
+      SELECT json_extract(snapshot.value, '$.elementId'), json_extract(snapshot.value, '$.text') FROM json_each(?) AS snapshot
+      EXCEPT
+      SELECT element_id, text FROM overlay_elements
+       WHERE channel_id = ? AND instr(text, ?) > 0
+    )`,
+    values: [channelId, overlayTextToken, overlayTextSnapshot, overlayTextSnapshot, channelId, overlayTextToken],
+  });
   const renamePreconditionSql = renamePreconditions.map(({ sql }) => `AND (${sql})`).join("\n        ");
   const renamePreconditionValues = renamePreconditions.flatMap(({ values }) => values);
   const invalidUsages = renameValidations.flatMap((validation) => validation?.usages ?? []);
@@ -209,12 +246,26 @@ variableRouter.patch("/api/channels/:channelId/variables/:name", async (context)
           SELECT 1 FROM overlay_elements AS element
            WHERE element.channel_id = overlays.channel_id
              AND element.overlay_id = overlays.overlay_id
-             AND element.variable_name = ?
+             AND (element.variable_name = ? OR instr(element.text, ?) > 0)
         )
         ${authorization.sql}
       RETURNING overlay_id, revision`,
-  ).bind(now, channelId, channelId, name, channelId, newName, before.value, before.createdAt, now, newName,
+  ).bind(now, channelId, channelId, name, channelId, newName, before.value, before.createdAt, now, newName, overlayTextToken,
     ...authorization.values)];
+  const overlayTextRewrite = newName === name ? null : context.env.DB.prepare(
+    `UPDATE overlay_elements
+        SET text = replace(text, ?, ?)
+      WHERE channel_id = ? AND instr(text, ?) > 0 AND changes() > 0
+        AND NOT EXISTS (SELECT 1 FROM channel_variables WHERE channel_id = ? AND name = ?)
+        AND EXISTS (
+          SELECT 1 FROM channel_variables
+           WHERE channel_id = ? AND name = ? AND value = ? AND description = ?
+             AND reset_on_stream_start = ? AND created_at = ? AND updated_at = ?
+        )
+        ${authorization.sql}`,
+  ).bind(overlayTextToken, renamedOverlayTextToken, channelId, overlayTextToken, channelId, name,
+    channelId, newName, before.value, description, resetOnStreamStart ? 1 : 0, before.createdAt, now,
+    ...authorization.values);
   const renameGuard = {
     value: before.value,
     description,
@@ -229,7 +280,14 @@ variableRouter.patch("/api/channels/:channelId/variables/:name", async (context)
       ? [...updates, timerScheduleReconciliationMutation(context.env.DB, channelId, timerMutationId, now, true)]
       : updates;
   });
-  const results = await context.env.DB.batch([references, mutation, audit, ...overlayRevisionUpdates, ...referenceUpdates]);
+  const results = await context.env.DB.batch([
+    references,
+    mutation,
+    audit,
+    ...overlayRevisionUpdates,
+    ...(overlayTextRewrite === null ? [] : [overlayTextRewrite]),
+    ...referenceUpdates,
+  ]);
   if ((results[1]?.meta.changes ?? 0) === 0) {
     if (await findChannelVariable(context.env.DB, channelId, newName) !== null) {
       return context.json({ error: "variable_already_exists" }, 409);
@@ -240,6 +298,23 @@ variableRouter.patch("/api/channels/:channelId/variables/:name", async (context)
     const currentInvalidUsages = currentValidations.flatMap((validation) => validation?.usages ?? []);
     if (currentInvalidUsages.length > 0) {
       return context.json({ error: "variable_rename_template_too_long", usages: currentInvalidUsages }, 400);
+    }
+    const latestOverlayTextRows = newName === name ? [] : (await context.env.DB.prepare(
+      `SELECT element.element_id, element.text, overlay.name AS overlay_name
+         FROM overlay_elements AS element
+         JOIN overlays AS overlay
+           ON overlay.channel_id = element.channel_id AND overlay.overlay_id = element.overlay_id
+        WHERE element.channel_id = ? AND instr(element.text, ?)>0
+        ORDER BY overlay.name, element.element_id`,
+    ).bind(channelId, overlayTextToken).all<{ element_id: string; text: string; overlay_name: string }>()).results;
+    const latestInvalidOverlayTextRows = latestOverlayTextRows.filter(({ text }) =>
+      templateTextLength(replaceChannelVariableTemplateToken(text, name, newName)) > 100,
+    );
+    if (latestInvalidOverlayTextRows.length > 0) {
+      return context.json({
+        error: "variable_rename_overlay_text_too_long",
+        usages: latestInvalidOverlayTextRows.map((row) => ({ moduleId: "overlays", itemName: row.overlay_name, kind: "template" as const, elementId: row.element_id })),
+      }, 400);
     }
     return context.json({ error: "variable_changed_concurrently" }, 409);
   }
@@ -362,7 +437,7 @@ variableRouter.delete("/api/channels/:channelId/variables/:name", async (context
           SELECT 1 FROM overlay_elements AS element
            WHERE element.channel_id = overlays.channel_id
              AND element.overlay_id = overlays.overlay_id
-             AND element.variable_name = ?
+             AND (element.variable_name = ? OR instr(element.text, ?) > 0)
         )
         AND EXISTS (
           SELECT 1 FROM channel_variables
@@ -371,7 +446,7 @@ variableRouter.delete("/api/channels/:channelId/variables/:name", async (context
         )
         ${authorization.sql}
       RETURNING overlay_id, revision`,
-  ).bind(now, channelId, name, channelId, name, before.value, before.description,
+  ).bind(now, channelId, name, channelVariableTemplateToken(name), channelId, name, before.value, before.description,
     before.resetOnStreamStart ? 1 : 0, before.createdAt, before.updatedAt, ...authorization.values);
   const detachOverlayElements = context.env.DB.prepare(
     `UPDATE overlay_elements

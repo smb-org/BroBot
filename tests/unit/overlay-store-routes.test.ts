@@ -157,20 +157,77 @@ describe("stored overlay routes", () => {
     const initialElement = { ...element("first-element"), variableName: "score", text: "score: {value}" };
 
     const created = await fetchPanel("manager-a", "/api/channels/channel-a/overlays", "POST", {
-      name: "Gameplay", width: 1920, height: 1080, initialElement,
+      name: "Gameplay", width: 1920, height: 1080, elements: [initialElement],
     });
     expect(created.status).toBe(201);
     const createdBody = await created.json<{ overlay: { id: string; revision: number; elements: Array<{ variableName: string }> } }>();
     expect(createdBody.overlay).toMatchObject({ revision: 1, elements: [{ variableName: "score" }] });
 
     const duplicateElementCreate = await fetchPanel("manager-a", "/api/channels/channel-a/overlays", "POST", {
-      name: "Must roll back", width: 1920, height: 1080, initialElement,
+      name: "Must roll back", width: 1920, height: 1080, elements: [initialElement],
     });
     expect(duplicateElementCreate.status).toBeGreaterThanOrEqual(400);
     await expect(database.prepare("SELECT COUNT(*) AS count FROM overlays WHERE channel_id = 'channel-a'").first())
       .resolves.toEqual({ count: 1 });
     await expect(database.prepare("SELECT COUNT(*) AS count FROM overlay_elements WHERE channel_id = 'channel-a'").first())
       .resolves.toEqual({ count: 1 });
+  });
+
+  it("creates all requested elements atomically and rolls back if one element cannot be inserted", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    const created = await fetchPanel("manager-a", "/api/channels/channel-a/overlays", "POST", {
+      name: "Gameplay",
+      width: 1920,
+      height: 1080,
+      elements: [element("first-element"), element("second-element")],
+    });
+
+    expect(created.status).toBe(201);
+    const body = await created.json<{ overlay: { elements: Array<{ id: string }> } }>();
+    expect(body.overlay.elements.map(({ id }) => id)).toEqual(["first-element", "second-element"]);
+
+    const failed = await fetchPanel("manager-a", "/api/channels/channel-a/overlays", "POST", {
+      name: "Must roll back",
+      width: 1920,
+      height: 1080,
+      elements: [element("third-element"), element("first-element")],
+    });
+
+    expect(failed.status).toBeGreaterThanOrEqual(400);
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM overlays WHERE channel_id = 'channel-a'").first())
+      .resolves.toEqual({ count: 1 });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM overlay_elements WHERE channel_id = 'channel-a'").first())
+      .resolves.toEqual({ count: 2 });
+  });
+
+  it("checks module activity in the atomic overlay create mutation", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled) VALUES ('channel-a', 'ads', 0)",
+    ).run();
+
+    const response = await fetchPanel("manager-a", "/api/channels/channel-a/overlays", "POST", {
+      name: "Disabled ads overlay",
+      width: 1920,
+      height: 1080,
+      elements: [{
+        ...element("ads-element"),
+        kind: "ads.countdown",
+        config: { showSnoozeInfo: false },
+      }],
+    });
+
+    expect(response.status).toBe(400);
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM overlays WHERE channel_id = 'channel-a'").first())
+      .resolves.toEqual({ count: 0 });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM overlay_elements WHERE channel_id = 'channel-a'").first())
+      .resolves.toEqual({ count: 0 });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log WHERE channel_id = 'channel-a'").first())
+      .resolves.toEqual({ count: 0 });
   });
 
   it("imports an active legacy link into one overlay and binds its token atomically", async () => {

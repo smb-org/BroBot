@@ -6,6 +6,7 @@ import {
 } from "../contracts/chat-vote-result-text-references";
 import type { BotModule, JsonObject, ModuleOverlayElementContext, ModuleTemplateUsageSource, ModuleVariableReferences } from "../contract";
 import { templateTextLength } from "../../contracts/template-text-length";
+import { channelVariableTemplateToken } from "../../contracts/channel-variable-template";
 import { createChatVotingRepository } from "./repository";
 import { CHAT_VOTING_CHAT_COMMANDS } from "./contracts/chat-commands";
 import { chatVotingDurationVariableCatalog, chatVotingOptionsVariableCatalog, chatVotingResultVariableCatalog, chatVotingTitleVariableCatalog } from "./contracts/template-variable-catalog";
@@ -48,7 +49,7 @@ const durationVariable = {
 const settingsReferences = settingsVariableReferences(CHAT_VOTING_MODULE_ID, ["startText", "resultText"]);
 const resultTextVariableReferences: ModuleVariableReferences = {
   async usages(db, channelId, name) {
-    const token = `{var.${name}}`;
+    const token = channelVariableTemplateToken(name);
     const rows = await findChatVoteResultTextReferences(db, channelId, token);
     return rows.map((row) => ({
       moduleId: CHAT_VOTING_MODULE_ID,
@@ -57,8 +58,8 @@ const resultTextVariableReferences: ModuleVariableReferences = {
     }));
   },
   async validateRename(db, channelId, from, to) {
-    const oldToken = `{var.${from}}`;
-    const nextToken = `{var.${to}}`;
+    const oldToken = channelVariableTemplateToken(from);
+    const nextToken = channelVariableTemplateToken(to);
     const rows = await findChatVoteResultTextReferences(db, channelId, oldToken);
     const snapshot = rows.map((row) => ({ sourceKind: row.source_kind, itemId: row.source_id, text: row.result_text }));
     const usages = rows.filter((row) => templateTextLength(row.result_text.replaceAll(oldToken, nextToken)) > 500)
@@ -94,8 +95,8 @@ const resultTextVariableReferences: ModuleVariableReferences = {
     const target = moduleVariableRenameTarget(channelId, to, guard);
     return prepareChatVoteResultTextReferenceRewrite(db, {
       channelId,
-      fromToken: `{var.${from}}`,
-      toToken: `{var.${to}}`,
+      fromToken: channelVariableTemplateToken(from),
+      toToken: channelVariableTemplateToken(to),
       conditionSql: `${target.sql} AND NOT EXISTS (SELECT 1 FROM channel_variables WHERE channel_id = ? AND name = ?)`,
       conditionValues: [...target.values, channelId, from],
     });
