@@ -360,6 +360,22 @@ test("variables collection keeps the editor in its column without horizontal ove
     const editorTitle = editor.locator(".channel-variable-editor__header .page-header__title-row .mono");
     await expect(editorTitle.locator("wbr")).toHaveCount(1);
     expect(await editorTitle.evaluate((element) => getComputedStyle(element).wordBreak)).toBe("normal");
+    if (width <= 640) {
+      const titleHeading = editor.locator(".channel-variable-editor__header .page-header__title-row h2");
+      const titleActions = editor.locator(".channel-variable-editor__header .page-header__right");
+      await expect(editorTitle).toHaveAttribute("title", "{var.score}");
+      expect(await titleHeading.evaluate((element) => getComputedStyle(element).textOverflow)).toBe("ellipsis");
+      expect(await titleHeading.evaluate((element) => getComputedStyle(element).whiteSpace)).toBe("nowrap");
+      const titleHeadingBox = await box(titleHeading);
+      const titleActionsBox = await box(titleActions);
+      expect(titleActionsBox.y).toBeGreaterThanOrEqual(titleHeadingBox.bottom);
+      expect(titleActionsBox.right).toBeLessThanOrEqual(headerBox.right + 1);
+      for (const action of await titleActions.getByRole("button").all()) {
+        const actionBox = await box(action);
+        expect(actionBox.x).toBeGreaterThanOrEqual(headerBox.x - 1);
+        expect(actionBox.right).toBeLessThanOrEqual(headerBox.right + 1);
+      }
+    }
     const editorTitleBox = await box(editorTitle);
     expect(editorTitleBox.x).toBeGreaterThanOrEqual(headerBox.x - 1);
     expect(editorTitleBox.right).toBeLessThanOrEqual(headerBox.right + 1);
