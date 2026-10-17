@@ -299,7 +299,25 @@ test("variables collection keeps the editor in its column without horizontal ove
     expect(await longNameCell.evaluate((cell) => getComputedStyle(cell).overflowWrap)).toBe("normal");
     expect(await longNameCell.evaluate((cell) => getComputedStyle(cell).wordBreak)).toBe("normal");
     const descriptionCells = table.locator(".channel-variables-table__description");
-    expect(await descriptionCells.evaluateAll((cells) => cells.every((cell) => getComputedStyle(cell).webkitLineClamp === "2"))).toBe(true);
+    const descriptionText = table.locator(".channel-variables-table__description-text");
+    expect(await descriptionText.evaluateAll((elements) => elements.every((element) => getComputedStyle(element).webkitLineClamp === "2"))).toBe(true);
+    const descriptionGeometry = await descriptionText.evaluateAll((elements) => elements.map((element) => {
+      const style = getComputedStyle(element);
+      const lineHeight = Number.parseFloat(style.lineHeight);
+      const bounds = element.getBoundingClientRect();
+      return { height: bounds.height, lineHeight };
+    }));
+    expect(descriptionGeometry.every(({ height, lineHeight }) => height <= lineHeight * 2 + 1)).toBe(true);
+    const rowBounds = await table.locator("tbody tr").evaluateAll((rows) => rows.map((row) => {
+      const bounds = row.getBoundingClientRect();
+      return { top: bounds.top, bottom: bounds.bottom };
+    }));
+    for (let index = 1; index < rowBounds.length; index += 1) {
+      const previousRow = rowBounds[index - 1];
+      const currentRow = rowBounds[index];
+      if (previousRow === undefined || currentRow === undefined) throw new Error("A variable row should have measurable bounds");
+      expect(currentRow.top).toBeGreaterThanOrEqual(previousRow.bottom - 1);
+    }
     expect((await box(descriptionCells.first())).width).toBeGreaterThan((await box(table.locator(".channel-variables-table__value").first())).width);
     if (width <= 639) {
       const descriptionBox = await box(selectedRow.locator(".channel-variables-table__description"));

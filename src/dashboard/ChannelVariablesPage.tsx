@@ -526,7 +526,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
             if (event.key === "Enter" || event.key === " ") { event.preventDefault(); requestSelectVariable(variable); }
           }}>
             <th scope="row" className="mono" aria-label={`{var.${variable.name}}`} title={`{var.${variable.name}}`}><span className="channel-variables-table__name">{`{var.${variable.name}}`}</span></th>
-            <td className="channel-variables-table__description" title={variable.description || labels.noDescription}>{variable.description || <EmptyCellValue />}</td>
+            <td className="channel-variables-table__description" title={variable.description || labels.noDescription}><span className="channel-variables-table__description-text">{variable.description || <EmptyCellValue />}</span></td>
             <td className="number channel-variables-table__value">{new Intl.NumberFormat(language).format(variable.value)}</td>
             <td className="channel-variables-table__reset">
               {variable.resetOnStreamStart ? <span role="img" aria-label={labels.resetOnStreamStart} title={labels.resetOnStreamStart}><Icon name="reload" size={16} /></span> : <EmptyCellValue />}

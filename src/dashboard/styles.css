@@ -1185,7 +1185,8 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .channel-variables-table tbody :is(th, td) { overflow: visible; text-overflow: clip; overflow-wrap: anywhere; white-space: normal; }
 .channel-variables-table tbody th[scope="row"] { overflow: hidden; overflow-wrap: normal; word-break: normal; }
 .channel-variables-table__name { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.channel-variables-table__description { display: -webkit-box; overflow: hidden; color: var(--text-3); text-overflow: ellipsis; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.channel-variables-table__description { overflow: hidden; color: var(--text-3); }
+.channel-variables-table__description-text { display: -webkit-box; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .channel-variables-table__value-heading,
 .channel-variables-table tbody .channel-variables-table__value { text-align: right !important; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .channel-variables-table__reset-heading,
