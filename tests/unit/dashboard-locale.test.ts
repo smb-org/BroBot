@@ -31,12 +31,12 @@ describe("dashboard locale", () => {
   });
 
   it("uses singular and plural counts for channel events and audit entries in both catalogs", () => {
-    expect(dashboardTexts("de").events.count(1)).toBe("1 Eintrag");
-    expect(dashboardTexts("de").events.count(2)).toBe("2 Einträge");
+    expect(dashboardTexts("de").events.count("1")).toBe("1 Eintrag");
+    expect(dashboardTexts("de").events.count("2")).toBe("2 Einträge");
     expect(dashboardTexts("de").audit.entries(1)).toBe("1 Eintrag");
     expect(dashboardTexts("de").audit.entries(2)).toBe("2 Einträge");
-    expect(dashboardTexts("en").events.count(1)).toBe("1 entry");
-    expect(dashboardTexts("en").events.count(2)).toBe("2 entries");
+    expect(dashboardTexts("en").events.count("1")).toBe("1 entry");
+    expect(dashboardTexts("en").events.count("2")).toBe("2 entries");
     expect(dashboardTexts("en").audit.entries(1)).toBe("1 entry");
     expect(dashboardTexts("en").audit.entries(2)).toBe("2 entries");
   });

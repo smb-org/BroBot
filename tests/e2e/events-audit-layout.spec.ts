@@ -44,6 +44,8 @@ const manyAuditEntries = Array.from({ length: 48 }, (_, index) => ({
   subjectLogin: `person_${String(index)}`,
   subjectDisplayName: `Person ${String(index)}`,
 }));
+const firstAuditEntry = manyAuditEntries.at(0);
+if (firstAuditEntry === undefined) throw new Error("The audit fixture should contain entries.");
 const channelVariables = [
   { channelId, name: "score", value: 1234, description: "Punkte im aktuellen Spiel", resetOnStreamStart: true, createdAt: at(10), updatedAt: at(1), usages: [] },
   { channelId, name: "long_counter_name_123456789", value: -42, description: "Ein längerer Beschreibungstext für einen schmalen Bildschirm", resetOnStreamStart: false, createdAt: at(9), updatedAt: at(2), usages: [] },
@@ -133,7 +135,7 @@ const expectChipGroupsFit = async (groups: Locator): Promise<void> => {
 
 test("events and audit keep their table geometry across desktop and mobile widths", async ({ page }) => {
   await mockApi(page);
-  for (const [width, height] of [[1920, 1080], [1280, 800], [390, 844], [2560, 1440]]) {
+  for (const [width, height] of [[1920, 1080], [1280, 800], [390, 844], [2560, 1440]] as const) {
     await page.setViewportSize({ width, height });
 
     await page.goto(`/channels/${channelId}/events`);
@@ -210,7 +212,7 @@ test("events and audit keep their table geometry across desktop and mobile width
 
 test("variables collection keeps the editor in its column without horizontal overflow", async ({ page }) => {
   await mockApi(page, { variableEntries: channelVariables });
-  for (const [width, height] of [[1920, 1080], [1280, 800], [390, 844], [2560, 1440]]) {
+  for (const [width, height] of [[1920, 1080], [1280, 800], [390, 844], [2560, 1440]] as const) {
     await page.setViewportSize({ width, height });
     await page.goto(`/channels/${channelId}/variables`);
     const collection = page.locator(".channel-variables-page .collection-page");
@@ -322,7 +324,7 @@ test("new realtime audit entries do not shift the first row while the reader is 
   const readingRowBefore = await box(firstRow);
 
   const newEntry = {
-    ...manyAuditEntries[0],
+    ...firstAuditEntry,
     auditId: "realtime-audit-new-at-top",
     actorDisplayName: "Tessa Reimann",
     createdAt: at(0, 1),
@@ -376,7 +378,7 @@ test("new realtime audit entries do not move the row being read", async ({ page 
   expect(scrollTopBefore).toBeGreaterThan(0);
 
   const newEntry = {
-    ...manyAuditEntries[0],
+    ...firstAuditEntry,
     auditId: "realtime-audit-new",
     actorDisplayName: "Mira Fox",
     createdAt: at(0, 1),

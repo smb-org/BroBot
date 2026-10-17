@@ -71,11 +71,12 @@ describe("AuditPage diff list", () => {
     const pagination = container.querySelector(".audit-pagination");
     const table = container.querySelector(".audit-sentence-list");
 
+    if (filters === null || pagination === null || table === null) throw new Error("The audit list structure should render.");
     expect(filters).not.toBeNull();
     expect(pagination).not.toBeNull();
     expect(table).not.toBeNull();
-    expect(filters?.compareDocumentPosition(pagination as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(pagination?.compareDocumentPosition(table as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(filters.compareDocumentPosition(pagination) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(pagination.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("holds newly arriving rows outside the reader's current position until they jump to the latest entries", async () => {

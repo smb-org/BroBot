@@ -1430,7 +1430,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       activeFilters: "Aktive Filter:", resetFilters: "Filter zurücksetzen", noMatches: "Keine Einträge passen zu den Filtern.",
     },
     events: {
-      title: "Kanalereignisse", count: (count) => `${count} ${count === 1 ? "Eintrag" : "Einträge"}`, log: "Ereignisprotokoll", time: "Zeit", event: "Ereignis",
+      title: "Kanalereignisse", count: (count) => `${count} ${count === "1" ? "Eintrag" : "Einträge"}`, log: "Ereignisprotokoll", time: "Zeit", event: "Ereignis",
       module: "Modul", who: "Wer", automatic: "Automatisch", info: "Info", error: "Fehler", notice: "Hinweis", unknown: "Unbekannt", timestamp: "Zeitstempel", operation: "Vorgang", history: "Verlauf",
       load: "Ereignisse werden geladen …",
       none: "Noch keine Ereignisse protokolliert.", detail: "Detail", loadOlder: "Ältere Ereignisse laden", loadingOlder: "Ältere Ereignisse werden geladen …",
@@ -1863,7 +1863,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       activeFilters: "Active filters:", resetFilters: "Reset filters", noMatches: "No entries match the filters.",
     },
     events: {
-      title: "Channel events", count: (count) => `${count} ${count === 1 ? "entry" : "entries"}`, log: "Event log", time: "Time", event: "Event", module: "Module",
+      title: "Channel events", count: (count) => `${count} ${count === "1" ? "entry" : "entries"}`, log: "Event log", time: "Time", event: "Event", module: "Module",
       who: "Who", automatic: "Automatic", info: "Info", error: "Error", notice: "Notice", unknown: "Unknown", timestamp: "Timestamp", operation: "Operation", history: "History", load: "Loading events …", none: "No events logged yet.", detail: "Detail",
       loadOlder: "Load older events", loadingOlder: "Loading older events …",
       filter: "Filters", origin: "Origin", moduleFilter: "Module", allModules: "All modules", tone: "Tone", person: "Person", all: "All",
