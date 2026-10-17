@@ -110,10 +110,12 @@ describe("AuditPage diff list", () => {
     const rendered = renderPage(current);
     const result = rendered.queryClient.getQueryData<{ pages: Array<{ entries: PanelAuditEntry[]; nextCursor: null }>; pageParams: [null] }>(dashboardDataKeys.audit("channel-a", emptyAuditFilter));
     if (result === undefined) throw new Error("Audit query data is missing.");
+    const firstPage = result.pages[0];
+    if (firstPage === undefined) throw new Error("The first audit page is missing.");
     act(() => {
       rendered.queryClient.setQueryData(dashboardDataKeys.audit("channel-a", emptyAuditFilter), {
         ...result,
-        pages: [{ ...result.pages[0]!, entries: [entry({ auditId: "audit-new", actorDisplayName: "Zoe", createdAt: "2026-09-26T11:00:00.000Z" }), ...current] }],
+        pages: [{ ...firstPage, entries: [entry({ auditId: "audit-new", actorDisplayName: "Zoe", createdAt: "2026-09-26T11:00:00.000Z" }), ...current] }],
       });
     });
 
@@ -171,9 +173,9 @@ describe("AuditPage diff list", () => {
 
     await waitFor(() => expect(rendered.container.querySelectorAll(".audit-sentence-list tbody tr:not(.data-table__day-row)")).toHaveLength(4));
     const sentences = [...rendered.container.querySelectorAll(".audit-sentence")].map((sentence) => sentence.textContent);
-    expect(sentences.some((sentence) => sentence?.includes("Nora"))).toBe(false);
-    expect(sentences.some((sentence) => sentence?.includes("Cara"))).toBe(true);
-    expect(sentences.some((sentence) => sentence?.includes("Otto"))).toBe(true);
+    expect(sentences.some((sentence) => sentence.includes("Nora"))).toBe(false);
+    expect(sentences.some((sentence) => sentence.includes("Cara"))).toBe(true);
+    expect(sentences.some((sentence) => sentence.includes("Otto"))).toBe(true);
     expect(await screen.findByRole("button", { name: /^1 neuer Eintrag/u })).toBeVisible();
   });
 

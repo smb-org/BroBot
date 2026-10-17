@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactElement } from "react";
 
 import type { PanelAuditEntry, PanelAuditFilters, PanelAuditResponse } from "../../panel-contract";
 import { AUDIT_AREAS } from "../../contracts/values";
@@ -212,7 +212,9 @@ const AuditPageContent = ({ identityKey, pages, channelTimeZone, timeZoneFallbac
   const texts = dashboardTexts();
   const feedRef = useRef<HTMLElement>(null);
   const identityKeyRef = useRef(identityKey);
-  identityKeyRef.current = identityKey;
+  useLayoutEffect(() => {
+    identityKeyRef.current = identityKey;
+  }, [identityKey]);
   const [snapshot, setSnapshot] = useState(() => ({ identityKey, entries, pageCount: pages.length, awaitingInitialPage: loading }));
   let displaySnapshot = snapshot;
   if (displaySnapshot.identityKey !== identityKey) {

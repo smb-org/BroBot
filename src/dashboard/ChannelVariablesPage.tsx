@@ -149,14 +149,13 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     if (definitionBaseline !== null && definitionBaseline.name === nextBaseline.name &&
       definitionBaseline.description === nextBaseline.description &&
       definitionBaseline.resetOnStreamStart === nextBaseline.resetOnStreamStart) return;
+    // Keep pristine drafts aligned with background query refreshes; edited drafts retain their local values.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- this effect synchronizes the editable draft with its query-backed source.
     setDefinitionBaseline(nextBaseline);
     setDraftName(nextBaseline.name);
     setDraftDescription(nextBaseline.description);
     setDraftReset(nextBaseline.resetOnStreamStart);
   }, [creating, definitionBaseline, draftDirty, selected]);
-  useEffect(() => {
-    if (selected !== null) setSelectedSnapshot(selected);
-  }, [selected]);
   useLayoutEffect(() => {
     if (editingValue) document.getElementById("channel-variable-inline-value")?.focus();
     else if (wasEditingValue.current) editValueButtonRef.current?.focus();
@@ -251,7 +250,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
         commitVariable(null, response.variable, response.usages);
         setCreating(false);
         setSelectedVariableName(response.variable.name);
-        setSelectedSnapshot({ ...response.variable, usages: response.usages ?? [] });
+        setSelectedSnapshot({ ...response.variable, usages: response.usages });
         setDefinitionBaseline({ name: response.variable.name, description: response.variable.description, resetOnStreamStart: response.variable.resetOnStreamStart });
         refreshBestEffort();
       } else if (selected !== null) {
@@ -262,7 +261,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
         });
         commitVariable(selected.name, response.variable, response.usages);
         setSelectedVariableName(response.variable.name);
-        setSelectedSnapshot({ ...response.variable, usages: response.usages ?? selectedUsages });
+        setSelectedSnapshot({ ...response.variable, usages: response.usages });
         setDraftName(response.variable.name);
         setDefinitionBaseline({ name: response.variable.name, description: response.variable.description, resetOnStreamStart: response.variable.resetOnStreamStart });
         if (response.variable.name !== selected.name) setUseOverlayOpen(false);
