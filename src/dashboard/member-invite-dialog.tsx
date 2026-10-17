@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent, type ReactElement } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
 
 import type { ChannelRole } from "../contracts/values";
 import type { PanelTwitchUser } from "../panel-contract";
@@ -6,7 +6,7 @@ import { PanelApiError } from "./api";
 import { roleDescription, roleLabel, membersTexts } from "./labels";
 import { dashboardCommonTexts } from "./locale";
 import { MemberAvatar } from "./member-avatar";
-import { Button, ChoiceCards, Field, StepDialog } from "./ui";
+import { Button, ChoiceCards, ConfirmDialog, Field, StepDialog, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
 
 interface MemberInviteDialogProperties {
   opened: boolean;
@@ -44,15 +44,29 @@ export function MemberInviteDialog({
   const [error, setError] = useState<string | undefined>();
   const searchGeneration = useRef(0);
 
-  const close = (): void => {
+  const discardDraft = (): void => {
     searchGeneration.current += 1;
     setStep(0);
     setLogin("");
     setFound(null);
     setRole(defaultRole);
     setError(undefined);
+  };
+
+  const draftDirty = opened && (login.trim().length > 0 || found !== null || step > 0);
+  const draftGuard = useDraftGuard(draftDirty, () => Promise.resolve(null), discardDraft);
+
+  useEffect(() => {
+    if (!opened) return;
+    return registerDashboardNavigationGuard(draftGuard.guardSwitch);
+  }, [draftGuard.guardSwitch, opened]);
+
+  const close = (): void => {
+    discardDraft();
     onClose();
   };
+
+  const requestClose = (): void => { draftGuard.guardSwitch(close); };
 
   const search = async (): Promise<void> => {
     const normalizedLogin = login.trim().replace(/^@/u, "");
@@ -109,16 +123,18 @@ export function MemberInviteDialog({
   const footer = <div className="member-invite-dialog__footer">
     <div>
       <Button variant="neutral" disabled={step === 0 || searching || granting} onClick={() => { setError(undefined); setStep((current) => Math.max(0, current - 1)); }}>{texts.inviteBack}</Button>
-      <Button variant="subtle" disabled={searching || granting} onClick={close}>{common.cancel}</Button>
+      <Button variant="subtle" disabled={searching || granting} onClick={requestClose}>{common.cancel}</Button>
     </div>
     {step === 0 ? <Button variant="primary" disabled={login.trim().length === 0 || searching} onClick={() => { void search(); }}>{searching ? texts.searching : texts.search}</Button>
       : step === 1 ? <Button variant="primary" disabled={found === null || granting} onClick={() => { setError(undefined); setStep(2); }}>{texts.inviteNext}</Button>
         : <Button variant="primary" disabled={found === null || granting} onClick={() => { void grant(); }}>{granting ? common.saving : texts.grantPermanently}</Button>}
   </div>;
 
-  return <StepDialog
+  return <>
+  <StepDialog
     opened={opened}
     title={texts.grantAccessTitle}
+    height={480}
     description={<div className="member-invite-dialog__intro">
       <div><h2>{currentTitle}</h2><p>{currentDescription}</p></div>
       <span>{progressLabel}</span>
@@ -130,7 +146,7 @@ export function MemberInviteDialog({
     </div>}
     footer={footer}
     pending={searching || granting}
-    onClose={close}
+    onClose={requestClose}
     onKeyDown={handleKeyDown}
   >
     <div className="member-invite-dialog">
@@ -166,5 +182,16 @@ export function MemberInviteDialog({
         </>}
       </>}
     </div>
-  </StepDialog>;
+  </StepDialog>
+  <ConfirmDialog
+    opened={draftGuard.confirmOpen}
+    title={texts.inviteUnsavedTitle}
+    description={texts.inviteUnsavedDescription}
+    cancelLabel={texts.continueEditing}
+    confirmLabel={texts.inviteDiscard}
+    danger
+    onCancel={draftGuard.continueEditing}
+    onConfirm={draftGuard.discardAndSwitch}
+  />
+  </>;
 }

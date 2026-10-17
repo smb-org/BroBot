@@ -463,7 +463,7 @@ test("platform tabs isolate populated channel and audit lists at desktop and mob
   }
 });
 
-test("member pagination stays in a sticky 44px footer as more rows load at desktop and 390px", async ({ page }) => {
+test("member pagination keeps one toolbar count and a 44px load action as more rows load at desktop and 390px", async ({ page }) => {
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     let releaseNextPage!: () => void;
@@ -485,22 +485,20 @@ test("member pagination stays in a sticky 44px footer as more rows load at deskt
     expect(collectionBox?.height ?? 0).toBeGreaterThan((mainContentBox?.height ?? 0) * 0.8);
     expect((collectionBox?.y ?? 0) + (collectionBox?.height ?? 0)).toBeLessThanOrEqual((mainContentBox?.y ?? 0) + (mainContentBox?.height ?? 0) + 1);
     const listTop = await measureDocumentBox(page, ".members-collection__rows");
-    const footer = page.locator(".collection-page__list .list-pagination-footer");
-    await expect(footer.getByRole("button", { name: "Load more members" })).toBeVisible();
-    expect((await measureBox(page, ".list-pagination-footer"))[3]).toBe(44);
-    await footer.getByRole("button", { name: "Load more members" }).click();
+    const loadMore = page.getByRole("button", { name: "Load more members" });
+    await expect(loadMore).toBeVisible();
+    expect((await measureBox(page, ".members-collection__load-more button"))[3]).toBe(44);
+    await expect(page.locator(".list-pagination-footer")).toHaveCount(0);
+    await expect(page.locator(".members-list-toolbar .list-toolbar__status")).toContainText("100 loaded");
+    await loadMore.click();
     await nextPageStarted;
     expect((await measureDocumentBox(page, ".members-collection__rows")).slice(0, 2)).toEqual(listTop.slice(0, 2));
     releaseNextPage();
     await expect(page.locator(".members-collection__rows .list-row")).toHaveCount(150);
     expect((await measureDocumentBox(page, ".members-collection__rows")).slice(0, 2)).toEqual(listTop.slice(0, 2));
-    await expect(footer).toContainText("150 loaded");
-    await expect(footer.getByRole("button", { name: "Load more members" })).toHaveCount(0);
-    await footer.scrollIntoViewIfNeeded();
-    const footerBox = await measureBox(page, ".list-pagination-footer");
-    const listContentBox = await measureBox(page, ".collection-page__list-content");
-    expect(footerBox[3]).toBe(44);
-    expect(Math.abs(footerBox[1] + footerBox[3] - (listContentBox[1] + listContentBox[3]))).toBeLessThanOrEqual(1);
+    await expect(page.locator(".members-list-toolbar .list-toolbar__status")).toContainText("150 loaded");
+    await expect(loadMore).toHaveCount(0);
+    await expect(page.getByText("150 loaded", { exact: true })).toHaveCount(1);
     await page.unrouteAll();
   }
 });

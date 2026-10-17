@@ -150,8 +150,8 @@ const showMembers = async (members: {
   members: unknown[];
   broadcasterCount: number;
   viewerUserId: string;
-}): Promise<void> => {
-  const channel = healthyChannel("kanal-a", "Alpha");
+}, channelRole: "manager" | "broadcaster" = "manager"): Promise<void> => {
+  const channel = { ...healthyChannel("kanal-a", "Alpha"), role: channelRole };
   stubDashboardFetch((url) => {
     if (url.pathname.endsWith("/members")) return jsonResponse({ ...members, nextCursor: null });
   }, [channel]);
@@ -1268,7 +1268,7 @@ describe("Dashboard skeleton", () => {
       members: [broadcaster("100", "esembe", "esembe"), broadcaster("200", "zweit", "Zweit")],
       broadcasterCount: 2,
       viewerUserId: "100",
-    });
+    }, "broadcaster");
     fireEvent.click(await screen.findByRole("link", { name: /esembe/ }));
 
     expect(await screen.findByRole("button", { name: "Entziehen" })).toBeEnabled();
@@ -1280,7 +1280,7 @@ describe("Dashboard skeleton", () => {
       members: [broadcaster("100", "esembe", "esembe"), broadcaster("200", "zweit", "Zweit")],
       broadcasterCount: 2,
       viewerUserId: "100",
-    });
+    }, "broadcaster");
     fireEvent.click(await screen.findByRole("link", { name: /esembe/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Entziehen" }));
 
@@ -1432,6 +1432,8 @@ describe("Dashboard skeleton", () => {
       window.history.pushState({}, "", "/channels/kanal-b/members");
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
+    expect(await screen.findByText("Einladung verwerfen?")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Verwerfen" }));
     await waitFor(() => expect(screen.queryByText("Neue Person")).not.toBeInTheDocument());
     // The route switched to the operator's channel: even the plus button
     // that would reopen the grant editor is disabled there.
@@ -1770,6 +1772,12 @@ describe("Dashboard skeleton", () => {
 
     fireEvent.keyDown(dialog, { key: "Escape" });
     expect(addRequestCount).toBe(0);
+    expect(await screen.findByText("Einladung verwerfen?")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Weiter bearbeiten" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(await screen.findByText("Einladung verwerfen?")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Verwerfen" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("button", { name: "Zugriff vergeben" }));
@@ -1781,6 +1789,8 @@ describe("Dashboard skeleton", () => {
     fireEvent.click(screen.getByRole("button", { name: "Abbrechen" }));
 
     expect(addRequestCount).toBe(0);
+    expect(await screen.findByText("Einladung verwerfen?")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Verwerfen" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Zugriff vergeben" }));
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
@@ -2843,7 +2853,7 @@ describe("Dashboard skeleton", () => {
       if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-token" });
       if (url.pathname === "/api/channels/kanal-a/modules/text_commands" && init?.method === "PATCH") {
         enabled = true;
-        return jsonResponse({ module: { id: "text_commands", enabled: true, settings: "{}" } });
+        return jsonResponse({ module: { id: "text_commands", enabled: true, settings: "{}" }, revision: 2 });
       }
       return jsonResponse({}, 404);
     }));
@@ -2866,6 +2876,8 @@ describe("Dashboard skeleton", () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "broadcaster" as const };
     let enabled = false;
     let overviewCalls = 0;
+    let toggleRequests = 0;
+    const overviewSnapshots: boolean[] = [];
     let releaseStale: () => void = () => undefined;
     const stale = new Promise<void>((resolve) => { releaseStale = resolve; });
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -2874,6 +2886,7 @@ describe("Dashboard skeleton", () => {
       if (url.pathname === "/api/channels/kanal-a/overview") {
         overviewCalls += 1;
         const snapshot = enabled;
+        overviewSnapshots.push(snapshot);
         if (overviewCalls === 1) await stale;
         return jsonResponse({ ...overview(channel), activeModules: snapshot ? [{ moduleId: "text_commands", settings: "{}" }] : [] });
       }
@@ -2882,8 +2895,9 @@ describe("Dashboard skeleton", () => {
       }
       if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-token" });
       if (url.pathname === "/api/channels/kanal-a/modules/text_commands" && init?.method === "PATCH") {
+        toggleRequests += 1;
         enabled = true;
-        return jsonResponse({ module: { id: "text_commands", enabled: true, settings: "{}" } });
+        return jsonResponse({ module: { id: "text_commands", enabled: true, settings: "{}" }, revision: 2 });
       }
       return jsonResponse({}, 404);
     }));
@@ -2895,9 +2909,11 @@ describe("Dashboard skeleton", () => {
     fireEvent.click(await screen.findByRole("switch", { name: /Textbefehle:/i }));
     await waitFor(() => expect(screen.getByRole("switch", { name: /Textbefehle:/i })).toBeChecked());
     await waitFor(() => expect(screen.getByRole("switch", { name: /Textbefehle:/i })).toBeEnabled());
+    expect(toggleRequests).toBe(1);
     // The pre-toggle response (module still off) arrives only now.
     releaseStale();
     await new Promise((resolve) => { window.setTimeout(resolve, 20); });
+    expect(overviewSnapshots).toContain(false);
 
     navigateToPath("/channels/kanal-a/modules/text_commands");
     expect(await screen.findByRole("button", { name: "Befehl anlegen" })).toBeInTheDocument();
@@ -2915,10 +2931,9 @@ describe("Dashboard skeleton", () => {
       if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-token" });
       if (url.pathname === "/api/channels/kanal-a/modules" && init?.method === undefined) {
         modulesCalls += 1;
-        // The first reload (after enabling text_commands) is held back; the
-        // second (after enabling raid) resolves immediately with both
-        // modules already on. The stale first response, reflecting only the
-        // first toggle, must lose once it does arrive.
+        // The reload after the first mutation is held back. The next mutation
+        // updates the cache from its own response, so this in-flight read is
+        // cancelled; if it arrives anyway, it must not restore the old state.
         if (modulesCalls === 2) return firstReload;
         return jsonResponse({
           modules: [
@@ -2928,10 +2943,10 @@ describe("Dashboard skeleton", () => {
         });
       }
       if (url.pathname === "/api/channels/kanal-a/modules/text_commands" && init?.method === "PATCH") {
-        return jsonResponse({ module: { id: "text_commands", enabled: true, settings: "{}" } });
+        return jsonResponse({ module: { id: "text_commands", enabled: true, settings: "{}" }, revision: 2 });
       }
       if (url.pathname === "/api/channels/kanal-a/modules/raid" && init?.method === "PATCH") {
-        return jsonResponse({ module: { id: "raid", enabled: true, settings: "{}" } });
+        return jsonResponse({ module: { id: "raid", enabled: true, settings: "{}" }, revision: 2 });
       }
       return jsonResponse({}, 404);
     });
@@ -2942,10 +2957,10 @@ describe("Dashboard skeleton", () => {
 
     fireEvent.click(await screen.findByRole("switch", { name: /Textbefehle:/i }));
     fireEvent.click(await screen.findByRole("switch", { name: /Shoutout:/i }));
-    await waitFor(() => { expect(modulesCalls).toBe(3); });
+    await waitFor(() => { expect(modulesCalls).toBe(2); });
     expect(await screen.findByRole("switch", { name: /Shoutout:/i })).toBeChecked();
 
-    // The held-back first reload arrives last, describing an older state.
+    // The held-back read arrives last, describing an older state.
     resolveFirstReload?.(jsonResponse({
       modules: [
         { id: "text_commands", enabled: true, settings: "{}" },

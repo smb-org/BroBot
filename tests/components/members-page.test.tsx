@@ -144,7 +144,10 @@ describe("members list permissions", () => {
     });
 
     const protectedReason = membersTexts().lastBroadcaster;
-    expect(screen.getByRole("img", { name: protectedReason })).toBeVisible();
+    const ownerRow = screen.getByRole("link", { name: /Channel owner/u });
+    const protectedRole = ownerRow.querySelector(".members-collection__role");
+    expect(protectedRole).toHaveAttribute("title", protectedReason);
+    expect(protectedRole?.querySelector("svg.lucide-lock")).not.toBeNull();
     const search = screen.getByRole("textbox", { name: "Mitglieder suchen" });
     fireEvent.change(search, { target: { value: "helper" } });
     expect(screen.getByText("Chat helper")).toBeVisible();

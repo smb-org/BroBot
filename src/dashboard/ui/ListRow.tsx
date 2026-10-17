@@ -4,7 +4,7 @@ export interface ListRowProps {
   href: string;
   onNavigate: () => void;
   icon?: ReactNode;
-  title: string;
+  title: ReactNode;
   description: ReactNode;
   status: ReactNode;
   action: ReactNode;

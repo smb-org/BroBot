@@ -6,7 +6,8 @@ import type { PanelMember } from "../panel-contract";
 import { membersTexts, roleDescription, roleLabel } from "./labels";
 import { apiErrorText, dashboardCommonTexts, dashboardTexts, formatDate } from "./locale";
 import { MemberAvatar } from "./member-avatar";
-import { Button, ChoiceCards, ConfirmDialog, EditorShell, Icon, Badge, CollectionPage, EmptyState, ListRow, ListPaginationFooter, ListToolbar, LoadState, LoadStateLines, notify, useDraftGuard, useInspectorSelection } from "./ui";
+import { Button, ChoiceCards, ConfirmDialog, EditorShell, Icon, Badge, CollectionPage, EmptyState, ListRow, ListToolbar, LoadState, LoadStateLines, notify, registerDashboardNavigationGuard, useDraftGuard, useInspectorSelection } from "./ui";
+import { TruncatedText } from "./ui/TruncatedText";
 import { dashboardDataKeys } from "./data/keys";
 import { useMembersQuery } from "./data/lists";
 import { dashboardRoutePath } from "./router";
@@ -64,6 +65,10 @@ const removalLocked = (member: PanelMember, broadcasterCount: number): string | 
     ? membersTexts().lastBroadcaster
     : null;
 
+const memberRoleLocked = (member: PanelMember, ownRole: ChannelRole, broadcasterCount: number): string | null =>
+  removalLocked(member, broadcasterCount)
+    ?? (member.role === "broadcaster" && ownRole !== "broadcaster" ? membersTexts().broadcasterRoleLocked : null);
+
 /**
  * Role values that actually go through for this entry. The own role
  * cannot be raised, and the last broadcaster cannot be demoted.
@@ -71,9 +76,11 @@ const removalLocked = (member: PanelMember, broadcasterCount: number): string | 
 const selectableRoles = (
   member: PanelMember,
   ownUserId: string,
+  ownRole: ChannelRole,
   broadcasterCount: number,
   availableRoles: readonly ChannelRole[],
 ): readonly ChannelRole[] => {
+  if (member.role === "broadcaster" && ownRole !== "broadcaster") return [member.role];
   if (isLastBroadcaster(member, broadcasterCount)) return [member.role];
   if (member.userId !== ownUserId) return availableRoles;
   const rank: Record<ChannelRole, number> = { operator: 0, manager: 1, broadcaster: 2 };
@@ -86,12 +93,14 @@ const memberLabel = (member: PanelMember): string =>
 const MemberList = ({
   channelId,
   members,
+  ownRole,
   broadcasterCount,
   selectedUserId,
   onSelect,
 }: {
   channelId: string;
   members: PanelMember[];
+  ownRole: ChannelRole;
   broadcasterCount: number;
   selectedUserId: string | null;
   onSelect: (userId: string) => void;
@@ -104,15 +113,20 @@ const MemberList = ({
         const selected = selectedUserId === member.userId;
         const identity = member.login === null ? texts.twitchId(member.userId) : `@${member.login}`;
         const description = texts.memberRowDescription(identity, formatJoinDate(member.joinedAt));
+        const lockReason = memberRoleLocked(member, ownRole, broadcasterCount);
         return <ListRow
           key={member.userId}
           href={dashboardRoutePath({ kind: "channel", channelId, section: "members" })}
           onNavigate={() => { onSelect(member.userId); }}
           icon={<MemberAvatar src={member.profileImageUrl} name={member.displayName ?? member.login ?? member.userId} />}
-          title={memberLabel(member)}
-          description={description}
-          status={<Badge tone={member.role === "broadcaster" ? "brand" : member.role === "manager" ? "green" : "neutral"}>{roleLabel(member.role)}</Badge>}
-          action={isLastBroadcaster(member, broadcasterCount) ? <span className="table-lock" role="img" aria-label={texts.lastBroadcaster} title={texts.lastBroadcaster}><Icon name="lock" size={16} /></span> : <span aria-hidden="true" />}
+          title={<TruncatedText text={memberLabel(member)} />}
+          description={<TruncatedText text={description} />}
+          status={<Badge tone={member.role === "broadcaster" ? "brand" : member.role === "manager" ? "green" : "neutral"}>
+            <span className="members-collection__role" {...(lockReason === null ? {} : { title: lockReason, "aria-label": `${roleLabel(member.role)}. ${lockReason}` })}>
+              {roleLabel(member.role)}{lockReason === null ? null : <Icon name="lock" size={16} aria-hidden="true" />}
+            </span>
+          </Badge>}
+          action={<span aria-hidden="true" />}
           selected={selected}
         />;
       })}
@@ -133,6 +147,7 @@ const MemberInspector = ({
   canManageMembers,
   broadcasterCount,
   ownUserId,
+  ownRole,
   availableRoles,
   role,
   dirty,
@@ -148,6 +163,7 @@ const MemberInspector = ({
   canManageMembers: boolean;
   broadcasterCount: number;
   ownUserId: string;
+  ownRole: ChannelRole;
   availableRoles: readonly ChannelRole[];
   role: ChannelRole;
   dirty: boolean;
@@ -162,8 +178,8 @@ const MemberInspector = ({
   const texts = membersTexts();
   const common = dashboardCommonTexts();
   const name = memberLabel(member);
-  const roles = selectableRoles(member, ownUserId, broadcasterCount, availableRoles);
-  const locked = removalLocked(member, broadcasterCount);
+  const roles = selectableRoles(member, ownUserId, ownRole, broadcasterCount, availableRoles);
+  const locked = memberRoleLocked(member, ownRole, broadcasterCount);
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
 
   const propertiesList = (
@@ -318,6 +334,8 @@ const MembersPageContent = ({
 
   const draftGuard = useDraftGuard(roleDirty, saveRoleDraft, () => { setRoleDraft(null); });
 
+  useEffect(() => registerDashboardNavigationGuard(draftGuard.guardSwitch), [draftGuard.guardSwitch]);
+
   const openGrant = (): void => {
     draftGuard.guardSwitch(() => {
       closeSelection();
@@ -365,20 +383,21 @@ const MembersPageContent = ({
       loading={<MemberListLoading />}
       empty={members.length > 0
         ? <p className="empty-state">{dashboardCommonTexts().noMatches}</p>
-        : <MemberList channelId={channelId} members={members} broadcasterCount={broadcasterCount} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} />}
+        : <MemberList channelId={channelId} members={members} ownRole={ownRole} broadcasterCount={broadcasterCount} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} />}
       error={<p role="alert">{error ?? texts.load}</p>}
       queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: error ?? texts.load, onRetry: () => { void membersQuery.refetch(); } }}
-    >{members.length === 0 ? null : <MemberList channelId={channelId} members={visibleMembers} broadcasterCount={broadcasterCount} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} />}</LoadState>
-    {members.length === 0 && nextCursor === null ? null : <ListPaginationFooter loadedCount={members.length} loadedLabel={texts.loaded}>
-      {nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={() => { void membersQuery.fetchNextPage(); }} disabled={loading || membersQuery.isFetching || membersQuery.isPlaceholderData}>{membersQuery.isFetchingNextPage ? texts.loadingMore : texts.loadMore}</button>}
-    </ListPaginationFooter>}
+    >{members.length === 0 ? null : <MemberList channelId={channelId} members={visibleMembers} ownRole={ownRole} broadcasterCount={broadcasterCount} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} />}</LoadState>
+    {nextCursor === null ? null : <div className="members-collection__load-more">
+      <Button variant="neutral" onClick={() => { void membersQuery.fetchNextPage(); }} disabled={loading || membersQuery.isFetching || membersQuery.isPlaceholderData}>{membersQuery.isFetchingNextPage ? texts.loadingMore : texts.loadMore}</Button>
+    </div>}
   </div>;
-  const selectedDetail = selectedMember === null ? <EmptyState title={texts.membersWithAccess} description={texts.selectMemberPrompt} /> : <MemberInspector
+  const selectedDetail = selectedMember === null ? <p className="members-collection__empty">{texts.selectMemberPrompt}</p> : <MemberInspector
     key={selectedMember.userId}
     member={selectedMember}
     canManageMembers={canManageMembers}
     broadcasterCount={broadcasterCount}
     ownUserId={ownUserId}
+    ownRole={ownRole}
     availableRoles={availableRoles}
     role={draftRole}
     dirty={roleDirty}
@@ -394,12 +413,16 @@ const MembersPageContent = ({
     <>
       <CollectionPage
         title={texts.title}
+        headerKind="members"
+        subtitle={texts.description}
         toolbar={<ListToolbar
+          className="members-list-toolbar"
           searchLabel={texts.searchMembers}
           searchPlaceholder={texts.searchMembers}
           searchClearLabel={dashboardCommonTexts().clearSearch}
           searchValue={search}
           onSearchChange={setSearch}
+          createPlacement="after-search"
           create={{ label: texts.grantAccessTitle, ref: grantButtonRef, onClick: openGrant, disabled: !canManageMembers, ...(!canManageMembers ? { reason: texts.managementLocked } : {}) }}
           usage={{
             count: members.length,

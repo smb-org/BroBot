@@ -169,7 +169,6 @@ vi.mock("../../src/modules/registry", () => ({
 }));
 
 import { UiProvider } from "../../src/dashboard/ui";
-import { ToastHost } from "../../src/dashboard/ui/Toast";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import { ModuleNavigation, ModulePanelMount, ModulePage, ModuleWorkspace } from "../../src/dashboard/module-panels";
 import { moduleQueryKey } from "../../src/dashboard/data";
@@ -336,16 +335,9 @@ describe("Module panel loader", () => {
   });
 
   it("navigates from the module row click and Enter, while the switch toggles without navigation", async () => {
-    const fetcher = vi.fn<typeof fetch>((input) => {
-      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
-      return Promise.resolve(path === "/api/csrf"
-        ? Response.json({ token: "csrf-token" })
-        : Response.json({ module: { id: "aktiv", enabled: false, settings: "{}" } }));
-    });
     const onNavigate = vi.fn();
-    const onChanged = vi.fn(() => Promise.resolve());
-    vi.stubGlobal("fetch", fetcher);
-    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={onNavigate} onChanged={onChanged} />);
+    const onToggleModule = vi.fn(() => Promise.resolve());
+    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={onNavigate} onToggleModule={onToggleModule} />);
 
     const link = screen.getByRole("link", { name: /aktiv.*Läuft/i });
     fireEvent.click(link);
@@ -360,13 +352,12 @@ describe("Module panel loader", () => {
     expect(within(row).queryByRole("checkbox")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("switch", { name: /^aktiv:/i }));
-    await waitFor(() => { expect(onChanged).toHaveBeenCalledTimes(1); });
+    await waitFor(() => { expect(onToggleModule).toHaveBeenCalledWith("kanal-a", "aktiv", false); });
     expect(onNavigate).toHaveBeenCalledTimes(2);
-    expect(fetcher.mock.calls.some(([, requestInit]) => requestInit?.method === "PATCH")).toBe(true);
   });
 
   it("shows mandatory channel events as always active without rendering a switch", () => {
-    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} onChanged={vi.fn(() => Promise.resolve())} />);
+    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} onToggleModule={vi.fn(() => Promise.resolve())} />);
 
     expect(screen.queryByRole("switch", { name: "Kanalereignisse" })).not.toBeInTheDocument();
     const row = screen.getByText("Kanalereignisse").closest(".list-row");
@@ -600,24 +591,22 @@ describe("Module panel loader", () => {
   });
 
   it("shows the module name and state once in the row", () => {
-    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onChanged={vi.fn(() => Promise.resolve())} />);
+    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onToggleModule={vi.fn(() => Promise.resolve())} />);
     const row = screen.getByRole("link", { name: /aktiv.*Läuft/i }).closest(".list-row");
     if (!(row instanceof HTMLElement)) throw new Error("Module row is missing");
     expect(within(row).getAllByText("aktiv", { exact: true })).toHaveLength(1);
     expect(within(row).getAllByText("Läuft", { exact: true })).toHaveLength(1);
   });
 
-  it("toggles a module and reloads the caller's list afterwards", async () => {
-    const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(Response.json({ module: { id: "aktiv", enabled: false, settings: "{}" } })));
-    vi.stubGlobal("fetch", fetcher);
+  it("reflects the state returned by the shared toggle handler", async () => {
     const onNavigate = vi.fn();
     const Harness = (): ReactElement => {
       const [modules, setModules] = useState([{ id: "aktiv", enabled: true, settings: "{}" }]);
-      const onChanged = (): Promise<void> => {
-        setModules([{ id: "aktiv", enabled: false, settings: "{}" }]);
+      const onToggleModule = (_channelId: string, _moduleId: string, enabled: boolean): Promise<void> => {
+        setModules([{ id: "aktiv", enabled, settings: "{}" }]);
         return Promise.resolve();
       };
-      return <ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={modules} onNavigate={onNavigate} onChanged={onChanged} />;
+      return <ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={modules} onNavigate={onNavigate} onToggleModule={onToggleModule} />;
     };
     renderWithMantine(<Harness />);
 
@@ -626,63 +615,21 @@ describe("Module panel loader", () => {
     fireEvent.click(toggle);
 
     await waitFor(() => { expect(screen.getByRole("switch", { name: /aktiv/i })).not.toBeChecked(); });
-    const [url, init] = fetcher.mock.calls.find(([, requestInit]) => requestInit?.method === "PATCH") ?? [];
-    expect(url instanceof URL ? url.pathname : url).toBe("/api/channels/kanal-a/modules/aktiv");
-    expect(init?.body).toBe(JSON.stringify({ enabled: false }));
   });
 
-  it("offers an undo action and reverses the module through the toggle endpoint", async () => {
-    const patchBodies: string[] = [];
-    const fetcher = vi.fn<typeof fetch>((input, init) => {
-      const pathname = input instanceof Request
-        ? new URL(input.url).pathname
-        : new URL(String(input), "https://brobot.example").pathname;
-      if (pathname === "/api/csrf") return Promise.resolve(Response.json({ token: "csrf-token" }));
-      if (init?.method === "PATCH") {
-        if (typeof init.body !== "string") throw new Error("The module toggle should send a JSON string body.");
-        patchBodies.push(init.body);
-        const enabled = (JSON.parse(init.body) as { enabled: boolean }).enabled;
-        return Promise.resolve(Response.json({ module: { id: "aktiv", enabled, settings: "{}", revision: 2 } }));
-      }
-      return Promise.resolve(Response.json({}));
-    });
-    const onChanged = vi.fn(() => Promise.resolve());
-    vi.stubGlobal("fetch", fetcher);
-    renderWithMantine(<><ToastHost /><ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onChanged={onChanged} /></>);
+  it("forwards module state transitions to the shared toggle handler", async () => {
+    const onToggleModule = vi.fn(() => Promise.resolve());
+    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onToggleModule={onToggleModule} />);
 
     fireEvent.click(screen.getByRole("switch", { name: /aktiv/i }));
-    fireEvent.click(await screen.findByRole("button", { name: "Rückgängig" }));
-
-    await waitFor(() => { expect(patchBodies).toEqual(['{"enabled":false}', '{"enabled":true}']); });
-    expect(onChanged).toHaveBeenCalledTimes(2);
+    await waitFor(() => { expect(onToggleModule).toHaveBeenCalledWith("kanal-a", "aktiv", false); });
   });
 
-  it("keeps the undo action when refreshing the module list fails after the toggle succeeds", async () => {
-    const fetcher = vi.fn<typeof fetch>((input, init) => {
-      const pathname = input instanceof Request
-        ? new URL(input.url).pathname
-        : new URL(String(input), "https://brobot.example").pathname;
-      if (pathname === "/api/csrf") return Promise.resolve(Response.json({ token: "csrf-token" }));
-      if (init?.method === "PATCH") return Promise.resolve(Response.json({ module: { id: "aktiv", enabled: false, settings: "{}", revision: 2 } }));
-      return Promise.resolve(Response.json({}));
-    });
-    vi.stubGlobal("fetch", fetcher);
-    renderWithMantine(<><ToastHost /><ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onChanged={() => Promise.reject(new Error("Refresh failed"))} /></>);
-
-    fireEvent.click(screen.getByRole("switch", { name: /aktiv/i }));
-
-    expect(await screen.findByRole("button", { name: "Rückgängig" })).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toBeVisible();
-  });
-
-  it("sends exactly one PATCH for two rapid clicks on the same switch", async () => {
-    let resolvePatch: ((response: Response) => void) | undefined;
-    const patch = new Promise<Response>((resolve) => { resolvePatch = resolve; });
-    const fetcher = vi.fn<typeof fetch>((_input, init) =>
-      init?.method === "PATCH" ? patch : Promise.resolve(Response.json({ modules: [] })));
-    const onChanged = vi.fn(() => Promise.resolve());
-    vi.stubGlobal("fetch", fetcher);
-    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onChanged={onChanged} />);
+  it("ignores rapid clicks on the same pending switch", async () => {
+    let resolveToggle: (() => void) | undefined;
+    const pending = new Promise<void>((resolve) => { resolveToggle = resolve; });
+    const onToggleModule = vi.fn(() => pending);
+    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onToggleModule={onToggleModule} />);
 
     const toggle = screen.getByRole("switch", { name: /aktiv/i });
     fireEvent.click(toggle);
@@ -690,13 +637,12 @@ describe("Module panel loader", () => {
     // the DOM is a no-op; `fireEvent.click` still lets us assert that.
     fireEvent.click(toggle);
 
-    resolvePatch?.(Response.json({ module: { id: "aktiv", enabled: false, settings: "{}" } }));
-    await waitFor(() => { expect(onChanged).toHaveBeenCalledTimes(1); });
-    expect(fetcher.mock.calls.filter(([, requestInit]) => requestInit?.method === "PATCH")).toHaveLength(1);
+    resolveToggle?.();
+    await waitFor(() => { expect(onToggleModule).toHaveBeenCalledTimes(1); });
   });
 
   it("shows no kicker above the module heading", () => {
-    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} onChanged={vi.fn(() => Promise.resolve())} />);
+    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} onToggleModule={vi.fn(() => Promise.resolve())} />);
 
     expect(screen.getByRole("heading", { name: "Module", level: 1 })).toBeInTheDocument();
     expect(screen.queryByText("Tastenraster")).not.toBeInTheDocument();

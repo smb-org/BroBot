@@ -12,7 +12,7 @@ import { RetryableLazy } from "./RetryableLazy";
 import { canManage, type ChannelRole } from "../contracts/values";
 import { isEventTemplateVariableAvailable } from "../contracts/event-template-variables";
 import type { PanelActiveModule, PanelModuleState, PanelTemplateWarning } from "../panel-contract";
-import { PanelApiError, getChannelModuleSettings, getChannelTemplateVariables, saveChannelModuleSettings, setChannelModuleEnabled } from "./api";
+import { PanelApiError, getChannelModuleSettings, getChannelTemplateVariables, saveChannelModuleSettings } from "./api";
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "./data";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber, serverFieldErrorText, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
@@ -942,8 +942,7 @@ interface ModuleWorkspaceProperties {
   loading?: boolean;
   error?: string | null;
   onNavigate: (route: DashboardRoute) => void;
-  /** Reloads `modules` after a successful toggle. */
-  onChanged: () => Promise<void>;
+  onToggleModule: (channelId: string, moduleId: string, enabled: boolean) => Promise<void>;
 }
 
 const ModuleWorkspaceRow = ({
@@ -1000,8 +999,7 @@ interface ModuleToggleListProperties {
   ownRole: ChannelRole;
   modules: PanelModuleState[];
   onNavigate: (route: DashboardRoute) => void;
-  /** Reloads `modules` after a successful toggle. */
-  onChanged: () => Promise<void>;
+  onToggleModule: (channelId: string, moduleId: string, enabled: boolean) => Promise<void>;
 }
 
 /**
@@ -1009,57 +1007,25 @@ interface ModuleToggleListProperties {
  * embed it beside other channel content. `ModuleWorkspace` below wraps this
  * with the full "Module" page's own heading and error line.
  */
-const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onChanged }: ModuleToggleListProperties): ReactElement => {
+const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onToggleModule }: ModuleToggleListProperties): ReactElement => {
   const texts = dashboardTexts();
   const labels = workspaceTexts();
   const manageable = canManageModules(ownRole);
   const [pendingEnabled, setPendingEnabled] = useState<Record<string, boolean>>({});
-  const [committedEnabled, setCommittedEnabled] = useState<Record<string, { enabled: boolean; source: PanelModuleState[] }>>({});
   const busyModulesRef = useRef(new Set<string>());
   const [busyModules, setBusyModules] = useState<ReadonlySet<string>>(new Set());
-  const operationGeneration = useRef<Record<string, number>>({});
 
-  const toggle = async (moduleId: string, nextEnabled: boolean, offerUndo = true): Promise<void> => {
+  const toggle = async (moduleId: string, nextEnabled: boolean): Promise<void> => {
     if (busyModulesRef.current.has(moduleId)) return;
     busyModulesRef.current.add(moduleId);
     setBusyModules(new Set(busyModulesRef.current));
     setPendingEnabled((current) => ({ ...current, [moduleId]: nextEnabled }));
-    const generation = (operationGeneration.current[moduleId] ?? 0) + 1;
-    operationGeneration.current[moduleId] = generation;
-    let mutationSucceeded = false;
     try {
-      await setChannelModuleEnabled(channelId, moduleId, nextEnabled);
-      mutationSucceeded = true;
-      setCommittedEnabled((current) => ({ ...current, [moduleId]: { enabled: nextEnabled, source: modules } }));
-      await onChanged();
-    } catch (toggleFailure: unknown) {
-      if (toggleFailure instanceof PanelApiError && toggleFailure.status === 401) {
-        notify({ tone: "error", message: texts.errors.sessionInvalid });
-      } else if (mutationSucceeded) {
-        notify({ tone: "error", message: texts.errors.dataLoadFailed });
-      } else {
-        notify({ tone: "error", message: toggleFailure instanceof PanelApiError
-          ? apiErrorText(toggleFailure.code, texts.errors.changeFailed)
-          : texts.errors.changeFailed });
-      }
+      await onToggleModule(channelId, moduleId, nextEnabled);
     } finally {
       setPendingEnabled((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== moduleId)));
       busyModulesRef.current.delete(moduleId);
       setBusyModules(new Set(busyModulesRef.current));
-      if (mutationSucceeded && offerUndo) {
-        const details = moduleDetails(moduleId);
-        notify({
-          tone: "success",
-          message: labels.changed(details.name, nextEnabled),
-          action: {
-            label: labels.undo,
-            onClick: () => {
-              if (operationGeneration.current[moduleId] !== generation) return;
-              void toggle(moduleId, !nextEnabled, false);
-            },
-          },
-        });
-      }
     }
   };
 
@@ -1078,9 +1044,7 @@ const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onChanged }
             {group.map((module) => {
           const state = modules.find((candidate) => candidate.id === module.id);
           const mandatory = state?.mandatory === true || module.mandatory === true;
-          const committed = committedEnabled[module.id];
-          const committedOverride = committed?.source === modules ? committed.enabled : undefined;
-          const rawEnabled = mandatory || (pendingEnabled[module.id] ?? committedOverride ?? state?.enabled === true);
+          const rawEnabled = mandatory || (pendingEnabled[module.id] ?? state?.enabled === true);
           return (
             <ModuleWorkspaceRow
               key={module.id}
@@ -1102,7 +1066,7 @@ const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onChanged }
   );
 };
 
-export const ModuleWorkspace = ({ channelId, ownRole, modules, loading = false, error = null, onNavigate, onChanged }: ModuleWorkspaceProperties): ReactElement => {
+export const ModuleWorkspace = ({ channelId, ownRole, modules, loading = false, error = null, onNavigate, onToggleModule }: ModuleWorkspaceProperties): ReactElement => {
   const labels = workspaceTexts();
   useEffect(() => {
     if (error !== null) notify({ tone: "error", message: error });
@@ -1118,7 +1082,7 @@ export const ModuleWorkspace = ({ channelId, ownRole, modules, loading = false, 
           return (state?.mandatory === true || module.mandatory === true || state?.enabled === true)
             && !modulePermissionsAreMissing({ missingBroadcasterScopes: state?.missingBroadcasterScopes ?? [] });
         }).length)}${loading ? ` · ${dashboardTexts().module.load}` : ""}`}
-        columns={[<ModuleToggleList key={channelId} channelId={channelId} ownRole={ownRole} modules={modules} onNavigate={onNavigate} onChanged={onChanged} />]}
+        columns={[<ModuleToggleList key={channelId} channelId={channelId} ownRole={ownRole} modules={modules} onNavigate={onNavigate} onToggleModule={onToggleModule} />]}
       />
     </section>
   );

@@ -1052,6 +1052,37 @@ describe("Module management in the panel", () => {
     await expect(auditCount(database)).resolves.toBe(2);
   });
 
+  it("returns the module row revision and rejects an undo after a later toggle", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+
+    const firstToggle = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/test-modul", "PATCH", { enabled: true }),
+      environment,
+    );
+    expect(firstToggle.status).toBe(200);
+    await expect(firstToggle.json()).resolves.toMatchObject({ module: { enabled: true }, revision: 1 });
+
+    const laterToggle = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/test-modul", "PATCH", { enabled: false, expectedRevision: 1 }),
+      environment,
+    );
+    expect(laterToggle.status).toBe(200);
+    await expect(laterToggle.json()).resolves.toMatchObject({ module: { enabled: false }, revision: 2 });
+
+    const staleUndo = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/test-modul", "PATCH", { enabled: true, expectedRevision: 1 }),
+      environment,
+    );
+    expect(staleUndo.status).toBe(409);
+    await expect(staleUndo.json()).resolves.toEqual({ error: "module_changed_concurrently" });
+    await expect(database.prepare(
+      "SELECT enabled, revision FROM channel_modules WHERE channel_id = 'kanal-a' AND module_id = 'test-modul'",
+    ).first()).resolves.toEqual({ enabled: 0, revision: 2 });
+    await expect(auditCount(database)).resolves.toBe(2);
+  });
+
   it("preserves settings and skips the initialization hook when re-enabling", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
@@ -1284,7 +1315,7 @@ describe("Module management in the panel", () => {
         await requestFor("user-1", "/api/channels/kanal-belabox/modules/belabox", "PATCH", { enabled }),
         environment,
       );
-      expect((await enable(false)).status).toBe(200);
+      expect((await enable(false)).status).toBe(409);
       await expect(database.prepare(
         "SELECT COUNT(*) AS count FROM channel_modules WHERE channel_id = 'kanal-belabox' AND module_id = 'belabox'",
       ).first()).resolves.toEqual({ count: 0 });
@@ -1340,7 +1371,7 @@ describe("Module management in the panel", () => {
         await requestFor("user-1", "/api/channels/kanal-text/modules/text_commands", "PATCH", { enabled }),
         environment,
       );
-      expect((await enable(false)).status).toBe(200);
+      expect((await enable(false)).status).toBe(409);
       await expect(database.prepare(
         "SELECT COUNT(*) AS count FROM channel_modules WHERE channel_id = 'kanal-text' AND module_id = 'text_commands'",
       ).first()).resolves.toEqual({ count: 0 });

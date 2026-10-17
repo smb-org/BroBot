@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactElement, type R
 import { dashboardCommonTexts } from "../locale";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
+import { PageHeader } from "./PageHeader";
 
 const SINGLE_COLUMN_MAX_INLINE_SIZE = 935;
 
@@ -20,6 +21,8 @@ const contentInlineSize = (element: HTMLElement): number => {
 export interface CollectionPageProps {
   title: string;
   headingLevel?: "h1" | "h2" | "h3";
+  headerKind?: string;
+  subtitle?: ReactNode;
   toolbar: ReactNode;
   list: ReactNode;
   detail: ReactNode;
@@ -33,6 +36,8 @@ export interface CollectionPageProps {
 export function CollectionPage({
   title,
   headingLevel = "h1",
+  headerKind,
+  subtitle,
   toolbar,
   list,
   detail,
@@ -109,7 +114,11 @@ export function CollectionPage({
 
   return (
     <div ref={collectionRef} data-ui="" className="collection-page" data-detail-open={detailOpen ? "true" : "false"} data-single-column={singleColumn ? "true" : "false"}>
-      <header className="collection-page__heading"><Heading>{title}</Heading></header>
+      <div className={`collection-page__heading${subtitle === undefined ? "" : " collection-page__heading--page-header"}`}>
+        {subtitle === undefined
+          ? <header><Heading>{title}</Heading></header>
+          : <PageHeader kind={headerKind ?? "module"} title={title} subtitle={subtitle} />}
+      </div>
       <div className="collection-page__body">
         <aside ref={listRef} aria-label={`${title}: ${texts.chooseCollection}`} className="collection-page__list">
           <div className="collection-page__list-toolbar">{toolbar}</div>

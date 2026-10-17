@@ -557,10 +557,11 @@ export const setChannelModuleEnabled = (
   channelId: string,
   moduleId: string,
   enabled: boolean,
-): Promise<{ module: PanelModuleState }> => requestMutation(
+  expectedRevision?: number,
+): Promise<{ module: PanelModuleState; revision: number }> => requestMutation(
   modulePath(channelId, moduleId),
   "PATCH",
-  { enabled },
+  { enabled, ...(expectedRevision === undefined ? {} : { expectedRevision }) },
 );
 
 export const getChannelModuleSettings = (channelId: string, moduleId: string, signal?: AbortSignal): Promise<{

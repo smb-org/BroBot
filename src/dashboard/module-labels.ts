@@ -219,6 +219,7 @@ export interface ModuleWorkspaceTexts {
   immediateDescription: string;
   activeCount: (count: number) => string;
   undo: string;
+  undoConflict: string;
   changed: (name: string, enabled: boolean) => string;
 }
 
@@ -234,6 +235,7 @@ const workspaceCatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
     immediateDescription: "Änderungen gelten sofort. Ausgeschaltete Module behalten ihre Einstellungen.",
     activeCount: (count) => `${String(count)} aktiv`,
     undo: "Rückgängig",
+    undoConflict: "Inzwischen geändert",
     changed: (name, enabled) => `${name} wurde ${enabled ? "eingeschaltet" : "ausgeschaltet"}.`,
   },
   en: {
@@ -247,6 +249,7 @@ const workspaceCatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
     immediateDescription: "Changes take effect immediately. Switched off modules keep their settings.",
     activeCount: (count) => `${String(count)} active`,
     undo: "Undo",
+    undoConflict: "Changed in the meantime",
     changed: (name, enabled) => `${name} was turned ${enabled ? "on" : "off"}.`,
   },
 };

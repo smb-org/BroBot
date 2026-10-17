@@ -95,7 +95,7 @@ export const ChannelDefaultsEditor = ({ channelId, role, saveTarget }: ChannelDe
   };
   const navigationGuard = useDraftGuard(dirty, saveDraft, discard);
 
-  const saveStatus = <SaveStatus dirty={dirty} pending={pending} persistent {...(saveError === undefined ? {} : { error: saveError })} saved={saved}
+  const saveStatus = <SaveStatus dirty={dirty} pending={pending} saveDisabled={!settingsReady} persistent {...(saveError === undefined ? {} : { error: saveError })} saved={saved}
     onSave={() => { void saveDraft(); }} onDiscard={discard}
     saveLabel={common.save} discardLabel={common.discard} savedLabel={common.saved} pendingLabel={common.saving} />;
 
@@ -123,9 +123,9 @@ export const ChannelDefaultsEditor = ({ channelId, role, saveTarget }: ChannelDe
             <p className="muted channel-defaults-editor__hint">{labels.defaultChatTargetHint}</p>
           </div>
         </div>
-        {saveTarget === undefined || saveTarget === null ? saveStatus : createPortal(saveStatus, saveTarget)}
       </>}
     </LoadState>
+    {canEdit ? saveTarget === undefined ? saveStatus : saveTarget === null ? null : createPortal(saveStatus, saveTarget) : null}
     <ConfirmDialog opened={navigationGuard.confirmOpen} title={dashboard.module.unsavedChangesTitle}
       description={dashboard.module.unsavedChangesDescription}
       confirmLabel={dashboard.module.discardAndSwitch} cancelLabel={dashboard.module.continueEditing}

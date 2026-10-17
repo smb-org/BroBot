@@ -313,6 +313,7 @@ export interface MembersTexts {
   searching: string;
   title: string;
   searchMembers: string;
+  description: string;
   countSuffix: (count: number) => string;
   filteredSuffix: (count: number) => string;
   name: string;
@@ -325,6 +326,7 @@ export interface MembersTexts {
   remove: string;
   removeConfirmTitle: (name: string) => string;
   lastBroadcaster: string;
+  broadcasterRoleLocked: string;
   unresolvable: string;
   twitchId: (userId: string) => string;
   roleFor: (name: string) => string;
@@ -344,6 +346,9 @@ export interface MembersTexts {
   /** `useDraftGuard`'s three-way confirmation for an unsaved role change (2, "Entwurfsschutz"). */
   unsavedRoleTitle: string;
   unsavedRoleDescription: string;
+  inviteUnsavedTitle: string;
+  inviteUnsavedDescription: string;
+  inviteDiscard: string;
   continueEditing: string;
   discardAndSwitch: string;
   saveAndSwitch: string;
@@ -363,10 +368,10 @@ export interface MembersTexts {
 const membersCatalog: LocaleCatalog<MembersTexts> = {
   de: {
     managementLocked: "Nur Broadcaster und Verwalter dürfen Mitglieder ändern.", grantAccessTitle: "Zugriff vergeben",
-    twitchName: "Twitch-Name", twitchNameHint: "Genau wie auf Twitch, ohne @.", search: "Suchen", searching: "Suche läuft …", title: "Mitglieder", searchMembers: "Mitglieder suchen", countSuffix: (count) => count === 1 ? "Mitglied" : "Mitglieder", filteredSuffix: (count) => count === 1 ? "Mitglied" : "Mitglieder", name: "Name",
+    twitchName: "Twitch-Name", twitchNameHint: "Genau wie auf Twitch, ohne @.", search: "Suchen", searching: "Suche läuft …", title: "Mitglieder", searchMembers: "Mitglieder suchen", description: "Verwalte, wer auf diesen Kanal zugreifen darf.", countSuffix: (count) => count === 1 ? "Mitglied" : "Mitglieder", filteredSuffix: (count) => count === 1 ? "Mitglied" : "Mitglieder", name: "Name",
     role: "Rolle", roleHint: "Bestimmt, was diese Person im Kanal darf.", accessSince: "Zugriff seit", memberRowDescription: (identity, date) => `${identity} · Zugriff seit ${date}`, editMember: (name) => `Mitglied bearbeiten: ${name}`, remove: "Entziehen",
     removeConfirmTitle: (name) => `Zugriff für ${name} entziehen?`,
-    lastBroadcaster: "Der letzte Broadcaster kann nicht herabgestuft oder entfernt werden.", unresolvable: "Nicht auflösbar", twitchId: (userId) => `Twitch-ID ${userId}`,
+    lastBroadcaster: "Der letzte Broadcaster kann nicht herabgestuft oder entfernt werden.", broadcasterRoleLocked: "Nur ein Broadcaster darf die Broadcaster-Rolle ändern oder entziehen.", unresolvable: "Nicht auflösbar", twitchId: (userId) => `Twitch-ID ${userId}`,
     roleFor: (name) => `Rolle für ${name}`, removeAccessFor: (name) => `Zugriff für ${name} entziehen`,
     empty: "Für diesen Kanal ist noch niemand zusätzlich freigegeben.",
     confirmationText: (role) => `Diese Person hat keinerlei Beziehung zum Kanal, die Twitch belegen würde. Mit der Rolle „${role}“ erhält sie Zugriff auf die Mitgliederliste und auf die kanalbezogenen Panel-Funktionen, die diese Rolle erlaubt.`,
@@ -377,6 +382,9 @@ const membersCatalog: LocaleCatalog<MembersTexts> = {
     removeOther: (name) => `${name} verliert den Zugang zu diesem Kanal und seinen kanalbezogenen Panel-Daten und -Funktionen.`,
     unsavedRoleTitle: "Ungespeicherte Rollenänderung",
     unsavedRoleDescription: "Die neue Rolle ist noch nicht gespeichert.",
+    inviteUnsavedTitle: "Einladung verwerfen?",
+    inviteUnsavedDescription: "Die Person und ihre Rolle sind noch nicht gespeichert.",
+    inviteDiscard: "Verwerfen",
     continueEditing: "Weiter bearbeiten", discardAndSwitch: "Verwerfen und wechseln", saveAndSwitch: "Speichern und wechseln",
     inviteStepPerson: "Person finden", inviteStepRole: "Rolle vergeben", inviteStepConfirm: "Zugriff prüfen",
     inviteProgress: "Einladungsschritte",
@@ -389,9 +397,9 @@ const membersCatalog: LocaleCatalog<MembersTexts> = {
   },
   en: {
     managementLocked: "Only broadcasters and managers may change members.", grantAccessTitle: "Grant access", twitchName: "Twitch name",
-    twitchNameHint: "Exactly as on Twitch, without @.", search: "Search", searching: "Searching …", title: "Members", searchMembers: "Search members", countSuffix: (count) => count === 1 ? "member" : "members", filteredSuffix: (count) => count === 1 ? "member" : "members", name: "Name", role: "Role",
+    twitchNameHint: "Exactly as on Twitch, without @.", search: "Search", searching: "Searching …", title: "Members", searchMembers: "Search members", description: "Manage who can access this channel.", countSuffix: (count) => count === 1 ? "member" : "members", filteredSuffix: (count) => count === 1 ? "member" : "members", name: "Name", role: "Role",
     roleHint: "Determines what this person can do in the channel.", accessSince: "Access since", memberRowDescription: (identity, date) => `${identity} · access since ${date}`,
-    editMember: (name) => `Edit member: ${name}`, remove: "Remove", removeConfirmTitle: (name) => `Remove access for ${name}?`, lastBroadcaster: "The last broadcaster cannot be demoted or removed.", unresolvable: "Unresolvable",
+    editMember: (name) => `Edit member: ${name}`, remove: "Remove", removeConfirmTitle: (name) => `Remove access for ${name}?`, lastBroadcaster: "The last broadcaster cannot be demoted or removed.", broadcasterRoleLocked: "Only a broadcaster may change or remove the broadcaster role.", unresolvable: "Unresolvable",
     twitchId: (userId) => `Twitch ID ${userId}`, roleFor: (name) => `Role for ${name}`, removeAccessFor: (name) => `Remove access for ${name}`,
     empty: "No one else has access to this channel yet.",
     confirmationText: (role) => `This person has no Twitch relationship proving access to this channel. The ${role} role grants access to the member list and the channel features allowed by that role.`,
@@ -402,6 +410,9 @@ const membersCatalog: LocaleCatalog<MembersTexts> = {
     removeOther: (name) => `${name} will lose access to this channel and its channel-specific panel data and features.`,
     unsavedRoleTitle: "Unsaved role change",
     unsavedRoleDescription: "The new role has not been saved yet.",
+    inviteUnsavedTitle: "Discard this invitation?",
+    inviteUnsavedDescription: "The person and role have not been saved yet.",
+    inviteDiscard: "Discard",
     continueEditing: "Continue editing", discardAndSwitch: "Discard and switch", saveAndSwitch: "Save and switch",
     inviteStepPerson: "Find person", inviteStepRole: "Choose role", inviteStepConfirm: "Review access",
     inviteProgress: "Invite steps",
