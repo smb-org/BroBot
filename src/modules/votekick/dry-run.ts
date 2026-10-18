@@ -2,7 +2,14 @@ import type { DryRunBlockCode, DryRunEffect, DryRunEntryReport } from "../../con
 import type { BallotCastResult, ModuleAction, ModuleBallotAccess, ModuleDiagnostic, ModuleDryRunContext, ModuleEvent, ModuleExecutionContext, ModuleResult } from "../contract";
 import { ballotChoiceFromMessage } from "../contract";
 import { createDryRunBallotAccess } from "../domain/dry-run-ballots";
-import { createVotekickRepository, peekVotekickAdmission } from "./adapters/d1";
+import {
+  createVotekickRepository,
+  peekVotekickAdmission,
+  peekVotekickCancel,
+  peekVotekickFinalize,
+  peekVotekickFinish,
+  peekVotekickMarkLifted,
+} from "./adapters/d1";
 import type { VotekickRepository } from "./repository";
 import { VOTEKICK_COMMAND_PATTERN } from "./domain";
 import type { Votekick, VotekickSettings } from "./contracts";
@@ -34,7 +41,7 @@ const blockCodeForReason = (reason: unknown): DryRunBlockCode => {
 
 const simulatedRepository = (context: ModuleDryRunContext, running: Votekick | null): VotekickRepository => {
   const repository = createVotekickRepository(context.DB);
-  const finalized = new Map<string, { status: "passed" | "expired"; yesVotes: number; noVotes: number; ballotRevision: number; durationSeconds: number | null; endedAt: string }>();
+  const updates = new Map<string, Partial<Votekick>>();
   return {
     ...repository,
     running: () => Promise.resolve(running),
@@ -48,17 +55,38 @@ const simulatedRepository = (context: ModuleDryRunContext, running: Votekick | n
     ),
     byId: async (channelId, id) => {
       const current = await repository.byId(channelId, id);
-      const final = finalized.get(id);
-      return current === null || final === undefined ? current : { ...current, ...final };
+      const update = updates.get(id);
+      return current === null || update === undefined ? current : { ...current, ...update };
     },
     updateCounts: () => Promise.resolve(),
-    finalize: (_channelId, id, status, yesVotes, noVotes, ballotRevision, durationSeconds, endedAt) => {
-      finalized.set(id, { status, yesVotes, noVotes, ballotRevision, durationSeconds, endedAt });
-      return Promise.resolve(true);
+    finalize: async (channelId, id, status, yesVotes, noVotes, ballotRevision, durationSeconds, endedAt) => {
+      if (!await peekVotekickFinalize(context.DB, channelId, id)) return false;
+      updates.set(id, { status, yesVotes, noVotes, ballotRevision, durationSeconds, endedAt });
+      return true;
     },
-    finish: () => Promise.resolve(true),
-    cancel: () => Promise.resolve(null),
-    markLifted: () => Promise.resolve(false),
+    finish: async (channelId, id, status, yesVotes, noVotes, ballotRevision, durationSeconds, endedAt) => {
+      if (!await peekVotekickFinish(context.DB, channelId, id, status, ballotRevision)) return false;
+      const current = await repository.byId(channelId, id);
+      if (current === null) return false;
+      const updateCounts = ballotRevision !== null && current.ballotRevision < ballotRevision;
+      updates.set(id, {
+        status,
+        ...(updateCounts ? { yesVotes, noVotes, ballotRevision } : {}),
+        durationSeconds,
+        endedAt,
+      });
+      return true;
+    },
+    cancel: async (channelId, id, now) => {
+      const cancelled = await peekVotekickCancel(context.DB, channelId, id, now);
+      if (cancelled !== null) updates.set(id, cancelled);
+      return cancelled;
+    },
+    markLifted: async (channelId, id, now) => {
+      const lifted = await peekVotekickMarkLifted(context.DB, channelId, id);
+      if (lifted) updates.set(id, { ...updates.get(id), liftedAt: now, liftClaimedAt: null });
+      return lifted;
+    },
   };
 };
 
@@ -68,7 +96,7 @@ const serviceContext = (
   ballots: ModuleBallotAccess = createDryRunBallotAccess(context, { initialRules: rules }),
 ): ModuleExecutionContext => ({
   ...context,
-  authorizeMutation: () => Promise.resolve({ sql: "", values: [] }),
+  authorizeMutation: () => { throw new Error("Dry-run cannot authorize channel mutations."); },
   ballots,
   scheduleAlarm: () => Promise.resolve(),
   clearAlarm: () => Promise.resolve(),
@@ -133,7 +161,7 @@ const actionEffects = (
         ...(counts === undefined ? {} : { counts }),
       });
     }
-    if (timeout !== undefined || status !== "running") {
+    if (timeout !== undefined || status === "passed" || status === "expired") {
       effects.push({
         kind: "ballot",
         moduleId: "votekick",

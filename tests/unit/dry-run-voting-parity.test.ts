@@ -86,6 +86,13 @@ const seedRunningVotekick = async (database: TestD1Database, channelId: string):
   expect(admission).toBe("admitted");
 };
 
+const callReadOnlyExport = async <Result>(module: object, name: string, args: readonly unknown[]): Promise<Result> => {
+  const method: unknown = Reflect.get(module, name);
+  expect(method).toBeTypeOf("function");
+  if (typeof method !== "function") throw new Error(`Expected ${name} to be available.`);
+  return await Reflect.apply(method, undefined, args) as Result;
+};
+
 const seedOpenChatVote = async (database: TestD1Database, channelId: string, closesAt: string): Promise<void> => {
   await insertChannel(database, channelId);
   await database.prepare(
@@ -135,6 +142,415 @@ const insertOpenOptionsVote = async (
 };
 
 describe("chat voting and votekick dry-run parity", () => {
+  it("requires the host ballot snapshot predicates instead of guessing their answers", async () => {
+    const ballots = createDryRunBallotAccess({} as ModuleDryRunContext);
+
+    await expect(ballots.readSnapshot?.("missing-provider")).rejects.toThrow("Dry-run ballot snapshots are unavailable.");
+    await expect(ballots.hasOpenBallotSnapshot?.()).rejects.toThrow("Dry-run ballot snapshots are unavailable.");
+  });
+
+  it("does not treat an inactive pinned ballot snapshot as the channel lock", async () => {
+    const ballots = createDryRunBallotAccess({
+      ballots: {
+        hasOpenBallotSnapshot: () => Promise.resolve(false),
+        readSnapshot: () => Promise.resolve({
+          counts: [0, 0],
+          revision: 1,
+          expiresAt: Date.now() + 60_000,
+          isActive: false,
+        }),
+      },
+    } as unknown as ModuleDryRunContext);
+    await ballots.readSnapshot?.("inactive-ballot");
+
+    await expect(ballots.hasOpenBallotSnapshot?.()).resolves.toBe(false);
+  });
+
+  it("checks the requested ballot id before simulating an open", async () => {
+    const readSnapshot = vi.fn(() => Promise.resolve({
+      counts: [0, 0],
+      revision: 1,
+      outcome: "expired" as const,
+      isActive: false,
+    }));
+    const ballots = createDryRunBallotAccess({
+      ballots: {
+        hasOpenBallotSnapshot: () => Promise.resolve(false),
+        readSnapshot,
+      },
+    } as unknown as ModuleDryRunContext);
+
+    await expect(ballots.open("retained-ballot-id", 2, Date.now() + 60_000)).resolves.toEqual({
+      status: "busy",
+      moduleId: "active",
+    });
+    expect(readSnapshot).toHaveBeenCalledWith("retained-ballot-id", undefined);
+  });
+
+  it("does not accept a free-text cast on a numbered ballot snapshot", async () => {
+    const ballots = createDryRunBallotAccess({
+      ballots: {
+        hasOpenBallotSnapshot: () => Promise.resolve(true),
+        readSnapshot: () => Promise.resolve({
+          counts: [0, 0],
+          revision: 1,
+          expiresAt: Date.now() + 60_000,
+          isActive: true,
+        }),
+      },
+    } as unknown as ModuleDryRunContext, { isBlockedFreeTextVote: () => false });
+
+    await expect(ballots.castTerm?.("numbered-ballot", "voter", "cat"))
+      .resolves.toMatchObject({ status: "not_open" });
+  });
+
+  it("filters blocked terms from the pinned free-text state", async () => {
+    const ballots = createDryRunBallotAccess({
+      ballots: {
+        hasOpenBallotSnapshot: () => Promise.resolve(true),
+        readSnapshot: () => Promise.resolve({
+          counts: [],
+          revision: 4,
+          terms: [
+            { term: "cat", count: 1, approved: true },
+            { term: "dog", count: 2, approved: false },
+          ],
+          approvedTerms: ["cat"],
+          blockedTerms: [],
+          termFilterReady: true,
+          expiresAt: Date.now() + 60_000,
+          isActive: true,
+        }),
+      },
+    } as unknown as ModuleDryRunContext, { isBlockedFreeTextVote: (term, blocked) => blocked.includes(term) });
+
+    await expect(ballots.setBlockedTerms?.("free-text-poll", ["cat"])).resolves.toMatchObject({
+      revision: 5,
+      terms: [{ term: "dog", count: 2, approved: false }],
+      blockedTerms: ["cat"],
+      termFilterReady: true,
+    });
+  });
+
+  it("does not refresh blocked terms for an inactive free-text ballot", async () => {
+    const ballots = createDryRunBallotAccess({
+      ballots: {
+        hasOpenBallotSnapshot: () => Promise.resolve(false),
+        readSnapshot: () => Promise.resolve({
+          counts: [],
+          revision: 1,
+          terms: [{ term: "cat", count: 1, approved: false }],
+          blockedTerms: [],
+          termFilterReady: true,
+          expiresAt: Date.now() + 60_000,
+          isActive: false,
+        }),
+      },
+    } as unknown as ModuleDryRunContext, { isBlockedFreeTextVote: (term, blocked) => blocked.includes(term) });
+
+    await expect(ballots.setBlockedTerms?.("free-text-poll", ["cat"])).resolves.toBeNull();
+  });
+
+  it("simulates term approval from the pinned ballot and filter state", async () => {
+    const ballots = createDryRunBallotAccess({
+      ballots: {
+        hasOpenBallotSnapshot: () => Promise.resolve(true),
+        readSnapshot: () => Promise.resolve({
+          counts: [],
+          revision: 2,
+          terms: [{ term: "cat", count: 2, approved: false }],
+          approvedTerms: [],
+          blockedTerms: [],
+          termFilterReady: true,
+          expiresAt: Date.now() + 60_000,
+          isActive: true,
+        }),
+      },
+    } as unknown as ModuleDryRunContext, { isBlockedFreeTextVote: (term, blocked) => blocked.includes(term) });
+
+    await expect(ballots.approveTerm?.("free-text-poll", "cat")).resolves.toMatchObject({
+      status: "approved",
+      snapshot: {
+        revision: 3,
+        terms: [{ term: "cat", count: 2, approved: true }],
+        approvedTerms: ["cat"],
+      },
+    });
+  });
+
+  it("allows term approval when the production filter exists but the display readiness flag is false", async () => {
+    const ballots = createDryRunBallotAccess({
+      ballots: {
+        hasOpenBallotSnapshot: () => Promise.resolve(true),
+        readSnapshot: () => Promise.resolve({
+          counts: [],
+          revision: 2,
+          terms: [{ term: "cat", count: 2, approved: false }],
+          approvedTerms: [],
+          blockedTerms: [],
+          termFilterReady: false,
+          expiresAt: Date.now() + 60_000,
+          isActive: true,
+        }),
+      },
+    } as unknown as ModuleDryRunContext, { isBlockedFreeTextVote: (term, blocked) => blocked.includes(term) });
+
+    await expect(ballots.approveTerm?.("free-text-poll", "cat")).resolves.toMatchObject({
+      status: "approved",
+      snapshot: { terms: [{ term: "cat", count: 2, approved: true }] },
+    });
+  });
+
+  it("requires the production free-text blocking predicate when simulating a term cast", async () => {
+    const ballots = createDryRunBallotAccess({
+      ballots: {
+        hasOpenBallotSnapshot: () => Promise.resolve(true),
+        readSnapshot: () => Promise.resolve({
+          counts: [],
+          revision: 1,
+          terms: [],
+          blockedTerms: [],
+          termFilterReady: true,
+          expiresAt: Date.now() + 60_000,
+          isActive: true,
+        }),
+      },
+    } as unknown as ModuleDryRunContext);
+
+    await expect(ballots.castTerm?.("free-text-poll", "voter", "cat"))
+      .rejects.toThrow("Dry-run free-text vote predicate is unavailable.");
+  });
+
+  it("checks the production chat-vote alarm-close claim predicate", async () => {
+    const database = new TestD1Database();
+    const channelId = "dry-run-alarm-claim-channel";
+    let closesAt = new Date(Date.now() + 60_000).toISOString();
+    try {
+      await seedOpenChatVote(database, channelId, closesAt);
+      const peek = async (): Promise<boolean> => await callReadOnlyExport<boolean>(
+        await import("../../src/modules/chat_voting/repository"),
+        "peekChatVoteAlarmClose",
+        [readOnlyD1(database as unknown as D1Database), channelId, "open-chat-vote", closesAt, new Date().toISOString()],
+      );
+
+      expect(await peek()).toBe(true);
+      await database.prepare(
+        "UPDATE chat_votes SET close_reason = 'timer' WHERE channel_id = ? AND poll_id = ?",
+      ).bind(channelId, "open-chat-vote").run();
+      expect(await peek()).toBe(false);
+      closesAt = new Date(Date.now() - 1).toISOString();
+      await database.prepare(
+        "UPDATE chat_votes SET closes_at = ? WHERE channel_id = ? AND poll_id = ?",
+      ).bind(closesAt, channelId, "open-chat-vote").run();
+      expect(await peek()).toBe(true);
+      await database.prepare(
+        "UPDATE chat_votes SET closing_at = ? WHERE channel_id = ? AND poll_id = ?",
+      ).bind(new Date().toISOString(), channelId, "open-chat-vote").run();
+      expect(await peek()).toBe(false);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("checks the production chat-vote extension guard and module authorization", async () => {
+    const database = new TestD1Database();
+    const channelId = "dry-run-extension-claim-channel";
+    const closesAt = new Date(Date.now() + 60_000).toISOString();
+    try {
+      await seedOpenChatVote(database, channelId, closesAt);
+      await database.prepare(
+        "UPDATE chat_votes SET close_reason = 'timer' WHERE channel_id = ? AND poll_id = ?",
+      ).bind(channelId, "open-chat-vote").run();
+      const check = async (authorization: { sql: string; values: readonly unknown[] }): Promise<boolean> =>
+        await callReadOnlyExport<boolean>(
+          await import("../../src/modules/chat_voting/repository"),
+          "peekChatVoteExtension",
+          [readOnlyD1(database as unknown as D1Database), channelId, "open-chat-vote", closesAt, authorization],
+        );
+
+      expect(await check({ sql: "AND 1 = 1", values: [] })).toBe(true);
+      expect(await check({ sql: "AND 1 = 0", values: [] })).toBe(false);
+      await database.prepare(
+        "UPDATE channel_modules SET enabled = 0 WHERE channel_id = ? AND module_id = 'chat_voting'",
+      ).bind(channelId).run();
+      expect(await check({ sql: "AND 1 = 1", values: [] })).toBe(false);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("checks the production chat-vote extension rollback revision predicate", async () => {
+    const database = new TestD1Database();
+    const channelId = "dry-run-extension-rollback-channel";
+    const originalDeadline = new Date(Date.now() + 60_000).toISOString();
+    const extendedDeadline = new Date(Date.now() + 90_000).toISOString();
+    try {
+      await seedOpenChatVote(database, channelId, originalDeadline);
+      await database.prepare(
+        "UPDATE chat_votes SET close_reason = 'timer', closes_at = ?, deadline_revision = 1 WHERE channel_id = ? AND poll_id = ?",
+      ).bind(extendedDeadline, channelId, "open-chat-vote").run();
+      const rollback = async (revision: number): Promise<boolean> => await callReadOnlyExport<boolean>(
+        await import("../../src/modules/chat_voting/repository"),
+        "peekChatVoteExtensionRollback",
+        [readOnlyD1(database as unknown as D1Database), channelId, "open-chat-vote", extendedDeadline, revision, originalDeadline],
+      );
+
+      expect(await rollback(1)).toBe(true);
+      expect(await rollback(0)).toBe(false);
+      await database.prepare(
+        "UPDATE chat_votes SET close_reason = 'manual' WHERE channel_id = ? AND poll_id = ?",
+      ).bind(channelId, "open-chat-vote").run();
+      expect(await rollback(1)).toBe(false);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("checks the production chat-vote open-row finish predicate", async () => {
+    const database = new TestD1Database();
+    const channelId = "dry-run-finish-vote-channel";
+    try {
+      await seedOpenChatVote(database, channelId, new Date(Date.now() + 60_000).toISOString());
+      const finish = async (): Promise<boolean> => await callReadOnlyExport<boolean>(
+        await import("../../src/modules/chat_voting/repository"),
+        "peekChatVoteFinish",
+        [readOnlyD1(database as unknown as D1Database), channelId, "open-chat-vote"],
+      );
+
+      expect(await finish()).toBe(true);
+      await expect(createChatVotingRepository(database as unknown as D1Database).finish(
+        channelId, "open-chat-vote", "manual", new Date().toISOString(), [0, 0], null, 0, null, false,
+      )).resolves.toBe(true);
+      expect(await finish()).toBe(false);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("checks the production result-delivery completion predicate", async () => {
+    const database = new TestD1Database();
+    const channelId = "dry-run-result-delivery-channel";
+    try {
+      await seedOpenChatVote(database, channelId, new Date(Date.now() + 60_000).toISOString());
+      await expect(createChatVotingRepository(database as unknown as D1Database).finish(
+        channelId, "open-chat-vote", "manual", new Date().toISOString(), [0, 0], null, 0, null, true,
+      )).resolves.toBe(true);
+      const complete = async (): Promise<boolean> => await callReadOnlyExport<boolean>(
+        await import("../../src/modules/chat_voting/repository"),
+        "peekChatVoteResultDelivery",
+        [readOnlyD1(database as unknown as D1Database), channelId, "open-chat-vote"],
+      );
+
+      expect(await complete()).toBe(true);
+      await database.prepare(
+        "UPDATE chat_votes SET result_delivery_pending = 0 WHERE channel_id = ? AND poll_id = ?",
+      ).bind(channelId, "open-chat-vote").run();
+      expect(await complete()).toBe(false);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("checks the production running-row predicate before a dry-run finalization claim", async () => {
+    const database = new TestD1Database();
+    const channelId = "dry-run-finalize-predicate-channel";
+    try {
+      await seedRunningVotekick(database, channelId);
+      const allowed = await callReadOnlyExport<boolean>(
+        await import("../../src/modules/votekick/adapters/d1"),
+        "peekVotekickFinalize",
+        [readOnlyD1(database as unknown as D1Database), channelId, "running-votekick"],
+      );
+      await database.prepare(
+        "UPDATE votekicks SET status = 'cancelled' WHERE channel_id = ? AND votekick_id = ?",
+      ).bind(channelId, "running-votekick").run();
+      const denied = await callReadOnlyExport<boolean>(
+        await import("../../src/modules/votekick/adapters/d1"),
+        "peekVotekickFinalize",
+        [readOnlyD1(database as unknown as D1Database), channelId, "running-votekick"],
+      );
+
+      expect(allowed).toBe(true);
+      expect(denied).toBe(false);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("checks the production finish predicate including the passed ballot revision guard", async () => {
+    const database = new TestD1Database();
+    const channelId = "dry-run-finish-predicate-channel";
+    try {
+      await seedRunningVotekick(database, channelId);
+      const finish = async (status: string, revision: number | null): Promise<boolean> =>
+        await callReadOnlyExport<boolean>(
+          await import("../../src/modules/votekick/adapters/d1"),
+          "peekVotekickFinish",
+          [readOnlyD1(database as unknown as D1Database), channelId, "running-votekick", status, revision],
+        );
+
+      expect(await finish("passed", 1)).toBe(true);
+      expect(await finish("passed", 0)).toBe(false);
+      expect(await finish("failed", 0)).toBe(true);
+      await database.prepare(
+        "UPDATE votekicks SET status = 'cancelled' WHERE channel_id = ? AND votekick_id = ?",
+      ).bind(channelId, "running-votekick").run();
+      expect(await finish("failed", 1)).toBe(false);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("reads the production cancel predicate and cancelled row projection", async () => {
+    const database = new TestD1Database();
+    const channelId = "dry-run-cancel-predicate-channel";
+    const endedAt = "2026-10-18T12:00:00.000Z";
+    try {
+      await seedRunningVotekick(database, channelId);
+      const adapter = await import("../../src/modules/votekick/adapters/d1");
+      const cancel = async (): Promise<{ status: string; endedAt: string } | null> =>
+        await callReadOnlyExport(adapter, "peekVotekickCancel", [
+          readOnlyD1(database as unknown as D1Database), channelId, "running-votekick", endedAt,
+        ]);
+
+      expect(await cancel()).toMatchObject({ status: "cancelled", endedAt });
+      await database.prepare(
+        "UPDATE votekicks SET status = 'cancelled' WHERE channel_id = ? AND votekick_id = ?",
+      ).bind(channelId, "running-votekick").run();
+      expect(await cancel()).toBeNull();
+    } finally {
+      database.close();
+    }
+  });
+
+  it("checks the production mark-lifted predicate without changing the row", async () => {
+    const database = new TestD1Database();
+    const channelId = "dry-run-mark-lifted-channel";
+    try {
+      await seedRunningVotekick(database, channelId);
+      await database.prepare(
+        "UPDATE votekicks SET status = 'passed' WHERE channel_id = ? AND votekick_id = ?",
+      ).bind(channelId, "running-votekick").run();
+      const check = async (): Promise<boolean> => await callReadOnlyExport<boolean>(
+        await import("../../src/modules/votekick/adapters/d1"),
+        "peekVotekickMarkLifted",
+        [readOnlyD1(database as unknown as D1Database), channelId, "running-votekick"],
+      );
+
+      expect(await check()).toBe(true);
+      await database.prepare(
+        "UPDATE votekicks SET lifted_at = ? WHERE channel_id = ? AND votekick_id = ?",
+      ).bind(new Date().toISOString(), channelId, "running-votekick").run();
+      expect(await check()).toBe(false);
+      await database.prepare(
+        "UPDATE votekicks SET lifted_at = NULL, target_user_id = NULL WHERE channel_id = ? AND votekick_id = ?",
+      ).bind(channelId, "running-votekick").run();
+      expect(await check()).toBe(false);
+    } finally {
+      database.close();
+    }
+  });
+
   it("preserves a voter's previous numbered ballot choice for duplicate, changed, and only-if-new casts", async () => {
     const database = new TestD1Database();
     try {
@@ -241,7 +657,7 @@ describe("chat voting and votekick dry-run parity", () => {
     }
   });
 
-  it("pins the running votekick row and its ballot rule across a replacement", async () => {
+  it("does not finalize a pinned votekick row after it was replaced", async () => {
     const database = new TestD1Database();
     const channelId = "pinned-votekick-channel";
     try {
@@ -285,7 +701,7 @@ describe("chat voting and votekick dry-run parity", () => {
         sql.includes("FROM votekicks WHERE channel_id = ? AND status = 'running' LIMIT 1"));
 
       expect(runningReads).toHaveLength(1);
-      expect(report[0]?.effects.some((effect) => effect.kind === "timeout")).toBe(true);
+      expect(report[0]?.effects.some((effect) => effect.kind === "timeout")).toBe(false);
     } finally {
       database.close();
     }
@@ -315,6 +731,65 @@ describe("chat voting and votekick dry-run parity", () => {
     } finally {
       database.close();
     }
+  });
+
+  it("does not report a votekick finalization after its running row was cancelled", async () => {
+    const database = new TestD1Database();
+    const channelId = "cancelled-votekick-claim-channel";
+    try {
+      await seedRunningVotekick(database, channelId);
+      const interleavedDatabase = createReadInterleavingDatabase(
+        database,
+        (sql) => sql.includes("FROM votekicks WHERE channel_id = ? AND status = 'running' LIMIT 1"),
+        async () => {
+          await database.prepare(
+            "UPDATE votekicks SET status = 'cancelled', ended_at = ? WHERE channel_id = ? AND votekick_id = ?",
+          ).bind(new Date().toISOString(), channelId, "running-votekick").run();
+        },
+      );
+      const event = { ...votekickEvent("1"), channelId };
+      const report = await dryRunVotekickMessage(event, {
+        ...chatDryRunContext(database, {
+          counts: [2, 0],
+          revision: 1,
+          expiresAt: Date.now() + 60_000,
+          isActive: true,
+        }),
+        DB: readOnlyD1(interleavedDatabase),
+      });
+
+      expect(report[0]?.effects).not.toContainEqual(expect.objectContaining({ kind: "timeout" }));
+      expect(report[0]?.effects).not.toContainEqual(expect.objectContaining({
+        kind: "ballot",
+        moduleId: "votekick",
+        action: "finalize",
+      }));
+    } finally {
+      database.close();
+    }
+  });
+
+  it("restores a returning free-text term with its retained approval", async () => {
+    const ballots = createDryRunBallotAccess({
+      ballots: {
+        hasOpenBallotSnapshot: () => Promise.resolve(false),
+        readSnapshot: () => Promise.resolve({
+          counts: [],
+          revision: 3,
+          terms: [{ term: "dog", count: 1, approved: false }],
+          approvedTerms: ["cat"],
+          expiresAt: Date.now() + 60_000,
+          isActive: true,
+        }),
+      },
+    } as unknown as ModuleDryRunContext, {
+      voterId: "returning-voter",
+      isBlockedFreeTextVote: (term, blockedTerms) => blockedTerms.includes(term),
+    });
+
+    const cast = await ballots.castTerm?.("free-text-poll", "returning-voter", "cat");
+    expect(cast?.status).toBe("counted");
+    expect(cast?.terms?.find(({ term }) => term === "cat")).toEqual({ term: "cat", count: 1, approved: true });
   });
 
   it("repeats the production closing reply while a manual close is pending", async () => {

@@ -80,6 +80,71 @@ export const peekVotekickAdmission = async (
     : "admitted";
 };
 
+export const votekickFinalizeClaimPredicate = (channelId: string, id: string): { sql: string; values: readonly string[] } => ({
+  sql: "channel_id = ? AND votekick_id = ? AND status = 'running'",
+  values: [channelId, id],
+});
+
+export const votekickFinishClaimPredicate = (
+  channelId: string,
+  id: string,
+  status: Exclude<VotekickStatus, "running">,
+  ballotRevision: number | null,
+): { sql: string; values: readonly (string | number | null)[] } => ({
+  sql: `channel_id = ? AND votekick_id = ? AND status = 'running'
+    AND (? <> 'passed' OR ballot_revision <= ?)`,
+  values: [channelId, id, status, ballotRevision],
+});
+
+export const votekickMarkLiftedPredicate = (channelId: string, id: string): { sql: string; values: readonly string[] } => ({
+  sql: `channel_id = ? AND votekick_id = ? AND status = 'passed'
+    AND lifted_at IS NULL AND target_user_id IS NOT NULL`,
+  values: [channelId, id],
+});
+
+/** Checks whether the production finalization update can claim this running row. */
+export const peekVotekickFinalize = async (db: D1Database, channelId: string, id: string): Promise<boolean> => {
+  const votekickFinalizePredicate = votekickFinalizeClaimPredicate(channelId, id);
+  const row = await db.prepare(`SELECT 1 AS claimed FROM votekicks WHERE ${votekickFinalizePredicate.sql} LIMIT 1`)
+    .bind(...votekickFinalizePredicate.values).first<{ claimed: number }>();
+  return row !== null;
+};
+
+/** Checks whether the production finish update can claim this running row and ballot revision. */
+export const peekVotekickFinish = async (
+  db: D1Database,
+  channelId: string,
+  id: string,
+  status: Exclude<VotekickStatus, "running">,
+  ballotRevision: number | null,
+): Promise<boolean> => {
+  const votekickFinishPredicate = votekickFinishClaimPredicate(channelId, id, status, ballotRevision);
+  const row = await db.prepare(`SELECT 1 AS claimed FROM votekicks WHERE ${votekickFinishPredicate.sql} LIMIT 1`)
+    .bind(...votekickFinishPredicate.values).first<{ claimed: number }>();
+  return row !== null;
+};
+
+/** Reads the row that production's conditional cancellation update could claim. */
+export const peekVotekickCancel = async (
+  db: D1Database,
+  channelId: string,
+  id: string,
+  now: string,
+): Promise<Votekick | null> => {
+  const votekickCancelPredicate = votekickFinalizeClaimPredicate(channelId, id);
+  const row = await db.prepare(`SELECT ${rowColumns} FROM votekicks WHERE ${votekickCancelPredicate.sql} LIMIT 1`)
+    .bind(...votekickCancelPredicate.values).first<VotekickRow>();
+  return row === null ? null : { ...mapRow(row), status: "cancelled", endedAt: now };
+};
+
+/** Checks whether the production lift update can claim an unlifted passed row. */
+export const peekVotekickMarkLifted = async (db: D1Database, channelId: string, id: string): Promise<boolean> => {
+  const votekickLiftPredicate = votekickMarkLiftedPredicate(channelId, id);
+  const row = await db.prepare(`SELECT 1 AS claimed FROM votekicks WHERE ${votekickLiftPredicate.sql} LIMIT 1`)
+    .bind(...votekickLiftPredicate.values).first<{ claimed: number }>();
+  return row !== null;
+};
+
 export const createVotekickRepository = (db: D1Database): VotekickRepository => ({
   async admit(channelId, input, checkedAt, channelCooldownSeconds, targetCooldownSeconds): Promise<VotekickAdmissionResult> {
     const { values: admissionValues, channelCutoff, targetCutoff } = admissionCutoffs(
@@ -147,15 +212,17 @@ export const createVotekickRepository = (db: D1Database): VotekickRepository => 
   },
 
   async finalize(channelId, id, status, yesVotes, noVotes, ballotRevision, durationSeconds, endedAt): Promise<boolean> {
+    const votekickFinalizePredicate = votekickFinalizeClaimPredicate(channelId, id);
     const result = await db.prepare(
       `UPDATE votekicks
           SET status = ?, yes_votes = ?, no_votes = ?, ballot_revision = ?, duration_seconds = ?, ended_at = ?
-        WHERE channel_id = ? AND votekick_id = ? AND status = 'running'`,
-    ).bind(status, yesVotes, noVotes, ballotRevision, durationSeconds, endedAt, channelId, id).run();
+        WHERE ${votekickFinalizePredicate.sql}`,
+    ).bind(status, yesVotes, noVotes, ballotRevision, durationSeconds, endedAt, ...votekickFinalizePredicate.values).run();
     return result.meta.changes === 1;
   },
 
   async finish(channelId, id, status: Exclude<VotekickStatus, "running">, yesVotes, noVotes, ballotRevision, durationSeconds, endedAt): Promise<boolean> {
+    const votekickFinishPredicate = votekickFinishClaimPredicate(channelId, id, status, ballotRevision);
     const result = await db.prepare(
       `UPDATE votekicks
           SET status = ?,
@@ -163,30 +230,31 @@ export const createVotekickRepository = (db: D1Database): VotekickRepository => 
               no_votes = CASE WHEN ? IS NOT NULL AND ballot_revision < ? THEN ? ELSE no_votes END,
               ballot_revision = CASE WHEN ? IS NOT NULL AND ballot_revision < ? THEN ? ELSE ballot_revision END,
               duration_seconds = ?, ended_at = ?
-        WHERE channel_id = ? AND votekick_id = ? AND status = 'running'
-          AND (? <> 'passed' OR ballot_revision <= ?)`,
+        WHERE ${votekickFinishPredicate.sql}`,
     ).bind(status, ballotRevision, ballotRevision, yesVotes, ballotRevision, ballotRevision, noVotes,
-      ballotRevision, ballotRevision, ballotRevision, durationSeconds, endedAt, channelId, id, status, ballotRevision).run();
+      ballotRevision, ballotRevision, ballotRevision, durationSeconds, endedAt, ...votekickFinishPredicate.values).run();
     return result.meta.changes > 0;
   },
 
   async cancel(channelId, id, now): Promise<Votekick | null> {
+    const votekickCancelPredicate = votekickFinalizeClaimPredicate(channelId, id);
     const row = await db.prepare(
-      `SELECT ${rowColumns} FROM votekicks WHERE channel_id = ? AND votekick_id = ? AND status = 'running'`,
-    ).bind(channelId, id).first<VotekickRow>();
+      `SELECT ${rowColumns} FROM votekicks WHERE ${votekickCancelPredicate.sql}`,
+    ).bind(...votekickCancelPredicate.values).first<VotekickRow>();
     if (row === null) return null;
     const result = await db.prepare(
       `UPDATE votekicks SET status = 'cancelled', ended_at = ?
-        WHERE channel_id = ? AND votekick_id = ? AND status = 'running'`,
-    ).bind(now, channelId, id).run();
+        WHERE ${votekickCancelPredicate.sql}`,
+    ).bind(now, ...votekickCancelPredicate.values).run();
     return result.meta.changes === 0 ? null : { ...mapRow(row), status: "cancelled", endedAt: now };
   },
 
   async markLifted(channelId, id, now): Promise<boolean> {
+    const votekickLiftPredicate = votekickMarkLiftedPredicate(channelId, id);
     const result = await db.prepare(
       `UPDATE votekicks SET lifted_at = ?, lift_claim_id = NULL, lift_claimed_at = NULL
-        WHERE channel_id = ? AND votekick_id = ? AND status = 'passed' AND lifted_at IS NULL AND target_user_id IS NOT NULL`,
-    ).bind(now, channelId, id).run();
+        WHERE ${votekickLiftPredicate.sql}`,
+    ).bind(now, ...votekickLiftPredicate.values).run();
     return result.meta.changes > 0;
   },
 });

@@ -671,6 +671,8 @@ export interface ModuleExecutionContext {
 export interface ModuleDryRunBallotSnapshot extends BallotSnapshot {
   /** The ballot-local term filter, available only to simulate a free-text cast. */
   blockedTerms?: readonly string[] | null;
+  /** Approved free-text terms retained after their last voter switches away. */
+  approvedTerms?: readonly string[];
   /** Absolute deadline from the stored ballot. */
   expiresAt?: number;
   /** Prior choice for the one simulated sender, without exposing other voter ids. */

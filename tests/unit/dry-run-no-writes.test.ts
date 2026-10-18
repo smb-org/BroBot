@@ -7,7 +7,10 @@ import { votekickModule } from "../../src/modules/votekick";
 import { createVotekickRepository } from "../../src/modules/votekick/adapters/d1";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { dryRunChatMessage } from "../../src/worker/dry-run";
-import { castStoredBallotTerm, openStoredBallot, readStoredBallotDryRunSnapshot } from "../../src/worker/durable/ballots";
+import { approveStoredBallotTerm, castStoredBallotTerm, openStoredBallot, readStoredBallotDryRunSnapshot } from "../../src/worker/durable/ballots";
+import { createDryRunBallotAccess } from "../../src/modules/domain/dry-run-ballots";
+import type { ModuleDryRunContext } from "../../src/modules/contract";
+import { isBlockedFreeTextVote } from "../../src/modules/chat_voting/domain";
 import { insertAppAccessToken, insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -798,5 +801,41 @@ describe("dryRunChatMessage", () => {
     });
     expect(storage.writes).toBe(0);
     expect(storage.alarms).toBe(0);
+  });
+
+  it("pins retained free-text approvals after the approved term loses its last vote", async () => {
+    const storage = memoryBallotStorage();
+    const ballotId = "dry-run-retained-approval";
+    const opened = await openStoredBallot(
+      storage.storage,
+      "chat_voting",
+      ballotId,
+      0,
+      Date.now() + 60_000,
+      undefined,
+      undefined,
+      undefined,
+      { blockedTerms: [] },
+    );
+    expect(opened.status).toBe("opened");
+    await castStoredBallotTerm(storage.storage, CHANNEL_ID, "chat_voting", ballotId, "voter-a", "cat");
+    await expect(approveStoredBallotTerm(storage.storage, "chat_voting", ballotId, "cat"))
+      .resolves.toMatchObject({ status: "approved" });
+    await castStoredBallotTerm(storage.storage, CHANNEL_ID, "chat_voting", ballotId, "voter-a", "dog");
+
+    const snapshot = await readStoredBallotDryRunSnapshot(storage.storage, "chat_voting", ballotId, CHANNEL_ID, "voter-b");
+    expect(snapshot).toMatchObject({
+      terms: [{ term: "dog", count: 1, approved: false }],
+      approvedTerms: ["cat"],
+    });
+    const dryRunBallots = createDryRunBallotAccess({
+      ballots: {
+        hasOpenBallotSnapshot: () => Promise.resolve(false),
+        readSnapshot: () => Promise.resolve(snapshot),
+      },
+    } as unknown as ModuleDryRunContext, { voterId: "voter-b", isBlockedFreeTextVote });
+
+    const cast = await dryRunBallots.castTerm?.(ballotId, "voter-b", "cat");
+    expect(cast?.terms?.find(({ term }) => term === "cat")).toEqual({ term: "cat", count: 1, approved: true });
   });
 });

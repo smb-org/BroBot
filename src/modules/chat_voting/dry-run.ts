@@ -2,7 +2,16 @@ import type { DryRunBlockCode, DryRunEffect, DryRunEntryReport } from "../../con
 import type { BallotCastResult, ModuleAction, ModuleBallotAccess, ModuleDiagnostic, ModuleDryRunBallotSnapshot, ModuleDryRunContext, ModuleEvent, ModuleExecutionContext, ModuleResult } from "../contract";
 import { parseVoteCommand, voteChoiceFromMessage, normalizeFreeTextVote, isBlockedFreeTextVote } from "./domain";
 import { createDryRunBallotAccess } from "../domain/dry-run-ballots";
-import { createChatVotingRepository, peekChatVoteManualClose, peekChatVoteOpenInsert } from "./repository";
+import {
+  createChatVotingRepository,
+  peekChatVoteAlarmClose,
+  peekChatVoteExtension,
+  peekChatVoteExtensionRollback,
+  peekChatVoteFinish,
+  peekChatVoteManualClose,
+  peekChatVoteOpenInsert,
+  peekChatVoteResultDelivery,
+} from "./repository";
 import type { ChatVotingRepository } from "./repository";
 import { canControlChatVoting, isChatVotingCommandLike, processChatVotingMessage } from "./service";
 import type { ChatVote, ChatVoteTemplate, ChatVoteTerm, ChatVotingSettings } from "./contracts";
@@ -34,6 +43,7 @@ const simulatedRepository = (
   templateLookup: PinnedTemplateLookup | null,
 ): ChatVotingRepository => {
   let latestRead: Promise<ChatVote | null> | null = null;
+  let simulatedVote = openVote;
   const templates = {
     ...source.templates,
     ...(templateLookup?.kind === "shortcut" ? {
@@ -52,37 +62,101 @@ const simulatedRepository = (
   };
   return {
     ...source,
-    open: (lookupChannelId) => lookupChannelId === channelId ? Promise.resolve(openVote) : source.open(lookupChannelId),
+    open: (lookupChannelId) => lookupChannelId === channelId
+      ? Promise.resolve(simulatedVote?.status === "closed" ? null : simulatedVote)
+      : source.open(lookupChannelId),
     latest: async (lookupChannelId) => {
       if (lookupChannelId !== channelId) return await source.latest(lookupChannelId);
-      if (openVote !== null) return openVote;
+      if (simulatedVote !== null) return simulatedVote;
       latestRead ??= source.latest(lookupChannelId);
       return await latestRead;
     },
     byId: (lookupChannelId, pollId) =>
-      lookupChannelId === channelId && openVote?.id === pollId
-        ? Promise.resolve(openVote)
+      lookupChannelId === channelId && simulatedVote?.id === pollId
+        ? Promise.resolve(simulatedVote)
         : source.byId(lookupChannelId, pollId),
     insertOpen: async (vote, authorization, resultTextTemplate, blockGuard) => {
       const admission = await peekChatVoteOpenInsert(context.DB, vote, authorization, resultTextTemplate, blockGuard);
       if (admission !== "inserted") return admission;
-      if (openVote !== null) throw new Error("An open D1 vote prevented the production insert.");
+      if (simulatedVote !== null && simulatedVote.status !== "closed") {
+        throw new Error("An open D1 vote prevented the production insert.");
+      }
+      simulatedVote = { ...vote, status: "open", closedAt: null, counts: null, voterCount: null };
       return "inserted";
     },
-    requestManualClose: (lookupChannelId, pollId, expectedClosesAt, authorization) =>
-      peekChatVoteManualClose(context.DB, lookupChannelId, pollId, expectedClosesAt, authorization),
-    claimAlarmClose: () => Promise.resolve(false),
-    extendClose: () => Promise.resolve(false),
-    rollbackCloseExtension: () => Promise.resolve(false),
-    finish: () => Promise.resolve(false),
-    completeResultDelivery: () => Promise.resolve(false),
+    requestManualClose: async (lookupChannelId, pollId, expectedClosesAt, authorization) => {
+      const requested = await peekChatVoteManualClose(context.DB, lookupChannelId, pollId, expectedClosesAt, authorization);
+      if (requested && simulatedVote?.id === pollId) {
+        simulatedVote = {
+          ...simulatedVote,
+          status: "closing",
+          closeReason: "manual",
+          closingAt: simulatedVote.closingAt ?? new Date().toISOString(),
+          deadlineRevision: (simulatedVote.deadlineRevision ?? 0) + Number(simulatedVote.closingAt == null),
+        };
+      }
+      return requested;
+    },
+    claimAlarmClose: async (lookupChannelId, pollId, expectedClosesAt, claimedAt) => {
+      const claimed = await peekChatVoteAlarmClose(context.DB, lookupChannelId, pollId, expectedClosesAt, claimedAt);
+      if (claimed && simulatedVote?.id === pollId) {
+        simulatedVote = {
+          ...simulatedVote,
+          status: "closing",
+          closingAt: claimedAt,
+          deadlineRevision: (simulatedVote.deadlineRevision ?? 0) + Number(simulatedVote.closingAt == null),
+        };
+      }
+      return claimed;
+    },
+    extendClose: async (lookupChannelId, pollId, expectedClosesAt, closesAt, authorization) => {
+      const extended = await peekChatVoteExtension(context.DB, lookupChannelId, pollId, expectedClosesAt, authorization);
+      if (extended && simulatedVote?.id === pollId) {
+        simulatedVote = { ...simulatedVote, closesAt, deadlineRevision: (simulatedVote.deadlineRevision ?? 0) + 1 };
+      }
+      return extended;
+    },
+    rollbackCloseExtension: async (lookupChannelId, pollId, expectedClosesAt, expectedDeadlineRevision, closesAt) => {
+      const rolledBack = await peekChatVoteExtensionRollback(
+        context.DB, lookupChannelId, pollId, expectedClosesAt, expectedDeadlineRevision,
+      );
+      if (rolledBack && simulatedVote?.id === pollId) {
+        simulatedVote = { ...simulatedVote, closesAt, deadlineRevision: (simulatedVote.deadlineRevision ?? 0) + 1 };
+      }
+      return rolledBack;
+    },
+    finish: async (lookupChannelId, pollId, closeReason, closedAt, counts, textResults, moreTerms, termFilterReady, resultDeliveryPending) => {
+      const finished = await peekChatVoteFinish(context.DB, lookupChannelId, pollId);
+      if (finished && simulatedVote?.id === pollId) {
+        simulatedVote = {
+          ...simulatedVote,
+          status: "closed",
+          closedAt,
+          closeReason,
+          counts: [...counts],
+          voterCount: textResults == null
+            ? counts.reduce((total, count) => total + count, 0)
+            : textResults.reduce((total, entry) => total + entry.count, 0),
+          textResults: textResults == null ? null : textResults.map((entry) => ({ ...entry })),
+          moreTerms: textResults == null ? null : moreTerms ?? 0,
+          termFilterReady: textResults == null || termFilterReady == null ? null : termFilterReady,
+          resultDeliveryPending: resultDeliveryPending ?? false,
+        };
+      }
+      return finished;
+    },
+    completeResultDelivery: async (lookupChannelId, pollId) => {
+      const completed = await peekChatVoteResultDelivery(context.DB, lookupChannelId, pollId);
+      if (completed && simulatedVote?.id === pollId) simulatedVote = { ...simulatedVote, resultDeliveryPending: false };
+      return completed;
+    },
     templates,
   };
 };
 
 const serviceContext = (context: ModuleDryRunContext, ballots: ModuleBallotAccess): ModuleExecutionContext => ({
   ...context,
-  authorizeMutation: () => Promise.resolve({ sql: "", values: [] }),
+  authorizeMutation: () => { throw new Error("Dry-run cannot authorize channel mutations."); },
   ballots,
   scheduleAlarm: () => Promise.resolve(),
   clearAlarm: () => Promise.resolve(),

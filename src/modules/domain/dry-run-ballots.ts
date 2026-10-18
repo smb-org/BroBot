@@ -32,7 +32,9 @@ export const createDryRunBallotAccess = (
     if (projected !== undefined) return projected;
     const pending = snapshotReads.get(ballotId);
     if (pending !== undefined) return pending;
-    const read = context.ballots?.readSnapshot(ballotId, options.voterId) ?? Promise.resolve(null);
+    const readSnapshot = context.ballots?.readSnapshot;
+    if (readSnapshot === undefined) throw new Error("Dry-run ballot snapshots are unavailable.");
+    const read = readSnapshot(ballotId, options.voterId);
     snapshotReads.set(ballotId, read);
     const snapshot = await read;
     if (snapshot !== null) snapshots.set(ballotId, snapshot);
@@ -46,8 +48,11 @@ export const createDryRunBallotAccess = (
 
   const hasOpenBallotSnapshot = async (): Promise<boolean> => {
     if ([...snapshots.values()].some((snapshot) => snapshot.outcome === undefined &&
+        snapshot.isActive !== false &&
         (snapshot.expiresAt ?? Number.POSITIVE_INFINITY) > Date.now())) return true;
-    return await context.ballots?.hasOpenBallotSnapshot() ?? false;
+    const readAvailability = context.ballots?.hasOpenBallotSnapshot;
+    if (readAvailability === undefined) throw new Error("Dry-run ballot snapshots are unavailable.");
+    return await readAvailability();
   };
 
   const voterMapFor = (ballotId: string): Map<string, number | string> => {
@@ -61,6 +66,7 @@ export const createDryRunBallotAccess = (
 
   return {
     open: async (ballotId, optionCount, deadline, rule, termFilter) => {
+      if (await snapshotFor(ballotId) !== null) return { status: "busy", moduleId: "active" };
       if (await hasOpenBallotSnapshot()) return { status: "busy", moduleId: "active" };
       rules.set(ballotId, rule);
       expiresAt.set(ballotId, deadline);
@@ -111,13 +117,14 @@ export const createDryRunBallotAccess = (
       const snapshot = await snapshotFor(ballotId);
       if (snapshot === null || snapshot.outcome !== undefined || typeof matchText !== "string" ||
           Array.from(term).length > 25 || term.trim().length === 0 || Array.from(matchText).length > 500 ||
-          snapshot.isActive === false ||
+          snapshot.terms === undefined || snapshot.isActive === false ||
           (snapshot.expiresAt ?? expiresAt.get(ballotId) ?? Number.POSITIVE_INFINITY) <= Date.now()) {
         return castResult(ballotId, { status: "not_open", counts: [], revision: 0 });
       }
+      const isBlockedFreeTextVote = options.isBlockedFreeTextVote;
+      if (isBlockedFreeTextVote === undefined) throw new Error("Dry-run free-text vote predicate is unavailable.");
       const blockedTerms = snapshot.blockedTerms ?? [];
-      const blocked = (options.isBlockedFreeTextVote?.(term, blockedTerms) ?? false) ||
-        (options.isBlockedFreeTextVote?.(matchText, blockedTerms) ?? false);
+      const blocked = isBlockedFreeTextVote(term, blockedTerms) || isBlockedFreeTextVote(matchText, blockedTerms);
       if (blocked) return castResult(ballotId, { status: "blocked", ...snapshot });
       if (snapshot.previousChoiceKnown === false) {
         context.markBallotChoiceUnresolved?.();
@@ -142,7 +149,11 @@ export const createDryRunBallotAccess = (
         snapshots.set(ballotId, updated);
         return castResult(ballotId, { status: "overflow", ...updated });
       }
-      if (existing === undefined) terms.set(term, { term, count: 1, approved: false });
+      if (existing === undefined) terms.set(term, {
+        term,
+        count: 1,
+        approved: (snapshot.approvedTerms ?? []).includes(term),
+      });
       else terms.set(term, { ...existing, count: existing.count + 1 });
       const updated = { ...snapshot, terms: [...terms.values()], revision: snapshot.revision + 1 };
       snapshots.set(ballotId, updated);
@@ -166,12 +177,57 @@ export const createDryRunBallotAccess = (
     },
     setBlockedTerms: async (ballotId, blockedTerms) => {
       const snapshot = await snapshotFor(ballotId);
-      if (snapshot === null || snapshot.outcome !== undefined) return null;
-      const updated = { ...snapshot, blockedTerms: [...blockedTerms], termFilterReady: true };
+      if (snapshot === null || snapshot.outcome !== undefined || snapshot.terms === undefined ||
+          snapshot.isActive === false || (snapshot.expiresAt ?? Number.POSITIVE_INFINITY) <= Date.now()) return null;
+      const isBlockedFreeTextVote = options.isBlockedFreeTextVote;
+      if (isBlockedFreeTextVote === undefined) throw new Error("Dry-run free-text vote predicate is unavailable.");
+      const retainedTerms = snapshot.terms.filter(({ term }) => !isBlockedFreeTextVote(term, blockedTerms));
+      const filterChanged = JSON.stringify(snapshot.blockedTerms ?? null) !== JSON.stringify([...blockedTerms]);
+      const tallyChanged = retainedTerms.length !== snapshot.terms.length;
+      for (const [userId, previous] of voterMapFor(ballotId)) {
+        if (typeof previous === "string" && isBlockedFreeTextVote(previous, blockedTerms)) voterMapFor(ballotId).delete(userId);
+      }
+      const clearPinnedChoice = typeof snapshot.previousChoice === "string" &&
+        isBlockedFreeTextVote(snapshot.previousChoice, blockedTerms);
+      const pinnedSnapshot = { ...snapshot };
+      if (clearPinnedChoice) delete pinnedSnapshot.previousChoice;
+      const updated = {
+        ...pinnedSnapshot,
+        terms: retainedTerms,
+        blockedTerms: [...blockedTerms],
+        termFilterReady: true,
+        revision: snapshot.revision + Number(filterChanged || tallyChanged),
+      };
       snapshots.set(ballotId, updated);
       return updated;
     },
-    approveTerm: () => Promise.resolve({ status: "unavailable", snapshot: null }),
+    approveTerm: async (ballotId, term) => {
+      const snapshot = await snapshotFor(ballotId);
+      if (snapshot === null || snapshot.outcome !== undefined || snapshot.terms === undefined ||
+          snapshot.isActive === false || (snapshot.expiresAt ?? Number.POSITIVE_INFINITY) <= Date.now()) {
+        return { status: "not_open", snapshot: null };
+      }
+      if (snapshot.blockedTerms === null || snapshot.blockedTerms === undefined) {
+        return { status: "unavailable", snapshot };
+      }
+      const isBlockedFreeTextVote = options.isBlockedFreeTextVote;
+      if (isBlockedFreeTextVote === undefined) throw new Error("Dry-run free-text vote predicate is unavailable.");
+      if (isBlockedFreeTextVote(term, snapshot.blockedTerms)) return { status: "blocked", snapshot };
+      const entry = snapshot.terms.find(({ term: existingTerm }) => existingTerm === term);
+      if (entry === undefined) return { status: "not_open", snapshot };
+      const approvedTerms = new Set(snapshot.approvedTerms ?? snapshot.terms.filter(({ approved }) => approved).map(({ term: approvedTerm }) => approvedTerm));
+      const approvalsChanged = !approvedTerms.has(term);
+      approvedTerms.add(term);
+      const tallyChanged = !entry.approved;
+      const updated = !approvalsChanged && !tallyChanged ? snapshot : {
+        ...snapshot,
+        terms: snapshot.terms.map((candidate) => candidate.term === term ? { ...candidate, approved: true } : candidate),
+        approvedTerms: [...approvedTerms],
+        revision: snapshot.revision + Number(tallyChanged),
+      };
+      if (updated !== snapshot) snapshots.set(ballotId, updated);
+      return { status: "approved", snapshot: updated };
+    },
     acknowledgeClosed: () => Promise.resolve(),
   };
 };

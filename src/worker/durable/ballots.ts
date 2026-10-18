@@ -696,7 +696,10 @@ export const readStoredBallotDryRunSnapshot = async (
       isActive: active?.moduleId === moduleId && active.ballotId === ballotId,
       previousChoiceKnown: channelId !== undefined && voterId !== undefined,
       ...(previousChoice === undefined ? {} : { previousChoice }),
-      ...(ballot.optionCount === 0 ? { blockedTerms: ballot.blockedTerms === null ? null : [...(ballot.blockedTerms ?? [])] } : {}),
+      ...(ballot.optionCount === 0 ? {
+        blockedTerms: ballot.blockedTerms === null ? null : [...(ballot.blockedTerms ?? [])],
+        approvedTerms: [...approvedTermsOf(ballot)],
+      } : {}),
     };
   });
 };

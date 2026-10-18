@@ -210,6 +210,108 @@ const chatVoteManualClosePredicate = (
   };
 };
 
+export const chatVoteAlarmClosePredicate = (
+  channelId: string,
+  pollId: string,
+  expectedClosesAt: string,
+  claimedAt: string,
+): { sql: string; values: readonly string[] } => ({
+  sql: `channel_id = ? AND poll_id = ? AND status = 'open' AND closing_at IS NULL
+    AND closes_at = ? AND (closes_at <= ? OR close_reason = 'manual')`,
+  values: [channelId, pollId, expectedClosesAt, claimedAt],
+});
+
+export const chatVoteExtensionPredicate = (
+  channelId: string,
+  pollId: string,
+  expectedClosesAt: string,
+  authorization?: ModuleMutationAuthorization,
+): { sql: string; values: readonly unknown[] } => ({
+  sql: `channel_id = ? AND poll_id = ? AND status = 'open' AND closing_at IS NULL
+    AND close_reason <> 'manual' AND closes_at = ?
+    AND EXISTS (
+      SELECT 1 FROM channel_modules
+       WHERE channel_modules.channel_id = chat_votes.channel_id
+         AND channel_modules.module_id = 'chat_voting' AND channel_modules.enabled = 1
+    ) ${authorization?.sql ?? ""}`,
+  values: [channelId, pollId, expectedClosesAt, ...(authorization?.values ?? [])],
+});
+
+export const chatVoteExtensionRollbackPredicate = (
+  channelId: string,
+  pollId: string,
+  expectedClosesAt: string,
+  expectedDeadlineRevision: number,
+): { sql: string; values: readonly (string | number)[] } => ({
+  sql: `channel_id = ? AND poll_id = ? AND status = 'open' AND closing_at IS NULL
+    AND close_reason <> 'manual' AND closes_at = ? AND deadline_revision = ?`,
+  values: [channelId, pollId, expectedClosesAt, expectedDeadlineRevision],
+});
+
+export const chatVoteFinishPredicate = (channelId: string, pollId: string): { sql: string; values: readonly string[] } => ({
+  sql: "channel_id = ? AND poll_id = ? AND status = 'open'",
+  values: [channelId, pollId],
+});
+
+export const chatVoteResultDeliveryPredicate = (channelId: string, pollId: string): { sql: string; values: readonly string[] } => ({
+  sql: `channel_id = ? AND poll_id = ? AND status = 'closed' AND result_delivery_pending = 1`,
+  values: [channelId, pollId],
+});
+
+const peekChatVotePredicate = async (db: D1Database, readOnlyPredicateSql: string, values: readonly unknown[]): Promise<boolean> => {
+  const row = await db.prepare(`SELECT 1 AS allowed FROM chat_votes WHERE ${readOnlyPredicateSql} LIMIT 1`)
+    .bind(...values).first<{ allowed: number }>();
+  return row !== null;
+};
+
+/** Evaluates the production alarm-close claim without changing the vote row. */
+export const peekChatVoteAlarmClose = async (
+  db: D1Database,
+  channelId: string,
+  pollId: string,
+  expectedClosesAt: string,
+  claimedAt: string,
+): Promise<boolean> => {
+  const alarmClosePredicate = chatVoteAlarmClosePredicate(channelId, pollId, expectedClosesAt, claimedAt);
+  return await peekChatVotePredicate(db, alarmClosePredicate.sql, alarmClosePredicate.values);
+};
+
+/** Evaluates the production extension claim, including its module and authorization guards. */
+export const peekChatVoteExtension = async (
+  db: D1Database,
+  channelId: string,
+  pollId: string,
+  expectedClosesAt: string,
+  authorization?: ModuleMutationAuthorization,
+): Promise<boolean> => {
+  const extensionPredicate = chatVoteExtensionPredicate(channelId, pollId, expectedClosesAt, authorization);
+  return await peekChatVotePredicate(db, extensionPredicate.sql, extensionPredicate.values);
+};
+
+/** Evaluates the production extension rollback claim without restoring the deadline. */
+export const peekChatVoteExtensionRollback = async (
+  db: D1Database,
+  channelId: string,
+  pollId: string,
+  expectedClosesAt: string,
+  expectedDeadlineRevision: number,
+): Promise<boolean> => {
+  const extensionRollbackPredicate = chatVoteExtensionRollbackPredicate(channelId, pollId, expectedClosesAt, expectedDeadlineRevision);
+  return await peekChatVotePredicate(db, extensionRollbackPredicate.sql, extensionRollbackPredicate.values);
+};
+
+/** Evaluates the production open-row finish claim without closing the vote. */
+export const peekChatVoteFinish = async (db: D1Database, channelId: string, pollId: string): Promise<boolean> => {
+  const chatVoteFinishGuard = chatVoteFinishPredicate(channelId, pollId);
+  return await peekChatVotePredicate(db, chatVoteFinishGuard.sql, chatVoteFinishGuard.values);
+};
+
+/** Evaluates the production pending-result delivery claim without clearing it. */
+export const peekChatVoteResultDelivery = async (db: D1Database, channelId: string, pollId: string): Promise<boolean> => {
+  const resultDeliveryPredicate = chatVoteResultDeliveryPredicate(channelId, pollId);
+  return await peekChatVotePredicate(db, resultDeliveryPredicate.sql, resultDeliveryPredicate.values);
+};
+
 /** Evaluates the production insert guard without inserting a vote row. */
 export const peekChatVoteOpenInsert = async (
   db: D1Database,
@@ -522,45 +624,40 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
     return result.meta.changes > 0;
   },
   async claimAlarmClose(channelId, pollId, expectedClosesAt, claimedAt) {
+    const alarmClosePredicate = chatVoteAlarmClosePredicate(channelId, pollId, expectedClosesAt, claimedAt);
     const result = await db.prepare(
       `UPDATE chat_votes
           SET closing_at = ?, deadline_revision = deadline_revision + CASE WHEN closing_at IS NULL THEN 1 ELSE 0 END
-        WHERE channel_id = ? AND poll_id = ? AND status = 'open' AND closing_at IS NULL
-          AND closes_at = ? AND (closes_at <= ? OR close_reason = 'manual')`,
-    ).bind(claimedAt, channelId, pollId, expectedClosesAt, claimedAt).run();
+        WHERE ${alarmClosePredicate.sql}`,
+    ).bind(claimedAt, ...alarmClosePredicate.values).run();
     return result.meta.changes > 0;
   },
   async extendClose(channelId, pollId, expectedClosesAt, closesAt, authorization) {
-    const guard = authorization?.sql ?? "";
+    const extensionPredicate = chatVoteExtensionPredicate(channelId, pollId, expectedClosesAt, authorization);
     const statement = db.prepare(
       `UPDATE chat_votes
           SET closes_at = ?, deadline_revision = deadline_revision + 1
-        WHERE channel_id = ? AND poll_id = ? AND status = 'open' AND closing_at IS NULL
-          AND close_reason <> 'manual' AND closes_at = ?
-          AND EXISTS (
-            SELECT 1 FROM channel_modules
-             WHERE channel_modules.channel_id = chat_votes.channel_id
-               AND channel_modules.module_id = 'chat_voting' AND channel_modules.enabled = 1
-          ) ${guard}`,
-    ).bind(closesAt, channelId, pollId, expectedClosesAt, ...(authorization?.values ?? []));
+        WHERE ${extensionPredicate.sql}`,
+    ).bind(closesAt, ...extensionPredicate.values);
     const result = await statement.run();
     return result.meta.changes > 0;
   },
   async rollbackCloseExtension(channelId, pollId, expectedClosesAt, expectedDeadlineRevision, closesAt) {
+    const extensionRollbackPredicate = chatVoteExtensionRollbackPredicate(channelId, pollId, expectedClosesAt, expectedDeadlineRevision);
     const result = await db.prepare(
       `UPDATE chat_votes
           SET closes_at = ?, deadline_revision = deadline_revision + 1
-        WHERE channel_id = ? AND poll_id = ? AND status = 'open' AND closing_at IS NULL
-          AND close_reason <> 'manual' AND closes_at = ? AND deadline_revision = ?`,
-    ).bind(closesAt, channelId, pollId, expectedClosesAt, expectedDeadlineRevision).run();
+        WHERE ${extensionRollbackPredicate.sql}`,
+    ).bind(closesAt, ...extensionRollbackPredicate.values).run();
     return result.meta.changes > 0;
   },
   async finish(channelId, pollId, closeReason, closedAt, counts, textResults = null, moreTerms = 0, termFilterReady = null, resultDeliveryPending = false) {
+    const chatVoteFinishGuard = chatVoteFinishPredicate(channelId, pollId);
     const statement = db.prepare(
       `UPDATE chat_votes
           SET status = 'closed', closed_at = ?, close_reason = ?, counts_json = ?, voter_count = ?,
               text_results_json = ?, more_terms = ?, term_filter_ready = ?, result_delivery_pending = ?
-        WHERE channel_id = ? AND poll_id = ? AND status = 'open'`,
+        WHERE ${chatVoteFinishGuard.sql}`,
     ).bind(
       closedAt,
       closeReason,
@@ -571,18 +668,18 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
       textResults === null ? null : moreTerms,
       textResults === null || termFilterReady === null ? null : Number(termFilterReady),
       Number(resultDeliveryPending),
-      channelId,
-      pollId,
+      ...chatVoteFinishGuard.values,
     );
     const result = await statement.run();
     return result.meta.changes > 0;
   },
   async completeResultDelivery(channelId, pollId) {
+    const resultDeliveryPredicate = chatVoteResultDeliveryPredicate(channelId, pollId);
     const [result] = await db.batch([
       db.prepare(
         `UPDATE chat_votes SET result_delivery_pending = 0
-          WHERE channel_id = ? AND poll_id = ? AND status = 'closed' AND result_delivery_pending = 1`,
-      ).bind(channelId, pollId),
+          WHERE ${resultDeliveryPredicate.sql}`,
+      ).bind(...resultDeliveryPredicate.values),
       db.prepare(
         `DELETE FROM chat_vote_result_delivery_reconciliation
           WHERE channel_id = ? AND poll_id = ?`,
