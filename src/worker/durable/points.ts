@@ -194,6 +194,10 @@ export const ensurePointsSchema = (sql: PointsSql): void => {
     closed INTEGER NOT NULL,
     revision INTEGER NOT NULL
   )`);
+  sql.exec(`CREATE TABLE IF NOT EXISTS game_round_cancellations (
+    module_id TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL
+  )`);
   sql.exec("CREATE INDEX IF NOT EXISTS point_accounts_balance ON point_accounts (kind, balance DESC)");
   sql.exec("CREATE INDEX IF NOT EXISTS point_monthly_rank ON point_monthly (month, net_won DESC, reached_at ASC, account_id ASC)");
   sql.exec("CREATE INDEX IF NOT EXISTS point_ledger_account_history ON point_ledger (account_id, operation_id)");
@@ -720,8 +724,23 @@ export const setGameModuleGateSync = (sql: PointsSql, moduleId: string, closed: 
     closed ? 1 : 0,
     revision,
   );
+  if (closed) {
+    sql.exec(
+      `INSERT INTO game_round_cancellations (module_id, revision) VALUES (?, ?)
+       ON CONFLICT(module_id) DO UPDATE SET revision = excluded.revision`,
+      moduleId,
+      revision,
+    );
+  } else {
+    sql.exec("DELETE FROM game_round_cancellations WHERE module_id = ?", moduleId);
+  }
   return { applied: true };
 };
+
+export const pendingPointRoundCancellations = (sql: PointsSql): Array<{ moduleId: string; revision: number }> =>
+  sql.exec<{ module_id: string; revision: number }>(
+    "SELECT module_id, revision FROM game_round_cancellations ORDER BY module_id",
+  ).toArray().map(({ module_id, revision }) => ({ moduleId: module_id, revision }));
 
 export const claimPointCooldownSync = (sql: PointsSql, moduleId: string, key: string, seconds: number, now: number): boolean => {
   if (key.length === 0 || !Number.isSafeInteger(seconds) || seconds < 0) throw new Error("invalid_cooldown");
@@ -738,7 +757,7 @@ export const claimPointCooldownSync = (sql: PointsSql, moduleId: string, key: st
   return true;
 };
 
-const parseRoundOpenData = (value: unknown): { data: unknown; durationS: number; announceText: string; settlement: { kind: string; params: unknown } | null } => {
+const parseRoundOpenData = (value: unknown): { data: unknown; durationS: number; announceText: string; settlement: { kind: string; params: unknown } } => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("invalid_round");
   const data = value as PointRoundOpenData;
   const durationS = data.durationS ?? data.duration_s;
@@ -746,10 +765,13 @@ const parseRoundOpenData = (value: unknown): { data: unknown; durationS: number;
   if (!Number.isSafeInteger(durationS) || (durationS ?? 0) < 1 || (durationS ?? 0) > 86_400 || typeof announceText !== "string" || announceText.length === 0) {
     throw new Error("invalid_round");
   }
-  if (data.settlement !== undefined && (typeof data.settlement.kind !== "string" || data.settlement.kind.length === 0)) {
-    throw new Error("invalid_round");
+  const rawSettlement: unknown = (value as Record<string, unknown>).settlement;
+  if (typeof rawSettlement !== "object" || rawSettlement === null || Array.isArray(rawSettlement) ||
+      typeof (rawSettlement as { kind?: unknown }).kind !== "string" ||
+      (rawSettlement as { kind: string }).kind.length === 0) {
+    throw new Error("settlement_unknown");
   }
-  return { data, durationS: durationS as number, announceText, settlement: data.settlement ?? null };
+  return { data, durationS: durationS as number, announceText, settlement: rawSettlement as { kind: string; params: unknown } };
 };
 
 export const pointRoundAlarmKey = (roundId: string): string => `${POINTS_ROUND_ALARM_PREFIX}${roundId}`;
@@ -768,9 +790,11 @@ export const openPointRoundSync = (
   roundId: string,
   value: unknown,
   now: string,
+  settlements: ReadonlyMap<string, PointSettlement>,
 ): { opened: boolean; alarmKey: string } => {
   checkModuleGateSync(sql, moduleId);
   const parsed = parseRoundOpenData(value);
+  if (!settlements.has(parsed.settlement.kind)) throw new Error("settlement_unknown");
   const dataJson = jsonValue(stableValue(parsed.data));
   const previous = pointRoundRow(sql, roundId);
   if (previous !== null) {
@@ -944,28 +968,39 @@ export const resolvePointRoundSync = (
   }
   const round = pointRoundRow(sql, roundId);
   if (round === null || round.module_id !== moduleId || round.state !== "open") throw new Error("round_closed");
+  const cancellation = sql.exec<{ revision: number }>(
+    "SELECT revision FROM game_round_cancellations WHERE module_id = ?",
+    moduleId,
+  ).toArray()[0];
+  if (cancellation !== undefined) throw new Error("round_cancellation_pending");
   const handler = settlements.get(settlement.kind);
   if (handler === undefined) throw new Error("settlement_unknown");
   const participants = participantsForRoundSync(sql, roundId);
   const roundData = JSON.parse(round.data_json) as unknown;
   sql.exec("UPDATE game_rounds SET state = 'resolving' WHERE round_id = ? AND state = 'open'", roundId);
-  const settled = handler({
-    round: { roundId, moduleId, data: roundData },
-    participants,
-    pots: potsForModuleSync(sql, moduleId, roundId),
-    params: settlement.params,
-  });
-  const before = new Map(participants.map(({ accountId }) => [accountId, pointBalance(sql, accountId)]));
-  const applied = applyPointOperationSync(
-    sql,
-    moduleId,
-    operationId,
-    "resolve",
-    settled.movements,
-    settled.result,
-    requestHash,
-    now,
-  );
+  let before: Map<string, number>;
+  let applied: PointApplyInternalResult;
+  try {
+    const settled: PointSettlementOutput = handler({
+      round: { roundId, moduleId, data: roundData },
+      participants,
+      pots: potsForModuleSync(sql, moduleId, roundId),
+      params: settlement.params,
+    });
+    before = new Map(participants.map(({ accountId }) => [accountId, pointBalance(sql, accountId)]));
+    applied = applyPointOperationSync(
+      sql,
+      moduleId,
+      operationId,
+      "resolve",
+      settled.movements,
+      settled.result,
+      requestHash,
+      now,
+    );
+  } catch {
+    throw new Error("settlement_execution_failed");
+  }
   if (!applied.replayed) {
     const month = now.slice(0, 7);
     for (const participant of participants) {
@@ -984,7 +1019,20 @@ export const cancelPointRoundsSync = (
   now: string,
   hashFor: (value: unknown) => string,
   roundIds?: readonly string[],
+  expectedGateRevision?: number,
 ): number => {
+  if (expectedGateRevision !== undefined) {
+    const gate = sql.exec<{ revision: number; closed: number }>(
+      "SELECT revision, closed FROM module_gates WHERE module_id = ?",
+      moduleId,
+    ).toArray()[0];
+    const cancellation = sql.exec<{ revision: number }>(
+      "SELECT revision FROM game_round_cancellations WHERE module_id = ?",
+      moduleId,
+    ).toArray()[0];
+    if (gate?.closed !== 1 || gate.revision !== expectedGateRevision ||
+        cancellation?.revision !== expectedGateRevision) return 0;
+  }
   const rounds = roundIds === undefined
     ? sql.exec<{ round_id: string }>(
       `SELECT round_id FROM game_rounds WHERE module_id = ? AND state IN ('announcing', 'open', 'resolving') ORDER BY created_at, round_id`,
@@ -1004,6 +1052,13 @@ export const cancelPointRoundsSync = (
     sql.exec("UPDATE game_rounds SET state = 'cancelled' WHERE round_id = ? AND module_id = ?", roundId, moduleId);
     cancelledCount += 1;
   }
+  if (expectedGateRevision !== undefined) {
+    sql.exec(
+      "DELETE FROM game_round_cancellations WHERE module_id = ? AND revision = ?",
+      moduleId,
+      expectedGateRevision,
+    );
+  }
   invariantSync(sql);
   return cancelledCount;
 };
@@ -1011,24 +1066,27 @@ export const cancelPointRoundsSync = (
 export const announceAttemptSync = (sql: PointsSql, roundId: string, now: number): {
   round: RoundRow | null;
   attempt: number | null;
-  outcome: "attempt" | "ambiguous" | "ignored";
+  outcome: "attempt" | "ambiguous" | "pending" | "ignored";
 } => {
   const round = pointRoundRow(sql, roundId);
   if (round === null || round.state !== "announcing") return { round, attempt: null, outcome: "ignored" };
-  if (round.announce_state === "pending" && round.announce_attempts > 0 && round.last_attempt_at !== null &&
-      now - round.last_attempt_at >= POINTS_ANNOUNCE_AMBIGUOUS_MS) {
-    return { round, attempt: null, outcome: "ambiguous" };
+  if (round.announce_state === "pending" && round.announce_attempts > 0 && round.last_attempt_at !== null) {
+    return {
+      round,
+      attempt: null,
+      outcome: now - round.last_attempt_at >= POINTS_ANNOUNCE_AMBIGUOUS_MS ? "ambiguous" : "pending",
+    };
   }
   if (round.announce_attempts >= POINTS_ANNOUNCE_MAX_ATTEMPTS) return { round, attempt: null, outcome: "ignored" };
   const attempt = round.announce_attempts + 1;
   sql.exec(
-    `UPDATE game_rounds SET announce_attempts = ?, last_attempt_at = ?
+    `UPDATE game_rounds SET announce_state = 'pending', announce_attempts = ?, last_attempt_at = ?
       WHERE round_id = ? AND state = 'announcing'`,
     attempt,
     now,
     roundId,
   );
-  return { round: { ...round, announce_attempts: attempt, last_attempt_at: now }, attempt, outcome: "attempt" };
+  return { round: { ...round, announce_state: "pending", announce_attempts: attempt, last_attempt_at: now }, attempt, outcome: "attempt" };
 };
 
 export const recordPointAnnouncementSync = (

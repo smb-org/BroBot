@@ -47,7 +47,7 @@ export interface PointsWorkerObject {
     result: unknown;
     balances: Record<string, number>;
   }>;
-  cancelOpenGameRounds(moduleId: string): Promise<number>;
+  cancelOpenGameRounds(moduleId: string, revision: number): Promise<number>;
   setGameModuleGate(moduleId: string, closed: boolean, revision: number): Promise<{ applied: boolean }>;
   claimGameCooldown(moduleId: string, key: string, seconds: number): Promise<boolean>;
   markPointAuditWritten(moduleId: string, operationId: string): Promise<void>;
@@ -118,7 +118,7 @@ export const runPointObject = <T>(
 
 export const stubPointRoundChat = (
   target: PointsWorkerObject,
-  sendChat: () => Promise<{ sent: boolean; retryable?: boolean; reason?: string }>,
+  sendChat: () => Promise<{ sent: boolean; retryable?: boolean; reason?: string | null; attemptedAt?: number }>,
 ): void => {
   Object.assign(target, { moduleAlarmContext: () => ({ sendChat }) });
 };

@@ -986,8 +986,10 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   if ((module.requiresModules?.length ?? 0) > 0 || module.id === "points") {
     try {
       const points = context.get("points")(channelId);
-      await points.rounds.setGate(!enabled, revision);
-      if (!enabled && (module.requiresModules?.length ?? 0) > 0) await points.rounds.cancelOpenRounds();
+      const gate = await points.rounds.setGate(!enabled, revision);
+      if (!enabled && gate.applied && (module.requiresModules?.length ?? 0) > 0) {
+        await points.rounds.cancelOpenRounds(revision);
+      }
     } catch {
       return context.json({ error: "module_gate_update_failed" }, 500);
     }

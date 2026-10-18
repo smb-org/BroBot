@@ -800,9 +800,39 @@ describe("Module management in the panel", () => {
     );
     expect(disableGame.status).toBe(200);
     expect(setGate).toHaveBeenLastCalledWith("test_game_requires_points", true, 2);
-    expect(cancelOpenRounds).toHaveBeenCalledOnce();
+    expect(cancelOpenRounds).toHaveBeenCalledTimes(1);
+    expect(cancelOpenRounds).toHaveBeenLastCalledWith("test_game_requires_points", 2);
     await expect(database.prepare("SELECT enabled FROM channel_modules WHERE channel_id = 'channel-demo' AND module_id = 'points'").first())
       .resolves.toEqual({ enabled: 1 });
+  });
+
+  it("skips round cancellation when the durable gate rejects a stale disable", async () => {
+    addDependencyTestModules();
+    await insertChannel(database, "channel-demo");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "channel-demo", "user-1", "broadcaster");
+    const setGate = vi.fn((_moduleId: string, closed: boolean) => Promise.resolve({ applied: !closed }));
+    const cancelOpenRounds = vi.fn(() => Promise.resolve(1));
+    environment.CHANNEL = {
+      idFromName: vi.fn((channelId: string) => channelId),
+      get: vi.fn(() => ({ setGameModuleGate: setGate, cancelOpenGameRounds: cancelOpenRounds })),
+    } as unknown as Env["CHANNEL"];
+
+    for (const moduleId of ["points", "test_game_requires_points"]) {
+      const response = await panelRouter.fetch(
+        await requestFor("user-1", `/api/channels/channel-demo/modules/${moduleId}`, "PATCH", { enabled: true }),
+        environment,
+      );
+      expect(response.status).toBe(200);
+    }
+    const disable = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/channel-demo/modules/test_game_requires_points", "PATCH", { enabled: false }),
+      environment,
+    );
+
+    expect(disable.status).toBe(200);
+    expect(setGate).toHaveBeenLastCalledWith("test_game_requires_points", true, 2);
+    expect(cancelOpenRounds).not.toHaveBeenCalled();
   });
 
   it(`leaves the game gate open and skips refunds when D1 rejects a disable (${dependencyTestCard("the game remains enabled when its D1 state update fails", "a failed database mutation still closes the gate or refunds escrow", "a SQLite trigger simulates the rejected D1 batch and the fake Durable Object records calls")})`, async () => {
@@ -852,9 +882,7 @@ describe("Module management in the panel", () => {
 
   it(`keeps concurrent dependency changes consistent and preserves modules without requirements (${dependencyTestCard("conditional D1 mutations leave game-on implies points-on", "both requests commit an invalid dependency state", "the SQLite test adapter serializes batches and a fake ChannelObject stands in for gate persistence")})`, async () => {
     addDependencyTestModules();
-    await insertChannel(database, "channel-demo");
     await insertLoginIdentityAndSession(database, "user-1");
-    await insertMember(database, "channel-demo", "user-1", "broadcaster");
     environment.CHANNEL = {
       idFromName: vi.fn((channelId: string) => channelId),
       get: vi.fn(() => ({
@@ -863,28 +891,76 @@ describe("Module management in the panel", () => {
         notifyScheduleInputsChanged: vi.fn(() => Promise.resolve()),
       })),
     } as unknown as Env["CHANNEL"];
-    const pointsEnable = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/channel-demo/modules/points", "PATCH", { enabled: true }),
-      environment,
-    );
-    expect(pointsEnable.status).toBe(200);
 
-    const [gameEnable, pointsDisable] = await Promise.all([
-      panelRouter.fetch(await requestFor("user-1", "/api/channels/channel-demo/modules/test_game_requires_points", "PATCH", { enabled: true }), environment),
-      panelRouter.fetch(await requestFor("user-1", "/api/channels/channel-demo/modules/points", "PATCH", { enabled: false, expectedRevision: 1 }), environment),
-    ]);
-    const statuses = [gameEnable.status, pointsDisable.status].sort((left, right) => left - right);
-    expect(statuses).toEqual([200, 409]);
+    for (const firstCommit of ["points-disable", "game-enable"] as const) {
+      const channelId = firstCommit === "points-disable" ? "channel-points-first" : "channel-game-first";
+      await insertChannel(database, channelId);
+      await insertMember(database, channelId, "user-1", "broadcaster");
+      const pointsEnable = await panelRouter.fetch(
+        await requestFor("user-1", `/api/channels/${channelId}/modules/points`, "PATCH", { enabled: true }),
+        environment,
+      );
+      expect(pointsEnable.status).toBe(200);
 
-    const states = await database.prepare(
-      "SELECT module_id, enabled FROM channel_modules WHERE channel_id = 'channel-demo' AND module_id IN ('points', 'test_game_requires_points') ORDER BY module_id",
-    ).all<{ module_id: string; enabled: number }>();
-    const enabled = Object.fromEntries(states.results.map(({ module_id, enabled: isEnabled }) => [module_id, isEnabled === 1]));
-    expect(enabled.points === true || enabled.test_game_requires_points === false).toBe(true);
-    expect(enabled.test_game_requires_points === true || enabled.points === false).toBe(true);
+      const originalBatch = database.batch.bind(database);
+      let arrivals = 0;
+      let releaseArrivals!: () => void;
+      const bothArrived = new Promise<void>((resolve) => { releaseArrivals = resolve; });
+      let releaseFirstCommit!: () => void;
+      const firstCommitted = new Promise<void>((resolve) => { releaseFirstCommit = resolve; });
+      database.batch = async (statements) => {
+        const sql = (statements[0] as unknown as { sql: string } | undefined)?.sql ?? "";
+        const action = /^\s*INSERT INTO channel_modules/iu.test(sql) ? "game-enable"
+          : /^\s*UPDATE channel_modules/iu.test(sql) ? "points-disable" : null;
+        if (action === null) return originalBatch(statements);
+        arrivals += 1;
+        if (arrivals === 2) releaseArrivals();
+        await bothArrived;
+        if (action === firstCommit) {
+          const result = await originalBatch(statements);
+          releaseFirstCommit();
+          return result;
+        }
+        await firstCommitted;
+        return originalBatch(statements);
+      };
+
+      const gameEnableRequest = await requestFor(
+        "user-1", `/api/channels/${channelId}/modules/test_game_requires_points`, "PATCH", { enabled: true },
+      );
+      const pointsDisableRequest = await requestFor(
+        "user-1", `/api/channels/${channelId}/modules/points`, "PATCH", { enabled: false, expectedRevision: 1 },
+      );
+      const [gameEnable, pointsDisable] = await Promise.all([
+        panelRouter.fetch(gameEnableRequest, environment),
+        panelRouter.fetch(pointsDisableRequest, environment),
+      ]);
+      database.batch = originalBatch;
+
+      const states = await database.prepare(
+        `SELECT module_id, enabled FROM channel_modules
+          WHERE channel_id = ? AND module_id IN ('points', 'test_game_requires_points') ORDER BY module_id`,
+      ).bind(channelId).all<{ module_id: string; enabled: number }>();
+      const rows = Object.fromEntries(states.results.map(({ module_id, enabled: isEnabled }) => [module_id, isEnabled === 1]));
+      const enabled = {
+        points: rows.points ?? false,
+        test_game_requires_points: rows.test_game_requires_points ?? false,
+      };
+
+      expect([gameEnable.status, pointsDisable.status].sort((left, right) => left - right)).toEqual([200, 409]);
+      if (firstCommit === "points-disable") {
+        expect(gameEnable.status).toBe(409);
+        expect(pointsDisable.status).toBe(200);
+        expect(enabled).toEqual({ points: false, test_game_requires_points: false });
+      } else {
+        expect(gameEnable.status).toBe(200);
+        expect(pointsDisable.status).toBe(409);
+        expect(enabled).toEqual({ points: true, test_game_requires_points: true });
+      }
+    }
 
     const unrequired = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/channel-demo/modules/test-modul", "PATCH", { enabled: true }),
+      await requestFor("user-1", "/api/channels/channel-points-first/modules/test-modul", "PATCH", { enabled: true }),
       environment,
     );
     expect(unrequired.status).toBe(200);

@@ -56,7 +56,7 @@ export const modulePoints = (
       join: (roundId, operationId, accountId, login, stake, data) =>
         object.joinGameRound(moduleId, roundId, operationId, accountId, login, stake, data),
       resolve: (roundId, settlement) => object.resolveGameRound(moduleId, roundId, settlement),
-      cancelOpenRounds: () => object.cancelOpenGameRounds(moduleId),
+      cancelOpenRounds: (revision) => object.cancelOpenGameRounds(moduleId, revision),
       setGate: (closed, revision) => object.setGameModuleGate(moduleId, closed, revision),
     },
   };

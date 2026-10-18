@@ -766,7 +766,7 @@ export interface ModuleAlarmContext {
     attributions?: readonly string[],
     stillValid?: () => Promise<boolean>,
     target?: ChatOutputTarget,
-  ) => Promise<{ sent: boolean; reason: string | null; retryable: boolean }>;
+  ) => Promise<{ sent: boolean; reason: string | null; retryable: boolean; attemptedAt?: number }>;
   /** Monotonic count of accepted chat messages kept in this channel object. */
   chatActivityCount: () => Promise<number>;
   /** Resolves all registered module event-time sources without exposing module identity. */
@@ -969,7 +969,7 @@ export interface ModulePointsAccess {
     markAnnounced: (roundId: string, deadlineAt: number, alarmKey: string) => Promise<void>;
     join: (roundId: string, operationId: string, accountId: string, login: string, stake: number, data: unknown) => Promise<PointJoinResult>;
     resolve: (roundId: string, settlement: { kind: string; params: unknown }) => Promise<PointsApplyResult>;
-    cancelOpenRounds: () => Promise<number>;
+    cancelOpenRounds: (revision: number) => Promise<number>;
     setGate: (closed: boolean, revision: number) => Promise<{ applied: boolean }>;
   };
 }
