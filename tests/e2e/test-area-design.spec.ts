@@ -173,6 +173,15 @@ test("keeps the mobile main screen compact and free of horizontal scroll", async
   await expect(page.locator(".test-area__mobile-context-copy")).toContainText("Just Chatting");
   await expect(page.getByRole("button", { name: /!discord/u })).toBeVisible();
 
+  const messageTopGap = await page.evaluate(() => {
+    const header = document.querySelector<HTMLElement>(".page-header");
+    const label = document.querySelector<HTMLElement>(".test-area__mobile-message .ui-field__label");
+    return header === null || label === null ? null : label.getBoundingClientRect().top - header.getBoundingClientRect().bottom;
+  });
+  if (messageTopGap === null) throw new Error("The mobile page header or message label is missing.");
+  expect(messageTopGap).toBeGreaterThanOrEqual(16);
+  expect(messageTopGap).toBeLessThanOrEqual(20);
+
   const dimensions = await page.evaluate(() => ({ pageWidth: document.documentElement.scrollWidth, viewportWidth: window.innerWidth }));
   expect(dimensions.pageWidth).toBeLessThanOrEqual(dimensions.viewportWidth);
   const controls = await page.evaluate(() => {
