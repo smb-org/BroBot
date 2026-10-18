@@ -21,6 +21,7 @@ import type {
 } from "../panel-contract";
 import type { ChannelControlDuration, ChannelRole, ChatOutputTarget, OverlayElementKind } from "../contracts/values";
 import type { ModuleRegisteredTemplateVariable } from "../modules/contract";
+import type { DryRunRequest, DryRunResponse } from "../contracts/dry-run";
 
 import { PanelApiError } from "../contracts/panel-error";
 
@@ -82,6 +83,17 @@ export const requestJson = async <T>(input: string, init?: RequestInit): Promise
   if (response.status === 204) return undefined as T;
   return response.json();
 };
+
+export const dryRunChatMessage = (
+  channelId: string,
+  request: DryRunRequest,
+  signal?: AbortSignal,
+): Promise<DryRunResponse> => requestJson<DryRunResponse>(channelPath(channelId, "dry-run"), {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(request),
+  ...requestOptions(signal),
+});
 
 const requestOptions = (signal: AbortSignal | undefined): RequestInit | undefined =>
   signal === undefined ? undefined : { signal };

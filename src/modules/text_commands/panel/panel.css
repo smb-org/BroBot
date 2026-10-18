@@ -136,9 +136,12 @@
     .text-command-editor > .page-header { grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
     .text-command-editor > .page-header .page-header__right { grid-column: 1; justify-content: flex-end; width: 100%; }
     .text-command-editor > .page-header .page-header__save { flex: 1 1 auto; }
+    .text-command-editor > .page-header .page-header__page-actions { box-sizing: border-box; padding-right: var(--s3); }
   }
   @container text-command-form (max-width: 900px) {
     .text-command-response-fields { grid-template-columns: minmax(0, 1fr); }
     .text-command-response-fields > .ui-chat-preview { margin-top: 0; margin-bottom: 20px; }
   }
+.text-command-test-area-action { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.text-command-test-area-action > span { max-width: 220px; min-height: calc(3 * 1.35em); color: var(--text-3); font-size: 11px; line-height: 1.35; }
 }

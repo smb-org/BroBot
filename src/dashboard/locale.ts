@@ -3,6 +3,7 @@ import { browserModuleLanguage, type ModuleChatCommandThreshold, type ModuleChat
 import type { ApiSourceFailureReason } from "../modules/api_source/contracts";
 import type { SystemVariableName } from "../template-variables";
 import type { GameSingleValueMessages } from "./ui/GameMultiSelect";
+import type { DryRunBlockCode } from "../contracts/dry-run";
 
 export type DashboardLanguage = ModuleLanguage;
 export type LocaleCatalog<T> = Record<DashboardLanguage, T>;
@@ -817,6 +818,7 @@ export interface DashboardTexts {
     locationWeather: string;
     members: string;
     variables: string;
+    testArea: string;
     overlays: string;
     overlaysChecking: string;
     module: string;
@@ -837,6 +839,80 @@ export interface DashboardTexts {
     sidebarSetupDescription: string;
     sidebarSearch: string;
     moduleOff: string;
+  };
+  testArea: {
+    title: string;
+    subtitle: string;
+    context: string;
+    message: string;
+    messagePlaceholder: string;
+    sender: string;
+    senderHint: string;
+    badges: string;
+    badgeNames: { subscriber: string; vip: string; moderator: string; broadcaster: string; viewer: string };
+    stream: string;
+    online: string;
+    offline: string;
+    game: GameSingleValueMessages;
+    sharedChat: string;
+    module: string;
+    allModules: string;
+    textCommands: string;
+    faq: string;
+    run: string;
+    history: string;
+    historyEmpty: string;
+    historyReplay: (message: string, sender: string) => string;
+    editContext: string;
+    clearEntryFilter: string;
+    result: string;
+    reactionsSummary: (fires: number, blocked: number) => string;
+    resultCount: (count: number) => string;
+    noReactionModules: (modules: string) => string;
+    noDryRunModules: (modules: string) => string;
+    moduleError: (modules: string) => string;
+    muted: string;
+    paused: string;
+    idleTitle: string;
+    idleDescription: string;
+    loading: string;
+    retry: string;
+    emptyTitle: string;
+    emptyDescription: string;
+    errorTitle: string;
+    errorDescription: string;
+    noDetails: string;
+    blocked: string;
+    fires: string;
+    wouldReply: string;
+    wouldAct: string;
+    matchCommand: string;
+    matchAlias: (token: string) => string;
+    matchKeyword: (pattern: string) => string;
+    matchRegex: (pattern: string) => string;
+    textCommand: string;
+    faqEntry: string;
+    why: string;
+    answer: string;
+    preview: string;
+    botSpeaker: string;
+    chatTarget: string;
+    thisChat: string;
+    sharedChats: string;
+    replyToMessage: string;
+    suppressedAnswer: string;
+    blocks: string;
+    wouldDo: string;
+    openEditor: string;
+    syntheticSenderNote: (login: string) => string;
+    chatEffect: string;
+    announcementEffect: string;
+    timeoutEffect: (minimum: number, maximum: number, reason: string) => string;
+    shoutoutEffect: (login: string) => string;
+    variableEffect: (name: string, from: number, to: number) => string;
+    cooldownEffect: (seconds: number) => string;
+    userCooldownEffect: (seconds: number) => string;
+    blockReason: (code: DryRunBlockCode, detail?: Readonly<Record<string, string | number | boolean | null>>) => string;
   };
   overview: {
     oneChannelAvailable: string;
@@ -1297,7 +1373,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     navigation: {
       mainNavigation: "Hauptnavigation", overview: "Übersicht", live: "Live", setup: "Einrichten", channel: "Kanal", system: "System", locationWeather: "Ort & Wetter",
-      members: "Mitglieder", variables: "Variablen", module: "Module", audit: "Protokoll", selectChannel: "Kanal auswählen",
+      members: "Mitglieder", variables: "Variablen", module: "Module", audit: "Protokoll", selectChannel: "Kanal auswählen", testArea: "Testbereich",
       accountMenu: "Konto", appearance: "Darstellung", appearanceNightShift: "Nachtschicht", appearanceIndigoNight: "Indigo-Nacht",
       manageModules: "Module verwalten", moduleCategories: { chat: "Chat", participation: "Mitmachen", twitch: "Twitch", data: "Daten", stream: "Stream", admin: "Verwaltung" },
       overlays: "Overlays",
@@ -1305,6 +1381,105 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       signingOut: "Abmeldung …", signOut: "Abmelden",
       openSidebar: "Seitenleiste öffnen", closeSidebar: "Seitenleiste schließen",
       sidebarSetupHeading: "Einrichten", sidebarSetupDescription: "Alles für deinen Stream.", sidebarSearch: "Alles durchsuchen", moduleOff: "Aus",
+    },
+    testArea: {
+      title: "Testbereich",
+      subtitle: "Probenachricht im Trockenlauf – nichts wird gesendet oder gespeichert. Verlauf nur in dieser Sitzung.",
+      context: "Kontext",
+      message: "Nachricht",
+      messagePlaceholder: "Chatnachricht eingeben",
+      sender: "Absender",
+      senderHint: "Fiktiver Testabsender für persönliche Abklingzeiten",
+      badges: "Abzeichen",
+      badgeNames: { subscriber: "Sub", vip: "VIP", moderator: "Mod", broadcaster: "Broadcaster", viewer: "Zuschauer" },
+      stream: "Stream",
+      online: "Live",
+      offline: "Offline",
+      game: {
+        label: "Spiel", hint: "Nur der Trockenlauf-Kontext ändert sich.", search: "Spiel suchen", searchHint: "Mindestens zwei Zeichen eingeben.",
+        loading: "Spiele werden geladen …", empty: "Keine Spiele gefunden.", error: "Spiele konnten nicht geladen werden.",
+        suggestions: "Vorgeschlagene Spiele", allGames: "Alle Spiele", remove: (name) => name + " entfernen",
+      },
+      sharedChat: "Geteilter Chat",
+      module: "Module",
+      allModules: "Alle chatlesenden Module",
+      textCommands: "Textbefehle",
+      faq: "FAQ",
+      run: "Prüfen",
+      history: "Verlauf",
+      historyEmpty: "Hier erscheinen die letzten zehn Prüfungen dieser Sitzung.",
+      historyReplay: (message, sender) => message + " von " + sender + " erneut prüfen",
+      editContext: "Ändern",
+      clearEntryFilter: "Eintragsfilter aufheben",
+      result: "Ergebnis",
+      reactionsSummary: (fires, blocked) => String(fires) + (fires === 1 ? " reagiert" : " reagieren") + " · " + String(blocked) + " blockiert",
+      resultCount: (count) => String(count) + (count === 1 ? " Treffer" : " Treffer"),
+      noReactionModules: (modules) => "Ohne Reaktion: " + modules,
+      noDryRunModules: (modules) => "Noch ohne Trockenlauf: " + modules,
+      moduleError: (modules) => "Fehler bei: " + modules,
+      muted: "Stumm",
+      paused: "Pausiert",
+      idleTitle: "Bereit für einen Trockenlauf",
+      idleDescription: "Gib eine Nachricht ein und wähle „Prüfen“.",
+      loading: "Wird geprüft …",
+      retry: "Erneut prüfen",
+      emptyTitle: "Keine Reaktion gefunden",
+      emptyDescription: "Für diese Nachricht gibt es keinen passenden Chat-Auslöser.",
+      errorTitle: "Trockenlauf fehlgeschlagen",
+      errorDescription: "Die Nachricht konnte nicht geprüft werden. Versuche es erneut.",
+      noDetails: "Keine passenden Details für diese Nachricht.",
+      blocked: "Blockiert",
+      fires: "Würde auslösen",
+      wouldReply: "Würde antworten",
+      wouldAct: "Würde auslösen",
+      matchCommand: "Befehlsname",
+      matchAlias: (token) => "Alias „" + token + "“",
+      matchKeyword: (pattern) => "Schlüsselwort „" + pattern + "“",
+      matchRegex: (pattern) => "Regulärer Ausdruck „" + pattern + "“",
+      textCommand: "Textbefehl",
+      faqEntry: "FAQ",
+      why: "Warum",
+      answer: "Antwort",
+      preview: "Vorschau",
+      botSpeaker: "BroBot",
+      chatTarget: "Chat-Ziel",
+      thisChat: "dieser Chat",
+      sharedChats: "alle geteilten Chats",
+      replyToMessage: "Antwort auf diese Nachricht",
+      suppressedAnswer: "Würde nicht gesendet: Kanal ist stummgeschaltet.",
+      blocks: "Blockiert",
+      wouldDo: "Würde tun",
+      openEditor: "Im Editor öffnen",
+      syntheticSenderNote: (login) => "Ausgewertet mit dem synthetischen Testabsender " + login + ".",
+      chatEffect: "Chatnachricht würde gesendet",
+      announcementEffect: "Ankündigung würde gesendet",
+      timeoutEffect: (minimum, maximum, reason) => "Timeout " + String(minimum) + "–" + String(maximum) + " s" + (reason.length === 0 ? "" : " · " + reason),
+      shoutoutEffect: (login) => "Shoutout für " + login + " würde ausgelöst",
+      variableEffect: (name, from, to) => "Variable " + name + " würde von " + String(from) + " auf " + String(to) + " wechseln",
+      cooldownEffect: (seconds) => "Abklingzeit " + String(seconds) + " s würde starten",
+      userCooldownEffect: (seconds) => "Persönliche Abklingzeit " + String(seconds) + " s würde starten",
+      blockReason: (code, detail) => {
+        const seconds = typeof detail?.remainingSeconds === "number" ? detail.remainingSeconds : null;
+        switch (code) {
+          case "text_commands.disabled": return "Textbefehl ist deaktiviert.";
+          case "text_commands.permission_denied": return "Der Absender erfüllt die Mindestrolle nicht.";
+          case "text_commands.stream_state": return "Der Streamstatus passt nicht zur Einstellung.";
+          case "text_commands.game_filter": return "Das aktuelle Spiel passt nicht zum Filter.";
+          case "text_commands.cooldown": return "Abklingzeit" + (seconds === null ? "" : ": noch " + String(seconds) + " s") + ".";
+          case "text_commands.user_cooldown": return "Abklingzeit pro Person" + (seconds === null ? "" : ": noch " + String(seconds) + " s") + ".";
+          case "text_commands.argument_invalid": return "Die Argumente sind ungültig.";
+          case "text_commands.argument_missing": return "Ein erforderliches Argument fehlt.";
+          case "faq.permission_denied": return "Der Absender erfüllt die Mindestrolle nicht.";
+          case "faq.game_filter": return "Das aktuelle Spiel passt nicht zum Filter.";
+          case "faq.cooldown": return "Abklingzeit" + (seconds === null ? "" : ": noch " + String(seconds) + " s") + ".";
+          case "faq.person_cooldown": return "Abklingzeit pro Person" + (seconds === null ? "" : ": noch " + String(seconds) + " s") + ".";
+          case "faq.shadowed": return "Ein früherer FAQ-Eintrag hat Vorrang.";
+          case "faq.command_prefix": return "Nachrichten mit ! am Anfang werden übersprungen.";
+          case "faq.own_message": return "Eigene Bot-Nachrichten werden übersprungen.";
+          case "host.module_disabled": return "Das Modul ist deaktiviert.";
+          case "host.channel_paused": return "Automatische Aktionen sind pausiert.";
+        }
+      },
     },
     overview: {
       oneChannelAvailable: "1 Kanal freigegeben",
@@ -1735,7 +1910,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     navigation: {
       mainNavigation: "Main navigation", overview: "Overview", live: "Live", setup: "Setup", channel: "Channel", system: "System", locationWeather: "Location & weather",
-      members: "Members", variables: "Variables", module: "Modules", audit: "Log", selectChannel: "Select channel",
+      members: "Members", variables: "Variables", module: "Modules", audit: "Log", selectChannel: "Select channel", testArea: "Test area",
       accountMenu: "Account", appearance: "Appearance", appearanceNightShift: "Night shift", appearanceIndigoNight: "Indigo night",
       manageModules: "Manage modules", moduleCategories: { chat: "Chat", participation: "Participation", twitch: "Twitch", data: "Data", stream: "Stream", admin: "Administration" },
       overlays: "Overlays",
@@ -1743,6 +1918,105 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       signingOut: "Signing out …", signOut: "Sign out",
       openSidebar: "Open sidebar", closeSidebar: "Close sidebar",
       sidebarSetupHeading: "Setup", sidebarSetupDescription: "Everything for your stream.", sidebarSearch: "Search everything", moduleOff: "Off",
+    },
+    testArea: {
+      title: "Test area",
+      subtitle: "Dry-run a sample message. Nothing is sent or saved. History stays in this session.",
+      context: "Context",
+      message: "Message",
+      messagePlaceholder: "Enter a chat message",
+      sender: "Sender",
+      senderHint: "Fictional test sender for per-person cooldowns",
+      badges: "Badges",
+      badgeNames: { subscriber: "Sub", vip: "VIP", moderator: "Mod", broadcaster: "Broadcaster", viewer: "Viewer" },
+      stream: "Stream",
+      online: "Live",
+      offline: "Offline",
+      game: {
+        label: "Game", hint: "Only the dry-run context changes.", search: "Search games", searchHint: "Enter at least two characters.",
+        loading: "Loading games …", empty: "No games found.", error: "Games could not be loaded.",
+        suggestions: "Suggested games", allGames: "All games", remove: (name) => "Remove " + name,
+      },
+      sharedChat: "Shared chat",
+      module: "Modules",
+      allModules: "All chat-reading modules",
+      textCommands: "Text commands",
+      faq: "FAQ",
+      run: "Check",
+      history: "History",
+      historyEmpty: "The last ten checks from this session appear here.",
+      historyReplay: (message, sender) => "Check " + message + " from " + sender + " again",
+      editContext: "Edit",
+      clearEntryFilter: "Clear entry filter",
+      result: "Result",
+      reactionsSummary: (fires, blocked) => String(fires) + (fires === 1 ? " reaction" : " reactions") + " · " + String(blocked) + " blocked",
+      resultCount: (count) => String(count) + (count === 1 ? " result" : " results"),
+      noReactionModules: (modules) => "No reaction: " + modules,
+      noDryRunModules: (modules) => "Dry run coming later: " + modules,
+      moduleError: (modules) => "Errors in: " + modules,
+      muted: "Muted",
+      paused: "Paused",
+      idleTitle: "Ready for a dry run",
+      idleDescription: "Enter a message and choose “Check”.",
+      loading: "Checking …",
+      retry: "Check again",
+      emptyTitle: "No reaction found",
+      emptyDescription: "No chat trigger matches this message.",
+      errorTitle: "Dry run failed",
+      errorDescription: "The message could not be checked. Try again.",
+      noDetails: "No matching details for this message.",
+      blocked: "Blocked",
+      fires: "Would trigger",
+      wouldReply: "Would reply",
+      wouldAct: "Would trigger",
+      matchCommand: "Command name",
+      matchAlias: (token) => "Alias “" + token + "”",
+      matchKeyword: (pattern) => "Keyword “" + pattern + "”",
+      matchRegex: (pattern) => "Regular expression “" + pattern + "”",
+      textCommand: "Text command",
+      faqEntry: "FAQ",
+      why: "Why",
+      answer: "Answer",
+      preview: "Preview",
+      botSpeaker: "BroBot",
+      chatTarget: "Chat target",
+      thisChat: "this chat",
+      sharedChats: "all shared chats",
+      replyToMessage: "Reply to this message",
+      suppressedAnswer: "Would not be sent: channel is muted.",
+      blocks: "Blocked",
+      wouldDo: "Would do",
+      openEditor: "Open in editor",
+      syntheticSenderNote: (login) => "Evaluated with the synthetic test sender " + login + ".",
+      chatEffect: "Chat message would be sent",
+      announcementEffect: "Announcement would be sent",
+      timeoutEffect: (minimum, maximum, reason) => "Timeout " + String(minimum) + "–" + String(maximum) + " s" + (reason.length === 0 ? "" : " · " + reason),
+      shoutoutEffect: (login) => "Shoutout for " + login + " would trigger",
+      variableEffect: (name, from, to) => "Variable " + name + " would change from " + String(from) + " to " + String(to),
+      cooldownEffect: (seconds) => "Cooldown of " + String(seconds) + " s would start",
+      userCooldownEffect: (seconds) => "Per-person cooldown of " + String(seconds) + " s would start",
+      blockReason: (code, detail) => {
+        const seconds = typeof detail?.remainingSeconds === "number" ? detail.remainingSeconds : null;
+        switch (code) {
+          case "text_commands.disabled": return "Text command is disabled.";
+          case "text_commands.permission_denied": return "The sender does not meet the minimum role.";
+          case "text_commands.stream_state": return "The stream state does not match the setting.";
+          case "text_commands.game_filter": return "The current game does not match the filter.";
+          case "text_commands.cooldown": return "Cooldown" + (seconds === null ? "" : ": " + String(seconds) + " s left") + ".";
+          case "text_commands.user_cooldown": return "Per-person cooldown" + (seconds === null ? "" : ": " + String(seconds) + " s left") + ".";
+          case "text_commands.argument_invalid": return "The arguments are invalid.";
+          case "text_commands.argument_missing": return "A required argument is missing.";
+          case "faq.permission_denied": return "The sender does not meet the minimum role.";
+          case "faq.game_filter": return "The current game does not match the filter.";
+          case "faq.cooldown": return "Cooldown" + (seconds === null ? "" : ": " + String(seconds) + " s left") + ".";
+          case "faq.person_cooldown": return "Per-person cooldown" + (seconds === null ? "" : ": " + String(seconds) + " s left") + ".";
+          case "faq.shadowed": return "An earlier FAQ entry takes priority.";
+          case "faq.command_prefix": return "Messages starting with ! are skipped.";
+          case "faq.own_message": return "The bot's own messages are skipped.";
+          case "host.module_disabled": return "The module is disabled.";
+          case "host.channel_paused": return "Automatic actions are paused.";
+        }
+      },
     },
     overview: {
       oneChannelAvailable: "1 channel available",

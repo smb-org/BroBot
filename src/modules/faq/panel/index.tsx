@@ -31,7 +31,7 @@ import {
 import { renderTemplate, type ModulePanelProperties } from "../../contract";
 import type { FaqEntry, FaqGame } from "../contracts";
 import { FAQ_ANSWER_MAX_LENGTH, FAQ_COOLDOWN_MAXIMUM_SECONDS, FAQ_COOLDOWN_MINIMUM_SECONDS, FAQ_ENTRY_NAME_MAX_LENGTH, FAQ_MINIMUM_TIERS, FAQ_PATTERN_MAXIMUM_COUNT, FAQ_PATTERN_MAX_LENGTH, FAQ_USER_COOLDOWN_MAXIMUM_SECONDS } from "../contracts";
-import { faqMatcherValidationError, matchFaqMatcher } from "../domain";
+import { faqMatcherValidationError } from "../domain";
 import { formatCharacterCount } from "../../../dashboard/ui/text-length";
 import { inputFromDraft, matcherFromDraft, type FaqDraft } from "./draft";
 import { faqMatcherValidationReasonText, faqTexts } from "./locale";
@@ -121,7 +121,7 @@ export default function FaqPanel(properties: ModulePanelProperties): ReactElemen
   return <FaqPanelContent key={properties.channelId} {...properties} />;
 }
 
-function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelProperties): ReactElement {
+function FaqPanelContent({ channelId, language, canManage = true, initialSelection, onOpenTestArea }: ModulePanelProperties): ReactElement {
   const labels = faqTexts(language);
   const characterCount = (count: number, maximum: number): string => formatCharacterCount(count, maximum, language ?? "de");
   const channelSettings = useChannelSettings(channelId);
@@ -135,7 +135,6 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
   const [draft, setDraft] = useState<FaqDraft>(emptyDraft);
   const [draftRevision, setDraftRevision] = useState<number | null>(null);
   const [pendingPatterns, setPendingPatterns] = useState("");
-  const [sampleMessage, setSampleMessage] = useState("");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "active" | "paused">("all");
   const [saving, setSaving] = useState(false);
@@ -148,7 +147,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
   const [deleteError, setDeleteError] = useState<string | undefined>();
 
   if (data !== undefined && selectedId === null) {
-    const firstEntry = data.entries[0];
+    const firstEntry = data.entries.find((entry) => entry.id === initialSelection) ?? data.entries[0];
     const next = firstEntry === undefined ? emptyDraft() : draftFromEntry(firstEntry);
     setSelectedId(firstEntry?.id ?? NEW_ENTRY_ID);
     setDraft(next);
@@ -165,7 +164,6 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
     ? undefined
     : faqMatcherValidationReasonText(matcherValidation.reasonCode, labels) ?? matcherValidation.reason;
   const matcherError = matcherServerError ?? matcherLocalError;
-  const sampleTest = useMemo(() => matchFaqMatcher(matcherFromDraft(draft), sampleMessage), [draft, sampleMessage]);
   const answerPreview = useMemo(() => renderTemplate(
     draft.answerText,
     Object.fromEntries((data?.variables ?? []).map(({ name, sample }) => [name, sample])),
@@ -190,7 +188,6 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
       setDraftRevision(entry.revision);
     }
     setPendingPatterns("");
-    setSampleMessage("");
     setAttemptedSave(false);
     setSaveError(undefined);
     setMatcherServerError(undefined);
@@ -370,15 +367,7 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
   });
   const selectedIndex = orderedEntries.findIndex((entry) => entry.id === selectedId);
   const listStatus = query.isPending ? "loading" : data === undefined ? "error" : orderedEntries.length === 0 ? "empty" : "success";
-  const sampleStatus = matcherError !== undefined
-    ? labels.sampleMessageInvalid
-    : sampleMessage.trim().length === 0
-      ? labels.sampleMessageEmpty
-      : sampleTest.reason === "command_prefix"
-        ? labels.sampleMessageCommand
-        : sampleTest.reason === "matched" && sampleTest.matchedPattern !== undefined
-          ? labels.sampleMessageMatch(sampleTest.matchedPattern)
-          : labels.sampleMessageNoMatch;
+  const testAreaDisabled = dirty || selectedEntry === undefined || saving || onOpenTestArea === undefined;
   const saveProps = {
     dirty,
     persistent: true,
@@ -407,7 +396,14 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
         {...(selectedEntry === undefined ? {} : { meta: labels.priorityMeta(selectedIndex + 1) })}
         badges={<Badge>{draft.matcherType === "regex" ? labels.regexCompact : labels.keywordsCompact}</Badge>}
         {...(canManage ? {} : { lockHint: labels.roleLocked })}
-        pageActions={<Button variant="neutral" onClick={() => { document.getElementById("faq-sample-message")?.focus(); }}>{labels.testSample}</Button>}
+        pageActions={<div className="faq-panel__test-area-action">
+          <Button
+            variant="neutral"
+            disabled={testAreaDisabled}
+            onClick={() => { if (selectedEntry !== undefined) onOpenTestArea?.("faq", selectedEntry.id); }}
+          >{labels.testAreaAction}</Button>
+          {testAreaDisabled ? <span>{dirty ? labels.testAreaDirty : labels.testAreaSavedOnly}</span> : null}
+        </div>}
         {...(selectedEntry === undefined ? {} : {
           overflow: <Button className="faq-panel__delete-action" variant="subtle" danger="subtle" size="compact" disabled={!canManage || deleting} onClick={openDelete}>
             <Icon name="remove" size={16} />{labels.delete}
@@ -470,20 +466,6 @@ function FaqPanelContent({ channelId, language, canManage = true }: ModulePanelP
                 disabled={!canManage || saving}
                 required
               />}
-              <Field
-                label={labels.sampleMessage}
-                hint={labels.sampleMessageHint}
-                value={sampleMessage}
-                onChange={setSampleMessage}
-                id="faq-sample-message"
-                className="faq-panel__sample-message"
-                maxLength={500}
-                countLabel={characterCount}
-                disabled={saving}
-              />
-              <div className="faq-panel__sample-result" data-testid="faq-test-result-slot" aria-live="polite" role={matcherError === undefined ? "status" : "alert"}>
-                {sampleStatus}
-              </div>
             </Section>
             <Section title={labels.rolesSectionTitle}>
               <RoleThreshold

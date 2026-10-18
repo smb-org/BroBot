@@ -144,6 +144,16 @@ const NAV_PAGES: readonly NavPageDefinition[] = [
     requiresChannel: true,
   },
   {
+    id: "test-area",
+    category: "admin",
+    area: "setup",
+    iconKind: "test",
+    route: (channelId) => ({ kind: "channel", channelId, section: "test-area" }),
+    label: (texts) => texts.navigation.testArea,
+    keywords: ["dry run", "trockenlauf", "testbereich", "test area"],
+    requiresChannel: true,
+  },
+  {
     id: "events",
     category: "admin",
     area: "setup",

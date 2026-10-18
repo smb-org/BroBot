@@ -62,8 +62,11 @@ const installPanelFetch = (handler?: PanelFetchHandler) => {
   return fetcher;
 };
 
-const renderFaqPanel = (language: "de" | "en") => renderWithQuery(
-  <UiProvider><FaqPanel channelId="channel-a" language={language} /><ToastHost /></UiProvider>,
+const renderFaqPanel = (language: "de" | "en", options: {
+  initialSelection?: string;
+  onOpenTestArea?: (moduleId: "text_commands" | "faq", entryId: string) => void;
+} = {}) => renderWithQuery(
+  <UiProvider><FaqPanel channelId="channel-a" language={language} {...options} /><ToastHost /></UiProvider>,
 );
 
 afterEach(() => {
@@ -73,19 +76,19 @@ afterEach(() => {
 });
 
 describe("FAQ panel", () => {
-  it("tests only the selected draft matcher and accepts multiword keyword chips", async () => {
-    const fetcher = installPanelFetch();
-    renderFaqPanel("de");
+  it("opens the saved FAQ entry in the test area and disables the action while dirty", async () => {
+    installPanelFetch();
+    const onOpenTestArea = vi.fn();
+    renderFaqPanel("de", { onOpenTestArea });
 
-    const keywordField = await screen.findByRole("textbox", { name: "Schlüsselwörter und Wortgruppen" });
-    fireEvent.change(keywordField, { target: { value: "hello there" } });
-    fireEvent.keyDown(keywordField, { key: "Enter" });
-    expect(await screen.findByRole("button", { name: "hello there entfernen" })).toBeInTheDocument();
+    const action = await screen.findByRole("button", { name: "Im Testbereich prüfen" });
+    expect(action).toBeEnabled();
+    fireEvent.click(action);
+    expect(onOpenTestArea).toHaveBeenCalledWith("faq", "entry-1");
 
-    const sampleField = screen.getByRole("textbox", { name: "Beispielnachricht testen" });
-    fireEvent.change(sampleField, { target: { value: "when do you say hello there?" } });
-    expect(screen.getByTestId("faq-test-result-slot")).toHaveTextContent("Treffer durch");
-    expect(fetcher.mock.calls.some(([input]) => (input instanceof Request ? input.url : input.toString()).includes("/test"))).toBe(false);
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Changed draft" } });
+    expect(action).toBeDisabled();
+    expect(screen.getByText("Speichere oder verwerfe Änderungen, bevor du prüfst.")).toBeInTheDocument();
   });
 
   it("saves answer, enabled state, and role threshold together with the entry revision", async () => {

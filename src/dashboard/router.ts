@@ -4,6 +4,7 @@ import { EVENT_TONES, type AuditArea, type EventTone } from "../contracts/values
 import { isAuditArea } from "./audit/areas";
 import type { PanelAuditFilters, PanelEventFilters, PanelEventOrigin } from "../panel-contract";
 import { runDashboardNavigationGuards } from "./ui/navigation-guard";
+import type { DryRunRequest } from "../contracts/dry-run";
 
 export type DashboardRoute =
   | { kind: "overview" }
@@ -11,13 +12,14 @@ export type DashboardRoute =
   | {
     kind: "channel";
     channelId: string;
-    section: "overview" | "system" | "members" | "variables" | "overlays" | "events" | "modules" | "audit" | "location-weather";
+    section: "overview" | "system" | "members" | "variables" | "overlays" | "events" | "modules" | "audit" | "location-weather" | "test-area";
     overlayId?: string;
     editorOverlayId?: string;
     initialVariable?: string;
     initialOverlayName?: string;
     filters?: PanelEventFilters;
     auditFilters?: PanelAuditFilters;
+    only?: DryRunRequest["only"];
   }
   | { kind: "module"; channelId: string; moduleId: string };
 
@@ -50,7 +52,7 @@ export const routeForDashboardMode = (
 export const dashboardRouteRequiresBot = (route: DashboardRoute): boolean =>
   route.kind === "overview" || route.kind === "module" || (route.kind === "channel" &&
     route.section !== "system" && route.section !== "audit" && route.section !== "variables" &&
-    route.section !== "overlays" && route.section !== "location-weather");
+    route.section !== "overlays" && route.section !== "location-weather" && route.section !== "test-area");
 
 let suppressNextPopState = false;
 let historyIndex = 0;
@@ -137,7 +139,7 @@ export const parseDashboardRoute = (pathname: string, search = ""): DashboardRou
       ...(editorOverlayId === "new" && initialOverlayName !== null && initialOverlayName.length > 0 ? { initialOverlayName } : {}),
     };
   }
-  const channelSections = ["system", "members", "variables", "overlays", "overlay-links", "events", "modules", "audit", "location-weather"];
+  const channelSections = ["system", "members", "variables", "overlays", "overlay-links", "events", "modules", "audit", "location-weather", "test-area"];
   if (segments[0] !== "channels" || (segments.length !== 2 && segments.length !== 3) ||
       (segments.length === 3 && !channelSections.includes(segments[2] ?? ""))) return { kind: "overview" };
   const channelId = decodeSegment(segments[1] ?? "");
@@ -147,7 +149,7 @@ export const parseDashboardRoute = (pathname: string, search = ""): DashboardRou
     kind: "channel",
     channelId,
     section: section === "overlay-links" ? "overlays"
-      : section === "system" || section === "members" || section === "variables" || section === "overlays" || section === "events" || section === "modules" || section === "audit" || section === "location-weather"
+      : section === "system" || section === "members" || section === "variables" || section === "overlays" || section === "events" || section === "modules" || section === "audit" || section === "location-weather" || section === "test-area"
       ? section
       : "overview",
   };
@@ -162,6 +164,13 @@ export const parseDashboardRoute = (pathname: string, search = ""): DashboardRou
   if (route.section === "audit") {
     const auditFilters = parseAuditFilters(search);
     return auditFilters === undefined ? route : { ...route, auditFilters };
+  }
+  if (route.section === "test-area") {
+    const params = new URLSearchParams(search);
+    const moduleId = params.get("onlyModule");
+    const entryId = params.get("onlyEntryId");
+    if (moduleId !== "text_commands" && moduleId !== "faq") return route;
+    return { ...route, only: { moduleId, ...(entryId === null || entryId.length === 0 ? {} : { entryId }) } };
   }
   return route;
 };
@@ -201,6 +210,11 @@ export const dashboardRoutePath = (route: DashboardRoute): string => {
     if (route.auditFilters.area !== null) params.set("area", route.auditFilters.area);
     const query = params.toString();
     return query.length === 0 ? path : `${path}?${query}`;
+  }
+  if (route.section === "test-area" && route.only !== undefined) {
+    const params = new URLSearchParams({ onlyModule: route.only.moduleId });
+    if (route.only.entryId !== undefined) params.set("onlyEntryId", route.only.entryId);
+    return `${path}?${params.toString()}`;
   }
   return path;
 };
