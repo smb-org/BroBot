@@ -189,7 +189,8 @@ export const updateChannelModuleEnabledStateWithAudit = async (
   };
   const mutation = db.prepare(
     `UPDATE channel_modules
-        SET enabled = ?, initialized = ?, revision = revision + 1
+        SET enabled = ?, initialized = ?, revision = revision + 1,
+            last_disabled_revision = CASE WHEN ? = 0 THEN revision + 1 ELSE last_disabled_revision END
       WHERE channel_id = ? AND module_id = ? AND revision = ?
         ${stateGuard?.sql ?? ""}
         ${actorGuard(MANAGING_ROLES)}
@@ -197,6 +198,7 @@ export const updateChannelModuleEnabledStateWithAudit = async (
   ).bind(
     after.enabled ? 1 : 0,
     after.initialized ? 1 : 0,
+    after.enabled ? 1 : 0,
     channelId,
     moduleId,
     expectedRevision ?? before.revision,

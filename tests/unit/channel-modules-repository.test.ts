@@ -138,6 +138,34 @@ describe("module activation in the repository", () => {
     await expect(auditCount(database)).resolves.toBe(2);
   });
 
+  it("persists the disable revision atomically and retains it after re-enabling", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await createChannelModuleWithAudit(
+      asD1(database),
+      actorFor("user-1"),
+      record("kanal-a", "test-modul", true),
+      "module.enabled",
+      NOW,
+    );
+
+    await updateChannelModuleEnabledStateWithAudit(
+      asD1(database), actorFor("user-1"), "kanal-a", "test-modul", false, "module.disabled", NOW,
+    );
+    await expect(database.prepare(
+      "SELECT revision, last_disabled_revision FROM channel_modules WHERE channel_id = ? AND module_id = ?",
+    ).bind("kanal-a", "test-modul").first()).resolves.toEqual({ revision: 2, last_disabled_revision: 2 });
+
+    await updateChannelModuleEnabledStateWithAudit(
+      asD1(database), actorFor("user-1"), "kanal-a", "test-modul", true, "module.enabled", NOW,
+      [], 2,
+    );
+    await expect(database.prepare(
+      "SELECT revision, last_disabled_revision FROM channel_modules WHERE channel_id = ? AND module_id = ?",
+    ).bind("kanal-a", "test-modul").first()).resolves.toEqual({ revision: 3, last_disabled_revision: 2 });
+  });
+
   it("denies a status change by an operator and leaves no further audit entry", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");

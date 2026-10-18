@@ -91,6 +91,25 @@ describe("points ledger in the worker Durable Object", () => {
     await expect(object.pointSummary(pointTestModule)).resolves.toMatchObject({ circulation: 0, accounts: 1 });
   });
 
+  it(`rejects invalid viewer and malformed system account IDs through apply (${testCard("generic ledger movements enforce viewer and reserved account formats", "an invalid account is accepted by apply but rejected by balance and history")})`, async () => {
+    const channelId = `points-invalid-accounts-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+
+    for (const accountId of ["a".repeat(33), "viewer/invalid"]) {
+      await expect(capturePointError(object, (target) => target.applyPointOperation(pointTestModule,
+        `invalid-viewer:${accountId}`, "bonus", [
+          { accountId, delta: 1 }, { accountId: "__house", delta: -1 },
+        ], {}))).resolves.toBe("invalid_account_id");
+    }
+    await expect(capturePointError(object, (target) => target.applyPointOperation(pointTestModule,
+      "invalid-system-account", "bonus", [
+        { accountId: "__escrow:round/invalid", delta: 1 }, { accountId: "__house", delta: -1 },
+      ], {}))).resolves.toBe("invalid_account");
+
+    await expect(object.pointSummary(pointTestModule)).resolves.toMatchObject({ circulation: 0, accounts: 0 });
+  });
+
   it(`rejects an idempotency key reused with a different payload (${testCard("payload hashes distinguish conflicting requests", "the second payload is silently treated as the first")})`, async () => {
     const channelId = `points-conflict-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);

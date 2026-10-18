@@ -204,6 +204,9 @@ const D1_IN_PARAMETER_LIMIT = 100;
 const FIXED_D1_PARAMETER_COUNT = 2;
 const D1_IDS_PER_QUERY = D1_IN_PARAMETER_LIMIT - FIXED_D1_PARAMETER_COUNT;
 const ALARM_TABLE_KEY = "channel:alarm_schedule";
+const POINTS_ACTIVATION_RECONCILIATION_ALARM_KEY = "points:activation_reconciliation";
+const POINTS_ACTIVATION_RECONCILIATION_ALARM_HANDLER = "host:points_activation_reconciliation";
+const POINTS_ACTIVATION_RECONCILIATION_MODULES_KEY = "points:activation_reconciliation_modules";
 const PANEL_DURABLE_REVISIONS_KEY = "channel:panel_resource_revisions";
 const CHAT_ACTIVITY_COUNT_KEY = "channel:chat_activity_count";
 const TIMER_MIRROR_RETRY_DELAY_MS = 5_000;
@@ -2828,8 +2831,15 @@ export class ChannelObject extends DurableObject<Env> {
 
   private async recoverPointRoundAlarms(): Promise<void> {
     this.ensurePointsSchema();
-    await this.reconcilePointModuleActivationsDuringRecovery();
-    for (const cancellation of pendingPointRoundCancellations(this.ctx.storage.sql)) {
+    const cancellations = pendingPointRoundCancellations(this.ctx.storage.sql);
+    const activeModuleIds = this.ctx.storage.sql.exec<{ module_id: string }>(
+      "SELECT DISTINCT module_id FROM game_rounds WHERE state IN ('announcing', 'open', 'resolving')",
+    ).toArray().map(({ module_id }) => module_id);
+    this.retainPointActivationReconciliationModulesSync([
+      ...activeModuleIds,
+      ...cancellations.map(({ moduleId }) => moduleId),
+    ]);
+    for (const cancellation of cancellations) {
       await this.cancelOpenGameRoundsInternal(cancellation.moduleId, cancellation.revision, false);
     }
     const rounds = recoverablePointRounds(this.ctx.storage.sql);
@@ -2856,6 +2866,14 @@ export class ChannelObject extends DurableObject<Env> {
       }
       this.ctx.storage.transactionSync(() => { this.writePointRoundAlarmSync(alarmKey, deadline); });
     }
+    if (this.pointActivationReconciliationModulesSync().length > 0) {
+      const current = table[POINTS_ACTIVATION_RECONCILIATION_ALARM_KEY];
+      if (current?.handler !== POINTS_ACTIVATION_RECONCILIATION_ALARM_HANDLER) {
+        this.ctx.storage.transactionSync(() => {
+          this.writePointActivationReconciliationAlarmSync(now);
+        });
+      }
+    }
     for (const notice of pendingPointRoundCancellationNotices(this.ctx.storage.sql)) {
       const key = pointCancellationNoticeAlarmKey(notice.moduleId, notice.revision);
       if (table[key] !== undefined) continue;
@@ -2869,30 +2887,56 @@ export class ChannelObject extends DurableObject<Env> {
   private async reconcilePointModuleActivationsDuringRecovery(): Promise<void> {
     const channelId = this.ownChannelId();
     if (channelId === null) return;
-    const moduleIds = this.ctx.storage.sql.exec<{ module_id: string }>(
-      `SELECT module_id FROM module_gates
-       UNION SELECT module_id FROM game_rounds`,
-    ).toArray().map(({ module_id }) => module_id);
-    if (moduleIds.length === 0) return;
+    const moduleIds = new Set(this.pointActivationReconciliationModulesSync());
+    for (const { module_id: moduleId } of this.ctx.storage.sql.exec<{ module_id: string }>(
+      `SELECT module_id FROM game_rounds WHERE state IN ('announcing', 'open', 'resolving')
+       UNION SELECT module_id FROM game_round_cancellations`,
+    ).toArray()) moduleIds.add(moduleId);
+    if (moduleIds.size === 0) return;
 
-    const placeholders = moduleIds.map(() => "?").join(", ");
-    const activations = await this.env.DB.prepare(
-      `SELECT module_id, enabled, revision FROM channel_modules
-        WHERE channel_id = ? AND module_id IN (${placeholders})`,
-    ).bind(channelId, ...moduleIds).all<{ module_id: string; enabled: number; revision: number }>();
-    for (const activation of activations.results) {
-      await this.applyPointModuleActivation(activation.module_id, activation.enabled === 1, activation.revision, false);
+    const requestedModuleIds = [...moduleIds].sort((left, right) => left.localeCompare(right));
+    for (const batch of chunksOf(requestedModuleIds, D1_IDS_PER_QUERY)) {
+      const placeholders = batch.map(() => "?").join(", ");
+      const activations = await this.env.DB.prepare(
+        `SELECT module_id, enabled, revision, last_disabled_revision FROM channel_modules
+          WHERE channel_id = ? AND module_id IN (${placeholders})`,
+      ).bind(channelId, ...batch).all<{
+        module_id: string;
+        enabled: number;
+        revision: number;
+        last_disabled_revision: number | null;
+      }>();
+      for (const activation of activations.results) {
+        await this.applyPointModuleActivation(
+          activation.module_id,
+          activation.enabled === 1,
+          activation.revision,
+          false,
+          activation.last_disabled_revision,
+        );
+      }
     }
+    this.clearPointActivationReconciliationModulesSync(requestedModuleIds);
   }
 
   private async reconcilePointModuleActivation(moduleId: string, flushCancellationNotices: boolean): Promise<void> {
     const channelId = this.ownChannelId();
     if (channelId === null) return;
     const activation = await this.env.DB.prepare(
-      "SELECT enabled, revision FROM channel_modules WHERE channel_id = ? AND module_id = ?",
-    ).bind(channelId, moduleId).first<{ enabled: number; revision: number }>();
+      "SELECT enabled, revision, last_disabled_revision FROM channel_modules WHERE channel_id = ? AND module_id = ?",
+    ).bind(channelId, moduleId).first<{
+      enabled: number;
+      revision: number;
+      last_disabled_revision: number | null;
+    }>();
     if (activation === null) return;
-    await this.applyPointModuleActivation(moduleId, activation.enabled === 1, activation.revision, flushCancellationNotices);
+    await this.applyPointModuleActivation(
+      moduleId,
+      activation.enabled === 1,
+      activation.revision,
+      flushCancellationNotices,
+      activation.last_disabled_revision,
+    );
   }
 
   private async applyPointModuleActivation(
@@ -2900,7 +2944,21 @@ export class ChannelObject extends DurableObject<Env> {
     enabled: boolean,
     revision: number,
     flushCancellationNotices: boolean,
+    lastDisabledRevision: number | null = null,
   ): Promise<void> {
+    if (lastDisabledRevision !== null) {
+      const currentGate = this.ctx.storage.sql.exec<{ revision: number }>(
+        "SELECT revision FROM module_gates WHERE module_id = ?",
+        moduleId,
+      ).toArray()[0];
+      if (currentGate === undefined || currentGate.revision < lastDisabledRevision) {
+        const disabled = await this.setGameModuleGateInternal(moduleId, true, lastDisabledRevision, flushCancellationNotices);
+        if (disabled.applied) await this.cancelOpenGameRoundsInternal(moduleId, lastDisabledRevision, flushCancellationNotices);
+      } else {
+        await this.cancelOpenGameRoundsInternal(moduleId, lastDisabledRevision, flushCancellationNotices);
+      }
+    }
+
     const gate = this.ctx.storage.sql.exec<{ revision: number }>(
       "SELECT revision FROM module_gates WHERE module_id = ?",
       moduleId,
@@ -2910,6 +2968,43 @@ export class ChannelObject extends DurableObject<Env> {
     if (result.applied && !enabled) {
       await this.cancelOpenGameRoundsInternal(moduleId, revision, flushCancellationNotices);
     }
+  }
+
+  private writePointActivationReconciliationAlarmSync(deadline: number): void {
+    const stored = this.ctx.storage.kv.get<AlarmScheduleTable>(ALARM_TABLE_KEY);
+    const table = stored === undefined ? {} : { ...stored };
+    table[POINTS_ACTIVATION_RECONCILIATION_ALARM_KEY] = {
+      deadline,
+      handler: POINTS_ACTIVATION_RECONCILIATION_ALARM_HANDLER,
+      revision: (table[POINTS_ACTIVATION_RECONCILIATION_ALARM_KEY]?.revision ?? 0) + 1,
+    };
+    this.ctx.storage.kv.put(ALARM_TABLE_KEY, table);
+  }
+
+  private pointActivationReconciliationModulesSync(): string[] {
+    const stored = this.ctx.storage.kv.get(POINTS_ACTIVATION_RECONCILIATION_MODULES_KEY);
+    return Array.isArray(stored)
+      ? [...new Set(stored.filter((value): value is string => typeof value === "string" && value.length > 0))]
+        .sort((left, right) => left.localeCompare(right))
+      : [];
+  }
+
+  private retainPointActivationReconciliationModulesSync(moduleIds: readonly string[]): void {
+    const modules = new Set([...this.pointActivationReconciliationModulesSync(), ...moduleIds]);
+    if (modules.size > 0) {
+      this.ctx.storage.kv.put(POINTS_ACTIVATION_RECONCILIATION_MODULES_KEY,
+        [...modules].sort((left, right) => left.localeCompare(right)));
+    }
+  }
+
+  private clearPointActivationReconciliationModulesSync(moduleIds: readonly string[]): void {
+    this.ctx.storage.transactionSync(() => {
+      const modules = new Set(this.pointActivationReconciliationModulesSync());
+      for (const moduleId of moduleIds) modules.delete(moduleId);
+      if (modules.size === 0) this.ctx.storage.kv.delete(POINTS_ACTIVATION_RECONCILIATION_MODULES_KEY);
+      else this.ctx.storage.kv.put(POINTS_ACTIVATION_RECONCILIATION_MODULES_KEY,
+        [...modules].sort((left, right) => left.localeCompare(right)));
+    });
   }
 
   private pointAccess(moduleId: string): ModulePointsAccess {
@@ -3838,6 +3933,15 @@ export class ChannelObject extends DurableObject<Env> {
       [ACTIVE_CHATTER_EXPIRY_HANDLER, {
         handle: async (_key, entry, now) => {
           await this.expireActiveChatters(entry.deadline, now);
+        },
+      }],
+      [POINTS_ACTIVATION_RECONCILIATION_ALARM_HANDLER, {
+        retryDelaysMs: [POINTS_ANNOUNCE_RETRY_MS],
+        handle: async () => {
+          await this.reconcilePointModuleActivationsDuringRecovery();
+          for (const cancellation of pendingPointRoundCancellations(this.ctx.storage.sql)) {
+            await this.cancelOpenGameRoundsInternal(cancellation.moduleId, cancellation.revision, false);
+          }
         },
       }],
       [POINTS_ROUND_ALARM_HANDLER, {

@@ -103,6 +103,11 @@ export type PointSettlement = (input: PointSettlementInput) => PointSettlementOu
 
 const POINT_ROUND_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/u;
 const POINT_ACCOUNT_ID_PATTERN = /^[A-Za-z0-9_-]{1,32}$/u;
+const POINT_SYSTEM_ACCOUNT_PATTERNS = [
+  /^__jackpot:[A-Za-z0-9_-]{1,64}$/u,
+  /^__escrow:[A-Za-z0-9_-]{1,64}$/u,
+  /^__bosspot:[A-Za-z0-9_-]{1,64}$/u,
+];
 
 export const assertPointRoundId = (roundId: string): void => {
   if (!POINT_ROUND_ID_PATTERN.test(roundId)) throw new Error("invalid_round_id");
@@ -116,9 +121,17 @@ const allowedKinds = new Set<PointsKind>(["bonus", "activity", "stake", "game", 
 const systemAccount = (accountId: string): boolean => accountId.startsWith("__");
 const pointKindFor = (accountId: string): "viewer" | "house" | "pot" => {
   if (accountId === "__house") return "house";
-  if (accountId.startsWith("__jackpot:") || accountId.startsWith("__escrow:") || accountId.startsWith("__bosspot:")) return "pot";
+  if (POINT_SYSTEM_ACCOUNT_PATTERNS.some((pattern) => pattern.test(accountId))) return "pot";
   if (systemAccount(accountId)) throw new Error("invalid_account");
   return "viewer";
+};
+
+const assertLedgerAccountId = (accountId: string): void => {
+  if (systemAccount(accountId)) {
+    pointKindFor(accountId);
+    return;
+  }
+  assertPointAccountId(accountId);
 };
 
 const jsonValue = (value: unknown): string => {
@@ -240,7 +253,7 @@ export const ensurePointsSchema = (sql: PointsSql): void => {
 };
 
 const ensureAccountSync = (sql: PointsSql, accountId: string, login: string | null, now: string): AccountRow => {
-  if (accountId.length === 0 || accountId.length > 200) throw new Error("invalid_account");
+  assertLedgerAccountId(accountId);
   const kind = pointKindFor(accountId);
   sql.exec(
     `INSERT INTO point_accounts (account_id, kind, login, balance, welcome_pending, updated_at)
@@ -375,6 +388,10 @@ export const applyPointOperationSync = (
 ): PointApplyInternalResult => {
   if (!allowedKinds.has(kind)) throw new Error("invalid_operation_kind");
   if (operationId.length === 0 || operationId.length > 200) throw new Error("invalid_operation_id");
+  for (const movement of movements) {
+    assertLedgerAccountId(movement.accountId);
+    if ("potShare" in movement) assertLedgerAccountId(movement.potShare.pot);
+  }
   if (kind === "game") checkModuleGateSync(sql, moduleId);
   const previous = operationSync(sql, operationId);
   if (previous !== null) {
