@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { faqModule } from "../../src/modules/faq";
+import { textLibraryModule } from "../../src/modules/text_library";
 import { textCommandModule } from "../../src/modules/text_commands";
 import { createTextCommandRepository } from "../../src/modules/text_commands/adapters/d1";
 import { dispatchEventSubNotification } from "../../src/worker/dispatch";
@@ -96,6 +97,49 @@ const seedBotIdentity = async (database: TestD1Database): Promise<void> => {
     NOW,
     NOW,
   );
+};
+
+const seedFaqAnswer = async (
+  database: TestD1Database,
+  faqId: string,
+  trigger: string,
+  answerText: string,
+  order = 0,
+): Promise<void> => {
+  await database.prepare(
+    `INSERT INTO faq_entries
+      (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, minimum_tier,
+       cooldown_seconds, user_cooldown_seconds, games_json, chat_target, use_channel_default_target,
+       sort_order, revision, last_used_at, created_at, updated_at)
+     VALUES (?, ?, ?, 1, 'keywords', ?, ?, 'everyone', 30, 0, '[]', 'where_asked', 1, ?, 1, NULL, ?, ?)`,
+  ).bind(
+    faqId,
+    CHANNEL_ID,
+    faqId,
+    JSON.stringify({ type: "keywords", patterns: [trigger] }),
+    answerText,
+    order,
+    NOW,
+    NOW,
+  ).run();
+};
+
+const seedTextBlock = async (
+  database: TestD1Database,
+  blockName: string,
+  variants: readonly { id: string; conditions: Readonly<Record<string, unknown>>; texts: readonly string[] }[],
+): Promise<void> => {
+  await database.prepare("INSERT INTO text_library_settings (channel_id, graph_revision, updated_at) VALUES (?, 1, ?)")
+    .bind(CHANNEL_ID, NOW).run();
+  await database.prepare("INSERT INTO text_library_categories (channel_id, category_id, created_at, updated_at) VALUES (?, 'faq', ?, ?)")
+    .bind(CHANNEL_ID, NOW, NOW).run();
+  await database.prepare("INSERT INTO text_blocks (channel_id, block_name, category_id, revision, created_at, updated_at) VALUES (?, ?, 'faq', 1, ?, ?)")
+    .bind(CHANNEL_ID, blockName, NOW, NOW).run();
+  for (const [position, variant] of variants.entries()) {
+    await database.prepare(
+      "INSERT INTO text_block_variants (channel_id, block_name, variant_id, position, conditions_json, texts_json) VALUES (?, ?, ?, ?, ?, ?)",
+    ).bind(CHANNEL_ID, blockName, variant.id, position, JSON.stringify(variant.conditions), JSON.stringify(variant.texts)).run();
+  }
 };
 
 describe("text-command dry-run parity", () => {
@@ -266,6 +310,135 @@ describe("text-command dry-run parity", () => {
     } finally {
       productionDatabase.close();
       dryRunDatabase.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses the FAQ production template context for moderator-conditioned answer blocks", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const productionDatabase = new TestD1Database();
+    const dryRunDatabase = new TestD1Database();
+    try {
+      for (const database of [productionDatabase, dryRunDatabase]) {
+        await insertChannel(database, CHANNEL_ID);
+        await database.prepare(
+          "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'faq', 1, '{}')",
+        ).bind(CHANNEL_ID).run();
+        await seedFaqAnswer(database, "faq-moderator", "hello", "{text.answer}");
+        await seedTextBlock(database, "answer", [
+          { id: "moderator", conditions: { minimumTier: "moderator" }, texts: ["Moderator answer"] },
+          { id: "fallback", conditions: {}, texts: [""] },
+        ]);
+      }
+      await Promise.all([seedBotIdentity(productionDatabase), seedBotIdentity(dryRunDatabase)]);
+
+      const productionFetcher = sent();
+      await dispatchEventSubNotification(environmentFor(productionDatabase), {
+        channelId: CHANNEL_ID,
+        subscriptionType: "channel.chat.message",
+        triggerId: "production-moderator-message",
+        payload: {
+          message: { text: "hello" },
+          message_id: "production-moderator-message",
+          chatter_user_id: "viewer-1",
+          chatter_user_login: "viewer_1",
+          broadcaster_user_login: CHANNEL_ID,
+          source_broadcaster_user_id: CHANNEL_ID,
+          badges: [{ set_id: "moderator", id: "1", info: "" }],
+        },
+        receivedAt: NOW,
+      }, productionFetcher, [faqModule, textLibraryModule]);
+      const dryRun = await dryRunChatMessage(
+        { ...environmentFor(dryRunDatabase), DB: dryRunDatabase as unknown as D1Database } as unknown as Env,
+        CHANNEL_ID,
+        {
+          text: "hello",
+          sender: { login: "viewer_1", statuses: ["moderator"] },
+          streamState: "online",
+          game: null,
+          sharedChat: false,
+          only: { moduleId: "faq" },
+        },
+        vi.fn<typeof fetch>(),
+        [faqModule],
+      );
+      const productionClaim = await productionDatabase.prepare(
+        "SELECT last_used_at FROM faq_entries WHERE faq_id = 'faq-moderator'",
+      ).first<{ last_used_at: string | null }>();
+      const dryRunClaim = await dryRunDatabase.prepare(
+        "SELECT last_used_at FROM faq_entries WHERE faq_id = 'faq-moderator'",
+      ).first<{ last_used_at: string | null }>();
+
+      expect(productionClaim?.last_used_at).toBeNull();
+      expect(dryRunClaim?.last_used_at).toBeNull();
+      expect(productionFetcher.mock.calls.filter(([input]) => urlFor(input).endsWith("/chat/messages"))).toHaveLength(0);
+      expect(dryRun.modules[0]?.entries[0]).toMatchObject({ outcome: "blocked", effects: [], templateNotes: [] });
+    } finally {
+      productionDatabase.close();
+      dryRunDatabase.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("samples multi-text FAQ answers read-only and reports unavailable text blocks", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, CHANNEL_ID);
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'faq', 1, '{}')",
+      ).bind(CHANNEL_ID).run();
+      await seedFaqAnswer(database, "faq-multiple", "hello", "{text.answer}");
+      await seedFaqAnswer(database, "faq-missing", "missing", "{text.unavailable}", 1);
+      await seedTextBlock(database, "answer", [
+        { id: "default", conditions: {}, texts: ["Answer A", "Answer B"] },
+      ]);
+      await seedBotIdentity(database);
+
+      const environment = { ...environmentFor(database), DB: database as unknown as D1Database } as unknown as Env;
+      const multiText = await dryRunChatMessage(environment, CHANNEL_ID, {
+        text: "hello",
+        sender: { login: "viewer_1", statuses: [] },
+        streamState: "online",
+        game: null,
+        sharedChat: false,
+        only: { moduleId: "faq", entryId: "faq-multiple" },
+      }, vi.fn<typeof fetch>(), [faqModule]);
+      const multiTextEntry = multiText.modules[0]?.entries[0];
+      const multiTextEffect = multiTextEntry?.effects.find((effect) => effect.kind === "chat");
+      const chosenIndex = await database.prepare(
+        "SELECT last_chosen_index FROM text_block_variants WHERE block_name = 'answer' AND variant_id = 'default'",
+      ).first<{ last_chosen_index: number }>();
+      const faqClaim = await database.prepare(
+        "SELECT last_used_at FROM faq_entries WHERE faq_id = 'faq-multiple'",
+      ).first<{ last_used_at: string | null }>();
+
+      expect(multiTextEntry?.outcome).toBe("fires");
+      expect(multiTextEffect).toMatchObject({ kind: "chat" });
+      if (multiTextEffect?.kind !== "chat") throw new Error("Expected a rendered FAQ chat effect.");
+      expect(["Answer A", "Answer B"]).toContain(multiTextEffect.text);
+      expect(multiTextEffect.text).not.toContain("{text.answer}");
+      expect(multiTextEntry?.templateNotes).toEqual([]);
+      expect(chosenIndex?.last_chosen_index).toBe(-1);
+      expect(faqClaim?.last_used_at).toBeNull();
+
+      const missingText = await dryRunChatMessage(environment, CHANNEL_ID, {
+        text: "missing",
+        sender: { login: "viewer_1", statuses: [] },
+        streamState: "online",
+        game: null,
+        sharedChat: false,
+        only: { moduleId: "faq", entryId: "faq-missing" },
+      }, vi.fn<typeof fetch>(), [faqModule]);
+
+      expect(missingText.modules[0]?.entries[0]?.templateNotes).toContainEqual({
+        code: "template.lookup_unavailable",
+        detail: { name: "text.unavailable" },
+      });
+    } finally {
+      database.close();
       vi.useRealTimers();
     }
   });

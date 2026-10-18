@@ -178,7 +178,7 @@ const regexRanges = (pattern: PreparedFaqPattern & { type: "regex" }, message: s
     } else if (end >= message.length) {
       break;
     } else {
-      searchFrom = end + 1;
+      searchFrom = end + codePointAfter(message, end).length;
     }
   }
   return ranges;

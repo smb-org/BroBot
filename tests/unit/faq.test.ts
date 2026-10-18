@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+import { RE2JS } from "re2js";
 
 import type { BotModule, ModuleEvent, ModuleExecutionContext, ModuleRegisteredTemplateVariable } from "../../src/modules/contract";
 import type { FaqEntry } from "../../src/modules/faq/contracts";
 import { createFaqRepository } from "../../src/modules/faq/adapters/d1";
-import { firstFaqMatch, matchFaqMatcher, normalizeFaqText, prepareFaqMatchers, selectFaqMatch } from "../../src/modules/faq/domain";
+import { explainFaqMatches, firstFaqMatch, matchFaqMatcher, normalizeFaqText, prepareFaqMatchers, selectFaqMatch } from "../../src/modules/faq/domain";
 import { processFaqMessage } from "../../src/modules/faq/service";
 import { faqModule } from "../../src/modules/faq";
 import { textCommandModule } from "../../src/modules/text_commands";
@@ -207,6 +208,41 @@ describe("FAQ literal matcher", () => {
       faqEntry({ matcher: { type: "regex", pattern: "" } }),
     ]);
     expect(selectFaqMatch(malformedStoredRegex, "any message", null).match).toBeNull();
+  });
+
+  it("keeps zero-length regex match ranges on Unicode code point boundaries", () => {
+    const pattern = "^|.";
+    const cases = [
+      { message: "😀x", expected: [[0, 0], [2, 3]] },
+      { message: "x😀y", expected: [[0, 0], [1, 3], [3, 4]] },
+      { message: "😀😀x", expected: [[0, 0], [2, 4], [4, 5]] },
+      { message: "a😀b", expected: [[0, 0], [1, 3], [3, 4]] },
+    ] as const;
+
+    for (const { message, expected } of cases) {
+      const prepared = prepareFaqMatchers([faqEntry({ matcher: { type: "regex", pattern } })]);
+      const explanation = explainFaqMatches(prepared, message, null)[0];
+      const productionMatcher = RE2JS.compile(pattern).matcher(message);
+      const productionRanges: [number, number][] = [];
+      let searchFrom = 0;
+      while (searchFrom <= message.length && productionMatcher.find(searchFrom)) {
+        const start = productionMatcher.start();
+        const end = productionMatcher.end();
+        productionRanges.push([start, end]);
+        if (end > start) {
+          searchFrom = end;
+        } else if (end >= message.length) {
+          break;
+        } else {
+          const nextCodePoint = message.codePointAt(end);
+          searchFrom = end + (nextCodePoint !== undefined && nextCodePoint > 0xffff ? 2 : 1);
+        }
+      }
+
+      expect(selectFaqMatch(prepared, message, null).match?.matchedPattern).toBe(pattern);
+      expect(explanation?.match).toMatchObject({ kind: "regex", pattern, ranges: expected });
+      expect(explanation?.match.kind === "regex" ? explanation.match.ranges : []).toEqual(productionRanges);
+    }
   });
 
   it("claims an entry cooldown atomically per user and scopes it to the channel", async () => {
