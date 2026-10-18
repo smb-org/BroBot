@@ -445,6 +445,7 @@ form.content-section { display: grid; gap: var(--s4); }
 .channel-defaults-editor .ui-chat-target-field__trigger { box-sizing: border-box; height: var(--control-height-touch); min-height: var(--control-height-touch); }
 .channel-defaults-editor .ui-select__search-control > .ui-select__trigger { width: var(--control-height-touch); }
 .channel-defaults-editor .inspector-field-row--stacked .ui-chat-target-field:not(:has(.ui-field__error)) { padding-bottom: 0; }
+.channel-defaults-editor__loading-control { display: grid; grid-auto-rows: var(--control-height-touch); }
 .channel-defaults-editor__hint { min-height: 18px; margin: var(--s1) 0 0; font-size: 12px; line-height: 18px; }
 .channel-location-page { display: flex; width: 100%; min-width: 0; min-height: 0; flex: 1 1 auto; flex-direction: column; }
 .channel-location-page .settings-page { width: 100%; max-width: none; height: auto; min-height: 0; flex: none; }

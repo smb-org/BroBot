@@ -104,7 +104,15 @@ export const ChannelDefaultsEditor = ({ channelId, role, saveTarget }: ChannelDe
   return <Section title={labels.section} className="channel-defaults-editor">
     <LoadState variant="panel-0" reserveHeight={canEdit ? "86px" : undefined}
       status={!settingsReady ? settingsQuery.isError || settings !== undefined ? "error" : "loading" : "success"}
-      loading={<LoadStateLines rows={2} height={39} />}
+      loading={canEdit ? <div className="channel-defaults-editor__fields">
+        <div className="channel-defaults-editor__field channel-defaults-editor__field--chat-target">
+          <div className="inspector-field-row inspector-field-row--stacked">
+            <div className="inspector-field-row__label">{labels.defaultChatTarget}</div>
+            <div className="inspector-field-row__control channel-defaults-editor__loading-control ui-load-state__reserved-lines" aria-hidden="true"><span /></div>
+          </div>
+          <p className="muted channel-defaults-editor__hint">{labels.defaultChatTargetHint}</p>
+        </div>
+      </div> : <LoadStateLines rows={2} height={39} />}
       empty={<LoadStateLines rows={2} height={39} />}
       error={<p role="alert">{labels.loadError}</p>}
       queryError={{ title: dashboard.errors.dataLoadFailed, message: labels.loadError, onRetry: () => { void settingsQuery.refetch(); } }}>
