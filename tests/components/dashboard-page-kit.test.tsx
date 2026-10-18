@@ -1,4 +1,5 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { CollectionPage, RuleNote, SettingsPage, ToolPage } from "../../src/dashboard/ui";
@@ -24,6 +25,30 @@ describe("dashboard page layouts", () => {
     expect(container.querySelector(".collection-page__list-toolbar")).toContainElement(screen.getByRole("button", { name: "Create" }));
     expect(container.querySelector(".collection-page__list-content")).toContainElement(screen.getByRole("button", { name: "!hello" }));
     expect(container.querySelector(".collection-page__detail")).toHaveTextContent("Command details");
+  });
+
+  it("returns focus to the latest opened row when the detail closes", async () => {
+    function Harness() {
+      const [selected, setSelected] = useState<string | null>(null);
+      return <CollectionPage
+        title="Members"
+        toolbar={null}
+        detailOpen={selected !== null}
+        onCloseDetail={() => { setSelected(null); }}
+        list={<>{["A", "B"].map((id) => <button key={id} type="button" onClick={() => { setSelected(id); }}>{`Member ${id}`}</button>)}</>}
+        detail={<button type="button" onClick={() => { setSelected(null); }}>Close</button>}
+      />;
+    }
+    render(<Harness />);
+    const rowA = screen.getByRole("button", { name: "Member A" });
+    const rowB = screen.getByRole("button", { name: "Member B" });
+    rowA.focus();
+    fireEvent.click(rowA);
+    rowB.focus();
+    fireEvent.click(rowB);
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    await waitFor(() => { expect(rowB).toHaveFocus(); });
   });
 
   it("places settings sections into internally scrollable columns", () => {

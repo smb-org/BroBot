@@ -124,7 +124,11 @@ export function CollectionPage({
           : <PageHeader kind={headerKind ?? "module"} title={title} subtitle={subtitle} />)}
       </div>
       <div className="collection-page__body">
-        <aside ref={listRef} aria-label={`${title}: ${texts.chooseCollection}`} className="collection-page__list">
+        <aside ref={listRef} aria-label={`${title}: ${texts.chooseCollection}`} className="collection-page__list" onClickCapture={(event) => {
+          // Selecting another row while the detail is open makes that row the one to return focus to.
+          const row = event.target instanceof Element ? event.target.closest<HTMLElement>("button, a, [tabindex]") : null;
+          if (detailOpen && !singleColumn && row !== null) returnFocus.current = row;
+        }}>
           <div className="collection-page__list-toolbar">{toolbar}</div>
           <div className="collection-page__list-content">
             {list ?? <div className="collection-page__empty">{empty ?? texts.noCollectionEntries}</div>}
