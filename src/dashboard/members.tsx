@@ -287,9 +287,9 @@ const MembersPageContent = ({
   const fetching = membersQuery.isFetching && !membersQuery.isFetchingNextPage;
   const error = membersQuery.isError ? listErrorMessage(membersQuery.error) : null;
   useEffect(() => {
-    if (!membersQuery.isError) return;
+    if (!membersQuery.isError || membersQuery.data === undefined) return;
     notify({ tone: "error", message: listErrorMessage(membersQuery.error) });
-  }, [membersQuery.error, membersQuery.isError]);
+  }, [membersQuery.data, membersQuery.error, membersQuery.isError]);
   const refreshMembers = async (): Promise<void> => {
     await queryClient.cancelQueries(queryFilter);
     await queryClient.invalidateQueries(queryFilter);

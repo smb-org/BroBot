@@ -1152,8 +1152,8 @@ export const DashboardApp = (): ReactElement => {
     reportLoadError("overview", route.kind === "channel" || route.kind === "module" ? overview.error : null);
   }, [overview.error, reportLoadError, route]);
   useEffect(() => {
-    reportLoadError("system", systemChannelId !== null && systemQuery.isError ? errorMessage(systemQuery.error) : null);
-  }, [reportLoadError, systemChannelId, systemQuery.error, systemQuery.isError]);
+    reportLoadError("system", systemChannelId !== null && systemQuery.isError && systemQuery.data !== undefined ? errorMessage(systemQuery.error) : null);
+  }, [reportLoadError, systemChannelId, systemQuery.data, systemQuery.error, systemQuery.isError]);
   const reloadChannels = useCallback(async (): Promise<void> => {
     const filter = { queryKey: queryKeys.channels(), exact: true } as const;
     await queryClient.cancelQueries(filter);

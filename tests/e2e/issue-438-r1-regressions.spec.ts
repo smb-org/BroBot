@@ -21,6 +21,7 @@ const viewports = [
   { width: 1280, height: 800 },
   { width: 390, height: 844 },
 ] as const;
+type Issue438MockOptions = { settingsLoading?: boolean; role?: ChannelRole; systemError?: boolean; membersError?: boolean };
 const json = (value: unknown, status = 200) => ({ status, contentType: "application/json", body: JSON.stringify(value) });
 
 interface MockControls {
@@ -30,7 +31,7 @@ interface MockControls {
   releaseSettings: () => void;
 }
 
-const installIssue438Mocks = async (page: Page, options: { settingsLoading?: boolean; role?: ChannelRole } = {}): Promise<MockControls> => {
+const installIssue438Mocks = async (page: Page, options: Issue438MockOptions = {}): Promise<MockControls> => {
   const role = options.role ?? "manager";
   const patchRequests: MockControls["patchRequests"] = [];
   const moduleState = new Map<string, Array<{ id: string; enabled: boolean; settings: string }>>([
@@ -112,6 +113,7 @@ const installIssue438Mocks = async (page: Page, options: { settingsLoading?: boo
     if (matchedChannelId !== undefined && path === `/api/channels/${matchedChannelId}/variables`) return route.fulfill(json({ variables: [] }));
     if (matchedChannelId !== undefined && path === `/api/channels/${matchedChannelId}/members/search`) return route.fulfill(json({ user: inviteUser }));
     if (matchedChannelId !== undefined && path === `/api/channels/${matchedChannelId}/members` && method === "GET") {
+      if (options.membersError) return route.fulfill(json({ error: "member_list_failed" }, 503));
       return route.fulfill(json({ members, nextCursor: null, broadcasterCount: 2, viewerUserId: "viewer-438" }));
     }
     if (matchedChannelId !== undefined && path === `/api/channels/${matchedChannelId}/members` && method === "POST") {
@@ -124,6 +126,7 @@ const installIssue438Mocks = async (page: Page, options: { settingsLoading?: boo
       return route.fulfill(json({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 0, defaultChatTarget: "source_only", defaultChatTargetRevision: 1 }));
     }
     if (matchedChannelId !== undefined && path === `/api/channels/${matchedChannelId}/system`) {
+      if (options.systemError) return route.fulfill(json({ error: "system_load_failed" }, 503));
       return route.fulfill(json({
         broadcasterConnection: "connected",
         bot,
@@ -146,7 +149,7 @@ const installIssue438Mocks = async (page: Page, options: { settingsLoading?: boo
   };
 };
 
-const freshRoute = async (page: Page, viewport: { width: number; height: number }, path: string, options: { settingsLoading?: boolean; role?: ChannelRole } = {}) => {
+const freshRoute = async (page: Page, viewport: { width: number; height: number }, path: string, options: Issue438MockOptions = {}) => {
   await page.unrouteAll({ behavior: "wait" });
   await page.setViewportSize(viewport);
   const controls = await installIssue438Mocks(page, options);
@@ -336,6 +339,17 @@ test("system save actions remain reserved and disabled while settings load", asy
   expect(Math.abs(headerAfter.height - headerBefore.height)).toBeLessThanOrEqual(1);
   expect(Math.abs(saveClusterAfter.y - saveClusterBefore.y)).toBeLessThanOrEqual(1);
   expect(Math.abs(statusListAfter.y - statusListBefore.y)).toBeLessThanOrEqual(1);
+});
+
+test("initial system and member load errors stay inline without duplicate toasts", async ({ page }) => {
+  const viewport = { width: 1280, height: 800 };
+  await freshRoute(page, viewport, `/channels/${channelId}/system`, { systemError: true });
+  await expect(page.locator(".system-page [role='alert']")).toBeVisible();
+  await expect(page.locator(".ui-toast--error")).toHaveCount(0);
+
+  await freshRoute(page, viewport, `/channels/${channelId}/members`, { membersError: true });
+  await expect(page.locator(".collection-page__list [role='alert']")).toBeVisible();
+  await expect(page.locator(".ui-toast--error")).toHaveCount(0);
 });
 
 test("the module list, module header, and command palette share revision-owned Undo", async ({ page }) => {
