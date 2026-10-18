@@ -144,12 +144,20 @@ const expectNoWholePageScroll = async (page: Page): Promise<void> => {
   expect(dimensions.pageHeight, JSON.stringify(dimensions)).toBeLessThanOrEqual(dimensions.viewportHeight);
 };
 
-const expectMobileDialogBounds = async (page: Page, name: string): Promise<void> => {
-  const rect = await page.getByRole("dialog", { name }).evaluate((dialog) => {
-    const { x, y, width, height } = dialog.getBoundingClientRect();
-    return { x, y, width, height };
+const expectMobileDialogBounds = async (page: Page, name: string, mode: "full" | "inset" = "full"): Promise<void> => {
+  const bounds = await page.getByRole("dialog", { name }).evaluate((dialog) => {
+    const { x, y, right, bottom, width, height } = dialog.getBoundingClientRect();
+    return { x, y, right, bottom, width, height, clientWidth: document.documentElement.clientWidth, viewportHeight: window.innerHeight };
   });
-  expect(rect).toEqual({ x: 0, y: 0, width: 390, height: 844 });
+  if (mode === "full") {
+    expect(bounds).toMatchObject({ x: 0, y: 0, right: 390, bottom: 844, width: 390, height: 844 });
+    return;
+  }
+  expect(bounds.x).toBeGreaterThanOrEqual(8);
+  expect(bounds.y).toBeGreaterThanOrEqual(16);
+  expect(bounds.right).toBeLessThanOrEqual(bounds.clientWidth - 8);
+  expect(bounds.bottom).toBeLessThanOrEqual(bounds.viewportHeight - 16);
+  expect(bounds.width).toBeLessThan(bounds.clientWidth);
 };
 
 const saveScreenshot = async (page: Page, info: TestInfo, name: string): Promise<void> => {
@@ -267,7 +275,7 @@ test.describe("test area screenshot captures", () => {
   test("1280 by 800 empty state", async ({ page }, info) => {
     await openTestArea(page, { width: 1280, height: 800, response: emptyResponse() });
     await submitMessage(page);
-    await expect(page.getByText("Keine Reaktion gefunden")).toBeVisible();
+    await expect(page.getByTestId("test-area-results-slot").getByText("Keine Reaktion gefunden")).toBeVisible();
     await saveScreenshot(page, info, "empty-1280x800");
   });
 
@@ -291,7 +299,7 @@ test.describe("test area screenshot captures", () => {
     await openTestArea(page, { width: 390, height: 844 });
     await page.getByRole("button", { name: "Ändern" }).click();
     await expect(page.getByRole("dialog", { name: "Kontext" })).toBeVisible();
-    await expectMobileDialogBounds(page, "Kontext");
+    await expectMobileDialogBounds(page, "Kontext", "inset");
     const gameName = page.locator(".test-area__context-dialog .ui-game-multi-select__single-value-name");
     await expect(gameName).toHaveText("Just Chatting");
     expect(await gameName.evaluate((name) => name.scrollWidth <= name.clientWidth)).toBe(true);
