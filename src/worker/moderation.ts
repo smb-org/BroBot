@@ -2,6 +2,7 @@ import type { ModerationFailureReason } from "../contracts/values";
 import type { ModerationResult, ModerationTimeoutExpectation } from "../modules/contracts/moderation";
 import { MODERATION_TIMEOUT_MAX_SECONDS } from "../modules/contracts/moderation";
 import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
+import { moderationOutputSuppressionReason } from "./chat-output-gate";
 import { getBotIdentity } from "./db/bot-identity";
 import { readChannelControls } from "./db/channel-controls";
 import { getLoginIdentity } from "./db/login-identity";
@@ -109,9 +110,7 @@ async function executeModeration(
   };
   const readSuppressionReason = async (): Promise<ModerationSuppressionReason | null> => {
     const controls = await readChannelControls(environment.DB, channelId, new Date().toISOString());
-    if (controls.mute.active) return "channel_muted";
-    if (controls.pause.active) return "channel_paused";
-    return null;
+    return moderationOutputSuppressionReason({ muted: controls.mute.active, paused: controls.pause.active });
   };
   if (method === "POST") {
     const suppressionReason = await readSuppressionReason();

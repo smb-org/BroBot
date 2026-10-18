@@ -92,6 +92,7 @@ const dryRunFaqMessage = async (
       reply: chatAction.replyToMessageId !== undefined,
       suppressedBy: null,
       automated: chatAction.automated ?? true,
+      ...(result.attributions === undefined || result.attributions.length === 0 ? {} : { attributions: result.attributions }),
     });
   }
 
