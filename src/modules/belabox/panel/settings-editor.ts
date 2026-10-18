@@ -1,3 +1,5 @@
+import "./panel.css";
+
 import type { SettingsEditorDefinition, SettingsEditorSpec } from "../../../dashboard/ui";
 import type { BelaboxSettings } from "../contracts";
 import { belaboxSettingsEditorCatalog } from "./settings-locale";

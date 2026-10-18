@@ -1319,7 +1319,7 @@ describe("EventsPage failure cause icon", () => {
     const trigger = screen.getByRole("button", { name: causeButtonName });
     fireEvent.mouseEnter(trigger);
     const content = await screen.findByText("Twitch-Abklingzeit aktiv");
-    // jsdom never resolves Mantine's open transition, so the dropdown stays
+    // jsdom never resolves the open transition, so the dropdown stays
     // `display: none` inline and `getByRole("tooltip")` (which filters
     // hidden elements) can't see it -- reach it via the text node instead.
     const dropdown = content.closest("[role='tooltip']");
@@ -1346,8 +1346,8 @@ describe("EventsPage failure cause icon", () => {
       // focuses the button -- then only the hover ends.
       fireEvent.mouseEnter(trigger);
       fireEvent.focus(trigger);
-      // Mantine mounts the dropdown a tick after `opened` flips, via its own
-      // (now fake) timer -- advance past it before the content is queryable.
+      // The menu mounts a tick after `opened` flips, via its timer -- advance
+      // past it before the content is queryable.
       vi.advanceTimersByTime(50);
       expect(screen.getByText("Twitch-Abklingzeit aktiv")).toBeInTheDocument();
 
@@ -1360,8 +1360,7 @@ describe("EventsPage failure cause icon", () => {
       // Losing focus too, with hover already gone, closes it -- checked via
       // `aria-describedby` (this component's own `opened` state, updated
       // synchronously) rather than the dropdown's removal from the DOM:
-      // Mantine's exit transition never resolves in jsdom (no real
-      // `transitionend`), so the node lingers there regardless.
+      // the exit transition never resolves in jsdom (no real `transitionend`).
       fireEvent.blur(trigger);
       expect(trigger).not.toHaveAttribute("aria-describedby");
     } finally {
@@ -1547,7 +1546,7 @@ describe("EventsPage failure cause icon", () => {
   it("renders a long unbroken diagnostic message inside the wrapping popover container (issue #201)", async () => {
     // No spaces at all -- exactly the shape a fixed-width popover can't
     // break on without `overflow-wrap: anywhere` (see `.event-cause` in
-    // styles.css, which carries the actual wrapping and max-height/scroll
+    // shared dashboard rules, which carry the actual wrapping and max-height/scroll
     // rules -- a jsdom component test has no layout engine to assert the
     // computed style against, so the Playwright visual check covers the
     // rendered result; this checks the message reaches that container

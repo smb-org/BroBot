@@ -6,7 +6,7 @@ import { ModuleOverlayElementEditor } from "../../src/dashboard/ModuleOverlayEle
 import { ModulePanelMount } from "../../src/dashboard/module-panels";
 import { UiProvider } from "../../src/dashboard/ui";
 import { MODULE_OVERLAY_ELEMENTS } from "../../src/modules/overlay-element-registry";
-import "../../src/dashboard/styles.css";
+import "../../src/dashboard/ui/core.css";
 
 const channelId = "channel-a";
 const query = new URLSearchParams(window.location.search);

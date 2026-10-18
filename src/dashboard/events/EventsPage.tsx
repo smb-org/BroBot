@@ -1,3 +1,5 @@
+import "./EventsPage.css";
+
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode, type RefCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { PanelEventEntry, PanelEventFilters, PanelEventsResponse, PanelModuleState } from "../../panel-contract";

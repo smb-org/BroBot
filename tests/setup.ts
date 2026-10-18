@@ -9,8 +9,7 @@ if (typeof window !== "undefined") {
     Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1440 });
   });
 
-  // jsdom doesn't implement ResizeObserver; Mantine's `ScrollArea` (used
-  // inside a `Select` dropdown, among others) observes with it.
+  // jsdom doesn't implement ResizeObserver; floating UI primitives observe with it.
   if (typeof globalThis.ResizeObserver === "undefined") {
     class NoopResizeObserver implements ResizeObserver {
       observe(): void {}

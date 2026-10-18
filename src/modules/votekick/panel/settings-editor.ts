@@ -1,3 +1,5 @@
+import "./panel.css";
+
 import type { SettingsEditorDefinition, SettingsEditorSpec } from "../../../dashboard/ui";
 import type { VotekickSettings } from "../contracts";
 import { votekickSettingsEditorCatalog } from "./locale";

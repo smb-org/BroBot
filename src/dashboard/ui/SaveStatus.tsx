@@ -6,7 +6,7 @@ import { Button } from "./Button";
 import { Icon } from "./Icon";
 import { TruncatedText } from "./TruncatedText";
 import { notify } from "./toast-store";
-import { colors } from "./theme";
+import { colors } from "./colors";
 
 export interface SaveStatusProps {
   dirty: boolean;

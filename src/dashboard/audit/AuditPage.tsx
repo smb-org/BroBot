@@ -1,3 +1,5 @@
+import "./AuditPage.css";
+
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactElement } from "react";
 
 import type { PanelAuditEntry, PanelAuditFilters, PanelAuditResponse } from "../../panel-contract";

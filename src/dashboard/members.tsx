@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import "./members.css";
 
 import { CHANNEL_ROLES, canManage, type ChannelRole } from "../contracts/values";
 import type { PanelMember } from "../panel-contract";

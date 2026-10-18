@@ -1,3 +1,5 @@
+import "./panel.css";
+
 import type { SettingsEditorDefinition, SettingsEditorSpec } from "../../../dashboard/ui";
 import type { AdsSettings } from "../contracts";
 import { dashboardLanguage } from "../../../dashboard/locale";

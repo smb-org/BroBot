@@ -47,7 +47,7 @@ const requestPath = (input: RequestInfo | URL): string => {
   return new URL(input, window.location.href).pathname;
 };
 const requestBody = (init: RequestInit | undefined): string => typeof init?.body === "string" ? init.body : "";
-const dashboardStyles = readFileSync(new NodeURL("../../src/dashboard/styles.css", import.meta.url), "utf8");
+const dashboardStyles = readFileSync(new NodeURL("../../src/dashboard/overlays.css", import.meta.url), "utf8");
 const openActionMenu = async (row: HTMLElement, triggerLabel: string): Promise<HTMLElement> => {
   const trigger = within(row).getByRole("button", { name: triggerLabel });
   fireEvent.click(trigger);

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const styles = readFileSync(path.resolve(process.cwd(), "src/dashboard/styles.css"), "utf8");
+const styles = readFileSync(path.resolve(process.cwd(), "src/dashboard/ui/core.css"), "utf8");
 
 describe("editor seam styles", () => {
   it("uses the editor container threshold for FieldPair without viewport JavaScript", () => {

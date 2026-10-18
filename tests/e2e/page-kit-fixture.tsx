@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { useState } from "react";
 
 import { CollectionPage, PageHeader, SaveStatus, ToolPage, UiProvider } from "../../src/dashboard/ui";
-import "../../src/dashboard/styles.css";
+import "../../src/dashboard/ui/core.css";
 import "../../src/dashboard/overlay-editor.css";
 
 const longGermanWord = "Donaudampfschifffahrtselektrizitätenhauptbetriebswerkbauunterbeamtengesellschaft".repeat(2);

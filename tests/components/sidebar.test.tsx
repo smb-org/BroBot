@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import "../../src/dashboard/styles.css";
+import "../../src/dashboard/ui/core.css";
 import { Sidebar, type SidebarEntry } from "../../src/dashboard/ui";
 
 describe("Sidebar", () => {

@@ -1,3 +1,5 @@
+import "./panel.css";
+
 import { useEffect, useState, type KeyboardEvent, type ReactElement, type SyntheticEvent } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";

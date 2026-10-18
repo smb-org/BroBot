@@ -104,7 +104,7 @@ describe("Part A dashboard kit", () => {
   });
 
   it("caps the module-row lock reason width", () => {
-    const css = readFileSync(resolve(process.cwd(), "src/dashboard/styles.css"), "utf8");
+    const css = readFileSync(resolve(process.cwd(), "src/dashboard/ui/core.css"), "utf8");
 
     expect(css).toMatch(/\.module-switch-control \.ui-locked-reason\s*\{[^}]*max-width:\s*16rem/u);
   });

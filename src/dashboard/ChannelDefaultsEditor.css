@@ -1,0 +1,19 @@
+@layer components.pages {
+  .channel-defaults-editor { width: min(var(--dashboard-content-width), 100%); }
+  .channel-defaults-editor .channel-defaults-editor__properties { grid-template-columns: minmax(0, 1fr); }
+  .channel-defaults-editor__fields { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: var(--s5); min-width: 0; }
+  .channel-defaults-editor__field { min-width: 0; }
+  .channel-defaults-editor .ui-select > .ui-field__label,
+  .channel-defaults-editor .inspector-field-row--stacked > .inspector-field-row__label { display: flex; box-sizing: border-box; height: 20px; min-height: 20px; align-items: center; }
+  .channel-defaults-editor .ui-select__search-control,
+  .channel-defaults-editor .ui-select__search-input,
+  .channel-defaults-editor .ui-select__search-control > .ui-select__trigger,
+  .channel-defaults-editor .ui-chat-target-field__trigger { box-sizing: border-box; height: var(--control-height-touch); min-height: var(--control-height-touch); }
+  .channel-defaults-editor .ui-select__search-control > .ui-select__trigger { width: var(--control-height-touch); }
+  .channel-defaults-editor .inspector-field-row--stacked .ui-chat-target-field:not(:has(.ui-field__error)) { padding-bottom: 0; }
+  .channel-defaults-editor__loading-control { display: grid; grid-auto-rows: var(--control-height-touch); }
+  .channel-defaults-editor__hint { min-height: 18px; margin: var(--s1) 0 0; font-size: 12px; line-height: 18px; }
+  @media (max-width: 639px) {
+    .channel-defaults-editor__fields { gap: var(--s4); }
+  }
+}

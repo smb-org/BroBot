@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactElement } from "react";
 
 import { API_SOURCE_FUNCTION_CATALOG, type ApiSourceFunctionGroup } from "../contracts/function-catalog";
 import type { ModuleLanguage } from "../../contract";
@@ -36,6 +36,9 @@ export function ExpressionField({ id, label, value, onChange, maxLength, languag
   const fieldId = id || `expression-${generatedId}`;
   const listboxId = `${fieldId}-functions`;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const setTextareaRef = useCallback((element: HTMLElement | null): void => {
+    textareaRef.current = element instanceof HTMLTextAreaElement ? element : null;
+  }, []);
   const pendingSelection = useRef<PendingSelection | null>(null);
   const dismissedQuery = useRef<string | null>(null);
   const programmaticEdit = useRef(false);
@@ -135,7 +138,7 @@ export function ExpressionField({ id, label, value, onChange, maxLength, languag
         <div data-ui="" className="ui-expression-field">
           <InlineSuggestionPickerTarget>
             <Textarea
-              ref={textareaRef}
+              ref={setTextareaRef}
               id={fieldId}
               aria-label={label}
               aria-autocomplete="list"

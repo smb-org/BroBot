@@ -1,16 +1,20 @@
-/* Dashboard palette tokens; legacy surface variables remain in styles.css. */
-@layer theme, base, mantine, components, utilities;
+/* Dashboard palette tokens and shared layer order. */
+@layer theme, base, utilities, components;
+@layer components.base, components.kit, components.pages, components.modules;
 
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
 @import "tw-animate-css";
-@import "@mantine/core/styles.layer.css";
-/* Keep legacy rules unlayered; their generic font reset excludes Mantine controls. */
-@import "../styles.css";
+@import "./core.css";
 
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  /* Mask gradients use the alpha channel; keep this opaque keyword color valid for CSS tooling. */
+  --mask-opaque: black;
+  --shadow-floating: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --color-error-border-subtle: rgba(226, 86, 77, 0.45);
+  --color-warning-border-subtle: rgba(217, 164, 65, 0.45);
   --control-height: 32px;
   --control-height-touch: 40px;
   --sidebar-row-height: 44px;

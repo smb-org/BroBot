@@ -69,7 +69,7 @@ for (const lang of ["de", "en"] as const) {
             // A filter area that scrolls horizontally by design (chips) clips its own overflow.
             const filterOverflow = filters === null || ["auto", "scroll"].includes(getComputedStyle(filters).overflowX) ? 0 : overflow(filters);
             const visible = (r: DOMRect): boolean => r.width > 0 && r.height > 0;
-            const controls = [...row.querySelectorAll<HTMLElement>("input, button, [role=combobox], .mantine-Select-input")]
+            const controls = [...row.querySelectorAll<HTMLElement>("input, button, [role=combobox]")]
               .filter((e) => !createWrap?.contains(e))
               .map((e) => e.getBoundingClientRect())
               .filter(visible);

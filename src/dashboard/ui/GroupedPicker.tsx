@@ -1,5 +1,6 @@
-import { Drawer, Popover, TextInput } from "@mantine/core";
-import { cloneElement, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactElement, type ReactNode } from "react";
+import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
+import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
+import { cloneElement, useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentProps, type KeyboardEvent, type MouseEvent, type ReactElement, type ReactNode } from "react";
 
 import { Button } from "./Button";
 import { Icon } from "./Icon";
@@ -90,6 +91,19 @@ const defaultMatches = (entry: GroupedPickerEntry, query: string): boolean => {
 
 const toIdPart = (value: string): string => encodeURIComponent(value);
 
+const transitionDurationMs = (element: HTMLElement | null): number => {
+  if (element === null) return 0;
+  const styles = window.getComputedStyle(element);
+  const parseTime = (value: string): number => {
+    const time = Number.parseFloat(value);
+    if (!Number.isFinite(time)) return 0;
+    return value.endsWith("ms") ? time : time * 1000;
+  };
+  const durations = styles.transitionDuration.split(",").map(parseTime);
+  const delays = styles.transitionDelay.split(",").map(parseTime);
+  return Math.max(0, ...durations.map((duration, index) => duration + (delays[index % delays.length] ?? 0)));
+};
+
 export function GroupedPicker<T = unknown>({
   groups,
   messages,
@@ -120,6 +134,9 @@ export function GroupedPicker<T = unknown>({
   const [isSmallScreen, setIsSmallScreen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeKey, setActiveKey] = useState<string | null>(null);
+  const popoverActionsRef = useRef<{ close: () => void; unmount: () => void } | null>(null);
+  const popoverPopupRef = useRef<HTMLDivElement>(null);
+  const sheetPopupRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 599px)");
@@ -150,34 +167,24 @@ export function GroupedPicker<T = unknown>({
   const navigableEntries = entries.filter(({ entry }) => entry.disabled !== true);
   const activeEntry = navigableEntries.find(({ key }) => key === activeKey) ?? navigableEntries[0];
   const activeEntryKey = activeEntry?.key;
-  const focusTrigger = (): void => {
-    const target = triggerRef.current?.querySelector<HTMLElement>("button, [href], input, [tabindex]:not([tabindex='-1'])");
-    target?.focus();
-  };
-
-  // Focus returns only after the surface has finished its exit transition. Mantine's focus trap
-  // schedules timeouts that refocus the search input while the dropdown is still mounted, so any
-  // earlier call (rAF, timer) can be overwritten on a slow runner.
-  // This component is the only owner of focus restoration (Mantine's returnFocus is off). Each
-  // close records the current generation; reopening bumps it, so an exit callback of an abandoned
-  // close can no longer restore focus. Zero-duration (reduced motion) exits call the callback
-  // synchronously, after `close` has already recorded its generation.
+  // Close records a generation; reopening invalidates any pending final-focus restoration.
   const focusGeneration = useRef(0);
   const pendingFocusGeneration = useRef<number | null>(null);
   // `onDismissFocus` (variable picker) is called on the next frame after close, as before: the caller
-  // owns its own selection handling. Only the default trigger restoration waits for the exit end,
-  // and only acts if focus is lost (nothing focused, or still inside the closing surface).
+  // owns its own selection handling. Default trigger restoration waits for the focus trap to settle.
   const restoreFocus = (): void => {
     if (onDismissFocus !== undefined) window.requestAnimationFrame(onDismissFocus);
     else pendingFocusGeneration.current = focusGeneration.current;
   };
-  const finishRestoreFocus = (): void => {
+  const finishRestoreFocus = useCallback((): void => {
     if (pendingFocusGeneration.current !== focusGeneration.current) return;
     pendingFocusGeneration.current = null;
-    const active = document.activeElement;
-    const lost = active === null || active === document.body || document.getElementById(panel)?.contains(active) === true;
-    if (lost) focusTrigger();
-  };
+    const activeElement = document.activeElement;
+    const focusIsInClosingSurface = popoverPopupRef.current?.contains(activeElement) === true || sheetPopupRef.current?.contains(activeElement) === true;
+    if (activeElement !== document.body && activeElement !== document.documentElement && !focusIsInClosingSurface) return;
+    const triggerTarget = triggerRef.current?.querySelector<HTMLElement>("button, [href], input, [tabindex]:not([tabindex='-1'])");
+    triggerTarget?.focus();
+  }, []);
 
   const changeOpened = (nextOpened: boolean): void => {
     if (nextOpened !== opened) {
@@ -190,6 +197,36 @@ export function GroupedPicker<T = unknown>({
 
   const handleOpenedChange = (nextOpened: boolean): void => {
     if (!disabled || !nextOpened) changeOpened(nextOpened);
+  };
+
+  const handlePopoverOpenedChange: NonNullable<ComponentProps<typeof PopoverPrimitive.Root>["onOpenChange"]> = (nextOpened, eventDetails) => {
+    if (nextOpened) {
+      handleOpenedChange(true);
+      return;
+    }
+    eventDetails.preventUnmountOnClose();
+    handleOpenedChange(false);
+    restoreFocus();
+    const generation = focusGeneration.current;
+    window.requestAnimationFrame(() => {
+      const popup = popoverPopupRef.current;
+      const getAnimations: unknown = popup === null ? undefined : Reflect.get(popup, "getAnimations");
+      const animations = typeof getAnimations === "function" && popup !== null
+        ? (Reflect.apply(getAnimations, popup, []) as Animation[]).filter((animation) => {
+          const timing = animation.effect?.getComputedTiming();
+          return timing?.duration !== Infinity && timing?.iterations !== Infinity;
+        })
+        : [];
+      const duration = transitionDurationMs(popup);
+      const exitEnd = animations.length > 0
+        ? Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)))
+        : new Promise<void>((resolve) => { window.setTimeout(resolve, duration); });
+      void exitEnd.then(() => {
+        if (generation !== focusGeneration.current) return;
+        popoverActionsRef.current?.unmount();
+        finishRestoreFocus();
+      });
+    });
   };
 
   const triggerProps = trigger.props as { disabled?: boolean; onClick?: (event: MouseEvent<HTMLElement>) => void };
@@ -225,6 +262,10 @@ export function GroupedPicker<T = unknown>({
   }, [activeEntryKey]);
 
   const close = (restore: boolean): void => {
+    if (restore && opened && !isSmallScreen && popoverActionsRef.current !== null) {
+      popoverActionsRef.current.close();
+      return;
+    }
     changeOpened(false);
     if (restore) restoreFocus();
   };
@@ -274,30 +315,30 @@ export function GroupedPicker<T = unknown>({
         {surface === "sheet" ? (
           <div className="ui-grouped-picker__mobile-header">
             <span className="ui-grouped-picker__handle" aria-hidden="true" />
-            <Drawer.Title component="h2">{messages.title}</Drawer.Title>
+            <DialogPrimitive.Title id={`${surfacePanelId}-title`}>{messages.title}</DialogPrimitive.Title>
             <Button icon="close" iconOnly ariaLabel={messages.closeLabel} variant="subtle" onClick={() => close(true)} />
           </div>
         ) : null}
-        <TextInput
-          ref={searchRef}
-          data-autofocus
-          id={`${surfacePanelId}-search`}
-          className="ui-grouped-picker__search"
-          aria-label={messages.searchLabel}
-          placeholder={messages.searchLabel}
-          role="combobox"
-          aria-autocomplete="list"
-          aria-expanded="true"
-          aria-controls={surfaceListId}
-          aria-activedescendant={activeOptionId}
-          // Mantine overwrites a plain aria-describedby; the Styles API attributes reach the input element.
-          {...(renderActiveDetail === undefined ? {} : { attributes: { input: { "aria-describedby": `${surfacePanelId}-detail` } } })}
-          leftSection={<Icon name="search" size={16} />}
-          value={query}
-          onChange={(event) => { setQuery(event.currentTarget.value); setActiveKey(null); }}
-          onKeyDown={handleKeyDown}
-          autoComplete="off"
-        />
+        <div className="ui-grouped-picker__search-wrap">
+          <Icon name="search" size={16} />
+          <input
+            ref={searchRef}
+            id={`${surfacePanelId}-search`}
+            className="ui-grouped-picker__search"
+            aria-label={messages.searchLabel}
+            placeholder={messages.searchLabel}
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded="true"
+            aria-controls={surfaceListId}
+            aria-activedescendant={activeOptionId}
+            {...(renderActiveDetail === undefined ? {} : { "aria-describedby": `${surfacePanelId}-detail` })}
+            value={query}
+            onChange={(event) => { setQuery(event.currentTarget.value); setActiveKey(null); }}
+            onKeyDown={handleKeyDown}
+            autoComplete="off"
+          />
+        </div>
         <div id={surfaceListId} className="ui-grouped-picker__list" role="listbox" aria-label={messages.title}>
           {indexedGroups.map(({ group, entries: groupEntries }) => (
             <div className="ui-grouped-picker__group" role="group" aria-label={group.label} key={group.id}>
@@ -367,49 +408,26 @@ export function GroupedPicker<T = unknown>({
   return (
     <>
       <span className="ui-grouped-picker__trigger" ref={triggerRef}>
-        <Popover
-          opened={opened && !isSmallScreen}
-          onChange={handleOpenedChange}
-          withinPortal
-          position="bottom-end"
-          width={width}
-          closeOnEscape={false}
-          onExitTransitionEnd={finishRestoreFocus}
-          trapFocus
-          returnFocus={false}
-          closeOnClickOutside
-        >
-          <Popover.Target>{interactiveTrigger}</Popover.Target>
-          <Popover.Dropdown
-            data-ui=""
-            role="dialog"
-            aria-label={messages.title}
-            className="ui-grouped-picker__popover"
-            onKeyDown={(event) => {
-              if (event.key !== "Escape") return;
-              event.preventDefault();
-              event.stopPropagation();
-              close(true);
-            }}
-          >
-            {renderContent("popover")}
-          </Popover.Dropdown>
-        </Popover>
+        <PopoverPrimitive.Root actionsRef={popoverActionsRef} open={opened && !isSmallScreen} onOpenChange={handlePopoverOpenedChange} onOpenChangeComplete={(nextOpened) => { if (!nextOpened) finishRestoreFocus(); }} modal="trap-focus">
+          <PopoverPrimitive.Trigger render={interactiveTrigger} />
+          <PopoverPrimitive.Portal>
+            <PopoverPrimitive.Positioner side="bottom" align="end" sideOffset={4} collisionPadding={12} className="z-[var(--layer-popover)]" style={{ zIndex: "var(--layer-popover)" }}>
+              <PopoverPrimitive.Popup ref={popoverPopupRef} data-ui="" role="dialog" aria-label={messages.title} className="ui-grouped-picker__popover" style={{ width: typeof width === "number" ? `${String(width)}px` : width }} initialFocus={false} finalFocus={false}>
+                <PopoverPrimitive.Close className="sr-only" aria-label={messages.closeLabel} tabIndex={-1} onClick={() => close(true)} />
+                {renderContent("popover")}
+              </PopoverPrimitive.Popup>
+            </PopoverPrimitive.Positioner>
+          </PopoverPrimitive.Portal>
+        </PopoverPrimitive.Root>
       </span>
-      <Drawer
-        data-ui=""
-        opened={opened && isSmallScreen}
-        onClose={() => close(true)}
-        position="bottom"
-        withCloseButton={false}
-        overlayProps={{ backgroundOpacity: 0.35, blur: 1 }}
-        classNames={{ content: "ui-grouped-picker__drawer-content", body: "ui-grouped-picker__drawer-body" }}
-        withinPortal
-        returnFocus={false}
-        onExitTransitionEnd={finishRestoreFocus}
-      >
-        {renderContent("sheet")}
-      </Drawer>
+      <DialogPrimitive.Root open={opened && isSmallScreen} onOpenChange={(next) => { if (!next) close(true); }} onOpenChangeComplete={(nextOpened) => { if (!nextOpened) finishRestoreFocus(); }}>
+        <DialogPrimitive.Portal>
+          <DialogPrimitive.Backdrop data-ui="" className="ui-grouped-picker__backdrop" />
+          <DialogPrimitive.Popup ref={sheetPopupRef} data-ui="" aria-labelledby={`${sheetPanelId}-title`} className="ui-grouped-picker__drawer-content" initialFocus={false} finalFocus={false}>
+            <div className="ui-grouped-picker__drawer-body">{renderContent("sheet")}</div>
+          </DialogPrimitive.Popup>
+        </DialogPrimitive.Portal>
+      </DialogPrimitive.Root>
     </>
   );
 }

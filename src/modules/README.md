@@ -56,7 +56,7 @@ Aktionen bleiben für Operatoren sichtbar und deaktiviert; der Grund steht einma
 am Abschnitt. Tabellen zeigen
 Status-Badges; ihre Spalten folgen dem Inhalt und kurze Werte werden nicht
 abgeschnitten. Module importieren diese Bauteile und den Toast-Helfer aus dem
-UI-Seam, nie direkt aus Mantine:
+UI-Seam; UI-Bauteile kommen aus dem Kit und nicht aus Feature-Modulen:
 
 ```ts
 import { notify } from "../../../dashboard/ui";

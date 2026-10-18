@@ -41,7 +41,7 @@ describe("ListDetail", () => {
     expect(screen.getByRole("region", { name: "Liste" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Details" })).toBeInTheDocument();
     expect(container.querySelector(".list-detail")).toHaveClass("list-detail--open");
-    // Both live in the same DOM tree -- styles.css, not React, decides
+    // Both live in the same DOM tree -- CSS, not React, decides
     // whether the inspector sits beside the list (>=1024px) or floats over
     // it (<1024px); see ListDetail's own doc comment.
     expect(container.querySelector(".list-detail__inspector")).toContainElement(screen.getByRole("region", { name: "Details" }));

@@ -191,7 +191,7 @@ const ActivePanelProbe = ({ channelId }: { channelId: string }): ReactElement =>
 
 relatedPanelLoader.mockImplementation(() => Promise.resolve({ default: ActivePanelProbe }));
 
-const renderWithMantine = (element: ReactElement, queryOptions: { gcTime?: number; staleTime?: number } = {}): ReturnType<typeof renderWithQuery> =>
+const renderWithUiProvider = (element: ReactElement, queryOptions: { gcTime?: number; staleTime?: number } = {}): ReturnType<typeof renderWithQuery> =>
   renderWithQuery(<UiProvider>{element}</UiProvider>, undefined, queryOptions);
 const editorFixtureSettings = { amount: 2, handle: "ada", labels: "", message: "Hello {viewer}", mode: "automatic", enabled: true, threshold: 4, extraMessage: "Extra value" };
 
@@ -221,7 +221,7 @@ const renderSettingsFixture = (
   moduleId = "editor-fixture",
 ): ReturnType<typeof renderWithQuery> => {
   vi.stubGlobal("fetch", fetcher);
-  return renderWithMantine(<ModulePage
+  return renderWithUiProvider(<ModulePage
     channelId="kanal-a"
     moduleId={moduleId}
     ownRole={ownRole}
@@ -297,7 +297,7 @@ describe("Module panel loader", () => {
       revision: 1,
       variables: [],
     }))));
-    renderWithMantine(<ModulePage
+    renderWithUiProvider(<ModulePage
       channelId="kanal-a"
       moduleId="editor-before-fixture"
       ownRole="manager"
@@ -337,7 +337,7 @@ describe("Module panel loader", () => {
   it("navigates from the module row click and Enter, while the switch toggles without navigation", async () => {
     const onNavigate = vi.fn();
     const onToggleModule = vi.fn(() => Promise.resolve());
-    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={onNavigate} onToggleModule={onToggleModule} />);
+    renderWithUiProvider(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={onNavigate} onToggleModule={onToggleModule} />);
 
     const link = screen.getByRole("link", { name: /aktiv.*Läuft/i });
     fireEvent.click(link);
@@ -357,7 +357,7 @@ describe("Module panel loader", () => {
   });
 
   it("shows mandatory channel events as always active without rendering a switch", () => {
-    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} onToggleModule={vi.fn(() => Promise.resolve())} />);
+    renderWithUiProvider(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} onToggleModule={vi.fn(() => Promise.resolve())} />);
 
     expect(screen.queryByRole("switch", { name: "Kanalereignisse" })).not.toBeInTheDocument();
     const row = screen.getByText("Kanalereignisse").closest(".list-row");
@@ -390,7 +390,7 @@ describe("Module panel loader", () => {
   });
 
   it("lets a registered channel page hide its always-active main switch and use its declared icon", () => {
-    renderWithMantine(<ModulePage
+    renderWithUiProvider(<ModulePage
       channelId="kanal-a"
       moduleId="channel-page-fixture"
       ownRole="manager"
@@ -591,7 +591,7 @@ describe("Module panel loader", () => {
   });
 
   it("shows the module name and state once in the row", () => {
-    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onToggleModule={vi.fn(() => Promise.resolve())} />);
+    renderWithUiProvider(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onToggleModule={vi.fn(() => Promise.resolve())} />);
     const row = screen.getByRole("link", { name: /aktiv.*Läuft/i }).closest(".list-row");
     if (!(row instanceof HTMLElement)) throw new Error("Module row is missing");
     expect(within(row).getAllByText("aktiv", { exact: true })).toHaveLength(1);
@@ -608,7 +608,7 @@ describe("Module panel loader", () => {
       };
       return <ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={modules} onNavigate={onNavigate} onToggleModule={onToggleModule} />;
     };
-    renderWithMantine(<Harness />);
+    renderWithUiProvider(<Harness />);
 
     const toggle = screen.getByRole("switch", { name: /aktiv/i });
     expect(toggle).toBeChecked();
@@ -619,7 +619,7 @@ describe("Module panel loader", () => {
 
   it("forwards module state transitions to the shared toggle handler", async () => {
     const onToggleModule = vi.fn(() => Promise.resolve());
-    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onToggleModule={onToggleModule} />);
+    renderWithUiProvider(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onToggleModule={onToggleModule} />);
 
     fireEvent.click(screen.getByRole("switch", { name: /aktiv/i }));
     await waitFor(() => { expect(onToggleModule).toHaveBeenCalledWith("kanal-a", "aktiv", false); });
@@ -629,7 +629,7 @@ describe("Module panel loader", () => {
     let resolveToggle: (() => void) | undefined;
     const pending = new Promise<void>((resolve) => { resolveToggle = resolve; });
     const onToggleModule = vi.fn(() => pending);
-    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onToggleModule={onToggleModule} />);
+    renderWithUiProvider(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onToggleModule={onToggleModule} />);
 
     const toggle = screen.getByRole("switch", { name: /aktiv/i });
     fireEvent.click(toggle);
@@ -642,7 +642,7 @@ describe("Module panel loader", () => {
   });
 
   it("shows no kicker above the module heading", () => {
-    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} onToggleModule={vi.fn(() => Promise.resolve())} />);
+    renderWithUiProvider(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} onToggleModule={vi.fn(() => Promise.resolve())} />);
 
     expect(screen.getByRole("heading", { name: "Module", level: 1 })).toBeInTheDocument();
     expect(screen.queryByText("Tastenraster")).not.toBeInTheDocument();
@@ -650,7 +650,7 @@ describe("Module panel loader", () => {
   });
 
   it("shows the operator the disabled detail switch with a reason", () => {
-    renderWithMantine(<ModulePage
+    renderWithUiProvider(<ModulePage
       channelId="kanal-a"
       moduleId="aktiv"
       ownRole="operator"
@@ -669,7 +669,7 @@ describe("Module panel loader", () => {
   });
 
   it("shows the module icon in the detail header; the breadcrumb lives in the top bar", () => {
-    renderWithMantine(<ModulePage
+    renderWithUiProvider(<ModulePage
       channelId="kanal-a"
       moduleId="aktiv"
       ownRole="manager"
@@ -854,7 +854,7 @@ describe("Module panel loader", () => {
         : Response.json({}));
     });
     vi.stubGlobal("fetch", fetcher);
-    const view = renderWithMantine(<ModulePage
+    const view = renderWithUiProvider(<ModulePage
       channelId="kanal-a"
       moduleId="belabox"
       ownRole="manager"
@@ -1042,7 +1042,7 @@ describe("Module panel loader", () => {
       return Promise.resolve(Response.json({}));
     });
     vi.stubGlobal("fetch", fetcher);
-    renderWithMantine(<ModulePage
+    renderWithUiProvider(<ModulePage
       channelId="kanal-a"
       moduleId="editor-before-fixture"
       ownRole="manager"
@@ -1106,7 +1106,7 @@ describe("Module panel loader", () => {
         /> : null}
       </>;
     };
-    renderWithMantine(<Harness />);
+    renderWithUiProvider(<Harness />);
 
     fireEvent.change(await screen.findByRole("textbox", { name: "Konto" }), { target: { value: "draft" } });
     fireEvent.click(screen.getByRole("button", { name: "Go overview" }));
@@ -1148,7 +1148,7 @@ describe("Module panel loader", () => {
         /> : null}
       </>;
     };
-    renderWithMantine(<Harness />);
+    renderWithUiProvider(<Harness />);
 
     fireEvent.click(screen.getByRole("button", { name: "Open module" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "Konto" }), { target: { value: "keep this draft" } });

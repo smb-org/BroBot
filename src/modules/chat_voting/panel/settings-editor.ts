@@ -1,3 +1,5 @@
+import "./panel.css";
+
 import type { SettingsEditorDefinition, SettingsEditorSpec } from "../../../dashboard/ui";
 import type { ChatVotingSettings } from "../contracts";
 import { chatVotingSettingsEditorCatalog } from "./locale";

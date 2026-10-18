@@ -1,4 +1,5 @@
 import { useState, type ReactElement } from "react";
+import "./member-avatar.css";
 
 const avatarInitials = (name: string): string =>
   name.trim().split(/\s+/).slice(0, 2).map((part) => part.charAt(0)).join("").toLocaleUpperCase();

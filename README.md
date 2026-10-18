@@ -11,7 +11,7 @@ adding a row to the `channels` table, not by changing configuration.
   [Durable Object](https://developers.cloudflare.com/durable-objects/)
   (`ChannelObject`, SQLite-backed) per channel handles the realtime
   WebSocket connection to the dashboard.
-- **Dashboard**: React 19 + [Mantine](https://mantine.dev), built with Vite,
+- **Dashboard**: React 19 + Base UI, built with Vite,
   served as static assets by the same Worker.
 - **Overlay**: a small, transparent, lazily-loaded React view for OBS or
   StreamElements browser sources.
@@ -414,7 +414,7 @@ realtime path for them doesn't exist yet.
   Zod.
 - `panel/` cannot import Worker, repository, adapter or overlay code; Zod
   and the module's own `service.ts` are allowed.
-- `@mantine/*`, `@tabler/icons-react` and `rich-textarea` may only be
+- `@base-ui/react`, `lucide-react` and `rich-textarea` may only be
   imported from `src/dashboard/ui/`.
 - The Worker cannot import React or `react-dom`.
 

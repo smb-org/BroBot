@@ -38,6 +38,42 @@ const routeApi = async (page: Page, elementCount = 0): Promise<void> => {
   await expect(page.getByRole("heading", { name: "Palette test" })).toBeVisible();
 };
 
+const assertFocusRestorationAfterTrapTimers = async (page: Page, reducedMotion: "no-preference" | "reduce"): Promise<void> => {
+  // Controlled ordering instead of a timing guess: while `hold` is on, 0 ms focus callbacks are queued and only run when the test releases them.
+  // Order enforced: Escape -> restoration frame -> delayed focus-trap callbacks -> exit completion.
+  await page.addInitScript(() => {
+    const nativeSetTimeout = window.setTimeout.bind(window);
+    const held: (() => void)[] = [];
+    const control = { hold: false, held, release: () => { control.hold = false; for (const run of held.splice(0)) run(); } };
+    (window as unknown as { __timers: typeof control }).__timers = control;
+    window.setTimeout = ((handler: TimerHandler, delay?: number, ...args: unknown[]) => {
+      if (control.hold && (delay ?? 0) <= 0 && typeof handler === "function") {
+        held.push(() => { (handler as (...rest: unknown[]) => void)(...args); });
+        return 0;
+      }
+      return nativeSetTimeout(handler, delay, ...args);
+    }) as typeof window.setTimeout;
+  });
+  await page.emulateMedia({ reducedMotion });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await routeApi(page);
+  const add = page.getByRole("button", { name: "Add element" });
+  const search = page.getByRole("combobox", { name: "Search elements" });
+  // Hold from before opening: the focus trap schedules its refocus callbacks (0 ms) while mounting.
+  await page.evaluate(() => { (window as unknown as { __timers: { hold: boolean } }).__timers.hold = true; });
+  await add.click();
+  await expect(search).toBeFocused();
+  await page.keyboard.press("Escape");
+  // Two animation frames: the frame in which a restoration scheduled by Escape would have run.
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => { requestAnimationFrame(() => { resolve(); }); })));
+  const held = await page.evaluate(() => (window as unknown as { __timers: { held: unknown[] } }).__timers.held.length);
+  expect(held).toBeGreaterThan(0); // the focus-trap callbacks are really delayed
+  await page.evaluate(() => { (window as unknown as { __timers: { release: () => void } }).__timers.release(); });
+
+  await expect(search).toHaveCount(0);
+  await expect(add).toBeFocused();
+};
+
 test("mobile palette focuses search, names its dialog and selects by keyboard", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await routeApi(page);
@@ -91,40 +127,11 @@ test("desktop palette closes with Escape after Tab and removal moves focus to th
 });
 
 test("desktop palette returns focus to the plus button when focus-trap timers fire after the restoration frame", async ({ page }) => {
-  // Controlled ordering instead of a timing guess: while `hold` is on, 0 ms timeouts (Mantine's
-  // focus-trap refocus callbacks) are queued and only run when the test releases them.
-  // Order enforced: Escape -> restoration frame -> delayed focus-trap callbacks -> exit completion.
-  await page.addInitScript(() => {
-    const nativeSetTimeout = window.setTimeout.bind(window);
-    const held: (() => void)[] = [];
-    const control = { hold: false, held, release: () => { control.hold = false; for (const run of held.splice(0)) run(); } };
-    (window as unknown as { __timers: typeof control }).__timers = control;
-    window.setTimeout = ((handler: TimerHandler, delay?: number, ...args: unknown[]) => {
-      if (control.hold && (delay ?? 0) <= 0 && typeof handler === "function") {
-        held.push(() => { (handler as (...rest: unknown[]) => void)(...args); });
-        return 0;
-      }
-      return nativeSetTimeout(handler, delay, ...args);
-    }) as typeof window.setTimeout;
-  });
-  await page.setViewportSize({ width: 1280, height: 800 });
-  await routeApi(page);
-  const add = page.getByRole("button", { name: "Add element" });
-  const search = page.getByRole("combobox", { name: "Search elements" });
-  // Hold from before opening: the focus trap schedules its refocus callbacks (0 ms) while mounting.
-  await page.evaluate(() => { (window as unknown as { __timers: { hold: boolean } }).__timers.hold = true; });
-  await add.click();
-  await expect(search).toBeFocused();
-  await page.keyboard.press("Escape");
-  // Two animation frames: the frame in which a restoration scheduled by Escape would have run.
-  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => { requestAnimationFrame(() => { resolve(); }); })));
-  await expect(search).toHaveCount(1); // exit has not completed yet
-  const held = await page.evaluate(() => (window as unknown as { __timers: { held: unknown[] } }).__timers.held.length);
-  expect(held).toBeGreaterThan(0); // the focus-trap callbacks are really delayed
-  await page.evaluate(() => { (window as unknown as { __timers: { release: () => void } }).__timers.release(); });
+  await assertFocusRestorationAfterTrapTimers(page, "no-preference");
+});
 
-  await expect(search).toHaveCount(0);
-  await expect(add).toBeFocused();
+test("desktop palette returns focus to the plus button when focus-trap timers fire after the restoration frame with reduced motion", async ({ page }) => {
+  await assertFocusRestorationAfterTrapTimers(page, "reduce");
 });
 
 for (const width of [1280, 390]) {

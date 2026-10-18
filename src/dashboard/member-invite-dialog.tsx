@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
+import "./member-invite-dialog.css";
 
 import type { ChannelRole } from "../contracts/values";
 import type { PanelTwitchUser } from "../panel-contract";

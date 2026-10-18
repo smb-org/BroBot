@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import "./ChannelVariablesPage.css";
 
 import {
   changeChannelVariableValue,

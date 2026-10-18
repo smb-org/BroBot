@@ -1,3 +1,4 @@
+@layer components.modules {
 .faq-panel,
 .faq-panel .collection-page {
   min-width: 0;
@@ -547,4 +548,5 @@
   .faq-panel .segment-choice__label-compact {
     display: inline;
   }
+}
 }

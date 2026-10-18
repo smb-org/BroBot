@@ -1,0 +1,42 @@
+@layer components.modules {
+  /* ModulePage owns these styles even while a module panel is disabled or lazy-loading. */
+  .main-content:has(.module-detail--chat_voting) { width: min(calc(var(--page-width) + 64px), 100%); max-width: calc(var(--page-width) + 64px); margin-inline: auto; }
+  .module-detail--chat_voting { display: flex; width: 100%; max-width: none; height: calc(100dvh - var(--app-shell-header-height) - 64px); min-height: 0; flex-direction: column; }
+  .module-detail--chat_voting > .module-detail-heading { width: 100%; max-width: none; grid-template-columns: 56px minmax(0, 1fr) minmax(0, auto); gap: 16px; min-height: 0; margin-bottom: 16px; padding-bottom: 16px; }
+  .module-detail--chat_voting .module-detail__content { display: flex; flex: 1 1 0; min-height: 0; }
+  .module-detail--chat_voting .module-stack { display: flex; flex: 1 1 0; min-height: 0; }
+  .module-detail--chat_voting .module-view { display: flex; flex: 1 1 0; min-height: 0; flex-direction: column; }
+  .chat-voting-page-tabs { width: auto; max-width: 100%; flex: none; }
+  .chat-voting-page-tabs__list { gap: var(--s1); border-bottom: 1px solid var(--line); }
+  .chat-voting-page-tabs__tab { min-height: 40px; padding-inline: var(--s3); border: 1px solid transparent; color: var(--text-2); background: transparent; font-size: 13px; }
+  .chat-voting-page-tabs__tab:hover { background: var(--surface-hover); color: var(--text); }
+  .chat-voting-page-tabs__tab[data-active] { border-color: transparent transparent var(--brand-text); color: var(--brand-text); }
+  @media (max-width: 768px) {
+    .module-detail--chat_voting { height: calc(100dvh - var(--app-shell-header-height) - 32px); }
+    .module-detail--chat_voting > .module-detail-heading { grid-template-columns: 56px minmax(0, 1fr) minmax(0, auto); gap: var(--s2); min-height: 0; margin-bottom: 8px; padding-bottom: 8px; }
+    .module-detail--chat_voting > .module-detail-heading .page-header__title-row :is(h1, h2, h3) { font-size: 18px; }
+  }
+
+  /* Belabox settings use an eager ModulePage wrapper around a lazy editor. */
+  .dashboard-shell:has(.settings-page--belabox) { height: 100dvh; overflow: hidden; }
+  .dashboard-shell__workspace:has(.settings-page--belabox) { height: calc(100dvh - var(--app-shell-header-height)); min-height: 0; overflow: hidden; }
+  .dashboard-shell__main:has(.settings-page--belabox) { height: 100%; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
+  .main-content:has(.settings-page--belabox) { display: block; height: auto; min-height: 100%; }
+  .module-route-layout:has(.settings-page--belabox) { display: block; height: auto; min-height: 0; flex: none; }
+  .module-route-layout:has(.settings-page--belabox) > .ui-load-state { display: block; height: auto; min-height: 0 !important; flex: none; }
+  .module-route-layout:has(.settings-page--belabox) > .ui-load-state > .ui-load-state__content { display: block; height: auto; min-height: 0; overflow: visible; }
+  .module-detail--settings-page:has(.settings-page--belabox) { display: block; height: auto; min-height: 100%; flex: none; }
+  .module-detail--settings-page:has(.settings-page--belabox) > .ui-load-state { display: block; height: auto; min-height: 0; flex: none; }
+  .module-detail--settings-page:has(.settings-page--belabox) > .ui-load-state > .ui-load-state__content { display: block; height: auto; min-height: 0; overflow: visible; }
+  .module-detail--settings-page:has(.settings-page--belabox) .settings-page { display: block; height: auto; min-height: 100%; flex: none; overflow: visible; }
+  .module-detail--settings-page:has(.settings-page--belabox) .settings-page > .page-header { position: sticky; top: 0; z-index: var(--layer-inspector); background: var(--background); }
+  .module-detail--settings-page:has(.settings-page--belabox) .settings-page__columns { flex: none; grid-template-rows: auto; min-height: 0; overflow: visible; padding-bottom: 16px; }
+  .module-detail--settings-page:has(.settings-page--belabox) .settings-page__column { min-height: auto; overflow: visible; }
+  .module-detail--settings-page:has(.settings-page--belabox) [data-section="polling"] .segment-choice-field__hint[aria-hidden="true"],
+  .module-detail--settings-page:has(.settings-page--belabox) [data-section="polling"] .segment-choice-field__warning[aria-hidden="true"] { display: none; }
+  .module-detail--settings-page:has(.settings-page--belabox) [data-section="polling"] .inspector-field-row { grid-template-columns: minmax(0, 1fr); gap: var(--s1); }
+  .module-detail--settings-page:has(.settings-page--belabox) [data-section="polling"] .inspector-field-row__label { min-height: 20px; font-size: 13px; }
+  .module-detail--settings-page:has(.settings-page--belabox) [data-section="polling"] .inspector-field-row__info { width: 20px; height: 20px; min-height: 20px; }
+  .module-detail--settings-page:has(.settings-page--belabox) .belabox-overview > .ui-section--inspector { padding-bottom: var(--s2); }
+  .module-detail--settings-page:has(.settings-page--belabox) .belabox-history-section__empty-streams { margin-top: -12px; }
+}

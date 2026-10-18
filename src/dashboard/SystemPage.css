@@ -1,0 +1,37 @@
+@layer components.pages {
+  .system-page > .page-header { margin-bottom: 4px; padding-bottom: 8px; }
+  .system-page .settings-page__columns { padding-top: 0; }
+  .system-page__status { min-width: 0; margin-top: 0; }
+  .system-page .content-section { width: 100%; max-width: none; }
+  .system-page .content-section > .empty-state { margin: 0; padding: 0; border: 0; border-radius: 0; }
+  .system-page__status > .ui-load-state--status-row { margin-bottom: 0; }
+  .system-page .system-page__status-list { gap: 0; width: 100%; }
+  .system-page .channel-defaults-editor { width: 100%; }
+  .system-page__status-list .state-row,
+  .system-page__status-list .state-row:has(.state-row__action) {
+    grid-template-columns: var(--state-label-width) auto minmax(0, 1fr) auto;
+    min-height: 44px; padding: 6px 0; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent;
+  }
+  .system-page__status-list .state-row[data-status="warning"],
+  .system-page__status-list .state-row[data-status="error"] { border-color: transparent; border-bottom-color: var(--line); background: transparent; }
+  .system-page__status-list .state-row__action { position: static; grid-column: 4; width: max-content; max-width: 280px; height: auto; align-self: center; justify-self: end; }
+  .system-page__status-list .state-row__action > .button,
+  .system-page__status-list .state-row__action > .ui-button { position: static; display: inline-flex; width: auto; transform: none; }
+  .system-page__status-list .state-row__action > .header-action { position: static; display: grid; width: 100%; height: auto; justify-items: end; }
+  .system-page__status-list .state-row__action > .header-action > .button,
+  .system-page__status-list .state-row__action > .header-action > .ui-button { position: static; display: inline-flex; width: auto; min-width: 0; min-height: 32px; transform: none; }
+  .system-page__status-list .state-row__action .header-action__reason-slot { position: static; display: grid; width: auto; height: auto; min-height: 0; justify-items: stretch; }
+  .system-page__status-list .state-row__action .header-action__reason-slot:empty { display: none; }
+  .system-page__status-list .state-row__action .header-action__reason-slot .lock-reason { display: block; width: 100%; max-width: none; max-height: none; margin: 0; overflow: visible; line-height: 14px; text-align: left; }
+  @container state-list (max-width: 759px) {
+    .system-page__status-list .state-row,
+    .system-page__status-list .state-row:has(.state-row__action) { grid-template-columns: auto minmax(0, 1fr); }
+    .system-page__status-list .state-row__label { grid-column: 1 / -1; }
+    .system-page__status-list .state-row__action { grid-column: 1 / -1; justify-self: start; }
+    .system-page__status-list .state-row__action > .header-action { justify-items: start; }
+    .system-page__status-list .state-row__action > .header-action { grid-template-rows: auto auto; }
+    .system-page__status-list .state-row__action .header-action__reason-slot { height: auto; min-height: 0; overflow: visible; }
+    .system-page__status-list .state-row__action .header-action__reason-slot .lock-reason { max-height: none; overflow: visible; }
+    .system-page__status-list .state-row__action .header-action__reason-slot .lock-reason { text-align: left; }
+  }
+}

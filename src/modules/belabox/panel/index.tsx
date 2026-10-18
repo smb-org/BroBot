@@ -1,3 +1,5 @@
+import "./panel.css";
+
 import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";

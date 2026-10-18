@@ -12,6 +12,7 @@ import { queryKeys } from "./data/keys";
 import { Button, Icon, StatusLed } from "./ui";
 import { ImmediateActions } from "./ImmediateActions";
 import { LiveCockpitEventFeed, LiveCockpitTiles } from "./LiveCockpitParts";
+import "./cockpit.css";
 import { LiveCockpitBroadcast } from "./LiveCockpitBroadcast";
 import { browserTimeZone } from "./ui/format-relative-time";
 import { useChannelSettings } from "./data/channel-settings";

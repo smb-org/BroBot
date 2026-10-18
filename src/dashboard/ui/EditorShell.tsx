@@ -1,4 +1,4 @@
-import { Popover as MantinePopover } from "@mantine/core";
+import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type SyntheticEvent } from "react";
 import { createPortal } from "react-dom";
 
@@ -74,18 +74,37 @@ function InvalidFieldsStatus({ fields, onFocusField }: { fields: readonly Editor
   const popoverId = useId();
   const common = dashboardCommonTexts();
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverContainerRef = useRef<HTMLElement | null>(null);
   const openedFromKeyboard = useRef(false);
+  const linkActivated = useRef(false);
+  const restoreTriggerFocus = useRef(false);
 
   const focusFirstErrorLink = (): void => {
     if (!openedFromKeyboard.current) return;
+    const firstLink = dropdownRef.current?.querySelector<HTMLElement>("button");
+    if (firstLink === undefined || firstLink === null) return;
     openedFromKeyboard.current = false;
-    dropdownRef.current?.querySelector<HTMLElement>("button")?.focus();
+    firstLink.focus();
+  };
+
+  const initialFocus = (): HTMLElement | false => {
+    if (!openedFromKeyboard.current) return false;
+    const firstLink = dropdownRef.current?.querySelector<HTMLElement>("button");
+    if (firstLink === undefined || firstLink === null) return false;
+    openedFromKeyboard.current = false;
+    return firstLink;
   };
 
   // Dismissal (Escape, outside click) returns focus to the trigger; activating an error link must not.
-  const [linkActivated, setLinkActivated] = useState(false);
   const setOpenedState = (next: boolean): void => {
-    if (next) setLinkActivated(false);
+    if (next) {
+      linkActivated.current = false;
+      restoreTriggerFocus.current = false;
+    } else {
+      restoreTriggerFocus.current = !linkActivated.current;
+      linkActivated.current = false;
+    }
     setOpened(next);
   };
 
@@ -96,52 +115,47 @@ function InvalidFieldsStatus({ fields, onFocusField }: { fields: readonly Editor
       if (event.key !== "Escape") return;
       event.preventDefault();
       event.stopPropagation();
-      setOpened(false);
+      setOpenedState(false);
     };
     window.addEventListener("keydown", closeOnEscape, true);
     return () => { window.removeEventListener("keydown", closeOnEscape, true); };
   }, [opened]);
 
+  useLayoutEffect(() => {
+    if (opened) focusFirstErrorLink();
+    else if (restoreTriggerFocus.current) {
+      restoreTriggerFocus.current = false;
+      triggerRef.current?.focus();
+    }
+  }, [opened]);
+
   return (
     <>
       <span className="ui-save-bar__invalid-summary">{common.invalidFieldCount(fields.length)}</span>
-      <MantinePopover
-        id={popoverId}
-        opened={opened}
-        onChange={setOpenedState}
-        withinPortal={false}
-        floatingStrategy="fixed"
-        position="top-start"
-        width={280}
-        middlewares={{ flip: true, shift: true }}
-        shadow="xs"
-        closeOnEscape={false}
-        // No exit fade: a fading popover keeps clickable links that unmount mid-click.
-        transitionProps={{ exitDuration: 0 }}
-        returnFocus={!linkActivated}
-        hideDetached={false}
-        onEnterTransitionEnd={focusFirstErrorLink}
-      >
-        <MantinePopover.Target>
-          <button
+      <PopoverPrimitive.Root open={opened} onOpenChange={setOpenedState}>
+        <PopoverPrimitive.Trigger render={<button
+            ref={(element) => {
+              triggerRef.current = element;
+              popoverContainerRef.current = element?.closest(".list-detail__inspector") ?? null;
+            }}
             className="ui-save-bar__invalid-trigger"
             type="button"
             aria-label={opened ? common.hideInvalidFields : common.showInvalidFields}
-            onKeyDown={(event) => {
+            onKeyDownCapture={(event) => {
               if (event.key === "Enter" || event.key === " ") openedFromKeyboard.current = !opened;
             }}
-            onClick={() => { setOpenedState(!opened); }}
           >
             <Icon name="cause" size={16} />
-          </button>
-        </MantinePopover.Target>
-        <MantinePopover.Dropdown data-ui="" ref={dropdownRef} className="ui-save-bar__invalid-popover" role="dialog" aria-labelledby={`${popoverId}-title`}>
+          </button>} />
+        {opened ? <PopoverPrimitive.Portal container={popoverContainerRef}>
+          <PopoverPrimitive.Positioner side="top" align="start" sideOffset={6} positionMethod="fixed" collisionPadding={8} className="z-[var(--layer-popover)]" style={{ zIndex: "var(--layer-popover)" }}>
+        <PopoverPrimitive.Popup data-ui="" id={popoverId} ref={dropdownRef} className="ui-save-bar__invalid-popover" role="dialog" aria-labelledby={`${popoverId}-title`} initialFocus={initialFocus} finalFocus={false}>
           <div>
             <h2 id={`${popoverId}-title`} className="sr-only">{common.invalidFieldsTitle}</h2>
             <ul className="ui-save-bar__invalid-fields">
               {fields.map((field) => (
                 <li key={`${field.sectionId}:${field.id}`}>
-                  <button type="button" aria-label={`${field.label}: ${field.message}`} onClick={() => { setLinkActivated(true); onFocusField(field); setOpened(false); }}>
+                  <button type="button" aria-label={`${field.label}: ${field.message}`} onClick={() => { linkActivated.current = true; onFocusField(field); setOpenedState(false); }}>
                     <span>{field.label}</span>
                     <span>{field.message}</span>
                   </button>
@@ -149,8 +163,10 @@ function InvalidFieldsStatus({ fields, onFocusField }: { fields: readonly Editor
               ))}
             </ul>
           </div>
-        </MantinePopover.Dropdown>
-      </MantinePopover>
+        </PopoverPrimitive.Popup>
+          </PopoverPrimitive.Positioner>
+        </PopoverPrimitive.Portal> : null}
+      </PopoverPrimitive.Root>
     </>
   );
 }

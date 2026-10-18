@@ -1,0 +1,27 @@
+@layer components.modules {
+  .belabox-overview { display: grid; grid-template-columns: minmax(300px, .8fr) minmax(0, 1.7fr); align-items: start; gap: 20px; min-width: 0; }
+  .belabox-overview > * { min-width: 0; }
+  .belabox-connection-state { display: flex; min-height: 28px; align-items: center; }
+  .properties.belabox-connection-properties { display: grid; grid-template-columns: minmax(0, 1fr); margin-top: 4px; }
+  .belabox-connection-properties > div { grid-template-columns: minmax(105px, .8fr) minmax(0, 1.2fr); gap: var(--s2); }
+  .belabox-connection-properties dt { font-size: 12px; }
+  .belabox-url-field { margin-top: 12px; }
+  .belabox-alert-notice-slot { display: flex; box-sizing: border-box; min-width: 0; height: 40px; align-items: center; justify-content: space-between; gap: var(--s2); overflow: hidden; }
+  .belabox-alert-notice-slot > span { display: -webkit-box; min-width: 0; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .belabox-alert-notice-slot > .ui-button { flex: none; }
+  .belabox-connection-actions { display: flex; min-height: 40px; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+  .belabox-connection-actions > .ui-button { flex: none; }
+  .belabox-test-result { box-sizing: border-box; min-height: 20px; max-height: 36px; margin: 0; overflow: hidden; overflow-wrap: anywhere; }
+  .belabox-history-section { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+  .belabox-chart { position: relative; width: 100%; min-height: 200px; aspect-ratio: 640 / 200; }
+  .belabox-chart > svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+  .belabox-chart__axis-label { position: absolute; z-index: 1; color: var(--text-3); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; line-height: 1.2; white-space: nowrap; }
+  .belabox-chart__axis--y { position: absolute; inset: 6% auto 14% 0; display: flex; width: 7.5%; flex-direction: column; align-items: flex-end; justify-content: space-between; }
+  .belabox-chart__axis--y .belabox-chart__axis-label { position: static; transform: none; }
+  .belabox-chart__axis--x { position: absolute; right: 1.875%; bottom: 0; left: 7.5%; display: flex; justify-content: space-between; }
+  .belabox-chart__axis--x .belabox-chart__axis-label { position: static; }
+  .belabox-chart__empty { position: absolute; top: 50%; left: 50%; box-sizing: border-box; width: max-content; max-width: calc(100% - 16px); padding: 4px 8px; transform: translate(-50%, -50%); border-radius: var(--r-control); background: var(--background); margin: 0; text-align: center; }
+  @media (max-width: 768px) {
+    .belabox-overview { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  }
+}
