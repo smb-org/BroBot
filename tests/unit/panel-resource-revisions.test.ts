@@ -407,7 +407,7 @@ describe("panel resource revisions", () => {
     const worker = readFileSync(resolve(root, "src/worker/app-routes.ts"), "utf8");
     expect(worker).toContain("app.use(PANEL_RESOURCE_NOTIFIER_COVERAGE.channelRoutes");
     expect(worker).toContain("app.use(PANEL_RESOURCE_NOTIFIER_COVERAGE.platformRoutes");
-    expect(worker).toMatch(/finally \{\s*const channelId = context\.req\.param\("channelId"\);\s*if \(channelId\.length > 0 && authorizedContextHas\(context, "session"\)\) \{\s*await notifyCommittedResources\(context\.env\);/u);
+    expect(worker).toMatch(/finally \{\s*const channelId = context\.req\.param\("channelId"\);\s*const isDryRun = .*context\.req\.path\);\s*if \(!isDryRun && channelId\.length > 0 && authorizedContextHas\(context, "session"\)\) \{\s*await notifyCommittedResources\(context\.env\);/u);
     expect(worker).not.toContain("PANEL_RESOURCE_NOTIFIER_COVERAGE.authRoutes");
     expect(worker).not.toMatch(/context\.res\.status !== 401/u);
     const deferredSources = new Map(sourceFilesUnder(resolve(root, "src")).map((path) => [

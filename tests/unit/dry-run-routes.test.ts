@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
+import { app } from "../../src/worker/app-routes";
 import { panelRouter } from "../../src/worker/panel/routes";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
@@ -42,6 +43,23 @@ const requestFor = async (
   });
 };
 
+const requestForRawBody = async (userId: string, body: string): Promise<Request> => {
+  const sessionId = `session-${userId}`;
+  const [sessionCookie, csrfToken] = await Promise.all([
+    createSessionCookie({ sessionId }, cookieKeys, encryptionKeys),
+    createCsrfToken(sessionId, cookieKeys, new Date().toISOString()),
+  ]);
+  return new Request(`https://brobot.example/api/channels/${CHANNEL_ID}/dry-run`, {
+    method: "POST",
+    headers: {
+      Cookie: `__Host-brobot_session=${sessionCookie}; __Host-brobot_csrf=${csrfToken}`,
+      "Content-Type": "application/json",
+      "X-CSRF-Token": csrfToken,
+    },
+    body,
+  });
+};
+
 const validRequest = {
   text: "!hello",
   sender: { login: "viewer_42", statuses: [] },
@@ -51,6 +69,65 @@ const validRequest = {
 };
 
 describe("dry-run route", () => {
+  it("does not drain committed resources for any channel while evaluating a dry run", async () => {
+    const database = new TestD1Database();
+    const reconciledChannels: string[] = [];
+    try {
+      await insertChannel(database, CHANNEL_ID);
+      await insertChannel(database, "kanal-b");
+      await insertLoginIdentityAndSession(database, OPERATOR_ID);
+      await insertMember(database, CHANNEL_ID, OPERATOR_ID, "operator");
+      const pendingBefore = await database.prepare("SELECT COUNT(*) AS count FROM panel_resource_pending")
+        .first<{ count: number }>();
+      const environment = {
+        ...environmentFor(database),
+        CHANNEL: {
+          idFromName: (channelId: string) => channelId,
+          get: (channelId: string) => ({
+            reconcilePanelResources: () => {
+              reconciledChannels.push(channelId);
+              return Promise.resolve();
+            },
+          }),
+        },
+      } as unknown as Env;
+
+      const response = await app.fetch(await requestFor(OPERATOR_ID, {
+        ...validRequest,
+        only: { moduleId: "faq" },
+      }), environment);
+
+      expect(response.status).toBe(200);
+      expect(reconciledChannels).toEqual([]);
+      await expect(database.prepare("SELECT COUNT(*) AS count FROM panel_resource_pending")
+        .first<{ count: number }>()).resolves.toEqual(pendingBefore);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("rejects oversized bodies and duplicate sender statuses", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, CHANNEL_ID);
+      await insertLoginIdentityAndSession(database, OPERATOR_ID);
+      await insertMember(database, CHANNEL_ID, OPERATOR_ID, "operator");
+      const oversized = await panelRouter.fetch(
+        await requestForRawBody(OPERATOR_ID, `${JSON.stringify(validRequest)}${" ".repeat(16 * 1024)}`),
+        environmentFor(database),
+      );
+      const duplicateStatuses = await panelRouter.fetch(await requestFor(OPERATOR_ID, {
+        ...validRequest,
+        sender: { ...validRequest.sender, statuses: ["vip", "vip", "vip", "vip", "vip"] },
+      }), environmentFor(database));
+
+      expect(oversized.status).toBe(400);
+      expect(duplicateStatuses.status).toBe(400);
+    } finally {
+      database.close();
+    }
+  });
+
   it("rejects invalid strict payloads with the dry-run error code", async () => {
     const database = new TestD1Database();
     try {

@@ -58,12 +58,29 @@ const resolveValues = async (
         getBelaboxStatus(context.DB, context.channelId),
         getBelaboxStreamSession(context.DB, context.channelId),
       ]);
-      if (status === null || !belaboxStatusMatchesSession(status, session) || !freshSample(
+      if (status === null) {
+        if (context.readOnly === true) {
+          names.forEach((name) => {
+            context.addDiagnostic({ code: "template.deferred_live", detail: { name } });
+          });
+          return {};
+        }
+        throw new Error("BELABOX_SAMPLE_UNAVAILABLE");
+      }
+      if (!belaboxStatusMatchesSession(status, session) || !freshSample(
         status.sample,
         status.errorCode,
         context.now,
         moduleState.settings.mode === "interval" ? moduleState.settings.intervalSeconds * 3_000 : 30_000,
-      )) throw new Error("BELABOX_SAMPLE_UNAVAILABLE");
+      )) {
+        if (context.readOnly === true && status.errorCode === null) {
+          names.forEach((name) => {
+            context.addDiagnostic({ code: "template.deferred_live", detail: { name } });
+          });
+          return {};
+        }
+        throw new Error("BELABOX_SAMPLE_UNAVAILABLE");
+      }
       return formatTemplateValues(
         status.sample,
         names,

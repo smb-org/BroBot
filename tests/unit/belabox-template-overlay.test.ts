@@ -202,6 +202,21 @@ describe("BELABOX template variables and overlay metadata", () => {
     expect(runModuleAlarm).not.toHaveBeenCalled();
   });
 
+  it("reports an uncached read-only sample as deferred live data", async () => {
+    await insertModule("on_demand");
+    const diagnostics: { code: string; detail?: Readonly<Record<string, unknown>> }[] = [];
+    const values = await belaboxModule.resolveTemplateValues?.(
+      ["belabox.bitrate"],
+      templateContext("en", vi.fn(), {
+        readOnly: true,
+        addDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      }),
+    );
+
+    expect(values).toEqual({});
+    expect(diagnostics).toContainEqual({ code: "template.deferred_live", detail: { name: "belabox.bitrate" } });
+  });
+
   it("checks an on-demand sample against real time after a delayed fetch", async () => {
     await insertModule("on_demand", 60);
     vi.useRealTimers();

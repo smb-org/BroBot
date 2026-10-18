@@ -122,6 +122,7 @@ export const createTextBlockTemplateValueProvider = (db: D1Database, channelId: 
   );
   const persistChoice = async (name: string, variantId: string, length: number): Promise<number> => {
     if (length <= 1 || context.mode !== "chat") return 0;
+    if (context.readOnly === true) return Math.floor(Math.random() * length);
     const row = await db.prepare(
       `UPDATE text_block_variants SET last_chosen_index = CASE
          WHEN last_chosen_index >= 0 AND last_chosen_index < ?

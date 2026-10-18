@@ -29,6 +29,18 @@ describe("event codes", () => {
     }
   });
 
+  it("labels cache-only template values that will resolve live when sent", () => {
+    const german = eventTexts.de["template.deferred_live"];
+    const english = eventTexts.en["template.deferred_live"];
+
+    expect(typeof german).toBe("function");
+    expect(typeof english).toBe("function");
+    if (typeof german === "function" && typeof english === "function") {
+      expect(german({})).toBe("wird beim Senden live ermittelt");
+      expect(english({})).toBe("resolved live when sent");
+    }
+  });
+
   it("lets no German code through", () => {
     const suspicious = EVENT_CODES.filter((code) => /[äöüÄÖÜß]|unbekannt|fehler|fehlgeschlagen|gesendet|gezeichnet|verdacht|einstufung|entwarnung|ankuendigung|halte(?!d)|aktion|modul(?!e)|unterdrueckt|ungueltig|ausgeloest|deaktiviert|berechtigung|abgekuehlt|vorwarnung|zeitplan|uebersprungen|vollzustimmung/.test(code));
     expect(suspicious).toEqual([]);
