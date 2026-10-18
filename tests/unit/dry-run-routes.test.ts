@@ -160,7 +160,7 @@ describe("dry-run route", () => {
       expect(result).toMatchObject({
         controls: { muted: false, paused: false },
         sender: { userId: "dry-run:viewer_42", resolved: false, perUserCooldownsUseSyntheticId: true },
-        modules: [{ moduleId: "faq", status: "not_testable", entries: [] }],
+        modules: [{ moduleId: "faq", status: "silent", entries: [] }],
       });
     } finally {
       database.close();

@@ -129,7 +129,7 @@ export const dryRunChatMessage = async (
       };
       const renderTemplate = await createSimulatedTemplateRenderer(env, channelId, {
         event,
-        templateContext: "chat_command",
+        templateContext: module.templateContext ?? "event",
         streamState,
         game,
         now: Date.parse(evaluatedAt),

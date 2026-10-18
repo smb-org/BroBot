@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import type { BotModule } from "../../src/modules/contract";
+import { faqModule } from "../../src/modules/faq";
+import { textLibraryModule } from "../../src/modules/text_library";
 import { textCommandModule } from "../../src/modules/text_commands";
 import { createTextCommandRepository } from "../../src/modules/text_commands/adapters/d1";
 import { dispatchEventSubNotification } from "../../src/worker/dispatch";
@@ -11,12 +13,15 @@ import { dryRunChatMessage } from "../../src/worker/dry-run";
 import { insertAppAccessToken, insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
-vi.mock("../../src/modules/registry", () => ({
-  MODULES: [],
-  templateVariableGroupForModule: () => undefined,
-  validateModuleTemplateVariable: () => undefined,
-  variablesForModuleTemplateContext: (_module: unknown, variables: readonly unknown[]) => variables,
-}));
+vi.mock("../../src/modules/registry", async () => {
+  const { textLibraryModule: templateProvider } = await import("../../src/modules/text_library");
+  return {
+    MODULES: [templateProvider],
+    templateVariableGroupForModule: () => undefined,
+    validateModuleTemplateVariable: () => undefined,
+    variablesForModuleTemplateContext: (_module: unknown, variables: readonly unknown[]) => variables,
+  };
+});
 
 const CHANNEL_ID = "kanal-a";
 const NOW = "2026-09-19T12:00:00.000Z";
@@ -152,6 +157,49 @@ const seedBotIdentity = async (database: TestD1Database): Promise<void> => {
   );
 };
 
+const seedFaqAnswer = async (
+  database: TestD1Database,
+  faqId: string,
+  trigger: string,
+  answerText: string,
+  order = 0,
+): Promise<void> => {
+  await database.prepare(
+    `INSERT INTO faq_entries
+      (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, minimum_tier,
+       cooldown_seconds, user_cooldown_seconds, games_json, chat_target, use_channel_default_target,
+       sort_order, revision, last_used_at, created_at, updated_at)
+     VALUES (?, ?, ?, 1, 'keywords', ?, ?, 'everyone', 30, 0, '[]', 'where_asked', 1, ?, 1, NULL, ?, ?)`,
+  ).bind(
+    faqId,
+    CHANNEL_ID,
+    faqId,
+    JSON.stringify({ type: "keywords", patterns: [trigger] }),
+    answerText,
+    order,
+    NOW,
+    NOW,
+  ).run();
+};
+
+const seedTextBlock = async (
+  database: TestD1Database,
+  blockName: string,
+  variants: readonly { id: string; conditions: Readonly<Record<string, unknown>>; texts: readonly string[] }[],
+): Promise<void> => {
+  await database.prepare("INSERT INTO text_library_settings (channel_id, graph_revision, updated_at) VALUES (?, 1, ?)")
+    .bind(CHANNEL_ID, NOW).run();
+  await database.prepare("INSERT INTO text_library_categories (channel_id, category_id, created_at, updated_at) VALUES (?, 'faq', ?, ?)")
+    .bind(CHANNEL_ID, NOW, NOW).run();
+  await database.prepare("INSERT INTO text_blocks (channel_id, block_name, category_id, revision, created_at, updated_at) VALUES (?, ?, 'faq', 1, ?, ?)")
+    .bind(CHANNEL_ID, blockName, NOW, NOW).run();
+  for (const [position, variant] of variants.entries()) {
+    await database.prepare(
+      "INSERT INTO text_block_variants (channel_id, block_name, variant_id, position, conditions_json, texts_json) VALUES (?, ?, ?, ?, ?, ?)",
+    ).bind(CHANNEL_ID, blockName, variant.id, position, JSON.stringify(variant.conditions), JSON.stringify(variant.texts)).run();
+  }
+};
+
 describe("text-command dry-run parity", () => {
   it("matches production alias diagnostics, rendered reply, and shared-chat target without consuming the dry-run seed", async () => {
     vi.useFakeTimers();
@@ -220,6 +268,351 @@ describe("text-command dry-run parity", () => {
       productionDatabase.close();
       dryRunDatabase.close();
       vi.useRealTimers();
+    }
+  });
+
+  it("reports FAQ fires only when the production service claims and uses the synthetic sender for cooldowns", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const productionDatabase = new TestD1Database();
+    const dryRunDatabase = new TestD1Database();
+    try {
+      for (const database of [productionDatabase, dryRunDatabase]) {
+        await insertChannel(database, CHANNEL_ID);
+        await database.prepare(
+          "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'faq', 1, '{}')",
+        ).bind(CHANNEL_ID).run();
+        await database.prepare(
+          `INSERT INTO faq_entries
+            (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, minimum_tier,
+             cooldown_seconds, user_cooldown_seconds, games_json, chat_target, use_channel_default_target,
+             sort_order, revision, last_used_at, created_at, updated_at)
+           VALUES
+            ('faq-hello', ?, 'Greeting', 1, 'keywords', '{"type":"keywords","patterns":["hello"]}', 'Hello!',
+             'everyone', 30, 120, '[]', 'where_asked', 1, 0, 1, NULL, ?, ?),
+            ('faq-later', ?, 'Later match', 1, 'regex', '{"type":"regex","pattern":"hello"}', 'Later!',
+             'everyone', 30, 0, '[]', 'where_asked', 1, 1, 1, NULL, ?, ?)`,
+        ).bind(CHANNEL_ID, NOW, NOW, CHANNEL_ID, NOW, NOW).run();
+      }
+      await Promise.all([seedBotIdentity(productionDatabase), seedBotIdentity(dryRunDatabase)]);
+      const request = {
+        text: "🎉 hello",
+        sender: { login: "viewer_42", statuses: [] },
+        streamState: "online" as const,
+        game: null,
+        sharedChat: false,
+        only: { moduleId: "faq" as const },
+      };
+      const dryRunEnvironment = {
+        ...environmentFor(dryRunDatabase),
+        DB: dryRunDatabase as unknown as D1Database,
+      } as unknown as Env;
+      const dryRunFirst = await dryRunChatMessage(dryRunEnvironment, CHANNEL_ID, request, vi.fn<typeof fetch>(), [faqModule]);
+      const productionFetcher = sent();
+      const productionEvent = (triggerId: string) => ({
+        channelId: CHANNEL_ID,
+        subscriptionType: "channel.chat.message",
+        triggerId,
+        payload: {
+          message: { text: request.text },
+          message_id: triggerId,
+          chatter_user_id: "dry-run:viewer_42",
+          chatter_user_login: "viewer_42",
+          broadcaster_user_login: CHANNEL_ID,
+          source_broadcaster_user_id: CHANNEL_ID,
+          badges: [],
+        },
+        receivedAt: NOW,
+      });
+      await dispatchEventSubNotification(environmentFor(productionDatabase), productionEvent("production-first"), productionFetcher, [faqModule]);
+      const firstClaim = await productionDatabase.prepare(
+        "SELECT last_used_at FROM faq_entries WHERE faq_id = 'faq-hello'",
+      ).first<{ last_used_at: string | null }>();
+      const firstOutcome = dryRunFirst.modules[0]?.entries.find(({ entry }) => entry.id === "faq-hello")?.outcome;
+
+      expect(firstClaim?.last_used_at).toBe(NOW);
+      expect(firstOutcome).toBe("fires");
+      expect(dryRunFirst.modules[0]?.entries.find(({ entry }) => entry.id === "faq-later")).toMatchObject({
+        outcome: "blocked",
+        blocks: [{ code: "faq.shadowed", detail: { byEntryId: "faq-hello" } }],
+      });
+      const onlyShadowed = await dryRunChatMessage(
+        dryRunEnvironment,
+        CHANNEL_ID,
+        { ...request, only: { moduleId: "faq", entryId: "faq-later" } },
+        vi.fn<typeof fetch>(),
+        [faqModule],
+      );
+      expect(onlyShadowed.modules[0]?.entries).toHaveLength(1);
+      expect(onlyShadowed.modules[0]?.entries[0]?.entry.id).toBe("faq-later");
+
+      await dispatchEventSubNotification(environmentFor(productionDatabase), productionEvent("production-second"), productionFetcher, [faqModule]);
+      const secondClaim = await productionDatabase.prepare(
+        "SELECT user_id, last_used_at FROM faq_entry_user_cooldowns WHERE faq_id = 'faq-hello'",
+      ).first<{ user_id: string; last_used_at: string }>();
+      await dryRunDatabase.prepare("UPDATE faq_entries SET last_used_at = ? WHERE faq_id = 'faq-hello'")
+        .bind(firstClaim?.last_used_at ?? NOW).run();
+      await dryRunDatabase.prepare(
+        `INSERT INTO faq_entry_user_cooldowns (channel_id, faq_id, user_id, last_used_at) VALUES (?, 'faq-hello', ?, ?)`,
+      ).bind(CHANNEL_ID, secondClaim?.user_id ?? "dry-run:viewer_42", secondClaim?.last_used_at ?? NOW).run();
+      const dryRunSecond = await dryRunChatMessage(dryRunEnvironment, CHANNEL_ID, request, vi.fn<typeof fetch>(), [faqModule]);
+      const secondOutcome = dryRunSecond.modules[0]?.entries.find(({ entry }) => entry.id === "faq-hello");
+
+      expect(secondClaim).toEqual({ user_id: "dry-run:viewer_42", last_used_at: NOW });
+      expect(productionFetcher.mock.calls.filter(([input]) => urlFor(input).endsWith("/chat/messages"))).toHaveLength(1);
+      expect(secondOutcome).toMatchObject({
+        outcome: "blocked",
+        blocks: [{ code: "faq.person_cooldown", detail: { remainingSeconds: 120 } }],
+        effects: [],
+      });
+    } finally {
+      productionDatabase.close();
+      dryRunDatabase.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("omits FAQ cooldown effects when muted delivery releases production claims", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const productionDatabase = new TestD1Database();
+    const dryRunDatabase = new TestD1Database();
+    try {
+      for (const database of [productionDatabase, dryRunDatabase]) {
+        await insertChannel(database, CHANNEL_ID);
+        await database.prepare(
+          "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'faq', 1, '{}')",
+        ).bind(CHANNEL_ID).run();
+        await database.prepare("INSERT INTO channel_controls (channel_id, muted, updated_at) VALUES (?, 1, ?)")
+          .bind(CHANNEL_ID, NOW).run();
+        await database.prepare(
+          `INSERT INTO faq_entries
+            (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, minimum_tier,
+             cooldown_seconds, user_cooldown_seconds, games_json, chat_target, use_channel_default_target,
+             sort_order, revision, last_used_at, created_at, updated_at)
+           VALUES
+            ('faq-muted', ?, 'Muted answer', 1, 'keywords', '{"type":"keywords","patterns":["hello"]}', 'Hello!',
+             'everyone', 30, 120, '[]', 'where_asked', 1, 0, 1, NULL, ?, ?)`,
+        ).bind(CHANNEL_ID, NOW, NOW).run();
+      }
+      await Promise.all([seedBotIdentity(productionDatabase), seedBotIdentity(dryRunDatabase)]);
+
+      const productionFetcher = sent();
+      await dispatchEventSubNotification(
+        environmentFor(productionDatabase),
+        chatEventFor("hello", "muted-production"),
+        productionFetcher,
+        [faqModule],
+      );
+      const productionGlobalCooldown = await productionDatabase.prepare(
+        "SELECT last_used_at FROM faq_entries WHERE faq_id = 'faq-muted'",
+      ).first<{ last_used_at: string | null }>();
+      const productionUserCooldowns = await productionDatabase.prepare(
+        "SELECT COUNT(*) AS count FROM faq_entry_user_cooldowns WHERE faq_id = 'faq-muted'",
+      ).first<{ count: number }>();
+
+      const dryRun = await dryRunChatMessage(
+        { ...environmentFor(dryRunDatabase), DB: dryRunDatabase as unknown as D1Database } as unknown as Env,
+        CHANNEL_ID,
+        {
+          text: "hello",
+          sender: { login: "viewer_42", statuses: [] },
+          streamState: "online",
+          game: null,
+          sharedChat: false,
+          only: { moduleId: "faq" },
+        },
+        vi.fn<typeof fetch>(),
+        [faqModule],
+      );
+      const faqEntry = dryRun.modules[0]?.entries.find(({ entry }) => entry.id === "faq-muted");
+      const dryRunCooldownEffects = faqEntry?.effects.filter((effect) => effect.kind === "cooldown");
+
+      expect(productionFetcher).not.toHaveBeenCalled();
+      expect(productionGlobalCooldown).toEqual({ last_used_at: null });
+      expect(productionUserCooldowns).toEqual({ count: 0 });
+      expect(faqEntry?.effects).toContainEqual(expect.objectContaining({ kind: "chat", suppressedBy: "channel_muted" }));
+      expect(dryRunCooldownEffects).toEqual([]);
+    } finally {
+      productionDatabase.close();
+      dryRunDatabase.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses the FAQ production template context for moderator-conditioned answer blocks", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const productionDatabase = new TestD1Database();
+    const dryRunDatabase = new TestD1Database();
+    try {
+      for (const database of [productionDatabase, dryRunDatabase]) {
+        await insertChannel(database, CHANNEL_ID);
+        await database.prepare(
+          "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'faq', 1, '{}')",
+        ).bind(CHANNEL_ID).run();
+        await seedFaqAnswer(database, "faq-moderator", "hello", "{text.answer}");
+        await seedTextBlock(database, "answer", [
+          { id: "moderator", conditions: { minimumTier: "moderator" }, texts: ["Moderator answer"] },
+          { id: "fallback", conditions: {}, texts: [""] },
+        ]);
+      }
+      await Promise.all([seedBotIdentity(productionDatabase), seedBotIdentity(dryRunDatabase)]);
+
+      const productionFetcher = sent();
+      await dispatchEventSubNotification(environmentFor(productionDatabase), {
+        channelId: CHANNEL_ID,
+        subscriptionType: "channel.chat.message",
+        triggerId: "production-moderator-message",
+        payload: {
+          message: { text: "hello" },
+          message_id: "production-moderator-message",
+          chatter_user_id: "viewer-1",
+          chatter_user_login: "viewer_1",
+          broadcaster_user_login: CHANNEL_ID,
+          source_broadcaster_user_id: CHANNEL_ID,
+          badges: [{ set_id: "moderator", id: "1", info: "" }],
+        },
+        receivedAt: NOW,
+      }, productionFetcher, [faqModule, textLibraryModule]);
+      const dryRun = await dryRunChatMessage(
+        { ...environmentFor(dryRunDatabase), DB: dryRunDatabase as unknown as D1Database } as unknown as Env,
+        CHANNEL_ID,
+        {
+          text: "hello",
+          sender: { login: "viewer_1", statuses: ["moderator"] },
+          streamState: "online",
+          game: null,
+          sharedChat: false,
+          only: { moduleId: "faq" },
+        },
+        vi.fn<typeof fetch>(),
+        [faqModule, textLibraryModule],
+      );
+      const productionClaim = await productionDatabase.prepare(
+        "SELECT last_used_at FROM faq_entries WHERE faq_id = 'faq-moderator'",
+      ).first<{ last_used_at: string | null }>();
+      const dryRunClaim = await dryRunDatabase.prepare(
+        "SELECT last_used_at FROM faq_entries WHERE faq_id = 'faq-moderator'",
+      ).first<{ last_used_at: string | null }>();
+
+      expect(productionClaim?.last_used_at).toBeNull();
+      expect(dryRunClaim?.last_used_at).toBeNull();
+      expect(productionFetcher.mock.calls.filter(([input]) => urlFor(input).endsWith("/chat/messages"))).toHaveLength(0);
+      expect(dryRun.modules[0]?.entries[0]).toMatchObject({ outcome: "blocked", effects: [], templateNotes: [] });
+    } finally {
+      productionDatabase.close();
+      dryRunDatabase.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("samples multi-text FAQ answers read-only and reports unavailable text blocks", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, CHANNEL_ID);
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'faq', 1, '{}')",
+      ).bind(CHANNEL_ID).run();
+      await seedFaqAnswer(database, "faq-multiple", "hello", "{text.answer}");
+      await seedFaqAnswer(database, "faq-missing", "missing", "{text.unavailable}", 1);
+      await seedTextBlock(database, "answer", [
+        { id: "default", conditions: {}, texts: ["Answer A", "Answer B"] },
+      ]);
+      await seedBotIdentity(database);
+
+      const environment = { ...environmentFor(database), DB: database as unknown as D1Database } as unknown as Env;
+      const multiText = await dryRunChatMessage(environment, CHANNEL_ID, {
+        text: "hello",
+        sender: { login: "viewer_1", statuses: [] },
+        streamState: "online",
+        game: null,
+        sharedChat: false,
+        only: { moduleId: "faq", entryId: "faq-multiple" },
+      }, vi.fn<typeof fetch>(), [faqModule, textLibraryModule]);
+      const multiTextEntry = multiText.modules[0]?.entries[0];
+      const multiTextEffect = multiTextEntry?.effects.find((effect) => effect.kind === "chat");
+      const chosenIndex = await database.prepare(
+        "SELECT last_chosen_index FROM text_block_variants WHERE block_name = 'answer' AND variant_id = 'default'",
+      ).first<{ last_chosen_index: number }>();
+      const faqClaim = await database.prepare(
+        "SELECT last_used_at FROM faq_entries WHERE faq_id = 'faq-multiple'",
+      ).first<{ last_used_at: string | null }>();
+
+      expect(multiTextEntry?.outcome).toBe("fires");
+      expect(multiTextEffect).toMatchObject({ kind: "chat" });
+      if (multiTextEffect?.kind !== "chat") throw new Error("Expected a rendered FAQ chat effect.");
+      expect(["Answer A", "Answer B"]).toContain(multiTextEffect.text);
+      expect(multiTextEffect.text).not.toContain("{text.answer}");
+      expect(multiTextEntry?.templateNotes).toEqual([]);
+      expect(chosenIndex?.last_chosen_index).toBe(-1);
+      expect(faqClaim?.last_used_at).toBeNull();
+
+      const missingText = await dryRunChatMessage(environment, CHANNEL_ID, {
+        text: "missing",
+        sender: { login: "viewer_1", statuses: [] },
+        streamState: "online",
+        game: null,
+        sharedChat: false,
+        only: { moduleId: "faq", entryId: "faq-missing" },
+      }, vi.fn<typeof fetch>(), [faqModule, textLibraryModule]);
+
+      expect(missingText.modules[0]?.entries[0]?.templateNotes).toContainEqual({
+        code: "template.lookup_unavailable",
+        detail: { name: "text.unavailable" },
+      });
+    } finally {
+      database.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("prepares attributed FAQ answers through the host dry-run output pipeline", async () => {
+    const database = new TestD1Database();
+    const message = "x".repeat(495);
+    const renderFaq = faqModule.dryRunChatMessage;
+    if (renderFaq === undefined) throw new Error("FAQ dry-run handler is required.");
+    const attributedFaqModule = {
+      ...faqModule,
+      dryRunChatMessage: (event: Parameters<typeof renderFaq>[0], context: Parameters<typeof renderFaq>[1]) => renderFaq(event, {
+        ...context,
+        renderTemplate: () => Promise.resolve({ text: message, diagnostics: [], attributions: ["MET Norway"] }),
+      }),
+    };
+    try {
+      await insertChannel(database, CHANNEL_ID);
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'faq', 1, '{}')",
+      ).bind(CHANNEL_ID).run();
+      await seedFaqAnswer(database, "faq-attributed", "hello", "unused");
+      await seedBotIdentity(database);
+
+      const report = await dryRunChatMessage(
+        { ...environmentFor(database), DB: database as unknown as D1Database } as unknown as Env,
+        CHANNEL_ID,
+        {
+          text: "hello",
+          sender: { login: "viewer_1", statuses: [] },
+          streamState: "online",
+          game: null,
+          sharedChat: false,
+          only: { moduleId: "faq", entryId: "faq-attributed" },
+        },
+        vi.fn<typeof fetch>(),
+        [attributedFaqModule, textLibraryModule],
+      );
+      const effect = report.modules[0]?.entries[0]?.effects.find((candidate) => candidate.kind === "chat");
+
+      expect(effect).toMatchObject({
+        kind: "chat",
+        text: `${"x".repeat(486)}… · MET Norway`,
+        postsTo: "this_chat",
+        suppressedBy: null,
+      });
+    } finally {
+      database.close();
     }
   });
 

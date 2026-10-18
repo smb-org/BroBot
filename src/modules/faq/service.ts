@@ -1,6 +1,11 @@
-import type { ModuleEvent, ModuleExecutionContext, ModuleResult } from "../contract";
+import { chatDeliveryReleasesClaim, type ModuleEvent, type ModuleExecutionContext, type ModuleResult } from "../contract";
 import { hasCommandPrefix, selectFaqMatch } from "./domain";
 import type { FaqRepository } from "./repository";
+
+type FaqMessageContext = Pick<ModuleExecutionContext, "renderTemplate"> & Partial<Pick<
+  ModuleExecutionContext,
+  "botUserId" | "isRecentBotMessage" | "channelGameId"
+>>;
 
 const messageText = (event: ModuleEvent): string | null => {
   const message = event.payload.message;
@@ -12,7 +17,7 @@ const messageText = (event: ModuleEvent): string | null => {
 export const processFaqMessage = async (
   event: ModuleEvent,
   repository: FaqRepository,
-  context: ModuleExecutionContext,
+  context: FaqMessageContext,
 ): Promise<ModuleResult> => {
   const text = messageText(event);
   if (event.subscriptionType !== "channel.chat.message" || text === null || text.length === 0) {
@@ -51,7 +56,7 @@ export const processFaqMessage = async (
       ...(match.entry.chatTarget === null ? {} : { target: match.entry.chatTarget }),
       automated: true,
       onDelivery: async (delivery) => {
-        if (delivery === "rejected" || delivery === "not_attempted") {
+        if (chatDeliveryReleasesClaim(delivery)) {
           await repository.releaseClaim(event.channelId, match.entry, senderId, claim.claimedAt);
         }
       },

@@ -28,6 +28,7 @@ import { platformRolesSql } from "../../src/worker/platform/repository";
 import { channelStateQuery } from "../../src/worker/panel/repository";
 import { apiSourceReferenceQuery } from "../../src/modules/api_source/routes";
 import { CLAIM_ELIGIBLE_SQL, textCommandSelectColumns } from "../../src/modules/text_commands/adapters/d1";
+import { FAQ_CLAIM_ELIGIBLE_SQL } from "../../src/modules/faq/adapters/d1";
 import { blockUsageExistsSql, textBlockCategorySelectColumns, textBlockSelectColumns } from "../../src/modules/text_library/adapters/d1";
 import { chatVoteSelectColumns, chatVoteTemplateSelectColumns } from "../../src/modules/chat_voting/repository";
 import {
@@ -155,6 +156,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["channelStateQuery", channelStateQuery],
   ["textCommandSelectColumns", textCommandSelectColumns],
   ["CLAIM_ELIGIBLE_SQL", CLAIM_ELIGIBLE_SQL],
+  ["FAQ_CLAIM_ELIGIBLE_SQL", FAQ_CLAIM_ELIGIBLE_SQL],
   ["quotedIdColumn", '"faq_id"'],
   ["quotedItemNameColumn", '"name"'],
   ["quotedTableName", '"faq_entries"'],

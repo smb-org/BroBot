@@ -22,6 +22,15 @@ export interface FaqSelection extends FaqMatchResult {
   skippedByGame: readonly FaqSkippedMatch[];
 }
 
+export interface FaqMatchExplanation {
+  entry: FaqEntry;
+  match:
+    | { kind: "keyword"; pattern: string }
+    | { kind: "regex"; pattern: string; ranges: readonly [number, number][] };
+  reason: "command_prefix" | "permission_denied" | "game_filter" | "shadowed" | null;
+  byEntryId?: string;
+}
+
 export interface PreparedFaqMatcher {
   entry: FaqEntry;
   patterns: readonly PreparedFaqPattern[];
@@ -155,6 +164,71 @@ export const firstFaqMatch = (prepared: readonly PreparedFaqMatcher[], message: 
 
 const isEligibleForGame = (entry: FaqEntry, gameId: string | null): boolean =>
   entry.games.length === 0 || (gameId !== null && entry.games.some((game) => game.id === gameId));
+
+const regexRanges = (pattern: PreparedFaqPattern & { type: "regex" }, message: string): [number, number][] => {
+  const matcher = pattern.compiled.matcher(message);
+  const ranges: [number, number][] = [];
+  let searchFrom = 0;
+  while (searchFrom <= message.length && matcher.find(searchFrom)) {
+    const start = matcher.start();
+    const end = matcher.end();
+    ranges.push([start, end]);
+    if (end > start) {
+      searchFrom = end;
+    } else if (end >= message.length) {
+      break;
+    } else {
+      searchFrom = end + codePointAfter(message, end).length;
+    }
+  }
+  return ranges;
+};
+
+/** Explains every entry whose matcher hits, preserving production order and selection rules. */
+export const explainFaqMatches = (
+  prepared: readonly PreparedFaqMatcher[],
+  message: string,
+  gameId: string | null,
+  chatStatus: readonly ModuleChatStatus[] | null = null,
+): FaqMatchExplanation[] => {
+  const commandPrefix = hasCommandPrefix(message);
+  const normalizedMessage = normalizeFaqText(message);
+  const explanations: FaqMatchExplanation[] = [];
+  let winnerId: string | null = null;
+
+  for (const matcher of prepared) {
+    const pattern = matcher.patterns.find((candidate) => patternMatches(message, normalizedMessage, candidate));
+    if (pattern === undefined) continue;
+    const match = pattern.type === "regex"
+      ? { kind: "regex" as const, pattern: pattern.source, ranges: regexRanges(pattern, message) }
+      : { kind: "keyword" as const, pattern: pattern.source };
+    let reason: FaqMatchExplanation["reason"];
+    let byEntryId: string | undefined;
+
+    if (commandPrefix) {
+      reason = "command_prefix";
+    } else if (winnerId !== null) {
+      reason = "shadowed";
+      byEntryId = winnerId;
+    } else if (!statusMeetsMinimumTier(chatStatus, matcher.entry.minimumTier)) {
+      reason = "permission_denied";
+    } else if (!isEligibleForGame(matcher.entry, gameId)) {
+      reason = "game_filter";
+    } else {
+      reason = null;
+      winnerId = matcher.entry.id;
+    }
+
+    explanations.push({
+      entry: matcher.entry,
+      match,
+      reason,
+      ...(byEntryId === undefined ? {} : { byEntryId }),
+    });
+  }
+
+  return explanations;
+};
 
 /** Selects the first entry that matches both its role and game restrictions. */
 export const selectFaqMatch = (
