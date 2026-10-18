@@ -77,8 +77,8 @@ test("aligns the desktop context, fixed result rows, and highlighted detail with
   const geometry = await page.evaluate(() => {
     const header = document.querySelector<HTMLElement>(".page-header");
     const area = document.querySelector<HTMLElement>(".test-area");
-    const form = document.querySelector<HTMLElement>(".test-area__context-form");
-    const formChildren = form === null ? [] : Array.from(form.children);
+    const fields = document.querySelector<HTMLElement>(".test-area__context-fields");
+    const formChildren = fields === null ? [] : Array.from(fields.children);
     const formGaps = formChildren.slice(1).map((child, index) => {
       const previous = formChildren[index];
       return previous === undefined ? 0 : child.getBoundingClientRect().top - previous.getBoundingClientRect().bottom;
@@ -147,8 +147,8 @@ test("aligns the desktop context, fixed result rows, and highlighted detail with
 test("keeps the compact desktop context on one field rhythm at 1280 by 800", async ({ page }) => {
   await openTestArea(page, 1280, 800);
 
-  const gaps = await page.locator(".test-area__context-form").evaluate((form) => {
-    const children = Array.from(form.children);
+  const gaps = await page.locator(".test-area__context-fields").evaluate((fields) => {
+    const children = Array.from(fields.children);
     return children.slice(1).map((child, index) => {
       const previous = children[index];
       return previous === undefined ? 0 : child.getBoundingClientRect().top - previous.getBoundingClientRect().bottom;

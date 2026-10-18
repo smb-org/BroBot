@@ -664,10 +664,12 @@ export function TestAreaPage({
     <div className="test-area">
       <aside className="test-area__context" aria-label={texts.context}>
         <form className="test-area__context-form" onSubmit={handleSubmit}>
-          <ContextFields {...contextProps} />
-          <Button type="submit" variant="primary" className="test-area__run-button" disabled={message.trim().length === 0}>
-            <Icon name="tabMessages" />{texts.run}
-          </Button>
+          <div className="test-area__context-fields"><ContextFields {...contextProps} /></div>
+          <div className="test-area__context-footer">
+            <Button type="submit" variant="primary" className="test-area__run-button" disabled={message.trim().length === 0}>
+              <Icon name="tabMessages" />{texts.run}
+            </Button>
+          </div>
         </form>
         <section className="test-area__history" aria-label={texts.history}>
           <h2>{texts.history}<span>{history.length}</span></h2>
@@ -763,7 +765,15 @@ export function TestAreaPage({
         className="test-area__dialog test-area__context-dialog"
         onClose={() => setMobileContextOpen(false)}
       >
-        <div className="test-area__dialog-fields"><ContextFields {...contextProps} /></div>
+        <form
+          className="test-area__context-dialog-form"
+          onSubmit={(event) => {
+            handleSubmit(event);
+            if (message.trim().length > 0) setMobileContextOpen(false);
+          }}
+        >
+          <div className="test-area__dialog-fields"><ContextFields {...contextProps} /></div>
+        </form>
       </Dialog>
       <Dialog
         opened={mobileHistoryOpen}

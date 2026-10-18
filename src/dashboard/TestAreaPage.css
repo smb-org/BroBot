@@ -45,10 +45,29 @@
 }
 
 .test-area__context-form {
-  display: grid;
-  flex: 0 0 auto;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   gap: 8px;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.test-area__context-fields {
+  display: grid;
+  flex: 1 1 auto;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.test-area__context-footer {
+  flex: 0 0 auto;
 }
 
 .test-area__context-form .ui-field__input,
@@ -79,7 +98,7 @@
 :is(.test-area__context-form, .test-area__dialog-fields) .ui-game-multi-select--compact:has(.ui-game-multi-select__input:focus):has(.ui-game-multi-select__input:placeholder-shown) .ui-game-multi-select__search > input { padding-left: calc(65% + var(--s2)); }
 :is(.test-area__context-form, .test-area__dialog-fields) .ui-game-multi-select--compact:has(.ui-game-multi-select__input:not(:placeholder-shown)) .ui-game-multi-select__selected { display: none; }
 
-.test-area__context-form > .ui-field:nth-of-type(2) .ui-field__hint {
+.test-area__context-fields > .ui-field:nth-of-type(2) .ui-field__hint {
   max-width: 100%;
   font-size: 11px;
 }
@@ -211,6 +230,7 @@
 
 .test-area__history-list {
   display: grid;
+  flex: 1 1 auto;
   align-content: start;
   gap: 2px;
   min-height: 0;

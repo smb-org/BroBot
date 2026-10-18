@@ -253,7 +253,7 @@ test.describe("test area screenshot captures", () => {
   test("1280 by 800 blocked detail", async ({ page }, info) => {
     await openTestArea(page, { width: 1280, height: 800, response: blockedResponse() });
     await submitMessage(page);
-    await expect(page.locator(".test-area__context-form > .ui-field").first()).toBeInViewport({ ratio: 1 });
+    await expect(page.locator(".test-area__context-fields > .ui-field").first()).toBeInViewport({ ratio: 1 });
     expect(await page.locator(".test-area__context").evaluate((context) => context.scrollTop)).toBe(0);
     const gameName = page.locator(".test-area__context-form .ui-game-multi-select__single-value-name");
     await expect(gameName).toHaveText("Just Chatting");
