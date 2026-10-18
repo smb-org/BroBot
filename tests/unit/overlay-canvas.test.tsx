@@ -19,6 +19,35 @@ const overlay = {
 describe("OverlayCanvas anchors", () => {
   afterEach(cleanup);
 
+  it("renders namespaced channel tokens while keeping bare names literal and value as an alias", () => {
+    const sourceElement = overlay.elements[0];
+    if (sourceElement === undefined) throw new Error("Overlay test element is missing.");
+    const { container, rerender } = render(<OverlayCanvas
+      overlay={{
+        ...overlay,
+        elements: [{ ...sourceElement, text: "{score}: {value}" }],
+      }}
+      language="en"
+      variables={{ score: 42, streak: 8 }}
+      elementId={null}
+    />);
+
+    const renderedText = (): string | null => container.querySelector(".brobot-variable")?.textContent ?? null;
+    expect(renderedText()).toBe("{score}: 42");
+
+    rerender(<OverlayCanvas
+      overlay={{
+        ...overlay,
+        elements: [{ ...sourceElement, text: "{var.score} · {var.streak} · {value}" }],
+      }}
+      language="en"
+      variables={{ score: 42, streak: 8 }}
+      elementId={null}
+    />);
+
+    expect(renderedText()).toBe("42 · 8 · 42");
+  });
+
   it("applies the managed horizontal anchor before the composition scale", () => {
     const { container } = render(<OverlayCanvas
       overlay={overlay}

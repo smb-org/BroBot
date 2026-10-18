@@ -89,6 +89,7 @@ const renderElement = (
       text={element.text}
       value={value}
       language={language}
+      variables={variables}
     />
   </div>;
 };

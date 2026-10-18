@@ -95,8 +95,13 @@ export const prepareChannelVariableOverlayReferences = (
   const placeholders = uniqueNames.map(() => "?").join(", ");
   return db.prepare(
     `SELECT variable_name, overlay_id
-       FROM overlay_elements
-      WHERE channel_id = ? AND variable_name IN (${placeholders})
+       FROM (
+         SELECT DISTINCT variable.name AS variable_name, element.overlay_id
+           FROM channel_variables AS variable
+           JOIN overlay_elements AS element ON element.channel_id = variable.channel_id
+          WHERE variable.channel_id = ? AND variable.name IN (${placeholders})
+            AND (element.variable_name = variable.name OR instr(element.text, '{var.' || variable.name || '}') > 0)
+       ) AS overlay_refs
       ORDER BY variable_name, overlay_id`,
   ).bind(channelId, ...uniqueNames);
 };
@@ -198,13 +203,14 @@ export const prepareResetChannelVariablesForStream = (
       RETURNING name`,
   ).bind(now, channelId),
   db.prepare(
-    `SELECT element.variable_name, element.overlay_id
+    `SELECT variable.name AS variable_name, element.overlay_id
        FROM overlay_elements AS element
        JOIN channel_variables AS variable
-         ON variable.channel_id = element.channel_id AND variable.name = element.variable_name
+         ON variable.channel_id = element.channel_id
       WHERE element.channel_id = ? AND variable.reset_on_stream_start = 1
+        AND (element.variable_name = variable.name OR instr(element.text, '{var.' || variable.name || '}') > 0)
         AND variable.value = 0 AND variable.updated_at = ?
-      ORDER BY element.variable_name, element.overlay_id`,
+      ORDER BY variable.name, element.overlay_id`,
   ).bind(channelId, now),
   db.prepare(
     `UPDATE channel_variable_stream_resets
