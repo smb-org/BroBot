@@ -1208,7 +1208,6 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .overlays-table tbody tr { cursor: pointer; }
 .overlays-table tbody tr[aria-selected="true"] { background: var(--surface-raised); }
 .overlay-inspector,
-.overlay-create-form,
 .overlay-access-section,
 .overlay-elements-section { display: grid; gap: 12px; }
 .overlay-inspector h3 { margin: 0; }
@@ -1226,7 +1225,6 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .overlay-access-list__summary > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .overlay-access-list__last-used { color: var(--text-3); font-size: 12px; }
 .overlay-access-list__actions,
-.overlay-custom-size,
 .overlay-form-actions,
 .channel-variable-use-overlay__actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
 .overlay-access-list__actions { flex: none; align-items: center; gap: var(--s1); }

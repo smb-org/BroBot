@@ -131,6 +131,8 @@ describe("dashboard locale", () => {
     expect(eventText("channel_events.chat.unknown", { art: "channel.chat.bits" })).toBe("Unbekannte Chat-Benachrichtigung: channel.chat.bits");
     expect(eventText("ads.commercial.failed", { reason: "stream_offline" })).toBe("Werbeeinblendung nicht gestartet: Stream ist offline");
     expect(apiErrorText("commercial_stream_offline", "Fallback")).toBe("Die Werbeeinblendung ist offline nicht verfügbar.");
+    expect(apiErrorText("variable_rename_overlay_text_too_long", "Fallback"))
+      .toBe("Die Umbenennung würde einen Overlay-Text über 100 Zeichen verlängern.");
     expect(shoutoutFailureReasonText("twitch_user_not_found")).toBe("Twitch-Nutzer nicht gefunden");
 
     setBrowserLanguage("en-US");
@@ -138,6 +140,8 @@ describe("dashboard locale", () => {
     expect(eventText("channel_events.chat.unknown", { art: "channel.chat.bits" })).toBe("Unknown chat notification: channel.chat.bits");
     expect(eventText("ads.commercial.failed", { reason: "stream_offline" })).toBe("Commercial not started: The stream is offline");
     expect(apiErrorText("commercial_stream_offline", "Fallback")).toBe("A commercial cannot run while the stream is offline.");
+    expect(apiErrorText("variable_rename_overlay_text_too_long", "Fallback"))
+      .toBe("Renaming this variable would make an overlay text longer than 100 characters.");
     expect(shoutoutFailureReasonText("twitch_user_not_found")).toBe("Twitch user not found");
   });
 

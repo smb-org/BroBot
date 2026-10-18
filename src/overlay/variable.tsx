@@ -194,5 +194,5 @@ export const VariableOverlay = ({ token, name, text, onTokenBound }: OverlayVari
   }, [name, onTokenBound, token]);
 
   if (token === null || !VARIABLE_NAME_PATTERN.test(name) || current === null || current.language === null) return null;
-  return <VariableValueView name={name} text={text} value={current.value} language={current.language} />;
+  return <VariableValueView name={name} text={text} value={current.value} language={current.language} variables={{ [name]: current.value }} />;
 };

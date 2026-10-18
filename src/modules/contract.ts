@@ -7,6 +7,7 @@ import type { SettingsEditorDefinition } from "../dashboard/ui";
 import { prepareChannelModuleSettingsWrite } from "./repository/channel-module-storage";
 import type { ModerationResult, ModerationTimeoutExpectation } from "./contracts/moderation";
 import { templateTextLength } from "../contracts/template-text-length";
+import { channelVariableTemplateToken } from "../contracts/channel-variable-template";
 export type { PanelTemplateWarning } from "../panel-contract";
 export type { ChatOutputTarget } from "../contracts/values";
 
@@ -1120,7 +1121,7 @@ export const settingsVariableReferences = (
       return [];
     }
     if (!isRecord(settings)) return [];
-    const token = `{var.${name}}`;
+    const token = channelVariableTemplateToken(name);
     return fields.flatMap((field) => {
       const value = settings[field];
       return typeof value === "string" && value.includes(token)
@@ -1129,8 +1130,8 @@ export const settingsVariableReferences = (
     });
   },
   rename(db, channelId, from, to, guard) {
-    const oldToken = `{var.${from}}`;
-    const nextToken = `{var.${to}}`;
+    const oldToken = channelVariableTemplateToken(from);
+    const nextToken = channelVariableTemplateToken(to);
     const target = moduleVariableRenameTarget(channelId, to, guard);
     return [prepareChannelModuleSettingsWrite(
       db,
