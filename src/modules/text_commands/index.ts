@@ -167,33 +167,31 @@ const dryRunTextCommandMessage = async (
   });
   const fires = blocks.length === 0 && result.diagnostics.some((diagnostic) => diagnostic.code === "text_commands.triggered");
   const effects: DryRunEffect[] = [];
-  if (fires) {
-    for (const action of result.actions) {
-      if (action.kind === "chat" || action.kind === "announcement") {
-        effects.push(chatEffect(action, event, context));
-      } else if (action.kind === "shoutout") {
-        effects.push({ kind: "shoutout", targetLogin: "targetLogin" in action ? action.targetLogin : action.targetChannelId });
-      } else if (action.kind === "timeout" && command.timeoutAction !== null) {
-        effects.push({
-          kind: "timeout",
-          minSeconds: command.timeoutAction.minSeconds,
-          maxSeconds: command.timeoutAction.maxSeconds,
-          reason: action.reason,
-        });
-        for (const followUp of [action.onSuccess, action.onFailure]) {
-          if (followUp !== undefined) effects.push(chatEffect(followUp, event, context));
-        }
+  for (const action of result.actions) {
+    if (action.kind === "chat" || action.kind === "announcement") {
+      effects.push(chatEffect(action, event, context));
+    } else if (action.kind === "shoutout") {
+      effects.push({ kind: "shoutout", targetLogin: "targetLogin" in action ? action.targetLogin : action.targetChannelId });
+    } else if (action.kind === "timeout" && command.timeoutAction !== null) {
+      effects.push({
+        kind: "timeout",
+        minSeconds: command.timeoutAction.minSeconds,
+        maxSeconds: command.timeoutAction.maxSeconds,
+        reason: action.reason,
+      });
+      for (const followUp of [action.onSuccess, action.onFailure]) {
+        if (followUp !== undefined) effects.push(chatEffect(followUp, event, context));
       }
     }
-    for (const change of result.variableChanges ?? []) {
-      const before = await context.readChannelVariables([change.name]);
-      const from = before[change.name];
-      if (from !== undefined) effects.push({ kind: "variable", name: change.name, from, to: change.value });
-    }
-    if (claimResult?.claimed === true) {
-      if (command.cooldownSeconds > 0) effects.push({ kind: "cooldown", scope: "global", seconds: command.cooldownSeconds });
-      if (command.userCooldownSeconds > 0) effects.push({ kind: "cooldown", scope: "user", seconds: command.userCooldownSeconds });
-    }
+  }
+  for (const change of result.variableChanges ?? []) {
+    const before = await context.readChannelVariables([change.name]);
+    const from = before[change.name];
+    if (from !== undefined) effects.push({ kind: "variable", name: change.name, from, to: change.value });
+  }
+  if (claimResult?.claimed === true) {
+    if (command.cooldownSeconds > 0) effects.push({ kind: "cooldown", scope: "global", seconds: command.cooldownSeconds });
+    if (command.userCooldownSeconds > 0) effects.push({ kind: "cooldown", scope: "user", seconds: command.userCooldownSeconds });
   }
   const templateNotes = result.diagnostics.filter((diagnostic) => diagnostic.code.startsWith("template."));
   return [{

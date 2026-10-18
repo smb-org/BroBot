@@ -2658,6 +2658,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
         : `Ankündigung nicht möglich (${reason}) — nicht gesendet`;
     },
     "template_truncated": (detail) => `Chatnachricht auf 500 Zeichen gekürzt (ursprünglich ${detailNumber(detail, "current", "unbekannte Länge")})`,
+    "template.deferred_live": () => "wird beim Senden live ermittelt",
     "template.lookup_unavailable": (detail) => `Vorlagenvariable ${detailText(detail, "name", "unbekannt")} ist gerade nicht verfügbar`,
     "template.chat_reference_dropped": (detail) => `Chatnachricht: ${detailText(detail, "name", "unbekannt")} konnte nicht aufgelöst werden und wurde weggelassen`,
     "template_parameters_invalid": (detail) => `Ungültiger Variablenparameter: ${detailText(detail, "name", "unbekannt")}`,
@@ -2775,6 +2776,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
         : `Announcement unavailable (${reason}); not sent`;
     },
     "template_truncated": (detail) => `Chat message shortened to 500 characters (originally ${detailNumber(detail, "current", "unknown length")})`,
+    "template.deferred_live": () => "resolved live when sent",
     "template.lookup_unavailable": (detail) => `Template variable ${detailText(detail, "name", "unknown")} is currently unavailable`,
     "template.chat_reference_dropped": (detail) => `Chat message: ${detailText(detail, "name", "unknown")} could not be resolved and was omitted`,
     "template_parameters_invalid": (detail) => `Invalid variable parameter: ${detailText(detail, "name", "unknown")}`,
@@ -2896,6 +2898,7 @@ export const eventToneEntries: Record<EventCode, EventToneEntry> = {
   "host.announcement.failed": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
   "host.announcement.sent": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
   "template_truncated": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
+  "template.deferred_live": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "info" },
   "template.lookup_unavailable": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
   "template.chat_reference_dropped": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
   "template_parameters_invalid": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },

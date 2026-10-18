@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ModuleTemplateValueContext } from "../../src/modules/contract";
+import type { ModuleDiagnostic, ModuleTemplateConditionContext, ModuleTemplateValueContext } from "../../src/modules/contract";
 import { PROVIDER_JSON_MAX_BYTES, readBoundedJsonResponse } from "../../src/modules/contract";
 import { currencyModule, parseCurrencyAmount } from "../../src/modules/currency";
 import { exchangeRate, readCachedExchangeRate } from "../../src/modules/currency/adapters/rates";
@@ -234,6 +234,72 @@ describe("weather data providers", () => {
     }
   });
 
+  it("defers uncached requested weather places instead of using the channel cache", async () => {
+    const database = new TestD1Database();
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response(metFixture));
+    try {
+      await fetchCachedWeather(database as unknown as D1Database, "met_norway", 52.52, 13.405, NOW, fetcher);
+      const diagnostics: ModuleDiagnostic[] = [];
+      const context = contextFor(database as unknown as D1Database, {
+        commandInput: { commandName: "weather", arguments: "Paris" },
+        readOnly: true,
+        addDiagnostic: (diagnostic: ModuleDiagnostic) => diagnostics.push(diagnostic),
+      });
+      const values = await weatherModule.resolveTemplateValues?.(["weather.place", "weather.temp"], context);
+      const conditions = await weatherModule.resolveTemplateConditions?.(["weather.condition"], {
+        DB: database as unknown as D1Database,
+        channelId: event.channelId,
+        channelLocation: context.channelLocation,
+        channelTimeZone: context.channelTimeZone,
+        commandInput: context.commandInput,
+        readOnly: true,
+        now: NOW,
+        addDiagnostic: (diagnostic: ModuleDiagnostic) => diagnostics.push(diagnostic),
+      } as unknown as ModuleTemplateConditionContext);
+
+      expect(values).toEqual({});
+      expect(conditions).toEqual({});
+      expect(diagnostics).toContainEqual({ code: "template.deferred_live", detail: { name: "weather.place" } });
+      expect(diagnostics).toContainEqual({ code: "template.deferred_live", detail: { name: "weather.condition" } });
+      expect(fetcher).toHaveBeenCalledOnce();
+    } finally {
+      database.close();
+    }
+  });
+
+  it("adds a deferred-live note when weather has no cached value", async () => {
+    const database = new TestD1Database();
+    try {
+      const diagnostics: ModuleDiagnostic[] = [];
+      const values = await weatherModule.resolveTemplateValues?.(["weather.temp"], contextFor(database as unknown as D1Database, {
+        readOnly: true,
+        addDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      }));
+
+      expect(values).toEqual({});
+      expect(diagnostics).toContainEqual({ code: "template.deferred_live", detail: { name: "weather.temp" } });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("marks weather provider failures as unavailable instead of deferred", async () => {
+    const database = new TestD1Database();
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.reject(new Error("Provider unavailable."))));
+    try {
+      const diagnostics: ModuleDiagnostic[] = [];
+      const values = await weatherModule.resolveTemplateValues?.(["weather.temp"], contextFor(database as unknown as D1Database, {
+        addDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      }));
+
+      expect(values?.["weather.temp"]).toBe("Wetterdaten sind derzeit nicht verfügbar.");
+      expect(diagnostics).toContainEqual({ code: "template.lookup_unavailable", detail: { name: "weather.temp" } });
+      expect(diagnostics).not.toContainEqual(expect.objectContaining({ code: "template.deferred_live" }));
+    } finally {
+      database.close();
+    }
+  });
+
   it("returns a distinct unknown-place message without adding source attribution", async () => {
     const database = new TestD1Database();
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(response({ results: [] })));
@@ -368,6 +434,7 @@ describe("currency conversion", () => {
     const fetcher = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetcher);
     try {
+      const diagnostics: ModuleDiagnostic[] = [];
       await database.prepare(
         `INSERT INTO currency_rate_cache (base_currency, target_currency, rate, expires_at, etag, updated_at)
          VALUES ('USD', 'EUR', 0.8, '2026-09-27T12:15:00.000Z', NULL, '2026-09-27T12:00:00.000Z')`,
@@ -375,6 +442,7 @@ describe("currency conversion", () => {
       const cachedContext = contextFor(database as unknown as D1Database, {
         commandInput: { commandName: "usd", arguments: "12,50" },
         readOnly: true,
+        addDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
       });
       const cachedResult = await currencyModule.resolveTemplateParameter?.("currency.convert", "USD EUR", cachedContext);
       await database.prepare("DELETE FROM currency_rate_cache WHERE base_currency = 'USD' AND target_currency = 'EUR'").run();
@@ -383,8 +451,27 @@ describe("currency conversion", () => {
       expect(cachedResult).toContain("10,00");
       await expect(readCachedExchangeRate(database as unknown as D1Database, "USD", "EUR", NOW))
         .rejects.toThrow("Exchange rate is not cached.");
-      expect(missingResult).toBe("Wechselkursdaten sind derzeit nicht verfügbar.");
+      expect(missingResult).toBe("{currency.convert USD EUR}");
+      expect(diagnostics).toContainEqual({ code: "template.deferred_live", detail: { name: "currency.convert" } });
       expect(fetcher).not.toHaveBeenCalled();
+    } finally {
+      database.close();
+    }
+  });
+
+  it("marks a currency provider failure as unavailable instead of deferred", async () => {
+    const database = new TestD1Database();
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.reject(new Error("Provider unavailable."))));
+    try {
+      const diagnostics: ModuleDiagnostic[] = [];
+      const result = await currencyModule.resolveTemplateParameter?.("currency.convert", "USD EUR", contextFor(database as unknown as D1Database, {
+        commandInput: { commandName: "usd", arguments: "12,50" },
+        addDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      }));
+
+      expect(result).toBe("Wechselkursdaten sind derzeit nicht verfügbar.");
+      expect(diagnostics).toContainEqual({ code: "template.lookup_unavailable", detail: { name: "currency.convert" } });
+      expect(diagnostics).not.toContainEqual(expect.objectContaining({ code: "template.deferred_live" }));
     } finally {
       database.close();
     }

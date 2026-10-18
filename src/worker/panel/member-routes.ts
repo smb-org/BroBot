@@ -48,9 +48,31 @@ const nowIso = (): string => new Date().toISOString();
 const isJsonRecord = (value: unknown): value is JsonRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-export const readJsonBody = async (request: Request): Promise<JsonRecord | null> => {
+export const readJsonBody = async (request: Request, maximumBytes = Number.POSITIVE_INFINITY): Promise<JsonRecord | null> => {
   try {
-    const value: unknown = await request.json();
+    const contentLength = Number(request.headers.get("Content-Length"));
+    if (Number.isFinite(contentLength) && contentLength > maximumBytes) return null;
+    const reader = request.body?.getReader();
+    if (reader === undefined) return null;
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > maximumBytes) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+    const body = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      body.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    const value: unknown = JSON.parse(new TextDecoder().decode(body));
     return isJsonRecord(value) ? value : null;
   } catch {
     return null;

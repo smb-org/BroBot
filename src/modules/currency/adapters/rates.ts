@@ -8,6 +8,13 @@ interface CurrencyCacheRow {
   etag: string | null;
 }
 
+export class CurrencyRateNotCachedError extends Error {
+  public constructor() {
+    super("Exchange rate is not cached.");
+    this.name = "CurrencyRateNotCachedError";
+  }
+}
+
 export const readCachedExchangeRate = async (
   db: D1Database,
   baseCurrency: string,
@@ -19,7 +26,7 @@ export const readCachedExchangeRate = async (
   ).bind(baseCurrency.toUpperCase(), targetCurrency.toUpperCase()).first<CurrencyCacheRow>();
   const expiration = cached === null ? Number.NaN : Date.parse(cached.expires_at);
   if (cached !== null && Number.isFinite(cached.rate) && expiration > now) return cached.rate;
-  throw new Error("Exchange rate is not cached.");
+  throw new CurrencyRateNotCachedError();
 };
 
 const expiryFromHeaders = (headers: Headers, now: number): number => {

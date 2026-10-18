@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import type { BotModule, ModuleTemplateValueContext } from "../contract";
 import { CURRENCY_TEMPLATE_VARIABLE, currencyModuleCatalog } from "./contracts";
-import { exchangeRate, readCachedExchangeRate } from "./adapters/rates";
+import { CurrencyRateNotCachedError, exchangeRate, readCachedExchangeRate } from "./adapters/rates";
 
 const settingsSchema = z.object({});
 const unavailableText = {
@@ -42,7 +42,12 @@ const convert = async (parameter: string, context: ModuleTemplateValueContext): 
       style: "currency",
       currency: target,
     }).format(amount * rate);
-  } catch {
+  } catch (error: unknown) {
+    if (context.readOnly === true && error instanceof CurrencyRateNotCachedError) {
+      context.addDiagnostic({ code: "template.deferred_live", detail: { name: "currency.convert" } });
+      return `{currency.convert ${parameter}}`;
+    }
+    context.addDiagnostic({ code: "template.lookup_unavailable", detail: { name: "currency.convert" } });
     return unavailableText[language];
   }
 };

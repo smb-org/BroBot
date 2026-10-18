@@ -1023,6 +1023,8 @@ export interface ModuleTemplateConditionContext {
   commandInput?: { commandName: string; arguments: string; usageText?: string };
   /** Records a source label when a condition uses values from this module. */
   addTemplateValueAttribution?: (text: string) => void;
+  /** Adds a note to the current template evaluation. */
+  addDiagnostic?: (diagnostic: ModuleDiagnostic) => void;
   /** Records the UTC instant when a resolved condition value may next change, for overlay refresh scheduling. */
   addTemplateConditionNextChangeAt?: (at: string) => void;
   /** Flags a transient lookup failure so the host schedules a short retry, without rejecting the batch. */

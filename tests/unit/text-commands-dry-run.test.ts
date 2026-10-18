@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ModuleDryRunContext, ModuleEvent } from "../../src/modules/contract";
 import { textCommandModule } from "../../src/modules/text_commands";
 import { createTextCommandRepository } from "../../src/modules/text_commands/adapters/d1";
+import { processTextCommandMessage } from "../../src/modules/text_commands/service";
 import { insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -189,7 +190,9 @@ describe("text command dry-run", () => {
       expect(reports?.[0]).toMatchObject({
         outcome: "blocked",
         blocks: [{ code: expectedCode }],
-        effects: [],
+        effects: expectedCode === "text_commands.argument_invalid"
+          ? [{ kind: "chat", text: "Nutzung: !so <name>", target: "source_only" }]
+          : [],
       });
     } finally {
       database.close();
@@ -235,6 +238,115 @@ describe("text command dry-run", () => {
         .bind(CHANNEL_ID).first()).resolves.toEqual({ value: 999999998 });
     } finally {
       database.close();
+    }
+  });
+
+  it("matches production's missing-target usage reply and consumed cooldowns", async () => {
+    const productionDatabase = new TestD1Database();
+    const dryRunDatabase = new TestD1Database();
+    try {
+      await Promise.all([insertChannel(productionDatabase, CHANNEL_ID), insertChannel(dryRunDatabase, CHANNEL_ID)]);
+      const productionRepository = createTextCommandRepository(
+        productionDatabase as unknown as D1Database,
+        () => ({ sql: "AND 1 = 1", values: [] }),
+      );
+      const dryRunRepository = createTextCommandRepository(
+        dryRunDatabase as unknown as D1Database,
+        () => ({ sql: "AND 1 = 1", values: [] }),
+      );
+      const command = {
+        channelId: CHANNEL_ID,
+        name: "shout",
+        text: "Visit {target}",
+        kind: "shoutout" as const,
+        usageText: "Usage: !shout <name>",
+        cooldownSeconds: 30,
+        userCooldownSeconds: 60,
+        responseType: "reply" as const,
+        chatTarget: "source_only" as const,
+        now: NOW,
+      };
+      await Promise.all([
+        productionRepository.create(command, { userId: "member-1" }),
+        dryRunRepository.create(command, { userId: "member-1" }),
+      ]);
+
+      const production = await processTextCommandMessage(eventFor("!shout"), productionRepository);
+      const dryRun = await textCommandModule.dryRunChatMessage?.(eventFor("!shout"), contextFor(dryRunDatabase));
+      const entry = dryRun?.[0];
+
+      expect(production.actions).toContainEqual(expect.objectContaining({ kind: "chat", text: "Usage: !shout <name>" }));
+      expect(entry).toMatchObject({
+        outcome: "blocked",
+        blocks: [{ code: "text_commands.argument_missing" }],
+        effects: [
+          { kind: "chat", text: "Usage: !shout <name>", target: "source_only" },
+          { kind: "cooldown", scope: "global", seconds: 30 },
+          { kind: "cooldown", scope: "user", seconds: 60 },
+        ],
+      });
+      await expect(productionDatabase.prepare("SELECT use_count, last_used_at FROM text_commands WHERE command_name = 'shout'").first())
+        .resolves.toEqual({ use_count: 1, last_used_at: NOW });
+      await expect(dryRunDatabase.prepare("SELECT use_count, last_used_at FROM text_commands WHERE command_name = 'shout'").first())
+        .resolves.toEqual({ use_count: 0, last_used_at: null });
+      await expect(dryRunDatabase.prepare("SELECT COUNT(*) AS count FROM text_command_user_cooldowns WHERE command_name = 'shout'").first())
+        .resolves.toEqual({ count: 0 });
+    } finally {
+      productionDatabase.close();
+      dryRunDatabase.close();
+    }
+  });
+
+  it("matches production's invalid set-argument usage reply without consuming the command", async () => {
+    const productionDatabase = new TestD1Database();
+    const dryRunDatabase = new TestD1Database();
+    try {
+      await Promise.all([insertChannel(productionDatabase, CHANNEL_ID), insertChannel(dryRunDatabase, CHANNEL_ID)]);
+      await Promise.all([productionDatabase, dryRunDatabase].map((database) => database.prepare(
+        "INSERT INTO channel_variables (channel_id, name, value, created_at, updated_at) VALUES (?, 'score', 7, ?, ?)",
+      ).bind(CHANNEL_ID, NOW, NOW).run()));
+      const productionRepository = createTextCommandRepository(
+        productionDatabase as unknown as D1Database,
+        () => ({ sql: "AND 1 = 1", values: [] }),
+      );
+      const dryRunRepository = createTextCommandRepository(
+        dryRunDatabase as unknown as D1Database,
+        () => ({ sql: "AND 1 = 1", values: [] }),
+      );
+      const command = {
+        channelId: CHANNEL_ID,
+        name: "score",
+        text: "Score updated",
+        kind: "text" as const,
+        usageText: "Usage: !score <number>",
+        cooldownSeconds: 30,
+        userCooldownSeconds: 60,
+        minimumTier: "everyone" as const,
+        variableAction: { name: "score", operation: "set_argument" as const, amount: 0 },
+        now: NOW,
+      };
+      await Promise.all([
+        productionRepository.create(command, { userId: "member-1" }),
+        dryRunRepository.create(command, { userId: "member-1" }),
+      ]);
+
+      const production = await processTextCommandMessage(eventFor("!score nope"), productionRepository);
+      const dryRun = await textCommandModule.dryRunChatMessage?.(eventFor("!score nope"), contextFor(dryRunDatabase));
+      const entry = dryRun?.[0];
+
+      expect(production.actions).toContainEqual(expect.objectContaining({ kind: "chat", text: "Usage: !score <number>" }));
+      expect(entry).toMatchObject({
+        outcome: "blocked",
+        blocks: [{ code: "text_commands.argument_invalid" }],
+        effects: [{ kind: "chat", text: "Usage: !score <number>", target: "source_only" }],
+      });
+      await expect(productionDatabase.prepare("SELECT use_count, last_used_at FROM text_commands WHERE command_name = 'score'").first())
+        .resolves.toEqual({ use_count: 0, last_used_at: null });
+      await expect(productionDatabase.prepare("SELECT COUNT(*) AS count FROM text_command_user_cooldowns WHERE command_name = 'score'").first())
+        .resolves.toEqual({ count: 0 });
+    } finally {
+      productionDatabase.close();
+      dryRunDatabase.close();
     }
   });
 });
