@@ -119,9 +119,9 @@ const matchLabel = (report: DryRunEntryReport, labels: ReturnType<typeof dashboa
   return labels.testArea.matchRegex((match as Extract<DryRunEntryReport["match"], { kind: "regex" }>).pattern);
 };
 
-const firingLabel = (report: DryRunEntryReport, labels: ReturnType<typeof dashboardTexts>): string =>
+const firingLabel = (report: DryRunEntryReport, labels: ReturnType<typeof dashboardTexts>, muted: boolean): string =>
   report.effects.some((effect) => effect.kind === "chat" || effect.kind === "announcement")
-    ? labels.testArea.wouldReply
+    ? muted ? labels.testArea.wouldReplyMuted : labels.testArea.wouldReply
     : labels.testArea.wouldAct;
 
 const moduleBadgeTone = (moduleId: string): "chat" | "participation" =>
@@ -423,7 +423,12 @@ function ResultDetail({ item, message, response, labels, language, onOpenEditor 
       {report.outcome === "fires" && report.effects.length > 0 ? <section className="test-area__detail-section">
         <h3>{texts.wouldDo}</h3>
         <ul className="test-area__effect-list">
-          {report.effects.map((effect, index) => <li key={effect.kind + ":" + String(index)}><Icon name="copied" />{effectLabel(effect, labels)}</li>)}
+          {report.effects.map((effect, index) => {
+            const suppressed = effectSuppression(effect, labels) !== null;
+            return <li className={suppressed ? "is-suppressed" : undefined} key={effect.kind + ":" + String(index)}>
+              <Icon name={suppressed ? "minus" : "copied"} {...(suppressed ? { className: "test-area__effect-icon--suppressed" } : {})} />{effectLabel(effect, labels)}
+            </li>;
+          })}
         </ul>
       </section> : null}
     </div>
@@ -618,7 +623,9 @@ export function TestAreaPage({
 
   const rowElement = (item: ResultItem): ReactElement => {
     const isBlocked = item.report.outcome === "blocked";
-    const statusText = isBlocked ? texts.blocked : firingLabel(item.report, labels);
+    const hasSuppressedEffects = item.report.effects.some((effect) => "suppressedBy" in effect && effect.suppressedBy !== null);
+    const isMutedReply = response?.controls.muted === true && item.report.effects.some((effect) => effect.kind === "chat" || effect.kind === "announcement");
+    const statusText = isBlocked ? texts.blocked : firingLabel(item.report, labels, isMutedReply);
     return <button
       key={item.key}
       type="button"
@@ -633,8 +640,8 @@ export function TestAreaPage({
         <span className="test-area__row-title"><Badge tone={moduleBadgeTone(item.moduleId)} className="test-area__module-badge">{moduleName(item.moduleId, labels, language)}</Badge><strong>{item.report.entry.label}</strong></span>
         <small>{matchLabel(item.report, labels)}</small>
       </span>
-      <span className="test-area__row-outcome">
-        <StatusLed state={isBlocked ? "warn" : "ok"} label={statusText} dotOnly />
+      <span className={"test-area__row-outcome" + (isMutedReply ? " is-muted" : "")}>
+        <StatusLed state={isBlocked ? "warn" : hasSuppressedEffects ? "off" : "ok"} label={statusText} dotOnly />
         <span>{statusText}</span>
       </span>
     </button>;

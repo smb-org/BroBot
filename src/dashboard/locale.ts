@@ -887,6 +887,7 @@ export interface DashboardTexts {
     blocked: string;
     fires: string;
     wouldReply: string;
+    wouldReplyMuted: string;
     wouldAct: string;
     matchCommandLabel: string;
     matchAliasLabel: string;
@@ -1446,6 +1447,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       blocked: "Blockiert",
       fires: "Würde auslösen",
       wouldReply: "Würde antworten",
+      wouldReplyMuted: "Würde antworten (stumm)",
       wouldAct: "Würde auslösen",
       matchCommandLabel: "Befehlsname",
       matchAliasLabel: "Alias",
@@ -1477,7 +1479,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       syntheticSenderNote: (login) => "Ausgewertet mit dem synthetischen Testabsender " + login + ".",
       chatEffect: "Chatnachricht würde gesendet",
       announcementEffect: "Ankündigung würde gesendet",
-      timeoutEffect: (minimum, maximum, reason) => "Timeout " + String(minimum) + "–" + String(maximum) + " s" + (reason.length === 0 ? "" : " · " + reason),
+      timeoutEffect: (minimum, maximum, reason) => "Timeout " + String(minimum) + (minimum === maximum ? "" : "–" + String(maximum)) + " s" + (reason.length === 0 ? "" : " · " + reason),
       shoutoutEffect: (login) => "Shoutout für " + login + " würde ausgelöst",
       variableEffect: (name, from, to) => "Variable " + name + " würde von " + String(from) + " auf " + String(to) + " wechseln",
       cooldownEffect: (seconds) => "Abklingzeit " + String(seconds) + " s würde starten",
@@ -1997,6 +1999,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       blocked: "Blocked",
       fires: "Would trigger",
       wouldReply: "Would reply",
+      wouldReplyMuted: "Would reply (muted)",
       wouldAct: "Would trigger",
       matchCommandLabel: "Command name",
       matchAliasLabel: "Alias",
@@ -2028,7 +2031,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       syntheticSenderNote: (login) => "Evaluated with the synthetic test sender " + login + ".",
       chatEffect: "Chat message would be sent",
       announcementEffect: "Announcement would be sent",
-      timeoutEffect: (minimum, maximum, reason) => "Timeout " + String(minimum) + "–" + String(maximum) + " s" + (reason.length === 0 ? "" : " · " + reason),
+      timeoutEffect: (minimum, maximum, reason) => "Timeout " + String(minimum) + (minimum === maximum ? "" : "–" + String(maximum)) + " s" + (reason.length === 0 ? "" : " · " + reason),
       shoutoutEffect: (login) => "Shoutout for " + login + " would trigger",
       variableEffect: (name, from, to) => "Variable " + name + " would change from " + String(from) + " to " + String(to),
       cooldownEffect: (seconds) => "Cooldown of " + String(seconds) + " s would start",

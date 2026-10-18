@@ -62,7 +62,8 @@
 :is(.test-area__context-form, .test-area__dialog-fields) .ui-select__error:not([role="alert"]),
 :is(.test-area__context-form, .test-area__dialog-fields) .segment-choice-field__hint[aria-hidden="true"],
 :is(.test-area__context-form, .test-area__dialog-fields) .segment-choice-field__warning[aria-hidden="true"] { display: none; }
-.test-area__context-form .ui-switch-row { min-height: 32px; }
+.test-area__context-form .ui-switch-row { height: 17px; min-height: 17px; grid-template-rows: 17px; }
+.test-area__context-form .ui-switch-row__copy strong { line-height: 17px; }
 .test-area__context-form .ui-game-multi-select--compact .ui-game-multi-select__search > input { height: 36px; min-height: 36px; }
 .test-area__context-form .ui-game-multi-select--compact .ui-game-multi-select__selected,
 .test-area__dialog-fields .ui-game-multi-select--compact .ui-game-multi-select__selected {
@@ -430,6 +431,8 @@
   text-align: right;
 }
 
+.test-area__row-outcome.is-muted { color: var(--text-3); }
+
 .test-area__row-outcome > span:last-child {
   overflow-wrap: anywhere;
 }
@@ -520,6 +523,8 @@
   font-weight: 600;
   line-height: 1.3;
 }
+
+.test-area__detail-dialog .test-area__detail-heading h2 { display: none; }
 
 .test-area__detail-meta {
   display: flex;
@@ -682,6 +687,9 @@
   overflow-wrap: anywhere;
 }
 
+.test-area__effect-list li.is-suppressed { color: var(--text-3); }
+.test-area__effect-list .test-area__effect-icon--suppressed { color: var(--text-4); }
+
 .test-area__effect-list svg {
   flex: 0 0 auto;
   margin-top: 1px;
@@ -762,7 +770,6 @@
   .test-area__context-form .ui-field__input,
   .test-area__context-form .ui-select__trigger { min-height: 32px; }
   .test-area__context-form .ui-game-multi-select--compact .ui-game-multi-select__search > input { height: 32px; min-height: 32px; }
-  .test-area__context-form .ui-switch-row { min-height: 28px; }
   .test-area__context .test-area__run-button { height: 34px; min-height: 34px; }
 }
 
@@ -869,7 +876,6 @@
   .test-area__detail-dialog .ui-dialog__header { padding-bottom: 12px; border-bottom: 1px solid var(--line); }
   .test-area__detail-dialog .test-area__detail-content { min-height: 100%; }
   .test-area__detail-dialog .test-area__detail-head { padding: 0 0 12px; border: 0; }
-  .test-area__detail-dialog .test-area__detail-heading h2 { display: none; }
   .test-area__detail-dialog .test-area__detail-scroll { padding: 12px 0 8px; }
 }
 
