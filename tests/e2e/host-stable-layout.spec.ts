@@ -359,7 +359,7 @@ test("event pagination keeps a fixed footer below the loaded rows", async ({ pag
   await page.unrouteAll();
 });
 
-test("channel audit pagination stays in a sticky 44px footer and the list top fixed at desktop and 390px", async ({ page }) => {
+test("channel audit pagination stays above the growing list and the list top fixed at desktop and 390px", async ({ page }) => {
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await installChannelMocks(page, {}, { audit: fullAuditPage });
@@ -369,19 +369,21 @@ test("channel audit pagination stays in a sticky 44px footer and the list top fi
     await expect(loadState).toHaveAttribute("data-status", "success");
     await expect(page.locator(".audit-page__pagination-slot")).toHaveCount(0);
     const listTop = await measureDocumentBox(page, ".ui-load-state--panel");
-    const footer = page.locator(".list-pagination-footer");
-    const more = footer.getByRole("button", { name: "Load older entries" });
+    const pagination = page.locator(".audit-pagination");
+    const more = pagination.getByRole("button", { name: "Load older entries" });
     await expect(more).toBeVisible();
-    await expect(footer).toContainText("50 loaded");
-    await footer.scrollIntoViewIfNeeded();
-    const footerBox = await measureBox(page, ".list-pagination-footer");
-    const mainBottom = await page.locator(".dashboard-shell__main").evaluate((main) => main.getBoundingClientRect().bottom);
-    expect(footerBox[3]).toBe(44);
-    expect(Math.abs(footerBox[1] + footerBox[3] - mainBottom)).toBeLessThanOrEqual(20);
+    await expect(page.locator(".audit-filter__count")).toContainText("50 loaded");
+    await expect(page.locator(".audit-filter .list-pagination-footer")).toHaveCount(0);
+    const filterBox = await measureDocumentBox(page, ".dashboard-filter-bar.audit-filter");
+    const paginationBox = await measureDocumentBox(page, ".audit-pagination");
+    expect(paginationBox[3]).toBe(44);
+    expect(filterBox[1] + filterBox[3]).toBeLessThanOrEqual(paginationBox[1]);
+    expect(paginationBox[1] + paginationBox[3]).toBeLessThanOrEqual(listTop[1]);
+    expect(await more.evaluate((button) => getComputedStyle(button).marginTop)).toBe("0px");
     await more.click();
     await expect(more).toBeEnabled();
     expect((await measureDocumentBox(page, ".ui-load-state--panel")).slice(0, 2)).toEqual(listTop.slice(0, 2));
-    expect((await measureBox(page, ".list-pagination-footer"))[3]).toBe(44);
+    expect((await measureDocumentBox(page, ".audit-pagination"))[1]).toBe(paginationBox[1]);
     await page.unrouteAll();
   }
 });
@@ -637,10 +639,10 @@ test("a failed realtime variable refresh keeps rows visible and offers retry", a
     panelSockets.at(-1)?.open();
   });
   await expect.poll(() => variableRequestCount).toBeGreaterThan(initialVariableRequestCount);
-  await expect(page.locator(".ui-toast--error")).toBeVisible();
   await expect(page.getByRole("rowheader", { name: "{var.score}" })).toBeVisible();
   await expect(page.locator(".ui-load-state--panel")).toHaveAttribute("data-status", "success");
   await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+  await expect(page.locator(".ui-toast--error")).toHaveCount(0);
   expect(await retrySlot.boundingBox()).toEqual(slotBeforeRefreshFailure);
 
   const failedVariableRequestCount = variableRequestCount;

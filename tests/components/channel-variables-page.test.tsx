@@ -1,12 +1,14 @@
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState, type ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChannelVariablesPage } from "../../src/dashboard/ChannelVariablesPage";
+import type { PanelChannelVariablesResponse } from "../../src/dashboard/api";
 import { UiProvider } from "../../src/dashboard/ui";
 import { ToastHost } from "../../src/dashboard/ui/Toast";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import { reconcileDashboardRealtimeMessage } from "../../src/dashboard/data/realtime";
+import { dashboardDataKeys } from "../../src/dashboard/data/keys";
 import type { RealtimeMessage } from "../../src/realtime-contract";
 import { jsonResponse } from "../unit/fixtures";
 import { renderWithQuery as render } from "../query-test-utils";
@@ -35,6 +37,140 @@ describe("Channel variables page", () => {
     setBrowserLanguage("de-DE");
   });
 
+  it("keeps the variable save cluster in the fixed editor header", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({
+      variables: [variable], count: 1, maximum: 25,
+    }))));
+
+    const { container } = render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+
+    const header = container.querySelector(".channel-variable-editor__header .page-header");
+    expect(header).not.toBeNull();
+    expect(within(header as HTMLElement).getByRole("button", { name: "Verwerfen" })).toBeDisabled();
+    expect(within(header as HTMLElement).getByRole("button", { name: "Speichern" })).toBeDisabled();
+    expect(container.querySelector(".inspector-actions")).toBeNull();
+  });
+
+  it("saves an edited value with the definition before switching to another variable", async () => {
+    const otherVariable = { ...variable, name: "other", value: 7, description: "Other value", resetOnStreamStart: false };
+    const requests: Array<{ path: string; method: string; body?: string }> = [];
+    let savedVariable = variable;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      const method = init?.method ?? "GET";
+      requests.push({ path: url.pathname, method, ...(typeof init?.body === "string" ? { body: init.body } : {}) });
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/variables" && method === "GET") {
+        return Promise.resolve(jsonResponse({ variables: [savedVariable, otherVariable], count: 2, maximum: 25 }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/variables/score" && method === "PATCH") {
+        savedVariable = { ...savedVariable, description: "Draft description" };
+        return Promise.resolve(jsonResponse({ variable: savedVariable, usages: [] }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/variables/score/value" && method === "POST") {
+        savedVariable = { ...savedVariable, value: 1600 };
+        return Promise.resolve(jsonResponse({ variable: savedVariable }));
+      }
+      return Promise.reject(new Error(`Unexpected request ${method} ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Beschreibung" }), { target: { value: "Draft description" } });
+    fireEvent.click(screen.getByRole("button", { name: "Wert bearbeiten" }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Wert" }), { target: { value: "1600" } });
+    expect(screen.getByRole("button", { name: "Speichern" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("row", { name: /other/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "Speichern und wechseln" }));
+
+    await screen.findByRole("heading", { name: /other/u });
+    expect(requests.find(({ method, path }) => method === "PATCH" && path.endsWith("/variables/score"))?.body)
+      .toBe(JSON.stringify({ newName: "score", description: "Draft description", resetOnStreamStart: true }));
+    expect(requests.find(({ method, path }) => method === "POST" && path.endsWith("/variables/score/value"))?.body)
+      .toBe(JSON.stringify({ operation: "set", amount: 1600 }));
+  });
+
+  it("does not write an untouched value when a live counter update lands during a metadata save", async () => {
+    const requests: Array<{ path: string; method: string }> = [];
+    let currentVariable = variable;
+    let resolveDefinitionUpdate: ((response: Response) => void) | undefined;
+    const definitionUpdate = new Promise<Response>((resolve) => { resolveDefinitionUpdate = resolve; });
+    let definitionUpdateStarted = false;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      const method = init?.method ?? "GET";
+      requests.push({ path: url.pathname, method });
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/variables" && method === "GET") {
+        return Promise.resolve(jsonResponse({ variables: [currentVariable], count: 1, maximum: 25 }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/variables/score" && method === "PATCH") {
+        definitionUpdateStarted = true;
+        return definitionUpdate;
+      }
+      if (url.pathname === "/api/channels/kanal-a/variables/score/value" && method === "POST") {
+        return Promise.resolve(jsonResponse({ variable: { ...currentVariable, value: 10 } }));
+      }
+      return Promise.reject(new Error(`Unexpected request ${method} ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const rendered = render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Beschreibung" }), { target: { value: "Updated description" } });
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+    await waitFor(() => { expect(definitionUpdateStarted).toBe(true); });
+
+    currentVariable = { ...currentVariable, value: 1235, updatedAt: "2026-10-18T12:01:00.000Z" };
+    act(() => {
+      rendered.queryClient.setQueryData<PanelChannelVariablesResponse>(dashboardDataKeys.variables("kanal-a"), (current) => current === undefined
+        ? current
+        : { ...current, variables: current.variables.map((entry) => entry.name === "score" ? currentVariable : entry) });
+    });
+    await waitFor(() => { expect(screen.getByRole("row", { name: /score/u })).toHaveTextContent("1.235"); });
+    currentVariable = { ...currentVariable, description: "Updated description" };
+    await act(async () => {
+      resolveDefinitionUpdate?.(jsonResponse({ variable: { ...currentVariable, description: "Updated description" }, usages: [] }));
+      await definitionUpdate;
+    });
+    await waitFor(() => { expect(screen.getByRole("button", { name: "Speichern" })).toBeDisabled(); });
+
+    expect(requests.filter(({ path, method }) => method === "POST" && path.endsWith("/variables/score/value"))).toHaveLength(0);
+    expect(screen.getByRole("row", { name: /score/u })).toHaveTextContent("1.235");
+  });
+
+  it("discards staged inline and step value edits without sending a value mutation", async () => {
+    const requests: Array<{ path: string; method: string }> = [];
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      const method = init?.method ?? "GET";
+      requests.push({ path: url.pathname, method });
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Wert bearbeiten" }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Wert" }), { target: { value: "1600" } });
+    fireEvent.click(screen.getByRole("button", { name: "Verwerfen" }));
+
+    expect(screen.getByRole("button", { name: "Speichern" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Wert bearbeiten" })).toBeVisible();
+    expect(requests.some(({ path, method }) => method === "POST" && path.endsWith("/variables/score/value"))).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "+1" }));
+    expect(screen.getByRole("button", { name: "Speichern" })).toBeEnabled();
+    expect(requests.some(({ path, method }) => method === "POST" && path.endsWith("/variables/score/value"))).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Verwerfen" }));
+    expect(screen.getByRole("button", { name: "Speichern" })).toBeDisabled();
+    expect(requests.some(({ path, method }) => method === "POST" && path.endsWith("/variables/score/value"))).toBe(false);
+  });
+
   it("shows a spaced table and lets operators change values while management actions stay locked", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({
       variables: [variable], count: 1, maximum: 25,
@@ -55,19 +191,18 @@ describe("Channel variables page", () => {
     if (row === null) throw new Error("Channel variable row is missing.");
     fireEvent.click(row);
 
-    const inspector = document.querySelector(".list-detail__inspector");
-    if (!(inspector instanceof HTMLElement)) throw new Error("Variable inspector is missing.");
-    const controls = within(inspector);
-    const resetSwitch = controls.getByRole("switch", { name: "Bei Streamstart auf null setzen" });
-    const resetField = resetSwitch.closest(".channel-variable-switch-control");
-    if (!(resetField instanceof HTMLElement)) throw new Error("Reset switch field is missing.");
-    expect(resetSwitch.closest(".channel-variable-switch-control")).toBeInTheDocument();
-    expect(controls.getByRole("button", { name: "Bei Streamstart auf null setzen: Wird zurückgesetzt, wenn der nächste Stream startet." })).toHaveAttribute("title", "Wird zurückgesetzt, wenn der nächste Stream startet.");
-    const permissionNote = resetField.querySelector(".ui-locked-reason");
-    if (!(permissionNote instanceof HTMLElement)) throw new Error("Reset switch permission note is missing.");
-    expect(permissionNote).toHaveAttribute("role", "note");
-    expect(permissionNote).toHaveTextContent(/Nur Broadcaster und Verwalter dürfen Variablen/u);
-    expect(resetSwitch.getAttribute("aria-describedby")).toContain(permissionNote.id);
+    const editor = document.querySelector(".channel-variable-editor");
+    if (!(editor instanceof HTMLElement)) throw new Error("Variable editor is missing.");
+    const controls = within(editor);
+    expect(controls.queryByRole("switch", { name: "Bei Streamstart auf null setzen" })).not.toBeInTheDocument();
+    expect(controls.queryByRole("textbox", { name: "Name" })).not.toBeInTheDocument();
+    expect(editor.querySelector(".channel-variable-definition-properties")).toHaveTextContent("score");
+    expect(editor.querySelector(".channel-variable-definition-properties")).toHaveTextContent("Current score");
+    expect(editor.querySelector(".channel-variable-definition-properties")).toHaveTextContent("Ja");
+    const permissionNotes = within(editor).queryAllByText(/Nur Broadcaster und Verwalter dürfen Variablen/u);
+    expect(permissionNotes).toHaveLength(1);
+    expect(permissionNotes[0]).toHaveTextContent(/Nur Broadcaster und Verwalter dürfen Variablen/u);
+    expect(editor.querySelectorAll(".ui-locked-reason")).toHaveLength(0);
     const increase = await controls.findByRole("button", { name: "+1" });
     const decrease = controls.getByRole("button", { name: "−1" });
     const editValue = controls.getByRole("button", { name: "Wert bearbeiten" });
@@ -77,11 +212,64 @@ describe("Channel variables page", () => {
     expect(controls.queryByText("Nur Broadcaster und Verwalter dürfen Variablenwerte ändern.")).not.toBeInTheDocument();
     expect(controls.queryByRole("spinbutton", { name: "Setzen auf" })).not.toBeInTheDocument();
     expect(controls.getByRole("button", { name: "Speichern" })).toBeDisabled();
-    expect(controls.getByRole("button", { name: "Speichern" })).toHaveAttribute("title", expect.stringContaining("Nur Broadcaster"));
     expect(screen.queryByText("Overlay-Link")).not.toBeInTheDocument();
   });
 
-  it("edits the current value inline, confirms on Enter, cancels on Escape, and applies one-step changes immediately", async () => {
+  it("keeps a dirty definition draft visible and guarded after a remote removal", async () => {
+    let currentVariables = [variable];
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname.endsWith("/overlay-tokens")) return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.resolve(jsonResponse({ variables: currentVariables, count: currentVariables.length, maximum: 25 }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const rendered = render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Beschreibung" }), { target: { value: "Local draft" } });
+    currentVariables = [];
+    await act(async () => {
+      await rendered.queryClient.invalidateQueries({ queryKey: dashboardDataKeys.variables("kanal-a"), exact: true });
+    });
+    await screen.findByText(/umbenannt oder gelöscht/u);
+
+    const editor = document.querySelector(".channel-variable-editor");
+    expect(editor).toBeInTheDocument();
+    expect(within(editor as HTMLElement).getByRole("textbox", { name: "Beschreibung" })).toHaveValue("Local draft");
+    expect(editor).toHaveTextContent("Diese Variable wurde inzwischen umbenannt oder gelöscht.");
+    const beforeUnload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(beforeUnload);
+    expect(beforeUnload.defaultPrevented).toBe(true);
+
+    fireEvent.click(within(editor as HTMLElement).getByRole("button", { name: "Verwerfen" }));
+    expect(document.querySelector(".channel-variable-editor")).not.toBeInTheDocument();
+  });
+
+  it("shows only one management permission reason when an operator's selected variable is removed remotely", async () => {
+    let currentVariables = [variable];
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname.endsWith("/overlay-tokens")) return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.resolve(jsonResponse({ variables: currentVariables, count: currentVariables.length, maximum: 25 }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const rendered = render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage={false} onOpenCommand={() => {}} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+    const editor = document.querySelector(".channel-variable-editor");
+    if (!(editor instanceof HTMLElement)) throw new Error("Variable editor is missing.");
+
+    currentVariables = [];
+    await act(async () => {
+      await rendered.queryClient.invalidateQueries({ queryKey: dashboardDataKeys.variables("kanal-a"), exact: true });
+    });
+    await screen.findByText(/umbenannt oder gelöscht/u);
+
+    expect(document.querySelector(".channel-variables-permission-note")).toBeNull();
+    expect(within(editor).queryAllByText(/Nur Broadcaster und Verwalter dürfen Variablen/u)).toHaveLength(1);
+  });
+
+  it("stages inline and one-step value edits for Save and cancels inline edits on Escape", async () => {
     let currentValue = variable.value;
     const requests: Array<{ path: string; method: string; body?: string }> = [];
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
@@ -116,17 +304,26 @@ describe("Channel variables page", () => {
     const reopenedInput = screen.getByRole("spinbutton", { name: "Wert" });
     fireEvent.change(reopenedInput, { target: { value: "456" } });
     fireEvent.keyDown(reopenedInput, { key: "Enter" });
+    expect(currentValue).toBe(1234);
+    expect(screen.getByRole("button", { name: "Speichern" })).toBeEnabled();
+    expect(requests.some(({ method, body }) => method === "POST" && body?.includes('"operation":"set"'))).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
     await waitFor(() => expect(currentValue).toBe(456));
     expect(requests.find(({ method, body }) => method === "POST" && body?.includes('"operation":"set"'))?.body).toBe(JSON.stringify({ operation: "set", amount: 456 }));
     await waitFor(() => expect(document.querySelector(".channel-variable-value-controls__value")).toHaveTextContent("456"));
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Wert bearbeiten" }));
 
     fireEvent.click(screen.getByRole("button", { name: "+1" }));
+    expect(currentValue).toBe(456);
+    expect(document.querySelector(".channel-variable-value-controls__value")).toHaveTextContent("457");
+    expect(screen.getByRole("button", { name: "Speichern" })).toBeEnabled();
+    expect(requests.some(({ method, body }) => method === "POST" && body?.includes('"amount":457'))).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
     await waitFor(() => expect(currentValue).toBe(457));
-    expect(requests.find(({ method, body }) => method === "POST" && body?.includes('"operation":"add"'))?.body).toBe(JSON.stringify({ operation: "add", amount: 1 }));
+    expect(requests.some(({ method, body }) => method === "POST" && body === JSON.stringify({ operation: "set", amount: 457 }))).toBe(true);
   });
 
-  it("keeps a successful variable increment when the follow-up read fails", async () => {
+  it("keeps a saved variable value when the follow-up read fails", async () => {
     setBrowserLanguage("en-US");
     let currentValue = variable.value;
     let variableReads = 0;
@@ -135,7 +332,9 @@ describe("Channel variables page", () => {
       const method = init?.method ?? "GET";
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
       if (url.pathname === "/api/channels/kanal-a/variables/score/value" && method === "POST") {
-        currentValue += 1;
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) as { operation: "add" | "subtract" | "set"; amount: number } : null;
+        if (body === null) return Promise.resolve(jsonResponse({ error: "missing_body" }, 400));
+        currentValue = body.operation === "add" ? currentValue + body.amount : body.operation === "subtract" ? currentValue - body.amount : body.amount;
         return Promise.resolve(jsonResponse({ variable: { ...variable, value: currentValue } }));
       }
       if (url.pathname === "/api/channels/kanal-a/variables") {
@@ -152,6 +351,8 @@ describe("Channel variables page", () => {
     const view = render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
     fireEvent.click(await screen.findByRole("row", { name: /score/i }));
     fireEvent.click(screen.getByRole("button", { name: "+1" }));
+    expect(currentValue).toBe(1234);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(currentValue).toBe(1235));
     await waitFor(() => expect(view.queryClient.getQueryData<{ variables: Array<{ value: number }> }>(["channel", "kanal-a", "variables"])?.variables[0]?.value).toBe(1235));
@@ -187,6 +388,40 @@ describe("Channel variables page", () => {
     expect(onOpenOverlay).toHaveBeenCalledWith("overlay-a", "score");
     expect(requests.some(({ path, method }) => path.endsWith("/overlays/overlay-a") && method !== "GET")).toBe(false);
     expect(requests.some(({ path }) => path.endsWith("/overlays/overlay-a"))).toBe(false);
+  });
+
+  it("uses the renamed variable when saving before opening the overlay editor", async () => {
+    const requests: Array<{ path: string; method: string; body?: string }> = [];
+    let savedVariable = variable;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      const method = init?.method ?? "GET";
+      requests.push({ path: url.pathname, method, ...(typeof init?.body === "string" ? { body: init.body } : {}) });
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/variables/score" && method === "PATCH") {
+        savedVariable = { ...variable, name: "wins" };
+        return Promise.resolve(jsonResponse({ variable: savedVariable, usages: [] }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [savedVariable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      if (url.pathname === "/api/channels/kanal-a/overlays") return Promise.resolve(jsonResponse({
+        overlays: [{ id: "overlay-a", name: "Gameplay", width: 1920, height: 1080, revision: 2, elementCount: 1 }],
+        maximum: 20,
+        elementMaximum: 20,
+      }));
+      return Promise.reject(new Error(`Unexpected request ${method} ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const onOpenOverlay = vi.fn();
+    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} onOpenOverlay={onOpenOverlay} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "wins" } });
+    fireEvent.click(screen.getByRole("button", { name: "In Overlay verwenden" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Editor öffnen" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Speichern und wechseln" }));
+
+    await waitFor(() => expect(onOpenOverlay).toHaveBeenCalledWith("overlay-a", "wins"));
+    expect(requests.find(({ method }) => method === "PATCH")?.body).toBe(JSON.stringify({ newName: "wins", description: "Current score", resetOnStreamStart: true }));
   });
 
   it("shows text command usages with one leading bang", async () => {
@@ -277,7 +512,7 @@ describe("Channel variables page", () => {
     render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage={false} onOpenCommand={() => {}} /></UiProvider>);
     fireEvent.click(await screen.findByRole("row", { name: /score/i }));
     expect(screen.getByRole("button", { name: "Neu verbinden" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Neu verbinden" })).toHaveAttribute("title", expect.stringContaining("Nur Broadcaster"));
+    expect(within(document.querySelector(".channel-variable-editor") as HTMLElement).queryAllByText(/Nur Broadcaster und Verwalter dürfen Variablen/u)).toHaveLength(1);
   });
 
   it("refuses to reconnect an element that the latest overlay response already binds to another variable", async () => {
@@ -381,15 +616,14 @@ describe("Channel variables page", () => {
     render(<UiProvider><Harness /></UiProvider>);
 
     await screen.findByText("{var.score}");
-    const nameField = await screen.findByLabelText("Name");
-    expect(nameField).toHaveValue("score");
+    expect(document.querySelector(".channel-variable-definition-properties")).toHaveTextContent("score");
 
     fireEvent.click(screen.getByRole("button", { name: "Request other variable" }));
-    expect(await screen.findByLabelText("Name")).toHaveValue("other");
+    expect(await screen.findByText("other", { selector: ".channel-variable-definition-properties dd" })).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "Leave variables" }));
     fireEvent.click(screen.getByRole("button", { name: "Return to variables" }));
     await screen.findByRole("table");
-    expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
+    expect(document.querySelector(".channel-variable-definition-properties")).not.toBeInTheDocument();
   });
 });
