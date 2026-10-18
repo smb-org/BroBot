@@ -68,6 +68,15 @@ test("GroupedPicker and invalid-fields popovers retain their tokenized surface",
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/tests/e2e/issue-440-popovers-fixture.html");
 
+  const tokenColor = async (token: "--surface" | "--surface-hover"): Promise<string> => page.locator("body").evaluate((body, name) => {
+    const probe = document.createElement("div");
+    probe.style.backgroundColor = `var(${name})`;
+    body.appendChild(probe);
+    const color = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return color;
+  }, token);
+
   const expectTokenizedSurface = async (popup: ReturnType<typeof page.locator>): Promise<void> => {
     const styles = await popup.evaluate((element) => {
       const computed = getComputedStyle(element);
@@ -92,6 +101,51 @@ test("GroupedPicker and invalid-fields popovers retain their tokenized surface",
   const invalidPopup = page.locator(".ui-save-bar__invalid-popover");
   await expect(invalidPopup).toBeVisible();
   await expectTokenizedSurface(invalidPopup);
+  const invalidPopupStyles = await invalidPopup.evaluate((element) => {
+    const computed = getComputedStyle(element);
+    return { background: computed.backgroundColor, padding: computed.paddingTop };
+  });
+  expect(invalidPopupStyles.background).toBe(await tokenColor("--surface"));
+  expect(invalidPopupStyles.padding).toBe("8px");
+  await expect(invalidPopup).toHaveCSS("width", "280px");
+  await expect(invalidPopup.locator(".ui-save-bar__invalid-fields button")).toHaveCount(3);
+});
+
+test("channel location menu uses the dashboard menu surface and highlighted item styles", async ({ page }) => {
+  const channelId = "kanal-440-location-menu";
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await installLiveCockpitMocks(page, {
+    channelId,
+    location: { name: "Berlin, Deutschland", latitude: 52.52, longitude: 13.405, timeZone: "Europe/Berlin" },
+  });
+  await page.goto(`/channels/${channelId}/system`);
+
+  const tokenColor = async (token: "--surface" | "--surface-hover"): Promise<string> => page.locator("body").evaluate((body, name) => {
+    const probe = document.createElement("div");
+    probe.style.backgroundColor = `var(${name})`;
+    body.appendChild(probe);
+    const color = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return color;
+  }, token);
+
+  await page.locator(".dashboard-header__location").click();
+  const popup = page.locator(".dashboard-header__location-menu");
+  await expect(popup).toBeVisible();
+  const popupStyles = await popup.evaluate((element) => {
+    const computed = getComputedStyle(element);
+    return { display: computed.display, background: computed.backgroundColor, padding: computed.paddingTop };
+  });
+  expect(popupStyles.display).toBe("grid");
+  expect(popupStyles.background).toBe(await tokenColor("--surface"));
+  expect(popupStyles.padding).toBe("8px");
+
+  const items = popup.locator(".dashboard-header__location-menu-item");
+  await expect(items).toHaveCount(4);
+  await expect(items.first()).toHaveCSS("display", "flex");
+  await items.first().hover();
+  await expect(items.first()).toHaveAttribute("data-highlighted", "");
+  await expect(items.first()).toHaveCSS("background-color", await tokenColor("--surface-hover"));
 });
 
 test("mobile invalid-field controls keep the full save actions without clipped summary text", async ({ page }) => {

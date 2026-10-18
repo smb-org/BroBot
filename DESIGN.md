@@ -387,7 +387,7 @@ Cmd/Strg+K, Dialog „Seite suchen“, genau ein Suchsymbol, Fokusring 2px/Offse
 
 ## 14. Barrierefreiheit: aktuelle Tests und künftige Anforderungen
 
-Aktuell erzwungen ist der Kontrasttest in `tests/unit/dashboard-ui-theme.test.ts`. Er prüft die folgenden gefüllten Farbpaare für beide Palette-Blöcke:
+Aktuell erzwungen ist der Kontrasttest in `tests/unit/dashboard-ui-token-contrast.test.ts`. Er prüft die folgenden gefüllten Farbpaare für beide Palette-Blöcke:
 
 | Paar | Minimum |
 |---|---|
@@ -420,7 +420,7 @@ Weitere geplante Pflichten:
 
 ## 15. Durchsetzung
 
-Der aktuelle Check führt `tests/unit/theme-color-lint.test.ts` und `tests/unit/dashboard-ui-theme.test.ts` aus. `tests/e2e/foundation-visual.spec.ts` kann Screenshots erfassen, aber keine Pixelvergleiche oder Layoutanforderungen automatisch bestätigen. Tests für Goldbutton-Anzahl, Seitenhöhe, Beschnitt, Kopfreihenfolge, Layoutstabilität und Dialoghöhe sind geplant.
+Der aktuelle Check führt `tests/unit/theme-color-lint.test.ts` und `tests/unit/dashboard-ui-token-contrast.test.ts` aus. `tests/e2e/foundation-visual.spec.ts` kann Screenshots erfassen, aber keine Pixelvergleiche oder Layoutanforderungen automatisch bestätigen. Tests für Goldbutton-Anzahl, Seitenhöhe, Beschnitt, Kopfreihenfolge, Layoutstabilität und Dialoghöhe sind geplant.
 
 ### Checkliste für Reviewer
 

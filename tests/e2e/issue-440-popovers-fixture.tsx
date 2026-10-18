@@ -17,12 +17,11 @@ const pickerGroups = [{
   entries: [{ id: "title", label: "Titel", description: "Zeigt den aktuellen Streamtitel.", icon: <span aria-hidden="true">T</span> }],
 }];
 
-const invalidFields = [{
-  id: "title",
-  label: "Titel",
-  message: "Gib einen Titel ein.",
-  sectionId: "settings",
-}];
+const invalidFields = [
+  { id: "title", label: "Titel", message: "Gib einen Titel ein.", sectionId: "settings" },
+  { id: "game", label: "Spiel", message: "Wähle ein Spiel aus der Liste aus.", sectionId: "settings" },
+  { id: "duration", label: "Dauer", message: "Die Dauer muss zwischen 1 und 60 Minuten liegen.", sectionId: "settings" },
+];
 
 export function Issue440PopoversFixture() {
   return (

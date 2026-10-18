@@ -8,7 +8,7 @@
   .channel-variables-page .list-toolbar__row { grid-template-columns: minmax(0, 1fr) auto; }
   .channel-variables-page .list-toolbar__search { grid-column: 1; }
   .channel-variables-page .list-toolbar__create { grid-column: 2; grid-row: 1; }
-  .channel-variables-page .collection-page__detail { display: flex; flex-direction: column; }
+  .channel-variables-page .collection-page[data-single-column="false"] .collection-page__detail { display: flex; flex-direction: column; }
   .channel-variables-permission-note { margin: 8px 0 0; font-size: 12px; line-height: 1.4; }
   .channel-variable-editor { display: flex; min-width: 0; min-height: 100%; flex-direction: column; }
   .channel-variable-editor__header { position: sticky; z-index: var(--layer-inspector); top: 0; flex: none; background: var(--background); }
@@ -30,9 +30,9 @@
   .channel-variables-list { min-width: 0; }
   .channel-variables-table-wrap { width: 100%; min-width: 0; }
   .table.channel-variables-table { width: 100%; min-width: 0; table-layout: fixed; }
-  .channel-variables-table thead th:first-child { width: 26%; }
+  .channel-variables-table thead th:first-child { width: 30%; }
   .channel-variables-table thead th:nth-child(2) { width: 34%; }
-  .channel-variables-table thead th:nth-child(3) { width: 30%; }
+  .channel-variables-table thead th:nth-child(3) { width: 26%; }
   .channel-variables-table thead th:nth-child(4) { width: 10%; }
   .channel-variables-table tbody :is(th, td) { overflow: visible; text-overflow: clip; overflow-wrap: anywhere; white-space: normal; }
   .channel-variables-table tbody th[scope="row"] { overflow: hidden; overflow-wrap: normal; word-break: normal; }

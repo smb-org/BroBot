@@ -91,10 +91,10 @@ export function ChannelLocationMenu({ location, messages }: {
         <MenuPrimitive.Portal>
           <MenuPrimitive.Positioner side="bottom" align="start" sideOffset={4} className="z-[var(--layer-popover)]" style={{ zIndex: "var(--layer-popover)" }}>
             <MenuPrimitive.Popup data-ui="" className="dashboard-header__location-menu">
-              <div className="dashboard-header__location-menu-label">{fullName}</div>
-              <div className="dashboard-header__location-menu-label mono">{coordinatesForDisplay(location)}</div>
+              <div className="dashboard-header__location-menu-label dashboard-header__location-menu-label--title">{fullName}</div>
+              <div className="dashboard-header__location-menu-label dashboard-header__location-menu-label--coordinates mono">{coordinatesForDisplay(location)}</div>
               <MenuPrimitive.Separator className="dashboard-header__location-menu-divider" />
-              <div className="dashboard-header__location-menu-label">{messages.openIn}</div>
+              <div className="dashboard-header__location-menu-label dashboard-header__location-menu-label--section">{messages.openIn}</div>
               {externalTargets.map((target) => <MenuPrimitive.Item
                 key={target.label}
                 render={<a href={target.href(namedLocation)} target="_blank" rel="noopener noreferrer" />}

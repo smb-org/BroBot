@@ -434,6 +434,15 @@ pre {
    long name can't clip them off the end (#280). */
 .dashboard-header__location-name { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dashboard-header__location-copy-status { position: absolute; z-index: 3; top: calc(100% + var(--s1)); left: 0; width: max-content; max-width: 240px; padding: var(--s2); border: 1px solid var(--line-strong); border-radius: var(--r-control); color: var(--text); background: var(--surface); font-size: 12px; }
+.dashboard-header__location-menu { display: grid; gap: 4px; min-width: 220px; max-width: min(90vw, 320px); padding: 8px; border: 1px solid var(--line-strong); border-radius: var(--r-container); color: var(--text); background: var(--surface); box-shadow: var(--shadow-floating); }
+.dashboard-header__location-menu-label { min-width: 0; padding-inline: 8px; overflow-wrap: anywhere; }
+.dashboard-header__location-menu-label--title { padding-top: 4px; color: var(--text); font-size: 13px; font-weight: 600; }
+.dashboard-header__location-menu-label--coordinates { padding-bottom: 4px; color: var(--text-3); font-family: var(--font-mono); font-size: 11px; }
+.dashboard-header__location-menu-label--section { padding-top: 4px; color: var(--text-3); font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.dashboard-header__location-menu-divider { height: 1px; margin-inline: 4px; background: var(--line); }
+.dashboard-header__location-menu-item { display: flex; min-width: 0; min-height: 36px; align-items: center; justify-content: flex-start; padding: 0 8px; border-radius: var(--r-control); color: var(--text-2); background: transparent; font: inherit; font-size: 12px; text-align: left; text-decoration: none; cursor: pointer; }
+.dashboard-header__location-menu-item:hover,
+.dashboard-header__location-menu-item[data-highlighted] { color: var(--text); background: var(--surface-hover); }
 .dashboard-header__mode { display: flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-well); }
 .dashboard-header__mode button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 0 10px; border: 1px solid transparent; border-radius: 6px; color: var(--text-3); background: transparent; font: inherit; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; }
 .dashboard-header__mode button:hover { color: var(--text); }
@@ -1199,7 +1208,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-save-bar__invalid-trigger { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 1px solid var(--line-strong); border-radius: var(--r-control); color: var(--error-text); background: var(--error-surface); cursor: pointer; }
 .ui-save-bar__invalid-trigger:hover { background: var(--surface-hover); }
 .ui-save-bar__invalid-trigger:focus-visible { outline: 2px solid var(--brand-text); outline-offset: 2px; }
-.ui-save-bar__invalid-popover { max-width: min(90vw, 24rem); border: 1px solid var(--line-strong); border-radius: var(--r-control); box-shadow: var(--shadow-floating); }
+.ui-save-bar__invalid-popover { width: 280px; max-width: min(90vw, 280px); padding: var(--s2); border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--surface); box-shadow: var(--shadow-floating); }
 .ui-save-bar__invalid-fields { display: grid; gap: var(--s1); max-height: min(50vh, 20rem); overflow: auto; margin: 0; padding: 0; list-style: none; }
 .ui-save-bar__invalid-fields button { display: grid; gap: 2px; width: 100%; min-width: 0; appearance: none; border: 0; border-radius: var(--r-control); padding: var(--s2); background: var(--error-surface); color: var(--error-text); font: inherit; text-align: left; cursor: pointer; }
 .ui-save-bar__invalid-fields button > span { display: block; white-space: normal; overflow-wrap: anywhere; }
