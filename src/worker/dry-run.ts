@@ -123,6 +123,14 @@ export const dryRunChatMessage = async (
     dryRun: true,
     textBlockSelectionState: new Map<string, number>(),
   } as const;
+  const simulatedChannelVariables = new Map<string, number>();
+  const readSimulatedChannelVariables = async (names: readonly string[]): Promise<Readonly<Record<string, number>>> => {
+    const values = await readVariables(db, channelId, names);
+    return Object.fromEntries([...new Set(names)].flatMap((name) => {
+      const value = simulatedChannelVariables.get(name) ?? values[name];
+      return value === undefined ? [] : [[name, value]];
+    }));
+  };
 
   const chatModules = registry.filter((module) => (module.eventSubTypes ?? []).includes(CHAT_EVENT));
   const modulesToReport = request.only === undefined
@@ -172,7 +180,7 @@ export const dryRunChatMessage = async (
         channelInfo,
         followedAt: () => Promise.resolve("unavailable"),
         userCreatedAt: () => Promise.resolve(null),
-      }, sharedTemplateRendererOptions);
+      }, { ...sharedTemplateRendererOptions, readChannelVariables: readSimulatedChannelVariables });
       const context: ModuleDryRunContext = {
         DB: db,
         defaultChatTarget,
@@ -187,7 +195,7 @@ export const dryRunChatMessage = async (
           return user === null ? null : { userId: user.userId, login: user.login, displayName: user.displayName };
         },
         isChannelModerator: (userId) => isTwitchChannelModerator(readOnlyEnvironment, channelId, userId, fetcher),
-        readChannelVariables: (names) => readVariables(db, channelId, names),
+        readChannelVariables: readSimulatedChannelVariables,
         renderTemplate: (text, moduleValues, changed) => renderTemplate(text, moduleValues, changed, "chat"),
         followedAt: () => Promise.resolve("unavailable"),
         userCreatedAt: () => Promise.resolve(null),
@@ -215,6 +223,14 @@ export const dryRunChatMessage = async (
         },
       };
       const reports = await dryRun(event, context);
+      if (!moduleDisabled && !channelPaused) {
+        for (const report of reports) {
+          if (report.outcome !== "fires") continue;
+          for (const effect of report.effects) {
+            if (effect.kind === "variable") simulatedChannelVariables.set(effect.name, effect.to);
+          }
+        }
+      }
       const filtered = request.only?.entryId === undefined
         ? reports
         : reports.filter((entry) => entry.entry.id === request.only?.entryId);
