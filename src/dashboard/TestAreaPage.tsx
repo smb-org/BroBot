@@ -25,7 +25,6 @@ import {
   Select,
   StatusLed,
   SwitchRow,
-  TokenChip,
   ToolPage,
 } from "./ui";
 import "./TestAreaPage.css";
@@ -123,6 +122,9 @@ const firingLabel = (report: DryRunEntryReport, labels: ReturnType<typeof dashbo
   report.effects.some((effect) => effect.kind === "chat" || effect.kind === "announcement")
     ? labels.testArea.wouldReply
     : labels.testArea.wouldAct;
+
+const moduleBadgeTone = (moduleId: string): "chat" | "participation" =>
+  moduleId === "chat_voting" || moduleId === "votekick" ? "participation" : "chat";
 
 const highlightedText = (text: string, ranges: readonly (readonly [number, number])[]): ReactNode[] => {
   const parts: ReactNode[] = [];
@@ -231,15 +233,18 @@ function ContextFields({
       countLabel={(count, maximum) => String(count) + "/" + String(maximum)}
       mono
     />
-    <ChipGroup
-      ariaLabel={texts.badges}
-      value={null}
-      onChange={() => undefined}
-      selectedValues={badges}
-      onSelectedValuesChange={updateBadges}
-      options={roleOptions}
-      className="test-area__badges"
-    />
+    <div className="test-area__badge-field">
+      <span className="ui-field__label">{texts.badges}</span>
+      <ChipGroup
+        ariaLabel={texts.badges}
+        value={null}
+        onChange={() => undefined}
+        selectedValues={badges}
+        onSelectedValuesChange={updateBadges}
+        options={roleOptions}
+        className="test-area__badges"
+      />
+    </div>
     <SegmentChoice
       label={texts.stream}
       value={streamState}
@@ -273,6 +278,7 @@ function ContextFields({
       }}
       options={moduleOptions}
       disabled={lockedModule !== null}
+      compact
     />
     {lockedModule === null ? null : <div className="test-area__deep-link"><Badge tone="brand">{lockedModule === "faq" ? texts.faq : texts.textCommands}</Badge><Button variant="subtle" size="compact" onClick={onClearFilter}>{texts.clearEntryFilter}</Button></div>}
   </>;
@@ -324,15 +330,18 @@ function MatchExplanation({ report, message, labels }: {
 }): ReactElement {
   const match = report.match;
   const texts = labels.testArea;
-  if (match.kind === "regex") return <div className="test-area__regex-match">
-    <Badge tone="brand"><code>{match.pattern}</code></Badge>
-    <p className="test-area__match-line">{highlightedText(message, match.ranges)}</p>
-  </div>;
-  const token = match.kind === "keyword" ? match.pattern : match.token;
-  const label = match.kind === "keyword"
-    ? texts.matchKeyword(match.pattern)
-    : match.kind === "alias" ? texts.matchAlias(match.token) : texts.matchCommand;
-  return <div className="test-area__match-line"><span>{label}</span> <TokenChip token={token} /></div>;
+  const token = match.kind === "keyword" || match.kind === "regex" ? match.pattern : match.token;
+  const label = match.kind === "keyword" ? texts.matchKeywordLabel
+    : match.kind === "regex" ? texts.matchRegexLabel
+      : match.kind === "alias" ? texts.matchAliasLabel : texts.matchCommandLabel;
+  const ranges = match.kind === "regex" ? match.ranges : (() => {
+    const start = message.toLocaleLowerCase().indexOf(token.toLocaleLowerCase());
+    return start < 0 ? [] : [[start, start + token.length] as const];
+  })();
+  return <p className="test-area__match-explanation">
+    <span>{label} </span><code>„{token}“</code>
+    <span> {texts.inMessage} </span><code>{highlightedText(message, ranges)}</code>
+  </p>;
 }
 
 function ResultDetail({ item, message, response, labels, language, onOpenEditor }: {
@@ -354,7 +363,7 @@ function ResultDetail({ item, message, response, labels, language, onOpenEditor 
       <div className="test-area__detail-heading">
         <h2>{report.entry.label}</h2>
         <div className="test-area__detail-meta">
-          <Badge tone="brand">{report.entry.kind === "faq_entry" ? texts.faqEntry : texts.textCommand}</Badge>
+          <Badge tone={moduleBadgeTone(moduleId)} className="test-area__module-badge">{report.entry.kind === "faq_entry" ? texts.faqEntry : texts.textCommand}</Badge>
           <span>{matchLabel(report, labels)}</span>
         </div>
       </div>
@@ -551,7 +560,7 @@ export function TestAreaPage({
   const muted = response?.controls.muted === true;
   const paused = response?.controls.paused === true;
   const selectedBadges = badges.length === 0 ? texts.badgeNames.viewer : badges.map((badge) => texts.badgeNames[badge]).join(" · ");
-  const contextSummary = [sender, selectedBadges, streamState === "online" ? texts.online : texts.offline, game?.name].filter(Boolean).join(" · ");
+  const contextStream = [streamState === "online" ? texts.online : texts.offline, game?.name].filter(Boolean).join(" · ");
   const lockedModule = deepLinkOnly?.moduleId ?? null;
   const contextProps = {
     labels,
@@ -592,9 +601,8 @@ export function TestAreaPage({
       }}
     >
       <span className="test-area__row-main">
-        <span className="test-area__row-title"><Badge tone={isBlocked ? "amber" : "brand"}>{moduleName(item.moduleId, labels, language)}</Badge><strong>{item.report.entry.label}</strong></span>
+        <span className="test-area__row-title"><Badge tone={moduleBadgeTone(item.moduleId)} className="test-area__module-badge">{moduleName(item.moduleId, labels, language)}</Badge><strong>{item.report.entry.label}</strong></span>
         <small>{matchLabel(item.report, labels)}</small>
-        {isBlocked ? <small className="test-area__row-reason">{firstBlockReason(item.report, labels)}</small> : null}
       </span>
       <span className="test-area__row-outcome">
         <StatusLed state={isBlocked ? "warn" : "ok"} label={statusText} dotOnly />
@@ -653,7 +661,10 @@ export function TestAreaPage({
             </Button>
           </form>
           <div className="test-area__mobile-context-summary">
-            <span>{contextSummary}</span>
+            <span className="test-area__mobile-context-copy">
+              <span><strong>{sender || "viewer_42"}</strong> · {selectedBadges}</span>
+              <span>{contextStream}</span>
+            </span>
             <div>
               <Button variant="subtle" size="compact" onClick={() => setMobileContextOpen(true)}>{texts.editContext}</Button>
               <Button variant="subtle" size="compact" onClick={() => setMobileHistoryOpen(true)}><Icon name="clock-hour-4" />{texts.history}</Button>
@@ -664,7 +675,7 @@ export function TestAreaPage({
         <header className="test-area__results-head">
           <div className="test-area__results-title">
             <h2>{texts.result}</h2>
-            <span>{response === null ? texts.resultCount(0) : texts.reactionsSummary(fires, blocked)}</span>
+            <span>{response === null || fires + blocked === 0 ? texts.resultCount(0) : texts.reactionsSummary(fires, blocked)}</span>
             {pending ? <span className="test-area__loading-label"><StatusLed state="loading" label={texts.loading} dotOnly />{texts.loading}</span> : null}
             {muted ? <Badge tone="amber">{texts.muted}</Badge> : null}
             {paused ? <Badge>{texts.paused}</Badge> : null}

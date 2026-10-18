@@ -886,6 +886,11 @@ export interface DashboardTexts {
     fires: string;
     wouldReply: string;
     wouldAct: string;
+    matchCommandLabel: string;
+    matchAliasLabel: string;
+    matchKeywordLabel: string;
+    matchRegexLabel: string;
+    inMessage: string;
     matchCommand: string;
     matchAlias: (token: string) => string;
     matchKeyword: (pattern: string) => string;
@@ -1412,7 +1417,10 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       editContext: "Ändern",
       clearEntryFilter: "Eintragsfilter aufheben",
       result: "Ergebnis",
-      reactionsSummary: (fires, blocked) => String(fires) + (fires === 1 ? " reagiert" : " reagieren") + " · " + String(blocked) + " blockiert",
+      reactionsSummary: (fires, blocked) => [
+        fires === 0 ? null : String(fires) + (fires === 1 ? " reagiert" : " reagieren"),
+        blocked === 0 ? null : String(blocked) + " blockiert",
+      ].filter((part): part is string => part !== null).join(" · "),
       resultCount: (count) => String(count) + (count === 1 ? " Treffer" : " Treffer"),
       noReactionModules: (modules) => "Ohne Reaktion: " + modules,
       noDryRunModules: (modules) => "Noch ohne Trockenlauf: " + modules,
@@ -1432,6 +1440,11 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       fires: "Würde auslösen",
       wouldReply: "Würde antworten",
       wouldAct: "Würde auslösen",
+      matchCommandLabel: "Befehlsname",
+      matchAliasLabel: "Alias",
+      matchKeywordLabel: "Schlüsselwort",
+      matchRegexLabel: "Regulärer Ausdruck",
+      inMessage: "in der Nachricht",
       matchCommand: "Befehlsname",
       matchAlias: (token) => "Alias „" + token + "“",
       matchKeyword: (pattern) => "Schlüsselwort „" + pattern + "“",
@@ -1949,7 +1962,10 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       editContext: "Edit",
       clearEntryFilter: "Clear entry filter",
       result: "Result",
-      reactionsSummary: (fires, blocked) => String(fires) + (fires === 1 ? " reaction" : " reactions") + " · " + String(blocked) + " blocked",
+      reactionsSummary: (fires, blocked) => [
+        fires === 0 ? null : String(fires) + (fires === 1 ? " reaction" : " reactions"),
+        blocked === 0 ? null : String(blocked) + " blocked",
+      ].filter((part): part is string => part !== null).join(" · "),
       resultCount: (count) => String(count) + (count === 1 ? " result" : " results"),
       noReactionModules: (modules) => "No reaction: " + modules,
       noDryRunModules: (modules) => "Dry run coming later: " + modules,
@@ -1969,6 +1985,11 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       fires: "Would trigger",
       wouldReply: "Would reply",
       wouldAct: "Would trigger",
+      matchCommandLabel: "Command name",
+      matchAliasLabel: "Alias",
+      matchKeywordLabel: "Keyword",
+      matchRegexLabel: "Regular expression",
+      inMessage: "in the message",
       matchCommand: "Command name",
       matchAlias: (token) => "Alias “" + token + "”",
       matchKeyword: (pattern) => "Keyword “" + pattern + "”",
