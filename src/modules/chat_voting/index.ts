@@ -15,6 +15,7 @@ import { CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE
 import { chatVotingOverlayElements } from "./overlay/element";
 import { chatVotingRoutes } from "./routes";
 import { chatVotingImmediateActionTexts } from "./action-locale";
+import { dryRunChatVotingMessage } from "./dry-run";
 
 const settingsSchema = chatVotingSettingsSchema;
 
@@ -315,4 +316,5 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
       initialTallyState(db, channelId, config, context),
   })),
   handleEvent: (event, context) => processChatVotingMessage(event, createChatVotingRepository(context.DB), context),
+  dryRunChatMessage: dryRunChatVotingMessage,
 };

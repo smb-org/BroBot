@@ -65,6 +65,7 @@ import type {
   ModuleAlarmIdentity,
   ModuleAlarmPlan,
   ModuleBallotAccess,
+  ModuleDryRunBallotSnapshot,
   ModuleExternalFetchBudget,
   ModuleScheduleInputChangeReason,
 } from "../../modules/contract";
@@ -136,6 +137,7 @@ import {
   hardDeleteFinalizedStoredBallot,
   openStoredBallot,
   readStoredBallot,
+  readStoredBallotDryRunSnapshot,
   readStoredBallotSnapshot,
   setStoredBallotBlockedTerms,
 } from "./ballots";
@@ -1580,6 +1582,19 @@ export class ChannelObject extends DurableObject<Env> {
     return Number.isFinite(createdAt) ? { keyHex: row.key_hex, createdAt } : null;
   }
 
+  private activeChatterKeyRowSnapshot(): { keyHex: string; createdAt: number } | null {
+    try {
+      const row = this.ctx.storage.sql.exec<{ key_hex: string; created_at: string }>(
+        `SELECT key_hex, created_at FROM ${ACTIVE_CHATTER_KEY_TABLE} WHERE slot = 1`,
+      ).toArray()[0];
+      if (row === undefined || !/^[0-9a-f]{64}$/iu.test(row.key_hex)) return null;
+      const createdAt = Date.parse(row.created_at);
+      return Number.isFinite(createdAt) ? { keyHex: row.key_hex, createdAt } : null;
+    } catch {
+      return null;
+    }
+  }
+
   private activeChatterNextSweepSync(keyCreatedAt: number): number | null {
     this.ensureActiveChatterTable();
     const row = this.ctx.storage.sql.exec<{ first_expiry: string | null }>(
@@ -2667,6 +2682,45 @@ export class ChannelObject extends DurableObject<Env> {
       : { firstSeenAt: activity.first_seen_at, lastSeenAt: activity.last_seen_at };
   }
 
+  /** Reads active chatter state without initializing storage tables or changing alarms. */
+  public async getActiveChatterSnapshot(userId: string): Promise<ActiveChatterActivity | null> {
+    if (userId.length === 0) return null;
+    const key = this.activeChatterKeyRowSnapshot();
+    if (key === null || Date.now() - key.createdAt >= ACTIVE_CHATTER_KEY_ROTATION_MS) return null;
+    try {
+      const hmac = await activeChatterKey(key.keyHex, this.ownChannelId() ?? "", userId);
+      const activity = this.ctx.storage.sql.exec<{ first_seen_at: string; last_seen_at: string }>(
+        `SELECT first_seen_at, last_seen_at FROM ${ACTIVE_CHATTER_TABLE}
+         WHERE hmac = ? AND last_seen_at >= ?`,
+        hmac,
+        new Date(Date.now() - ACTIVE_CHATTER_RETENTION_MS).toISOString(),
+      ).toArray()[0];
+      return activity === undefined
+        ? null
+        : { firstSeenAt: activity.first_seen_at, lastSeenAt: activity.last_seen_at };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Reads the active chatter count without initializing storage tables or changing alarms. */
+  public getActiveChatterCountSnapshot(windowMs: number): Promise<number> {
+    if (!Number.isFinite(windowMs) || windowMs <= 0) return Promise.resolve(0);
+    const now = Date.now();
+    const key = this.activeChatterKeyRowSnapshot();
+    if (key === null || now - key.createdAt >= ACTIVE_CHATTER_KEY_ROTATION_MS) return Promise.resolve(0);
+    const cutoff = Math.max(now - windowMs, now - ACTIVE_CHATTER_RETENTION_MS);
+    try {
+      const result = this.ctx.storage.sql.exec<{ count: number }>(
+        `SELECT COUNT(*) AS count FROM ${ACTIVE_CHATTER_TABLE} WHERE last_seen_at >= ?`,
+        new Date(cutoff).toISOString(),
+      ).one();
+      return Promise.resolve(result.count);
+    } catch {
+      return Promise.resolve(0);
+    }
+  }
+
   private async expireActiveChatters(_deadline: number, now: number): Promise<void> {
     await this.ctx.blockConcurrencyWhile(() => {
       this.ctx.storage.transactionSync(() => {
@@ -2868,6 +2922,10 @@ export class ChannelObject extends DurableObject<Env> {
 
   public async readBallotSnapshot(moduleId: string, ballotId: string): Promise<BallotSnapshot | null> {
     return await readStoredBallotSnapshot(this.ballotStorage(moduleId), moduleId, ballotId);
+  }
+
+  public async readBallotDryRunSnapshot(moduleId: string, ballotId: string): Promise<ModuleDryRunBallotSnapshot | null> {
+    return await readStoredBallotDryRunSnapshot(this.ballotStorage(moduleId), moduleId, ballotId);
   }
 
   public async hasOpenBallot(): Promise<boolean> {

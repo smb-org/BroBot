@@ -67,6 +67,7 @@ export const timersModule: BotModule<typeof settingsSchema> = {
     },
   },
   eventSubTypes: ["channel.chat.message"],
+  dryRunSilentReason: "activity_tracking",
   alarms: [{
     key: "run",
     retryDelaysMs: [5_000, 15_000, 60_000],

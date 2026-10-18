@@ -29,6 +29,7 @@ import { channelStateQuery } from "../../src/worker/panel/repository";
 import { apiSourceReferenceQuery } from "../../src/modules/api_source/routes";
 import { CLAIM_ELIGIBLE_SQL, textCommandSelectColumns } from "../../src/modules/text_commands/adapters/d1";
 import { FAQ_CLAIM_ELIGIBLE_SQL } from "../../src/modules/faq/adapters/d1";
+import { votekickAdmissionReasonSql } from "../../src/modules/votekick/adapters/d1";
 import { blockUsageExistsSql, textBlockCategorySelectColumns, textBlockSelectColumns } from "../../src/modules/text_library/adapters/d1";
 import { chatVoteSelectColumns, chatVoteTemplateSelectColumns } from "../../src/modules/chat_voting/repository";
 import {
@@ -172,6 +173,8 @@ const sqlGetFixtures = new Map<string, string>([
     updatedAt: now,
   }).sql],
   ["rowColumns", "votekick_id, target_user_id, target_login, initiator_user_id, status, threshold, yes_votes, no_votes, ballot_revision, duration_seconds, started_at, expires_at, ended_at, lifted_at"],
+  ["votekickAdmissionReasonSql(\"admitted\")", votekickAdmissionReasonSql("admitted")],
+  ["votekickAdmissionReasonSql(\"busy\")", votekickAdmissionReasonSql("busy")],
   ["selectFaqEntries", `SELECT faq.faq_id, faq.name, faq.enabled, faq.matcher_type, faq.matcher_json, faq.answer_text, faq.cooldown_seconds,
                                  faq.games_json, faq.chat_target, entry_order.sort_order, faq.revision, faq.last_used_at, faq.created_at, faq.updated_at
                             FROM faq_entries AS faq

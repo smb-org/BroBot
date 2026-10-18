@@ -72,7 +72,7 @@ const renderChat = async (
   };
 };
 
-const finalizeRule = (threshold: number) => ({
+export const votekickFinalizeRule = (threshold: number) => ({
   passIf: { yes: 0, no: 1, netAtLeast: threshold },
 });
 
@@ -305,7 +305,7 @@ const commandResult = async (
     // Register this first so the module can snapshot and close the ballot before its own expiry alarm.
     await context.scheduleAlarm("close", `close:${id}`, endsAtMs);
     alarmScheduled = true;
-    const opened = await context.ballots.open(id, 2, endsAtMs, finalizeRule(threshold));
+    const opened = await context.ballots.open(id, 2, endsAtMs, votekickFinalizeRule(threshold));
     if (opened.status === "busy") {
       await bestEffortClear(context, `close:${id}`);
       const busy = await renderChat(context, event.settings.busyTextEnabled ? event.settings.busyText : "", {

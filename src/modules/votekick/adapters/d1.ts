@@ -40,10 +40,55 @@ const mapRow = (row: VotekickRow): Votekick => ({
 const rowColumns = `votekick_id, target_user_id, target_login, initiator_user_id, status, threshold,
   yes_votes, no_votes, ballot_revision, duration_seconds, started_at, expires_at, ended_at, lifted_at, lift_claimed_at`;
 
+export const votekickAdmissionReasonSql = (otherwise: "busy" | "admitted"): string => `CASE
+  WHEN EXISTS (SELECT 1 FROM votekicks WHERE channel_id = ? AND status = 'running') THEN 'busy'
+  WHEN EXISTS (SELECT 1 FROM votekicks WHERE channel_id = ? AND ended_at > ?) THEN 'channel_cooldown'
+  WHEN EXISTS (SELECT 1 FROM votekicks WHERE channel_id = ? AND target_user_id = ? AND started_at > ?) THEN 'target_cooldown'
+  ELSE '${otherwise}'
+END`;
+
+const admissionCutoffs = (
+  channelId: string,
+  targetUserId: string,
+  checkedAt: string,
+  channelCooldownSeconds: number,
+  targetCooldownSeconds: number,
+): { values: [string, string, string, string, string, string]; channelCutoff: string; targetCutoff: string } => {
+  const channelCutoff = new Date(Date.parse(checkedAt) - channelCooldownSeconds * 1000).toISOString();
+  const targetCutoff = new Date(Date.parse(checkedAt) - targetCooldownSeconds * 1000).toISOString();
+  return {
+    values: [channelId, channelId, channelCutoff, channelId, targetUserId, targetCutoff],
+    channelCutoff,
+    targetCutoff,
+  };
+};
+
+/** Returns the admission result from the same cooldown predicate without claiming the start. */
+export const peekVotekickAdmission = async (
+  db: D1Database,
+  channelId: string,
+  targetUserId: string,
+  checkedAt: string,
+  channelCooldownSeconds: number,
+  targetCooldownSeconds: number,
+): Promise<VotekickAdmissionResult> => {
+  const { values } = admissionCutoffs(channelId, targetUserId, checkedAt, channelCooldownSeconds, targetCooldownSeconds);
+  const result = await db.prepare(`SELECT ${votekickAdmissionReasonSql("admitted")} AS reason`).bind(...values)
+    .first<{ reason: VotekickAdmissionResult }>();
+  return result?.reason === "channel_cooldown" || result?.reason === "target_cooldown" || result?.reason === "busy"
+    ? result.reason
+    : "admitted";
+};
+
 export const createVotekickRepository = (db: D1Database): VotekickRepository => ({
   async admit(channelId, input, checkedAt, channelCooldownSeconds, targetCooldownSeconds): Promise<VotekickAdmissionResult> {
-    const channelCutoff = new Date(Date.parse(checkedAt) - channelCooldownSeconds * 1000).toISOString();
-    const targetCutoff = new Date(Date.parse(checkedAt) - targetCooldownSeconds * 1000).toISOString();
+    const { values: admissionValues, channelCutoff, targetCutoff } = admissionCutoffs(
+      channelId,
+      input.targetUserId,
+      checkedAt,
+      channelCooldownSeconds,
+      targetCooldownSeconds,
+    );
     const results = await db.batch([
       db.prepare(
         `INSERT OR IGNORE INTO votekicks
@@ -63,13 +108,8 @@ export const createVotekickRepository = (db: D1Database): VotekickRepository => 
         input.yesVotes, input.ballotRevision, input.startedAt, input.endsAt, channelId, channelId, channelCutoff,
         channelId, input.targetUserId, targetCutoff),
       db.prepare(
-        `SELECT CASE
-          WHEN EXISTS (SELECT 1 FROM votekicks WHERE channel_id = ? AND status = 'running') THEN 'busy'
-          WHEN EXISTS (SELECT 1 FROM votekicks WHERE channel_id = ? AND ended_at > ?) THEN 'channel_cooldown'
-          WHEN EXISTS (SELECT 1 FROM votekicks WHERE channel_id = ? AND target_user_id = ? AND started_at > ?) THEN 'target_cooldown'
-          ELSE 'busy'
-        END AS reason`,
-      ).bind(channelId, channelId, channelCutoff, channelId, input.targetUserId, targetCutoff),
+        `SELECT ${votekickAdmissionReasonSql("busy")} AS reason`,
+      ).bind(...admissionValues),
     ]);
     if ((results[0]?.meta.changes ?? 0) > 0) return "admitted";
     const reason = (results[1]?.results[0] as { reason?: unknown } | undefined)?.reason;

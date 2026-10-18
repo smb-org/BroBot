@@ -1,4 +1,4 @@
-import type { ModuleBallotAccess } from "../modules/contract";
+import type { ModuleBallotAccess, ModuleDryRunContext } from "../modules/contract";
 
 /** Binds the raw ChannelObject RPCs so a module cannot choose another module or channel. */
 export const moduleBallots = (
@@ -33,5 +33,24 @@ export const moduleBallots = (
     close: (ballotId) => object.closeBallot(moduleId, ballotId),
     finalize: (ballotId) => object.finalizeBallot(moduleId, ballotId),
     acknowledgeClosed: (ballotId) => object.acknowledgeClosedBallot(moduleId, ballotId),
+  };
+};
+
+/** Exposes only snapshot RPCs to dry-run module handlers. */
+export const moduleBallotSnapshots = (
+  namespace: Env["CHANNEL"] | undefined,
+  channelId: string,
+  moduleId: string,
+): NonNullable<ModuleDryRunContext["ballots"]> => {
+  if (namespace === undefined) {
+    return {
+      readSnapshot: () => Promise.resolve(null),
+      hasOpenBallotSnapshot: () => Promise.resolve(false),
+    };
+  }
+  const object = namespace.get(namespace.idFromName(channelId));
+  return {
+    readSnapshot: (ballotId) => object.readBallotDryRunSnapshot(moduleId, ballotId),
+    hasOpenBallotSnapshot: () => object.hasOpenBallotSnapshot(),
   };
 };

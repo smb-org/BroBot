@@ -10,6 +10,9 @@ import { actorForEvent, chatStatusFor, selectModulesForEvent } from "./dispatch"
 import { withHostBlocks, withOutputGate } from "./dry-run-output";
 import { createSimulatedTemplateRenderer } from "./simulated-template-renderer";
 import { secureRandomInteger } from "./template-resolver";
+import { moduleBallotSnapshots } from "./module-ballots";
+import { fetchTwitchUserByLogin } from "./shoutout";
+import { isTwitchChannelModerator } from "./moderation";
 
 const CHAT_EVENT = "channel.chat.message";
 
@@ -39,7 +42,6 @@ export const dryRunChatMessage = async (
   fetcher: typeof fetch = fetch,
   registry: readonly BotModule[] = MODULES,
 ): Promise<DryRunResponse> => {
-  void fetcher;
   const evaluatedAt = new Date().toISOString();
   const db = readOnlyD1(env.DB);
   const channel = await db.prepare(
@@ -60,6 +62,9 @@ export const dryRunChatMessage = async (
 
   const syntheticUserId = `dry-run:${request.sender.login}`;
   const sourceBroadcasterUserId = request.sharedChat ? `shared-chat:${channelId}` : channelId;
+  const channelNamespace = Reflect.get(env, "CHANNEL") as Env["CHANNEL"] | undefined;
+  const channelObject = channelNamespace?.get(channelNamespace.idFromName(channelId));
+  const trackIncomingMessage = sourceBroadcasterUserId === channelId && syntheticUserId !== (botIdentity?.userId ?? null);
   const payload: Record<string, unknown> = {
     message: { text: request.text },
     message_id: "dry-run",
@@ -100,7 +105,9 @@ export const dryRunChatMessage = async (
   for (const module of modulesToReport) {
     const dryRun = module.dryRunChatMessage as ((event: ModuleEvent, context: ModuleDryRunContext) => Promise<readonly DryRunEntryReport[]>) | undefined;
     if (dryRun === undefined) {
-      modules.push({ moduleId: module.id, status: "not_testable", entries: [] });
+      modules.push(module.dryRunSilentReason === undefined
+        ? { moduleId: module.id, status: "not_testable", entries: [] }
+        : { moduleId: module.id, status: "silent", reasonCode: module.dryRunSilentReason, entries: [] });
       continue;
     }
     const moduleDisabled = !enabledModuleIds.has(module.id);
@@ -124,6 +131,7 @@ export const dryRunChatMessage = async (
         payload,
         settings,
         receivedAt: evaluatedAt,
+        eventSubTimestamp: evaluatedAt,
         actor,
         chatStatus,
       };
@@ -146,11 +154,30 @@ export const dryRunChatMessage = async (
         channelGameId: () => Promise.resolve(game?.id ?? null),
         channelLanguage: () => Promise.resolve(channel.language === "en" ? "en" : "de"),
         channelTimeZone: () => Promise.resolve(channel.time_zone),
+        lookupUserByLogin: async (login) => {
+          const user = await fetchTwitchUserByLogin(fetcher, env, login, "app");
+          return user === null ? null : { userId: user.userId, login: user.login, displayName: user.displayName };
+        },
+        isChannelModerator: (userId) => isTwitchChannelModerator(env, channelId, userId, fetcher),
         readChannelVariables: (names) => readVariables(db, channelId, names),
         renderTemplate: (text, moduleValues, changed) => renderTemplate(text, moduleValues, changed, "chat"),
         followedAt: () => Promise.resolve("unavailable"),
         userCreatedAt: () => Promise.resolve(null),
         secureRandomInteger,
+        ballots: moduleBallotSnapshots(env.CHANNEL, channelId, module.id),
+        activeChatters: {
+          count: async (windowMs) => {
+            const count = await channelObject?.getActiveChatterCountSnapshot(windowMs) ?? 0;
+            if (!trackIncomingMessage) return count;
+            const existing = await channelObject?.getActiveChatterSnapshot(syntheticUserId) ?? null;
+            return existing === null ? count + 1 : count;
+          },
+          seen: async (userId) => {
+            const existing = await channelObject?.getActiveChatterSnapshot(userId) ?? null;
+            if (existing !== null || !trackIncomingMessage || userId !== syntheticUserId) return existing;
+            return { firstSeenAt: evaluatedAt, lastSeenAt: evaluatedAt };
+          },
+        },
       };
       const reports = await dryRun(event, context);
       const filtered = request.only?.entryId === undefined

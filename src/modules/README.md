@@ -34,6 +34,28 @@ Mutationen, Alarme, Durable-Object-Aufrufe oder externen Aktionen auslösen.
 Schreibversuche gegen `context.DB` werden zur Laufzeit abgewiesen und als
 `write_blocked` gemeldet.
 
+### Chatnachrichten verarbeitende Module
+
+Derzeit abonnieren `text_commands`, `faq`, `chat_voting`, `timers` und
+`votekick` `channel.chat.message`. Textbefehle prüfen Namen, Aliase,
+Berechtigungen, Filter und Abklingzeiten und bereiten ihre Antwort oder
+Aktionen vor. FAQ wählt den ersten passenden Eintrag und bereitet dessen
+Antwort vor. Chat-Abstimmungen verarbeiten Start-, Hilfe- und Endbefehle und
+zählen passende Stimmen für die laufende Abstimmung. Votekick verarbeitet
+Startbefehle und Stimmen; jede Chatnachricht kann außerdem einen laufenden
+Votekick finalisieren.
+
+`timers` hat keinen Nachrichtenhandler: Der Host zählt Chataktivität für
+zeitgesteuerte Nachrichten. Der Trockenlauf meldet das Modul deshalb mit
+`status: "silent"` und `reasonCode: "activity_tracking"`. `clips` abonniert
+keine Chatnachrichten und wird in dieser Liste nicht ausgewertet.
+
+Abstimmungs- und Votekick-Auswertungen führen dieselben Produktionsservices
+mit simulierten Schreibadaptern aus. Laufende Ballot- und Aktivitätsdaten
+kommen aus reinen Durable-Object-Snapshots. Der Trockenlauf öffnet oder ändert
+keinen Ballot, schreibt keine D1- oder Durable-Object-Daten und plant keinen
+Alarm.
+
 ### Hülle und Bauteile der Panel-Ansicht
 
 Die äußerste Ansicht liegt in `.module-stack` (normalerweise als `<section>`

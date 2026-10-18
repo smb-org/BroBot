@@ -668,6 +668,11 @@ export interface ModuleExecutionContext {
   getAlarmPlan?: (alarmKey: string) => Promise<ModuleAlarmPlan | null>;
 }
 
+export interface ModuleDryRunBallotSnapshot extends BallotSnapshot {
+  /** The ballot-local term filter, available only to simulate a free-text cast. */
+  blockedTerms?: readonly string[] | null;
+}
+
 /** Read-only capabilities available while a chat message is being simulated. */
 export type ModuleDryRunContext = Pick<ModuleExecutionContext,
   | "DB"
@@ -677,6 +682,8 @@ export type ModuleDryRunContext = Pick<ModuleExecutionContext,
   | "channelGameId"
   | "channelLanguage"
   | "channelTimeZone"
+  | "lookupUserByLogin"
+  | "isChannelModerator"
   | "readChannelVariables"
   | "renderTemplate"
   | "followedAt"
@@ -685,6 +692,13 @@ export type ModuleDryRunContext = Pick<ModuleExecutionContext,
 > & {
   /** Host-resolved default chat target, so modules do not need another lookup. */
   defaultChatTarget: ChatOutputTarget;
+  /** Read-only ballot snapshots; the dry-run context never exposes ballot mutation methods. */
+  ballots?: {
+    readSnapshot: (ballotId: string) => Promise<ModuleDryRunBallotSnapshot | null>;
+    hasOpenBallotSnapshot: () => Promise<boolean>;
+  };
+  /** Durable Object activity reads that do not initialize tables, write state, or schedule alarms. */
+  activeChatters?: Pick<ModuleExecutionContext["activeChatters"], "count" | "seen">;
 };
 
 /** Durable storage and alarm access given to a module alarm handler. */
@@ -1720,6 +1734,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
     event: ModuleEvent<z.output<SettingsSchema>>,
     context: ModuleExecutionContext,
   ) => ModuleResult | Promise<ModuleResult>;
+  /** Explains why a chat subscription has no single-message reaction. */
+  dryRunSilentReason?: "activity_tracking";
   /** Reuses the production service with read-only adapters and describes its effects without executing them. */
   dryRunChatMessage?: (
     event: ModuleEvent<z.output<SettingsSchema>>,
