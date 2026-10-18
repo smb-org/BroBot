@@ -102,10 +102,10 @@ export const ChannelDefaultsEditor = ({ channelId, role, saveTarget }: ChannelDe
   useEffect(() => registerDashboardNavigationGuard(navigationGuard.guardSwitch), [navigationGuard.guardSwitch]);
 
   return <Section title={labels.section} className="channel-defaults-editor">
-    <LoadState variant={canEdit ? "panel-178" : "panel-0"}
+    <LoadState variant="panel-0" reserveHeight={canEdit ? "86px" : undefined}
       status={!settingsReady ? settingsQuery.isError || settings !== undefined ? "error" : "loading" : "success"}
-      loading={<LoadStateLines rows={2} height={58} />}
-      empty={<LoadStateLines rows={2} height={58} />}
+      loading={<LoadStateLines rows={2} height={39} />}
+      empty={<LoadStateLines rows={2} height={39} />}
       error={<p role="alert">{labels.loadError}</p>}
       queryError={{ title: dashboard.errors.dataLoadFailed, message: labels.loadError, onRetry: () => { void settingsQuery.refetch(); } }}>
       {!settingsReady ? null : !canEdit ? <>

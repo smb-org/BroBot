@@ -179,6 +179,17 @@ test("issue 438 layout regressions stay aligned at the requested viewports", asy
     const firstRowBox = await box(page.locator(".members-collection__rows .list-row").first());
     expect(firstRowBox.y - (statusBox.y + statusBox.height)).toBeLessThanOrEqual(12);
 
+    await freshRoute(page, viewport, `/channels/${channelId}/members`, { role: "operator" });
+    const operatorMemberReason = page.locator(".members-list-toolbar .list-toolbar__reason");
+    await expect(operatorMemberReason).toBeVisible();
+    expect(await operatorMemberReason.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return [style.display, style.overflow, style.textOverflow, style.whiteSpace, element.scrollWidth <= element.clientWidth];
+    })).toEqual(["block", "visible", "clip", "normal", true]);
+    await expect(operatorMemberReason).toContainText("Nur Broadcaster und Verwalter dürfen Mitglieder ändern.");
+    await freshRoute(page, viewport, `/channels/${channelId}/members`);
+    await expect(page.locator(".members-collection__rows .list-row")).toHaveCount(members.length);
+
     const rowBoxes = await page.locator(".members-collection__rows .list-row").evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height));
     expect(new Set(rowBoxes.map((height) => Math.round(height))).size).toBe(1);
     const rowText = page.locator(".members-collection__rows .list-row").first().locator(".list-row__title");
@@ -255,6 +266,8 @@ test("issue 438 layout regressions stay aligned at the requested viewports", asy
     const defaultsSection = await box(page.locator(".channel-defaults-editor"));
     const statusList = await box(page.locator(".system-page__status-list"));
     expect(statusList.y).toBeGreaterThan(defaultsSection.y + defaultsSection.height - 2);
+    const defaultsHint = await box(page.locator(".channel-defaults-editor__hint"));
+    expect(statusList.y - (defaultsHint.y + defaultsHint.height)).toBeLessThanOrEqual(32);
     const systemRow = page.locator(".system-page__status-list .state-row").first();
     expect(await systemRow.evaluate((element) => [getComputedStyle(element).borderLeftStyle, getComputedStyle(element).backgroundColor])).toEqual(["none", "rgba(0, 0, 0, 0)"]);
     const moderatorButton = page.getByRole("button", { name: "Moderatorstatus prüfen" });
@@ -273,6 +286,18 @@ test("issue 438 layout regressions stay aligned at the requested viewports", asy
     }
     expect(await moderatorButton.getAttribute("class")).toContain("ui-button--neutral");
     if (viewport.width > 640) expect(Math.abs((moderatorBox.y + moderatorBox.height / 2) - (moderatorRowBox.y + moderatorRowBox.height / 2))).toBeLessThanOrEqual(2);
+
+    await freshRoute(page, viewport, `/channels/${channelId}/system`, { role: "operator" });
+    const operatorModeratorRow = page.locator(".system-page__status-list .state-row").filter({ has: page.getByRole("button", { name: "Moderatorstatus prüfen" }) });
+    const operatorModeratorReason = operatorModeratorRow.locator(".header-action__reason-slot .lock-reason");
+    await expect(operatorModeratorReason).toBeVisible();
+    expect(await operatorModeratorReason.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return [style.overflow, style.maxHeight, element.scrollHeight <= element.clientHeight];
+    })).toEqual(["visible", "none", true]);
+    const operatorModeratorRowBox = await box(operatorModeratorRow);
+    const operatorReasonBox = await box(operatorModeratorReason);
+    expect(operatorReasonBox.y + operatorReasonBox.height).toBeLessThanOrEqual(operatorModeratorRowBox.y + operatorModeratorRowBox.height + 1);
 
     await freshRoute(page, viewport, `/channels/${channelId}/members`);
     await page.getByRole("button", { name: "Zugriff vergeben" }).click();
@@ -301,12 +326,16 @@ test("system save actions remain reserved and disabled while settings load", asy
   await expect(saveButton).toBeDisabled();
   const headerBefore = await box(page.locator(".system-page > .page-header"));
   const saveClusterBefore = await box(page.locator(".system-page .page-header__save"));
+  await expect(page.locator(".system-page__status-list .state-row").first()).toBeVisible();
+  const statusListBefore = await box(page.locator(".system-page__status-list"));
   controls.releaseSettings();
     await expect(page.getByRole("button", { name: "Standard-Chat-Ziel", exact: true })).toBeVisible();
   const headerAfter = await box(page.locator(".system-page > .page-header"));
   const saveClusterAfter = await box(page.locator(".system-page .page-header__save"));
+  const statusListAfter = await box(page.locator(".system-page__status-list"));
   expect(Math.abs(headerAfter.height - headerBefore.height)).toBeLessThanOrEqual(1);
   expect(Math.abs(saveClusterAfter.y - saveClusterBefore.y)).toBeLessThanOrEqual(1);
+  expect(Math.abs(statusListAfter.y - statusListBefore.y)).toBeLessThanOrEqual(1);
 });
 
 test("the module list, module header, and command palette share revision-owned Undo", async ({ page }) => {
