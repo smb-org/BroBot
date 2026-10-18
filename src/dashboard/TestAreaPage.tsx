@@ -453,7 +453,7 @@ export function TestAreaPage({
   const [game, setGame] = useState<PanelBroadcastGame | null>(null);
   const [sharedChat, setSharedChat] = useState(false);
   const [moduleFilter, setModuleFilter] = useState<ModuleFilter>(only?.moduleId ?? "all");
-  const [deepLinkOnly, setDeepLinkOnly] = useState<DryRunRequest["only"]>(only);
+  const [deepLinkOnly, setDeepLinkOnly] = useState<DryRunRequest["only"]>(only?.entryId === undefined ? undefined : only);
   const [history, setHistory] = useState<HistoryItem[]>(() => readHistory(channelId));
   const historyRef = useRef(history);
   const [snapshot, setSnapshot] = useState<ResultSnapshot | null>(null);
@@ -485,10 +485,24 @@ export function TestAreaPage({
     controller.current?.abort();
   }, []);
 
+  const currentRequest = (): DryRunRequest => {
+    const requestedOnly = deepLinkOnly ?? (moduleFilter === "all" ? undefined : { moduleId: moduleFilter });
+    return {
+      text: message,
+      sender: { login: sender.trim() || "viewer_42", statuses: [...badges] },
+      streamState,
+      game: game === null ? null : { id: game.id, name: game.name },
+      sharedChat,
+      ...(requestedOnly === undefined ? {} : { only: requestedOnly }),
+    };
+  };
+  const snapshotStale = snapshot !== null && JSON.stringify(snapshot.request) !== JSON.stringify(currentRequest());
   const allRows = useMemo(() => resultItems(snapshot?.response ?? null), [snapshot]);
-  const visibleRows = useMemo(() => moduleFilter === "all"
-    ? allRows
-    : allRows.filter((row) => row.moduleId === moduleFilter), [allRows, moduleFilter]);
+  const visibleRows = useMemo(() => {
+    const only = snapshot?.request.only;
+    return allRows.filter((row) => (only === undefined || row.moduleId === only.moduleId) &&
+      (only?.entryId === undefined || row.report.entry.id === only.entryId));
+  }, [allRows, snapshot]);
   const selectedItem = visibleRows.find((row) => row.key === selectedKey)
     ?? visibleRows.find((row) => row.report.outcome === "fires")
     ?? visibleRows[0]
@@ -533,18 +547,6 @@ export function TestAreaPage({
     }
   };
 
-  const currentRequest = (): DryRunRequest => {
-    const requestedOnly = deepLinkOnly ?? (moduleFilter === "all" ? undefined : { moduleId: moduleFilter });
-    return {
-      text: message,
-      sender: { login: sender.trim() || "viewer_42", statuses: [...badges] },
-      streamState,
-      game: game === null ? null : { id: game.id, name: game.name },
-      sharedChat,
-      ...(requestedOnly === undefined ? {} : { only: requestedOnly }),
-    };
-  };
-
   const handleSubmit = (event: SyntheticEvent<HTMLFormElement>): void => {
     event.preventDefault();
     const request = currentRequest();
@@ -562,7 +564,7 @@ export function TestAreaPage({
     setStreamState(request.streamState);
     setGame(request.game);
     setSharedChat(request.sharedChat);
-    setDeepLinkOnly(request.only);
+    setDeepLinkOnly(request.only?.entryId === undefined ? undefined : request.only);
     setModuleFilter(request.only?.moduleId ?? "all");
     setMobileHistoryOpen(false);
     void submitRequest(request);
@@ -576,9 +578,10 @@ export function TestAreaPage({
   const response = snapshot?.response ?? null;
   const fires = visibleRows.filter((row) => row.report.outcome === "fires").length;
   const blocked = visibleRows.filter((row) => row.report.outcome === "blocked").length;
-  const silentModules = response?.modules.filter((module) => module.status === "silent").map((module) => moduleName(module.moduleId, labels, language)) ?? [];
-  const notTestableModules = response?.modules.filter((module) => module.status === "not_testable").map((module) => moduleName(module.moduleId, labels, language)) ?? [];
-  const errorModules = response?.modules.filter((module) => module.status === "error").map((module) => moduleName(module.moduleId, labels, language)) ?? [];
+  const responseModules = response?.modules.filter((module) => snapshot?.request.only === undefined || module.moduleId === snapshot.request.only.moduleId) ?? [];
+  const silentModules = responseModules.filter((module) => module.status === "silent").map((module) => moduleName(module.moduleId, labels, language));
+  const notTestableModules = responseModules.filter((module) => module.status === "not_testable").map((module) => moduleName(module.moduleId, labels, language));
+  const errorModules = responseModules.filter((module) => module.status === "error").map((module) => moduleName(module.moduleId, labels, language));
   const state: "idle" | "loading" | "result" | "empty" | "incomplete" | "error" =
     pending ? "loading" : error !== null ? "error" : response === null ? "idle"
       : errorModules.length > 0 ? "incomplete" : visibleRows.length === 0 ? "empty" : "result";
@@ -677,7 +680,7 @@ export function TestAreaPage({
         </section>
       </aside>
 
-      <section className="test-area__results" aria-label={texts.result} aria-busy={pending}>
+      <section className={"test-area__results" + (snapshotStale ? " is-stale" : "")} aria-label={texts.result} aria-busy={pending}>
         <div className="test-area__mobile-controls">
           <form className="test-area__mobile-message" onSubmit={handleSubmit}>
             <Field
@@ -725,7 +728,14 @@ export function TestAreaPage({
               : <>{notTestableModules.length === 0 ? null : texts.noDryRunModules(notTestableModules.join(", "))}{notTestableModules.length > 0 && errorModules.length > 0 ? " · " : null}{errorModules.length === 0 ? null : texts.moduleError(errorModules.join(", "))}</>}
           </p>
         </header>
-        <div className={"test-area__results-slot" + (pending && response !== null ? " is-pending" : "") + (state === "incomplete" ? " is-incomplete" : "")} data-testid="test-area-results-slot" data-state={state} aria-busy={pending}>
+        <div className={"test-area__results-slot" + (pending && response !== null ? " is-pending" : "") + (state === "incomplete" ? " is-incomplete" : "") + (snapshotStale ? " is-stale" : "")} data-testid="test-area-results-slot" data-state={state} aria-busy={pending}>
+          <div
+            className="test-area__scope-hint"
+            data-testid="test-area-stale-result-hint"
+            data-visible={snapshotStale}
+            aria-hidden={!snapshotStale}
+            {...(snapshotStale ? { role: "status", "aria-live": "polite" as const } : {})}
+          >{snapshotStale ? texts.inputsChangedHint : " "}</div>
           {state === "idle" ? <div className="test-area__state-slot">
             <Icon name="tabMessages" size={20} />
             <strong>{texts.idleTitle}</strong>
@@ -757,7 +767,7 @@ export function TestAreaPage({
         </div>
       </section>
 
-      <aside className="test-area__detail" aria-label={texts.noDetails}>{detail}</aside>
+      <aside className={"test-area__detail" + (snapshotStale ? " is-stale" : "")} aria-label={texts.noDetails}>{detail}</aside>
 
       <Dialog
         opened={mobileContextOpen}

@@ -865,6 +865,7 @@ export interface DashboardTexts {
     historyReplay: (message: string, sender: string) => string;
     editContext: string;
     clearEntryFilter: string;
+    inputsChangedHint: string;
     result: string;
     reactionsSummary: (fires: number, blocked: number) => string;
     resultCount: (count: number) => string;
@@ -1422,6 +1423,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       historyReplay: (message, sender) => message + " von " + sender + " erneut prüfen",
       editContext: "Ändern",
       clearEntryFilter: "Eintragsfilter aufheben",
+      inputsChangedHint: "Eingaben geändert – Prüfen aktualisiert das Ergebnis",
       result: "Ergebnis",
       reactionsSummary: (fires, blocked) => [
         fires === 0 ? null : String(fires) + (fires === 1 ? " reagiert" : " reagieren"),
@@ -1974,6 +1976,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       historyReplay: (message, sender) => "Check " + message + " from " + sender + " again",
       editContext: "Edit",
       clearEntryFilter: "Clear entry filter",
+      inputsChangedHint: "Inputs changed – Check updates the result",
       result: "Result",
       reactionsSummary: (fires, blocked) => [
         fires === 0 ? null : String(fires) + (fires === 1 ? " reaction" : " reactions"),
