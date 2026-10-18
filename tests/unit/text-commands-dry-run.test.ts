@@ -275,6 +275,42 @@ describe("text command dry-run", () => {
     }
   });
 
+  it("prepares rendered timeout reasons with production's 500-code-point limit", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, CHANNEL_ID);
+      const repository = createTextCommandRepository(
+        database as unknown as D1Database,
+        () => ({ sql: "AND 1 = 1", values: [] }),
+      );
+      const reason = `${"r".repeat(490)}{args}`;
+      await repository.create({
+        channelId: CHANNEL_ID,
+        name: "timeout",
+        text: "Timeout response",
+        kind: "timeout",
+        cooldownSeconds: 0,
+        timeoutAction: { minSeconds: 20, maxSeconds: 20, fallbackText: "Fallback", reason },
+        now: NOW,
+      }, { userId: "member-1" });
+
+      const reports = await textCommandModule.dryRunChatMessage?.(eventFor(`!timeout ${"x".repeat(50)}`), contextFor(database, {
+        renderTemplate: (text, values) => Promise.resolve({
+          text: text.replaceAll("{args}", String(values.args ?? "")),
+          diagnostics: [],
+        }),
+      }));
+      const timeout = reports?.[0]?.effects.find((effect) => effect.kind === "timeout");
+
+      expect(timeout?.kind).toBe("timeout");
+      if (timeout?.kind !== "timeout") throw new Error("Expected timeout effect.");
+      expect(Array.from(timeout.reason)).toHaveLength(500);
+      expect(timeout.reason).toBe(`${"r".repeat(490)}${"x".repeat(10)}`);
+    } finally {
+      database.close();
+    }
+  });
+
   it("matches production's missing-target usage reply and consumed cooldowns", async () => {
     const productionDatabase = new TestD1Database();
     const dryRunDatabase = new TestD1Database();

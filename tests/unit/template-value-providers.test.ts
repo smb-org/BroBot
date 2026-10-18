@@ -114,6 +114,7 @@ describe("template value providers", () => {
   it("adds a template note when a text-block lookup fails instead of hiding the raw token", async () => {
     const sources = {
       DB: {} as D1Database,
+      dryRun: true,
       channelInfo: () => Promise.resolve(null),
       channelGameId: () => Promise.resolve(null),
       channelTimeZone: () => Promise.resolve("Europe/Berlin"),

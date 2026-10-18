@@ -243,6 +243,7 @@ describe("weather data providers", () => {
       const context = contextFor(database as unknown as D1Database, {
         commandInput: { commandName: "weather", arguments: "Paris" },
         readOnly: true,
+        dryRun: true,
         addDiagnostic: (diagnostic: ModuleDiagnostic) => diagnostics.push(diagnostic),
       });
       const values = await weatherModule.resolveTemplateValues?.(["weather.place", "weather.temp"], context);
@@ -253,6 +254,7 @@ describe("weather data providers", () => {
         channelTimeZone: context.channelTimeZone,
         commandInput: context.commandInput,
         readOnly: true,
+        dryRun: true,
         now: NOW,
         addDiagnostic: (diagnostic: ModuleDiagnostic) => diagnostics.push(diagnostic),
       } as unknown as ModuleTemplateConditionContext);
@@ -273,6 +275,7 @@ describe("weather data providers", () => {
       const diagnostics: ModuleDiagnostic[] = [];
       const values = await weatherModule.resolveTemplateValues?.(["weather.temp"], contextFor(database as unknown as D1Database, {
         readOnly: true,
+        dryRun: true,
         addDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
       }));
 
@@ -289,12 +292,34 @@ describe("weather data providers", () => {
     try {
       const diagnostics: ModuleDiagnostic[] = [];
       const values = await weatherModule.resolveTemplateValues?.(["weather.temp"], contextFor(database as unknown as D1Database, {
+        dryRun: true,
         addDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
       }));
 
       expect(values?.["weather.temp"]).toBe("Wetterdaten sind derzeit nicht verfügbar.");
       expect(diagnostics).toContainEqual({ code: "template.lookup_unavailable", detail: { name: "weather.temp" } });
       expect(diagnostics).not.toContainEqual(expect.objectContaining({ code: "template.deferred_live" }));
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps the origin/main template-preview response for a weather provider failure", async () => {
+    const database = new TestD1Database();
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.reject(new Error("Provider unavailable."))));
+    try {
+      const provider = {
+        moduleId: weatherModule.id,
+        variables: weatherModule.templateVariableCatalog ?? [],
+        ...(weatherModule.templateUnavailableText === undefined ? {} : { templateUnavailableText: weatherModule.templateUnavailableText }),
+        ...(weatherModule.resolveTemplateValues === undefined ? {} : { resolveTemplateValues: weatherModule.resolveTemplateValues }),
+      };
+
+      const response = await createTemplateRenderer(event, "event", [], resolverSources(database as unknown as D1Database, [provider]))(
+        "{weather.temp}", {}, undefined, "preview",
+      );
+
+      expect(response).toEqual({ text: "Wetterdaten sind derzeit nicht verfügbar.", diagnostics: [] });
     } finally {
       database.close();
     }

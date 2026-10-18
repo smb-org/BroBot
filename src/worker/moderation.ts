@@ -1,6 +1,6 @@
 import type { ModerationFailureReason } from "../contracts/values";
 import type { ModerationResult, ModerationTimeoutExpectation } from "../modules/contracts/moderation";
-import { MODERATION_TIMEOUT_MAX_SECONDS } from "../modules/contracts/moderation";
+import { MODERATION_TIMEOUT_MAX_SECONDS, prepareModerationReason } from "../modules/contracts/moderation";
 import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
 import { moderationOutputSuppressionReason } from "./chat-output-gate";
 import { getBotIdentity } from "./db/bot-identity";
@@ -54,8 +54,6 @@ interface SuppressedModerationResult {
 
 type ModerationExecutionResult = ModerationResult | SuppressedModerationResult;
 
-const truncateReason = (reason: string): string => Array.from(reason).slice(0, 500).join("");
-
 const failure = (
   reason: ModerationFailureReason,
   detail: Readonly<Record<string, string | number | boolean | null>>,
@@ -102,7 +100,7 @@ async function executeModeration(
   method: "POST" | "DELETE",
   fetcher: typeof fetch,
 ): Promise<ModerationExecutionResult> {
-  const reason = truncateReason(request.reason);
+  const reason = prepareModerationReason(request.reason);
   const baseDetail = {
     target: request.userId,
     ...(request.durationSeconds === null ? {} : { seconds: request.durationSeconds }),

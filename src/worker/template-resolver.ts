@@ -44,6 +44,8 @@ export interface TemplateResolverSources {
   publicOrigin?: string;
   externalFetchBudget?: ModuleExternalFetchBudget;
   readOnly?: boolean;
+  dryRun?: boolean;
+  textBlockSelectionState?: Map<string, number>;
   runModuleAlarm?: ModuleTemplateValueContext["runModuleAlarm"];
   channelInfo: () => Promise<ModuleChannelInfo | null>;
   channelGameId?: () => Promise<string | null>;
@@ -385,6 +387,8 @@ export const createTemplateRenderer = (
     ...(sources.publicOrigin === undefined ? {} : { publicOrigin: sources.publicOrigin }),
     externalFetchBudget,
     ...(sources.readOnly === true ? { readOnly: true } : {}),
+    ...(sources.dryRun === true ? { dryRun: true } : {}),
+    ...(sources.textBlockSelectionState === undefined ? {} : { textBlockSelectionState: sources.textBlockSelectionState }),
     ...(sources.runModuleAlarm === undefined ? {} : { runModuleAlarm: sources.runModuleAlarm }),
     renderTemplate: renderNestedTemplate,
     addDiagnostic,
@@ -409,15 +413,18 @@ export const createTemplateRenderer = (
             ...(sources.publicOrigin === undefined ? {} : { publicOrigin: sources.publicOrigin }),
             externalFetchBudget,
             ...(sources.readOnly === true ? { readOnly: true } : {}),
+            ...(sources.dryRun === true ? { dryRun: true } : {}),
             ...(commandInput === undefined ? {} : { commandInput }),
             addTemplateValueAttribution: addAttribution,
-            addDiagnostic,
+            ...(sources.dryRun === true ? { addDiagnostic } : {}),
             now,
           });
         } catch {
-          names.forEach((name) => {
-            addDiagnostic({ code: "template.lookup_unavailable", detail: { name } });
-          });
+          if (sources.dryRun === true) {
+            names.forEach((name) => {
+              addDiagnostic({ code: "template.lookup_unavailable", detail: { name } });
+            });
+          }
           continue;
         }
         for (const name of names) {
@@ -453,21 +460,26 @@ export const createTemplateRenderer = (
     try {
       resolved = await provider.resolveTemplateValues(requestedNames, providerContextFor(provider.moduleId));
     } catch {
-      requestedNames.forEach((name) => {
-        addDiagnostic({
-          code: "template.lookup_unavailable",
-          detail: { name: provider.templateVariableNamespace === "text_blocks" ? `text.${name}` : name },
+      if (mode === "overlay" || sources.dryRun === true) {
+        requestedNames.forEach((name) => {
+          addDiagnostic({
+            code: "template.lookup_unavailable",
+            detail: { name: provider.templateVariableNamespace === "text_blocks" ? `text.${name}` : name },
+          });
         });
-      });
+      }
       if (provider.templateVariableNamespace === "text_blocks" || provider.templateUnavailableText === undefined) continue;
       for (const name of requestedNames) values[name] = provider.templateUnavailableText[language];
+      if (mode !== "overlay" && sources.dryRun !== true) {
+        requestedNames.forEach((name) => { addDiagnostic({ code: "template.lookup_unavailable", detail: { name } }); });
+      }
       continue;
     }
     for (const name of requestedNames) {
       const value: unknown = resolved[name];
       const tokenName = namespace === undefined ? name : namespacedTokenName(name, namespace);
       if (typeof value === "string") values[tokenName] = value;
-      else if (mode === "overlay" || namespace === "text_blocks") {
+      else if (mode === "overlay" || (sources.dryRun === true && namespace === "text_blocks")) {
         addDiagnostic({ code: "template.lookup_unavailable", detail: { name: tokenName } });
       }
     }

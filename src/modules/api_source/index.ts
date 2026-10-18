@@ -160,7 +160,11 @@ const resolveConditionValues = async (
     let value: unknown;
     try {
       value = await outputFor(name, context);
-    } catch {
+    } catch (failure: unknown) {
+      if (failure instanceof ApiSourceDeferredLiveError && context.readOnly === true && context.dryRun === true) {
+        context.addDiagnostic?.({ code: "template.deferred_live", detail: { name: `api.${name}` } });
+        return [id, null] as const;
+      }
       // A failing source only makes its own condition unavailable; healthy ones still resolve.
       context.reportTemplateLookupFailure?.();
       return [id, null] as const;

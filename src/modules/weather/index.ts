@@ -58,9 +58,11 @@ const valuesFor = async (
       return Object.fromEntries(names.map((name) => [name, text]));
     }
     if (place.deferredLive) {
-      names.forEach((name) => {
-        context.addDiagnostic({ code: "template.deferred_live", detail: { name } });
-      });
+      if (context.dryRun === true) {
+        names.forEach((name) => {
+          context.addDiagnostic({ code: "template.deferred_live", detail: { name } });
+        });
+      }
       return {};
     }
     const location = place.location;
@@ -70,9 +72,11 @@ const valuesFor = async (
       : await fetchCachedWeather(context.DB, settings.provider, location.latitude, location.longitude, context.now);
     if (cached === null) {
       if (context.readOnly === true) {
-        names.forEach((name) => {
-          context.addDiagnostic({ code: "template.deferred_live", detail: { name } });
-        });
+        if (context.dryRun === true) {
+          names.forEach((name) => {
+            context.addDiagnostic({ code: "template.deferred_live", detail: { name } });
+          });
+        }
         return {};
       }
       throw new Error("Weather data is not cached.");
@@ -88,9 +92,11 @@ const valuesFor = async (
     context.addTemplateValueAttribution?.(settings.provider === "met_norway" ? "MET Norway" : "Open-Meteo");
     return result;
   } catch {
-    names.forEach((name) => {
-      context.addDiagnostic({ code: "template.lookup_unavailable", detail: { name } });
-    });
+    if (context.dryRun === true) {
+      names.forEach((name) => {
+        context.addDiagnostic({ code: "template.lookup_unavailable", detail: { name } });
+      });
+    }
     const message = errorTextsFor(settings)[language];
     return Object.fromEntries(names.map((name) => [name, message]));
   }
@@ -103,7 +109,7 @@ const resolveConditions = async (
   if (!ids.includes("weather.condition")) return {};
   try {
     if (context.readOnly === true && (context.commandInput?.arguments.trim().length ?? 0) > 0) {
-      context.addDiagnostic?.({ code: "template.deferred_live", detail: { name: "weather.condition" } });
+      if (context.dryRun === true) context.addDiagnostic?.({ code: "template.deferred_live", detail: { name: "weather.condition" } });
       return {};
     }
     const [settings, locationSetting] = await Promise.all([
@@ -117,7 +123,7 @@ const resolveConditions = async (
       ? await readWeatherCache(context.DB, settings.provider, locationSetting.latitude, locationSetting.longitude, context.now)
       : await fetchCachedWeather(context.DB, settings.provider, locationSetting.latitude, locationSetting.longitude, context.now);
     if (cached === null) {
-      if (context.readOnly === true) {
+      if (context.readOnly === true && context.dryRun === true) {
         context.addDiagnostic?.({ code: "template.deferred_live", detail: { name: "weather.condition" } });
       }
       return {};
@@ -127,7 +133,7 @@ const resolveConditions = async (
     context.addTemplateConditionNextChangeAt?.(new Date(cached.expiresAt).toISOString());
     return { "weather.condition": condition };
   } catch {
-    context.addDiagnostic?.({ code: "template.lookup_unavailable", detail: { name: "weather.condition" } });
+    if (context.dryRun === true) context.addDiagnostic?.({ code: "template.lookup_unavailable", detail: { name: "weather.condition" } });
     return {};
   }
 };

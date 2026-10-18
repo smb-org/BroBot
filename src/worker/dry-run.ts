@@ -87,6 +87,8 @@ export const dryRunChatMessage = async (
     externalFetchBudget: { claim: () => false },
     runModuleAlarm: null,
     readOnly: true,
+    dryRun: true,
+    textBlockSelectionState: new Map<string, number>(),
   } as const;
 
   const chatModules = registry.filter((module) => (module.eventSubTypes ?? []).includes(CHAT_EVENT));

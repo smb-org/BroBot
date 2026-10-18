@@ -67,6 +67,8 @@ export interface SimulatedTemplateRendererOptions {
   externalFetchBudget?: ModuleExternalFetchBudget;
   runModuleAlarm?: ModuleTemplateValueContext["runModuleAlarm"] | null;
   readOnly?: boolean;
+  dryRun?: boolean;
+  textBlockSelectionState?: Map<string, number>;
 }
 
 /** Builds the provider stack used by template previews and read-only chat simulations. */
@@ -132,6 +134,8 @@ export const createSimulatedTemplateRenderer = async (
     moduleSecrets: (moduleId) => createModuleSecretReadAccess({ ...env, DB: db }, channelId, moduleId),
     ...(options.externalFetchBudget === undefined ? {} : { externalFetchBudget: options.externalFetchBudget }),
     ...(options.readOnly === true ? { readOnly: true } : {}),
+    ...(options.dryRun === true ? { dryRun: true } : {}),
+    ...(options.textBlockSelectionState === undefined ? {} : { textBlockSelectionState: options.textBlockSelectionState }),
     ...(options.runModuleAlarm == null ? {} : { runModuleAlarm: options.runModuleAlarm }),
     publicOrigin: env.PUBLIC_ORIGIN,
     channelInfo: () => Promise.resolve(channelInfo),

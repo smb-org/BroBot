@@ -1035,6 +1035,42 @@ describe("API source JSONata", () => {
 });
 
 describe("API source template dispatch", () => {
+  it("keeps the origin/main template-preview response for an unknown text block", async () => {
+    const response = await createTemplateRenderer({
+      channelId: CHANNEL_ID,
+      subscriptionType: "channel.chat.message",
+      triggerId: "missing-text-preview",
+      payload: {},
+      settings: {},
+      receivedAt: new Date(NOW).toISOString(),
+      actor: null,
+      chatStatus: null,
+    }, "event", [], {
+      DB: {} as D1Database,
+      channelInfo: () => Promise.resolve(null),
+      channelGameId: () => Promise.resolve(null),
+      channelTimeZone: () => Promise.resolve("Europe/Berlin"),
+      channelLocation: () => Promise.resolve(null),
+      templateValueProviders: [{
+        moduleId: "text_library",
+        templateVariableNamespace: "text_blocks",
+        variables: [],
+        resolveTemplateValues: () => Promise.resolve({}),
+      }],
+      streamState: () => Promise.resolve("offline"),
+      channelDetails: () => Promise.resolve(null),
+      streamDetails: () => Promise.resolve(null),
+      followedAt: () => Promise.resolve("unavailable"),
+      followerTotal: () => Promise.resolve(null),
+      chattersTotal: () => Promise.resolve(null),
+      userCreatedAt: () => Promise.resolve(null),
+      channelLanguage: () => Promise.resolve("de"),
+      readChannelVariables: () => Promise.resolve({}),
+    })("{text.missing}", {}, undefined, "preview");
+
+    expect(response).toEqual({ text: "{text.missing}", diagnostics: [] });
+  });
+
   it("marks an uncached read-only value as deferred live data", async () => {
     const database = await createDatabase();
     const db = database as unknown as D1Database;
@@ -1089,6 +1125,77 @@ describe("API source template dispatch", () => {
     expect(rendered.diagnostics).toContainEqual({ code: "template.deferred_live", detail: { name: "api.status" } });
     expect(rendered.diagnostics).not.toContainEqual(expect.objectContaining({ code: "template.lookup_unavailable" }));
     expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("marks a text-block result as depending on an uncached API condition", async () => {
+    const database = await createDatabase();
+    const db = database as unknown as D1Database;
+    await insertSource(database, "status", "$.status");
+    await database.prepare(
+      `INSERT INTO text_library_categories (channel_id, category_id, catalog_key, custom_name, created_at, updated_at)
+       VALUES (?, 'info', 'info', NULL, ?, ?)`,
+    ).bind(CHANNEL_ID, new Date(NOW).toISOString(), new Date(NOW).toISOString()).run();
+    await database.prepare(
+      `INSERT INTO text_blocks (channel_id, block_name, category_id, games_json, revision, created_at, updated_at)
+       VALUES (?, 'status', 'info', '[]', 1, ?, ?)`,
+    ).bind(CHANNEL_ID, new Date(NOW).toISOString(), new Date(NOW).toISOString()).run();
+    await database.prepare(
+      `INSERT INTO text_block_variants (channel_id, block_name, variant_id, position, conditions_json, texts_json)
+       VALUES (?, 'status', 'live', 0, ?, '["Live status"]'), (?, 'status', 'default', 1, '{}', '["Default status"]')`,
+    ).bind(CHANNEL_ID, JSON.stringify({ data: { "api_source.status": "true" } }), CHANNEL_ID).run();
+    const conditions = await apiSourceModule.textBlockConditionsForChannel?.(db, CHANNEL_ID) ?? [];
+    const apiVariables = await apiSourceModule.templateVariables?.(db, CHANNEL_ID) ?? [];
+    const result = await createTemplateRenderer({
+      channelId: CHANNEL_ID,
+      subscriptionType: "channel.chat.message",
+      triggerId: "uncached-api-condition-dry-run",
+      payload: {},
+      settings: {},
+      receivedAt: new Date(NOW).toISOString(),
+      actor: null,
+      chatStatus: null,
+    }, "event", [], {
+      DB: db,
+      publicOrigin: "https://brobot.esembe.app",
+      readOnly: true,
+      dryRun: true,
+      channelInfo: () => Promise.resolve(null),
+      channelGameId: () => Promise.resolve(null),
+      channelTimeZone: () => Promise.resolve("Europe/Berlin"),
+      channelLocation: () => Promise.resolve(null),
+      templateValueProviders: [
+        {
+          moduleId: textLibraryModule.id,
+          templateVariableNamespace: "text_blocks",
+          variables: [],
+          resolveTemplateValues: (names, context) => createTextBlockTemplateValueProvider(db, CHANNEL_ID)(names, context),
+        },
+        {
+          moduleId: apiSourceModule.id,
+          templateVariableNamespace: "api_sources",
+          variables: apiVariables,
+          textBlockConditions: conditions,
+          ...(apiSourceModule.templateUnavailableText === undefined ? {} : { templateUnavailableText: apiSourceModule.templateUnavailableText }),
+          resolveTemplateValues: (names, context) => apiSourceModule.resolveTemplateValues?.(names, context) ?? Promise.resolve({}),
+          resolveTemplateConditions: (ids, context) => apiSourceModule.resolveTemplateConditions?.(ids, context) ?? Promise.resolve({}),
+        },
+      ],
+      registeredTemplateVariables: apiVariables,
+      streamState: () => Promise.resolve("offline"),
+      channelDetails: () => Promise.resolve(null),
+      streamDetails: () => Promise.resolve(null),
+      followedAt: () => Promise.resolve("unavailable"),
+      followerTotal: () => Promise.resolve(null),
+      chattersTotal: () => Promise.resolve(null),
+      userCreatedAt: () => Promise.resolve(null),
+      channelLanguage: () => Promise.resolve("en"),
+      readChannelVariables: () => Promise.resolve({}),
+      now: () => NOW,
+    })("{text.status}", {}, undefined, "chat");
+
+    expect(result.text).toBe("Default status");
+    expect(result.diagnostics).toContainEqual({ code: "template.deferred_live", detail: { name: "api.status" } });
+    expect(result.diagnostics).not.toContainEqual(expect.objectContaining({ code: "template.lookup_unavailable" }));
   });
 
   it.each([
