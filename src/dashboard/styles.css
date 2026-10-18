@@ -1532,6 +1532,8 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .system-page > .page-header { margin-bottom: 4px; padding-bottom: 8px; }
 .system-page .settings-page__columns { padding-top: 0; }
 .system-page__status { min-width: 0; margin-top: 0; }
+.system-page .content-section { width: 100%; max-width: none; }
+.system-page .content-section > .empty-state { margin: 0; padding: 0; border: 0; border-radius: 0; }
 .system-page__status > .ui-load-state--status-row { margin-bottom: 0; }
 .system-page .system-page__status-list { gap: 0; width: 100%; }
 .system-page .channel-defaults-editor { width: 100%; }
@@ -2619,6 +2621,10 @@ p.lock-reason { margin-bottom: 1em; }
 .empty-state h2 { color: var(--text); }
 .empty-state p { margin: var(--s1) 0 0; font-size: 13px; }
 .members-collection__rows .list-row__link { grid-template-columns: 28px minmax(0, 1fr) auto; }
+.members-collection__rows .list-row--selected { border-radius: var(--r-control); box-shadow: inset 0 0 0 1px var(--color-selection-border); background: var(--color-selection-surface); }
+.members-collection__rows .list-row--selected .list-row__link { background: transparent; }
+.members-collection__rows .list-row--selected .list-row__link:hover { background: var(--surface-hover); }
+.member-editor .ui-save-bar--persistent { border-top: 0; background: transparent; }
 .members-collection__rows .list-row__icon { display: flex; align-items: center; }
 .members-collection__rows .list-row__status { justify-self: end; }
 .members-collection__rows :is(.list-row__title, .list-row__description) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

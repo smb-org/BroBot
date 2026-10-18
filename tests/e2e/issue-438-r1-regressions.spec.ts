@@ -279,6 +279,11 @@ test("issue 438 layout regressions stay aligned at the requested viewports", asy
     expect(moderatorBox.height).toBeLessThanOrEqual(36);
     expect(Math.abs(statusList.width - systemHeader.width)).toBeLessThanOrEqual(1);
     expect(Math.abs(defaultsSection.width - systemHeader.width)).toBeLessThanOrEqual(1);
+    for (const section of await page.locator(".system-page .content-section").all()) {
+      const sectionBox = await box(section);
+      expect(Math.abs(sectionBox.x + sectionBox.width - (systemHeader.x + systemHeader.width))).toBeLessThanOrEqual(2);
+    }
+    expect(await page.locator(".system-page .content-section > .empty-state").evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).borderTopStyle))).not.toContain("dashed");
     expect(statusList.y - (defaultsSection.y + defaultsSection.height)).toBeLessThanOrEqual(56);
     if (viewport.width > 640) {
       expect(moderatorBox.width).toBeLessThanOrEqual(200);
@@ -428,6 +433,17 @@ test("member detail is a plain full-width column and closing returns focus to it
   expect(Math.abs(editorBox.x - detailBox.x - detailPadding.left)).toBeLessThanOrEqual(1);
   expect(Math.abs(editorBox.width - (detailBox.width - detailPadding.left - detailPadding.right))).toBeLessThanOrEqual(2);
   expect(await editor.evaluate((element) => [getComputedStyle(element).borderTopWidth, getComputedStyle(element).paddingLeft, getComputedStyle(element).backgroundColor])).toEqual(["0px", "0px", "rgba(0, 0, 0, 0)"]);
+  expect(await editor.locator(".ui-save-bar").first().evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
+  const selected = await page.locator(".members-collection__rows .list-row--selected").evaluate((element) => {
+    const probe = document.createElement("span");
+    probe.style.color = "var(--color-selection-border)";
+    element.appendChild(probe);
+    const token = getComputedStyle(probe).color;
+    probe.remove();
+    return { token, shadow: getComputedStyle(element).boxShadow };
+  });
+  expect(selected.shadow).toContain(selected.token);
+  expect(selected.shadow).toMatch(/ 0px 0px 0px 1px inset$/u);
   const title = await box(editor.locator(".inspector-section__heading h3"));
   const close = editor.getByRole("button", { name: "Schließen" });
   const closeBox = await box(close);
