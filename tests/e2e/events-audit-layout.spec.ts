@@ -402,6 +402,11 @@ test("variables collection keeps the editor in its column without horizontal ove
       expect(await page.locator(".channel-variables-table-wrap").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
       expect(await table.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await unbrokenNameCell.click();
+      const unbrokenHeading = editor.locator(".channel-variable-editor__header .page-header__title-row h2");
+      await expect(unbrokenHeading).toContainText("abcdefghijklmnopqrstuvwxyzabcdef");
+      const discard = await box(editor.getByRole("button", { name: "Verwerfen" }));
+      expect((await box(unbrokenHeading)).right).toBeLessThanOrEqual(discard.x);
       expect((await box(unbrokenNameCell)).right).toBeLessThanOrEqual((await box(table)).right + 1);
       expect((await box(valueCell)).right).toBeLessThanOrEqual((await box(table)).right + 1);
     }
