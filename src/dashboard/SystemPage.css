@@ -23,7 +23,7 @@
   .system-page__status-list .state-row__action .header-action__reason-slot { position: static; display: grid; width: auto; height: auto; min-height: 0; justify-items: stretch; }
   .system-page__status-list .state-row__action .header-action__reason-slot:empty { display: none; }
   .system-page__status-list .state-row__action .header-action__reason-slot .lock-reason { display: block; width: 100%; max-width: none; max-height: none; margin: 0; overflow: visible; line-height: 14px; text-align: left; }
-  @media (max-width: 639px) {
+  @container state-list (max-width: 759px) {
     .system-page__status-list .state-row,
     .system-page__status-list .state-row:has(.state-row__action) { grid-template-columns: auto minmax(0, 1fr); }
     .system-page__status-list .state-row__label { grid-column: 1 / -1; }

@@ -1193,10 +1193,13 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-save-bar__status--footer-only .ui-save-bar__footer { flex: 1 1 auto; }
 .ui-save-bar__status .ui-icon { flex: none; color: var(--warn); }
 .ui-save-bar__invalid-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 599px) {
+  .ui-save-bar__invalid-summary { display: none; }
+}
 .ui-save-bar__invalid-trigger { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 1px solid var(--line-strong); border-radius: var(--r-control); color: var(--error-text); background: var(--error-surface); cursor: pointer; }
 .ui-save-bar__invalid-trigger:hover { background: var(--surface-hover); }
 .ui-save-bar__invalid-trigger:focus-visible { outline: 2px solid var(--brand-text); outline-offset: 2px; }
-.ui-save-bar__invalid-popover { max-width: min(90vw, 24rem); }
+.ui-save-bar__invalid-popover { max-width: min(90vw, 24rem); border: 1px solid var(--line-strong); border-radius: var(--r-control); box-shadow: var(--shadow-floating); }
 .ui-save-bar__invalid-fields { display: grid; gap: var(--s1); max-height: min(50vh, 20rem); overflow: auto; margin: 0; padding: 0; list-style: none; }
 .ui-save-bar__invalid-fields button { display: grid; gap: 2px; width: 100%; min-width: 0; appearance: none; border: 0; border-radius: var(--r-control); padding: var(--s2); background: var(--error-surface); color: var(--error-text); font: inherit; text-align: left; cursor: pointer; }
 .ui-save-bar__invalid-fields button > span { display: block; white-space: normal; overflow-wrap: anywhere; }

@@ -24,25 +24,4 @@
   @media (max-width: 768px) {
     .belabox-overview { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   }
-  .dashboard-shell:has(.settings-page--belabox) { height: 100dvh; overflow: hidden; }
-  .dashboard-shell__workspace:has(.settings-page--belabox) { height: calc(100dvh - var(--app-shell-header-height)); min-height: 0; overflow: hidden; }
-  .dashboard-shell__main:has(.settings-page--belabox) { height: 100%; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
-  .main-content:has(.settings-page--belabox) { display: block; height: auto; min-height: 100%; }
-  .module-route-layout:has(.settings-page--belabox) { display: block; height: auto; min-height: 0; flex: none; }
-  .module-route-layout:has(.settings-page--belabox) > .ui-load-state { display: block; height: auto; min-height: 0 !important; flex: none; }
-  .module-route-layout:has(.settings-page--belabox) > .ui-load-state > .ui-load-state__content { display: block; height: auto; min-height: 0; overflow: visible; }
-  .module-detail--settings-page:has(.settings-page--belabox) { display: block; height: auto; min-height: 100%; flex: none; }
-  .module-detail--settings-page:has(.settings-page--belabox) > .ui-load-state { display: block; height: auto; min-height: 0; flex: none; }
-  .module-detail--settings-page:has(.settings-page--belabox) > .ui-load-state > .ui-load-state__content { display: block; height: auto; min-height: 0; overflow: visible; }
-  .module-detail--settings-page:has(.settings-page--belabox) .settings-page { display: block; height: auto; min-height: 100%; flex: none; overflow: visible; }
-  .module-detail--settings-page:has(.settings-page--belabox) .settings-page > .page-header { position: sticky; top: 0; z-index: var(--layer-inspector); background: var(--background); }
-  .module-detail--settings-page:has(.settings-page--belabox) .settings-page__columns { flex: none; grid-template-rows: auto; min-height: 0; overflow: visible; padding-bottom: 16px; }
-  .module-detail--settings-page:has(.settings-page--belabox) .settings-page__column { min-height: auto; overflow: visible; }
-  .module-detail--settings-page:has(.settings-page--belabox) [data-section="polling"] .segment-choice-field__hint[aria-hidden="true"],
-  .module-detail--settings-page:has(.settings-page--belabox) [data-section="polling"] .segment-choice-field__warning[aria-hidden="true"] { display: none; }
-  .module-detail--settings-page:has(.settings-page--belabox) [data-section="polling"] .inspector-field-row { grid-template-columns: minmax(0, 1fr); gap: var(--s1); }
-  .module-detail--settings-page:has(.settings-page--belabox) [data-section="polling"] .inspector-field-row__label { min-height: 20px; font-size: 13px; }
-  .module-detail--settings-page:has(.settings-page--belabox) [data-section="polling"] .inspector-field-row__info { width: 20px; height: 20px; min-height: 20px; }
-  .module-detail--settings-page:has(.settings-page--belabox) .belabox-overview > .ui-section--inspector { padding-bottom: var(--s2); }
-  .module-detail--settings-page:has(.settings-page--belabox) .belabox-history-section__empty-streams { margin-top: -12px; }
 }
