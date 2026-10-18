@@ -8,7 +8,7 @@ import {
   searchChannelGames,
   type PanelBroadcastGame,
 } from "./api";
-import { apiErrorText, dashboardTexts, type DashboardLanguage } from "./locale";
+import { apiErrorText, dashboardTexts, eventText, type DashboardLanguage } from "./locale";
 import { moduleNavigationName } from "./module-labels";
 import { formatCharacterTotal } from "./ui/text-length";
 import {
@@ -31,24 +31,24 @@ import "./TestAreaPage.css";
 
 type DryRunModuleId = NonNullable<DryRunRequest["only"]>["moduleId"];
 type ModuleFilter = "all" | DryRunModuleId;
-type HistoryItem = { request: DryRunRequest; createdAt: string };
+type HistoryItem = { channelId: string; request: DryRunRequest; createdAt: string };
 type ResultItem = { key: string; moduleId: string; report: DryRunEntryReport };
 type ResultSnapshot = { response: DryRunResponse; request: DryRunRequest };
 type StreamState = DryRunRequest["streamState"];
 
-const HISTORY_KEY = "test-area-history";
+const historyKey = (channelId: string): string => "test-area-history:" + encodeURIComponent(channelId);
 const HISTORY_LIMIT = 10;
 const DEFAULT_MESSAGE = "!dc hallo";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const readHistory = (): HistoryItem[] => {
+const readHistory = (channelId: string): HistoryItem[] => {
   try {
-    const raw: unknown = JSON.parse(window.sessionStorage.getItem(HISTORY_KEY) ?? "null");
+    const raw: unknown = JSON.parse(window.sessionStorage.getItem(historyKey(channelId)) ?? "null");
     if (!Array.isArray(raw)) return [];
     return raw.flatMap((item): HistoryItem[] => {
-      if (!isRecord(item) || !isRecord(item.request) || typeof item.createdAt !== "string") return [];
+      if (!isRecord(item) || item.channelId !== channelId || !isRecord(item.request) || typeof item.createdAt !== "string") return [];
       const request = item.request;
       if (typeof request.text !== "string" || !isRecord(request.sender) ||
           typeof request.sender.login !== "string" || !Array.isArray(request.sender.statuses) ||
@@ -64,6 +64,7 @@ const readHistory = (): HistoryItem[] => {
       const statuses = request.sender.statuses.filter((status): status is NonNullable<DryRunRequest["sender"]["statuses"][number]> =>
         status === "subscriber" || status === "vip" || status === "moderator" || status === "broadcaster");
       return [{
+        channelId,
         request: {
           text: request.text,
           sender: { login: request.sender.login, statuses },
@@ -311,16 +312,25 @@ function HistoryList({ items, labels, language, onReplay }: {
   </ul>;
 }
 
+function effectSuppression(effect: DryRunEffect, labels: ReturnType<typeof dashboardTexts>): string | null {
+  if (!("suppressedBy" in effect) || effect.suppressedBy === null) return null;
+  return labels.testArea.suppressedEffect(effect.suppressedBy);
+}
+
 function effectLabel(effect: DryRunEffect, labels: ReturnType<typeof dashboardTexts>): string {
   const texts = labels.testArea;
-  switch (effect.kind) {
+  const label = (() => {
+    switch (effect.kind) {
     case "chat": return effect.reply ? texts.replyToMessage : texts.chatEffect;
     case "announcement": return texts.announcementEffect;
     case "timeout": return texts.timeoutEffect(effect.minSeconds, effect.maxSeconds, effect.reason);
     case "shoutout": return texts.shoutoutEffect(effect.targetLogin);
     case "variable": return texts.variableEffect(effect.name, effect.from, effect.to);
     case "cooldown": return effect.scope === "user" ? texts.userCooldownEffect(effect.seconds) : texts.cooldownEffect(effect.seconds);
-  }
+    }
+  })();
+  const condition = "when" in effect ? texts.effectCondition(effect.when) : null;
+  return [label, condition, effectSuppression(effect, labels)].filter((part): part is string => part !== null).join(" · ");
 }
 
 function MatchExplanation({ report, message, labels }: {
@@ -354,10 +364,9 @@ function ResultDetail({ item, message, response, labels, language, onOpenEditor 
 }): ReactElement {
   const { report, moduleId } = item;
   const texts = labels.testArea;
-  const chatEffect = report.effects.find((effect): effect is Extract<DryRunEffect, { kind: "chat" | "announcement" }> =>
+  const chatEffects = report.effects.filter((effect): effect is Extract<DryRunEffect, { kind: "chat" | "announcement" }> =>
     effect.kind === "chat" || effect.kind === "announcement");
   const editorModuleId: DryRunModuleId | null = moduleId === "text_commands" || moduleId === "faq" ? moduleId : null;
-  const muted = response.controls.muted;
   return <div className="test-area__detail-content">
     <header className="test-area__detail-head">
       <div className="test-area__detail-heading">
@@ -380,19 +389,32 @@ function ResultDetail({ item, message, response, labels, language, onOpenEditor 
         <MatchExplanation report={report} message={message} labels={labels} />
         <p className="test-area__detail-note">{texts.syntheticSenderNote(response.sender.userId.replace(/^dry-run:/u, ""))}</p>
       </section>
-      {chatEffect === undefined ? null : <section className="test-area__detail-section">
+      {chatEffects.length === 0 ? null : <section className="test-area__detail-section">
         <h3>{texts.answer}</h3>
-        <ChatPreview
-          label={texts.preview}
-          speaker={texts.botSpeaker}
-          text={chatEffect.text}
-          countLabel={formatCharacterTotal(chatEffect.text.length, language)}
-        />
-        {muted && chatEffect.suppressedBy === "channel_muted" ? <p className="test-area__muted-note">{texts.suppressedAnswer}</p> : null}
-        <div className="test-area__chat-target">
-          <span>{texts.chatTarget}</span>
-          <Badge>{chatEffect.postsTo === "all_shared_chats" ? texts.sharedChats : texts.thisChat}</Badge>
+        <div className="test-area__answer-list">
+          {chatEffects.map((chatEffect, index) => <div className="test-area__answer-item" key={chatEffect.kind + ":" + String(index)}>
+            <ChatPreview
+              label={texts.preview}
+              speaker={texts.botSpeaker}
+              text={chatEffect.text}
+              countLabel={formatCharacterTotal(chatEffect.text.length, language)}
+            />
+            {chatEffect.when === undefined ? null : <p className="test-area__effect-qualifier">{texts.effectCondition(chatEffect.when)}</p>}
+            {chatEffect.suppressedBy === null ? null : <p className="test-area__muted-note">
+              {chatEffect.suppressedBy === "channel_muted" ? texts.suppressedAnswer : texts.suppressedEffect(chatEffect.suppressedBy)}
+            </p>}
+            <div className="test-area__chat-target">
+              <span>{texts.chatTarget}</span>
+              <Badge>{chatEffect.postsTo === "all_shared_chats" ? texts.sharedChats : texts.thisChat}</Badge>
+            </div>
+          </div>)}
         </div>
+      </section>}
+      {report.templateNotes.length === 0 ? null : <section className="test-area__detail-section">
+        <h3>{texts.templateNotes}</h3>
+        <ul className="test-area__template-notes">
+          {report.templateNotes.map((note, index) => <li key={note.code + ":" + String(index)}>{eventText(note.code, note.detail ?? {}, language)}</li>)}
+        </ul>
       </section>}
       {report.outcome === "blocked" ? <section className="test-area__detail-section">
         <h3>{texts.blocks}</h3>
@@ -431,7 +453,7 @@ export function TestAreaPage({
   const [sharedChat, setSharedChat] = useState(false);
   const [moduleFilter, setModuleFilter] = useState<ModuleFilter>(only?.moduleId ?? "all");
   const [deepLinkOnly, setDeepLinkOnly] = useState<DryRunRequest["only"]>(only);
-  const [history, setHistory] = useState<HistoryItem[]>(readHistory);
+  const [history, setHistory] = useState<HistoryItem[]>(() => readHistory(channelId));
   const historyRef = useRef(history);
   const [snapshot, setSnapshot] = useState<ResultSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -471,16 +493,16 @@ export function TestAreaPage({
     ?? null;
 
   const updateHistory = useCallback((request: DryRunRequest): void => {
-    const item = { request, createdAt: new Date().toISOString() };
+    const item = { channelId, request, createdAt: new Date().toISOString() };
     const next = [item, ...historyRef.current].slice(0, HISTORY_LIMIT);
     historyRef.current = next;
     setHistory(next);
     try {
-      window.sessionStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+      window.sessionStorage.setItem(historyKey(channelId), JSON.stringify(next));
     } catch {
       // Session storage can be unavailable in private or restricted contexts.
     }
-  }, []);
+  }, [channelId]);
 
   const submitRequest = async (request: DryRunRequest, record = true): Promise<void> => {
     if (record) updateHistory(request);
@@ -529,6 +551,7 @@ export function TestAreaPage({
   };
 
   const replay = (item: HistoryItem): void => {
+    if (item.channelId !== channelId) return;
     const request = item.request;
     contextChanged.current = true;
     setMessage(request.text);
@@ -554,11 +577,17 @@ export function TestAreaPage({
   const silentModules = response?.modules.filter((module) => module.status === "silent").map((module) => moduleName(module.moduleId, labels, language)) ?? [];
   const notTestableModules = response?.modules.filter((module) => module.status === "not_testable").map((module) => moduleName(module.moduleId, labels, language)) ?? [];
   const errorModules = response?.modules.filter((module) => module.status === "error").map((module) => moduleName(module.moduleId, labels, language)) ?? [];
-  const state: "idle" | "loading" | "result" | "empty" | "error" =
-    pending ? "loading" : error !== null ? "error" : response === null ? "idle" : visibleRows.length === 0 ? "empty" : "result";
+  const state: "idle" | "loading" | "result" | "empty" | "incomplete" | "error" =
+    pending ? "loading" : error !== null ? "error" : response === null ? "idle"
+      : errorModules.length > 0 ? "incomplete" : visibleRows.length === 0 ? "empty" : "result";
   const detailMessage = snapshot?.request.text ?? message;
   const muted = response?.controls.muted === true;
   const paused = response?.controls.paused === true;
+  const liveSummary = pending ? texts.loading
+    : error !== null ? texts.errorTitle
+      : response === null ? ""
+        : errorModules.length > 0 ? texts.incompleteTitle + (fires + blocked > 0 ? ": " + texts.reactionsSummary(fires, blocked) : "")
+          : fires + blocked === 0 ? texts.emptyTitle : texts.reactionsSummary(fires, blocked);
   const selectedBadges = badges.length === 0 ? texts.badgeNames.viewer : badges.map((badge) => texts.badgeNames[badge]).join(" · ");
   const contextStream = [streamState === "online" ? texts.online : texts.offline, game?.name].filter(Boolean).join(" · ");
   const lockedModule = deepLinkOnly?.moduleId ?? null;
@@ -597,7 +626,7 @@ export function TestAreaPage({
       aria-current={selectedItem?.key === item.key ? "true" : undefined}
       onClick={() => {
         setSelectedKey(item.key);
-        if (window.innerWidth <= 820) setMobileDetailOpen(true);
+        if (window.innerWidth <= 1279) setMobileDetailOpen(true);
       }}
     >
       <span className="test-area__row-main">
@@ -680,6 +709,7 @@ export function TestAreaPage({
             {muted ? <Badge tone="amber">{texts.muted}</Badge> : null}
             {paused ? <Badge>{texts.paused}</Badge> : null}
           </div>
+          <span className="sr-only" data-testid="test-area-live-summary" role="status" aria-live="polite" aria-atomic="true">{liveSummary}</span>
           <p className="test-area__meta-line" title={silentModules.length === 0 ? "" : silentModules.join(", ")}>
             {silentModules.length === 0 ? <span aria-hidden="true">&nbsp;</span> : texts.noReactionModules(silentModules.join(", "))}
           </p>
@@ -710,7 +740,12 @@ export function TestAreaPage({
             <strong>{texts.emptyTitle}</strong>
             <p>{texts.emptyDescription}</p>
           </div> : null}
-          {state === "result" || state === "loading" && response !== null
+          {state === "incomplete" ? <div className="test-area__state-slot" role="status">
+            <Icon name="warning" size={20} />
+            <strong>{texts.incompleteTitle}</strong>
+            <p>{texts.incompleteDescription}</p>
+          </div> : null}
+          {state === "result" || state === "incomplete" || state === "loading" && response !== null
             ? <div className="test-area__result-scroll">{visibleRows.map(rowElement)}</div>
             : null}
         </div>

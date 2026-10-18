@@ -131,7 +131,7 @@ test("aligns the desktop context, fixed result rows, and highlighted detail with
   expect(new Set(geometry.resultHeights)).toEqual(new Set([62]));
   expect(geometry.resultMainLineCounts).toEqual([2, 2]);
 
-  await expect(page.getByText("1 reagiert · 1 blockiert")).toBeVisible();
+  await expect(page.locator(".test-area__results-title").getByText("1 reagiert · 1 blockiert")).toBeVisible();
   const explanation = page.locator(".test-area__detail .test-area__match-explanation");
   await expect(explanation).toContainText("Alias „dc“ in der Nachricht !dc hallo");
   await expect(explanation.locator("mark")).toHaveText("dc");

@@ -879,6 +879,8 @@ export interface DashboardTexts {
     retry: string;
     emptyTitle: string;
     emptyDescription: string;
+    incompleteTitle: string;
+    incompleteDescription: string;
     errorTitle: string;
     errorDescription: string;
     noDetails: string;
@@ -899,6 +901,7 @@ export interface DashboardTexts {
     faqEntry: string;
     why: string;
     answer: string;
+    templateNotes: string;
     preview: string;
     botSpeaker: string;
     chatTarget: string;
@@ -906,6 +909,8 @@ export interface DashboardTexts {
     sharedChats: string;
     replyToMessage: string;
     suppressedAnswer: string;
+    suppressedEffect: (reason: "module_disabled" | "channel_paused" | "channel_muted") => string;
+    effectCondition: (condition: "on_success" | "on_failure") => string;
     blocks: string;
     wouldDo: string;
     openEditor: string;
@@ -1433,6 +1438,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       retry: "Erneut prüfen",
       emptyTitle: "Keine Reaktion gefunden",
       emptyDescription: "Für diese Nachricht gibt es keinen passenden Chat-Auslöser.",
+      incompleteTitle: "Ergebnis unvollständig",
+      incompleteDescription: "Mindestens ein Modul konnte die Nachricht nicht vollständig prüfen. Die angezeigten Ergebnisse können unvollständig sein.",
       errorTitle: "Trockenlauf fehlgeschlagen",
       errorDescription: "Die Nachricht konnte nicht geprüft werden. Versuche es erneut.",
       noDetails: "Keine passenden Details für diese Nachricht.",
@@ -1453,6 +1460,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       faqEntry: "FAQ",
       why: "Warum",
       answer: "Antwort",
+      templateNotes: "Vorlagenhinweise",
       preview: "Vorschau",
       botSpeaker: "BroBot",
       chatTarget: "Chat-Ziel",
@@ -1460,6 +1468,9 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       sharedChats: "alle geteilten Chats",
       replyToMessage: "Antwort auf diese Nachricht",
       suppressedAnswer: "Würde nicht gesendet: Kanal ist stummgeschaltet.",
+      suppressedEffect: (reason) => reason === "module_disabled" ? "Unterdrückt: Modul deaktiviert"
+        : reason === "channel_paused" ? "Unterdrückt: Kanal pausiert" : "Unterdrückt: Kanal stummgeschaltet",
+      effectCondition: (condition) => condition === "on_success" ? "Nur bei Erfolg" : "Nur bei Fehler",
       blocks: "Blockiert",
       wouldDo: "Würde tun",
       openEditor: "Im Editor öffnen",
@@ -1978,6 +1989,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       retry: "Check again",
       emptyTitle: "No reaction found",
       emptyDescription: "No chat trigger matches this message.",
+      incompleteTitle: "Incomplete result",
+      incompleteDescription: "At least one module could not check the message fully. The results shown may be incomplete.",
       errorTitle: "Dry run failed",
       errorDescription: "The message could not be checked. Try again.",
       noDetails: "No matching details for this message.",
@@ -1998,6 +2011,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       faqEntry: "FAQ",
       why: "Why",
       answer: "Answer",
+      templateNotes: "Template notes",
       preview: "Preview",
       botSpeaker: "BroBot",
       chatTarget: "Chat target",
@@ -2005,6 +2019,9 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       sharedChats: "all shared chats",
       replyToMessage: "Reply to this message",
       suppressedAnswer: "Would not be sent: channel is muted.",
+      suppressedEffect: (reason) => reason === "module_disabled" ? "Suppressed: module disabled"
+        : reason === "channel_paused" ? "Suppressed: channel paused" : "Suppressed: channel is muted",
+      effectCondition: (condition) => condition === "on_success" ? "Only on success" : "Only on failure",
       blocks: "Blocked",
       wouldDo: "Would do",
       openEditor: "Open in editor",

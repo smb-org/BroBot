@@ -149,6 +149,7 @@ function FaqPanelContent({ channelId, language, canManage = true, initialSelecti
   if (data !== undefined && selectedId === null) {
     const firstEntry = data.entries.find((entry) => entry.id === initialSelection) ?? data.entries[0];
     const next = firstEntry === undefined ? emptyDraft() : draftFromEntry(firstEntry);
+    if (initialSelection !== undefined && firstEntry !== undefined) setMobileDetailOpen(true);
     setSelectedId(firstEntry?.id ?? NEW_ENTRY_ID);
     setDraft(next);
     setBaseline(next);

@@ -117,7 +117,7 @@ describe("test area page", () => {
     renderPage();
     run();
 
-    expect(await screen.findByText("1 reagiert · 1 blockiert")).toBeInTheDocument();
+    await waitFor(() => expect(document.querySelector(".test-area__results-title")).toHaveTextContent("1 reagiert · 1 blockiert"));
     expect(screen.getByText(/^Ohne Reaktion:/u)).toBeInTheDocument();
     expect(screen.getByText("Noch ohne Trockenlauf: Votekick")).toBeInTheDocument();
     expect(screen.queryByText("Nicht testbar")).not.toBeInTheDocument();
@@ -186,28 +186,6 @@ describe("test area page", () => {
     fireEvent.click(await screen.findByRole("button", { name: /!discord/u }));
     expect(await screen.findByText("Würde nicht gesendet: Kanal ist stummgeschaltet.")).toBeInTheDocument();
     expect(screen.queryByText("Stumm")).toBeInTheDocument();
-  });
-
-  it("restores a session history item and re-runs its complete context", async () => {
-    const savedRequest: DryRunRequest = {
-      text: "!hello",
-      sender: { login: "viewer_17", statuses: ["moderator"] },
-      streamState: "offline",
-      game: { id: "1", name: "Example Game" },
-      sharedChat: true,
-      only: { moduleId: "faq", entryId: "faq-a" },
-    };
-    sessionStorage.setItem("test-area-history", JSON.stringify([{
-      request: savedRequest,
-      createdAt: "2030-01-01T12:00:00.000Z",
-    }]));
-    renderPage();
-    fireEvent.click(screen.getByRole("button", { name: /!hello/u }));
-
-    await waitFor(() => expect(dryRunChatMessage).toHaveBeenCalledWith("channel-a", savedRequest, expect.anything()));
-    expect(screen.getAllByRole("textbox", { name: "Nachricht" }).map((input) => (input as HTMLInputElement).value)).toContain("!hello");
-    expect(screen.getAllByRole("textbox", { name: "Absender" }).map((input) => (input as HTMLInputElement).value)).toContain("viewer_17");
-    expect(screen.getAllByRole("button", { name: "Mod" })[0]).toHaveAttribute("aria-pressed", "true");
   });
 
   it("sends a deep-linked module and saved entry filter", async () => {

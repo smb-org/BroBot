@@ -33,6 +33,9 @@ export const routeForSelectedChannel = (route: DashboardRoute, channelId: string
   if (route.kind === "module") return { ...route, channelId };
   if (route.kind === "platform") return { kind: "channel", channelId, section: "system" };
   if (route.section === "overlays") return { kind: "channel", channelId, section: "overlays" };
+  if (route.section === "test-area" && route.channelId !== channelId && route.only?.entryId !== undefined) {
+    return { ...route, channelId, only: { moduleId: route.only.moduleId } };
+  }
   return { ...route, channelId };
 };
 
