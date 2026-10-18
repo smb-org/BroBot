@@ -23,6 +23,17 @@ Eine Panel-Ansicht rendert keine eigene Überschrift mit dem Modulnamen. Der
 Host trägt Name, Kennung und Kurzbeschreibung im Eigenschaften-Inspektor; die
 Ansicht beginnt direkt mit ihrem fachlichen Inhalt.
 
+## Trockenlauf (`dryRunChatMessage`)
+
+Module, die Chatnachrichten verarbeiten, können `dryRunChatMessage` anbieten.
+Der Host übergibt dasselbe `ModuleEvent` wie bei der Produktion sowie einen
+`ModuleDryRunContext` mit ausschließlich lesenden Fähigkeiten. Implementierungen
+sollen den Produktionsservice mit einem lesenden Repository ausführen und dessen
+Treffer, Sperrgründe und möglichen Effekte beschreiben. Sie dürfen keine
+Mutationen, Alarme, Durable-Object-Aufrufe oder externen Aktionen auslösen.
+Schreibversuche gegen `context.DB` werden zur Laufzeit abgewiesen und als
+`write_blocked` gemeldet.
+
 ### Hülle und Bauteile der Panel-Ansicht
 
 Die äußerste Ansicht liegt in `.module-stack` (normalerweise als `<section>`

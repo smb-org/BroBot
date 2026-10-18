@@ -89,6 +89,7 @@ describe("BELABOX template variables and overlay metadata", () => {
       ok: true,
       sample: sample(new Date().toISOString()),
     })),
+    overrides: Partial<ModuleTemplateValueContext> = {},
   ): ModuleTemplateValueContext => ({
     DB: database as unknown as D1Database,
     channelId: CHANNEL_ID,
@@ -112,6 +113,7 @@ describe("BELABOX template variables and overlay metadata", () => {
     addDiagnostic: () => undefined,
     now: Date.now(),
     resolveTemplateConditions: () => Promise.resolve({}),
+    ...overrides,
   });
 
   it("declares all localized external variables in the BELABOX picker group", () => {
@@ -184,6 +186,35 @@ describe("BELABOX template variables and overlay metadata", () => {
     await expect(belaboxModule.resolveTemplateValues?.(["belabox.bitrate", "belabox.status"], templateContext("en", runModuleAlarm)))
       .resolves.toEqual({ "belabox.bitrate": "4,520 kbps", "belabox.status": "healthy" });
     expect(runModuleAlarm).toHaveBeenCalledWith("belabox", "poll", "poll", { reason: "on_demand" });
+  });
+
+  it("uses a fresh cached on-demand sample in read-only mode without polling", async () => {
+    await insertModule("on_demand");
+    await insertStatus(sample("2026-10-06T12:00:00.000Z"));
+    const runModuleAlarm = vi.fn();
+
+    const values = await belaboxModule.resolveTemplateValues?.(
+      ["belabox.bitrate", "belabox.status"],
+      templateContext("en", runModuleAlarm, { readOnly: true }),
+    );
+
+    expect(values).toEqual({ "belabox.bitrate": "4,520 kbps", "belabox.status": "healthy" });
+    expect(runModuleAlarm).not.toHaveBeenCalled();
+  });
+
+  it("reports an uncached read-only sample as deferred live data", async () => {
+    await insertModule("on_demand");
+    const diagnostics: { code: string; detail?: Readonly<Record<string, unknown>> }[] = [];
+    const values = await belaboxModule.resolveTemplateValues?.(
+      ["belabox.bitrate"],
+      templateContext("en", vi.fn(), {
+        readOnly: true,
+        addDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      }),
+    );
+
+    expect(values).toEqual({});
+    expect(diagnostics).toContainEqual({ code: "template.deferred_live", detail: { name: "belabox.bitrate" } });
   });
 
   it("checks an on-demand sample against real time after a delayed fetch", async () => {

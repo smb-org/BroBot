@@ -1,4 +1,4 @@
-import type { AuditAction, ChannelVariableOperation } from "../../../contracts/values";
+import { nextVariableValue, type AuditAction, type ChannelVariableOperation } from "../../../contracts/values";
 import type {
   NewTextCommand,
   TextCommand,
@@ -252,6 +252,52 @@ export const textCommandSelectColumns = `channel_id, command_name, response_text
                                        chat_target, use_channel_default_target, games_json, template_fields_json, last_used_at, created_at, updated_at, revision,
                                        use_count, variable_name, variable_operation, variable_amount,
                                        timeout_min_seconds, timeout_max_seconds, timeout_fallback_text, timeout_reason`;
+
+export const CLAIM_ELIGIBLE_SQL = `enabled = 1
+          AND (last_used_at IS NULL OR julianday(last_used_at) <= julianday(?) - cooldown_seconds / 86400.0)
+          AND (? IS NULL OR revision = ?)
+          AND (? IS NULL OR user_cooldown_seconds = 0 OR NOT EXISTS (
+            SELECT 1 FROM text_command_user_cooldowns AS user_cooldown
+             WHERE user_cooldown.channel_id = ? AND user_cooldown.command_name = ? AND user_cooldown.user_id = ?
+               AND julianday(user_cooldown.last_used_at) > julianday(?) - text_commands.user_cooldown_seconds / 86400.0
+          ))`;
+
+const explainUnclaimed = async (
+  db: D1Database,
+  current: TextCommand,
+  knownCommand: TextCommand | null,
+  now: string,
+  userId: string | null | undefined,
+  variableChangePrepared: boolean,
+): Promise<TextCommandClaim> => {
+  if (knownCommand !== null && current.revision !== knownCommand.revision) {
+    return { command: current, claimed: false, stale: true };
+  }
+
+  const globalRemaining = cooldownRemaining(current.lastUsedAt, now, current.cooldownSeconds);
+  if (globalRemaining > 0) return { command: current, claimed: false, reason: "cooldown", remainingSeconds: globalRemaining };
+  if (variableChangePrepared && (userId === undefined || userId === null || current.userCooldownSeconds === 0)) {
+    return { command: current, claimed: false, reason: "variable_update_failed" };
+  }
+  if (userId === undefined || userId === null || current.userCooldownSeconds === 0) {
+    return { command: current, claimed: false, reason: "cooldown", remainingSeconds: globalRemaining };
+  }
+  const userCooldown = await db.prepare(
+    `SELECT last_used_at
+       FROM text_command_user_cooldowns
+      WHERE channel_id = ? AND command_name = ? AND user_id = ?`,
+  ).bind(current.channelId, current.name, userId).first<UserCooldownRow>();
+  const userRemaining = cooldownRemaining(userCooldown?.last_used_at ?? null, now, current.userCooldownSeconds);
+  if (variableChangePrepared && userRemaining === 0) {
+    return { command: current, claimed: false, reason: "variable_update_failed" };
+  }
+  return {
+    command: current,
+    claimed: false,
+    reason: userRemaining > 0 ? "user_cooldown" : "cooldown",
+    remainingSeconds: userRemaining,
+  };
+};
 
 export const createTextCommandRepository = (
   db: D1Database,
@@ -685,14 +731,7 @@ export const createTextCommandRepository = (
       `UPDATE text_commands
           SET last_used_at = ?, updated_at = ?, use_count = use_count + 1
         WHERE channel_id = ? AND command_name = ?
-          AND enabled = 1
-          AND (last_used_at IS NULL OR julianday(last_used_at) <= julianday(?) - cooldown_seconds / 86400.0)
-          AND (? IS NULL OR revision = ?)
-          AND (? IS NULL OR user_cooldown_seconds = 0 OR NOT EXISTS (
-            SELECT 1 FROM text_command_user_cooldowns AS user_cooldown
-             WHERE user_cooldown.channel_id = ? AND user_cooldown.command_name = ? AND user_cooldown.user_id = ?
-               AND julianday(user_cooldown.last_used_at) > julianday(?) - text_commands.user_cooldown_seconds / 86400.0
-          ))
+          AND ${CLAIM_ELIGIBLE_SQL}
           ${variableChange === null ? "" : "AND changes() > 0"}
         RETURNING ${textCommandSelectColumns}`,
     ).bind(now, now, channelId, name, now, knownCommand?.revision ?? null, knownCommand?.revision ?? null,
@@ -772,35 +811,69 @@ export const createTextCommandRepository = (
       };
     }
 
-    if (commandBeforeClaim !== null && current.revision !== commandBeforeClaim.revision) {
-      return { command: current, claimed: false, stale: true };
-    }
-
-    const globalRemaining = cooldownRemaining(current.lastUsedAt, now, current.cooldownSeconds);
-    if (globalRemaining > 0) {
-      return { command: current, claimed: false, reason: "cooldown", remainingSeconds: globalRemaining };
-    }
-    if (variableChange !== null && (userId === undefined || userId === null || current.userCooldownSeconds === 0)) {
-      return { command: current, claimed: false, reason: "variable_update_failed" };
-    }
-    if (userId === undefined || userId === null || current.userCooldownSeconds === 0) {
-      return { command: current, claimed: false, reason: "cooldown", remainingSeconds: globalRemaining };
-    }
-    const userCooldown = await db.prepare(
-      `SELECT last_used_at
-         FROM text_command_user_cooldowns
-        WHERE channel_id = ? AND command_name = ? AND user_id = ?`,
-    ).bind(channelId, name, userId).first<UserCooldownRow>();
-    const userRemaining = cooldownRemaining(userCooldown?.last_used_at ?? null, now, current.userCooldownSeconds);
-    if (variableChange !== null && userRemaining === 0) return { command: current, claimed: false, reason: "variable_update_failed" };
-    return {
-      command: current,
-      claimed: false,
-      reason: userRemaining > 0 ? "user_cooldown" : "cooldown",
-      remainingSeconds: userRemaining,
-    };
+    return explainUnclaimed(db, current, commandBeforeClaim, now, userId, variableChange !== null);
   },
 });
+
+export const peekClaim = async (
+  db: D1Database,
+  channelId: string,
+  name: string,
+  now: string,
+  userId?: string | null,
+  userCooldownSeconds = 0,
+  _prepareVariableChange?: PrepareTextCommandVariableChange,
+  variableAmount?: number | null,
+  knownCommand?: TextCommand,
+): Promise<TextCommandClaim | null> => {
+  void userCooldownSeconds;
+  const currentRow = await db.prepare(
+    `SELECT ${textCommandSelectColumns}
+       FROM text_commands
+      WHERE channel_id = ? AND command_name = ?`,
+  ).bind(channelId, name).first<TextCommandRow>();
+  if (currentRow === null) return null;
+  const current = mapTextCommand(currentRow);
+  const eligibleRow = await db.prepare(
+    `SELECT ${textCommandSelectColumns}
+       FROM text_commands
+      WHERE channel_id = ? AND command_name = ? AND ${CLAIM_ELIGIBLE_SQL}`,
+  ).bind(channelId, name, now, knownCommand?.revision ?? null, knownCommand?.revision ?? null,
+    userId ?? null, channelId, name, userId ?? null, now).first<TextCommandRow>();
+  if (eligibleRow === null) {
+    return explainUnclaimed(db, current, knownCommand ?? null, now, userId, false);
+  }
+
+  const command = mapTextCommand(eligibleRow);
+  const action = command.variableAction;
+  let changedVariable: { name: string; value: number } | undefined;
+  if (action !== null && (action.operation !== "set_argument" || variableAmount !== null && variableAmount !== undefined)) {
+    const amount = action.operation === "set_argument" ? variableAmount ?? 0 : action.amount ?? 0;
+    const variable = await db.prepare(
+      "SELECT value FROM channel_variables WHERE channel_id = ? AND name = ?",
+    ).bind(channelId, action.name).first<{ value: number }>();
+    if (variable === null) return { command, claimed: false, reason: "variable_update_failed" };
+    const value = nextVariableValue(variable.value, action.operation, amount);
+    if (value !== variable.value) changedVariable = { name: action.name, value };
+  }
+
+  return {
+    command: { ...command, lastUsedAt: now, updatedAt: now, useCount: command.useCount + 1 },
+    claimed: true,
+    ...(changedVariable === undefined ? {} : { changedVariable, changedVariableOverlayIds: [] }),
+  };
+};
+
+export const createTextCommandPeekRepository = (db: D1Database): TextCommandRepository => {
+  const repository = createTextCommandRepository(db, () => {
+    throw new Error("Mutations are unavailable in a text-command dry-run.");
+  });
+  return {
+    ...repository,
+    claim: (channelId, name, now, userId, userCooldownSeconds, prepareVariableChange, variableAmount, knownCommand) =>
+      peekClaim(db, channelId, name, now, userId, userCooldownSeconds, prepareVariableChange, variableAmount, knownCommand),
+  };
+};
 
 /** Creates the built-in list command as a normal row once, when the module is enabled. */
 export const initializeListCommand = async (

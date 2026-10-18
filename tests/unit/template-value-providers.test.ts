@@ -111,6 +111,40 @@ describe("template value providers", () => {
     expect(resolveBlocks).toHaveBeenCalledWith(["welcome"], expect.any(Object));
   });
 
+  it("adds a template note when a text-block lookup fails instead of hiding the raw token", async () => {
+    const sources = {
+      DB: {} as D1Database,
+      dryRun: true,
+      channelInfo: () => Promise.resolve(null),
+      channelGameId: () => Promise.resolve(null),
+      channelTimeZone: () => Promise.resolve("Europe/Berlin"),
+      channelLocation: () => Promise.resolve(null),
+      templateValueProviders: [{
+        moduleId: "text_library",
+        templateVariableNamespace: "text_blocks" as const,
+        variables: [],
+        resolveTemplateValues: () => Promise.reject(new Error("Text block lookup failed.")),
+      }],
+      streamState: () => Promise.resolve("offline" as const),
+      channelDetails: () => Promise.resolve(null),
+      streamDetails: () => Promise.resolve(null),
+      followedAt: () => Promise.resolve(null),
+      followerTotal: () => Promise.resolve(null),
+      chattersTotal: () => Promise.resolve(null),
+      userCreatedAt: () => Promise.resolve(null),
+      channelLanguage: () => Promise.resolve("en" as const),
+      readChannelVariables: () => Promise.resolve({}),
+    } as TemplateResolverSources;
+
+    const result = await createTemplateRenderer(event, "chat_command", [], sources)("{text.welcome}", {});
+
+    expect(result.text).toBe("{text.welcome}");
+    expect(result.diagnostics).toContainEqual({
+      code: "template.lookup_unavailable",
+      detail: { name: "text.welcome" },
+    });
+  });
+
   it("uses the provider's bilingual unavailable text when resolving its values fails", async () => {
     const sources = {
       channelLanguage: () => Promise.resolve("de" as const),
@@ -134,6 +168,7 @@ describe("template value providers", () => {
     const result = await createTemplateRenderer(event, "event", [], sources)("{weather.temp}", {});
 
     expect(result.text).toBe("Wetterdaten fehlen.");
+    expect(result.diagnostics).toContainEqual({ code: "template.lookup_unavailable", detail: { name: "weather.temp" } });
   });
 
   it("keeps event-only raid variables from shadowing host variables in a command preview", async () => {

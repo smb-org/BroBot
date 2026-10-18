@@ -2,6 +2,7 @@ import type { Hono } from "hono";
 import type { ComponentType } from "react";
 import type { z } from "zod";
 import type { AuditWriteAction, ChannelRole, ChannelStreamState, ChannelVariableOperation, ChatOutputTarget } from "../contracts/values";
+import type { DryRunEntryReport } from "../contracts/dry-run";
 import type { TemplateContext, TemplateFields, TemplateVariable } from "../template";
 import type { SettingsEditorDefinition } from "../dashboard/ui";
 import { prepareChannelModuleSettingsWrite } from "./repository/channel-module-storage";
@@ -663,6 +664,25 @@ export interface ModuleExecutionContext {
   getAlarmPlan?: (alarmKey: string) => Promise<ModuleAlarmPlan | null>;
 }
 
+/** Read-only capabilities available while a chat message is being simulated. */
+export type ModuleDryRunContext = Pick<ModuleExecutionContext,
+  | "DB"
+  | "botUserId"
+  | "streamState"
+  | "channelInfo"
+  | "channelGameId"
+  | "channelLanguage"
+  | "channelTimeZone"
+  | "readChannelVariables"
+  | "renderTemplate"
+  | "followedAt"
+  | "userCreatedAt"
+  | "secureRandomInteger"
+> & {
+  /** Host-resolved default chat target, so modules do not need another lookup. */
+  defaultChatTarget: ChatOutputTarget;
+};
+
 /** Durable storage and alarm access given to a module alarm handler. */
 export interface ModuleAlarmContext {
   DB: D1Database;
@@ -969,6 +989,12 @@ export interface ModuleTemplateValueContext {
   publicOrigin?: string;
   /** Shared across the providers involved in a single template render. */
   externalFetchBudget?: ModuleExternalFetchBudget;
+  /** Resolves provider values from cache only and suppresses provider status writes. */
+  readOnly?: boolean;
+  /** Marks template resolution performed as part of a chat dry run. */
+  dryRun?: boolean;
+  /** Simulated last-chosen indices shared by all renders in one dry-run request. */
+  textBlockSelectionState?: Map<string, number>;
   /** Runs a registered module alarm through its channel Durable Object. */
   runModuleAlarm?: (moduleId: string, handlerKey: string, alarmKey: string, invocation?: unknown) => Promise<unknown>;
   /** Renders a module-owned nested fragment with the same host values and channel context. */
@@ -997,10 +1023,14 @@ export interface ModuleTemplateConditionContext {
   externalFetchBudget?: ModuleExternalFetchBudget;
   /** Prevents provider lookups or cache fills when resolving a panel read. */
   readOnly?: boolean;
+  /** Marks template condition resolution performed as part of a chat dry run. */
+  dryRun?: boolean;
   now: number;
   commandInput?: { commandName: string; arguments: string; usageText?: string };
   /** Records a source label when a condition uses values from this module. */
   addTemplateValueAttribution?: (text: string) => void;
+  /** Adds a note to the current template evaluation. */
+  addDiagnostic?: (diagnostic: ModuleDiagnostic) => void;
   /** Records the UTC instant when a resolved condition value may next change, for overlay refresh scheduling. */
   addTemplateConditionNextChangeAt?: (at: string) => void;
   /** Flags a transient lookup failure so the host schedules a short retry, without rejecting the batch. */
@@ -1686,6 +1716,11 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
     event: ModuleEvent<z.output<SettingsSchema>>,
     context: ModuleExecutionContext,
   ) => ModuleResult | Promise<ModuleResult>;
+  /** Reuses the production service with read-only adapters and describes its effects without executing them. */
+  dryRunChatMessage?: (
+    event: ModuleEvent<z.output<SettingsSchema>>,
+    context: ModuleDryRunContext,
+  ) => Promise<readonly DryRunEntryReport[]>;
   /** Called on first enable to create module-specific initial data. */
   onEnable?: (
     context: ModuleEnableContext,

@@ -43,6 +43,9 @@ export interface TemplateResolverSources {
   moduleSecrets?: (moduleId: string) => ModuleSecretReadAccess;
   publicOrigin?: string;
   externalFetchBudget?: ModuleExternalFetchBudget;
+  readOnly?: boolean;
+  dryRun?: boolean;
+  textBlockSelectionState?: Map<string, number>;
   runModuleAlarm?: ModuleTemplateValueContext["runModuleAlarm"];
   channelInfo: () => Promise<ModuleChannelInfo | null>;
   channelGameId?: () => Promise<string | null>;
@@ -383,6 +386,9 @@ export const createTemplateRenderer = (
     channelLocation: sources.channelLocation,
     ...(sources.publicOrigin === undefined ? {} : { publicOrigin: sources.publicOrigin }),
     externalFetchBudget,
+    ...(sources.readOnly === true ? { readOnly: true } : {}),
+    ...(sources.dryRun === true ? { dryRun: true } : {}),
+    ...(sources.textBlockSelectionState === undefined ? {} : { textBlockSelectionState: sources.textBlockSelectionState }),
     ...(sources.runModuleAlarm === undefined ? {} : { runModuleAlarm: sources.runModuleAlarm }),
     renderTemplate: renderNestedTemplate,
     addDiagnostic,
@@ -406,11 +412,19 @@ export const createTemplateRenderer = (
             channelLocation: sources.channelLocation,
             ...(sources.publicOrigin === undefined ? {} : { publicOrigin: sources.publicOrigin }),
             externalFetchBudget,
+            ...(sources.readOnly === true ? { readOnly: true } : {}),
+            ...(sources.dryRun === true ? { dryRun: true } : {}),
             ...(commandInput === undefined ? {} : { commandInput }),
             addTemplateValueAttribution: addAttribution,
+            ...(sources.dryRun === true ? { addDiagnostic } : {}),
             now,
           });
         } catch {
+          if (sources.dryRun === true) {
+            names.forEach((name) => {
+              addDiagnostic({ code: "template.lookup_unavailable", detail: { name } });
+            });
+          }
           continue;
         }
         for (const name of names) {
@@ -446,12 +460,17 @@ export const createTemplateRenderer = (
     try {
       resolved = await provider.resolveTemplateValues(requestedNames, providerContextFor(provider.moduleId));
     } catch {
-      if (mode === "overlay") {
-        requestedNames.forEach((name) => { addDiagnostic({ code: "template.lookup_unavailable", detail: { name } }); });
+      if (mode === "overlay" || sources.dryRun === true) {
+        requestedNames.forEach((name) => {
+          addDiagnostic({
+            code: "template.lookup_unavailable",
+            detail: { name: provider.templateVariableNamespace === "text_blocks" ? `text.${name}` : name },
+          });
+        });
       }
       if (provider.templateVariableNamespace === "text_blocks" || provider.templateUnavailableText === undefined) continue;
       for (const name of requestedNames) values[name] = provider.templateUnavailableText[language];
-      if (mode !== "overlay") {
+      if (mode !== "overlay" && sources.dryRun !== true) {
         requestedNames.forEach((name) => { addDiagnostic({ code: "template.lookup_unavailable", detail: { name } }); });
       }
       continue;
@@ -460,7 +479,9 @@ export const createTemplateRenderer = (
       const value: unknown = resolved[name];
       const tokenName = namespace === undefined ? name : namespacedTokenName(name, namespace);
       if (typeof value === "string") values[tokenName] = value;
-      else if (mode === "overlay") addDiagnostic({ code: "template.lookup_unavailable", detail: { name: tokenName } });
+      else if (mode === "overlay" || (sources.dryRun === true && namespace === "text_blocks")) {
+        addDiagnostic({ code: "template.lookup_unavailable", detail: { name: tokenName } });
+      }
     }
   }
   const parameterValuesByToken = new Map<string, string>();
@@ -483,7 +504,7 @@ export const createTemplateRenderer = (
     } catch {
       const unavailable = provider.templateUnavailableText?.[language];
       if (unavailable !== undefined) parameterValuesByToken.set(`${name}\u0000${parameter ?? ""}`, unavailable);
-      else addDiagnostic({ code: "template.lookup_unavailable", detail: { name } });
+      addDiagnostic({ code: "template.lookup_unavailable", detail: { name } });
     }
   }
   for (const provider of sources.templateValueProviders ?? []) {

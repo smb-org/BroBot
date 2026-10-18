@@ -35,12 +35,15 @@ const LOOKUP_FAILURE_RETRY_MS = 30_000;
 const errorTextsFor = (settings: WeatherSettings) => settings.errorTexts;
 
 const placeFor = async (
-  context: Pick<ModuleTemplateValueContext, "channelLocation" | "channelLanguage" | "commandInput">,
-): Promise<{ location: ModuleChannelLocation | null; unknownPlace: boolean }> => {
+  context: Pick<ModuleTemplateValueContext, "channelLocation" | "channelLanguage" | "commandInput" | "readOnly">,
+): Promise<{ location: ModuleChannelLocation | null; unknownPlace: boolean; deferredLive: boolean }> => {
   const requestedPlace = context.commandInput?.arguments.trim() ?? "";
-  if (requestedPlace.length === 0) return { location: await context.channelLocation(), unknownPlace: false };
+  if (requestedPlace.length > 0 && context.readOnly === true) return { location: null, unknownPlace: false, deferredLive: true };
+  if (requestedPlace.length === 0) return { location: await context.channelLocation(), unknownPlace: false, deferredLive: false };
   const lookup = await geocodeWeatherPlace(requestedPlace, await context.channelLanguage());
-  return lookup.kind === "found" ? { location: lookup.location, unknownPlace: false } : { location: null, unknownPlace: true };
+  return lookup.kind === "found"
+    ? { location: lookup.location, unknownPlace: false, deferredLive: false }
+    : { location: null, unknownPlace: true, deferredLive: false };
 };
 const valuesFor = async (
   names: readonly string[],
@@ -54,9 +57,30 @@ const valuesFor = async (
       const text = weatherModuleCatalog[language].unknownPlace;
       return Object.fromEntries(names.map((name) => [name, text]));
     }
+    if (place.deferredLive) {
+      if (context.dryRun === true) {
+        names.forEach((name) => {
+          context.addDiagnostic({ code: "template.deferred_live", detail: { name } });
+        });
+      }
+      return {};
+    }
     const location = place.location;
     if (location === null || !validChannelTimeZone(location.timeZone)) throw new Error("Weather location is unavailable.");
-    const cached = await fetchCachedWeather(context.DB, settings.provider, location.latitude, location.longitude, context.now);
+    const cached = context.readOnly === true
+      ? await readWeatherCache(context.DB, settings.provider, location.latitude, location.longitude, context.now)
+      : await fetchCachedWeather(context.DB, settings.provider, location.latitude, location.longitude, context.now);
+    if (cached === null) {
+      if (context.readOnly === true) {
+        if (context.dryRun === true) {
+          names.forEach((name) => {
+            context.addDiagnostic({ code: "template.deferred_live", detail: { name } });
+          });
+        }
+        return {};
+      }
+      throw new Error("Weather data is not cached.");
+    }
     const result = resolveWeatherValues({
       names,
       locationName: location.name,
@@ -68,6 +92,11 @@ const valuesFor = async (
     context.addTemplateValueAttribution?.(settings.provider === "met_norway" ? "MET Norway" : "Open-Meteo");
     return result;
   } catch {
+    if (context.dryRun === true) {
+      names.forEach((name) => {
+        context.addDiagnostic({ code: "template.lookup_unavailable", detail: { name } });
+      });
+    }
     const message = errorTextsFor(settings)[language];
     return Object.fromEntries(names.map((name) => [name, message]));
   }
@@ -79,9 +108,13 @@ const resolveConditions = async (
 ): Promise<Readonly<Record<string, string>>> => {
   if (!ids.includes("weather.condition")) return {};
   try {
+    if (context.readOnly === true && (context.commandInput?.arguments.trim().length ?? 0) > 0) {
+      if (context.dryRun === true) context.addDiagnostic?.({ code: "template.deferred_live", detail: { name: "weather.condition" } });
+      return {};
+    }
     const [settings, locationSetting] = await Promise.all([
       readWeatherSettings(context.DB, context.channelId),
-      context.commandInput?.arguments.trim()
+      context.readOnly !== true && context.commandInput?.arguments.trim()
         ? geocodeWeatherPlace(context.commandInput.arguments, "en").then((result) => result.kind === "found" ? result.location : null)
         : context.channelLocation(),
     ]);
@@ -89,12 +122,18 @@ const resolveConditions = async (
     const cached = context.readOnly
       ? await readWeatherCache(context.DB, settings.provider, locationSetting.latitude, locationSetting.longitude, context.now)
       : await fetchCachedWeather(context.DB, settings.provider, locationSetting.latitude, locationSetting.longitude, context.now);
-    if (cached === null) return {};
+    if (cached === null) {
+      if (context.readOnly === true && context.dryRun === true) {
+        context.addDiagnostic?.({ code: "template.deferred_live", detail: { name: "weather.condition" } });
+      }
+      return {};
+    }
     const condition: WeatherCondition = cached.weather.condition;
     context.addTemplateValueAttribution?.(settings.provider === "met_norway" ? "MET Norway" : "Open-Meteo");
     context.addTemplateConditionNextChangeAt?.(new Date(cached.expiresAt).toISOString());
     return { "weather.condition": condition };
   } catch {
+    if (context.dryRun === true) context.addDiagnostic?.({ code: "template.lookup_unavailable", detail: { name: "weather.condition" } });
     return {};
   }
 };

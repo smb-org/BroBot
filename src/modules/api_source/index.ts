@@ -24,6 +24,13 @@ const apiSourceNameForVariable = (name: string): string | null => {
   return match?.[1] ?? null;
 };
 
+class ApiSourceDeferredLiveError extends Error {
+  public constructor() {
+    super("API source has no cached response for this read-only render.");
+    this.name = "ApiSourceDeferredLiveError";
+  }
+}
+
 const recordFailure = async (
   source: ApiSource,
   context: ModuleTemplateValueContext | ModuleTemplateConditionContext,
@@ -41,7 +48,7 @@ const sourcePayload = (
   if ("readOnly" in context && context.readOnly) {
     return readCachedApiSourceJson(context.DB, context.channelId, source.url, context.publicOrigin, context.now)
       .then((cached) => {
-        if (cached === null) throw new Error("API source has no cached response.");
+        if (cached === null) throw new ApiSourceDeferredLiveError();
         return cached;
       });
   }
@@ -153,7 +160,11 @@ const resolveConditionValues = async (
     let value: unknown;
     try {
       value = await outputFor(name, context);
-    } catch {
+    } catch (failure: unknown) {
+      if (failure instanceof ApiSourceDeferredLiveError && context.readOnly === true && context.dryRun === true) {
+        context.addDiagnostic?.({ code: "template.deferred_live", detail: { name: `api.${name}` } });
+        return [id, null] as const;
+      }
       // A failing source only makes its own condition unavailable; healthy ones still resolve.
       context.reportTemplateLookupFailure?.();
       return [id, null] as const;
@@ -203,7 +214,11 @@ export const apiSourceModule: BotModule<typeof settingsSchema> = {
       try {
         const value = await outputFor(sourceName, context);
         return [name, formatApiSourceValue(value)] as const;
-      } catch {
+      } catch (failure: unknown) {
+        if (failure instanceof ApiSourceDeferredLiveError && "readOnly" in context && context.readOnly) {
+          if ("addDiagnostic" in context) context.addDiagnostic({ code: "template.deferred_live", detail: { name } });
+          return [name, null] as const;
+        }
         return [name, unavailableText[await context.channelLanguage()]] as const;
       }
     }));

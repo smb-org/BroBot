@@ -27,7 +27,7 @@ import { overlayElementIdCollisionGuard, referencedVariablesGuard } from "../../
 import { platformRolesSql } from "../../src/worker/platform/repository";
 import { channelStateQuery } from "../../src/worker/panel/repository";
 import { apiSourceReferenceQuery } from "../../src/modules/api_source/routes";
-import { textCommandSelectColumns } from "../../src/modules/text_commands/adapters/d1";
+import { CLAIM_ELIGIBLE_SQL, textCommandSelectColumns } from "../../src/modules/text_commands/adapters/d1";
 import { blockUsageExistsSql, textBlockCategorySelectColumns, textBlockSelectColumns } from "../../src/modules/text_library/adapters/d1";
 import { chatVoteSelectColumns, chatVoteTemplateSelectColumns } from "../../src/modules/chat_voting/repository";
 import {
@@ -154,6 +154,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["placeholders", "?, ?, ?"],
   ["channelStateQuery", channelStateQuery],
   ["textCommandSelectColumns", textCommandSelectColumns],
+  ["CLAIM_ELIGIBLE_SQL", CLAIM_ELIGIBLE_SQL],
   ["quotedIdColumn", '"faq_id"'],
   ["quotedItemNameColumn", '"name"'],
   ["quotedTableName", '"faq_entries"'],

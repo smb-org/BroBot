@@ -38,6 +38,7 @@ import { escapeLoginLikeTerm, hasLoginIdentityMatchingPattern } from "../db/logi
 import { memberRouter } from "./member-routes";
 import { fetchTwitchUsersById } from "../twitch/user-resolution";
 import { moduleRouter } from "./module-routes";
+import { dryRunRouter } from "./dry-run-routes";
 import { variableRouter } from "./variable-routes";
 import { overlayRouter } from "./overlay-routes";
 import { overlayAccessRouter } from "./overlay-access-routes";
@@ -240,6 +241,7 @@ panelRouter.get(
 
 panelRouter.route("/", memberRouter);
 panelRouter.route("/", moduleRouter);
+panelRouter.route("/", dryRunRouter);
 panelRouter.route("/", variableRouter);
 panelRouter.route("/", overlayRouter);
 panelRouter.route("/", overlayAccessRouter);
