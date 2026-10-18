@@ -268,7 +268,10 @@ test("issue 438 layout regressions stay aligned at the requested viewports", asy
       expect(moderatorBox.width).toBeLessThanOrEqual(200);
       expect(moderatorRowBox.height).toBeLessThanOrEqual(52);
       expect((await box(systemRow)).height).toBeLessThanOrEqual(52);
+      const statusRowHeights = await page.locator(".system-page__status-list .state-row").evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height));
+      expect(statusRowHeights.every((height) => height >= 40 && height <= 48)).toBe(true);
     }
+    expect(await moderatorButton.getAttribute("class")).toContain("ui-button--neutral");
     if (viewport.width > 640) expect(Math.abs((moderatorBox.y + moderatorBox.height / 2) - (moderatorRowBox.y + moderatorRowBox.height / 2))).toBeLessThanOrEqual(2);
 
     await freshRoute(page, viewport, `/channels/${channelId}/members`);
@@ -375,12 +378,18 @@ test("member detail is a plain full-width column and closing returns focus to it
   await expect(editor).toBeVisible();
   const detailBox = await box(detail);
   const editorBox = await box(editor);
-  expect(detailBox.x + detailBox.width - (editorBox.x + editorBox.width)).toBeLessThanOrEqual(2);
+  const detailPadding = await detail.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { left: Number.parseFloat(style.paddingLeft), right: Number.parseFloat(style.paddingRight) };
+  });
+  expect(Math.abs(editorBox.x - detailBox.x - detailPadding.left)).toBeLessThanOrEqual(1);
+  expect(Math.abs(editorBox.width - (detailBox.width - detailPadding.left - detailPadding.right))).toBeLessThanOrEqual(2);
   expect(await editor.evaluate((element) => [getComputedStyle(element).borderTopWidth, getComputedStyle(element).paddingLeft, getComputedStyle(element).backgroundColor])).toEqual(["0px", "0px", "rgba(0, 0, 0, 0)"]);
-  const title = await box(editor.locator("h3").first());
+  const title = await box(editor.locator(".inspector-section__heading h3"));
   const close = editor.getByRole("button", { name: "Schließen" });
   const closeBox = await box(close);
-  expect(Math.abs((title.y + title.height / 2) - (closeBox.y + closeBox.height / 2))).toBeLessThanOrEqual(4);
+  expect(title.x + title.width).toBeLessThanOrEqual(closeBox.x + 1);
+  expect(Math.abs((title.y + title.height / 2) - (closeBox.y + closeBox.height / 2))).toBeLessThanOrEqual(2);
   await close.focus();
   await page.keyboard.press("Enter");
   await expect(editor).toHaveCount(0);
