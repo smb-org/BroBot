@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactEle
 
 import type { ModuleOverlayRealtimeEnvelope, ModuleOverlayRealtimeMessageType, RealtimeEnvelope } from "../realtime-contract";
 import { sanitizeOverlayCss } from "../contracts/overlay-css";
+import { channelVariableTemplateNames } from "../contracts/channel-variable-template";
 import { connectOverlayRealtime } from "./realtime";
 import { OverlayCanvas } from "./canvas";
 import type { OverlayBootstrapData, OverlayElementData, OverlayLanguage } from "./model";
@@ -106,8 +107,10 @@ const parseBootstrap = (value: unknown): OverlayBootstrapData | null => {
 };
 
 const referencedVariableNames = (bootstrap: OverlayBootstrapData): Set<string> => new Set(
-  bootstrap.overlay?.elements.flatMap((element) =>
-    element.variableName !== null && VARIABLE_NAME_PATTERN.test(element.variableName) ? [element.variableName] : []) ?? [],
+  bootstrap.overlay?.elements.flatMap((element) => [
+    ...(element.variableName !== null && VARIABLE_NAME_PATTERN.test(element.variableName) ? [element.variableName] : []),
+    ...channelVariableTemplateNames(element.text).filter((name) => VARIABLE_NAME_PATTERN.test(name)),
+  ]) ?? [],
 );
 
 const applyVariableMessage = (

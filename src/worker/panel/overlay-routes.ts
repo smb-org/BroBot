@@ -63,7 +63,7 @@ const elementSchema = z.object({
   kind: z.string().min(1).max(80),
   label: z.string().max(40).default(""),
   variableName: z.string().regex(VARIABLE_PATTERN).nullable().default(null),
-  // Legacy text can have zero or many markers; the renderer substitutes the first and preserves the remaining text.
+  // Legacy text can have zero or many markers; recognized markers are substituted and bare text stays literal.
   text: z.string().refine((value) => templateTextLength(value) <= 100).default("{value}"),
   config: z.record(z.string(), z.json()).default({}),
   x: z.number().int().default(0),
@@ -77,23 +77,22 @@ const createOverlaySchema = z.object({
   name: nameSchema,
   width: z.number().int().min(64).max(3840).default(1920),
   height: z.number().int().min(64).max(2160).default(1080),
-  initialElement: elementSchema.optional(),
+  elements: z.array(elementSchema).max(OVERLAY_ELEMENT_MAXIMUM_COUNT).default([]),
 }).strict().superRefine((input, context) => {
-  const element = input.initialElement;
-  if (element === undefined) return;
-  if (element.kind !== "variable" && element.variableName !== null) {
-    context.addIssue({ code: "custom", path: ["initialElement", "variableName"], message: "element variable reference does not match its kind" });
-  }
-  if (element.x < 0 || element.x > input.width) {
-    context.addIssue({ code: "custom", path: ["initialElement", "x"], message: "x is outside the overlay" });
-  }
-  if (element.y < 0 || element.y > input.height) {
-    context.addIssue({ code: "custom", path: ["initialElement", "y"], message: "y is outside the overlay" });
-  }
-  if (parseOverlayElementConfig(element.kind, element.config) === null ||
-      new TextEncoder().encode(JSON.stringify(element.config)).byteLength > OVERLAY_ELEMENT_CONFIG_MAXIMUM_BYTES) {
-    context.addIssue({ code: "custom", path: ["initialElement", "config"], message: "config is invalid" });
-  }
+  const identifiers = new Set<string>();
+  input.elements.forEach((element, index) => {
+    if (identifiers.has(element.id)) context.addIssue({ code: "custom", path: ["elements", index, "id"], message: "duplicate element id" });
+    identifiers.add(element.id);
+    if (element.kind !== "variable" && element.variableName !== null) {
+      context.addIssue({ code: "custom", path: ["elements", index, "variableName"], message: "element variable reference does not match its kind" });
+    }
+    if (element.x < 0 || element.x > input.width) context.addIssue({ code: "custom", path: ["elements", index, "x"], message: "x is outside the overlay" });
+    if (element.y < 0 || element.y > input.height) context.addIssue({ code: "custom", path: ["elements", index, "y"], message: "y is outside the overlay" });
+    if (parseOverlayElementConfig(element.kind, element.config) === null ||
+        new TextEncoder().encode(JSON.stringify(element.config)).byteLength > OVERLAY_ELEMENT_CONFIG_MAXIMUM_BYTES) {
+      context.addIssue({ code: "custom", path: ["elements", index, "config"], message: "config is invalid" });
+    }
+  });
 });
 
 const updateOverlaySchema = z.object({
@@ -140,6 +139,34 @@ const legacyOverlayImportSchema = z.object({
   text: z.string().refine((value) => templateTextLength(value) <= 100),
 }).strict();
 
+const invalidVariableReferenceResponse = (
+  elements: readonly Pick<OverlayDraftElement, "variableName">[],
+  invalidVariableNames: readonly string[],
+) => {
+  const invalidNames = new Set(invalidVariableNames);
+  const fieldErrors: Record<string, string> = {};
+  elements.forEach((element, index) => {
+    if (element.variableName !== null && invalidNames.has(element.variableName)) {
+      fieldErrors[`elements.${String(index)}.variableName`] = "invalid_variable_reference";
+    }
+  });
+  return { error: "overlay_variable_reference_invalid" satisfies ApiErrorCode, fieldErrors };
+};
+
+const missingVariableNames = async (
+  db: D1Database,
+  channelId: string,
+  elements: readonly Pick<OverlayDraftElement, "variableName">[],
+): Promise<string[]> => {
+  const referencedNames = [...new Set(elements.flatMap((element) =>
+    element.variableName === null ? [] : [element.variableName]))];
+  const missing: string[] = [];
+  for (const variableName of referencedNames) {
+    if (!await hasChannelVariableForOverlay(db, channelId, variableName)) missing.push(variableName);
+  }
+  return missing;
+};
+
 const managementDenied = (context: { json: (body: { error: string }, status: 403) => Response }): Response =>
   context.json({ error: "overlay_management_denied" }, 403);
 
@@ -162,14 +189,17 @@ overlayRouter.post("/api/channels/:channelId/overlays", async (context) => {
   if (!parsed.success) return context.json({ error: "overlay_data_invalid" }, 400);
 
   const channelId = context.req.param("channelId");
-  const parsedInitialElement = parsed.data.initialElement as OverlayDraftElement | undefined;
-  const initialElement = parsedInitialElement === undefined ? undefined : {
-    ...parsedInitialElement,
-    config: parseOverlayElementConfig(parsedInitialElement.kind, parsedInitialElement.config) ?? {},
-  };
-  if (initialElement !== undefined && initialElement.variableName !== null &&
-      !await hasChannelVariableForOverlay(context.env.DB, channelId, initialElement.variableName)) {
-    return context.json({ error: "overlay_data_invalid" satisfies ApiErrorCode }, 400);
+  const elements = parsed.data.elements.map((element) => ({
+    ...element,
+    config: parseOverlayElementConfig(element.kind, element.config) ?? {},
+  })) as OverlayDraftElement[];
+  const requiredModuleIds = [...new Set(elements.flatMap((element) => {
+    const registered = moduleOverlayElementForKind(element.kind, MODULES);
+    return registered === null || registered.module.mandatory === true ? [] : [registered.module.id];
+  }))];
+  const invalidVariableNames = await missingVariableNames(context.env.DB, channelId, elements);
+  if (invalidVariableNames.length > 0) {
+    return context.json(invalidVariableReferenceResponse(elements, invalidVariableNames), 400);
   }
   const now = nowIso();
   const id = crypto.randomUUID();
@@ -179,7 +209,8 @@ overlayRouter.post("/api/channels/:channelId/overlays", async (context) => {
     name: parsed.data.name,
     width: parsed.data.width,
     height: parsed.data.height,
-    ...(initialElement === undefined ? {} : { initialElement }),
+    elements,
+    requiredModuleIds,
   }, now);
   if (created.changes > 0) {
     const overlay = await getOverlayForChannel(context.env.DB, channelId, id);
@@ -187,11 +218,27 @@ overlayRouter.post("/api/channels/:channelId/overlays", async (context) => {
     await publishOverlayChanged(context.env.CHANNEL, channelId, [{ overlayId: id, revision: overlay.revision }]);
     return context.json({ overlay }, 201);
   }
+  const missingCreatedVariableNames = await missingVariableNames(context.env.DB, channelId, elements);
+  if (missingCreatedVariableNames.length > 0) {
+    return context.json(invalidVariableReferenceResponse(elements, missingCreatedVariableNames), 400);
+  }
   if (!await isOverlayManagementAllowed(context.env.DB, actorOf(context), channelId, now)) {
     return managementDenied(context);
   }
   if (await countOverlaysForChannel(context.env.DB, channelId) >= OVERLAY_MAXIMUM_COUNT) {
     return context.json({ error: "overlay_limit_reached" }, 409);
+  }
+  if (requiredModuleIds.length > 0) {
+    const disabledModule = await context.env.DB.prepare(
+      `SELECT required.value AS module_id
+         FROM json_each(?) AS required
+        WHERE NOT EXISTS (
+          SELECT 1 FROM channel_modules AS module
+           WHERE module.channel_id = ? AND module.module_id = required.value AND module.enabled = 1
+        )
+        LIMIT 1`,
+    ).bind(JSON.stringify(requiredModuleIds), channelId).first<{ module_id: string }>();
+    if (disabledModule !== null) return context.json({ error: "overlay_data_invalid" satisfies ApiErrorCode }, 400);
   }
   return context.json({ error: "overlay_changed_concurrently" }, 409);
 });
@@ -275,7 +322,9 @@ overlayRouter.put("/api/channels/:channelId/overlays/:overlayId", async (context
   if (result.outcome === "not_found") return context.json({ error: "overlay_not_found" }, 404);
   if (result.outcome === "forbidden") return managementDenied(context);
   if (result.outcome === "element_limit") return context.json({ error: "overlay_element_limit_reached" }, 409);
-  if (result.outcome === "invalid_reference") return context.json({ error: "overlay_data_invalid" }, 400);
+  if (result.outcome === "invalid_reference") {
+    return context.json(invalidVariableReferenceResponse(draft.elements, result.variableNames), 400);
+  }
   if (result.outcome === "element_id_conflict") return context.json({ error: "overlay_element_id_conflict" }, 409);
   if (result.outcome === "reconnect_conflict") return context.json({
     error: "overlay_changed_concurrently",

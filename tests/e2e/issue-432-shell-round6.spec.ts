@@ -165,7 +165,7 @@ const installOverlayFixture = async (page: Page): Promise<void> => {
   });
 };
 
-test("the narrow desktop overlay preview uses one shell offset and does not cover the focused layer field", async ({ page }) => {
+test("the narrow desktop overlay preview follows the page header and does not cover the focused layer field", async ({ page }) => {
   await page.setViewportSize({ width: 1000, height: 800 });
   await installOverlayFixture(page);
   await page.goto(`/channels/${overlayChannelId}/overlays/${overlayId}`);
@@ -175,17 +175,25 @@ test("the narrow desktop overlay preview uses one shell offset and does not cove
   const geometry = await page.evaluate(() => {
     const preview = document.querySelector<HTMLElement>(".overlay-editor__preview-panel");
     const input = document.querySelector<HTMLElement>("#overlay-editor-z");
-    if (preview === null || input === null) throw new Error("The overlay preview and layer input must render.");
+    const header = document.querySelector<HTMLElement>(".page-header");
+    if (preview === null || input === null || header === null) throw new Error("The page header, overlay preview, and layer input must render.");
     const previewBox = preview.getBoundingClientRect();
     const inputBox = input.getBoundingClientRect();
+    const headerBox = header.getBoundingClientRect();
+    const previewStyle = getComputedStyle(preview);
     return {
       previewTop: previewBox.top,
+      headerBottom: headerBox.bottom,
+      previewPosition: previewStyle.position,
+      shellOffsetTop: previewStyle.top,
       inputInViewport: inputBox.top >= 64 && inputBox.bottom <= window.innerHeight,
       overlaps: previewBox.left < inputBox.right && previewBox.right > inputBox.left && previewBox.top < inputBox.bottom && previewBox.bottom > inputBox.top,
     };
   });
-  expect(geometry.previewTop).toBeGreaterThanOrEqual(75);
-  expect(geometry.previewTop).toBeLessThanOrEqual(80);
+  expect(geometry.previewTop).toBeGreaterThanOrEqual(geometry.headerBottom);
+  expect(geometry.previewTop - geometry.headerBottom).toBeLessThanOrEqual(32);
+  expect(geometry.previewPosition).toBe("sticky");
+  expect(geometry.shellOffsetTop).toBe("12px");
   expect(geometry.inputInViewport).toBe(true);
   expect(geometry.overlaps).toBe(false);
 });

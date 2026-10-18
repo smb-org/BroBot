@@ -194,17 +194,15 @@ export const getOverlayVariableValues = async (
   overlayId: string,
 ): Promise<Record<string, number>> => {
   const rows = await db.prepare(
-    `SELECT variable.name, variable.value
+    `SELECT DISTINCT variable.name, variable.value
        FROM channel_variables AS variable
+       JOIN overlay_elements AS element
+         ON element.channel_id = variable.channel_id
+        AND element.overlay_id = ?
+        AND (element.variable_name = variable.name OR instr(element.text, '{var.' || variable.name || '}') > 0)
       WHERE variable.channel_id = ?
-        AND variable.name IN (
-          SELECT DISTINCT element.variable_name
-            FROM overlay_elements AS element
-           WHERE element.channel_id = ? AND element.overlay_id = ?
-             AND element.variable_name IS NOT NULL
-        )
       ORDER BY variable.name`,
-  ).bind(channelId, channelId, overlayId).all<{ name: string; value: number }>();
+  ).bind(overlayId, channelId).all<{ name: string; value: number }>();
   return Object.fromEntries(rows.results.map(({ name, value }) => [name, value]));
 };
 
@@ -231,41 +229,69 @@ export const overlayElementIdCollisionGuard = (elementCount: number): string => 
             AND NOT (conflicting_element.channel_id = ? AND conflicting_element.overlay_id = ?)
        )`;
 
+/** Checks all referenced channel variables in the same statement as the overlay mutation. */
+export const referencedVariablesGuard = `
+        AND NOT EXISTS (
+          SELECT 1
+            FROM json_each(?) AS referenced_variable
+           WHERE NOT EXISTS (
+             SELECT 1 FROM channel_variables
+              WHERE channel_id = ? AND name = referenced_variable.value
+           )
+        )`;
+
 export const createOverlayWithAudit = async (
   db: D1Database,
   actor: ActorContext,
-  input: { id: string; channelId: string; name: string; width: number; height: number; initialElement?: OverlayDraftElement },
+  input: {
+    id: string;
+    channelId: string;
+    name: string;
+    width: number;
+    height: number;
+    elements?: readonly OverlayDraftElement[];
+    requiredModuleIds?: readonly string[];
+  },
   changedAt: string,
 ): Promise<{ changes: number; rowsWritten: number }> => {
+  const referencedVariableNames = [...new Set((input.elements ?? []).flatMap((element) =>
+    element.variableName === null ? [] : [element.variableName]))];
   const mutation = db.prepare(
     `INSERT INTO overlays (overlay_id, channel_id, name, width, height, revision, created_at, updated_at)
      SELECT ?, ?, ?, ?, ?, 1, ?, ?
       WHERE (SELECT COUNT(*) FROM overlays WHERE channel_id = ?) < ?
-        AND (? = 0 OR EXISTS (SELECT 1 FROM channel_variables WHERE channel_id = ? AND name = ?))
+        ${referencedVariablesGuard}
+        AND NOT EXISTS (
+          SELECT 1 FROM json_each(?) AS required_module
+           WHERE NOT EXISTS (
+             SELECT 1 FROM channel_modules
+              WHERE channel_id = ? AND module_id = required_module.value AND enabled = 1
+           )
+        )
         ${actorGuard(MANAGING_ROLES)}`,
   ).bind(input.id, input.channelId, input.name, input.width, input.height, changedAt, changedAt,
     input.channelId, OVERLAY_MAXIMUM_COUNT,
-    input.initialElement?.kind === "variable" ? 1 : 0,
-    input.channelId, input.initialElement?.variableName ?? "",
+    JSON.stringify(referencedVariableNames), input.channelId,
+    JSON.stringify([...new Set(input.requiredModuleIds ?? [])]), input.channelId,
     ...bindActorGuard(actor, input.channelId, changedAt));
-  const elementWrite = input.initialElement === undefined ? [] : [db.prepare(
+  const elements = input.elements ?? [];
+  const elementWrites = elements.map((element) => db.prepare(
     `INSERT INTO overlay_elements
       (element_id, channel_id, overlay_id, kind, label, variable_name, text, config_json, x, y,
        scale_percent, z, in_composition, missing_variable_name)
      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL WHERE changes() > 0`,
-  ).bind(input.initialElement.id, input.channelId, input.id, input.initialElement.kind, input.initialElement.label,
-    input.initialElement.variableName, input.initialElement.text, JSON.stringify(input.initialElement.config),
-    input.initialElement.x, input.initialElement.y, input.initialElement.scalePercent, input.initialElement.z,
-    input.initialElement.inComposition ? 1 : 0)];
+  ).bind(element.id, input.channelId, input.id, element.kind, element.label,
+    element.variableName, element.text, JSON.stringify(element.config), element.x, element.y,
+    element.scalePercent, element.z, element.inComposition ? 1 : 0));
   const audit = prepareAudit(db, actor.userId, changedAt, input.channelId, null, "overlay.created", null, {
     overlayId: input.id,
     name: input.name,
     width: input.width,
     height: input.height,
     revision: 1,
-    elementCount: input.initialElement === undefined ? 0 : 1,
+    elementCount: elements.length,
   });
-  const results = await db.batch([mutation, ...elementWrite, audit]);
+  const results = await db.batch([mutation, ...elementWrites, audit]);
   return { changes: results[0]?.meta.changes ?? 0, rowsWritten: rowsWritten(results) };
 };
 
@@ -393,25 +419,6 @@ export const isOverlayManagementAllowed = async (
     .bind(channelId, ...bindActorGuard(actor, channelId, now)).first<{ allowed: number }>();
   return row !== null;
 };
-
-/**
- * A manager can delete a channel variable between the pre-check in the
- * service and this batch. Folding the check into the CAS guard -- instead
- * of only checking before the batch -- means a variable removed in that
- * window fails the UPDATE the same way a stale revision does, so the
- * dependent element INSERT (which would otherwise violate its foreign key
- * and roll back the whole batch) is skipped via `changes() > 0` like the
- * other guard failures.
- */
-export const referencedVariablesGuard = `
-        AND NOT EXISTS (
-          SELECT 1
-            FROM json_each(?) AS referenced_variable
-           WHERE NOT EXISTS (
-             SELECT 1 FROM channel_variables
-              WHERE channel_id = ? AND name = referenced_variable.value
-           )
-        )`;
 
 export const updateOverlayDraftWithAudit = async (
   db: D1Database,

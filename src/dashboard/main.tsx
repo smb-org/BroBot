@@ -1546,8 +1546,7 @@ export const DashboardApp = (): ReactElement => {
           ? route.editorOverlayId === undefined
             ? <OverlaysPage key={dashboardRoutePath(route)} channelId={route.channelId} canManage={canManage(selectedChannel.role)} onOpenEditor={(overlayId) => { navigate({ kind: "channel", channelId: route.channelId, section: "overlays", editorOverlayId: overlayId }); }} {...(route.overlayId === undefined ? {} : { initialSelection: route.overlayId })} />
             : <OverlayEditorPage key={dashboardRoutePath(route)} channelId={route.channelId} overlayId={route.editorOverlayId} canManage={canManage(selectedChannel.role)} language={selectedChannel.language} {...(route.initialVariable === undefined ? {} : { initialVariable: route.initialVariable })} {...(route.initialOverlayName === undefined ? {} : { initialOverlayName: route.initialOverlayName })} onBack={() => { navigate({ kind: "channel", channelId: route.channelId, section: "overlays" }); }} onOverlayCreated={(overlayId) => {
-              const path = dashboardRoutePath({ kind: "channel", channelId: route.channelId, section: "overlays", editorOverlayId: overlayId });
-              window.history.replaceState(window.history.state, "", path);
+              replaceDashboardRoute({ kind: "channel", channelId: route.channelId, section: "overlays", editorOverlayId: overlayId });
             }} />
           : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModuleWorkspace channelId={route.channelId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onNavigate={navigate} onToggleModule={toggleModuleEnabled} /> : null}

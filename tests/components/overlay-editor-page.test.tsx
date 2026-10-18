@@ -8,6 +8,7 @@ import { OverlayEditorPage } from "../../src/dashboard/OverlayEditorPage";
 import { dashboardDataKeys } from "../../src/dashboard/data/keys";
 import { createDashboardQueryClient } from "../../src/dashboard/data/client";
 import { UiProvider } from "../../src/dashboard/ui";
+import { runDashboardNavigationGuards } from "../../src/dashboard/ui/navigation-guard";
 import { jsonResponse } from "../unit/fixtures";
 import { clickSelectOption, renderWithQuery as render } from "../query-test-utils";
 
@@ -1007,13 +1008,13 @@ describe("Overlay composition editor", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
-    await waitFor(() => expect(document.querySelectorAll(".overlay-editor__element-list li")).toHaveLength(2));
+    await waitFor(() => expect(document.querySelectorAll(".overlay-editor__element-list tbody tr")).toHaveLength(2));
     expect(window.location.search).toBe("");
     expect(screen.getByRole("button", { name: "Speichern" })).toBeEnabled();
     expect(fetcher.mock.calls.filter(([input, init]) => requestUrl(input).pathname.endsWith("/overlays/overlay-a") && init?.method === "PUT")).toHaveLength(0);
   });
 
-  it("keeps a new overlay local until Save and drops it when discarded", async () => {
+  it("keeps a new overlay local while its creation dialog is open", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = requestUrl(input);
       if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
@@ -1031,16 +1032,33 @@ describe("Overlay composition editor", () => {
     fireEvent.click(await screen.findByText("{var.score}"));
     fireEvent.click(await screen.findByRole("button", { name: "In Overlay verwenden" }));
     fireEvent.click(await screen.findByRole("button", { name: "Editor öffnen" }));
-    expect(await screen.findByRole("heading", { name: "Overlay score", level: 1 })).toBeInTheDocument();
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("heading", { name: "Overlay erstellen" })).toBeInTheDocument();
+    expect(screen.queryByText("Ungespeicherte Änderungen")).not.toBeInTheDocument();
     expect(fetcher.mock.calls.filter(([input, init]) => requestUrl(input).pathname === "/api/channels/kanal-a/overlays" && init?.method === "POST")).toHaveLength(0);
 
-    fireEvent.click(screen.getByRole("button", { name: "Entwurf verwerfen" }));
-    fireEvent.click(screen.getByRole("button", { name: "Zurück zu Overlays" }));
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Name" }), { target: { value: "Score Entwurf" } });
+    let navigationProceeded = false;
+    act(() => runDashboardNavigationGuards(() => { navigationProceeded = true; }, () => undefined));
+    expect(await screen.findByRole("heading", { name: "Ungespeicherte Änderungen" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Weiter bearbeiten" }));
+    expect(within(dialog).getByRole("textbox", { name: "Name" })).toHaveValue("Score Entwurf");
+    expect(navigationProceeded).toBe(false);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Schließen" }));
+    expect(await screen.findByRole("heading", { name: "Ungespeicherte Änderungen" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Weiter bearbeiten" }));
+    expect(within(dialog).getByRole("textbox", { name: "Name" })).toHaveValue("Score Entwurf");
+    expect(screen.queryByRole("heading", { name: "Ungespeicherte Änderungen" })).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Schließen" }));
+    expect(await screen.findByRole("heading", { name: "Ungespeicherte Änderungen" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Verwerfen und verlassen" }));
     expect(await screen.findByRole("heading", { name: "Overlays", level: 1 })).toBeInTheDocument();
     expect(fetcher.mock.calls.filter(([input, init]) => requestUrl(input).pathname === "/api/channels/kanal-a/overlays" && init?.method === "POST")).toHaveLength(0);
   });
 
-  it("creates a new overlay only when Save is pressed", async () => {
+  it("creates an overlay and its OBS link in the creation dialog", async () => {
+    const createdOverlay: { current: typeof initialOverlay | null } = { current: null };
+    let accessIssueCount = 0;
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = requestUrl(input);
       if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
@@ -1049,12 +1067,25 @@ describe("Overlay composition editor", () => {
       if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
       if (url.pathname === "/api/channels/kanal-a/overlays" && init?.method === "POST") {
         if (typeof init.body !== "string") throw new Error("Overlay create body must be JSON text.");
-        const body = JSON.parse(init.body) as { name: string; width: number; height: number; initialElement?: typeof initialOverlay.elements[number] };
-        return Promise.resolve(jsonResponse({ overlay: {
+        const body = JSON.parse(init.body) as { name: string; width: number; height: number; elements: typeof initialOverlay.elements };
+        createdOverlay.current = {
           ...initialOverlay,
           id: "overlay-new", name: body.name, width: body.width, height: body.height, css: "", revision: 1,
-          elements: body.initialElement === undefined ? [] : [body.initialElement],
-        } }, 201));
+          elements: body.elements,
+        };
+        return Promise.resolve(jsonResponse({ overlay: createdOverlay.current }, 201));
+      }
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-new/accesses" && init?.method === "POST") {
+        accessIssueCount += 1;
+        const tokenId = `access-new${accessIssueCount === 1 ? "" : `-${String(accessIssueCount)}`}`;
+        const secret = `secret${accessIssueCount === 1 ? "" : `-${String(accessIssueCount)}`}`;
+        return Promise.resolve(jsonResponse({ tokenId, overlayUrl: `https://brobot.example.test/overlay?token=${secret}`, label: "OBS-Einbindung", expiresAt: null }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-new/accesses") {
+        return Promise.resolve(jsonResponse({ accesses: [{ tokenId: "access-new", overlayId: "overlay-new", label: "OBS-Einbindung", createdAt: "2026-09-24T10:00:00.000Z", expiresAt: null, revokedAt: null, lastUsedAt: null, recoverable: true }], activeCount: 1, maximum: 10 }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-new") {
+        return Promise.resolve(jsonResponse({ overlay: createdOverlay.current }));
       }
       return Promise.reject(new Error(`Unexpected request ${init?.method ?? "GET"} ${url.pathname}`));
     });
@@ -1062,14 +1093,231 @@ describe("Overlay composition editor", () => {
     window.history.replaceState({}, "", "/channels/kanal-a/overlays/new?name=Overlay+score&variable=score");
     render(<DashboardApp />);
 
-    expect(await screen.findByRole("heading", { name: "Overlay score", level: 1 })).toBeInTheDocument();
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("heading", { name: "Overlay erstellen" })).toBeInTheDocument();
     expect(fetcher.mock.calls.filter(([input, init]) => requestUrl(input).pathname === "/api/channels/kanal-a/overlays" && init?.method === "POST")).toHaveLength(0);
-    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+    fireEvent.click(within(dialog).getByRole("combobox", { name: "Breite × Höhe" }));
+    clickSelectOption(await screen.findByRole("option", { name: "Eigene Fläche", hidden: true }));
+    expect(within(dialog).getByRole("spinbutton", { name: "Breite" })).toBeVisible();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Weiter" }));
+    expect(within(dialog).getByRole("status")).toHaveTextContent("1 / 20");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Hinzufügen" }));
+    expect(within(dialog).getByRole("status")).toHaveTextContent("2 / 20");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Overlay anlegen und OBS-Link erstellen" }));
     await waitFor(() => expect(fetcher.mock.calls.filter(([input, init]) => requestUrl(input).pathname === "/api/channels/kanal-a/overlays" && init?.method === "POST")).toHaveLength(1));
+    expect(await within(dialog).findByText("https://brobot.example.test/overlay?token=secret")).toBeInTheDocument();
+    expect(fetcher.mock.calls.filter(([input, init]) => requestUrl(input).pathname === "/api/channels/kanal-a/overlays/overlay-new/accesses" && init?.method === "POST")).toHaveLength(1);
+    expect(createdOverlay.current?.elements).toHaveLength(2);
+    expect(fetcher.mock.calls.filter(([input, init]) => requestUrl(input).pathname.endsWith("/overlays/overlay-new") && init?.method === "PUT")).toHaveLength(0);
+    expect(within(dialog).queryByRole("button", { name: "Zurück" })).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Zum Editor" }));
+    expect(await screen.findByRole("heading", { name: "Overlay score", level: 1 })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(fetcher.mock.calls.filter(([input, init]) => requestUrl(input).pathname === "/api/channels/kanal-a/overlays/overlay-new" && init?.method === "PUT")).toHaveLength(0);
   });
 
-  it("shows operator add, row-remove and Save actions disabled with the read-only reason", async () => {
+  it("keeps a persisted overlay on the element step and retries access issuance after a failure", async () => {
+    const client = createDashboardQueryClient();
+    let overlayCreateCount = 0;
+    let accessIssueCount = 0;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlays" && init?.method === "POST") {
+        overlayCreateCount += 1;
+        return Promise.resolve(jsonResponse({ overlay: {
+          ...initialOverlay, id: "overlay-retry", name: "Overlay Retry", css: "", revision: 1, elements: [],
+        } }, 201));
+      }
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-retry/accesses" && init?.method === "POST") {
+        accessIssueCount += 1;
+        if (accessIssueCount === 1) return Promise.reject(new Error("Access service unavailable."));
+        return Promise.resolve(jsonResponse({
+          tokenId: "access-retry", overlayUrl: "https://brobot.example.test/overlay?token=secret-retry",
+          label: "OBS integration", expiresAt: null,
+        }, 201));
+      }
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-retry/accesses") {
+        return Promise.resolve(jsonResponse({ accesses: [{
+          tokenId: "access-retry", overlayId: "overlay-retry", label: "OBS integration",
+          createdAt: "2026-09-24T10:00:00.000Z", expiresAt: null, revokedAt: null, lastUsedAt: null, recoverable: true,
+        }], activeCount: 1, maximum: 10 }));
+      }
+      return Promise.reject(new Error(`Unexpected request ${init?.method ?? "GET"} ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const view = render(<UiProvider><OverlayEditorPage
+      channelId="kanal-a" overlayId="new" canManage language="en" initialOverlayName="Overlay Retry"
+      onBack={vi.fn()} onOverlayCreated={vi.fn()}
+    /></UiProvider>, undefined, { queryClient: client, gcTime: 600_000 });
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Weiter" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Overlay anlegen und OBS-Link erstellen" }));
+
+    expect(await within(dialog).findByText("Das Overlay wurde erstellt, aber der OBS-Link fehlt. Erstelle einen neuen Link.")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "OBS-Link erneut erstellen" })).toBeEnabled();
+    expect(within(dialog).queryByRole("button", { name: "Zurück" })).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "OBS-Link erneut erstellen" }));
+
+    expect(await within(dialog).findByText("https://brobot.example.test/overlay?token=secret-retry")).toBeInTheDocument();
+    expect(overlayCreateCount).toBe(1);
+    expect(accessIssueCount).toBe(2);
+    view.unmount();
+  });
+
+  it("cancels an old access read before retrying after permission returns", async () => {
+    const client = createDashboardQueryClient();
+    const accessKey = dashboardDataKeys.overlayAccesses("kanal-a", "overlay-retry");
+    let resolveStaleAccessList: ((response: Response) => void) | undefined;
+    let accessIssueCount = 0;
+    let accessListReadCount = 0;
+    const issuedAccess = (tokenId: string, revokedAt: string | null = null, expiresAt: string | null = null) => ({
+      tokenId, overlayId: "overlay-retry", label: "OBS integration", createdAt: "2026-09-24T10:00:00.000Z",
+      expiresAt, revokedAt, lastUsedAt: null, recoverable: true,
+    });
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlays" && init?.method === "POST") {
+        return Promise.resolve(jsonResponse({ overlay: { ...initialOverlay, id: "overlay-retry", name: "Overlay Retry", css: "", revision: 1, elements: [] } }, 201));
+      }
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-retry/accesses" && init?.method === "POST") {
+        accessIssueCount += 1;
+        return Promise.resolve(jsonResponse({
+          tokenId: `access-${String(accessIssueCount)}`,
+          overlayUrl: `https://brobot.example.test/overlay?token=secret-${String(accessIssueCount)}`,
+          label: "OBS integration", expiresAt: null,
+        }, 201));
+      }
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-retry/accesses") {
+        accessListReadCount += 1;
+        if (accessListReadCount === 1) return new Promise<Response>((resolve) => { resolveStaleAccessList = resolve; });
+        return Promise.resolve(jsonResponse({ accesses: [issuedAccess("access-2")], activeCount: 1, maximum: 10 }));
+      }
+      return Promise.reject(new Error(`Unexpected request ${init?.method ?? "GET"} ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const renderPage = (canManage: boolean) => <UiProvider><OverlayEditorPage
+      channelId="kanal-a" overlayId="new" canManage={canManage} language="en" initialOverlayName="Overlay Retry"
+      onBack={vi.fn()} onOverlayCreated={vi.fn()}
+    /></UiProvider>;
+    const view = render(renderPage(true), undefined, { queryClient: client, gcTime: 600_000 });
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Weiter" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Overlay anlegen und OBS-Link erstellen" }));
+    expect(await within(dialog).findByText("https://brobot.example.test/overlay?token=secret-1")).toBeInTheDocument();
+    await waitFor(() => expect(resolveStaleAccessList).toBeTypeOf("function"));
+
+    view.rerender(renderPage(false));
+    expect(within(dialog).queryByText("https://brobot.example.test/overlay?token=secret-1")).not.toBeInTheDocument();
+    expect(await within(dialog).findByRole("button", { name: "OBS-Link erneut erstellen" })).toBeDisabled();
+    view.rerender(renderPage(true));
+    fireEvent.click(within(dialog).getByRole("button", { name: "OBS-Link erneut erstellen" }));
+    expect(await within(dialog).findByText("https://brobot.example.test/overlay?token=secret-2")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveStaleAccessList?.(jsonResponse({ accesses: [issuedAccess("old-revoked", "2026-09-24T09:00:00.000Z")], activeCount: 0, maximum: 10 }));
+      await Promise.resolve();
+    });
+    expect(within(dialog).getByText("https://brobot.example.test/overlay?token=secret-2")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Link kopieren" })).toBeEnabled();
+    await waitFor(() => expect(client.getQueryData<{ accesses: readonly { tokenId: string }[] }>(accessKey)?.accesses[0]?.tokenId).toBe("access-2"));
+    act(() => {
+      client.setQueryData(accessKey, {
+        accesses: [issuedAccess("access-2", null, new Date(Date.now() - 1_000).toISOString())], activeCount: 0, maximum: 10,
+      });
+    });
+    const expiredAccess = client.getQueryData<{ accesses: readonly { tokenId: string; expiresAt: string | null }[] }>(accessKey)?.accesses[0];
+    expect(expiredAccess?.tokenId).toBe("access-2");
+    expect(typeof expiredAccess?.expiresAt).toBe("string");
+    expect(Date.parse(expiredAccess?.expiresAt ?? "")).toBeLessThan(Date.now());
+    await waitFor(() => expect(within(dialog).queryByText("https://brobot.example.test/overlay?token=secret-2")).not.toBeInTheDocument());
+    expect(within(dialog).queryByRole("button", { name: "Link kopieren" })).not.toBeInTheDocument();
+    view.unmount();
+  });
+
+  it("keeps an issued link through stale access data and clears it on revoke or permission loss", async () => {
+    const client = createDashboardQueryClient();
+    const accessKey = dashboardDataKeys.overlayAccesses("kanal-a", "overlay-new");
+    let resolveFirstIssue: ((response: Response) => void) | undefined;
+    let resolveFreshAccessList: ((response: Response) => void) | undefined;
+    let accessIssueCount = 0;
+    let accessListReadCount = 0;
+    const issuedAccess = (tokenId: string, revokedAt: string | null = null) => ({
+      tokenId, overlayId: "overlay-new", label: "OBS-Einbindung", createdAt: "2026-09-24T10:00:00.000Z",
+      expiresAt: null, revokedAt, lastUsedAt: null, recoverable: true,
+    });
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlays" && init?.method === "POST") {
+        return Promise.resolve(jsonResponse({ overlay: { ...initialOverlay, id: "overlay-new", name: "Overlay Race", css: "", revision: 1, elements: [] } }, 201));
+      }
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-new/accesses" && init?.method === "POST") {
+        accessIssueCount += 1;
+        if (accessIssueCount === 1) return new Promise<Response>((resolve) => { resolveFirstIssue = resolve; });
+        client.setQueryData(accessKey, { accesses: [issuedAccess("old-revoked", "2026-09-24T09:00:00.000Z")], activeCount: 0, maximum: 10 });
+        return Promise.resolve(jsonResponse({
+          tokenId: `access-${String(accessIssueCount)}`,
+          overlayUrl: `https://brobot.example.test/overlay?token=secret-${String(accessIssueCount)}`,
+          label: "OBS-Einbindung", expiresAt: null,
+        }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-new/accesses") {
+        accessListReadCount += 1;
+        if (accessListReadCount === 1) return new Promise<Response>((resolve) => { resolveFreshAccessList = resolve; });
+        return Promise.resolve(jsonResponse({ accesses: [issuedAccess("access-3")], activeCount: 1, maximum: 10 }));
+      }
+      return Promise.reject(new Error(`Unexpected request ${init?.method ?? "GET"} ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const renderPage = (canManage: boolean) => <UiProvider><OverlayEditorPage
+      channelId="kanal-a" overlayId="new" canManage={canManage} language="en" initialOverlayName="Overlay Race"
+      onBack={vi.fn()} onOverlayCreated={vi.fn()}
+    /></UiProvider>;
+    const view = render(renderPage(true), undefined, { queryClient: client, gcTime: 600_000 });
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Weiter" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Overlay anlegen und OBS-Link erstellen" }));
+    await waitFor(() => expect(resolveFirstIssue).toBeTypeOf("function"));
+
+    view.rerender(renderPage(false));
+    await act(async () => {
+      resolveFirstIssue?.(jsonResponse({ tokenId: "access-1", overlayUrl: "https://brobot.example.test/overlay?token=secret-1", label: "OBS-Einbindung", expiresAt: null }));
+      await Promise.resolve();
+    });
+    expect(screen.queryByText("https://brobot.example.test/overlay?token=secret-1")).not.toBeInTheDocument();
+
+    view.rerender(renderPage(true));
+    fireEvent.click(within(dialog).getByRole("button", { name: "OBS-Link erneut erstellen" }));
+    await waitFor(() => expect(resolveFreshAccessList).toBeTypeOf("function"));
+    expect(await within(dialog).findByText("https://brobot.example.test/overlay?token=secret-2")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Link kopieren" })).toBeEnabled();
+    await act(async () => {
+      resolveFreshAccessList?.(jsonResponse({ accesses: [issuedAccess("access-2")], activeCount: 1, maximum: 10 }));
+      await Promise.resolve();
+    });
+
+    act(() => {
+      client.setQueryData(accessKey, { accesses: [issuedAccess("access-2", "2026-09-24T10:02:00.000Z")], activeCount: 0, maximum: 10 });
+    });
+    expect(await within(dialog).findByText("Der OBS-Zugang ist nicht mehr aktiv. Erstelle einen neuen Link.")).toBeInTheDocument();
+    expect(within(dialog).queryByText("https://brobot.example.test/overlay?token=secret-2")).not.toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "OBS-Link erneut erstellen" }));
+    expect(await within(dialog).findByText("https://brobot.example.test/overlay?token=secret-3")).toBeInTheDocument();
+    view.rerender(renderPage(false));
+    expect(within(dialog).queryByText("https://brobot.example.test/overlay?token=secret-3")).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Link kopieren" })).toBeDisabled();
+  });
+
+  it("shows operator properties as a read-only list with one reason", async () => {
     const operatorChannel = { ...channel, role: "operator" };
     const operatorOverlay = {
       ...initialOverlay,
@@ -1091,7 +1339,7 @@ describe("Overlay composition editor", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
-    const reason = screen.getByText("Nur Verwalter und Broadcaster können die Komposition ändern.", { selector: "p" });
+    const reason = screen.getByText("Bediener können die Komposition ansehen, aber nicht ändern.", { selector: "p" });
     expect(reason).toHaveAttribute("id", "overlay-editor-readonly-reason");
     const addElement = screen.getByRole("button", { name: "Element hinzufügen" });
     const removeElement = screen.getByRole("button", { name: "Entfernen: Score" });
@@ -1104,36 +1352,14 @@ describe("Overlay composition editor", () => {
       expect(action).toBeDisabled();
       expect(action).toHaveAttribute("aria-describedby", "overlay-editor-readonly-reason");
     }
-    fireEvent.click(screen.getByRole("tab", { name: "Stil-Editor" }));
-    expect(screen.getByText("Bediener dürfen den Overlay-Stil ansehen, aber nicht ändern.", { selector: "p" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Textfarbe")).toBeDisabled();
-    const styleTarget = screen.getByRole("combobox", { name: "Stil anwenden auf" });
-    expect(styleTarget).toBeEnabled();
-    fireEvent.click(styleTarget);
-    clickSelectOption(await screen.findByRole("option", { name: "Element: Score", hidden: true }));
-    expect(screen.getByRole("spinbutton", { name: "Schriftgröße" })).toHaveValue(28);
-    expect(screen.getByLabelText("Textfarbe")).toHaveValue("#123456");
-    const outlineWidth = screen.getByRole("spinbutton", { name: "Konturstärke" });
-    expect(outlineWidth).toHaveValue(2);
-    expect(outlineWidth).toBeDisabled();
-    const shadowDisclosure = screen.getByRole("button", { name: /^Schatten/ });
-    expect(shadowDisclosure).toHaveAttribute("aria-expanded", "false");
-    fireEvent.click(shadowDisclosure);
-    const shadowX = screen.getByRole("spinbutton", { name: "Schatten X-Versatz" });
-    expect(shadowX).toBeDisabled();
-    const shadowReasonId = shadowX.getAttribute("aria-describedby");
-    expect(shadowReasonId).not.toBeNull();
-    expect(shadowReasonId?.split(" ")).toContain("overlay-style-disabled-reason");
-    expect(document.getElementById("overlay-style-disabled-reason")).toHaveTextContent("Bediener dürfen den Overlay-Stil ansehen, aber nicht ändern.");
-    const systemFont = screen.getByRole("combobox", { name: "Systemschrift auswählen" });
-    expect(systemFont).toBeDisabled();
-    const styleReasonId = systemFont.getAttribute("aria-describedby");
-    expect(styleReasonId?.split(" ")).toContain("overlay-style-disabled-reason");
-    expect(document.getElementById("overlay-style-disabled-reason")).toHaveTextContent("Bediener dürfen den Overlay-Stil ansehen, aber nicht ändern.");
-    fireEvent.click(screen.getByRole("tab", { name: "CSS-Code" }));
-    expect(screen.getByText("Bediener können das Overlay-CSS kopieren, aber nicht ändern.", { selector: "p" })).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "CSS-Code" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "CSS kopieren" })).toBeEnabled();
+    expect(screen.getAllByText("Bediener können die Komposition ansehen, aber nicht ändern.", { selector: "p" })).toHaveLength(1);
+    const properties = document.querySelector<HTMLElement>(".overlay-editor__properties");
+    expect(properties?.querySelector("[data-testid=overlay-editor-readonly-properties]")).not.toBeNull();
+    expect(properties?.querySelectorAll("input, textarea, select, [role=combobox], [role=tab]")).toHaveLength(0);
+    expect(within(properties as HTMLElement).getByText("Score: {value}")).toBeInTheDocument();
+    expect(within(properties as HTMLElement).getByText(/font-size: 28px/)).toBeInTheDocument();
+    expect(within(properties as HTMLElement).getByText(/color: #123456/)).toBeInTheDocument();
+    expect(within(properties as HTMLElement).getByText(/brobot:style:begin/)).toBeInTheDocument();
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "PUT")).toBe(false);
   });
 
@@ -1273,7 +1499,7 @@ describe("Overlay composition editor", () => {
     expect(fetcher.mock.calls.filter(([input, init]) => requestUrl(input).pathname.endsWith("/overlays/overlay-a") && init?.method === "PUT")).toHaveLength(1);
   });
 
-  it("keeps selected and dashed preview bounds visible when authored CSS hides element outlines", async () => {
+  it("shows only the selected preview bound when authored CSS hides element outlines", async () => {
     Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
     const firstElement = initialOverlay.elements[0];
     if (firstElement === undefined) throw new Error("Overlay test element is missing.");
@@ -1299,7 +1525,7 @@ describe("Overlay composition editor", () => {
     await waitFor(() => {
       const bounds = previewFrame?.contentDocument?.querySelector<HTMLElement>("[data-brobot-editor-bounds-layer]")?.shadowRoot;
       expect(bounds?.querySelector('[data-brobot-editor-bound="element-a"]')).toBeInTheDocument();
-      expect(bounds?.querySelector('[data-brobot-editor-bound="element-b"]')).toBeInTheDocument();
+      expect(bounds?.querySelector('[data-brobot-editor-bound="element-b"]')).toBeNull();
     });
     const previewDocument = previewFrame?.contentDocument;
     const boundsHost = previewDocument?.querySelector<HTMLElement>("[data-brobot-editor-bounds-layer]");
@@ -1308,9 +1534,8 @@ describe("Overlay composition editor", () => {
     const unselectedBound = bounds?.querySelector<HTMLElement>('[data-brobot-editor-bound="element-b"]');
     expect(selectedBound).toHaveAttribute("data-selected", "true");
     expect(selectedBound?.style.borderStyle).toBe("solid");
-    expect(unselectedBound).toHaveAttribute("data-selected", "false");
-    expect(unselectedBound?.style.borderStyle).toBe("dashed");
-    expect(unselectedBound?.closest(".brobot-overlay")).toBeNull();
+    expect(selectedBound?.style.borderWidth).toBe("1px");
+    expect(unselectedBound).toBeNull();
     expect(previewDocument?.querySelector("style[data-brobot-overlay-css]")?.textContent).toContain("outline: none !important");
     const renderedElement = previewDocument?.querySelector<HTMLElement>('[data-element="element-a"]');
     if (renderedElement === null || renderedElement === undefined) throw new Error("Overlay preview element is missing.");
@@ -1324,7 +1549,7 @@ describe("Overlay composition editor", () => {
     fireEvent.click(secondElementButton);
     await waitFor(() => {
       expect(bounds?.querySelector('[data-brobot-editor-bound="element-b"]')).toHaveAttribute("data-selected", "true");
-      expect(bounds?.querySelector('[data-brobot-editor-bound="element-a"]')).toHaveAttribute("data-selected", "false");
+      expect(bounds?.querySelector('[data-brobot-editor-bound="element-a"]')).toBeNull();
     });
     fireEvent.click(screen.getByRole("button", { name: "Remove: Score" }));
     await waitFor(() => expect(bounds?.querySelector('[data-brobot-editor-bound="element-a"]')).not.toBeInTheDocument());

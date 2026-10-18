@@ -194,7 +194,7 @@ export const createOverlay = (channelId: string, input: {
   name: string;
   width: number;
   height: number;
-  initialElement?: Omit<PanelOverlayElement, "missingVariableName">;
+  elements: readonly Omit<PanelOverlayElement, "missingVariableName">[];
 }): Promise<{ overlay: PanelOverlay }> =>
   requestMutation(overlaysPath(channelId), "POST", input);
 

@@ -4,6 +4,7 @@ import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { panelRouter } from "../../src/worker/panel/routes";
 import { publishOverlayChanged } from "../../src/worker/realtime";
+import { prepareResetChannelVariablesForStream } from "../../src/worker/db/channel-variables";
 import { createFaqRepository } from "../../src/modules/faq/adapters/d1";
 import type { RealtimeMessage } from "../../src/realtime-contract";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
@@ -86,6 +87,37 @@ describe("Channel variable routes", () => {
     expect(renamed.status).toBe(200);
     expect(deleted.status).toBe(204);
     expect(reconcileLegacyChatVoteResultDeliveries).toHaveBeenCalledTimes(3);
+  });
+
+  it("publishes stream resets to overlays that reference a variable only in text", async () => {
+    await insertChannel(database, "channel-a");
+    await database.prepare(
+      `INSERT INTO channel_variables (channel_id, name, value, reset_on_stream_start, created_at, updated_at)
+       VALUES ('channel-a', 'score', 9, 1, '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, started_at, stream_id)
+       VALUES ('channel-a', 'online', '2026-09-24T00:00:00.000Z', 'eventsub', '2026-09-24T00:00:00.000Z', 'stream-a')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+       VALUES ('overlay-a', 'channel-a', 'Gameplay', '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, variable_name, text)
+       VALUES ('element-a', 'channel-a', 'overlay-a', 'variable', NULL, 'Score: {var.score}')`,
+    ).run();
+
+    const reset = await prepareResetChannelVariablesForStream(
+      database as unknown as D1Database,
+      "channel-a",
+      "2026-09-24T00:00:00.000Z",
+      "2026-09-24T00:00:01.000Z",
+      "stream-a",
+    );
+
+    expect(reset).toEqual({ names: ["score"], overlayIdsByVariable: { score: ["overlay-a"] } });
+    await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'score'").first()).resolves.toEqual({ value: 0 });
   });
 
   it("lets operators change values while keeping variable management for managers", async () => {
@@ -356,6 +388,33 @@ describe("Channel variable routes", () => {
     ).first()).resolves.toEqual({ message_text: longTemplate });
   });
 
+  it("returns a localized API error when renaming an overlay text token would exceed its limit", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    await fetchPanel("manager-a", "/api/channels/channel-a/variables", "POST", {
+      name: "score", value: 5, description: "", resetOnStreamStart: false,
+    });
+    await database.prepare(
+      `INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+       VALUES ('overlay-a', 'channel-a', 'Gameplay', '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, variable_name, text)
+       VALUES ('element-a', 'channel-a', 'overlay-a', 'variable', NULL, '{var.score} {var.score} {var.score}')`,
+    ).run();
+
+    const response = await fetchPanel("manager-a", "/api/channels/channel-a/variables/score", "PATCH", { newName: "p".repeat(32) });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "variable_rename_overlay_text_too_long",
+      usages: [{ moduleId: "overlays", itemName: "Gameplay", kind: "template", elementId: "element-a" }],
+    });
+    await expect(database.prepare("SELECT name FROM channel_variables WHERE channel_id = 'channel-a' AND name = 'score'").first())
+      .resolves.toEqual({ name: "score" });
+  });
+
   it("rechecks text block length inside the rename batch", async () => {
     await insertChannel(database, "channel-a");
     await insertLoginIdentityAndSession(database, "manager-a");
@@ -430,7 +489,7 @@ describe("Channel variable routes", () => {
         kind: "variable",
         label: "Score",
         variableName: "score",
-        text: "Score {value}",
+        text: "Score {var.score} · {value}",
         config: {},
         x: 0,
         y: 0,
@@ -444,6 +503,9 @@ describe("Channel variable routes", () => {
 
     const renamed = await fetchPanel("manager-a", "/api/channels/channel-a/variables/score", "PATCH", { newName: "points" });
     expect(renamed.status).toBe(200);
+    await expect(database.prepare(
+      "SELECT variable_name, text FROM overlay_elements WHERE channel_id = 'channel-a' AND overlay_id = ?",
+    ).bind(overlayId).first()).resolves.toEqual({ variable_name: "points", text: "Score {var.points} · {value}" });
     await expect(database.prepare(
       "SELECT revision FROM overlays WHERE channel_id = 'channel-a' AND overlay_id = ?",
     ).bind(overlayId).first()).resolves.toEqual({ revision: 3 });
@@ -526,6 +588,38 @@ describe("Channel variable routes", () => {
     await expect(database.prepare(
       "SELECT COUNT(*) AS count FROM channel_variables WHERE channel_id = 'channel-a' AND name = 'score'",
     ).first()).resolves.toEqual({ count: 1 });
+  });
+
+  it("tracks namespaced overlay text references for variable deletion warnings", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    await fetchPanel("manager-a", "/api/channels/channel-a/variables", "POST", {
+      name: "score", value: 10, description: "", resetOnStreamStart: false,
+    });
+    await database.prepare(
+      `INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+       VALUES ('overlay-a', 'channel-a', 'Gameplay', '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO overlay_elements
+        (element_id, channel_id, overlay_id, kind, label, variable_name, text, config_json)
+       VALUES ('score-element', 'channel-a', 'overlay-a', 'variable', 'Display', NULL, 'Score: {var.score}', '{}')`,
+    ).run();
+
+    const listed = await fetchPanel("manager-a", "/api/channels/channel-a/variables");
+    expect(await listed.json()).toMatchObject({ variables: [{ usages: [{
+      moduleId: "overlays",
+      itemName: "Gameplay",
+      elementLabel: "Display",
+      kind: "display",
+    }] }] });
+
+    const deleted = await fetchPanel("manager-a", "/api/channels/channel-a/variables/score", "DELETE");
+    expect(deleted.status).toBe(204);
+    await expect(database.prepare(
+      "SELECT revision FROM overlays WHERE channel_id = 'channel-a' AND overlay_id = 'overlay-a'",
+    ).first()).resolves.toEqual({ revision: 2 });
   });
 
   it("rejects a stale value edit and writes no audit for the value written concurrently", async () => {

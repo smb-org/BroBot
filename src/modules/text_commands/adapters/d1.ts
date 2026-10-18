@@ -702,11 +702,14 @@ export const createTextCommandRepository = (
       "SELECT value FROM channel_variables WHERE channel_id = ? AND name = ?",
     ).bind(channelId, action?.name ?? "");
     const variableOverlayReferences = variableChange === null ? null : db.prepare(
-      `SELECT DISTINCT overlay_id
-         FROM overlay_elements
-        WHERE channel_id = ? AND variable_name = ?
-        ORDER BY overlay_id`,
-    ).bind(channelId, action?.name ?? "");
+      `SELECT DISTINCT element.overlay_id
+         FROM overlay_elements AS element
+         JOIN channel_variables AS variable
+           ON variable.channel_id = element.channel_id AND variable.name = ?
+        WHERE element.channel_id = ?
+          AND (element.variable_name = variable.name OR instr(element.text, '{var.' || variable.name || '}') > 0)
+        ORDER BY element.overlay_id`,
+    ).bind(action?.name ?? "", channelId);
     const statements: D1PreparedStatement[] = variableChange === null
       ? [claim]
       : [variableBefore as D1PreparedStatement, variableChange, claim];
