@@ -217,9 +217,13 @@ export function GroupedPicker<T = unknown>({
           return timing?.duration !== Infinity && timing?.iterations !== Infinity;
         })
         : [];
-      const exitEnd = animations.length > 0
-        ? Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)))
-        : new Promise<void>((resolve) => { window.setTimeout(resolve, transitionDurationMs(popup)); });
+      const duration = transitionDurationMs(popup);
+      // Reduced-motion CSS can leave a .01ms transition; retain the closing surface briefly so queued focus-trap timers settle first.
+      const exitEnd = duration <= 1
+        ? new Promise<void>((resolve) => { window.setTimeout(resolve, 150); })
+        : animations.length > 0
+          ? Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)))
+          : new Promise<void>((resolve) => { window.setTimeout(resolve, duration); });
       void exitEnd.then(() => {
         if (generation !== focusGeneration.current) return;
         popoverActionsRef.current?.unmount();
@@ -314,7 +318,7 @@ export function GroupedPicker<T = unknown>({
         {surface === "sheet" ? (
           <div className="ui-grouped-picker__mobile-header">
             <span className="ui-grouped-picker__handle" aria-hidden="true" />
-            <DialogPrimitive.Title id={`${surfacePanelId}-title`} render={<h2 />}>{messages.title}</DialogPrimitive.Title>
+            <DialogPrimitive.Title id={`${surfacePanelId}-title`}>{messages.title}</DialogPrimitive.Title>
             <Button icon="close" iconOnly ariaLabel={messages.closeLabel} variant="subtle" onClick={() => close(true)} />
           </div>
         ) : null}

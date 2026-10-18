@@ -18,7 +18,12 @@ test("TemplateTextField supports the brace, filter, insert, and Escape keyboard 
   await expect(page.getByRole("listbox", { name: "Choose a variable" })).toBeVisible();
   await expect(page.getByText("This module", { exact: true })).toBeVisible();
   await expect(page.getByText("nachtfalke", { exact: true })).toBeVisible();
-  await expect(page.getByRole("option", { name: /\{user\}/u })).toHaveCount(1);
+  const userOption = page.getByRole("option", { name: /\{user\}/u });
+  await expect(userOption).toHaveCount(1);
+  await expect(userOption).toHaveAttribute("tabindex", "-1");
+  const userOptionId = await userOption.getAttribute("id");
+  expect(userOptionId).not.toBeNull();
+  await expect(input).toHaveAttribute("aria-activedescendant", userOptionId ?? "");
   await expect(page.getByRole("option", { name: /\{viewers\}/u })).toHaveCount(0);
 
   const popup = await dropdown.boundingBox();

@@ -158,6 +158,7 @@ export function InlineSuggestionPicker<Option extends { name: string }>({
                       id={`${listboxId}-${option.name}`}
                       key={option.name}
                       role="option"
+                      tabIndex={-1}
                       aria-selected={index === activeIndex}
                       className="ui-template-text-field__suggestion"
                       onMouseDown={(event) => { event.preventDefault(); }}
