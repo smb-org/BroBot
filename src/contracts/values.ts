@@ -59,6 +59,19 @@ export const CHANNEL_VARIABLE_MAXIMUM_COUNT = 50;
 export const CHANNEL_VARIABLE_MINIMUM_VALUE = -999_999_999;
 export const CHANNEL_VARIABLE_MAXIMUM_VALUE = 999_999_999;
 
+/** Mirrors the arithmetic in prepareChannelVariableChange without changing D1. */
+export const nextVariableValue = (
+  currentValue: number,
+  operation: ChannelVariableOperation,
+  amount: number,
+): number => {
+  if (operation === "set" || operation === "set_argument") return amount;
+  if (operation === "add") {
+    return Math.max(CHANNEL_VARIABLE_MINIMUM_VALUE, Math.min(CHANNEL_VARIABLE_MAXIMUM_VALUE, currentValue + amount));
+  }
+  return Math.max(CHANNEL_VARIABLE_MINIMUM_VALUE, Math.min(CHANNEL_VARIABLE_MAXIMUM_VALUE, currentValue - amount));
+};
+
 /** Limits for the first stored-overlay editor iteration. */
 export const OVERLAY_MAXIMUM_COUNT = 20;
 export const OVERLAY_ELEMENT_MAXIMUM_COUNT = 20;

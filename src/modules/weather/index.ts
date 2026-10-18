@@ -35,10 +35,10 @@ const LOOKUP_FAILURE_RETRY_MS = 30_000;
 const errorTextsFor = (settings: WeatherSettings) => settings.errorTexts;
 
 const placeFor = async (
-  context: Pick<ModuleTemplateValueContext, "channelLocation" | "channelLanguage" | "commandInput">,
+  context: Pick<ModuleTemplateValueContext, "channelLocation" | "channelLanguage" | "commandInput" | "readOnly">,
 ): Promise<{ location: ModuleChannelLocation | null; unknownPlace: boolean }> => {
   const requestedPlace = context.commandInput?.arguments.trim() ?? "";
-  if (requestedPlace.length === 0) return { location: await context.channelLocation(), unknownPlace: false };
+  if (requestedPlace.length === 0 || context.readOnly === true) return { location: await context.channelLocation(), unknownPlace: false };
   const lookup = await geocodeWeatherPlace(requestedPlace, await context.channelLanguage());
   return lookup.kind === "found" ? { location: lookup.location, unknownPlace: false } : { location: null, unknownPlace: true };
 };
@@ -56,7 +56,10 @@ const valuesFor = async (
     }
     const location = place.location;
     if (location === null || !validChannelTimeZone(location.timeZone)) throw new Error("Weather location is unavailable.");
-    const cached = await fetchCachedWeather(context.DB, settings.provider, location.latitude, location.longitude, context.now);
+    const cached = context.readOnly === true
+      ? await readWeatherCache(context.DB, settings.provider, location.latitude, location.longitude, context.now)
+      : await fetchCachedWeather(context.DB, settings.provider, location.latitude, location.longitude, context.now);
+    if (cached === null) throw new Error("Weather data is not cached.");
     const result = resolveWeatherValues({
       names,
       locationName: location.name,
@@ -81,7 +84,7 @@ const resolveConditions = async (
   try {
     const [settings, locationSetting] = await Promise.all([
       readWeatherSettings(context.DB, context.channelId),
-      context.commandInput?.arguments.trim()
+      context.readOnly !== true && context.commandInput?.arguments.trim()
         ? geocodeWeatherPlace(context.commandInput.arguments, "en").then((result) => result.kind === "found" ? result.location : null)
         : context.channelLocation(),
     ]);

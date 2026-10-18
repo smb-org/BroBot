@@ -43,6 +43,7 @@ export interface TemplateResolverSources {
   moduleSecrets?: (moduleId: string) => ModuleSecretReadAccess;
   publicOrigin?: string;
   externalFetchBudget?: ModuleExternalFetchBudget;
+  readOnly?: boolean;
   runModuleAlarm?: ModuleTemplateValueContext["runModuleAlarm"];
   channelInfo: () => Promise<ModuleChannelInfo | null>;
   channelGameId?: () => Promise<string | null>;
@@ -383,6 +384,7 @@ export const createTemplateRenderer = (
     channelLocation: sources.channelLocation,
     ...(sources.publicOrigin === undefined ? {} : { publicOrigin: sources.publicOrigin }),
     externalFetchBudget,
+    ...(sources.readOnly === true ? { readOnly: true } : {}),
     ...(sources.runModuleAlarm === undefined ? {} : { runModuleAlarm: sources.runModuleAlarm }),
     renderTemplate: renderNestedTemplate,
     addDiagnostic,
@@ -406,6 +408,7 @@ export const createTemplateRenderer = (
             channelLocation: sources.channelLocation,
             ...(sources.publicOrigin === undefined ? {} : { publicOrigin: sources.publicOrigin }),
             externalFetchBudget,
+            ...(sources.readOnly === true ? { readOnly: true } : {}),
             ...(commandInput === undefined ? {} : { commandInput }),
             addTemplateValueAttribution: addAttribution,
             now,

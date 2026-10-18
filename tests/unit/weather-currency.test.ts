@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ModuleTemplateValueContext } from "../../src/modules/contract";
 import { PROVIDER_JSON_MAX_BYTES, readBoundedJsonResponse } from "../../src/modules/contract";
 import { currencyModule, parseCurrencyAmount } from "../../src/modules/currency";
-import { exchangeRate } from "../../src/modules/currency/adapters/rates";
+import { exchangeRate, readCachedExchangeRate } from "../../src/modules/currency/adapters/rates";
 import { weatherModule } from "../../src/modules/weather";
 import { fetchCachedWeather, readWeatherCache } from "../../src/modules/weather/adapters/cache";
 import { metNorwayWeather, openMeteoWeather } from "../../src/modules/weather/adapters/providers";
@@ -358,6 +358,33 @@ describe("currency conversion", () => {
       expect(result).toContain("€");
       expect(cachedRate).toBe(0.8);
       expect(fetcher).toHaveBeenCalledOnce();
+    } finally {
+      database.close();
+    }
+  });
+
+  it("resolves currency conversions from cache only in read-only mode", async () => {
+    const database = new TestD1Database();
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+    try {
+      await database.prepare(
+        `INSERT INTO currency_rate_cache (base_currency, target_currency, rate, expires_at, etag, updated_at)
+         VALUES ('USD', 'EUR', 0.8, '2026-09-27T12:15:00.000Z', NULL, '2026-09-27T12:00:00.000Z')`,
+      ).run();
+      const cachedContext = contextFor(database as unknown as D1Database, {
+        commandInput: { commandName: "usd", arguments: "12,50" },
+        readOnly: true,
+      });
+      const cachedResult = await currencyModule.resolveTemplateParameter?.("currency.convert", "USD EUR", cachedContext);
+      await database.prepare("DELETE FROM currency_rate_cache WHERE base_currency = 'USD' AND target_currency = 'EUR'").run();
+      const missingResult = await currencyModule.resolveTemplateParameter?.("currency.convert", "USD EUR", cachedContext);
+
+      expect(cachedResult).toContain("10,00");
+      await expect(readCachedExchangeRate(database as unknown as D1Database, "USD", "EUR", NOW))
+        .rejects.toThrow("Exchange rate is not cached.");
+      expect(missingResult).toBe("Wechselkursdaten sind derzeit nicht verfügbar.");
+      expect(fetcher).not.toHaveBeenCalled();
     } finally {
       database.close();
     }

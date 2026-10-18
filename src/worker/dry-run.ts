@@ -1,0 +1,219 @@
+import type { DryRunBlockCode, DryRunEntryReport, DryRunModuleReport, DryRunRequest, DryRunResponse } from "../contracts/dry-run";
+import type { BotModule, ModuleDryRunContext, ModuleEvent, ModuleStreamState } from "../modules/contract";
+import { MODULES } from "../modules/registry";
+import { forSourceOnlyForChatTarget } from "./chat";
+import { chatOutputSuppressionReason } from "./chat-output-gate";
+import { getBotIdentity } from "./db/bot-identity";
+import { readChannelDefaultChatTarget } from "./db/channel-settings";
+import { readDispatchChannelState } from "./db/channel-controls";
+import { readChannelVariables as readVariables } from "./db/channel-variables";
+import { readOnlyD1, DryRunWriteError } from "./db/read-only";
+import { actorForEvent, chatStatusFor, selectModulesForEvent } from "./dispatch";
+import { createSimulatedTemplateRenderer } from "./simulated-template-renderer";
+import { secureRandomInteger } from "./template-resolver";
+
+const CHAT_EVENT = "channel.chat.message";
+
+export class DryRunChannelNotReleasedError extends Error {
+  public constructor() {
+    super("The channel is not available for dry-run requests.");
+    this.name = "DryRunChannelNotReleasedError";
+  }
+}
+
+const badgeForStatus: Readonly<Record<DryRunRequest["sender"]["statuses"][number], { set_id: string; id: string; info: string }>> = {
+  subscriber: { set_id: "subscriber", id: "1", info: "" },
+  vip: { set_id: "vip", id: "1", info: "" },
+  moderator: { set_id: "moderator", id: "1", info: "" },
+  broadcaster: { set_id: "broadcaster", id: "1", info: "" },
+};
+
+const withHostBlocks = (
+  report: DryRunEntryReport,
+  moduleDisabled: boolean,
+  channelPaused: boolean,
+): DryRunEntryReport => {
+  if (report.outcome !== "fires" || (!moduleDisabled && !channelPaused)) return report;
+  const hostBlocks = [
+    ...(moduleDisabled ? [{ code: "host.module_disabled" as const satisfies DryRunBlockCode }] : []),
+    ...(channelPaused ? [{ code: "host.channel_paused" as const satisfies DryRunBlockCode }] : []),
+  ];
+  return { ...report, outcome: "blocked", blocks: [...report.blocks, ...hostBlocks], effects: [] };
+};
+
+const withOutputGate = (
+  report: DryRunEntryReport,
+  module: BotModule,
+  event: ModuleEvent,
+  channelId: string,
+  muted: boolean,
+): DryRunEntryReport => ({
+  ...report,
+  effects: report.effects.map((effect) => {
+    if (effect.kind !== "chat" && effect.kind !== "announcement") return effect;
+    const suppression = chatOutputSuppressionReason({
+      moduleEnabled: true,
+      mandatory: module.mandatory === true,
+      paused: false,
+      muted,
+    });
+    return {
+      ...effect,
+      postsTo: forSourceOnlyForChatTarget(effect.target, channelId, event.payload.source_broadcaster_user_id as string | null | undefined)
+        ? "this_chat"
+        : "all_shared_chats",
+      suppressedBy: suppression === "channel_muted" ? "channel_muted" : null,
+    };
+  }),
+});
+
+const moduleStatusFor = (entries: readonly DryRunEntryReport[]): DryRunModuleReport["status"] => {
+  if (entries.length === 0) return "silent";
+  return entries.some(({ outcome }) => outcome === "fires") ? "reacts" : "blocked";
+};
+
+export const dryRunChatMessage = async (
+  env: Env,
+  channelId: string,
+  request: DryRunRequest,
+  fetcher: typeof fetch = fetch,
+  registry: readonly BotModule[] = MODULES,
+): Promise<DryRunResponse> => {
+  void fetcher;
+  const evaluatedAt = new Date().toISOString();
+  const db = readOnlyD1(env.DB);
+  const channel = await db.prepare(
+    "SELECT login, language, time_zone FROM channels WHERE channel_id = ?",
+  ).bind(channelId).first<{ login: string; language: string; time_zone: string }>();
+  if (channel === null) throw new DryRunChannelNotReleasedError();
+
+  const [dispatchState, defaultChatTarget, botIdentity] = await Promise.all([
+    readDispatchChannelState(db, channelId, evaluatedAt),
+    readChannelDefaultChatTarget(db, channelId),
+    getBotIdentity(db),
+  ]);
+  const selectedWithoutPause = selectModulesForEvent(dispatchState.activations, CHAT_EVENT, registry, false);
+  const selectedByProduction = selectModulesForEvent(dispatchState.activations, CHAT_EVENT, registry, dispatchState.controls.pause.active);
+  const enabledModuleIds = new Set(selectedWithoutPause.matches.map(({ module }) => module.id));
+  const selectedModuleIds = new Set(selectedByProduction.matches.map(({ module }) => module.id));
+  const activationByModule = new Map(dispatchState.activations.map((activation) => [activation.moduleId, activation]));
+
+  const syntheticUserId = `dry-run:${request.sender.login}`;
+  const sourceBroadcasterUserId = request.sharedChat ? `shared-chat:${channelId}` : channelId;
+  const payload: Record<string, unknown> = {
+    message: { text: request.text },
+    message_id: "dry-run",
+    chatter_user_id: syntheticUserId,
+    chatter_user_login: request.sender.login,
+    chatter_user_name: request.sender.login,
+    broadcaster_user_login: channel.login,
+    source_broadcaster_user_id: sourceBroadcasterUserId,
+    badges: request.sender.statuses.map((status) => badgeForStatus[status]),
+  };
+  const lookedUpActor = await actorForEvent(db, channelId, payload);
+  const actor = lookedUpActor === null ? null : { ...lookedUpActor, role: null };
+  const chatStatus = chatStatusFor(CHAT_EVENT, payload);
+  const streamState: ModuleStreamState = request.streamState;
+  const game = request.game;
+  const channelInfo = {
+    title: "",
+    gameName: game?.name ?? "",
+    gameId: game?.id ?? "",
+    startedAt: streamState === "online" ? evaluatedAt : null,
+    viewerCount: 0,
+  };
+  const sharedTemplateRendererOptions = {
+    db,
+    externalFetchBudget: { claim: () => false },
+    runModuleAlarm: null,
+    readOnly: true,
+  } as const;
+
+  const chatModules = registry.filter((module) => (module.eventSubTypes ?? []).includes(CHAT_EVENT));
+  const modulesToReport = request.only === undefined
+    ? chatModules
+    : chatModules.filter((module) => module.id === request.only?.moduleId);
+  const modules: DryRunModuleReport[] = [];
+
+  for (const module of modulesToReport) {
+    const dryRun = module.dryRunChatMessage as ((event: ModuleEvent, context: ModuleDryRunContext) => Promise<readonly DryRunEntryReport[]>) | undefined;
+    if (dryRun === undefined) {
+      modules.push({ moduleId: module.id, status: "not_testable", entries: [] });
+      continue;
+    }
+    const moduleDisabled = !enabledModuleIds.has(module.id);
+    const channelPaused = !moduleDisabled && dispatchState.controls.pause.active && !selectedModuleIds.has(module.id);
+
+    try {
+      const activation = activationByModule.get(module.id);
+      let rawSettings: unknown = activation?.settings ?? module.defaultSettings;
+      if (typeof rawSettings === "string") {
+        try {
+          rawSettings = JSON.parse(rawSettings) as unknown;
+        } catch {
+          throw new Error("Module settings contain invalid JSON.");
+        }
+      }
+      const settings = module.settingsSchema.parse(rawSettings);
+      const event: ModuleEvent = {
+        channelId,
+        subscriptionType: CHAT_EVENT,
+        triggerId: "dry-run",
+        payload,
+        settings,
+        receivedAt: evaluatedAt,
+        actor,
+        chatStatus,
+      };
+      const renderTemplate = await createSimulatedTemplateRenderer(env, channelId, {
+        event,
+        templateContext: "chat_command",
+        streamState,
+        game,
+        now: Date.parse(evaluatedAt),
+        channelInfo,
+        followedAt: () => Promise.resolve("unavailable"),
+        userCreatedAt: () => Promise.resolve(null),
+      }, sharedTemplateRendererOptions);
+      const context: ModuleDryRunContext = {
+        DB: db,
+        defaultChatTarget,
+        botUserId: () => Promise.resolve(botIdentity?.userId ?? null),
+        streamState: () => Promise.resolve(streamState),
+        channelInfo: () => Promise.resolve(channelInfo),
+        channelGameId: () => Promise.resolve(game?.id ?? null),
+        channelLanguage: () => Promise.resolve(channel.language === "en" ? "en" : "de"),
+        channelTimeZone: () => Promise.resolve(channel.time_zone),
+        readChannelVariables: (names) => readVariables(db, channelId, names),
+        renderTemplate: (text, moduleValues, changed) => renderTemplate(text, moduleValues, changed, "chat"),
+        followedAt: () => Promise.resolve("unavailable"),
+        userCreatedAt: () => Promise.resolve(null),
+        secureRandomInteger,
+      };
+      const reports = await dryRun(event, context);
+      const filtered = request.only?.entryId === undefined
+        ? reports
+        : reports.filter((entry) => entry.entry.id === request.only?.entryId);
+      const entries = filtered
+        .map((entry) => withHostBlocks(entry, moduleDisabled, channelPaused))
+        .map((entry) => withOutputGate(entry, module, event, channelId, dispatchState.controls.mute.active));
+      modules.push({ moduleId: module.id, status: moduleStatusFor(entries), entries });
+    } catch (error: unknown) {
+      const writeBlocked = error instanceof DryRunWriteError;
+      console.error("Chat dry-run module evaluation failed.", { channelId, moduleId: module.id, error });
+      modules.push({
+        moduleId: module.id,
+        status: "error",
+        entries: [],
+        error: writeBlocked ? "write_blocked" : "module_error",
+      });
+    }
+  }
+
+  return {
+    evaluatedAt,
+    controls: { muted: dispatchState.controls.mute.active, paused: dispatchState.controls.pause.active },
+    sender: { userId: syntheticUserId, resolved: false, perUserCooldownsUseSyntheticId: true },
+    modules,
+  };
+};

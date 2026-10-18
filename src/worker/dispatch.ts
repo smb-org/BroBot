@@ -241,7 +241,7 @@ const channelTimeZoneFor = async (db: D1Database, channelId: string): Promise<st
 const recordValue = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const chatStatusFor = (
+export const chatStatusFor = (
   subscriptionType: string,
   payload: Readonly<Record<string, unknown>>,
 ): readonly ModuleChatStatus[] | null => {
@@ -265,7 +265,7 @@ const chatStatusFor = (
   return statuses.length === 0 ? ["viewer"] : statuses;
 };
 
-const actorForEvent = async (
+export const actorForEvent = async (
   db: D1Database,
   channelId: string,
   payload: Readonly<Record<string, unknown>>,

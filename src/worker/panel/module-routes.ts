@@ -12,8 +12,8 @@ import {
   type ChannelAuthorizationVariables,
 } from "../auth/guards";
 import { canManage, type AuditAction } from "../../contracts/values";
-import type { ModuleChannelInfo, ModuleChannelVariable, ModuleEvent, ModuleExternalFetchBudget, ModuleLanguage, ModuleOverlayHostEvent, ModuleRegisteredTemplateVariable, ModuleRouteVariables, ModuleStreamState, ModuleTemplateConditionContext } from "../../modules/contract";
-import { MODULES, templateVariableGroupForModule, validateModuleTemplateVariable, variablesForModuleTemplateContext } from "../../modules/registry";
+import type { ModuleChannelVariable, ModuleEvent, ModuleExternalFetchBudget, ModuleLanguage, ModuleOverlayHostEvent, ModuleRouteVariables, ModuleStreamState, ModuleTemplateConditionContext } from "../../modules/contract";
+import { MODULES } from "../../modules/registry";
 import { BELABOX_MODULE_ID, BELABOX_STATS_URL_SECRET } from "../../modules/belabox/contracts";
 import { validateBelaboxStatsUrl } from "../../modules/belabox/domain/stats-url";
 import { resetSampleAfterStatsUrlChangeBestEffort } from "../../modules/belabox/routes";
@@ -38,15 +38,15 @@ import { measureServerTiming, recordServerTiming, scheduleBackgroundWork } from 
 import { publishOverlayChanged, publishOverlayHostEvent as publishOverlayHostEventHint, publishRealtimeMessages } from "../realtime";
 import { prepareModuleOverlayRealtimeMessage } from "../module-overlay-realtime";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../../modules/contract";
-import { readChannelVariables } from "../db/channel-variables";
 import { readChannelLocation } from "../db/channel-settings";
 import { readCachedGameList, readRecentChannelGames, writeCachedGameList, type TwitchGameCategory } from "../db/game-search-cache";
-import { createTemplateRenderer, type TemplateValueProvider } from "../template-resolver";
+import { createSimulatedTemplateRenderer, registeredTemplateVariablesForChannel } from "../simulated-template-renderer";
+export { registeredTemplateVariablesForChannel } from "../simulated-template-renderer";
 import { moduleEventTimeOptions, resolveModuleEventTimes } from "../module-event-times";
 import { notifyModuleScheduleInputsChanged, reconcileChannelTimerSchedules } from "../module-schedules";
 import { createModuleExternalFetchBudget } from "../external-fetch-budget";
 import { moduleBallots } from "../module-ballots";
-import { createModuleSecretAccess, createModuleSecretReadAccess } from "../module-secrets";
+import { createModuleSecretAccess } from "../module-secrets";
 import { liftModerationBan } from "../moderation";
 import { readTextBlockGraphRevision, textBlockWriteGuard } from "../../modules/contracts/text-block-write-guard";
 import { effectiveEventTemplateDeclarations } from "../../modules/contracts/text-block-validation";
@@ -242,40 +242,6 @@ const moduleStateFor = async (
 };
 
 export const moduleRouter = new Hono<ModuleRouteEnvironment>();
-
-export const registeredTemplateVariablesForChannel = async (
-  db: D1Database,
-  channelId: string,
-): Promise<readonly ModuleRegisteredTemplateVariable[]> => {
-  const registrations = await Promise.all(MODULES.map(async (module) => {
-    const fields = Object.values(module.templateFields ?? {})
-      .flatMap((variables) => variables ?? []) as TemplateVariable[];
-    const dynamic = await module.templateVariables?.(db, channelId) ?? [];
-    const catalog = new Map((module.templateVariableCatalog ?? []).map((variable) => [variable.name, variable]));
-    const declarations = new Map<string, TemplateVariable>();
-    for (const variable of [...(module.templateVariableCatalog ?? []), ...fields, ...dynamic]) {
-      declarations.set(variable.name, { ...declarations.get(variable.name), ...variable });
-    }
-    return variablesForModuleTemplateContext(module, [...declarations.values()]).map((variable) => {
-      validateModuleTemplateVariable(module, variable.name);
-      const pickerGroup = templateVariableGroupForModule(module);
-      const picker = variable.picker ?? catalog.get(variable.name)?.picker;
-      if (module.templateVariableNamespace !== "text_blocks" && module.templateVariableGroup !== undefined &&
-          (picker === undefined || pickerGroup === undefined)) {
-        throw new Error(`Module template variable ${module.id}.${variable.name} is missing picker copy or source group metadata.`);
-      }
-      return {
-        ...variable,
-        ...(picker === undefined ? {} : { picker }),
-        moduleId: module.id,
-        isTextBlock: module.templateVariableNamespace === "text_blocks",
-        availableInEventTemplates: module.resolveTemplateValues !== undefined || module.resolveTemplateParameter !== undefined,
-        ...(pickerGroup === undefined ? {} : { pickerGroup }),
-      };
-    });
-  }));
-  return registrations.flat();
-};
 
 moduleRouter.use("/api/channels/:channelId/modules", requireChannelAuthorization());
 moduleRouter.use("/api/channels/:channelId/modules/*", requireChannelAuthorization());
@@ -665,54 +631,9 @@ moduleRouter.post("/api/channels/:channelId/template-preview", async (context) =
   const parsed = previewSchema.safeParse(await readJsonBody(context.req.raw));
   if (!parsed.success) return context.json({ error: "template_preview_invalid" }, 400);
   const channelId = context.req.param("channelId");
-  const [registeredVariables, channelSettings, channelLanguage] = await Promise.all([
-    context.get("listRegisteredTemplateVariables")(channelId),
-    context.env.DB.prepare("SELECT time_zone FROM channels WHERE channel_id = ?").bind(channelId).first<{ time_zone: string }>(),
-    context.env.DB.prepare("SELECT language FROM channels WHERE channel_id = ?").bind(channelId).first<{ language: ModuleLanguage }>(),
-  ]);
-  const providerVariables = new Map(MODULES.map((module) => [
-    module.id,
-    registeredVariables.filter((variable) => variable.moduleId === module.id),
-  ]));
-  const providerConditions = new Map(await Promise.all(MODULES.map(async (module) => [
-    module.id,
-    [
-      ...(module.textBlockConditions ?? []),
-      ...(await module.textBlockConditionsForChannel?.(context.env.DB, channelId) ?? []),
-    ],
-  ] as const)));
-  const templateValueProviders: TemplateValueProvider[] = MODULES.flatMap((module) => {
-    const resolveTemplateValues = module.resolveTemplateValues;
-    if (resolveTemplateValues === undefined && module.resolveTemplateParameter === undefined) return [];
-    const variables = providerVariables.get(module.id) ?? [];
-    return [{
-      moduleId: module.id,
-      ...(module.templateVariableNamespace === undefined ? {} : { templateVariableNamespace: module.templateVariableNamespace }),
-      variables,
-      textBlockConditions: providerConditions.get(module.id) ?? [],
-      ...(module.templateUnavailableText === undefined ? {} : { templateUnavailableText: module.templateUnavailableText }),
-      ...(module.resolveTemplateConditions === undefined ? {} : { resolveTemplateConditions: module.resolveTemplateConditions }),
-      ...(module.dynamicTemplateVariableNames === undefined ? {} : { dynamicTemplateVariableNames: module.dynamicTemplateVariableNames }),
-      ...(module.resolveOverlayTemplateValues === undefined ? {} : { resolveOverlayTemplateValues: module.resolveOverlayTemplateValues }),
-      ...(module.resolveTemplateConditionTransitions === undefined ? {} : { resolveTemplateConditionTransitions: module.resolveTemplateConditionTransitions }),
-      ...(resolveTemplateValues === undefined ? {} : { resolveTemplateValues }),
-      ...(module.resolveTemplateParameter === undefined ? {} : { resolveTemplateParameter: module.resolveTemplateParameter }),
-    }];
-  });
-  const registeredTemplateVariables = registeredVariables.filter((variable) => {
-    return !variable.isTextBlock &&
-      (variable.contexts?.includes(parsed.data.templateContext) ?? true);
-  });
   const now = Date.now();
   const game = parsed.data.game;
   const streamState: ModuleStreamState = parsed.data.streamState;
-  const channelInfo: ModuleChannelInfo = {
-    title: "",
-    gameName: game?.name ?? "",
-    gameId: game?.id ?? "",
-    startedAt: streamState === "online" ? new Date(now).toISOString() : null,
-    viewerCount: 0,
-  };
   const event: ModuleEvent = {
     channelId,
     subscriptionType: "channel.chat.message",
@@ -723,14 +644,13 @@ moduleRouter.post("/api/channels/:channelId/template-preview", async (context) =
     actor: { userId: "template-preview-viewer", login: "viewer", role: null },
     chatStatus: parsed.data.chatStatus,
   };
-  // The preview has no simulated module of its own (text blocks declare no local
-  // variables), so pass none here — otherwise other modules' local declarations
-  // (e.g. raid's event-scoped "viewers"/"channel") would shadow the host system
-  // variables in every preview. The full registry stays available below for
-  // value-provider discovery only.
-  const render = createTemplateRenderer(event, parsed.data.templateContext, [], {
-    DB: context.env.DB,
-    moduleSecrets: (moduleId) => createModuleSecretReadAccess(context.env, channelId, moduleId),
+  const render = await createSimulatedTemplateRenderer(context.env, channelId, {
+    event,
+    templateContext: parsed.data.templateContext,
+    streamState,
+    game,
+    now,
+  }, {
     externalFetchBudget: context.get("externalFetchBudget"),
     runModuleAlarm: (moduleId, handlerKey, alarmKey, invocation) => {
       const object = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
@@ -738,23 +658,6 @@ moduleRouter.post("/api/channels/:channelId/template-preview", async (context) =
         ? object.runModuleAlarm(moduleId, handlerKey, alarmKey)
         : object.runModuleAlarm(moduleId, handlerKey, alarmKey, invocation);
     },
-    publicOrigin: context.env.PUBLIC_ORIGIN,
-    channelInfo: () => Promise.resolve(channelInfo),
-    channelGameId: () => Promise.resolve(game?.id ?? null),
-    channelTimeZone: () => Promise.resolve(channelSettings === null ? DEFAULT_CHANNEL_TIME_ZONE : channelSettings.time_zone),
-    channelLocation: () => readChannelLocation(context.env.DB, channelId),
-    templateValueProviders,
-    registeredTemplateVariables,
-    streamState: () => Promise.resolve(streamState),
-    channelDetails: () => Promise.resolve({ title: channelInfo.title, gameName: channelInfo.gameName, gameId: channelInfo.gameId }),
-    streamDetails: () => Promise.resolve({ startedAt: channelInfo.startedAt, viewerCount: channelInfo.viewerCount }),
-    followedAt: () => Promise.resolve("unavailable"),
-    followerTotal: () => Promise.resolve(null),
-    chattersTotal: () => Promise.resolve(null),
-    userCreatedAt: () => Promise.resolve(null),
-    channelLanguage: () => Promise.resolve(channelLanguage?.language === "en" ? "en" : "de"),
-    readChannelVariables: (names) => readChannelVariables(context.env.DB, channelId, names),
-    now: () => now,
   });
   const textCommands = {
     args: parsed.data.templateContext === "chat_command" ? "viewer input" : "",

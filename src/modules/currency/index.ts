@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import type { BotModule, ModuleTemplateValueContext } from "../contract";
 import { CURRENCY_TEMPLATE_VARIABLE, currencyModuleCatalog } from "./contracts";
-import { exchangeRate } from "./adapters/rates";
+import { exchangeRate, readCachedExchangeRate } from "./adapters/rates";
 
 const settingsSchema = z.object({});
 const unavailableText = {
@@ -33,7 +33,11 @@ const convert = async (parameter: string, context: ModuleTemplateValueContext): 
     return currencyModuleCatalog[language].usageText(commandInput?.commandName ?? "convert");
   }
   try {
-    const rate = base === target ? 1 : await exchangeRate(context.DB, base, target, context.now);
+    const rate = base === target
+      ? 1
+      : context.readOnly === true
+        ? await readCachedExchangeRate(context.DB, base, target, context.now)
+        : await exchangeRate(context.DB, base, target, context.now);
     return new Intl.NumberFormat(language === "de" ? "de-DE" : "en-US", {
       style: "currency",
       currency: target,

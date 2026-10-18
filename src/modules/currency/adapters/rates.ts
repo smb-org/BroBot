@@ -8,6 +8,20 @@ interface CurrencyCacheRow {
   etag: string | null;
 }
 
+export const readCachedExchangeRate = async (
+  db: D1Database,
+  baseCurrency: string,
+  targetCurrency: string,
+  now: number,
+): Promise<number> => {
+  const cached = await db.prepare(
+    "SELECT rate, expires_at, etag FROM currency_rate_cache WHERE base_currency = ? AND target_currency = ?",
+  ).bind(baseCurrency.toUpperCase(), targetCurrency.toUpperCase()).first<CurrencyCacheRow>();
+  const expiration = cached === null ? Number.NaN : Date.parse(cached.expires_at);
+  if (cached !== null && Number.isFinite(cached.rate) && expiration > now) return cached.rate;
+  throw new Error("Exchange rate is not cached.");
+};
+
 const expiryFromHeaders = (headers: Headers, now: number): number => {
   const expiresHeader = headers.get("Expires");
   const expiresAt = expiresHeader === null ? Number.NaN : Date.parse(expiresHeader);
