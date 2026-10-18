@@ -23,6 +23,7 @@ export interface CollectionPageProps {
   headingLevel?: "h1" | "h2" | "h3";
   headerKind?: string;
   subtitle?: ReactNode;
+  heading?: ReactNode;
   toolbar: ReactNode;
   list: ReactNode;
   detail: ReactNode;
@@ -38,6 +39,7 @@ export function CollectionPage({
   headingLevel = "h1",
   headerKind,
   subtitle,
+  heading,
   toolbar,
   list,
   detail,
@@ -116,10 +118,10 @@ export function CollectionPage({
 
   return (
     <div ref={collectionRef} data-ui="" className="collection-page" data-detail-open={detailOpen ? "true" : "false"} data-single-column={singleColumn ? "true" : "false"}>
-      <div className={`collection-page__heading${subtitle === undefined ? "" : " collection-page__heading--page-header"}`}>
-        {subtitle === undefined
+      <div className={`collection-page__heading${heading !== undefined || subtitle !== undefined ? " collection-page__heading--page-header" : ""}`}>
+        {heading ?? (subtitle === undefined
           ? <header><Heading>{title}</Heading></header>
-          : <PageHeader kind={headerKind ?? "module"} title={title} subtitle={subtitle} />}
+          : <PageHeader kind={headerKind ?? "module"} title={title} subtitle={subtitle} />)}
       </div>
       <div className="collection-page__body">
         <aside ref={listRef} aria-label={`${title}: ${texts.chooseCollection}`} className="collection-page__list">

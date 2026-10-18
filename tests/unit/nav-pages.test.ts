@@ -27,20 +27,24 @@ describe("dashboard navigation", () => {
     const groups = navigationFor(MODULES.map(({ id }) => ({ id, enabled: true })));
     for (const module of MODULES) {
       const entry = groups.flatMap(({ entries }) => entries).find((candidate) => candidate.moduleId === module.id);
+      if (module.id === "channel_events") {
+        expect(entry, "the dedicated channel-events history page replaces the generic mandatory module link").toBeUndefined();
+        continue;
+      }
       expect(entry?.category, `${module.id} must have one known navigation group`).toBe(MODULE_NAVIGATION_CATEGORY_GROUPS[module.navigationCategory]);
     }
   });
 
-  it("places Kanalereignisse directly before Protokoll in admin", () => {
+  it("places the channel-events history page directly before the audit log in admin", () => {
     const groups = navigationFor(MODULES.map(({ id }) => ({ id, enabled: true })));
     const admin = groups.find(({ category }) => category === "admin");
     const entries = admin?.entries ?? [];
-    const channelEventsIndex = entries.findIndex(({ moduleId }) => moduleId === "channel_events");
-    expect(entries[channelEventsIndex]?.label).toBe("Channel events");
+    const channelEventsIndex = entries.findIndex(({ pageId }) => pageId === "events");
+    expect(entries[channelEventsIndex]).toMatchObject({ pageId: "events", label: "Channel events" });
     expect(entries[channelEventsIndex + 1]).toMatchObject({ pageId: "audit", label: "Log" });
   });
 
-  it("keeps Twitch Ereignisse distinct from the Kanalereignisse module", () => {
+  it("routes Kanalereignisse through the dedicated admin history page", () => {
     const groups = dashboardNavigationGroups(
       { isPlatformAdmin: true },
       "channel-a",
@@ -52,8 +56,8 @@ describe("dashboard navigation", () => {
       (moduleId) => moduleName(moduleId, "de"),
     );
     const entries = groups.flatMap(({ entries: groupEntries }) => groupEntries);
-    expect(entries.find(({ pageId }) => pageId === "events")?.label).toBe("Ereignisse");
-    expect(entries.find(({ moduleId }) => moduleId === "channel_events")?.label).toBe("Kanalereignisse");
+    expect(entries.find(({ pageId }) => pageId === "events")).toMatchObject({ category: "admin", label: "Kanalereignisse" });
+    expect(entries.some(({ moduleId }) => moduleId === "channel_events")).toBe(false);
   });
 
   it("places Ort & Wetter in Setup data and keeps channel defaults in admin System", () => {

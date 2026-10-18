@@ -104,16 +104,6 @@ const NAV_PAGES: readonly NavPageDefinition[] = [
     requiresChannel: true,
   },
   {
-    id: "events",
-    category: "twitch",
-    area: "setup",
-    iconKind: "events",
-    route: channelRoute("events"),
-    label: (texts) => texts.navigation.events,
-    keywords: ["events", "ereignisse", "eventsub", "history"],
-    requiresChannel: true,
-  },
-  {
     id: "location-weather",
     category: "data",
     area: "setup",
@@ -154,13 +144,13 @@ const NAV_PAGES: readonly NavPageDefinition[] = [
     requiresChannel: true,
   },
   {
-    id: "system",
+    id: "events",
     category: "admin",
     area: "setup",
-    iconKind: "system",
-    route: channelRoute("system"),
-    label: (texts) => texts.navigation.system,
-    keywords: ["settings", "einstellungen", "konfiguration", "configuration"],
+    iconKind: "events",
+    route: channelRoute("events"),
+    label: (texts) => texts.events.channelEvents,
+    keywords: ["events", "ereignisse", "eventsub", "history", "kanalereignisse"],
     requiresChannel: true,
   },
   {
@@ -171,6 +161,16 @@ const NAV_PAGES: readonly NavPageDefinition[] = [
     route: channelRoute("audit"),
     label: (texts) => texts.navigation.audit,
     keywords: ["audit", "changes", "aenderungen", "protokoll", "log"],
+    requiresChannel: true,
+  },
+  {
+    id: "system",
+    category: "admin",
+    area: "setup",
+    iconKind: "system",
+    route: channelRoute("system"),
+    label: (texts) => texts.navigation.system,
+    keywords: ["settings", "einstellungen", "konfiguration", "configuration"],
     requiresChannel: true,
   },
   {
@@ -195,6 +195,10 @@ const registeredModuleEntries = (
 ): DashboardNavigationEntry[] => {
   const visibleModules = visibleModuleNavigationIds(moduleStates, memberRole);
   return modules.flatMap((module): DashboardNavigationEntry[] => {
+    // The channel-events history is a dedicated page; its mandatory runtime
+    // module remains available from the Modules workspace without a duplicate
+    // generic module link in the sidebar or command palette.
+    if (module.id === "channel_events") return [];
     const category = MODULE_NAVIGATION_CATEGORY_GROUPS[module.navigationCategory];
     const route: DashboardRoute = { kind: "module", channelId, moduleId: module.id };
     const entries = module.navigationEntries ?? [];
@@ -258,12 +262,11 @@ export const dashboardNavigationGroups = (
     const categoryModules = moduleEntries.filter((entry) => entry.category === category);
     let entries: DashboardNavigationEntry[];
     if (category === "admin") {
-      const channelEvents = categoryModules.filter((entry) => entry.moduleId === "channel_events");
-      const otherModules = categoryModules.filter((entry) => entry.moduleId !== "channel_events");
-      const beforeAudit = categoryPages.filter((entry) => entry.pageId !== "audit" && entry.pageId !== "platform");
+      const beforeAudit = categoryPages.filter((entry) => entry.pageId !== "audit" && entry.pageId !== "events" && entry.pageId !== "platform");
+      const channelEvents = categoryPages.filter((entry) => entry.pageId === "events");
       const afterAudit = categoryPages.filter((entry) => entry.pageId === "platform");
       const audit = categoryPages.filter((entry) => entry.pageId === "audit");
-      entries = [...beforeAudit, ...otherModules, ...channelEvents, ...audit, ...afterAudit];
+      entries = [...beforeAudit, ...categoryModules, ...channelEvents, ...audit, ...afterAudit];
     } else if (category === "stream") {
       entries = [...categoryPages, ...categoryModules];
     } else {
