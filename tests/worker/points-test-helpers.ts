@@ -118,7 +118,13 @@ export const runPointObject = <T>(
 
 export const stubPointRoundChat = (
   target: PointsWorkerObject,
-  sendChat: () => Promise<{ sent: boolean; retryable?: boolean; reason?: string | null; attemptedAt?: number }>,
+  sendChat: () => Promise<{
+    sent: boolean;
+    retryable?: boolean;
+    reason?: string | null;
+    attemptedAt?: number;
+    delivery: "delivered" | "rate_limited" | "ambiguous" | "failed";
+  }>,
 ): void => {
   Object.assign(target, { moduleAlarmContext: () => ({ sendChat }) });
 };
@@ -153,7 +159,7 @@ export const openAnnouncedRound = async (
   data: unknown,
   deadlineAt: number,
 ): Promise<void> => runPointObject(object, async (target) => {
-  stubPointRoundChat(target, () => Promise.resolve({ sent: false, retryable: true, reason: "rate_limited" }));
+  stubPointRoundChat(target, () => Promise.resolve({ sent: false, retryable: true, reason: "rate_limited", delivery: "rate_limited" }));
   await target.openGameRound(moduleId, roundId, data);
   await target.markGameRoundAnnounced(moduleId, roundId, deadlineAt, `round:${roundId}`);
 });

@@ -806,7 +806,7 @@ describe("Module management in the panel", () => {
       .resolves.toEqual({ enabled: 1 });
   });
 
-  it("skips round cancellation when the durable gate rejects a stale disable", async () => {
+  it("reconciles round cancellation when the durable gate already has the disable revision", async () => {
     addDependencyTestModules();
     await insertChannel(database, "channel-demo");
     await insertLoginIdentityAndSession(database, "user-1");
@@ -832,7 +832,52 @@ describe("Module management in the panel", () => {
 
     expect(disable.status).toBe(200);
     expect(setGate).toHaveBeenLastCalledWith("test_game_requires_points", true, 2);
-    expect(cancelOpenRounds).not.toHaveBeenCalled();
+    expect(cancelOpenRounds).toHaveBeenCalledOnce();
+    expect(cancelOpenRounds).toHaveBeenLastCalledWith("test_game_requires_points", 2);
+  });
+
+  it("retries cancellation after a post-commit disable retry keeps the original revision", async () => {
+    addDependencyTestModules();
+    await insertChannel(database, "channel-demo");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "channel-demo", "user-1", "broadcaster");
+    let gateRevision = 0;
+    const setGate = vi.fn((_moduleId: string, closed: boolean, revision: number) => {
+      if (revision <= gateRevision) return Promise.resolve({ applied: false });
+      gateRevision = revision;
+      return Promise.resolve({ applied: closed });
+    });
+    const cancelOpenRounds = vi.fn()
+      .mockRejectedValueOnce(new Error("simulated_refund_failure"))
+      .mockResolvedValueOnce(1);
+    environment.CHANNEL = {
+      idFromName: vi.fn((channelId: string) => channelId),
+      get: vi.fn(() => ({ setGameModuleGate: setGate, cancelOpenGameRounds: cancelOpenRounds })),
+    } as unknown as Env["CHANNEL"];
+
+    for (const moduleId of ["points", "test_game_requires_points"]) {
+      const response = await panelRouter.fetch(
+        await requestFor("user-1", `/api/channels/channel-demo/modules/${moduleId}`, "PATCH", { enabled: true }),
+        environment,
+      );
+      expect(response.status).toBe(200);
+    }
+
+    const disableBody = { enabled: false, expectedRevision: 1 };
+    const first = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/channel-demo/modules/test_game_requires_points", "PATCH", disableBody),
+      environment,
+    );
+    const retry = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/channel-demo/modules/test_game_requires_points", "PATCH", disableBody),
+      environment,
+    );
+
+    expect(first.status).toBe(500);
+    expect(retry.status).toBe(200);
+    expect(setGate).toHaveBeenLastCalledWith("test_game_requires_points", true, 2);
+    expect(cancelOpenRounds).toHaveBeenCalledTimes(2);
+    expect(cancelOpenRounds).toHaveBeenLastCalledWith("test_game_requires_points", 2);
   });
 
   it(`leaves the game gate open and skips refunds when D1 rejects a disable (${dependencyTestCard("the game remains enabled when its D1 state update fails", "a failed database mutation still closes the gate or refunds escrow", "a SQLite trigger simulates the rejected D1 batch and the fake Durable Object records calls")})`, async () => {

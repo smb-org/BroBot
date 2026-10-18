@@ -135,8 +135,8 @@ const alarmContext = (
   const overlayMessages: Array<{ type: string; elementKind: string; payload: Readonly<Record<string, unknown>> }> = [];
   let currentDeadline: number | null = null;
   const sendChat = vi.fn<ModuleAlarmContext["sendChat"]>(async (_text, _idempotencyKey, _attributions, stillValid) => {
-    if (stillValid !== undefined && !await stillValid()) return { sent: false, reason: "stale_before_send", retryable: false };
-    return { sent: true, reason: null, retryable: false };
+    if (stillValid !== undefined && !await stillValid()) return { sent: false, reason: "stale_before_send", retryable: false, delivery: "failed" };
+    return { sent: true, reason: null, retryable: false, delivery: "delivered" };
   });
   const context = {
     DB: options.databaseBinding ?? database as unknown as D1Database,
@@ -1137,8 +1137,8 @@ describe("BELABOX polling", () => {
       chatEnabled: true,
     });
     const { context, sendChat } = alarmContext(database);
-    sendChat.mockResolvedValueOnce({ sent: false, reason: "temporary_failure", retryable: true });
-    sendChat.mockResolvedValueOnce({ sent: true, reason: null, retryable: true });
+    sendChat.mockResolvedValueOnce({ sent: false, reason: "temporary_failure", retryable: true, delivery: "failed" });
+    sendChat.mockResolvedValueOnce({ sent: true, reason: null, retryable: true, delivery: "delivered" });
     const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse(relayPayload(true, 900))));
 
     await handleBelaboxPollAlarm(context, "poll", Date.now(), undefined, fetcher);
@@ -1199,9 +1199,9 @@ describe("BELABOX polling", () => {
     } as unknown as D1Database;
     const { context, sendChat } = alarmContext(database, { databaseBinding });
     sendChat.mockImplementation(async (_message, idempotencyKey, _attributions, stillValid) => {
-      if (stillValid !== undefined && !await stillValid()) return { sent: false, reason: "stale_before_send", retryable: false };
+      if (stillValid !== undefined && !await stillValid()) return { sent: false, reason: "stale_before_send", retryable: false, delivery: "failed" };
       if (idempotencyKey.endsWith(":recovered")) interceptSettlementRead = true;
-      return { sent: true, reason: null, retryable: false };
+      return { sent: true, reason: null, retryable: false, delivery: "delivered" };
     });
     const poll = (bitrateKbps: number): Promise<BelaboxPollRoutineResult | undefined> => handleBelaboxPollAlarm(
       context,

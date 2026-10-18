@@ -766,7 +766,13 @@ export interface ModuleAlarmContext {
     attributions?: readonly string[],
     stillValid?: () => Promise<boolean>,
     target?: ChatOutputTarget,
-  ) => Promise<{ sent: boolean; reason: string | null; retryable: boolean; attemptedAt?: number }>;
+  ) => Promise<{
+    sent: boolean;
+    reason: string | null;
+    retryable: boolean;
+    delivery: "delivered" | "rate_limited" | "ambiguous" | "failed";
+    attemptedAt?: number;
+  }>;
   /** Monotonic count of accepted chat messages kept in this channel object. */
   chatActivityCount: () => Promise<number>;
   /** Resolves all registered module event-time sources without exposing module identity. */

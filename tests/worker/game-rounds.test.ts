@@ -1,5 +1,16 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { evictDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:workers";
+import type { ModuleAlarmContext, ModuleAlarmDefinition, ModuleExternalFetchBudget } from "../../src/modules/contract";
+import { templateLanguageText } from "../../src/modules/template-language";
+import type { ChatSendResult, sendChatMessage } from "../../src/worker/chat";
+
+type HostChatSender = (...args: Parameters<typeof sendChatMessage>) => Promise<ChatSendResult>;
+const hostChatMock = vi.hoisted(() => ({ send: vi.fn<HostChatSender>() }));
+
+vi.mock("../../src/worker/chat", () => ({
+  sendChatMessage: (...args: Parameters<typeof sendChatMessage>) => hostChatMock.send(...args),
+}));
 
 import {
   insertPointChannel,
@@ -15,7 +26,17 @@ import {
 } from "./points-test-helpers";
 
 beforeAll(runMigrations);
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  hostChatMock.send.mockReset();
+  hostChatMock.send.mockImplementation(() => Promise.resolve({
+    sent: false,
+    truncated: false,
+    delivery: "not_attempted",
+    reason: "test_transport_unconfigured",
+    detail: {},
+  }));
+});
 
 describe("game rounds in the worker Durable Object", () => {
   it(`rejects a join after the stored deadline without booking a stake (${testCard("join checks the round deadline inside the DO transaction", "a late participant loses points or appears in the round")})`, async () => {
@@ -24,7 +45,7 @@ describe("game rounds in the worker Durable Object", () => {
     const object = pointObject(channelId);
     await object.touchPointAccount(pointTestModule, "viewer-a", "nachtfalke", 40);
     const joinResult = await runPointObject(object, async (target) => {
-      stubPointRoundChat(target, () => Promise.resolve({ sent: false, retryable: true, reason: "rate_limited" }));
+      stubPointRoundChat(target, () => Promise.resolve({ sent: false, retryable: true, reason: "rate_limited", delivery: "rate_limited" }));
       await target.openGameRound(pointTestModule, "round-late", {
         durationS: 60,
         announceText: "The round starts",
@@ -122,6 +143,86 @@ describe("game rounds in the worker Durable Object", () => {
     await expect(object.pointRanking(pointTestModule, new Date().toISOString().slice(0, 7), 10)).resolves.toEqual([]);
   });
 
+  it(`persists and sends one host cancellation notice with the refund (${testCard("a disabled game refunds escrow and announces cancellation once", "a refund has no durable notice or a retry posts it twice")})`, async () => {
+    const channelId = `round-cancellation-notice-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const database = (env as unknown as { DB: D1Database }).DB;
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, ?, 0, '{}')",
+    ).bind(channelId, pointTestModule).run();
+    const object = pointObject(channelId);
+    const sentTexts: string[] = [];
+    hostChatMock.send.mockImplementation(async (...args: Parameters<typeof sendChatMessage>) => {
+      const [, , text, , , stillValid, claimBeforePost, , afterPost] = args;
+      expect(await (stillValid?.() ?? Promise.resolve(true))).toBe(true);
+      expect(await (claimBeforePost?.() ?? Promise.resolve(true))).toBe(true);
+      sentTexts.push(text);
+      await afterPost?.("sent", null);
+      return { sent: true, truncated: false, delivery: "sent", reason: null, detail: {} };
+    });
+    await object.touchPointAccount(pointTestModule, "viewer-a", "nachtfalke", 20);
+    await openAnnouncedRound(object, pointTestModule, "round-cancellation-notice", {
+      durationS: 60,
+      announceText: "The round starts",
+      settlement: { kind: "test", params: { payouts: [] } },
+    }, Date.now() + 60_000);
+    await object.joinGameRound(pointTestModule, "round-cancellation-notice", "msg:stake", "viewer-a", "nachtfalke", 5, {});
+    await object.setGameModuleGate(pointTestModule, true, 11);
+
+    await expect(object.cancelOpenGameRounds(pointTestModule, 11)).resolves.toBe(1);
+    await expect(object.cancelOpenGameRounds(pointTestModule, 11)).resolves.toBe(0);
+
+    await expect(object.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(20);
+    expect(sentTexts).toEqual(["Runde abgebrochen, Einsätze erstattet."]);
+    expect(templateLanguageText.en.pointRoundCancelled).toBe("Round cancelled, stakes refunded.");
+    expect(hostChatMock.send).toHaveBeenCalledOnce();
+    await expect(runPointObject(object, (_target, state) => state.storage.sql.exec<{
+      module_id: string;
+      revision: number;
+      completed_at: string | null;
+    }>(
+      "SELECT module_id, revision, completed_at FROM game_round_cancellation_notices WHERE module_id = ? AND revision = ?",
+      pointTestModule,
+      11,
+    ).one())).resolves.toMatchObject({ module_id: pointTestModule, revision: 11 });
+  });
+
+  it(`rolls back a stake refund when its cancellation notice cannot be persisted (${testCard("refund and cancellation notice share one transaction", "a stake is returned without leaving a cancellation notice")})`, async () => {
+    const channelId = `round-cancellation-notice-atomic-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    await object.touchPointAccount(pointTestModule, "viewer-a", "nachtfalke", 20);
+    await openAnnouncedRound(object, pointTestModule, "round-cancellation-notice-atomic", {
+      durationS: 60,
+      announceText: "The round starts",
+      settlement: { kind: "test", params: { payouts: [] } },
+    }, Date.now() + 60_000);
+    await object.joinGameRound(pointTestModule, "round-cancellation-notice-atomic", "msg:stake", "viewer-a", "nachtfalke", 5, {});
+    await object.setGameModuleGate(pointTestModule, true, 12);
+
+    await runPointObject(object, (_target, state) => {
+      state.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS game_round_cancellation_notices (
+          module_id TEXT NOT NULL,
+          revision INTEGER NOT NULL,
+          created_at TEXT NOT NULL,
+          completed_at TEXT,
+          PRIMARY KEY (module_id, revision)
+        )
+      `);
+      state.storage.sql.exec(`CREATE TRIGGER reject_cancellation_notice
+          BEFORE INSERT ON game_round_cancellation_notices
+          BEGIN SELECT RAISE(ABORT, 'simulated_notice_storage_failure'); END`);
+    });
+
+    await expect(capturePointError(object, (target) => target.cancelOpenGameRounds(pointTestModule, 12)))
+      .resolves.toContain("simulated_notice_storage_failure");
+    await expect(object.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(15);
+    await expect(runPointObject(object, (_target, state) => state.storage.sql.exec<{ state: string }>(
+      "SELECT state FROM game_rounds WHERE round_id = ?", "round-cancellation-notice-atomic",
+    ).one().state)).resolves.toBe("open");
+  });
+
   it(`closes a gate before cancelling and reopens only for a newer revision (${testCard("gate revision order blocks new game operations and round starts", "a stale activation reopens a newer disabled module")})`, async () => {
     const channelId = `round-gate-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
@@ -146,13 +247,38 @@ describe("game rounds in the worker Durable Object", () => {
     }, Date.now() + 60_000);
   });
 
+  it(`refunds a pending cancellation before a newer activation clears its intent (${testCard("re-enabling commits outstanding refunds before clearing cancellation intent", "re-enabling strands an escrowed stake or permits settlement")})`, async () => {
+    const channelId = `round-reenable-refund-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    await object.touchPointAccount(pointTestModule, "viewer-a", "nachtfalke", 20);
+    await openAnnouncedRound(object, pointTestModule, "round-reenable-refund", {
+      durationS: 60,
+      announceText: "The round starts",
+      settlement: { kind: "test", params: { payouts: [{ accountId: "viewer-a", amount: 50 }] } },
+    }, Date.now() + 60_000);
+    await object.joinGameRound(pointTestModule, "round-reenable-refund", "msg:stake", "viewer-a", "nachtfalke", 5, {});
+
+    await expect(object.setGameModuleGate(pointTestModule, true, 1)).resolves.toEqual({ applied: true });
+    await expect(object.setGameModuleGate(pointTestModule, false, 2)).resolves.toEqual({ applied: true });
+
+    await expect(object.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(20);
+    await expect(runPointObject(object, (_target, state) => state.storage.sql.exec<{ state: string }>(
+      "SELECT state FROM game_rounds WHERE round_id = ?", "round-reenable-refund",
+    ).one().state)).resolves.toBe("cancelled");
+    await expect(capturePointError(object, (target) => target.resolveGameRound(pointTestModule, "round-reenable-refund", {
+      kind: "test",
+      params: { payouts: [{ accountId: "viewer-a", amount: 50 }] },
+    }))).resolves.toBe("round_closed");
+  });
+
   it(`reconciles an expired open round through the Durable Object alarm (${testCard("a delivered round deadline survives a DO wake and resolves", "an open round has no outcome after its deadline")})`, async () => {
     const channelId = `round-recovery-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
     await object.touchPointAccount(pointTestModule, "viewer-a", "nachtfalke", 20);
     await runPointObject(object, async (target, state) => {
-      stubPointRoundChat(target, () => Promise.resolve({ sent: false, retryable: true, reason: "rate_limited" }));
+      stubPointRoundChat(target, () => Promise.resolve({ sent: false, retryable: true, reason: "rate_limited", delivery: "rate_limited" }));
       await target.openGameRound(pointTestModule, "round-recovery", {
       durationS: 1,
       announceText: "The round starts",
@@ -276,7 +402,7 @@ describe("game rounds in the worker Durable Object", () => {
     const channelId = `round-rate-limit-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
-    const sendChat = vi.fn(() => Promise.resolve({ sent: false, retryable: true, reason: "rate_limited" }));
+    const sendChat = vi.fn(() => Promise.resolve({ sent: false, retryable: true, reason: "rate_limited", delivery: "rate_limited" as const }));
 
     await runPointObject(object, async (target, state) => {
       stubPointRoundChat(target, sendChat);
@@ -304,11 +430,163 @@ describe("game rounds in the worker Durable Object", () => {
     await expect(object.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(10);
   });
 
+  it(`treats an ambiguous response without is_sent as delivered (${testCard("an HTTP-success ambiguity opens the round without a second announcement", "a potentially delivered start line cancels the round")})`, async () => {
+    const channelId = `round-ambiguous-http-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    const sendChat = vi.fn(() => Promise.resolve({
+      sent: false,
+      retryable: false,
+      reason: "not_sent",
+      delivery: "ambiguous" as const,
+    }));
+
+    await runPointObject(object, async (target, state) => {
+      stubPointRoundChat(target, sendChat);
+      await target.openGameRound(pointTestModule, "round-ambiguous-http", {
+        durationS: 60,
+        announceText: "The round starts",
+        settlement: { kind: "test", params: { payouts: [] } },
+      });
+      await forcePointAlarmWithin(target, state, "round-ambiguous-http");
+    });
+
+    const recovered = await runPointObject(object, (_target, state) => state.storage.sql.exec<{
+      state: string;
+      announce_state: string;
+      deadline_at: number | null;
+    }>("SELECT state, announce_state, deadline_at FROM game_rounds WHERE round_id = ?", "round-ambiguous-http").one());
+    expect(recovered.state).toBe("open");
+    expect(recovered.announce_state).toBe("ambiguous");
+    expect(recovered.deadline_at).not.toBeNull();
+    expect(sendChat).toHaveBeenCalledOnce();
+  });
+
+  it("preserves an HTTP-success ambiguity through the module alarm context", async () => {
+    const channelId = `round-context-ambiguous-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    const sendChatImpl: typeof sendChatMessage = () => Promise.resolve({
+      sent: false,
+      truncated: false,
+      delivery: "ambiguous",
+      reason: "not_sent",
+      detail: {},
+    });
+
+    const delivery = await runPointObject(object, async (target) => {
+      const internal = target as unknown as {
+        moduleAlarmContext: (
+          moduleId: string,
+          registration: ModuleAlarmDefinition,
+          budget: ModuleExternalFetchBudget,
+          streamGeneration?: number,
+          identity?: ModuleAlarmContext["alarmIdentity"],
+          planSequence?: number,
+          sendChatImpl?: typeof sendChatMessage,
+        ) => ModuleAlarmContext;
+      };
+      const registration = {
+        key: "points_announce",
+        handle: () => Promise.resolve(),
+      } satisfies ModuleAlarmDefinition;
+      const context = internal.moduleAlarmContext(
+        pointTestModule,
+        registration,
+        { claim: () => true } satisfies ModuleExternalFetchBudget,
+        undefined,
+        undefined,
+        undefined,
+        sendChatImpl,
+      );
+      return await context.sendChat("The round starts", "round:ambiguous:announce");
+    });
+
+    expect(delivery.delivery).toBe("ambiguous");
+    expect(delivery.reason).toBe("not_sent");
+  });
+
+  it(`timestamps a point announcement after a slower alarm handler in the same invocation (${testCard("each announcement uses its own attempt timestamp", "a slow earlier handler consumes the round duration")})`, async () => {
+    vi.useFakeTimers();
+    const startedAt = Date.parse("2026-10-12T12:00:00.000Z");
+    vi.setSystemTime(startedAt);
+    const channelId = `round-fresh-attempt-time-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    const attemptedAt = startedAt + 20_000;
+    const sendChat = vi.fn(() => Promise.resolve({
+      sent: false,
+      retryable: false,
+      reason: "network_error",
+      delivery: "ambiguous" as const,
+    }));
+
+    await runPointObject(object, async (target, state) => {
+      stubPointRoundChat(target, sendChat);
+      Object.assign(target, {
+        expireActiveChatters: () => { vi.setSystemTime(attemptedAt); return Promise.resolve(); },
+      });
+      await target.openGameRound(pointTestModule, "round-fresh-attempt-time", {
+        durationS: 60,
+        announceText: "The round starts",
+        settlement: { kind: "test", params: { payouts: [] } },
+      });
+      state.storage.kv.put("channel:alarm_schedule", {
+        "channel:active_chatters_expiry": { deadline: startedAt - 1, handler: "channel.active_chatters_expiry", revision: 1 },
+        "points:round:round-fresh-attempt-time": { deadline: startedAt, handler: "host:points_round", revision: 1 },
+      });
+      await state.storage.setAlarm(startedAt - 1);
+      await (target as unknown as { alarm(): Promise<void> }).alarm();
+    });
+
+    const attempt = await runPointObject(object, (_target, state) => state.storage.sql.exec<{
+      state: string;
+      announce_state: string;
+      last_attempt_at: number | null;
+      deadline_at: number | null;
+    }>("SELECT state, announce_state, last_attempt_at, deadline_at FROM game_rounds WHERE round_id = ?", "round-fresh-attempt-time").one());
+    expect(attempt).toEqual({
+      state: "open",
+      announce_state: "ambiguous",
+      last_attempt_at: attemptedAt,
+      deadline_at: attemptedAt + 60_000,
+    });
+    expect(sendChat).toHaveBeenCalledOnce();
+  });
+
+  it(`reconciles a later platform alarm to a persisted earlier round after restart (${testCard("startup replaces the platform alarm with the earliest stored schedule", "restart leaves an immediately due announcement behind a later alarm")})`, async () => {
+    const channelId = `round-earliest-alarm-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    const laterAlarmAt = Date.now() + 60 * 60_000;
+
+    await runPointObject(object, async (target, state) => {
+      await target.openGameRound(pointTestModule, "round-earliest-alarm", {
+        durationS: 60,
+        announceText: "The round starts",
+        settlement: { kind: "test", params: { payouts: [] } },
+      });
+      const table = state.storage.kv.get<Record<string, { deadline: number; handler: string; revision: number }>>(
+        "channel:alarm_schedule",
+      ) ?? {};
+      const alarmKey = "points:round:round-earliest-alarm";
+      expect(table[alarmKey]).toBeDefined();
+      await state.storage.setAlarm(laterAlarmAt);
+    });
+
+    await evictDurableObject(object as unknown as DurableObjectStub);
+    await runPointObject(object, async (_target, state) => {
+      const reconciledAlarmAt = await state.storage.getAlarm();
+      expect(reconciledAlarmAt).not.toBeNull();
+      expect(reconciledAlarmAt).toBeLessThan(laterAlarmAt);
+    });
+  });
+
   it(`treats a persisted attempt older than thirty seconds as delivered without resending (${testCard("the next alarm opens an ambiguous announcement from its recorded attempt time", "a lost send acknowledgement emits a duplicate start line", "a persisted attempt row stands in for a crash after the POST and before its state update")})`, async () => {
     const channelId = `round-ambiguous-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
-    const sendChat = vi.fn(() => Promise.resolve({ sent: true }));
+    const sendChat = vi.fn(() => Promise.resolve({ sent: true, delivery: "delivered" as const }));
     const attemptedAt = Date.now();
     const roundId = "round-ambiguous";
     const alarmKey = `points:round:${roundId}`;
@@ -373,8 +651,8 @@ describe("game rounds in the worker Durable Object", () => {
     const sendChat = vi.fn(() => {
       attempts += 1;
       return Promise.resolve(attempts <= 5
-        ? { sent: false, retryable: true, reason: "rate_limited" }
-        : { sent: true, retryable: false, reason: null });
+        ? { sent: false, retryable: true, reason: "rate_limited", delivery: "rate_limited" as const }
+        : { sent: true, retryable: false, reason: null, delivery: "delivered" as const });
     });
 
     await runPointObject(object, async (target, state) => {
@@ -458,7 +736,7 @@ describe("game rounds in the worker Durable Object", () => {
     await object.joinGameRound(pointTestModule, "round-settlement-failure", "msg:stake", "viewer-a", "nachtfalke", 10, {});
 
     await expect(runPointObject(object, async (target, state) => {
-      stubPointRoundChat(target, () => Promise.resolve({ sent: false, retryable: true, reason: "rate_limited" }));
+      stubPointRoundChat(target, () => Promise.resolve({ sent: false, retryable: true, reason: "rate_limited", delivery: "rate_limited" }));
       state.storage.sql.exec(
         "UPDATE game_rounds SET deadline_at = ? WHERE round_id = ?",
         Date.now() - 1,
@@ -485,11 +763,12 @@ describe("game rounds in the worker Durable Object", () => {
     let attempts = 0;
     const sendChat = vi.fn(() => {
       attempts += 1;
-      if (attempts === 1) return Promise.resolve({ sent: false, retryable: true, reason: "rate_limited" });
+      if (attempts === 1) return Promise.resolve({ sent: false, retryable: true, reason: "rate_limited", delivery: "rate_limited" as const });
       return Promise.resolve({
         sent: false,
         retryable: false,
         reason,
+        delivery: "ambiguous" as const,
         ...(actualClaimAt === undefined ? {} : { attemptedAt: start + actualClaimAt }),
       });
     });

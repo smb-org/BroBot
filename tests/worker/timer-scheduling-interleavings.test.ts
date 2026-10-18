@@ -327,12 +327,27 @@ const alarmTableKey = "channel:alarm_schedule";
 const plannedCount = (values: Map<string, unknown>): number =>
   Object.values(stateOf(values).timers).filter((entry) => entry.plannedOccurrence !== null).length;
 
+type TimerTestChatResult = Omit<Awaited<ReturnType<ModuleAlarmContext["sendChat"]>>, "delivery"> & {
+  delivery?: Awaited<ReturnType<ModuleAlarmContext["sendChat"]>>["delivery"];
+};
+
+type TimerTestChatSender = (...args: Parameters<ModuleAlarmContext["sendChat"]>) => Promise<TimerTestChatResult>;
+
 const timerAlarmContext = (
-  sendChat: ModuleAlarmContext["sendChat"],
+  sendChat: TimerTestChatSender,
   renderTemplate: ModuleAlarmContext["renderTemplate"] = (text) => Promise.resolve({ text: typeof text === "string" ? text : "" }),
 ): ModuleAlarmContext => ({
   renderTemplate,
-  sendChat,
+  sendChat: async (...args: Parameters<ModuleAlarmContext["sendChat"]>) => {
+    const result = await sendChat(...args);
+    const delivery = result.delivery ?? (result.sent
+      ? "delivered"
+      : result.reason === "rate_limited" ? "rate_limited"
+        : result.reason === "network_error" || result.reason === "timeout" || result.reason === "already_attempted"
+          ? "ambiguous"
+          : "failed");
+    return { ...result, delivery };
+  },
 } as unknown as ModuleAlarmContext);
 
 const deferred = (): { promise: Promise<void>; resolve: () => void } => {

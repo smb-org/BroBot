@@ -3770,7 +3770,7 @@ describe("ChannelObject realtime path", () => {
         await releaseSend.promise;
         const valid = await (stillValid?.() ?? Promise.resolve(true));
         if (valid) acceptedPosts.push(key);
-        return { sent: valid, reason: valid ? null : "stale_before_send", retryable: false };
+        return { sent: valid, reason: valid ? null : "stale_before_send", retryable: false, delivery: valid ? "delivered" : "failed" };
       });
       const firing = object.runTimerOccurrence(context, `timer:${config.id}`, first.identity.deadline,
         config.revision, first.identity, first.sequence);
@@ -3820,7 +3820,7 @@ describe("ChannelObject realtime path", () => {
         await releaseSend.promise;
         const valid = await (stillValid?.() ?? Promise.resolve(true));
         if (valid) acceptedPosts.push(key);
-        return { sent: valid, reason: valid ? null : "stale_before_send", retryable: false };
+        return { sent: valid, reason: valid ? null : "stale_before_send", retryable: false, delivery: valid ? "delivered" : "failed" };
       });
       const firing = object.runTimerOccurrence(context, `timer:${config.id}`, first.identity.deadline,
         config.revision, first.identity, first.sequence);
@@ -3921,7 +3921,7 @@ describe("ChannelObject realtime path", () => {
       const sends: string[] = [];
       const context = timerAlarmContext((_text, key) => {
         sends.push(key);
-        return Promise.resolve({ sent: true, reason: null, retryable: false });
+        return Promise.resolve({ sent: true, reason: null, retryable: false, delivery: "delivered" });
       });
 
       await object.runTimerOccurrence(context, `timer:${config.id}`, occurrence.identity.deadline,
