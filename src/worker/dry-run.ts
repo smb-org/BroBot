@@ -121,16 +121,9 @@ export const dryRunChatMessage = async (
     runModuleAlarm: null,
     readOnly: true,
     dryRun: true,
-    textBlockSelectionState: new Map<string, number>(),
   } as const;
+  const textBlockSelectionState = new Map<string, number>();
   const simulatedChannelVariables = new Map<string, number>();
-  const readSimulatedChannelVariables = async (names: readonly string[]): Promise<Readonly<Record<string, number>>> => {
-    const values = await readVariables(db, channelId, names);
-    return Object.fromEntries([...new Set(names)].flatMap((name) => {
-      const value = simulatedChannelVariables.get(name) ?? values[name];
-      return value === undefined ? [] : [[name, value]];
-    }));
-  };
 
   const chatModules = registry.filter((module) => (module.eventSubTypes ?? []).includes(CHAT_EVENT));
   const modulesToReport = request.only === undefined
@@ -148,6 +141,15 @@ export const dryRunChatMessage = async (
     }
     const moduleDisabled = !enabledModuleIds.has(module.id);
     const channelPaused = !moduleDisabled && dispatchState.controls.pause.active && !selectedModuleIds.has(module.id);
+    const moduleTextBlockSelectionState = new Map(textBlockSelectionState);
+    const moduleSimulatedChannelVariables = new Map(simulatedChannelVariables);
+    const readSimulatedChannelVariables = async (names: readonly string[]): Promise<Readonly<Record<string, number>>> => {
+      const values = await readVariables(db, channelId, names);
+      return Object.fromEntries([...new Set(names)].flatMap((name) => {
+        const value = moduleSimulatedChannelVariables.get(name) ?? values[name];
+        return value === undefined ? [] : [[name, value]];
+      }));
+    };
     let moduleBallotChoiceUnresolved = false;
     try {
       const activation = activationByModule.get(module.id);
@@ -180,7 +182,11 @@ export const dryRunChatMessage = async (
         channelInfo,
         followedAt: () => Promise.resolve("unavailable"),
         userCreatedAt: () => Promise.resolve(null),
-      }, { ...sharedTemplateRendererOptions, readChannelVariables: readSimulatedChannelVariables });
+      }, {
+        ...sharedTemplateRendererOptions,
+        readChannelVariables: readSimulatedChannelVariables,
+        textBlockSelectionState: moduleTextBlockSelectionState,
+      });
       const context: ModuleDryRunContext = {
         DB: db,
         defaultChatTarget,
@@ -223,18 +229,7 @@ export const dryRunChatMessage = async (
         },
       };
       const reports = await dryRun(event, context);
-      if (!moduleDisabled && !channelPaused) {
-        for (const report of reports) {
-          if (report.outcome !== "fires") continue;
-          for (const effect of report.effects) {
-            if (effect.kind === "variable") simulatedChannelVariables.set(effect.name, effect.to);
-          }
-        }
-      }
-      const filtered = request.only?.entryId === undefined
-        ? reports
-        : reports.filter((entry) => entry.entry.id === request.only?.entryId);
-      const entries = filtered
+      const evaluatedReports = reports
         .map((entry) => withHostBlocks(entry, moduleDisabled, channelPaused))
         .map((entry) => withOutputGate(
           entry,
@@ -244,6 +239,34 @@ export const dryRunChatMessage = async (
           dispatchState.controls.mute.active,
           dispatchState.controls.pause.active,
         ));
+      const productionSelected = selectedModuleIds.has(module.id);
+      if (productionSelected) {
+        for (const report of evaluatedReports) {
+          if (report.outcome !== "fires") continue;
+          for (const effect of report.effects) {
+            if (effect.kind === "variable") moduleSimulatedChannelVariables.set(effect.name, effect.to);
+          }
+        }
+        const commitsSharedState = evaluatedReports.some(({ effects }) => effects.some((effect) => {
+          switch (effect.kind) {
+            case "chat":
+            case "announcement":
+              return effect.suppressedBy === null;
+            case "shoutout":
+            case "timeout":
+              return effect.suppressedBy === undefined;
+            default:
+              return true;
+          }
+        }));
+        if (commitsSharedState) {
+          for (const [key, index] of moduleTextBlockSelectionState) textBlockSelectionState.set(key, index);
+        }
+        for (const [name, value] of moduleSimulatedChannelVariables) simulatedChannelVariables.set(name, value);
+      }
+      const entries = request.only?.entryId === undefined
+        ? evaluatedReports
+        : evaluatedReports.filter((entry) => entry.entry.id === request.only?.entryId);
       modules.push({ moduleId: module.id, status: moduleStatusFor(entries), entries });
     } catch (error: unknown) {
       const writeBlocked = error instanceof DryRunWriteError;

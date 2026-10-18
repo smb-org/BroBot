@@ -45,13 +45,21 @@ const seedIdentity = async (database: TestD1Database): Promise<void> => {
   ).bind(await encryptedToken("broadcaster-token"), await encryptedToken("broadcaster-refresh-token"), CHANNEL_ID).run();
 };
 
-const createScenario = async (withFaq: boolean) => {
+interface ScenarioOptions {
+  textCommandEnabled?: boolean;
+  paused?: boolean;
+  muted?: boolean;
+  textCommandText?: string;
+  startText?: string;
+}
+
+const createScenario = async (withFaq: boolean, options: ScenarioOptions = {}) => {
   const database = new TestD1Database();
   await insertChannel(database, CHANNEL_ID);
   await seedIdentity(database);
   await database.prepare(
-    "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'text_commands', 1, '{}')",
-  ).bind(CHANNEL_ID).run();
+    "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'text_commands', ?, '{}')",
+  ).bind(CHANNEL_ID, options.textCommandEnabled === false ? 0 : 1).run();
   if (withFaq) {
     await database.prepare(
       "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'faq', 1, '{}')",
@@ -72,8 +80,13 @@ const createScenario = async (withFaq: boolean) => {
     starterMinRole: "vip",
     minNetVotes: 3,
     percent: 5,
-    startText: "Kick start, score {var.score}",
+    startText: options.startText ?? "Kick start, score {var.score}",
   })).run();
+  if (options.paused === true || options.muted === true) {
+    await database.prepare(
+      "INSERT INTO channel_controls (channel_id, muted, paused, updated_at) VALUES (?, ?, ?, ?)",
+    ).bind(CHANNEL_ID, options.muted === true ? 1 : 0, options.paused === true ? 1 : 0, NOW).run();
+  }
   await database.prepare(
     "INSERT INTO channel_variables (channel_id, name, value, created_at, updated_at) VALUES (?, 'score', 41, ?, ?)",
   ).bind(CHANNEL_ID, NOW, NOW).run();
@@ -85,7 +98,7 @@ const createScenario = async (withFaq: boolean) => {
   await commands.create({
     channelId: CHANNEL_ID,
     name: "votekick",
-    text: "Score {var.score}",
+    text: options.textCommandText ?? "Score {var.score}",
     kind: "text",
     cooldownSeconds: 0,
     variableAction: { name: "score", operation: "add", amount: 1 },
@@ -134,6 +147,17 @@ const createScenario = async (withFaq: boolean) => {
   return { database, env, fetcher };
 };
 
+const seedGreetingTextBlock = async (database: TestD1Database): Promise<void> => {
+  await database.prepare("INSERT INTO text_library_settings (channel_id, graph_revision, updated_at) VALUES (?, 1, ?)")
+    .bind(CHANNEL_ID, NOW).run();
+  await database.prepare("INSERT INTO text_library_categories (channel_id, category_id, created_at, updated_at) VALUES (?, 'social', ?, ?)")
+    .bind(CHANNEL_ID, NOW, NOW).run();
+  await database.prepare("INSERT INTO text_blocks (channel_id, block_name, category_id, revision, created_at, updated_at) VALUES (?, 'greeting', 'social', 1, ?, ?)")
+    .bind(CHANNEL_ID, NOW, NOW).run();
+  await database.prepare("INSERT INTO text_block_variants (channel_id, block_name, variant_id, position, conditions_json, texts_json, last_chosen_index) VALUES (?, 'greeting', 'default', 0, '{}', '[\"Hello\",\"Welcome\"]', 0)")
+    .bind(CHANNEL_ID).run();
+};
+
 const request = {
   text: "!votekick target",
   sender: { login: "viewer_42", statuses: ["vip"] as const },
@@ -147,6 +171,133 @@ afterEach(() => {
 });
 
 describe("dry-run sequential module effects", () => {
+  it("does not carry text-block choices forward from a disabled module", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const { database, env, fetcher } = await createScenario(false, {
+      textCommandEnabled: false,
+      textCommandText: "{text.greeting}",
+      startText: "Kick {text.greeting}",
+    });
+    try {
+      await seedGreetingTextBlock(database);
+      const result = await dryRunChatMessage(env, CHANNEL_ID, request, fetcher, [textCommandModule, votekickModule]);
+      const commandEntry = result.modules.find(({ moduleId }) => moduleId === "text_commands")?.entries[0];
+      const votekickEntry = result.modules.find(({ moduleId }) => moduleId === "votekick")?.entries[0];
+
+      expect(commandEntry?.blocks.map(({ code }) => code)).toContain("host.module_disabled");
+      expect(votekickEntry?.effects).toContainEqual(expect.objectContaining({ kind: "chat", text: "Kick Welcome" }));
+      await expect(database.prepare("SELECT last_chosen_index FROM text_block_variants WHERE block_name = 'greeting'").first())
+        .resolves.toEqual({ last_chosen_index: 0 });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("does not carry text-block choices from a paused module into a pause-safe module", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const { database, env, fetcher } = await createScenario(false, {
+      paused: true,
+      textCommandText: "{text.greeting}",
+      startText: "Kick {text.greeting}",
+    });
+    const pauseSafeVotekickModule: typeof votekickModule = {
+      ...votekickModule,
+      pauseSafeEventSubTypes: ["channel.chat.message"],
+    };
+    try {
+      await seedGreetingTextBlock(database);
+      const result = await dryRunChatMessage(env, CHANNEL_ID, request, fetcher, [textCommandModule, pauseSafeVotekickModule]);
+      const commandEntry = result.modules.find(({ moduleId }) => moduleId === "text_commands")?.entries[0];
+      const votekickEntry = result.modules.find(({ moduleId }) => moduleId === "votekick")?.entries[0];
+
+      expect(commandEntry?.blocks.map(({ code }) => code)).toContain("host.channel_paused");
+      expect(votekickEntry?.effects).toContainEqual(expect.objectContaining({ kind: "chat", text: "Kick Welcome" }));
+      await expect(database.prepare("SELECT last_chosen_index FROM text_block_variants WHERE block_name = 'greeting'").first())
+        .resolves.toEqual({ last_chosen_index: 0 });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("projects a committed variable increment across modules when mute suppresses chat delivery", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const { database, env, fetcher } = await createScenario(false, { muted: true });
+    try {
+      const result = await dryRunChatMessage(env, CHANNEL_ID, request, fetcher, [textCommandModule, votekickModule]);
+      const commandEntry = result.modules.find(({ moduleId }) => moduleId === "text_commands")?.entries[0];
+      const votekickEntry = result.modules.find(({ moduleId }) => moduleId === "votekick")?.entries[0];
+
+      expect(commandEntry?.effects).toContainEqual(expect.objectContaining({ kind: "chat", suppressedBy: "channel_muted" }));
+      expect(commandEntry?.effects).toContainEqual({ kind: "variable", name: "score", from: 41, to: 42 });
+      expect(votekickEntry?.effects).toContainEqual(expect.objectContaining({
+        kind: "chat",
+        text: "Kick start, score 42",
+        suppressedBy: "channel_muted",
+      }));
+      await expect(database.prepare("SELECT value FROM channel_variables WHERE channel_id = ? AND name = 'score'")
+        .bind(CHANNEL_ID).first()).resolves.toEqual({ value: 41 });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("discards shared state when muted FAQ delivery releases its claim", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const { database, env, fetcher } = await createScenario(true, { muted: true });
+    const blockProbeModule: typeof textCommandModule = {
+      ...textCommandModule,
+      id: "state_probe",
+      templateContext: "event",
+      dryRunChatMessage: async (_event, context) => {
+        const rendered = await context.renderTemplate("Probe {text.greeting}", {}, undefined, "chat");
+        return [{
+          moduleId: "state_probe",
+          entry: { kind: "faq_entry", id: "state-probe", label: "State probe" },
+          outcome: "fires",
+          match: { kind: "keyword", pattern: "votekick" },
+          blocks: [],
+          effects: [{
+            kind: "chat",
+            text: rendered.text,
+            target: "source_only",
+            postsTo: "this_chat",
+            reply: false,
+            suppressedBy: null,
+            automated: false,
+          }],
+          templateNotes: rendered.diagnostics,
+        }];
+      },
+    };
+    try {
+      await seedGreetingTextBlock(database);
+      await database.prepare("UPDATE faq_entries SET answer_text = '{text.greeting}' WHERE faq_id = 'faq-votekick'")
+        .run();
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'state_probe', 1, '{}')",
+      ).bind(CHANNEL_ID).run();
+      const result = await dryRunChatMessage(
+        env,
+        CHANNEL_ID,
+        { ...request, text: "votekick" },
+        fetcher,
+        [faqModule, blockProbeModule],
+      );
+      const faqEntry = result.modules.find(({ moduleId }) => moduleId === "faq")?.entries[0];
+      const probeEntry = result.modules.find(({ moduleId }) => moduleId === "state_probe")?.entries[0];
+
+      expect(faqEntry?.effects).toContainEqual(expect.objectContaining({ kind: "chat", text: "Welcome", suppressedBy: "channel_muted" }));
+      expect(faqEntry?.effects.some(({ kind }) => kind === "cooldown")).toBe(false);
+      expect(probeEntry?.effects).toContainEqual(expect.objectContaining({ kind: "chat", text: "Probe Welcome" }));
+    } finally {
+      database.close();
+    }
+  });
+
   it("renders a later votekick reply with the earlier text command's simulated variable change", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW));
