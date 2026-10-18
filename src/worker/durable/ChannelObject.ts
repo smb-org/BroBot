@@ -156,6 +156,8 @@ import {
   acknowledgeWelcomeSync,
   announceAttemptSync,
   applyPointOperationSync,
+  assertPointAccountId,
+  assertPointRoundId,
   cancelPointRoundsSync,
   claimPointCooldownSync,
   completePointRoundCancellationNoticeSync,
@@ -2826,6 +2828,7 @@ export class ChannelObject extends DurableObject<Env> {
 
   private async recoverPointRoundAlarms(): Promise<void> {
     this.ensurePointsSchema();
+    await this.reconcilePointModuleActivationsDuringRecovery();
     for (const cancellation of pendingPointRoundCancellations(this.ctx.storage.sql)) {
       await this.cancelOpenGameRoundsInternal(cancellation.moduleId, cancellation.revision, false);
     }
@@ -2861,6 +2864,52 @@ export class ChannelObject extends DurableObject<Env> {
       });
     }
     await this.scheduleEarliestAlarm();
+  }
+
+  private async reconcilePointModuleActivationsDuringRecovery(): Promise<void> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return;
+    const moduleIds = this.ctx.storage.sql.exec<{ module_id: string }>(
+      `SELECT module_id FROM module_gates
+       UNION SELECT module_id FROM game_rounds`,
+    ).toArray().map(({ module_id }) => module_id);
+    if (moduleIds.length === 0) return;
+
+    const placeholders = moduleIds.map(() => "?").join(", ");
+    const activations = await this.env.DB.prepare(
+      `SELECT module_id, enabled, revision FROM channel_modules
+        WHERE channel_id = ? AND module_id IN (${placeholders})`,
+    ).bind(channelId, ...moduleIds).all<{ module_id: string; enabled: number; revision: number }>();
+    for (const activation of activations.results) {
+      await this.applyPointModuleActivation(activation.module_id, activation.enabled === 1, activation.revision, false);
+    }
+  }
+
+  private async reconcilePointModuleActivation(moduleId: string, flushCancellationNotices: boolean): Promise<void> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return;
+    const activation = await this.env.DB.prepare(
+      "SELECT enabled, revision FROM channel_modules WHERE channel_id = ? AND module_id = ?",
+    ).bind(channelId, moduleId).first<{ enabled: number; revision: number }>();
+    if (activation === null) return;
+    await this.applyPointModuleActivation(moduleId, activation.enabled === 1, activation.revision, flushCancellationNotices);
+  }
+
+  private async applyPointModuleActivation(
+    moduleId: string,
+    enabled: boolean,
+    revision: number,
+    flushCancellationNotices: boolean,
+  ): Promise<void> {
+    const gate = this.ctx.storage.sql.exec<{ revision: number }>(
+      "SELECT revision FROM module_gates WHERE module_id = ?",
+      moduleId,
+    ).toArray()[0];
+    if (gate !== undefined && revision <= gate.revision) return;
+    const result = await this.setGameModuleGateInternal(moduleId, !enabled, revision, flushCancellationNotices);
+    if (result.applied && !enabled) {
+      await this.cancelOpenGameRoundsInternal(moduleId, revision, flushCancellationNotices);
+    }
   }
 
   private pointAccess(moduleId: string): ModulePointsAccess {
@@ -2919,6 +2968,7 @@ export class ChannelObject extends DurableObject<Env> {
     login: string,
     startBonus: number,
   ): Promise<{ welcomePending: boolean }> {
+    assertPointAccountId(accountId);
     this.ensurePointsSchema();
     const operationId = `bonus:${accountId}`;
     const movements: PointsMovement[] = [
@@ -2944,6 +2994,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public acknowledgePointWelcome(_moduleId: string, accountId: string): Promise<void> {
+    assertPointAccountId(accountId);
     this.ensurePointsSchema();
     this.ctx.storage.transactionSync(() => { acknowledgeWelcomeSync(this.ctx.storage.sql, accountId, new Date().toISOString()); });
     return Promise.resolve();
@@ -2957,6 +3008,7 @@ export class ChannelObject extends DurableObject<Env> {
     live: boolean,
     rules: { amount: number; windowMinutes: number; dailyCap: number },
   ): Promise<{ credited: number }> {
+    assertPointAccountId(accountId);
     this.ensurePointsSchema();
     const windowStart = Math.floor(messageAt / (rules.windowMinutes * 60_000)) * rules.windowMinutes * 60_000;
     const operationId = `activity:${accountId}:${String(windowStart)}`;
@@ -2975,6 +3027,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public pointBalance(_moduleId: string, accountId: string): Promise<number> {
+    assertPointAccountId(accountId);
     this.ensurePointsSchema();
     return Promise.resolve(pointBalance(this.ctx.storage.sql, accountId));
   }
@@ -2993,6 +3046,7 @@ export class ChannelObject extends DurableObject<Env> {
     cursor?: string,
     limit?: number,
   ): Promise<Awaited<ReturnType<ModulePointsAccess["history"]>>> {
+    assertPointAccountId(accountId);
     this.ensurePointsSchema();
     return Promise.resolve(pointHistory(this.ctx.storage.sql, accountId, cursor, limit));
   }
@@ -3017,6 +3071,7 @@ export class ChannelObject extends DurableObject<Env> {
     accountId: string,
     month: string,
   ): Promise<Awaited<ReturnType<ModulePointsAccess["rankOf"]>>> {
+    assertPointAccountId(accountId);
     this.ensurePointsSchema();
     return Promise.resolve(pointRankOf(this.ctx.storage.sql, accountId, month));
   }
@@ -3038,6 +3093,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async openGameRound(moduleId: string, roundId: string, data: unknown): Promise<void> {
+    assertPointRoundId(roundId);
     this.ensurePointsSchema();
     const alarmKey = pointRoundAlarmKey(roundId);
     this.ctx.storage.transactionSync(() => {
@@ -3048,6 +3104,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async markGameRoundAnnounced(moduleId: string, roundId: string, deadlineAt: number, alarmKey: string): Promise<void> {
+    assertPointRoundId(roundId);
     this.ensurePointsSchema();
     this.ctx.storage.transactionSync(() => {
       markPointRoundAnnouncedSync(this.ctx.storage.sql, moduleId, roundId, deadlineAt, alarmKey);
@@ -3065,6 +3122,8 @@ export class ChannelObject extends DurableObject<Env> {
     stake: number,
     data: unknown,
   ): Promise<PointJoinResult> {
+    assertPointRoundId(roundId);
+    assertPointAccountId(accountId);
     this.ensurePointsSchema();
     const payloadHash = await pointPayloadHash({ moduleId, roundId, operationId, accountId, login, stake, data });
     return this.ctx.storage.transactionSync(() => joinPointRoundSync(
@@ -3087,7 +3146,9 @@ export class ChannelObject extends DurableObject<Env> {
     roundId: string,
     settlement: { kind: string; params: unknown },
   ): Promise<PointsApplyResult> {
+    assertPointRoundId(roundId);
     this.ensurePointsSchema();
+    await this.reconcilePointModuleActivation(moduleId, true);
     const operationId = `round:${roundId}:resolve`;
     const payloadHash = await pointPayloadHash({ moduleId, operationId, kind: "resolve", roundId, settlement });
     let resolved;
@@ -3129,8 +3190,11 @@ export class ChannelObject extends DurableObject<Env> {
   ): Promise<number> {
     this.ensurePointsSchema();
     const roundIds = this.ctx.storage.sql.exec<{ round_id: string }>(
-      `SELECT round_id FROM game_rounds WHERE module_id = ? AND state IN ('announcing', 'open', 'resolving') ORDER BY created_at, round_id`,
+      `SELECT round_id FROM game_rounds
+        WHERE module_id = ? AND gate_revision < ? AND state IN ('announcing', 'open', 'resolving')
+        ORDER BY created_at, round_id`,
       moduleId,
+      revision,
     ).toArray().map(({ round_id }) => round_id);
     return await this.cancelPointRounds(moduleId, roundIds, revision, flushCancellationNotices);
   }
@@ -3180,6 +3244,15 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async setGameModuleGate(moduleId: string, closed: boolean, revision: number): Promise<{ applied: boolean }> {
+    return await this.setGameModuleGateInternal(moduleId, closed, revision, true);
+  }
+
+  private async setGameModuleGateInternal(
+    moduleId: string,
+    closed: boolean,
+    revision: number,
+    flushCancellationNotices: boolean,
+  ): Promise<{ applied: boolean }> {
     this.ensurePointsSchema();
     const cancellation = closed
       ? undefined
@@ -3187,8 +3260,11 @@ export class ChannelObject extends DurableObject<Env> {
     const roundIds = cancellation === undefined
       ? []
       : this.ctx.storage.sql.exec<{ round_id: string }>(
-        `SELECT round_id FROM game_rounds WHERE module_id = ? AND state IN ('announcing', 'open', 'resolving') ORDER BY created_at, round_id`,
+        `SELECT round_id FROM game_rounds
+          WHERE module_id = ? AND gate_revision < ? AND state IN ('announcing', 'open', 'resolving')
+          ORDER BY created_at, round_id`,
         moduleId,
+        cancellation.revision,
       ).toArray().map(({ round_id }) => round_id);
     const refundRequests = pointRoundRefundRequests(this.ctx.storage.sql, moduleId, roundIds);
     const hashes = new Map<string, string>();
@@ -3216,7 +3292,7 @@ export class ChannelObject extends DurableObject<Env> {
     });
     if (result.applied && !closed) {
       await this.scheduleEarliestAlarm();
-      await this.flushPointCancellationNotices();
+      if (flushCancellationNotices) await this.flushPointCancellationNotices();
     }
     return result;
   }
@@ -3348,7 +3424,10 @@ export class ChannelObject extends DurableObject<Env> {
       ? alarmKey.slice(POINTS_ROUND_ALARM_PREFIX.length)
       : "";
     if (roundId.length === 0) return;
-    const round = pointRoundRow(this.ctx.storage.sql, roundId);
+    let round = pointRoundRow(this.ctx.storage.sql, roundId);
+    if (round === null) return;
+    await this.reconcilePointModuleActivation(round.module_id, true);
+    round = pointRoundRow(this.ctx.storage.sql, roundId);
     if (round === null || round.state === "resolved" || round.state === "cancelled") return;
     if (round.state === "open") {
       if (round.deadline_at === null || round.deadline_at > now) return;
@@ -3398,13 +3477,22 @@ export class ChannelObject extends DurableObject<Env> {
       await this.scheduleEarliestAlarm();
       return;
     }
+    const attemptRound = attempt.round;
+    const attemptNumber = attempt.attempt;
     await this.scheduleEarliestAlarm();
     const context = this.moduleAlarmContext(
-      attempt.round.module_id,
+      attemptRound.module_id,
       POINTS_ANNOUNCEMENT_REGISTRATION,
       createModuleExternalFetchBudget(),
     );
-    const delivery = await context.sendChat(attempt.round.announce_text, `round:${roundId}:announce`);
+    const attemptTimestamp = attemptRound.last_attempt_at;
+    const stillValid = async (): Promise<boolean> => {
+      await this.reconcilePointModuleActivation(attemptRound.module_id, true);
+      const current = pointRoundRow(this.ctx.storage.sql, roundId);
+      return current !== null && current.state === "announcing" && current.announce_state === "pending" &&
+        current.announce_attempts === attemptNumber && current.last_attempt_at === attemptTimestamp;
+    };
+    const delivery = await context.sendChat(attemptRound.announce_text, `round:${roundId}:announce`, [], stillValid);
     const sendReturnedAt = Date.now();
     if (delivery.delivery === "delivered") {
       await this.recordPointRoundAnnouncement(roundId, "delivered", sendReturnedAt);

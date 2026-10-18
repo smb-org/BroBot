@@ -170,6 +170,27 @@ describe("points ledger in the worker Durable Object", () => {
     await expect(object.pointSummary(pointTestModule)).resolves.toMatchObject({ circulation: 2_326, jackpots: { test_game: 500 } });
   });
 
+  it(`floors pot shares using exact integer arithmetic (${testCard("large valid ratios preserve the exact floored payout", "floating point rounds a payout up by one")})`, async () => {
+    const channelId = `points-potshare-boundary-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    await object.applyPointOperation(pointTestModule, "seed-boundary-pot", "bonus", [
+      { accountId: "__jackpot:test_game", delta: 3 },
+      { accountId: "__house", delta: -3 },
+    ], { source: "boundary" });
+
+    await object.applyPointOperation(pointTestModule, "boundary-share", "game", [
+      { accountId: "viewer-a", potShare: {
+        pot: "__jackpot:test_game",
+        numerator: 9_007_199_254_740_986,
+        denominator: 9_007_199_254_740_987,
+      } },
+    ], { payout: "boundary" });
+
+    await expect(object.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(2);
+    await expect(object.pointSummary(pointTestModule)).resolves.toMatchObject({ jackpots: { test_game: 1 } });
+  });
+
   it(`credits at most once per message-time window and clips to the UTC daily cap (${testCard("activity uses UTC message timestamps and cap remaining", "offline messages or retries create extra points")})`, async () => {
     const channelId = `points-activity-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);

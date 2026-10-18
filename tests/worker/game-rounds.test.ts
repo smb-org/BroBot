@@ -23,6 +23,7 @@ import {
   stubPointRoundChat,
   runMigrations,
   testCard,
+  type PointsWorkerObject,
 } from "./points-test-helpers";
 
 beforeAll(runMigrations);
@@ -141,6 +142,189 @@ describe("game rounds in the worker Durable Object", () => {
     expect(firstHistory.rows.filter((row) => row.kind === "refund")).toHaveLength(1);
     expect(secondHistory.rows.filter((row) => row.kind === "refund")).toHaveLength(1);
     await expect(object.pointRanking(pointTestModule, new Date().toISOString().slice(0, 7), 10)).resolves.toEqual([]);
+  });
+
+  it(`reconciles a committed D1 disable before settling an expired round (${testCard("the D1 activation revision cancels before alarm settlement", "the stale open gate settles the round")})`, async () => {
+    const channelId = `round-d1-disable-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const database = (env as unknown as { DB: D1Database }).DB;
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, ?, 1, '{}', 1)",
+    ).bind(channelId, pointTestModule).run();
+    const object = pointObject(channelId);
+    await object.setGameModuleGate(pointTestModule, false, 1);
+    await object.touchPointAccount(pointTestModule, "viewer-a", "nachtfalke", 20);
+    await openAnnouncedRound(object, pointTestModule, "round-d1-disable", {
+      durationS: 60,
+      announceText: "The round starts",
+      settlement: { kind: "test", params: { payouts: [] } },
+    }, Date.now() + 60_000);
+    await object.joinGameRound(pointTestModule, "round-d1-disable", "msg:stake", "viewer-a", "nachtfalke", 5, {});
+    await runPointObject(object, (_target, state) => {
+      state.storage.sql.exec("UPDATE game_rounds SET deadline_at = ? WHERE round_id = ?", Date.now() - 1, "round-d1-disable");
+    });
+
+    await database.prepare("UPDATE channel_modules SET enabled = 0, revision = 2 WHERE channel_id = ? AND module_id = ?")
+      .bind(channelId, pointTestModule).run();
+    await runPointObject(object, async (target, state) => forcePointAlarmWithin(target, state, "round-d1-disable"));
+
+    await expect(object.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(20);
+    await expect(runPointObject(object, (_target, state) => state.storage.sql.exec<{ state: string }>(
+      "SELECT state FROM game_rounds WHERE round_id = ?", "round-d1-disable",
+    ).one().state)).resolves.toBe("cancelled");
+  });
+
+  it(`applies a delayed older disable only to rounds opened before it (${testCard("revision-scoped cancellation refunds older stakes while preserving newer rounds", "a stale disable is lost or refunds a round opened after re-enable")})`, async () => {
+    const channelId = `round-stale-disable-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const database = (env as unknown as { DB: D1Database }).DB;
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, ?, 1, '{}', 1)",
+    ).bind(channelId, pointTestModule).run();
+    const object = pointObject(channelId);
+    await object.setGameModuleGate(pointTestModule, false, 1);
+    await object.touchPointAccount(pointTestModule, "viewer-a", "pixelpilz", 50);
+    await openAnnouncedRound(object, pointTestModule, "round-before-disable", {
+      durationS: 60,
+      announceText: "The earlier round starts",
+      settlement: { kind: "test", params: { payouts: [] } },
+    }, Date.now() + 60_000);
+    await object.joinGameRound(pointTestModule, "round-before-disable", "msg:old-stake", "viewer-a", "pixelpilz", 10, {});
+
+    await database.prepare("UPDATE channel_modules SET enabled = 1, revision = 3 WHERE channel_id = ? AND module_id = ?")
+      .bind(channelId, pointTestModule).run();
+    await object.setGameModuleGate(pointTestModule, false, 3);
+    await openAnnouncedRound(object, pointTestModule, "round-after-enable", {
+      durationS: 60,
+      announceText: "The later round starts",
+      settlement: { kind: "test", params: { payouts: [] } },
+    }, Date.now() + 60_000);
+    await object.joinGameRound(pointTestModule, "round-after-enable", "msg:new-stake", "viewer-a", "pixelpilz", 5, {});
+
+    await object.setGameModuleGate(pointTestModule, true, 2);
+    await expect(object.cancelOpenGameRounds(pointTestModule, 2)).resolves.toBe(1);
+
+    await expect(object.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(45);
+    await expect(runPointObject(object, (_target, state) => state.storage.sql.exec<{ round_id: string; state: string }>(
+      "SELECT round_id, state FROM game_rounds WHERE round_id IN (?, ?) ORDER BY round_id",
+      "round-after-enable",
+      "round-before-disable",
+    ).toArray())).resolves.toEqual([
+      { round_id: "round-after-enable", state: "open" },
+      { round_id: "round-before-disable", state: "cancelled" },
+    ]);
+  });
+
+  it(`rejects overlong round and account identifiers before accepting them (${testCard("bounded identifiers are enforced before ledger writes", "refund identifiers can exceed the operation key limit")})`, async () => {
+    const channelId = `round-id-boundaries-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    const validRound = "valid-round";
+    const roundData = {
+      durationS: 60,
+      announceText: "The round starts",
+      settlement: { kind: "test", params: { payouts: [] } },
+    };
+
+    await expect(capturePointError(object, (target) => target.openGameRound(pointTestModule, "r".repeat(65), roundData)))
+      .resolves.toBe("invalid_round_id");
+    await object.openGameRound(pointTestModule, validRound, roundData);
+    await object.markGameRoundAnnounced(pointTestModule, validRound, Date.now() + 60_000, `round:${validRound}`);
+
+    await expect(capturePointError(object, (target) => target.joinGameRound(
+      pointTestModule, validRound, "msg:invalid-account", "a".repeat(33), "nachtfalke", 1, {},
+    ))).resolves.toBe("invalid_account_id");
+    await expect(capturePointError(object, (target) => target.joinGameRound(
+      pointTestModule, validRound, "msg:invalid-character", "viewer/invalid", "nachtfalke", 1, {},
+    ))).resolves.toBe("invalid_account_id");
+
+    await expect(runPointObject(object, (_target, state) => state.storage.sql.exec<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM game_rounds WHERE round_id = ?", "r".repeat(65),
+    ).one().count)).resolves.toBe(0);
+    await expect(runPointObject(object, (_target, state) => state.storage.sql.exec<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM game_round_participants WHERE round_id = ?", validRound,
+    ).one().count)).resolves.toBe(0);
+  });
+
+  it(`cancels and recovers a round at the maximum supported identifier lengths (${testCard("boundary-length identifiers remain cancellable after restart", "a valid maximum-length refund fails during startup recovery")})`, async () => {
+    const channelId = `round-id-max-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const database = (env as unknown as { DB: D1Database }).DB;
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, ?, 1, '{}', 1)",
+    ).bind(channelId, pointTestModule).run();
+    const object = pointObject(channelId);
+    const roundId = "r".repeat(64);
+    const accountId = "a".repeat(32);
+    await object.setGameModuleGate(pointTestModule, false, 1);
+    await object.touchPointAccount(pointTestModule, accountId, "pixelpilz", 20);
+    await openAnnouncedRound(object, pointTestModule, roundId, {
+      durationS: 60,
+      announceText: "The boundary round starts",
+      settlement: { kind: "test", params: { payouts: [] } },
+    }, Date.now() + 60_000);
+    await object.joinGameRound(pointTestModule, roundId, "msg:boundary-stake", accountId, "pixelpilz", 7, {});
+    await database.prepare("UPDATE channel_modules SET enabled = 0, revision = 2 WHERE channel_id = ? AND module_id = ?")
+      .bind(channelId, pointTestModule).run();
+
+    await evictDurableObject(object as unknown as DurableObjectStub);
+    await expect(object.pointBalance(pointTestModule, accountId)).resolves.toBe(20);
+    await expect(object.pointHistory(pointTestModule, accountId)).resolves.toMatchObject({ rows: [
+      { operationId: `round:${roundId}:refund:${accountId}`, kind: "refund", delta: 7 },
+      { operationId: `msg:boundary-stake`, kind: "stake", delta: -7 },
+      { operationId: `bonus:${accountId}`, kind: "bonus", delta: 20 },
+    ] });
+    expect(hostChatMock.send).not.toHaveBeenCalled();
+  });
+
+  it(`does not post an announcement after its round is cancelled and the module re-enabled (${testCard("the pre-post callback checks the persisted round attempt", "re-enabling the module revives an announcement for a cancelled round")})`, async () => {
+    const channelId = `round-stale-announcement-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const database = (env as unknown as { DB: D1Database }).DB;
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, ?, 1, '{}', 1)",
+    ).bind(channelId, pointTestModule).run();
+    const object = pointObject(channelId);
+    const roundId = "round-cancel-before-post";
+    const roundData = {
+      durationS: 60,
+      announceText: "The round starts",
+      settlement: { kind: "test", params: { payouts: [] } },
+    };
+    let targetRef!: PointsWorkerObject;
+    const posted: string[] = [];
+    hostChatMock.send.mockImplementation(async (...args) => {
+      const [, , text, , , stillValid] = args;
+      await database.prepare("UPDATE channel_modules SET enabled = 0, revision = 2 WHERE channel_id = ? AND module_id = ?")
+        .bind(channelId, pointTestModule).run();
+      await targetRef.setGameModuleGate(pointTestModule, true, 2);
+      await targetRef.cancelOpenGameRounds(pointTestModule, 2);
+      await database.prepare("UPDATE channel_modules SET enabled = 1, revision = 3 WHERE channel_id = ? AND module_id = ?")
+        .bind(channelId, pointTestModule).run();
+      await targetRef.setGameModuleGate(pointTestModule, false, 3);
+
+      const valid = await (stillValid?.() ?? Promise.resolve(true));
+      if (valid) posted.push(text);
+      return {
+        sent: valid,
+        truncated: false,
+        delivery: valid ? "sent" : "not_attempted",
+        reason: valid ? null : "stale_before_send",
+        detail: {},
+      };
+    });
+
+    await runPointObject(object, async (target, state) => {
+      targetRef = target;
+      await target.setGameModuleGate(pointTestModule, false, 1);
+      await target.openGameRound(pointTestModule, roundId, roundData);
+      await forcePointAlarmWithin(target, state, roundId);
+    });
+
+    expect(posted).toEqual([]);
+    await expect(runPointObject(object, (_target, state) => state.storage.sql.exec<{ state: string }>(
+      "SELECT state FROM game_rounds WHERE round_id = ?", roundId,
+    ).one().state)).resolves.toBe("cancelled");
   });
 
   it(`persists and sends one host cancellation notice with the refund (${testCard("a disabled game refunds escrow and announces cancellation once", "a refund has no durable notice or a retry posts it twice")})`, async () => {

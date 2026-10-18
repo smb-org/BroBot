@@ -37,6 +37,7 @@ interface AccountRow extends Record<string, string | number | null> {
 interface RoundRow extends Record<string, string | number | null> {
   round_id: string;
   module_id: string;
+  gate_revision: number;
   state: string;
   deadline_at: number | null;
   alarm_key: string | null;
@@ -99,6 +100,17 @@ interface PointSettlementOutput {
 }
 
 export type PointSettlement = (input: PointSettlementInput) => PointSettlementOutput;
+
+const POINT_ROUND_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/u;
+const POINT_ACCOUNT_ID_PATTERN = /^[A-Za-z0-9_-]{1,32}$/u;
+
+export const assertPointRoundId = (roundId: string): void => {
+  if (!POINT_ROUND_ID_PATTERN.test(roundId)) throw new Error("invalid_round_id");
+};
+
+export const assertPointAccountId = (accountId: string): void => {
+  if (!POINT_ACCOUNT_ID_PATTERN.test(accountId)) throw new Error("invalid_account_id");
+};
 
 const allowedKinds = new Set<PointsKind>(["bonus", "activity", "stake", "game", "resolve", "refund", "admin"]);
 const systemAccount = (accountId: string): boolean => accountId.startsWith("__");
@@ -164,6 +176,7 @@ export const ensurePointsSchema = (sql: PointsSql): void => {
   sql.exec(`CREATE TABLE IF NOT EXISTS game_rounds (
     round_id TEXT PRIMARY KEY,
     module_id TEXT NOT NULL,
+    gate_revision INTEGER NOT NULL DEFAULT 0,
     state TEXT NOT NULL,
     deadline_at INTEGER,
     alarm_key TEXT,
@@ -207,6 +220,19 @@ export const ensurePointsSchema = (sql: PointsSql): void => {
     completed_at TEXT,
     PRIMARY KEY (module_id, revision)
   )`);
+  const gameRoundColumns = sql.exec<{ name: string }>("PRAGMA table_info(game_rounds)").toArray();
+  if (!gameRoundColumns.some(({ name }) => name === "gate_revision")) {
+    sql.exec("ALTER TABLE game_rounds ADD COLUMN gate_revision INTEGER NOT NULL DEFAULT 0");
+    sql.exec(`UPDATE game_rounds
+                 SET gate_revision = COALESCE(
+                   CASE WHEN state IN ('announcing', 'open', 'resolving') THEN
+                     (SELECT revision - 1 FROM game_round_cancellations
+                       WHERE game_round_cancellations.module_id = game_rounds.module_id)
+                   END,
+                   (SELECT revision FROM module_gates WHERE module_gates.module_id = game_rounds.module_id),
+                   0
+                 )`);
+  }
   sql.exec("CREATE INDEX IF NOT EXISTS point_accounts_balance ON point_accounts (kind, balance DESC)");
   sql.exec("CREATE INDEX IF NOT EXISTS point_monthly_rank ON point_monthly (month, net_won DESC, reached_at ASC, account_id ASC)");
   sql.exec("CREATE INDEX IF NOT EXISTS point_ledger_account_history ON point_ledger (account_id, operation_id)");
@@ -311,12 +337,15 @@ const expandedMovementsSync = (
     }
     if (pointKindFor(pot) !== "pot") throw new Error("invalid_pot_share");
     if (pointKindFor(movement.accountId) !== "viewer") throw new Error("invalid_pot_share");
-    const share = Math.floor(Math.max(0, currentBalance(pot)) * numerator / denominator);
+    const shareBigInt = BigInt(Math.max(0, currentBalance(pot))) * BigInt(numerator) / BigInt(denominator);
+    const share = Number(shareBigInt);
     if (!Number.isSafeInteger(share)) throw new Error("balance_overflow");
     if (share > 0) {
-      currentBalance(movement.accountId);
+      const viewerBalance = currentBalance(movement.accountId);
+      const nextViewerBalance = viewerBalance + share;
+      if (!Number.isSafeInteger(nextViewerBalance)) throw new Error("balance_overflow");
       running.set(pot, currentBalance(pot) - share);
-      running.set(movement.accountId, currentBalance(movement.accountId) + share);
+      running.set(movement.accountId, nextViewerBalance);
       deltas.set(pot, (deltas.get(pot) ?? 0) - share);
       deltas.set(movement.accountId, (deltas.get(movement.accountId) ?? 0) + share);
     }
@@ -835,7 +864,7 @@ export const pointRoundAlarmKey = (roundId: string): string => `${POINTS_ROUND_A
 
 export const pointRoundRow = (sql: PointsSql, roundId: string): RoundRow | null =>
   sql.exec<RoundRow>(
-    `SELECT round_id, module_id, state, deadline_at, alarm_key, data_json, created_at, duration_s,
+    `SELECT round_id, module_id, gate_revision, state, deadline_at, alarm_key, data_json, created_at, duration_s,
             announce_text, announce_state, announce_attempts, last_attempt_at
        FROM game_rounds WHERE round_id = ?`,
     roundId,
@@ -849,7 +878,12 @@ export const openPointRoundSync = (
   now: string,
   settlements: ReadonlyMap<string, PointSettlement>,
 ): { opened: boolean; alarmKey: string } => {
-  checkModuleGateSync(sql, moduleId);
+  assertPointRoundId(roundId);
+  const gate = sql.exec<{ closed: number; revision: number }>(
+    "SELECT closed, revision FROM module_gates WHERE module_id = ?",
+    moduleId,
+  ).toArray()[0];
+  if (gate?.closed === 1) throw new Error("module_closed");
   const parsed = parseRoundOpenData(value);
   if (!settlements.has(parsed.settlement.kind)) throw new Error("settlement_unknown");
   const dataJson = jsonValue(stableValue(parsed.data));
@@ -861,11 +895,12 @@ export const openPointRoundSync = (
   const alarmKey = pointRoundAlarmKey(roundId);
   sql.exec(
     `INSERT INTO game_rounds
-      (round_id, module_id, state, deadline_at, alarm_key, data_json, created_at, duration_s,
+      (round_id, module_id, gate_revision, state, deadline_at, alarm_key, data_json, created_at, duration_s,
        announce_text, announce_state, announce_attempts, last_attempt_at)
-     VALUES (?, ?, 'announcing', NULL, ?, ?, ?, ?, ?, 'pending', 0, NULL)`,
+     VALUES (?, ?, ?, 'announcing', NULL, ?, ?, ?, ?, ?, 'pending', 0, NULL)`,
     roundId,
     moduleId,
+    gate?.revision ?? 0,
     alarmKey,
     dataJson,
     now,
@@ -882,6 +917,7 @@ export const markPointRoundAnnouncedSync = (
   deadlineAt: number,
   alarmKey: string,
 ): void => {
+  assertPointRoundId(roundId);
   if (!Number.isFinite(deadlineAt)) throw new Error("invalid_deadline");
   const row = pointRoundRow(sql, roundId);
   if (row === null || row.module_id !== moduleId) throw new Error("round_not_found");
@@ -952,6 +988,8 @@ export const joinPointRoundSync = (
   nowMs: number,
   now: string,
 ): PointJoinResult => {
+  assertPointRoundId(roundId);
+  assertPointAccountId(accountId);
   const existingOperation = operationSync(sql, operationId);
   if (existingOperation !== null) {
     if (existingOperation.payload_hash !== requestHash) throw new Error("operation_conflict");
@@ -1010,6 +1048,7 @@ export const resolvePointRoundSync = (
   requestHash: string,
   now: string,
 ): PointApplyInternalResult => {
+  assertPointRoundId(roundId);
   const operationId = `round:${roundId}:resolve`;
   const previous = operationSync(sql, operationId);
   if (previous !== null) {
@@ -1087,8 +1126,10 @@ export const cancelPointRoundsSync = (
       "SELECT revision FROM game_round_cancellations WHERE module_id = ?",
       moduleId,
     ).toArray()[0];
-    if (gate?.closed !== 1 || gate.revision !== expectedGateRevision ||
-        cancellation?.revision !== expectedGateRevision) return 0;
+    const matchingPendingCancellation = gate?.closed === 1 && gate.revision === expectedGateRevision &&
+      cancellation?.revision === expectedGateRevision;
+    const delayedOlderCancellation = gate !== undefined && gate.revision > expectedGateRevision;
+    if (!matchingPendingCancellation && !delayedOlderCancellation) return 0;
   }
   const rounds = roundIds === undefined
     ? sql.exec<{ round_id: string }>(
@@ -1102,6 +1143,7 @@ export const cancelPointRoundsSync = (
     const round = pointRoundRow(sql, roundId);
     if (round === null || round.module_id !== moduleId ||
         (round.state !== "announcing" && round.state !== "open" && round.state !== "resolving")) continue;
+    if (expectedGateRevision !== undefined && round.gate_revision >= expectedGateRevision) continue;
     const refunds = pointRoundRefundRequests(sql, moduleId, [roundId]);
     for (const refund of refunds) {
       const payload = { moduleId, operationId: refund.operationId, kind: "refund", movements: refund.movements, result: refund.result };
@@ -1190,7 +1232,7 @@ export const recordPointAnnouncementSync = (
 
 export const recoverablePointRounds = (sql: PointsSql): RoundRow[] =>
   sql.exec<RoundRow>(
-    `SELECT round_id, module_id, state, deadline_at, alarm_key, data_json, created_at, duration_s,
+    `SELECT round_id, module_id, gate_revision, state, deadline_at, alarm_key, data_json, created_at, duration_s,
             announce_text, announce_state, announce_attempts, last_attempt_at
        FROM game_rounds WHERE state IN ('announcing', 'open') ORDER BY created_at, round_id`,
   ).toArray();
