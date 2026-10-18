@@ -17,6 +17,7 @@ import { commandFromMessage } from "./domain";
 import type { TextCommand } from "./contracts";
 import { moduleVariableRenameTarget } from "../contract";
 import type { ModuleVariableReferences } from "../contract";
+import { prepareModerationReason } from "../contracts/moderation";
 
 const variableReferences: ModuleVariableReferences = {
   async usages(db, channelId, name) {
@@ -181,7 +182,7 @@ const dryRunTextCommandMessage = async (
         kind: "timeout",
         minSeconds: command.timeoutAction.minSeconds,
         maxSeconds: command.timeoutAction.maxSeconds,
-        reason: action.reason,
+        reason: prepareModerationReason(action.reason),
       });
       if (action.onSuccess !== undefined) effects.push(chatEffect(action.onSuccess, event, context, result.attributions, "on_success"));
       if (action.onFailure !== undefined) effects.push(chatEffect(action.onFailure, event, context, result.attributions, "on_failure"));

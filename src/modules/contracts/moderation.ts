@@ -4,6 +4,7 @@ import type { ModerationFailureReason } from "../../contracts/values";
 import type { ModuleLanguage } from "../contract";
 
 export const MODERATION_TIMEOUT_MAX_SECONDS = 1_209_600;
+export const prepareModerationReason = (reason: string): string => Array.from(reason).slice(0, 500).join("");
 
 export interface ModerationTimeoutExpectation {
   reason: string;

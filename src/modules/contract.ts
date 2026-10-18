@@ -991,6 +991,10 @@ export interface ModuleTemplateValueContext {
   externalFetchBudget?: ModuleExternalFetchBudget;
   /** Resolves provider values from cache only and suppresses provider status writes. */
   readOnly?: boolean;
+  /** Marks template resolution performed as part of a chat dry run. */
+  dryRun?: boolean;
+  /** Simulated last-chosen indices shared by all renders in one dry-run request. */
+  textBlockSelectionState?: Map<string, number>;
   /** Runs a registered module alarm through its channel Durable Object. */
   runModuleAlarm?: (moduleId: string, handlerKey: string, alarmKey: string, invocation?: unknown) => Promise<unknown>;
   /** Renders a module-owned nested fragment with the same host values and channel context. */
@@ -1019,6 +1023,8 @@ export interface ModuleTemplateConditionContext {
   externalFetchBudget?: ModuleExternalFetchBudget;
   /** Prevents provider lookups or cache fills when resolving a panel read. */
   readOnly?: boolean;
+  /** Marks template condition resolution performed as part of a chat dry run. */
+  dryRun?: boolean;
   now: number;
   commandInput?: { commandName: string; arguments: string; usageText?: string };
   /** Records a source label when a condition uses values from this module. */

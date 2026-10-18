@@ -129,7 +129,11 @@ export const createTextBlockTemplateValueProvider = (db: D1Database, channelId: 
     if (length <= 1) return 0;
     if (context.readOnly === true) {
       if (context.mode !== "chat") return 0;
-      return previousIndex >= 0 && previousIndex < length ? (previousIndex + 1) % length : 0;
+      const selectionKey = `${name}\u0000${variantId}`;
+      const simulatedPreviousIndex = context.textBlockSelectionState?.get(selectionKey) ?? previousIndex;
+      const index = simulatedPreviousIndex >= 0 && simulatedPreviousIndex < length ? (simulatedPreviousIndex + 1) % length : 0;
+      context.textBlockSelectionState?.set(selectionKey, index);
+      return index;
     }
     if (context.mode !== "chat") return 0;
     const row = await db.prepare(
