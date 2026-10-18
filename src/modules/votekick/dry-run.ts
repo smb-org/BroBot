@@ -1,5 +1,5 @@
 import type { DryRunBlockCode, DryRunEffect, DryRunEntryReport } from "../../contracts/dry-run";
-import type { ModuleAction, ModuleBallotAccess, ModuleDiagnostic, ModuleDryRunBallotSnapshot, ModuleDryRunContext, ModuleEvent, ModuleExecutionContext, ModuleResult } from "../contract";
+import type { BallotCastResult, ModuleAction, ModuleBallotAccess, ModuleDiagnostic, ModuleDryRunContext, ModuleEvent, ModuleExecutionContext, ModuleResult } from "../contract";
 import { ballotChoiceFromMessage } from "../contract";
 import { createDryRunBallotAccess } from "../domain/dry-run-ballots";
 import { createVotekickRepository, peekVotekickAdmission } from "./adapters/d1";
@@ -95,7 +95,7 @@ const actionEffects = (
   actions: readonly ModuleAction[],
   event: ModuleEvent<VotekickSettings>,
   context: ModuleDryRunContext,
-  initialSnapshot: ModuleDryRunBallotSnapshot | null,
+  castResults: ReadonlyMap<string, BallotCastResult>,
   attributions: readonly string[] | undefined,
 ): DryRunEffect[] => {
   const text = messageText(event);
@@ -104,26 +104,26 @@ const actionEffects = (
   const timeout = actions.find((action): action is Extract<ModuleAction, { kind: "timeout" }> => action.kind === "timeout");
   const overlay = actions.find((action): action is Extract<ModuleAction, { kind: "overlay" }> => action.kind === "overlay");
   const effects: DryRunEffect[] = [];
-  const initialOutcome = initialSnapshot?.outcome;
   if (overlay?.type === "opened") {
     const target = Reflect.get(overlay.payload, "targetLogin");
+    const votekickId = Reflect.get(overlay.payload, "votekickId");
+    const starterVote = typeof votekickId === "string" ? castResults.get(votekickId) : undefined;
     effects.push({
       kind: "ballot",
       moduleId: "votekick",
       action: "start",
       label: typeof target === "string" ? target : command?.[1] ?? "Votekick",
-      counts: [1, 0],
+      ...(starterVote?.status === "counted" || starterVote?.status === "changed" ? { counts: starterVote.counts } : {}),
     });
   } else if (overlay?.type === "tally") {
     const target = Reflect.get(overlay.payload, "targetLogin");
+    const votekickId = Reflect.get(overlay.payload, "votekickId");
     const yes = Reflect.get(overlay.payload, "yesVotes");
     const no = Reflect.get(overlay.payload, "noVotes");
     const status = Reflect.get(overlay.payload, "status");
-    const revision = Reflect.get(overlay.payload, "ballotRevision");
+    const cast = typeof votekickId === "string" ? castResults.get(votekickId) : undefined;
     const counts = typeof yes === "number" && typeof no === "number" ? [yes, no] : undefined;
-    const castChanged = choice !== null && initialOutcome === undefined && initialSnapshot !== null &&
-      typeof revision === "number" && revision > initialSnapshot.revision;
-    if (castChanged) {
+    if (cast?.status === "counted" || cast?.status === "changed") {
       effects.push({
         kind: "ballot",
         moduleId: "votekick",
@@ -133,7 +133,7 @@ const actionEffects = (
         ...(counts === undefined ? {} : { counts }),
       });
     }
-    if (timeout !== undefined || initialOutcome !== undefined || choice === null || status !== "running") {
+    if (timeout !== undefined || status !== "running") {
       effects.push({
         kind: "ballot",
         moduleId: "votekick",
@@ -172,8 +172,10 @@ export const dryRunVotekickMessage = async (
   const repository = simulatedRepository(context, current);
   const rules = current === null ? new Map() : new Map([[current.id, votekickFinalizeRule(current.threshold)]]);
   const voter = Reflect.get(event.payload, "chatter_user_id");
+  const castResults = new Map<string, BallotCastResult>();
   const ballots = createDryRunBallotAccess(context, {
     initialRules: rules,
+    onCastResult: (ballotId, result) => castResults.set(ballotId, result),
     ...(typeof voter === "string" && voter.length > 0 ? { voterId: voter } : {}),
   });
   const initialSnapshot = current === null ? null : await ballots.readSnapshot?.(current.id) ?? null;
@@ -188,7 +190,7 @@ export const dryRunVotekickMessage = async (
     : [{ code: blockCodeForReason(rejectedDetail.reason), detail: rejectedDetail }];
   const effects = targetLookupDeferred || ballotChoiceUnresolved
     ? []
-    : actionEffects(result.actions, event, context, initialSnapshot, result.attributions);
+    : actionEffects(result.actions, event, context, castResults, result.attributions);
   if (result.actions.length === 0 && result.diagnostics.length === 0 && effects.length === 0 &&
       !targetLookupDeferred && !ballotChoiceUnresolved) return [];
   if (command === null && choice === null && effects.length === 0 && blocks.length === 0) return [];

@@ -1,11 +1,11 @@
 import type { DryRunBlockCode, DryRunEffect, DryRunEntryReport } from "../../contracts/dry-run";
-import type { ModuleAction, ModuleDiagnostic, ModuleDryRunContext, ModuleEvent, ModuleExecutionContext, ModuleResult } from "../contract";
+import type { BallotCastResult, ModuleAction, ModuleBallotAccess, ModuleDiagnostic, ModuleDryRunBallotSnapshot, ModuleDryRunContext, ModuleEvent, ModuleExecutionContext, ModuleResult } from "../contract";
 import { parseVoteCommand, voteChoiceFromMessage, normalizeFreeTextVote, isBlockedFreeTextVote } from "./domain";
 import { createDryRunBallotAccess } from "../domain/dry-run-ballots";
-import { createChatVotingRepository } from "./repository";
+import { createChatVotingRepository, peekChatVoteManualClose, peekChatVoteOpenInsert } from "./repository";
 import type { ChatVotingRepository } from "./repository";
-import { processChatVotingMessage } from "./service";
-import type { ChatVotingSettings } from "./contracts";
+import { canControlChatVoting, isChatVotingCommandLike, processChatVotingMessage } from "./service";
+import type { ChatVote, ChatVoteTemplate, ChatVoteTerm, ChatVotingSettings } from "./contracts";
 
 const messageText = (event: ModuleEvent): string => {
   const message = event.payload.message;
@@ -13,9 +13,6 @@ const messageText = (event: ModuleEvent): string => {
   const text: unknown = Reflect.get(message, "text");
   return typeof text === "string" ? text : "";
 };
-
-const commandControlAllowed = (event: ModuleEvent): boolean =>
-  event.chatStatus?.includes("moderator") === true || event.chatStatus?.includes("broadcaster") === true;
 
 const diagnosticValues = (diagnostic: ModuleDiagnostic): Readonly<Record<string, string | number | boolean | null>> => {
   const detail = diagnostic.detail;
@@ -25,52 +22,79 @@ const diagnosticValues = (diagnostic: ModuleDiagnostic): Readonly<Record<string,
     Readonly<Record<string, string | number | boolean | null>>;
 };
 
+type PinnedTemplateLookup =
+  | { kind: "shortcut"; key: string; template: ChatVoteTemplate | null }
+  | { kind: "legacy_alias"; key: NonNullable<ChatVoteTemplate["legacyAlias"]>; template: ChatVoteTemplate | null };
+
 const simulatedRepository = (
   context: ModuleDryRunContext,
+  channelId: string,
+  source: ChatVotingRepository,
+  openVote: ChatVote | null,
+  templateLookup: PinnedTemplateLookup | null,
 ): ChatVotingRepository => {
-  const repository = createChatVotingRepository(context.DB);
+  let latestRead: Promise<ChatVote | null> | null = null;
+  const templates = {
+    ...source.templates,
+    ...(templateLookup?.kind === "shortcut" ? {
+      templateByShortcut: (lookupChannelId: string, shortcut: string) =>
+        lookupChannelId === channelId && shortcut === templateLookup.key
+          ? Promise.resolve(templateLookup.template)
+          : source.templates.templateByShortcut(lookupChannelId, shortcut),
+    } : {}),
+    ...(templateLookup?.kind === "legacy_alias" ? {
+      templateByLegacyAlias: (lookupChannelId: string, alias: NonNullable<ChatVoteTemplate["legacyAlias"]>) =>
+        lookupChannelId === channelId && alias === templateLookup.key
+          ? Promise.resolve(templateLookup.template)
+          : source.templates.templateByLegacyAlias(lookupChannelId, alias),
+    } : {}),
+    markTemplateUsed: () => Promise.resolve(),
+  };
   return {
-    ...repository,
-    insertOpen: async (_vote, _authorization, _resultTextTemplate, blockGuard) => {
-      if (blockGuard !== undefined && blockGuard.references.length > 0) {
-        const valid = await context.DB.prepare(`SELECT 1 AS valid WHERE 1 = 1 ${blockGuard.sql}`)
-          .bind(...blockGuard.values).first<{ valid: number }>();
-        if (valid === null) return "reference_conflict";
-      }
-      const [enabled, openVote] = await Promise.all([
-        context.DB.prepare(
-          "SELECT 1 AS enabled FROM channel_modules WHERE channel_id = ? AND module_id = 'chat_voting' AND enabled = 1",
-        ).bind(_vote.channelId).first<{ enabled: number }>(),
-        repository.open(_vote.channelId),
-      ]);
-      if (enabled === null) return "busy";
+    ...source,
+    open: (lookupChannelId) => lookupChannelId === channelId ? Promise.resolve(openVote) : source.open(lookupChannelId),
+    latest: async (lookupChannelId) => {
+      if (lookupChannelId !== channelId) return await source.latest(lookupChannelId);
+      if (openVote !== null) return openVote;
+      latestRead ??= source.latest(lookupChannelId);
+      return await latestRead;
+    },
+    byId: (lookupChannelId, pollId) =>
+      lookupChannelId === channelId && openVote?.id === pollId
+        ? Promise.resolve(openVote)
+        : source.byId(lookupChannelId, pollId),
+    insertOpen: async (vote, authorization, resultTextTemplate, blockGuard) => {
+      const admission = await peekChatVoteOpenInsert(context.DB, vote, authorization, resultTextTemplate, blockGuard);
+      if (admission !== "inserted") return admission;
       if (openVote !== null) throw new Error("An open D1 vote prevented the production insert.");
-      return await context.ballots?.hasOpenBallotSnapshot() ? "busy" : "inserted";
+      return "inserted";
     },
-    requestManualClose: async (channelId, pollId, expectedClosesAt) => {
-      const vote = await repository.byId(channelId, pollId);
-      return vote !== null && vote.closesAt === expectedClosesAt &&
-        (vote.status === "open" || vote.status === "closing" && vote.closeReason === "manual");
-    },
+    requestManualClose: (lookupChannelId, pollId, expectedClosesAt, authorization) =>
+      peekChatVoteManualClose(context.DB, lookupChannelId, pollId, expectedClosesAt, authorization),
     claimAlarmClose: () => Promise.resolve(false),
     extendClose: () => Promise.resolve(false),
     rollbackCloseExtension: () => Promise.resolve(false),
     finish: () => Promise.resolve(false),
     completeResultDelivery: () => Promise.resolve(false),
-    templates: {
-      ...repository.templates,
-      markTemplateUsed: () => Promise.resolve(),
-    },
+    templates,
   };
 };
 
-const serviceContext = (context: ModuleDryRunContext, voterId?: string): ModuleExecutionContext => ({
+const serviceContext = (context: ModuleDryRunContext, ballots: ModuleBallotAccess): ModuleExecutionContext => ({
   ...context,
   authorizeMutation: () => Promise.resolve({ sql: "", values: [] }),
-  ballots: createDryRunBallotAccess(context, { isBlockedFreeTextVote, ...(voterId === undefined ? {} : { voterId }) }),
+  ballots,
   scheduleAlarm: () => Promise.resolve(),
   clearAlarm: () => Promise.resolve(),
 } as unknown as ModuleExecutionContext);
+
+const isChatVoteTerm = (value: unknown): value is ChatVoteTerm => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const term: unknown = Reflect.get(value, "term");
+  const count: unknown = Reflect.get(value, "count");
+  const approved: unknown = Reflect.get(value, "approved");
+  return typeof term === "string" && Number.isSafeInteger(count) && (count as number) > 0 && typeof approved === "boolean";
+};
 
 const chatEffect = (action: Extract<ModuleAction, { kind: "chat" }>, context: ModuleDryRunContext): DryRunEffect => ({
   kind: "chat",
@@ -89,24 +113,49 @@ export const dryRunChatVotingMessage = async (
   const text = messageText(event);
   if (text.length === 0) return [];
   const command = parseVoteCommand(text);
-  const commandLike = command !== null || /^!vote(?:\s|$)/iu.test(text.trim());
-  const repository = simulatedRepository(context);
-  const openVote = await repository.open(event.channelId);
+  const commandLike = isChatVotingCommandLike(text, command);
+  const source = createChatVotingRepository(context.DB);
+  const openVote = await source.open(event.channelId);
+  let templateLookup: PinnedTemplateLookup | null = null;
+  if (command?.kind === "template") {
+    templateLookup = {
+      kind: "shortcut",
+      key: command.shortcut,
+      template: await source.templates.templateByShortcut(event.channelId, command.shortcut),
+    };
+  } else if (command?.kind === "legacyAlias") {
+    templateLookup = {
+      kind: "legacy_alias",
+      key: command.alias,
+      template: await source.templates.templateByLegacyAlias(event.channelId, command.alias),
+    };
+  }
+  const repository = simulatedRepository(context, event.channelId, source, openVote, templateLookup);
+  const voter = Reflect.get(event.payload, "chatter_user_id");
+  const voterId = typeof voter === "string" && voter.length > 0 ? voter : undefined;
+  const castResults = new Map<string, BallotCastResult>();
+  const ballots = createDryRunBallotAccess(context, {
+    isBlockedFreeTextVote,
+    ...(voterId === undefined ? {} : { voterId }),
+    onCastResult: (ballotId, result) => castResults.set(ballotId, result),
+  });
+  const initialSnapshot: ModuleDryRunBallotSnapshot | null = openVote === null
+    ? null
+    : await ballots.readSnapshot?.(openVote.id) ?? null;
   const ballotChoice = openVote === null || openVote.status !== "open" || openVote.kind === "free_text"
     ? null
     : voteChoiceFromMessage(text, openVote.kind, openVote.optionCount, openVote.labels);
   const textBallot = openVote?.status === "open" && openVote.kind === "free_text"
     ? normalizeFreeTextVote(text, openVote.textMode ?? "first_word")
     : null;
-  const voter = Reflect.get(event.payload, "chatter_user_id");
   const result: ModuleResult = await processChatVotingMessage(
     event,
     repository,
-    serviceContext(context, typeof voter === "string" && voter.length > 0 ? voter : undefined),
+    serviceContext(context, ballots),
   );
-  const ballotChoiceUnresolved = context.isBallotChoiceUnresolved?.() === true;
+  const ballotChoiceUnresolved = context.isBallotChoiceUnresolved?.() === true && initialSnapshot?.isActive !== false;
   if (result.actions.length === 0 && result.diagnostics.length === 0 && !ballotChoiceUnresolved) return [];
-  const permissionBlocked = commandLike && !commandControlAllowed(event);
+  const permissionBlocked = commandLike && !canControlChatVoting(event);
   const blocks: { code: DryRunBlockCode; detail?: Readonly<Record<string, string | number | boolean | null>> }[] = [];
   if (permissionBlocked) blocks.push({ code: "chat_voting.permission_denied" });
   for (const diagnostic of result.diagnostics) {
@@ -128,13 +177,20 @@ export const dryRunChatVotingMessage = async (
     }
     if (action.kind === "overlay" && action.type === "tally") {
       const counts: unknown = Reflect.get(action.payload, "counts");
+      const terms: unknown = Reflect.get(action.payload, "terms");
+      const more: unknown = Reflect.get(action.payload, "more");
+      const cast = openVote === null ? undefined : castResults.get(openVote.id);
+      const overflow = cast?.status === "overflow";
+      const savedTerms = Array.isArray(terms) && terms.every(isChatVoteTerm) ? terms : undefined;
       effects.push({
         kind: "ballot",
         moduleId: "chat_voting",
-        action: "count",
+        action: overflow ? "overflow" : "count",
         label: openVote?.title ?? "Abstimmung",
-        choice: textBallot ?? String(ballotChoice?.choice ?? text.trim()),
+        ...(overflow ? {} : { choice: textBallot ?? String(ballotChoice?.choice ?? text.trim()) }),
         ...(Array.isArray(counts) && counts.every((count) => typeof count === "number") ? { counts } : {}),
+        ...(savedTerms === undefined ? {} : { terms: savedTerms }),
+        ...(typeof more === "number" ? { more } : {}),
       });
     }
   }

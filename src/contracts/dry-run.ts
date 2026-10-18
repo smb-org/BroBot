@@ -57,10 +57,12 @@ export type DryRunEffect =
   | {
     kind: "ballot";
     moduleId: "chat_voting" | "votekick";
-    action: "start" | "count" | "finalize";
+    action: "start" | "count" | "overflow" | "finalize";
     label: string;
     choice?: string;
     counts?: readonly number[];
+    terms?: readonly { term: string; count: number; approved: boolean }[];
+    more?: number;
   };
 
 export interface DryRunEntryReport {

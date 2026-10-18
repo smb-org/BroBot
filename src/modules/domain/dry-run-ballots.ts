@@ -12,6 +12,7 @@ export interface DryRunBallotSimulationOptions {
   initialRules?: ReadonlyMap<string, BallotFinalizeRule>;
   isBlockedFreeTextVote?: (term: string, blockedTerms: readonly string[]) => boolean;
   voterId?: string;
+  onCastResult?: (ballotId: string, result: BallotCastResult) => void;
 }
 
 /** Simulates ballot mutations in memory while reading the running snapshot through read-only RPCs. */
@@ -20,6 +21,7 @@ export const createDryRunBallotAccess = (
   options: DryRunBallotSimulationOptions = {},
 ): ModuleBallotAccess => {
   const snapshots = new Map<string, ModuleDryRunBallotSnapshot>();
+  const snapshotReads = new Map<string, Promise<ModuleDryRunBallotSnapshot | null>>();
   const rules = new Map<string, BallotFinalizeRule | undefined>();
   for (const [ballotId, rule] of options.initialRules ?? []) rules.set(ballotId, rule);
   const expiresAt = new Map<string, number>();
@@ -28,9 +30,18 @@ export const createDryRunBallotAccess = (
   const snapshotFor = async (ballotId: string): Promise<ModuleDryRunBallotSnapshot | null> => {
     const projected = snapshots.get(ballotId);
     if (projected !== undefined) return projected;
-    const snapshot = await context.ballots?.readSnapshot(ballotId, options.voterId) ?? null;
+    const pending = snapshotReads.get(ballotId);
+    if (pending !== undefined) return pending;
+    const read = context.ballots?.readSnapshot(ballotId, options.voterId) ?? Promise.resolve(null);
+    snapshotReads.set(ballotId, read);
+    const snapshot = await read;
     if (snapshot !== null) snapshots.set(ballotId, snapshot);
     return snapshot;
+  };
+
+  const castResult = (ballotId: string, result: BallotCastResult): BallotCastResult => {
+    options.onCastResult?.(ballotId, result);
+    return result;
   };
 
   const hasOpenBallotSnapshot = async (): Promise<boolean> => {
@@ -73,18 +84,18 @@ export const createDryRunBallotAccess = (
           !Number.isInteger(choice) || choice < 1 || choice > snapshot.counts.length ||
           snapshot.isActive === false ||
           (snapshot.expiresAt ?? expiresAt.get(ballotId) ?? Number.POSITIVE_INFINITY) <= Date.now()) {
-        return { status: "not_open", counts: [], revision: 0 };
+        return castResult(ballotId, { status: "not_open", counts: [], revision: 0 });
       }
       if (snapshot.previousChoiceKnown === false) {
         context.markBallotChoiceUnresolved?.();
-        return { status: "not_open", ...snapshot };
+        return castResult(ballotId, { status: "not_open", ...snapshot });
       }
       const voters = voterMapFor(ballotId);
       const previous = voters.has(userId)
         ? voters.get(userId)
         : userId === options.voterId ? snapshot.previousChoice : undefined;
       if (castOptions?.onlyIfNew === true && previous !== undefined || previous === choice) {
-        return { status: "unchanged", ...snapshot };
+        return castResult(ballotId, { status: "unchanged", ...snapshot });
       }
       const counts = [...snapshot.counts];
       if (typeof previous === "number" && previous >= 1 && previous <= counts.length) {
@@ -94,7 +105,7 @@ export const createDryRunBallotAccess = (
       const updated = { ...snapshot, counts, revision: snapshot.revision + 1 };
       voters.set(userId, choice);
       snapshots.set(ballotId, updated);
-      return { status: previous === undefined ? "counted" : "changed", ...updated };
+      return castResult(ballotId, { status: previous === undefined ? "counted" : "changed", ...updated });
     },
     castTerm: async (ballotId, userId, term, matchText = term): Promise<BallotCastResult> => {
       const snapshot = await snapshotFor(ballotId);
@@ -102,22 +113,22 @@ export const createDryRunBallotAccess = (
           Array.from(term).length > 25 || term.trim().length === 0 || Array.from(matchText).length > 500 ||
           snapshot.isActive === false ||
           (snapshot.expiresAt ?? expiresAt.get(ballotId) ?? Number.POSITIVE_INFINITY) <= Date.now()) {
-        return { status: "not_open", counts: [], revision: 0 };
+        return castResult(ballotId, { status: "not_open", counts: [], revision: 0 });
       }
       const blockedTerms = snapshot.blockedTerms ?? [];
       const blocked = (options.isBlockedFreeTextVote?.(term, blockedTerms) ?? false) ||
         (options.isBlockedFreeTextVote?.(matchText, blockedTerms) ?? false);
-      if (blocked) return { status: "blocked", ...snapshot };
+      if (blocked) return castResult(ballotId, { status: "blocked", ...snapshot });
       if (snapshot.previousChoiceKnown === false) {
         context.markBallotChoiceUnresolved?.();
-        return { status: "not_open", ...snapshot };
+        return castResult(ballotId, { status: "not_open", ...snapshot });
       }
       const voters = voterMapFor(ballotId);
       const previous = voters.has(userId)
         ? voters.get(userId)
         : userId === options.voterId ? snapshot.previousChoice : undefined;
       const terms = new Map((snapshot.terms ?? []).map((entry) => [entry.term, { ...entry }]));
-      if (previous === term && terms.has(term)) return { status: "unchanged", ...snapshot };
+      if (previous === term && terms.has(term)) return castResult(ballotId, { status: "unchanged", ...snapshot });
       if (typeof previous === "string") {
         const previousEntry = terms.get(previous);
         if (previousEntry !== undefined) {
@@ -129,14 +140,14 @@ export const createDryRunBallotAccess = (
       if (existing === undefined && terms.size >= BALLOT_MAX_TEXT_TERMS) {
         const updated = { ...snapshot, more: Math.min(Number.MAX_SAFE_INTEGER, (snapshot.more ?? 0) + 1), revision: snapshot.revision + 1 };
         snapshots.set(ballotId, updated);
-        return { status: "overflow", ...updated };
+        return castResult(ballotId, { status: "overflow", ...updated });
       }
       if (existing === undefined) terms.set(term, { term, count: 1, approved: false });
       else terms.set(term, { ...existing, count: existing.count + 1 });
       const updated = { ...snapshot, terms: [...terms.values()], revision: snapshot.revision + 1 };
       snapshots.set(ballotId, updated);
       voters.set(userId, term);
-      return { status: previous === undefined ? "counted" : "changed", ...updated };
+      return castResult(ballotId, { status: previous === undefined ? "counted" : "changed", ...updated });
     },
     read: snapshotFor,
     readSnapshot: snapshotFor,

@@ -133,7 +133,7 @@ type ChatVoteTemplateSaveResult =
   | { status: "unauthorized" }
   | { status: "reference_conflict" };
 
-type ChatVoteOpenInsertStatus = "inserted" | "busy" | "reference_conflict";
+export type ChatVoteOpenInsertStatus = "inserted" | "busy" | "reference_conflict";
 
 const NO_BLOCK_GUARD: TextBlockWriteGuard = { sql: "", values: [], references: [] };
 
@@ -141,6 +141,103 @@ const writeGuardPassed = async (db: D1Database, guard: TextBlockWriteGuard): Pro
   if (guard.references.length === 0) return true;
   const row = await db.prepare(`SELECT 1 AS valid WHERE 1 = 1 ${guard.sql}`)
     .bind(...guard.values).first<{ valid: number }>();
+  return row !== null;
+};
+
+const chatVoteOpenInsertPredicate = (
+  vote: ChatVoteDraft,
+  authorization: ModuleMutationAuthorization | undefined,
+  resultTextTemplate: ChatVoteResultTextTemplateSnapshot | undefined,
+  blockGuard: TextBlockWriteGuard,
+): { sql: string; values: readonly (string | number | null)[] } => {
+  const guard = authorization?.sql ?? "";
+  return {
+    sql: `EXISTS (
+    SELECT 1 FROM channel_modules
+     WHERE channel_id = ? AND module_id = 'chat_voting' AND enabled = 1
+  ) AND (? IS NULL OR EXISTS (
+    SELECT 1 FROM chat_vote_templates
+     WHERE channel_id = ? AND id = ? AND revision = ? AND result_text = ?
+  )) ${guard} ${blockGuard.sql}`,
+    values: [
+      vote.channelId,
+      resultTextTemplate?.id ?? null,
+      resultTextTemplate === undefined ? null : vote.channelId,
+      resultTextTemplate?.id ?? null,
+      resultTextTemplate?.revision ?? null,
+      resultTextTemplate?.resultText ?? null,
+      ...(authorization?.values ?? []),
+      ...blockGuard.values,
+    ],
+  };
+};
+
+const classifyChatVoteInsertFailure = async (
+  db: D1Database,
+  channelId: string,
+  authorization: ModuleMutationAuthorization | undefined,
+  blockGuard: TextBlockWriteGuard,
+): Promise<ChatVoteOpenInsertStatus> => {
+  if (blockGuard.references.length > 0) {
+    const guard = authorization?.sql ?? "";
+    const authorized = await db.prepare(
+      `SELECT 1 AS authorized WHERE EXISTS (
+         SELECT 1 FROM channel_modules WHERE channel_id = ? AND module_id = 'chat_voting' AND enabled = 1
+       ) ${guard}`,
+    ).bind(channelId, ...(authorization?.values ?? [])).first<{ authorized: number }>();
+    if (authorized !== null && !await writeGuardPassed(db, blockGuard)) return "reference_conflict";
+  }
+  return "busy";
+};
+
+const chatVoteManualClosePredicate = (
+  channelId: string,
+  pollId: string,
+  expectedClosesAt: string,
+  authorization?: ModuleMutationAuthorization,
+): { sql: string; values: readonly (string | number | null)[] } => {
+  const guard = authorization?.sql ?? "";
+  return {
+    sql: `chat_votes.channel_id = ? AND chat_votes.poll_id = ? AND chat_votes.status = 'open'
+    AND chat_votes.closes_at = ? AND chat_votes.close_reason IN ('timer', 'limit', 'manual')
+    AND (chat_votes.closing_at IS NULL OR chat_votes.close_reason = 'manual')
+    AND EXISTS (
+      SELECT 1 FROM channel_modules
+       WHERE channel_modules.channel_id = chat_votes.channel_id
+         AND channel_modules.module_id = 'chat_voting' AND channel_modules.enabled = 1
+    ) ${guard}`,
+    values: [channelId, pollId, expectedClosesAt, ...(authorization?.values ?? [])],
+  };
+};
+
+/** Evaluates the production insert guard without inserting a vote row. */
+export const peekChatVoteOpenInsert = async (
+  db: D1Database,
+  vote: ChatVoteDraft,
+  authorization?: ModuleMutationAuthorization,
+  resultTextTemplate?: ChatVoteResultTextTemplateSnapshot,
+  blockGuard: TextBlockWriteGuard = NO_BLOCK_GUARD,
+): Promise<ChatVoteOpenInsertStatus> => {
+  const predicate = chatVoteOpenInsertPredicate(vote, authorization, resultTextTemplate, blockGuard);
+  const predicateSql = predicate.sql;
+  const row = await db.prepare(`SELECT 1 AS admitted WHERE ${predicateSql}`)
+    .bind(...predicate.values).first<{ admitted: number }>();
+  if (row !== null) return "inserted";
+  return await classifyChatVoteInsertFailure(db, vote.channelId, authorization, blockGuard);
+};
+
+/** Evaluates the production close guard without changing the vote row. */
+export const peekChatVoteManualClose = async (
+  db: D1Database,
+  channelId: string,
+  pollId: string,
+  expectedClosesAt: string,
+  authorization?: ModuleMutationAuthorization,
+): Promise<boolean> => {
+  const predicate = chatVoteManualClosePredicate(channelId, pollId, expectedClosesAt, authorization);
+  const predicateSql = predicate.sql;
+  const row = await db.prepare(`SELECT 1 AS allowed FROM chat_votes WHERE ${predicateSql} LIMIT 1`)
+    .bind(...predicate.values).first<{ allowed: number }>();
   return row !== null;
 };
 
@@ -383,19 +480,14 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
     };
   },
   async insertOpen(vote, authorization, resultTextTemplate, blockGuard = NO_BLOCK_GUARD) {
-    const guard = authorization?.sql ?? "";
+    const predicate = chatVoteOpenInsertPredicate(vote, authorization, resultTextTemplate, blockGuard);
+    const predicateSql = predicate.sql;
     const statement = db.prepare(
       `INSERT INTO chat_votes
          (channel_id, poll_id, kind, option_count, labels_json, title, result_text, text_mode, term_filter_ready, status, opened_at, closes_at,
           requested_duration_seconds, close_reason)
        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?
-        WHERE EXISTS (
-          SELECT 1 FROM channel_modules
-           WHERE channel_id = ? AND module_id = 'chat_voting' AND enabled = 1
-        ) AND (? IS NULL OR EXISTS (
-          SELECT 1 FROM chat_vote_templates
-           WHERE channel_id = ? AND id = ? AND revision = ? AND result_text = ?
-        )) ${guard} ${blockGuard.sql}`,
+        WHERE ${predicateSql}`,
     ).bind(
       vote.channelId,
       vote.id,
@@ -410,43 +502,22 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
       vote.closesAt,
       vote.requestedDurationSeconds,
       vote.closeReason,
-      vote.channelId,
-      resultTextTemplate?.id ?? null,
-      resultTextTemplate?.id === undefined ? null : vote.channelId,
-      resultTextTemplate?.id ?? null,
-      resultTextTemplate?.revision ?? null,
-      resultTextTemplate?.resultText ?? null,
-      ...(authorization?.values ?? []),
-      ...blockGuard.values,
+      ...predicate.values,
     );
     const result = await statement.run();
     if (result.meta.changes > 0) return "inserted";
-    if (blockGuard.references.length > 0) {
-      const authorized = await db.prepare(
-        `SELECT 1 AS authorized WHERE EXISTS (
-           SELECT 1 FROM channel_modules WHERE channel_id = ? AND module_id = 'chat_voting' AND enabled = 1
-         ) ${guard}`,
-      ).bind(vote.channelId, ...(authorization?.values ?? [])).first<{ authorized: number }>();
-      if (authorized !== null && !await writeGuardPassed(db, blockGuard)) return "reference_conflict";
-    }
-    return "busy";
+    return await classifyChatVoteInsertFailure(db, vote.channelId, authorization, blockGuard);
   },
   async requestManualClose(channelId, pollId, expectedClosesAt, authorization) {
-    const guard = authorization?.sql ?? "";
+    const predicate = chatVoteManualClosePredicate(channelId, pollId, expectedClosesAt, authorization);
+    const predicateSql = predicate.sql;
     const statement = db.prepare(
       `UPDATE chat_votes
           SET close_reason = 'manual',
               closing_at = COALESCE(closing_at, ?),
               deadline_revision = deadline_revision + CASE WHEN closing_at IS NULL THEN 1 ELSE 0 END
-        WHERE channel_id = ? AND poll_id = ? AND status = 'open'
-          AND closes_at = ? AND close_reason IN ('timer', 'limit', 'manual')
-          AND (closing_at IS NULL OR close_reason = 'manual')
-          AND EXISTS (
-            SELECT 1 FROM channel_modules
-             WHERE channel_modules.channel_id = chat_votes.channel_id
-               AND channel_modules.module_id = 'chat_voting' AND channel_modules.enabled = 1
-          ) ${guard}`,
-    ).bind(new Date().toISOString(), channelId, pollId, expectedClosesAt, ...(authorization?.values ?? []));
+        WHERE ${predicateSql}`,
+    ).bind(new Date().toISOString(), ...predicate.values);
     const result = await statement.run();
     return result.meta.changes > 0;
   },

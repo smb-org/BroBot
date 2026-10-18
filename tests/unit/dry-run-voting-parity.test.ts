@@ -110,6 +110,30 @@ const seedOpenChatVote = async (database: TestD1Database, channelId: string, clo
   });
 };
 
+const insertOpenOptionsVote = async (
+  database: TestD1Database,
+  channelId: string,
+  input: { id: string; title: string; labels: readonly string[] },
+): Promise<void> => {
+  await createChatVotingRepository(database as unknown as D1Database).insertOpen({
+    id: input.id,
+    channelId,
+    kind: "options",
+    optionCount: input.labels.length,
+    labels: input.labels,
+    title: input.title,
+    resultText: "{vote.result}",
+    textMode: null,
+    termFilterReady: null,
+    openedAt: new Date(Date.now() - 30_000).toISOString(),
+    closesAt: new Date(Date.now() + 60_000).toISOString(),
+    requestedDurationSeconds: null,
+    closeReason: "manual",
+    textResults: null,
+    moreTerms: null,
+  });
+};
+
 describe("chat voting and votekick dry-run parity", () => {
   it("preserves a voter's previous numbered ballot choice for duplicate, changed, and only-if-new casts", async () => {
     const database = new TestD1Database();
@@ -1137,6 +1161,219 @@ describe("chat voting and votekick dry-run parity", () => {
     } finally {
       productionDatabase.close();
       dryRunDatabase.close();
+    }
+  });
+
+  it("uses one pinned chat-vote row for evaluation and reporting during replacement", async () => {
+    const database = new TestD1Database();
+    const channelId = "pinned-chat-vote-channel";
+    try {
+      await insertChannel(database, channelId);
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'chat_voting', 1, '{}')",
+      ).bind(channelId).run();
+      await insertOpenOptionsVote(database, channelId, {
+        id: "vote-a",
+        title: "Vote A",
+        labels: ["left", "right"],
+      });
+      const prepare = vi.spyOn(database, "prepare");
+      const interleavedDatabase = createReadInterleavingDatabase(
+        database,
+        (sql) => sql.includes("FROM chat_votes WHERE channel_id = ? AND status = 'open' LIMIT 1"),
+        async () => {
+          await database.prepare("DELETE FROM chat_votes WHERE channel_id = ? AND poll_id = ?")
+            .bind(channelId, "vote-a").run();
+          await insertOpenOptionsVote(database, channelId, {
+            id: "vote-b",
+            title: "Vote B",
+            labels: ["right", "left"],
+          });
+        },
+      );
+      const snapshot: ModuleDryRunBallotSnapshot = {
+        counts: [0, 0],
+        revision: 1,
+        expiresAt: Date.now() + 60_000,
+        previousChoiceKnown: true,
+      };
+      const readSnapshot = vi.fn((ballotId: string) => Promise.resolve(ballotId === "vote-a" ? snapshot : null));
+      const settings = chatVotingSettingsSchema.parse(DEFAULT_CHAT_VOTING_SETTINGS);
+      const event: ModuleEvent<typeof settings> = {
+        channelId,
+        subscriptionType: "channel.chat.message",
+        triggerId: "dry-run-pinned-chat-vote",
+        payload: { message: { text: "left" }, chatter_user_id: "fictional-voter" },
+        settings,
+        receivedAt: new Date().toISOString(),
+        actor: null,
+        chatStatus: ["viewer"],
+      };
+      const report = await chatVotingModule.dryRunChatMessage?.(event, {
+        ...chatDryRunContext(database),
+        DB: readOnlyD1(interleavedDatabase),
+        ballots: { readSnapshot, hasOpenBallotSnapshot: () => Promise.resolve(true) },
+      });
+      const openReads = prepare.mock.calls.filter(([sql]) =>
+        sql.includes("FROM chat_votes WHERE channel_id = ? AND status = 'open' LIMIT 1"));
+      const tally = report?.[0]?.effects.find((effect) => effect.kind === "ballot");
+
+      expect(openReads).toHaveLength(1);
+      expect(readSnapshot).toHaveBeenCalledExactlyOnceWith("vote-a", "fictional-voter");
+      expect(tally).toMatchObject({ label: "Vote A", choice: "1", counts: [1, 0] });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("uses the production template revision guard when a selected template is deleted", async () => {
+    const database = new TestD1Database();
+    const channelId = "pinned-chat-vote-template-channel";
+    try {
+      await insertChannel(database, channelId);
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'chat_voting', 1, '{}')",
+      ).bind(channelId).run();
+      const now = new Date().toISOString();
+      await database.prepare(
+        `INSERT INTO chat_vote_templates
+          (id, channel_id, shortcut, title, result_text, labels, free_text_mode, duration_seconds, revision,
+           legacy_alias, last_used_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, NULL, 0, 3, NULL, NULL, ?, ?)`,
+      ).bind("next-template", channelId, "next", "Next", "Result: {vote.result}", '["yes","no"]', now, now).run();
+      const prepare = vi.spyOn(database, "prepare");
+      const interleavedDatabase = createReadInterleavingDatabase(
+        database,
+        (sql) => sql.includes("FROM chat_vote_templates WHERE channel_id = ? AND shortcut = ? LIMIT 1"),
+        async () => {
+          await database.prepare("DELETE FROM chat_vote_templates WHERE channel_id = ? AND id = ?")
+            .bind(channelId, "next-template").run();
+        },
+      );
+      const settings = chatVotingSettingsSchema.parse(DEFAULT_CHAT_VOTING_SETTINGS);
+      const event: ModuleEvent<typeof settings> = {
+        channelId,
+        subscriptionType: "channel.chat.message",
+        triggerId: "dry-run-deleted-chat-vote-template",
+        payload: { message: { text: "!vote next" }, chatter_user_id: "fictional-mod" },
+        settings,
+        receivedAt: new Date().toISOString(),
+        actor: null,
+        chatStatus: ["moderator"],
+      };
+      const report = await chatVotingModule.dryRunChatMessage?.(event, {
+        ...chatDryRunContext(database),
+        DB: readOnlyD1(interleavedDatabase),
+      });
+      const templateLookups = prepare.mock.calls.filter(([sql]) =>
+        sql.includes("FROM chat_vote_templates WHERE channel_id = ? AND shortcut = ? LIMIT 1"));
+
+      expect(templateLookups).toHaveLength(1);
+      expect(report?.[0]?.effects).not.toContainEqual(expect.objectContaining({ kind: "ballot", action: "start" }));
+      expect(report?.[0]?.effects).toContainEqual(expect.objectContaining({ kind: "chat", text: "A vote is already in progress." }));
+    } finally {
+      database.close();
+    }
+  });
+
+  it("reports free-text overflow with stored terms and the incremented more tally", async () => {
+    const database = new TestD1Database();
+    const channelId = "free-text-overflow-channel";
+    try {
+      await insertChannel(database, channelId);
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'chat_voting', 1, '{}')",
+      ).bind(channelId).run();
+      await createChatVotingRepository(database as unknown as D1Database).insertOpen({
+        id: "full-text-vote",
+        channelId,
+        kind: "free_text",
+        optionCount: 0,
+        labels: [],
+        title: "Favorite word",
+        resultText: "{vote.result}",
+        textMode: "first_word",
+        termFilterReady: true,
+        openedAt: new Date(Date.now() - 30_000).toISOString(),
+        closesAt: new Date(Date.now() + 60_000).toISOString(),
+        requestedDurationSeconds: null,
+        closeReason: "manual",
+        textResults: null,
+        moreTerms: null,
+      });
+      const terms = Array.from({ length: 200 }, (_value, index) => ({
+        term: `term${String(index)}`,
+        count: 1,
+        approved: false,
+      }));
+      const readSnapshot = vi.fn((ballotId: string) => Promise.resolve(ballotId === "full-text-vote" ? {
+        counts: [],
+        revision: 4,
+        terms,
+        more: 7,
+        expiresAt: Date.now() + 60_000,
+        termFilterReady: true,
+        blockedTerms: [],
+        previousChoiceKnown: true,
+      } : null));
+      const settings = chatVotingSettingsSchema.parse(DEFAULT_CHAT_VOTING_SETTINGS);
+      const event: ModuleEvent<typeof settings> = {
+        channelId,
+        subscriptionType: "channel.chat.message",
+        triggerId: "dry-run-free-text-overflow",
+        payload: { message: { text: "newword" }, chatter_user_id: "fictional-voter" },
+        settings,
+        receivedAt: new Date().toISOString(),
+        actor: null,
+        chatStatus: ["viewer"],
+      };
+      const report = await chatVotingModule.dryRunChatMessage?.(event, {
+        ...chatDryRunContext(database),
+        ballots: { readSnapshot, hasOpenBallotSnapshot: () => Promise.resolve(true) },
+      });
+      const tally = report?.[0]?.effects.find((effect) => effect.kind === "ballot");
+
+      expect(readSnapshot).toHaveBeenCalledExactlyOnceWith("full-text-vote", "fictional-voter");
+      expect(tally).toMatchObject({ action: "overflow", terms, more: 8 });
+      expect(tally).not.toHaveProperty("choice");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("uses the production close predicate when the module is disabled after the open-row read", async () => {
+    const database = new TestD1Database();
+    const channelId = "disabled-close-module-channel";
+    try {
+      await seedOpenChatVote(database, channelId, new Date(Date.now() + 60_000).toISOString());
+      const interleavedDatabase = createReadInterleavingDatabase(
+        database,
+        (sql) => sql.includes("FROM chat_votes WHERE channel_id = ? AND status = 'open' LIMIT 1"),
+        async () => {
+          await database.prepare(
+            "UPDATE channel_modules SET enabled = 0 WHERE channel_id = ? AND module_id = 'chat_voting'",
+          ).bind(channelId).run();
+        },
+      );
+      const settings = chatVotingSettingsSchema.parse(DEFAULT_CHAT_VOTING_SETTINGS);
+      const event: ModuleEvent<typeof settings> = {
+        channelId,
+        subscriptionType: "channel.chat.message",
+        triggerId: "dry-run-disabled-chat-vote-close",
+        payload: { message: { text: "!vote end" }, chatter_user_id: "fictional-mod" },
+        settings,
+        receivedAt: new Date().toISOString(),
+        actor: null,
+        chatStatus: ["moderator"],
+      };
+      const report = await chatVotingModule.dryRunChatMessage?.(event, {
+        ...chatDryRunContext(database),
+        DB: readOnlyD1(interleavedDatabase),
+      });
+
+      expect(report?.[0]?.effects).toContainEqual(expect.objectContaining({ kind: "chat", text: "There is no vote in progress." }));
+    } finally {
+      database.close();
     }
   });
 });
