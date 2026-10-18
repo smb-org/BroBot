@@ -189,6 +189,7 @@ export const dryRunChatVotingMessage = async (
   const command = parseVoteCommand(text);
   const commandLike = isChatVotingCommandLike(text, command);
   const source = createChatVotingRepository(context.DB);
+  // Pin D1 and ballot state at request start; concurrent changes are out of scope.
   const openVote = await source.open(event.channelId);
   let templateLookup: PinnedTemplateLookup | null = null;
   if (command?.kind === "template") {

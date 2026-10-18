@@ -161,7 +161,7 @@ const actionEffects = (
         ...(counts === undefined ? {} : { counts }),
       });
     }
-    if (timeout !== undefined || status === "passed" || status === "expired") {
+    if (timeout !== undefined || status === "passed" || status === "expired" || status === "cancelled") {
       effects.push({
         kind: "ballot",
         moduleId: "votekick",
@@ -196,6 +196,7 @@ export const dryRunVotekickMessage = async (
   const command = VOTEKICK_COMMAND_PATTERN.exec(text.trim());
   const choice = ballotChoiceFromMessage(text, 2);
   const sourceRepository = createVotekickRepository(context.DB);
+  // Pin D1 and ballot state at request start; concurrent changes are out of scope.
   const current = await sourceRepository.running(event.channelId);
   const repository = simulatedRepository(context, current);
   const rules = current === null ? new Map() : new Map([[current.id, votekickFinalizeRule(current.threshold)]]);

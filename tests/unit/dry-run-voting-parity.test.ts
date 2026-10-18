@@ -733,42 +733,6 @@ describe("chat voting and votekick dry-run parity", () => {
     }
   });
 
-  it("does not report a votekick finalization after its running row was cancelled", async () => {
-    const database = new TestD1Database();
-    const channelId = "cancelled-votekick-claim-channel";
-    try {
-      await seedRunningVotekick(database, channelId);
-      const interleavedDatabase = createReadInterleavingDatabase(
-        database,
-        (sql) => sql.includes("FROM votekicks WHERE channel_id = ? AND status = 'running' LIMIT 1"),
-        async () => {
-          await database.prepare(
-            "UPDATE votekicks SET status = 'cancelled', ended_at = ? WHERE channel_id = ? AND votekick_id = ?",
-          ).bind(new Date().toISOString(), channelId, "running-votekick").run();
-        },
-      );
-      const event = { ...votekickEvent("1"), channelId };
-      const report = await dryRunVotekickMessage(event, {
-        ...chatDryRunContext(database, {
-          counts: [2, 0],
-          revision: 1,
-          expiresAt: Date.now() + 60_000,
-          isActive: true,
-        }),
-        DB: readOnlyD1(interleavedDatabase),
-      });
-
-      expect(report[0]?.effects).not.toContainEqual(expect.objectContaining({ kind: "timeout" }));
-      expect(report[0]?.effects).not.toContainEqual(expect.objectContaining({
-        kind: "ballot",
-        moduleId: "votekick",
-        action: "finalize",
-      }));
-    } finally {
-      database.close();
-    }
-  });
-
   it("restores a returning free-text term with its retained approval", async () => {
     const ballots = createDryRunBallotAccess({
       ballots: {

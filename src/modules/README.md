@@ -52,7 +52,11 @@ keine Chatnachrichten und wird in dieser Liste nicht ausgewertet.
 
 Abstimmungs- und Votekick-Auswertungen führen dieselben Produktionsservices
 mit simulierten Schreibadaptern aus. Laufende Ballot- und Aktivitätsdaten
-kommen aus reinen Durable-Object-Snapshots. Der Trockenlauf öffnet oder ändert
+kommen aus reinen Durable-Object-Snapshots. Der Trockenlauf liest den D1- und
+Ballot-Zustand zu Beginn einmal ein und wertet ausschließlich diesen Snapshot
+aus; Auswertung und Bericht verwenden dieselben gelesenen Werte. Änderungen,
+die während der Anfrage parallel eintreten, sind außerhalb dieses Trockenlaufs
+und werden erst beim nächsten sichtbar. Der Trockenlauf öffnet oder ändert
 keinen Ballot, schreibt keine D1- oder Durable-Object-Daten und plant keinen
 Alarm.
 
