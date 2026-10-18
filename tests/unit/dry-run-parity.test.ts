@@ -506,11 +506,11 @@ describe("text-command dry-run parity", () => {
     const message = "x".repeat(495);
     const renderFaq = faqModule.dryRunChatMessage;
     if (renderFaq === undefined) throw new Error("FAQ dry-run handler is required.");
-    const attributedFaqModule: BotModule = {
+    const attributedFaqModule = {
       ...faqModule,
-      dryRunChatMessage: (event, context) => renderFaq(event, {
+      dryRunChatMessage: (event: Parameters<typeof renderFaq>[0], context: Parameters<typeof renderFaq>[1]) => renderFaq(event, {
         ...context,
-        renderTemplate: async () => ({ text: message, diagnostics: [], attributions: ["MET Norway"] }),
+        renderTemplate: () => Promise.resolve({ text: message, diagnostics: [], attributions: ["MET Norway"] }),
       }),
     };
     try {
