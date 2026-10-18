@@ -1,5 +1,4 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { MantineProvider } from "@mantine/core";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -21,6 +20,7 @@ import { firstMatchingTextBlockVariant, textBlockConditionsMatch } from "../../s
 import { runDashboardNavigationGuards } from "../../src/dashboard/ui/navigation-guard";
 import TextLibraryPanel from "../../src/modules/text_library/panel/index";
 import { textLibraryTexts } from "../../src/modules/text_library/panel/locale";
+import { UiProvider } from "../../src/dashboard/ui";
 import { templateTextLength } from "../../src/contracts/template-text-length";
 import { createTemplateRenderer, type TemplateResolverSources, type TemplateValueProvider } from "../../src/worker/template-resolver";
 import { truncateChatText } from "../../src/worker/chat";
@@ -42,7 +42,7 @@ const reconciliationChannelNamespace = () => ({
 });
 
 const renderTextLibraryPanel = (canManage = true): void => {
-  renderWithQuery(<MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage={canManage} /></MantineProvider>);
+  renderWithQuery(<UiProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage={canManage} /></UiProvider>);
 };
 
 const variant = (id: string, text: string, conditions: TextBlockConditions = {}): TextBlockVariant => ({
@@ -181,10 +181,10 @@ describe("text library", () => {
     });
     function TogglePanel() {
       const [open, setOpen] = useState(true);
-      return <MantineProvider>
+      return <UiProvider>
         <button onClick={() => setOpen((current) => !current)}>Toggle panel</button>
         {open ? <TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /> : null}
-      </MantineProvider>;
+      </UiProvider>;
     }
 
     renderWithQuery(<TogglePanel />, undefined, { gcTime: 600_000 });
@@ -234,7 +234,7 @@ describe("text library", () => {
     }));
 
     renderWithQuery(
-      <MantineProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /></MantineProvider>,
+      <UiProvider><TextLibraryPanel channelId={CHANNEL_ID} language="en" canManage /></UiProvider>,
       undefined,
       { gcTime: 600_000 },
     );

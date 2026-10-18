@@ -1,0 +1,11 @@
+@layer components.kit {
+.settings-page { display: flex; flex: 1 1 auto; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; }
+.settings-page__heading { flex: none; min-width: 0; }
+.settings-page__columns { display: grid; flex: 1 1 auto; min-width: 0; min-height: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: minmax(0, 1fr); gap: 16px; padding: 16px 0; }
+.settings-page__top { flex: none; min-width: 0; padding-top: 12px; }
+.settings-page__columns--1 { grid-template-columns: minmax(0, 1fr); }
+.settings-page__columns--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.settings-page__columns--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.settings-page__column { min-width: 0; min-height: 0; overflow: auto; overflow-wrap: anywhere; scrollbar-width: thin; }
+@media (max-width: 768px) { .settings-page__columns, .settings-page__columns--2, .settings-page__columns--3, .settings-page__columns--4 { grid-template-columns: minmax(0, 1fr); } }
+}

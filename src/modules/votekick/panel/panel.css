@@ -1,0 +1,10 @@
+@layer components.modules {
+  .ui-editor-shell.votekick-settings-editor { box-sizing: border-box; width: 100%; max-width: none; max-height: none; overflow: visible; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
+  .votekick-settings-editor .ui-editor-shell__columns { grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); }
+  .votekick-settings-editor .inspector-field-row { grid-template-columns: minmax(0, 1fr); gap: var(--s1); }
+  .votekick-settings-editor .inspector-field-row__label { color: var(--text-2); font-size: 13px; font-weight: 500; line-height: var(--leading-normal); }
+  .votekick-settings-editor .template-text-field textarea.template-text-field__input { min-height: 68px; }
+  @media (max-width: 1599px) {
+    .votekick-settings-editor .ui-editor-shell__columns { grid-template-columns: minmax(0, 1fr); }
+  }
+}

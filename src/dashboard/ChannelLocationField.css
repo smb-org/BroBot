@@ -1,0 +1,28 @@
+@layer components.pages {
+  .channel-location-field { display: grid; gap: var(--s3); width: 100%; min-width: 0; padding-top: var(--s3); }
+  .channel-location-field__heading { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: var(--s2); min-width: 0; }
+  .channel-location-field__heading p { max-width: 48ch; margin: 0; }
+  .channel-location-field__current { display: grid; justify-items: start; gap: 2px; min-width: 0; text-align: left; }
+  .channel-location-field__place { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .channel-location-field__coordinates { max-width: 100%; overflow: hidden; font-size: 11px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+  .channel-location-field__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); min-width: 0; }
+  .channel-location-field__actions > .ui-button { width: auto; }
+  .channel-location-field__remove { min-height: 36px; padding-inline: var(--s2); border-color: transparent; color: var(--error); background: transparent; }
+  .channel-location-field__remove:hover:not(:disabled) { border-color: transparent; color: var(--error); background: var(--color-error-surface); }
+  .channel-location-field__search { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s2); align-items: start; }
+  .channel-location-field__search > .ui-button { align-self: start; margin-top: 23px; }
+  .channel-location-field__results { display: grid; min-width: 0; min-height: 178px; max-height: 320px; overflow-y: auto; }
+  .channel-location-field__result { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); min-width: 0; min-height: 54px; padding: var(--s2) var(--s3); border: 0; border-top: 1px solid var(--line); color: var(--text); background: transparent; cursor: pointer; text-align: left; }
+  .channel-location-field__result:hover:not(:disabled) { background: var(--tint-1); }
+  .channel-location-field__result:disabled { color: var(--text-3); cursor: not-allowed; }
+  .channel-location-field__result > span { min-width: 0; overflow-wrap: anywhere; }
+  .channel-location-field__result-action { flex: none; color: var(--brand-text); }
+  .channel-location-dialog { display: grid; gap: var(--s3); }
+  .channel-location-dialog > p { margin: 0; }
+  .channel-location-field__suggestion { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: var(--s2); min-width: 0; padding-top: var(--s2); border-top: 1px solid var(--line); }
+  .channel-location-field__suggestion > span { min-width: 0; overflow-wrap: anywhere; }
+  @media (max-width: 639px) {
+    .channel-location-field__heading { grid-template-columns: minmax(0, 1fr); align-items: start; gap: var(--s2); }
+    .channel-location-field__current { justify-items: start; text-align: left; }
+  }
+}

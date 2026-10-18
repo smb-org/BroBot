@@ -1,5 +1,5 @@
-import { Combobox, useCombobox } from "@mantine/core";
-import { useEffect, useState, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
+import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
+import { cloneElement, createContext, useCallback, useContext, useEffect, useRef, useState, type KeyboardEvent, type ReactElement, type ReactNode, type RefCallback } from "react";
 
 import { Icon, type IconName } from "./Icon";
 
@@ -22,6 +22,8 @@ export interface InlineSuggestionPickerMessages {
   keyHints: { navigate: string; insert: string; close: string };
 }
 
+const PickerTargetContext = createContext<RefCallback<HTMLElement> | null>(null);
+
 interface InlineSuggestionPickerControls {
   activeIndex: number;
   activeOptionId: string | undefined;
@@ -30,7 +32,15 @@ interface InlineSuggestionPickerControls {
 }
 
 export function InlineSuggestionPickerTarget({ children }: { children: ReactElement }): ReactElement {
-  return <Combobox.Target withKeyboardNavigation={false} withAriaAttributes={false}>{children}</Combobox.Target>;
+  const targetRef = useContext(PickerTargetContext);
+  const child = children as ReactElement<{ ref?: RefCallback<HTMLElement> }>;
+  const childRef = child.props.ref;
+  const mergedRef = useCallback((element: HTMLElement | null): void => {
+    targetRef?.(element);
+    childRef?.(element);
+  }, [childRef, targetRef]);
+
+  return targetRef === null ? children : cloneElement(child, { ref: mergedRef });
 }
 
 interface InlineSuggestionPickerProps<Option extends { name: string }> {
@@ -87,12 +97,14 @@ export function InlineSuggestionPicker<Option extends { name: string }>({
   const options = groups.flatMap(({ options: groupOptions }) => groupOptions);
   const activeOption = options[activeIndex]?.option ?? options[0]?.option;
   const activeOptionId = activeOption === undefined ? undefined : `${listboxId}-${activeOption.name}`;
-  const combobox = useCombobox();
+  const anchorRef = useRef<HTMLElement>(null);
+  const targetRef = useCallback((element: HTMLElement | null): void => {
+    anchorRef.current = element;
+  }, []);
 
   const close = (): void => {
     onClose();
     setActiveSelection({ groupKey, index: 0 });
-    combobox.closeDropdown();
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): boolean => {
@@ -123,11 +135,6 @@ export function InlineSuggestionPicker<Option extends { name: string }>({
   };
 
   useEffect(() => {
-    if (open) combobox.openDropdown();
-    else combobox.closeDropdown();
-  }, [combobox, open]);
-
-  useEffect(() => {
     if (!open) return;
     scrollOptionIntoView(activeOptionId);
   }, [activeOptionId, open]);
@@ -135,52 +142,36 @@ export function InlineSuggestionPicker<Option extends { name: string }>({
   const controls: InlineSuggestionPickerControls = { activeIndex, activeOptionId, handleKeyDown, close };
 
   return (
-    <Combobox
-      store={combobox}
-      onOptionSubmit={onSelect}
-      withinPortal
-      position="bottom-start"
-      hideDetached={false}
-      preventPositionChangeWhenVisible={false}
-      middlewares={{
-        flip: true,
-        shift: { padding: 16 },
-        size: {
-          padding: 12,
-          apply: ({ availableHeight, elements }) => {
-            elements.floating.style.maxHeight = `${String(Math.max(0, Math.min(440, availableHeight)))}px`;
-          },
-        },
-      }}
-      shadow="xs"
-      width="min(400px, calc(100vw - 70px))"
-    >
-      {children(controls)}
-      {open ? (
-        <Combobox.Dropdown data-ui="" className="ui-template-text-field__suggestions-dropdown">
-          <Combobox.Options id={listboxId} className="ui-template-text-field__suggestions" role="listbox" aria-label={messages.title}>
-            {groups.map(({ group, options: groupOptions }) => (
-              <Combobox.Group key={group.id} label={<GroupHeading group={group} />}>
-                {groupOptions.map(({ option, index }) => (
-                  <Combobox.Option
-                    id={`${listboxId}-${option.name}`}
-                    key={option.name}
-                    value={option.name}
-                    active={index === activeIndex}
-                    className="ui-template-text-field__suggestion"
-                    aria-selected={index === activeIndex}
-                    onMouseDown={(event) => { event.preventDefault(); }}
-                  >
-                    {renderOption(option, index === activeIndex)}
-                  </Combobox.Option>
-                ))}
-              </Combobox.Group>
-            ))}
-            {options.length === 0 ? <Combobox.Empty className="ui-template-text-field__no-results">{messages.noResults}</Combobox.Empty> : null}
-          </Combobox.Options>
-          <KeyboardHints messages={messages} />
-        </Combobox.Dropdown>
-      ) : null}
-    </Combobox>
+    <PopoverPrimitive.Root open={open} onOpenChange={(next) => { if (!next) close(); }}>
+      <PickerTargetContext.Provider value={targetRef}>
+        {children(controls)}
+      </PickerTargetContext.Provider>
+      {open ? <PopoverPrimitive.Portal>
+        <PopoverPrimitive.Positioner anchor={anchorRef} side="bottom" align="start" sideOffset={4} collisionPadding={12} collisionAvoidance={{ side: "flip", align: "shift", fallbackAxisSide: "start" }} className="z-[var(--layer-popover)]" style={{ zIndex: "var(--layer-popover)" }}>
+          <PopoverPrimitive.Popup data-ui="" className="ui-template-text-field__suggestions-dropdown" initialFocus={false} finalFocus={false}>
+            <div id={listboxId} className="ui-template-text-field__suggestions" role="listbox" aria-label={messages.title}>
+              {groups.map(({ group, options: groupOptions }) => (
+                <div className="ui-template-text-field__suggestions-group" role="group" aria-label={group.label} key={group.id}>
+                  <div className="ui-template-text-field__group-label"><GroupHeading group={group} /></div>
+                  {groupOptions.map(({ option, index }) => (
+                    <div
+                      id={`${listboxId}-${option.name}`}
+                      key={option.name}
+                      role="option"
+                      aria-selected={index === activeIndex}
+                      className="ui-template-text-field__suggestion"
+                      onMouseDown={(event) => { event.preventDefault(); }}
+                      onClick={() => { onSelect(option.name); }}
+                    >{renderOption(option, index === activeIndex)}</div>
+                  ))}
+                </div>
+              ))}
+              {options.length === 0 ? <div className="ui-template-text-field__no-results">{messages.noResults}</div> : null}
+            </div>
+            <KeyboardHints messages={messages} />
+          </PopoverPrimitive.Popup>
+        </PopoverPrimitive.Positioner>
+      </PopoverPrimitive.Portal> : null}
+    </PopoverPrimitive.Root>
   );
 }

@@ -13,7 +13,7 @@ import FaqPanel from "../../src/modules/faq/panel";
 import TextCommandsPanel from "../../src/modules/text_commands/panel";
 import TextLibraryPanel from "../../src/modules/text_library/panel";
 import TimersPanel from "../../src/modules/timers/panel";
-import "../../src/dashboard/styles.css";
+import "../../src/dashboard/ui/core.css";
 
 const channelId = "channel-a";
 const query = new URLSearchParams(window.location.search);

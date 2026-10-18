@@ -227,8 +227,7 @@ test("editor stage 2 pages fit at 1280px and 390px and produce review screenshot
 });
 
 // #190/#191: the event row's cause icon, exercised in a real browser --
-// jsdom's component tests can't prove real visibility (Mantine's popover
-// never resolves its exit transition without a genuine `transitionend`).
+// jsdom's component tests can't prove real visibility (popover positioning and transitions are browser-only).
 test("events page cause icon: hover shows it, Escape hides it, tap opens it", async ({ page }) => {
   await installMocks(page, [{
     eventId: "evt-cause-1",

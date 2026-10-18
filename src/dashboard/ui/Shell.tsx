@@ -3,7 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 import { isCommandPaletteShortcut } from "../command-palette-shortcut";
 import { ToastHost } from "./Toast";
 
-// Must match the `max-width` of the drawer rules in styles.css (`.dashboard-shell__burger { display: flex }`).
+// Must match the `max-width` of the drawer rules in core.css (`.dashboard-shell__burger { display: flex }`).
 const MOBILE_LAYOUT_QUERY = "(max-width: 768px)";
 
 function subscribeMobileLayout(onChange: () => void): () => void {

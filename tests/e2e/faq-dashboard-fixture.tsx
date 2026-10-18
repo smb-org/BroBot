@@ -10,7 +10,7 @@ import { Icon } from "../../src/dashboard/ui/Icon";
 import { NavigationIcon } from "../../src/dashboard/ui/NavigationIcon";
 import { Select as UiSelect } from "../../src/dashboard/ui/Select";
 import FaqPanel from "../../src/modules/faq/panel";
-import "../../src/dashboard/styles.css";
+import "../../src/dashboard/ui/core.css";
 
 const sidebarGroups: SidebarGroup[] = [
   {

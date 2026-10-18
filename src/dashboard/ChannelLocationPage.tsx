@@ -1,4 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
+import "./ChannelLocationPage.css";
+
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import type { ChannelRole } from "../contracts/values";

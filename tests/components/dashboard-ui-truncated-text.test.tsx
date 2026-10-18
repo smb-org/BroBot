@@ -43,8 +43,8 @@ describe("truncated field copy", () => {
 
     const compact = container.querySelector("#header-channel")?.closest(".ui-select");
     expect(compact).toHaveClass("ui-select--compact");
-    expect(compact?.querySelector(".mantine-InputWrapper-description")).not.toBeInTheDocument();
-    expect(compact?.querySelector(".mantine-InputWrapper-error")).not.toBeInTheDocument();
+    expect(compact?.querySelector(".ui-select__description")).not.toBeInTheDocument();
+    expect(compact?.querySelector(".ui-select__error")).not.toBeInTheDocument();
     expect(container.querySelector("#form-channel")?.closest(".ui-select")).toHaveTextContent("Form hint");
     expect(container.querySelector("#form-channel")?.closest(".ui-select")).toHaveTextContent("Form error");
   });

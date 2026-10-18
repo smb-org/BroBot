@@ -1,5 +1,7 @@
 import type { ReactElement, ReactNode } from "react";
 
+import "./ToolPage.css";
+
 import { PageHeader } from "./PageHeader";
 import type { PageHeaderProps } from "./PageHeader";
 

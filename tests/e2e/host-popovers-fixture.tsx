@@ -2,7 +2,7 @@ import { createRoot } from "react-dom/client";
 import { useState } from "react";
 
 import { EditorShell, Field, FormDialog, ListDetail, UiProvider } from "../../src/dashboard/ui";
-import "../../src/dashboard/styles.css";
+import "../../src/dashboard/ui/core.css";
 import "./host-popovers-fixture.css";
 
 const fieldMessages = {

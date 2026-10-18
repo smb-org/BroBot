@@ -1,4 +1,4 @@
-import { colors } from "./theme";
+import { colors } from "./colors";
 import { Button } from "./Button";
 
 interface ErrorPanelAction {

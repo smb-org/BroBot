@@ -447,7 +447,7 @@ test("Raid settings use compact unframed message fields, stacked unit inputs, an
   expect(messageStyles.backgroundColor).toBe("rgba(0, 0, 0, 0)");
   await expect(message.locator(".ui-settings-editor__message-heading strong")).toHaveCount(1);
   await expect(message.locator(".ui-settings-editor__message-heading span")).toHaveCount(1);
-  const labelBox = await message.locator(".mantine-InputWrapper-label").boundingBox();
+  const labelBox = await message.locator(".ui-template-text-field__label").boundingBox();
   expect(labelBox?.width).toBeLessThanOrEqual(1);
   const textareaBox = await message.getByRole("textbox").boundingBox();
   expect(textareaBox?.height).toBeLessThanOrEqual(80);
@@ -496,7 +496,7 @@ test("Raid message-off state keeps one title and its status", async ({ page }) =
   await expect(shortMessage.locator(".ui-settings-editor__message-heading strong")).toHaveText("Kurzer Dankestext");
   await expect(shortMessage.locator(".ui-settings-editor__message-heading span")).toHaveText("Aus");
   await expect(shortMessage.locator(".ui-settings-editor__message-heading")).toHaveCount(1);
-  const duplicateLabelWidth = await shortMessage.locator(".mantine-InputWrapper-label").evaluate((element) => getComputedStyle(element).width);
+  const duplicateLabelWidth = await shortMessage.locator(".ui-template-text-field__label").evaluate((element) => getComputedStyle(element).width);
   expect(duplicateLabelWidth).toBe("1px");
 });
 

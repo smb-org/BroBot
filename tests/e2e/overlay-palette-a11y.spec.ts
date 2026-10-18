@@ -91,8 +91,7 @@ test("desktop palette closes with Escape after Tab and removal moves focus to th
 });
 
 test("desktop palette returns focus to the plus button when focus-trap timers fire after the restoration frame", async ({ page }) => {
-  // Controlled ordering instead of a timing guess: while `hold` is on, 0 ms timeouts (Mantine's
-  // focus-trap refocus callbacks) are queued and only run when the test releases them.
+  // Controlled ordering instead of a timing guess: while `hold` is on, 0 ms focus callbacks are queued and only run when the test releases them.
   // Order enforced: Escape -> restoration frame -> delayed focus-trap callbacks -> exit completion.
   await page.addInitScript(() => {
     const nativeSetTimeout = window.setTimeout.bind(window);

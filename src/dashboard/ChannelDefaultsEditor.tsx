@@ -1,3 +1,5 @@
+import "./ChannelDefaultsEditor.css";
+
 import { useEffect, useState, type ReactElement } from "react";
 import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";

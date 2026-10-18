@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import "./panel.css";
 
 import { dashboardCommonTexts, dashboardLanguage, serverFieldErrorText, type DashboardLanguage } from "../../../dashboard/locale";
 import {

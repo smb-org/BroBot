@@ -1,3 +1,5 @@
+import "./panel.css";
+
 import { useEffect, useRef, useState, type ReactElement } from "react";
 
 import type { DashboardLanguage } from "../../../dashboard/locale";

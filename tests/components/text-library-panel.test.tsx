@@ -1,9 +1,9 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { MantineProvider } from "@mantine/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { jsonResponse } from "../unit/fixtures";
 import { moduleQueryKey } from "../../src/dashboard/data";
+import { UiProvider } from "../../src/dashboard/ui";
 import { renderWithQuery } from "../query-test-utils";
 import TextLibraryPanel from "../../src/modules/text_library/panel";
 
@@ -40,7 +40,7 @@ afterEach(() => {
 describe("Text library panel layout slots", () => {
   it("keeps the heading and disabled toolbar mounted while loading and after a load failure", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.reject(new Error("offline"))));
-    renderWithQuery(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" /></MantineProvider>);
+    renderWithQuery(<UiProvider><TextLibraryPanel channelId="channel-a" language="en" /></UiProvider>);
 
     expect(screen.getByRole("heading", { level: 1, name: "Text blocks" })).toBeInTheDocument();
     const addButton = screen.getByRole("button", { name: "Add text block" });
@@ -57,7 +57,7 @@ describe("Text library panel layout slots", () => {
   ])("uses $panelLanguage for common toolbar text when the browser is $browserLanguage", async ({ browserLanguage, panelLanguage, search, clear, usage }) => {
     Object.defineProperty(window.navigator, "language", { configurable: true, value: browserLanguage });
     vi.stubGlobal("fetch", libraryFetcher());
-    renderWithQuery(<MantineProvider><TextLibraryPanel channelId="channel-a" language={panelLanguage} /></MantineProvider>);
+    renderWithQuery(<UiProvider><TextLibraryPanel channelId="channel-a" language={panelLanguage} /></UiProvider>);
     await waitFor(() => expect(document.querySelector(".list-toolbar__usage")).toHaveTextContent(usage));
 
     const searchInput = document.querySelector<HTMLInputElement>(".text-library__list-toolbar .ui-field__input--search");
@@ -68,7 +68,7 @@ describe("Text library panel layout slots", () => {
 
   it("shows the operator reason for disabled text block creation", async () => {
     vi.stubGlobal("fetch", libraryFetcher());
-    renderWithQuery(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" canManage={false} /></MantineProvider>);
+    renderWithQuery(<UiProvider><TextLibraryPanel channelId="channel-a" language="en" canManage={false} /></UiProvider>);
     await waitForLibraryLoad();
 
     const addButton = await screen.findByRole("button", { name: "Add text block" });
@@ -82,7 +82,7 @@ describe("Text library panel layout slots", () => {
 
   it("keeps the create action before the filters in the list toolbar", async () => {
     vi.stubGlobal("fetch", libraryFetcher());
-    renderWithQuery(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" /></MantineProvider>);
+    renderWithQuery(<UiProvider><TextLibraryPanel channelId="channel-a" language="en" /></UiProvider>);
     await waitForLibraryLoad();
 
     const row = document.querySelector(".text-library__list-toolbar .list-toolbar__row");
@@ -103,7 +103,7 @@ describe("Text library panel layout slots", () => {
       revision: 1,
     }));
     vi.stubGlobal("fetch", libraryFetcher(blocks));
-    renderWithQuery(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" /></MantineProvider>);
+    renderWithQuery(<UiProvider><TextLibraryPanel channelId="channel-a" language="en" /></UiProvider>);
     await screen.findByRole("button", { name: /\{text\.block_1\}/u });
 
     const addButton = await screen.findByRole("button", { name: "Add text block" });
@@ -131,7 +131,7 @@ describe("Text library panel layout slots", () => {
       }));
     }));
 
-    renderWithQuery(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" /></MantineProvider>);
+    renderWithQuery(<UiProvider><TextLibraryPanel channelId="channel-a" language="en" /></UiProvider>);
     await screen.findByRole("heading", { level: 1, name: "Text blocks" });
     await waitForLibraryLoad();
     fireEvent.click(await screen.findByRole("button", { name: "Add text block" }));
@@ -161,7 +161,7 @@ describe("Text library panel layout slots", () => {
       }
       return fallback(input, init);
     }));
-    const { queryClient } = renderWithQuery(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" /></MantineProvider>);
+    const { queryClient } = renderWithQuery(<UiProvider><TextLibraryPanel channelId="channel-a" language="en" /></UiProvider>);
 
     const nameField = await screen.findByRole("textbox", { name: "Name" });
     expect(await screen.findByText("Hello Alice")).toBeInTheDocument();
@@ -189,7 +189,7 @@ describe("Text library panel layout slots", () => {
       variants: [{ id: "default", conditions: {}, texts: ["Welcome to chat"] }],
       revision: 1,
     }]));
-    renderWithQuery(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" canManage={false} /></MantineProvider>);
+    renderWithQuery(<UiProvider><TextLibraryPanel channelId="channel-a" language="en" canManage={false} /></UiProvider>);
 
     expect(await screen.findByRole("button", { name: /\{text\.welcome\}/u })).toBeInTheDocument();
     await waitFor(() => expect(document.querySelector(".text-library__read-only-properties")).toBeInTheDocument());
@@ -212,7 +212,7 @@ describe("Text library panel layout slots", () => {
       variants: [{ id: "default", conditions: {}, texts: ["Welcome to chat"] }],
       revision: 1,
     }]));
-    renderWithQuery(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" /></MantineProvider>);
+    renderWithQuery(<UiProvider><TextLibraryPanel channelId="channel-a" language="en" /></UiProvider>);
 
     const nameField = await screen.findByRole("textbox", { name: "Name" });
     fireEvent.change(nameField, { target: { value: "welcome_updated" } });
@@ -240,7 +240,7 @@ describe("Text library panel layout slots", () => {
       variants: [{ id: "default", conditions: {}, texts: ["Welcome to chat"] }],
       revision: 1,
     }], { welcome: [{ kind: "timer", label: "Welcome timer" }, { kind: "faq", label: "Welcome FAQ" }] }));
-    renderWithQuery(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" /></MantineProvider>);
+    renderWithQuery(<UiProvider><TextLibraryPanel channelId="channel-a" language="en" /></UiProvider>);
 
     await screen.findByRole("textbox", { name: "Name" });
     fireEvent.click(screen.getByRole("button", { name: "More actions" }));
@@ -264,7 +264,7 @@ describe("Text library panel layout slots", () => {
       variants: [{ id: "default", conditions: {}, texts: ["Welcome to chat"] }],
       revision: 1,
     }]));
-    renderWithQuery(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" /></MantineProvider>);
+    renderWithQuery(<UiProvider><TextLibraryPanel channelId="channel-a" language="en" /></UiProvider>);
 
     await screen.findByRole("textbox", { name: "Name" });
     fireEvent.click(screen.getByRole("button", { name: "More actions" }));
@@ -296,7 +296,7 @@ describe("Text library panel layout slots", () => {
       return fallback(input);
     });
     vi.stubGlobal("fetch", fetchMock);
-    renderWithQuery(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" /></MantineProvider>);
+    renderWithQuery(<UiProvider><TextLibraryPanel channelId="channel-a" language="en" /></UiProvider>);
 
     const nameField = await screen.findByRole("textbox", { name: "Name" });
     fireEvent.change(nameField, { target: { value: "another_name" } });
@@ -347,7 +347,7 @@ describe("Text library panel layout slots", () => {
       }
       return fallback(input, init);
     }));
-    renderWithQuery(<MantineProvider><TextLibraryPanel channelId="channel-a" language="en" /></MantineProvider>, {}, { staleTime: 60_000 });
+    renderWithQuery(<UiProvider><TextLibraryPanel channelId="channel-a" language="en" /></UiProvider>, {}, { staleTime: 60_000 });
 
     const nameField = await screen.findByRole("textbox", { name: "Name" });
     const textField = screen.getByRole("textbox", { name: "Text" });

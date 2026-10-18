@@ -17,7 +17,7 @@ import { renderWithQuery } from "../query-test-utils";
  * non-empty helper line via `aria-describedby`. Scoped to members and
  * platform pages, not module panels, which have their own suites.
  */
-const renderWithMantine = (element: ReactElement): ReturnType<typeof render> => render(<UiProvider>{element}</UiProvider>);
+const renderWithUiProvider = (element: ReactElement): ReturnType<typeof render> => render(<UiProvider>{element}</UiProvider>);
 
 const requestUrl = (input: RequestInfo | URL): URL =>
   input instanceof Request ? new URL(input.url) : new URL(String(input), window.location.origin);
@@ -57,7 +57,7 @@ afterEach(() => {
 
 describe("helper text on every field (editor-konzept 3.0/15d)", () => {
   it("fails on a field without a hint -- proves the check itself catches a missing helper line", () => {
-    const { container } = renderWithMantine(<Field label="Probe" value="" onChange={() => {}} />);
+    const { container } = renderWithUiProvider(<Field label="Probe" value="" onChange={() => {}} />);
     expect(() => { expectEveryFieldHasHelperText(container); }).toThrow();
   });
 
@@ -105,7 +105,7 @@ describe("helper text on every field (editor-konzept 3.0/15d)", () => {
       return Promise.resolve(jsonResponse({}, 404));
     }));
 
-    renderWithMantine(<PlatformPage onAuthenticationRequired={() => {}} />);
+    renderWithUiProvider(<PlatformPage onAuthenticationRequired={() => {}} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Kanal freigeben" }));
     const freigabe = await screen.findByRole("dialog", { name: "Kanal freigeben" });

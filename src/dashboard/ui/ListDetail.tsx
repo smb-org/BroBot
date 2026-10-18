@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
+import "./ListDetail.css";
+
 export interface ListDetailProps {
   /** The list. Always rendered, always first -- "Two children, list first"
    *  in docs/input/DESIGN-neu.md. */
@@ -23,7 +25,7 @@ export interface ListDetailProps {
  * 1280px a fixed 592px column beside the list; below that the inspector
  * floats from the right (up to 480px wide) instead of stacking under the
  * list. The responsive layout is one CSS switch in
- * `styles.css` (`.list-detail`/`.list-detail__inspector`). Below 1280px
+ * `ListDetail.css` (`.list-detail`/`.list-detail__inspector`). Below 1280px
  * the positioned inspector becomes a modal surface: the list is inert and
  * focus moves inside and stays there. At 1280px the inspector sits beside
  * the list and both columns remain available. At every width, closing the

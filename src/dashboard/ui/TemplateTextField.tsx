@@ -1,4 +1,3 @@
-import { Input } from "@mantine/core";
 import { RichTextarea, type CaretPosition, type RichTextareaHandle } from "rich-textarea";
 import { useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ReactElement, type ReactNode, type SyntheticEvent } from "react";
 
@@ -437,16 +436,10 @@ export function TemplateTextField({
     >
       {({ activeOptionId, handleKeyDown: handlePickerKeyDown, close }) => {
       const inputWrapper = (
-      <Input.Wrapper
-        data-ui=""
-        className="ui-template-text-field"
-        id={id}
-        label={label}
-        description={description}
-        descriptionProps={{ component: "div" }}
-        inputWrapperOrder={["label", "input", "description", "error"]}
-        withAsterisk={required}
-      >
+      <div data-ui="" className="ui-template-text-field" id={`${id}-field`}>
+        <label className="ui-template-text-field__label" htmlFor={id}>
+          {label}{required ? <span aria-hidden="true"> *</span> : null}
+        </label>
         {insertVariableLabel === undefined ? null : <Button
           className="ui-template-text-field__insert-variable"
           size="compact"
@@ -505,7 +498,8 @@ export function TemplateTextField({
             <span aria-hidden="true" className="template-text-field__caret-anchor" style={{ left: caretAnchor.left, top: caretAnchor.top }} />
             </InlineSuggestionPickerTarget>
         </div>
-      </Input.Wrapper>
+        <div className="ui-template-text-field__description" id={`${id}-description`}>{description}</div>
+      </div>
       );
       return previewLayout === "side-by-side"
         ? <div className="ui-template-text-field-layout"><div className="ui-template-text-field-layout__pair">{inputWrapper}{previewNode}</div></div>

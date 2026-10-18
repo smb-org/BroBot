@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
 
+import "./overlays.css";
+
 import streamElementsFields from "../../docs/embedding/streamelements/fields.json?raw";
 import streamElementsHtml from "../../docs/embedding/streamelements/widget.html?raw";
 import streamElementsJs from "../../docs/embedding/streamelements/widget.js?raw";

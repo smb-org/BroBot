@@ -1,0 +1,48 @@
+@layer components.modules {
+  .belabox-overview { display: grid; grid-template-columns: minmax(300px, .8fr) minmax(0, 1.7fr); align-items: start; gap: 20px; min-width: 0; }
+  .belabox-overview > * { min-width: 0; }
+  .belabox-connection-state { display: flex; min-height: 28px; align-items: center; }
+  .properties.belabox-connection-properties { display: grid; grid-template-columns: minmax(0, 1fr); margin-top: 4px; }
+  .belabox-connection-properties > div { grid-template-columns: minmax(105px, .8fr) minmax(0, 1.2fr); gap: var(--s2); }
+  .belabox-connection-properties dt { font-size: 12px; }
+  .belabox-url-field { margin-top: 12px; }
+  .belabox-alert-notice-slot { display: flex; box-sizing: border-box; min-width: 0; height: 40px; align-items: center; justify-content: space-between; gap: var(--s2); overflow: hidden; }
+  .belabox-alert-notice-slot > span { display: -webkit-box; min-width: 0; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .belabox-alert-notice-slot > .ui-button { flex: none; }
+  .belabox-connection-actions { display: flex; min-height: 40px; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+  .belabox-connection-actions > .ui-button { flex: none; }
+  .belabox-test-result { box-sizing: border-box; min-height: 20px; max-height: 36px; margin: 0; overflow: hidden; overflow-wrap: anywhere; }
+  .belabox-history-section { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+  .belabox-chart { position: relative; width: 100%; min-height: 200px; aspect-ratio: 640 / 200; }
+  .belabox-chart > svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+  .belabox-chart__axis-label { position: absolute; z-index: 1; color: var(--text-3); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; line-height: 1.2; white-space: nowrap; }
+  .belabox-chart__axis--y { position: absolute; inset: 6% auto 14% 0; display: flex; width: 7.5%; flex-direction: column; align-items: flex-end; justify-content: space-between; }
+  .belabox-chart__axis--y .belabox-chart__axis-label { position: static; transform: none; }
+  .belabox-chart__axis--x { position: absolute; right: 1.875%; bottom: 0; left: 7.5%; display: flex; justify-content: space-between; }
+  .belabox-chart__axis--x .belabox-chart__axis-label { position: static; }
+  .belabox-chart__empty { position: absolute; top: 50%; left: 50%; box-sizing: border-box; width: max-content; max-width: calc(100% - 16px); padding: 4px 8px; transform: translate(-50%, -50%); border-radius: var(--r-control); background: var(--background); margin: 0; text-align: center; }
+  @media (max-width: 768px) {
+    .belabox-overview { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  }
+  .dashboard-shell:has(.settings-page--belabox) { height: 100dvh; overflow: hidden; }
+  .dashboard-shell__workspace:has(.settings-page--belabox) { height: calc(100dvh - var(--app-shell-header-height)); min-height: 0; overflow: hidden; }
+  .dashboard-shell__main:has(.settings-page--belabox) { height: 100%; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
+  .main-content:has(.settings-page--belabox) { display: block; height: auto; min-height: 100%; }
+  .module-route-layout:has(.settings-page--belabox) { display: block; height: auto; min-height: 0; flex: none; }
+  .module-route-layout:has(.settings-page--belabox) > .ui-load-state { display: block; height: auto; min-height: 0 !important; flex: none; }
+  .module-route-layout:has(.settings-page--belabox) > .ui-load-state > .ui-load-state__content { display: block; height: auto; min-height: 0; overflow: visible; }
+  .module-detail--settings-page:has(.settings-page--belabox) { display: block; height: auto; min-height: 100%; flex: none; }
+  .module-detail--settings-page:has(.settings-page--belabox) > .ui-load-state { display: block; height: auto; min-height: 0; flex: none; }
+  .module-detail--settings-page:has(.settings-page--belabox) > .ui-load-state > .ui-load-state__content { display: block; height: auto; min-height: 0; overflow: visible; }
+  .module-detail--settings-page:has(.settings-page--belabox) .settings-page { display: block; height: auto; min-height: 100%; flex: none; overflow: visible; }
+  .module-detail--settings-page:has(.settings-page--belabox) .settings-page > .page-header { position: sticky; top: 0; z-index: var(--layer-inspector); background: var(--background); }
+  .module-detail--settings-page:has(.settings-page--belabox) .settings-page__columns { flex: none; grid-template-rows: auto; min-height: 0; overflow: visible; padding-bottom: 16px; }
+  .module-detail--settings-page:has(.settings-page--belabox) .settings-page__column { min-height: auto; overflow: visible; }
+  .module-detail--settings-page:has(.settings-page--belabox) [data-section="polling"] .segment-choice-field__hint[aria-hidden="true"],
+  .module-detail--settings-page:has(.settings-page--belabox) [data-section="polling"] .segment-choice-field__warning[aria-hidden="true"] { display: none; }
+  .module-detail--settings-page:has(.settings-page--belabox) [data-section="polling"] .inspector-field-row { grid-template-columns: minmax(0, 1fr); gap: var(--s1); }
+  .module-detail--settings-page:has(.settings-page--belabox) [data-section="polling"] .inspector-field-row__label { min-height: 20px; font-size: 13px; }
+  .module-detail--settings-page:has(.settings-page--belabox) [data-section="polling"] .inspector-field-row__info { width: 20px; height: 20px; min-height: 20px; }
+  .module-detail--settings-page:has(.settings-page--belabox) .belabox-overview > .ui-section--inspector { padding-bottom: var(--s2); }
+  .module-detail--settings-page:has(.settings-page--belabox) .belabox-history-section__empty-streams { margin-top: -12px; }
+}

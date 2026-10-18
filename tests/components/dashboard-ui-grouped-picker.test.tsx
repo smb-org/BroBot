@@ -1,12 +1,8 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MantineProvider } from "@mantine/core";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createDashboardTheme } from "../../src/dashboard/ui/theme";
 import { GroupedPicker, UiProvider, type GroupedPickerGroup, type GroupedPickerMessages } from "../../src/dashboard/ui";
-
-const theme = createDashboardTheme((variable) => getComputedStyle(document.documentElement).getPropertyValue(variable));
 
 afterEach(cleanup);
 
@@ -155,6 +151,22 @@ describe("GroupedPicker", () => {
   });
 
   it("does not run a stale focus restore when reopened during the exit transition", async () => {
+    const exitAnimations: Array<() => void> = [];
+    const originalGetAnimations = Object.getOwnPropertyDescriptor(Element.prototype, "getAnimations");
+    Object.defineProperty(Element.prototype, "getAnimations", {
+      configurable: true,
+      value(this: Element) {
+        if (!this.hasAttribute("data-ending-style")) return [];
+        return [{
+          effect: {
+            getTiming: () => ({ duration: 150, iterations: 1 }),
+            getComputedTiming: () => ({ duration: 150, iterations: 1 }),
+          },
+          finished: new Promise<void>((resolve) => { exitAnimations.push(resolve); }),
+        }];
+      },
+    });
+    try {
     function ControlledPicker() {
       const [opened, setOpened] = useState(false);
       return <>
@@ -175,22 +187,53 @@ describe("GroupedPicker", () => {
     fireEvent.click(trigger);
     const search = await screen.findByRole("combobox", { name: "Search elements" });
     fireEvent.keyDown(search, { key: "Escape" });
+    await waitFor(() => expect(exitAnimations.length).toBeGreaterThan(0));
     fireEvent.click(trigger);
     expect(trigger).toHaveAttribute("aria-expanded", "true");
-    fireEvent.click(screen.getByRole("button", { name: "Programmatic close", hidden: true }));
+    act(() => { for (const finishExit of exitAnimations.splice(0)) finishExit(); });
+    fireEvent.click(screen.getByText("Programmatic close"));
+    await waitFor(() => expect(exitAnimations.length).toBeGreaterThan(0));
+    act(() => { for (const finishExit of exitAnimations.splice(0)) finishExit(); });
     await waitFor(() => expect(screen.queryByRole("listbox", { name: "Choose an element", hidden: true })).not.toBeInTheDocument());
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(document.activeElement).not.toBe(trigger);
+    } finally {
+      if (originalGetAnimations === undefined) delete (Element.prototype as Partial<Element>).getAnimations;
+      else Object.defineProperty(Element.prototype, "getAnimations", originalGetAnimations);
+    }
   });
 
   it("calls onDismissFocus right after close, before the exit transition ends", async () => {
     const onDismissFocus = vi.fn();
+    const finishExits: (() => void)[] = [];
+    const originalGetAnimations = Object.getOwnPropertyDescriptor(Element.prototype, "getAnimations");
+    Object.defineProperty(Element.prototype, "getAnimations", {
+      configurable: true,
+      value(this: Element) {
+        if (!this.hasAttribute("data-ending-style")) return [];
+        return [{
+          effect: {
+            getTiming: () => ({ duration: 150, iterations: 1 }),
+            getComputedTiming: () => ({ duration: 150, iterations: 1 }),
+          },
+          finished: new Promise<void>((resolve) => { finishExits.push(resolve); }),
+        }];
+      },
+    });
+    try {
     renderPicker(<GroupedPicker groups={groups} messages={messages} trigger={<button type="button">Add element</button>} onSelect={() => {}} onDismissFocus={onDismissFocus} />);
     fireEvent.click(screen.getByRole("button", { name: "Add element" }));
     const search = await screen.findByRole("combobox", { name: "Search elements" });
     fireEvent.keyDown(search, { key: "Escape" });
     await waitFor(() => expect(onDismissFocus).toHaveBeenCalledOnce());
     expect(screen.queryByRole("combobox", { name: "Search elements", hidden: true })).toBeInTheDocument();
+    await waitFor(() => expect(finishExits.length).toBeGreaterThan(0));
+    act(() => { for (const finishExit of finishExits) finishExit(); });
+    await waitFor(() => expect(screen.queryByRole("combobox", { name: "Search elements", hidden: true })).not.toBeInTheDocument());
+    } finally {
+      if (originalGetAnimations === undefined) delete (Element.prototype as Partial<Element>).getAnimations;
+      else Object.defineProperty(Element.prototype, "getAnimations", originalGetAnimations);
+    }
   });
 
   it("does not move focus to the trigger after the exit when focus went elsewhere meanwhile", async () => {
@@ -221,7 +264,7 @@ describe("GroupedPicker", () => {
       dispatchEvent: () => false,
     });
     try {
-      render(<MantineProvider theme={{ ...theme, respectReducedMotion: true }} forceColorScheme="dark">
+      render(<UiProvider>
         <textarea aria-label="Editor" />
         <GroupedPicker
           groups={groups}
@@ -229,7 +272,7 @@ describe("GroupedPicker", () => {
           trigger={<button type="button">Add element</button>}
           onSelect={() => {}}
         />
-      </MantineProvider>);
+      </UiProvider>);
       fireEvent.click(screen.getByRole("button", { name: "Add element" }));
       await screen.findByRole("combobox", { name: "Search elements" });
       fireEvent.click(screen.getByRole("button", { name: "Close", hidden: true }));

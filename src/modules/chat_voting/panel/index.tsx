@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
+import "./panel.css";
 
 import { CollectionPage, EmptyState, ListToolbar, LoadState, LoadStateLines } from "../../../dashboard/ui";
 import { dashboardCommonTexts } from "../../../dashboard/locale";

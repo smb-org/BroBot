@@ -499,7 +499,7 @@ test("command editor error and response layouts stay aligned", async ({ page }) 
   const preview = page.locator(".text-command-response-fields > .ui-chat-preview");
   const desktopAlignment = await page.evaluate(() => {
     const textarea = document.querySelector<HTMLElement>("#command-text");
-    const label = document.querySelector<HTMLElement>(".command-template-editor .ui-template-text-field .mantine-InputWrapper-label");
+    const label = document.querySelector<HTMLElement>(".command-template-editor .ui-template-text-field__label");
     const button = document.querySelector<HTMLElement>(".text-command-editor .ui-template-text-field__insert-variable");
     const previewNode = document.querySelector<HTMLElement>(".text-command-response-fields > .ui-chat-preview");
     if (textarea === null || label === null || button === null || previewNode === null) throw new Error("Command response geometry is incomplete.");

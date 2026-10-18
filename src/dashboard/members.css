@@ -1,0 +1,26 @@
+@layer components.pages {
+  .ui-editor-shell.member-editor { box-sizing: border-box; width: 100%; max-width: none; max-height: none; overflow: visible; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
+  .member-editor .inspector-section__heading { align-items: center; margin: 0 0 8px; }
+  .member-editor .ui-save-bar--persistent { border-top: 0; background: transparent; }
+  .members-collection__rows .list-row__link { grid-template-columns: 28px minmax(0, 1fr) auto; }
+  .members-collection__rows .list-row--selected { border-radius: var(--r-control); box-shadow: inset 0 0 0 1px var(--color-selection-border); background: var(--color-selection-surface); }
+  .members-collection__rows .list-row--selected .list-row__link { background: transparent; }
+  .members-collection__rows .list-row--selected .list-row__link:hover { background: var(--surface-hover); }
+  .members-collection__rows .list-row__icon { display: flex; align-items: center; }
+  .members-collection__rows .list-row__status { justify-self: end; }
+  .members-collection__rows :is(.list-row__title, .list-row__description) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .members-collection__role { display: inline-flex; align-items: center; gap: 4px; }
+  .members-collection__empty { margin: 0; color: var(--text-3); font-size: 13px; }
+  .members-list-toolbar { margin-bottom: 0; }
+  .members-list-toolbar .list-toolbar__search { grid-column: 1; }
+  .members-list-toolbar .list-toolbar__create { grid-column: 2; grid-row: 1; }
+  .members-list-toolbar .list-toolbar__status { margin-top: 2px; }
+  .members-list-toolbar .list-toolbar__status:has(.list-toolbar__reason:not(.sr-only)) { height: auto; min-height: 40px; overflow: visible; }
+  .members-list-toolbar .list-toolbar__status:has(.list-toolbar__reason:not(.sr-only)) > .ui-load-state__content { grid-template-columns: minmax(0, 1fr); align-items: start; height: auto; min-height: 40px; }
+  .members-list-toolbar .list-toolbar__status:has(.list-toolbar__reason:not(.sr-only)) .list-toolbar__status-right { justify-content: flex-start; overflow: visible; white-space: normal; }
+  .members-list-toolbar .list-toolbar__status:has(.list-toolbar__reason:not(.sr-only)) .list-toolbar__reason:not(.sr-only) { display: block; overflow: visible; overflow-wrap: anywhere; text-overflow: clip; white-space: normal; }
+  .members-list-toolbar .list-toolbar__row:not(:has(.list-toolbar__filters)) { grid-template-columns: minmax(0, 1fr) auto; height: 44px; }
+  .collection-page:has(.members-list-toolbar) .collection-page__list-toolbar { padding-bottom: 4px; }
+  .members-collection__load-more { display: flex; min-height: 44px; justify-content: flex-end; margin-top: 8px; }
+  .members-collection__load-more > .ui-button, .members-collection__load-more > .button { min-height: 44px; }
+}

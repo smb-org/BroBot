@@ -1222,7 +1222,7 @@ describe("Dashboard skeleton", () => {
 
     const person = await screen.findByRole("textbox", { name: "Person" });
     expect(person).toHaveAccessibleName("Person");
-    expect(person.closest(".mantine-Input-wrapper")?.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+    expect(person.closest(".ui-field__control")?.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     const initialRequests = eventRequests.length;
     for (const value of ["a", "al", "ali", "alic", "alice"]) {
       fireEvent.change(person, { target: { value } });

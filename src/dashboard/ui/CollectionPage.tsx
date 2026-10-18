@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 
+import "./CollectionPage.css";
+
 import { dashboardCommonTexts } from "../locale";
 import { Button } from "./Button";
 import { Icon } from "./Icon";

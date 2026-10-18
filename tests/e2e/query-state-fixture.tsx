@@ -2,7 +2,7 @@ import { createRoot } from "react-dom/client";
 import { useState } from "react";
 
 import { ListToolbar, LoadState, UiProvider } from "../../src/dashboard/ui";
-import "../../src/dashboard/styles.css";
+import "../../src/dashboard/ui/core.css";
 
 type RequestState = "loading" | "initial-error" | "success" | "refresh-error";
 

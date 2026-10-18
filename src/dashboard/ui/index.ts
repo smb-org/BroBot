@@ -1,9 +1,14 @@
-// The seam: everything a panel is allowed to import from `@mantine/*` comes
-// through here, in project vocabulary. See "The seam `src/dashboard/ui/`"
-// in docs/input/DESIGN-neu.md.
+// Shared dashboard primitives and layout components live behind this kit API.
 
 export { UiProvider } from "./Provider";
-export { Tabs } from "@mantine/core";
+import { Tabs as TabsPrimitive } from "@base-ui/react/tabs";
+import { TabsPanel, TabsRoot } from "./Tabs";
+
+export const Tabs = Object.assign(TabsRoot, {
+  List: TabsPrimitive.List,
+  Tab: TabsPrimitive.Tab,
+  Panel: TabsPanel,
+});
 export { Dialog } from "./Dialog";
 export { Shell } from "./Shell";
 export { NavigationIcon } from "./NavigationIcon";
@@ -76,7 +81,6 @@ export { FieldError } from "./FieldError";
 export { LockedReason } from "./LockedReason";
 export { Button } from "./Button";
 export { FormDialog } from "./FormDialog";
-export { FormDensity } from "./FormDensity";
 export { Icon } from "./Icon";
 export { StatusLed } from "./StatusLed";
 export type { StatusLedState } from "./StatusLed";

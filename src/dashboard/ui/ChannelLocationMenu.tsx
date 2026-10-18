@@ -1,4 +1,4 @@
-import { Menu } from "@mantine/core";
+import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { useEffect, useState, type ReactElement } from "react";
 
 import type { PanelChannelLocation } from "../../panel-contract";
@@ -69,9 +69,8 @@ export function ChannelLocationMenu({ location, messages }: {
 
   return (
     <div data-ui="" className="dashboard-header__location-wrap">
-      <Menu opened={opened} onChange={setOpened} position="bottom-start" withinPortal closeOnItemClick={false}>
-        <Menu.Target>
-          <Button
+      <MenuPrimitive.Root open={opened} onOpenChange={setOpened}>
+        <MenuPrimitive.Trigger render={<Button
             className="dashboard-header__location"
             variant="subtle"
             ariaHasPopup="menu"
@@ -88,26 +87,27 @@ export function ChannelLocationMenu({ location, messages }: {
                 shortened -- visually hidden, never duplicating a name that's
                 already fully visible. */}
             {shortName === fullName ? null : <span className="sr-only">, {fullName}</span>}
-          </Button>
-        </Menu.Target>
-        <Menu.Dropdown data-ui="">
-          <Menu.Label>{fullName}</Menu.Label>
-          <Menu.Label className="mono">{coordinatesForDisplay(location)}</Menu.Label>
-          <Menu.Divider />
-          <Menu.Label>{messages.openIn}</Menu.Label>
-          {externalTargets.map((target) => <Menu.Item
-            key={target.label}
-            component="a"
-            href={target.href(namedLocation)}
-            target="_blank"
-            rel="noopener noreferrer"
-          >{target.label}</Menu.Item>)}
-          <Menu.Divider />
-          <Menu.Item onClick={() => { void copyCoordinates(); }}>
-            {copyStatus === "copied" ? messages.coordinatesCopied : copyStatus === "failed" ? messages.copyCoordinatesFailed : messages.copyCoordinates}
-          </Menu.Item>
-        </Menu.Dropdown>
-      </Menu>
+          </Button>} />
+        <MenuPrimitive.Portal>
+          <MenuPrimitive.Positioner side="bottom" align="start" sideOffset={4} className="z-[var(--layer-popover)]" style={{ zIndex: "var(--layer-popover)" }}>
+            <MenuPrimitive.Popup data-ui="" className="dashboard-header__location-menu">
+              <div className="dashboard-header__location-menu-label">{fullName}</div>
+              <div className="dashboard-header__location-menu-label mono">{coordinatesForDisplay(location)}</div>
+              <MenuPrimitive.Separator className="dashboard-header__location-menu-divider" />
+              <div className="dashboard-header__location-menu-label">{messages.openIn}</div>
+              {externalTargets.map((target) => <MenuPrimitive.Item
+                key={target.label}
+                render={<a href={target.href(namedLocation)} target="_blank" rel="noopener noreferrer" />}
+                className="dashboard-header__location-menu-item"
+              >{target.label}</MenuPrimitive.Item>)}
+              <MenuPrimitive.Separator className="dashboard-header__location-menu-divider" />
+              <MenuPrimitive.Item className="dashboard-header__location-menu-item" onClick={() => { void copyCoordinates(); }}>
+                {copyStatus === "copied" ? messages.coordinatesCopied : copyStatus === "failed" ? messages.copyCoordinatesFailed : messages.copyCoordinates}
+              </MenuPrimitive.Item>
+            </MenuPrimitive.Popup>
+          </MenuPrimitive.Positioner>
+        </MenuPrimitive.Portal>
+      </MenuPrimitive.Root>
       {copyStatus === null ? null : <span className="dashboard-header__location-copy-status" role="status" aria-live="polite">
         {copyStatus === "copied" ? messages.coordinatesCopied : messages.copyCoordinatesFailed}
       </span>}

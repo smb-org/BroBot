@@ -1,3 +1,5 @@
+import "./DataTable.css";
+
 import { useEffect, useState, type ReactElement, type ReactNode, type RefCallback } from "react";
 
 import { dashboardLanguage, dashboardTexts } from "../locale";

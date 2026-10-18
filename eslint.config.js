@@ -5,18 +5,6 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
-/**
- * Mantine gehoert hinter die Naht `src/dashboard/ui/`. Die Bauteile dort
- * sprechen Projektvokabular, nicht Bibliotheksvokabular -- deshalb laesst sich
- * hinter der Naht ein Bauteil austauschen, ohne dass eine Aufrufstelle sich
- * aendert. Das Muster haengt an jeder bestehenden Importgrenze statt in einem
- * eigenen Block: ein spaeterer Block ueberschreibt `no-restricted-imports`
- * sonst vollstaendig, und die Grenze greift lautlos nicht mehr.
- */
-const mantineBoundaryPattern = {
-  group: ["@mantine/*"],
-  message: "Mantine nur in src/dashboard/ui/. Panels importieren aus der Naht.",
-};
 const primitivePackageBoundaryPattern = {
   group: ["@base-ui/react", "@base-ui/react/*", "cmdk", "lucide-react"],
   message: "Import UI primitive packages only from src/dashboard/ui/.",
@@ -62,7 +50,6 @@ const moduleIsolationPatterns = [
     regex: "^(?:src/)?modules/",
     message: "Module dürfen kein anderes Modul importieren.",
   },
-  mantineBoundaryPattern,
   primitivePackageBoundaryPattern,
   richTextareaBoundaryPattern,
   tanstackBoundaryPattern,
@@ -93,7 +80,6 @@ const overlayBoundaryPatterns = [
     regex: "^zod$",
     message: "Overlay-Ansichten dürfen Zod nicht importieren.",
   },
-  mantineBoundaryPattern,
   primitivePackageBoundaryPattern,
   richTextareaBoundaryPattern,
   tanstackBoundaryPattern,
@@ -102,7 +88,7 @@ const overlayBoundaryPatterns = [
 const overlayRestrictedImportPatterns = [
   ...moduleOverlayIsolationPatterns,
   ...overlayBoundaryPatterns.filter((pattern) =>
-    pattern !== mantineBoundaryPattern && pattern !== primitivePackageBoundaryPattern &&
+    pattern !== primitivePackageBoundaryPattern &&
     pattern !== richTextareaBoundaryPattern && pattern !== tanstackBoundaryPattern),
 ];
 
@@ -116,14 +102,13 @@ const panelBoundaryPatterns = [
     message: "Panel-Ansichten dürfen keine Repository- oder Adapterdateien importieren.",
   },
   overlayViewBoundaryPattern,
-  mantineBoundaryPattern,
   primitivePackageBoundaryPattern,
   richTextareaBoundaryPattern,
 ];
 
 const panelRestrictedImportPatterns = [
   ...moduleIsolationPatterns,
-  ...panelBoundaryPatterns.filter((pattern) => pattern !== mantineBoundaryPattern && pattern !== primitivePackageBoundaryPattern && pattern !== richTextareaBoundaryPattern),
+  ...panelBoundaryPatterns.filter((pattern) => pattern !== primitivePackageBoundaryPattern && pattern !== richTextareaBoundaryPattern),
 ];
 
 export default defineConfig(
@@ -237,8 +222,7 @@ export default defineConfig(
     //
     // Dieser Block muss NACH dem Dashboard-Block stehen: ui/ liegt unter
     // src/dashboard/**, und in der Flat Config gewinnt der spaetere Block.
-    // Davor haette der Dashboard-Block hier Mantine verboten -- also genau
-    // an der einen Stelle, an der es erlaubt sein muss.
+    // Keep this import boundary active when the flat config overrides ui/ through the dashboard block.
     files: ["src/dashboard/ui/**/*.{ts,tsx}"],
     ignores: ["src/dashboard/ui/Icon.tsx"],
     rules: {
