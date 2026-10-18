@@ -5,13 +5,18 @@ import { chatVotingModule } from "../../src/modules/chat_voting";
 import { createChatVotingRepository } from "../../src/modules/chat_voting/repository";
 import { votekickModule } from "../../src/modules/votekick";
 import { createVotekickRepository } from "../../src/modules/votekick/adapters/d1";
+import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { dryRunChatMessage } from "../../src/worker/dry-run";
-import { openStoredBallot, readStoredBallotDryRunSnapshot } from "../../src/worker/durable/ballots";
-import { insertChannel } from "./fixtures";
+import { castStoredBallotTerm, openStoredBallot, readStoredBallotDryRunSnapshot } from "../../src/worker/durable/ballots";
+import { insertAppAccessToken, insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
 const NOW = "2026-09-19T12:00:00.000Z";
 const CHANNEL_ID = "kanal-a";
+const TOKEN_ENCRYPTION_KEYS = JSON.stringify({
+  active: { id: "dry-run-token", key: Buffer.from(new Uint8Array(32).fill(7)).toString("base64url") },
+  retired: [],
+});
 
 const snapshotTables = (database: TestD1Database): Readonly<Record<string, unknown>> => {
   const tables = database.sqlite.prepare(
@@ -187,23 +192,314 @@ describe("dryRunChatMessage", () => {
     }
   });
 
-  it("reads vote and active-chatter snapshots without D1 writes, ballot mutations, or alarms", async () => {
+  it("does not refresh a missing app token while resolving a dry-run votekick target", async () => {
+    const database = new TestD1Database();
+    const fetcher = vi.fn<typeof fetch>((input) => Promise.resolve(new Response(
+      JSON.stringify((typeof input === "string" ? input : input instanceof Request ? input.url : input.href).includes("oauth2/token")
+        ? { access_token: "new-app-token", expires_in: 7200 }
+        : { data: [] }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    )));
+    try {
+      await insertChannel(database, CHANNEL_ID);
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'votekick', 1, ?)",
+      ).bind(CHANNEL_ID, JSON.stringify(votekickModule.defaultSettings)).run();
+      const before = snapshotTables(database);
+      const response = await dryRunChatMessage({
+        DB: database as unknown as D1Database,
+        PUBLIC_ORIGIN: "https://brobot.example",
+        TWITCH_CLIENT_ID: "client-id",
+        TWITCH_CLIENT_SECRET: "client-secret",
+        TOKEN_ENCRYPTION_KEYS,
+      } as unknown as Env, CHANNEL_ID, {
+        text: "!votekick @missing_user",
+        sender: { login: "viewer_42", statuses: ["vip"] },
+        streamState: "online",
+        game: null,
+        sharedChat: false,
+        only: { moduleId: "votekick" },
+      }, fetcher);
+
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(snapshotTables(database)).toEqual(before);
+      expect(response.modules[0]?.entries[0]?.templateNotes).toContainEqual({
+        code: "template.deferred_live",
+        detail: { name: "votekick.target" },
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("treats an unreadable cached token as resolved at send time without fetching", async () => {
+    const database = new TestD1Database();
+    const wrongKeys = JSON.stringify({
+      active: { id: "different-key", key: Buffer.from(new Uint8Array(32).fill(8)).toString("base64url") },
+      retired: [],
+    });
+    const fetcher = vi.fn<typeof fetch>(() => Promise.reject(new Error("Dry-run must not fetch without a valid token.")));
+    try {
+      await insertChannel(database, CHANNEL_ID);
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'votekick', 1, ?)",
+      ).bind(CHANNEL_ID, JSON.stringify(votekickModule.defaultSettings)).run();
+      await insertAppAccessToken(
+        database,
+        await encryptJson({ token: "unreadable-token" }, parseKeyRing(wrongKeys)),
+        "2099-09-20T00:00:00.000Z",
+        NOW,
+        NOW,
+      );
+      const before = snapshotTables(database);
+
+      const response = await dryRunChatMessage({
+        DB: database as unknown as D1Database,
+        PUBLIC_ORIGIN: "https://brobot.example",
+        TWITCH_CLIENT_ID: "client-id",
+        TOKEN_ENCRYPTION_KEYS: "invalid-key-ring",
+      } as unknown as Env, CHANNEL_ID, {
+        text: "!votekick @target_viewer",
+        sender: { login: "viewer_42", statuses: ["vip"] },
+        streamState: "online",
+        game: null,
+        sharedChat: false,
+        only: { moduleId: "votekick" },
+      }, fetcher);
+
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(snapshotTables(database)).toEqual(before);
+      expect(response.modules[0]?.entries[0]?.templateNotes).toContainEqual({
+        code: "template.deferred_live",
+        detail: { name: "votekick.target" },
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps an open D1 vote silent when the read-only ballot snapshot is missing", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW));
     const database = new TestD1Database();
-    const targetTime = new Date(Date.parse(NOW) - 5 * 60_000).toISOString();
-    const activity = { firstSeenAt: targetTime, lastSeenAt: NOW };
+    const channelObject = {
+      readBallotDryRunSnapshot: () => Promise.resolve(null),
+      hasOpenBallotSnapshot: () => Promise.resolve(false),
+    };
+    const channelNamespace = {
+      idFromName: () => CHANNEL_ID,
+      get: () => channelObject,
+    } as unknown as Env["CHANNEL"];
+    const fetcher = vi.fn<typeof fetch>(() => Promise.reject(new Error("Dry-run must not refresh an app token.")));
+    try {
+      await insertChannel(database, CHANNEL_ID);
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'chat_voting', 1, '{}')",
+      ).bind(CHANNEL_ID).run();
+      await createChatVotingRepository(database as unknown as D1Database).insertOpen({
+        id: "open-d1-without-do-ballot",
+        channelId: CHANNEL_ID,
+        kind: "yes_no",
+        optionCount: 2,
+        labels: ["Yes", "No"],
+        title: null,
+        resultText: "{vote.result}",
+        textMode: null,
+        termFilterReady: null,
+        openedAt: "2026-09-19T11:59:00.000Z",
+        closesAt: "2026-09-19T12:01:00.000Z",
+        requestedDurationSeconds: null,
+        closeReason: "manual",
+        textResults: null,
+        moreTerms: null,
+      });
+
+      const response = await dryRunChatMessage({
+        DB: database as unknown as D1Database,
+        CHANNEL: channelNamespace,
+        PUBLIC_ORIGIN: "https://brobot.example",
+      } as unknown as Env, CHANNEL_ID, {
+        text: "1",
+        sender: { login: "viewer_42", statuses: [] },
+        streamState: "online",
+        game: null,
+        sharedChat: false,
+        only: { moduleId: "chat_voting" },
+      }, fetcher);
+
+      expect(response.modules[0]).toMatchObject({ status: "silent", entries: [] });
+      expect(fetcher).not.toHaveBeenCalled();
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps a votekick silent when its stored ballot is inactive", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const database = new TestD1Database();
+    const channelObject = {
+      readBallotDryRunSnapshot: () => Promise.resolve({
+        counts: [0, 0],
+        revision: 1,
+        expiresAt: Date.parse("2026-09-19T12:01:00.000Z"),
+        previousChoiceKnown: false,
+        isActive: false,
+      }),
+      hasOpenBallotSnapshot: () => Promise.resolve(false),
+    };
+    const channelNamespace = {
+      idFromName: () => CHANNEL_ID,
+      get: () => channelObject,
+    } as unknown as Env["CHANNEL"];
+    const fetcher = vi.fn<typeof fetch>(() => Promise.reject(new Error("Dry-run must not refresh an app token.")));
+    try {
+      await insertChannel(database, CHANNEL_ID);
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'votekick', 1, ?)",
+      ).bind(CHANNEL_ID, JSON.stringify(votekickModule.defaultSettings)).run();
+      await createVotekickRepository(database as unknown as D1Database).admit(CHANNEL_ID, {
+        id: "running-inactive-kick",
+        targetUserId: "target-id",
+        targetLogin: "target_viewer",
+        initiatorUserId: "starter-id",
+        threshold: 3,
+        yesVotes: 0,
+        ballotRevision: 1,
+        startedAt: "2026-09-19T11:59:00.000Z",
+        endsAt: "2026-09-19T12:01:00.000Z",
+      }, NOW, 0, 0);
+
+      const response = await dryRunChatMessage({
+        DB: database as unknown as D1Database,
+        CHANNEL: channelNamespace,
+        PUBLIC_ORIGIN: "https://brobot.example",
+      } as unknown as Env, CHANNEL_ID, {
+        text: "1",
+        sender: { login: "viewer_42", statuses: [] },
+        streamState: "online",
+        game: null,
+        sharedChat: false,
+        only: { moduleId: "votekick" },
+      }, fetcher);
+
+      expect(response.modules[0]).toMatchObject({ status: "silent", entries: [] });
+      expect(fetcher).not.toHaveBeenCalled();
+    } finally {
+      database.close();
+    }
+  });
+
+  it("resolves the simulated sender with a cached token before reading their ballot choice", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const database = new TestD1Database();
+    const ballotVoterIds: (string | undefined)[] = [];
+    const channelObject = {
+      readBallotDryRunSnapshot: (moduleId: string, ballotId: string, voterId?: string) => {
+        expect(moduleId).toBe("votekick");
+        expect(ballotId).toBe("kick-with-existing-vote");
+        ballotVoterIds.push(voterId);
+        return Promise.resolve({
+          counts: [0, 0],
+          revision: 1,
+          expiresAt: Date.parse("2026-09-19T12:01:00.000Z"),
+          isActive: true,
+        });
+      },
+      hasOpenBallotSnapshot: () => Promise.resolve(false),
+      getActiveChatterSnapshot: (userId: string) => {
+        expect(userId).toBe("real-viewer-id");
+        return Promise.resolve({
+          firstSeenAt: "2026-09-19T11:58:00.000Z",
+          lastSeenAt: NOW,
+        });
+      },
+      getActiveChatterCountSnapshot: () => Promise.resolve(0),
+    };
+    const channelNamespace = {
+      idFromName: () => CHANNEL_ID,
+      get: () => channelObject,
+    } as unknown as Env["CHANNEL"];
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const url = typeof input === "string" ? input : input instanceof Request ? input.url : input.href;
+      expect(url).toBe("https://api.twitch.tv/helix/users?login=viewer_42");
+      expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer cached-app-token");
+      return Promise.resolve(new Response(JSON.stringify({
+        data: [{ id: "real-viewer-id", login: "viewer_42", display_name: "Viewer 42" }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    });
+    try {
+      await insertChannel(database, CHANNEL_ID);
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'votekick', 1, ?)",
+      ).bind(CHANNEL_ID, JSON.stringify(votekickModule.defaultSettings)).run();
+      await insertAppAccessToken(
+        database,
+        await encryptJson({ token: "cached-app-token" }, parseKeyRing(TOKEN_ENCRYPTION_KEYS)),
+        "2099-09-20T00:00:00.000Z",
+        NOW,
+        NOW,
+      );
+      const repository = createVotekickRepository(database as unknown as D1Database);
+      await repository.admit(CHANNEL_ID, {
+        id: "kick-with-existing-vote",
+        targetUserId: "target-id",
+        targetLogin: "target_viewer",
+        initiatorUserId: "starter-id",
+        threshold: 3,
+        yesVotes: 1,
+        ballotRevision: 1,
+        startedAt: "2026-09-19T11:59:00.000Z",
+        endsAt: "2026-09-19T12:01:00.000Z",
+      }, NOW, 0, 0);
+
+      const response = await dryRunChatMessage({
+        DB: database as unknown as D1Database,
+        CHANNEL: channelNamespace,
+        PUBLIC_ORIGIN: "https://brobot.example",
+        TWITCH_CLIENT_ID: "client-id",
+        TWITCH_CLIENT_SECRET: "client-secret",
+        TOKEN_ENCRYPTION_KEYS,
+      } as unknown as Env, CHANNEL_ID, {
+        text: "1",
+        sender: { login: "viewer_42", statuses: ["vip"] },
+        streamState: "online",
+        game: null,
+        sharedChat: false,
+        only: { moduleId: "votekick" },
+      }, fetcher);
+
+      expect(ballotVoterIds).toEqual(["real-viewer-id"]);
+      expect(response.modules[0]?.entries[0]).toMatchObject({
+        outcome: "fires",
+        effects: [{ kind: "ballot", action: "count", choice: "yes", counts: [1, 0] }],
+      });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(fetcher.mock.calls.every(([input]) => {
+        const url = typeof input === "string" ? input : input instanceof Request ? input.url : input.href;
+        return !url.includes("oauth2/token");
+      })).toBe(true);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("reports unresolved ballots without synthetic activity reads or storage mutations", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const database = new TestD1Database();
     const calls = { ballotReads: 0, activityReads: 0, mutations: 0, alarms: 0 };
     const forbidden = (): never => {
       calls.mutations += 1;
       throw new Error("Dry-run called a Durable Object mutation RPC.");
     };
     const channelObject = {
-      readBallotDryRunSnapshot: (moduleId: string, ballotId: string) => {
+      readBallotDryRunSnapshot: (moduleId: string, ballotId: string, voterId?: string) => {
         expect(["chat_voting", "votekick"]).toContain(moduleId);
         expect(ballotId).toBe(moduleId === "chat_voting" ? "poll-1" : "running-kick");
         calls.ballotReads += 1;
-        return Promise.resolve({ counts: [0, 0], revision: 0 });
+        return Promise.resolve({ counts: [0, 0], revision: 0, previousChoiceKnown: voterId !== undefined });
       },
       hasOpenBallotSnapshot: () => {
         calls.ballotReads += 1;
@@ -211,7 +507,7 @@ describe("dryRunChatMessage", () => {
       },
       getActiveChatterSnapshot: () => {
         calls.activityReads += 1;
-        return Promise.resolve(activity);
+        return Promise.resolve(null);
       },
       getActiveChatterCountSnapshot: () => {
         calls.activityReads += 1;
@@ -290,8 +586,24 @@ describe("dryRunChatMessage", () => {
 
       expect(response.modules.map(({ moduleId }) => moduleId)).toEqual(["chat_voting", "votekick"]);
       expect(response.modules.every(({ status }) => status !== "error" && status !== "not_testable")).toBe(true);
+      expect(response.modules.find(({ moduleId }) => moduleId === "chat_voting")).toMatchObject({
+        status: "indeterminate",
+        entries: [{
+          outcome: "indeterminate",
+          effects: [],
+          templateNotes: [{ code: "template.deferred_live", detail: { name: "ballot.previous_choice" } }],
+        }],
+      });
+      expect(response.modules.find(({ moduleId }) => moduleId === "votekick")).toMatchObject({
+        status: "indeterminate",
+        entries: [{
+          outcome: "indeterminate",
+          effects: [],
+          templateNotes: [{ code: "template.deferred_live", detail: { name: "ballot.previous_choice" } }],
+        }],
+      });
       expect(calls.ballotReads).toBeGreaterThan(0);
-      expect(calls.activityReads).toBeGreaterThan(0);
+      expect(calls.activityReads).toBe(0);
       expect(calls.mutations).toBe(0);
       expect(calls.alarms).toBe(0);
       expect(snapshotTables(database)).toEqual(before);
@@ -303,23 +615,34 @@ describe("dryRunChatMessage", () => {
 
   it("reads a durable ballot snapshot without storage writes or alarm changes", async () => {
     const storage = memoryBallotStorage();
+    const expiresAt = Date.now() + 60_000;
     const opened = await openStoredBallot(
       storage.storage,
       "chat_voting",
       "dry-run-text-ballot",
       0,
-      Date.now() + 60_000,
+      expiresAt,
       undefined,
       undefined,
       undefined,
       { blockedTerms: ["spoiler"] },
     );
     expect(opened.status).toBe("opened");
+    await castStoredBallotTerm(storage.storage, "channel-a", "chat_voting", "dry-run-text-ballot", "voter-a", "sunny");
     storage.reset();
 
-    const snapshot = await readStoredBallotDryRunSnapshot(storage.storage, "chat_voting", "dry-run-text-ballot");
+    const snapshot = await readStoredBallotDryRunSnapshot(
+      storage.storage, "chat_voting", "dry-run-text-ballot", "channel-a", "voter-a",
+    );
 
-    expect(snapshot).toMatchObject({ counts: [], blockedTerms: ["spoiler"], termFilterReady: true });
+    expect(snapshot).toMatchObject({
+      counts: [],
+      blockedTerms: ["spoiler"],
+      termFilterReady: true,
+      expiresAt,
+      previousChoice: "sunny",
+      isActive: true,
+    });
     expect(storage.writes).toBe(0);
     expect(storage.alarms).toBe(0);
   });

@@ -11,7 +11,8 @@ import { withHostBlocks, withOutputGate } from "./dry-run-output";
 import { createSimulatedTemplateRenderer } from "./simulated-template-renderer";
 import { secureRandomInteger } from "./template-resolver";
 import { moduleBallotSnapshots } from "./module-ballots";
-import { fetchTwitchUserByLogin } from "./shoutout";
+import { readCachedAppAccessToken } from "./app-token";
+import { fetchTwitchUserByLoginWithToken } from "./shoutout";
 import { isTwitchChannelModerator } from "./moderation";
 
 const CHAT_EVENT = "channel.chat.message";
@@ -32,7 +33,8 @@ const badgeForStatus: Readonly<Record<DryRunRequest["sender"]["statuses"][number
 
 const moduleStatusFor = (entries: readonly DryRunEntryReport[]): DryRunModuleReport["status"] => {
   if (entries.length === 0) return "silent";
-  return entries.some(({ outcome }) => outcome === "fires") ? "reacts" : "blocked";
+  if (entries.some(({ outcome }) => outcome === "fires")) return "reacts";
+  return entries.some(({ outcome }) => outcome === "indeterminate") ? "indeterminate" : "blocked";
 };
 
 export const dryRunChatMessage = async (
@@ -49,11 +51,51 @@ export const dryRunChatMessage = async (
   ).bind(channelId).first<{ login: string; language: string; time_zone: string }>();
   if (channel === null) throw new DryRunChannelNotReleasedError();
 
-  const [dispatchState, defaultChatTarget, botIdentity] = await Promise.all([
+  const [dispatchState, defaultChatTarget, botIdentity, ballotState] = await Promise.all([
     readDispatchChannelState(db, channelId, evaluatedAt),
     readChannelDefaultChatTarget(db, channelId),
     getBotIdentity(db),
+    db.prepare(
+      `SELECT
+         EXISTS (SELECT 1 FROM chat_votes WHERE channel_id = ? AND status = 'open') AS has_open_chat_vote,
+         EXISTS (SELECT 1 FROM votekicks WHERE channel_id = ? AND status = 'running') AS has_running_votekick`,
+    ).bind(channelId, channelId).first<{ has_open_chat_vote: number; has_running_votekick: number }>(),
   ]);
+  const readOnlyEnvironment = {
+    DB: db,
+    PUBLIC_ORIGIN: env.PUBLIC_ORIGIN,
+    TWITCH_CLIENT_ID: env.TWITCH_CLIENT_ID,
+    TOKEN_ENCRYPTION_KEYS: env.TOKEN_ENCRYPTION_KEYS,
+    SESSION_ENCRYPTION_KEYS: env.SESSION_ENCRYPTION_KEYS,
+  } as Env;
+  let cachedAppAccessToken: Promise<string | null> | null = null;
+  const deferredUserLookups = new Set<string>();
+  const userLookups = new Map<string, Promise<Awaited<ReturnType<typeof fetchTwitchUserByLoginWithToken>>>>();
+  const lookupUserByLogin = (login: string) => {
+    const normalizedLogin = login.toLowerCase();
+    const cachedLookup = userLookups.get(normalizedLogin);
+    if (cachedLookup !== undefined) return cachedLookup;
+    const lookup = (async () => {
+      cachedAppAccessToken ??= readCachedAppAccessToken(db, readOnlyEnvironment, evaluatedAt);
+      const accessToken = await cachedAppAccessToken;
+      if (accessToken === null) {
+        deferredUserLookups.add(normalizedLogin);
+        return null;
+      }
+      return await fetchTwitchUserByLoginWithToken(fetcher, env.TWITCH_CLIENT_ID, login, accessToken);
+    })();
+    userLookups.set(normalizedLogin, lookup);
+    return lookup;
+  };
+  const resolveBallotVoterId = async (): Promise<string | null> => {
+    try {
+      const user = await lookupUserByLogin(request.sender.login);
+      return user?.userId ?? null;
+    } catch {
+      deferredUserLookups.add(request.sender.login.toLowerCase());
+      return null;
+    }
+  };
   const selectedWithoutPause = selectModulesForEvent(dispatchState.activations, CHAT_EVENT, registry, false);
   const selectedByProduction = selectModulesForEvent(dispatchState.activations, CHAT_EVENT, registry, dispatchState.controls.pause.active);
   const enabledModuleIds = new Set(selectedWithoutPause.matches.map(({ module }) => module.id));
@@ -112,8 +154,16 @@ export const dryRunChatMessage = async (
     }
     const moduleDisabled = !enabledModuleIds.has(module.id);
     const channelPaused = !moduleDisabled && dispatchState.controls.pause.active && !selectedModuleIds.has(module.id);
+    let moduleBallotChoiceUnresolved = false;
+    const resolvesBallotVoter = module.id === "chat_voting" && ballotState?.has_open_chat_vote === 1
+      ? !/^!vote(?:\s|$)/iu.test(request.text.trim())
+      : module.id === "votekick" && ballotState?.has_running_votekick === 1 && /^[12]$/u.test(request.text);
 
     try {
+      const resolvedBallotVoterId = resolvesBallotVoter ? await resolveBallotVoterId() : null;
+      const modulePayload = resolvedBallotVoterId === null
+        ? payload
+        : { ...payload, chatter_user_id: resolvedBallotVoterId };
       const activation = activationByModule.get(module.id);
       let rawSettings: unknown = activation?.settings ?? module.defaultSettings;
       if (typeof rawSettings === "string") {
@@ -128,14 +178,14 @@ export const dryRunChatMessage = async (
         channelId,
         subscriptionType: CHAT_EVENT,
         triggerId: "dry-run",
-        payload,
+        payload: modulePayload,
         settings,
         receivedAt: evaluatedAt,
         eventSubTimestamp: evaluatedAt,
         actor,
         chatStatus,
       };
-      const renderTemplate = await createSimulatedTemplateRenderer(env, channelId, {
+      const renderTemplate = await createSimulatedTemplateRenderer(readOnlyEnvironment, channelId, {
         event,
         templateContext: module.templateContext ?? "event",
         streamState,
@@ -155,16 +205,24 @@ export const dryRunChatMessage = async (
         channelLanguage: () => Promise.resolve(channel.language === "en" ? "en" : "de"),
         channelTimeZone: () => Promise.resolve(channel.time_zone),
         lookupUserByLogin: async (login) => {
-          const user = await fetchTwitchUserByLogin(fetcher, env, login, "app");
+          const user = await lookupUserByLogin(login);
           return user === null ? null : { userId: user.userId, login: user.login, displayName: user.displayName };
         },
-        isChannelModerator: (userId) => isTwitchChannelModerator(env, channelId, userId, fetcher),
+        isChannelModerator: (userId) => isTwitchChannelModerator(readOnlyEnvironment, channelId, userId, fetcher),
         readChannelVariables: (names) => readVariables(db, channelId, names),
         renderTemplate: (text, moduleValues, changed) => renderTemplate(text, moduleValues, changed, "chat"),
         followedAt: () => Promise.resolve("unavailable"),
         userCreatedAt: () => Promise.resolve(null),
         secureRandomInteger,
-        ballots: moduleBallotSnapshots(env.CHANNEL, channelId, module.id),
+        isUserLookupDeferred: (login) => deferredUserLookups.has(login.toLowerCase()),
+        markBallotChoiceUnresolved: () => { moduleBallotChoiceUnresolved = true; },
+        isBallotChoiceUnresolved: () => moduleBallotChoiceUnresolved,
+        ballots: moduleBallotSnapshots(
+          env.CHANNEL,
+          channelId,
+          module.id,
+          resolvesBallotVoter ? resolveBallotVoterId : undefined,
+        ),
         activeChatters: {
           count: async (windowMs) => {
             const count = await channelObject?.getActiveChatterCountSnapshot(windowMs) ?? 0;
@@ -173,8 +231,13 @@ export const dryRunChatMessage = async (
             return existing === null ? count + 1 : count;
           },
           seen: async (userId) => {
+            if (resolvesBallotVoter && resolvedBallotVoterId === null && userId === syntheticUserId) {
+              moduleBallotChoiceUnresolved = true;
+              return null;
+            }
             const existing = await channelObject?.getActiveChatterSnapshot(userId) ?? null;
-            if (existing !== null || !trackIncomingMessage || userId !== syntheticUserId) return existing;
+            const simulatedSenderId = resolvedBallotVoterId ?? syntheticUserId;
+            if (existing !== null || !trackIncomingMessage || userId !== simulatedSenderId) return existing;
             return { firstSeenAt: evaluatedAt, lastSeenAt: evaluatedAt };
           },
         },

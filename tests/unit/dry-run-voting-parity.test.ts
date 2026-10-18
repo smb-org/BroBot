@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import type { ModuleDryRunContext, ModuleEvent, ModuleExecutionContext } from "../../src/modules/contract";
+import type { ModuleDryRunBallotSnapshot, ModuleDryRunContext, ModuleEvent, ModuleExecutionContext } from "../../src/modules/contract";
 import { chatVotingModule } from "../../src/modules/chat_voting";
 import { DEFAULT_CHAT_VOTING_SETTINGS, chatVotingSettingsSchema } from "../../src/modules/chat_voting/contracts";
 import { createChatVotingRepository } from "../../src/modules/chat_voting/repository";
@@ -9,13 +9,16 @@ import { votekickModule } from "../../src/modules/votekick";
 import { votekickSettingsSchema, type VotekickSettings } from "../../src/modules/votekick/contracts";
 import { createVotekickRepository } from "../../src/modules/votekick/adapters/d1";
 import { processVotekickMessage } from "../../src/modules/votekick/service";
+import { createDryRunBallotAccess } from "../../src/modules/domain/dry-run-ballots";
+import { dryRunVotekickMessage } from "../../src/modules/votekick/dry-run";
+import { withOutputGate } from "../../src/worker/dry-run-output";
 import { readOnlyD1 } from "../../src/worker/db/read-only";
 import { insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
 const chatDryRunContext = (
   database: TestD1Database,
-  ballotSnapshot: { counts: readonly number[]; revision: number; outcome?: "passed" | "expired" | "not_open" } | null = null,
+  ballotSnapshot: ModuleDryRunBallotSnapshot | null = null,
   hasOpenBallot = false,
 ): ModuleDryRunContext => ({
   DB: readOnlyD1(database as unknown as D1Database),
@@ -82,7 +85,419 @@ const seedRunningVotekick = async (database: TestD1Database, channelId: string):
   expect(admission).toBe("admitted");
 };
 
+const seedOpenChatVote = async (database: TestD1Database, channelId: string, closesAt: string): Promise<void> => {
+  await insertChannel(database, channelId);
+  await database.prepare(
+    "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'chat_voting', 1, '{}')",
+  ).bind(channelId).run();
+  await createChatVotingRepository(database as unknown as D1Database).insertOpen({
+    id: "open-chat-vote",
+    channelId,
+    kind: "yes_no",
+    optionCount: 2,
+    labels: ["Yes", "No"],
+    title: null,
+    resultText: "{vote.result}",
+    textMode: null,
+    termFilterReady: null,
+    openedAt: new Date(Date.now() - 30_000).toISOString(),
+    closesAt,
+    requestedDurationSeconds: null,
+    closeReason: "manual",
+    textResults: null,
+    moreTerms: null,
+  });
+};
+
 describe("chat voting and votekick dry-run parity", () => {
+  it("preserves a voter's previous numbered ballot choice for duplicate, changed, and only-if-new casts", async () => {
+    const database = new TestD1Database();
+    try {
+      const context = chatDryRunContext(database, {
+        counts: [1, 0],
+        revision: 7,
+        expiresAt: Date.now() + 60_000,
+        previousChoice: 1,
+      });
+      const ballots = createDryRunBallotAccess(context, { voterId: "voter-a" });
+
+      await expect(ballots.cast("poll-1", "voter-a", 1)).resolves.toMatchObject({
+        status: "unchanged",
+        counts: [1, 0],
+        revision: 7,
+      });
+      await expect(ballots.cast("poll-1", "voter-a", 2)).resolves.toMatchObject({
+        status: "changed",
+        counts: [0, 1],
+        revision: 8,
+      });
+      await expect(ballots.cast("poll-1", "voter-a", 1, { onlyIfNew: true })).resolves.toMatchObject({
+        status: "unchanged",
+        counts: [0, 1],
+        revision: 8,
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("does not fabricate a new vote when the sender identity cannot be checked", async () => {
+    const database = new TestD1Database();
+    const markUnresolved = vi.fn();
+    try {
+      const context = {
+        ...chatDryRunContext(database, {
+          counts: [1, 0],
+          revision: 7,
+          expiresAt: Date.now() + 60_000,
+          previousChoiceKnown: false,
+        }),
+        markBallotChoiceUnresolved: markUnresolved,
+      } as ModuleDryRunContext;
+      const ballots = createDryRunBallotAccess(context, { voterId: "dry-run:viewer" });
+
+      await expect(ballots.cast("poll-1", "dry-run:viewer", 1)).resolves.toMatchObject({
+        status: "not_open",
+        counts: [1, 0],
+        revision: 7,
+      });
+      expect(markUnresolved).toHaveBeenCalledOnce();
+    } finally {
+      database.close();
+    }
+  });
+
+  it("expires a loaded ballot at its snapshot deadline", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-18T12:00:00.000Z"));
+    const database = new TestD1Database();
+    try {
+      const context = chatDryRunContext(database, {
+        counts: [2, 0],
+        revision: 2,
+        expiresAt: Date.parse("2026-10-18T12:00:01.000Z"),
+      });
+      const ballots = createDryRunBallotAccess(context);
+      vi.setSystemTime(new Date("2026-10-18T12:00:02.000Z"));
+
+      await expect(ballots.finalize("poll-1")).resolves.toMatchObject({ outcome: "expired", counts: [2, 0] });
+      await expect(ballots.cast("poll-1", "voter-b", 1)).resolves.toMatchObject({ status: "not_open" });
+    } finally {
+      database.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("shares one votekick snapshot between simulation and reporting", async () => {
+    const database = new TestD1Database();
+    try {
+      const channelId = "snapshot-votekick-channel";
+      await seedRunningVotekick(database, channelId);
+      let reads = 0;
+      const event = { ...votekickEvent("1"), channelId, payload: { message: { text: "1" }, chatter_user_id: "fictional-voter" } };
+      const context = {
+        ...chatDryRunContext(database),
+        ballots: {
+          hasOpenBallotSnapshot: () => Promise.resolve(true),
+          readSnapshot: () => {
+            reads += 1;
+            return Promise.resolve(reads === 1
+              ? { counts: [0, 0], revision: 1, expiresAt: Date.now() + 60_000 }
+              : { counts: [1, 0], revision: 2, expiresAt: Date.now() - 1, outcome: "expired" as const });
+          },
+        },
+      } as unknown as ModuleDryRunContext;
+
+      await dryRunVotekickMessage(event, context);
+
+      expect(reads).toBe(1);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("reports an expired votekick ballot as finalized without counting the late message", async () => {
+    const database = new TestD1Database();
+    const channelId = "expired-votekick-report-channel";
+    try {
+      await seedRunningVotekick(database, channelId);
+      const baseEvent = votekickEvent("1");
+      const event = { ...baseEvent, channelId };
+      const report = await dryRunVotekickMessage(event, chatDryRunContext(database, {
+        counts: [2, 0],
+        revision: 7,
+        expiresAt: Date.now() - 1,
+        isActive: true,
+      }));
+
+      expect(report[0]?.effects).toEqual([{
+        kind: "ballot",
+        moduleId: "votekick",
+        action: "finalize",
+        label: "protected_viewer",
+        counts: [2, 0],
+      }]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("repeats the production closing reply while a manual close is pending", async () => {
+    const productionDatabase = new TestD1Database();
+    const dryRunDatabase = new TestD1Database();
+    const channelId = "closing-vote-channel";
+    const settings = chatVotingSettingsSchema.parse(DEFAULT_CHAT_VOTING_SETTINGS);
+    const event: ModuleEvent<typeof settings> = {
+      channelId,
+      subscriptionType: "channel.chat.message",
+      triggerId: "dry-run-repeated-end",
+      payload: { message: { text: "!vote end" }, chatter_user_id: "fictional-mod" },
+      settings,
+      receivedAt: new Date().toISOString(),
+      actor: null,
+      chatStatus: ["moderator"],
+    };
+    const insertClosingVote = async (database: TestD1Database): Promise<void> => {
+      await insertChannel(database, channelId);
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'chat_voting', 1, '{}')",
+      ).bind(channelId).run();
+      const repository = createChatVotingRepository(database as unknown as D1Database);
+      await repository.insertOpen({
+        id: "manual-close-poll",
+        channelId,
+        kind: "yes_no",
+        optionCount: 2,
+        labels: ["Yes", "No"],
+        title: null,
+        resultText: "{vote.result}",
+        textMode: null,
+        termFilterReady: null,
+        openedAt: new Date(Date.now() - 30_000).toISOString(),
+        closesAt: new Date(Date.now() + 60_000).toISOString(),
+        requestedDurationSeconds: null,
+        closeReason: "manual",
+        textResults: null,
+        moreTerms: null,
+      });
+      await database.prepare(
+        "UPDATE chat_votes SET closing_at = ? WHERE channel_id = ? AND poll_id = ?",
+      ).bind(new Date().toISOString(), channelId, "manual-close-poll").run();
+    };
+    try {
+      await Promise.all([insertClosingVote(productionDatabase), insertClosingVote(dryRunDatabase)]);
+      const execution = {
+        DB: productionDatabase as unknown as D1Database,
+        botUserId: () => Promise.resolve("bot-user"),
+        channelLanguage: () => Promise.resolve("en"),
+        ballots: {},
+        scheduleAlarm: () => Promise.resolve(),
+      } as unknown as ModuleExecutionContext;
+      const production = await processChatVotingMessage(event, createChatVotingRepository(execution.DB), execution);
+      const report = await chatVotingModule.dryRunChatMessage?.(event, chatDryRunContext(dryRunDatabase));
+
+      expect(report?.[0]?.effects).toContainEqual(expect.objectContaining({ kind: "chat", text: "The vote is closing." }));
+      expect(production.actions).toContainEqual(expect.objectContaining({ kind: "chat", text: "The vote is closing." }));
+    } finally {
+      productionDatabase.close();
+      dryRunDatabase.close();
+    }
+  });
+
+  it("respects the unique open-vote D1 admission constraint when starting a vote", async () => {
+    const database = new TestD1Database();
+    try {
+      const channelId = "open-vote-admission-channel";
+      await insertChannel(database, channelId);
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'chat_voting', 1, '{}')",
+      ).bind(channelId).run();
+      await createChatVotingRepository(database as unknown as D1Database).insertOpen({
+        id: "already-open-poll",
+        channelId,
+        kind: "yes_no",
+        optionCount: 2,
+        labels: ["Yes", "No"],
+        title: null,
+        resultText: "{vote.result}",
+        textMode: null,
+        termFilterReady: null,
+        openedAt: new Date(Date.now() - 30_000).toISOString(),
+        closesAt: new Date(Date.now() + 60_000).toISOString(),
+        requestedDurationSeconds: null,
+        closeReason: "manual",
+        textResults: null,
+        moreTerms: null,
+      });
+      const settings = chatVotingSettingsSchema.parse(DEFAULT_CHAT_VOTING_SETTINGS);
+      const event: ModuleEvent<typeof settings> = {
+        channelId,
+        subscriptionType: "channel.chat.message",
+        triggerId: "dry-run-second-start",
+        payload: { message: { text: "!vote yesno Another vote?" }, chatter_user_id: "fictional-mod" },
+        settings,
+        receivedAt: new Date().toISOString(),
+        actor: null,
+        chatStatus: ["moderator"],
+      };
+      const report = await chatVotingModule.dryRunChatMessage?.(event, chatDryRunContext(database));
+
+      expect(report?.[0]?.effects.some((effect) => effect.kind === "ballot" && effect.action === "start")).toBe(false);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("is silent for a numeric message when the production service returns no actions", async () => {
+    const database = new TestD1Database();
+    try {
+      const event = votekickEvent("1");
+
+      await expect(dryRunVotekickMessage(event, chatDryRunContext(database))).resolves.toEqual([]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("is silent when the production service ignores a duplicate ballot choice", async () => {
+    const database = new TestD1Database();
+    const channelId = "duplicate-chat-vote-channel";
+    try {
+      await seedOpenChatVote(database, channelId, new Date(Date.now() + 60_000).toISOString());
+      const settings = chatVotingSettingsSchema.parse(DEFAULT_CHAT_VOTING_SETTINGS);
+      const event: ModuleEvent<typeof settings> = {
+        channelId,
+        subscriptionType: "channel.chat.message",
+        triggerId: "dry-run-duplicate-vote",
+        payload: { message: { text: "1" }, chatter_user_id: "voter-a" },
+        settings,
+        receivedAt: new Date().toISOString(),
+        actor: null,
+        chatStatus: ["viewer"],
+      };
+      const context = chatDryRunContext(database, {
+        counts: [1, 0],
+        revision: 3,
+        expiresAt: Date.now() + 60_000,
+        previousChoice: 1,
+        previousChoiceKnown: true,
+      });
+
+      await expect(chatVotingModule.dryRunChatMessage?.(event, context)).resolves.toEqual([]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("is silent when the production service ignores a vote past its deadline", async () => {
+    const database = new TestD1Database();
+    const channelId = "expired-chat-vote-channel";
+    try {
+      await seedOpenChatVote(database, channelId, new Date(Date.now() - 1_000).toISOString());
+      const settings = chatVotingSettingsSchema.parse(DEFAULT_CHAT_VOTING_SETTINGS);
+      const event: ModuleEvent<typeof settings> = {
+        channelId,
+        subscriptionType: "channel.chat.message",
+        triggerId: "dry-run-expired-vote",
+        payload: { message: { text: "1" }, chatter_user_id: "voter-a" },
+        settings,
+        receivedAt: new Date().toISOString(),
+        actor: null,
+        chatStatus: ["viewer"],
+      };
+      const context = chatDryRunContext(database, {
+        counts: [0, 0],
+        revision: 0,
+        expiresAt: Date.now() - 1,
+        previousChoiceKnown: true,
+      });
+
+      await expect(chatVotingModule.dryRunChatMessage?.(event, context)).resolves.toEqual([]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("preserves timeout ranges and success or failure conditions", async () => {
+    const database = new TestD1Database();
+    try {
+      const channelId = "votekick-follow-up-channel";
+      await seedRunningVotekick(database, channelId);
+      const baseEvent = votekickEvent("ordinary chat");
+      const event = {
+        ...baseEvent,
+        channelId,
+        settings: votekickSettingsSchema.parse({
+          ...baseEvent.settings,
+          duration: { minSeconds: 60, maxSeconds: 300 },
+        }),
+      };
+      const report = await dryRunVotekickMessage(event, chatDryRunContext(database, {
+        counts: [3, 0],
+        revision: 2,
+        expiresAt: Date.now() + 60_000,
+      }));
+
+      expect(report[0]?.effects).toContainEqual(expect.objectContaining({
+        kind: "timeout",
+        minSeconds: 60,
+        maxSeconds: 300,
+      }));
+      expect(report[0]?.effects.filter((effect) => effect.kind === "chat").map((effect) =>
+        effect.kind === "chat" ? effect.when : undefined)).toEqual(["on_success", "on_failure"]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("passes module attributions through shared host output preparation", async () => {
+    const database = new TestD1Database();
+    try {
+      const event = votekickEvent("!votekick @protected_viewer");
+      const context = {
+        ...chatDryRunContext(database),
+        renderTemplate: () => Promise.resolve({
+          text: "Votekick start text",
+          diagnostics: [],
+          attributions: ["MET Norway"],
+        }),
+      } as unknown as ModuleDryRunContext;
+      const report = await dryRunVotekickMessage(event, context);
+      const result = report[0];
+      if (result === undefined) throw new Error("Expected votekick dry-run result");
+      const prepared = withOutputGate(result, votekickModule, event, event.channelId, false, false);
+
+      expect(prepared.effects).toContainEqual(expect.objectContaining({
+        kind: "chat",
+        text: "Votekick start text · MET Norway",
+      }));
+    } finally {
+      database.close();
+    }
+  });
+
+  it("marks a target lookup as resolved at send time when no cached lookup is available", async () => {
+    const database = new TestD1Database();
+    try {
+      const event = votekickEvent("!votekick @protected_viewer");
+      const context = {
+        ...chatDryRunContext(database),
+        lookupUserByLogin: () => Promise.resolve(null),
+        isUserLookupDeferred: () => true,
+      } as unknown as ModuleDryRunContext;
+      const report = await dryRunVotekickMessage(event, context);
+
+      expect(report[0]).toMatchObject({
+        outcome: "fires",
+        blocks: [],
+        effects: [],
+        templateNotes: [{ code: "template.deferred_live", detail: { name: "votekick.target" } }],
+      });
+    } finally {
+      database.close();
+    }
+  });
+
   it("uses the production chat-voting help reply for a moderator command", async () => {
     const database = new TestD1Database();
     try {
@@ -168,6 +583,10 @@ describe("chat voting and votekick dry-run parity", () => {
   it("reports starting a vote when the production service opens one", async () => {
     const database = new TestD1Database();
     try {
+      await insertChannel(database, "fictional-channel");
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('fictional-channel', 'chat_voting', 1, '{}')",
+      ).run();
       const settings = chatVotingSettingsSchema.parse(DEFAULT_CHAT_VOTING_SETTINGS);
       const event: ModuleEvent<typeof settings> = {
         channelId: "fictional-channel",
@@ -208,7 +627,7 @@ describe("chat voting and votekick dry-run parity", () => {
     }
   });
 
-  it("reports the production permission block when a viewer tries a chat-voting command", async () => {
+  it("stays silent when a viewer command has no production result", async () => {
     const database = new TestD1Database();
     try {
       const settings = chatVotingSettingsSchema.parse(DEFAULT_CHAT_VOTING_SETTINGS);
@@ -228,17 +647,13 @@ describe("chat voting and votekick dry-run parity", () => {
       if (dryRun === undefined) return;
       const report = await dryRun(event, chatDryRunContext(database));
 
-      expect(report[0]).toMatchObject({
-        outcome: "blocked",
-        blocks: [{ code: "chat_voting.permission_denied" }],
-        effects: [],
-      });
+      expect(report).toEqual([]);
     } finally {
       database.close();
     }
   });
 
-  it("reports the production unavailable ballot when a chat-voting snapshot is missing", async () => {
+  it("stays silent when a chat-voting snapshot is missing", async () => {
     const database = new TestD1Database();
     try {
       const channelId = "fictional-channel";
@@ -287,7 +702,7 @@ describe("chat voting and votekick dry-run parity", () => {
       const report = await dryRun(event, chatDryRunContext(database));
 
       expect(production.actions).toEqual([]);
-      expect(report[0]).toMatchObject({ outcome: "blocked", blocks: [{ code: "chat_voting.vote_unavailable" }], effects: [] });
+      expect(report).toEqual([]);
     } finally {
       database.close();
     }

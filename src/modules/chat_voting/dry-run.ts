@@ -37,11 +37,19 @@ const simulatedRepository = (
           .bind(...blockGuard.values).first<{ valid: number }>();
         if (valid === null) return "reference_conflict";
       }
+      const [enabled, openVote] = await Promise.all([
+        context.DB.prepare(
+          "SELECT 1 AS enabled FROM channel_modules WHERE channel_id = ? AND module_id = 'chat_voting' AND enabled = 1",
+        ).bind(_vote.channelId).first<{ enabled: number }>(),
+        repository.open(_vote.channelId),
+      ]);
+      if (enabled === null || openVote !== null) return "busy";
       return await context.ballots?.hasOpenBallotSnapshot() ? "busy" : "inserted";
     },
     requestManualClose: async (channelId, pollId, expectedClosesAt) => {
       const vote = await repository.byId(channelId, pollId);
-      return vote?.status === "open" && vote.closesAt === expectedClosesAt;
+      return vote !== null && vote.closesAt === expectedClosesAt &&
+        (vote.status === "open" || vote.status === "closing" && vote.closeReason === "manual");
     },
     claimAlarmClose: () => Promise.resolve(false),
     extendClose: () => Promise.resolve(false),
@@ -55,10 +63,10 @@ const simulatedRepository = (
   };
 };
 
-const serviceContext = (context: ModuleDryRunContext): ModuleExecutionContext => ({
+const serviceContext = (context: ModuleDryRunContext, voterId?: string): ModuleExecutionContext => ({
   ...context,
   authorizeMutation: () => Promise.resolve({ sql: "", values: [] }),
-  ballots: createDryRunBallotAccess(context, { isBlockedFreeTextVote }),
+  ballots: createDryRunBallotAccess(context, { isBlockedFreeTextVote, ...(voterId === undefined ? {} : { voterId }) }),
   scheduleAlarm: () => Promise.resolve(),
   clearAlarm: () => Promise.resolve(),
 } as unknown as ModuleExecutionContext);
@@ -89,7 +97,14 @@ export const dryRunChatVotingMessage = async (
   const textBallot = openVote?.status === "open" && openVote.kind === "free_text"
     ? normalizeFreeTextVote(text, openVote.textMode ?? "first_word")
     : null;
-  const result: ModuleResult = await processChatVotingMessage(event, repository, serviceContext(context));
+  const voter = Reflect.get(event.payload, "chatter_user_id");
+  const result: ModuleResult = await processChatVotingMessage(
+    event,
+    repository,
+    serviceContext(context, typeof voter === "string" && voter.length > 0 ? voter : undefined),
+  );
+  const ballotChoiceUnresolved = context.isBallotChoiceUnresolved?.() === true;
+  if (result.actions.length === 0 && result.diagnostics.length === 0 && !ballotChoiceUnresolved) return [];
   const permissionBlocked = commandLike && !commandControlAllowed(event);
   const blocks: { code: DryRunBlockCode; detail?: Readonly<Record<string, string | number | boolean | null>> }[] = [];
   if (permissionBlocked) blocks.push({ code: "chat_voting.permission_denied" });
@@ -122,19 +137,21 @@ export const dryRunChatVotingMessage = async (
       });
     }
   }
-  if (effects.length === 0 && blocks.length === 0 && (ballotChoice !== null || textBallot !== null)) {
-    blocks.push({ code: "chat_voting.vote_unavailable" });
-  }
   if (!commandLike && ballotChoice === null && textBallot === null && effects.length === 0) return [];
 
   const token = commandLike ? "!vote" : text.trim();
   return [{
     moduleId: "chat_voting",
     entry: { kind: "chat_vote", id: "chat-vote-message", label: commandLike ? text.trim() : `Stimme ${token}` },
-    outcome: blocks.length === 0 ? "fires" : "blocked",
+    outcome: ballotChoiceUnresolved ? "indeterminate" : blocks.length === 0 ? "fires" : "blocked",
     match: { kind: "command_name", token },
     blocks,
     effects,
-    templateNotes: result.diagnostics.filter(({ code }) => code !== "chat_voting.permission_denied"),
+    templateNotes: [
+      ...result.diagnostics.filter(({ code }) => code !== "chat_voting.permission_denied"),
+      ...(ballotChoiceUnresolved
+        ? [{ code: "template.deferred_live", detail: { name: "ballot.previous_choice" } }]
+        : []),
+    ],
   }];
 };

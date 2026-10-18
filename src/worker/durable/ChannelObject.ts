@@ -542,6 +542,7 @@ export class ChannelObject extends DurableObject<Env> {
   private belaboxPollQueue: Promise<void> = Promise.resolve();
   private alarmScheduleQueue: Promise<void> = Promise.resolve();
   private timerScheduleReconciliationQueue: Promise<void> = Promise.resolve();
+  private timerScheduleInitialization: Promise<void> | null = null;
   private activeChatterSchemaReady = false;
   // ponytail: This Set is per-instance memory and is empty after hibernation, so the residual window is bounded by the security alarm. Persist token IDs in DO storage if that window needs to be shorter.
   private recentlyBoundOverlayTokenIds = new Set<string>();
@@ -549,17 +550,6 @@ export class ChannelObject extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
-    if (ctx.storage.kv.get(LEGACY_ACTIVE_CHATTER_STREAM_KEY) !== undefined) {
-      this.ensureActiveChatterTable();
-      ctx.storage.transactionSync(() => {
-        if (this.activeChatterKeyRowSync() === null) this.clearActiveChatterStateSync();
-        else ctx.storage.kv.delete(LEGACY_ACTIVE_CHATTER_STREAM_KEY);
-      });
-    }
-    // Cloudflare-documented Durable Object init: the input gate blocks all events until this completes.
-    void ctx.blockConcurrencyWhile(async () => { // NOSONAR
-      await this.ensureTimerSchedulesInitialized();
-    });
   }
 
   private ownChannelId(): string | null {
@@ -613,6 +603,15 @@ export class ChannelObject extends DurableObject<Env> {
       )`,
     );
     this.activeChatterSchemaReady = true;
+  }
+
+  private reconcileLegacyActiveChatterStream(): void {
+    if (this.ctx.storage.kv.get(LEGACY_ACTIVE_CHATTER_STREAM_KEY) === undefined) return;
+    this.ensureActiveChatterTable();
+    this.ctx.storage.transactionSync(() => {
+      if (this.activeChatterKeyRowSync() === null) this.clearActiveChatterStateSync();
+      else this.ctx.storage.kv.delete(LEGACY_ACTIVE_CHATTER_STREAM_KEY);
+    });
   }
 
   private incrementChatActivityCountSync(): number {
@@ -1003,7 +1002,22 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   private async ensureTimerSchedulesInitialized(): Promise<void> {
+    const pendingInitialization = this.timerScheduleInitialization;
+    if (pendingInitialization !== null) {
+      await pendingInitialization;
+      return;
+    }
     if (this.timerScheduleStateSync().initialized) return;
+    const initialization = this.initializeTimerSchedules();
+    this.timerScheduleInitialization = initialization;
+    try {
+      await initialization;
+    } finally {
+      if (this.timerScheduleInitialization === initialization) this.timerScheduleInitialization = null;
+    }
+  }
+
+  private async initializeTimerSchedules(): Promise<void> {
     const [configs, stream, legacyActivityBaselines] = await Promise.all([
       this.readTimerConfigsFromDatabase(),
       this.readTimerStreamFromDatabase(),
@@ -1012,48 +1026,48 @@ export class ChannelObject extends DurableObject<Env> {
     const inputs = await this.timerScheduleInputs(configs, Date.now());
     const changedTimerIds: string[] = [];
     this.ctx.storage.transactionSync(() => {
-      const state = this.timerScheduleStateSync();
-      if (state.initialized) return;
-      if (stream.generation >= state.stream.generation) state.stream = stream;
-      state.initialized = true;
-      for (const config of configs) {
-        if (this.timerTombstoneRevision(state, config.id) >= config.revision) continue;
-        const existing = state.timers[config.id];
-        if (existing !== undefined && existing.config.revision >= config.revision) continue;
-        const entry = existing ?? this.newDurableTimerEntry(config, state);
-        entry.config = config;
-        entry.activityBaselines = { ...state.activityCounts };
-        const legacyBaseline = legacyActivityBaselines.get(config.id);
-        if (config.trigger.type === "interval" && state.stream.state === "online" &&
-            legacyBaseline?.streamId === state.stream.streamId && legacyBaseline.count !== null) {
-          entry.activityBaselines.live = Math.min(state.activityCounts.live, legacyBaseline.count);
+        const state = this.timerScheduleStateSync();
+        if (state.initialized) return;
+        if (stream.generation >= state.stream.generation) state.stream = stream;
+        state.initialized = true;
+        for (const config of configs) {
+          if (this.timerTombstoneRevision(state, config.id) >= config.revision) continue;
+          const existing = state.timers[config.id];
+          if (existing !== undefined && existing.config.revision >= config.revision) continue;
+          const entry = existing ?? this.newDurableTimerEntry(config, state);
+          entry.config = config;
+          entry.activityBaselines = { ...state.activityCounts };
+          const legacyBaseline = legacyActivityBaselines.get(config.id);
+          if (config.trigger.type === "interval" && state.stream.state === "online" &&
+              legacyBaseline?.streamId === state.stream.streamId && legacyBaseline.count !== null) {
+            entry.activityBaselines.live = Math.min(state.activityCounts.live, legacyBaseline.count);
+          }
+          if (config.trigger.type === "stream_start" && state.stream.state === "online" &&
+              state.stream.streamId !== null && state.stream.startedAt !== null &&
+              this.importLegacyTimerSendClaim(config.id,
+                Date.parse(state.stream.startedAt) + triggerDelayMs(config.trigger),
+                state.stream.streamId, "stream_start") === "sent") {
+            entry.completedStreamId = state.stream.streamId;
+          }
+          const existingOccurrence = existing?.plannedOccurrence;
+          const persistedOccurrence = existingOccurrence?.identity.revision === config.revision
+            ? existingOccurrence
+            : this.previousTimerOccurrenceFromAlarm(config, state.stream, inputs, legacyBaseline?.nextRunStreamId);
+          if (persistedOccurrence === null) {
+            this.setTimerPlanSync(entry, makeTimerPlan(config, state.stream, null, inputs, "reset", entry.completedStreamId));
+          } else {
+            entry.plannedOccurrence = persistedOccurrence;
+            entry.planSequence = persistedOccurrence.sequence;
+            entry.inFlightClaim = null;
+            entry.refreshAt = null;
+            entry.mirrorSequence += 1;
+          }
+          state.timers[config.id] = entry;
+          this.writeTimerAlarmEntriesSync(config.id, entry);
+          changedTimerIds.push(config.id);
         }
-        if (config.trigger.type === "stream_start" && state.stream.state === "online" &&
-            state.stream.streamId !== null && state.stream.startedAt !== null &&
-            this.importLegacyTimerSendClaim(config.id,
-              Date.parse(state.stream.startedAt) + triggerDelayMs(config.trigger),
-              state.stream.streamId, "stream_start") === "sent") {
-          entry.completedStreamId = state.stream.streamId;
-        }
-        const existingOccurrence = existing?.plannedOccurrence;
-        const persistedOccurrence = existingOccurrence?.identity.revision === config.revision
-          ? existingOccurrence
-          : this.previousTimerOccurrenceFromAlarm(config, state.stream, inputs, legacyBaseline?.nextRunStreamId);
-        if (persistedOccurrence === null) {
-          this.setTimerPlanSync(entry, makeTimerPlan(config, state.stream, null, inputs, "reset", entry.completedStreamId));
-        } else {
-          entry.plannedOccurrence = persistedOccurrence;
-          entry.planSequence = persistedOccurrence.sequence;
-          entry.inFlightClaim = null;
-          entry.refreshAt = null;
-          entry.mirrorSequence += 1;
-        }
-        state.timers[config.id] = entry;
-        this.writeTimerAlarmEntriesSync(config.id, entry);
-        changedTimerIds.push(config.id);
-      }
-      this.writeTimerDurableStateSync(state);
-      this.ctx.storage.kv.put(LEGACY_TIMER_CLAIMS_IMPORTED_KEY, true);
+        this.writeTimerDurableStateSync(state);
+        this.ctx.storage.kv.put(LEGACY_TIMER_CLAIMS_IMPORTED_KEY, true);
     });
     await Promise.all(changedTimerIds.map((timerId) => this.writeTimerMirror(timerId)));
     await this.scheduleEarliestAlarm();
@@ -2588,6 +2602,8 @@ export class ChannelObject extends DurableObject<Env> {
     chatterUserId: string | null = null,
     needsActiveChatters = false,
   ): Promise<number> {
+    await this.ensureTimerSchedulesInitialized();
+    this.reconcileLegacyActiveChatterStream();
     const now = Date.now();
     const nowIso = new Date(now).toISOString();
     const userIdForTracking = needsActiveChatters && typeof chatterUserId === "string" && chatterUserId.length > 0
@@ -2924,8 +2940,14 @@ export class ChannelObject extends DurableObject<Env> {
     return await readStoredBallotSnapshot(this.ballotStorage(moduleId), moduleId, ballotId);
   }
 
-  public async readBallotDryRunSnapshot(moduleId: string, ballotId: string): Promise<ModuleDryRunBallotSnapshot | null> {
-    return await readStoredBallotDryRunSnapshot(this.ballotStorage(moduleId), moduleId, ballotId);
+  public async readBallotDryRunSnapshot(
+    moduleId: string,
+    ballotId: string,
+    voterId?: string,
+  ): Promise<ModuleDryRunBallotSnapshot | null> {
+    return await readStoredBallotDryRunSnapshot(
+      this.ballotStorage(moduleId), moduleId, ballotId, this.ownChannelId() ?? undefined, voterId,
+    );
   }
 
   public async hasOpenBallot(): Promise<boolean> {
@@ -4001,6 +4023,10 @@ export class ChannelObject extends DurableObject<Env> {
 
   override async alarm(): Promise<void> {
     await withCommittedPanelResourceDrain(async () => {
+      const alarmTable = await this.ctx.storage.transaction((transaction) => readAlarmScheduleTable(transaction));
+      const hasTimerAlarms = Object.keys(alarmTable).some((key) =>
+        key.startsWith(`${TIMER_ALARM_PREFIX}timer:`) || key.startsWith(`${TIMER_ALARM_PREFIX}mirror:`));
+      if (hasTimerAlarms) await this.ensureTimerSchedulesInitialized();
       const now = Date.now();
       const nowIso = new Date(now).toISOString();
       const externalFetchBudget = createModuleExternalFetchBudget();

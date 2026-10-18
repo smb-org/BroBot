@@ -671,6 +671,8 @@ export const readStoredBallotDryRunSnapshot = async (
   storage: BallotStorage,
   moduleId: string,
   ballotId: string,
+  channelId?: string,
+  voterId?: string,
 ): Promise<ModuleDryRunBallotSnapshot | null> => {
   validId(moduleId, "Module id");
   validId(ballotId, "Ballot id");
@@ -682,8 +684,18 @@ export const readStoredBallotDryRunSnapshot = async (
     const snapshot = finalization !== null
       ? terminalSnapshot(finalization.outcome, finalization.snapshot)
       : outcome === "open" ? snapshotOf(ballot) : terminalSnapshot(outcome, snapshotOf(ballot));
+    const active = await transaction.get<ActiveBallot>(ACTIVE_BALLOT_KEY);
+    const previousChoice = channelId === undefined || voterId === undefined
+      ? undefined
+      : await transaction.get<number | string>(
+        `${voterPrefix(moduleId, ballotId)}${await ballotVoterHash(ballot.key, channelId, voterId)}`,
+      );
     return {
       ...snapshot,
+      expiresAt: ballot.expiresAt,
+      isActive: active?.moduleId === moduleId && active.ballotId === ballotId,
+      previousChoiceKnown: channelId !== undefined && voterId !== undefined,
+      ...(previousChoice === undefined ? {} : { previousChoice }),
       ...(ballot.optionCount === 0 ? { blockedTerms: ballot.blockedTerms === null ? null : [...(ballot.blockedTerms ?? [])] } : {}),
     };
   });

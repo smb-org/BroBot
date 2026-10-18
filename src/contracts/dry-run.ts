@@ -66,7 +66,7 @@ export type DryRunEffect =
 export interface DryRunEntryReport {
   moduleId: string;
   entry: { kind: DryRunEntryKind; id: string; label: string };
-  outcome: "fires" | "blocked";
+  outcome: "fires" | "blocked" | "indeterminate";
   match: DryRunMatch;
   blocks: readonly { code: DryRunBlockCode; detail?: Readonly<Record<string, string | number | boolean | null>> }[];
   effects: readonly DryRunEffect[];
@@ -75,7 +75,7 @@ export interface DryRunEntryReport {
 
 export interface DryRunModuleReport {
   moduleId: string;
-  status: "reacts" | "blocked" | "silent" | "not_testable" | "error";
+  status: "reacts" | "blocked" | "indeterminate" | "silent" | "not_testable" | "error";
   entries: readonly DryRunEntryReport[];
   reasonCode?: "activity_tracking";
   error?: "write_blocked" | "module_error";

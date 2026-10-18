@@ -11,6 +11,7 @@ import { BALLOT_MAX_TEXT_TERMS } from "./ballots";
 export interface DryRunBallotSimulationOptions {
   initialRules?: ReadonlyMap<string, BallotFinalizeRule>;
   isBlockedFreeTextVote?: (term: string, blockedTerms: readonly string[]) => boolean;
+  voterId?: string;
 }
 
 /** Simulates ballot mutations in memory while reading the running snapshot through read-only RPCs. */
@@ -27,13 +28,14 @@ export const createDryRunBallotAccess = (
   const snapshotFor = async (ballotId: string): Promise<ModuleDryRunBallotSnapshot | null> => {
     const projected = snapshots.get(ballotId);
     if (projected !== undefined) return projected;
-    const snapshot = await context.ballots?.readSnapshot(ballotId) ?? null;
+    const snapshot = await context.ballots?.readSnapshot(ballotId, options.voterId) ?? null;
     if (snapshot !== null) snapshots.set(ballotId, snapshot);
     return snapshot;
   };
 
   const hasOpenBallotSnapshot = async (): Promise<boolean> => {
-    if ([...snapshots.values()].some(({ outcome }) => outcome === undefined)) return true;
+    if ([...snapshots.values()].some((snapshot) => snapshot.outcome === undefined &&
+        (snapshot.expiresAt ?? Number.POSITIVE_INFINITY) > Date.now())) return true;
     return await context.ballots?.hasOpenBallotSnapshot() ?? false;
   };
 
@@ -54,6 +56,8 @@ export const createDryRunBallotAccess = (
       snapshots.set(ballotId, {
         counts: Array.from({ length: optionCount }, () => 0),
         revision: 0,
+        expiresAt: deadline,
+        isActive: true,
         ...(optionCount === 0 ? {
           terms: [],
           more: 0,
@@ -67,11 +71,18 @@ export const createDryRunBallotAccess = (
       const snapshot = await snapshotFor(ballotId);
       if (snapshot === null || snapshot.outcome !== undefined ||
           !Number.isInteger(choice) || choice < 1 || choice > snapshot.counts.length ||
-          (expiresAt.get(ballotId) ?? Number.POSITIVE_INFINITY) <= Date.now()) {
+          snapshot.isActive === false ||
+          (snapshot.expiresAt ?? expiresAt.get(ballotId) ?? Number.POSITIVE_INFINITY) <= Date.now()) {
         return { status: "not_open", counts: [], revision: 0 };
       }
+      if (snapshot.previousChoiceKnown === false) {
+        context.markBallotChoiceUnresolved?.();
+        return { status: "not_open", ...snapshot };
+      }
       const voters = voterMapFor(ballotId);
-      const previous = voters.get(userId);
+      const previous = voters.has(userId)
+        ? voters.get(userId)
+        : userId === options.voterId ? snapshot.previousChoice : undefined;
       if (castOptions?.onlyIfNew === true && previous !== undefined || previous === choice) {
         return { status: "unchanged", ...snapshot };
       }
@@ -89,17 +100,24 @@ export const createDryRunBallotAccess = (
       const snapshot = await snapshotFor(ballotId);
       if (snapshot === null || snapshot.outcome !== undefined || typeof matchText !== "string" ||
           Array.from(term).length > 25 || term.trim().length === 0 || Array.from(matchText).length > 500 ||
-          (expiresAt.get(ballotId) ?? Number.POSITIVE_INFINITY) <= Date.now()) {
+          snapshot.isActive === false ||
+          (snapshot.expiresAt ?? expiresAt.get(ballotId) ?? Number.POSITIVE_INFINITY) <= Date.now()) {
         return { status: "not_open", counts: [], revision: 0 };
       }
       const blockedTerms = snapshot.blockedTerms ?? [];
       const blocked = (options.isBlockedFreeTextVote?.(term, blockedTerms) ?? false) ||
         (options.isBlockedFreeTextVote?.(matchText, blockedTerms) ?? false);
-      const voters = voterMapFor(ballotId);
-      const previous = voters.get(userId);
-      const terms = new Map((snapshot.terms ?? []).map((entry) => [entry.term, { ...entry }]));
-      if (previous === term && !blocked && terms.has(term)) return { status: "unchanged", ...snapshot };
       if (blocked) return { status: "blocked", ...snapshot };
+      if (snapshot.previousChoiceKnown === false) {
+        context.markBallotChoiceUnresolved?.();
+        return { status: "not_open", ...snapshot };
+      }
+      const voters = voterMapFor(ballotId);
+      const previous = voters.has(userId)
+        ? voters.get(userId)
+        : userId === options.voterId ? snapshot.previousChoice : undefined;
+      const terms = new Map((snapshot.terms ?? []).map((entry) => [entry.term, { ...entry }]));
+      if (previous === term && terms.has(term)) return { status: "unchanged", ...snapshot };
       if (typeof previous === "string") {
         const previousEntry = terms.get(previous);
         if (previousEntry !== undefined) {
@@ -132,7 +150,7 @@ export const createDryRunBallotAccess = (
       const rule = rules.get(ballotId);
       const passed = rule !== undefined &&
         (snapshot.counts[rule.passIf.yes] ?? 0) - (snapshot.counts[rule.passIf.no] ?? 0) >= rule.passIf.netAtLeast;
-      const expired = (expiresAt.get(ballotId) ?? Number.POSITIVE_INFINITY) <= Date.now();
+      const expired = (snapshot.expiresAt ?? expiresAt.get(ballotId) ?? Number.POSITIVE_INFINITY) <= Date.now();
       return { ...snapshot, outcome: passed ? "passed" : expired ? "expired" : "open" };
     },
     setBlockedTerms: async (ballotId, blockedTerms) => {
