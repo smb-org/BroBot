@@ -96,6 +96,8 @@ const chatEffect = (
   action: Extract<ModuleAction, { kind: "chat" | "announcement" }>,
   event: ModuleEvent,
   context: ModuleDryRunContext,
+  attributions: readonly string[] | undefined,
+  when?: "on_success" | "on_failure",
 ): DryRunEffect => {
   const target = targetFor(action, context);
   const sourceBroadcasterId = event.payload.source_broadcaster_user_id;
@@ -111,6 +113,8 @@ const chatEffect = (
     reply: action.kind === "chat" && action.replyToMessageId !== undefined,
     suppressedBy: null,
     automated: action.automated ?? true,
+    ...(attributions === undefined || attributions.length === 0 ? {} : { attributions }),
+    ...(when === undefined ? {} : { when }),
   };
 };
 
@@ -169,7 +173,7 @@ const dryRunTextCommandMessage = async (
   const effects: DryRunEffect[] = [];
   for (const action of result.actions) {
     if (action.kind === "chat" || action.kind === "announcement") {
-      effects.push(chatEffect(action, event, context));
+      effects.push(chatEffect(action, event, context, result.attributions));
     } else if (action.kind === "shoutout") {
       effects.push({ kind: "shoutout", targetLogin: "targetLogin" in action ? action.targetLogin : action.targetChannelId });
     } else if (action.kind === "timeout" && command.timeoutAction !== null) {
@@ -179,9 +183,8 @@ const dryRunTextCommandMessage = async (
         maxSeconds: command.timeoutAction.maxSeconds,
         reason: action.reason,
       });
-      for (const followUp of [action.onSuccess, action.onFailure]) {
-        if (followUp !== undefined) effects.push(chatEffect(followUp, event, context));
-      }
+      if (action.onSuccess !== undefined) effects.push(chatEffect(action.onSuccess, event, context, result.attributions, "on_success"));
+      if (action.onFailure !== undefined) effects.push(chatEffect(action.onFailure, event, context, result.attributions, "on_failure"));
     }
   }
   for (const change of result.variableChanges ?? []) {

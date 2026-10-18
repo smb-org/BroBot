@@ -36,11 +36,14 @@ export type DryRunEffect =
     target: ChatOutputTarget;
     postsTo: "this_chat" | "all_shared_chats";
     reply: boolean;
-    suppressedBy: "channel_muted" | null;
+    suppressedBy: "module_disabled" | "channel_paused" | "channel_muted" | null;
     automated: boolean;
+    /** Internal host input, removed after production message preparation. */
+    attributions?: readonly string[];
+    when?: "on_success" | "on_failure";
   }
-  | { kind: "timeout"; minSeconds: number; maxSeconds: number; reason: string }
-  | { kind: "shoutout"; targetLogin: string }
+  | { kind: "timeout"; minSeconds: number; maxSeconds: number; reason: string; suppressedBy?: "channel_muted" | "channel_paused" }
+  | { kind: "shoutout"; targetLogin: string; suppressedBy?: "module_disabled" | "channel_paused" | "channel_muted" }
   | { kind: "variable"; name: string; from: number; to: number }
   | { kind: "cooldown"; scope: "global" | "user"; seconds: number };
 

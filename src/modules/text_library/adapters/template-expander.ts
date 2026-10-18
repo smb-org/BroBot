@@ -14,6 +14,7 @@ interface VariantRow {
   position: number;
   conditions_json: string;
   texts_json: string;
+  last_chosen_index: number;
 }
 
 const parseJson = <T,>(value: string, fallback: T): T => {
@@ -66,7 +67,7 @@ export const createTextBlockTemplateValueProvider = (db: D1Database, channelId: 
     const chunks = chunksOf(blockNames, 50);
     const results = await Promise.all(chunks.map(async (chunk) => {
       const placeholders = chunk.map(() => "?").join(", ");
-      return db.prepare(`SELECT block_name, variant_id, position, conditions_json, texts_json FROM text_block_variants
+      return db.prepare(`SELECT block_name, variant_id, position, conditions_json, texts_json, last_chosen_index FROM text_block_variants
         WHERE channel_id = ? AND block_name IN (${placeholders}) ORDER BY block_name, position`)
         .bind(channelId, ...chunk).all<VariantRow>();
     }));
@@ -91,6 +92,10 @@ export const createTextBlockTemplateValueProvider = (db: D1Database, channelId: 
   }
 
   const variants = variantMap(allVariantRows);
+  const lastChosenIndexByVariant = new Map(allVariantRows.map((row) => [
+    `${row.block_name}\u0000${row.variant_id}`,
+    row.last_chosen_index,
+  ]));
   const blocks = new Map<string, TextBlock>();
   for (const row of blockRows.values()) {
     blocks.set(row.block_name, {
@@ -120,9 +125,13 @@ export const createTextBlockTemplateValueProvider = (db: D1Database, channelId: 
   const needsGame = [...blocks.values()].some((block) =>
     block.games.length > 0 || block.variants.some((variant) => variant.conditions.game !== undefined),
   );
-  const persistChoice = async (name: string, variantId: string, length: number): Promise<number> => {
-    if (length <= 1 || context.mode !== "chat") return 0;
-    if (context.readOnly === true) return Math.floor(Math.random() * length);
+  const persistChoice = async (name: string, variantId: string, length: number, previousIndex: number): Promise<number> => {
+    if (length <= 1) return 0;
+    if (context.readOnly === true) {
+      if (context.mode !== "chat") return 0;
+      return previousIndex >= 0 && previousIndex < length ? (previousIndex + 1) % length : 0;
+    }
+    if (context.mode !== "chat") return 0;
     const row = await db.prepare(
       `UPDATE text_block_variants SET last_chosen_index = CASE
          WHEN last_chosen_index >= 0 AND last_chosen_index < ?
@@ -210,7 +219,12 @@ export const createTextBlockTemplateValueProvider = (db: D1Database, channelId: 
       let selectedTextPromise = selectedTextByVariant.get(selectionKey);
       if (selectedTextPromise === undefined) {
         selectedTextPromise = (async () => {
-          const index = await persistChoice(name, selected.id, selected.texts.length);
+          const index = await persistChoice(
+            name,
+            selected.id,
+            selected.texts.length,
+            lastChosenIndexByVariant.get(selectionKey) ?? -1,
+          );
           return selected.texts[index] ?? selected.texts[0] ?? "";
         })();
         selectedTextByVariant.set(selectionKey, selectedTextPromise);
@@ -253,7 +267,12 @@ export const createTextBlockTemplateValueProvider = (db: D1Database, channelId: 
     let selectedTextPromise = selectedTextByVariant.get(selectionKey);
     if (selectedTextPromise === undefined) {
       selectedTextPromise = (async () => {
-        const index = await persistChoice(name, selected.id, selected.texts.length);
+        const index = await persistChoice(
+          name,
+          selected.id,
+          selected.texts.length,
+          lastChosenIndexByVariant.get(selectionKey) ?? -1,
+        );
         return selected.texts[index] ?? selected.texts[0] ?? "";
       })();
       selectedTextByVariant.set(selectionKey, selectedTextPromise);

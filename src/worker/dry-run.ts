@@ -1,14 +1,13 @@
-import type { DryRunBlockCode, DryRunEntryReport, DryRunModuleReport, DryRunRequest, DryRunResponse } from "../contracts/dry-run";
+import type { DryRunEntryReport, DryRunModuleReport, DryRunRequest, DryRunResponse } from "../contracts/dry-run";
 import type { BotModule, ModuleDryRunContext, ModuleEvent, ModuleStreamState } from "../modules/contract";
 import { MODULES } from "../modules/registry";
-import { forSourceOnlyForChatTarget } from "./chat";
-import { chatOutputSuppressionReason } from "./chat-output-gate";
 import { getBotIdentity } from "./db/bot-identity";
 import { readChannelDefaultChatTarget } from "./db/channel-settings";
 import { readDispatchChannelState } from "./db/channel-controls";
 import { readChannelVariables as readVariables } from "./db/channel-variables";
 import { readOnlyD1, DryRunWriteError } from "./db/read-only";
 import { actorForEvent, chatStatusFor, selectModulesForEvent } from "./dispatch";
+import { withHostBlocks, withOutputGate } from "./dry-run-output";
 import { createSimulatedTemplateRenderer } from "./simulated-template-renderer";
 import { secureRandomInteger } from "./template-resolver";
 
@@ -27,45 +26,6 @@ const badgeForStatus: Readonly<Record<DryRunRequest["sender"]["statuses"][number
   moderator: { set_id: "moderator", id: "1", info: "" },
   broadcaster: { set_id: "broadcaster", id: "1", info: "" },
 };
-
-const withHostBlocks = (
-  report: DryRunEntryReport,
-  moduleDisabled: boolean,
-  channelPaused: boolean,
-): DryRunEntryReport => {
-  if (report.outcome !== "fires" || (!moduleDisabled && !channelPaused)) return report;
-  const hostBlocks = [
-    ...(moduleDisabled ? [{ code: "host.module_disabled" as const satisfies DryRunBlockCode }] : []),
-    ...(channelPaused ? [{ code: "host.channel_paused" as const satisfies DryRunBlockCode }] : []),
-  ];
-  return { ...report, outcome: "blocked", blocks: [...report.blocks, ...hostBlocks], effects: [] };
-};
-
-const withOutputGate = (
-  report: DryRunEntryReport,
-  module: BotModule,
-  event: ModuleEvent,
-  channelId: string,
-  muted: boolean,
-): DryRunEntryReport => ({
-  ...report,
-  effects: report.effects.map((effect) => {
-    if (effect.kind !== "chat" && effect.kind !== "announcement") return effect;
-    const suppression = chatOutputSuppressionReason({
-      moduleEnabled: true,
-      mandatory: module.mandatory === true,
-      paused: false,
-      muted,
-    });
-    return {
-      ...effect,
-      postsTo: forSourceOnlyForChatTarget(effect.target, channelId, event.payload.source_broadcaster_user_id as string | null | undefined)
-        ? "this_chat"
-        : "all_shared_chats",
-      suppressedBy: suppression === "channel_muted" ? "channel_muted" : null,
-    };
-  }),
-});
 
 const moduleStatusFor = (entries: readonly DryRunEntryReport[]): DryRunModuleReport["status"] => {
   if (entries.length === 0) return "silent";
@@ -196,7 +156,14 @@ export const dryRunChatMessage = async (
         : reports.filter((entry) => entry.entry.id === request.only?.entryId);
       const entries = filtered
         .map((entry) => withHostBlocks(entry, moduleDisabled, channelPaused))
-        .map((entry) => withOutputGate(entry, module, event, channelId, dispatchState.controls.mute.active));
+        .map((entry) => withOutputGate(
+          entry,
+          module,
+          event,
+          channelId,
+          dispatchState.controls.mute.active,
+          dispatchState.controls.pause.active,
+        ));
       modules.push({ moduleId: module.id, status: moduleStatusFor(entries), entries });
     } catch (error: unknown) {
       const writeBlocked = error instanceof DryRunWriteError;

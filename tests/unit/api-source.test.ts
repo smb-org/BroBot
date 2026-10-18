@@ -1035,6 +1035,62 @@ describe("API source JSONata", () => {
 });
 
 describe("API source template dispatch", () => {
+  it("marks an uncached read-only value as deferred live data", async () => {
+    const database = await createDatabase();
+    const db = database as unknown as D1Database;
+    await insertSource(database, "status", "$.status");
+    const variables = await apiSourceModule.templateVariables?.(db, CHANNEL_ID) ?? [];
+    const unavailableText = apiSourceModule.templateUnavailableText;
+    if (unavailableText === undefined) throw new Error("API source unavailable text is missing.");
+    const event: ModuleEvent = {
+      channelId: CHANNEL_ID,
+      subscriptionType: "channel.chat.message",
+      triggerId: "uncached-api-source-dry-run",
+      payload: {},
+      settings: {},
+      receivedAt: new Date(NOW).toISOString(),
+      actor: null,
+      chatStatus: null,
+    };
+    const sources: TemplateResolverSources = {
+      DB: db,
+      publicOrigin: "https://brobot.esembe.app",
+      readOnly: true,
+      channelInfo: () => Promise.resolve(null),
+      channelGameId: () => Promise.resolve(null),
+      channelTimeZone: () => Promise.resolve("Europe/Berlin"),
+      channelLocation: () => Promise.resolve(null),
+      templateValueProviders: [{
+        moduleId: apiSourceModule.id,
+        templateVariableNamespace: "api_sources",
+        variables,
+        templateUnavailableText: unavailableText,
+        resolveTemplateValues: (names, context) =>
+          apiSourceModule.resolveTemplateValues?.(names, context) ?? Promise.resolve({}),
+      }],
+      registeredTemplateVariables: variables,
+      streamState: () => Promise.resolve("offline"),
+      channelDetails: () => Promise.resolve(null),
+      streamDetails: () => Promise.resolve(null),
+      followedAt: () => Promise.resolve("unavailable"),
+      followerTotal: () => Promise.resolve(null),
+      chattersTotal: () => Promise.resolve(null),
+      userCreatedAt: () => Promise.resolve(null),
+      channelLanguage: () => Promise.resolve("de"),
+      readChannelVariables: () => Promise.resolve({}),
+      now: () => NOW,
+    };
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+
+    const rendered = await createTemplateRenderer(event, "event", [], sources)("{api.status}", {}, undefined, "chat");
+
+    expect(rendered.text).toBe("{api.status}");
+    expect(rendered.diagnostics).toContainEqual({ code: "template.deferred_live", detail: { name: "api.status" } });
+    expect(rendered.diagnostics).not.toContainEqual(expect.objectContaining({ code: "template.lookup_unavailable" }));
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it.each([
     { consumer: "timer", templateContext: "event" as const, mode: "chat" as const },
     { consumer: "FAQ", templateContext: "event" as const, mode: "chat" as const },

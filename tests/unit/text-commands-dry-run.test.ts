@@ -101,6 +101,38 @@ describe("text command dry-run", () => {
     database.close();
   });
 
+  it("carries rendered source attributions to the host output preparation stage", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, CHANNEL_ID);
+      const repository = createTextCommandRepository(
+        database as unknown as D1Database,
+        () => ({ sql: "AND 1 = 1", values: [] }),
+      );
+      await repository.create({
+        channelId: CHANNEL_ID,
+        name: "weather",
+        text: "Weather",
+        kind: "text",
+        cooldownSeconds: 0,
+        now: NOW,
+      }, { userId: "member-1" });
+
+      const reports = await textCommandModule.dryRunChatMessage?.(eventFor("!weather"), contextFor(database, {
+        renderTemplate: () => Promise.resolve({
+          text: "Berlin: 17 °C",
+          diagnostics: [],
+          attributions: ["MET Norway"],
+        }),
+      }));
+      const effect = reports?.[0]?.effects[0] as unknown as { attributions?: readonly string[] };
+
+      expect(effect.attributions).toEqual(["MET Norway"]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("reports production cooldown diagnostics as a block for the matched command", async () => {
     const database = new TestD1Database();
     await insertChannel(database, CHANNEL_ID);
@@ -234,6 +266,8 @@ describe("text command dry-run", () => {
 
       expect(score?.[0]?.effects).toContainEqual({ kind: "variable", name: "score", from: 999999998, to: 999999999 });
       expect(timeout?.[0]?.effects).toContainEqual({ kind: "timeout", minSeconds: 20, maxSeconds: 60, reason: "!timeout" });
+      expect(timeout?.[0]?.effects).toContainEqual(expect.objectContaining({ kind: "chat", text: "Timeout", when: "on_success" }));
+      expect(timeout?.[0]?.effects).toContainEqual(expect.objectContaining({ kind: "chat", text: "Fallback", when: "on_failure" }));
       await expect(database.prepare("SELECT value FROM channel_variables WHERE channel_id = ? AND name = 'score'")
         .bind(CHANNEL_ID).first()).resolves.toEqual({ value: 999999998 });
     } finally {

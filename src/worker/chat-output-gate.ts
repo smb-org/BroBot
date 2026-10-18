@@ -11,3 +11,12 @@ export const chatOutputSuppressionReason = (input: {
   if (input.muted) return "channel_muted";
   return null;
 };
+
+export const moderationOutputSuppressionReason = (input: {
+  paused: boolean;
+  muted: boolean;
+}): "channel_paused" | "channel_muted" | null => {
+  if (input.muted) return "channel_muted";
+  if (input.paused) return "channel_paused";
+  return null;
+};
