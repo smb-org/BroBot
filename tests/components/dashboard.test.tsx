@@ -150,8 +150,8 @@ const showMembers = async (members: {
   members: unknown[];
   broadcasterCount: number;
   viewerUserId: string;
-}): Promise<void> => {
-  const channel = healthyChannel("kanal-a", "Alpha");
+}, channelRole: "manager" | "broadcaster" = "manager"): Promise<void> => {
+  const channel = { ...healthyChannel("kanal-a", "Alpha"), role: channelRole };
   stubDashboardFetch((url) => {
     if (url.pathname.endsWith("/members")) return jsonResponse({ ...members, nextCursor: null });
   }, [channel]);
@@ -1250,7 +1250,7 @@ describe("Dashboard skeleton", () => {
       broadcasterCount: 1,
       viewerUserId: "100",
     });
-    fireEvent.click(await screen.findByRole("row", { name: /esembe/ }));
+    fireEvent.click(await screen.findByRole("link", { name: /esembe/ }));
 
     expect(await screen.findByRole("button", { name: "Entziehen" })).toBeDisabled();
     expect(screen.getAllByText("Der letzte Broadcaster kann nicht herabgestuft oder entfernt werden.")).toHaveLength(1);
@@ -1268,8 +1268,8 @@ describe("Dashboard skeleton", () => {
       members: [broadcaster("100", "esembe", "esembe"), broadcaster("200", "zweit", "Zweit")],
       broadcasterCount: 2,
       viewerUserId: "100",
-    });
-    fireEvent.click(await screen.findByRole("row", { name: /esembe/ }));
+    }, "broadcaster");
+    fireEvent.click(await screen.findByRole("link", { name: /esembe/ }));
 
     expect(await screen.findByRole("button", { name: "Entziehen" })).toBeEnabled();
     expect(screen.queryByText("Letzter Broadcaster")).not.toBeInTheDocument();
@@ -1280,8 +1280,8 @@ describe("Dashboard skeleton", () => {
       members: [broadcaster("100", "esembe", "esembe"), broadcaster("200", "zweit", "Zweit")],
       broadcasterCount: 2,
       viewerUserId: "100",
-    });
-    fireEvent.click(await screen.findByRole("row", { name: /esembe/ }));
+    }, "broadcaster");
+    fireEvent.click(await screen.findByRole("link", { name: /esembe/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Entziehen" }));
 
     const ownDialog = await screen.findByRole("dialog");
@@ -1292,7 +1292,7 @@ describe("Dashboard skeleton", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 
     // Someone else's entry: same action, different question.
-    fireEvent.click(screen.getByRole("row", { name: /Zweit/ }));
+    fireEvent.click(screen.getByRole("link", { name: /Zweit/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Entziehen" }));
     const otherDialog = await screen.findByRole("dialog");
     expect(within(otherDialog).getByRole("heading")).toHaveTextContent("Zugriff für Zweit entziehen?");
@@ -1319,8 +1319,8 @@ describe("Dashboard skeleton", () => {
 
     expect(await screen.findByRole("heading", { name: "Mitglieder", level: 1 })).toBeInTheDocument();
     expect(await screen.findByText("Streamerin")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "twitch.tv/streamer" }))
-      .toHaveAttribute("href", "https://twitch.tv/streamer");
+    expect(screen.getByRole("link", { name: /Streamerin/ }))
+      .toHaveAttribute("href", "/channels/kanal-a/members");
     const avatarImage = document.querySelector("img.member-avatar");
     expect(avatarImage).toHaveAttribute("src", "https://cdn.example/streamerin.png");
     expect(document.querySelector(".member-avatar-placeholder")).toBeInTheDocument();
@@ -1330,12 +1330,12 @@ describe("Dashboard skeleton", () => {
     fireEvent.error(avatarImage as Element);
     expect(document.querySelector("img.member-avatar")).not.toBeInTheDocument();
     expect(document.querySelectorAll(".member-avatar-placeholder")).toHaveLength(2);
-    expect(screen.getByRole("link", { name: "twitch.tv/streamer" }))
-      .toHaveAttribute("href", "https://twitch.tv/streamer");
+    expect(screen.getByRole("link", { name: /Streamerin/ }))
+      .toHaveAttribute("href", "/channels/kanal-a/members");
 
     expect(screen.queryByText("100")).not.toBeInTheDocument();
     expect(screen.getByText("Nicht auflösbar")).toBeInTheDocument();
-    expect(screen.getByText("Twitch-ID 200")).toBeInTheDocument();
+    expect(screen.getByText(/Twitch-ID 200/)).toBeInTheDocument();
     expect(screen.getByText(/17\.09\.2026|Sep 17, 2026/), "Beitrittszeitpunkt wird angezeigt").toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Zugriff vergeben" })).toBeEnabled();
 
@@ -1354,23 +1354,17 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByRole("button", { name: "Zugriff vergeben" })).toBeDisabled();
   });
 
-  it("keeps the members table's semantics for narrow cards", async () => {
+  it("shows each member as a navigable collection row", async () => {
     await showMembers({
       members: [{ userId: "100", login: "streamer", displayName: "Streamerin", profileImageUrl: null, role: "manager", joinedAt: "2026-09-17T12:00:00.000Z" }],
       broadcasterCount: 1,
       viewerUserId: "100",
     });
 
-    const table = await screen.findByRole("table");
-    expect(table.querySelector("thead")).toHaveClass("sr-only");
-    expect(screen.getByRole("columnheader", { name: "Name" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Rolle" })).toBeInTheDocument();
-
-    const row = table.querySelector("tbody tr");
-    expect(row).toHaveAttribute("role", "row");
-    expect(row?.querySelector("th[scope='row']")).toHaveAttribute("role", "rowheader");
-    expect(row?.querySelectorAll("td")).toHaveLength(2);
-    expect(Array.from(row?.querySelectorAll("td") ?? []).every((cell) => cell.getAttribute("role") === "cell")).toBe(true);
+    const row = await screen.findByRole("link", { name: /Streamerin/ });
+    expect(row).toHaveAttribute("href", "/channels/kanal-a/members");
+    expect(within(row).getByText("Verwalter")).toBeInTheDocument();
+    expect(within(row).getByText(/Zugriff seit/)).toBeInTheDocument();
   });
 
   it("shows the operator member actions disabled with a reason", async () => {
@@ -1401,7 +1395,7 @@ describe("Dashboard skeleton", () => {
     // A locked whole form is read as a properties list (ADR 0006 addendum),
     // not a form with disabled fields -- there is no role choice and no
     // remove action to disable, only the one reason line above the values.
-    fireEvent.click(await screen.findByRole("row", { name: /Moderation/ }));
+    fireEvent.click(await screen.findByRole("link", { name: /Moderation/ }));
     const editor = await screen.findByRole("region", { name: "Mitglied bearbeiten: Moderation" });
     expect(within(editor).getByText(reason)).toBeInTheDocument();
     expect(within(editor).queryByRole("group")).not.toBeInTheDocument();
@@ -1431,15 +1425,15 @@ describe("Dashboard skeleton", () => {
     fireEvent.change(search, { target: { value: "neue-person" } });
     fireEvent.click(screen.getByRole("button", { name: "Suchen" }));
     expect(await screen.findByText("Neue Person")).toBeInTheDocument();
-    const grantAccess = screen.getByRole("button", { name: "Zugriff freigeben" });
-    expect(grantAccess).toHaveAccessibleName("Zugriff freigeben");
-    fireEvent.click(grantAccess);
+    fireEvent.click(screen.getByRole("button", { name: "Weiter" }));
     expect(await screen.findByRole("button", { name: "Zugriff endgültig freigeben" })).toBeInTheDocument();
 
     act(() => {
       window.history.pushState({}, "", "/channels/kanal-b/members");
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
+    expect(await screen.findByText("Einladung verwerfen?")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Verwerfen" }));
     await waitFor(() => expect(screen.queryByText("Neue Person")).not.toBeInTheDocument());
     // The route switched to the operator's channel: even the plus button
     // that would reopen the grant editor is disabled there.
@@ -1738,7 +1732,7 @@ describe("Dashboard skeleton", () => {
     expect(profileLink.getAttribute("rel")?.split(/\s+/)).toEqual(expect.arrayContaining(["noopener", "noreferrer"]));
     expect(document.querySelector("img.member-avatar")).toHaveAttribute("src", "https://cdn.example/neue-person.png");
 
-    fireEvent.click(screen.getByRole("button", { name: "Zugriff freigeben" }));
+    fireEvent.click(screen.getByRole("button", { name: "Weiter" }));
 
     const confirmation = await screen.findByRole("dialog");
     expect(confirmation).toHaveTextContent("Neue Person");
@@ -1771,24 +1765,34 @@ describe("Dashboard skeleton", () => {
     fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "neue-person" } });
     fireEvent.click(screen.getByRole("button", { name: "Suchen" }));
     await screen.findByText("Neue Person");
-    fireEvent.click(screen.getByRole("button", { name: "Zugriff freigeben" }));
+    fireEvent.click(screen.getByRole("button", { name: "Weiter" }));
     const dialog = await screen.findByRole("dialog");
-    // Anyone using only a keyboard or a screen reader must actually notice
-    // the form's most important safety prompt -- Cancel starts focused, so
-    // an accidental Enter never grants access by itself.
-    expect(screen.getByRole("button", { name: "Abbrechen" })).toHaveFocus();
+    // The dialog does not focus the final grant action when it opens.
+    expect(screen.getByRole("button", { name: "Zugriff endgültig freigeben" })).not.toHaveFocus();
 
     fireEvent.keyDown(dialog, { key: "Escape" });
     expect(addRequestCount).toBe(0);
+    expect(await screen.findByText("Einladung verwerfen?")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Weiter bearbeiten" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(await screen.findByText("Einladung verwerfen?")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Verwerfen" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole("button", { name: "Zugriff freigeben" }));
+    fireEvent.click(screen.getByRole("button", { name: "Zugriff vergeben" }));
+    fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "neue-person" } });
+    fireEvent.click(screen.getByRole("button", { name: "Suchen" }));
+    await screen.findByText("Neue Person");
+    fireEvent.click(screen.getByRole("button", { name: "Weiter" }));
     await screen.findByRole("dialog");
     fireEvent.click(screen.getByRole("button", { name: "Abbrechen" }));
 
     expect(addRequestCount).toBe(0);
+    expect(await screen.findByText("Einladung verwerfen?")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Verwerfen" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Zugriff freigeben" }));
+    fireEvent.click(screen.getByRole("button", { name: "Zugriff vergeben" }));
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 
@@ -1820,7 +1824,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
     await screen.findByText("Alpha-Mitglied");
-    fireEvent.click(screen.getByRole("row", { name: /Alpha-Mitglied/ }));
+    fireEvent.click(screen.getByRole("link", { name: /Alpha-Mitglied/ }));
     const roleGroup = screen.getByRole("group", { name: "Rolle für Alpha-Mitglied" });
     fireEvent.click(within(roleGroup).getByRole("button", { name: /Verwalter/ }));
     fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
@@ -1876,17 +1880,17 @@ describe("Dashboard skeleton", () => {
     fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "neue-person" } });
     fireEvent.click(screen.getByRole("button", { name: "Suchen" }));
     await screen.findByText("Neuer Stand");
-    fireEvent.click(screen.getByRole("button", { name: "Zugriff freigeben" }));
+    fireEvent.click(screen.getByRole("button", { name: "Weiter" }));
     fireEvent.click(await screen.findByRole("button", { name: "Zugriff endgültig freigeben" }));
     await waitFor(() => expect(memberRequestCount).toBe(2));
-    expect(within(screen.getByRole("table")).getByText("Neuer Stand")).toBeInTheDocument();
+    expect(screen.getByText("Neuer Stand")).toBeInTheDocument();
 
     await act(async () => {
       resolveLateInitial?.(jsonResponse({ members: [delayedMember], broadcasterCount: 1, viewerUserId: "late-user", nextCursor: null }));
       await Promise.resolve();
     });
 
-    expect(within(screen.getByRole("table")).getByText("Neuer Stand")).toBeInTheDocument();
+    expect(screen.getByText("Neuer Stand")).toBeInTheDocument();
     expect(screen.queryByText("Verspäteter Stand")).not.toBeInTheDocument();
   });
 
@@ -1921,7 +1925,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
     await screen.findByText("Erster Stand");
-    fireEvent.click(screen.getByRole("row", { name: /Erster Stand/ }));
+    fireEvent.click(screen.getByRole("link", { name: /Erster Stand/ }));
     const roleGroup = screen.getByRole("group", { name: "Rolle für Erster Stand" });
     fireEvent.click(within(roleGroup).getByRole("button", { name: /Verwalter/ }));
     fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
@@ -1980,7 +1984,7 @@ describe("Dashboard skeleton", () => {
       expect(fetcher.mock.calls.some(([reqInput]) => requestUrl(reqInput).search === "?cursor=cursor-1")).toBe(true);
     });
 
-    fireEvent.click(screen.getByRole("row", { name: /Erster Stand/ }));
+    fireEvent.click(screen.getByRole("link", { name: /Erster Stand/ }));
     const roleGroup = screen.getByRole("group", { name: "Rolle für Erster Stand" });
     fireEvent.click(within(roleGroup).getByRole("button", { name: /Verwalter/ }));
     fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
@@ -2849,7 +2853,7 @@ describe("Dashboard skeleton", () => {
       if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-token" });
       if (url.pathname === "/api/channels/kanal-a/modules/text_commands" && init?.method === "PATCH") {
         enabled = true;
-        return jsonResponse({ module: { id: "text_commands", enabled: true, settings: "{}" } });
+        return jsonResponse({ module: { id: "text_commands", enabled: true, settings: "{}" }, revision: 2 });
       }
       return jsonResponse({}, 404);
     }));
@@ -2872,6 +2876,8 @@ describe("Dashboard skeleton", () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "broadcaster" as const };
     let enabled = false;
     let overviewCalls = 0;
+    let toggleRequests = 0;
+    const overviewSnapshots: boolean[] = [];
     let releaseStale: () => void = () => undefined;
     const stale = new Promise<void>((resolve) => { releaseStale = resolve; });
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -2880,6 +2886,7 @@ describe("Dashboard skeleton", () => {
       if (url.pathname === "/api/channels/kanal-a/overview") {
         overviewCalls += 1;
         const snapshot = enabled;
+        overviewSnapshots.push(snapshot);
         if (overviewCalls === 1) await stale;
         return jsonResponse({ ...overview(channel), activeModules: snapshot ? [{ moduleId: "text_commands", settings: "{}" }] : [] });
       }
@@ -2888,8 +2895,9 @@ describe("Dashboard skeleton", () => {
       }
       if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-token" });
       if (url.pathname === "/api/channels/kanal-a/modules/text_commands" && init?.method === "PATCH") {
+        toggleRequests += 1;
         enabled = true;
-        return jsonResponse({ module: { id: "text_commands", enabled: true, settings: "{}" } });
+        return jsonResponse({ module: { id: "text_commands", enabled: true, settings: "{}" }, revision: 2 });
       }
       return jsonResponse({}, 404);
     }));
@@ -2901,9 +2909,11 @@ describe("Dashboard skeleton", () => {
     fireEvent.click(await screen.findByRole("switch", { name: /Textbefehle:/i }));
     await waitFor(() => expect(screen.getByRole("switch", { name: /Textbefehle:/i })).toBeChecked());
     await waitFor(() => expect(screen.getByRole("switch", { name: /Textbefehle:/i })).toBeEnabled());
+    expect(toggleRequests).toBe(1);
     // The pre-toggle response (module still off) arrives only now.
     releaseStale();
     await new Promise((resolve) => { window.setTimeout(resolve, 20); });
+    expect(overviewSnapshots).toContain(false);
 
     navigateToPath("/channels/kanal-a/modules/text_commands");
     expect(await screen.findByRole("button", { name: "Befehl anlegen" })).toBeInTheDocument();
@@ -2921,10 +2931,9 @@ describe("Dashboard skeleton", () => {
       if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-token" });
       if (url.pathname === "/api/channels/kanal-a/modules" && init?.method === undefined) {
         modulesCalls += 1;
-        // The first reload (after enabling text_commands) is held back; the
-        // second (after enabling raid) resolves immediately with both
-        // modules already on. The stale first response, reflecting only the
-        // first toggle, must lose once it does arrive.
+        // The reload after the first mutation is held back. The next mutation
+        // updates the cache from its own response, so this in-flight read is
+        // cancelled; if it arrives anyway, it must not restore the old state.
         if (modulesCalls === 2) return firstReload;
         return jsonResponse({
           modules: [
@@ -2934,10 +2943,10 @@ describe("Dashboard skeleton", () => {
         });
       }
       if (url.pathname === "/api/channels/kanal-a/modules/text_commands" && init?.method === "PATCH") {
-        return jsonResponse({ module: { id: "text_commands", enabled: true, settings: "{}" } });
+        return jsonResponse({ module: { id: "text_commands", enabled: true, settings: "{}" }, revision: 2 });
       }
       if (url.pathname === "/api/channels/kanal-a/modules/raid" && init?.method === "PATCH") {
-        return jsonResponse({ module: { id: "raid", enabled: true, settings: "{}" } });
+        return jsonResponse({ module: { id: "raid", enabled: true, settings: "{}" }, revision: 2 });
       }
       return jsonResponse({}, 404);
     });
@@ -2948,10 +2957,10 @@ describe("Dashboard skeleton", () => {
 
     fireEvent.click(await screen.findByRole("switch", { name: /Textbefehle:/i }));
     fireEvent.click(await screen.findByRole("switch", { name: /Shoutout:/i }));
-    await waitFor(() => { expect(modulesCalls).toBe(3); });
+    await waitFor(() => { expect(modulesCalls).toBe(2); });
     expect(await screen.findByRole("switch", { name: /Shoutout:/i })).toBeChecked();
 
-    // The held-back first reload arrives last, describing an older state.
+    // The held-back read arrives last, describing an older state.
     resolveFirstReload?.(jsonResponse({
       modules: [
         { id: "text_commands", enabled: true, settings: "{}" },

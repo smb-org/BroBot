@@ -63,7 +63,7 @@ const expectDeniedCreate = async (
     NOW,
   );
 
-  expect(changed).toBe(false);
+  expect(changed).toBeNull();
   await expect(getChannelModuleForChannel(asD1(database), options.targetChannelId, "test-modul")).resolves.toBeNull();
   await expect(auditCount(database)).resolves.toBe(0);
 };
@@ -87,7 +87,7 @@ describe("module activation in the repository", () => {
       NOW,
     );
 
-    expect(changed).toBe(true);
+    expect(changed).toBe(1);
     await expect(getChannelModuleForChannel(asD1(database), "kanal-a", "test-modul"))
       .resolves.toEqual(record("kanal-a", "test-modul", true));
     await expect(auditCount(database)).resolves.toBe(1);
@@ -132,7 +132,7 @@ describe("module activation in the repository", () => {
       NOW,
     );
 
-    expect(changed).toBe(true);
+    expect(changed).toBe(2);
     await expect(getChannelModuleForChannel(asD1(database), "kanal-a", "test-modul"))
       .resolves.toEqual({ ...record("kanal-a", "test-modul", false), initialized: true, revision: 2 });
     await expect(auditCount(database)).resolves.toBe(2);
@@ -162,7 +162,7 @@ describe("module activation in the repository", () => {
       NOW,
     );
 
-    expect(changed).toBe(false);
+    expect(changed).toBeNull();
     await expect(getChannelModuleForChannel(asD1(database), "kanal-a", "test-modul"))
       .resolves.toEqual(record("kanal-a", "test-modul", true));
     await expect(auditCount(database)).resolves.toBe(1);
@@ -193,7 +193,7 @@ describe("module activation in the repository", () => {
       NOW,
     );
 
-    expect(changed).toBe(false);
+    expect(changed).toBeNull();
     await expect(getChannelModuleForChannel(asD1(database), "kanal-b", "test-modul"))
       .resolves.toEqual(record("kanal-b", "test-modul", true));
     await expect(auditCount(database)).resolves.toBe(1);

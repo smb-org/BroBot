@@ -27,12 +27,11 @@ import {
   PanelApiError,
   refreshModeratorStatus,
   setChannelControl,
-  setChannelModuleEnabled,
 } from "./api";
 import { ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, ModuleWorkspace, NavigationIcon, StateRow, type StateTone } from "./module-panels";
 import { preloadModulePanel } from "./module-panel-loaders";
 import { BroadcasterConsentAction } from "./channel-actions";
-import { refreshAfterModuleToggle } from "./data/module-toggle";
+import { dismissModuleToggleToasts, moduleToggleGeneration, moduleToggleToastScope, reconcileOverviewAfterModuleToggle, toggleModuleWithUndo } from "./data/module-toggle";
 import { mergeChannelRefreshData, mergeChannelsRefreshData, runModeratorRecheck } from "./data/channel-cache";
 import { useMountedPageGuard } from "./data/page-generation";
 import { useSystemQuery } from "./data/lists";
@@ -46,7 +45,7 @@ import { MODULES } from "../modules/registry";
 import { eventSubName, moduleNavigationName, statusWord } from "./module-labels";
 import { dashboardModeForRoute, dashboardRouteFocusKey, dashboardRoutePath, dashboardRouteRequiresBot, routeForDashboardMode, routeForSelectedChannel, replaceDashboardRoute, useDashboardRoute, type DashboardMode, type DashboardRoute } from "./router";
 import { dashboardNavigationGroups, visibleModuleNavigationIds } from "./nav-pages";
-import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, LoadStateLines, notify, PageHeader, Select as UiSelect, Shell, Sidebar, StatusLed, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type StatusLedState } from "./ui";
+import { BlockingState, Button, ChannelLocationMenu, ControlDurationDialog, EmptyCellValue, Icon, InspectorSection, ListDetail, LoadState as UiLoadState, LoadStateLines, notify, SettingsPage, Select as UiSelect, Shell, Sidebar, StatusLed, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type StatusLedState } from "./ui";
 import { readPalette, writePalette, type Palette } from "./ui/palette";
 import { EventsPage } from "./events/EventsPage";
 import { emptyEventFilter, eventFilterIsActive } from "./events/model";
@@ -946,6 +945,8 @@ interface SystemPageProperties {
 
 const SystemPage = ({ channelId, login, role, channelBotConsent, viewerUserId, moderator, system, error, loadedAt, onRetry, onModeratorRecheck }: SystemPageProperties): ReactElement => {
   const texts = dashboardTexts();
+  const [saveTarget, setSaveTarget] = useState<HTMLDivElement | null>(null);
+  const saveTargetRef = useCallback((element: HTMLDivElement | null): void => { setSaveTarget(element); }, []);
   const [recheckingModerator, setRecheckingModerator] = useState(false);
   const isCurrentPage = useMountedPageGuard();
   const canRecheckModerator = canManage(role);
@@ -976,34 +977,42 @@ const SystemPage = ({ channelId, login, role, channelBotConsent, viewerUserId, m
     node: <StateRow label={texts.statusCard.moderatorStatus} tone={moderatorTone} word={moderatorWord} detail={moderatorDetail} action={moderatorAction} />,
   };
   return (
-    <>
-      <PageHeader kind="system" title={texts.system.title} subtitle={texts.system.readOnly} />
-      <ChannelDefaultsEditor channelId={channelId} role={role} />
-      <UiLoadState
-        variant="status-row"
-        status={system !== undefined && error !== null ? "error" : "success"}
-        loading={null}
-        empty={null}
-        error={null}
-        {...(system !== undefined && error !== null ? { queryError: { title: texts.errors.dataLoadFailed, message: error, onRetry } } : {})}
-      >{null}</UiLoadState>
-      <UiLoadState
-        variant="panel-720"
-        status={system !== undefined ? "success" : error !== null ? "error" : "loading"}
-        loading={<LoadStateLines rows={8} height={58} />}
-        empty={<LoadStateLines rows={8} height={58} />}
-        error={<p role="alert">{error ?? texts.system.loadState}</p>}
-        queryError={{ title: texts.errors.dataLoadFailed, message: error ?? texts.system.loadState, onRetry }}
-      >
-        {system === undefined ? null : <>
-          <div className="state-list">{[broadcasterRow(system.broadcasterConnection), chatRow(system.chatSubscription, system.chatSubscriptionNeeded === true), botRow(system.bot), botPermissionsRow(system.botPermissions), channelBotConsentRow(channelId, channelBotConsent, viewerUserId), broadcasterPermissionsRow(system.broadcasterPermissions, login, role === "broadcaster"), moderatorStatusRow, tokenRow(system.tokens, system.bot, loadedAt)].filter((entry): entry is StatusEntry => entry !== null).map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
-          <BotPermissionsInspector permissions={system.botPermissions} />
-          <BroadcasterPermissionsInspector permissions={system.broadcasterPermissions} />
-          <SubscriptionsSection subscriptions={system.subscriptions ?? []} />
-          <SystemProperties system={system} />
-        </>}
-      </UiLoadState>
-    </>
+    <SettingsPage
+      className="system-page"
+      kind="system"
+      title={texts.system.title}
+      subtitle={texts.system.readOnly}
+      saveTargetRef={saveTargetRef}
+      columns={[<Fragment key="system-column">
+        <ChannelDefaultsEditor key="channel-defaults" channelId={channelId} role={role} saveTarget={saveTarget} />
+        <div className="system-page__status">
+          <UiLoadState
+            variant="status-row"
+            status={system !== undefined && error !== null ? "error" : "success"}
+            loading={null}
+            empty={null}
+            error={null}
+            {...(system !== undefined && error !== null ? { queryError: { title: texts.errors.dataLoadFailed, message: error, onRetry } } : {})}
+          >{null}</UiLoadState>
+          <UiLoadState
+            variant="panel-720"
+            status={system !== undefined ? "success" : error !== null ? "error" : "loading"}
+            loading={<LoadStateLines rows={8} height={58} />}
+            empty={<LoadStateLines rows={8} height={58} />}
+            error={<p role="alert">{error ?? texts.system.loadState}</p>}
+            queryError={{ title: texts.errors.dataLoadFailed, message: error ?? texts.system.loadState, onRetry }}
+          >
+            {system === undefined ? null : <>
+              <div className="state-list system-page__status-list">{[broadcasterRow(system.broadcasterConnection), chatRow(system.chatSubscription, system.chatSubscriptionNeeded === true), botRow(system.bot), botPermissionsRow(system.botPermissions), channelBotConsentRow(channelId, channelBotConsent, viewerUserId), broadcasterPermissionsRow(system.broadcasterPermissions, login, role === "broadcaster"), moderatorStatusRow, tokenRow(system.tokens, system.bot, loadedAt)].filter((entry): entry is StatusEntry => entry !== null).map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
+              <BotPermissionsInspector permissions={system.botPermissions} />
+              <BroadcasterPermissionsInspector permissions={system.broadcasterPermissions} />
+              <SubscriptionsSection subscriptions={system.subscriptions ?? []} />
+              <SystemProperties system={system} />
+            </>}
+          </UiLoadState>
+        </div>
+      </Fragment>]}
+    />
   );
 };
 
@@ -1091,8 +1100,15 @@ export const DashboardApp = (): ReactElement => {
     structuralSharing: mergeChannelRefreshData,
     queryFn: async ({ signal }) => {
       if (overviewChannelId === null) throw new Error("An overview query needs a channel ID.");
+      const startedAtModuleGeneration = moduleToggleGeneration(queryClient, overviewChannelId);
       const response = await fetchChannelOverview(overviewChannelId, signal);
-      return mergeAndRememberChannelStreamVersion(response, latestStreamByChannel.current);
+      const withLatestModuleToggles = reconcileOverviewAfterModuleToggle(
+        queryClient,
+        overviewChannelId,
+        startedAtModuleGeneration,
+        response,
+      );
+      return mergeAndRememberChannelStreamVersion(withLatestModuleToggles, latestStreamByChannel.current);
     },
     refetchInterval: overviewChannelId === null ? false : offlineRefetchInterval,
     enabled: !authenticationRequired && overviewChannelId !== null &&
@@ -1136,8 +1152,8 @@ export const DashboardApp = (): ReactElement => {
     reportLoadError("overview", route.kind === "channel" || route.kind === "module" ? overview.error : null);
   }, [overview.error, reportLoadError, route]);
   useEffect(() => {
-    reportLoadError("system", systemChannelId !== null && systemQuery.isError ? errorMessage(systemQuery.error) : null);
-  }, [reportLoadError, systemChannelId, systemQuery.error, systemQuery.isError]);
+    reportLoadError("system", systemChannelId !== null && systemQuery.isError && systemQuery.data !== undefined ? errorMessage(systemQuery.error) : null);
+  }, [reportLoadError, systemChannelId, systemQuery.data, systemQuery.error, systemQuery.isError]);
   const reloadChannels = useCallback(async (): Promise<void> => {
     const filter = { queryKey: queryKeys.channels(), exact: true } as const;
     await queryClient.cancelQueries(filter);
@@ -1174,8 +1190,7 @@ export const DashboardApp = (): ReactElement => {
     await queryClient.invalidateQueries(filter, { throwOnError: true });
   }, [queryClient, reloadChannels, route, selectedChannel]);
 
-  const reloadAfterModuleToggle = async (channelId: string): Promise<void> => refreshAfterModuleToggle(queryClient, channelId);
-
+  const moduleToastChannelIdRef = useRef<string | null>(null);
   const toggleModuleEnabled = async (channelId: string, moduleId: string, enabled: boolean): Promise<void> => {
     const targetKey = `${channelId}:${moduleId}`;
     if (headerModuleBusyKeysRef.current.has(targetKey)) return;
@@ -1184,19 +1199,21 @@ export const DashboardApp = (): ReactElement => {
     const moduleState = channel?.modules?.find((candidate) => candidate.id === moduleId)
       ?? (selectedChannel?.channelId === channelId ? modules.data?.modules.find((candidate) => candidate.id === moduleId) : undefined);
     const module = MODULES.find((candidate) => candidate.id === moduleId);
-    if (channel === null || !canManage(channel.role) || moduleState === undefined || moduleState.mandatory === true || module?.mandatory === true) return;
+    if (channel === null || !canManage(channel.role) || moduleState?.mandatory === true || module?.mandatory === true) return;
+    if ((moduleState?.enabled ?? false) === enabled) return;
 
     const busyKeys = new Set(headerModuleBusyKeysRef.current);
     busyKeys.add(targetKey);
     headerModuleBusyKeysRef.current = busyKeys;
     setHeaderModuleBusyKeys(busyKeys);
     try {
-      await setChannelModuleEnabled(channelId, moduleId, enabled);
-      await reloadAfterModuleToggle(channelId);
+      await toggleModuleWithUndo(queryClient, channelId, moduleId, enabled, () => moduleToastChannelIdRef.current === channelId);
     } catch (error) {
-      notify({ tone: "error", message: error instanceof PanelApiError
-        ? apiErrorText(error.code, dashboardTexts().errors.changeFailed)
-        : dashboardTexts().errors.changeFailed });
+      if (moduleToastChannelIdRef.current === channelId) {
+        notify({ tone: "error", message: error instanceof PanelApiError
+          ? apiErrorText(error.code, dashboardTexts().errors.changeFailed)
+          : dashboardTexts().errors.changeFailed, scope: moduleToggleToastScope(channelId) });
+      }
       if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
     } finally {
       const nextBusyKeys = new Set(headerModuleBusyKeysRef.current);
@@ -1304,10 +1321,13 @@ export const DashboardApp = (): ReactElement => {
   const paletteChannelIdRef = useRef(paletteChannel?.channelId ?? null);
   useEffect(() => {
     const nextChannelId = paletteChannel?.channelId ?? null;
-    if (paletteChannelIdRef.current !== null && nextChannelId !== null && paletteChannelIdRef.current !== nextChannelId) {
-      setCommandPaletteOpen(false);
+    const previousChannelId = paletteChannelIdRef.current;
+    if (previousChannelId !== nextChannelId) {
+      if (previousChannelId !== null) dismissModuleToggleToasts(previousChannelId);
+      if (previousChannelId !== null && nextChannelId !== null) setCommandPaletteOpen(false);
     }
     paletteChannelIdRef.current = nextChannelId;
+    moduleToastChannelIdRef.current = nextChannelId;
   }, [paletteChannel?.channelId]);
 
   // Current workers include module state in GET /api/channels. Keep a
@@ -1529,7 +1549,7 @@ export const DashboardApp = (): ReactElement => {
               replaceDashboardRoute({ kind: "channel", channelId: route.channelId, section: "overlays", editorOverlayId: overlayId });
             }} />
           : null}
-        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModuleWorkspace channelId={route.channelId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onNavigate={navigate} onChanged={() => reloadAfterModuleToggle(route.channelId)} /> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModuleWorkspace channelId={route.channelId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onNavigate={navigate} onToggleModule={toggleModuleEnabled} /> : null}
         {route.kind === "module" ? <div className="module-route-layout">
           <Suspense fallback={<div className="module-view-fallback" aria-hidden="true"><LoadStateLines rows={3} height={58} /></div>}>
             {!showChannelNotReleased && !showBotBlocking && selectedChannel !== null ? <UiLoadState

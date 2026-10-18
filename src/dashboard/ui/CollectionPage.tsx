@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactElement, type R
 import { dashboardCommonTexts } from "../locale";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
+import { PageHeader } from "./PageHeader";
 
 const SINGLE_COLUMN_MAX_INLINE_SIZE = 935;
 
@@ -20,6 +21,8 @@ const contentInlineSize = (element: HTMLElement): number => {
 export interface CollectionPageProps {
   title: string;
   headingLevel?: "h1" | "h2" | "h3";
+  headerKind?: string;
+  subtitle?: ReactNode;
   heading?: ReactNode;
   toolbar: ReactNode;
   list: ReactNode;
@@ -34,6 +37,8 @@ export interface CollectionPageProps {
 export function CollectionPage({
   title,
   headingLevel = "h1",
+  headerKind,
+  subtitle,
   heading,
   toolbar,
   list,
@@ -86,6 +91,8 @@ export function CollectionPage({
     const active = document.activeElement;
     const focusIsInList = active instanceof HTMLElement && listRef.current?.contains(active) === true;
 
+    if (openedDetail && !singleColumn && focusIsInList) returnFocus.current = active;
+
     if (singleColumn && (openedDetail || (enteredSingleColumn && focusIsInList))) {
       returnFocus.current = focusIsInList && active instanceof HTMLElement ? active : null;
       const frame = window.requestAnimationFrame(() => {
@@ -98,7 +105,7 @@ export function CollectionPage({
       return () => { window.cancelAnimationFrame(frame); };
     }
 
-    if (!closedDetail || (!singleColumn && !previous.singleColumn)) return;
+    if (!closedDetail) return;
     const frame = window.requestAnimationFrame(() => {
       const preferred = returnFocus.current;
       const fallback = listRef.current?.querySelector<HTMLElement>("[aria-selected='true'], [aria-current='true'], button");
@@ -111,9 +118,17 @@ export function CollectionPage({
 
   return (
     <div ref={collectionRef} data-ui="" className="collection-page" data-detail-open={detailOpen ? "true" : "false"} data-single-column={singleColumn ? "true" : "false"}>
-      <div className="collection-page__heading">{heading ?? <Heading>{title}</Heading>}</div>
+      <div className={`collection-page__heading${heading !== undefined || subtitle !== undefined ? " collection-page__heading--page-header" : ""}`}>
+        {heading ?? (subtitle === undefined
+          ? <header><Heading>{title}</Heading></header>
+          : <PageHeader kind={headerKind ?? "module"} title={title} subtitle={subtitle} />)}
+      </div>
       <div className="collection-page__body">
-        <aside ref={listRef} aria-label={`${title}: ${texts.chooseCollection}`} className="collection-page__list">
+        <aside ref={listRef} aria-label={`${title}: ${texts.chooseCollection}`} className="collection-page__list" onClickCapture={(event) => {
+          // Selecting another row while the detail is open makes that row the one to return focus to.
+          const row = event.target instanceof Element ? event.target.closest<HTMLElement>("button, a, [tabindex]") : null;
+          if (detailOpen && !singleColumn && row !== null) returnFocus.current = row;
+        }}>
           <div className="collection-page__list-toolbar">{toolbar}</div>
           <div className="collection-page__list-content">
             {list ?? <div className="collection-page__empty">{empty ?? texts.noCollectionEntries}</div>}

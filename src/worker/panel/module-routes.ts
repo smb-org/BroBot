@@ -968,6 +968,10 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   const body = await readJsonBody(context.req.raw);
   const enabled = body?.enabled;
   if (typeof enabled !== "boolean") return context.json({ error: "module_enabled_field_invalid" }, 400);
+  const expectedRevision = body?.expectedRevision;
+  if (expectedRevision !== undefined && (!Number.isSafeInteger(expectedRevision) || Number(expectedRevision) < 1)) {
+    return context.json({ error: "module_revision_invalid" }, 400);
+  }
   if (module.mandatory === true && !enabled) return context.json({ error: "module_mandatory" }, 400);
 
   const channelId = context.req.param("channelId");
@@ -993,9 +997,10 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
     }, channelId) ?? [];
   }
   const settings = existing === null ? defaultSettingsJson : existing.settings;
-  let changed = true;
+  let revision: number | null;
   if (existing === null && enabled) {
-    changed = await createChannelModuleWithAudit(
+    if (expectedRevision !== undefined) return context.json({ error: "module_changed_concurrently" }, 409);
+    revision = await createChannelModuleWithAudit(
       context.env.DB,
       actor,
       { channelId, moduleId, enabled, settings },
@@ -1004,7 +1009,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       dependentMutations,
     );
   } else if (existing !== null) {
-    changed = await updateChannelModuleEnabledStateWithAudit(
+    revision = await updateChannelModuleEnabledStateWithAudit(
       context.env.DB,
       actor,
       channelId,
@@ -1013,11 +1018,13 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       action,
       now,
       dependentMutations,
-      existing.revision,
+      expectedRevision === undefined ? existing.revision : Number(expectedRevision),
       initialize,
     );
+  } else {
+    return context.json({ error: "module_changed_concurrently" }, 409);
   }
-  if (!changed) return context.json({ error: "module_changed_concurrently" }, 409);
+  if (revision === null) return context.json({ error: "module_changed_concurrently" }, 409);
   if (module.id === "belabox" && module.settingsChangedAlarm !== undefined) {
     await runModuleAlarmAfterMutation(
       context,
@@ -1052,6 +1059,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   }
   return context.json({
     module: await moduleStateFor(context.env.DB, channelId, module, enabled, settings),
+    revision,
   });
 });
 

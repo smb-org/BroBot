@@ -57,7 +57,7 @@ test("list toolbar controls share height and center line at desktop and keep the
   });
 
   await page.goto(`/channels/${channelId}/members`);
-  const toolbar = page.locator(".members-page__list-column .list-toolbar");
+  const toolbar = page.locator(".collection-page__list-toolbar .list-toolbar");
   const search = toolbar.getByRole("textbox", { name: "Search members" });
   const create = toolbar.getByRole("button", { name: "Grant access" });
   const status = toolbar.locator(".list-toolbar__status");
@@ -71,7 +71,7 @@ test("list toolbar controls share height and center line at desktop and keep the
     const buttonBox = await create.boundingBox();
     expect(inputBox?.height).toBe(32);
     expect(buttonBox?.height).toBe(inputBox?.height);
-    expect(Math.abs((inputBox?.y ?? 0) + (inputBox?.height ?? 0) / 2 - ((buttonBox?.y ?? 0) + (buttonBox?.height ?? 0) / 2))).toBeLessThanOrEqual(1);
+    expect(Math.abs((buttonBox?.y ?? 0) + (buttonBox?.height ?? 0) / 2 - ((inputBox?.y ?? 0) + (inputBox?.height ?? 0) / 2))).toBeLessThanOrEqual(1);
   }
 
   const desktopRow = await toolbar.locator(".list-toolbar__row").boundingBox();
@@ -89,10 +89,10 @@ test("list toolbar controls share height and center line at desktop and keep the
   const createBox = await create.boundingBox();
   const mobileRow = await toolbar.locator(".list-toolbar__row").boundingBox();
   const mobileStatus = await status.boundingBox();
-  expect(mobileRow?.height).toBeGreaterThan(44);
+  expect(mobileRow?.height).toBe(44);
   expect(searchBox).not.toBeNull();
   expect(createBox).not.toBeNull();
-  expect(createBox?.y ?? 0).toBeGreaterThan(searchBox?.y ?? 0);
+  expect(Math.abs((createBox?.y ?? 0) + (createBox?.height ?? 0) / 2 - ((searchBox?.y ?? 0) + (searchBox?.height ?? 0) / 2))).toBeLessThanOrEqual(1);
   expect(mobileStatus?.height).toBe(20);
   await expect(status).toContainText("1 of 2 members");
 });

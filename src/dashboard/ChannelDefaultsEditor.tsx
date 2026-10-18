@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactElement } from "react";
+import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 
 import type { ChannelRole, ChatOutputTarget } from "../contracts/values";
@@ -16,6 +17,7 @@ import { ChatTargetField, ConfirmDialog, LoadState, LoadStateLines, SaveStatus, 
 interface ChannelDefaultsEditorProperties {
   channelId: string;
   role: ChannelRole;
+  saveTarget?: HTMLElement | null;
 }
 
 interface ChannelDefaultsDraft {
@@ -24,7 +26,7 @@ interface ChannelDefaultsDraft {
   chatTarget: ChatOutputTarget;
 }
 
-export const ChannelDefaultsEditor = ({ channelId, role }: ChannelDefaultsEditorProperties): ReactElement => {
+export const ChannelDefaultsEditor = ({ channelId, role, saveTarget }: ChannelDefaultsEditorProperties): ReactElement => {
   const labels = channelSettingsTexts(dashboardLanguage());
   const targetLabels = chatTargetFieldTexts[dashboardLanguage()];
   const common = dashboardCommonTexts();
@@ -93,13 +95,25 @@ export const ChannelDefaultsEditor = ({ channelId, role }: ChannelDefaultsEditor
   };
   const navigationGuard = useDraftGuard(dirty, saveDraft, discard);
 
+  const saveStatus = <SaveStatus dirty={dirty} pending={pending} saveDisabled={!settingsReady} persistent {...(saveError === undefined ? {} : { error: saveError })} saved={saved}
+    onSave={() => { void saveDraft(); }} onDiscard={discard}
+    saveLabel={common.save} discardLabel={common.discard} savedLabel={common.saved} pendingLabel={common.saving} />;
+
   useEffect(() => registerDashboardNavigationGuard(navigationGuard.guardSwitch), [navigationGuard.guardSwitch]);
 
   return <Section title={labels.section} className="channel-defaults-editor">
-    <LoadState variant={canEdit ? "panel-178" : "panel-0"}
+    <LoadState variant="panel-0" reserveHeight={canEdit ? "86px" : undefined}
       status={!settingsReady ? settingsQuery.isError || settings !== undefined ? "error" : "loading" : "success"}
-      loading={<LoadStateLines rows={2} height={58} />}
-      empty={<LoadStateLines rows={2} height={58} />}
+      loading={canEdit ? <div className="channel-defaults-editor__fields">
+        <div className="channel-defaults-editor__field channel-defaults-editor__field--chat-target">
+          <div className="inspector-field-row inspector-field-row--stacked">
+            <div className="inspector-field-row__label">{labels.defaultChatTarget}</div>
+            <div className="inspector-field-row__control channel-defaults-editor__loading-control ui-load-state__reserved-lines" aria-hidden="true"><span /></div>
+          </div>
+          <p className="muted channel-defaults-editor__hint">{labels.defaultChatTargetHint}</p>
+        </div>
+      </div> : <LoadStateLines rows={2} height={39} />}
+      empty={<LoadStateLines rows={2} height={39} />}
       error={<p role="alert">{labels.loadError}</p>}
       queryError={{ title: dashboard.errors.dataLoadFailed, message: labels.loadError, onRetry: () => { void settingsQuery.refetch(); } }}>
       {!settingsReady ? null : !canEdit ? <>
@@ -117,11 +131,9 @@ export const ChannelDefaultsEditor = ({ channelId, role }: ChannelDefaultsEditor
             <p className="muted channel-defaults-editor__hint">{labels.defaultChatTargetHint}</p>
           </div>
         </div>
-        <SaveStatus dirty={dirty} pending={pending} persistent {...(saveError === undefined ? {} : { error: saveError })} saved={saved}
-          onSave={() => { void saveDraft(); }} onDiscard={discard}
-          saveLabel={common.save} discardLabel={common.discard} savedLabel={common.saved} pendingLabel={common.saving} />
       </>}
     </LoadState>
+    {canEdit ? saveTarget === undefined ? saveStatus : saveTarget === null ? null : createPortal(saveStatus, saveTarget) : null}
     <ConfirmDialog opened={navigationGuard.confirmOpen} title={dashboard.module.unsavedChangesTitle}
       description={dashboard.module.unsavedChangesDescription}
       confirmLabel={dashboard.module.discardAndSwitch} cancelLabel={dashboard.module.continueEditing}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactElement, type ReactNode } from "react";
 
 import { MODULES } from "../modules/registry";
+import { MODULE_NAVIGATION_CATEGORIES } from "../modules/contract";
 import type { ModulePanelProperties, ModuleRegisteredTemplateVariable } from "../modules/contract";
 import type { BelaboxSettings } from "../modules/belabox/contracts";
 import type { BelaboxStatusResponse } from "../modules/belabox/contracts";
@@ -11,7 +12,7 @@ import { RetryableLazy } from "./RetryableLazy";
 import { canManage, type ChannelRole } from "../contracts/values";
 import { isEventTemplateVariableAvailable } from "../contracts/event-template-variables";
 import type { PanelActiveModule, PanelModuleState, PanelTemplateWarning } from "../panel-contract";
-import { PanelApiError, getChannelModuleSettings, getChannelTemplateVariables, saveChannelModuleSettings, setChannelModuleEnabled } from "./api";
+import { PanelApiError, getChannelModuleSettings, getChannelTemplateVariables, saveChannelModuleSettings } from "./api";
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "./data";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber, serverFieldErrorText, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
@@ -19,7 +20,7 @@ import { templateTextLength } from "../template";
 import { modulePermissionsAreMissing } from "./channel-health";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { effectivePanelTemplateVariables, panelTemplateOptions, registeredModuleTemplateGroup, type PanelChannelVariable } from "./ui/template-variable-options";
-import { ChatCommandsHelp, ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, SettingsEditor, SettingsPage, StatusLed, LockedReason, Tabs, mapServerFieldErrors, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
+import { ChatCommandsHelp, ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, Section, SettingsEditor, SettingsPage, StatusLed, LockedReason, Tabs, mapServerFieldErrors, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
 import { useDraft } from "./ui/useDraft";
 import { useChannelSettings } from "./data/channel-settings";
 import { Switch as SwitchPrimitive } from "./ui/primitives/switch";
@@ -121,10 +122,11 @@ export const StateRow = ({ label, tone, word, detail, action, icon }: {
   );
 };
 
-const LockedModuleStatus = ({ status, reason }: { status: string; reason: string }): ReactElement => (
+const LockedModuleStatus = ({ status, reason, showReason = false }: { status: string; reason: string; showReason?: boolean }): ReactElement => (
   <span className="module-locked-status" aria-label={`${status}: ${reason}`} aria-description={reason} title={reason}>
     <Icon name="lock" size={16} className="module-locked-status__icon" />
     <span>{status}</span>
+    {showReason ? <span className="module-locked-status__reason" role="note">{reason}</span> : null}
   </span>
 );
 
@@ -940,8 +942,7 @@ interface ModuleWorkspaceProperties {
   loading?: boolean;
   error?: string | null;
   onNavigate: (route: DashboardRoute) => void;
-  /** Reloads `modules` after a successful toggle. */
-  onChanged: () => Promise<void>;
+  onToggleModule: (channelId: string, moduleId: string, enabled: boolean) => Promise<void>;
 }
 
 const ModuleWorkspaceRow = ({
@@ -973,7 +974,7 @@ const ModuleWorkspaceRow = ({
   const effectiveEnabled = (rawEnabled || mandatory) && !permissionsMissing;
   const state = permissionsMissing ? labels.disabled : statusWord(effectiveEnabled);
   const route: DashboardRoute = { kind: "module", channelId, moduleId };
-  const lockedReason = mandatory ? mandatoryReason : manageable ? undefined : texts.module.managementLocked;
+  const lockedReason = mandatory || manageable ? undefined : texts.module.managementLocked;
 
   return (
     <ListRow
@@ -981,13 +982,15 @@ const ModuleWorkspaceRow = ({
       onNavigate={() => { onNavigate(route); }}
       icon={<ModuleIcon moduleId={moduleId} className="scope-row__icon" />}
       title={details.name}
-      description={details.description}
+      description={<>
+        {details.description}
+        {lockedReason === undefined ? null : <span className="module-workspace__lock-reason"><LockedReason id={`module-lock-${moduleId}`} reason={lockedReason} /></span>}
+      </>}
       status={mandatory
-        ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} />
+        ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} showReason />
         : <StatusLed state={permissionsMissing ? "warn" : effectiveEnabled ? "ok" : "off"} label={state} />}
       action={mandatory ? null : <div className="module-switch-control">
         <SwitchPrimitive aria-label={`${details.name}: ${statusWord(rawEnabled)}`} aria-describedby={lockedReason === undefined ? undefined : `module-lock-${moduleId}`} aria-busy={busy} checked={rawEnabled} disabled={!manageable || busy} onCheckedChange={onToggle} />
-        <LockedReason id={`module-lock-${moduleId}`} {...(lockedReason === undefined ? {} : { reason: lockedReason })} />
       </div>}
     />
   );
@@ -998,8 +1001,7 @@ interface ModuleToggleListProperties {
   ownRole: ChannelRole;
   modules: PanelModuleState[];
   onNavigate: (route: DashboardRoute) => void;
-  /** Reloads `modules` after a successful toggle. */
-  onChanged: () => Promise<void>;
+  onToggleModule: (channelId: string, moduleId: string, enabled: boolean) => Promise<void>;
 }
 
 /**
@@ -1007,42 +1009,41 @@ interface ModuleToggleListProperties {
  * embed it beside other channel content. `ModuleWorkspace` below wraps this
  * with the full "Module" page's own heading and error line.
  */
-const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onChanged }: ModuleToggleListProperties): ReactElement => {
+const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onToggleModule }: ModuleToggleListProperties): ReactElement => {
   const texts = dashboardTexts();
+  const labels = workspaceTexts();
   const manageable = canManageModules(ownRole);
-  // Holds the clicked value only while the request is in flight; afterwards
-  // the caller reloads `modules`, so the list, sidebar and overview agree.
   const [pendingEnabled, setPendingEnabled] = useState<Record<string, boolean>>({});
-  const [busyModuleId, setBusyModuleId] = useState<string | null>(null);
+  const busyModulesRef = useRef(new Set<string>());
+  const [busyModules, setBusyModules] = useState<ReadonlySet<string>>(new Set());
 
   const toggle = async (moduleId: string, nextEnabled: boolean): Promise<void> => {
-    // The seam `Switch` already disables itself while `pending`, but that
-    // guard lives in a prop the caller could ignore -- ignore an in-flight
-    // click here too, so two toggles for the same module never race.
-    if (busyModuleId === moduleId) return;
-    setBusyModuleId(moduleId);
+    if (busyModulesRef.current.has(moduleId)) return;
+    busyModulesRef.current.add(moduleId);
+    setBusyModules(new Set(busyModulesRef.current));
     setPendingEnabled((current) => ({ ...current, [moduleId]: nextEnabled }));
     try {
-      await setChannelModuleEnabled(channelId, moduleId, nextEnabled);
-      await onChanged();
-    } catch (toggleFailure: unknown) {
-      if (toggleFailure instanceof PanelApiError && toggleFailure.status === 401) {
-        notify({ tone: "error", message: texts.errors.sessionInvalid });
-      } else {
-        notify({ tone: "error", message: toggleFailure instanceof PanelApiError
-          ? apiErrorText(toggleFailure.code, texts.errors.changeFailed)
-          : texts.errors.changeFailed });
-      }
+      await onToggleModule(channelId, moduleId, nextEnabled);
     } finally {
       setPendingEnabled((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== moduleId)));
-      setBusyModuleId(null);
+      busyModulesRef.current.delete(moduleId);
+      setBusyModules(new Set(busyModulesRef.current));
     }
   };
 
+  type WorkspaceModule = Omit<(typeof MODULES)[number], "navigationCategory"> & { navigationCategory?: (typeof MODULE_NAVIGATION_CATEGORIES)[number] };
+  const workspaceModules = MODULES as readonly WorkspaceModule[];
+  const groupedModules = MODULE_NAVIGATION_CATEGORIES.map((category) => ({
+    category,
+    modules: workspaceModules.filter((module) => (module.navigationCategory ?? "admin") === category),
+  })).filter(({ modules: group }) => group.length > 0);
   return (
     <>
-      <div className="state-list">
-        {MODULES.map((module) => {
+      <p className="module-workspace__hint">{labels.immediateDescription}</p>
+      <div className="module-workspace__groups">
+        {groupedModules.map(({ category, modules: group }) => <Section key={category} title={texts.navigation.moduleCategories[category]} className="module-workspace__group">
+          <div className="state-list">
+            {group.map((module) => {
           const state = modules.find((candidate) => candidate.id === module.id);
           const mandatory = state?.mandatory === true || module.mandatory === true;
           const rawEnabled = mandatory || (pendingEnabled[module.id] ?? state?.enabled === true);
@@ -1054,32 +1055,37 @@ const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onChanged }
               rawEnabled={rawEnabled}
               missingScopes={state?.missingBroadcasterScopes ?? []}
               manageable={manageable}
-              busy={busyModuleId === module.id}
+              busy={busyModules.has(module.id)}
               onToggle={(nextEnabled) => { void toggle(module.id, nextEnabled); }}
               onNavigate={onNavigate}
             />
           );
-        })}
+            })}
+          </div>
+        </Section>)}
       </div>
     </>
   );
 };
 
-export const ModuleWorkspace = ({ channelId, ownRole, modules, loading = false, error = null, onNavigate, onChanged }: ModuleWorkspaceProperties): ReactElement => {
+export const ModuleWorkspace = ({ channelId, ownRole, modules, loading = false, error = null, onNavigate, onToggleModule }: ModuleWorkspaceProperties): ReactElement => {
+  const labels = workspaceTexts();
   useEffect(() => {
     if (error !== null) notify({ tone: "error", message: error });
   }, [error]);
 
   return (
     <section className="module-workspace" aria-label={dashboardTexts().navigation.module}>
-      <div className="module-workspace__main">
-        <SettingsPage
-          kind="modules"
-          title={dashboardTexts().navigation.module}
-          subtitle={loading ? dashboardTexts().module.load : dashboardTexts().module.available}
-          columns={[<ModuleToggleList key={channelId} channelId={channelId} ownRole={ownRole} modules={modules} onNavigate={onNavigate} onChanged={onChanged} />]}
-        />
-      </div>
+      <SettingsPage
+        kind="modules"
+        title={dashboardTexts().navigation.module}
+        subtitle={`${labels.activeCount(MODULES.filter((module) => {
+          const state = modules.find((candidate) => candidate.id === module.id);
+          return (state?.mandatory === true || module.mandatory === true || state?.enabled === true)
+            && !modulePermissionsAreMissing({ missingBroadcasterScopes: state?.missingBroadcasterScopes ?? [] });
+        }).length)}${loading ? ` · ${dashboardTexts().module.load}` : ""}`}
+        columns={[<ModuleToggleList key={channelId} channelId={channelId} ownRole={ownRole} modules={modules} onNavigate={onNavigate} onToggleModule={onToggleModule} />]}
+      />
     </section>
   );
 };

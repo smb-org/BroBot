@@ -40,7 +40,7 @@ const expectEveryFieldHasHelperText = (scope: HTMLElement): void => {
   const fields = [
     ...within(scope).queryAllByRole("textbox"),
     ...within(scope).queryAllByRole("spinbutton"),
-    ...within(scope).queryAllByRole("group").filter((field) => field.classList.contains("segment-choice")),
+    ...within(scope).queryAllByRole("group"),
     ...within(scope).queryAllByRole("combobox"),
     ...within(scope).queryAllByRole("switch"),
   ].filter((field) => field.closest(".ui-field--search") === null);
@@ -61,18 +61,31 @@ describe("helper text on every field (editor-konzept 3.0/15d)", () => {
     expect(() => { expectEveryFieldHasHelperText(container); }).toThrow();
   });
 
-  it("gives every field in the members grant editor and member inspector a helper text", () => {
+  it("gives every field in the members invite dialog and member inspector a helper text", async () => {
     const member = { userId: "1", login: "mod", displayName: "Mod", profileImageUrl: null, role: "manager" as const, joinedAt: "2026-09-01T00:00:00.000Z" };
     const response: PanelMembersResponse = { members: [member], nextCursor: null, broadcasterCount: 1, viewerUserId: "1" };
-    const { container } = renderWithQuery(
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path.endsWith("/members/search")) return Promise.resolve(jsonResponse({ user: { userId: "2", login: "new_helper", displayName: "New Helper", profileImageUrl: null } }));
+      return Promise.resolve(jsonResponse({}));
+    }));
+    renderWithQuery(
       <UiProvider><MembersPage channelId="kanal-a" ownRole="manager" onAuthenticationRequired={() => {}} /></UiProvider>,
       undefined,
       { initialData: [{ queryKey: dashboardDataKeys.members("kanal-a"), data: { pages: [response], pageParams: [null] } }] },
     );
 
-    fireEvent.click(screen.getByRole("row", { name: /Mod/ }));
+    fireEvent.click(screen.getByRole("link", { name: /Mod/ }));
+    const inspector = await screen.findByRole("region", { name: "Mitglied bearbeiten: Mod" });
+    expectEveryFieldHasHelperText(inspector);
+
     fireEvent.click(screen.getByRole("button", { name: "Zugriff vergeben" }));
-    expectEveryFieldHasHelperText(container);
+    const dialog = await screen.findByRole("dialog", { name: "Zugriff vergeben" });
+    expectEveryFieldHasHelperText(dialog);
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Twitch-Name" }), { target: { value: "new_helper" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Suchen" }));
+    await within(dialog).findByRole("heading", { name: "Rolle vergeben" });
+    expectEveryFieldHasHelperText(dialog);
   });
 
   it("gives every field in the platform release form and channel inspector a helper text", async () => {

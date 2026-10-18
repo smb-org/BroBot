@@ -42,7 +42,7 @@ const mockDashboard = async (page: Page, role: string, modules: unknown[]): Prom
   });
 };
 
-test("operator module names keep priority while lock reasons sit below each row at 390px", async ({ page }) => {
+test("operator module names and centered lock controls fit at 390px", async ({ page }) => {
   await mockDashboard(page, "operator", [
     { id: "text_commands", enabled: true, settings: "{}" },
     { id: "faq", enabled: false, settings: "{}" },
@@ -57,11 +57,14 @@ test("operator module names keep priority while lock reasons sit below each row 
     names.every((name) => name.scrollWidth <= name.clientWidth + 1));
   expect(namesFit).toBe(true);
 
-  const reason = page.locator(".module-workspace .module-switch-control .ui-locked-reason").first();
-  const reasonBelowLink = await reason.evaluate((element) => {
-    const link = element.closest(".list-row")?.querySelector(".list-row__link");
-    if (link === null || link === undefined) throw new Error("The module link is missing.");
-    return element.getBoundingClientRect().top >= link.getBoundingClientRect().bottom - 1;
-  });
-  expect(reasonBelowLink).toBe(true);
+  const reason = page.locator(".module-workspace .module-workspace__lock-reason .ui-locked-reason").first();
+  await expect(reason).toBeVisible();
+  const row = reason.locator("xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' list-row ')]");
+  const descriptionBox = await row.locator(".list-row__description").boundingBox();
+  const rowBox = await row.boundingBox();
+  const switchBox = await row.getByRole("switch").boundingBox();
+  expect(descriptionBox?.width ?? 0).toBeGreaterThan(140);
+  expect(rowBox).not.toBeNull();
+  expect(switchBox).not.toBeNull();
+  expect(Math.abs((rowBox?.y ?? 0) + (rowBox?.height ?? 0) / 2 - ((switchBox?.y ?? 0) + (switchBox?.height ?? 0) / 2))).toBeLessThanOrEqual(2);
 });

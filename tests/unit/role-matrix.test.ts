@@ -221,13 +221,13 @@ const actions: readonly RoleAction[] = [
     name: "Enable module",
     source: "db/channel-modules.ts:createChannelModuleWithAudit + db/guards.ts:actorGuard",
     expected: allowed(true, true, false, false),
-    execute: (database) => createChannelModuleWithAudit(
+    execute: async (database) => (await createChannelModuleWithAudit(
       database as unknown as D1Database,
       actor,
       { channelId: "kanal-a", moduleId: "raid", enabled: true, settings: "{}" },
       "module.enabled",
       timestamp,
-    ),
+    )) !== null,
   },
   {
     name: "Change module settings",
