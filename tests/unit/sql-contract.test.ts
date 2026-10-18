@@ -193,6 +193,10 @@ const sqlGetFixtures = new Map<string, string>([
   ["authorization.sql", authorizeModuleMutation("channel-id", actor, now).sql],
   ["blockGuard.sql", textBlockWriteGuard("channel-id", 1, ["{text.welcome}"]).sql],
   ["textBlockGuard?.sql ?? \"\"", textBlockWriteGuard("channel-id", 1, ["{text.welcome}"]).sql],
+  ["stateGuard?.sql ?? \"\"", `AND EXISTS (
+        SELECT 1 FROM channel_modules AS required_module
+         WHERE required_module.channel_id = ? AND required_module.module_id = ? AND required_module.enabled = 1
+      )`],
   ["renamedBlockGuard", `EXISTS (
         SELECT 1 FROM text_blocks
          WHERE channel_id = ? AND block_name = ? AND revision = ?

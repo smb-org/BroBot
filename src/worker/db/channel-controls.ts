@@ -26,6 +26,7 @@ interface DispatchChannelStateRow extends ChannelControlFields {
   module_id: string | null;
   enabled: number | null;
   settings: string | null;
+  revision: number | null;
   stream_state: string | null;
   stream_started_at: string | null;
   stream_id: string | null;
@@ -39,7 +40,7 @@ interface CurrentStreamFields {
 
 export interface DispatchChannelState {
   controls: PanelChannelControls;
-  activations: { moduleId: string; enabled: boolean; settings: string }[];
+  activations: { moduleId: string; enabled: boolean; settings: string; revision: number }[];
   streamState: string | null;
   streamStartedAt: string | null;
   streamId: string | null;
@@ -134,7 +135,7 @@ export const readDispatchChannelState = async (
   now: string,
 ): Promise<DispatchChannelState> => {
   const rows = await db.prepare(
-    `SELECT channel_modules.module_id, channel_modules.enabled, channel_modules.settings,
+    `SELECT channel_modules.module_id, channel_modules.enabled, channel_modules.settings, channel_modules.revision,
             channel_controls.muted, channel_controls.muted_until, channel_controls.mute_until_stream_end,
             channel_controls.mute_stream_started_at, channel_controls.mute_stream_id,
             channel_controls.paused, channel_controls.paused_until, channel_controls.pause_until_stream_end,
@@ -151,9 +152,9 @@ export const readDispatchChannelState = async (
   const first = rows.results[0];
   return {
     controls: first === undefined ? mapRow(null, now, false) : mapRow(first, now, false),
-    activations: rows.results.flatMap((row) => row.module_id === null || row.enabled === null || row.settings === null
+    activations: rows.results.flatMap((row) => row.module_id === null || row.enabled === null || row.settings === null || row.revision === null
       ? []
-      : [{ moduleId: row.module_id, enabled: row.enabled === 1, settings: row.settings }]),
+      : [{ moduleId: row.module_id, enabled: row.enabled === 1, settings: row.settings, revision: row.revision }]),
     streamState: first?.stream_state ?? null,
     streamStartedAt: first?.stream_started_at ?? null,
     streamId: first?.stream_id ?? null,

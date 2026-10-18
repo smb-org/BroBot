@@ -34,6 +34,7 @@ import { DEFAULT_CHANNEL_TIME_ZONE } from "../modules/contract";
 import { chatOutputSuppressionReason } from "./chat-output-gate";
 import { createModuleExternalFetchBudget } from "./external-fetch-budget";
 import { moduleBallots } from "./module-ballots";
+import { modulePoints } from "./module-points";
 import { createModuleSecretReadAccess } from "./module-secrets";
 import { recordChannelGameHistory } from "./db/game-search-cache";
 import { notifyModuleScheduleInputsChanged } from "./module-schedules";
@@ -947,6 +948,11 @@ export const dispatchEventSubNotification = async (
     let result: ModuleResult | null = null;
 
     try {
+      const activation = dispatchState.activations.find((candidate) => candidate.moduleId === module.id);
+      const points = modulePoints(environment.CHANNEL, event.channelId, module.id);
+      if (module.requiresModules?.includes("points") === true && activation !== undefined) {
+        await points.rounds.setGate(!activation.enabled, activation.revision);
+      }
       const validatedSettings: unknown = module.settingsSchema.parse(JSON.parse(settings));
       const moduleEvent: ModuleEvent = {
         channelId: event.channelId,
@@ -1001,6 +1007,7 @@ export const dispatchEventSubNotification = async (
             DB: environment.DB,
             authorizeMutation: authorizeModuleMutation,
             ballots: moduleBallots(environment.CHANNEL, event.channelId, module.id),
+            points,
             readChannelBlockedTerms: channelBlockedTerms,
             botUserId,
             lookupUserByLogin: async (login) => {

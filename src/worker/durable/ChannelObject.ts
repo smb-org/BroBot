@@ -65,7 +65,12 @@ import type {
   ModuleAlarmIdentity,
   ModuleAlarmPlan,
   ModuleBallotAccess,
+  ModulePointsAccess,
+  PointJoinResult,
   ModuleExternalFetchBudget,
+  PointsApplyResult,
+  PointsKind,
+  PointsMovement,
   ModuleScheduleInputChangeReason,
 } from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
@@ -139,6 +144,42 @@ import {
   readStoredBallotSnapshot,
   setStoredBallotBlockedTerms,
 } from "./ballots";
+import {
+  POINTS_ANNOUNCE_AMBIGUOUS_MS,
+  POINTS_ANNOUNCE_MAX_ATTEMPTS,
+  POINTS_ANNOUNCE_RETRY_MS,
+  POINTS_ROUND_ALARM_HANDLER,
+  POINTS_ROUND_ALARM_PREFIX,
+  acknowledgeWelcomeSync,
+  announceAttemptSync,
+  applyPointOperationSync,
+  cancelPointRoundsSync,
+  claimPointCooldownSync,
+  creditPointActivitySync,
+  ensurePointsSchema,
+  joinPointRoundSync,
+  listPointAccounts,
+  markPointRoundAnnouncedSync,
+  openPointRoundSync,
+  pendingPointAudits,
+  pointAuditWrittenSync,
+  pointBalance,
+  pointHistory,
+  pointPayloadHash,
+  pointRankOf,
+  pointRanking,
+  pointRoundAlarmKey,
+  pointRoundRefundRequests,
+  pointRoundRow,
+  pointSummary,
+  recoverablePointRounds,
+  recordPointAnnouncementSync,
+  resolvePointRoundSync,
+  settlementFromRoundData,
+  setGameModuleGateSync,
+  touchPointAccountSync,
+} from "./points";
+import { POINT_SETTLEMENTS } from "./point-settlements";
 
 const SECURITY_ALARM_INTERVAL_MS = 15 * 60 * 1000;
 const SECURITY_RETRY_INTERVAL_MS = 60 * 1000;
@@ -158,6 +199,11 @@ const ALARM_TABLE_KEY = "channel:alarm_schedule";
 const PANEL_DURABLE_REVISIONS_KEY = "channel:panel_resource_revisions";
 const CHAT_ACTIVITY_COUNT_KEY = "channel:chat_activity_count";
 const TIMER_MIRROR_RETRY_DELAY_MS = 5_000;
+const POINTS_ANNOUNCEMENT_REGISTRATION: ModuleAlarmDefinition = {
+  key: "points_announce",
+  retryDelaysMs: [POINTS_ANNOUNCE_RETRY_MS],
+  handle: () => Promise.resolve(),
+};
 const TIMER_TOMBSTONE_RETENTION_MS = 24 * 60 * 60_000;
 const MODULE_ALARM_SEND_CLAIMS_KEY = "module_alarm:send_claims";
 const LEGACY_TIMER_CLAIMS_IMPORTED_KEY = "timers:legacy_claims_imported";
@@ -541,12 +587,14 @@ export class ChannelObject extends DurableObject<Env> {
   private alarmScheduleQueue: Promise<void> = Promise.resolve();
   private timerScheduleReconciliationQueue: Promise<void> = Promise.resolve();
   private activeChatterSchemaReady = false;
+  private pointsSchemaReady = false;
   // ponytail: This Set is per-instance memory and is empty after hibernation, so the residual window is bounded by the security alarm. Persist token IDs in DO storage if that window needs to be shorter.
   private recentlyBoundOverlayTokenIds = new Set<string>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+    this.ensurePointsSchema();
     if (ctx.storage.kv.get(LEGACY_ACTIVE_CHATTER_STREAM_KEY) !== undefined) {
       this.ensureActiveChatterTable();
       ctx.storage.transactionSync(() => {
@@ -557,7 +605,14 @@ export class ChannelObject extends DurableObject<Env> {
     // Cloudflare-documented Durable Object init: the input gate blocks all events until this completes.
     void ctx.blockConcurrencyWhile(async () => { // NOSONAR
       await this.ensureTimerSchedulesInitialized();
+      await this.recoverPointRoundAlarms();
     });
+  }
+
+  private ensurePointsSchema(): void {
+    if (this.pointsSchemaReady) return;
+    ensurePointsSchema(this.ctx.storage.sql);
+    this.pointsSchemaReady = true;
   }
 
   private ownChannelId(): string | null {
@@ -2411,6 +2466,7 @@ export class ChannelObject extends DurableObject<Env> {
       ...(streamGeneration === undefined ? {} : { streamGeneration }),
       externalFetchBudget,
       ballots: this.ballotAccess(moduleId),
+      points: this.pointAccess(moduleId),
       secrets: createModuleSecretAccess(this.env, channelId, moduleId),
       channelLanguage: async () => {
         const row = await this.env.DB.prepare("SELECT language FROM channels WHERE channel_id = ?")
@@ -2705,6 +2761,348 @@ export class ChannelObject extends DurableObject<Env> {
     return typeof current === "number" && Number.isSafeInteger(current) && current >= 0 ? current : 0;
   }
 
+  private writePointRoundAlarmSync(key: string, deadline: number): void {
+    const stored = this.ctx.storage.kv.get<AlarmScheduleTable>(ALARM_TABLE_KEY);
+    const table = stored === undefined ? {} : { ...stored };
+    table[key] = {
+      deadline,
+      handler: POINTS_ROUND_ALARM_HANDLER,
+      revision: (table[key]?.revision ?? 0) + 1,
+    };
+    this.ctx.storage.kv.put(ALARM_TABLE_KEY, table);
+  }
+
+  private clearPointRoundAlarmSync(key: string): void {
+    const stored = this.ctx.storage.kv.get<AlarmScheduleTable>(ALARM_TABLE_KEY);
+    if (stored === undefined || stored[key] === undefined) return;
+    const table = { ...stored };
+    Reflect.deleteProperty(table, key);
+    this.ctx.storage.kv.put(ALARM_TABLE_KEY, table);
+  }
+
+  private async recoverPointRoundAlarms(): Promise<void> {
+    this.ensurePointsSchema();
+    const rounds = recoverablePointRounds(this.ctx.storage.sql);
+    const table = await this.ensureAlarmScheduleTable();
+    const now = Date.now();
+    let changed = false;
+    for (const round of rounds) {
+      const alarmKey = pointRoundAlarmKey(round.round_id);
+      if (round.state === "open" && round.deadline_at !== null && round.deadline_at + 60_000 < now) {
+        console.error(`Point round ${round.round_id} is stuck past its resolution grace period.`);
+      }
+      if (table[alarmKey] !== undefined) continue;
+      let deadline = round.deadline_at ?? now;
+      if (round.state === "announcing") {
+        if (round.announce_state === "rate_limited" && round.last_attempt_at !== null) {
+          deadline = round.last_attempt_at + POINTS_ANNOUNCE_RETRY_MS;
+        } else if (round.announce_state === "pending" && round.announce_attempts >= POINTS_ANNOUNCE_MAX_ATTEMPTS &&
+            round.last_attempt_at !== null) {
+          deadline = round.last_attempt_at + POINTS_ANNOUNCE_AMBIGUOUS_MS;
+        } else if (round.announce_state === "failed") {
+          deadline = now;
+        } else if (round.announce_state === "pending") {
+          deadline = now;
+        }
+      }
+      this.ctx.storage.transactionSync(() => { this.writePointRoundAlarmSync(alarmKey, deadline); });
+      changed = true;
+    }
+    if (changed || await this.ctx.storage.getAlarm() === null) await this.scheduleEarliestAlarm();
+  }
+
+  private pointAccess(moduleId: string): ModulePointsAccess {
+    return {
+      apply: (operationId, kind, movements, result) => this.applyPointOperation(moduleId, operationId, kind, movements, result),
+      touchAccount: (accountId, login, startBonus) => this.touchPointAccount(moduleId, accountId, login, startBonus),
+      ackWelcome: (accountId) => this.acknowledgePointWelcome(moduleId, accountId),
+      creditActivity: (accountId, login, messageAt, live, rules) =>
+        this.creditPointActivity(moduleId, accountId, login, messageAt, live, rules),
+      balance: (accountId) => this.pointBalance(moduleId, accountId),
+      listAccounts: (query) => this.listPointAccounts(moduleId, query),
+      history: (accountId, cursor, limit) => this.pointHistory(moduleId, accountId, cursor, limit),
+      summary: () => this.pointSummary(moduleId),
+      ranking: (month, limit) => this.pointRanking(moduleId, month, limit),
+      rankOf: (accountId, month) => this.pointRankOf(moduleId, accountId, month),
+      markAuditWritten: (operationId) => this.markPointAuditWritten(moduleId, operationId),
+      pendingAudits: () => this.pendingPointAudits(moduleId),
+      claimCooldown: (key, seconds) => this.claimPointCooldown(moduleId, key, seconds),
+      rounds: {
+        open: (roundId, data) => this.openGameRound(moduleId, roundId, data),
+        markAnnounced: (roundId, deadlineAt, alarmKey) => this.markGameRoundAnnounced(moduleId, roundId, deadlineAt, alarmKey),
+        join: (roundId, operationId, accountId, login, stake, data) =>
+          this.joinGameRound(moduleId, roundId, operationId, accountId, login, stake, data),
+        resolve: (roundId, settlement) => this.resolveGameRound(moduleId, roundId, settlement),
+        cancelOpenRounds: () => this.cancelOpenGameRounds(moduleId),
+        setGate: (closed, revision) => this.setGameModuleGate(moduleId, closed, revision),
+      },
+    };
+  }
+
+  public async applyPointOperation(
+    moduleId: string,
+    operationId: string,
+    kind: PointsKind,
+    movements: PointsMovement[],
+    result: unknown,
+  ): Promise<PointsApplyResult> {
+    this.ensurePointsSchema();
+    const payloadHash = await pointPayloadHash({ moduleId, operationId, kind, movements, result });
+    const applied = this.ctx.storage.transactionSync(() => applyPointOperationSync(
+      this.ctx.storage.sql,
+      moduleId,
+      operationId,
+      kind,
+      movements,
+      result,
+      payloadHash,
+      new Date().toISOString(),
+    ));
+    return { replayed: applied.replayed, result: applied.result, balances: applied.balances };
+  }
+
+  public async touchPointAccount(
+    moduleId: string,
+    accountId: string,
+    login: string,
+    startBonus: number,
+  ): Promise<{ welcomePending: boolean }> {
+    this.ensurePointsSchema();
+    const operationId = `bonus:${accountId}`;
+    const movements: PointsMovement[] = [
+      { accountId, delta: startBonus, login },
+      { accountId: "__house", delta: -startBonus },
+    ];
+    const payloadHash = await pointPayloadHash({
+      moduleId,
+      operationId,
+      kind: "bonus",
+      movements,
+      result: { amount: startBonus },
+    });
+    return this.ctx.storage.transactionSync(() => touchPointAccountSync(
+      this.ctx.storage.sql,
+      moduleId,
+      accountId,
+      login,
+      startBonus,
+      payloadHash,
+      new Date().toISOString(),
+    ));
+  }
+
+  public acknowledgePointWelcome(_moduleId: string, accountId: string): Promise<void> {
+    this.ensurePointsSchema();
+    this.ctx.storage.transactionSync(() => { acknowledgeWelcomeSync(this.ctx.storage.sql, accountId, new Date().toISOString()); });
+    return Promise.resolve();
+  }
+
+  public async creditPointActivity(
+    moduleId: string,
+    accountId: string,
+    login: string,
+    messageAt: number,
+    live: boolean,
+    rules: { amount: number; windowMinutes: number; dailyCap: number },
+  ): Promise<{ credited: number }> {
+    this.ensurePointsSchema();
+    const windowStart = Math.floor(messageAt / (rules.windowMinutes * 60_000)) * rules.windowMinutes * 60_000;
+    const operationId = `activity:${accountId}:${String(windowStart)}`;
+    const payloadHash = await pointPayloadHash({ moduleId, operationId, kind: "activity", accountId });
+    return this.ctx.storage.transactionSync(() => creditPointActivitySync(
+      this.ctx.storage.sql,
+      moduleId,
+      accountId,
+      login,
+      messageAt,
+      live,
+      rules,
+      () => payloadHash,
+      new Date().toISOString(),
+    ));
+  }
+
+  public pointBalance(_moduleId: string, accountId: string): Promise<number> {
+    this.ensurePointsSchema();
+    return Promise.resolve(pointBalance(this.ctx.storage.sql, accountId));
+  }
+
+  public listPointAccounts(
+    _moduleId: string,
+    query: { sort: "balance" | "month"; search?: string; cursor?: string; limit: number },
+  ): Promise<Awaited<ReturnType<ModulePointsAccess["listAccounts"]>>> {
+    this.ensurePointsSchema();
+    return Promise.resolve(listPointAccounts(this.ctx.storage.sql, query, new Date().toISOString().slice(0, 7)));
+  }
+
+  public pointHistory(
+    _moduleId: string,
+    accountId: string,
+    cursor?: string,
+    limit?: number,
+  ): Promise<Awaited<ReturnType<ModulePointsAccess["history"]>>> {
+    this.ensurePointsSchema();
+    return Promise.resolve(pointHistory(this.ctx.storage.sql, accountId, cursor, limit));
+  }
+
+  public pointSummary(_moduleId: string): Promise<Awaited<ReturnType<ModulePointsAccess["summary"]>>> {
+    void _moduleId;
+    this.ensurePointsSchema();
+    return Promise.resolve(pointSummary(this.ctx.storage.sql));
+  }
+
+  public pointRanking(
+    _moduleId: string,
+    month: string,
+    limit: number,
+  ): Promise<Awaited<ReturnType<ModulePointsAccess["ranking"]>>> {
+    this.ensurePointsSchema();
+    return Promise.resolve(pointRanking(this.ctx.storage.sql, month, limit));
+  }
+
+  public pointRankOf(
+    _moduleId: string,
+    accountId: string,
+    month: string,
+  ): Promise<Awaited<ReturnType<ModulePointsAccess["rankOf"]>>> {
+    this.ensurePointsSchema();
+    return Promise.resolve(pointRankOf(this.ctx.storage.sql, accountId, month));
+  }
+
+  public markPointAuditWritten(moduleId: string, operationId: string): Promise<void> {
+    this.ensurePointsSchema();
+    this.ctx.storage.transactionSync(() => { pointAuditWrittenSync(this.ctx.storage.sql, moduleId, operationId); });
+    return Promise.resolve();
+  }
+
+  public pendingPointAudits(moduleId: string): Promise<Awaited<ReturnType<ModulePointsAccess["pendingAudits"]>>> {
+    this.ensurePointsSchema();
+    return Promise.resolve(pendingPointAudits(this.ctx.storage.sql, moduleId));
+  }
+
+  public claimPointCooldown(moduleId: string, key: string, seconds: number): Promise<boolean> {
+    this.ensurePointsSchema();
+    return Promise.resolve(this.ctx.storage.transactionSync(() => claimPointCooldownSync(this.ctx.storage.sql, moduleId, key, seconds, Date.now())));
+  }
+
+  public async openGameRound(moduleId: string, roundId: string, data: unknown): Promise<void> {
+    this.ensurePointsSchema();
+    const alarmKey = pointRoundAlarmKey(roundId);
+    this.ctx.storage.transactionSync(() => {
+      const opened = openPointRoundSync(this.ctx.storage.sql, moduleId, roundId, data, new Date().toISOString());
+      if (opened.opened) this.writePointRoundAlarmSync(alarmKey, Date.now());
+    });
+    await this.scheduleEarliestAlarm();
+  }
+
+  public async markGameRoundAnnounced(moduleId: string, roundId: string, deadlineAt: number, alarmKey: string): Promise<void> {
+    this.ensurePointsSchema();
+    this.ctx.storage.transactionSync(() => {
+      markPointRoundAnnouncedSync(this.ctx.storage.sql, moduleId, roundId, deadlineAt, alarmKey);
+      this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), deadlineAt);
+    });
+    await this.scheduleEarliestAlarm();
+  }
+
+  public async joinGameRound(
+    moduleId: string,
+    roundId: string,
+    operationId: string,
+    accountId: string,
+    login: string,
+    stake: number,
+    data: unknown,
+  ): Promise<PointJoinResult> {
+    this.ensurePointsSchema();
+    const payloadHash = await pointPayloadHash({ moduleId, roundId, operationId, accountId, login, stake, data });
+    return this.ctx.storage.transactionSync(() => joinPointRoundSync(
+      this.ctx.storage.sql,
+      moduleId,
+      roundId,
+      operationId,
+      accountId,
+      login,
+      stake,
+      data,
+      payloadHash,
+      Date.now(),
+      new Date().toISOString(),
+    ));
+  }
+
+  public async resolveGameRound(
+    moduleId: string,
+    roundId: string,
+    settlement: { kind: string; params: unknown },
+  ): Promise<PointsApplyResult> {
+    this.ensurePointsSchema();
+    const operationId = `round:${roundId}:resolve`;
+    const payloadHash = await pointPayloadHash({ moduleId, operationId, kind: "resolve", roundId, settlement });
+    const resolved = this.ctx.storage.transactionSync(() => {
+      const value = resolvePointRoundSync(
+        this.ctx.storage.sql,
+        moduleId,
+        roundId,
+        settlement,
+        POINT_SETTLEMENTS,
+        payloadHash,
+        new Date().toISOString(),
+      );
+      this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
+      return value;
+    });
+    await this.scheduleEarliestAlarm();
+    return { replayed: resolved.replayed, result: resolved.result, balances: resolved.balances };
+  }
+
+  public async cancelOpenGameRounds(moduleId: string): Promise<number> {
+    this.ensurePointsSchema();
+    const roundIds = this.ctx.storage.sql.exec<{ round_id: string }>(
+      `SELECT round_id FROM game_rounds WHERE module_id = ? AND state IN ('announcing', 'open', 'resolving') ORDER BY created_at, round_id`,
+      moduleId,
+    ).toArray().map(({ round_id }) => round_id);
+    return await this.cancelPointRounds(moduleId, roundIds);
+  }
+
+  private async cancelPointRounds(moduleId: string, roundIds: readonly string[]): Promise<number> {
+    const refundRequests = pointRoundRefundRequests(this.ctx.storage.sql, moduleId, roundIds);
+    const hashes = new Map<string, string>();
+    await Promise.all(refundRequests.map(async (refund) => {
+      hashes.set(refund.operationId, await pointPayloadHash({
+        moduleId,
+        operationId: refund.operationId,
+        kind: "refund",
+        movements: refund.movements,
+        result: refund.result,
+      }));
+    }));
+    const cancelled = this.ctx.storage.transactionSync(() => {
+      const count = cancelPointRoundsSync(
+        this.ctx.storage.sql,
+        moduleId,
+        new Date().toISOString(),
+        (value) => {
+          if (typeof value !== "object" || value === null || !("operationId" in value) || typeof value.operationId !== "string") {
+            throw new Error("invalid_refund");
+          }
+          const hash = hashes.get(value.operationId);
+          if (hash === undefined) throw new Error("refund_retry_required");
+          return hash;
+        },
+        roundIds,
+      );
+      for (const roundId of roundIds) this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
+      return count;
+    });
+    if (roundIds.length > 0) await this.scheduleEarliestAlarm();
+    return cancelled;
+  }
+
+  public setGameModuleGate(moduleId: string, closed: boolean, revision: number): Promise<{ applied: boolean }> {
+    this.ensurePointsSchema();
+    return Promise.resolve(this.ctx.storage.transactionSync(() => setGameModuleGateSync(this.ctx.storage.sql, moduleId, closed, revision)));
+  }
+
   /** Runs one registered module alarm from an authorized host request. */
   public async runModuleAlarm(
     moduleId: string,
@@ -2728,6 +3126,107 @@ export class ChannelObject extends DurableObject<Env> {
       () => this.runModuleAlarmHandler(moduleId, handlerKey, execute),
       () => this.notifyCommittedPanelResources(),
     );
+  }
+
+  private async recordPointRoundAnnouncement(
+    roundId: string,
+    state: "rate_limited" | "failed" | "delivered" | "ambiguous",
+    deliveredAt: number,
+  ): Promise<void> {
+    const recorded = this.ctx.storage.transactionSync(() => {
+      const outcome = recordPointAnnouncementSync(
+        this.ctx.storage.sql,
+        roundId,
+        state,
+        deliveredAt,
+      );
+      if (outcome === null) return null;
+      if (outcome.cancelled) this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), Date.now());
+      else if (state === "rate_limited") this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), Date.now() + POINTS_ANNOUNCE_RETRY_MS);
+      else if (outcome.deadlineAt !== null) this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), outcome.deadlineAt);
+      return outcome;
+    });
+    if (recorded?.cancelled === true) await this.cancelPointRounds(recorded.moduleId, [roundId]);
+    else await this.scheduleEarliestAlarm();
+  }
+
+  private async handlePointRoundAlarm(alarmKey: string, now: number): Promise<void> {
+    const roundId = alarmKey.startsWith(POINTS_ROUND_ALARM_PREFIX)
+      ? alarmKey.slice(POINTS_ROUND_ALARM_PREFIX.length)
+      : "";
+    if (roundId.length === 0) return;
+    const round = pointRoundRow(this.ctx.storage.sql, roundId);
+    if (round === null || round.state === "resolved" || round.state === "cancelled") return;
+    if (round.state === "open") {
+      if (round.deadline_at === null || round.deadline_at > now) return;
+      const settlement = settlementFromRoundData(JSON.parse(round.data_json) as unknown);
+      if (settlement === null) {
+        console.error(`Point round ${roundId} has no persisted settlement.`);
+        throw new Error("settlement_missing");
+      }
+      await this.resolveGameRound(round.module_id, roundId, settlement);
+      return;
+    }
+    if (round.announce_state === "failed") {
+      await this.cancelPointRounds(round.module_id, [roundId]);
+      return;
+    }
+    if (round.announce_state === "rate_limited" && round.announce_attempts >= POINTS_ANNOUNCE_MAX_ATTEMPTS) {
+      await this.recordPointRoundAnnouncement(roundId, "failed", now);
+      return;
+    }
+    if (round.announce_state === "pending" && round.announce_attempts >= POINTS_ANNOUNCE_MAX_ATTEMPTS &&
+        round.last_attempt_at !== null && now - round.last_attempt_at < POINTS_ANNOUNCE_AMBIGUOUS_MS) {
+      const rescheduleAt = round.last_attempt_at + POINTS_ANNOUNCE_AMBIGUOUS_MS;
+      this.ctx.storage.transactionSync(() => { this.writePointRoundAlarmSync(
+        pointRoundAlarmKey(roundId),
+        rescheduleAt,
+      ); });
+      await this.scheduleEarliestAlarm();
+      return;
+    }
+    if (round.announce_state === "pending" && round.announce_attempts > 0 && round.last_attempt_at !== null &&
+        now - round.last_attempt_at >= POINTS_ANNOUNCE_AMBIGUOUS_MS) {
+      await this.recordPointRoundAnnouncement(roundId, "ambiguous", round.last_attempt_at);
+      return;
+    }
+
+    const priorAttemptAt = round.last_attempt_at;
+    const attempt = this.ctx.storage.transactionSync(() => {
+      const claimed = announceAttemptSync(this.ctx.storage.sql, roundId, now);
+      if (claimed.outcome === "attempt") {
+        this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), now + POINTS_ANNOUNCE_RETRY_MS);
+      }
+      return claimed;
+    });
+    if (attempt.outcome === "ambiguous") {
+      await this.recordPointRoundAnnouncement(roundId, "ambiguous", attempt.round?.last_attempt_at ?? now);
+      return;
+    }
+    if (attempt.outcome !== "attempt" || attempt.round === null || attempt.attempt === null) {
+      await this.scheduleEarliestAlarm();
+      return;
+    }
+    await this.scheduleEarliestAlarm();
+    const context = this.moduleAlarmContext(
+      attempt.round.module_id,
+      POINTS_ANNOUNCEMENT_REGISTRATION,
+      createModuleExternalFetchBudget(),
+    );
+    const delivery = await context.sendChat(attempt.round.announce_text, `round:${roundId}:announce`);
+    if (delivery.sent) {
+      await this.recordPointRoundAnnouncement(roundId, "delivered", Date.now());
+      return;
+    }
+    if (delivery.reason === "rate_limited") {
+      await this.recordPointRoundAnnouncement(roundId, "rate_limited", Date.now());
+      return;
+    }
+    if (delivery.reason === "already_attempted" || delivery.reason === "network_error" || delivery.reason === "timeout") {
+      await this.recordPointRoundAnnouncement(roundId, "ambiguous", priorAttemptAt ?? attempt.round.last_attempt_at ?? now);
+      return;
+    }
+    await this.recordPointRoundAnnouncement(roundId, "failed", Date.now());
   }
 
   private ballotAccess(moduleId: string): ModuleBallotAccess {
@@ -3059,6 +3558,13 @@ export class ChannelObject extends DurableObject<Env> {
       [ACTIVE_CHATTER_EXPIRY_HANDLER, {
         handle: async (_key, entry, now) => {
           await this.expireActiveChatters(entry.deadline, now);
+        },
+      }],
+      [POINTS_ROUND_ALARM_HANDLER, {
+        retryDelaysMs: [POINTS_ANNOUNCE_RETRY_MS],
+        handle: async (key, _entry, now) => {
+          await this.handlePointRoundAlarm(key, now);
+          return undefined;
         },
       }],
       [BALLOT_EXPIRY_ALARM_HANDLER, { handle: async (key) => { await this.expireBallot(key); } }],

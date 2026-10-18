@@ -91,6 +91,27 @@ const defaultEnabledTestModule: BotModule<typeof clipsTestSchema> = {
 };
 
 const registeredModules = [testModule, mandatoryTestModule, defaultEnabledTestModule] as BotModule[];
+const dependencyTestSchema = z.object({});
+const dependencyPointsModule: BotModule<typeof dependencyTestSchema> = {
+  id: "points",
+  navigationCategory: "participation",
+  settingsSchema: dependencyTestSchema,
+  defaultSettings: {},
+};
+const dependentGameTestModule: BotModule<typeof dependencyTestSchema> = {
+  id: "test_game_requires_points",
+  navigationCategory: "participation",
+  settingsSchema: dependencyTestSchema,
+  defaultSettings: {},
+  requiresModules: ["points"],
+};
+
+const addDependencyTestModules = (): void => {
+  registeredModules.push(dependencyPointsModule, dependentGameTestModule);
+};
+
+const dependencyTestCard = (protects: string, failsWhen: string, noClaim: string): string =>
+  `protects=${protects}; fails_when=${failsWhen}; no_claim=${noClaim}`;
 
 vi.mock("../../src/modules/registry", async (importOriginal) => ({
   ...(await importOriginal<typeof ModuleRegistry>()),
@@ -223,6 +244,7 @@ describe("Module management in the panel", () => {
     environment = environmentFor(database);
     prepareEnableCommand = false;
     enableHookCallCount = 0;
+    registeredModules.splice(3);
   });
 
   afterEach(() => {
@@ -723,6 +745,149 @@ describe("Module management in the panel", () => {
       { id: "channel_events", enabled: true, settings: '{"betrag":42}', mandatory: true },
       { id: "clips", enabled: false, settings: "{}", mandatory: false },
     ]);
+  });
+
+  it(`requires points before a dependent module can be enabled (${dependencyTestCard("the dependency guard rejects the mutation and audit together", "an unsupported game becomes enabled while points is disabled", "fictional module descriptors exercise the generic route guard")})`, async () => {
+    addDependencyTestModules();
+    await insertChannel(database, "channel-demo");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "channel-demo", "user-1", "broadcaster");
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/channel-demo/modules/test_game_requires_points", "PATCH", { enabled: true }),
+      environment,
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "module_requires" });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM channel_modules WHERE module_id = 'test_game_requires_points'").first())
+      .resolves.toEqual({ count: 0 });
+    await expect(auditCount(database)).resolves.toBe(0);
+  });
+
+  it(`blocks disabling points while a dependent is enabled and gates a game disable (${dependencyTestCard("points stays enabled until dependents are off and disable calls gate before cancellation", "a dependent runs without points or an open round avoids refund", "the fake ChannelObject records calls but does not execute real round storage")})`, async () => {
+    addDependencyTestModules();
+    await insertChannel(database, "channel-demo");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "channel-demo", "user-1", "broadcaster");
+    const setGate = vi.fn(() => Promise.resolve({ applied: true }));
+    const cancelOpenRounds = vi.fn(() => Promise.resolve(2));
+    environment.CHANNEL = {
+      idFromName: vi.fn((channelId: string) => channelId),
+      get: vi.fn(() => ({ setGameModuleGate: setGate, cancelOpenGameRounds: cancelOpenRounds })),
+    } as unknown as Env["CHANNEL"];
+
+    for (const [moduleId, enabled] of [["points", true], ["test_game_requires_points", true]] as const) {
+      const response = await panelRouter.fetch(
+        await requestFor("user-1", `/api/channels/channel-demo/modules/${moduleId}`, "PATCH", { enabled }),
+        environment,
+      );
+      expect(response.status).toBe(200);
+    }
+
+    const disablePoints = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/channel-demo/modules/points", "PATCH", { enabled: false }),
+      environment,
+    );
+    expect(disablePoints.status).toBe(409);
+    await expect(disablePoints.json()).resolves.toEqual({ error: "module_required_by" });
+    expect(setGate).toHaveBeenCalledTimes(2);
+    expect(cancelOpenRounds).not.toHaveBeenCalled();
+
+    const disableGame = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/channel-demo/modules/test_game_requires_points", "PATCH", { enabled: false }),
+      environment,
+    );
+    expect(disableGame.status).toBe(200);
+    expect(setGate).toHaveBeenLastCalledWith("test_game_requires_points", true, 2);
+    expect(cancelOpenRounds).toHaveBeenCalledOnce();
+    await expect(database.prepare("SELECT enabled FROM channel_modules WHERE channel_id = 'channel-demo' AND module_id = 'points'").first())
+      .resolves.toEqual({ enabled: 1 });
+  });
+
+  it(`leaves the game gate open and skips refunds when D1 rejects a disable (${dependencyTestCard("the game remains enabled when its D1 state update fails", "a failed database mutation still closes the gate or refunds escrow", "a SQLite trigger simulates the rejected D1 batch and the fake Durable Object records calls")})`, async () => {
+    addDependencyTestModules();
+    await insertChannel(database, "channel-demo");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "channel-demo", "user-1", "broadcaster");
+    let gateClosed = false;
+    const setGate = vi.fn((_moduleId: string, closed: boolean) => {
+      gateClosed = closed;
+      return Promise.resolve({ applied: true });
+    });
+    const cancelOpenRounds = vi.fn(() => Promise.resolve(1));
+    environment.CHANNEL = {
+      idFromName: vi.fn((channelId: string) => channelId),
+      get: vi.fn(() => ({ setGameModuleGate: setGate, cancelOpenGameRounds: cancelOpenRounds })),
+    } as unknown as Env["CHANNEL"];
+
+    for (const moduleId of ["points", "test_game_requires_points"]) {
+      const response = await panelRouter.fetch(
+        await requestFor("user-1", `/api/channels/channel-demo/modules/${moduleId}`, "PATCH", { enabled: true }),
+        environment,
+      );
+      expect(response.status).toBe(200);
+    }
+    setGate.mockClear();
+    cancelOpenRounds.mockClear();
+    database.sqlite.exec(`
+      CREATE TRIGGER reject_game_disable
+      BEFORE UPDATE OF enabled ON channel_modules
+      WHEN OLD.module_id = 'test_game_requires_points' AND NEW.enabled = 0
+      BEGIN SELECT RAISE(ABORT, 'simulated_d1_failure'); END;
+    `);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/channel-demo/modules/test_game_requires_points", "PATCH", { enabled: false }),
+      environment,
+    );
+
+    expect(response.status).toBe(500);
+    expect(gateClosed).toBe(false);
+    expect(setGate).not.toHaveBeenCalled();
+    expect(cancelOpenRounds).not.toHaveBeenCalled();
+    await expect(database.prepare("SELECT enabled FROM channel_modules WHERE channel_id = 'channel-demo' AND module_id = 'test_game_requires_points'").first())
+      .resolves.toEqual({ enabled: 1 });
+  });
+
+  it(`keeps concurrent dependency changes consistent and preserves modules without requirements (${dependencyTestCard("conditional D1 mutations leave game-on implies points-on", "both requests commit an invalid dependency state", "the SQLite test adapter serializes batches and a fake ChannelObject stands in for gate persistence")})`, async () => {
+    addDependencyTestModules();
+    await insertChannel(database, "channel-demo");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "channel-demo", "user-1", "broadcaster");
+    environment.CHANNEL = {
+      idFromName: vi.fn((channelId: string) => channelId),
+      get: vi.fn(() => ({
+        setGameModuleGate: vi.fn(() => Promise.resolve({ applied: true })),
+        cancelOpenGameRounds: vi.fn(() => Promise.resolve(0)),
+        notifyScheduleInputsChanged: vi.fn(() => Promise.resolve()),
+      })),
+    } as unknown as Env["CHANNEL"];
+    const pointsEnable = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/channel-demo/modules/points", "PATCH", { enabled: true }),
+      environment,
+    );
+    expect(pointsEnable.status).toBe(200);
+
+    const [gameEnable, pointsDisable] = await Promise.all([
+      panelRouter.fetch(await requestFor("user-1", "/api/channels/channel-demo/modules/test_game_requires_points", "PATCH", { enabled: true }), environment),
+      panelRouter.fetch(await requestFor("user-1", "/api/channels/channel-demo/modules/points", "PATCH", { enabled: false, expectedRevision: 1 }), environment),
+    ]);
+    const statuses = [gameEnable.status, pointsDisable.status].sort((left, right) => left - right);
+    expect(statuses).toEqual([200, 409]);
+
+    const states = await database.prepare(
+      "SELECT module_id, enabled FROM channel_modules WHERE channel_id = 'channel-demo' AND module_id IN ('points', 'test_game_requires_points') ORDER BY module_id",
+    ).all<{ module_id: string; enabled: number }>();
+    const enabled = Object.fromEntries(states.results.map(({ module_id, enabled: isEnabled }) => [module_id, isEnabled === 1]));
+    expect(enabled.points === true || enabled.test_game_requires_points === false).toBe(true);
+    expect(enabled.test_game_requires_points === true || enabled.points === false).toBe(true);
+
+    const unrequired = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/channel-demo/modules/test-modul", "PATCH", { enabled: true }),
+      environment,
+    );
+    expect(unrequired.status).toBe(200);
   });
 
   it("invalidates only overlays containing the toggled module's declared element", async () => {

@@ -593,6 +593,8 @@ export interface ModuleExecutionContext {
   authorizeMutation: AuthorizeModuleMutation;
   /** Ephemeral ballot access bound to the event channel and executing module. */
   ballots: ModuleBallotAccess;
+  /** Point ledger access bound to the event channel and executing module. */
+  points: ModulePointsAccess;
   /** Lazily reads the current channel's public blocked terms with the bot moderator token. */
   readChannelBlockedTerms?: () => Promise<readonly string[] | null>;
   /** Lazily resolves the connected bot identity so modules can ignore its own chat messages. */
@@ -711,6 +713,8 @@ export interface ModuleAlarmContext {
   secrets: ModuleSecretAccess;
   /** Ephemeral ballot access bound to this alarm's channel and module. */
   ballots: ModuleBallotAccess;
+  /** Point ledger access bound to this alarm's channel and module. */
+  points: ModulePointsAccess;
   /** Channel locale and unbiased randomness for preparing the same module actions as event handlers. */
   channelLanguage: () => Promise<ModuleLanguage>;
   secureRandomInteger: (maximumExclusive: number) => number;
@@ -916,6 +920,58 @@ export interface ModuleBallotAccess {
   finalize: (ballotId: string) => Promise<BallotFinalizeResult>;
   /** Releases an idempotent close snapshot after the module has persisted its result. */
   acknowledgeClosed?: (ballotId: string) => Promise<void>;
+}
+
+export type PointsKind = "bonus" | "activity" | "stake" | "game" | "resolve" | "refund" | "admin";
+
+export type PointsMovement =
+  | { accountId: string; delta: number; login?: string }
+  | { accountId: string; potShare: { pot: string; numerator: number; denominator: number } };
+
+export interface PointsApplyResult {
+  replayed: boolean;
+  result: unknown;
+  balances: Record<string, number>;
+}
+
+export type PointJoinResult =
+  | { status: "joined"; replayed: boolean }
+  | { status: "already_joined" | "round_closed" };
+
+export interface ModulePointsAccess {
+  apply: (operationId: string, kind: PointsKind, movements: PointsMovement[], result: unknown) => Promise<PointsApplyResult>;
+  touchAccount: (accountId: string, login: string, startBonus: number) => Promise<{ welcomePending: boolean }>;
+  ackWelcome: (accountId: string) => Promise<void>;
+  creditActivity: (
+    accountId: string,
+    login: string,
+    messageAt: number,
+    live: boolean,
+    rules: { amount: number; windowMinutes: number; dailyCap: number },
+  ) => Promise<{ credited: number }>;
+  balance: (accountId: string) => Promise<number>;
+  listAccounts: (query: { sort: "balance" | "month"; search?: string; cursor?: string; limit: number }) => Promise<{
+    rows: { accountId: string; login: string; balance: number; monthNet: number }[];
+    cursor?: string;
+  }>;
+  history: (accountId: string, cursor?: string, limit?: number) => Promise<{
+    rows: { operationId: string; kind: string; moduleId: string; delta: number; balanceAfter: number; at: string; detail: unknown }[];
+    cursor?: string;
+  }>;
+  summary: () => Promise<{ circulation: number; jackpots: Record<string, number>; inRounds: number; accounts: number; month: string }>;
+  ranking: (month: string, limit: number) => Promise<{ accountId: string; login: string; net: number }[]>;
+  rankOf: (accountId: string, month: string) => Promise<{ rank: number | null; net: number }>;
+  markAuditWritten: (operationId: string) => Promise<void>;
+  pendingAudits: () => Promise<{ operationId: string; detail: unknown }[]>;
+  claimCooldown: (key: string, seconds: number) => Promise<boolean>;
+  rounds: {
+    open: (roundId: string, data: unknown) => Promise<void>;
+    markAnnounced: (roundId: string, deadlineAt: number, alarmKey: string) => Promise<void>;
+    join: (roundId: string, operationId: string, accountId: string, login: string, stake: number, data: unknown) => Promise<PointJoinResult>;
+    resolve: (roundId: string, settlement: { kind: string; params: unknown }) => Promise<PointsApplyResult>;
+    cancelOpenRounds: () => Promise<number>;
+    setGate: (closed: boolean, revision: number) => Promise<{ applied: boolean }>;
+  };
 }
 
 export type ModuleStreamState = "online" | "offline" | "unknown";
@@ -1332,7 +1388,7 @@ export interface ModulePanelProperties {
   initialSelection?: string;
 }
 
-type ModuleImmediateActionIcon = "ad" | "shoutout" | "clip" | "broadcast" | "vote";
+type ModuleImmediateActionIcon = "ad" | "shoutout" | "clip" | "broadcast" | "vote" | "boss" | "blitz";
 
 type ModuleImmediateActionAvailability = {
   reason: Readonly<Record<ModuleLanguage, string>> | null;
@@ -1506,6 +1562,8 @@ export interface ModuleRouteVariables {
   externalFetchBudget: ModuleExternalFetchBudget;
   /** Returns ballot access bound to the authorized route channel and mounted module. */
   ballots: (channelId: string) => ModuleBallotAccess;
+  /** Returns point ledger access bound to the authorized route channel and mounted module. */
+  points: (channelId: string) => ModulePointsAccess;
   /** Reads blocked terms only for the authorized route channel. */
   readChannelBlockedTerms?: (channelId: string) => Promise<readonly string[] | null>;
   /** Runs a registered module alarm immediately for a route that must reconcile module-owned state. */
@@ -1602,6 +1660,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   /** Host-catalog category used to place this module in the channel sidebar. */
   navigationCategory: ModuleNavigationCategory;
   panelIcon?: ModuleIconDescriptor;
+  /** Other optional modules that must already be enabled for this module to activate. */
+  requiresModules?: readonly string[];
   /** Read-only help shown on the module page for commands listened to in chat. */
   chatCommands?: readonly ModuleChatCommandDeclaration[];
   /** The module is always enabled for every released channel and cannot be disabled. */
