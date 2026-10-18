@@ -343,6 +343,19 @@
   opacity: 0.58;
 }
 
+.test-area__results-slot.is-incomplete {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.test-area__results-slot.is-incomplete > .test-area__state-slot {
+  flex: 0 0 auto;
+  min-height: 0;
+  align-items: flex-start;
+  padding: 12px 4px 8px;
+  text-align: left;
+}
+
 .test-area__result-scroll {
   display: grid;
   flex: 1 1 auto;

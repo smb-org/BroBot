@@ -88,12 +88,7 @@ export const dryRunChatMessage = (
   channelId: string,
   request: DryRunRequest,
   signal?: AbortSignal,
-): Promise<DryRunResponse> => requestJson<DryRunResponse>(channelPath(channelId, "dry-run"), {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify(request),
-  ...requestOptions(signal),
-});
+): Promise<DryRunResponse> => requestMutation<DryRunResponse>(channelPath(channelId, "dry-run"), "POST", request, signal);
 
 const requestOptions = (signal: AbortSignal | undefined): RequestInit | undefined =>
   signal === undefined ? undefined : { signal };
@@ -532,14 +527,16 @@ export const searchTwitchUser = async (
 const requestMutation = <T>(
   path: string,
   method: "POST" | "PATCH" | "DELETE" | "PUT",
-  body?: Record<string, unknown>,
-): Promise<T> => requestJson<{ token: string }>("/api/csrf").then(({ token }) => requestJson<T>(path, {
+  body?: object,
+  signal?: AbortSignal,
+): Promise<T> => requestJson<{ token: string }>("/api/csrf", requestOptions(signal)).then(({ token }) => requestJson<T>(path, {
   method,
   headers: {
     ...(body === undefined ? {} : { "Content-Type": "application/json" }),
     "X-CSRF-Token": token,
   },
   ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  ...requestOptions(signal),
 }));
 
 export const addChannelMember = (

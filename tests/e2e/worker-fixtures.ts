@@ -147,3 +147,26 @@ export const seedE2EOverlay = (): void => {
   applyMigrations();
   wrangler(["--cwd", "dist/brobot_local", "--config", "wrangler.json", "d1", "execute", "DB", "--local", "--yes", "--persist-to", e2eWorkerPersist, "--command", sql]);
 };
+
+export const seedE2ETestArea = (): void => {
+  seedE2EOverlay();
+  const createdAt = new Date().toISOString();
+  const sql = `
+    INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+      VALUES ('${e2eChannelId}', 'text_commands', 1, '{}');
+    INSERT INTO text_commands (channel_id, command_name, response_text, aliases_json, created_at, updated_at)
+      VALUES ('${e2eChannelId}', 'discord', 'Discord: discord.gg/e2e', '["dc"]', '${createdAt}', '${createdAt}');
+    INSERT INTO text_command_aliases (channel_id, alias, command_name)
+      VALUES ('${e2eChannelId}', 'dc', 'discord');
+  `;
+  const result = spawnSync("./node_modules/.bin/wrangler", [
+    "--cwd", "dist/brobot_local", "--config", "wrangler.json", "d1", "execute", "DB", "--local", "--yes",
+    "--persist-to", e2eWorkerPersist, "--command", sql,
+  ], {
+    encoding: "utf8",
+    env: { ...process.env, CI: "1", ...e2eWorkerEnvironment },
+  });
+  if (result.status !== 0) {
+    throw new Error(`Wrangler test area setup failed.\n${result.stdout}\n${result.stderr}`);
+  }
+};

@@ -124,6 +124,74 @@ describe("test area page", () => {
     expect(firingRow()).toHaveAttribute("aria-current", "true");
   });
 
+  it("applies the broadcast game after a message edit while the broadcast request is pending", async () => {
+    let resolveBroadcast!: (value: { title: string; game: { id: string; name: string }; manageScopeAvailable: boolean }) => void;
+    vi.mocked(fetchChannelBroadcast).mockReturnValue(new Promise((resolve) => { resolveBroadcast = resolve; }));
+    renderPage();
+
+    const message = screen.getAllByRole("textbox", { name: "Nachricht" })[0];
+    if (message === undefined) throw new Error("The message field is missing.");
+    fireEvent.change(message, { target: { value: "!dc geaendert" } });
+
+    resolveBroadcast({ title: "Demo", game: { id: "509658", name: "Just Chatting" }, manageScopeAvailable: false });
+    await waitFor(() => expect(document.querySelector(".ui-game-multi-select__single-value-name")).toHaveTextContent("Just Chatting"));
+
+    run();
+    await waitFor(() => expect(dryRunChatMessage).toHaveBeenCalledWith("channel-a", expect.objectContaining({
+      text: "!dc geaendert",
+      game: { id: "509658", name: "Just Chatting" },
+    }), expect.anything()));
+  });
+
+  it("preserves the restored history game when a pending broadcast response arrives", async () => {
+    const restoredRequest: DryRunRequest = {
+      text: "!dc aus verlauf",
+      sender: { login: "viewer_17", statuses: ["moderator"] },
+      streamState: "offline",
+      game: { id: "saved-game", name: "Saved Game" },
+      sharedChat: true,
+    };
+    sessionStorage.setItem("test-area-history:channel-a", JSON.stringify([{
+      channelId: "channel-a",
+      request: restoredRequest,
+      createdAt: "2030-01-01T12:00:00.000Z",
+    }]));
+    let resolveBroadcast!: (value: { title: string; game: { id: string; name: string }; manageScopeAvailable: boolean }) => void;
+    vi.mocked(fetchChannelBroadcast).mockReturnValue(new Promise((resolve) => { resolveBroadcast = resolve; }));
+    renderPage();
+
+    const replayButton = document.querySelector<HTMLButtonElement>(".test-area__history-item");
+    if (replayButton === null) throw new Error("The saved history entry is missing.");
+    fireEvent.click(replayButton);
+    resolveBroadcast({ title: "Demo", game: { id: "current-game", name: "Current Game" }, manageScopeAvailable: false });
+
+    await waitFor(() => expect(document.querySelector(".ui-game-multi-select__single-value-name")).toHaveTextContent("Saved Game"));
+    await waitFor(() => expect(dryRunChatMessage).toHaveBeenCalledWith("channel-a", expect.objectContaining({
+      text: "!dc aus verlauf",
+      game: { id: "saved-game", name: "Saved Game" },
+      sharedChat: true,
+    }), expect.anything()));
+  });
+
+  it("keeps a user-selected game when the delayed broadcast response arrives", async () => {
+    let resolveBroadcast!: (value: { title: string; game: { id: string; name: string }; manageScopeAvailable: boolean }) => void;
+    vi.mocked(fetchChannelBroadcast).mockReturnValue(new Promise((resolve) => { resolveBroadcast = resolve; }));
+    vi.mocked(searchChannelGames).mockResolvedValue([{ id: "manual-game", name: "Manual Game" }]);
+    renderPage();
+
+    const gameSearch = screen.getByRole("searchbox", { name: "Spiel" });
+    fireEvent.focus(gameSearch);
+    fireEvent.change(gameSearch, { target: { value: "Manual" } });
+    fireEvent.click(await screen.findByRole("option", { name: "Manual Game" }));
+    resolveBroadcast({ title: "Demo", game: { id: "current-game", name: "Current Game" }, manageScopeAvailable: false });
+
+    await waitFor(() => expect(document.querySelector(".ui-game-multi-select__single-value-name")).toHaveTextContent("Manual Game"));
+    run();
+    await waitFor(() => expect(dryRunChatMessage).toHaveBeenCalledWith("channel-a", expect.objectContaining({
+      game: { id: "manual-game", name: "Manual Game" },
+    }), expect.anything()));
+  });
+
   it("shows regex ranges and only the first block reason in the detail", async () => {
     const regexResponse = response({
       modules: [{

@@ -160,7 +160,7 @@ function ContextFields({
   setModuleFilter,
   lockedModule,
   onClearFilter,
-  onContextChange,
+  onGameChange,
 }: {
   labels: ReturnType<typeof dashboardTexts>;
   channelId: string;
@@ -180,7 +180,7 @@ function ContextFields({
   setModuleFilter: (value: ModuleFilter) => void;
   lockedModule: DryRunModuleId | null;
   onClearFilter: () => void;
-  onContextChange: () => void;
+  onGameChange: () => void;
 }): ReactElement {
   const texts = labels.testArea;
   const roleOptions = badgeValues.map((value) => ({ value, label: texts.badgeNames[value] }));
@@ -192,15 +192,12 @@ function ContextFields({
   const searchGames = useCallback((query: string) => searchChannelGames(channelId, query), [channelId]);
   const lookupGames = useCallback((ids: readonly string[]) => lookupChannelGames(channelId, ids), [channelId]);
   const updateMessage = (value: string): void => {
-    onContextChange();
     setMessage(value.slice(0, 500));
   };
   const updateSender = (value: string): void => {
-    onContextChange();
     setSender(value.toLowerCase().replace(/[^a-z0-9_]/gu, "").slice(0, 25));
   };
   const updateBadges = (value: readonly string[]): void => {
-    onContextChange();
     setBadges(value.filter((entry): entry is DryRunRequest["sender"]["statuses"][number] =>
       badgeValues.some((badge) => badge === entry)));
   };
@@ -249,7 +246,7 @@ function ContextFields({
     <SegmentChoice
       label={texts.stream}
       value={streamState}
-      onChange={(value) => { onContextChange(); setStreamState(value); }}
+      onChange={setStreamState}
       options={[
         { value: "online", label: texts.online },
         { value: "offline", label: texts.offline },
@@ -259,7 +256,7 @@ function ContextFields({
       searchGames={searchGames}
       lookupGames={lookupGames}
       value={game === null ? [] : [game]}
-      onChange={(next) => { onContextChange(); setGame(next[0] ?? null); }}
+      onChange={(next) => { onGameChange(); setGame(next[0] ?? null); }}
       messages={texts.game}
       singleValue
       compact
@@ -267,14 +264,13 @@ function ContextFields({
     <SwitchRow
       label={texts.sharedChat}
       checked={sharedChat}
-      onChange={(next) => { onContextChange(); setSharedChat(next); }}
+      onChange={setSharedChat}
     />
     <Select
       label={texts.module}
       value={moduleFilter}
       onChange={(value) => {
         if (lockedModule !== null) return;
-        onContextChange();
         setModuleFilter(value === "text_commands" || value === "faq" ? value : "all");
       }}
       options={moduleOptions}
@@ -467,15 +463,16 @@ export function TestAreaPage({
   const [mobileContextOpen, setMobileContextOpen] = useState(false);
   const [mobileHistoryOpen, setMobileHistoryOpen] = useState(false);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
-  const contextChanged = useRef(false);
+  const gameChanged = useRef(false);
   const sequence = useRef(0);
   const controller = useRef<AbortController | null>(null);
 
   useEffect(() => {
     let active = true;
+    gameChanged.current = false;
     const requestController = new AbortController();
     void fetchChannelBroadcast(channelId, requestController.signal).then((broadcast) => {
-      if (active && !contextChanged.current) setGame(broadcast.game);
+      if (active && !gameChanged.current) setGame(broadcast.game);
     }).catch(() => undefined);
     return () => {
       active = false;
@@ -558,7 +555,7 @@ export function TestAreaPage({
   const replay = (item: HistoryItem): void => {
     if (item.channelId !== channelId) return;
     const request = item.request;
-    contextChanged.current = true;
+    gameChanged.current = true;
     setMessage(request.text);
     setSender(request.sender.login);
     setBadges(request.sender.statuses);
@@ -618,7 +615,7 @@ export function TestAreaPage({
       setDeepLinkOnly(undefined);
       setModuleFilter("all");
     },
-    onContextChange: () => { contextChanged.current = true; },
+    onGameChange: () => { gameChanged.current = true; },
   };
 
   const rowElement = (item: ResultItem): ReactElement => {
@@ -684,7 +681,7 @@ export function TestAreaPage({
             <Field
               label={texts.message}
               value={message}
-              onChange={(value) => { contextChanged.current = true; setMessage(value.slice(0, 500)); }}
+              onChange={(value) => setMessage(value.slice(0, 500))}
               placeholder={texts.messagePlaceholder}
               autoComplete="off"
               maxLength={500}
@@ -726,7 +723,7 @@ export function TestAreaPage({
               : <>{notTestableModules.length === 0 ? null : texts.noDryRunModules(notTestableModules.join(", "))}{notTestableModules.length > 0 && errorModules.length > 0 ? " · " : null}{errorModules.length === 0 ? null : texts.moduleError(errorModules.join(", "))}</>}
           </p>
         </header>
-        <div className={"test-area__results-slot" + (pending && response !== null ? " is-pending" : "")} data-testid="test-area-results-slot" data-state={state} aria-busy={pending}>
+        <div className={"test-area__results-slot" + (pending && response !== null ? " is-pending" : "") + (state === "incomplete" ? " is-incomplete" : "")} data-testid="test-area-results-slot" data-state={state} aria-busy={pending}>
           {state === "idle" ? <div className="test-area__state-slot">
             <Icon name="tabMessages" size={20} />
             <strong>{texts.idleTitle}</strong>

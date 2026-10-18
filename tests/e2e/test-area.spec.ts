@@ -66,6 +66,14 @@ const emptyResponse = (): DryRunResponse => {
   };
 };
 
+const partialFailureResponse = (): DryRunResponse => {
+  const response = firingResponse();
+  return {
+    ...response,
+    modules: [moduleReport(response, "text_commands"), { moduleId: "faq", status: "error", error: "module_error", entries: [] }],
+  };
+};
+
 interface TestAreaHarness {
   setResponse: (response: DryRunResponse) => void;
   failNextRequest: () => void;
@@ -149,6 +157,33 @@ const saveScreenshot = async (page: Page, info: TestInfo, name: string): Promise
   await page.screenshot({ path: info.outputPath(`${name}.png`), fullPage: false, animations: "disabled" });
 };
 
+const expectIncompleteResultsLayout = async (page: Page): Promise<void> => {
+  const warning = page.locator(".test-area__results-slot > .test-area__state-slot");
+  await expect(warning).toContainText("Ergebnis unvollständig");
+  await expect(page.getByRole("button", { name: /!discord/u })).toBeVisible();
+  const layout = await page.evaluate(() => {
+    const slot = document.querySelector<HTMLElement>(".test-area__results-slot");
+    if (slot === null) return null;
+    const warningElement = slot.querySelector<HTMLElement>(".test-area__state-slot");
+    const listElement = slot.querySelector<HTMLElement>(".test-area__result-scroll");
+    if (warningElement === null || listElement === null) return null;
+    const slotRect = slot.getBoundingClientRect();
+    const warningRect = warningElement.getBoundingClientRect();
+    const listRect = listElement.getBoundingClientRect();
+    return {
+      warningBottom: warningRect.bottom,
+      listTop: listRect.top,
+      slotWidth: slotRect.width,
+      warningWidth: warningRect.width,
+      listWidth: listRect.width,
+    };
+  });
+  expect(layout).not.toBeNull();
+  expect(layout?.warningBottom).toBeLessThanOrEqual((layout?.listTop ?? 0) + 1);
+  expect(layout?.warningWidth).toBeCloseTo(layout?.slotWidth ?? 0, 0);
+  expect(layout?.listWidth).toBeCloseTo(layout?.slotWidth ?? 0, 0);
+};
+
 test("submits one synthetic chat message and shows the selected firing row without page scroll", async ({ page }) => {
   const harness = await openTestArea(page, { width: 1920, height: 1080 });
   await submitMessage(page);
@@ -169,6 +204,12 @@ test("submits one synthetic chat message and shows the selected firing row witho
   await expectNoWholePageScroll(page);
 });
 
+test("places the incomplete warning above the full-width result list at 1280 by 800", async ({ page }) => {
+  await openTestArea(page, { width: 1280, height: 800, response: partialFailureResponse() });
+  await submitMessage(page);
+  await expectIncompleteResultsLayout(page);
+});
+
 test.describe("test area screenshot captures", () => {
   test.use({ locale: "de-DE" });
   test.skip(process.env.TEST_AREA_CAPTURE !== "1", "Run explicitly to capture reviewed test area screenshots.");
@@ -178,6 +219,27 @@ test.describe("test area screenshot captures", () => {
     await submitMessage(page);
     await expect(page.getByRole("button", { name: /!discord/u })).toHaveAttribute("aria-current", "true");
     await saveScreenshot(page, info, "result-selected-firing-1920x1080");
+  });
+
+  test("1280 by 800 result with the firing row selected", async ({ page }, info) => {
+    await openTestArea(page, { width: 1280, height: 800 });
+    await submitMessage(page);
+    await expect(page.getByRole("button", { name: /!discord/u })).toHaveAttribute("aria-current", "true");
+    await saveScreenshot(page, info, "result-selected-firing-1280x800");
+  });
+
+  test("1920 by 1080 successful rows with a partial failure", async ({ page }, info) => {
+    await openTestArea(page, { width: 1920, height: 1080, response: partialFailureResponse() });
+    await submitMessage(page);
+    await expectIncompleteResultsLayout(page);
+    await saveScreenshot(page, info, "partial-failure-1920x1080");
+  });
+
+  test("1280 by 800 successful rows with a partial failure", async ({ page }, info) => {
+    await openTestArea(page, { width: 1280, height: 800, response: partialFailureResponse() });
+    await submitMessage(page);
+    await expectIncompleteResultsLayout(page);
+    await saveScreenshot(page, info, "partial-failure-1280x800");
   });
 
   test("1280 by 800 blocked detail", async ({ page }, info) => {
