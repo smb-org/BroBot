@@ -141,8 +141,8 @@ kostet im Overlay-Bundle null Bytes.
 ## Evidence on Hand
 
 - Laufende Staging-Umgebung unter `brobot-staging.esembe.app`.
-- Bestehende Oberfläche in `src/dashboard/` samt `styles.css` als Beweismittel
-  des Ist-Zustands.
+- Bestehende Oberfläche in `src/dashboard/` samt Styles neben ihren Bauteilen
+  als Beleg des Ist-Zustands.
 - Architektur- und Entscheidungsdokumente unter `docs/`, insbesondere
   `docs/ARCHITECTURE.md` und `docs/decisions/`.
 

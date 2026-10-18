@@ -1,13 +1,14 @@
 ---
 name: BroBot Panel
-description: Dashboard UI design target for the implemented palette foundation and planned page migrations
+description: Dashboard UI design system and implementation record
 status: verbindlich für die Umsetzung
 ---
 
 # BroBot Panel – Zielsystem
 
-Die aktuelle Implementierung liegt in `src/dashboard/ui/tokens.css`,
-`src/dashboard/styles.css`, `src/dashboard/ui/theme.ts` und `src/dashboard/router.ts`.
+Die Implementierung liegt in `src/dashboard/ui/tokens.css`, der gemeinsamen
+Basis `src/dashboard/ui/core.css`, den Styles neben ihren UI-Bauteilen und
+Seiten sowie in `src/dashboard/router.ts`.
 Die verbindlichen Tests liegen unter `tests/unit/` und `tests/e2e/`. Dieses Dokument
 beschreibt das Zielsystem; Anforderungen ohne verlinkten Implementierungs- oder
 Testbeleg sind geplant und noch keine Aussage über das heutige Produkt.
@@ -17,11 +18,10 @@ Beispiele hier sind fiktiv (`kanal_demo`, `nachtfalke`, `pixelpilz`).
 
 ## Implementierungsstand
 
-- `src/dashboard/ui/tokens.css` enthält die englischen Palette-Tokens und die Werte für `nachtschicht` und `indigo-nacht`.
-- `src/dashboard/styles.css` enthält weiterhin die bestehenden warmen Oberflächen-Tokens wie `--background`, `--surface` und `--line`. Palette-Tokens mit Präfix `--color-` überschreiben diese Legacy-Tokens nicht.
-- `src/dashboard/ui/theme.ts` bindet Mantine an die bestehenden Legacy-Farben. Die Migration bestehender Seiten auf die neuen Palette-Tokens ist geplant.
+- `src/dashboard/ui/tokens.css` enthält die englischen Palette-Tokens, die Werte für `nachtschicht` und `indigo-nacht` sowie die gemeinsame Komponenten-Layer-Reihenfolge.
+- `src/dashboard/ui/core.css` enthält die bestehenden Oberflächen-Tokens wie `--background`, `--surface` und `--line` sowie gemeinsam genutzte Basis- und Dashboard-Regeln. Palette-Tokens mit Präfix `--color-` überschreiben diese Tokens nicht.
+- Das Dashboard verwendet Base UI und das Projekt-Kit. Komponenten- und Seitenstile liegen bei ihren Besitzern und sind in `@layer components` eingeordnet.
 - `tests/unit/theme-color-lint.test.ts` prüft Farb-Literale in `.ts`, `.tsx` und `.css` unter `src/dashboard/ui/`; nur `src/dashboard/ui/tokens.css` ist ausgenommen.
-- `tests/unit/dashboard-ui-theme.test.ts` prüft Mantine-Formgrößen und die dokumentierten gefüllten Farbpaare beider Paletten.
 - `tests/e2e/foundation-visual.spec.ts` kann Dashboard-Routen als Screenshots erfassen. Es vergleicht diese Screenshots nicht automatisch.
 
 ## 1. Produktprinzipien
@@ -48,7 +48,7 @@ Zwei Themes, Wahl im Kontomenü unter „Darstellung“ (Menü-Radio), gespeiche
 
 Aktuelle Palette-Mechanik:
 
-- `src/dashboard/ui/tokens.css` definiert die Palette-Tokens auf `:root[data-palette]`. Nachtschicht ist der Standard; Indigo-Nacht überschreibt seine abweichenden Werte. Die Werte sind verfügbar, aber bestehende Seiten verwenden weiterhin die Legacy-Tokens aus `src/dashboard/styles.css`.
+- `src/dashboard/ui/tokens.css` definiert die Palette-Tokens auf `:root[data-palette]`. Nachtschicht ist der Standard; Indigo-Nacht überschreibt seine abweichenden Werte. Seiten verwenden zusätzlich die gemeinsamen Oberflächen-Tokens aus `src/dashboard/ui/core.css`.
 - Theme-spezifische Strukturregeln sind geplant. Unterschiede sollen zuerst in Tokens ausgedrückt werden; Strukturregeln sind nur nötig, wo ein Token nicht reicht.
 - **Keine fest codierten Farben außerhalb von Theme-Tokens und Inhaltsfarb-Sets.** Der aktuelle Lint in `tests/unit/theme-color-lint.test.ts` weist `#hex`, `rgb(`, `rgba(` und `hsl(` in `.ts`, `.tsx` und `.css` unter `src/dashboard/ui/` zurück; die zentrale Token-Datei `src/dashboard/ui/tokens.css` ist ausgenommen.
 
@@ -61,7 +61,7 @@ Aktuelle Palette-Mechanik:
 | **Gold** | `--color-gold`, `--color-gold-hover`, `--color-gold-press`, `--color-on-gold` | die eine nächste Aktion je Bereich | Primärbutton, aktiver Schritt, Fortschritt, Slider, gewählter Tab in einem Ablauf |
 | **Brand** | `--color-brand*` | wo du bist / was gewählt ist | aktive Navigation, gewähltes Listenelement, Fokusring, Links, Schalter „an“, Checkboxen, Variablen-Token |
 | **Orange** | `--color-orange`, `--color-orange-on`, `--color-orange-soft`, `--color-orange-border`, `--color-orange-text` | „du bist dran“ (selten) | Hinweisbanner, Werbung in < 2 min, fehlende Berechtigung, Ungespeichert-Anzeige |
-| **Rot** | `--color-error`, `--color-error-text`, `--color-error-surface`, `--color-error-border`, `--color-on-error` | Fehler / Zerstörendes | Fehlerzeilen, Löschen (umrandet); gefüllt nur im Bestätigungsdialog |
+| **Rot** | `--color-error`, `--color-error-text`, `--color-error-surface`, `--color-error-border`, `--color-error-border-subtle`, `--color-on-error` | Fehler / Zerstörendes | Fehlerzeilen, Löschen (umrandet); gefüllt nur im Bestätigungsdialog |
 | **Grün** | `--color-success`, `--color-success-text`, `--color-success-surface`, `--color-success-border` | läuft wirklich | LED + Wort, „Verbunden“ |
 | Neutral | `--color-surface*`, `--color-text*`, `--color-border*` | alles übrige | „Beenden“, „Abbrechen“, „Verwerfen“ |
 
@@ -157,7 +157,7 @@ Beide Paletten verwenden die Flächen-Tokens `--color-depth`, `--color-well`, `-
 | `--color-success` / `--color-success-text` | `#3FCF7F` / `#3FCF7F` | `#34D399` / `#4ADE9A` | Läuft | |
 | `--color-success-surface` / `--color-success-border` | `#14271D` / `#286647` | `#0F2A26` / `#1F5A47` | Läuft-Fläche | |
 
-`--tint-1` und `--tint-2` gehören zu den Legacy-Tokens in `src/dashboard/styles.css`; sie sind nicht Palette-Tokens.
+`--tint-1` und `--tint-2` gehören zu den Oberflächen-Tokens in `src/dashboard/ui/core.css`; sie sind keine Palette-Tokens.
 
 ### 5.4 Semantik für Befehle und Variablen
 
@@ -196,7 +196,7 @@ Schriften: **Archivo** (UI) und **IBM Plex Mono** (Zahlen), selbst gehostet.
 |---|---|---|
 | Body | 14px / 400 / lh 1.45 | `--text-body`, `--leading-normal` |
 | Label / Abschnittstitel | 13px / 500 in `--color-text` (Abschnitt: 600) | `--text-field-label`, `--text-section` |
-| Button | 13px / 600 | Mantine `--button-fz` in `src/dashboard/ui/theme.ts` |
+| Button | 13px / 600 | UI-kit button styles |
 | Spaltenkopf | 11px / 600 | `--text-column-heading` |
 | Zahlen | IBM Plex Mono, tabellarisch | `--font-mono`, `--text-number` |
 | Seitentitel | 22px / 600, −0.015em, lh 1.25 | `--text-page-title` |
