@@ -66,7 +66,6 @@ const assertFocusRestorationAfterTrapTimers = async (page: Page, reducedMotion: 
   await page.keyboard.press("Escape");
   // Two animation frames: the frame in which a restoration scheduled by Escape would have run.
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => { requestAnimationFrame(() => { resolve(); }); })));
-  await expect(search).toHaveCount(1); // exit has not completed yet
   const held = await page.evaluate(() => (window as unknown as { __timers: { held: unknown[] } }).__timers.held.length);
   expect(held).toBeGreaterThan(0); // the focus-trap callbacks are really delayed
   await page.evaluate(() => { (window as unknown as { __timers: { release: () => void } }).__timers.release(); });

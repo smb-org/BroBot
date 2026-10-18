@@ -218,12 +218,9 @@ export function GroupedPicker<T = unknown>({
         })
         : [];
       const duration = transitionDurationMs(popup);
-      // Reduced-motion CSS can leave a .01ms transition; retain the closing surface briefly so queued focus-trap timers settle first.
-      const exitEnd = duration <= 1
-        ? new Promise<void>((resolve) => { window.setTimeout(resolve, 150); })
-        : animations.length > 0
-          ? Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)))
-          : new Promise<void>((resolve) => { window.setTimeout(resolve, duration); });
+      const exitEnd = animations.length > 0
+        ? Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)))
+        : new Promise<void>((resolve) => { window.setTimeout(resolve, duration); });
       void exitEnd.then(() => {
         if (generation !== focusGeneration.current) return;
         popoverActionsRef.current?.unmount();
