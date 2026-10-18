@@ -35,6 +35,14 @@ describe("dryRunChatMessage", () => {
       await database.prepare(
         "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'text_commands', 1, '{}')",
       ).bind(CHANNEL_ID).run();
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'faq', 1, '{}')",
+      ).bind(CHANNEL_ID).run();
+      await database.prepare(
+        `INSERT INTO bot_identity
+          (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext, expires_at, created_at, updated_at)
+         VALUES (1, 'bot-user', 'brobot', '[]', 'access', 'refresh', ?, ?, ?)`,
+      ).bind("2099-09-20T00:00:00.000Z", NOW, NOW).run();
       await database.prepare("UPDATE channels SET default_chat_target = 'where_asked' WHERE channel_id = ?")
         .bind(CHANNEL_ID).run();
       await database.prepare(
@@ -98,6 +106,9 @@ describe("dryRunChatMessage", () => {
 
       const first = await dryRunChatMessage(environment, CHANNEL_ID, request, fetcher);
       const second = await dryRunChatMessage(environment, CHANNEL_ID, request, fetcher);
+      const faqRequest = { ...request, text: "status", only: { moduleId: "faq" as const, entryId: "faq-status" } };
+      const firstFaq = await dryRunChatMessage(environment, CHANNEL_ID, faqRequest, fetcher);
+      const secondFaq = await dryRunChatMessage(environment, CHANNEL_ID, faqRequest, fetcher);
 
       expect(first.modules.find(({ moduleId }) => moduleId === "text_commands")?.entries[0]).toMatchObject({
         entry: { id: "score" },
@@ -112,8 +123,13 @@ describe("dryRunChatMessage", () => {
       });
       expect(first.sender).toMatchObject({ resolved: false, perUserCooldownsUseSyntheticId: true });
       expect(first.sender.userId).toMatch(/^dry-run:/u);
-      expect(first.modules.find(({ moduleId }) => moduleId === "faq")?.status).toBe("not_testable");
+      expect(firstFaq.modules.find(({ moduleId }) => moduleId === "faq")?.entries[0]).toMatchObject({
+        entry: { id: "faq-status" },
+        outcome: "fires",
+        match: { kind: "keyword", pattern: "status" },
+      });
       expect(second.modules).toEqual(first.modules);
+      expect(secondFaq.modules).toEqual(firstFaq.modules);
       expect(snapshotTables(database)).toEqual(before);
       expect(fetcher).not.toHaveBeenCalled();
     } finally {

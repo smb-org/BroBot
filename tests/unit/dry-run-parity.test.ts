@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { faqModule } from "../../src/modules/faq";
 import { textCommandModule } from "../../src/modules/text_commands";
 import { createTextCommandRepository } from "../../src/modules/text_commands/adapters/d1";
 import { dispatchEventSubNotification } from "../../src/worker/dispatch";
@@ -161,6 +162,107 @@ describe("text-command dry-run parity", () => {
         .toBe(true);
       await expect(dryRunDatabase.prepare("SELECT use_count, last_used_at FROM text_commands WHERE command_name = 'hello'").first())
         .resolves.toEqual({ use_count: 0, last_used_at: null });
+    } finally {
+      productionDatabase.close();
+      dryRunDatabase.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports FAQ fires only when the production service claims and uses the synthetic sender for cooldowns", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const productionDatabase = new TestD1Database();
+    const dryRunDatabase = new TestD1Database();
+    try {
+      for (const database of [productionDatabase, dryRunDatabase]) {
+        await insertChannel(database, CHANNEL_ID);
+        await database.prepare(
+          "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'faq', 1, '{}')",
+        ).bind(CHANNEL_ID).run();
+        await database.prepare(
+          `INSERT INTO faq_entries
+            (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, minimum_tier,
+             cooldown_seconds, user_cooldown_seconds, games_json, chat_target, use_channel_default_target,
+             sort_order, revision, last_used_at, created_at, updated_at)
+           VALUES
+            ('faq-hello', ?, 'Greeting', 1, 'keywords', '{"type":"keywords","patterns":["hello"]}', 'Hello!',
+             'everyone', 30, 120, '[]', 'where_asked', 1, 0, 1, NULL, ?, ?),
+            ('faq-later', ?, 'Later match', 1, 'regex', '{"type":"regex","pattern":"hello"}', 'Later!',
+             'everyone', 30, 0, '[]', 'where_asked', 1, 1, 1, NULL, ?, ?)`,
+        ).bind(CHANNEL_ID, NOW, NOW, CHANNEL_ID, NOW, NOW).run();
+      }
+      await Promise.all([seedBotIdentity(productionDatabase), seedBotIdentity(dryRunDatabase)]);
+      const request = {
+        text: "🎉 hello",
+        sender: { login: "viewer_42", statuses: [] },
+        streamState: "online" as const,
+        game: null,
+        sharedChat: false,
+        only: { moduleId: "faq" as const },
+      };
+      const dryRunEnvironment = {
+        ...environmentFor(dryRunDatabase),
+        DB: dryRunDatabase as unknown as D1Database,
+      } as unknown as Env;
+      const dryRunFirst = await dryRunChatMessage(dryRunEnvironment, CHANNEL_ID, request, vi.fn<typeof fetch>(), [faqModule]);
+      const productionFetcher = sent();
+      const productionEvent = (triggerId: string) => ({
+        channelId: CHANNEL_ID,
+        subscriptionType: "channel.chat.message",
+        triggerId,
+        payload: {
+          message: { text: request.text },
+          message_id: triggerId,
+          chatter_user_id: "dry-run:viewer_42",
+          chatter_user_login: "viewer_42",
+          broadcaster_user_login: CHANNEL_ID,
+          source_broadcaster_user_id: CHANNEL_ID,
+          badges: [],
+        },
+        receivedAt: NOW,
+      });
+      await dispatchEventSubNotification(environmentFor(productionDatabase), productionEvent("production-first"), productionFetcher, [faqModule]);
+      const firstClaim = await productionDatabase.prepare(
+        "SELECT last_used_at FROM faq_entries WHERE faq_id = 'faq-hello'",
+      ).first<{ last_used_at: string | null }>();
+      const firstOutcome = dryRunFirst.modules[0]?.entries.find(({ entry }) => entry.id === "faq-hello")?.outcome;
+
+      expect(firstClaim?.last_used_at).toBe(NOW);
+      expect(firstOutcome).toBe("fires");
+      expect(dryRunFirst.modules[0]?.entries.find(({ entry }) => entry.id === "faq-later")).toMatchObject({
+        outcome: "blocked",
+        blocks: [{ code: "faq.shadowed", detail: { byEntryId: "faq-hello" } }],
+      });
+      const onlyShadowed = await dryRunChatMessage(
+        dryRunEnvironment,
+        CHANNEL_ID,
+        { ...request, only: { moduleId: "faq", entryId: "faq-later" } },
+        vi.fn<typeof fetch>(),
+        [faqModule],
+      );
+      expect(onlyShadowed.modules[0]?.entries).toHaveLength(1);
+      expect(onlyShadowed.modules[0]?.entries[0]?.entry.id).toBe("faq-later");
+
+      await dispatchEventSubNotification(environmentFor(productionDatabase), productionEvent("production-second"), productionFetcher, [faqModule]);
+      const secondClaim = await productionDatabase.prepare(
+        "SELECT user_id, last_used_at FROM faq_entry_user_cooldowns WHERE faq_id = 'faq-hello'",
+      ).first<{ user_id: string; last_used_at: string }>();
+      await dryRunDatabase.prepare("UPDATE faq_entries SET last_used_at = ? WHERE faq_id = 'faq-hello'")
+        .bind(firstClaim?.last_used_at ?? NOW).run();
+      await dryRunDatabase.prepare(
+        `INSERT INTO faq_entry_user_cooldowns (channel_id, faq_id, user_id, last_used_at) VALUES (?, 'faq-hello', ?, ?)`,
+      ).bind(CHANNEL_ID, secondClaim?.user_id ?? "dry-run:viewer_42", secondClaim?.last_used_at ?? NOW).run();
+      const dryRunSecond = await dryRunChatMessage(dryRunEnvironment, CHANNEL_ID, request, vi.fn<typeof fetch>(), [faqModule]);
+      const secondOutcome = dryRunSecond.modules[0]?.entries.find(({ entry }) => entry.id === "faq-hello");
+
+      expect(secondClaim).toEqual({ user_id: "dry-run:viewer_42", last_used_at: NOW });
+      expect(productionFetcher.mock.calls.filter(([input]) => urlFor(input).endsWith("/chat/messages"))).toHaveLength(1);
+      expect(secondOutcome).toMatchObject({
+        outcome: "blocked",
+        blocks: [{ code: "faq.person_cooldown", detail: { remainingSeconds: 120 } }],
+        effects: [],
+      });
     } finally {
       productionDatabase.close();
       dryRunDatabase.close();

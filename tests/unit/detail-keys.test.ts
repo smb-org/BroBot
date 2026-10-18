@@ -68,7 +68,7 @@ const detailKeys = (): string[] => {
 describe("diagnostic detail keys", () => {
   it("freezes the set of keys that land on the wire", () => {
     expect(detailKeys()).toEqual([
-      "action", "alias", "allowed", "arguments", "art", "commercialCooldownUntil", "count", "current", "currentTier", "duration", "endsAt", "gifter", "kind",
+      "action", "alias", "allowed", "arguments", "art", "byEntryId", "commercialCooldownUntil", "count", "current", "currentTier", "duration", "endsAt", "gifter", "kind",
       "message", "moderator", "name", "person", "reason", "recipient",
       "remainingSeconds", "requiredTier", "response", "retryAfter", "scope", "seconds", "source",
       "sourceChannelId", "startedAt", "status", "streamState", "target", "targetChannelId", "text",

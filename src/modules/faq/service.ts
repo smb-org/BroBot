@@ -2,6 +2,11 @@ import type { ModuleEvent, ModuleExecutionContext, ModuleResult } from "../contr
 import { hasCommandPrefix, selectFaqMatch } from "./domain";
 import type { FaqRepository } from "./repository";
 
+type FaqMessageContext = Pick<ModuleExecutionContext, "renderTemplate"> & Partial<Pick<
+  ModuleExecutionContext,
+  "botUserId" | "isRecentBotMessage" | "channelGameId"
+>>;
+
 const messageText = (event: ModuleEvent): string | null => {
   const message = event.payload.message;
   if (typeof message !== "object" || message === null || Array.isArray(message)) return null;
@@ -12,7 +17,7 @@ const messageText = (event: ModuleEvent): string | null => {
 export const processFaqMessage = async (
   event: ModuleEvent,
   repository: FaqRepository,
-  context: ModuleExecutionContext,
+  context: FaqMessageContext,
 ): Promise<ModuleResult> => {
   const text = messageText(event);
   if (event.subscriptionType !== "channel.chat.message" || text === null || text.length === 0) {

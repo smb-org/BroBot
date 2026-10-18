@@ -99,6 +99,70 @@ const remainingCooldown = (lastUsedAt: string | null, now: string, cooldownSecon
   return Math.max(0, Math.ceil(cooldownSeconds - elapsed / 1000));
 };
 
+export const FAQ_CLAIM_ELIGIBLE_SQL = `channel_id = ? AND faq_id = ? AND enabled = 1 AND revision = ?
+          AND matcher_type = ?
+          AND (last_used_at IS NULL OR
+               julianday(last_used_at) <= julianday(?) - cooldown_seconds / 86400.0)
+          AND (? IS NULL OR user_cooldown_seconds = 0 OR NOT EXISTS (
+            SELECT 1 FROM faq_entry_user_cooldowns AS user_cooldown
+             WHERE user_cooldown.channel_id = faq_entries.channel_id
+               AND user_cooldown.faq_id = faq_entries.faq_id
+               AND user_cooldown.user_id = ?
+               AND julianday(user_cooldown.last_used_at) >
+                   julianday(?) - faq_entries.user_cooldown_seconds / 86400.0
+          ))`;
+
+const explainUnclaimed = async (
+  db: D1Database,
+  channelId: string,
+  entry: FaqEntry,
+  userId: string | null,
+  now: string,
+): Promise<FaqClaimResult> => {
+  const current = await db.prepare(
+    "SELECT last_used_at, cooldown_seconds, user_cooldown_seconds, enabled, revision FROM faq_entries WHERE channel_id = ? AND faq_id = ?",
+  ).bind(channelId, entry.id).first<{
+    last_used_at: string | null;
+    cooldown_seconds: number;
+    user_cooldown_seconds: number;
+    enabled: number;
+    revision: number;
+  }>();
+  if (current === null || current.enabled !== 1 || current.revision !== entry.revision) return { claimed: false, reason: "changed" };
+  const userCooldown = userId === null || current.user_cooldown_seconds === 0
+    ? null
+    : await db.prepare(
+      "SELECT last_used_at FROM faq_entry_user_cooldowns WHERE channel_id = ? AND faq_id = ? AND user_id = ?",
+    ).bind(channelId, entry.id, userId).first<{ last_used_at: string }>();
+  const personRemainingSeconds = remainingCooldown(
+    userCooldown?.last_used_at ?? null,
+    now,
+    current.user_cooldown_seconds,
+  );
+  if (personRemainingSeconds > 0) {
+    return { claimed: false, reason: "person_cooldown", remainingSeconds: personRemainingSeconds };
+  }
+  return {
+    claimed: false,
+    reason: "cooldown",
+    remainingSeconds: remainingCooldown(current.last_used_at, now, current.cooldown_seconds),
+  };
+};
+
+export const peekClaim = async (
+  db: D1Database,
+  channelId: string,
+  entry: FaqEntry,
+  userId: string | null,
+  now: string,
+): Promise<FaqClaimResult> => {
+  const eligible = await db.prepare(
+    `SELECT faq_id FROM faq_entries WHERE ${FAQ_CLAIM_ELIGIBLE_SQL}`,
+  ).bind(channelId, entry.id, entry.revision, entry.matcher.type, now, userId, userId, now).first<{ faq_id: string }>();
+  if (eligible !== null) return { claimed: true, claimedAt: now };
+  return explainUnclaimed(db, channelId, entry, userId, now);
+};
+
 export const createFaqRepository = (db: D1Database): FaqRepository => ({
   async list(channelId) {
     const result = await db.prepare(`${selectFaqEntries} ORDER BY entry_order.sort_order, faq.faq_id`)
@@ -139,18 +203,7 @@ export const createFaqRepository = (db: D1Database): FaqRepository => ({
     const claimEntry = db.prepare(
       `UPDATE faq_entries
           SET last_used_at = ?
-        WHERE channel_id = ? AND faq_id = ? AND enabled = 1 AND revision = ?
-          AND matcher_type = ?
-          AND (last_used_at IS NULL OR
-               julianday(last_used_at) <= julianday(?) - cooldown_seconds / 86400.0)
-          AND (? IS NULL OR user_cooldown_seconds = 0 OR NOT EXISTS (
-            SELECT 1 FROM faq_entry_user_cooldowns AS user_cooldown
-             WHERE user_cooldown.channel_id = faq_entries.channel_id
-               AND user_cooldown.faq_id = faq_entries.faq_id
-               AND user_cooldown.user_id = ?
-               AND julianday(user_cooldown.last_used_at) >
-                   julianday(?) - faq_entries.user_cooldown_seconds / 86400.0
-          ))`,
+        WHERE ${FAQ_CLAIM_ELIGIBLE_SQL}`,
     ).bind(now, channelId, entry.id, entry.revision, entry.matcher.type, now, userId, userId, now);
     let changes: number;
     if (userId !== null && entry.userCooldownSeconds > 0) {
@@ -169,34 +222,7 @@ export const createFaqRepository = (db: D1Database): FaqRepository => ({
       changes = (await claimEntry.run()).meta.changes;
     }
     if (changes > 0) return { claimed: true, claimedAt: now };
-    const current = await db.prepare(
-      "SELECT last_used_at, cooldown_seconds, user_cooldown_seconds, enabled, revision FROM faq_entries WHERE channel_id = ? AND faq_id = ?",
-    ).bind(channelId, entry.id).first<{
-      last_used_at: string | null;
-      cooldown_seconds: number;
-      user_cooldown_seconds: number;
-      enabled: number;
-      revision: number;
-    }>();
-    if (current === null || current.enabled !== 1 || current.revision !== entry.revision) return { claimed: false, reason: "changed" };
-    const userCooldown = userId === null || current.user_cooldown_seconds === 0
-      ? null
-      : await db.prepare(
-        "SELECT last_used_at FROM faq_entry_user_cooldowns WHERE channel_id = ? AND faq_id = ? AND user_id = ?",
-      ).bind(channelId, entry.id, userId).first<{ last_used_at: string }>();
-    const personRemainingSeconds = remainingCooldown(
-      userCooldown?.last_used_at ?? null,
-      now,
-      current.user_cooldown_seconds,
-    );
-    if (personRemainingSeconds > 0) {
-      return { claimed: false, reason: "person_cooldown", remainingSeconds: personRemainingSeconds };
-    }
-    return {
-      claimed: false,
-      reason: "cooldown",
-      remainingSeconds: remainingCooldown(current.last_used_at, now, current.cooldown_seconds),
-    };
+    return explainUnclaimed(db, channelId, entry, userId, now);
   },
   async releaseClaim(channelId, entry, userId, claimedAt) {
     const releaseEntry = db.prepare(
@@ -218,6 +244,21 @@ export const createFaqRepository = (db: D1Database): FaqRepository => ({
     cacheByDatabase.get(db)?.delete(channelId);
   },
 });
+
+export const createFaqPeekRepository = (
+  db: D1Database,
+  recordClaim?: (result: FaqClaimResult) => void,
+): FaqRepository => {
+  const repository = createFaqRepository(db);
+  return {
+    ...repository,
+    async claim(channelId, entry, userId, now) {
+      const result = await peekClaim(db, channelId, entry, userId, now);
+      recordClaim?.(result);
+      return result;
+    },
+  };
+};
 
 export const purgeExpiredFaqUserCooldowns = async (db: D1Database, now: string): Promise<void> => {
   const cutoff = new Date(Date.parse(now) - 24 * 60 * 60 * 1000).toISOString();
