@@ -11,10 +11,11 @@ import { createVotekickRepository } from "../../src/modules/votekick/adapters/d1
 import { processVotekickMessage } from "../../src/modules/votekick/service";
 import { createDryRunBallotAccess } from "../../src/modules/domain/dry-run-ballots";
 import { dryRunVotekickMessage } from "../../src/modules/votekick/dry-run";
+import { eventText } from "../../src/dashboard/locale";
 import { withOutputGate } from "../../src/worker/dry-run-output";
 import { readOnlyD1 } from "../../src/worker/db/read-only";
 import { insertChannel } from "./fixtures";
-import { TestD1Database } from "./test-d1";
+import { createReadInterleavingDatabase, TestD1Database } from "./test-d1";
 
 const chatDryRunContext = (
   database: TestD1Database,
@@ -211,6 +212,56 @@ describe("chat voting and votekick dry-run parity", () => {
       await dryRunVotekickMessage(event, context);
 
       expect(reads).toBe(1);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("pins the running votekick row and its ballot rule across a replacement", async () => {
+    const database = new TestD1Database();
+    const channelId = "pinned-votekick-channel";
+    try {
+      await seedRunningVotekick(database, channelId);
+      const prepare = vi.spyOn(database, "prepare");
+      const interleavedDatabase = createReadInterleavingDatabase(
+        database,
+        (sql) => sql.includes("FROM votekicks WHERE channel_id = ? AND status = 'running' LIMIT 1"),
+        async () => {
+          await database.prepare(
+            "UPDATE votekicks SET status = 'expired', ended_at = ? WHERE channel_id = ? AND votekick_id = ?",
+          ).bind(new Date(Date.now() - 60 * 60_000).toISOString(), channelId, "running-votekick").run();
+          const replacementRepository = createVotekickRepository(database as unknown as D1Database);
+          const now = Date.now();
+          expect(await replacementRepository.admit(channelId, {
+            id: "replacement-votekick",
+            targetUserId: "replacement-target-id",
+            targetLogin: "replacement_viewer",
+            initiatorUserId: "replacement-starter",
+            threshold: 10,
+            yesVotes: 0,
+            ballotRevision: 1,
+            startedAt: new Date(now - 30_000).toISOString(),
+            endsAt: new Date(now + 60_000).toISOString(),
+          }, new Date(now).toISOString(), 0, 0)).toBe("admitted");
+        },
+      );
+      const event = { ...votekickEvent("1"), channelId };
+      const context = {
+        ...chatDryRunContext(database, {
+          counts: [2, 0],
+          revision: 1,
+          expiresAt: Date.now() + 60_000,
+          previousChoiceKnown: true,
+        }),
+        DB: readOnlyD1(interleavedDatabase),
+      } as unknown as ModuleDryRunContext;
+
+      const report = await dryRunVotekickMessage(event, context);
+      const runningReads = prepare.mock.calls.filter(([sql]) =>
+        sql.includes("FROM votekicks WHERE channel_id = ? AND status = 'running' LIMIT 1"));
+
+      expect(runningReads).toHaveLength(1);
+      expect(report[0]?.effects.some((effect) => effect.kind === "timeout")).toBe(true);
     } finally {
       database.close();
     }
@@ -476,7 +527,7 @@ describe("chat voting and votekick dry-run parity", () => {
     }
   });
 
-  it("marks a target lookup as resolved at send time when no cached lookup is available", async () => {
+  it("marks a deferred votekick target as indeterminate until it is checked at send time", async () => {
     const database = new TestD1Database();
     try {
       const event = votekickEvent("!votekick @protected_viewer");
@@ -488,11 +539,14 @@ describe("chat voting and votekick dry-run parity", () => {
       const report = await dryRunVotekickMessage(event, context);
 
       expect(report[0]).toMatchObject({
-        outcome: "fires",
+        outcome: "indeterminate",
         blocks: [],
         effects: [],
         templateNotes: [{ code: "template.deferred_live", detail: { name: "votekick.target" } }],
       });
+      const note = report[0]?.templateNotes[0];
+      expect(note === undefined ? "" : eventText(note.code, note.detail ?? {}, "en"))
+        .toBe("The target will be checked when the command is sent.");
     } finally {
       database.close();
     }

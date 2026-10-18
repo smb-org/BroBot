@@ -41,7 +41,6 @@ export const moduleBallotSnapshots = (
   namespace: Env["CHANNEL"] | undefined,
   channelId: string,
   moduleId: string,
-  resolveVoterId?: () => Promise<string | null>,
 ): NonNullable<ModuleDryRunContext["ballots"]> => {
   if (namespace === undefined) {
     return {
@@ -51,10 +50,7 @@ export const moduleBallotSnapshots = (
   }
   const object = namespace.get(namespace.idFromName(channelId));
   return {
-    readSnapshot: async (ballotId, voterId) => {
-      const resolvedVoterId = resolveVoterId === undefined ? voterId : await resolveVoterId();
-      return await object.readBallotDryRunSnapshot(moduleId, ballotId, resolvedVoterId ?? undefined);
-    },
+    readSnapshot: async (ballotId, voterId) => await object.readBallotDryRunSnapshot(moduleId, ballotId, voterId),
     hasOpenBallotSnapshot: () => object.hasOpenBallotSnapshot(),
   };
 };

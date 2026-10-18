@@ -43,7 +43,8 @@ const simulatedRepository = (
         ).bind(_vote.channelId).first<{ enabled: number }>(),
         repository.open(_vote.channelId),
       ]);
-      if (enabled === null || openVote !== null) return "busy";
+      if (enabled === null) return "busy";
+      if (openVote !== null) throw new Error("An open D1 vote prevented the production insert.");
       return await context.ballots?.hasOpenBallotSnapshot() ? "busy" : "inserted";
     },
     requestManualClose: async (channelId, pollId, expectedClosesAt) => {

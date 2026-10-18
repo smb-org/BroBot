@@ -51,15 +51,10 @@ export const dryRunChatMessage = async (
   ).bind(channelId).first<{ login: string; language: string; time_zone: string }>();
   if (channel === null) throw new DryRunChannelNotReleasedError();
 
-  const [dispatchState, defaultChatTarget, botIdentity, ballotState] = await Promise.all([
+  const [dispatchState, defaultChatTarget, botIdentity] = await Promise.all([
     readDispatchChannelState(db, channelId, evaluatedAt),
     readChannelDefaultChatTarget(db, channelId),
     getBotIdentity(db),
-    db.prepare(
-      `SELECT
-         EXISTS (SELECT 1 FROM chat_votes WHERE channel_id = ? AND status = 'open') AS has_open_chat_vote,
-         EXISTS (SELECT 1 FROM votekicks WHERE channel_id = ? AND status = 'running') AS has_running_votekick`,
-    ).bind(channelId, channelId).first<{ has_open_chat_vote: number; has_running_votekick: number }>(),
   ]);
   const readOnlyEnvironment = {
     DB: db,
@@ -86,15 +81,6 @@ export const dryRunChatMessage = async (
     })();
     userLookups.set(normalizedLogin, lookup);
     return lookup;
-  };
-  const resolveBallotVoterId = async (): Promise<string | null> => {
-    try {
-      const user = await lookupUserByLogin(request.sender.login);
-      return user?.userId ?? null;
-    } catch {
-      deferredUserLookups.add(request.sender.login.toLowerCase());
-      return null;
-    }
   };
   const selectedWithoutPause = selectModulesForEvent(dispatchState.activations, CHAT_EVENT, registry, false);
   const selectedByProduction = selectModulesForEvent(dispatchState.activations, CHAT_EVENT, registry, dispatchState.controls.pause.active);
@@ -155,15 +141,7 @@ export const dryRunChatMessage = async (
     const moduleDisabled = !enabledModuleIds.has(module.id);
     const channelPaused = !moduleDisabled && dispatchState.controls.pause.active && !selectedModuleIds.has(module.id);
     let moduleBallotChoiceUnresolved = false;
-    const resolvesBallotVoter = module.id === "chat_voting" && ballotState?.has_open_chat_vote === 1
-      ? !/^!vote(?:\s|$)/iu.test(request.text.trim())
-      : module.id === "votekick" && ballotState?.has_running_votekick === 1 && /^[12]$/u.test(request.text);
-
     try {
-      const resolvedBallotVoterId = resolvesBallotVoter ? await resolveBallotVoterId() : null;
-      const modulePayload = resolvedBallotVoterId === null
-        ? payload
-        : { ...payload, chatter_user_id: resolvedBallotVoterId };
       const activation = activationByModule.get(module.id);
       let rawSettings: unknown = activation?.settings ?? module.defaultSettings;
       if (typeof rawSettings === "string") {
@@ -178,7 +156,7 @@ export const dryRunChatMessage = async (
         channelId,
         subscriptionType: CHAT_EVENT,
         triggerId: "dry-run",
-        payload: modulePayload,
+        payload,
         settings,
         receivedAt: evaluatedAt,
         eventSubTimestamp: evaluatedAt,
@@ -221,7 +199,6 @@ export const dryRunChatMessage = async (
           env.CHANNEL,
           channelId,
           module.id,
-          resolvesBallotVoter ? resolveBallotVoterId : undefined,
         ),
         activeChatters: {
           count: async (windowMs) => {
@@ -231,13 +208,8 @@ export const dryRunChatMessage = async (
             return existing === null ? count + 1 : count;
           },
           seen: async (userId) => {
-            if (resolvesBallotVoter && resolvedBallotVoterId === null && userId === syntheticUserId) {
-              moduleBallotChoiceUnresolved = true;
-              return null;
-            }
             const existing = await channelObject?.getActiveChatterSnapshot(userId) ?? null;
-            const simulatedSenderId = resolvedBallotVoterId ?? syntheticUserId;
-            if (existing !== null || !trackIncomingMessage || userId !== simulatedSenderId) return existing;
+            if (existing !== null || !trackIncomingMessage || userId !== syntheticUserId) return existing;
             return { firstSeenAt: evaluatedAt, lastSeenAt: evaluatedAt };
           },
         },

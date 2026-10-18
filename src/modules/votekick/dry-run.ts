@@ -5,7 +5,7 @@ import { createDryRunBallotAccess } from "../domain/dry-run-ballots";
 import { createVotekickRepository, peekVotekickAdmission } from "./adapters/d1";
 import type { VotekickRepository } from "./repository";
 import { VOTEKICK_COMMAND_PATTERN } from "./domain";
-import type { VotekickSettings } from "./contracts";
+import type { Votekick, VotekickSettings } from "./contracts";
 import { votekickFinalizeRule, processVotekickMessage } from "./service";
 
 const messageText = (event: ModuleEvent): string => {
@@ -32,11 +32,12 @@ const blockCodeForReason = (reason: unknown): DryRunBlockCode => {
   return "votekick.unavailable";
 };
 
-const simulatedRepository = (context: ModuleDryRunContext): VotekickRepository => {
+const simulatedRepository = (context: ModuleDryRunContext, running: Votekick | null): VotekickRepository => {
   const repository = createVotekickRepository(context.DB);
   const finalized = new Map<string, { status: "passed" | "expired"; yesVotes: number; noVotes: number; ballotRevision: number; durationSeconds: number | null; endedAt: string }>();
   return {
     ...repository,
+    running: () => Promise.resolve(running),
     admit: async (channelId, input, checkedAt, channelCooldownSeconds, targetCooldownSeconds) => await peekVotekickAdmission(
       context.DB,
       channelId,
@@ -166,8 +167,9 @@ export const dryRunVotekickMessage = async (
   if (text.length === 0) return [];
   const command = VOTEKICK_COMMAND_PATTERN.exec(text.trim());
   const choice = ballotChoiceFromMessage(text, 2);
-  const repository = simulatedRepository(context);
-  const current = await repository.running(event.channelId);
+  const sourceRepository = createVotekickRepository(context.DB);
+  const current = await sourceRepository.running(event.channelId);
+  const repository = simulatedRepository(context, current);
   const rules = current === null ? new Map() : new Map([[current.id, votekickFinalizeRule(current.threshold)]]);
   const voter = Reflect.get(event.payload, "chatter_user_id");
   const ballots = createDryRunBallotAccess(context, {
@@ -188,13 +190,13 @@ export const dryRunVotekickMessage = async (
     ? []
     : actionEffects(result.actions, event, context, initialSnapshot, result.attributions);
   if (result.actions.length === 0 && result.diagnostics.length === 0 && effects.length === 0 &&
-      !ballotChoiceUnresolved) return [];
+      !targetLookupDeferred && !ballotChoiceUnresolved) return [];
   if (command === null && choice === null && effects.length === 0 && blocks.length === 0) return [];
   const token = command === null ? choice === null ? "any chat message" : text.trim() : "!votekick";
   return [{
     moduleId: "votekick",
     entry: { kind: "votekick", id: "votekick-message", label: command === null ? token : text.trim() },
-    outcome: ballotChoiceUnresolved ? "indeterminate" : blocks.length === 0 ? "fires" : "blocked",
+    outcome: targetLookupDeferred || ballotChoiceUnresolved ? "indeterminate" : blocks.length === 0 ? "fires" : "blocked",
     match: command === null && choice === null
       ? { kind: "keyword", pattern: "any chat message" }
       : { kind: "command_name", token },
