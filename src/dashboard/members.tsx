@@ -193,6 +193,7 @@ const MemberInspector = ({
   if (!canManageMembers) {
     return (
       <EditorShell
+        className="member-editor"
         ariaLabel={texts.editMember(name)}
         title={name}
         identifier={formatJoinDate(member.joinedAt)}
@@ -215,6 +216,7 @@ const MemberInspector = ({
   return (
     <>
       <EditorShell
+        className="member-editor"
         ariaLabel={texts.editMember(name)}
         title={name}
         identifier={formatJoinDate(member.joinedAt)}

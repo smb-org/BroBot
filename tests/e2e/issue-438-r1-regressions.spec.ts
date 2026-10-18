@@ -261,6 +261,14 @@ test("issue 438 layout regressions stay aligned at the requested viewports", asy
     const moderatorBox = await box(moderatorButton);
     const moderatorRowBox = await box(page.locator(".system-page__status-list .state-row").filter({ has: moderatorButton }));
     expect(moderatorBox.height).toBeLessThanOrEqual(36);
+    expect(Math.abs(statusList.width - systemHeader.width)).toBeLessThanOrEqual(1);
+    expect(Math.abs(defaultsSection.width - systemHeader.width)).toBeLessThanOrEqual(1);
+    expect(statusList.y - (defaultsSection.y + defaultsSection.height)).toBeLessThanOrEqual(56);
+    if (viewport.width > 640) {
+      expect(moderatorBox.width).toBeLessThanOrEqual(200);
+      expect(moderatorRowBox.height).toBeLessThanOrEqual(52);
+      expect((await box(systemRow)).height).toBeLessThanOrEqual(52);
+    }
     if (viewport.width > 640) expect(Math.abs((moderatorBox.y + moderatorBox.height / 2) - (moderatorRowBox.y + moderatorRowBox.height / 2))).toBeLessThanOrEqual(2);
 
     await freshRoute(page, viewport, `/channels/${channelId}/members`);
@@ -356,4 +364,25 @@ test("member role edits and invite dismissal use the dashboard draft guard", asy
   await page.getByRole("button", { name: "Abbrechen" }).click();
   await expect(page.getByText("Einladung verwerfen?")).toBeVisible();
   await expect(page.getByRole("button", { name: "Weiter bearbeiten" })).toBeVisible();
+});
+
+test("member detail is a plain full-width column and closing returns focus to its row", async ({ page }) => {
+  await freshRoute(page, { width: 1920, height: 1080 }, `/channels/${channelId}/members`);
+  const row = page.locator(".members-collection__rows .list-row__link").first();
+  await row.click();
+  const detail = page.locator(".collection-page__detail");
+  const editor = detail.locator(".ui-editor-shell");
+  await expect(editor).toBeVisible();
+  const detailBox = await box(detail);
+  const editorBox = await box(editor);
+  expect(detailBox.x + detailBox.width - (editorBox.x + editorBox.width)).toBeLessThanOrEqual(2);
+  expect(await editor.evaluate((element) => [getComputedStyle(element).borderTopWidth, getComputedStyle(element).paddingLeft, getComputedStyle(element).backgroundColor])).toEqual(["0px", "0px", "rgba(0, 0, 0, 0)"]);
+  const title = await box(editor.locator("h3").first());
+  const close = editor.getByRole("button", { name: "Schließen" });
+  const closeBox = await box(close);
+  expect(Math.abs((title.y + title.height / 2) - (closeBox.y + closeBox.height / 2))).toBeLessThanOrEqual(4);
+  await close.focus();
+  await page.keyboard.press("Enter");
+  await expect(editor).toHaveCount(0);
+  await expect(row).toBeFocused();
 });

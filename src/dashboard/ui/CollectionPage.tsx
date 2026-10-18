@@ -89,6 +89,8 @@ export function CollectionPage({
     const active = document.activeElement;
     const focusIsInList = active instanceof HTMLElement && listRef.current?.contains(active) === true;
 
+    if (openedDetail && !singleColumn && focusIsInList) returnFocus.current = active;
+
     if (singleColumn && (openedDetail || (enteredSingleColumn && focusIsInList))) {
       returnFocus.current = focusIsInList && active instanceof HTMLElement ? active : null;
       const frame = window.requestAnimationFrame(() => {
@@ -101,7 +103,7 @@ export function CollectionPage({
       return () => { window.cancelAnimationFrame(frame); };
     }
 
-    if (!closedDetail || (!singleColumn && !previous.singleColumn)) return;
+    if (!closedDetail) return;
     const frame = window.requestAnimationFrame(() => {
       const preferred = returnFocus.current;
       const fallback = listRef.current?.querySelector<HTMLElement>("[aria-selected='true'], [aria-current='true'], button");
