@@ -1,5 +1,6 @@
 import type { DryRunBlockCode, DryRunEffect, DryRunEntryReport } from "../contracts/dry-run";
-import type { BotModule, ModuleEvent } from "../modules/contract";
+import { chatDeliveryReleasesClaim, type BotModule, type ModuleEvent } from "../modules/contract";
+import { FAQ_MODULE_ID } from "../modules/faq/contracts";
 import { forSourceOnlyForChatTarget, truncateChatTextWithAttributions } from "./chat";
 import { chatOutputSuppressionReason, moderationOutputSuppressionReason } from "./chat-output-gate";
 
@@ -23,9 +24,8 @@ export const withOutputGate = (
   channelId: string,
   muted: boolean,
   paused: boolean,
-): DryRunEntryReport => ({
-  ...report,
-  effects: report.effects.map((effect): DryRunEffect => {
+): DryRunEntryReport => {
+  const effects = report.effects.map((effect): DryRunEffect => {
     if (effect.kind === "chat" || effect.kind === "announcement") {
       const { attributions = [], ...visibleEffect } = effect;
       const suppression = chatOutputSuppressionReason({
@@ -60,5 +60,14 @@ export const withOutputGate = (
       return suppression === null ? effect : { ...effect, suppressedBy: suppression };
     }
     return effect;
-  }),
-});
+  });
+  const faqDeliveryWasNotAttempted = module.id === FAQ_MODULE_ID &&
+    effects.some((effect) => effect.kind === "chat" && effect.suppressedBy !== null) &&
+    chatDeliveryReleasesClaim("not_attempted");
+  return {
+    ...report,
+    effects: faqDeliveryWasNotAttempted
+      ? effects.filter((effect) => effect.kind !== "cooldown")
+      : effects,
+  };
+};

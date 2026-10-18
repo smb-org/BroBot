@@ -1,4 +1,4 @@
-import type { ModuleEvent, ModuleExecutionContext, ModuleResult } from "../contract";
+import { chatDeliveryReleasesClaim, type ModuleEvent, type ModuleExecutionContext, type ModuleResult } from "../contract";
 import { hasCommandPrefix, selectFaqMatch } from "./domain";
 import type { FaqRepository } from "./repository";
 
@@ -56,7 +56,7 @@ export const processFaqMessage = async (
       ...(match.entry.chatTarget === null ? {} : { target: match.entry.chatTarget }),
       automated: true,
       onDelivery: async (delivery) => {
-        if (delivery === "rejected" || delivery === "not_attempted") {
+        if (chatDeliveryReleasesClaim(delivery)) {
           await repository.releaseClaim(event.channelId, match.entry, senderId, claim.claimedAt);
         }
       },

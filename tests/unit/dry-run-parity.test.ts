@@ -372,6 +372,74 @@ describe("text-command dry-run parity", () => {
     }
   });
 
+  it("omits FAQ cooldown effects when muted delivery releases production claims", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const productionDatabase = new TestD1Database();
+    const dryRunDatabase = new TestD1Database();
+    try {
+      for (const database of [productionDatabase, dryRunDatabase]) {
+        await insertChannel(database, CHANNEL_ID);
+        await database.prepare(
+          "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'faq', 1, '{}')",
+        ).bind(CHANNEL_ID).run();
+        await database.prepare("INSERT INTO channel_controls (channel_id, muted, updated_at) VALUES (?, 1, ?)")
+          .bind(CHANNEL_ID, NOW).run();
+        await database.prepare(
+          `INSERT INTO faq_entries
+            (faq_id, channel_id, name, enabled, matcher_type, matcher_json, answer_text, minimum_tier,
+             cooldown_seconds, user_cooldown_seconds, games_json, chat_target, use_channel_default_target,
+             sort_order, revision, last_used_at, created_at, updated_at)
+           VALUES
+            ('faq-muted', ?, 'Muted answer', 1, 'keywords', '{"type":"keywords","patterns":["hello"]}', 'Hello!',
+             'everyone', 30, 120, '[]', 'where_asked', 1, 0, 1, NULL, ?, ?)`,
+        ).bind(CHANNEL_ID, NOW, NOW).run();
+      }
+      await Promise.all([seedBotIdentity(productionDatabase), seedBotIdentity(dryRunDatabase)]);
+
+      const productionFetcher = sent();
+      await dispatchEventSubNotification(
+        environmentFor(productionDatabase),
+        chatEventFor("hello", "muted-production"),
+        productionFetcher,
+        [faqModule],
+      );
+      const productionGlobalCooldown = await productionDatabase.prepare(
+        "SELECT last_used_at FROM faq_entries WHERE faq_id = 'faq-muted'",
+      ).first<{ last_used_at: string | null }>();
+      const productionUserCooldowns = await productionDatabase.prepare(
+        "SELECT COUNT(*) AS count FROM faq_entry_user_cooldowns WHERE faq_id = 'faq-muted'",
+      ).first<{ count: number }>();
+
+      const dryRun = await dryRunChatMessage(
+        { ...environmentFor(dryRunDatabase), DB: dryRunDatabase as unknown as D1Database } as unknown as Env,
+        CHANNEL_ID,
+        {
+          text: "hello",
+          sender: { login: "viewer_42", statuses: [] },
+          streamState: "online",
+          game: null,
+          sharedChat: false,
+          only: { moduleId: "faq" },
+        },
+        vi.fn<typeof fetch>(),
+        [faqModule],
+      );
+      const faqEntry = dryRun.modules[0]?.entries.find(({ entry }) => entry.id === "faq-muted");
+      const dryRunCooldownEffects = faqEntry?.effects.filter((effect) => effect.kind === "cooldown");
+
+      expect(productionFetcher).not.toHaveBeenCalled();
+      expect(productionGlobalCooldown).toEqual({ last_used_at: null });
+      expect(productionUserCooldowns).toEqual({ count: 0 });
+      expect(faqEntry?.effects).toContainEqual(expect.objectContaining({ kind: "chat", suppressedBy: "channel_muted" }));
+      expect(dryRunCooldownEffects).toEqual([]);
+    } finally {
+      productionDatabase.close();
+      dryRunDatabase.close();
+      vi.useRealTimers();
+    }
+  });
+
   it("uses the FAQ production template context for moderator-conditioned answer blocks", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW));

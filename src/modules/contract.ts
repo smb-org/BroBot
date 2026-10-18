@@ -421,6 +421,10 @@ export const apiErrorDetail = (
 /** A semantically well-named module action for the host to execute. */
 export type ModuleChatDelivery = "sent" | "rejected" | "ambiguous" | "not_attempted";
 
+/** Whether a definite failed or unattempted chat delivery should release an action claim. */
+export const chatDeliveryReleasesClaim = (delivery: ModuleChatDelivery): boolean =>
+  delivery === "rejected" || delivery === "not_attempted";
+
 export type ModuleAction =
   | {
     kind: "chat";
