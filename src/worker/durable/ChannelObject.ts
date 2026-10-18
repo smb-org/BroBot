@@ -2827,7 +2827,7 @@ export class ChannelObject extends DurableObject<Env> {
   private async recoverPointRoundAlarms(): Promise<void> {
     this.ensurePointsSchema();
     for (const cancellation of pendingPointRoundCancellations(this.ctx.storage.sql)) {
-      await this.cancelOpenGameRounds(cancellation.moduleId, cancellation.revision);
+      await this.cancelOpenGameRoundsInternal(cancellation.moduleId, cancellation.revision, false);
     }
     const rounds = recoverablePointRounds(this.ctx.storage.sql);
     const table = await this.ensureAlarmScheduleTable();
@@ -3119,18 +3119,27 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async cancelOpenGameRounds(moduleId: string, revision: number): Promise<number> {
+    return await this.cancelOpenGameRoundsInternal(moduleId, revision, true);
+  }
+
+  private async cancelOpenGameRoundsInternal(
+    moduleId: string,
+    revision: number,
+    flushCancellationNotices: boolean,
+  ): Promise<number> {
     this.ensurePointsSchema();
     const roundIds = this.ctx.storage.sql.exec<{ round_id: string }>(
       `SELECT round_id FROM game_rounds WHERE module_id = ? AND state IN ('announcing', 'open', 'resolving') ORDER BY created_at, round_id`,
       moduleId,
     ).toArray().map(({ round_id }) => round_id);
-    return await this.cancelPointRounds(moduleId, roundIds, revision);
+    return await this.cancelPointRounds(moduleId, roundIds, revision, flushCancellationNotices);
   }
 
   private async cancelPointRounds(
     moduleId: string,
     roundIds: readonly string[],
     expectedGateRevision?: number,
+    flushCancellationNotices = true,
   ): Promise<number> {
     const refundRequests = pointRoundRefundRequests(this.ctx.storage.sql, moduleId, roundIds);
     const hashes = new Map<string, string>();
@@ -3166,7 +3175,7 @@ export class ChannelObject extends DurableObject<Env> {
       return count;
     });
     if (roundIds.length > 0) await this.scheduleEarliestAlarm();
-    if (expectedGateRevision !== undefined) await this.flushPointCancellationNotices();
+    if (expectedGateRevision !== undefined && flushCancellationNotices) await this.flushPointCancellationNotices();
     return cancelled;
   }
 
@@ -3218,6 +3227,7 @@ export class ChannelObject extends DurableObject<Env> {
     const notices = pendingPointRoundCancellationNotices(this.ctx.storage.sql);
     for (const notice of notices) {
       const key = pointCancellationNoticeAlarmKey(notice.moduleId, notice.revision);
+      const sendOccurrenceKey = `points:cancellation:${notice.moduleId}:${String(notice.revision)}`;
       try {
         const channel = await this.env.DB.prepare("SELECT language FROM channels WHERE channel_id = ?")
           .bind(channelId).first<{ language: string }>();
@@ -3239,7 +3249,7 @@ export class ChannelObject extends DurableObject<Env> {
           },
           async () => await claimModuleAlarmSend(
             this.ctx.storage,
-            `points:cancellation:${notice.moduleId}:${String(notice.revision)}`,
+            sendOccurrenceKey,
             Date.now(),
           ),
           [],
@@ -3247,7 +3257,7 @@ export class ChannelObject extends DurableObject<Env> {
             if (delivery !== "not_attempted") {
               await finishModuleAlarmSend(
                 this.ctx.storage,
-                `points:cancellation:${notice.moduleId}:${String(notice.revision)}`,
+                sendOccurrenceKey,
                 delivery,
                 Date.now(),
               );
@@ -3257,7 +3267,13 @@ export class ChannelObject extends DurableObject<Env> {
           undefined,
           (senderId, messageText) => this.recordBotChatMessage(senderId, messageText),
         );
-        if (result.sent || result.delivery === "ambiguous" || result.reason === "already_attempted") {
+        const existingSend = result.reason === "already_attempted"
+          ? await readModuleAlarmSendClaim(this.ctx.storage, sendOccurrenceKey)
+          : null;
+        const ambiguousSendTimedOut = existingSend?.status === "sending" &&
+          Date.now() - existingSend.at >= POINTS_ANNOUNCE_AMBIGUOUS_MS;
+        if (result.sent || (result.delivery === "ambiguous" && result.reason !== "already_attempted") ||
+            existingSend?.status === "sent" || ambiguousSendTimedOut) {
           this.ctx.storage.transactionSync(() => {
             completePointRoundCancellationNoticeSync(
               this.ctx.storage.sql,
@@ -3389,10 +3405,11 @@ export class ChannelObject extends DurableObject<Env> {
       createModuleExternalFetchBudget(),
     );
     const delivery = await context.sendChat(attempt.round.announce_text, `round:${roundId}:announce`);
+    const sendReturnedAt = Date.now();
     if (delivery.delivery === "delivered") {
-      await this.recordPointRoundAnnouncement(roundId, "delivered", attemptAt);
+      await this.recordPointRoundAnnouncement(roundId, "delivered", sendReturnedAt);
     } else if (delivery.delivery === "rate_limited") {
-      await this.recordPointRoundAnnouncement(roundId, "rate_limited", attemptAt);
+      await this.recordPointRoundAnnouncement(roundId, "rate_limited", sendReturnedAt);
     } else if (delivery.delivery === "ambiguous") {
       await this.recordPointRoundAnnouncement(
         roundId,
@@ -3400,7 +3417,7 @@ export class ChannelObject extends DurableObject<Env> {
         delivery.attemptedAt ?? attemptAt,
       );
     } else {
-      await this.recordPointRoundAnnouncement(roundId, "failed", attemptAt);
+      await this.recordPointRoundAnnouncement(roundId, "failed", sendReturnedAt);
     }
   }
 
