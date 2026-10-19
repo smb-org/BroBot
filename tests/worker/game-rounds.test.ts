@@ -161,7 +161,7 @@ describe("game rounds in the worker Durable Object", () => {
         Date.now() - 1,
         roundId,
       );
-    })).resolves.toBe(true);
+    }, { preservePlatformAlarm: true })).resolves.toBe(true);
 
     await expect(object.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(1);
     const state = await runPointObject(object, async (_target, objectState) => ({
@@ -1626,6 +1626,18 @@ describe("game rounds in the worker Durable Object", () => {
       });
     });
     expect(await forcePointAlarm(object, "round-sixth-crash")).toBe(true);
+    const pendingAfterCrash = await runPointObject(object, (_target, state) => state.storage.sql.exec<{
+      state: string;
+      announce_state: string;
+      announce_attempts: number;
+      deadline_at: number | null;
+    }>("SELECT state, announce_state, announce_attempts, deadline_at FROM game_rounds WHERE round_id = ?", "round-sixth-crash").one());
+    expect(pendingAfterCrash).toEqual({
+      state: "announcing",
+      announce_state: "pending",
+      announce_attempts: 6,
+      deadline_at: null,
+    });
     let currentAttempt: number | null = null;
     let ambiguousAt = 0;
     expect(await forcePointAlarm(object, "round-sixth-crash", (target, state) => {

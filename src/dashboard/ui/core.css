@@ -523,6 +523,7 @@ pre {
 .sidebar__category-marker { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--badge-admin); }
 .sidebar__group[data-category="chat"] .sidebar__category-marker { background: var(--badge-chat); }
 .sidebar__group[data-category="participation"] .sidebar__category-marker { background: var(--badge-participation); }
+.sidebar__group[data-category="games"] .sidebar__category-marker { background: var(--badge-games); }
 .sidebar__group[data-category="twitch"] .sidebar__category-marker { background: var(--badge-twitch); }
 .sidebar__group[data-category="data"] .sidebar__category-marker { background: var(--badge-data); }
 .sidebar__group[data-category="stream"] .sidebar__category-marker { background: var(--badge-stream); }
@@ -1414,6 +1415,7 @@ body:has(.module-detail--settings-page) .ui-toast-host { top: auto; bottom: var(
 .ui-badge--brand { border-color: var(--brand-line); color: var(--brand-text); background: var(--tint-1); }
 .ui-badge--chat { border-color: var(--badge-chat-line); color: var(--badge-chat); background: var(--badge-chat-fill); }
 .ui-badge--participation { border-color: var(--badge-participation-line); color: var(--badge-participation); background: var(--badge-participation-fill); }
+.ui-badge--games { border-color: var(--badge-games-line); color: var(--badge-games); background: var(--badge-games-fill); }
 .ui-badge--green { border-color: color-mix(in srgb, var(--green) 45%, var(--line)); color: var(--green); }
 .ui-badge--amber { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); color: var(--warn); }
 .ui-badge--red { border-color: color-mix(in srgb, var(--error) 45%, var(--line)); color: var(--error-text); }

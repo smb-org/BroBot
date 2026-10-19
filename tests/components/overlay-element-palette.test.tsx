@@ -34,7 +34,7 @@ const messages: OverlayElementPaletteMessages = {
   noResults: (query) => `No element matches “${query}”.`,
   keyHints: { navigate: "Navigate", choose: "Add", close: "Close" },
   variablesLabel: "Channel variables",
-  categoryLabels: { chat: "Chat", participation: "Participation", twitch: "Twitch", data: "Data", stream: "Stream", admin: "Administration" },
+  categoryLabels: { chat: "Chat", participation: "Participation", games: "Games", twitch: "Twitch", data: "Data", stream: "Stream", admin: "Administration" },
 };
 
 describe("OverlayElementPalette", () => {

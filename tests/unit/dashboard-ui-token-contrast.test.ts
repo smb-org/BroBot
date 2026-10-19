@@ -36,6 +36,31 @@ function contrastRatio(hexA: string, hexB: string): number {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
+function sharedPaletteTokens(): Map<string, string> {
+  const selector = /:root\[data-palette="nachtschicht"\],\s*:root\[data-palette="indigo-nacht"\],\s*:root:not\(\[data-palette\]\)\s*\{([^}]*)\}/u;
+  const declarations = selector.exec(tokenStyles)?.[1];
+  if (declarations === undefined) throw new Error("Missing shared palette token block");
+  return new Map(Array.from(declarations.matchAll(/(--[\w-]+):\s*(#[\da-f]{6})\s*;/giu), ([, name, value]) => [name ?? "", value ?? ""]));
+}
+
+function oklchHue(hex: string): number {
+  const value = hex.replace("#", "");
+  const linear = [0, 2, 4].map((offset) => {
+    const channel = Number.parseInt(value.slice(offset, offset + 2), 16) / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  });
+  const [red, green, blue] = linear as [number, number, number];
+  const l = 0.4122214708 * red + 0.5363325363 * green + 0.0514459929 * blue;
+  const m = 0.2119034982 * red + 0.6806995451 * green + 0.1073969566 * blue;
+  const s = 0.0883024619 * red + 0.2817188376 * green + 0.6299787005 * blue;
+  const lRoot = Math.cbrt(l);
+  const mRoot = Math.cbrt(m);
+  const sRoot = Math.cbrt(s);
+  const a = 1.9779984951 * lRoot - 2.4285922050 * mRoot + 0.4505937099 * sRoot;
+  const b = 0.0259040371 * lRoot + 0.7827717662 * mRoot - 0.8086757660 * sRoot;
+  return (Math.atan2(b, a) * 180 / Math.PI + 360) % 360;
+}
+
 describe("filled-control token contrast", () => {
   it.each(["nachtschicht", "indigo-nacht"] as const)("keeps every filled-control foreground at WCAG AA in %s", (palette) => {
     const values = paletteTokens(palette);
@@ -59,4 +84,22 @@ describe("filled-control token contrast", () => {
       }
     }
   });
+});
+
+describe("games badge tokens", () => {
+  it.each(["nachtschicht", "indigo-nacht"] as const)(
+    `keeps the games badge readable and distinct in %s (protects=games badge foreground contrast and category hue separation; fails_when=contrast is below 4.5:1 or OKLCH hue distance from the Data badge is below 30 degrees; no_claim=shared badge tokens are repeated for both palettes, but browser rendering is not asserted)`,
+    (palette) => {
+      const values = sharedPaletteTokens();
+      const foreground = values.get("--badge-games");
+      const fill = values.get("--badge-games-fill");
+      const data = values.get("--badge-data");
+      expect(foreground, `${palette} must define --badge-games`).toBeDefined();
+      expect(fill, `${palette} must define --badge-games-fill`).toBeDefined();
+      expect(data, `${palette} must define --badge-data`).toBeDefined();
+      expect(contrastRatio(foreground ?? "", fill ?? ""), `${palette} games foreground on fill`).toBeGreaterThanOrEqual(WCAG_AA_NORMAL_TEXT);
+      const rawDistance = Math.abs(oklchHue(foreground ?? "") - oklchHue(data ?? ""));
+      expect(Math.min(rawDistance, 360 - rawDistance), `${palette} games and Data OKLCH hue distance`).toBeGreaterThanOrEqual(30);
+    },
+  );
 });

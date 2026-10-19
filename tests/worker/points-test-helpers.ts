@@ -16,18 +16,22 @@ interface PointMovement {
 }
 
 export interface PointsWorkerObject {
-  applyPointOperation(moduleId: string, operationId: string, kind: string, movements: PointMovement[], result: unknown): Promise<{
+  applyPointOperation(moduleId: string, operationId: string, kind: string, movements: PointMovement[], result: unknown, identity?: unknown): Promise<{
     replayed: boolean;
     result: unknown;
     balances: Record<string, number>;
   }>;
-  touchPointAccount(moduleId: string, accountId: string, login: string, startBonus: number): Promise<{ welcomePending: boolean }>;
+  touchPointAccount(moduleId: string, accountId: string, login: string, startBonus: number): Promise<{
+    welcomePending: boolean;
+    startBonus: number | null;
+  }>;
   acknowledgePointWelcome(moduleId: string, accountId: string): Promise<void>;
   pointBalance(moduleId: string, accountId: string): Promise<number>;
+  pointAccount(moduleId: string, accountId: string): Promise<{ accountId: string; login: string; balance: number } | null>;
   creditPointActivity(moduleId: string, accountId: string, login: string, messageAt: number, live: boolean,
     rules: { amount: number; windowMinutes: number; dailyCap: number }): Promise<{ credited: number }>;
   listPointAccounts(moduleId: string, query: { sort: "balance" | "month"; search?: string; cursor?: string; limit: number }): Promise<{
-    rows: Array<{ accountId: string; login: string; balance: number; monthNet: number }>;
+    rows: Array<{ accountId: string; login: string; balance: number; monthNet: number | null }>;
     cursor?: string;
   }>;
   pointHistory(moduleId: string, accountId: string, cursor?: string, limit?: number): Promise<{
@@ -203,6 +207,7 @@ export const forcePointAlarm = async (
   object: PointsWorkerObject,
   roundId: string,
   prepare?: (target: PointsWorkerObject, state: DurableObjectState) => Promise<void> | void,
+  options: { preservePlatformAlarm?: boolean } = {},
 ): Promise<boolean> => {
   await runPointObject(object, async (target, state) => {
     // runInDurableObject enters through the object input gate. Remove the
@@ -212,7 +217,13 @@ export const forcePointAlarm = async (
     await prepare?.(target, state);
     await schedulePointAlarmWithin(state, roundId);
   });
-  return await runPointAlarm(object);
+  const ran = await runPointAlarm(object);
+  if (options.preservePlatformAlarm !== true) {
+    // Alarm handlers re-arm the real platform timer at their retry deadline.
+    // Park it again so a slow test runner cannot race the next explicitly forced step.
+    await runPointObject(object, async (_target, state) => deferPointAlarmWithin(state));
+  }
+  return ran;
 };
 
 export const openAnnouncedRound = async (

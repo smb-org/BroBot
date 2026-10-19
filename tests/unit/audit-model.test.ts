@@ -120,6 +120,33 @@ describe("audit sentence action templates", () => {
     expect(auditSentenceText(removed, "en")).toContain("Bob with the Manager role");
   });
 
+  it("renders the corrected points account and exposes only meaningful correction fields (protects=points audit rows show the viewer and meaningful amount and reason fields; fails_when=internal metadata is rendered as an editable correction field or account identity is lost; no_claim=audit rendering uses the provided immutable entry)", () => {
+    const after = JSON.stringify({
+      operationId: "admin:01234567-89ab-42cd-8abc-0123456789ab",
+      accountId: "viewer-1",
+      accountLogin: "nachtfalke",
+      actorId: "manager-1",
+      actorLogin: "kanal_demo",
+      delta: 12,
+      reason: "stream prize",
+      createdAt: "2026-10-19T12:00:00.000Z",
+    });
+    const entry = baseEntry({
+      action: "points_adjusted",
+      moduleId: "points",
+      actorDisplayName: "Manager",
+      after,
+    });
+
+    expect(auditSentenceText(entry, "de")).toBe("Manager korrigierte Punkte für @nachtfalke");
+    expect(auditSentenceText(entry, "en")).toBe("Manager adjusted points for @nachtfalke");
+    expect(auditDiffRows("null", after).map(({ key }) => key)).toEqual(["delta", "reason"]);
+    expect(auditFieldLabel("delta", "de")).toBe("Betrag");
+    expect(auditFieldLabel("reason", "de")).toBe("Grund");
+    expect(auditFieldLabel("delta", "en")).toBe("Amount");
+    expect(auditFieldLabel("reason", "en")).toBe("Reason");
+  });
+
   it("describes timeout lifting as an attempt and localizes the recorded outcome", () => {
     const entry = baseEntry({
       action: "votekick.timeout_lift_attempted",

@@ -531,6 +531,7 @@ export type PrepareModuleAudit = (
 export type WriteModuleAudit = (
   entry: ModuleAuditEntry,
   changedAt: string,
+  options?: { operationId?: string; actorUserId?: string },
 ) => Promise<void>;
 
 export type AuthorizeModuleMutation = (
@@ -975,8 +976,12 @@ export type PointJoinResult =
   | { status: "already_joined" | "round_closed" };
 
 export interface ModulePointsAccess {
-  apply: (operationId: string, kind: PointsKind, movements: PointsMovement[], result: unknown) => Promise<PointsApplyResult>;
-  touchAccount: (accountId: string, login: string, startBonus: number) => Promise<{ welcomePending: boolean }>;
+  /** Optional stable request identity for operations whose persisted result contains server-generated metadata. */
+  apply: (operationId: string, kind: PointsKind, movements: PointsMovement[], result: unknown, payloadIdentity?: unknown) => Promise<PointsApplyResult>;
+  touchAccount: (accountId: string, login: string, startBonus: number) => Promise<{
+    welcomePending: boolean;
+    startBonus: number | null;
+  }>;
   ackWelcome: (accountId: string) => Promise<void>;
   creditActivity: (
     accountId: string,
@@ -986,8 +991,9 @@ export interface ModulePointsAccess {
     rules: { amount: number; windowMinutes: number; dailyCap: number },
   ) => Promise<{ credited: number }>;
   balance: (accountId: string) => Promise<number>;
+  getAccount: (accountId: string) => Promise<{ accountId: string; login: string; balance: number } | null>;
   listAccounts: (query: { sort: "balance" | "month"; search?: string; cursor?: string; limit: number }) => Promise<{
-    rows: { accountId: string; login: string; balance: number; monthNet: number }[];
+    rows: { accountId: string; login: string; balance: number; monthNet: number | null }[];
     cursor?: string;
   }>;
   history: (accountId: string, cursor?: string, limit?: number) => Promise<{
@@ -1012,7 +1018,7 @@ export interface ModulePointsAccess {
 
 export type ModuleStreamState = "online" | "offline" | "unknown";
 
-export const MODULE_NAVIGATION_CATEGORIES = ["chat", "participation", "twitch", "data", "stream", "admin"] as const;
+export const MODULE_NAVIGATION_CATEGORIES = ["chat", "participation", "games", "twitch", "data", "stream", "admin"] as const;
 export type ModuleNavigationCategory = (typeof MODULE_NAVIGATION_CATEGORIES)[number];
 
 export interface ModuleChannelInfo {
@@ -1403,6 +1409,8 @@ export interface ModulePanelProperties {
   channelId: string;
   /** The panel language resolved by the host; optional for legacy modules. */
   language?: ModuleLanguage;
+  /** Resolves other registered module names for collection rows and history. */
+  resolveModuleName?: (moduleId: string, language: ModuleLanguage) => string;
   /** Changes when the channel goes online/offline or a new stream session starts. */
   streamSessionIdentity?: string;
   /** May the view execute management controls? */
@@ -1590,7 +1598,7 @@ export type HelixResult<Data = unknown> =
 export type HelixRequest = <Data = unknown>(options: HelixRequestOptions<Data>) => Promise<HelixResult<Data>>;
 
 export interface ModuleRouteVariables {
-  session: { userId: string; sessionId: string };
+  session: { userId: string; sessionId: string; login?: string };
   channelRole: ChannelRole;
   actor: { userId: string; sessionId: string };
   authorizeMutation: AuthorizeModuleMutation;

@@ -912,6 +912,7 @@ const MountedModuleView = ({ module, channelId, streamSessionIdentity, canManage
         channelId,
         ...(streamSessionIdentity === undefined ? {} : { streamSessionIdentity }),
         language: dashboardLanguage(),
+        resolveModuleName: moduleName,
         canManage,
         canOperate,
         botIsModerator,
@@ -1142,9 +1143,14 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   const mandatoryReason = registered?.mandatoryReason?.[dashboardLanguage()] ?? labels.mandatoryReason;
   const enabled = mandatory || moduleState?.enabled === true;
   const manageable = canManageModules(ownRole);
-  const headerLockHint = manageable ? null : texts.module.managementLocked;
-  const disabledReason = mandatory ? mandatoryReason : manageable ? null : texts.module.managementLocked;
-  const switchDisabled = mandatory || registered === undefined || moduleState === undefined;
+  const dependentGames = moduleId === "points" ? MODULES.filter((candidate) => candidate.navigationCategory === "games" &&
+    candidate.requiresModules?.includes("points") === true && modules.some((state) => state.id === candidate.id && state.enabled)) : [];
+  const dependentModulesReason = dependentGames.length === 0 ? null : texts.module.dependentModulesLock(
+    dependentGames.map((candidate) => moduleName(candidate.id, dashboardLanguage())).join(", "),
+  );
+  const headerLockHint = dependentModulesReason ?? (manageable ? null : texts.module.managementLocked);
+  const disabledReason = mandatory ? mandatoryReason : dependentModulesReason ?? (manageable ? null : texts.module.managementLocked);
+  const switchDisabled = mandatory || registered === undefined || moduleState === undefined || dependentGames.length > 0;
   const missingScopes = moduleState?.missingBroadcasterScopes ?? [];
   const permissionsMissing = modulePermissionsAreMissing(moduleState);
   const requiredScopes = moduleState?.requiredBroadcasterScopes ?? registered?.broadcasterScopes ?? [];
@@ -1212,7 +1218,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
             switchDisabled: !manageable || switchDisabled || busy || mandatory,
             switchBusy: busy,
             ...(mandatory ? { moduleSwitch: <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} /> } : {}),
-            ...(headerLockHint === null || (registered?.settingsEditor !== undefined && showActiveView && moduleId !== "chat_voting") || (registered?.panelManagesSettings && moduleState?.enabled !== false && moduleId !== "clips") ? {} : { lockHint: headerLockHint }),
+            ...(headerLockHint === null || (dependentModulesReason === null && ((registered?.settingsEditor !== undefined && showActiveView && moduleId !== "chat_voting") || (registered?.panelManagesSettings && moduleState?.enabled !== false && moduleId !== "clips"))) ? {} : { lockHint: headerLockHint }),
           })}
           {...(moduleId === "chat_voting" ? {
             pageActions: <>

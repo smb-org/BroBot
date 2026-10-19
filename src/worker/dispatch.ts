@@ -38,6 +38,8 @@ import { modulePoints } from "./module-points";
 import { createModuleSecretReadAccess } from "./module-secrets";
 import { recordChannelGameHistory } from "./db/game-search-cache";
 import { notifyModuleScheduleInputsChanged } from "./module-schedules";
+import { pointsCatalog } from "../modules/points/locale";
+import { appendPointWelcome, type PendingPointWelcome } from "./point-welcome";
 
 export interface DispatchEnvironment {
   DB: D1Database;
@@ -328,6 +330,21 @@ export const needsActiveChatterTracking = (
     (module.mandatory === true || enabledModuleIds.has(module.id)));
 };
 
+const commandRouteMatchesModule = (
+  module: BotModule,
+  event: Pick<ModuleEvent, "payload" | "subscriptionType">,
+): boolean => {
+  if (event.subscriptionType !== "channel.chat.message") return false;
+  const message = event.payload.message;
+  if (typeof message !== "object" || message === null || Array.isArray(message)) return false;
+  const text: unknown = Reflect.get(message, "text");
+  if (typeof text !== "string") return false;
+  const commandName = text.trim().split(/\s+/u, 1)[0]?.toLowerCase();
+  if (commandName === undefined || !commandName.startsWith("!")) return false;
+  if (module.id === "text_commands") return true;
+  return module.chatCommands?.some((command) => command.name.toLowerCase() === commandName) === true;
+};
+
 // The `ursache`/`typ`/`meldung` detail keys below stay: they land in
 // event_log.detail_json (a wire/stored shape), and this file lives outside
 // `src/modules`, so the frozen detailKeys() test in
@@ -341,6 +358,9 @@ const runActions = async (
   fetcher: typeof fetch,
   attributions: readonly string[] = [],
   sourceBroadcasterUserId?: string | null,
+  pendingWelcome?: PendingPointWelcome,
+  handledMessageId?: string,
+  commandResponseActions: WeakSet<ModuleAction> = new WeakSet(),
 ): Promise<ModuleDiagnostic[]> => {
   const diagnostics: ModuleDiagnostic[] = [];
   const pendingActions = [...actions];
@@ -350,8 +370,12 @@ const runActions = async (
   // Order is preserved: a reply after an announcement reads as a different
   // conversation than the reverse.
   for (let index = 0; index < pendingActions.length; index += 1) {
-    const action = pendingActions[index];
+    let action = pendingActions[index];
     if (action === undefined) continue;
+    const isModerationFollowUp = moderationFollowUps.has(action);
+    const commandResponseMessageId = commandResponseActions.has(action) ? handledMessageId : undefined;
+    // Moderation follow-ups never carry or acknowledge the welcome, threaded or not.
+    if (!isModerationFollowUp) action = appendPointWelcome(action, pendingWelcome, attributions, commandResponseMessageId);
     const reportDelivery = async (delivery: ModuleChatDelivery): Promise<void> => {
       if (action.kind !== "chat" || action.onDelivery === undefined) return;
       try {
@@ -363,7 +387,7 @@ const runActions = async (
     const moderationAction = action.kind === "timeout" || action.kind === "ban";
     let mutedForAction = muted;
     let pausedForAction = false;
-    if ((action.kind === "chat" || action.kind === "announcement") && moderationFollowUps.has(action)) {
+    if ((action.kind === "chat" || action.kind === "announcement") && isModerationFollowUp) {
       const controls = await readChannelControls(environment.DB, channelId, new Date().toISOString());
       mutedForAction = controls.mute.active;
       pausedForAction = controls.pause.active;
@@ -372,7 +396,7 @@ const runActions = async (
       ? null
       : chatOutputSuppressionReason({
         moduleEnabled: true,
-        mandatory: moderationFollowUps.has(action) ? module.mandatory === true : true,
+        mandatory: isModerationFollowUp ? module.mandatory === true : true,
         paused: pausedForAction,
         muted: mutedForAction,
       });
@@ -943,9 +967,40 @@ export const dispatchEventSubNotification = async (
   }
 
   const streamStateTransitionAccepted = streamStateChanged !== null;
+  let pendingWelcome: PendingPointWelcome | undefined;
+  const pointsMatch = matches.find(({ module }) => module.id === "points");
+  const chatterUserId = textValue(event.payload.chatter_user_id);
+  const chatterLogin = textValue(event.payload.chatter_user_login);
+  const messageId = textValue(event.payload.message_id);
+  const sourceBroadcasterUserId = textValue(event.payload.source_broadcaster_user_id);
+  if (pointsMatch !== undefined && event.subscriptionType === "channel.chat.message" && chatterUserId !== null &&
+      chatterLogin !== null && messageId !== null && (sourceBroadcasterUserId === null || sourceBroadcasterUserId === event.channelId)) {
+    try {
+      const botUserId = await getCachedBotUserId(environment.DB);
+      if (chatterUserId !== botUserId) {
+        const settings = pointsMatch.module.settingsSchema.parse(JSON.parse(pointsMatch.settings)) as { startBonus: number; currencyName: string };
+        const access = modulePoints(environment.CHANNEL, event.channelId, "points");
+        const touched = await access.touchAccount(chatterUserId, chatterLogin, settings.startBonus);
+        if (touched.welcomePending && touched.startBonus !== null) {
+          const language = await channelLanguage();
+          pendingWelcome = {
+            accountId: chatterUserId,
+            messageId,
+            text: pointsCatalog[language].chat.startBonus(touched.startBonus, settings.currencyName),
+            access,
+            used: false,
+          };
+        }
+      }
+    } catch {
+      // The module handler retries the account touch and reports any failure through its normal diagnostics.
+    }
+  }
+
   for (const { module, settings } of matches) {
     const diagnostics: ModuleDiagnostic[] = [];
     let result: ModuleResult | null = null;
+    const isCommandResponseHandler = commandRouteMatchesModule(module, event);
 
     try {
       const activation = dispatchState.activations.find((candidate) => candidate.moduleId === module.id);
@@ -1094,6 +1149,12 @@ export const dispatchEventSubNotification = async (
         overlayIdsByVariable.set(change.name, change.overlayIds);
       }
       try {
+        const commandResponseActions = new WeakSet<ModuleAction>();
+        if (isCommandResponseHandler) {
+          for (const action of result.actions) {
+            if (action.kind === "chat") commandResponseActions.add(action);
+          }
+        }
         diagnostics.push(...await runActions(
           environment,
           event.channelId,
@@ -1103,6 +1164,9 @@ export const dispatchEventSubNotification = async (
           fetcher,
           result.attributions,
           textValue(event.payload.source_broadcaster_user_id),
+          pendingWelcome,
+          messageId ?? undefined,
+          commandResponseActions,
         ));
       } catch (error: unknown) {
         diagnostics.push({ code: "host.action.failed" satisfies EventCode, detail: { message: errorMessage(error) } });

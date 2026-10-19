@@ -171,6 +171,7 @@ Pro Navigationsgruppe ein Farbton; Token-Dreier wie `--badge-chat`, `--badge-cha
 |---|---|---|---|
 | Chat (`chat`) | `#3FD0C9` | `#122D30` | `#29565B` |
 | Mitmachen (`participation`/`mitmachen`) | `#B48CFF` | `#292137` | `#4F3C70` |
+| Spiele (`games`) | `#D8F36A` | `#26301A` | `#566B31` |
 | Twitch (`twitch`) | `#E07BFF` | `#2D1D39` | `#68406F` |
 | Daten (`data`/`daten`) | `#5BD68A` | `#193527` | `#316244` |
 | Stream (`stream`) | `#FF9F5A` | `#35271E` | `#684D38` |
@@ -214,7 +215,7 @@ Schriften: **Archivo** (UI) und **IBM Plex Mono** (Zahlen), selbst gehostet.
 - **Rahmen:** 1px Haarlinie; kräftige Rahmen nur an Eingaben (`linie-control`). Leerzustände gestrichelt.
 - **Schatten:** nur auf schwebenden Ebenen (Dialog, Popover, Menü, Toast); im Fluss keine. Tiefe entsteht durch Flächenstufen.
 - **Bewegung:** kurze Übergänge (≤ 160ms), unter `prefers-reduced-motion` aus. Kein Schimmer, keine animierten Skelette.
-- **Symbole:** Tabler Icons über `src/dashboard/ui/Icon.tsx`, einheitliche Strichstärke; Emoji nirgends im UI.
+- **Symbole:** Icons come from `lucide-react` through `src/dashboard/ui/Icon.tsx`, with consistent stroke weight. Emoji may appear as game content (reel symbols and chat previews), never as interface chrome.
 - **Dichte:** Controls 32px hoch, auch `UnitInput`; Abstand zwischen Abschnitten 20px, innerhalb eines Abschnitts 12px. Vorlagen-Textfelder haben zwei Zeilen, FAQ-Antworten und Textbausteine drei. Chatvorschauen zeigen zwei reservierte Zeilen. Vorlagenfeld und Vorschau stehen in Timer, Textbefehlen, FAQ, Textbausteinen, Raid, Werbung, Votekick und BELABOX nebeneinander. Einrichtungsseiten gruppieren Felder nicht in eigene Rahmen.
 
 ## 9. Layout und Navigation
@@ -233,12 +234,13 @@ Links: Marke, Kanalwahl (`kanal_demo`, Popover „Kanal wechseln“). Mitte: Mod
 
 ### 9.3 Aufgabenbasierte Navigation (Einrichten, `.setup-nav`, 256px)
 
-Sechs Gruppen, je Gruppe ein Badge-Farbton (Abschnitt 6). Aktiver Punkt: 1px Brand-Rahmen rundum + `--color-selection-surface`, keine Leiste. Hover immer `--surface-hover`, nie ein literales Warmgrau.
+Seven groups, each with a badge hue (section 6): Chat, Mitmachen, Spiele, Twitch, Daten, Stream, Verwaltung. The Spiele group contains Punkte; game entries arrive with their game modules. Aktiver Punkt: 1px Brand-Rahmen rundum + `--color-selection-surface`, keine Leiste. Hover immer `--surface-hover`, nie ein literales Warmgrau.
 
 | Gruppe | geplante Seiten (Route unter `/setup/`) |
 |---|---|
 | Chat | Textbefehle (`text-commands`), FAQ & Auto-Antworten (`faq`), Textbausteine (`text-library`), Timer (`timers`) |
 | Mitmachen | Abstimmung (`voting`), Votekick (`votekick`), Clips (`clips`) |
+| Spiele | Punkte (`points`); weitere Spiele folgen mit ihren Modulen |
 | Twitch | Werbung (`ads`), Raid & Shoutout (`raid`) |
 | Daten | Ort & Wetter (`location-weather`), Eigene Datenquellen (`data-sources`) |
 | Stream | Overlays (`overlays`), BELABOX (`belabox`) |
@@ -252,7 +254,7 @@ Sechs Gruppen, je Gruppe ein Badge-Farbton (Abschnitt 6). Aktiver Punkt: 1px Bra
 
 | Typ | Bauteil | Aufbau | Beispiele |
 |---|---|---|---|
-| **Sammlung** | `CollectionPage` | Liste links (360/420/480px nach Breite, Werkzeugleiste oben) + Detail rechts | Textbefehle, Timer, Abstimmung, FAQ, Textbausteine, Datenquellen, Variablen, Mitglieder |
+| **Sammlung** | `CollectionPage` | Liste links (360/420/480px nach Breite, Werkzeugleiste oben) + Detail rechts | Textbefehle, Timer, Abstimmung, FAQ, Textbausteine, Datenquellen, Variablen, Mitglieder, Punkte |
 | **Einstellungen** | `SettingsPage` | 1–4 Spalten unter dem Seitenkopf | Ort & Wetter, Raid, Votekick, Werbung, BELABOX, System, Module |
 | **Werkzeug** | `ToolPage` | volle Fläche, Kopf + Arbeitsfläche | Overlay-Editor, Protokoll |
 
@@ -270,7 +272,8 @@ rechts: Speicher-Cluster | Seitenaktionen | „…“ (Weitere Aktionen)
 
 - **Geplanter Speicher-Cluster** im Seiten- bzw. Detailkopf, **nie** als Fußleiste. Reihenfolge: Statustext, „Verwerfen“ (ghost), „Speichern“ (gold, Strg/Cmd+S). Zielbreite 430px; Überlauf- und Größenprüfungen sind geplant.
 - **Seitenaktionen** nach dem Cluster; höchstens ein Goldbutton.
-- Bei Abstimmung, Votekick und Clips steht zusätzlich „Chatbefehle · n“ rechts neben dem Speicher-Cluster. Andere Module zeigen diesen Knopf nicht.
+- Collection modules show an Einstellungen page action that opens their settings in the detail area with its own explicit save cluster.
+- Bei Abstimmung, Votekick, Clips und Spiele-Seiten einschließlich Punkte steht zusätzlich „Chatbefehle · n“ rechts neben dem Speicher-Cluster.
 - **„…“-Menü** ganz rechts: seltene und zerstörerische Aktionen (Löschen, Zurücksetzen), jede mit Bestätigung.
 - Titel < Cluster < Aktionen von links nach rechts.
 - Der Kopf soll beim Zustandswechsel (lädt, Fehler, bereit) an derselben Stelle bleiben; ein Layouttest ist geplant.
@@ -376,6 +379,10 @@ Das Zielsystem sieht Sofortaktionen (`ImmediateAction`) und Live-Kacheln (`LiveT
 - Spezialelemente können Farben aus der Abstimmung übernehmen („Farben aus Abstimmung übernehmen“).
 - Dynamische Werte (Wetter, Zähler) kommen über Variablen, nie als feste Zahlen.
 
+#### Game overlay frame
+
+At 1080p, the game frame is at most about 640 × 160 px. Main values are at least 32 px and secondary values at least 22 px. Use an opaque bar for readability. Motion is brief, respects reduced-motion preferences, and never changes the frame dimensions or moves unrelated content.
+
 ### 13.2 Befehlspalette (geplant)
 
 Cmd/Strg+K, Dialog „Seite suchen“, genau ein Suchsymbol, Fokusring 2px/Offset 2px, filtert Seiten, Pfeile + Enter öffnen. Auswahl: 1px Brand-Rahmen + Tönung, keine Leiste. Nicht für Aktionen (dafür Sofortaktionen).
@@ -475,5 +482,6 @@ Diese Zielvorgaben beschreiben künftige Konsistenzregeln für die bestehenden D
 ### 16.5 Seitenmuster
 
 - Clips ist eine schmale Einspaltenseite ohne Videovorschau: Modusschalter und Status, „Clip erstellen“, „Letzte Clips“, danach `!clip`-Rollen-/Abklingzeiteinstellungen sowie die optionalen Abschnitte „Clip-Link im Chat posten“ und „Automatische Clips“.
-- „Chatbefehle · n“ erscheint ausschließlich bei Abstimmung, Votekick und Clips. Verwaltung enthält Kanalereignisse unmittelbar vor Protokoll; ein „Pflichtmodul“-Badge erscheint nicht.
+- „Chatbefehle · n“ erscheint bei Abstimmung, Votekick, Clips, game pages und Punkte. Verwaltung enthält Kanalereignisse unmittelbar vor Protokoll; ein „Pflichtmodul“-Badge erscheint nicht.
+- Die Punkte-Sammlung verwendet links eine 360px-Personenliste mit Stand/Monat-Sortierung und rechts Kontostand, Korrektur und Verlauf. Die Zeilen bleiben flach mit Haarlinien; nur die gewählte Zeile erhält die Auswahlfläche.
 - Mitglieder zeigen Rollen in einer gemeinsamen Mitgliederansicht statt doppelter Rollenkarten. Vorschautexte für Live-Ereignisse behalten ihre Zahlen; Streamtitel werden als lokaler Entwurf bearbeitet. „Verwerfen“ stellt auf jeder Seite den letzten gespeicherten Stand wieder her.

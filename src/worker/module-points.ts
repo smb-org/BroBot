@@ -15,6 +15,7 @@ export const modulePoints = (
       ackWelcome: () => unavailable(),
       creditActivity: () => unavailable(),
       balance: () => unavailable(),
+      getAccount: () => unavailable(),
       listAccounts: () => unavailable(),
       history: () => unavailable(),
       summary: () => unavailable(),
@@ -35,13 +36,14 @@ export const modulePoints = (
   }
   const object = namespace.get(namespace.idFromName(channelId));
   return {
-    apply: (operationId, kind: PointsKind, movements: PointsMovement[], result) =>
-      object.applyPointOperation(moduleId, operationId, kind, movements, result),
+    apply: (operationId, kind: PointsKind, movements: PointsMovement[], result, payloadIdentity) =>
+      object.applyPointOperation(moduleId, operationId, kind, movements, result, payloadIdentity),
     touchAccount: (accountId, login, startBonus) => object.touchPointAccount(moduleId, accountId, login, startBonus),
     ackWelcome: (accountId) => object.acknowledgePointWelcome(moduleId, accountId),
     creditActivity: (accountId, login, messageAt, live, rules) =>
       object.creditPointActivity(moduleId, accountId, login, messageAt, live, rules),
     balance: (accountId) => object.pointBalance(moduleId, accountId),
+    getAccount: (accountId) => object.pointAccount(moduleId, accountId),
     listAccounts: (query) => object.listPointAccounts(moduleId, query),
     history: (accountId, cursor, limit) => object.pointHistory(moduleId, accountId, cursor, limit),
     summary: () => object.pointSummary(moduleId),

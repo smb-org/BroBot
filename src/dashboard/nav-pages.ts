@@ -5,13 +5,14 @@ import { modulePermissionsAreMissing } from "./channel-health";
 import type { ChannelRole } from "../contracts/values";
 import type { BotModule, ModuleLanguage, ModuleNavigationCategory } from "../modules/contract";
 
-export const DASHBOARD_NAVIGATION_CATEGORIES = ["chat", "participation", "twitch", "data", "stream", "admin"] as const;
+export const DASHBOARD_NAVIGATION_CATEGORIES = ["chat", "participation", "games", "twitch", "data", "stream", "admin"] as const;
 export type DashboardNavigationCategory = (typeof DASHBOARD_NAVIGATION_CATEGORIES)[number];
 
 /** Every module contract category has an explicit home in the dashboard shell. */
 export const MODULE_NAVIGATION_CATEGORY_GROUPS = {
   chat: "chat",
   participation: "participation",
+  games: "games",
   twitch: "twitch",
   data: "data",
   stream: "stream",

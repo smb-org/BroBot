@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { groupOverlayElementPaletteItems, type OverlayElementPaletteItem } from "../../src/dashboard/overlay-element-palette-model";
 
-const categories = { chat: "Chat", participation: "Participation", twitch: "Twitch", data: "Data", stream: "Stream", admin: "Administration" } as const;
+const categories = { chat: "Chat", participation: "Participation", games: "Games", twitch: "Twitch", data: "Data", stream: "Stream", admin: "Administration" } as const;
 
 const items: readonly OverlayElementPaletteItem[] = [
   { id: "ads", groupId: "twitch", label: "Ad countdown", description: "Time until next ad break.", moduleName: "Ad breaks" },
