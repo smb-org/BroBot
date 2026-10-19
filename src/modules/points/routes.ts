@@ -165,10 +165,6 @@ pointsRoutes.post("/accounts/:accountId/adjust", async (context) => {
     return context.json({ balance: await access.balance(accountId), auditPending: false });
   }
 
-  if (!previousMatches && !Number.isSafeInteger((await access.balance(accountId)) + delta)) {
-    return context.json({ error: "balance_overflow" }, 400);
-  }
-
   const detail: PendingAdjustment = previousMatches ? previousDetail : {
     operationId,
     accountId,

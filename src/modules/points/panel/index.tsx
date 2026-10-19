@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { moduleQueryKey, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { moduleQueryKey, refetchModuleQueryData, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { dashboardCommonTexts, dashboardLanguage, formatNumber, pointsDashboardTexts } from "../../../dashboard/locale";
 import { ActionMenu } from "../../../dashboard/ui/ActionMenu";
 import { CollectionPage } from "../../../dashboard/ui/CollectionPage";
@@ -201,8 +201,16 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
       await queryClient.invalidateQueries({ queryKey: ["channel", channelId, "module", "points", "summary"] });
       await queryClient.invalidateQueries({ queryKey: ["channel", channelId, "module", "points", "settings"] });
       setSettingsSaved(true);
-    } catch {
-      setSettingsError(labels.settingsError);
+    } catch (error) {
+      if (error instanceof PanelApiError && error.status === 409) {
+        try {
+          await refetchModuleQueryData(queryClient, channelId, "points", "settings");
+        } catch {
+          setSettingsError(labels.settingsError);
+        }
+      } else {
+        setSettingsError(labels.settingsError);
+      }
     } finally {
       setSettingsPending(false);
     }
@@ -473,8 +481,9 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
     }}
   />;
 
-  const list = accounts.length === 0 ? null : <>
-    <div className="points-account-list" role="list">
+  const hasAccountPages = accountsQuery.data?.cursor !== undefined || accountCursorStack.length > 0;
+  const list = accounts.length === 0 && !hasAccountPages ? null : <>
+    {accounts.length === 0 ? <p className="points-list-empty">{labels.pageEmpty}</p> : <div className="points-account-list" role="list">
       {accounts.map((account: PointsAccount) => <button
         type="button"
         role="listitem"
@@ -490,8 +499,8 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
           ? labels.noMonthGame(monthLabel(month, locale))
           : labels.monthNet(account.monthNet, monthLabel(month, locale), null)}</span>
       </button>)}
-    </div>
-    {accountsQuery.data?.cursor !== undefined || accountCursorStack.length > 0 ? <ListPaginationFooter loadedCount={accounts.length} loadedLabel={labels.accounts}>
+    </div>}
+    {hasAccountPages ? <ListPaginationFooter loadedCount={accounts.length} loadedLabel={labels.accounts}>
       <Button variant="neutral" size="compact" disabled={accountCursorStack.length === 0} onClick={() => {
         const stack = accountCursorStack.slice(0, -1);
         setAccountCursorStack(stack);

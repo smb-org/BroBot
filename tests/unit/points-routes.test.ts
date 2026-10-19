@@ -122,7 +122,7 @@ describe("points routes", () => {
     expect(harness.auditWriter).not.toHaveBeenCalled();
   });
 
-  it("rejects a correction that exceeds the safe balance range before booking (protects=balance overflow is a definite response and never starts a ledger operation; fails_when=the route returns 500 or writes a pending or completed operation; no_claim=the ledger is represented by a safe-range in-memory double)", async () => {
+  it("rejects a correction whose resulting balance exceeds the safe range in the ledger (protects=balance overflow is a definite response and never persists an operation; fails_when=the route returns 500 or writes a pending or completed operation; no_claim=the ledger is represented by a safe-range in-memory double)", async () => {
     const harness = createHarness({ initialBalance: Number.MAX_SAFE_INTEGER });
     await insertChannel(harness.database, CHANNEL_ID);
 
@@ -132,11 +132,53 @@ describe("points routes", () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: "balance_overflow" });
-    expect(harness.pointAccess.balance).toHaveBeenCalledExactlyOnceWith("viewer_demo");
-    expect(harness.pointAccess.apply).not.toHaveBeenCalled();
+    expect(harness.pointAccess.balance).not.toHaveBeenCalled();
+    expect(harness.pointAccess.apply).toHaveBeenCalledOnce();
     expect(harness.operations.size).toBe(0);
     expect(harness.pending.size).toBe(0);
     expect(harness.auditWriter).not.toHaveBeenCalled();
+  });
+
+  it("reports an identical concurrent correction as booked after reaching the safe maximum (protects=replayed corrections return the persisted booking after another request fills the balance; fails_when=one identical request returns balance_overflow even though one operation is persisted; no_claim=the replay-aware ledger and its serialized operation are represented by an in-memory double)", async () => {
+    const harness = createHarness({ initialBalance: Number.MAX_SAFE_INTEGER - 1 });
+    await insertChannel(harness.database, CHANNEL_ID);
+    harness.pointAccess.pendingAudits.mockResolvedValue([]);
+
+    const ledgerApply = harness.pointAccess.apply.getMockImplementation();
+    if (ledgerApply === undefined) throw new Error("The replay-aware ledger double is missing its implementation.");
+    let releaseFirstApply = (): void => undefined;
+    let signalFirstApply: () => void = () => undefined;
+    const release = new Promise<void>((resolve) => { releaseFirstApply = resolve; });
+    const firstApplied = new Promise<void>((resolve) => { signalFirstApply = resolve; });
+    let applyCalls = 0;
+    harness.pointAccess.apply.mockImplementation(async (operationId, kind, movements, result, payloadIdentity) => {
+      const applied = await ledgerApply(operationId, kind, movements, result, payloadIdentity);
+      applyCalls += 1;
+      if (applyCalls === 1) {
+        signalFirstApply();
+        await release;
+      }
+      return applied;
+    });
+
+    const body = { operationId: "01234567-89ab-42cd-8abc-0123456789ab", delta: 1, reason: "concurrent safe maximum" };
+    const firstRequest = harness.app.fetch(harness.request("/accounts/viewer_demo/adjust", body), {
+      DB: harness.database as unknown as D1Database,
+    });
+    await firstApplied;
+    const secondResponse = await harness.app.fetch(harness.request("/accounts/viewer_demo/adjust", body), {
+      DB: harness.database as unknown as D1Database,
+    });
+    releaseFirstApply();
+    const firstResponse = await firstRequest;
+
+    expect([firstResponse.status, secondResponse.status].every((status) => status === 200 || status === 202)).toBe(true);
+    expect([firstResponse.status, secondResponse.status]).not.toContain(400);
+    await expect(firstResponse.json()).resolves.toMatchObject({ balance: Number.MAX_SAFE_INTEGER });
+    await expect(secondResponse.json()).resolves.toMatchObject({ balance: Number.MAX_SAFE_INTEGER });
+    expect(harness.pointAccess.apply).toHaveBeenCalledTimes(2);
+    expect(harness.operations.size).toBe(1);
+    expect(harness.operations.get(OPERATION_ID)).toMatchObject({ accountId: "viewer_demo", delta: 1 });
   });
 
   it("retries a pending audit with the same operation without another booking (protects=partial success can finish audit idempotently; fails_when=retry changes balance twice or writes duplicate audit rows; no_claim=the Durable Object apply is represented by a replay-aware fake)", async () => {

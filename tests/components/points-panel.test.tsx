@@ -75,6 +75,36 @@ describe("points panel", () => {
     await waitFor(() => expect(within(settingsPanel).getByRole("button", { name: "Save" })).toBeDisabled());
   });
 
+  it("refreshes the settings revision after a save conflict while preserving the draft (protects=the conflict reload choice appears and a later save uses the refreshed revision; fails_when=PATCH 409 leaves no reload choice or a second save sends the stale revision; no_claim=settings reads and writes are service mocks)", async () => {
+    const remoteSettings = { ...settings, startBonus: 200 };
+    const nextSettings = { ...settings, startBonus: 225 };
+    mocks.savePointsSettings
+      .mockRejectedValueOnce(new PanelApiError(409, "revision_conflict", { error: "revision_conflict" }))
+      .mockResolvedValueOnce({ settings: nextSettings, revision: 3 });
+
+    renderWithQuery(<UiProvider><PointsPanel channelId="kanal_demo" language="en" canManage /></UiProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    const settingsPanel = screen.getByLabelText("Points settings");
+    const startBonus = within(settingsPanel).getByLabelText("Start balance");
+    await waitFor(() => expect(startBonus).toBeEnabled());
+    fireEvent.change(startBonus, { target: { value: "125" } });
+    mocks.loadPointsSettings.mockResolvedValueOnce({ settings: remoteSettings, revision: 2 });
+    fireEvent.click(within(settingsPanel).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(within(settingsPanel).getByRole("button", { name: "Load server version" })).toBeEnabled());
+    expect(startBonus).toHaveValue("125");
+    expect(within(settingsPanel).getByRole("status")).toHaveTextContent("changed in another session");
+
+    fireEvent.click(within(settingsPanel).getByRole("button", { name: "Load server version" }));
+    expect(startBonus).toHaveValue("200");
+    fireEvent.change(startBonus, { target: { value: "225" } });
+    fireEvent.click(within(settingsPanel).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mocks.savePointsSettings).toHaveBeenCalledTimes(2));
+    expect(mocks.savePointsSettings).toHaveBeenNthCalledWith(1, "kanal_demo", 1, expect.objectContaining({ startBonus: 125 }));
+    expect(mocks.savePointsSettings).toHaveBeenNthCalledWith(2, "kanal_demo", 2, expect.objectContaining({ startBonus: 225 }));
+  });
+
   it("keeps selected detail and history when a correction moves the account beyond the first 50 (protects=the selected account stays available independently of the current account page; fails_when=correction refetch removes its detail or history after it moves to page two; no_claim=account, correction, and history API results are in-memory service mocks)", async () => {
     const accounts = [
       { accountId: "viewer_target", login: "pixelpilz", balance: 1_000, monthNet: 0 },
@@ -128,6 +158,52 @@ describe("points panel", () => {
     expect(mocks.loadPointsAccount).toHaveBeenCalledWith("kanal_demo", "viewer_target", expect.anything());
     expect(await screen.findByText("Correction · first page correction · by kanal_demo")).toBeVisible();
     expect(screen.getByRole("table", { name: "History" })).toHaveTextContent("952");
+  });
+
+  it("keeps pagination visible when an account correction empties page two (protects=an empty later page shows a page hint and active Previous control while the account collection exists; fails_when=the panel says there are no accounts or removes pagination after the last row moves to page one; no_claim=the 51 account pages and correction result are service mocks)", async () => {
+    const accounts = Array.from({ length: 51 }, (_unused, index) => ({
+      accountId: `viewer_${String(index + 1).padStart(2, "0")}`,
+      login: `nachtfalke${String(index + 1).padStart(2, "0")}`,
+      balance: 51 - index,
+      monthNet: 0,
+    }));
+    const target = accounts[50];
+    if (target === undefined) throw new Error("The account fixture is missing its last row.");
+    const initialBoundaryBalance = 2;
+    mocks.loadPointsAccounts.mockImplementation((_channelId: string, _sort: string, _search: string, cursor?: string) => {
+      const sorted = [...accounts].sort((left, right) => right.balance - left.balance);
+      const rows = cursor === undefined ? sorted.slice(0, 50) : sorted.filter((account) => account.balance < initialBoundaryBalance).slice(0, 50);
+      return Promise.resolve({ rows, ...(sorted.length > 50 && cursor === undefined ? { cursor: "page-two" } : {}) });
+    });
+    mocks.loadPointsAccount.mockImplementation((_channelId: string, accountId: string) => {
+      const account = accounts.find((entry) => entry.accountId === accountId);
+      return Promise.resolve(account === undefined ? null : { accountId: account.accountId, login: account.login, balance: account.balance });
+    });
+    mocks.adjustPoints.mockImplementation((_channelId: string, accountId: string, _operationId: string, delta: number) => {
+      const account = accounts.find((entry) => entry.accountId === accountId);
+      if (account === undefined) throw new Error("missing account fixture");
+      account.balance += delta;
+      return Promise.resolve({ balance: account.balance, auditPending: false });
+    });
+    mocks.loadPointsSummary.mockResolvedValue({ circulation: 1_326, jackpots: {}, inRounds: 0, accounts: 51, month: "2026-10" });
+
+    const view = renderWithQuery(<UiProvider><PointsPanel channelId="kanal_demo" language="en" canManage /></UiProvider>);
+    await screen.findByText("nachtfalke01", { exact: true });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    const secondPageAccount = await screen.findByText("nachtfalke51", { exact: true });
+    fireEvent.click(secondPageAccount.closest("button") as HTMLButtonElement);
+    fireEvent.change(screen.getByLabelText("Amount ±"), { target: { value: "1000" } });
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "move to page one" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mocks.loadPointsAccounts).toHaveBeenCalledTimes(3));
+    expect(await screen.findByText("No accounts on this page.", { exact: true })).toBeVisible();
+    expect(screen.queryByText("No accounts yet. Points start when someone chats.", { exact: true })).toBeNull();
+    const accountList = view.container.querySelector(".collection-page__list");
+    if (!(accountList instanceof HTMLElement)) throw new Error("The account collection frame is missing.");
+    expect(within(accountList).getByRole("button", { name: "Previous" })).toBeEnabled();
+    expect(within(accountList).getByRole("button", { name: "Next" })).toBeDisabled();
+    expect(accountList.querySelector(".list-pagination-footer")).not.toBeNull();
   });
 
   it("unlocks a definite server overflow rejection (protects=a 400 balance overflow rejection restores editable correction controls; fails_when=the panel keeps retry state or shows a generic correction error; no_claim=the correction response is supplied by a service mock)", async () => {
