@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { installLiveCockpitMocks } from "./live-cockpit-regression-fixtures";
+
 test.use({ locale: "de-DE", timezoneId: "Europe/Berlin" });
 
 const channelId = "issue-490-boundary";
@@ -134,4 +136,13 @@ test("cockpit warnings flow below the mobile status indicators at 640 to 767 pix
     expect(emptyGeometry.headerBottom).toBe(geometry.headerBottom);
     expect(emptyGeometry.wallTop).toBe(geometry.wallTop);
   }
+});
+
+test("the title slot collapses its empty action track at 640 pixels", async ({ page }) => {
+  await installLiveCockpitMocks(page, { channelId: "issue-490-no-action", role: "broadcaster" });
+  await page.setViewportSize({ width: 640, height: 900 });
+  await page.goto("/channels/issue-490-no-action?lang=de");
+  await expect(page.locator(".live-cockpit-broadcast__actions")).toBeEmpty();
+  await expect(page.locator(".live-cockpit-broadcast__reason-slot")).toBeEmpty();
+  await expect.poll(() => page.locator(".live-cockpit-header__title-slot").evaluate((element) => element.getBoundingClientRect().height)).toBe(46);
 });
