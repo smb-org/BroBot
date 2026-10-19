@@ -344,4 +344,34 @@ describe("points panel", () => {
     await waitFor(() => expect(mocks.adjustPoints).toHaveBeenCalledTimes(2));
     expect(mocks.adjustPoints.mock.calls[1]?.[2]).toBe(mocks.adjustPoints.mock.calls[0]?.[2]);
   });
+
+  it("does not add a booked delta again while the refresh is pending (protects=after an HTTP 200 correction the preview shows the booked balance while the account refetch is still running; fails_when=the sent draft stays until the refetch ends and the preview adds the delta twice or reports a safe-range error; no_claim=the delayed refetch is a deferred service mock)", async () => {
+    const account = { accountId: "viewer_edge", login: "funkenflug", balance: Number.MAX_SAFE_INTEGER - 1, monthNet: 0 };
+    let releaseRefresh!: () => void;
+    const refreshGate = new Promise<void>((resolve) => { releaseRefresh = resolve; });
+    let detailReads = 0;
+    mocks.loadPointsAccounts.mockResolvedValue({ rows: [account] });
+    mocks.loadPointsAccount.mockImplementation(async () => {
+      detailReads += 1;
+      if (detailReads > 1) await refreshGate;
+      return { accountId: account.accountId, login: account.login, balance: Number.MAX_SAFE_INTEGER };
+    });
+    mocks.adjustPoints.mockResolvedValue({ balance: Number.MAX_SAFE_INTEGER, auditPending: false });
+
+    const view = renderWithQuery(<UiProvider><PointsPanel channelId="kanal_demo" language="en" canManage /></UiProvider>);
+    const edgeAccount = await screen.findByText("funkenflug", { exact: true });
+    fireEvent.click(edgeAccount.closest("button") as HTMLButtonElement);
+    fireEvent.change(screen.getByLabelText("Amount ±"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "delayed refresh" } });
+    const detailHeader = view.container.querySelector(".points-detail__header");
+    if (!(detailHeader instanceof HTMLElement)) throw new Error("The selected account detail header is missing.");
+    fireEvent.click(within(detailHeader).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mocks.adjustPoints).toHaveBeenCalledOnce());
+    await waitFor(() => expect(detailReads).toBeGreaterThan(1));
+    const preview = view.container.querySelector(".points-correction__preview");
+    if (preview === null) throw new Error("The correction preview slot is missing.");
+    expect(preview).not.toHaveTextContent("safe range");
+    releaseRefresh();
+  });
 });

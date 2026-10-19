@@ -241,12 +241,13 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
       if (result.auditPending) {
         updateCorrection(accountId, { committedBalance: result.balance, pending: request, status: labels.correctionBookedPending });
       } else {
-        await queryClient.invalidateQueries({ queryKey: ["channel", channelId, "module", "points"] });
+        // Clear the sent draft before the refetch so the preview never adds the delta to the booked balance again.
         updateCorrection(accountId, { committedBalance: null, pending: null, status: labels.saved });
         if (selectedIdRef.current === accountId) {
           setDelta("");
           setReason("");
         }
+        await queryClient.invalidateQueries({ queryKey: ["channel", channelId, "module", "points"] });
       }
     } catch (error) {
       const code = error instanceof PanelApiError ? error.code : "";
