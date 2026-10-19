@@ -7,6 +7,8 @@ const iconNames: Readonly<Record<IconName, true>> = {
   ad: true,
   shoutout: true,
   clip: true,
+  boss: true,
+  blitz: true,
   add: true,
   remove: true,
   close: true,

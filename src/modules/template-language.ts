@@ -5,6 +5,7 @@ interface TemplateLanguageText {
   notFollowing: string;
   commandInputUsage: string;
   commandInputError: string;
+  pointRoundCancelled: string;
   day: (count: number) => string;
   hour: (count: number) => string;
   minute: (count: number) => string;
@@ -21,6 +22,7 @@ export const templateLanguageText: Readonly<Record<ModuleLanguage, TemplateLangu
     notFollowing: "folgt nicht",
     commandInputUsage: "Nur in Chatbefehlen verfügbar",
     commandInputError: "Diese Eingabe ist nur in Chatbefehlen verfügbar",
+    pointRoundCancelled: "Runde abgebrochen, Einsätze erstattet.",
     day: (count) => `${String(count)} Tg.`,
     hour: (count) => `${String(count)} Std.`,
     minute: (count) => `${String(count)} Min.`,
@@ -34,6 +36,7 @@ export const templateLanguageText: Readonly<Record<ModuleLanguage, TemplateLangu
     notFollowing: "not following",
     commandInputUsage: "Only available in chat commands",
     commandInputError: "This input is only available in chat commands",
+    pointRoundCancelled: "Round cancelled, stakes refunded.",
     day: (count) => `${String(count)} d`,
     hour: (count) => `${String(count)} h`,
     minute: (count) => `${String(count)} min`,
