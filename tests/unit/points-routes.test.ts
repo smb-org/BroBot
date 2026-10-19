@@ -55,7 +55,14 @@ const createHarness = (options: { role?: "manager" | "operator"; failFirstAudit?
     ackWelcome: vi.fn(() => Promise.resolve()),
     creditActivity: vi.fn(() => Promise.resolve({ credited: 0 })),
     balance: vi.fn((accountId: string) => Promise.resolve(accountId === "viewer_demo" ? balance : 0)),
-    listAccounts: vi.fn(() => Promise.resolve({ rows: [{ accountId: "viewer_demo", login: "pixelpilz", balance, monthNet: 0 }] })),
+    getAccount: vi.fn((accountId: string) => Promise.resolve(accountId === "viewer_demo"
+      ? { accountId, login: "pixelpilz", balance }
+      : null)),
+    listAccounts: vi.fn((query: Parameters<ModulePointsAccess["listAccounts"]>[0]) => {
+      const row = { accountId: "viewer_demo", login: "pixelpilz", balance, monthNet: 0 };
+      const matchesSearch = query.search === undefined || row.login.includes(query.search) || row.accountId.includes(query.search);
+      return Promise.resolve({ rows: query.limit > 0 && matchesSearch ? [row] : [] });
+    }),
     history: vi.fn(() => Promise.resolve({ rows: [] })),
     summary: vi.fn(() => Promise.resolve({ circulation: balance, jackpots: {}, inRounds: 0, accounts: 1, month: "2026-10" })),
     ranking: vi.fn(() => Promise.resolve([])),
@@ -191,6 +198,47 @@ describe("points routes", () => {
     expect(operatorResponse.status).toBe(200);
     expect(operatorHarness.auditWriter).not.toHaveBeenCalled();
     expect(operatorHarness.pointAccess.markAuditWritten).not.toHaveBeenCalled();
+  });
+
+  it("recovers an audit for the exact account beyond the first 50 substring matches", async () => {
+    const harness = createHarness();
+    await insertChannel(harness.database, CHANNEL_ID);
+    const accounts = Array.from({ length: 50 }, (_, index) => ({
+      accountId: `richer_123_${String(index).padStart(2, "0")}`,
+      login: `richer_demo_${String(index).padStart(2, "0")}`,
+      balance: 10_000 - index,
+      monthNet: 0,
+    }));
+    const target = { accountId: "123", login: "target_demo", balance: 1, monthNet: 0 };
+    accounts.push(target);
+    harness.pointAccess.listAccounts.mockImplementation((query) => {
+      const matching = query.search === undefined
+        ? accounts
+        : accounts.filter((account) => account.accountId.includes(query.search ?? ""));
+      return Promise.resolve({ rows: matching.sort((left, right) => right.balance - left.balance).slice(0, query.limit) });
+    });
+    const exactLookup = harness.pointAccess.getAccount;
+    exactLookup.mockImplementation((accountId) => Promise.resolve(accounts.find((account) => account.accountId === accountId) ?? null));
+
+    const pending: Operation = {
+      operationId: OPERATION_ID,
+      accountId: target.accountId,
+      delta: 8,
+      reason: "stream prize",
+      actorId: ACTOR_ID,
+      actorLogin: "kanal_demo",
+      createdAt: "2026-10-19T12:00:00.000Z",
+    };
+    harness.pending.set(OPERATION_ID, pending);
+
+    const response = await harness.app.fetch(harness.request("/accounts"), { DB: harness.database as unknown as D1Database });
+
+    expect(response.status).toBe(200);
+    expect(exactLookup).toHaveBeenCalledExactlyOnceWith("123");
+    expect(harness.auditWriter).toHaveBeenCalledOnce();
+    expect(harness.auditWriter.mock.calls[0]?.[0].after).toMatchObject({ accountId: "123", accountLogin: "target_demo" });
+    expect(harness.pointAccess.markAuditWritten).toHaveBeenCalledWith(OPERATION_ID);
+    expect(harness.pointAccess.listAccounts).toHaveBeenCalledOnce();
   });
 
   it("rejects an operation ID reused with a different correction payload (protects=adjustment idempotency includes account, amount, and reason; fails_when=a conflicting retry returns success or mutates balance; no_claim=the ledger apply is represented by an in-memory fake)", async () => {

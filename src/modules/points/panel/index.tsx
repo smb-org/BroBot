@@ -144,7 +144,13 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
   };
 
   const selectAccount = (accountId: string): void => {
-    if (selectedId !== accountId) resetDetailDraft();
+    if (selectedId !== accountId) {
+      setHistoryCursor(undefined);
+      setHistoryCursorStack([]);
+      const pending = corrections[accountId]?.pending;
+      setDelta(pending === null || pending === undefined ? "" : String(pending.delta));
+      setReason(pending?.reason ?? "");
+    }
     selectedIdRef.current = accountId;
     setSelectedId(accountId);
     setSettingsOpen(false);
@@ -247,7 +253,7 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
   };
 
   const month = summary?.month ?? new Date().toISOString().slice(0, 7);
-  const correctionDirty = delta.trim().length > 0 || reason.trim().length > 0;
+  const correctionDirty = pendingAdjustment !== null || delta.trim().length > 0 || reason.trim().length > 0;
   const correctionWarnings = selectedCorrection.status === undefined
     ? correctionDirty ? [labels.unsaved] : []
     : selectedCorrection.status === labels.saved ? [] : [selectedCorrection.status];

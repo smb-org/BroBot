@@ -10,6 +10,15 @@ const CHAT_MESSAGES_URL = "https://api.twitch.tv/helix/chat/messages";
 const CHAT_MESSAGE_MAXIMUM_LENGTH = 500;
 const CHAT_MENTION_PREFIX = /^@[a-zA-Z0-9_]{1,25} /u;
 
+const chatAttributionSuffix = (attributions: readonly string[]): string => [...new Set(attributions.map((value) => {
+  let safe = "";
+  for (const character of value) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    safe += codePoint < 32 || codePoint === 127 ? " " : character;
+  }
+  return safe.trim();
+}).filter(Boolean))].map((label) => ` · ${label}`).join("");
+
 export const truncateChatText = (text: string): { text: string; truncated: boolean } => {
   if (text.length <= CHAT_MESSAGE_MAXIMUM_LENGTH) return { text, truncated: false };
   const prefix = CHAT_MENTION_PREFIX.exec(text)?.[0] ?? "";
@@ -21,20 +30,31 @@ export const truncateChatText = (text: string): { text: string; truncated: boole
   };
 };
 
+/** Truncates the reply body while reserving a complete suffix and transport attributions. */
+export const reserveChatTextBeforeSuffix = (
+  text: string,
+  suffix: string,
+  attributions: readonly string[] = [],
+): string | null => {
+  const prefix = CHAT_MENTION_PREFIX.exec(text)?.[0] ?? "";
+  const body = text.slice(prefix.length);
+  const reservedLength = prefix.length + suffix.length + chatAttributionSuffix(attributions).length;
+  const availableBodyLength = CHAT_MESSAGE_MAXIMUM_LENGTH - reservedLength;
+  if (availableBodyLength < 0) return null;
+  const preparedBody = body.length <= availableBodyLength
+    ? body
+    : availableBodyLength === 0
+      ? ""
+      : `${body.slice(0, availableBodyLength - 1)}…`;
+  return `${prefix}${preparedBody}${suffix}`;
+};
+
 export const truncateChatTextWithAttributions = (
   text: string,
   attributions: readonly string[] = [],
 ): { text: string; truncated: boolean } => {
-  const labels = [...new Set(attributions.map((value) => {
-    let safe = "";
-    for (const character of value) {
-      const codePoint = character.codePointAt(0) ?? 0;
-      safe += codePoint < 32 || codePoint === 127 ? " " : character;
-    }
-    return safe.trim();
-  }).filter(Boolean))];
-  if (labels.length === 0) return truncateChatText(text);
-  const suffix = labels.map((label) => ` · ${label}`).join("");
+  const suffix = chatAttributionSuffix(attributions);
+  if (suffix.length === 0) return truncateChatText(text);
   if (suffix.length >= CHAT_MESSAGE_MAXIMUM_LENGTH) return { text: suffix, truncated: text.length > 0 };
   const prefix = CHAT_MENTION_PREFIX.exec(text)?.[0] ?? "";
   const body = text.slice(prefix.length);

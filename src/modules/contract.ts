@@ -988,6 +988,7 @@ export interface ModulePointsAccess {
     rules: { amount: number; windowMinutes: number; dailyCap: number },
   ) => Promise<{ credited: number }>;
   balance: (accountId: string) => Promise<number>;
+  getAccount: (accountId: string) => Promise<{ accountId: string; login: string; balance: number } | null>;
   listAccounts: (query: { sort: "balance" | "month"; search?: string; cursor?: string; limit: number }) => Promise<{
     rows: { accountId: string; login: string; balance: number; monthNet: number | null }[];
     cursor?: string;

@@ -15,6 +15,7 @@ export const modulePoints = (
       ackWelcome: () => unavailable(),
       creditActivity: () => unavailable(),
       balance: () => unavailable(),
+      getAccount: () => unavailable(),
       listAccounts: () => unavailable(),
       history: () => unavailable(),
       summary: () => unavailable(),
@@ -42,6 +43,7 @@ export const modulePoints = (
     creditActivity: (accountId, login, messageAt, live, rules) =>
       object.creditPointActivity(moduleId, accountId, login, messageAt, live, rules),
     balance: (accountId) => object.pointBalance(moduleId, accountId),
+    getAccount: (accountId) => object.pointAccount(moduleId, accountId),
     listAccounts: (query) => object.listPointAccounts(moduleId, query),
     history: (accountId, cursor, limit) => object.pointHistory(moduleId, accountId, cursor, limit),
     summary: () => object.pointSummary(moduleId),

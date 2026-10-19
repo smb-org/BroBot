@@ -41,9 +41,8 @@ const parsePending = (operationId: string, detail: unknown): PendingAdjustment |
 
 const writeAdjustmentAudit = async (context: PointsContext, adjustment: PendingAdjustment): Promise<void> => {
   const operationId = adjustment.operationId;
-  const account = (await points(context).listAccounts({ sort: "balance", search: adjustment.accountId, limit: 50 }))
-    .rows.find((row) => row.accountId === adjustment.accountId);
-  if (account === undefined) throw new Error("points_account_missing");
+  const account = await points(context).getAccount(adjustment.accountId);
+  if (account === null) throw new Error("points_account_missing");
   await context.get("writeModuleAudit")({
     channelId: channelIdFrom(context),
     moduleId: POINTS_MODULE_ID,

@@ -1,4 +1,5 @@
 import type { ModuleAction, ModulePointsAccess } from "../modules/contract";
+import { reserveChatTextBeforeSuffix } from "./chat";
 
 export interface PendingPointWelcome {
   accountId: string;
@@ -9,13 +10,19 @@ export interface PendingPointWelcome {
 }
 
 /** Adds the first-contact note to the next command reply and acknowledges only a successful send. */
-export const appendPointWelcome = (action: ModuleAction, pending: PendingPointWelcome | undefined): ModuleAction => {
+export const appendPointWelcome = (
+  action: ModuleAction,
+  pending: PendingPointWelcome | undefined,
+  attributions: readonly string[] = [],
+): ModuleAction => {
   if (action.kind !== "chat" || pending === undefined || pending.used || action.replyToMessageId !== pending.messageId) return action;
+  const text = reserveChatTextBeforeSuffix(action.text, ` · ${pending.text}`, attributions);
+  if (text === null) return action;
   pending.used = true;
   const originalDelivery = action.onDelivery;
   return {
     ...action,
-    text: `${action.text} · ${pending.text}`,
+    text,
     onDelivery: async (delivery) => {
       if (delivery === "sent") await pending.access.ackWelcome(pending.accountId);
       else pending.used = false;

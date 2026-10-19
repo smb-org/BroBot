@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { ModuleAction, ModuleExecutionContext, ModuleEvent } from "../../src/modules/contract";
 import { DEFAULT_POINTS_SETTINGS, pointsDefaultSettingsForLanguage, pointsSettingsSchema, type PointsSettings } from "../../src/modules/points/contracts";
 import { localizedMonth, pointsBalanceReply, pointsTopReply, processPointsMessage } from "../../src/modules/points/service";
-import { appendPointWelcome } from "../../src/worker/point-welcome";
+import { truncateChatTextWithAttributions } from "../../src/worker/chat";
+import { appendPointWelcome, type PendingPointWelcome } from "../../src/worker/point-welcome";
 
 const emptyDatabase = {
   prepare: () => ({ bind: () => ({ all: () => Promise.resolve({ results: [] }) }) }),
@@ -136,5 +137,45 @@ describe("points module", () => {
     await retry.onDelivery?.("sent");
     expect(ackWelcome).toHaveBeenCalledOnce();
     expect(ackWelcome).toHaveBeenCalledWith("viewer_demo");
+  });
+
+  it("keeps the complete welcome note in a 500-character reply with its mention prefix and transport attribution", async () => {
+    const ackWelcome = vi.fn(() => Promise.resolve());
+    const pending: PendingPointWelcome = {
+      accountId: "viewer_demo",
+      messageId: "message_demo",
+      text: "Initial balance 100 points",
+      access: { ackWelcome },
+      used: false,
+    };
+    const prefix = "@nachtfalke ";
+    const action: ModuleAction = {
+      kind: "chat",
+      text: `${prefix}${"x".repeat(500 - prefix.length)}`,
+      replyToMessageId: "message_demo",
+    };
+    const attributions = ["Source label"];
+    const decorated = appendPointWelcome(action, pending, attributions);
+    if (decorated.kind !== "chat") throw new Error("The expected welcome action was not a chat reply.");
+    const transported = truncateChatTextWithAttributions(decorated.text, attributions);
+
+    expect(transported.text).toHaveLength(500);
+    expect(transported.text.startsWith(prefix)).toBe(true);
+    expect(transported.text.endsWith(" · Initial balance 100 points · Source label")).toBe(true);
+    await decorated.onDelivery?.("sent");
+    expect(ackWelcome).toHaveBeenCalledOnce();
+  });
+
+  it("leaves an oversized welcome note pending when it cannot fit in the transport limit", () => {
+    const pending: PendingPointWelcome = {
+      accountId: "viewer_demo",
+      messageId: "message_demo",
+      text: "x".repeat(500),
+      access: { ackWelcome: vi.fn(() => Promise.resolve()) },
+      used: false,
+    };
+    const action: ModuleAction = { kind: "chat", text: "Command reply", replyToMessageId: "message_demo" };
+    expect(appendPointWelcome(action, pending, ["Source label"])).toBe(action);
+    expect(pending.used).toBe(false);
   });
 });

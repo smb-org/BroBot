@@ -24,6 +24,7 @@ export interface PointsWorkerObject {
   touchPointAccount(moduleId: string, accountId: string, login: string, startBonus: number): Promise<{ welcomePending: boolean }>;
   acknowledgePointWelcome(moduleId: string, accountId: string): Promise<void>;
   pointBalance(moduleId: string, accountId: string): Promise<number>;
+  pointAccount(moduleId: string, accountId: string): Promise<{ accountId: string; login: string; balance: number } | null>;
   creditPointActivity(moduleId: string, accountId: string, login: string, messageAt: number, live: boolean,
     rules: { amount: number; windowMinutes: number; dailyCap: number }): Promise<{ credited: number }>;
   listPointAccounts(moduleId: string, query: { sort: "balance" | "month"; search?: string; cursor?: string; limit: number }): Promise<{

@@ -800,6 +800,17 @@ export const pointRankOf = (
 export const pointBalance = (sql: PointsSql, accountId: string): number =>
   sql.exec<{ balance: number }>("SELECT balance FROM point_accounts WHERE account_id = ?", accountId).toArray()[0]?.balance ?? 0;
 
+export const pointAccount = (
+  sql: PointsSql,
+  accountId: string,
+): Awaited<ReturnType<ModulePointsAccess["getAccount"]>> => {
+  const row = sql.exec<{ account_id: string; login: string | null; balance: number }>(
+    "SELECT account_id, login, balance FROM point_accounts WHERE account_id = ? AND kind = 'viewer' LIMIT 1",
+    accountId,
+  ).toArray()[0];
+  return row === undefined ? null : { accountId: row.account_id, login: row.login ?? row.account_id, balance: row.balance };
+};
+
 export const acknowledgeWelcomeSync = (sql: PointsSql, accountId: string, now: string): void => {
   sql.exec("UPDATE point_accounts SET welcome_pending = 0, updated_at = ? WHERE account_id = ?", now, accountId);
 };

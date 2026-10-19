@@ -39,6 +39,7 @@ const contextFor = (object: PointsWorkerObject, live: "online" | "offline" = "on
     ackWelcome: (accountId) => object.acknowledgePointWelcome(moduleId, accountId),
     creditActivity: (accountId, login, messageAt, isLive, rules) => object.creditPointActivity(moduleId, accountId, login, messageAt, isLive, rules),
     balance: (accountId) => object.pointBalance(moduleId, accountId),
+    getAccount: (accountId) => object.pointAccount(moduleId, accountId),
     listAccounts: (query) => object.listPointAccounts(moduleId, query),
     history: (accountId, cursor, limit) => object.pointHistory(moduleId, accountId, cursor, limit),
     summary: () => object.pointSummary(moduleId),

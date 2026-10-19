@@ -171,6 +171,7 @@ import {
   markPointRoundAnnouncedSync,
   openPointRoundSync,
   pendingPointAudits,
+  pointAccount,
   pointAuditWrittenSync,
   pointBalance,
   pointHistory,
@@ -3184,6 +3185,7 @@ export class ChannelObject extends DurableObject<Env> {
       creditActivity: (accountId, login, messageAt, live, rules) =>
         this.creditPointActivity(moduleId, accountId, login, messageAt, live, rules),
       balance: (accountId) => this.pointBalance(moduleId, accountId),
+      getAccount: (accountId) => this.pointAccount(moduleId, accountId),
       listAccounts: (query) => this.listPointAccounts(moduleId, query),
       history: (accountId, cursor, limit) => this.pointHistory(moduleId, accountId, cursor, limit),
       summary: () => this.pointSummary(moduleId),
@@ -3304,6 +3306,13 @@ export class ChannelObject extends DurableObject<Env> {
     await this.ensurePointsInitialized();
     assertPointAccountId(accountId);
     return pointBalance(this.ctx.storage.sql, accountId);
+  }
+
+  public async pointAccount(_moduleId: string, accountId: string): Promise<Awaited<ReturnType<ModulePointsAccess["getAccount"]>>> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    assertPointAccountId(accountId);
+    return pointAccount(this.ctx.storage.sql, accountId);
   }
 
   public async listPointAccounts(

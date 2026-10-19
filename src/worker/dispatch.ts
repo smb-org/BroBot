@@ -355,7 +355,7 @@ const runActions = async (
   for (let index = 0; index < pendingActions.length; index += 1) {
     let action = pendingActions[index];
     if (action === undefined) continue;
-    action = appendPointWelcome(action, pendingWelcome);
+    action = appendPointWelcome(action, pendingWelcome, attributions);
     const reportDelivery = async (delivery: ModuleChatDelivery): Promise<void> => {
       if (action.kind !== "chat" || action.onDelivery === undefined) return;
       try {

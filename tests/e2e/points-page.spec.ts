@@ -241,6 +241,39 @@ test("keeps a delayed correction response attached to the account that was submi
   await expect(page.locator(".points-correction__preview")).toHaveText("Neuer Stand: 200 Punkte");
 });
 
+test("restores an audit-pending correction after switching accounts so it can be retried", async ({ page }) => {
+  const controls = await installPointsPage(page, [
+    { accountId: "viewer_alice", login: "nachtfalke", balance: 1_000, monthNet: 0 },
+    { accountId: "viewer_bob", login: "pixelpilz", balance: 200, monthNet: 0 },
+  ]);
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto(`/channels/${CHANNEL_ID}/modules/points`);
+  await page.getByRole("listitem").filter({ hasText: "nachtfalke" }).click();
+  const correctionFields = page.locator(".points-correction__fields input");
+  await correctionFields.nth(0).fill("15");
+  await correctionFields.nth(1).fill("stream prize");
+  const header = page.locator(".points-detail__header");
+  await header.locator(".ui-save-bar__save").click();
+  await expect(header.locator(".ui-save-bar__save")).toBeVisible();
+  await expect(header.locator(".ui-save-bar__discard")).toBeDisabled();
+
+  await page.getByRole("listitem").filter({ hasText: "pixelpilz" }).click();
+  await page.getByRole("listitem").filter({ hasText: "nachtfalke" }).click();
+
+  await expect(correctionFields.nth(0)).toHaveValue("15");
+  await expect(correctionFields.nth(1)).toHaveValue("stream prize");
+  await expect(header.locator(".ui-save-bar__save")).toBeEnabled();
+  await expect(header.locator(".ui-save-bar__discard")).toBeDisabled();
+  await expect(correctionFields.nth(0)).toBeDisabled();
+  await expect(correctionFields.nth(1)).toBeDisabled();
+
+  await header.locator(".ui-save-bar__save").click();
+  await expect(correctionFields.nth(0)).toBeEnabled();
+  await expect(correctionFields.nth(0)).toHaveValue("");
+  expect(controls.adjustmentRequests).toHaveLength(2);
+  expect(controls.adjustmentRequests[1]).toEqual(controls.adjustmentRequests[0]);
+});
+
 test("clears retry state after a definite insufficient-balance rejection", async ({ page }) => {
   await installPointsPage(page, [{ accountId: "viewer_demo", login: "pixelpilz", balance: 20, monthNet: 0 }]);
   await page.setViewportSize({ width: 1920, height: 1080 });
