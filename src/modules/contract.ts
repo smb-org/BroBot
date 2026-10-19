@@ -971,6 +971,11 @@ export interface PointsApplyResult {
   balances: Record<string, number>;
 }
 
+export interface PointSettlementCooldown {
+  key: string;
+  seconds: number;
+}
+
 export type PointJoinResult =
   | { status: "joined"; replayed: boolean }
   | { status: "already_joined" | "round_closed" };
@@ -978,6 +983,15 @@ export type PointJoinResult =
 export interface ModulePointsAccess {
   /** Optional stable request identity for operations whose persisted result contains server-generated metadata. */
   apply: (operationId: string, kind: PointsKind, movements: PointsMovement[], result: unknown, payloadIdentity?: unknown) => Promise<PointsApplyResult>;
+  /** Runs an instant game settlement against the actor balance and jackpot snapshot in one ledger transaction. */
+  settle: (
+    operationId: string,
+    kind: string,
+    actor: { accountId: string; login: string },
+    stake: number,
+    params: unknown,
+    options: { payloadIdentity: unknown; cooldown?: PointSettlementCooldown },
+  ) => Promise<PointsApplyResult>;
   touchAccount: (accountId: string, login: string, startBonus: number) => Promise<{
     welcomePending: boolean;
     startBonus: number | null;
@@ -1597,6 +1611,19 @@ export type HelixResult<Data = unknown> =
 
 export type HelixRequest = <Data = unknown>(options: HelixRequestOptions<Data>) => Promise<HelixResult<Data>>;
 
+export interface ModuleTwitchEmote {
+  id: string;
+  name: string;
+  images?: { url_1x?: string; url_2x?: string; url_4x?: string };
+}
+
+export type ModuleTwitchEmoteList = (options: {
+  clientId: string;
+  accessToken: string;
+  userId?: string;
+  broadcasterId?: string;
+}) => Promise<HelixResult<ModuleTwitchEmote[]>>;
+
 export interface ModuleRouteVariables {
   session: { userId: string; sessionId: string; login?: string };
   channelRole: ChannelRole;
@@ -1610,6 +1637,8 @@ export interface ModuleRouteVariables {
   ballots: (channelId: string) => ModuleBallotAccess;
   /** Returns point ledger access bound to the authorized route channel and mounted module. */
   points: (channelId: string) => ModulePointsAccess;
+  /** Returns the bot token and granted scopes for the authorized channel when available. */
+  botCredentials?: (channelId: string) => Promise<{ userId: string; accessToken: string; scopes: readonly string[] } | null>;
   /** Reads blocked terms only for the authorized route channel. */
   readChannelBlockedTerms?: (channelId: string) => Promise<readonly string[] | null>;
   /** Runs a registered module alarm immediately for a route that must reconcile module-owned state. */
@@ -1670,6 +1699,8 @@ export interface ModuleRouteVariables {
   getAppAccessToken: (environment: Env, now: string, fetcher?: typeof fetch, forceRefresh?: boolean) => Promise<string>;
   /** Thin Helix HTTP transport (issue #163); modules never talk to `api.twitch.tv` directly. */
   helixRequest: HelixRequest;
+  getUserEmotes: ModuleTwitchEmoteList;
+  getGlobalEmotes: ModuleTwitchEmoteList;
   liftModerationBan: (channelId: string, userId: string, expected: ModerationTimeoutExpectation) => Promise<ModerationResult>;
 }
 
@@ -1827,7 +1858,7 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
     context: ModuleExecutionContext,
   ) => ModuleResult | Promise<ModuleResult>;
   /** Explains why a chat subscription has no single-message reaction. */
-  dryRunSilentReason?: "activity_tracking";
+  dryRunSilentReason?: "activity_tracking" | "instant_settlement";
   /** Reuses the production service with read-only adapters and describes its effects without executing them. */
   dryRunChatMessage?: (
     event: ModuleEvent<z.output<SettingsSchema>>,
@@ -1854,7 +1885,9 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   /** Module query parts that depend on settings edited by this editor. */
   settingsEditorRelatedParts?: readonly string[];
   /** Places the settings editor before a potentially long module panel. */
-  settingsEditorPlacement?: "before-panel" | "after-panel";
+  settingsEditorPlacement?: "before-panel" | "after-panel" | "page";
+  /** Server-side semantic validation after the shared settings schema parses. */
+  validateSettings?: (settings: z.output<SettingsSchema>) => string | null;
   /** Reconciles one module-owned alarm immediately after settings are saved. */
   settingsChangedAlarm?: { handlerKey: string; alarmKey: string };
   /** Individual dashboard actions; only their optional content is loaded on demand. */

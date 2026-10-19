@@ -12,7 +12,7 @@ import { RetryableLazy } from "./RetryableLazy";
 import { canManage, type ChannelRole } from "../contracts/values";
 import { isEventTemplateVariableAvailable } from "../contracts/event-template-variables";
 import type { PanelActiveModule, PanelModuleState, PanelTemplateWarning } from "../panel-contract";
-import { PanelApiError, getChannelModuleSettings, getChannelTemplateVariables, saveChannelModuleSettings } from "./api";
+import { PanelApiError, getChannelModuleSettings, getChannelModuleSummary, getChannelTemplateVariables, saveChannelModuleSettings } from "./api";
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "./data";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber, serverFieldErrorText, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
@@ -20,13 +20,14 @@ import { templateTextLength } from "../template";
 import { modulePermissionsAreMissing } from "./channel-health";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { effectivePanelTemplateVariables, panelTemplateOptions, registeredModuleTemplateGroup, type PanelChannelVariable } from "./ui/template-variable-options";
-import { ChatCommandsHelp, ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, Section, SettingsEditor, SettingsPage, StatusLed, LockedReason, Tabs, mapServerFieldErrors, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
+import { ChatCommandsHelp, ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, Section, SettingsEditor, SettingsPage, StatusLed, LockedReason, Tabs, mapServerFieldErrors, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorCatalog, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
 import { useDraft } from "./ui/useDraft";
 import { useChannelSettings } from "./data/channel-settings";
 import { Switch as SwitchPrimitive } from "./ui/primitives/switch";
 import { runDashboardNavigationGuards } from "./ui/navigation-guard";
 import { worstCaseTemplateLength } from "../template";
 import type { TemplateVariable } from "../template";
+import { emoteSlotsCatalog } from "../modules/emote_slots/locale";
 
 const workspaceTexts = moduleWorkspaceTexts;
 
@@ -137,6 +138,15 @@ export const ModuleHeading = ({ kind, title, subtitle, actions }: {
   actions?: ReactNode;
 }): ReactElement => <PageHeader kind={kind} title={title} subtitle={subtitle} actions={actions} />;
 
+const SlotJackpotMeta = ({ channelId, language }: { channelId: string; language: DashboardLanguage }): ReactElement => {
+  const query = useModuleQuery(channelId, "points", "summary", (signal) =>
+    getChannelModuleSummary<{ jackpots: Record<string, number> }>(channelId, "points", signal));
+  const jackpot = query.data?.jackpots.emote_slots;
+  const amount = jackpot === undefined ? "\u00a0" : formatNumber(jackpot, language);
+  const text = emoteSlotsCatalog[language].panel.jackpotCurrent.replace("{amount}", amount);
+  return <span className="slot-jackpot-meta" aria-live="polite" title={jackpot === undefined ? undefined : text}>{text}</span>;
+};
+
 export const ModuleCount = ({ count, label }: { count: number; label: (formattedCount: string) => string }): ReactElement => {
   const formattedCount = formatNumber(count);
   return <>{<span className="number">{formattedCount}</span>}{label(formattedCount).slice(formattedCount.length)}</>;
@@ -210,6 +220,7 @@ interface ModulePanelMountProperties {
 interface ModuleSettingsPageOptions {
   title: string;
   subtitle: string;
+  meta?: ReactNode;
   icon: ReactNode;
   active: boolean;
   onToggle: (active: boolean) => void;
@@ -217,6 +228,7 @@ interface ModuleSettingsPageOptions {
   switchBusy: boolean;
   lockHint?: string;
   onNavigate: (route: DashboardRoute) => void;
+  pageActions?: ReactNode;
 }
 
 const ModuleSettingsEditor = ({ module, channelId, canManageContent, language, settingsSaveTarget, page }: {
@@ -297,14 +309,16 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       kind="modules"
       title={page.title}
       subtitle={page.subtitle}
+      {...(page.meta === undefined ? {} : { meta: page.meta })}
       icon={page.icon}
-      {...(module.id === "belabox" ? { className: "settings-page--belabox" } : {})}
+      {...(module.id === "belabox" ? { className: "settings-page--belabox" } : module.id === "emote_slots" ? { className: "settings-page--slot" } : {})}
       active={page.active}
       onToggle={page.onToggle}
       switchDisabled={page.switchDisabled}
       switchBusy={page.switchBusy}
       {...(page.lockHint === undefined ? {} : { lockHint: page.lockHint })}
       overflow={<ModuleListLink channelId={channelId} onNavigate={page.onNavigate} />}
+      {...(page.pageActions === undefined ? {} : { pageActions: page.pageActions })}
       columns={[state]}
     />;
   }
@@ -410,8 +424,8 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   channelId: string;
   canManageContent: boolean;
   language: DashboardLanguage;
-  definition: SettingsEditorDefinition<Record<string, unknown>>;
-  copy: SettingsEditorDefinition<Record<string, unknown>>["locales"]["de"];
+  definition: SettingsEditorDefinition<unknown>;
+  copy: SettingsEditorCatalog;
   retryLabel: string;
   channelVariables: readonly PanelChannelVariable[];
   registeredTemplateVariables: readonly ModuleRegisteredTemplateVariable[];
@@ -458,11 +472,11 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       return { ...current, [key]: issues };
     });
   }, []);
-  const spec = definition.spec;
+  const spec = definition.spec as unknown as SettingsEditorSpec<Record<string, unknown>>;
   const templateFields = (module.templateFields ?? {}) as Readonly<Record<string, readonly TemplateVariable[] | undefined>>;
   const templateMetadata = Object.fromEntries(Object.entries(templateFields).map(([key, variables]) => {
     const context = module.templateContext ?? "event";
-    const includesRegistered = definition.registeredTemplateVariableFields?.includes(key) === true;
+    const includesRegistered = (definition.registeredTemplateVariableFields as readonly string[] | undefined)?.includes(key) === true;
     const registered = includesRegistered
       ? registeredTemplateVariables.filter((variable) => variable.source !== "system" && variable.source !== "channel" && (
         context === "event"
@@ -495,12 +509,13 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   const templateVariableOptions: Readonly<Partial<Record<string, readonly TemplateTextFieldVariable[]>>> = templateMetadata;
   const settingsEditor = (sectionId: string, fieldErrors: Readonly<Record<string, string>>): ReactElement => (
     <SettingsEditor
+      key={sectionId}
       spec={spec}
       sectionId={sectionId}
       settings={currentValue}
       onChange={(key, next) => {
         setValue((current) => ({ ...current, [key]: next }));
-        setTouchedFields((current) => new Set(current).add(key));
+        setTouchedFields((current) => new Set([...current].filter((field) => field !== key)).add(key));
         setSaved(false); setConflict(false); setError(undefined);
         setServerFieldErrors((current) => Object.fromEntries(Object.entries(current).filter(([field]) => field !== key)));
       }}
@@ -509,7 +524,13 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       templateMetadata={templateMetadata}
       templateMessages={copy.templateMessages}
       messagePreviewLayout={page === undefined ? "stacked" : "side-by-side"}
-      fieldErrors={fieldErrors}
+      fieldErrors={module.id === "emote_slots" && module.validateSettings?.(currentValue) === "payout_rate_too_high"
+        && ["minStake", "jackpotSeed"].includes([...touchedFields].at(-1) ?? "")
+        ? { ...fieldErrors, [[...touchedFields].at(-1) ?? ""]: emoteSlotsCatalog[language].panel.quoteFieldError }
+        : fieldErrors}
+      customContext={{ channelId, language, rateLocked: module.validateSettings?.(currentValue) === "payout_rate_too_high",
+        rateLockReason: module.id === "emote_slots" ? emoteSlotsCatalog[language].panel.quoteFieldError : undefined,
+        lastTouchedField: [...touchedFields].at(-1) }}
       disabled={pending}
       readOnly={page !== undefined && !canManageContent}
       readOnlySectionOnly={page !== undefined}
@@ -568,6 +589,15 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       }
     };
     collect(spec.sections.flatMap((section) => section.fields));
+    if (module.id === "emote_slots") {
+      const parsed = module.settingsSchema.safeParse(currentValue);
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) {
+          const key = typeof issue.path[0] === "string" ? issue.path[0] : "symbols";
+          errors[key] = copy.fields[key]?.invalidError ?? copy.invalidMessage;
+        }
+      }
+    }
     return errors;
   };
   const fieldPathMap = Object.fromEntries(Object.keys(copy.fields).flatMap((field) => [
@@ -708,6 +738,8 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   const navigationGuard = useDraftGuard(dirty, save, discard);
   useEffect(() => registerDashboardNavigationGuard(navigationGuard.guardSwitch), [navigationGuard.guardSwitch]);
   const notifyPageSaveError = page !== undefined;
+  const slotRateLocked = module.id === "emote_slots" && module.validateSettings?.(currentValue) === "payout_rate_too_high";
+  const slotRateLockReason = emoteSlotsCatalog[language].panel.quoteLockedReason;
   useEffect(() => {
     if (notifyPageSaveError && error !== undefined && error.length < 80) notify({ tone: "error", message: error });
   }, [error, notifyPageSaveError]);
@@ -715,7 +747,12 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     persistent: true,
     dirty,
     pending: pending || urlRemovalPending,
-    saveDisabled: pending || urlRemovalPending,
+    saveDisabled: pending || urlRemovalPending || slotRateLocked,
+    ...(module.id === "emote_slots" ? {
+      saveLocked: slotRateLocked,
+      saveTitle: slotRateLocked ? slotRateLockReason : copy.saveLabel,
+      footer: slotRateLocked ? slotRateLockReason : dirty ? emoteSlotsCatalog[language].panel.unsaved : " ",
+    } : {}),
     saved,
     ...(error === undefined ? {} : { error }),
     invalid,
@@ -743,8 +780,9 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     kind="modules"
     title={page.title}
     subtitle={page.subtitle}
+    {...(page.meta === undefined ? {} : { meta: page.meta })}
     icon={page.icon}
-    {...(module.id === "belabox" ? { className: "settings-page--belabox" } : {})}
+    {...(module.id === "belabox" ? { className: "settings-page--belabox" } : module.id === "emote_slots" ? { className: "settings-page--slot" } : {})}
     active={page.active}
     onToggle={page.onToggle}
     switchDisabled={page.switchDisabled || pending || urlRemovalPending}
@@ -752,6 +790,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     {...(page.lockHint === undefined ? {} : { lockHint: page.lockHint })}
     {...(pageSave === undefined ? {} : { save: pageSave })}
     overflow={<ModuleListLink channelId={channelId} onNavigate={page.onNavigate} />}
+    {...(page.pageActions === undefined ? {} : { pageActions: page.pageActions })}
     {...(module.id === "belabox" ? { topContent: <BelaboxSettingsPanelMount key="belabox-panel" module={module} channelId={channelId}
       language={language} canManageContent={canManageContent}
       lowBitrateKbps={typeof currentValue.lowBitrateKbps === "number" ? currentValue.lowBitrateKbps : 1_000}
@@ -776,7 +815,9 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
           settingsEditor("polling", fieldErrors),
           settingsEditor("alerts", fieldErrors),
         ]
-      : sections.map(({ id }) => settingsEditor(id, fieldErrors))}
+      : definition.pageColumns?.map((column, index) => <div className="settings-page__column-stack" key={index}>
+        {column.map((sectionId) => settingsEditor(sectionId, fieldErrors))}
+      </div>) ?? sections.map(({ id }) => settingsEditor(id, fieldErrors))}
   />;
   return <>
     {pageContent}
@@ -1174,7 +1215,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
     if (error !== null) notify({ tone: "error", message: error });
   }, [error]);
 
-  if ((moduleId === "ads" || moduleId === "raid" || moduleId === "belabox") && registered?.settingsEditor !== undefined && !permissionsMissing) {
+  if ((moduleId === "ads" || moduleId === "raid" || moduleId === "belabox" || registered?.settingsEditorPlacement === "page") && registered?.settingsEditor !== undefined && !permissionsMissing) {
     return <section className="module-detail module-detail--settings-page" aria-label={details.name}>
       <ModuleSettingsEditor
         module={registered}
@@ -1184,6 +1225,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
         page={{
           title: details.name,
           subtitle: details.description,
+          ...(moduleId === "emote_slots" ? { meta: <SlotJackpotMeta channelId={channelId} language={dashboardLanguage()} /> } : {}),
           icon: iconFor(moduleId, "module-heading-glyph"),
           active: enabled,
           onToggle: (nextEnabled) => { if (nextEnabled !== enabled) onToggle(); },
@@ -1191,6 +1233,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
           switchBusy: busy,
           ...(disabledReason === null ? {} : { lockHint: disabledReason }),
           onNavigate,
+          ...(moduleId === "emote_slots" && registered.chatCommands?.length ? { pageActions: <ChatCommandsHelp commands={registered.chatCommands} language={dashboardLanguage()} /> } : {}),
         }}
       />
     </section>;

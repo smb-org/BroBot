@@ -94,12 +94,21 @@ export interface PointSettlementInput {
   params: unknown;
 }
 
+interface InstantPointSettlementInput {
+  actor: { accountId: string; login: string };
+  balance: number;
+  stake: number;
+  pots: Readonly<Record<string, number>>;
+  params: unknown;
+}
+
 interface PointSettlementOutput {
   movements: PointsMovement[];
   result: unknown;
 }
 
 export type PointSettlement = (input: PointSettlementInput) => PointSettlementOutput;
+export type InstantPointSettlement = (input: InstantPointSettlementInput) => PointSettlementOutput;
 
 const POINT_ROUND_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/u;
 const POINT_ACCOUNT_ID_PATTERN = /^[A-Za-z0-9_-]{1,32}$/u;
@@ -512,6 +521,55 @@ export const applyPointOperationSync = (
     balances: Object.fromEntries(finalBalances),
     deltas: Object.fromEntries(deltas),
   };
+};
+
+/** Checks replay, gate, gross stake and cooldown before calculating a state-dependent instant settlement. */
+export const settlePointOperationSync = (
+  sql: PointsSql,
+  moduleId: string,
+  operationId: string,
+  actor: { accountId: string; login: string },
+  stake: number,
+  params: unknown,
+  handler: InstantPointSettlement | undefined,
+  payloadHash: string,
+  now: string,
+  cooldown?: { key: string; seconds: number },
+): PointApplyInternalResult => {
+  if (operationId.length === 0 || operationId.length > 200) throw new Error("invalid_operation_id");
+  const previous = operationSync(sql, operationId);
+  if (previous !== null) {
+    if (previous.payload_hash !== payloadHash) throw new Error("operation_conflict");
+    return {
+      replayed: true,
+      result: JSON.parse(previous.result_json) as unknown,
+      balances: recordedBalancesSync(sql, operationId),
+      deltas: Object.fromEntries(sql.exec<{ account_id: string; delta: number }>(
+        "SELECT account_id, delta FROM point_ledger WHERE operation_id = ?", operationId,
+      ).toArray().map(({ account_id, delta }) => [account_id, delta])),
+    };
+  }
+  checkModuleGateSync(sql, moduleId);
+  assertPointAccountId(actor.accountId);
+  if (!Number.isSafeInteger(stake) || stake < 1) throw new Error("invalid_stake");
+  const balance = pointBalance(sql, actor.accountId);
+  if (balance < stake) throw new Error("insufficient_balance");
+  if (cooldown !== undefined && !claimPointCooldownSync(sql, moduleId, cooldown.key, cooldown.seconds, Date.parse(now))) {
+    throw new Error("cooldown");
+  }
+  if (handler === undefined) throw new Error("settlement_unknown");
+  const settled = handler({ actor, balance, stake, pots: jackpotForModuleSync(sql, moduleId), params });
+  return applyPointOperationSync(
+    sql,
+    moduleId,
+    operationId,
+    "game",
+    settled.movements,
+    settled.result,
+    payloadHash,
+    now,
+    canonicalPointResult(settled.result),
+  );
 };
 
 export const touchPointAccountSync = (
@@ -1156,6 +1214,12 @@ const potsForModuleSync = (sql: PointsSql, moduleId: string, roundId: string): R
     `__bosspot:${roundId}`,
   ).toArray();
   return Object.fromEntries(rows.map(({ account_id, balance }) => [account_id, balance]));
+};
+
+const jackpotForModuleSync = (sql: PointsSql, moduleId: string): Record<string, number> => {
+  const accountId = `__jackpot:${moduleId}`;
+  const row = sql.exec<{ balance: number }>("SELECT balance FROM point_accounts WHERE account_id = ?", accountId).toArray()[0];
+  return row === undefined ? {} : { [accountId]: row.balance };
 };
 
 export const resolvePointRoundSync = (

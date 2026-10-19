@@ -34,6 +34,7 @@ export interface SaveStatusProps {
   pendingLabel: string;
   saveDescribedBy?: string;
   saveTitle?: string;
+  saveLocked?: boolean;
 }
 
 export function SaveStatus({
@@ -62,6 +63,7 @@ export function SaveStatus({
   pendingLabel,
   saveDescribedBy,
   saveTitle,
+  saveLocked = false,
 }: SaveStatusProps) {
   const lastToastedMessage = useRef<string | null>(null);
   const longError = conflict?.message ?? error;
@@ -113,7 +115,8 @@ export function SaveStatus({
             {showButtons && (conflict === undefined || discardOnConflict) ? <Button className="ui-save-bar__discard" variant="subtle" onClick={onDiscard} disabled={!dirty || pending || discardDisabled} ariaLabel={discardLabel} title={discardLabel}>{discardLabel}</Button> : null}
             {showButtons ? conflict === undefined ? <Button
               className="ui-save-bar__save"
-              variant={persistent && invalid ? "neutral" : "primary"}
+              variant={persistent && (invalid || saveLocked) ? "neutral" : "primary"}
+              {...(saveLocked ? { icon: "lock" as const } : {})}
               onClick={invalidAction && onInvalidSave !== undefined ? onInvalidSave : onSave}
               disabled={isSaveDisabled && !invalidAction}
               ariaDisabled={invalidAction}

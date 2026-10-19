@@ -25,10 +25,13 @@ import { actorOf, readJsonBody } from "./member-routes";
 import { broadcasterHasScope, broadcasterScopesForChannel } from "../broadcaster-scope";
 import { getAppAccessToken } from "../app-token";
 import { getLoginIdentity, type LoginIdentityRecord } from "../db/login-identity";
+import { getBotIdentity } from "../db/bot-identity";
+import { decryptStoredToken } from "../bot-maintenance";
+import { getTokenEncryptionKeys } from "../auth/crypto";
 import { decryptLoginIdentityAccessToken, refreshLoginIdentityTokens } from "../auth/login-token-refresh";
 import { recordAudit } from "../db/audit";
 import { writeModuleDiagnostics } from "../event-log";
-import { helixRequest } from "../twitch/helix";
+import { getGlobalEmotes, getUserEmotes, helixRequest } from "../twitch/helix";
 import { readChannelBlockedTerms } from "../twitch/blocked-terms";
 import { effectiveTemplateVariables, templateTextLength, templateWarnings, type TemplateVariable } from "../../template";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../../template-variables";
@@ -62,6 +65,7 @@ interface ModuleRouteEnvironment {
     | "externalFetchBudget"
     | "ballots"
     | "points"
+    | "botCredentials" | "getUserEmotes" | "getGlobalEmotes"
     | "readChannelBlockedTerms"
     | "runModuleAlarm"
     | "listTextBlockConditions"
@@ -267,6 +271,21 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
     if (!MODULES.some((module) => module.id === moduleId)) throw new Error("Point access requires a registered module route.");
     return modulePoints(context.env.CHANNEL, channelId, moduleId);
   });
+  context.set("botCredentials", async (channelId) => {
+    if (channelId !== context.req.param("channelId")) throw new Error("Bot credentials must use the authorized route channel.");
+    const identity = await getBotIdentity(context.env.DB);
+    if (identity === null) return null;
+    const accessToken = await decryptStoredToken(identity.accessTokenCiphertext, getTokenEncryptionKeys(context.env));
+    if (accessToken === null) return null;
+    let scopes: string[] = [];
+    try {
+      const parsed: unknown = JSON.parse(identity.scopesJson);
+      if (Array.isArray(parsed)) scopes = parsed.filter((scope): scope is string => typeof scope === "string");
+    } catch { scopes = []; }
+    return { userId: identity.userId, accessToken, scopes };
+  });
+  context.set("getUserEmotes", (options) => getUserEmotes(options));
+  context.set("getGlobalEmotes", (options) => getGlobalEmotes(options));
   context.set("secrets", (channelId) => {
     if (channelId !== context.req.param("channelId")) throw new Error("Module secret access must use the authorized route channel.");
     const marker = "/modules/";
@@ -764,6 +783,8 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
       reason: issue?.message ?? "Settings do not match the module schema.",
     }, 400);
   }
+  const semanticError = module.validateSettings?.(settings.data);
+  if (semanticError !== undefined && semanticError !== null) return context.json({ error: semanticError }, 400);
   if (module.id === "clips") {
     let rawStoredSettings: unknown;
     try {
