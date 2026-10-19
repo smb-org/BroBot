@@ -11,6 +11,7 @@ export interface ChannelModuleRecord {
   settings: string;
   revision: number;
   settingsRevision: number;
+  lastDisabledRevision: number | null;
 }
 
 interface ChannelModuleRow {
@@ -21,6 +22,12 @@ interface ChannelModuleRow {
   settings: string;
   revision: number;
   settings_revision: number;
+  last_disabled_revision: number | null;
+}
+
+export interface ChannelModuleStateGuard {
+  sql: string;
+  values: readonly unknown[];
 }
 
 const mapChannelModule = (row: ChannelModuleRow): ChannelModuleRecord => ({
@@ -31,6 +38,7 @@ const mapChannelModule = (row: ChannelModuleRow): ChannelModuleRecord => ({
   settings: row.settings,
   revision: row.revision,
   settingsRevision: row.settings_revision,
+  lastDisabledRevision: row.last_disabled_revision,
 });
 
 const moduleAuditValue = (module: Pick<ChannelModuleRecord, "channelId" | "moduleId" | "enabled" | "settings">) => ({
@@ -52,7 +60,7 @@ const getChannelModule = async (
   moduleId: string,
 ): Promise<ChannelModuleRecord | null> => {
   const row = await db.prepare(
-    `SELECT channel_id, module_id, enabled, initialized, settings, revision, settings_revision
+    `SELECT channel_id, module_id, enabled, initialized, settings, revision, settings_revision, last_disabled_revision
        FROM channel_modules
       WHERE channel_id = ? AND module_id = ?`,
   ).bind(channelId, moduleId).first<ChannelModuleRow>();
@@ -77,6 +85,7 @@ export const createChannelModuleWithAudit = async (
   action: AuditWriteAction,
   changedAt: string,
   dependentMutations: readonly D1PreparedStatement[] = [],
+  stateGuard?: ChannelModuleStateGuard,
 ): Promise<number | null> => {
   const mutation = db.prepare(
     `INSERT INTO channel_modules (channel_id, module_id, enabled, settings, initialized, revision, settings_revision)
@@ -85,6 +94,7 @@ export const createChannelModuleWithAudit = async (
         SELECT 1 FROM channel_modules
          WHERE channel_id = ? AND module_id = ?
       )
+      ${stateGuard?.sql ?? ""}
       ${actorGuard(MANAGING_ROLES)}
      RETURNING revision`,
   ).bind(
@@ -95,6 +105,7 @@ export const createChannelModuleWithAudit = async (
     module.enabled ? 1 : 0,
     module.channelId,
     module.moduleId,
+    ...(stateGuard?.values ?? []),
     ...bindActorGuard(actor, module.channelId, changedAt),
   );
   const audit = prepareHostModuleAudit(db, actor.userId, changedAt, {
@@ -169,7 +180,8 @@ export const updateChannelModuleEnabledStateWithAudit = async (
   dependentMutations: readonly D1PreparedStatement[] = [],
   expectedRevision?: number,
   markInitialized = false,
-): Promise<number | null> => {
+  stateGuard?: ChannelModuleStateGuard,
+): Promise<{ revision: number; lastDisabledRevision: number | null } | null> => {
   const before = await getChannelModule(db, channelId, moduleId);
   if (before === null) return null;
   const after: ChannelModuleRecord = {
@@ -177,19 +189,24 @@ export const updateChannelModuleEnabledStateWithAudit = async (
     enabled,
     initialized: before.initialized || markInitialized,
     revision: (expectedRevision ?? before.revision) + 1,
+    lastDisabledRevision: enabled ? before.lastDisabledRevision : (expectedRevision ?? before.revision) + 1,
   };
   const mutation = db.prepare(
     `UPDATE channel_modules
-        SET enabled = ?, initialized = ?, revision = revision + 1
+        SET enabled = ?, initialized = ?, revision = revision + 1,
+            last_disabled_revision = CASE WHEN ? = 0 THEN revision + 1 ELSE last_disabled_revision END
       WHERE channel_id = ? AND module_id = ? AND revision = ?
+        ${stateGuard?.sql ?? ""}
         ${actorGuard(MANAGING_ROLES)}
-      RETURNING revision`,
+      RETURNING revision, last_disabled_revision`,
   ).bind(
     after.enabled ? 1 : 0,
     after.initialized ? 1 : 0,
+    after.enabled ? 1 : 0,
     channelId,
     moduleId,
     expectedRevision ?? before.revision,
+    ...(stateGuard?.values ?? []),
     ...bindActorGuard(actor, channelId, changedAt),
   );
   const audit = prepareHostModuleAudit(db, actor.userId, changedAt, {
@@ -200,6 +217,13 @@ export const updateChannelModuleEnabledStateWithAudit = async (
     after: moduleAuditValue(after),
   });
   const results = await db.batch([mutation, audit, ...dependentMutations]);
-  const revision = (results[0]?.results[0] as { revision?: unknown } | undefined)?.revision;
-  return typeof revision === "number" ? revision : null;
+  const activation = results[0]?.results[0] as {
+    revision?: unknown;
+    last_disabled_revision?: unknown;
+  } | undefined;
+  if (typeof activation?.revision !== "number") return null;
+  return {
+    revision: activation.revision,
+    lastDisabledRevision: typeof activation.last_disabled_revision === "number" ? activation.last_disabled_revision : null,
+  };
 };

@@ -853,8 +853,8 @@ describe("Votekick module", () => {
       order.push("send");
       sendCount += 1;
       return Promise.resolve(sendCount === 1
-        ? { sent: false, reason: "rate_limited", retryable: true }
-        : { sent: true, reason: null, retryable: false });
+        ? { sent: false, reason: "rate_limited", retryable: true, delivery: "rate_limited" }
+        : { sent: true, reason: null, retryable: false, delivery: "delivered" });
     });
     const clear = vi.fn(() => { order.push("clear"); return Promise.resolve(); });
     const db = { prepare: vi.fn(() => ({
@@ -895,8 +895,8 @@ describe("Votekick module", () => {
       byId,
     });
     const sendChat = vi.fn<ModuleAlarmContext["sendChat"]>()
-      .mockResolvedValueOnce({ sent: false, reason: "rate_limited", retryable: true })
-      .mockResolvedValueOnce({ sent: true, reason: null, retryable: false });
+      .mockResolvedValueOnce({ sent: false, reason: "rate_limited", retryable: true, delivery: "rate_limited" })
+      .mockResolvedValueOnce({ sent: true, reason: null, retryable: false, delivery: "delivered" });
     const clear = vi.fn(() => Promise.resolve());
     const db = { prepare: vi.fn(() => ({
       bind: vi.fn().mockReturnThis(),
@@ -932,7 +932,12 @@ describe("Votekick module", () => {
     const repository = repositoryFor({
       byId,
     });
-    const sendChat = vi.fn<ModuleAlarmContext["sendChat"]>(() => Promise.resolve({ sent: true, reason: null, retryable: false }));
+    const sendChat = vi.fn<ModuleAlarmContext["sendChat"]>(() => Promise.resolve({
+      sent: true,
+      reason: null,
+      retryable: false,
+      delivery: "delivered",
+    }));
     const closeBallot = vi.fn(() => Promise.reject(new Error("DO unavailable")));
     const db = { prepare: vi.fn(() => ({
       bind: vi.fn().mockReturnThis(),

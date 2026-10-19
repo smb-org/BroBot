@@ -46,6 +46,7 @@ import { moduleEventTimeOptions, resolveModuleEventTimes } from "../module-event
 import { notifyModuleScheduleInputsChanged, reconcileChannelTimerSchedules } from "../module-schedules";
 import { createModuleExternalFetchBudget } from "../external-fetch-budget";
 import { moduleBallots } from "../module-ballots";
+import { modulePoints } from "../module-points";
 import { createModuleSecretAccess } from "../module-secrets";
 import { liftModerationBan } from "../moderation";
 import { readTextBlockGraphRevision, textBlockWriteGuard } from "../../modules/contracts/text-block-write-guard";
@@ -60,6 +61,7 @@ interface ModuleRouteEnvironment {
     | "listChannelVariables" | "findChannelVariable" | "secrets"
     | "externalFetchBudget"
     | "ballots"
+    | "points"
     | "readChannelBlockedTerms"
     | "runModuleAlarm"
     | "listTextBlockConditions"
@@ -256,6 +258,14 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
     const moduleId = suffix === undefined ? "" : decodeURIComponent(suffix.split("/", 1)[0] ?? "");
     if (!MODULES.some((module) => module.id === moduleId)) throw new Error("Ballot access requires a registered module route.");
     return moduleBallots(context.env.CHANNEL, channelId, moduleId);
+  });
+  context.set("points", (channelId) => {
+    if (channelId !== context.req.param("channelId")) throw new Error("Point access must use the authorized route channel.");
+    const marker = "/modules/";
+    const suffix = new URL(context.req.url).pathname.split(marker, 2)[1];
+    const moduleId = suffix === undefined ? "" : decodeURIComponent(suffix.split("/", 1)[0] ?? "");
+    if (!MODULES.some((module) => module.id === moduleId)) throw new Error("Point access requires a registered module route.");
+    return modulePoints(context.env.CHANNEL, channelId, moduleId);
   });
   context.set("secrets", (channelId) => {
     if (channelId !== context.req.param("channelId")) throw new Error("Module secret access must use the authorized route channel.");
@@ -888,6 +898,30 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   const actor = actorOf(context);
 
   const existing = await getChannelModuleForChannel(context.env.DB, channelId, moduleId);
+  const requiredModules = enabled ? module.requiresModules ?? [] : [];
+  const dependentModules = !enabled
+    ? MODULES.filter((candidate) => candidate.requiresModules?.includes(moduleId)).map((candidate) => candidate.id)
+    : [];
+  const stateGuard = requiredModules.length > 0
+    ? {
+      sql: requiredModules.map(() => `AND EXISTS (
+        SELECT 1 FROM channel_modules AS required_module
+         WHERE required_module.channel_id = ? AND required_module.module_id = ? AND required_module.enabled = 1
+      )`).join(" "),
+      values: requiredModules.flatMap((requiredModule) => [channelId, requiredModule]),
+    }
+    : dependentModules.length > 0
+      ? {
+        sql: `AND NOT EXISTS (
+          SELECT 1 FROM channel_modules AS dependent_module
+           WHERE dependent_module.channel_id = ? AND dependent_module.enabled = 1
+             AND dependent_module.module_id IN (${dependentModules.map(() => "?").join(", ")})
+        )`,
+        values: [channelId, ...dependentModules],
+      }
+      : undefined;
+  const retryingPostCommit = existing !== null && existing.enabled === enabled && expectedRevision !== undefined &&
+    Number(expectedRevision) + 1 === existing.revision;
   const initialize = enabled && existing?.initialized !== true;
   let dependentMutations: readonly D1PreparedStatement[] = [];
   if (initialize && module.onEnable !== undefined) {
@@ -901,6 +935,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   }
   const settings = existing === null ? defaultSettingsJson : existing.settings;
   let revision: number | null;
+  let lastDisabledRevision = existing?.lastDisabledRevision ?? null;
   if (existing === null && enabled) {
     if (expectedRevision !== undefined) return context.json({ error: "module_changed_concurrently" }, 409);
     revision = await createChannelModuleWithAudit(
@@ -910,24 +945,60 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       action,
       now,
       dependentMutations,
+      stateGuard,
     );
   } else if (existing !== null) {
-    revision = await updateChannelModuleEnabledStateWithAudit(
-      context.env.DB,
-      actor,
-      channelId,
-      moduleId,
-      enabled,
-      action,
-      now,
-      dependentMutations,
-      expectedRevision === undefined ? existing.revision : Number(expectedRevision),
-      initialize,
-    );
+    if (retryingPostCommit) revision = existing.revision;
+    else {
+      const activation = await updateChannelModuleEnabledStateWithAudit(
+        context.env.DB,
+        actor,
+        channelId,
+        moduleId,
+        enabled,
+        action,
+        now,
+        dependentMutations,
+        expectedRevision === undefined ? existing.revision : Number(expectedRevision),
+        initialize,
+        stateGuard,
+      );
+      revision = activation?.revision ?? null;
+      lastDisabledRevision = activation?.lastDisabledRevision ?? null;
+    }
   } else {
     return context.json({ error: "module_changed_concurrently" }, 409);
   }
-  if (revision === null) return context.json({ error: "module_changed_concurrently" }, 409);
+  if (revision === null) {
+    if (enabled && requiredModules.length > 0) {
+      const placeholders = requiredModules.map(() => "?").join(", ");
+      const enabledCount = await context.env.DB.prepare(
+        `SELECT COUNT(*) AS count FROM channel_modules
+          WHERE channel_id = ? AND module_id IN (${placeholders}) AND enabled = 1`,
+      ).bind(channelId, ...requiredModules).first<{ count: number }>();
+      if ((enabledCount?.count ?? 0) !== requiredModules.length) return context.json({ error: "module_requires" }, 409);
+    }
+    if (!enabled && dependentModules.length > 0) {
+      const placeholders = dependentModules.map(() => "?").join(", ");
+      const requiredBy = await context.env.DB.prepare(
+        `SELECT 1 AS found FROM channel_modules
+          WHERE channel_id = ? AND module_id IN (${placeholders}) AND enabled = 1 LIMIT 1`,
+      ).bind(channelId, ...dependentModules).first<{ found: number }>();
+      if (requiredBy !== null) return context.json({ error: "module_required_by" }, 409);
+    }
+    return context.json({ error: "module_changed_concurrently" }, 409);
+  }
+  if ((module.requiresModules?.length ?? 0) > 0 || module.id === "points") {
+    try {
+      const points = context.get("points")(channelId);
+      await points.rounds.setGate(!enabled, revision, lastDisabledRevision);
+      if (!enabled && (module.requiresModules?.length ?? 0) > 0) {
+        await points.rounds.cancelOpenRounds(revision);
+      }
+    } catch {
+      return context.json({ error: "module_gate_update_failed" }, 500);
+    }
+  }
   if (module.id === "belabox" && module.settingsChangedAlarm !== undefined) {
     await runModuleAlarmAfterMutation(
       context,

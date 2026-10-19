@@ -67,7 +67,12 @@ import type {
   ModuleBallotAccess,
   ModuleDryRunBallotSnapshot,
   ModuleExternalFetchBudget,
+  ModulePointsAccess,
   ModuleScheduleInputChangeReason,
+  PointJoinResult,
+  PointsApplyResult,
+  PointsKind,
+  PointsMovement,
 } from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
 import {
@@ -109,6 +114,7 @@ import { resolveModuleEventTimes } from "../module-event-times";
 import { renderScheduledTemplate } from "../scheduled-template-renderer";
 import { secureRandomInteger } from "../template-resolver";
 import { createModuleExternalFetchBudget } from "../external-fetch-budget";
+import { templateLanguageText } from "../../modules/template-language";
 import { writeModuleDiagnostics } from "../event-log";
 import {
   claimModuleAlarmSend,
@@ -141,6 +147,50 @@ import {
   readStoredBallotSnapshot,
   setStoredBallotBlockedTerms,
 } from "./ballots";
+import {
+  POINTS_ANNOUNCE_AMBIGUOUS_MS,
+  POINTS_ANNOUNCE_MAX_ATTEMPTS,
+  POINTS_ANNOUNCE_RETRY_MS,
+  POINTS_CANCELLATION_NOTICE_ALARM_HANDLER,
+  POINTS_CANCELLATION_NOTICE_ALARM_PREFIX,
+  POINTS_ROUND_ALARM_HANDLER,
+  POINTS_ROUND_ALARM_PREFIX,
+  acknowledgeWelcomeSync,
+  announceAttemptSync,
+  applyPointOperationSync,
+  canonicalPointResult,
+  assertPointAccountId,
+  assertPointRoundId,
+  cancelPointRoundsSync,
+  claimPointCooldownSync,
+  completePointRoundCancellationNoticeSync,
+  creditPointActivitySync,
+  ensurePointsSchema,
+  joinPointRoundSync,
+  listPointAccounts,
+  markPointRoundAnnouncedSync,
+  openPointRoundSync,
+  pendingPointAudits,
+  pointAuditWrittenSync,
+  pointBalance,
+  pointHistory,
+  pointPayloadHash,
+  pointRankOf,
+  pointRanking,
+  pointRoundAlarmKey,
+  pointRoundRefundRequests,
+  pointRoundRow,
+  pendingPointRoundCancellations,
+  pendingPointRoundCancellationNotices,
+  pointSummary,
+  recoverablePointRounds,
+  recordPointAnnouncementSync,
+  resolvePointRoundSync,
+  settlementFromRoundData,
+  setGameModuleGateSync,
+  touchPointAccountSync,
+} from "./points";
+import { POINT_SETTLEMENTS } from "./point-settlements";
 
 const SECURITY_ALARM_INTERVAL_MS = 15 * 60 * 1000;
 const SECURITY_RETRY_INTERVAL_MS = 60 * 1000;
@@ -157,9 +207,19 @@ const D1_IN_PARAMETER_LIMIT = 100;
 const FIXED_D1_PARAMETER_COUNT = 2;
 const D1_IDS_PER_QUERY = D1_IN_PARAMETER_LIMIT - FIXED_D1_PARAMETER_COUNT;
 const ALARM_TABLE_KEY = "channel:alarm_schedule";
+const POINTS_ACTIVATION_RECONCILIATION_ALARM_KEY = "points:activation_reconciliation";
+const POINTS_ACTIVATION_RECONCILIATION_ALARM_HANDLER = "host:points_activation_reconciliation";
+const POINTS_ACTIVATION_RECONCILIATION_MODULES_KEY = "points:activation_reconciliation_modules";
 const PANEL_DURABLE_REVISIONS_KEY = "channel:panel_resource_revisions";
 const CHAT_ACTIVITY_COUNT_KEY = "channel:chat_activity_count";
 const TIMER_MIRROR_RETRY_DELAY_MS = 5_000;
+const POINTS_ANNOUNCEMENT_REGISTRATION: ModuleAlarmDefinition = {
+  key: "points_announce",
+  retryDelaysMs: [POINTS_ANNOUNCE_RETRY_MS],
+  handle: () => Promise.resolve(),
+};
+const pointCancellationNoticeAlarmKey = (moduleId: string, revision: number): string =>
+  `${POINTS_CANCELLATION_NOTICE_ALARM_PREFIX}${encodeURIComponent(moduleId)}:${String(revision)}`;
 const TIMER_TOMBSTONE_RETENTION_MS = 24 * 60 * 60_000;
 const MODULE_ALARM_SEND_CLAIMS_KEY = "module_alarm:send_claims";
 const LEGACY_TIMER_CLAIMS_IMPORTED_KEY = "timers:legacy_claims_imported";
@@ -544,12 +604,82 @@ export class ChannelObject extends DurableObject<Env> {
   private timerScheduleReconciliationQueue: Promise<void> = Promise.resolve();
   private timerScheduleInitialization: Promise<void> | null = null;
   private activeChatterSchemaReady = false;
+  private pointsSchemaReady = false;
+  private pointsInitialized = false;
+  private pointsInitialization: Promise<void> | null = null;
+  private pointRoundRecoveryInitialized = false;
+  private pointRoundRecoveryInitialization: Promise<void> | null = null;
   // ponytail: This Set is per-instance memory and is empty after hibernation, so the residual window is bounded by the security alarm. Persist token IDs in DO storage if that window needs to be shorter.
   private recentlyBoundOverlayTokenIds = new Set<string>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+  }
+
+  private ensurePointsSchema(): void {
+    if (this.pointsSchemaReady) return;
+    ensurePointsSchema(this.ctx.storage.sql);
+    this.pointsSchemaReady = true;
+  }
+
+  private async ensurePointsInitialized(): Promise<void> {
+    const pendingInitialization = this.pointsInitialization;
+    if (pendingInitialization !== null) {
+      await pendingInitialization;
+      return;
+    }
+    if (this.pointsInitialized) return;
+    const initialization = this.initializePoints();
+    this.pointsInitialization = initialization;
+    try {
+      await initialization;
+      this.pointsInitialized = true;
+    } finally {
+      if (this.pointsInitialization === initialization) this.pointsInitialization = null;
+    }
+  }
+
+  /** Restores local point alarms on the first non-snapshot entry after activation. */
+  private async ensurePointRoundRecovery(): Promise<void> {
+    const pendingInitialization = this.pointRoundRecoveryInitialization;
+    if (pendingInitialization !== null) {
+      await pendingInitialization;
+      return;
+    }
+    if (this.pointRoundRecoveryInitialized) return;
+    const initializedSchema = this.ctx.storage.sql.exec<{ present: number }>(
+      "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'game_rounds') AS present",
+    ).one().present === 1;
+    if (!initializedSchema) {
+      this.pointRoundRecoveryInitialized = true;
+      return;
+    }
+
+    const hasActiveRounds = this.ctx.storage.sql.exec<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM game_rounds WHERE state IN ('announcing', 'open', 'resolving')",
+    ).one().count > 0;
+    const hasPendingCancellations = pendingPointRoundCancellations(this.ctx.storage.sql).length > 0;
+    const hasPendingNotices = pendingPointRoundCancellationNotices(this.ctx.storage.sql).length > 0;
+    const hasActivationReconciliation = this.pointActivationReconciliationModulesSync().length > 0;
+    if (!hasActiveRounds && !hasPendingCancellations && !hasPendingNotices && !hasActivationReconciliation) {
+      this.pointRoundRecoveryInitialized = true;
+      return;
+    }
+
+    const initialization = this.recoverPointRoundAlarms();
+    this.pointRoundRecoveryInitialization = initialization;
+    try {
+      await initialization;
+      this.pointRoundRecoveryInitialized = true;
+    } finally {
+      if (this.pointRoundRecoveryInitialization === initialization) this.pointRoundRecoveryInitialization = null;
+    }
+  }
+
+  private async initializePoints(): Promise<void> {
+    this.ensurePointsSchema();
+    await this.ensurePointRoundRecovery();
   }
 
   private ownChannelId(): string | null {
@@ -1075,6 +1205,7 @@ export class ChannelObject extends DurableObject<Env> {
 
   /** Applies a committed timer config revision in the channel's single scheduler. */
   public async upsertTimerConfig(config: DurableTimerConfig): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await this.ensureTimerSchedulesInitialized();
     await this.transitionTimerStream(await this.readTimerStreamFromDatabase());
     const inputs = await this.timerScheduleInputs([config], Date.now());
@@ -1101,6 +1232,7 @@ export class ChannelObject extends DurableObject<Env> {
 
   /** Removes a committed D1 timer and fences any config snapshot read before its delete. */
   public async deleteTimerConfig(timerId: string, expectedRevision: number): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await this.ensureTimerSchedulesInitialized();
     await this.transitionTimerStream(await this.readTimerStreamFromDatabase());
     const changed = this.ctx.storage.transactionSync(() => {
@@ -1120,6 +1252,7 @@ export class ChannelObject extends DurableObject<Env> {
 
   /** Commits an accepted EventSub or Helix stream transition before replanning stream-scoped timers. */
   public async transitionTimerStream(stream: DurableTimerStream): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await this.ensureTimerSchedulesInitialized();
     const now = Date.now();
     const changedTimerIds: string[] = [];
@@ -1149,6 +1282,7 @@ export class ChannelObject extends DurableObject<Env> {
 
   /** Replans host-owned timer inputs after activation, timezone, event-time, or repair notifications. */
   public async reconcileTimerSchedules(reason: ModuleScheduleInputChangeReason): Promise<void> {
+    await this.ensurePointRoundRecovery();
     const previous = this.timerScheduleReconciliationQueue;
     let release!: () => void;
     this.timerScheduleReconciliationQueue = new Promise<void>((resolve) => { release = resolve; });
@@ -1390,6 +1524,7 @@ export class ChannelObject extends DurableObject<Env> {
     identity?: ModuleAlarmIdentity | null,
     planSequence?: number,
   ): Promise<"retain" | undefined> {
+    await this.ensurePointRoundRecovery();
     if (key.startsWith("mirror:")) {
       const timerId = key.slice("mirror:".length).split(":")[0] ?? "";
       if (timerId.length > 0) await this.writeTimerMirror(timerId);
@@ -1718,6 +1853,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async reconcileCachedAdPrewarning(grantedScopes?: readonly string[]): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await this.withAdScheduleOperation(async () => {
       // Read after entering the queue: an EventSub or Helix schedule save that
       // was queued first must be the value reconciled by this panel read.
@@ -1747,6 +1883,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async getCachedAdSchedule(): Promise<CachedAdSchedule | null> {
+    await this.ensurePointRoundRecovery();
     const channelId = this.ownChannelId();
     if (channelId === null) return null;
     const cache = await this.ctx.storage.get<CachedAdSchedule>(AD_SCHEDULE_CACHE_KEY);
@@ -1759,6 +1896,7 @@ export class ChannelObject extends DurableObject<Env> {
     expectedStreamId: string | null,
     now: number,
   ): Promise<OverlayStreamDetailsCache | null> {
+    await this.ensurePointRoundRecovery();
     const channelId = this.ownChannelId();
     if (channelId === null) return null;
     const cached = await this.ctx.storage.get<CachedOverlayStreamDetails>(OVERLAY_STREAM_DETAILS_CACHE_KEY);
@@ -1823,6 +1961,7 @@ export class ChannelObject extends DurableObject<Env> {
    * changes are not time-critical enough to warrant their own constant.
    */
   public async getCachedChannelGameId(now: number): Promise<string | null> {
+    await this.ensurePointRoundRecovery();
     const channelId = this.ownChannelId();
     if (channelId === null) return null;
     const cached = await this.ctx.storage.get<CachedChannelGameId>(CHANNEL_GAME_ID_CACHE_KEY);
@@ -1873,17 +2012,20 @@ export class ChannelObject extends DurableObject<Env> {
    * instead of waiting out the cache TTL (or spending another Helix call).
    */
   public async updateCachedChannelGameId(gameId: string | null, now: number): Promise<void> {
+    await this.ensurePointRoundRecovery();
     const channelId = this.ownChannelId();
     if (channelId === null) return;
     await this.ctx.storage.put(CHANNEL_GAME_ID_CACHE_KEY, { checkedAt: now, gameId, failed: false } satisfies CachedChannelGameId);
   }
 
   public async getAdScheduleGeneration(): Promise<number> {
+    await this.ensurePointRoundRecovery();
     return await this.ctx.storage.get<number>(AD_SCHEDULE_GENERATION_KEY) ?? 0;
   }
 
   /** Refreshes stale countdown data at most once per minute for this channel. */
   public async refreshAdScheduleForCountdown(): Promise<AdScheduleRefreshResult | null> {
+    await this.ensurePointRoundRecovery();
     const now = Date.now();
     const cached = await this.getCachedAdSchedule();
     const cachedAt = cached === null ? Number.NaN : Date.parse(cached.asOf);
@@ -1908,6 +2050,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async refreshAdSchedule(grantedScopes?: readonly string[]): Promise<AdScheduleRefreshResult> {
+    await this.ensurePointRoundRecovery();
     const now = Date.now();
     if (this.adScheduleRefresh !== null && now - this.adScheduleRefreshStartedAt < AD_SCHEDULE_REFRESH_TIMEOUT_MS) {
       return this.adScheduleRefresh;
@@ -1984,6 +2127,7 @@ export class ChannelObject extends DurableObject<Env> {
     expectedGeneration?: number,
     reconcileAlarm = true,
   ): Promise<CachedAdSchedule | null> {
+    await this.ensurePointRoundRecovery();
     const saved = await this.saveAdSchedule(schedule, asOf, grantedScopes, expectedGeneration, reconcileAlarm);
     if (saved === null) return null;
     await this.ctx.storage.delete(AD_COUNTDOWN_REFRESH_RETRY_COUNT_KEY);
@@ -1991,6 +2135,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async getTwitchRateLimitRetryAfter(now = Date.now()): Promise<number | null> {
+    await this.ensurePointRoundRecovery();
     const retryAfter = await this.ctx.storage.get<number>(TWITCH_RETRY_AFTER_KEY);
     return typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter > now
       ? retryAfter
@@ -1998,6 +2143,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async setTwitchRateLimitRetryAfter(retryAfter: number): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await this.ctx.storage.transaction(async (transaction) => {
       await transaction.put(TWITCH_RETRY_AFTER_KEY, retryAfter);
       await bumpDurablePanelResources(transaction, ["module:ads:schedule"]);
@@ -2098,6 +2244,7 @@ export class ChannelObject extends DurableObject<Env> {
 
   /** A durable short lease coalesces overview-triggered refreshes across Worker isolates. */
   public async beginStreamStateRefresh(now = Date.now()): Promise<string | null> {
+    await this.ensurePointRoundRecovery();
     const token = crypto.randomUUID();
     return this.ctx.storage.transaction(async (transaction) => {
       const current = await transaction.get<StreamRefreshLease>(STREAM_REFRESH_LEASE_KEY);
@@ -2108,6 +2255,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async endStreamStateRefresh(token: string): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await this.ctx.storage.transaction(async (transaction) => {
       const current = await transaction.get<StreamRefreshLease>(STREAM_REFRESH_LEASE_KEY);
       if (current?.token === token) await transaction.delete(STREAM_REFRESH_LEASE_KEY);
@@ -2440,6 +2588,7 @@ export class ChannelObject extends DurableObject<Env> {
       ...(streamGeneration === undefined ? {} : { streamGeneration }),
       externalFetchBudget,
       ballots: this.ballotAccess(moduleId),
+      points: this.pointAccess(moduleId),
       secrets: createModuleSecretAccess(this.env, channelId, moduleId),
       channelLanguage: async () => {
         const row = await this.env.DB.prepare("SELECT language FROM channels WHERE channel_id = ?")
@@ -2570,14 +2719,26 @@ export class ChannelObject extends DurableObject<Env> {
           undefined,
           (senderId, messageText) => this.recordBotChatMessage(senderId, messageText),
         );
+        let attemptedAt: number | undefined;
+        let hasPersistedSendClaim = false;
         if (result.reason === "already_attempted") {
           const claim = await readModuleAlarmSendClaim(this.ctx.storage, idempotencyKey);
-          if (claim?.status === "sent") return { sent: true, reason: null, retryable: false };
+          if (claim?.status === "sent") return { sent: true, reason: null, retryable: false, delivery: "delivered" };
+          hasPersistedSendClaim = claim !== null;
+          attemptedAt = claim?.at;
         }
         const reason = suppression.reason ?? result.reason;
         const retryable = suppression.reason === null && result.reason !== "stale_before_send" &&
           result.reason !== "already_attempted" && result.delivery !== "ambiguous";
-        return { sent: result.sent, reason, retryable };
+        const ambiguous = result.reason === "already_attempted"
+          ? hasPersistedSendClaim
+          : result.delivery === "ambiguous";
+        const delivery = result.sent
+          ? "delivered"
+          : result.reason === "rate_limited" ? "rate_limited"
+            : ambiguous ? "ambiguous"
+              : "failed";
+        return { sent: result.sent, reason, retryable, delivery, ...(attemptedAt === undefined ? {} : { attemptedAt }) };
       },
       chatActivityCount: () => this.getChatActivityCount(),
       resolveEventTimes: (now) => resolveModuleEventTimes(this.env.DB, channelId, now),
@@ -2602,6 +2763,7 @@ export class ChannelObject extends DurableObject<Env> {
     chatterUserId: string | null = null,
     needsActiveChatters = false,
   ): Promise<number> {
+    await this.ensurePointRoundRecovery();
     await this.ensureTimerSchedulesInitialized();
     this.reconcileLegacyActiveChatterStream();
     const now = Date.now();
@@ -2659,6 +2821,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async clearActiveChatters(): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await this.ctx.blockConcurrencyWhile(async () => {
       this.ctx.storage.transactionSync(() => {
         this.clearActiveChatterStateSync();
@@ -2667,7 +2830,8 @@ export class ChannelObject extends DurableObject<Env> {
     });
   }
 
-  public getActiveChatterCount(windowMs: number): Promise<number> {
+  public async getActiveChatterCount(windowMs: number): Promise<number> {
+    await this.ensurePointRoundRecovery();
     if (!Number.isFinite(windowMs) || windowMs <= 0) return Promise.resolve(0);
     const now = Date.now();
     const key = this.activeChatterKeyRowSync();
@@ -2682,6 +2846,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async getActiveChatter(userId: string): Promise<ActiveChatterActivity | null> {
+    await this.ensurePointRoundRecovery();
     if (userId.length === 0) return null;
     this.ensureActiveChatterTable();
     const key = this.activeChatterKeyRowSync();
@@ -2759,20 +2924,749 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async claimAutomatedChatOutput(): Promise<boolean> {
+    await this.ensurePointRoundRecovery();
     return claimAutomatedChatOutput(this.ctx.storage, Date.now());
   }
 
   public async isRecentBotChatMessage(senderId: string | null, text: string): Promise<boolean> {
+    await this.ensurePointRoundRecovery();
     return isRecentBotChatMessage(this.ctx.storage, senderId, text, Date.now());
   }
 
   public async recordBotChatMessage(senderId: string, text: string): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await recordRecentBotChatMessage(this.ctx.storage, senderId, text, Date.now());
   }
 
   public async getChatActivityCount(): Promise<number> {
+    await this.ensurePointRoundRecovery();
     const current = await this.ctx.storage.get<number>(CHAT_ACTIVITY_COUNT_KEY);
     return typeof current === "number" && Number.isSafeInteger(current) && current >= 0 ? current : 0;
+  }
+
+  private writePointRoundAlarmSync(key: string, deadline: number): void {
+    const stored = this.ctx.storage.kv.get<AlarmScheduleTable>(ALARM_TABLE_KEY);
+    const table = stored === undefined ? {} : { ...stored };
+    table[key] = {
+      deadline,
+      handler: POINTS_ROUND_ALARM_HANDLER,
+      revision: (table[key]?.revision ?? 0) + 1,
+    };
+    this.ctx.storage.kv.put(ALARM_TABLE_KEY, table);
+  }
+
+  private writePointCancellationNoticeAlarmSync(moduleId: string, revision: number, deadline: number): void {
+    const key = pointCancellationNoticeAlarmKey(moduleId, revision);
+    const stored = this.ctx.storage.kv.get<AlarmScheduleTable>(ALARM_TABLE_KEY);
+    const table = stored === undefined ? {} : { ...stored };
+    table[key] = {
+      deadline,
+      handler: POINTS_CANCELLATION_NOTICE_ALARM_HANDLER,
+      revision: (table[key]?.revision ?? 0) + 1,
+    };
+    this.ctx.storage.kv.put(ALARM_TABLE_KEY, table);
+  }
+
+  private ensurePointCancellationNoticeAlarmsSync(): void {
+    const stored = this.ctx.storage.kv.get<AlarmScheduleTable>(ALARM_TABLE_KEY);
+    const table = stored === undefined ? {} : { ...stored };
+    let changed = false;
+    for (const notice of pendingPointRoundCancellationNotices(this.ctx.storage.sql)) {
+      const key = pointCancellationNoticeAlarmKey(notice.moduleId, notice.revision);
+      if (table[key]?.handler === POINTS_CANCELLATION_NOTICE_ALARM_HANDLER) continue;
+      table[key] = {
+        deadline: Date.now(),
+        handler: POINTS_CANCELLATION_NOTICE_ALARM_HANDLER,
+        revision: (table[key]?.revision ?? 0) + 1,
+      };
+      changed = true;
+    }
+    if (changed) this.ctx.storage.kv.put(ALARM_TABLE_KEY, table);
+  }
+
+  private clearPointRoundAlarmSync(key: string): void {
+    const stored = this.ctx.storage.kv.get<AlarmScheduleTable>(ALARM_TABLE_KEY);
+    if (stored === undefined || stored[key] === undefined) return;
+    const table = { ...stored };
+    Reflect.deleteProperty(table, key);
+    this.ctx.storage.kv.put(ALARM_TABLE_KEY, table);
+  }
+
+  private async recoverPointRoundAlarms(): Promise<void> {
+    this.ensurePointsSchema();
+    const cancellations = pendingPointRoundCancellations(this.ctx.storage.sql);
+    const activeModuleIds = this.ctx.storage.sql.exec<{ module_id: string }>(
+      "SELECT DISTINCT module_id FROM game_rounds WHERE state IN ('announcing', 'open', 'resolving')",
+    ).toArray().map(({ module_id }) => module_id);
+    this.retainPointActivationReconciliationModulesSync([
+      ...activeModuleIds,
+      ...cancellations.map(({ moduleId }) => moduleId),
+    ]);
+    for (const cancellation of cancellations) {
+      await this.cancelOpenGameRoundsInternal(cancellation.moduleId, cancellation.revision, false);
+    }
+    const rounds = recoverablePointRounds(this.ctx.storage.sql);
+    const table = await this.ensureAlarmScheduleTable();
+    const now = Date.now();
+    for (const round of rounds) {
+      const alarmKey = pointRoundAlarmKey(round.round_id);
+      if (round.state === "open" && round.deadline_at !== null && round.deadline_at + 60_000 < now) {
+        console.error(`Point round ${round.round_id} is stuck past its resolution grace period.`);
+      }
+      if (table[alarmKey] !== undefined) continue;
+      let deadline = round.deadline_at ?? now;
+      if (round.state === "announcing") {
+        if (round.announce_state === "rate_limited" && round.last_attempt_at !== null) {
+          deadline = round.last_attempt_at + POINTS_ANNOUNCE_RETRY_MS;
+        } else if (round.announce_state === "pending" && round.announce_attempts >= POINTS_ANNOUNCE_MAX_ATTEMPTS &&
+            round.last_attempt_at !== null) {
+          deadline = round.last_attempt_at + POINTS_ANNOUNCE_AMBIGUOUS_MS;
+        } else if (round.announce_state === "failed") {
+          deadline = now;
+        } else if (round.announce_state === "pending") {
+          deadline = now;
+        }
+      }
+      this.ctx.storage.transactionSync(() => { this.writePointRoundAlarmSync(alarmKey, deadline); });
+    }
+    if (this.pointActivationReconciliationModulesSync().length > 0) {
+      const current = table[POINTS_ACTIVATION_RECONCILIATION_ALARM_KEY];
+      if (current?.handler !== POINTS_ACTIVATION_RECONCILIATION_ALARM_HANDLER) {
+        this.ctx.storage.transactionSync(() => {
+          this.writePointActivationReconciliationAlarmSync(now);
+        });
+      }
+    }
+    for (const notice of pendingPointRoundCancellationNotices(this.ctx.storage.sql)) {
+      const key = pointCancellationNoticeAlarmKey(notice.moduleId, notice.revision);
+      if (table[key] !== undefined) continue;
+      this.ctx.storage.transactionSync(() => {
+        this.writePointCancellationNoticeAlarmSync(notice.moduleId, notice.revision, now);
+      });
+    }
+    await this.scheduleEarliestAlarm();
+  }
+
+  private async reconcilePointModuleActivationsDuringRecovery(): Promise<void> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return;
+    const moduleIds = new Set(this.pointActivationReconciliationModulesSync());
+    for (const { module_id: moduleId } of this.ctx.storage.sql.exec<{ module_id: string }>(
+      `SELECT module_id FROM game_rounds WHERE state IN ('announcing', 'open', 'resolving')
+       UNION SELECT module_id FROM game_round_cancellations`,
+    ).toArray()) moduleIds.add(moduleId);
+    if (moduleIds.size === 0) return;
+
+    const requestedModuleIds = [...moduleIds].sort((left, right) => left.localeCompare(right));
+    for (const batch of chunksOf(requestedModuleIds, D1_IDS_PER_QUERY)) {
+      const placeholders = batch.map(() => "?").join(", ");
+      const activations = await this.env.DB.prepare(
+        `SELECT module_id, enabled, revision, last_disabled_revision FROM channel_modules
+          WHERE channel_id = ? AND module_id IN (${placeholders})`,
+      ).bind(channelId, ...batch).all<{
+        module_id: string;
+        enabled: number;
+        revision: number;
+        last_disabled_revision: number | null;
+      }>();
+      for (const activation of activations.results) {
+        await this.applyPointModuleActivation(
+          activation.module_id,
+          activation.enabled === 1,
+          activation.revision,
+          false,
+          activation.last_disabled_revision,
+        );
+      }
+    }
+    this.clearPointActivationReconciliationModulesSync(requestedModuleIds);
+  }
+
+  private async reconcilePointModuleActivation(moduleId: string, flushCancellationNotices: boolean): Promise<void> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return;
+    const activation = await this.env.DB.prepare(
+      "SELECT enabled, revision, last_disabled_revision FROM channel_modules WHERE channel_id = ? AND module_id = ?",
+    ).bind(channelId, moduleId).first<{
+      enabled: number;
+      revision: number;
+      last_disabled_revision: number | null;
+    }>();
+    if (activation === null) return;
+    await this.applyPointModuleActivation(
+      moduleId,
+      activation.enabled === 1,
+      activation.revision,
+      flushCancellationNotices,
+      activation.last_disabled_revision,
+    );
+  }
+
+  private async applyPointModuleActivation(
+    moduleId: string,
+    enabled: boolean,
+    revision: number,
+    flushCancellationNotices: boolean,
+    lastDisabledRevision: number | null = null,
+  ): Promise<void> {
+    if (enabled && lastDisabledRevision !== null) {
+      await this.setGameModuleGateInternal(moduleId, false, revision, flushCancellationNotices, lastDisabledRevision);
+      return;
+    }
+
+    if (lastDisabledRevision !== null) {
+      const currentGate = this.ctx.storage.sql.exec<{ revision: number }>(
+        "SELECT revision FROM module_gates WHERE module_id = ?",
+        moduleId,
+      ).toArray()[0];
+      if (currentGate === undefined || currentGate.revision < lastDisabledRevision) {
+        const disabled = await this.setGameModuleGateInternal(moduleId, true, lastDisabledRevision, flushCancellationNotices);
+        if (disabled.applied) await this.cancelOpenGameRoundsInternal(moduleId, lastDisabledRevision, flushCancellationNotices);
+      } else {
+        await this.cancelOpenGameRoundsInternal(moduleId, lastDisabledRevision, flushCancellationNotices);
+      }
+    }
+
+    const gate = this.ctx.storage.sql.exec<{ revision: number }>(
+      "SELECT revision FROM module_gates WHERE module_id = ?",
+      moduleId,
+    ).toArray()[0];
+    if (gate !== undefined && revision <= gate.revision) return;
+    const result = await this.setGameModuleGateInternal(moduleId, !enabled, revision, flushCancellationNotices);
+    if (result.applied && !enabled) {
+      await this.cancelOpenGameRoundsInternal(moduleId, revision, flushCancellationNotices);
+    }
+  }
+
+  private writePointActivationReconciliationAlarmSync(deadline: number): void {
+    const stored = this.ctx.storage.kv.get<AlarmScheduleTable>(ALARM_TABLE_KEY);
+    const table = stored === undefined ? {} : { ...stored };
+    table[POINTS_ACTIVATION_RECONCILIATION_ALARM_KEY] = {
+      deadline,
+      handler: POINTS_ACTIVATION_RECONCILIATION_ALARM_HANDLER,
+      revision: (table[POINTS_ACTIVATION_RECONCILIATION_ALARM_KEY]?.revision ?? 0) + 1,
+    };
+    this.ctx.storage.kv.put(ALARM_TABLE_KEY, table);
+  }
+
+  private pointActivationReconciliationModulesSync(): string[] {
+    const stored = this.ctx.storage.kv.get(POINTS_ACTIVATION_RECONCILIATION_MODULES_KEY);
+    return Array.isArray(stored)
+      ? [...new Set(stored.filter((value): value is string => typeof value === "string" && value.length > 0))]
+        .sort((left, right) => left.localeCompare(right))
+      : [];
+  }
+
+  private retainPointActivationReconciliationModulesSync(moduleIds: readonly string[]): void {
+    const modules = new Set([...this.pointActivationReconciliationModulesSync(), ...moduleIds]);
+    if (modules.size > 0) {
+      this.ctx.storage.kv.put(POINTS_ACTIVATION_RECONCILIATION_MODULES_KEY,
+        [...modules].sort((left, right) => left.localeCompare(right)));
+    }
+  }
+
+  private clearPointActivationReconciliationModulesSync(moduleIds: readonly string[]): void {
+    this.ctx.storage.transactionSync(() => {
+      const modules = new Set(this.pointActivationReconciliationModulesSync());
+      for (const moduleId of moduleIds) modules.delete(moduleId);
+      if (modules.size === 0) this.ctx.storage.kv.delete(POINTS_ACTIVATION_RECONCILIATION_MODULES_KEY);
+      else this.ctx.storage.kv.put(POINTS_ACTIVATION_RECONCILIATION_MODULES_KEY,
+        [...modules].sort((left, right) => left.localeCompare(right)));
+    });
+  }
+
+  private pointAccess(moduleId: string): ModulePointsAccess {
+    return {
+      apply: (operationId, kind, movements, result) => this.applyPointOperation(moduleId, operationId, kind, movements, result),
+      touchAccount: (accountId, login, startBonus) => this.touchPointAccount(moduleId, accountId, login, startBonus),
+      ackWelcome: (accountId) => this.acknowledgePointWelcome(moduleId, accountId),
+      creditActivity: (accountId, login, messageAt, live, rules) =>
+        this.creditPointActivity(moduleId, accountId, login, messageAt, live, rules),
+      balance: (accountId) => this.pointBalance(moduleId, accountId),
+      listAccounts: (query) => this.listPointAccounts(moduleId, query),
+      history: (accountId, cursor, limit) => this.pointHistory(moduleId, accountId, cursor, limit),
+      summary: () => this.pointSummary(moduleId),
+      ranking: (month, limit) => this.pointRanking(moduleId, month, limit),
+      rankOf: (accountId, month) => this.pointRankOf(moduleId, accountId, month),
+      markAuditWritten: (operationId) => this.markPointAuditWritten(moduleId, operationId),
+      pendingAudits: () => this.pendingPointAudits(moduleId),
+      claimCooldown: (key, seconds) => this.claimPointCooldown(moduleId, key, seconds),
+      rounds: {
+        open: (roundId, data) => this.openGameRound(moduleId, roundId, data),
+        markAnnounced: (roundId, deadlineAt, alarmKey) => this.markGameRoundAnnounced(moduleId, roundId, deadlineAt, alarmKey),
+        join: (roundId, operationId, accountId, login, stake, data) =>
+          this.joinGameRound(moduleId, roundId, operationId, accountId, login, stake, data),
+        resolve: (roundId, settlement) => this.resolveGameRound(moduleId, roundId, settlement),
+        cancelOpenRounds: (revision) => this.cancelOpenGameRounds(moduleId, revision),
+        setGate: (closed, revision, lastDisabledRevision) =>
+          this.setGameModuleGate(moduleId, closed, revision, lastDisabledRevision),
+      },
+    };
+  }
+
+  public async applyPointOperation(
+    moduleId: string,
+    operationId: string,
+    kind: PointsKind,
+    movements: PointsMovement[],
+    result: unknown,
+  ): Promise<PointsApplyResult> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    const canonicalResult = canonicalPointResult(result);
+    const payloadHash = await pointPayloadHash({ moduleId, operationId, kind, movements, result: canonicalResult.value });
+    const applied = this.ctx.storage.transactionSync(() => applyPointOperationSync(
+      this.ctx.storage.sql,
+      moduleId,
+      operationId,
+      kind,
+      movements,
+      result,
+      payloadHash,
+      new Date().toISOString(),
+      canonicalResult,
+    ));
+    return { replayed: applied.replayed, result: applied.result, balances: applied.balances };
+  }
+
+  public async touchPointAccount(
+    moduleId: string,
+    accountId: string,
+    login: string,
+    startBonus: number,
+  ): Promise<{ welcomePending: boolean }> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    assertPointAccountId(accountId);
+    const operationId = `bonus:${accountId}`;
+    const movements: PointsMovement[] = [
+      { accountId, delta: startBonus, login },
+      { accountId: "__house", delta: -startBonus },
+    ];
+    const payloadHash = await pointPayloadHash({
+      moduleId,
+      operationId,
+      kind: "bonus",
+      movements,
+      result: { amount: startBonus },
+    });
+    return this.ctx.storage.transactionSync(() => touchPointAccountSync(
+      this.ctx.storage.sql,
+      moduleId,
+      accountId,
+      login,
+      startBonus,
+      payloadHash,
+      new Date().toISOString(),
+    ));
+  }
+
+  public async acknowledgePointWelcome(_moduleId: string, accountId: string): Promise<void> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    assertPointAccountId(accountId);
+    this.ctx.storage.transactionSync(() => { acknowledgeWelcomeSync(this.ctx.storage.sql, accountId, new Date().toISOString()); });
+  }
+
+  public async creditPointActivity(
+    moduleId: string,
+    accountId: string,
+    login: string,
+    messageAt: number,
+    live: boolean,
+    rules: { amount: number; windowMinutes: number; dailyCap: number },
+  ): Promise<{ credited: number }> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    assertPointAccountId(accountId);
+    const windowStart = Math.floor(messageAt / (rules.windowMinutes * 60_000)) * rules.windowMinutes * 60_000;
+    const operationId = `activity:${accountId}:${String(windowStart)}`;
+    const payloadHash = await pointPayloadHash({ moduleId, operationId, kind: "activity", accountId });
+    return this.ctx.storage.transactionSync(() => creditPointActivitySync(
+      this.ctx.storage.sql,
+      moduleId,
+      accountId,
+      login,
+      messageAt,
+      live,
+      rules,
+      () => payloadHash,
+      new Date().toISOString(),
+    ));
+  }
+
+  public async pointBalance(_moduleId: string, accountId: string): Promise<number> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    assertPointAccountId(accountId);
+    return pointBalance(this.ctx.storage.sql, accountId);
+  }
+
+  public async listPointAccounts(
+    _moduleId: string,
+    query: { sort: "balance" | "month"; search?: string; cursor?: string; limit: number },
+  ): Promise<Awaited<ReturnType<ModulePointsAccess["listAccounts"]>>> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    return listPointAccounts(this.ctx.storage.sql, query, new Date().toISOString().slice(0, 7));
+  }
+
+  public async pointHistory(
+    _moduleId: string,
+    accountId: string,
+    cursor?: string,
+    limit?: number,
+  ): Promise<Awaited<ReturnType<ModulePointsAccess["history"]>>> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    assertPointAccountId(accountId);
+    return pointHistory(this.ctx.storage.sql, accountId, cursor, limit);
+  }
+
+  public async pointSummary(_moduleId: string): Promise<Awaited<ReturnType<ModulePointsAccess["summary"]>>> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    void _moduleId;
+    return pointSummary(this.ctx.storage.sql);
+  }
+
+  public async pointRanking(
+    _moduleId: string,
+    month: string,
+    limit: number,
+  ): Promise<Awaited<ReturnType<ModulePointsAccess["ranking"]>>> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    return pointRanking(this.ctx.storage.sql, month, limit);
+  }
+
+  public async pointRankOf(
+    _moduleId: string,
+    accountId: string,
+    month: string,
+  ): Promise<Awaited<ReturnType<ModulePointsAccess["rankOf"]>>> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    assertPointAccountId(accountId);
+    return pointRankOf(this.ctx.storage.sql, accountId, month);
+  }
+
+  public async markPointAuditWritten(moduleId: string, operationId: string): Promise<void> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    this.ctx.storage.transactionSync(() => { pointAuditWrittenSync(this.ctx.storage.sql, moduleId, operationId); });
+  }
+
+  public async pendingPointAudits(moduleId: string): Promise<Awaited<ReturnType<ModulePointsAccess["pendingAudits"]>>> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    return pendingPointAudits(this.ctx.storage.sql, moduleId);
+  }
+
+  public async claimPointCooldown(moduleId: string, key: string, seconds: number): Promise<boolean> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    return this.ctx.storage.transactionSync(() => claimPointCooldownSync(this.ctx.storage.sql, moduleId, key, seconds, Date.now()));
+  }
+
+  public async openGameRound(moduleId: string, roundId: string, data: unknown): Promise<void> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    assertPointRoundId(roundId);
+    const alarmKey = pointRoundAlarmKey(roundId);
+    this.ctx.storage.transactionSync(() => {
+      const opened = openPointRoundSync(this.ctx.storage.sql, moduleId, roundId, data, new Date().toISOString(), POINT_SETTLEMENTS);
+      if (opened.opened) this.writePointRoundAlarmSync(alarmKey, Date.now());
+    });
+    await this.scheduleEarliestAlarm();
+  }
+
+  public async markGameRoundAnnounced(moduleId: string, roundId: string, deadlineAt: number, alarmKey: string): Promise<void> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    assertPointRoundId(roundId);
+    this.ctx.storage.transactionSync(() => {
+      markPointRoundAnnouncedSync(this.ctx.storage.sql, moduleId, roundId, deadlineAt, alarmKey);
+      this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), deadlineAt);
+    });
+    await this.scheduleEarliestAlarm();
+  }
+
+  public async joinGameRound(
+    moduleId: string,
+    roundId: string,
+    operationId: string,
+    accountId: string,
+    login: string,
+    stake: number,
+    data: unknown,
+  ): Promise<PointJoinResult> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    assertPointRoundId(roundId);
+    assertPointAccountId(accountId);
+    const payloadHash = await pointPayloadHash({ moduleId, roundId, operationId, accountId, login, stake, data });
+    return this.ctx.storage.transactionSync(() => joinPointRoundSync(
+      this.ctx.storage.sql,
+      moduleId,
+      roundId,
+      operationId,
+      accountId,
+      login,
+      stake,
+      data,
+      payloadHash,
+      Date.now(),
+      new Date().toISOString(),
+    ));
+  }
+
+  public async resolveGameRound(
+    moduleId: string,
+    roundId: string,
+    settlement: { kind: string; params: unknown },
+  ): Promise<PointsApplyResult> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    assertPointRoundId(roundId);
+    await this.reconcilePointModuleActivation(moduleId, true);
+    const operationId = `round:${roundId}:resolve`;
+    const payloadHash = await pointPayloadHash({ moduleId, operationId, kind: "resolve", roundId, settlement });
+    let resolved;
+    try {
+      resolved = this.ctx.storage.transactionSync(() => {
+        const value = resolvePointRoundSync(
+          this.ctx.storage.sql,
+          moduleId,
+          roundId,
+          settlement,
+          POINT_SETTLEMENTS,
+          payloadHash,
+          new Date().toISOString(),
+        );
+        this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
+        return value;
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      if (reason === "round_cancellation_pending") throw error;
+      if (reason === "settlement_missing" || reason === "settlement_unknown" || reason === "settlement_execution_failed" ||
+          reason === "monthly_overflow") {
+        await this.cancelPointRounds(moduleId, [roundId]);
+        throw new Error("round_cancelled", { cause: error });
+      }
+      throw error;
+    }
+    await this.scheduleEarliestAlarm();
+    return { replayed: resolved.replayed, result: resolved.result, balances: resolved.balances };
+  }
+
+  public async cancelOpenGameRounds(moduleId: string, revision: number): Promise<number> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    return await this.cancelOpenGameRoundsInternal(moduleId, revision, true);
+  }
+
+  private async cancelOpenGameRoundsInternal(
+    moduleId: string,
+    revision: number,
+    flushCancellationNotices: boolean,
+  ): Promise<number> {
+    this.ensurePointsSchema();
+    const roundIds = this.ctx.storage.sql.exec<{ round_id: string }>(
+      `SELECT round_id FROM game_rounds
+        WHERE module_id = ? AND gate_revision < ? AND state IN ('announcing', 'open', 'resolving')
+        ORDER BY created_at, round_id`,
+      moduleId,
+      revision,
+    ).toArray().map(({ round_id }) => round_id);
+    return await this.cancelPointRounds(moduleId, roundIds, revision, flushCancellationNotices);
+  }
+
+  private async cancelPointRounds(
+    moduleId: string,
+    roundIds: readonly string[],
+    expectedGateRevision?: number,
+    flushCancellationNotices = true,
+  ): Promise<number> {
+    const refundRequests = pointRoundRefundRequests(this.ctx.storage.sql, moduleId, roundIds);
+    const hashes = new Map<string, string>();
+    await Promise.all(refundRequests.map(async (refund) => {
+      hashes.set(refund.operationId, await pointPayloadHash({
+        moduleId,
+        operationId: refund.operationId,
+        kind: "refund",
+        movements: refund.movements,
+        result: refund.result,
+      }));
+    }));
+    const cancelled = this.ctx.storage.transactionSync(() => {
+      const count = cancelPointRoundsSync(
+        this.ctx.storage.sql,
+        moduleId,
+        new Date().toISOString(),
+        (value) => {
+          if (typeof value !== "object" || value === null || !("operationId" in value) || typeof value.operationId !== "string") {
+            throw new Error("invalid_refund");
+          }
+          const hash = hashes.get(value.operationId);
+          if (hash === undefined) throw new Error("refund_retry_required");
+          return hash;
+        },
+        roundIds,
+        expectedGateRevision,
+      );
+      if (count > 0) {
+        for (const roundId of roundIds) this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
+      }
+      if (expectedGateRevision !== undefined) this.ensurePointCancellationNoticeAlarmsSync();
+      return count;
+    });
+    if (roundIds.length > 0) await this.scheduleEarliestAlarm();
+    if (expectedGateRevision !== undefined && flushCancellationNotices) await this.flushPointCancellationNotices();
+    return cancelled;
+  }
+
+  public async setGameModuleGate(
+    moduleId: string,
+    closed: boolean,
+    revision: number,
+    lastDisabledRevision: number | null = null,
+  ): Promise<{ applied: boolean }> {
+    await this.ensurePointRoundRecovery();
+    return await this.setGameModuleGateInternal(moduleId, closed, revision, true, lastDisabledRevision);
+  }
+
+  private async setGameModuleGateInternal(
+    moduleId: string,
+    closed: boolean,
+    revision: number,
+    flushCancellationNotices: boolean,
+    lastDisabledRevision: number | null = null,
+  ): Promise<{ applied: boolean }> {
+    await this.ensurePointsInitialized();
+    if (lastDisabledRevision !== null && (!Number.isSafeInteger(lastDisabledRevision) || lastDisabledRevision < 1)) {
+      throw new Error("invalid_revision");
+    }
+    const cancellation = closed
+      ? undefined
+      : pendingPointRoundCancellations(this.ctx.storage.sql).find((entry) => entry.moduleId === moduleId);
+    const cancellationRevision = !closed
+      ? Math.max(lastDisabledRevision ?? 0, cancellation?.revision ?? 0) || null
+      : null;
+    const roundIds = cancellationRevision === null
+      ? []
+      : this.ctx.storage.sql.exec<{ round_id: string }>(
+        `SELECT round_id FROM game_rounds
+          WHERE module_id = ? AND gate_revision < ? AND state IN ('announcing', 'open', 'resolving')
+          ORDER BY created_at, round_id`,
+        moduleId,
+        cancellationRevision,
+      ).toArray().map(({ round_id }) => round_id);
+    const refundRequests = pointRoundRefundRequests(this.ctx.storage.sql, moduleId, roundIds);
+    const hashes = new Map<string, string>();
+    await Promise.all(refundRequests.map(async (refund) => {
+      hashes.set(refund.operationId, await pointPayloadHash({
+        moduleId,
+        operationId: refund.operationId,
+        kind: "refund",
+        movements: refund.movements,
+        result: refund.result,
+      }));
+    }));
+    const now = new Date().toISOString();
+    const result = this.ctx.storage.transactionSync(() => {
+      const applied = setGameModuleGateSync(this.ctx.storage.sql, moduleId, closed, revision, (value) => {
+        if (typeof value !== "object" || value === null || !("operationId" in value) || typeof value.operationId !== "string") {
+          throw new Error("invalid_refund");
+        }
+        const hash = hashes.get(value.operationId);
+        if (hash === undefined) throw new Error("refund_retry_required");
+        return hash;
+      }, now, lastDisabledRevision, (roundId) => {
+        this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
+      });
+      if (!closed && cancellationRevision !== null) this.ensurePointCancellationNoticeAlarmsSync();
+      return applied;
+    });
+    if (!closed && (result.applied || cancellationRevision !== null)) {
+      await this.scheduleEarliestAlarm();
+      if (flushCancellationNotices && cancellationRevision !== null) await this.flushPointCancellationNotices();
+    }
+    return result;
+  }
+
+  private async flushPointCancellationNotices(): Promise<void> {
+    await this.ensurePointsInitialized();
+    const channelId = this.ownChannelId();
+    if (channelId === null) return;
+    const notices = pendingPointRoundCancellationNotices(this.ctx.storage.sql);
+    for (const notice of notices) {
+      const key = pointCancellationNoticeAlarmKey(notice.moduleId, notice.revision);
+      const sendOccurrenceKey = `points:cancellation:${notice.moduleId}:${String(notice.revision)}`;
+      try {
+        const channel = await this.env.DB.prepare("SELECT language FROM channels WHERE channel_id = ?")
+          .bind(channelId).first<{ language: string }>();
+        const text = templateLanguageText[channel?.language === "en" ? "en" : "de"].pointRoundCancelled;
+        const result = await sendChatMessage(
+          this.env,
+          channelId,
+          text,
+          undefined,
+          fetch,
+          async () => {
+            const state = await readDispatchChannelState(this.env.DB, channelId, new Date().toISOString());
+            return chatOutputSuppressionReason({
+              moduleEnabled: true,
+              mandatory: false,
+              paused: state.controls.pause.active,
+              muted: state.controls.mute.active,
+            }) === null;
+          },
+          async () => await claimModuleAlarmSend(
+            this.ctx.storage,
+            sendOccurrenceKey,
+            Date.now(),
+          ),
+          [],
+          async (delivery) => {
+            if (delivery !== "not_attempted") {
+              await finishModuleAlarmSend(
+                this.ctx.storage,
+                sendOccurrenceKey,
+                delivery,
+                Date.now(),
+              );
+            }
+          },
+          await readChannelDefaultChatTarget(this.env.DB, channelId),
+          undefined,
+          (senderId, messageText) => this.recordBotChatMessage(senderId, messageText),
+        );
+        const existingSend = result.reason === "already_attempted"
+          ? await readModuleAlarmSendClaim(this.ctx.storage, sendOccurrenceKey)
+          : null;
+        const ambiguousSendTimedOut = existingSend?.status === "sending" &&
+          Date.now() - existingSend.at >= POINTS_ANNOUNCE_AMBIGUOUS_MS;
+        if (result.sent || (result.delivery === "ambiguous" && result.reason !== "already_attempted") ||
+            existingSend?.status === "sent" || ambiguousSendTimedOut) {
+          this.ctx.storage.transactionSync(() => {
+            completePointRoundCancellationNoticeSync(
+              this.ctx.storage.sql,
+              notice.moduleId,
+              notice.revision,
+              new Date().toISOString(),
+            );
+            this.clearPointRoundAlarmSync(key);
+          });
+        } else {
+          await this.scheduleAlarmEntry(key, POINTS_CANCELLATION_NOTICE_ALARM_HANDLER, Date.now() + POINTS_ANNOUNCE_RETRY_MS);
+        }
+      } catch {
+        await this.scheduleAlarmEntry(key, POINTS_CANCELLATION_NOTICE_ALARM_HANDLER, Date.now() + POINTS_ANNOUNCE_RETRY_MS);
+      }
+    }
+    await this.scheduleEarliestAlarm();
   }
 
   /** Runs one registered module alarm from an authorized host request. */
@@ -2782,6 +3676,7 @@ export class ChannelObject extends DurableObject<Env> {
     alarmKey: string,
     invocation?: unknown,
   ): Promise<unknown> {
+    await this.ensurePointRoundRecovery();
     const module = MODULES.find((candidate) => candidate.id === moduleId);
     const registration = module?.alarms?.find((candidate) => candidate.key === handlerKey);
     if (registration === undefined || alarmKey.length === 0 || alarmKey.length > 256) {
@@ -2798,6 +3693,122 @@ export class ChannelObject extends DurableObject<Env> {
       () => this.runModuleAlarmHandler(moduleId, handlerKey, execute),
       () => this.notifyCommittedPanelResources(),
     );
+  }
+
+  private async recordPointRoundAnnouncement(
+    roundId: string,
+    state: "rate_limited" | "failed" | "delivered" | "ambiguous",
+    deliveredAt: number,
+  ): Promise<void> {
+    const recorded = this.ctx.storage.transactionSync(() => {
+      const outcome = recordPointAnnouncementSync(
+        this.ctx.storage.sql,
+        roundId,
+        state,
+        deliveredAt,
+      );
+      if (outcome === null) return null;
+      if (outcome.cancelled) this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), deliveredAt);
+      else if (state === "rate_limited") this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), deliveredAt + POINTS_ANNOUNCE_RETRY_MS);
+      else if (outcome.deadlineAt !== null) this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), outcome.deadlineAt);
+      return outcome;
+    });
+    if (recorded?.cancelled === true) await this.cancelPointRounds(recorded.moduleId, [roundId]);
+    else await this.scheduleEarliestAlarm();
+  }
+
+  private async handlePointRoundAlarm(alarmKey: string, now: number): Promise<void> {
+    await this.ensurePointsInitialized();
+    for (const cancellation of pendingPointRoundCancellations(this.ctx.storage.sql)) {
+      await this.cancelOpenGameRounds(cancellation.moduleId, cancellation.revision);
+    }
+    const roundId = alarmKey.startsWith(POINTS_ROUND_ALARM_PREFIX)
+      ? alarmKey.slice(POINTS_ROUND_ALARM_PREFIX.length)
+      : "";
+    if (roundId.length === 0) return;
+    let round = pointRoundRow(this.ctx.storage.sql, roundId);
+    if (round === null) return;
+    await this.reconcilePointModuleActivation(round.module_id, true);
+    round = pointRoundRow(this.ctx.storage.sql, roundId);
+    if (round === null || round.state === "resolved" || round.state === "cancelled") return;
+    if (round.state === "open") {
+      if (round.deadline_at === null || round.deadline_at > now) return;
+      const settlement = settlementFromRoundData(JSON.parse(round.data_json) as unknown);
+      if (settlement === null) {
+        console.error(`Point round ${roundId} has no persisted settlement.`);
+        await this.cancelPointRounds(round.module_id, [roundId]);
+        return;
+      }
+      try {
+        await this.resolveGameRound(round.module_id, roundId, settlement);
+      } catch (error) {
+        if (error instanceof Error && error.message === "round_cancelled") return;
+        throw error;
+      }
+      return;
+    }
+    if (round.announce_state === "failed") {
+      await this.cancelPointRounds(round.module_id, [roundId]);
+      return;
+    }
+    if (round.announce_state === "rate_limited" && round.announce_attempts >= POINTS_ANNOUNCE_MAX_ATTEMPTS) {
+      await this.recordPointRoundAnnouncement(roundId, "failed", now);
+      return;
+    }
+    const attemptAt = Date.now();
+    const attempt = this.ctx.storage.transactionSync(() => {
+      const claimed = announceAttemptSync(this.ctx.storage.sql, roundId, attemptAt);
+      if (claimed.outcome === "attempt") {
+        this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), attemptAt + POINTS_ANNOUNCE_RETRY_MS);
+      }
+      return claimed;
+    });
+    if (attempt.outcome === "ambiguous") {
+      await this.recordPointRoundAnnouncement(roundId, "ambiguous", attempt.round?.last_attempt_at ?? now);
+      return;
+    }
+    if (attempt.outcome === "pending") {
+      const retryAt = (attempt.round?.last_attempt_at ?? now) + POINTS_ANNOUNCE_AMBIGUOUS_MS;
+      this.ctx.storage.transactionSync(() => {
+        this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), retryAt);
+      });
+      await this.scheduleEarliestAlarm();
+      return;
+    }
+    if (attempt.outcome !== "attempt" || attempt.round === null || attempt.attempt === null) {
+      await this.scheduleEarliestAlarm();
+      return;
+    }
+    const attemptRound = attempt.round;
+    const attemptNumber = attempt.attempt;
+    await this.scheduleEarliestAlarm();
+    const context = this.moduleAlarmContext(
+      attemptRound.module_id,
+      POINTS_ANNOUNCEMENT_REGISTRATION,
+      createModuleExternalFetchBudget(),
+    );
+    const attemptTimestamp = attemptRound.last_attempt_at;
+    const stillValid = async (): Promise<boolean> => {
+      await this.reconcilePointModuleActivation(attemptRound.module_id, true);
+      const current = pointRoundRow(this.ctx.storage.sql, roundId);
+      return current !== null && current.state === "announcing" && current.announce_state === "pending" &&
+        current.announce_attempts === attemptNumber && current.last_attempt_at === attemptTimestamp;
+    };
+    const delivery = await context.sendChat(attemptRound.announce_text, `round:${roundId}:announce`, [], stillValid);
+    const sendReturnedAt = Date.now();
+    if (delivery.delivery === "delivered") {
+      await this.recordPointRoundAnnouncement(roundId, "delivered", sendReturnedAt);
+    } else if (delivery.delivery === "rate_limited") {
+      await this.recordPointRoundAnnouncement(roundId, "rate_limited", sendReturnedAt);
+    } else if (delivery.delivery === "ambiguous") {
+      await this.recordPointRoundAnnouncement(
+        roundId,
+        "ambiguous",
+        delivery.attemptedAt ?? attemptAt,
+      );
+    } else {
+      await this.recordPointRoundAnnouncement(roundId, "failed", sendReturnedAt);
+    }
   }
 
   private ballotAccess(moduleId: string): ModuleBallotAccess {
@@ -2823,6 +3834,7 @@ export class ChannelObject extends DurableObject<Env> {
     passRule?: BallotFinalizeRule,
     termFilter?: BallotTermFilter,
   ): Promise<BallotOpenResult> {
+    await this.ensurePointRoundRecovery();
     const channelId = this.ownChannelId();
     if (channelId === null) throw new Error("Ballots require a named Durable Object.");
     const requestedAlarmKey = ballotExpiryAlarmKey(moduleId, ballotId);
@@ -2864,6 +3876,7 @@ export class ChannelObject extends DurableObject<Env> {
     choice: number,
     options?: { onlyIfNew?: boolean },
   ): Promise<BallotCastResult> {
+    await this.ensurePointRoundRecovery();
     const channelId = this.ownChannelId();
     if (channelId === null) return { status: "not_open", counts: [], revision: 0 };
     const result = await castStoredBallot(this.ballotStorage(moduleId), channelId, moduleId, ballotId, userId, choice, options);
@@ -2880,6 +3893,7 @@ export class ChannelObject extends DurableObject<Env> {
     term: string,
     matchText?: string,
   ): Promise<BallotCastResult> {
+    await this.ensurePointRoundRecovery();
     const channelId = this.ownChannelId();
     if (channelId === null) return { status: "not_open", counts: [], revision: 0 };
     const result = await castStoredBallotTerm(this.ballotStorage(moduleId), channelId, moduleId, ballotId, userId, term, matchText);
@@ -2894,6 +3908,7 @@ export class ChannelObject extends DurableObject<Env> {
     ballotId: string,
     blockedTerms: readonly string[],
   ): Promise<BallotSnapshot | null> {
+    await this.ensurePointRoundRecovery();
     const snapshot = await setStoredBallotBlockedTerms(this.ballotStorage(moduleId), moduleId, ballotId, blockedTerms);
     if (snapshot !== null) await this.notifyCommittedPanelResources();
     return snapshot;
@@ -2904,6 +3919,7 @@ export class ChannelObject extends DurableObject<Env> {
     ballotId: string,
     term: string,
   ): ReturnType<typeof approveStoredBallotTerm> {
+    await this.ensurePointRoundRecovery();
     const channelId = this.ownChannelId();
     if (channelId === null || moduleId !== CHAT_VOTING_MODULE_ID) {
       return { status: "not_open", snapshot: null };
@@ -2922,6 +3938,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async readBallot(moduleId: string, ballotId: string): Promise<BallotSnapshot | null> {
+    await this.ensurePointRoundRecovery();
     const snapshot = await readStoredBallot(this.ballotStorage(moduleId), moduleId, ballotId, async (transaction, finalizedModuleId, finalizedBallotId, hardDeleteAt) => {
       await this.writeBallotAlarmInTransaction(
         transaction,
@@ -2951,6 +3968,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async hasOpenBallot(): Promise<boolean> {
+    await this.ensurePointRoundRecovery();
     const hasOpen = await hasOpenStoredBallot(this.ballotStorage(CHAT_VOTING_MODULE_ID), async (transaction, moduleId, ballotId, hardDeleteAt) => {
       await this.writeBallotAlarmInTransaction(
         transaction,
@@ -2968,6 +3986,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async closeBallot(moduleId: string, ballotId: string): Promise<BallotSnapshot | null> {
+    await this.ensurePointRoundRecovery();
     const result = await closeStoredBallot(this.ballotStorage(moduleId), moduleId, ballotId);
     if (result !== null) await this.notifyCommittedPanelResources();
     await this.clearAlarmEntry(ballotExpiryAlarmKey(moduleId, ballotId));
@@ -2975,6 +3994,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async finalizeBallot(moduleId: string, ballotId: string): Promise<BallotFinalizeResult> {
+    await this.ensurePointRoundRecovery();
     const result = await finalizeStoredBallot(this.ballotStorage(moduleId), moduleId, ballotId, async (transaction, finalizedModuleId, finalizedBallotId, hardDeleteAt) => {
       await this.writeBallotAlarmInTransaction(
         transaction,
@@ -2990,6 +4010,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async acknowledgeClosedBallot(moduleId: string, ballotId: string): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await forgetClosedStoredBallot(this.ctx.storage, moduleId, ballotId);
   }
 
@@ -3076,11 +4097,13 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async getPanelResourceRevisions(): Promise<PanelResourceRevisionVector> {
+    await this.ensurePointRoundRecovery();
     return await this.ctx.storage.get<PanelResourceRevisionVector>(PANEL_DURABLE_REVISIONS_KEY) ?? {};
   }
 
   /** Delivers only advanced, data-free resources to panel principals in this channel. */
   public async reconcilePanelResources(revisions: PanelResourceRevisionVector): Promise<void> {
+    await this.ensurePointRoundRecovery();
     const channelId = this.ownChannelId();
     if (channelId === null) return;
     const durableRevisions = await this.getPanelResourceRevisions();
@@ -3139,6 +4162,30 @@ export class ChannelObject extends DurableObject<Env> {
       [ACTIVE_CHATTER_EXPIRY_HANDLER, {
         handle: async (_key, entry, now) => {
           await this.expireActiveChatters(entry.deadline, now);
+        },
+      }],
+      [POINTS_ACTIVATION_RECONCILIATION_ALARM_HANDLER, {
+        retryDelaysMs: [POINTS_ANNOUNCE_RETRY_MS],
+        handle: async () => {
+          await this.ensurePointsInitialized();
+          await this.reconcilePointModuleActivationsDuringRecovery();
+          for (const cancellation of pendingPointRoundCancellations(this.ctx.storage.sql)) {
+            await this.cancelOpenGameRoundsInternal(cancellation.moduleId, cancellation.revision, false);
+          }
+        },
+      }],
+      [POINTS_ROUND_ALARM_HANDLER, {
+        retryDelaysMs: [POINTS_ANNOUNCE_RETRY_MS],
+        handle: async (key, _entry, now) => {
+          await this.handlePointRoundAlarm(key, now);
+          return undefined;
+        },
+      }],
+      [POINTS_CANCELLATION_NOTICE_ALARM_HANDLER, {
+        retryDelaysMs: [POINTS_ANNOUNCE_RETRY_MS],
+        handle: async () => {
+          await this.flushPointCancellationNotices();
+          return undefined;
         },
       }],
       [BALLOT_EXPIRY_ALARM_HANDLER, { handle: async (key) => { await this.expireBallot(key); } }],
@@ -3371,6 +4418,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async scheduleAdPrewarning(dueAtMs: number): Promise<void> {
+    await this.ensurePointRoundRecovery();
     if (!Number.isFinite(dueAtMs)) {
       await this.clearAdPrewarning();
       return;
@@ -3379,6 +4427,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async clearAdPrewarning(): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await this.clearAlarmEntry(AD_PREWARNING_DEADLINE_KEY);
     // The send claim for the occurrence just cleared is kept, not deleted: a
     // re-arm for that same due-at ms (e.g. an unrelated schedule refresh
@@ -3403,6 +4452,7 @@ export class ChannelObject extends DurableObject<Env> {
     identity?: ModuleAlarmIdentity,
     planSequence?: number,
   ): Promise<void> {
+    await this.ensurePointRoundRecovery();
     const registration = MODULES.find((module) => module.id === moduleId)?.alarms?.find((alarm) => alarm.key === handlerKey);
     if (registration === undefined || alarmKey.length === 0) {
       throw new Error(`Unknown module alarm ${moduleId}.${handlerKey}.`);
@@ -3442,11 +4492,13 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async reconcileLegacyChatVoteResultDeliveries(): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await this.reconcileLegacyChatVoteResultDeliveriesFor(await this.retainedLegacyChatVoteResultPollIds());
   }
 
   /** Returns the current retry/execution time for one module alarm, if scheduled. */
   public async getModuleAlarmDeadline(moduleId: string, alarmKey: string): Promise<number | null> {
+    await this.ensurePointRoundRecovery();
     if (!MODULES.some((module) => module.id === moduleId) || alarmKey.length === 0) return null;
     const stored = await this.ctx.storage.get(ALARM_TABLE_KEY);
     if (!isRecord(stored)) return null;
@@ -3457,6 +4509,7 @@ export class ChannelObject extends DurableObject<Env> {
 
   /** Returns the identity and sequence stored on one module alarm entry. */
   public async getModuleAlarmPlan(moduleId: string, alarmKey: string): Promise<ModuleAlarmPlan | null> {
+    await this.ensurePointRoundRecovery();
     if (!MODULES.some((module) => module.id === moduleId) || alarmKey.length === 0) return null;
     const stored = await this.ctx.storage.get(ALARM_TABLE_KEY);
     if (!isRecord(stored)) return null;
@@ -3477,6 +4530,7 @@ export class ChannelObject extends DurableObject<Env> {
     expectedIdentity?: ModuleAlarmIdentity | null,
     planSequence?: number,
   ): Promise<void> {
+    await this.ensurePointRoundRecovery();
     if (!MODULES.some((module) => module.id === moduleId) || alarmKey.length === 0) {
       throw new Error(`Unknown module alarm key ${moduleId}.${alarmKey}.`);
     }
@@ -3486,6 +4540,7 @@ export class ChannelObject extends DurableObject<Env> {
 
   /** Queues a generic replan after a host or module changes schedule inputs. */
   public async notifyScheduleInputsChanged(reason: ModuleScheduleInputChangeReason): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await this.scheduleAlarmEntry(
       `${MODULE_SCHEDULE_INPUTS_CHANGED_KEY}:${reason}`,
       MODULE_SCHEDULE_INPUTS_CHANGED_HANDLER,
@@ -3494,6 +4549,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   override async fetch(request: Request): Promise<Response> {
+    await this.ensurePointRoundRecovery();
     const rawPrincipal = request.headers.get(REALTIME_PRINCIPAL_HEADER);
     let principal: RealtimePrincipal | null = null;
     if (rawPrincipal !== null) {
@@ -3623,6 +4679,7 @@ export class ChannelObject extends DurableObject<Env> {
   public async publish(
     messages: readonly RealtimeMessage[],
   ): Promise<void> {
+    await this.ensurePointRoundRecovery();
     if (messages.length === 0) return Promise.resolve();
     const ownChannelId = this.ownChannelId();
     if (ownChannelId === null || messages.some((message) => message.channelId !== ownChannelId)) {
@@ -3759,6 +4816,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async revokeSession(sessionId: string): Promise<void> {
+    await this.ensurePointRoundRecovery();
     for (const webSocket of this.ctx.getWebSockets(`session:${sessionId}`)) {
       closeSocket(webSocket, SOCKET_REVOKED_CODE, "Session revoked");
     }
@@ -3766,6 +4824,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async revokeUser(userId: string): Promise<void> {
+    await this.ensurePointRoundRecovery();
     for (const webSocket of this.ctx.getWebSockets(`user:${userId}`)) {
       const principal = readAttachment(webSocket);
       if (principal?.kind === "panel" && principal.userId === userId) {
@@ -3785,6 +4844,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async revokeToken(tokenId: string): Promise<boolean> {
+    await this.ensurePointRoundRecovery();
     const now = Date.now();
     await this.pruneRevokedTokenMarkers(now);
     // A short-lived marker blocks handshakes already in flight while the
@@ -3811,6 +4871,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async closeUnboundOverlayTokenSockets(tokenId: string): Promise<boolean> {
+    await this.ensurePointRoundRecovery();
     const ownChannelId = this.ownChannelId();
     this.recentlyBoundOverlayTokenIds.add(tokenId);
     let closed = true;
@@ -4023,6 +5084,7 @@ export class ChannelObject extends DurableObject<Env> {
 
   override async alarm(): Promise<void> {
     await withCommittedPanelResourceDrain(async () => {
+      await this.ensurePointRoundRecovery();
       const alarmTable = await this.ctx.storage.transaction((transaction) => readAlarmScheduleTable(transaction));
       const hasTimerAlarms = Object.keys(alarmTable).some((key) =>
         key.startsWith(`${TIMER_ALARM_PREFIX}timer:`) || key.startsWith(`${TIMER_ALARM_PREFIX}mirror:`));

@@ -15,6 +15,29 @@ const seedOperator = async (database: TestD1Database): Promise<void> => {
 };
 
 describe("channel controls", () => {
+  it("includes the last disable revision in the dispatch activation snapshot", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await database.prepare(
+        `INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision, last_disabled_revision)
+         VALUES ('kanal-a', 'fictional_game', 1, '{}', 3, 2)`,
+      ).run();
+
+      await expect(readDispatchChannelState(database as unknown as D1Database, "kanal-a", NOW)).resolves.toMatchObject({
+        activations: [{
+          moduleId: "fictional_game",
+          enabled: true,
+          settings: "{}",
+          revision: 3,
+          lastDisabledRevision: 2,
+        }],
+      });
+    } finally {
+      database.close();
+    }
+  });
+
   it("preserves concurrent mute and pause writes and audits each requested control", async () => {
     const database = new TestD1Database();
     try {
