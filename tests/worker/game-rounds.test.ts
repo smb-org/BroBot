@@ -425,6 +425,9 @@ describe("game rounds in the worker Durable Object", () => {
   });
 
   it(`reconciles a pending disable after a missed re-enable across eviction (${testCard("startup keeps cancellation intent until an immediate activation alarm reads D1", "local cancellation drains before re-enable revision 3 reaches the gate")})`, async () => {
+    vi.useFakeTimers();
+    // Keep the platform alarm pending until the test explicitly invokes it.
+    vi.setSystemTime(Date.now() + 30 * 24 * 60 * 60_000);
     const channelId = `round-missed-reenable-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const database = (env as unknown as { DB: D1Database }).DB;
@@ -561,6 +564,9 @@ describe("game rounds in the worker Durable Object", () => {
   });
 
   it(`cancels and recovers a round at the maximum supported identifier lengths (${testCard("boundary-length identifiers remain cancellable after restart", "a valid maximum-length refund fails during startup recovery")})`, async () => {
+    vi.useFakeTimers();
+    // Keep the platform alarm pending until the test explicitly invokes it.
+    vi.setSystemTime(Date.now() + 30 * 24 * 60 * 60_000);
     const channelId = `round-id-max-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const database = (env as unknown as { DB: D1Database }).DB;
