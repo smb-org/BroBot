@@ -486,13 +486,10 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
 
   const hasAccountPages = accountsQuery.data?.cursor !== undefined || accountCursorStack.length > 0;
   const list = accounts.length === 0 && !hasAccountPages ? null : <>
-    {accounts.length === 0 ? <p className="points-list-empty">{labels.pageEmpty}</p> : <div className="points-account-list" role="list">
-      {accounts.map((account: PointsAccount) => <button
+    {accounts.length === 0 ? <p className="points-list-empty">{labels.pageEmpty}</p> : <ul className="points-account-list">
+      {accounts.map((account: PointsAccount) => <li key={account.accountId}><button
         type="button"
-        role="listitem"
-        key={account.accountId}
         className="points-account-row"
-        aria-selected={selectedId === account.accountId}
         aria-current={selectedId === account.accountId ? "true" : undefined}
         onClick={() => { selectAccount(account); }}
       >
@@ -501,8 +498,8 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
         <span className="points-account-row__meta">{account.monthNet === null
           ? labels.noMonthGame(monthLabel(month, locale))
           : labels.monthNet(account.monthNet, monthLabel(month, locale), null)}</span>
-      </button>)}
-    </div>}
+      </button></li>)}
+    </ul>}
     {hasAccountPages ? <ListPaginationFooter loadedCount={accounts.length} loadedLabel={labels.accounts}>
       <Button variant="neutral" size="compact" disabled={accountCursorStack.length === 0} onClick={() => {
         const stack = accountCursorStack.slice(0, -1);

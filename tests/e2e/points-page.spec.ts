@@ -133,7 +133,7 @@ test("keeps the account layout inside the viewport at desktop widths (protects=t
     { accountId: "viewer_zero", login: "funkenflug", balance: 620, monthNet: null },
   ]);
   await page.goto(`/channels/${CHANNEL_ID}/modules/points`);
-  const row = page.getByRole("listitem").filter({ hasText: "pixelpilz" });
+  const row = page.locator(".points-account-list").getByRole("button").filter({ hasText: "pixelpilz" });
   await expect(row).toBeVisible();
   await expect(page.getByText("+340 im Oktober", { exact: true })).toBeVisible();
   await expect(page.getByText("Noch kein Spiel im Oktober", { exact: true })).toBeVisible();
@@ -195,7 +195,7 @@ test("lists accounts, selects one, corrects its balance, and shows the history r
 
   await expect(page.getByRole("heading", { name: "Punkte" }).first()).toBeVisible();
   await expect(page.getByText("Spiele", { exact: true }).first()).toBeVisible();
-  const row = page.getByRole("listitem").filter({ hasText: "pixelpilz" });
+  const row = page.locator(".points-account-list").getByRole("button").filter({ hasText: "pixelpilz" });
   await expect(row).toContainText("1.000");
   await row.click();
   await expect(page.getByRole("heading", { name: "pixelpilz" })).toBeVisible();
@@ -233,13 +233,13 @@ test("keeps a delayed correction response attached to the account that was submi
   ]);
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto(`/channels/${CHANNEL_ID}/modules/points`);
-  await page.getByRole("listitem").filter({ hasText: "nachtfalke" }).click();
+  await page.locator(".points-account-list").getByRole("button").filter({ hasText: "nachtfalke" }).click();
   await page.getByLabel("Betrag ±").fill("15");
   await page.getByLabel("Grund").fill("Verzögerte Antwort");
   await page.locator(".points-detail__header .ui-save-bar__save").click();
   await controls.waitForDelayedAdjustment();
 
-  await page.getByRole("listitem").filter({ hasText: "pixelpilz" }).click();
+  await page.locator(".points-account-list").getByRole("button").filter({ hasText: "pixelpilz" }).click();
   await expect(page.getByRole("heading", { name: "pixelpilz" })).toBeVisible();
   await expect(page.locator(".points-detail__balance")).toContainText("200");
   await expect(page.locator(".points-correction__preview")).toHaveText("Neuer Stand: 200 Punkte");
@@ -255,7 +255,7 @@ test("restores an audit-pending correction after switching accounts so it can be
   ]);
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto(`/channels/${CHANNEL_ID}/modules/points`);
-  await page.getByRole("listitem").filter({ hasText: "nachtfalke" }).click();
+  await page.locator(".points-account-list").getByRole("button").filter({ hasText: "nachtfalke" }).click();
   const correctionFields = page.locator(".points-correction__fields input");
   await correctionFields.nth(0).fill("15");
   await correctionFields.nth(1).fill("stream prize");
@@ -264,8 +264,8 @@ test("restores an audit-pending correction after switching accounts so it can be
   await expect(header.locator(".ui-save-bar__save")).toBeVisible();
   await expect(header.locator(".ui-save-bar__discard")).toBeDisabled();
 
-  await page.getByRole("listitem").filter({ hasText: "pixelpilz" }).click();
-  await page.getByRole("listitem").filter({ hasText: "nachtfalke" }).click();
+  await page.locator(".points-account-list").getByRole("button").filter({ hasText: "pixelpilz" }).click();
+  await page.locator(".points-account-list").getByRole("button").filter({ hasText: "nachtfalke" }).click();
 
   await expect(correctionFields.nth(0)).toHaveValue("15");
   await expect(correctionFields.nth(1)).toHaveValue("stream prize");
@@ -285,7 +285,7 @@ test("clears retry state after a definite insufficient-balance rejection (protec
   await installPointsPage(page, [{ accountId: "viewer_demo", login: "pixelpilz", balance: 20, monthNet: 0 }]);
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto(`/channels/${CHANNEL_ID}/modules/points`);
-  await page.getByRole("listitem").filter({ hasText: "pixelpilz" }).click();
+  await page.locator(".points-account-list").getByRole("button").filter({ hasText: "pixelpilz" }).click();
   await page.getByLabel("Betrag ±").fill("-10");
   await page.getByLabel("Grund").fill("Nicht genug Punkte");
   await page.locator(".points-detail__header .ui-save-bar__save").click();
@@ -302,7 +302,7 @@ test("shows a reserved field error when the correction reason exceeds the server
   const controls = await installPointsPage(page, [{ accountId: "viewer_demo", login: "pixelpilz", balance: 100, monthNet: 0 }]);
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto(`/channels/${CHANNEL_ID}/modules/points`);
-  await page.getByRole("listitem").filter({ hasText: "pixelpilz" }).click();
+  await page.locator(".points-account-list").getByRole("button").filter({ hasText: "pixelpilz" }).click();
   await page.getByLabel("Betrag ±").fill("5");
   const reason = page.getByLabel("Grund");
   await reason.fill("R".repeat(161));
@@ -330,7 +330,7 @@ test("shows history loading, retryable errors, and confirmed empty results in on
   });
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto(`/channels/${CHANNEL_ID}/modules/points`);
-  await page.getByRole("listitem").filter({ hasText: "funkenflug" }).click();
+  await page.locator(".points-account-list").getByRole("button").filter({ hasText: "funkenflug" }).click();
 
   const history = page.locator(".points-history");
   await firstHistoryStarted;
@@ -343,7 +343,7 @@ test("shows history loading, retryable errors, and confirmed empty results in on
   const errorBox = await page.locator(".points-history__content").boundingBox();
   expect(errorBox?.height).toBe(loadingBox?.height);
   expect(errorBox?.y).toBe(loadingBox?.y);
-  await page.getByRole("listitem").filter({ hasText: "abendstern" }).click();
+  await page.locator(".points-account-list").getByRole("button").filter({ hasText: "abendstern" }).click();
   await expect(history.getByText("Noch kein Verlauf.", { exact: true })).toBeVisible();
   const emptyBox = await page.locator(".points-history__content").boundingBox();
   expect(emptyBox?.height).toBe(errorBox?.height);
