@@ -219,7 +219,7 @@ test("shows the empty account state with the chat prompt and timer action (prote
   await expect(page.locator(".collection-page__list-content .list-pagination-footer")).toHaveCount(0);
 });
 
-test("keeps a delayed correction response attached to the account that was submitted", async ({ page }) => {
+test("keeps a delayed correction response attached to the account that was submitted (protects=late correction responses cannot overwrite the newly selected account; fails_when=the new account balance or preview shows the old response; no_claim=points APIs are mocked)", async ({ page }) => {
   const controls = await installPointsPage(page, [
     { accountId: "viewer_alice", login: "nachtfalke", balance: 1_000, monthNet: 0 },
     { accountId: "viewer_bob", login: "pixelpilz", balance: 200, monthNet: 0 },
@@ -241,7 +241,7 @@ test("keeps a delayed correction response attached to the account that was submi
   await expect(page.locator(".points-correction__preview")).toHaveText("Neuer Stand: 200 Punkte");
 });
 
-test("restores an audit-pending correction after switching accounts so it can be retried", async ({ page }) => {
+test("restores an audit-pending correction after switching accounts so it can be retried (protects=an audit-pending correction remains retryable after account selection changes; fails_when=retry data is lost, editable, or submitted with a new operation identity; no_claim=module APIs are mocked)", async ({ page }) => {
   const controls = await installPointsPage(page, [
     { accountId: "viewer_alice", login: "nachtfalke", balance: 1_000, monthNet: 0 },
     { accountId: "viewer_bob", login: "pixelpilz", balance: 200, monthNet: 0 },
@@ -274,7 +274,7 @@ test("restores an audit-pending correction after switching accounts so it can be
   expect(controls.adjustmentRequests[1]).toEqual(controls.adjustmentRequests[0]);
 });
 
-test("clears retry state after a definite insufficient-balance rejection", async ({ page }) => {
+test("clears retry state after a definite insufficient-balance rejection (protects=definite correction rejection restores editable draft controls; fails_when=the UI keeps an ambiguous retry action or locks the draft; no_claim=module APIs are mocked)", async ({ page }) => {
   await installPointsPage(page, [{ accountId: "viewer_demo", login: "pixelpilz", balance: 20, monthNet: 0 }]);
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto(`/channels/${CHANNEL_ID}/modules/points`);
@@ -291,7 +291,7 @@ test("clears retry state after a definite insufficient-balance rejection", async
   await expect(page.getByLabel("Grund")).toBeEnabled();
 });
 
-test("shows a reserved field error when the correction reason exceeds the server limit", async ({ page }) => {
+test("shows a reserved field error when the correction reason exceeds the server limit (protects=the reason limit is visible before submitting; fails_when=an overlong reason can be saved or the error shifts the layout; no_claim=module APIs are mocked)", async ({ page }) => {
   const controls = await installPointsPage(page, [{ accountId: "viewer_demo", login: "pixelpilz", balance: 100, monthNet: 0 }]);
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto(`/channels/${CHANNEL_ID}/modules/points`);
@@ -307,7 +307,7 @@ test("shows a reserved field error when the correction reason exceeds the server
   expect(controls.adjustmentRequests).toHaveLength(0);
 });
 
-test("shows history loading, retryable errors, and confirmed empty results in one reserved area", async ({ page }) => {
+test("shows history loading, retryable errors, and confirmed empty results in one reserved area (protects=history states occupy one stable area and errors remain retryable; fails_when=loading, error, and empty states shift content or an error looks empty; no_claim=history responses are controlled by route mocks)", async ({ page }) => {
   await installPointsPage(page, [
     { accountId: "viewer_error", login: "funkenflug", balance: 120, monthNet: 0 },
     { accountId: "viewer_empty", login: "abendstern", balance: 80, monthNet: 0 },
@@ -343,7 +343,7 @@ test("shows history loading, retryable errors, and confirmed empty results in on
   expect(emptyBox?.y).toBe(errorBox?.y);
 });
 
-test("loads points settings, discards an edit, and saves explicitly", async ({ page }) => {
+test("loads points settings, discards an edit, and saves explicitly (protects=settings require an explicit save and discard restores stored values; fails_when=typing autosaves or discard retains the draft; no_claim=module settings APIs are mocked)", async ({ page }) => {
   const controls = await installPointsPage(page, []);
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto(`/channels/${CHANNEL_ID}/modules/points`);
@@ -370,7 +370,7 @@ test("loads points settings, discards an edit, and saves explicitly", async ({ p
   await expect(currencyName).toHaveValue("Sterne");
 });
 
-test("prepares the games timer text and creates it only after an explicit save", async ({ page }) => {
+test("prepares the games timer text and creates it only after an explicit save (protects=timer setup starts with the games prompt and creates only after save; fails_when=opening the action creates a timer or the saved text differs; no_claim=timer and preview APIs are mocked)", async ({ page }) => {
   await installPointsPage(page, [], true);
   let createdInput: Record<string, unknown> | null = null;
   const json = (value: unknown) => ({ status: 200, contentType: "application/json", body: JSON.stringify(value) });

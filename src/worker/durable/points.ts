@@ -522,7 +522,7 @@ export const touchPointAccountSync = (
   startBonus: number,
   bonusHash: string,
   now: string,
-): { welcomePending: boolean } => {
+): { welcomePending: boolean; startBonus: number | null } => {
   if (pointKindFor(accountId) !== "viewer" || login.length === 0 || !Number.isSafeInteger(startBonus) || startBonus < 0) {
     throw new Error("invalid_account");
   }
@@ -538,11 +538,24 @@ export const touchPointAccountSync = (
     ], { amount: startBonus }, bonusHash, now);
     sql.exec("UPDATE point_accounts SET welcome_pending = 1, login = ?, updated_at = ? WHERE account_id = ?", login, now, accountId);
     invariantSync(sql);
-    return { welcomePending: true };
+    return { welcomePending: true, startBonus };
   }
   if (existing.kind !== "viewer") throw new Error("account_kind_conflict");
   sql.exec("UPDATE point_accounts SET login = ?, updated_at = ? WHERE account_id = ?", login, now, accountId);
-  return { welcomePending: existing.welcome_pending === 1 };
+  const bonus = operationSync(sql, `bonus:${accountId}`);
+  let bookedStartBonus: number | null = null;
+  if (bonus !== null) {
+    try {
+      const result: unknown = JSON.parse(bonus.result_json);
+      if (typeof result === "object" && result !== null && !Array.isArray(result)) {
+        const amount: unknown = Reflect.get(result, "amount");
+        if (typeof amount === "number" && Number.isSafeInteger(amount) && amount >= 0) bookedStartBonus = amount;
+      }
+    } catch {
+      // A missing or malformed legacy result cannot provide a reliable welcome amount.
+    }
+  }
+  return { welcomePending: existing.welcome_pending === 1, startBonus: bookedStartBonus };
 };
 
 export const creditPointActivitySync = (

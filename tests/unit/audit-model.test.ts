@@ -120,7 +120,7 @@ describe("audit sentence action templates", () => {
     expect(auditSentenceText(removed, "en")).toContain("Bob with the Manager role");
   });
 
-  it("renders the corrected points account and exposes only meaningful correction fields", () => {
+  it("renders the corrected points account and exposes only meaningful correction fields (protects=points audit rows show the viewer and meaningful amount and reason fields; fails_when=internal metadata is rendered as an editable correction field or account identity is lost; no_claim=audit rendering uses the provided immutable entry)", () => {
     const after = JSON.stringify({
       operationId: "admin:01234567-89ab-42cd-8abc-0123456789ab",
       accountId: "viewer-1",

@@ -2,6 +2,10 @@ import { z } from "zod";
 
 export const POINTS_MODULE_ID = "points";
 export const MAX_POINTS_ADJUSTMENT_REASON_LENGTH = 160;
+const POINT_VIEWER_ACCOUNT_ID_PATTERN = /^[A-Za-z0-9_-]{1,32}$/u;
+
+export const isPointViewerAccountId = (accountId: string): boolean =>
+  POINT_VIEWER_ACCOUNT_ID_PATTERN.test(accountId) && !accountId.startsWith("__");
 
 export const pointsSettingsSchema = z.object({
   currencyName: z.string().trim().min(1).max(24),

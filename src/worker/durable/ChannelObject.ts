@@ -3240,7 +3240,7 @@ export class ChannelObject extends DurableObject<Env> {
     accountId: string,
     login: string,
     startBonus: number,
-  ): Promise<{ welcomePending: boolean }> {
+  ): Promise<{ welcomePending: boolean; startBonus: number | null }> {
     await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     assertPointAccountId(accountId);

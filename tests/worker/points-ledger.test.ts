@@ -381,14 +381,14 @@ describe("points ledger in the worker Durable Object", () => {
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
 
-    await expect(object.touchPointAccount(pointTestModule, "viewer-a", "nachtfalke", 75)).resolves.toEqual({ welcomePending: true });
+    await expect(object.touchPointAccount(pointTestModule, "viewer-a", "nachtfalke", 75)).resolves.toEqual({ welcomePending: true, startBonus: 75 });
     await expect(object.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(75);
-    await expect(object.touchPointAccount(pointTestModule, "viewer-a", "nachtfalke_neu", 75)).resolves.toEqual({ welcomePending: true });
+    await expect(object.touchPointAccount(pointTestModule, "viewer-a", "nachtfalke_neu", 75)).resolves.toEqual({ welcomePending: true, startBonus: 75 });
     await expect(object.pointHistory(pointTestModule, "viewer-a")).resolves.toMatchObject({ rows: [{ operationId: "bonus:viewer-a" }] });
 
     await object.acknowledgePointWelcome(pointTestModule, "viewer-a");
 
-    await expect(object.touchPointAccount(pointTestModule, "viewer-a", "nachtfalke_neu", 75)).resolves.toEqual({ welcomePending: false });
+    await expect(object.touchPointAccount(pointTestModule, "viewer-a", "nachtfalke_neu", 75)).resolves.toEqual({ welcomePending: false, startBonus: 75 });
     await expect(object.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(75);
     await expect(object.pointSummary(pointTestModule)).resolves.toMatchObject({ accounts: 1, circulation: 75 });
   });

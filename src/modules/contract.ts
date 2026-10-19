@@ -978,7 +978,10 @@ export type PointJoinResult =
 export interface ModulePointsAccess {
   /** Optional stable request identity for operations whose persisted result contains server-generated metadata. */
   apply: (operationId: string, kind: PointsKind, movements: PointsMovement[], result: unknown, payloadIdentity?: unknown) => Promise<PointsApplyResult>;
-  touchAccount: (accountId: string, login: string, startBonus: number) => Promise<{ welcomePending: boolean }>;
+  touchAccount: (accountId: string, login: string, startBonus: number) => Promise<{
+    welcomePending: boolean;
+    startBonus: number | null;
+  }>;
   ackWelcome: (accountId: string) => Promise<void>;
   creditActivity: (
     accountId: string,

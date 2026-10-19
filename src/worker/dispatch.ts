@@ -355,6 +355,7 @@ const runActions = async (
   for (let index = 0; index < pendingActions.length; index += 1) {
     let action = pendingActions[index];
     if (action === undefined) continue;
+    const isModerationFollowUp = moderationFollowUps.has(action);
     action = appendPointWelcome(action, pendingWelcome, attributions);
     const reportDelivery = async (delivery: ModuleChatDelivery): Promise<void> => {
       if (action.kind !== "chat" || action.onDelivery === undefined) return;
@@ -367,7 +368,7 @@ const runActions = async (
     const moderationAction = action.kind === "timeout" || action.kind === "ban";
     let mutedForAction = muted;
     let pausedForAction = false;
-    if ((action.kind === "chat" || action.kind === "announcement") && moderationFollowUps.has(action)) {
+    if ((action.kind === "chat" || action.kind === "announcement") && isModerationFollowUp) {
       const controls = await readChannelControls(environment.DB, channelId, new Date().toISOString());
       mutedForAction = controls.mute.active;
       pausedForAction = controls.pause.active;
@@ -376,7 +377,7 @@ const runActions = async (
       ? null
       : chatOutputSuppressionReason({
         moduleEnabled: true,
-        mandatory: moderationFollowUps.has(action) ? module.mandatory === true : true,
+        mandatory: isModerationFollowUp ? module.mandatory === true : true,
         paused: pausedForAction,
         muted: mutedForAction,
       });
@@ -961,12 +962,12 @@ export const dispatchEventSubNotification = async (
         const settings = pointsMatch.module.settingsSchema.parse(JSON.parse(pointsMatch.settings)) as { startBonus: number; currencyName: string };
         const access = modulePoints(environment.CHANNEL, event.channelId, "points");
         const touched = await access.touchAccount(chatterUserId, chatterLogin, settings.startBonus);
-        if (touched.welcomePending) {
+        if (touched.welcomePending && touched.startBonus !== null) {
           const language = await channelLanguage();
           pendingWelcome = {
             accountId: chatterUserId,
             messageId,
-            text: pointsCatalog[language].chat.startBonus(settings.startBonus, settings.currencyName),
+            text: pointsCatalog[language].chat.startBonus(touched.startBonus, settings.currencyName),
             access,
             used: false,
           };

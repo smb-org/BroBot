@@ -31,7 +31,7 @@ const makeContext = (overrides: Record<string, unknown> = {}) => {
   const calls: { activity: unknown[][]; touched: number } = { activity: [], touched: 0 };
   const points = {
     apply: vi.fn(),
-    touchAccount: vi.fn(() => { calls.touched += 1; return Promise.resolve({ welcomePending: false }); }),
+    touchAccount: vi.fn(() => { calls.touched += 1; return Promise.resolve({ welcomePending: false, startBonus: null }); }),
     ackWelcome: vi.fn(() => Promise.resolve()),
     creditActivity: vi.fn((...args: unknown[]) => { calls.activity.push(args); return Promise.resolve({ credited: 5 }); }),
     balance: vi.fn(() => Promise.resolve(240)),
@@ -139,7 +139,7 @@ describe("points module", () => {
     expect(ackWelcome).toHaveBeenCalledWith("viewer_demo");
   });
 
-  it("keeps the complete welcome note in a 500-character reply with its mention prefix and transport attribution", async () => {
+  it("keeps the complete welcome note in a 500-character reply with its mention prefix and transport attribution (protects=welcome suffix, mention prefix and attribution survive chat truncation; fails_when=transport truncation removes part of the welcome or attribution; no_claim=the transport formatter is exercised directly without a chat send)", async () => {
     const ackWelcome = vi.fn(() => Promise.resolve());
     const pending: PendingPointWelcome = {
       accountId: "viewer_demo",
@@ -166,7 +166,7 @@ describe("points module", () => {
     expect(ackWelcome).toHaveBeenCalledOnce();
   });
 
-  it("leaves an oversized welcome note pending when it cannot fit in the transport limit", () => {
+  it("leaves an oversized welcome note pending when it cannot fit in the transport limit (protects=an unrenderable welcome remains eligible for a later reply; fails_when=the welcome is marked used despite not being appended; no_claim=delivery is not simulated because no action is emitted)", () => {
     const pending: PendingPointWelcome = {
       accountId: "viewer_demo",
       messageId: "message_demo",

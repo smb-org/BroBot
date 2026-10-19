@@ -92,7 +92,19 @@ describe("points module worker events", () => {
     if (welcomedReply.kind !== "chat") throw new Error("The welcome note did not remain a chat reply.");
     expect(welcomedReply.text).toContain("Startguthaben 100 Punkte");
     await welcomedReply.onDelivery?.("sent");
-    await expect(object.touchPointAccount(moduleId, "viewer_demo", "nachtfalke", 100)).resolves.toEqual({ welcomePending: false });
+    await expect(object.touchPointAccount(moduleId, "viewer_demo", "nachtfalke", 100)).resolves.toEqual({ welcomePending: false, startBonus: 100 });
+  });
+
+  it(`keeps the first booked bonus on a pending welcome after settings change (${testCard("the pending welcome retains the amount recorded by the bonus operation", "changing startBonus before the next contact changes the reported booking", "the test reads the real persisted points ledger through a ChannelObject")})`, async () => {
+    const channelId = `points-module-booked-bonus-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+
+    const firstContact = await object.touchPointAccount(moduleId, "viewer_demo", "nachtfalke", 100);
+    const nextContact = await object.touchPointAccount(moduleId, "viewer_demo", "nachtfalke", 200);
+
+    expect(firstContact).toEqual({ welcomePending: true, startBonus: 100 });
+    expect(nextContact).toEqual({ welcomePending: true, startBonus: 100 });
   });
 
   it(`credits one activity window and refreshes the account login (${testCard("module chat events update login and award at most one configured activity credit per window", "two messages within ten minutes earn twice or the account keeps a stale login", "chat events run through the module against a real ChannelObject")})`, async () => {

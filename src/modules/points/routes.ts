@@ -3,7 +3,7 @@ import { Hono, type Context } from "hono";
 import { canManage } from "../../contracts/values";
 import type { ModuleRouteEnvironment } from "../contract";
 import type { ModulePointsAccess } from "../contract";
-import { MAX_POINTS_ADJUSTMENT_REASON_LENGTH, POINTS_MODULE_ID } from "./contracts";
+import { isPointViewerAccountId, MAX_POINTS_ADJUSTMENT_REASON_LENGTH, POINTS_MODULE_ID } from "./contracts";
 
 type PointsContext = Context<ModuleRouteEnvironment>;
 
@@ -123,13 +123,15 @@ pointsRoutes.post("/accounts/:accountId/adjust", async (context) => {
     return context.json({ error: "points_adjustment_invalid" }, 400);
   }
   const accountId = context.req.param("accountId");
+  if (!isPointViewerAccountId(accountId)) return context.json({ error: "invalid_account" }, 400);
+  const access = points(context);
+  if (await access.getAccount(accountId) === null) return context.json({ error: "account_not_found" }, 404);
   const actor = context.get("actor");
   const actorLogin = context.get("session").login ?? actor.userId;
   const operationId = `admin:${body.operationId}`;
   const delta = body.delta as number;
   const reason = body.reason.trim();
   const actorId = context.get("actor").userId;
-  const access = points(context);
   const previous = (await access.pendingAudits()).find((item) => item.operationId === operationId);
   const previousDetail = previous === undefined ? null : parsePending(operationId, previous.detail);
   const previousMatches = previousDetail !== null && previousDetail.accountId === accountId &&

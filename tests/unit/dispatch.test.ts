@@ -59,7 +59,9 @@ const environment = (database: TestD1Database, publish = vi.fn()) => {
     getChatActivityCount: vi.fn().mockResolvedValue(0),
     getTwitchRateLimitRetryAfter: vi.fn().mockResolvedValue(null),
     setTwitchRateLimitRetryAfter: vi.fn().mockResolvedValue(undefined),
-    touchPointAccount: vi.fn().mockResolvedValue({ welcomePending: true }),
+    transitionTimerStream: vi.fn().mockResolvedValue(undefined),
+    touchPointAccount: vi.fn((_moduleId: string, _accountId: string, _login: string, startBonus: number) =>
+      Promise.resolve({ welcomePending: true, startBonus })),
     acknowledgePointWelcome: vi.fn().mockResolvedValue(undefined),
     creditPointActivity: vi.fn().mockResolvedValue({ credited: 5 }),
     scheduleModuleAlarm: vi.fn().mockResolvedValue(undefined),
@@ -327,7 +329,7 @@ describe("module selection", () => {
 });
 
 describe("dispatch and execution", () => {
-  it("sends a real points chat event as a threaded welcome reply", async () => {
+  it("sends a real points chat event as a threaded welcome reply (protects=the first-contact note stays on the viewer's matching bot reply; fails_when=the note is omitted or sent as a separate message; no_claim=chat delivery uses the test HTTP transport)", async () => {
     const database = new TestD1Database();
     try {
       await withBot(database);
@@ -362,6 +364,144 @@ describe("dispatch and execution", () => {
         acknowledgePointWelcome: ReturnType<typeof vi.fn>;
       };
       expect(object.acknowledgePointWelcome).toHaveBeenCalledWith("points", "viewer-1");
+    } finally {
+      database.close();
+    }
+  });
+
+  it.each(["mute", "pause"] as const)(
+    "suppresses a threaded moderation reply with a welcome note after %s activates (protects=moderation follow-ups recheck channel controls after welcome decoration; fails_when=the reply is sent after mute or pause activates during Helix; no_claim=Helix and chat responses use controlled HTTP doubles)",
+    async (control) => {
+      const database = new TestD1Database();
+      try {
+        await withBot(database);
+        await database.prepare(
+          `INSERT INTO bot_channel_status (channel_id, is_moderator, checked_at, reason)
+           VALUES ('kanal-a', 1, ?, NULL)`,
+        ).bind(NOW).run();
+        await activate(database, "kanal-a", pointsModule.id);
+        await database.prepare("UPDATE channel_modules SET settings = ? WHERE channel_id = ? AND module_id = ?")
+          .bind(JSON.stringify(DEFAULT_POINTS_SETTINGS), "kanal-a", pointsModule.id).run();
+        const module = fakeModule(`moderation-welcome-${control}`, () => ({
+          actions: [{
+            kind: "timeout",
+            userId: `fictional-viewer-${control}`,
+            durationSeconds: 30,
+            reason: "test",
+            onSuccess: {
+              kind: "chat",
+              text: "Timeout applied",
+              replyToMessageId: "twitch-message-welcome",
+            },
+          }],
+          diagnostics: [],
+        }));
+        await activate(database, "kanal-a", module.id);
+        const runtime = environment(database);
+        let markHelixStarted!: () => void;
+        const helixStarted = new Promise<void>((resolve) => { markHelixStarted = resolve; });
+        let releaseHelix!: (response: Response) => void;
+        const helixResponse = new Promise<Response>((resolve) => { releaseHelix = resolve; });
+        const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+          if (requestedUrl(input).includes("/helix/moderation/bans")) {
+            markHelixStarted();
+            return helixResponse;
+          }
+          return Promise.resolve(new Response(JSON.stringify({ data: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }));
+        });
+        const dispatch = dispatchEventSubNotification(runtime, {
+          channelId: "kanal-a",
+          subscriptionType: CHAT_TYPE,
+          triggerId: `moderation-welcome-${control}`,
+          payload: {
+            broadcaster_user_id: "kanal-a",
+            broadcaster_user_login: "kanal_demo",
+            chatter_user_id: "viewer-1",
+            chatter_user_login: "nachtfalke",
+            message_id: "twitch-message-welcome",
+            message: { text: "hello", fragments: [{ type: "text", text: "hello" }] },
+          },
+          receivedAt: NOW,
+          eventSubTimestamp: NOW,
+        }, fetcher, [pointsModule, module]);
+
+        await helixStarted;
+        const muted = control === "mute" ? 1 : 0;
+        const paused = control === "pause" ? 1 : 0;
+        await database.prepare(
+          `INSERT INTO channel_controls (channel_id, muted, paused, updated_at) VALUES ('kanal-a', ?, ?, ?)
+           ON CONFLICT(channel_id) DO UPDATE SET muted = excluded.muted, paused = excluded.paused, updated_at = excluded.updated_at`,
+        ).bind(muted, paused, NOW).run();
+        releaseHelix(new Response(null, { status: 204 }));
+        await dispatch;
+
+        expect(fetcher.mock.calls.filter(([input]) => requestedUrl(input).includes("/helix/chat/messages"))).toHaveLength(0);
+        await expect(eventLog(database)).resolves.toMatchObject([
+          { code: "host.timeout.applied" },
+          {
+            code: "host.action.suppressed",
+            detail_json: JSON.stringify({ action: "chat", reason: control === "mute" ? "channel_muted" : "channel_paused" }),
+          },
+        ]);
+      } finally {
+        database.close();
+      }
+    },
+  );
+
+  it("uses the booked bonus in a pending welcome after the setting changes (protects=welcome notes report the amount already credited to first contact; fails_when=a later setting is reported as the old booking; no_claim=the touch reply models the persisted Durable Object result)", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      await activate(database, "kanal-a", pointsModule.id);
+      await database.prepare("UPDATE channel_modules SET settings = ? WHERE channel_id = ? AND module_id = ?")
+        .bind(JSON.stringify(DEFAULT_POINTS_SETTINGS), "kanal-a", pointsModule.id).run();
+      const runtime = environment(database);
+      const object = runtime.CHANNEL.get(runtime.CHANNEL.idFromName("kanal-a")) as unknown as {
+        touchPointAccount: {
+          mockImplementation: (implementation: (
+            moduleId: string,
+            accountId: string,
+            login: string,
+            configuredBonus: number,
+          ) => Promise<{ welcomePending: boolean; startBonus: number }>) => void;
+        };
+      };
+      let bookedBonus: number | undefined;
+      object.touchPointAccount.mockImplementation((_moduleId: string, _accountId: string, _login: string, configuredBonus: number) => {
+        bookedBonus ??= configuredBonus;
+        return Promise.resolve({ welcomePending: true, startBonus: bookedBonus });
+      });
+      const fetcher = sent();
+      const sendEvent = (triggerId: string, messageId: string, text: string) => dispatchEventSubNotification(runtime, {
+        channelId: "kanal-a",
+        subscriptionType: CHAT_TYPE,
+        triggerId,
+        payload: {
+          broadcaster_user_id: "kanal-a",
+          broadcaster_user_login: "kanal_demo",
+          chatter_user_id: "viewer-1",
+          chatter_user_login: "nachtfalke",
+          message_id: messageId,
+          message: { text, fragments: [{ type: "text", text }] },
+        },
+        receivedAt: NOW,
+        eventSubTimestamp: NOW,
+      }, fetcher, [pointsModule]);
+
+      await sendEvent("silent-first-contact", "first-contact-message", "hello");
+      await database.prepare("UPDATE channel_modules SET settings = ? WHERE channel_id = ? AND module_id = ?")
+        .bind(JSON.stringify({ ...DEFAULT_POINTS_SETTINGS, startBonus: 200 }), "kanal-a", pointsModule.id).run();
+      await sendEvent("next-command", "next-command-message", "!spiele");
+
+      const chatBody = fetcher.mock.calls.map((_call, index) => bodyOf(fetcher, index))
+        .find((body) => typeof body.message === "string");
+      expect(String(chatBody?.message)).toContain("Startguthaben 100 Punkte");
+      expect(String(chatBody?.message)).not.toContain("Startguthaben 200 Punkte");
+      expect(chatBody?.reply_parent_message_id).toBe("next-command-message");
     } finally {
       database.close();
     }

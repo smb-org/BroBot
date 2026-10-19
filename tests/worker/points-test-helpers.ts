@@ -21,7 +21,10 @@ export interface PointsWorkerObject {
     result: unknown;
     balances: Record<string, number>;
   }>;
-  touchPointAccount(moduleId: string, accountId: string, login: string, startBonus: number): Promise<{ welcomePending: boolean }>;
+  touchPointAccount(moduleId: string, accountId: string, login: string, startBonus: number): Promise<{
+    welcomePending: boolean;
+    startBonus: number | null;
+  }>;
   acknowledgePointWelcome(moduleId: string, accountId: string): Promise<void>;
   pointBalance(moduleId: string, accountId: string): Promise<number>;
   pointAccount(moduleId: string, accountId: string): Promise<{ accountId: string; login: string; balance: number } | null>;

@@ -51,7 +51,7 @@ const createHarness = (options: { role?: "manager" | "operator"; failFirstAudit?
       balance += userMovement.delta ?? 0;
       return Promise.resolve({ replayed: false, result: detail, balances: { [detail.accountId]: balance } });
     }),
-    touchAccount: vi.fn(() => Promise.resolve({ welcomePending: false })),
+    touchAccount: vi.fn(() => Promise.resolve({ welcomePending: false, startBonus: null })),
     ackWelcome: vi.fn(() => Promise.resolve()),
     creditActivity: vi.fn(() => Promise.resolve({ credited: 0 })),
     balance: vi.fn((accountId: string) => Promise.resolve(accountId === "viewer_demo" ? balance : 0)),
@@ -140,7 +140,42 @@ describe("points routes", () => {
     expect([...harness.operations.keys()]).toEqual([OPERATION_ID]);
   });
 
-  it("passes correction identity to the ledger and audits its persisted replay result", async () => {
+  it.each(["__house", "__jackpot:game_demo", "__escrow:round_demo", "__bosspot:round_demo", "viewer!", "x".repeat(33)])(
+    "rejects reserved or invalid correction target %s before ledger work (protects=corrections only target viewer ids; fails_when=system or malformed ids reach the ledger; no_claim=the ledger access is an in-memory fake)",
+    async (accountId) => {
+      const harness = createHarness();
+      await insertChannel(harness.database, CHANNEL_ID);
+
+      const response = await harness.app.fetch(harness.request(`/accounts/${accountId}/adjust`, {
+        operationId: "01234567-89ab-42cd-8abc-0123456789ab", delta: 1, reason: "manual correction",
+      }), { DB: harness.database as unknown as D1Database });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({ error: "invalid_account" });
+      expect(harness.pointAccess.getAccount).not.toHaveBeenCalled();
+      expect(harness.pointAccess.pendingAudits).not.toHaveBeenCalled();
+      expect(harness.pointAccess.apply).not.toHaveBeenCalled();
+      expect(harness.auditWriter).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects a correction for an unknown viewer without creating an account (protects=adjustments require an exact existing viewer account; fails_when=an unknown id is booked or audit recovery starts; no_claim=the ledger access is an in-memory fake)", async () => {
+    const harness = createHarness();
+    await insertChannel(harness.database, CHANNEL_ID);
+
+    const response = await harness.app.fetch(harness.request("/accounts/viewer_missing/adjust", {
+      operationId: "01234567-89ab-42cd-8abc-0123456789ab", delta: 1, reason: "manual correction",
+    }), { DB: harness.database as unknown as D1Database });
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: "account_not_found" });
+    expect(harness.pointAccess.getAccount).toHaveBeenCalledExactlyOnceWith("viewer_missing");
+    expect(harness.pointAccess.pendingAudits).not.toHaveBeenCalled();
+    expect(harness.pointAccess.apply).not.toHaveBeenCalled();
+    expect(harness.auditWriter).not.toHaveBeenCalled();
+  });
+
+  it("passes correction identity to the ledger and audits its persisted replay result (protects=correction identity and audit use the persisted operation; fails_when=the route loses server metadata or writes a different identity; no_claim=ledger apply is represented by an in-memory replay result)", async () => {
     const harness = createHarness();
     await insertChannel(harness.database, CHANNEL_ID);
     const persistedAt = "2026-10-19T11:59:00.000Z";
@@ -200,7 +235,7 @@ describe("points routes", () => {
     expect(operatorHarness.pointAccess.markAuditWritten).not.toHaveBeenCalled();
   });
 
-  it("recovers an audit for the exact account beyond the first 50 substring matches", async () => {
+  it("recovers an audit for the exact account beyond the first 50 substring matches (protects=pending audits resolve exact viewer ids outside the first page; fails_when=a substring match is audited as the target; no_claim=the ledger and account list are supplied by in-memory fakes)", async () => {
     const harness = createHarness();
     await insertChannel(harness.database, CHANNEL_ID);
     const accounts = Array.from({ length: 50 }, (_, index) => ({
