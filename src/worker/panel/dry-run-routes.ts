@@ -28,7 +28,7 @@ const requestSchema = z.object({
   }).strict().nullable(),
   sharedChat: z.boolean(),
   only: z.object({
-    moduleId: z.enum(["text_commands", "faq"]),
+    moduleId: z.enum(["text_commands", "faq", "chat_voting", "votekick"]),
     entryId: z.string().min(1).max(100).optional(),
   }).strict().optional(),
 }).strict();

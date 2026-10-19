@@ -408,6 +408,7 @@ const objectFor = (
   (object as unknown as { adScheduleOperationQueue: Promise<void> }).adScheduleOperationQueue = Promise.resolve();
   (object as unknown as { belaboxPollQueue: Promise<void> }).belaboxPollQueue = Promise.resolve();
   (object as unknown as { alarmScheduleQueue: Promise<void> }).alarmScheduleQueue = Promise.resolve();
+  (object as unknown as { timerScheduleInitialization: Promise<void> | null }).timerScheduleInitialization = Promise.resolve();
   (object as unknown as { recentlyBoundOverlayTokenIds: Set<string> }).recentlyBoundOverlayTokenIds = new Set();
   return object;
 };

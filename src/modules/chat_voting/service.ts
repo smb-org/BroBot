@@ -301,8 +301,11 @@ const invalidVoteMessages = {
   duration: "invalidDuration",
 } as const;
 
-const canControlVotes = (event: ModuleEvent): boolean =>
+export const canControlChatVoting = (event: ModuleEvent): boolean =>
   event.chatStatus?.includes("moderator") === true || event.chatStatus?.includes("broadcaster") === true;
+
+export const isChatVotingCommandLike = (text: string, command = parseVoteCommand(text)): boolean =>
+  command !== null || /^!vote(?:\s|$)/iu.test(text.trim());
 
 const closeAlarmScheduler = (context: ModuleExecutionContext) => (
   pollId: string,
@@ -333,18 +336,19 @@ export const processChatVotingMessage = async (
   if (text === null || text.length === 0) return { actions: [], diagnostics: [] };
 
   const command = parseVoteCommand(text);
+  const commandLike = isChatVotingCommandLike(text, command);
 
   const userId = chatterId(event);
   const botUserId = await context.botUserId?.() ?? null;
   if (userId === null || botUserId !== null && userId === botUserId) return { actions: [], diagnostics: [] };
 
-  if (command === null && /^!vote(?:\s|$)/iu.test(text.trim())) {
-    if (!canControlVotes(event)) return { actions: [], diagnostics: [] };
+  if (command === null && commandLike) {
+    if (!canControlChatVoting(event)) return { actions: [], diagnostics: [] };
     return { actions: [directChat(chatVotingChatText(await context.channelLanguage(), "help"))], diagnostics: [] };
   }
 
   if (command !== null) {
-    if (!canControlVotes(event)) return { actions: [], diagnostics: [] };
+    if (!canControlChatVoting(event)) return { actions: [], diagnostics: [] };
     const language = await context.channelLanguage();
     if (command.kind === "help") {
       return { actions: [directChat(chatVotingChatText(language, "help"))], diagnostics: [] };

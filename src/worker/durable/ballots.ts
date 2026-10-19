@@ -6,14 +6,15 @@ import type {
   BallotSnapshot,
   BallotTermCount,
   BallotTermFilter,
+  ModuleDryRunBallotSnapshot,
 } from "../../modules/contract";
 import { isBlockedFreeTextVote } from "../../modules/chat_voting/domain";
+import { BALLOT_MAX_TEXT_TERMS } from "../../modules/domain/ballots";
 
 const BALLOT_MAX_LIFETIME_MS = 24 * 60 * 60 * 1_000;
 const BALLOT_FINALIZATION_RETENTION_MS = 24 * 60 * 60 * 1_000;
 export const BALLOT_EXPIRY_ALARM_HANDLER = "host:ballot_expiry";
 export const BALLOT_HARD_DELETE_ALARM_HANDLER = "host:ballot_hard_delete";
-const BALLOT_MAX_TEXT_TERMS = 200;
 const BALLOT_MAX_BLOCKED_TERMS = 1_000;
 const BALLOT_MAX_BLOCKED_TERM_LENGTH = 500;
 const BALLOT_MAX_BLOCKED_FILTER_BYTES = 64 * 1024;
@@ -662,6 +663,44 @@ export const readStoredBallotSnapshot = async (
     if (finalization !== null) return terminalSnapshot(finalization.outcome, finalization.snapshot);
     const outcome = outcomeForBallot(ballot, Date.now());
     return outcome === "open" ? snapshotOf(ballot) : terminalSnapshot(outcome, snapshotOf(ballot));
+  });
+};
+
+/** Reads the same ballot projection as readStoredBallotSnapshot plus its term filter, without finalizing it. */
+export const readStoredBallotDryRunSnapshot = async (
+  storage: BallotStorage,
+  moduleId: string,
+  ballotId: string,
+  channelId?: string,
+  voterId?: string,
+): Promise<ModuleDryRunBallotSnapshot | null> => {
+  validId(moduleId, "Module id");
+  validId(ballotId, "Ballot id");
+  return await storage.transaction(async (transaction) => {
+    const ballot = await transaction.get(ballotKey(moduleId, ballotId));
+    if (!isStoredBallot(ballot) || ballot.moduleId !== moduleId || ballot.ballotId !== ballotId) return null;
+    const finalization = finalizationOf(ballot);
+    const outcome = finalization?.outcome ?? outcomeForBallot(ballot, Date.now());
+    const snapshot = finalization !== null
+      ? terminalSnapshot(finalization.outcome, finalization.snapshot)
+      : outcome === "open" ? snapshotOf(ballot) : terminalSnapshot(outcome, snapshotOf(ballot));
+    const active = await transaction.get<ActiveBallot>(ACTIVE_BALLOT_KEY);
+    const previousChoice = channelId === undefined || voterId === undefined
+      ? undefined
+      : await transaction.get<number | string>(
+        `${voterPrefix(moduleId, ballotId)}${await ballotVoterHash(ballot.key, channelId, voterId)}`,
+      );
+    return {
+      ...snapshot,
+      expiresAt: ballot.expiresAt,
+      isActive: active?.moduleId === moduleId && active.ballotId === ballotId,
+      previousChoiceKnown: channelId !== undefined && voterId !== undefined,
+      ...(previousChoice === undefined ? {} : { previousChoice }),
+      ...(ballot.optionCount === 0 ? {
+        blockedTerms: ballot.blockedTerms === null ? null : [...(ballot.blockedTerms ?? [])],
+        approvedTerms: [...approvedTermsOf(ballot)],
+      } : {}),
+    };
   });
 };
 

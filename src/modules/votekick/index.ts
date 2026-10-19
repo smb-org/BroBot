@@ -6,6 +6,7 @@ import { VOTEKICK_CHAT_COMMANDS } from "./contracts/chat-commands";
 import { DEFAULT_VOTEKICK_SETTINGS, VOTEKICK_HISTORY_DAYS, VOTEKICK_LIFT_CLAIM_LEASE_MS, VOTEKICK_MODULE_ID, votekickDefaultSettingsForLanguage, votekickSettingsSchema } from "./contracts";
 import { createVotekickRepository, purgeExpiredVotekickUserIds } from "./adapters/d1";
 import { processVotekickMessage, closeExpiredVotekick, votekickOverlayPayload } from "./service";
+import { dryRunVotekickMessage } from "./dry-run";
 import { votekickRoutes } from "./routes";
 import { votekickOverlayElements } from "./overlay/element";
 import { VOTEKICK_ELEMENT_KIND } from "./overlay/kinds";
@@ -115,4 +116,5 @@ export const votekickModule: BotModule<typeof votekickSettingsSchema> = {
     },
   },
   handleEvent: (event, context) => processVotekickMessage(event, createVotekickRepository(context.DB), context),
+  dryRunChatMessage: dryRunVotekickMessage,
 };
