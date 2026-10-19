@@ -1063,6 +1063,105 @@ describe("game rounds in the worker Durable Object", () => {
     expect(delivery.reason).toBe("not_sent");
   });
 
+  it.each(["pause", "mute"] as const)(
+    `treats a late %s suppression as a definite announcement failure (${testCard("a control activated between pre-send validations prevents the send claim and POST", "the unannounced round opens as ambiguous", "the injected sender exercises both validation callbacks without making a network request")})`,
+    async (control) => {
+      const channelId = `round-late-${control}-${crypto.randomUUID()}`;
+      const roundId = `round-late-${control}`;
+      const database = (env as unknown as { DB: D1Database }).DB;
+      await insertPointChannel(channelId);
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, ?, 1, '{}', 1)",
+      ).bind(channelId, pointTestModule).run();
+      await database.prepare(
+        "INSERT INTO channel_controls (channel_id, updated_at) VALUES (?, ?)",
+      ).bind(channelId, new Date().toISOString()).run();
+      const object = pointObject(channelId);
+      let firstValidationAccepted: boolean | null = null;
+      let sendClaimResult: boolean | "rate_limited" | null = null;
+      let postCount = 0;
+      const sendChatImpl: typeof sendChatMessage = async (...args) => {
+        const validateOutput = args[5];
+        const claimBeforePost = args[6];
+        if (validateOutput === undefined || claimBeforePost === undefined) {
+          throw new Error("The module announcement did not provide its pre-send checks.");
+        }
+
+        firstValidationAccepted = await validateOutput();
+        const column = control === "pause" ? "paused" : "muted";
+        await database.prepare(`UPDATE channel_controls SET ${column} = 1, updated_at = ? WHERE channel_id = ?`)
+          .bind(new Date().toISOString(), channelId).run();
+
+        sendClaimResult = await claimBeforePost();
+        if (sendClaimResult === true) {
+          postCount += 1;
+          return { sent: true, truncated: false, delivery: "sent", reason: null, detail: {} };
+        }
+        return {
+          sent: false,
+          truncated: false,
+          delivery: "not_attempted",
+          reason: sendClaimResult === "rate_limited" ? "rate_limited" : "already_attempted",
+          detail: {},
+        };
+      };
+
+      await runPointObject(object, async (target, state) => {
+        const internal = target as unknown as {
+          moduleAlarmContext: (
+            moduleId: string,
+            registration: ModuleAlarmDefinition,
+            budget: ModuleExternalFetchBudget,
+            streamGeneration?: number,
+            identity?: ModuleAlarmContext["alarmIdentity"],
+            planSequence?: number,
+            sender?: typeof sendChatMessage,
+          ) => ModuleAlarmContext;
+        };
+        const createModuleAlarmContext = internal.moduleAlarmContext.bind(target);
+        Object.assign(target, {
+          moduleAlarmContext: (
+            moduleId: string,
+            registration: ModuleAlarmDefinition,
+            budget: ModuleExternalFetchBudget,
+            streamGeneration?: number,
+            identity?: ModuleAlarmContext["alarmIdentity"],
+            planSequence?: number,
+          ) => createModuleAlarmContext(
+            moduleId,
+            registration,
+            budget,
+            streamGeneration,
+            identity,
+            planSequence,
+            sendChatImpl,
+          ),
+        });
+        await target.openGameRound(pointTestModule, roundId, {
+          durationS: 60,
+          announceText: "The round starts",
+          settlement: { kind: "test", params: { payouts: [] } },
+        });
+        await deferPointAlarmWithin(state);
+      });
+
+      expect(await forcePointAlarm(object, roundId)).toBe(true);
+      expect(firstValidationAccepted).toBe(true);
+      expect(sendClaimResult).toBe(false);
+      expect(postCount).toBe(0);
+
+      const round = await runPointObject(object, (_target, state) => state.storage.sql.exec<{
+        state: string;
+        announce_state: string;
+        deadline_at: number | null;
+      }>("SELECT state, announce_state, deadline_at FROM game_rounds WHERE round_id = ?", roundId).one());
+      expect(round).toEqual({ state: "cancelled", announce_state: "failed", deadline_at: null });
+      const claims = await runPointObject(object, (_target, state) =>
+        state.storage.get<Record<string, unknown>>("module_alarm:send_claims"));
+      expect(claims?.[`round:${roundId}:announce`]).toBeUndefined();
+    },
+  );
+
   it(`timestamps a point announcement after a slower alarm handler in the same invocation (${testCard("each announcement uses its own attempt timestamp", "a slow earlier handler consumes the round duration")})`, async () => {
     vi.useFakeTimers();
     const startedAt = Date.parse("2026-10-12T12:00:00.000Z");

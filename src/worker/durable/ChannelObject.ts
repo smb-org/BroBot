@@ -2611,18 +2611,23 @@ export class ChannelObject extends DurableObject<Env> {
           (senderId, messageText) => this.recordBotChatMessage(senderId, messageText),
         );
         let attemptedAt: number | undefined;
+        let hasPersistedSendClaim = false;
         if (result.reason === "already_attempted") {
           const claim = await readModuleAlarmSendClaim(this.ctx.storage, idempotencyKey);
           if (claim?.status === "sent") return { sent: true, reason: null, retryable: false, delivery: "delivered" };
+          hasPersistedSendClaim = claim !== null;
           attemptedAt = claim?.at;
         }
         const reason = suppression.reason ?? result.reason;
         const retryable = suppression.reason === null && result.reason !== "stale_before_send" &&
           result.reason !== "already_attempted" && result.delivery !== "ambiguous";
+        const ambiguous = result.reason === "already_attempted"
+          ? hasPersistedSendClaim
+          : result.delivery === "ambiguous";
         const delivery = result.sent
           ? "delivered"
           : result.reason === "rate_limited" ? "rate_limited"
-            : result.delivery === "ambiguous" || result.reason === "already_attempted" ? "ambiguous"
+            : ambiguous ? "ambiguous"
               : "failed";
         return { sent: result.sent, reason, retryable, delivery, ...(attemptedAt === undefined ? {} : { attemptedAt }) };
       },
