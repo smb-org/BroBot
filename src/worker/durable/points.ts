@@ -139,6 +139,27 @@ const jsonValue = (value: unknown): string => {
   return typeof serialized === "string" ? serialized : "null";
 };
 
+export interface CanonicalPointResult {
+  json: string;
+  value: unknown;
+}
+
+export const canonicalPointResult = (value: unknown): CanonicalPointResult => {
+  if (value === undefined) return { json: "null", value: null };
+  let serialized: string | undefined;
+  try {
+    serialized = JSON.stringify(value);
+  } catch {
+    throw new Error("result_not_json_compatible");
+  }
+  if (typeof serialized !== "string") throw new Error("result_not_json_compatible");
+  try {
+    return { json: serialized, value: JSON.parse(serialized) as unknown };
+  } catch {
+    throw new Error("result_not_json_compatible");
+  }
+};
+
 const stableValue = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(stableValue);
   if (typeof value !== "object" || value === null) return value;
@@ -312,8 +333,14 @@ const expandedMovementsSync = (
   movements: readonly PointsMovement[],
   now: string,
 ): Map<string, number> => {
-  const deltas = new Map<string, number>();
+  const deltaTotals = new Map<string, bigint>();
   const running = new Map<string, number>();
+  const safeInteger = (value: bigint, errorCode: string): number => {
+    if (value < BigInt(Number.MIN_SAFE_INTEGER) || value > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new Error(errorCode);
+    }
+    return Number(value);
+  };
   const currentBalance = (accountId: string): number => {
     const cached = running.get(accountId);
     if (cached !== undefined) return cached;
@@ -321,23 +348,22 @@ const expandedMovementsSync = (
     running.set(accountId, row.balance);
     return row.balance;
   };
-  const addSegment = (segment: Map<string, { delta: number; login: string | null }>): void => {
+  const addSegment = (segment: Map<string, { delta: bigint; login: string | null }>): void => {
     for (const [accountId, movement] of segment) {
-      if (movement.delta === 0) continue;
-      const next = currentBalance(accountId) + movement.delta;
-      if (!Number.isSafeInteger(next)) throw new Error("balance_overflow");
+      if (movement.delta === 0n) continue;
+      const next = safeInteger(BigInt(currentBalance(accountId)) + movement.delta, "balance_overflow");
       running.set(accountId, next);
-      deltas.set(accountId, (deltas.get(accountId) ?? 0) + movement.delta);
+      deltaTotals.set(accountId, (deltaTotals.get(accountId) ?? 0n) + movement.delta);
       if (movement.login !== null) ensureAccountSync(sql, accountId, movement.login, now);
     }
   };
-  let segment = new Map<string, { delta: number; login: string | null }>();
+  let segment = new Map<string, { delta: bigint; login: string | null }>();
   for (const movement of movements) {
     if ("delta" in movement) {
       if (!Number.isSafeInteger(movement.delta)) throw new Error("invalid_movement");
       const existing = segment.get(movement.accountId);
       segment.set(movement.accountId, {
-        delta: (existing?.delta ?? 0) + movement.delta,
+        delta: (existing?.delta ?? 0n) + BigInt(movement.delta),
         login: movement.login ?? existing?.login ?? null,
       });
       continue;
@@ -355,15 +381,18 @@ const expandedMovementsSync = (
     if (!Number.isSafeInteger(share)) throw new Error("balance_overflow");
     if (share > 0) {
       const viewerBalance = currentBalance(movement.accountId);
-      const nextViewerBalance = viewerBalance + share;
-      if (!Number.isSafeInteger(nextViewerBalance)) throw new Error("balance_overflow");
-      running.set(pot, currentBalance(pot) - share);
+      const nextViewerBalance = safeInteger(BigInt(viewerBalance) + BigInt(share), "balance_overflow");
+      running.set(pot, safeInteger(BigInt(currentBalance(pot)) - BigInt(share), "balance_overflow"));
       running.set(movement.accountId, nextViewerBalance);
-      deltas.set(pot, (deltas.get(pot) ?? 0) - share);
-      deltas.set(movement.accountId, (deltas.get(movement.accountId) ?? 0) + share);
+      deltaTotals.set(pot, (deltaTotals.get(pot) ?? 0n) - BigInt(share));
+      deltaTotals.set(movement.accountId, (deltaTotals.get(movement.accountId) ?? 0n) + BigInt(share));
     }
   }
   addSegment(segment);
+  const deltas = new Map<string, number>();
+  for (const [accountId, delta] of deltaTotals) {
+    deltas.set(accountId, safeInteger(delta, "invalid_movement"));
+  }
   return deltas;
 };
 
@@ -385,6 +414,7 @@ export const applyPointOperationSync = (
   result: unknown,
   payloadHash: string,
   now: string,
+  canonicalResult?: CanonicalPointResult,
 ): PointApplyInternalResult => {
   if (!allowedKinds.has(kind)) throw new Error("invalid_operation_kind");
   if (operationId.length === 0 || operationId.length > 200) throw new Error("invalid_operation_id");
@@ -417,8 +447,8 @@ export const applyPointOperationSync = (
     if (!Number.isSafeInteger(delta)) throw new Error("invalid_movement");
     ensureAccountSync(sql, accountId, null, now);
   }
-  const total = [...deltas.values()].reduce((sum, delta) => sum + delta, 0);
-  if (total !== 0) throw new Error("ledger_not_zero_sum");
+  const total = [...deltas.values()].reduce((sum, delta) => sum + BigInt(delta), 0n);
+  if (total !== 0n) throw new Error("ledger_not_zero_sum");
 
   const finalBalances = new Map<string, number>();
   for (const [accountId, delta] of deltas) {
@@ -426,19 +456,23 @@ export const applyPointOperationSync = (
       "SELECT account_id, kind, login, balance, welcome_pending FROM point_accounts WHERE account_id = ?",
       accountId,
     ).one();
-    const balance = account.balance + delta;
-    if (!Number.isSafeInteger(balance)) throw new Error("balance_overflow");
+    const balanceBigInt = BigInt(account.balance) + BigInt(delta);
+    if (balanceBigInt < BigInt(Number.MIN_SAFE_INTEGER) || balanceBigInt > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new Error("balance_overflow");
+    }
+    const balance = Number(balanceBigInt);
     if (accountId !== "__house" && balance < 0) throw new Error("insufficient_balance");
     finalBalances.set(accountId, balance);
   }
 
+  const persistedResult = canonicalResult ?? canonicalPointResult(result);
   sql.exec(
     `INSERT INTO point_operations (operation_id, module_id, kind, result_json, payload_hash, audit_state, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
     operationId,
     moduleId,
     kind,
-    jsonValue(result),
+    persistedResult.json,
     payloadHash,
     kind === "admin" ? "pending" : null,
     now,
@@ -463,7 +497,7 @@ export const applyPointOperationSync = (
   invariantSync(sql);
   return {
     replayed: false,
-    result,
+    result: persistedResult.value,
     balances: Object.fromEntries(finalBalances),
     deltas: Object.fromEntries(deltas),
   };
@@ -778,6 +812,7 @@ export const setGameModuleGateSync = (
   hashFor: (value: unknown) => string,
   now = new Date().toISOString(),
   lastDisabledRevision: number | null = null,
+  onRoundCancelled?: (roundId: string) => void,
 ): { applied: boolean } => {
   if (!Number.isSafeInteger(revision) || revision < 1) throw new Error("invalid_revision");
   if (lastDisabledRevision !== null && (!Number.isSafeInteger(lastDisabledRevision) || lastDisabledRevision < 1)) {
@@ -822,6 +857,7 @@ export const setGameModuleGateSync = (
         hashFor,
         roundIds,
         cancellationRevision,
+        onRoundCancelled,
       );
     }
   }
@@ -1164,6 +1200,7 @@ export const cancelPointRoundsSync = (
   hashFor: (value: unknown) => string,
   roundIds?: readonly string[],
   expectedGateRevision?: number,
+  onRoundCancelled?: (roundId: string) => void,
 ): number => {
   if (expectedGateRevision !== undefined) {
     const gate = sql.exec<{ revision: number; closed: number }>(
@@ -1200,6 +1237,7 @@ export const cancelPointRoundsSync = (
     }
     refundedStake ||= refunds.length > 0;
     sql.exec("UPDATE game_rounds SET state = 'cancelled' WHERE round_id = ? AND module_id = ?", roundId, moduleId);
+    onRoundCancelled?.(roundId);
     cancelledCount += 1;
   }
   if (expectedGateRevision !== undefined) {

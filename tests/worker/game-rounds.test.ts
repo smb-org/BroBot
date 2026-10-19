@@ -245,6 +245,54 @@ describe("game rounds in the worker Durable Object", () => {
     ]);
   });
 
+  it(`clears schedules for rounds cancelled during re-enable (${testCard("re-enable removes alarms for rounds it cancels and arms the earliest remaining schedule", "cancelled rounds leave stale points:round entries or a later platform alarm")})`, async () => {
+    const channelId = `round-reenable-schedules-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const database = (env as unknown as { DB: D1Database }).DB;
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, ?, 1, '{}', 1)",
+    ).bind(channelId, pointTestModule).run();
+    const object = pointObject(channelId);
+    await object.setGameModuleGate(pointTestModule, false, 1);
+    const cancelledDeadline = Date.now() + 60_000;
+    const remainingDeadline = cancelledDeadline + 60_000;
+    const cancelledAlarmKey = "points:round:round-before-reenable";
+    const remainingAlarmKey = "points:round:round-still-scheduled";
+    await openAnnouncedRound(object, pointTestModule, "round-before-reenable", {
+      durationS: 60,
+      announceText: "The earlier round starts",
+      settlement: { kind: "test", params: { payouts: [] } },
+    }, cancelledDeadline);
+    await runPointObject(object, async (_target, state) => {
+      const table = state.storage.kv.get<Record<string, { deadline: number; handler: string; revision: number }>>(
+        "channel:alarm_schedule",
+      ) ?? {};
+      table[remainingAlarmKey] = { deadline: remainingDeadline, handler: "host:points_round", revision: 1 };
+      state.storage.kv.put("channel:alarm_schedule", table);
+      await state.storage.setAlarm(cancelledDeadline);
+    });
+
+    await database.prepare(
+      "UPDATE channel_modules SET enabled = 0, revision = 2, last_disabled_revision = 2 WHERE channel_id = ? AND module_id = ?",
+    ).bind(channelId, pointTestModule).run();
+    await database.prepare(
+      "UPDATE channel_modules SET enabled = 1, revision = 3 WHERE channel_id = ? AND module_id = ?",
+    ).bind(channelId, pointTestModule).run();
+    await object.setGameModuleGate(pointTestModule, false, 3, 2);
+
+    const state = await runPointObject(object, async (_target, objectState) => ({
+      roundState: objectState.storage.sql.exec<{ state: string }>(
+        "SELECT state FROM game_rounds WHERE round_id = ?", "round-before-reenable",
+      ).one().state,
+      table: objectState.storage.kv.get<Record<string, { deadline: number }>>("channel:alarm_schedule") ?? {},
+      platformAlarm: await objectState.storage.getAlarm(),
+    }));
+    expect(state.roundState).toBe("cancelled");
+    expect(state.table[cancelledAlarmKey]).toBeUndefined();
+    expect(state.table[remainingAlarmKey]?.deadline).toBe(remainingDeadline);
+    expect(state.platformAlarm).toBe(remainingDeadline);
+  });
+
   it(`keeps recovery local for historical points state when D1 is unavailable (${testCard("history-only point storage does not block unrelated channel work at startup", "startup queries D1 despite having no active round or pending cancellation")})`, async () => {
     const channelId = `round-history-only-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
@@ -769,6 +817,69 @@ describe("game rounds in the worker Durable Object", () => {
       kind: "test",
       params: { payouts: [{ accountId: "viewer-a", amount: 50 }] },
     }))).resolves.toBe("round_closed");
+  });
+
+  it(`retries points recovery after the first initialization attempt fails (${testCard("a later points access retries rejected lazy recovery after eviction", "a transient recovery failure leaves points initialization permanently incomplete", "recovery is fault-injected once on an evicted Durable Object")})`, async () => {
+    const channelId = `round-recovery-retry-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    await object.pointBalance(pointTestModule, "viewer-a");
+    await evictDurableObject(object as unknown as DurableObjectStub);
+
+    await runPointObject(object, async (target) => {
+      const internals = target as unknown as { recoverPointRoundAlarms(): Promise<void> };
+      const recover = internals.recoverPointRoundAlarms.bind(target);
+      let attempts = 0;
+      Object.assign(target, {
+        recoverPointRoundAlarms: async () => {
+          attempts += 1;
+          if (attempts === 1) throw new Error("simulated_recovery_failure");
+          await recover();
+        },
+      });
+
+      let firstError: string | null = null;
+      try {
+        await target.pointBalance(pointTestModule, "viewer-a");
+      } catch (error) {
+        firstError = error instanceof Error ? error.message : String(error);
+      }
+      expect(firstError).toBe("simulated_recovery_failure");
+      await expect(target.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(0);
+      expect(attempts).toBe(2);
+    });
+  });
+
+  it(`shares one points recovery across concurrent first accesses after eviction (${testCard("concurrent points accesses share one lazy recovery promise", "both first accesses independently run recovery after eviction", "recovery waits on a test-controlled promise before calling the real recovery method")})`, async () => {
+    const channelId = `round-recovery-concurrent-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    await object.pointBalance(pointTestModule, "viewer-a");
+    await evictDurableObject(object as unknown as DurableObjectStub);
+
+    await runPointObject(object, async (target) => {
+      const internals = target as unknown as { recoverPointRoundAlarms(): Promise<void> };
+      const recover = internals.recoverPointRoundAlarms.bind(target);
+      let attempts = 0;
+      let releaseRecovery!: () => void;
+      const recoveryGate = new Promise<void>((resolve) => { releaseRecovery = resolve; });
+      Object.assign(target, {
+        recoverPointRoundAlarms: async () => {
+          attempts += 1;
+          await recoveryGate;
+          await recover();
+        },
+      });
+
+      const balanceAccess = target.pointBalance(pointTestModule, "viewer-a");
+      const summaryAccess = target.pointSummary(pointTestModule);
+      const attemptsBeforeRecoveryFinishes = attempts;
+      releaseRecovery();
+      await expect(balanceAccess).resolves.toBe(0);
+      await expect(summaryAccess).resolves.toMatchObject({ circulation: 0 });
+      expect(attemptsBeforeRecoveryFinishes).toBe(1);
+      expect(attempts).toBe(1);
+    });
   });
 
   it(`restores a lost round schedule and platform alarm on first points access after eviction (${testCard("the first points access after eviction restores a deleted schedule entry and alarm", "a round stays open after both persisted alarm records are removed")})`, async () => {

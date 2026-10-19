@@ -158,6 +158,7 @@ import {
   acknowledgeWelcomeSync,
   announceAttemptSync,
   applyPointOperationSync,
+  canonicalPointResult,
   assertPointAccountId,
   assertPointRoundId,
   cancelPointRoundsSync,
@@ -3146,7 +3147,8 @@ export class ChannelObject extends DurableObject<Env> {
     result: unknown,
   ): Promise<PointsApplyResult> {
     await this.ensurePointsInitialized();
-    const payloadHash = await pointPayloadHash({ moduleId, operationId, kind, movements, result });
+    const canonicalResult = canonicalPointResult(result);
+    const payloadHash = await pointPayloadHash({ moduleId, operationId, kind, movements, result: canonicalResult.value });
     const applied = this.ctx.storage.transactionSync(() => applyPointOperationSync(
       this.ctx.storage.sql,
       moduleId,
@@ -3156,6 +3158,7 @@ export class ChannelObject extends DurableObject<Env> {
       result,
       payloadHash,
       new Date().toISOString(),
+      canonicalResult,
     ));
     return { replayed: applied.replayed, result: applied.result, balances: applied.balances };
   }
@@ -3495,7 +3498,9 @@ export class ChannelObject extends DurableObject<Env> {
         const hash = hashes.get(value.operationId);
         if (hash === undefined) throw new Error("refund_retry_required");
         return hash;
-      }, now, lastDisabledRevision);
+      }, now, lastDisabledRevision, (roundId) => {
+        this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
+      });
       if (!closed && cancellationRevision !== null) this.ensurePointCancellationNoticeAlarmsSync();
       return applied;
     });

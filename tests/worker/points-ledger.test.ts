@@ -77,6 +77,53 @@ describe("points ledger in the worker Durable Object", () => {
     await expect(object.pointSummary(pointTestModule)).resolves.toMatchObject({ circulation: 85, accounts: 1 });
   });
 
+  it(`nets large repeated deltas exactly before booking (${testCard("same-account movements use exact net totals even when intermediate sums exceed safe integer precision", "viewer and house deltas drift by one after [M, 2, -M] cancellation")})`, async () => {
+    const channelId = `points-large-netting-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    const max = Number.MAX_SAFE_INTEGER;
+
+    await object.applyPointOperation(pointTestModule, "msg:large-net", "bonus", [
+      { accountId: "viewer-a", delta: max },
+      { accountId: "__house", delta: -max },
+      { accountId: "viewer-a", delta: 2 },
+      { accountId: "__house", delta: -2 },
+      { accountId: "viewer-a", delta: -max },
+      { accountId: "__house", delta: max },
+    ], { reason: "exact netting" });
+
+    await expect(runPointObject(object, (_target, state) => state.storage.sql.exec<{
+      account_id: string;
+      delta: number;
+      balance_after: number;
+    }>(
+      "SELECT account_id, delta, balance_after FROM point_ledger WHERE operation_id = ? ORDER BY account_id",
+      "msg:large-net",
+    ).toArray())).resolves.toEqual([
+      { account_id: "__house", delta: -2, balance_after: -2 },
+      { account_id: "viewer-a", delta: 2, balance_after: 2 },
+    ]);
+    await expect(object.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(2);
+    await expect(object.pointHistory(pointTestModule, "viewer-a")).resolves.toMatchObject({
+      rows: [expect.objectContaining({ operationId: "msg:large-net", delta: 2, balanceAfter: 2 })],
+    });
+  });
+
+  it(`returns the same JSON result on first execution and replay (${testCard("an operation returns exactly the representation persisted as JSON", "undefined returns before persistence as undefined and replays as null")})`, async () => {
+    const channelId = `points-result-canonical-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    const movements = [{ accountId: "viewer-a", delta: 1 }, { accountId: "__house", delta: -1 }];
+
+    const first = await object.applyPointOperation(pointTestModule, "msg:undefined-result", "bonus", movements, undefined);
+    const replay = await object.applyPointOperation(pointTestModule, "msg:undefined-result", "bonus", movements, undefined);
+
+    expect(first.replayed).toBe(false);
+    expect(first.result).toBeNull();
+    expect(replay.replayed).toBe(true);
+    expect(replay.result).toBe(first.result);
+  });
+
   it(`rejects an overdraft without writing either side of the transfer (${testCard("a failed apply rolls back the viewer and house together", "the viewer goes below zero or the house is credited")})`, async () => {
     const channelId = `points-overdraft-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
