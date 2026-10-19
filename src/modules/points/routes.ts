@@ -101,6 +101,14 @@ pointsRoutes.get("/accounts", async (context) => {
   return context.json(result);
 });
 
+pointsRoutes.get("/accounts/:accountId", async (context) => {
+  const accountId = context.req.param("accountId");
+  if (!isPointViewerAccountId(accountId)) return context.json({ error: "invalid_account" }, 400);
+  const account = await points(context).getAccount(accountId);
+  if (account === null) return context.json({ error: "points_account_missing" }, 404);
+  return context.json(account);
+});
+
 pointsRoutes.get("/accounts/:accountId/history", async (context) => {
   const accountId = context.req.param("accountId");
   const result = await points(context).history(accountId, context.req.query("cursor"), 25);
@@ -126,10 +134,10 @@ pointsRoutes.post("/accounts/:accountId/adjust", async (context) => {
   if (!isPointViewerAccountId(accountId)) return context.json({ error: "invalid_account" }, 400);
   const access = points(context);
   if (await access.getAccount(accountId) === null) return context.json({ error: "account_not_found" }, 404);
+  const delta = body.delta as number;
   const actor = context.get("actor");
   const actorLogin = context.get("session").login ?? actor.userId;
   const operationId = `admin:${body.operationId}`;
-  const delta = body.delta as number;
   const reason = body.reason.trim();
   const actorId = context.get("actor").userId;
   const previous = (await access.pendingAudits()).find((item) => item.operationId === operationId);
@@ -155,6 +163,10 @@ pointsRoutes.post("/accounts/:accountId/adjust", async (context) => {
       return context.json({ error: "operation_conflict" }, 409);
     }
     return context.json({ balance: await access.balance(accountId), auditPending: false });
+  }
+
+  if (!previousMatches && !Number.isSafeInteger((await access.balance(accountId)) + delta)) {
+    return context.json({ error: "balance_overflow" }, 400);
   }
 
   const detail: PendingAdjustment = previousMatches ? previousDetail : {
@@ -187,6 +199,7 @@ pointsRoutes.post("/accounts/:accountId/adjust", async (context) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("insufficient_balance")) return context.json({ error: "insufficient_balance" }, 400);
+    if (message.includes("balance_overflow")) return context.json({ error: "balance_overflow" }, 400);
     if (message.includes("operation_conflict")) return context.json({ error: "operation_conflict" }, 409);
     if (message.includes("invalid_account")) return context.json({ error: "points_account_missing" }, 404);
     throw error;

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { moduleQueryKey, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { dashboardCommonTexts, dashboardLanguage, formatNumber, pointsDashboardTexts } from "../../../dashboard/locale";
 import { ActionMenu } from "../../../dashboard/ui/ActionMenu";
 import { CollectionPage } from "../../../dashboard/ui/CollectionPage";
@@ -17,8 +17,8 @@ import { PageHeader } from "../../../dashboard/ui/PageHeader";
 import type { ModulePanelProperties } from "../../contract";
 import type { PointsSettings } from "../contracts";
 import { DEFAULT_POINTS_SETTINGS, MAX_POINTS_ADJUSTMENT_REASON_LENGTH, pointsSettingsSchema } from "../contracts";
-import type { PointsAccount, PointsHistoryRow } from "./service";
-import { adjustPoints, loadPointsAccounts, loadPointsHistory, loadPointsRank, loadPointsSettings, loadPointsSummary, savePointsSettings } from "./service";
+import type { PointsAccount, PointsAccountDetail, PointsHistoryRow } from "./service";
+import { adjustPoints, loadPointsAccount, loadPointsAccounts, loadPointsHistory, loadPointsRank, loadPointsSettings, loadPointsSummary, savePointsSettings } from "./service";
 import "./panel.css";
 
 const randomId = (): string => crypto.randomUUID();
@@ -49,6 +49,17 @@ interface CorrectionRequest {
   reason: string;
 }
 
+interface PointsSettingsEdit {
+  revision: number;
+  base: PointsSettings;
+  settings: PointsSettings;
+}
+
+interface SelectedAccount {
+  accountId: string;
+  detail: PointsAccount;
+}
+
 interface AccountCorrectionState {
   pending: CorrectionRequest | null;
   committedBalance: number | null;
@@ -70,10 +81,11 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
   const [accountCursorStack, setAccountCursorStack] = useState<(string | undefined)[]>([]);
   const [historyCursor, setHistoryCursor] = useState<string | undefined>();
   const [historyCursorStack, setHistoryCursorStack] = useState<(string | undefined)[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedAccount, setSelectedAccount] = useState<SelectedAccount | null>(null);
+  const selectedId = selectedAccount?.accountId ?? null;
   const selectedIdRef = useRef<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsEdit, setSettingsEdit] = useState<{ revision: number; settings: PointsSettings } | null>(null);
+  const [settingsEdit, setSettingsEdit] = useState<PointsSettingsEdit | null>(null);
   const [settingsError, setSettingsError] = useState<string | undefined>();
   const [settingsPending, setSettingsPending] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
@@ -91,7 +103,13 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
     (signal) => loadPointsAccounts(channelId, sort, search, accountCursor, signal));
   const summaryQuery = useModuleQuery(channelId, "points", "summary", (signal) => loadPointsSummary(channelId, signal));
   const settingsQuery = useModuleQuery(channelId, "points", "settings", (signal) => loadPointsSettings(channelId, signal));
-  const selected = accountsQuery.data?.rows.find((account) => account.accountId === selectedId) ?? null;
+  const accountDetailQuery = useModuleQuery(channelId, "points", `account:${selectedId ?? "none"}`,
+    (signal) => selectedId === null ? Promise.resolve(null) : loadPointsAccount(channelId, selectedId, signal),
+    { enabled: selectedId !== null });
+  const selected = useMemo(() => selectedAccount === null ? null : {
+    ...selectedAccount.detail,
+    ...(accountDetailQuery.data ?? {}),
+  }, [accountDetailQuery.data, selectedAccount]);
   const selectedCorrection = selected === null ? emptyCorrectionState() : corrections[selected.accountId] ?? emptyCorrectionState();
   const selectedBalance = selected === null ? 0 : selectedCorrection.committedBalance ?? selected.balance;
   const rankQuery = useModuleQuery(channelId, "points", `rank:${selectedId ?? "none"}`,
@@ -107,18 +125,19 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
   const pendingAdjustment = selectedCorrection.pending;
   const adjustPending = selectedCorrection.submitting;
   const correctionValid = selected !== null && Number.isSafeInteger(deltaNumber) && delta.trim().length > 0 && deltaNumber !== 0 &&
-    selectedBalance + deltaNumber >= 0 && reason.trim().length > 0 && reason.trim().length <= MAX_POINTS_ADJUSTMENT_REASON_LENGTH;
+    Number.isSafeInteger(selectedBalance + deltaNumber) && selectedBalance + deltaNumber >= 0 && reason.trim().length > 0 && reason.trim().length <= MAX_POINTS_ADJUSTMENT_REASON_LENGTH;
   // Once booked (audit pending), selectedBalance already includes the draft amount.
   const newBalance = selectedCorrection.committedBalance !== null || !Number.isSafeInteger(deltaNumber) ? selectedBalance : selectedBalance + deltaNumber;
+  const balanceOverflow = selected !== null && Number.isSafeInteger(deltaNumber) && !Number.isSafeInteger(selectedBalance + deltaNumber);
   const settingsDataRevision = settingsQuery.data?.revision ?? null;
-  const settingsRevision = settingsDataRevision === null
-    ? settingsEdit?.revision ?? null
-    : Math.max(settingsDataRevision, settingsEdit?.revision ?? settingsDataRevision);
-  const settingsDraft = settingsEdit !== null && (settingsDataRevision === null || settingsEdit.revision >= settingsDataRevision)
+  const settingsDirty = settingsEdit !== null && JSON.stringify(settingsEdit.settings) !== JSON.stringify(settingsEdit.base);
+  const settingsRevision = settingsDirty ? settingsEdit.revision : settingsDataRevision ?? settingsEdit?.revision ?? null;
+  const settingsDraft = settingsDirty
     ? settingsEdit.settings
-    : settingsQuery.data?.settings ?? DEFAULT_POINTS_SETTINGS;
-  const settingsDirty = settingsQuery.data !== undefined && settingsRevision === settingsQuery.data.revision &&
-    JSON.stringify(settingsDraft) !== JSON.stringify(settingsQuery.data.settings);
+    : settingsQuery.data !== undefined && (settingsEdit === null || settingsQuery.data.revision >= settingsEdit.revision)
+      ? settingsQuery.data.settings
+      : settingsEdit?.settings ?? DEFAULT_POINTS_SETTINGS;
+  const settingsConflict = settingsDirty && settingsDataRevision !== null && settingsDataRevision > settingsEdit.revision;
   const settingsValid = pointsSettingsSchema.safeParse(settingsDraft).success;
 
   const resetAccountPage = (): void => {
@@ -143,23 +162,23 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
     resetAccountPage();
   };
 
-  const selectAccount = (accountId: string): void => {
-    if (selectedId !== accountId) {
+  const selectAccount = (account: PointsAccount): void => {
+    if (selectedId !== account.accountId) {
       setHistoryCursor(undefined);
       setHistoryCursorStack([]);
-      const pending = corrections[accountId]?.pending;
+      const pending = corrections[account.accountId]?.pending;
       setDelta(pending === null || pending === undefined ? "" : String(pending.delta));
       setReason(pending?.reason ?? "");
     }
-    selectedIdRef.current = accountId;
-    setSelectedId(accountId);
+    selectedIdRef.current = account.accountId;
+    setSelectedAccount({ accountId: account.accountId, detail: account });
     setSettingsOpen(false);
   };
 
   const closeDetail = (): void => {
     resetDetailDraft();
     selectedIdRef.current = null;
-    setSelectedId(null);
+    setSelectedAccount(null);
     setSettingsOpen(false);
   };
 
@@ -172,13 +191,13 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
   ];
 
   const saveSettings = useCallback(async (): Promise<void> => {
-    if (!canManage || settingsRevision === null || settingsPending || !settingsDirty || !settingsValid) return;
+    if (!canManage || settingsRevision === null || settingsPending || !settingsDirty || settingsConflict || !settingsValid) return;
     setSettingsPending(true);
     setSettingsError(undefined);
     setSettingsSaved(false);
     try {
       const result = await savePointsSettings(channelId, settingsRevision, settingsDraft);
-      setSettingsEdit({ revision: result.revision, settings: result.settings });
+      setSettingsEdit({ revision: result.revision, base: result.settings, settings: result.settings });
       await queryClient.invalidateQueries({ queryKey: ["channel", channelId, "module", "points", "summary"] });
       await queryClient.invalidateQueries({ queryKey: ["channel", channelId, "module", "points", "settings"] });
       setSettingsSaved(true);
@@ -187,11 +206,11 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
     } finally {
       setSettingsPending(false);
     }
-  }, [canManage, channelId, labels.settingsError, queryClient, settingsDirty, settingsDraft, settingsPending, settingsRevision, settingsValid]);
+  }, [canManage, channelId, labels.settingsError, queryClient, settingsConflict, settingsDirty, settingsDraft, settingsPending, settingsRevision, settingsValid]);
 
   const discardSettings = (): void => {
     if (settingsQuery.data === undefined) return;
-    setSettingsEdit({ revision: settingsQuery.data.revision, settings: settingsQuery.data.settings });
+    setSettingsEdit(null);
     setSettingsError(undefined);
     setSettingsSaved(false);
   };
@@ -201,6 +220,13 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
     updateCorrection(accountId, { submitting: true, error: undefined, status: undefined });
     try {
       const result = await adjustPoints(channelId, accountId, request.operationId, request.delta, request.reason);
+      setSelectedAccount((current) => current?.accountId === accountId
+        ? { ...current, detail: { ...current.detail, balance: result.balance } }
+        : current);
+      const accountQueryKey = moduleQueryKey(channelId, "points", `account:${accountId}`);
+      await queryClient.cancelQueries({ queryKey: accountQueryKey, exact: true });
+      queryClient.setQueryData<PointsAccountDetail | null>(accountQueryKey, (current) =>
+        current === undefined || current === null ? current : { ...current, balance: result.balance });
       if (result.auditPending) {
         updateCorrection(accountId, { committedBalance: result.balance, pending: request, status: labels.correctionBookedPending });
       } else {
@@ -216,13 +242,13 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
       const definiteRejection = error instanceof PanelApiError && error.status >= 400 && error.status < 500;
       updateCorrection(accountId, {
         pending: definiteRejection ? null : request,
-        error: code === "insufficient_balance" ? labels.negative : labels.correctionError,
+        error: code === "insufficient_balance" ? labels.negative : code === "balance_overflow" ? labels.balanceOverflow : labels.correctionError,
         status: undefined,
       });
     } finally {
       updateCorrection(accountId, { submitting: false });
     }
-  }, [canManage, channelId, corrections, labels.correctionBookedPending, labels.correctionError, labels.negative, labels.saved, queryClient, updateCorrection]);
+  }, [canManage, channelId, corrections, labels.balanceOverflow, labels.correctionBookedPending, labels.correctionError, labels.negative, labels.saved, queryClient, updateCorrection]);
 
   const saveAdjustment = useCallback((): void => {
     if (!correctionValid) return;
@@ -267,6 +293,11 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
         pending: settingsPending,
         saved: settingsSaved,
         ...(settingsError === undefined ? {} : { error: settingsError }),
+        ...(settingsConflict ? { conflict: {
+          message: labels.settingsConflict,
+          reloadLabel: labels.settingsReload,
+          onReload: discardSettings,
+        } } : {}),
         saveDisabled: !canManage || settingsRevision === null || !settingsValid,
         onSave: () => { void saveSettings(); },
         onDiscard: discardSettings,
@@ -287,7 +318,8 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
         onChange={(value) => {
           setSettingsSaved(false);
           setSettingsEdit({
-            revision: settingsRevision ?? 0,
+            revision: settingsDirty ? settingsEdit.revision : settingsRevision ?? 0,
+            base: settingsDirty ? settingsEdit.base : settingsDraft,
             settings: { ...settingsDraft, [key]: type === "number" ? Number(value) : value },
           });
         }}
@@ -340,7 +372,7 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
             resetDetailDraft();
             setSettingsOpen(true);
             selectedIdRef.current = null;
-            setSelectedId(null);
+            setSelectedAccount(null);
           } }]}
         />
       </div>
@@ -351,15 +383,16 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
         <Field label={labels.amount} value={delta} onChange={(value) => {
           setDelta(value);
           updateCorrection(selected.accountId, { error: undefined, status: undefined });
-        }} disabled={!canManage || adjustPending || pendingAdjustment !== null} mono {...(newBalance < 0 ? { error: labels.negative } : {})} />
+        }} disabled={!canManage || adjustPending || pendingAdjustment !== null} mono
+          {...(newBalance < 0 ? { error: labels.negative } : balanceOverflow ? { error: labels.balanceOverflow } : {})} />
         <Field label={labels.reason} value={reason} onChange={(value) => {
           setReason(value);
           updateCorrection(selected.accountId, { error: undefined, status: undefined });
         }} disabled={!canManage || adjustPending || pendingAdjustment !== null} required
           {...(reason.trim().length > MAX_POINTS_ADJUSTMENT_REASON_LENGTH ? { error: labels.reasonTooLong } : {})} />
       </div>
-      <p className={`points-correction__preview${newBalance < 0 ? " is-invalid" : ""}`} role="status">
-        {labels.newBalance(newBalance, settingsQuery.data?.settings.currencyName ?? DEFAULT_POINTS_SETTINGS.currencyName)}
+      <p className={`points-correction__preview${newBalance < 0 || balanceOverflow ? " is-invalid" : ""}`} role="status">
+        {balanceOverflow ? labels.balanceOverflow : labels.newBalance(newBalance, settingsQuery.data?.settings.currencyName ?? DEFAULT_POINTS_SETTINGS.currencyName)}
       </p>
     </section>
     <section className="points-history" aria-labelledby="points-history-title">
@@ -449,7 +482,7 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
         className="points-account-row"
         aria-selected={selectedId === account.accountId}
         aria-current={selectedId === account.accountId ? "true" : undefined}
-        onClick={() => { selectAccount(account.accountId); }}
+        onClick={() => { selectAccount(account); }}
       >
         <span className="points-account-row__login">{account.login}</span>
         <span className="points-account-row__balance mono">{formatNumber(sort === "month" ? account.monthNet ?? 0 : account.balance, locale)}</span>
@@ -481,7 +514,7 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
       resetDetailDraft();
       setSettingsOpen((value) => !value);
       selectedIdRef.current = null;
-      setSelectedId(null);
+      setSelectedAccount(null);
     }}>{labels.settings}</Button>
     <Button variant="neutral" onClick={createTimer}><Icon name="clock-hour-4" size={16} />{labels.timer}</Button>
   </div>;

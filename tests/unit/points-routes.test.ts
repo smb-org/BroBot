@@ -44,6 +44,7 @@ const createHarness = (options: { role?: "manager" | "operator"; failFirstAudit?
       const userMovement = movements.find((movement) => movement.accountId !== "__house");
       if (userMovement === undefined) throw new Error("invalid_account");
       if (balance + (userMovement.delta ?? 0) < 0) throw new Error("insufficient_balance");
+      if (!Number.isSafeInteger(balance + (userMovement.delta ?? 0))) throw new Error("balance_overflow");
       const detail = result as Operation;
       operations.set(operationId, detail);
       if (payloadIdentity !== undefined) operationIdentities.set(operationId, payloadIdentity);
@@ -116,6 +117,23 @@ describe("points routes", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: "insufficient_balance" });
     expect(harness.pointAccess.apply).toHaveBeenCalledOnce();
+    expect(harness.operations.size).toBe(0);
+    expect(harness.pending.size).toBe(0);
+    expect(harness.auditWriter).not.toHaveBeenCalled();
+  });
+
+  it("rejects a correction that exceeds the safe balance range before booking (protects=balance overflow is a definite response and never starts a ledger operation; fails_when=the route returns 500 or writes a pending or completed operation; no_claim=the ledger is represented by a safe-range in-memory double)", async () => {
+    const harness = createHarness({ initialBalance: Number.MAX_SAFE_INTEGER });
+    await insertChannel(harness.database, CHANNEL_ID);
+
+    const response = await harness.app.fetch(harness.request("/accounts/viewer_demo/adjust", {
+      operationId: "01234567-89ab-42cd-8abc-0123456789ab", delta: 1, reason: "manual correction",
+    }), { DB: harness.database as unknown as D1Database });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "balance_overflow" });
+    expect(harness.pointAccess.balance).toHaveBeenCalledExactlyOnceWith("viewer_demo");
+    expect(harness.pointAccess.apply).not.toHaveBeenCalled();
     expect(harness.operations.size).toBe(0);
     expect(harness.pending.size).toBe(0);
     expect(harness.auditWriter).not.toHaveBeenCalled();
@@ -302,6 +320,17 @@ describe("points routes", () => {
     expect(response.status).toBe(403);
     expect(harness.pointAccess.apply).not.toHaveBeenCalled();
     expect(harness.auditWriter).not.toHaveBeenCalled();
+  });
+
+  it("loads an exact account detail by viewer ID (protects=selected accounts can refresh independently of their current page; fails_when=the route lists or returns a different account; no_claim=account detail comes from the in-memory ledger double)", async () => {
+    const harness = createHarness({ role: "operator" });
+
+    const response = await harness.app.fetch(harness.request("/accounts/viewer_demo"), { DB: harness.database as unknown as D1Database });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ accountId: "viewer_demo", login: "pixelpilz", balance: 50 });
+    expect(harness.pointAccess.getAccount).toHaveBeenCalledExactlyOnceWith("viewer_demo");
+    expect(harness.pointAccess.listAccounts).not.toHaveBeenCalled();
   });
 
   it("lists account pages and history through read-only ledger calls (protects=member reads expose the requested sort, search, and page sizes; fails_when=route skips the read API or forwards a wrong query; no_claim=results are supplied by an in-memory ledger double)", async () => {

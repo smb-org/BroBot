@@ -19,6 +19,8 @@ export interface PointsAccount {
   monthNet: number | null;
 }
 
+export type PointsAccountDetail = Pick<PointsAccount, "accountId" | "login" | "balance">;
+
 export interface PointsHistoryRow {
   operationId: string;
   kind: string;
@@ -43,6 +45,9 @@ export const loadPointsAccounts = async (channelId: string, sort: "balance" | "m
   if (cursor !== undefined) params.set("cursor", cursor);
   return readJson<{ rows: PointsAccount[]; cursor?: string }>(await fetch(`${basePath(channelId)}/accounts?${params.toString()}`, signal === undefined ? undefined : { signal }));
 };
+
+export const loadPointsAccount = async (channelId: string, accountId: string, signal?: AbortSignal): Promise<PointsAccountDetail> =>
+  readJson<PointsAccountDetail>(await fetch(`${basePath(channelId)}/accounts/${encodeURIComponent(accountId)}`, signal === undefined ? undefined : { signal }));
 
 export const loadPointsSummary = async (channelId: string, signal?: AbortSignal): Promise<PointsSummary> =>
   readJson<PointsSummary>(await fetch(`${basePath(channelId)}/summary`, signal === undefined ? undefined : { signal }));

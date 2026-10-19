@@ -72,6 +72,13 @@ const installPointsPage = async (page: Page, initialAccounts: Account[], include
     if (path === "/accounts" && route.request().method() === "GET") {
       return json({ rows: [...accounts].sort((left, right) => right.balance - left.balance), cursor: undefined });
     }
+    const accountMatch = path.match(/^\/accounts\/([^/]+)$/u);
+    if (accountMatch !== null && route.request().method() === "GET") {
+      const account = accounts.find((entry) => entry.accountId === decodeURIComponent(accountMatch[1] ?? ""));
+      return account === undefined
+        ? json({ error: "points_account_missing" }, 404)
+        : json({ accountId: account.accountId, login: account.login, balance: account.balance });
+    }
     if (path.endsWith("/rank")) return json({ rank: 3, net: 340 });
     if (path.endsWith("/history")) {
       const accountId = path.split("/").at(-2) ?? "";
