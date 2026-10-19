@@ -121,6 +121,7 @@ export function SlotReelTable({
   const [unavailable, setUnavailable] = useState(false);
   const [pickerRow, setPickerRow] = useState<number | null>(null);
   const [reconnectDialogOpen, setReconnectDialogOpen] = useState(false);
+  const [reconnectAfterPickerClose, setReconnectAfterPickerClose] = useState(false);
   useEffect(() => {
     let active = true;
     const channelId = parsedContext?.channelId;
@@ -156,13 +157,22 @@ export function SlotReelTable({
     icon: emote.imageUrl === undefined ? <Icon name="styleFont" /> : <img src={emote.imageUrl} alt="" loading="lazy" />,
     value: emote,
   }));
+  const requestReconnect = (): void => {
+    setReconnectAfterPickerClose(true);
+    setPickerRow(null);
+  };
+  const handlePickerCloseComplete = (): void => {
+    if (!reconnectAfterPickerClose) return;
+    setReconnectAfterPickerClose(false);
+    setReconnectDialogOpen(true);
+  };
   const groups: GroupedPickerGroup<SlotEmote>[] = [
     { id: "emoji", label: copy.emoji, entries: emojiEntries, footer: statusLine("ok", emojiEntries.length, language, "emoji") },
     {
       id: "twitch",
       label: copy.twitch,
       entries: twitchEntries,
-      footer: statusLine(parsedContext?.channelId === undefined || unavailable ? "unavailable" : loading ? "loading" : emotes?.twitch.status ?? "unavailable", twitchEntries.length, language, "twitch", () => setReconnectDialogOpen(true)),
+      footer: statusLine(parsedContext?.channelId === undefined || unavailable ? "unavailable" : loading ? "loading" : emotes?.twitch.status ?? "unavailable", twitchEntries.length, language, "twitch", requestReconnect),
     },
   ];
   const status = rate === null ? "off" : rate.status === "locked" ? "error" : rate.status === "warning" ? "warn" : "ok";
@@ -231,6 +241,7 @@ export function SlotReelTable({
             messages={pickerMessages(language)}
             opened={pickerRow === index}
             onOpenedChange={(opened) => setPickerRow(opened ? index : null)}
+            onCloseComplete={handlePickerCloseComplete}
             onSelect={(entry) => choose(index, entry)}
             disabled={disabled || readOnly}
             trigger={<Button variant="neutral" className="slot-symbol-trigger" ariaLabel={`${copy.chooseSymbol}: ${symbol.name}`} disabled={disabled || readOnly}>{copy.chooseSymbol}</Button>}
@@ -240,7 +251,7 @@ export function SlotReelTable({
       </div>
     </div>
     <div className="slot-rate-line" data-status={rateStatus}>
-      <span>{copy.quote} <span className="slot-rate-value">{rate === null ? copy.quoteInvalid : formatSlotPayoutRate(rate, language)}</span></span>
+      <span>{copy.quote} <span className="slot-rate-value">{rate === null ? "–" : formatSlotPayoutRate(rate, language)}</span></span>
       <StatusLed state={status} label={rateLabel} />
     </div>
     <FieldError message={rate?.status === "locked" && parsedContext?.lastTouchedField === "symbols" ? copy.quoteFieldError : error} />

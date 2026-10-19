@@ -572,7 +572,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       for (const field of fields) {
         const current = currentValue[field.key];
         if (field.kind === "number" && (typeof current !== "number" || !Number.isInteger(current) || current < field.min || current > field.max)) {
-          errors[field.key] = typeof current !== "number" ? copy.numberMissing : copy.invalidMessage;
+          errors[field.key] = typeof current !== "number" ? copy.numberMissing : copy.fields[field.key]?.invalidError ?? copy.invalidMessage;
         } else if (field.kind === "number" && field.validate !== undefined &&
             (includeUntouched || validationAttempted || touchedFields.has(field.key)) &&
             !field.validate(current as number, currentValue)) {
@@ -603,7 +603,17 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       if (!parsed.success) {
         for (const issue of parsed.error.issues) {
           const key = typeof issue.path[0] === "string" ? issue.path[0] : "symbols";
-          errors[key] = copy.fields[key]?.invalidError ?? copy.invalidMessage;
+          const slotCopy = emoteSlotsCatalog[language].panel;
+          const nestedField = issue.path[2];
+          errors[key] = issue.message === "minimum_exceeds_maximum"
+            ? slotCopy.minimumExceedsMaximum
+            : issue.message === "default_outside_stake_range"
+              ? slotCopy.defaultOutsideStakeRange
+              : key === "symbols" && nestedField === "weight"
+                ? slotCopy.weightError
+                : key === "symbols" && nestedField === "triple"
+                  ? slotCopy.tripleError
+                  : copy.fields[key]?.invalidError ?? copy.invalidMessage;
         }
       }
     }

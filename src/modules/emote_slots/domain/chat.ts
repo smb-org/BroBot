@@ -7,7 +7,7 @@ export type SlotStakeParseResult =
   | { ok: false; reason: "not_command" | "invalid" | "out_of_range" };
 
 export const parseSlotStake = (text: string, settings: Pick<EmoteSlotSettings, "defaultStake" | "minStake" | "maxStake">): SlotStakeParseResult => {
-  const match = /^!slot(?:\s+([\s\S]*))?$/iu.exec(text.trim());
+  const match = /^!slot(?:\s([\s\S]*))?$/iu.exec(text.trim());
   if (match === null) return { ok: false, reason: "not_command" };
   const argument = match[1];
   if (argument === undefined || argument.trim().length === 0) return { ok: true, stake: settings.defaultStake };
