@@ -5,8 +5,11 @@ import type { BotModule, ModuleEvent, ModuleExecutionContext, ModuleResult } fro
 import { belaboxModule } from "../../src/modules/belabox";
 import { BELABOX_DEFAULT_SETTINGS, BELABOX_STATS_URL_SECRET } from "../../src/modules/belabox/contracts";
 import { channelEventsModule } from "../../src/modules/channel_events";
+import { chatVotingModule } from "../../src/modules/chat_voting";
+import { DEFAULT_CHAT_VOTING_SETTINGS } from "../../src/modules/chat_voting/contracts";
 import { pointsModule } from "../../src/modules/points";
 import { DEFAULT_POINTS_SETTINGS } from "../../src/modules/points/contracts";
+import { pointsCatalog } from "../../src/modules/points/locale";
 import { dispatchEventSubNotification, needsActiveChatterTracking, selectModulesForEvent } from "../../src/worker/dispatch";
 import {
   upsertBotIdentity,
@@ -329,6 +332,51 @@ describe("module selection", () => {
 });
 
 describe("dispatch and execution", () => {
+  it("appends a pending welcome to the real unthreaded !vote response (protects=the next command response produced for the viewer's chat message carries the welcome and acknowledges it after delivery even without Twitch threading; fails_when=the dispatcher requires replyToMessageId and sends the vote response without the welcome or acknowledgement; no_claim=chat delivery uses the test HTTP transport)", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      await activate(database, "kanal-a", pointsModule.id);
+      await activate(database, "kanal-a", chatVotingModule.id);
+      await database.prepare("UPDATE channel_modules SET settings = ? WHERE channel_id = ? AND module_id = ?")
+        .bind(JSON.stringify(DEFAULT_POINTS_SETTINGS), "kanal-a", pointsModule.id).run();
+      await database.prepare("UPDATE channel_modules SET settings = ? WHERE channel_id = ? AND module_id = ?")
+        .bind(JSON.stringify(DEFAULT_CHAT_VOTING_SETTINGS), "kanal-a", chatVotingModule.id).run();
+      const runtime = environment(database);
+      const fetcher = sent();
+
+      await dispatchEventSubNotification(runtime, {
+        channelId: "kanal-a",
+        subscriptionType: CHAT_TYPE,
+        triggerId: "unthreaded-vote-welcome",
+        payload: {
+          broadcaster_user_id: "kanal-a",
+          broadcaster_user_login: "kanal_demo",
+          chatter_user_id: "viewer-1",
+          chatter_user_login: "nachtfalke",
+          message_id: "vote-message-486",
+          badges: [{ set_id: "moderator", id: "1", info: "" }],
+          message: { text: "!vote help", fragments: [{ type: "text", text: "!vote help" }] },
+        },
+        receivedAt: NOW,
+        eventSubTimestamp: NOW,
+      }, fetcher, [pointsModule, chatVotingModule]);
+
+      const chatBody = fetcher.mock.calls.map((_call, index) => bodyOf(fetcher, index))
+        .find((body) => typeof body.message === "string");
+      expect(String(chatBody?.message)).toContain("!vote");
+      expect(String(chatBody?.message)).toContain(pointsCatalog.de.chat.startBonus(100, DEFAULT_POINTS_SETTINGS.currencyName));
+      expect(chatBody).not.toHaveProperty("reply_parent_message_id");
+      const object = runtime.CHANNEL.get(runtime.CHANNEL.idFromName("kanal-a")) as unknown as {
+        acknowledgePointWelcome: ReturnType<typeof vi.fn>;
+      };
+      expect(object.acknowledgePointWelcome).toHaveBeenCalledOnce();
+      expect(object.acknowledgePointWelcome).toHaveBeenCalledWith("points", "viewer-1");
+    } finally {
+      database.close();
+    }
+  });
+
   it("sends a real points chat event as a threaded welcome reply (protects=the first-contact note stays on the viewer's matching bot reply; fails_when=the note is omitted or sent as a separate message; no_claim=chat delivery uses the test HTTP transport)", async () => {
     const database = new TestD1Database();
     try {

@@ -234,6 +234,51 @@ describe("points panel", () => {
     expect(screen.getByLabelText("Amount ±")).toBeEnabled();
   });
 
+  it("reuses a booked correction after an authentication failure and recovery (protects=an uncertain correction keeps its exact operation identity and payload until the ledger confirms success or definite rejection; fails_when=a 401/403 clears retry state, a new operation id is generated, or the ledger balance changes twice; no_claim=the panel uses the real UI and an idempotent in-memory ledger behind the service boundary)", async () => {
+    let ledgerBalance = 100;
+    const bookings = new Map<string, number>();
+    const attempts: { operationId: string; delta: number; reason: string }[] = [];
+    mocks.loadPointsAccounts.mockResolvedValue({ rows: [{ accountId: "viewer_demo", login: "pixelpilz", balance: 100, monthNet: 0 }] });
+    mocks.loadPointsAccount.mockImplementation(() => Promise.resolve({ accountId: "viewer_demo", login: "pixelpilz", balance: ledgerBalance }));
+    mocks.adjustPoints.mockImplementation((_channelId: string, _accountId: string, operationId: string, delta: number, reason: string) => {
+      attempts.push({ operationId, delta, reason });
+      const existingBooking = bookings.get(operationId);
+      if (attempts.length === 2) return Promise.reject(new PanelApiError(401, "unauthorized", { error: "unauthorized" }));
+      if (existingBooking !== undefined) return Promise.resolve({ balance: existingBooking, auditPending: false });
+      ledgerBalance += delta;
+      bookings.set(operationId, ledgerBalance);
+      return Promise.resolve({ balance: ledgerBalance, auditPending: attempts.length === 1 });
+    });
+
+    const view = renderWithQuery(<UiProvider><PointsPanel channelId="kanal_demo" language="en" canManage /></UiProvider>);
+    const firstAccount = await screen.findByText("pixelpilz", { exact: true });
+    fireEvent.click(firstAccount.closest("button") as HTMLButtonElement);
+    fireEvent.change(screen.getByLabelText("Amount ±"), { target: { value: "10" } });
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "welcome correction" } });
+
+    const detailHeader = view.container.querySelector(".points-detail__header");
+    if (!(detailHeader instanceof HTMLElement)) throw new Error("The selected account detail header is missing.");
+    const header = within(detailHeader);
+    fireEvent.click(header.getByRole("button", { name: "Save" }));
+    fireEvent.click(await header.findByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(header.getByRole("status").querySelector(".ui-save-bar__message")).toHaveTextContent("could not be saved"));
+    expect(header.getByRole("button", { name: "Retry" })).toBeEnabled();
+    expect(screen.getByLabelText("Amount ±")).toBeDisabled();
+    expect(screen.getByLabelText("Reason")).toBeDisabled();
+
+    fireEvent.click(header.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(header.getByRole("status").querySelector(".ui-save-bar__message")).toHaveTextContent("Saved"));
+
+    expect(attempts).toHaveLength(3);
+    expect(attempts[0]?.operationId).toBeTruthy();
+    expect(attempts.map(({ operationId }) => operationId)).toEqual(Array(3).fill(attempts[0]?.operationId));
+    expect(attempts.map(({ delta, reason }) => ({ delta, reason }))).toEqual(Array(3).fill({ delta: 10, reason: "welcome correction" }));
+    expect(ledgerBalance).toBe(110);
+    expect(bookings).toHaveLength(1);
+    expect(view.container.querySelector(".points-detail__balance")).toHaveTextContent("110");
+  });
+
   it("blocks an unsafe resulting balance before calling the correction API (protects=the client rejects a correction whose resulting balance is outside the safe integer range; fails_when=the Save action stays enabled or the API receives an unsafe balance; no_claim=the selected balance is supplied by an account service mock)", async () => {
     const account = { accountId: "viewer_edge", login: "funkenflug", balance: Number.MAX_SAFE_INTEGER, monthNet: 0 };
     mocks.loadPointsAccounts.mockResolvedValue({ rows: [account] });

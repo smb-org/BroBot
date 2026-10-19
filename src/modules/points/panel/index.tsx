@@ -43,6 +43,9 @@ const monthLabel = (month: string, language: "de" | "en"): string => new Intl.Da
   month: "long", timeZone: "UTC",
 }).format(new Date(`${month}-01T00:00:00.000Z`));
 
+const isDefiniteCorrectionRejection = (error: unknown): boolean => error instanceof PanelApiError && error.status === 400 &&
+  ["points_adjustment_invalid", "invalid_account", "insufficient_balance", "balance_overflow"].includes(error.code ?? "");
+
 interface CorrectionRequest {
   operationId: string;
   delta: number;
@@ -247,9 +250,8 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
       }
     } catch (error) {
       const code = error instanceof PanelApiError ? error.code : "";
-      const definiteRejection = error instanceof PanelApiError && error.status >= 400 && error.status < 500;
       updateCorrection(accountId, {
-        pending: definiteRejection ? null : request,
+        pending: isDefiniteCorrectionRejection(error) ? null : request,
         error: code === "insufficient_balance" ? labels.negative : code === "balance_overflow" ? labels.balanceOverflow : labels.correctionError,
         status: undefined,
       });

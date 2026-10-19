@@ -344,6 +344,7 @@ const runActions = async (
   attributions: readonly string[] = [],
   sourceBroadcasterUserId?: string | null,
   pendingWelcome?: PendingPointWelcome,
+  handledMessageId?: string,
 ): Promise<ModuleDiagnostic[]> => {
   const diagnostics: ModuleDiagnostic[] = [];
   const pendingActions = [...actions];
@@ -356,7 +357,7 @@ const runActions = async (
     let action = pendingActions[index];
     if (action === undefined) continue;
     const isModerationFollowUp = moderationFollowUps.has(action);
-    action = appendPointWelcome(action, pendingWelcome, attributions);
+    action = appendPointWelcome(action, pendingWelcome, attributions, handledMessageId);
     const reportDelivery = async (delivery: ModuleChatDelivery): Promise<void> => {
       if (action.kind !== "chat" || action.onDelivery === undefined) return;
       try {
@@ -1139,6 +1140,7 @@ export const dispatchEventSubNotification = async (
           result.attributions,
           textValue(event.payload.source_broadcaster_user_id),
           pendingWelcome,
+          messageId ?? undefined,
         ));
       } catch (error: unknown) {
         diagnostics.push({ code: "host.action.failed" satisfies EventCode, detail: { message: errorMessage(error) } });
