@@ -120,8 +120,13 @@ const votekickTargetFromMessage = (message: string): string | null => {
   return match?.[1]?.replace(/^@/u, "") ?? null;
 };
 
-const entryLabel = (item: ResultItem): string => {
+const entryLabel = (item: ResultItem, labels: ReturnType<typeof dashboardTexts>): string => {
   const ballot = firstBallotEffect(item.report);
+  const isVotekickTargetCommand = item.moduleId === "votekick" && ballot === undefined &&
+    item.report.match.kind === "command_name" && item.report.match.token === "!votekick";
+  if (item.moduleId === "votekick" && (ballot?.action === "start" || isVotekickTargetCommand)) {
+    return labels.testArea.votekickEntryLabel;
+  }
   return item.moduleId === "chat_voting" && ballot !== undefined && ballot.action !== "start"
     ? ballot.label
     : item.report.entry.label;
@@ -441,7 +446,7 @@ function ResultDetail({ item, message, response, labels, language, onOpenEditor 
   return <div className="test-area__detail-content">
     <header className="test-area__detail-head">
       <div className="test-area__detail-heading">
-        <h2>{entryLabel(item)}</h2>
+        <h2>{entryLabel(item, labels)}</h2>
         <div className="test-area__detail-meta">
           <Badge tone={moduleBadgeTone(moduleId)} className="test-area__module-badge">{report.entry.kind === "faq_entry" ? texts.faqEntry : report.entry.kind === "text_command" ? texts.textCommand : moduleName(moduleId, labels, language)}</Badge>
           <span>{matchLabel(report, labels, message)}</span>
@@ -720,7 +725,7 @@ export function TestAreaPage({
       }}
     >
       <span className="test-area__row-main">
-        <span className="test-area__row-title"><Badge tone={moduleBadgeTone(item.moduleId)} className="test-area__module-badge">{moduleName(item.moduleId, labels, language)}</Badge><strong>{entryLabel(item)}</strong></span>
+        <span className="test-area__row-title"><Badge tone={moduleBadgeTone(item.moduleId)} className="test-area__module-badge">{moduleName(item.moduleId, labels, language)}</Badge><strong>{entryLabel(item, labels)}</strong></span>
         <small>{matchLabel(item.report, labels, detailMessage)}</small>
       </span>
       <span className={"test-area__row-outcome" + (isMutedReply ? " is-muted" : "")}>
@@ -877,7 +882,7 @@ export function TestAreaPage({
       </Dialog>
       <Dialog
         opened={mobileDetailOpen && selectedItem !== null && response !== null}
-        title={selectedItem === null ? texts.result : entryLabel(selectedItem)}
+        title={selectedItem === null ? texts.result : entryLabel(selectedItem, labels)}
         className="test-area__dialog test-area__detail-dialog"
         headerActions={selectedItem !== null && response !== null && onOpenEditor !== undefined &&
           (selectedItem.moduleId === "faq" || selectedItem.moduleId === "text_commands")

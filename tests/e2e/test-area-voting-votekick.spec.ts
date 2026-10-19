@@ -192,10 +192,12 @@ test("shows a votekick target row and target-specific explanation without a dead
   await runMessage(page, "!votekick spieler_demo");
 
   const row = page.locator(".test-area__result-row");
+  await expect(row).toContainText("Spieler melden");
   await expect(row).toContainText("Ziel „spieler_demo“");
   await expect(row).toContainText("Würde Votekick starten");
   await row.click();
   const detail = page.locator(".test-area__detail");
+  await expect(detail.getByRole("heading", { name: "Spieler melden" })).toBeVisible();
   await expect(detail).toContainText("Die Nachricht „!votekick spieler_demo“ nennt das Ziel „spieler_demo“.");
   await expect(detail).toContainText("Ja: 1 · Nein: 0");
   await expect(detail.getByRole("button", { name: "Im Editor öffnen" })).toHaveCount(0);
@@ -206,6 +208,7 @@ test("marks a deferred votekick target as neutral and shows its send-time note",
   await runMessage(page, "!votekick spieler_demo");
 
   const row = page.locator(".test-area__result-row");
+  await expect(row).toContainText("Spieler melden");
   await expect(row).toContainText("Noch offen");
   await expect(row).not.toContainText("Würde antworten");
   await row.click();
@@ -217,6 +220,7 @@ test("shows the target-protection reason for a blocked votekick", async ({ page 
   await runMessage(page, "!votekick geschuetzter_spieler");
 
   const row = page.locator(".test-area__result-row");
+  await expect(row).toContainText("Spieler melden");
   await expect(row).toContainText("Ziel „geschuetzter_spieler“");
   await expect(row).toContainText("Blockiert");
   await row.click();

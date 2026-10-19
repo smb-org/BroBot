@@ -861,6 +861,7 @@ export interface DashboardTexts {
     faq: string;
     chatVoting: string;
     votekick: string;
+    votekickEntryLabel: string;
     run: string;
     history: string;
     historyEmpty: string;
@@ -1449,6 +1450,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       faq: "FAQ",
       chatVoting: "Abstimmung",
       votekick: "Votekick",
+      votekickEntryLabel: "Spieler melden",
       run: "Prüfen",
       history: "Verlauf",
       historyEmpty: "Hier erscheinen die letzten zehn Prüfungen dieser Sitzung.",
@@ -2048,6 +2050,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       faq: "FAQ",
       chatVoting: "Voting",
       votekick: "Votekick",
+      votekickEntryLabel: "Report player",
       run: "Check",
       history: "History",
       historyEmpty: "The last ten checks from this session appear here.",
