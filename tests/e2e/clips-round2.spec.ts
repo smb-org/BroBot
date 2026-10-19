@@ -89,28 +89,39 @@ const openClips = async (page: Page, options: DashboardOptions = {}) => {
   await expect(page.locator(".clips-panel")).toBeVisible();
 };
 
-test("manager and operator see the same locked settings without save or restore actions", async ({ page }) => {
+test("managers can edit command and chat-link settings while automatic clips stay locked", async ({ page }) => {
   for (const role of ["manager", "operator"] as const) {
     await openClips(page, { role });
+    const canManage = role === "manager";
 
     await expect(page.getByRole("heading", { name: "Chatbefehl !clip", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Clip-Link im Chat posten", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Automatische Clip-Einstellungen", exact: true })).toBeVisible();
-    await expect(page.getByText("Kommt in einer späteren Version.", { exact: true })).toHaveCount(3);
-    await expect(page.locator("#clips-command-cooldown")).toBeDisabled();
-    await expect(page.locator("#clips-chat-message")).toBeDisabled();
+    await expect(page.getByText("Kommt in einer späteren Version.", { exact: true })).toHaveCount(1);
+    if (canManage) {
+      await expect(page.locator("#clips-command-cooldown")).toBeEnabled();
+      await expect(page.locator("#clips-chat-message")).toBeEnabled();
+    } else {
+      await expect(page.locator("#clips-command-cooldown")).toBeDisabled();
+      await expect(page.locator("#clips-chat-message")).toBeDisabled();
+    }
     await expect(page.locator("#clips-auto-threshold")).toBeDisabled();
     await expect(page.locator("#clips-auto-cooldown")).toBeDisabled();
-    await expect(page.getByRole("switch", { name: "Aktiviert" })).toBeDisabled();
+    if (canManage) {
+      await expect(page.getByRole("switch", { name: "Aktiviert" })).toBeEnabled();
+      await expect(page.getByRole("combobox", { name: "Mindestrolle" })).toBeEnabled();
+    } else {
+      await expect(page.getByRole("switch", { name: "Aktiviert" })).toBeDisabled();
+      await expect(page.getByRole("combobox", { name: "Mindestrolle" })).toBeDisabled();
+    }
     await expect(page.getByRole("switch", { name: "Automatische Clips" })).toBeDisabled();
-    await expect(page.getByRole("combobox", { name: "Mindestrolle" })).toBeDisabled();
     await expect(page.locator("#clips-command-cooldown")).toHaveValue("180");
     await expect(page.locator("#clips-chat-message")).toHaveValue(STORED_SETTINGS.chatLinkTemplate);
     await expect(page.locator("#clips-auto-threshold")).toHaveValue("3.5");
     await expect(page.locator("#clips-auto-cooldown")).toHaveValue("1200");
-    await expect(page.getByRole("button", { name: "Speichern", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Speichern", exact: true })).toBeDisabled();
     await expect(page.getByRole("button", { name: "Weitere Aktionen", exact: true })).toHaveCount(0);
-    await expect(page.locator(".ui-save-bar")).toHaveCount(0);
+    await expect(page.locator(".ui-save-bar")).toHaveCount(1);
     await expect(page.locator(".page-header__badges")).toHaveCount(0);
     await expect(page.getByText("nicht implementiert", { exact: false })).toHaveCount(0);
     await expect(page.getByText("Helix", { exact: false })).toHaveCount(0);
@@ -160,7 +171,7 @@ for (const width of [1920, 1280, 390, 2560]) {
     expect(header).not.toBeNull();
     expect(content).not.toBeNull();
     expect(Math.abs((header?.width ?? 0) - (content?.width ?? 0))).toBeLessThanOrEqual(1);
-    await expect(page.locator(".clips-panel .page-header__save .ui-save-bar--persistent")).toHaveCount(0);
+    await expect(page.locator(".clips-panel .page-header__save .ui-save-bar--persistent")).toHaveCount(1);
 
     const settings = page.locator(".clips-panel__settings");
     expect(await page.locator(".clips-panel").evaluate((element) => getComputedStyle(element).alignContent)).toBe("start");
@@ -224,6 +235,21 @@ for (const width of [1920, 1280, 390, 2560]) {
   });
 }
 
+test("hides the valid cooldown placeholder and shows cooldown validation", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1080 });
+  await mockDashboard(page);
+  await page.goto(`/channels/${CHANNEL_ID}/modules/clips`);
+  const cooldown = page.locator("#clips-command-cooldown");
+  const error = page.locator("#clips-command-cooldown-error");
+  await expect(cooldown).toBeVisible();
+  expect(await error.getAttribute("role")).toBeNull();
+  expect(await error.evaluate((element) => getComputedStyle(element).display)).toBe("none");
+
+  await cooldown.fill("");
+  await expect(error).toHaveAttribute("role", "alert");
+  expect(await error.evaluate((element) => getComputedStyle(element).display)).not.toBe("none");
+});
+
 for (const width of [1920, 1280, 390, 2560]) {
   test(`settings loading reserves the final block without moving the session list at ${String(width)}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1080 });
@@ -234,7 +260,7 @@ for (const width of [1920, 1280, 390, 2560]) {
     const loadStateBefore = await page.locator(".clips-panel__settings-load-state").boundingBox();
     const listBefore = await page.locator(".clips-panel__clips-section").boundingBox();
     await expect(page.getByRole("heading", { name: "Clip-Einstellungen", exact: true })).toBeVisible();
-    const reservedHeight = width < 600 ? 850 : 658;
+    const reservedHeight = width < 600 ? 851 : 627;
     expect(await page.locator(".clips-panel__settings-load-state").evaluate((element) => getComputedStyle(element).minHeight)).toBe(`${String(reservedHeight)}px`);
     expect(await page.locator(".clips-panel__settings-load-state .ui-load-state__reserved-lines > span").nth(14).evaluate((element) => getComputedStyle(element).display)).toBe(width < 600 ? "block" : "none");
     expect(await page.locator(".clips-panel__settings-load-state .ui-load-state__reserved-lines > span").nth(18).evaluate((element) => getComputedStyle(element).display)).toBe("none");

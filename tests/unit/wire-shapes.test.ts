@@ -386,7 +386,7 @@ const expectedModuleSettings = {
     commandMinimumRole: "viewer",
     commandCooldownSeconds: 60,
     postClipLinkInChat: true,
-    chatLinkTemplate: "Clip aus dem Stream: {clip.title} {clip.url}",
+    chatLinkTemplate: "Clip from the stream: {clip.title} {clip.url}",
     automaticClipsEnabled: false,
     automaticThresholdMultiplier: 2.5,
     automaticCooldownSeconds: 900,
@@ -574,7 +574,7 @@ void [
 ];
 const allRecipientKinds: Record<RealtimeRecipientKind, true> = { panel: true, overlay: true };
 const allChatStatus: Record<ModuleChatStatus, true> = { viewer: true, subscriber: true, vip: true, moderator: true, broadcaster: true };
-const allActionKinds: Record<ModuleAction["kind"], true> = { announcement: true, ban: true, chat: true, shoutout: true, timeout: true, overlay: true };
+const allActionKinds: Record<ModuleAction["kind"], true> = { announcement: true, ban: true, chat: true, shoutout: true, timeout: true, overlay: true, clip: true };
 const allLanguages: Record<ModuleLanguage, true> = { de: true, en: true };
 const allTextCommandKinds: Record<TextCommandKind, true> = { text: true, list: true, shoutout: true, timeout: true };
 const allTextCommandResponseTypes: Record<TextCommandResponseType, true> = { say: true, reply: true, announcement: true };
@@ -872,7 +872,7 @@ describe("serialized contract shapes", () => {
       expect(REALTIME_RECIPIENTS["overlay.changed"]).toEqual(["panel", "overlay"]);
       expect(REALTIME_RECIPIENTS["stream.state.changed"]).toEqual(["panel"]);
       expect(Object.keys(allChatStatus).sort((a, b) => a.localeCompare(b))).toEqual(["broadcaster", "moderator", "subscriber", "viewer", "vip"]);
-      expect(Object.keys(allActionKinds).sort((a, b) => a.localeCompare(b))).toEqual(["announcement", "ban", "chat", "overlay", "shoutout", "timeout"]);
+      expect(Object.keys(allActionKinds).sort((a, b) => a.localeCompare(b))).toEqual(["announcement", "ban", "chat", "clip", "overlay", "shoutout", "timeout"]);
       expect(Object.keys(allLanguages).sort((a, b) => a.localeCompare(b))).toEqual(["de", "en"]);
       expect(Object.keys(allTextCommandKinds).sort((a, b) => a.localeCompare(b))).toEqual(["list", "shoutout", "text", "timeout"]);
       expect(Object.keys(allTextCommandResponseTypes).sort((a, b) => a.localeCompare(b))).toEqual([...TEXT_COMMAND_RESPONSE_TYPES].sort((a, b) => a.localeCompare(b)));

@@ -26,6 +26,20 @@ export const loadClipsSettings = (
   return { ...result, settings: clipsSettingsSchema.parse(result.settings) };
 });
 
+export const saveClipsSettings = async (
+  channelId: string,
+  revision: number,
+  settings: ClipsSettings,
+): Promise<{ settings: ClipsSettings; revision: number }> => {
+  const { token } = await readJson<{ token: string }>(await fetch("/api/csrf"));
+  const result = await readJson<{ settings: unknown; revision: number }>(await fetch(`${modulePath(channelId)}/settings`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", "X-CSRF-Token": token },
+    body: JSON.stringify({ revision, settings }),
+  }));
+  return { ...result, settings: clipsSettingsSchema.parse(result.settings) };
+};
+
 export const loadSessionClips = (
   channelId: string,
   signal?: AbortSignal,

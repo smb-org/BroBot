@@ -72,6 +72,8 @@ describe("create clip", () => {
   // "Betrieblich" per 0006: an immediate action open to every channel role.
   it("lets an operator create a clip and writes an audit entry", async () => {
     const environment = await asMember("operator");
+    await database.prepare("UPDATE channel_modules SET settings = ? WHERE channel_id = 'kanal-a' AND module_id = 'clips'")
+      .bind(JSON.stringify(clipsSettingsSchema.parse({ postClipLinkInChat: false }))).run();
     const fetcher = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(
         JSON.stringify({ data: [{ id: "clip-1", edit_url: "https://clips.twitch.tv/clip-1/edit" }] }),
@@ -210,10 +212,6 @@ describe("create clip", () => {
   });
 
   it.each([
-    ["commandMinimumRole", { commandMinimumRole: "subscriber" }],
-    ["commandCooldownSeconds", { commandCooldownSeconds: 120 }],
-    ["postClipLinkInChat", { postClipLinkInChat: false }],
-    ["chatLinkTemplate", { chatLinkTemplate: "Neuer Clip: {clip.url}" }],
     ["automaticClipsEnabled", { automaticClipsEnabled: true }],
     ["automaticThresholdMultiplier", { automaticThresholdMultiplier: 3.5 }],
     ["automaticCooldownSeconds", { automaticCooldownSeconds: 1200 }],

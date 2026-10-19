@@ -49,7 +49,7 @@ export const recordAuditOnce = async (
      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
       WHERE NOT EXISTS (
         SELECT 1 FROM audit_log
-         WHERE channel_id = ? AND module_id = ? AND action = ?
+         WHERE channel_id = ? AND module_id IS ? AND action = ?
            AND json_extract(after_json, '$.operationId') = ?
       )`,
   ).bind(

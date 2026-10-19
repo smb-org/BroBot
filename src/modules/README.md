@@ -47,8 +47,10 @@ Votekick finalisieren.
 
 `timers` hat keinen Nachrichtenhandler: Der Host zählt Chataktivität für
 zeitgesteuerte Nachrichten. Der Trockenlauf meldet das Modul deshalb mit
-`status: "silent"` und `reasonCode: "activity_tracking"`. `clips` abonniert
-keine Chatnachrichten und wird in dieser Liste nicht ausgewertet.
+`status: "silent"` und `reasonCode: "activity_tracking"`. The `clips` module
+subscribes to `channel.chat.message`, checks the configured role and channel
+cooldown for `!clip`, and only posts its configured message after Twitch
+confirms the clip is available.
 
 Abstimmungs- und Votekick-Auswertungen führen dieselben Produktionsservices
 mit simulierten Schreibadaptern aus. Laufende Ballot- und Aktivitätsdaten

@@ -37,4 +37,4 @@ export const writeModuleAudit = async (
 ): Promise<void> => options?.operationId === undefined
   ? recordAudit(db, actorUserId, changedAt, entry.channelId, entry.moduleId, entry.action, entry.before, entry.after, actorKind)
   : recordAuditOnce(db, options.actorUserId ?? actorUserId, changedAt, entry.channelId, entry.moduleId, entry.action,
-    entry.before, entry.after, options.operationId, actorKind);
+    entry.before, { ...(entry.after ?? {}), operationId: options.operationId }, options.operationId, actorKind);

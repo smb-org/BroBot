@@ -16,6 +16,7 @@ import { CHANNEL_ROLES, type ChannelRole } from "../../contracts/values";
 import { processAdPrewarning } from "../ad-prewarning";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../realtime-protocol";
 import type { AdsSchedule } from "../../modules/ads/contracts";
+import type { ClipsSettings } from "../../modules/clips/contracts";
 import {
   alarmKeyFor as timerAlarmKeyFor,
   eventTimeRefreshKeyFor,
@@ -79,6 +80,7 @@ import {
   ACTIVE_CHATTER_EXPIRY_HANDLER,
   AD_COUNTDOWN_REFRESH_HANDLER,
   AD_PREWARNING_HANDLER,
+  CLIP_JOB_ALARM_HANDLER,
   CHANNEL_HOST_ALARM_HANDLER_KEYS,
   MODULE_SCHEDULE_INPUTS_CHANGED_HANDLER,
   SECURITY_RETRY_HANDLER,
@@ -116,6 +118,13 @@ import { secureRandomInteger } from "../template-resolver";
 import { createModuleExternalFetchBudget } from "../external-fetch-budget";
 import { templateLanguageText } from "../../modules/template-language";
 import { writeModuleDiagnostics } from "../event-log";
+import {
+  confirmChannelClipAvailability,
+  postConfirmedClipLink,
+  requestChannelClipCreation,
+  type ClipCreationResult,
+  type CreateClipResult,
+} from "../clip";
 import {
   claimModuleAlarmSend,
   finishModuleAlarmSend,
@@ -176,6 +185,7 @@ import {
   pointBalance,
   pointHistory,
   pointPayloadHash,
+  pointCooldownRemainingSync,
   pointRankOf,
   pointRanking,
   pointRoundAlarmKey,
@@ -208,6 +218,13 @@ const D1_IN_PARAMETER_LIMIT = 100;
 const FIXED_D1_PARAMETER_COUNT = 2;
 const D1_IDS_PER_QUERY = D1_IN_PARAMETER_LIMIT - FIXED_D1_PARAMETER_COUNT;
 const ALARM_TABLE_KEY = "channel:alarm_schedule";
+const CLIP_JOB_ALARM_KEY = "clip_jobs";
+const CLIP_JOB_STORAGE_PREFIX = "clip:job:";
+const CLIP_JOB_LAST_PRUNED_KEY = "clip:jobs_pruned_at";
+const CLIP_JOB_MAX_ATTEMPTS = 3;
+const CLIP_JOB_RETRY_DELAYS_MS = [5_000, 15_000] as const;
+const CLIP_JOB_COMPLETED_RETENTION_MS = 7 * 24 * 60 * 60_000;
+const CLIP_JOB_PRUNE_INTERVAL_MS = 60 * 60_000;
 const POINTS_ACTIVATION_RECONCILIATION_ALARM_KEY = "points:activation_reconciliation";
 const POINTS_ACTIVATION_RECONCILIATION_ALARM_HANDLER = "host:points_activation_reconciliation";
 const POINTS_ACTIVATION_RECONCILIATION_MODULES_KEY = "points:activation_reconciliation_modules";
@@ -417,6 +434,44 @@ type AlarmScheduleEntry = {
   identity?: ModuleAlarmIdentity;
   planSequence?: number;
   suppressedBy?: string;
+};
+
+type StoredClipJob = {
+  version: 1;
+  channelId: string;
+  triggerId: string;
+  actorUserId: string | null;
+  settings: Pick<ClipsSettings, "postClipLinkInChat" | "chatLinkTemplate">;
+  createdAt: string;
+  attempts: number;
+  nextAttemptAt: number;
+  status: "pending" | "reporting_failure" | "complete" | "failed";
+  clipId: string | null;
+  createAttemptedAt?: number | null;
+  editUrl: string | null;
+  creationDetail: ClipCreationResult["detail"] | null;
+  confirmedClip: CreateClipResult | null;
+  failure: { channelId: string; triggerId: string; reason: string; attempts: number } | null;
+  completedAt?: number;
+};
+
+const clipJobStorageKey = (triggerId: string): string => `${CLIP_JOB_STORAGE_PREFIX}${encodeURIComponent(triggerId)}`;
+
+const isStoredClipJob = (value: unknown): value is StoredClipJob => {
+  if (!isRecord(value)) return false;
+  return value.version === 1 && typeof value.channelId === "string" && typeof value.triggerId === "string" &&
+    (value.actorUserId === null || typeof value.actorUserId === "string") && isRecord(value.settings) &&
+    typeof value.settings.postClipLinkInChat === "boolean" && typeof value.settings.chatLinkTemplate === "string" &&
+    typeof value.createdAt === "string" && Number.isSafeInteger(value.attempts) && (value.attempts as number) >= 0 &&
+    typeof value.nextAttemptAt === "number" && Number.isFinite(value.nextAttemptAt) &&
+    (value.status === "pending" || value.status === "reporting_failure" || value.status === "complete" || value.status === "failed") &&
+    (value.clipId === null || typeof value.clipId === "string") &&
+    (value.createAttemptedAt === undefined || value.createAttemptedAt === null ||
+      (typeof value.createAttemptedAt === "number" && Number.isFinite(value.createAttemptedAt))) &&
+    (value.editUrl === null || typeof value.editUrl === "string") &&
+    (value.creationDetail === null || isRecord(value.creationDetail)) &&
+    (value.confirmedClip === null || isRecord(value.confirmedClip)) &&
+    (value.failure === null || isRecord(value.failure));
 };
 
 type AlarmScheduleTable = Record<string, AlarmScheduleEntry>;
@@ -3382,6 +3437,11 @@ export class ChannelObject extends DurableObject<Env> {
     return this.ctx.storage.transactionSync(() => claimPointCooldownSync(this.ctx.storage.sql, moduleId, key, seconds, Date.now()));
   }
 
+  /** Reads a cooldown for dry-run explanations without initializing points or changing stored state. */
+  public async getPointCooldownRemaining(moduleId: string, key: string, now = Date.now()): Promise<number> {
+    return Promise.resolve(this.ctx.storage.transactionSync(() => pointCooldownRemainingSync(this.ctx.storage.sql, moduleId, key, now)));
+  }
+
   public async openGameRound(moduleId: string, roundId: string, data: unknown): Promise<void> {
     await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
@@ -4167,6 +4227,242 @@ export class ChannelObject extends DurableObject<Env> {
     else await transaction.setAlarm(nextAlarmAt);
   }
 
+  private async pruneCompletedClipJobs(now: number, force = false): Promise<void> {
+    const lastPrunedAt = await this.ctx.storage.get<number>(CLIP_JOB_LAST_PRUNED_KEY);
+    if (!force && typeof lastPrunedAt === "number" && Number.isFinite(lastPrunedAt) && now - lastPrunedAt < CLIP_JOB_PRUNE_INTERVAL_MS) return;
+    const jobs = await this.ctx.storage.list({ prefix: CLIP_JOB_STORAGE_PREFIX });
+    const expiredKeys = [...jobs].flatMap(([key, value]) =>
+      isStoredClipJob(value) && (value.status === "complete" || value.status === "failed") && typeof value.completedAt === "number" &&
+      now - value.completedAt >= CLIP_JOB_COMPLETED_RETENTION_MS ? [key] : []);
+    for (let offset = 0; offset < expiredKeys.length; offset += 128) {
+      await this.ctx.storage.delete(expiredKeys.slice(offset, offset + 128));
+    }
+    await this.ctx.storage.put(CLIP_JOB_LAST_PRUNED_KEY, now);
+  }
+
+  private async nextClipJobCleanupAt(): Promise<number | null> {
+    const jobs = await this.ctx.storage.list({ prefix: CLIP_JOB_STORAGE_PREFIX });
+    const expiries = [...jobs.values()].flatMap((value) =>
+      isStoredClipJob(value) && (value.status === "complete" || value.status === "failed") &&
+      typeof value.completedAt === "number" ? [value.completedAt + CLIP_JOB_COMPLETED_RETENTION_MS] : []);
+    return expiries.length === 0 ? null : Math.min(...expiries);
+  }
+
+  private async pendingClipJobs(channelId: string): Promise<StoredClipJob[]> {
+    const rows = await this.ctx.storage.list({ prefix: CLIP_JOB_STORAGE_PREFIX });
+    return [...rows.values()].flatMap((value) =>
+      isStoredClipJob(value) && value.channelId === channelId &&
+        (value.status === "pending" || value.status === "reporting_failure") ? [value] : [])
+      .sort((left, right) => left.nextAttemptAt - right.nextAttemptAt || left.createdAt.localeCompare(right.createdAt));
+  }
+
+  private async runClipJobAlarm(now: number): Promise<void> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return;
+    await this.pruneCompletedClipJobs(now, true);
+    const pending = await this.pendingClipJobs(channelId);
+    const ready = pending.find((job) => job.nextAttemptAt <= now);
+    if (ready !== undefined) await this.processClipJob(ready);
+
+    const remaining = await this.pendingClipJobs(channelId);
+    const pendingAt = remaining.length === 0 ? null : remaining.reduce((earliest, job) => Math.min(earliest, job.nextAttemptAt), Number.POSITIVE_INFINITY);
+    const cleanupAt = await this.nextClipJobCleanupAt();
+    const nextWakeAt = [pendingAt, cleanupAt].filter((deadline): deadline is number => deadline !== null)
+      .reduce<number | null>((earliest, deadline) => earliest === null ? deadline : Math.min(earliest, deadline), null);
+    if (nextWakeAt !== null) {
+      await this.scheduleAlarmEntry(CLIP_JOB_ALARM_KEY, CLIP_JOB_ALARM_HANDLER, Math.max(nextWakeAt, Date.now() + 1));
+    }
+  }
+
+  private async completeClipJob(job: StoredClipJob): Promise<void> {
+    const completedAt = Date.now();
+    await this.ctx.storage.put(clipJobStorageKey(job.triggerId), {
+      ...job,
+      status: "complete",
+      nextAttemptAt: completedAt,
+      completedAt,
+    } satisfies StoredClipJob);
+  }
+
+  private async failClipJob(job: StoredClipJob, reason: string, attempts: number): Promise<void> {
+    const now = Date.now();
+    const failure = { channelId: job.channelId, triggerId: job.triggerId, reason: reason.slice(0, 160), attempts };
+    const reportingJob: StoredClipJob = {
+      ...job,
+      attempts,
+      nextAttemptAt: now,
+      status: "reporting_failure",
+      failure,
+    };
+    await this.ctx.storage.put(clipJobStorageKey(job.triggerId), reportingJob);
+    await this.writeClipJobFailureDiagnostic(reportingJob);
+  }
+
+  private async retryClipJob(job: StoredClipJob, attempts: number): Promise<void> {
+    const now = Date.now();
+    const delay = CLIP_JOB_RETRY_DELAYS_MS[attempts - 1] ?? CLIP_JOB_RETRY_DELAYS_MS.at(-1) ?? 15_000;
+    await this.ctx.storage.put(clipJobStorageKey(job.triggerId), {
+      ...job,
+      attempts,
+      nextAttemptAt: now + delay,
+    } satisfies StoredClipJob);
+  }
+
+  private async processClipJob(initialJob: StoredClipJob): Promise<void> {
+    let job = initialJob;
+    if (job.status === "reporting_failure") {
+      await this.writeClipJobFailureDiagnostic(job);
+      return;
+    }
+    if (job.clipId === null && job.createAttemptedAt !== null) {
+      await this.failClipJob(job, "clip_creation_outcome_uncertain", job.attempts + 1);
+      return;
+    }
+    try {
+      let confirmedClip = job.confirmedClip;
+      if (confirmedClip === null) {
+        let creation: ClipCreationResult;
+        if (job.clipId === null) {
+          const attemptedJob = { ...job, createAttemptedAt: Date.now() };
+          // If the process stops after this write, recovery must not issue a second create POST.
+          await this.ctx.storage.put(clipJobStorageKey(job.triggerId), attemptedJob);
+          job = attemptedJob;
+          creation = await requestChannelClipCreation(this.env, job.channelId);
+          if (!creation.created || creation.clipId === null) {
+            const attempts = job.attempts + 1;
+            const reason = creation.reason ?? "clip_creation_failed";
+            if (creation.delivery === "ambiguous" || creation.delivery === "accepted") {
+              await this.failClipJob(job, `clip_creation_outcome_uncertain:${reason}`, attempts);
+              return;
+            }
+            const retryable = creation.delivery === "not_attempted" || creation.detail.status === 429;
+            if (retryable && attempts < CLIP_JOB_MAX_ATTEMPTS) {
+              // A recorded no-attempt or definite rejection releases the POST fence for a bounded retry.
+              await this.retryClipJob({ ...job, createAttemptedAt: null }, attempts);
+              return;
+            }
+            const failureReason = retryable
+              ? `clip_creation_retries_exhausted:${reason}`
+              : `clip_creation_rejected:${reason}`;
+            await this.failClipJob(job, failureReason, attempts);
+            return;
+          }
+          job = {
+            ...job,
+            clipId: creation.clipId,
+            editUrl: creation.editUrl,
+            creationDetail: creation.detail,
+          };
+          // Save Twitch's returned ID before the first availability poll. A retry can then only confirm this clip.
+          await this.ctx.storage.put(clipJobStorageKey(job.triggerId), job);
+        } else {
+          creation = {
+            created: true,
+            delivery: "accepted",
+            reason: null,
+            detail: job.creationDetail ?? {},
+            clipId: job.clipId,
+            editUrl: job.editUrl,
+          };
+        }
+
+        confirmedClip = await confirmChannelClipAvailability(this.env, creation);
+        if (!confirmedClip.created || confirmedClip.clipId === null) throw new Error(confirmedClip.reason ?? "clip_confirmation_failed");
+        job = { ...job, confirmedClip };
+        await this.ctx.storage.put(clipJobStorageKey(job.triggerId), job);
+      }
+
+      const chatSendClaimKey = `clip:${encodeURIComponent(job.triggerId)}:chat`;
+      const existingChatSend = await readModuleAlarmSendClaim(this.ctx.storage, chatSendClaimKey);
+      if (existingChatSend?.status === "sent") {
+        await this.completeClipJob(job);
+        return;
+      }
+
+      const posted = await postConfirmedClipLink(
+        this.env,
+        job.channelId,
+        job.actorUserId,
+        job.settings,
+        confirmedClip,
+        fetch,
+        job.triggerId,
+        {
+          claimBeforePost: () => claimModuleAlarmSend(this.ctx.storage, chatSendClaimKey, Date.now()),
+          afterPost: async (delivery) => {
+            if (delivery !== "not_attempted") {
+              await finishModuleAlarmSend(this.ctx.storage, chatSendClaimKey, delivery, Date.now());
+            }
+          },
+        },
+      );
+      const postFailure = posted.diagnostics.find((diagnostic) =>
+        diagnostic.code === "host.chat.failed" || diagnostic.code === "host.action.failed");
+      if (postFailure !== undefined) {
+        throw new Error(typeof postFailure.detail?.reason === "string" ? postFailure.detail.reason : "clip_post_failed");
+      }
+
+      const completedAt = Date.now();
+      await this.completeClipJob(job);
+      if (posted.diagnostics.length > 0) {
+        try {
+          await writeModuleDiagnostics(
+            this.env.DB,
+            job.channelId,
+            "clips",
+            job.triggerId,
+            job.actorUserId,
+            posted.diagnostics,
+            new Date(completedAt).toISOString(),
+          );
+        } catch (error: unknown) {
+          console.error("Clip job result diagnostics could not be recorded.", error);
+        }
+      }
+    } catch (error: unknown) {
+      const reason = (error instanceof Error ? error.message : "clip_job_failed").slice(0, 160);
+      const attempts = job.attempts + 1;
+      if (job.clipId === null && job.createAttemptedAt !== null) {
+        await this.failClipJob(job, `clip_creation_outcome_uncertain:${reason}`, attempts);
+        return;
+      }
+      if (attempts >= CLIP_JOB_MAX_ATTEMPTS) {
+        await this.failClipJob(job, reason, attempts);
+        return;
+      }
+
+      await this.retryClipJob(job, attempts);
+    }
+  }
+
+  private async writeClipJobFailureDiagnostic(job: StoredClipJob): Promise<void> {
+    if (job.failure === null) return;
+    const now = Date.now();
+    try {
+      await writeModuleDiagnostics(
+        this.env.DB,
+        job.channelId,
+        "clips",
+        job.triggerId,
+        job.actorUserId,
+        [{ code: "host.clip.failed", detail: { reason: job.failure.reason } }],
+        new Date(now).toISOString(),
+      );
+      await this.ctx.storage.put(clipJobStorageKey(job.triggerId), {
+        ...job,
+        status: "failed",
+        nextAttemptAt: now,
+        completedAt: now,
+      } satisfies StoredClipJob);
+    } catch (error: unknown) {
+      console.error("Clip job failure diagnostic could not be recorded; the alarm will retry it.", error);
+      await this.ctx.storage.put(clipJobStorageKey(job.triggerId), {
+        ...job,
+        nextAttemptAt: now + 60_000,
+      } satisfies StoredClipJob);
+    }
+  }
+
   private alarmHandlers(
     modules: readonly BotModule[] = MODULES,
     externalFetchBudget: ModuleExternalFetchBudget = createModuleExternalFetchBudget(),
@@ -4212,6 +4508,12 @@ export class ChannelObject extends DurableObject<Env> {
       [AD_COUNTDOWN_REFRESH_HANDLER, {
         handle: async () => {
           await this.refreshCountdownScheduleFromAlarm();
+          return undefined;
+        },
+      }],
+      [CLIP_JOB_ALARM_HANDLER, {
+        handle: async (_key, _entry, now) => {
+          await this.runClipJobAlarm(now);
           return undefined;
         },
       }],
@@ -4452,6 +4754,74 @@ export class ChannelObject extends DurableObject<Env> {
     const pruned = prunePrewarningClaims(claims, Date.now());
     if (Object.keys(pruned).length === 0) await this.ctx.storage.delete(AD_PREWARNING_SEND_CLAIM_KEY);
     else await this.ctx.storage.put(AD_PREWARNING_SEND_CLAIM_KEY, pruned);
+  }
+
+  /** Persists a per-channel clip job and schedules its alarm. Trigger IDs are idempotent within this channel object. */
+  public async enqueueClipJob(
+    triggerId: string,
+    actorUserId: string | null,
+    settings: Pick<ClipsSettings, "postClipLinkInChat" | "chatLinkTemplate">,
+    cooldownSeconds: number,
+  ): Promise<"enqueued" | "duplicate" | "cooldown"> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) throw new Error("The channel Durable Object has no tenant identity.");
+    if (triggerId.length === 0 || triggerId.length > 512 ||
+        typeof settings.postClipLinkInChat !== "boolean" ||
+        typeof settings.chatLinkTemplate !== "string" || settings.chatLinkTemplate.length < 1 || settings.chatLinkTemplate.length > 500 ||
+        !Number.isSafeInteger(cooldownSeconds) || cooldownSeconds < 0 || cooldownSeconds > 86_400) {
+      throw new RangeError("Invalid clip job input.");
+    }
+
+    const now = Date.now();
+    const key = clipJobStorageKey(triggerId);
+    if (cooldownSeconds > 0) {
+      await this.ensurePointRoundRecovery();
+      await this.ensurePointsInitialized();
+    }
+    const job: StoredClipJob = {
+      version: 1,
+      channelId,
+      triggerId,
+      actorUserId,
+      settings: { ...settings },
+      createdAt: new Date(now).toISOString(),
+      attempts: 0,
+      nextAttemptAt: now,
+      status: "pending",
+      clipId: null,
+      createAttemptedAt: null,
+      editUrl: null,
+      creationDetail: null,
+      confirmedClip: null,
+      failure: null,
+    };
+    const outcome = await this.ctx.storage.transaction(async (transaction): Promise<"enqueued" | "duplicate" | "cooldown"> => {
+      if (await transaction.get(key) !== undefined) return "duplicate";
+      if (cooldownSeconds > 0 && !claimPointCooldownSync(
+        this.ctx.storage.sql,
+        "clips",
+        "clip",
+        cooldownSeconds,
+        Date.now(),
+      )) return "cooldown";
+      await transaction.put(key, job);
+
+      const table = await readAlarmScheduleTable(transaction);
+      const currentAlarm = table[CLIP_JOB_ALARM_KEY];
+      table[CLIP_JOB_ALARM_KEY] = {
+        deadline: now,
+        handler: CLIP_JOB_ALARM_HANDLER,
+        revision: (currentAlarm?.revision ?? 0) + 1,
+      };
+      await transaction.put(ALARM_TABLE_KEY, table);
+      const nextAlarmAt = earliestAlarmAt(table, now);
+      if (nextAlarmAt === null) await transaction.deleteAlarm();
+      else await transaction.setAlarm(nextAlarmAt);
+      return "enqueued";
+    });
+    if (outcome !== "enqueued") return outcome;
+    await this.pruneCompletedClipJobs(now);
+    return "enqueued";
   }
 
   /** Schedule one module-owned alarm key through its registered handler. */

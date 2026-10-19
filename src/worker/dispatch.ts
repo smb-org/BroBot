@@ -361,6 +361,8 @@ const runActions = async (
   pendingWelcome?: PendingPointWelcome,
   handledMessageId?: string,
   commandResponseActions: WeakSet<ModuleAction> = new WeakSet(),
+  actorUserId?: string | null,
+  triggerId?: string,
 ): Promise<ModuleDiagnostic[]> => {
   const diagnostics: ModuleDiagnostic[] = [];
   const pendingActions = [...actions];
@@ -558,6 +560,43 @@ const runActions = async (
         diagnostics.push(result.sent
           ? { code: "host.shoutout.sent" satisfies EventCode, detail: result.detail }
           : { code: "host.shoutout.failed" satisfies EventCode, detail: { cause: result.reason, ...result.detail } });
+        continue;
+      }
+      if (action.kind === "clip") {
+        if (environment.CHANNEL === undefined || triggerId === undefined) {
+          diagnostics.push({
+            code: "host.clip.failed" satisfies EventCode,
+            detail: { reason: environment.CHANNEL === undefined ? "channel_object_unavailable" : "trigger_id_missing" },
+          });
+          continue;
+        }
+        const channelNamespace = environment.CHANNEL;
+        const channelObjectId = channelNamespace.idFromName(channelId);
+        const enqueue = (): Promise<"enqueued" | "duplicate" | "cooldown"> => channelNamespace.get(channelObjectId).enqueueClipJob(
+          triggerId,
+          actorUserId ?? null,
+          { postClipLinkInChat: action.postClipLinkInChat, chatLinkTemplate: action.chatLinkTemplate },
+          action.cooldownSeconds,
+        );
+        try {
+          const outcome = await enqueue();
+          if (outcome === "cooldown") {
+            diagnostics.push({ code: "text_commands.cooldown" satisfies EventCode, detail: { name: "clip" } });
+          }
+        } catch {
+          try {
+            // The same trigger key makes an uncertain first response safe to retry.
+            const outcome = await enqueue();
+            if (outcome === "cooldown") {
+              diagnostics.push({ code: "text_commands.cooldown" satisfies EventCode, detail: { name: "clip" } });
+            }
+          } catch (error: unknown) {
+            diagnostics.push({
+              code: "host.clip.failed" satisfies EventCode,
+              detail: { reason: "job_enqueue_failed", message: errorMessage(error) },
+            });
+          }
+        }
         continue;
       }
       if (action.kind === "timeout" || action.kind === "ban") {
@@ -1167,6 +1206,8 @@ export const dispatchEventSubNotification = async (
           pendingWelcome,
           messageId ?? undefined,
           commandResponseActions,
+          textValue(event.payload.chatter_user_id) ?? actor?.userId ?? null,
+          event.triggerId,
         ));
       } catch (error: unknown) {
         diagnostics.push({ code: "host.action.failed" satisfies EventCode, detail: { message: errorMessage(error) } });

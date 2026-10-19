@@ -234,6 +234,8 @@ export const dryRunChatMessage = async (
             return { firstSeenAt: evaluatedAt, lastSeenAt: evaluatedAt };
           },
         },
+        pointCooldownRemaining: async (moduleId, key) =>
+          await channelObject?.getPointCooldownRemaining(moduleId, key) ?? 0,
       };
       const reports = await dryRun(event, context);
       const evaluatedReports = reports
