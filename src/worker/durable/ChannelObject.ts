@@ -4298,18 +4298,21 @@ export class ChannelObject extends DurableObject<Env> {
     await this.writeClipJobFailureDiagnostic(reportingJob);
   }
 
-  private async retryClipJob(job: StoredClipJob, attempts: number): Promise<void> {
+  private async retryClipJob(job: StoredClipJob, attempts: number, retryAfter: number | null = null): Promise<void> {
     const now = Date.now();
     const delay = CLIP_JOB_RETRY_DELAYS_MS[attempts - 1] ?? CLIP_JOB_RETRY_DELAYS_MS.at(-1) ?? 15_000;
     await this.ctx.storage.put(clipJobStorageKey(job.triggerId), {
       ...job,
       attempts,
-      nextAttemptAt: now + delay,
+      nextAttemptAt: typeof retryAfter === "number" && Number.isFinite(retryAfter)
+        ? Math.max(now + delay, retryAfter)
+        : now + delay,
     } satisfies StoredClipJob);
   }
 
   private async processClipJob(initialJob: StoredClipJob): Promise<void> {
     let job = initialJob;
+    let retryAfter: number | null = null;
     if (job.status === "reporting_failure") {
       await this.writeClipJobFailureDiagnostic(job);
       return;
@@ -4338,7 +4341,12 @@ export class ChannelObject extends DurableObject<Env> {
             const retryable = creation.delivery === "not_attempted" || creation.detail.status === 429;
             if (retryable && attempts < CLIP_JOB_MAX_ATTEMPTS) {
               // A recorded no-attempt or definite rejection releases the POST fence for a bounded retry.
-              await this.retryClipJob({ ...job, createAttemptedAt: null }, attempts);
+              const retryAfter = creation.detail.retryAfter;
+              await this.retryClipJob(
+                { ...job, createAttemptedAt: null },
+                attempts,
+                typeof retryAfter === "number" ? retryAfter : null,
+              );
               return;
             }
             const failureReason = retryable
@@ -4367,6 +4375,7 @@ export class ChannelObject extends DurableObject<Env> {
         }
 
         confirmedClip = await confirmChannelClipAvailability(this.env, creation);
+        retryAfter = typeof confirmedClip.detail.retryAfter === "number" ? confirmedClip.detail.retryAfter : null;
         if (!confirmedClip.created || confirmedClip.clipId === null) throw new Error(confirmedClip.reason ?? "clip_confirmation_failed");
         job = { ...job, confirmedClip };
         await this.ctx.storage.put(clipJobStorageKey(job.triggerId), job);
@@ -4399,6 +4408,7 @@ export class ChannelObject extends DurableObject<Env> {
       const postFailure = posted.diagnostics.find((diagnostic) =>
         diagnostic.code === "host.chat.failed" || diagnostic.code === "host.action.failed");
       if (postFailure !== undefined) {
+        retryAfter = typeof posted.retryAfter === "number" ? posted.retryAfter : null;
         throw new Error(typeof postFailure.detail?.reason === "string" ? postFailure.detail.reason : "clip_post_failed");
       }
 
@@ -4431,7 +4441,7 @@ export class ChannelObject extends DurableObject<Env> {
         return;
       }
 
-      await this.retryClipJob(job, attempts);
+      await this.retryClipJob(job, attempts, retryAfter);
     }
   }
 

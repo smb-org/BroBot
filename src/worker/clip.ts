@@ -6,7 +6,7 @@ import { writeModuleAudit } from "./module-audit";
 import { sendChatMessage, type ChatSendResult } from "./chat";
 import { readBotCredentials } from "./auth/bot-credentials";
 import type { EventCode } from "../contracts/values";
-import { readChannelControls } from "./db/channel-controls";
+import { moduleEnabledForChannel, readChannelControls } from "./db/channel-controls";
 import { chatOutputSuppressionReason, type ChatOutputSuppressionReason } from "./chat-output-gate";
 
 const CREATE_CLIP_URL = "https://api.twitch.tv/helix/clips";
@@ -101,7 +101,11 @@ const requestClipCreation = async (
       return creationFailure(result.reason, "ambiguous", { status: null, twitchMessage: result.message });
     }
     const delivery = result.status !== null && result.status >= 400 && result.status < 500 ? "rejected" : "ambiguous";
-    return creationFailure(clipReasonFor(result.status ?? 0), delivery, { status: result.status, twitchMessage: result.message });
+    return creationFailure(clipReasonFor(result.status ?? 0), delivery, {
+      status: result.status,
+      twitchMessage: result.message,
+      ...(result.retryAfter === undefined ? {} : { retryAfter: result.retryAfter }),
+    });
   }
 
   const body = isRecord(result.data) ? result.data : {};
@@ -159,7 +163,11 @@ const confirmClipAvailability = async (
         : availability.reason === "network_error"
           ? availability.reason
           : "availability_check_failed";
-      return failure(reason, { status: availability.status, twitchMessage: availability.message });
+      return failure(reason, {
+        status: availability.status,
+        twitchMessage: availability.message,
+        ...(availability.retryAfter === undefined ? {} : { retryAfter: availability.retryAfter }),
+      });
     }
     const confirmedClip = availableClip(availability.data, clipId);
     if (confirmedClip !== null) {
@@ -233,6 +241,8 @@ export const confirmChannelClipAvailability = async (
 export interface CreateAndPostClipResult {
   clip: CreateClipResult;
   diagnostics: readonly ModuleDiagnostic[];
+  /** Helix retry deadline returned by a rate-limited chat send. */
+  retryAfter?: number;
 }
 
 export interface ClipChatSendHooks {
@@ -289,9 +299,12 @@ export const postConfirmedClipLink = async (
   };
   const sent = await sendChatMessage(environment, channelId, message, undefined, fetcher, async () => {
     try {
-      const controls = await readChannelControls(environment.DB, channelId, new Date().toISOString());
+      const [controls, moduleEnabled] = await Promise.all([
+        readChannelControls(environment.DB, channelId, new Date().toISOString()),
+        moduleEnabledForChannel(environment.DB, channelId, "clips"),
+      ]);
       outputGate.suppressionReason = chatOutputSuppressionReason({
-        moduleEnabled: true,
+        moduleEnabled,
         mandatory: false,
         paused: controls.pause.active,
         muted: controls.mute.active,
@@ -304,6 +317,7 @@ export const postConfirmedClipLink = async (
   }, sendHooks.claimBeforePost, [], sendHooks.afterPost);
   return {
     clip,
+    ...(typeof sent.detail.retryAfter === "number" ? { retryAfter: sent.detail.retryAfter } : {}),
     diagnostics: [
       ...(sent.truncated ? [{ code: "template_truncated" as const, detail: { current: message.length } }] : []),
       ...(outputGate.suppressionReason !== null

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   helixRequest: vi.fn(),
   readBotCredentials: vi.fn(),
   readChannelControls: vi.fn(),
+  moduleEnabledForChannel: vi.fn(),
   sendChatMessage: vi.fn(),
   writeModuleAudit: vi.fn(),
   writeModuleDiagnostics: vi.fn(),
@@ -13,7 +14,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../src/worker/twitch/helix", () => ({ helixRequest: mocks.helixRequest }));
 vi.mock("../../src/worker/auth/bot-credentials", () => ({ readBotCredentials: mocks.readBotCredentials }));
-vi.mock("../../src/worker/db/channel-controls", () => ({ readChannelControls: mocks.readChannelControls }));
+vi.mock("../../src/worker/db/channel-controls", () => ({
+  readChannelControls: mocks.readChannelControls,
+  moduleEnabledForChannel: mocks.moduleEnabledForChannel,
+}));
 vi.mock("../../src/worker/chat", () => ({ sendChatMessage: mocks.sendChatMessage }));
 vi.mock("../../src/worker/module-audit", () => ({ writeModuleAudit: mocks.writeModuleAudit }));
 vi.mock("../../src/worker/event-log", async (importOriginal) => ({
@@ -66,6 +70,7 @@ const mockChatDelivery = async (
   delivery: "sent" | "rejected" | "ambiguous" = "sent",
   reason: string | null = null,
   onPostAttempt?: () => void,
+  detail: Record<string, string | number | boolean | null> = { status: 200 },
 ) => {
   if (!await chatAllowed(args)) {
     return { sent: false, reason: "stale_before_send", delivery: "not_attempted" as const, truncated: false, detail: {} };
@@ -79,7 +84,7 @@ const mockChatDelivery = async (
   const afterCandidate = args[8];
   const afterPost = typeof afterCandidate === "function" ? afterCandidate as AfterChatPost : null;
   await afterPost?.(delivery, reason);
-  return { sent: delivery === "sent", reason, delivery, truncated: false, detail: { status: 200 } };
+  return { sent: delivery === "sent", reason, delivery, truncated: false, detail };
 };
 
 const objectFor = (channelId: string): { object: ChannelObject; storage: StorageDouble } => {
@@ -220,6 +225,7 @@ const successfulConfirmation = {
 };
 
 const setChatAllowed = (allowed: boolean): void => {
+  mocks.moduleEnabledForChannel.mockResolvedValue(true);
   mocks.readChannelControls.mockResolvedValue({
     pause: { active: false },
     mute: { active: !allowed },
@@ -311,7 +317,15 @@ describe("durable clip jobs", () => {
     vi.setSystemTime(new Date("2026-10-19T10:00:00.000Z"));
     const { object, storage } = objectFor("channel-a");
     mocks.readBotCredentials.mockResolvedValue({ accessToken: "bot-token" });
-    mocks.helixRequest.mockResolvedValueOnce({ ok: false, status: 429, reason: "rate_limited", message: "Slow down", body: {} })
+    const retryAt = Date.now() + 60_000;
+    mocks.helixRequest.mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      reason: "rate_limited",
+      message: "Slow down",
+      body: {},
+      retryAfter: retryAt,
+    })
       .mockResolvedValueOnce(successfulCreate)
       .mockResolvedValueOnce(successfulConfirmation);
     setChatAllowed(true);
@@ -321,10 +335,91 @@ describe("durable clip jobs", () => {
 
     expect(mocks.helixRequest.mock.calls.filter(([request]) => Reflect.get(request as object, "method") === "POST")).toHaveLength(1);
     expect(pendingJobs(storage)).toContainEqual(expect.objectContaining({ status: "pending", attempts: 1, clipId: null }));
+    expect(await storage.getAlarm()).toBe(retryAt);
+    vi.setSystemTime(retryAt - 40_000);
+    await object.alarm();
+    expect(mocks.helixRequest.mock.calls.filter(([request]) => Reflect.get(request as object, "method") === "POST")).toHaveLength(1);
     vi.setSystemTime(await storage.getAlarm() ?? Date.now());
     await object.alarm();
 
     expect(mocks.helixRequest.mock.calls.filter(([request]) => Reflect.get(request as object, "method") === "POST")).toHaveLength(2);
+    expect(pendingJobs(storage)).toContainEqual(expect.objectContaining({ status: "complete", clipId: "clip-1" }));
+  });
+
+  it("uses the confirmation 429 retry deadline without creating another clip", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-19T10:00:00.000Z"));
+    const { object, storage } = objectFor("channel-a");
+    mocks.readBotCredentials.mockResolvedValue({ accessToken: "bot-token" });
+    const retryAt = Date.now() + 60_000;
+    mocks.helixRequest.mockResolvedValueOnce(successfulCreate)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        reason: "rate_limited",
+        message: "Slow down",
+        body: {},
+        retryAfter: retryAt,
+      })
+      .mockResolvedValueOnce(successfulConfirmation);
+    setChatAllowed(true);
+
+    await enqueue(object, "confirmation-rate-limit-trigger");
+    await object.alarm();
+
+    expect(pendingJobs(storage)).toContainEqual(expect.objectContaining({ status: "pending", attempts: 1, clipId: "clip-1" }));
+    expect(await storage.getAlarm()).toBe(retryAt);
+    vi.setSystemTime(retryAt - 40_000);
+    await object.alarm();
+    expect(mocks.helixRequest).toHaveBeenCalledTimes(2);
+
+    vi.setSystemTime(retryAt);
+    await object.alarm();
+
+    expect(mocks.helixRequest).toHaveBeenCalledTimes(3);
+    expect(mocks.helixRequest.mock.calls.filter(([request]) => Reflect.get(request as object, "method") === "POST")).toHaveLength(1);
+    expect(pendingJobs(storage)).toContainEqual(expect.objectContaining({ status: "complete", clipId: "clip-1" }));
+  });
+
+  it("uses the chat-send 429 retry deadline before retrying the announcement", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-19T10:00:00.000Z"));
+    const { object, storage } = objectFor("channel-a");
+    mocks.readBotCredentials.mockResolvedValue({ accessToken: "bot-token" });
+    mocks.helixRequest.mockResolvedValueOnce(successfulCreate).mockResolvedValueOnce(successfulConfirmation);
+    const retryAt = Date.now() + 60_000;
+    setChatAllowed(true);
+    let postAttempts = 0;
+    mocks.sendChatMessage
+      .mockImplementationOnce(async (...args: unknown[]) => await mockChatDelivery(
+        args,
+        "rejected",
+        "rate_limited",
+        () => { postAttempts += 1; },
+        { status: 429, retryAfter: retryAt },
+      ))
+      .mockImplementationOnce(async (...args: unknown[]) => await mockChatDelivery(
+        args,
+        "sent",
+        null,
+        () => { postAttempts += 1; },
+      ));
+
+    await enqueue(object, "chat-rate-limit-trigger");
+    await object.alarm();
+
+    expect(postAttempts).toBe(1);
+    expect(pendingJobs(storage)).toContainEqual(expect.objectContaining({ status: "pending", attempts: 1, clipId: "clip-1" }));
+    expect(await storage.getAlarm()).toBe(retryAt);
+    vi.setSystemTime(retryAt - 40_000);
+    await object.alarm();
+    expect(postAttempts).toBe(1);
+
+    vi.setSystemTime(retryAt);
+    await object.alarm();
+
+    expect(postAttempts).toBe(2);
+    expect(mocks.helixRequest).toHaveBeenCalledTimes(2);
     expect(pendingJobs(storage)).toContainEqual(expect.objectContaining({ status: "complete", clipId: "clip-1" }));
   });
 
@@ -444,6 +539,38 @@ describe("durable clip jobs", () => {
 
     expect(posted).toEqual([]);
     expect(pendingJobs(storageOf(object))).toContainEqual(expect.objectContaining({ status: "complete", clipId: "clip-1" }));
+  });
+
+  it("suppresses the queued post when Clips is disabled after confirmation", async () => {
+    vi.useFakeTimers();
+    const { object, storage } = objectFor("channel-a");
+    mocks.readBotCredentials.mockResolvedValue({ accessToken: "bot-token" });
+    setChatAllowed(true);
+    let clipsEnabled = true;
+    mocks.moduleEnabledForChannel.mockImplementation(() => Promise.resolve(clipsEnabled));
+    mocks.helixRequest.mockImplementation((request: unknown) => {
+      if (Reflect.get(request as object, "method") === "POST") return Promise.resolve(successfulCreate);
+      clipsEnabled = false;
+      return Promise.resolve(successfulConfirmation);
+    });
+    const posted: string[] = [];
+    mocks.sendChatMessage.mockImplementation(async (...args: unknown[]) =>
+      await mockChatDelivery(args, "sent", null, () => posted.push(String(args[2]))));
+
+    await enqueue(object, "disabled-before-post-trigger");
+    await object.alarm();
+
+    expect(posted).toEqual([]);
+    expect(pendingJobs(storage)).toContainEqual(expect.objectContaining({ status: "complete", clipId: "clip-1" }));
+    expect(mocks.writeModuleDiagnostics).toHaveBeenCalledWith(
+      expect.anything(),
+      "channel-a",
+      "clips",
+      "disabled-before-post-trigger",
+      "viewer-1",
+      [expect.objectContaining({ code: "host.action.suppressed", detail: { action: "chat", reason: "module_disabled" } })],
+      expect.any(String),
+    );
   });
 
   it("does not repeat an ambiguous chat post when a later alarm resumes", async () => {

@@ -20,6 +20,9 @@ describe("clip chat channel controls", () => {
     const database = new TestD1Database();
     await insertChannel(database, "channel-a");
     await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('channel-a', 'clips', 1, '{}')",
+    ).run();
+    await database.prepare(
       "INSERT INTO channel_controls (channel_id, muted, updated_at) VALUES (?, 0, ?)",
     ).bind("channel-a", new Date().toISOString()).run();
 
