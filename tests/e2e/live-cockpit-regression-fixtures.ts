@@ -55,9 +55,11 @@ export interface LiveCockpitMockController {
 export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMockOptions): Promise<LiveCockpitMockController> => {
   const modules = options.modules ?? [];
   const channelId = options.channelId;
-  const now = new Date().toISOString();
-  const bot = { status: options.botStatus ?? "connected", reason: null, updatedAt: now };
-  const channelBot = { ...bot, status: options.channelBotStatus ?? bot.status };
+  // Timestamps are getters so every response is fresh, however long a run takes.
+  const freshNow = (): string => new Date().toISOString();
+  const botStatus = options.botStatus ?? "connected";
+  const bot = { status: botStatus, reason: null, get updatedAt() { return freshNow(); } };
+  const channelBot = { status: options.channelBotStatus ?? botStatus, reason: null, get updatedAt() { return freshNow(); } };
   const tokens = options.tokens ?? { botExpiresAt: "2099-09-20T08:00:00.000Z", loginStatus: "connected" as const, loginReason: null, loginExpiresAt: "2099-09-20T08:00:00.000Z" };
   const channel = {
     channelId,
@@ -66,7 +68,7 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
     language: "de",
     role: options.role ?? "manager",
     streamState: options.streamState ?? "online",
-    streamStartedAt: new Date(Date.now() - 60_000).toISOString(),
+    get streamStartedAt() { return new Date(Date.now() - 60_000).toISOString(); },
     viewerCount: options.viewerCount ?? 42,
     location: options.location ?? null,
     broadcasterConnection: "connected",
@@ -74,8 +76,8 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
     bot: channelBot,
     botPermissions: { missingScopes: [] },
     broadcasterPermissions: { missingScopes: options.broadcasterMissingScopes ?? [] },
-    moderator: { isModerator: true, checkedAt: now, reason: null },
-    chatSubscription: { status: "enabled", subscriptionId: "sub-live-regression", reason: null, updatedAt: now },
+    moderator: { isModerator: true, get checkedAt() { return freshNow(); }, reason: null },
+    chatSubscription: { status: "enabled", subscriptionId: "sub-live-regression", reason: null, get updatedAt() { return freshNow(); } },
     chatSubscriptionNeeded: false,
     modules,
     tokens,
@@ -167,7 +169,7 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
       return route.fulfill(json({ closing: true, pollId: "vote-regression" }));
     }
     if (pathname === `${channelPrefix}/modules/votekick/votekicks` && method === "GET") {
-      return route.fulfill(json({ running: options.votekick ?? null, votekicks: options.votekick === null ? [] : [options.votekick], now }));
+      return route.fulfill(json({ running: options.votekick ?? null, votekicks: options.votekick === null ? [] : [options.votekick], now: freshNow() }));
     }
     if (pathname.startsWith(`${channelPrefix}/modules/votekick/votekicks/`) && pathname.endsWith("/cancel") && method === "POST") {
       const requestedId = decodeURIComponent(pathname.split("/").at(-2) ?? "");
@@ -182,7 +184,7 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
     if (pathname === "/api/csrf") return route.fulfill(json({ token: "csrf-live-regression" }));
     if (pathname === `${channelPrefix}/modules/belabox/status`) {
       return route.fulfill(json({
-        configured: true, updatedAt: now, mode: "stats_url", sample: { connected: true, bitrateKbps: options.belaboxStatus?.bitrateKbps ?? 4_000, at: now },
+        configured: true, updatedAt: freshNow(), mode: "stats_url", sample: { connected: true, bitrateKbps: options.belaboxStatus?.bitrateKbps ?? 4_000, at: freshNow() },
         errorCode: options.belaboxStatus?.errorCode ?? null, polling: true, pollingDesired: true, streamId: "stream-a",
         belaboxStreamId: "stream-a", alertNotice: null, fetchFailureNotice: options.belaboxStatus?.fetchFailureNotice ?? false,
         intervalSeconds: 5,
