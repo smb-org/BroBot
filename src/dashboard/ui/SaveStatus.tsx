@@ -12,6 +12,7 @@ export interface SaveStatusProps {
   dirty: boolean;
   pending?: boolean;
   saveDisabled?: boolean;
+  discardDisabled?: boolean;
   error?: string;
   saved?: boolean;
   invalid?: boolean;
@@ -39,6 +40,7 @@ export function SaveStatus({
   dirty,
   pending = false,
   saveDisabled = false,
+  discardDisabled = false,
   error,
   saved = false,
   invalid = false,
@@ -108,7 +110,7 @@ export function SaveStatus({
         <div className={`ui-save-bar__actions${destructive === undefined ? "" : " ui-save-bar__actions--destructive"}`}>
           {destructive}
           <div className="ui-save-bar__buttons">
-            {showButtons && (conflict === undefined || discardOnConflict) ? <Button className="ui-save-bar__discard" variant="subtle" onClick={onDiscard} disabled={!dirty || pending} ariaLabel={discardLabel} title={discardLabel}>{discardLabel}</Button> : null}
+            {showButtons && (conflict === undefined || discardOnConflict) ? <Button className="ui-save-bar__discard" variant="subtle" onClick={onDiscard} disabled={!dirty || pending || discardDisabled} ariaLabel={discardLabel} title={discardLabel}>{discardLabel}</Button> : null}
             {showButtons ? conflict === undefined ? <Button
               className="ui-save-bar__save"
               variant={persistent && invalid ? "neutral" : "primary"}

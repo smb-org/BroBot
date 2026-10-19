@@ -531,6 +531,7 @@ export type PrepareModuleAudit = (
 export type WriteModuleAudit = (
   entry: ModuleAuditEntry,
   changedAt: string,
+  options?: { operationId?: string; actorUserId?: string },
 ) => Promise<void>;
 
 export type AuthorizeModuleMutation = (
@@ -987,7 +988,7 @@ export interface ModulePointsAccess {
   ) => Promise<{ credited: number }>;
   balance: (accountId: string) => Promise<number>;
   listAccounts: (query: { sort: "balance" | "month"; search?: string; cursor?: string; limit: number }) => Promise<{
-    rows: { accountId: string; login: string; balance: number; monthNet: number }[];
+    rows: { accountId: string; login: string; balance: number; monthNet: number | null }[];
     cursor?: string;
   }>;
   history: (accountId: string, cursor?: string, limit?: number) => Promise<{
@@ -1012,7 +1013,7 @@ export interface ModulePointsAccess {
 
 export type ModuleStreamState = "online" | "offline" | "unknown";
 
-export const MODULE_NAVIGATION_CATEGORIES = ["chat", "participation", "twitch", "data", "stream", "admin"] as const;
+export const MODULE_NAVIGATION_CATEGORIES = ["chat", "participation", "games", "twitch", "data", "stream", "admin"] as const;
 export type ModuleNavigationCategory = (typeof MODULE_NAVIGATION_CATEGORIES)[number];
 
 export interface ModuleChannelInfo {
@@ -1403,6 +1404,8 @@ export interface ModulePanelProperties {
   channelId: string;
   /** The panel language resolved by the host; optional for legacy modules. */
   language?: ModuleLanguage;
+  /** Resolves other registered module names for collection rows and history. */
+  resolveModuleName?: (moduleId: string, language: ModuleLanguage) => string;
   /** Changes when the channel goes online/offline or a new stream session starts. */
   streamSessionIdentity?: string;
   /** May the view execute management controls? */
@@ -1590,7 +1593,7 @@ export type HelixResult<Data = unknown> =
 export type HelixRequest = <Data = unknown>(options: HelixRequestOptions<Data>) => Promise<HelixResult<Data>>;
 
 export interface ModuleRouteVariables {
-  session: { userId: string; sessionId: string };
+  session: { userId: string; sessionId: string; login?: string };
   channelRole: ChannelRole;
   actor: { userId: string; sessionId: string };
   authorizeMutation: AuthorizeModuleMutation;

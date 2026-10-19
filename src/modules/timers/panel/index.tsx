@@ -320,6 +320,31 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
   useEffect(() => {
     if (data === undefined || initialSelectionDone.current) return;
     initialSelectionDone.current = true;
+    const preparedDraft = window.sessionStorage.getItem("brobot.timer-draft-message");
+    if (preparedDraft !== null) {
+      window.sessionStorage.removeItem("brobot.timer-draft-message");
+      let prepared: unknown;
+      try { prepared = JSON.parse(preparedDraft) as unknown; } catch { prepared = null; }
+      if (typeof prepared === "object" && prepared !== null && !Array.isArray(prepared) &&
+          "name" in prepared && typeof prepared.name === "string" && "messageText" in prepared && typeof prepared.messageText === "string") {
+        const next = { ...emptyDraft(data.sources), name: prepared.name, messageText: prepared.messageText };
+        const startedSwitch = editorSwitch.current;
+        const timer = window.setTimeout(() => {
+          if (editorSwitch.current !== startedSwitch) return;
+          editorSwitch.current += 1;
+          dirtyRef.current = true;
+          setSelectedId("__new__");
+          setDraft(next);
+          setBaselineDraft(null);
+          setEditing(null);
+          setMobileDetailOpen(true);
+          setError(null);
+          setAttemptedSave(false);
+          setServerConflict(false);
+        });
+        return () => { window.clearTimeout(timer); };
+      }
+    }
     const first = data.timers[0];
     if (first !== undefined && selectedId === null && draft === null) {
       const startedSwitch = editorSwitch.current;

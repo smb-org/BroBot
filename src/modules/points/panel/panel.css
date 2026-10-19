@@ -1,0 +1,59 @@
+.points-page { display: flex; flex: 1 1 auto; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
+.points-page-actions { display: flex; min-width: 0; align-items: center; justify-content: flex-end; gap: var(--s2); }
+.points-page-actions__meta { flex: 1 1 240px; min-width: 0; min-height: 18px; overflow: hidden; color: var(--text-3); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.points-list-toolbar { margin-bottom: 0; }
+.points-list-toolbar .list-toolbar__filters { overflow: visible; }
+.points-list-toolbar .segment-choice-field__label,
+.points-list-toolbar .segment-choice-field__hint,
+.points-list-toolbar .segment-choice-field__error { display: none; }
+.points-account-list { display: grid; align-content: start; }
+.points-account-row { display: grid; box-sizing: border-box; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); width: 100%; height: 52px; min-height: 52px; align-items: center; padding: 0 10px; border: 1px solid transparent; border-bottom-color: var(--line); color: var(--text); background: transparent; cursor: pointer; text-align: left; }
+.points-account-row:hover { background: var(--surface-hover); }
+.points-account-row[aria-selected="true"] { border-color: var(--brand-line); background: var(--tint-1); }
+.points-account-row__login { min-width: 0; overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.points-account-row__balance { grid-column: 2; grid-row: 1; font-size: 13px; }
+.points-account-row__meta { grid-column: 1 / 3; grid-row: 2; min-width: 0; overflow: hidden; color: var(--text-3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.points-list-empty { margin: 0; padding: 0; color: var(--text-2); font-size: 13px; }
+.points-detail-empty { display: grid; min-height: 0; align-content: start; justify-items: start; gap: var(--s3); padding: 0; color: var(--text-2); }
+.points-detail-empty p { margin: 0; }
+.points-detail { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--s5); width: 100%; min-width: 0; }
+.points-detail__header { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(0, calc(430px + var(--control-height) + var(--s2))); align-items: start; gap: var(--s4); min-width: 0; padding-bottom: var(--s4); border-bottom: 1px solid var(--line); }
+.points-detail__identity { min-width: 0; }
+.points-detail__header h2 { width: 100%; min-width: 120px; margin: 0; overflow: hidden; font-size: 18px; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
+.points-detail__header-actions { display: grid; grid-template-columns: minmax(0, 430px) var(--control-height); align-items: center; gap: var(--s2); min-width: 0; }
+.points-detail__header-actions > .ui-save-bar { box-sizing: border-box; display: grid; grid-template-columns: 180px minmax(0, 1fr); align-items: center; gap: var(--s2); width: 100%; min-width: 0; min-height: 36px; padding: 0; border: 0; background: transparent; }
+.points-detail__header-actions .ui-save-bar__status { box-sizing: border-box; width: 180px; min-width: 0; min-height: 36px; align-items: center; overflow: visible; }
+.points-detail__header-actions .ui-save-bar__status > .ui-icon { display: none; }
+.points-detail__header-actions .ui-save-bar__message { width: 100%; min-width: 0; line-height: 1.4; }
+.points-detail__header-actions .ui-save-bar__message-copy.ui-truncated-text { overflow: visible; }
+.points-detail__header-actions .ui-save-bar__message-copy.ui-truncated-text::before { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.4; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
+.points-detail__header-actions .ui-save-bar__actions { min-width: 0; justify-content: flex-end; gap: var(--s1); }
+.points-detail__header-actions .ui-save-bar__buttons { gap: var(--s1); }
+.points-detail__header-actions .ui-save-bar__discard,
+.points-detail__header-actions .ui-save-bar__save { padding-inline: var(--s2); }
+.points-detail__header-actions > button { box-sizing: border-box; width: var(--control-height); height: var(--control-height); padding: 0; }
+.points-detail__balance { margin: var(--s2) 0 0; font-family: var(--font-mono); font-size: 26px; font-variant-numeric: tabular-nums; font-weight: 650; white-space: nowrap; }
+.points-detail__balance span { color: var(--text-3); font-family: var(--font-ui); font-size: 13px; font-weight: 500; }
+.points-detail__meta { min-height: 18px; margin: 4px 0 0; color: var(--text-2); font-size: 12px; }
+.points-correction, .points-history, .points-settings { display: grid; gap: var(--s3); min-width: 0; }
+.points-correction h3, .points-history h3 { margin: 0; font-size: 14px; }
+.points-correction__fields { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(240px, 2fr); gap: var(--s3); max-width: 560px; }
+.points-correction__preview { min-height: 20px; margin: 0; color: var(--text-2); font-size: 12px; line-height: 20px; }
+.points-correction__preview.is-invalid { color: var(--error-text); }
+.points-history__table { min-width: 0; }
+.points-settings { gap: var(--s5); }
+.points-settings > .page-header { margin-bottom: 0; padding-bottom: var(--s4); }
+.points-settings__fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s3); min-width: 0; }
+.points-settings__field--wide { grid-column: 1 / -1; }
+.points-settings__hint { min-height: 20px; margin: 0; color: var(--text-3); font-size: 12px; }
+.points-error { display: grid; min-height: 240px; place-items: center; color: var(--error-text); }
+@media (max-width: 720px) {
+  .points-page-actions { flex-wrap: wrap; justify-content: flex-start; }
+  .points-page-actions__meta { flex-basis: 100%; }
+  .points-detail__header { grid-template-columns: minmax(0, 1fr); }
+  .points-detail__header-actions { grid-template-columns: minmax(0, 1fr) var(--control-height); }
+  .points-detail__header-actions > .ui-save-bar { grid-template-columns: minmax(0, 1fr) auto; }
+  .points-detail__header-actions .ui-save-bar__status { width: auto; }
+  .points-correction__fields, .points-settings__fields { grid-template-columns: minmax(0, 1fr); }
+  .points-settings__field--wide { grid-column: auto; }
+}

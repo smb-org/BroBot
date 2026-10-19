@@ -38,6 +38,8 @@ import { modulePoints } from "./module-points";
 import { createModuleSecretReadAccess } from "./module-secrets";
 import { recordChannelGameHistory } from "./db/game-search-cache";
 import { notifyModuleScheduleInputsChanged } from "./module-schedules";
+import { pointsCatalog } from "../modules/points/locale";
+import { appendPointWelcome, type PendingPointWelcome } from "./point-welcome";
 
 export interface DispatchEnvironment {
   DB: D1Database;
@@ -341,6 +343,7 @@ const runActions = async (
   fetcher: typeof fetch,
   attributions: readonly string[] = [],
   sourceBroadcasterUserId?: string | null,
+  pendingWelcome?: PendingPointWelcome,
 ): Promise<ModuleDiagnostic[]> => {
   const diagnostics: ModuleDiagnostic[] = [];
   const pendingActions = [...actions];
@@ -350,8 +353,9 @@ const runActions = async (
   // Order is preserved: a reply after an announcement reads as a different
   // conversation than the reverse.
   for (let index = 0; index < pendingActions.length; index += 1) {
-    const action = pendingActions[index];
+    let action = pendingActions[index];
     if (action === undefined) continue;
+    action = appendPointWelcome(action, pendingWelcome);
     const reportDelivery = async (delivery: ModuleChatDelivery): Promise<void> => {
       if (action.kind !== "chat" || action.onDelivery === undefined) return;
       try {
@@ -943,6 +947,37 @@ export const dispatchEventSubNotification = async (
   }
 
   const streamStateTransitionAccepted = streamStateChanged !== null;
+  let pendingWelcome: PendingPointWelcome | undefined;
+  const pointsMatch = matches.find(({ module }) => module.id === "points");
+  const chatterUserId = textValue(event.payload.chatter_user_id);
+  const chatterLogin = textValue(event.payload.chatter_user_login);
+  const eventMessage = recordValue(event.payload.message) ? event.payload.message : null;
+  const messageId = eventMessage === null ? null : textValue(eventMessage.message_id);
+  const sourceBroadcasterUserId = textValue(event.payload.source_broadcaster_user_id);
+  if (pointsMatch !== undefined && event.subscriptionType === "channel.chat.message" && chatterUserId !== null &&
+      chatterLogin !== null && messageId !== null && (sourceBroadcasterUserId === null || sourceBroadcasterUserId === event.channelId)) {
+    try {
+      const botUserId = await getCachedBotUserId(environment.DB);
+      if (chatterUserId !== botUserId) {
+        const settings = pointsMatch.module.settingsSchema.parse(JSON.parse(pointsMatch.settings)) as { startBonus: number; currencyName: string };
+        const access = modulePoints(environment.CHANNEL, event.channelId, "points");
+        const touched = await access.touchAccount(chatterUserId, chatterLogin, settings.startBonus);
+        if (touched.welcomePending) {
+          const language = await channelLanguage();
+          pendingWelcome = {
+            accountId: chatterUserId,
+            messageId,
+            text: pointsCatalog[language].chat.startBonus(settings.startBonus, settings.currencyName),
+            access,
+            used: false,
+          };
+        }
+      }
+    } catch {
+      // The module handler retries the account touch and reports any failure through its normal diagnostics.
+    }
+  }
+
   for (const { module, settings } of matches) {
     const diagnostics: ModuleDiagnostic[] = [];
     let result: ModuleResult | null = null;
@@ -1103,6 +1138,7 @@ export const dispatchEventSubNotification = async (
           fetcher,
           result.attributions,
           textValue(event.payload.source_broadcaster_user_id),
+          pendingWelcome,
         ));
       } catch (error: unknown) {
         diagnostics.push({ code: "host.action.failed" satisfies EventCode, detail: { message: errorMessage(error) } });

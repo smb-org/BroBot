@@ -1,4 +1,4 @@
-import { prepareAudit, recordAudit } from "./db/audit";
+import { prepareAudit, recordAudit, recordAuditOnce } from "./db/audit";
 import type { ModuleAuditEntry } from "../modules/contract";
 import type { AuditActorKind } from "../contracts/values";
 
@@ -33,14 +33,8 @@ export const writeModuleAudit = async (
   changedAt: string,
   entry: ModuleAuditEntry,
   actorKind: AuditActorKind = "member",
-): Promise<void> => recordAudit(
-  db,
-  actorUserId,
-  changedAt,
-  entry.channelId,
-  entry.moduleId,
-  entry.action,
-  entry.before,
-  entry.after,
-  actorKind,
-);
+  options?: { operationId?: string; actorUserId?: string },
+): Promise<void> => options?.operationId === undefined
+  ? recordAudit(db, actorUserId, changedAt, entry.channelId, entry.moduleId, entry.action, entry.before, entry.after, actorKind)
+  : recordAuditOnce(db, options.actorUserId ?? actorUserId, changedAt, entry.channelId, entry.moduleId, entry.action,
+    entry.before, entry.after, options.operationId, actorKind);

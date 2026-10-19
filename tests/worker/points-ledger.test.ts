@@ -425,7 +425,7 @@ describe("points ledger in the worker Durable Object", () => {
     expect(monthFirstPage.rows.map((row) => [row.accountId, row.monthNet])).toEqual([[
       "viewer-a", 5,
     ], ["viewer-b", 5]]);
-    expect(monthSecondPage.rows.map((row) => [row.accountId, row.monthNet])).toEqual([["viewer-c", 0]]);
+    expect(monthSecondPage.rows.map((row) => [row.accountId, row.monthNet])).toEqual([["viewer-c", null]]);
     expect(searched.rows.map((row) => row.login)).toEqual(["nachtfalke", "nachtfalke_zwei"]);
     expect(history.rows).toMatchObject([{ operationId: "game-a", delta: 5, balanceAfter: 25, detail: { payout: 5 } }]);
     expect(ranking).toEqual([

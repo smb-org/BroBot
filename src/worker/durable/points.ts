@@ -679,7 +679,7 @@ export const listPointAccounts = (
       accountId: row.account_id,
       login: row.login ?? row.account_id,
       balance: row.balance,
-      monthNet: row.month_net ?? 0,
+      monthNet: row.month_net,
     })),
     ...(nextCursor === undefined ? {} : { cursor: nextCursor }),
   };

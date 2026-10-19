@@ -105,8 +105,8 @@ const requireChannelAuthorizationFor = (browserEntry: boolean) => createMiddlewa
     context.set("authorizeManagementMutation", authorizeModuleManagementMutation);
     context.set("prepareModuleAudit", (entry, changedAt) =>
       prepareModuleAudit(context.env.DB, session.userId, changedAt, entry));
-    context.set("writeModuleAudit", (entry, changedAt) =>
-      writeModuleAudit(context.env.DB, session.userId, changedAt, entry));
+    context.set("writeModuleAudit", (entry, changedAt, options) =>
+      writeModuleAudit(context.env.DB, session.userId, changedAt, entry, "member", options));
     finishAuthTiming();
     await next();
   },

@@ -27,7 +27,7 @@ export interface PointsWorkerObject {
   creditPointActivity(moduleId: string, accountId: string, login: string, messageAt: number, live: boolean,
     rules: { amount: number; windowMinutes: number; dailyCap: number }): Promise<{ credited: number }>;
   listPointAccounts(moduleId: string, query: { sort: "balance" | "month"; search?: string; cursor?: string; limit: number }): Promise<{
-    rows: Array<{ accountId: string; login: string; balance: number; monthNet: number }>;
+    rows: Array<{ accountId: string; login: string; balance: number; monthNet: number | null }>;
     cursor?: string;
   }>;
   pointHistory(moduleId: string, accountId: string, cursor?: string, limit?: number): Promise<{
