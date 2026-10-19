@@ -436,6 +436,7 @@ export type ModuleAction =
     /** Lets a module finalize a claim after the host knows the delivery outcome. */
     onDelivery?: (delivery: ModuleChatDelivery) => Promise<void>;
   }
+  | { kind: "clip"; cooldownSeconds: number; postClipLinkInChat: boolean; chatLinkTemplate: string }
   | { kind: "announcement"; text: string; target?: ChatOutputTarget; automated?: boolean }
   | { kind: "shoutout"; targetChannelId: string }
   | { kind: "shoutout"; targetLogin: string }
@@ -718,6 +719,8 @@ export type ModuleDryRunContext = Pick<ModuleExecutionContext,
   isBallotChoiceUnresolved?: () => boolean;
   /** Durable Object activity reads that do not initialize tables, write state, or schedule alarms. */
   activeChatters?: Pick<ModuleExecutionContext["activeChatters"], "count" | "seen">;
+  /** Reads a module cooldown without claiming or changing it. */
+  pointCooldownRemaining?: (moduleId: string, key: string) => Promise<number>;
 };
 
 /** Durable storage and alarm access given to a module alarm handler. */
@@ -1538,6 +1541,13 @@ export const MODULE_TEMPLATE_TIER_CHAT_STATUSES: Readonly<Record<ModuleTemplateM
   moderator: ["moderator", "broadcaster"],
   broadcaster: ["broadcaster"],
 };
+
+/** Checks a user's Twitch chat badges against the shared minimum-role ladder. */
+export const chatStatusMeetsMinimumTier = (
+  statuses: readonly ModuleChatStatus[] | null,
+  minimumTier: ModuleTemplateMinimumTier | "viewer",
+): boolean => minimumTier === "viewer" || minimumTier === "everyone" ||
+  statuses?.some((status) => MODULE_TEMPLATE_TIER_CHAT_STATUSES[minimumTier].includes(status)) === true;
 
 /** A variable name provided by a module for template validation. */
 export interface ModuleRegisteredTemplateVariable extends TemplateVariable {

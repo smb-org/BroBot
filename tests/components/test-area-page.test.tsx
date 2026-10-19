@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { dryRunChatMessage, fetchChannelBroadcast, lookupChannelGames, searchChannelGames } from "../../src/dashboard/api";
@@ -123,6 +123,31 @@ describe("test area page", () => {
     expect(screen.getByText(/^Ohne Reaktion:/u)).toBeInTheDocument();
     expect(screen.queryByText("Nicht testbar")).not.toBeInTheDocument();
     expect(firingRow()).toHaveAttribute("aria-current", "true");
+  });
+
+  it("uses the shared Clips module name in the result row and detail badge", async () => {
+    vi.mocked(dryRunChatMessage).mockResolvedValue(response({
+      modules: [{
+        moduleId: "clips",
+        status: "reacts",
+        entries: [{
+          moduleId: "clips",
+          entry: { kind: "clip", id: "clip", label: "!clip" },
+          outcome: "fires",
+          match: { kind: "command_name", token: "!clip" },
+          blocks: [],
+          effects: [{ kind: "clip" }],
+          templateNotes: [],
+        }],
+      }],
+    }));
+    renderPage();
+    run();
+
+    const row = await screen.findByRole("button", { name: /!clip/u });
+    expect(within(row).getByText("Clips")).toBeInTheDocument();
+    fireEvent.click(row);
+    expect(document.querySelector(".test-area__detail .test-area__module-badge")).toHaveTextContent("Clips");
   });
 
   it("applies the broadcast game after a message edit while the broadcast request is pending", async () => {

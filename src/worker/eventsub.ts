@@ -327,19 +327,18 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
     return response("Invalid EventSub notification.", 400);
   }
 
-  // Deliberately awaited instead of run in the background: a chat call is
-  // short, and this keeps the outcome visible in tests. If dispatch later
-  // takes longer, it belongs after the response.
+  const dispatchNotification = (): Promise<void> => dispatchEventSubNotification(context.env, {
+    channelId: target.channelId,
+    subscriptionType: target.subscriptionType,
+    subscriptionVariant: target.subscriptionVariant,
+    triggerId: messageId,
+    payload: target.payload,
+    receivedAt: now,
+    eventSubTimestamp: timestamp,
+  });
+
   try {
-    await dispatchEventSubNotification(context.env, {
-      channelId: target.channelId,
-      subscriptionType: target.subscriptionType,
-      subscriptionVariant: target.subscriptionVariant,
-      triggerId: messageId,
-      payload: target.payload,
-      receivedAt: now,
-      eventSubTimestamp: timestamp,
-    });
+    await dispatchNotification();
     if (isAdPrewarningTrigger(target.subscriptionType)) {
       try {
         await refreshAdPrewarning(context.env, target.channelId, messageId, now);

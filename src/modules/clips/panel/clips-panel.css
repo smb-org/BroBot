@@ -33,8 +33,12 @@
 
 .clips-panel__settings { gap: 0; }
 
-/* The fields are permanently locked, so their reserved description, error and reason rows stay empty. */
-.clips-panel__settings :is(.ui-select__description, .unit-input__description, .ui-field-error, .ui-locked-reason--reserved) { display: none; }
+/* These controls have no helper text; keep only real cooldown errors in the flow. */
+.clips-panel__command-fields :is(.ui-select__description, .ui-select__error, .unit-input__description) { display: none; }
+.clips-panel__command-fields .unit-input__error:not([role="alert"]) { display: none; }
+
+/* Locked automatic controls cannot show validation or helper text yet. */
+.clips-panel__automatic-fields :is(.unit-input__description, .unit-input__error, .ui-locked-reason--reserved) { display: none; }
 
 .clips-panel__locked-note {
   margin: 0;
@@ -59,8 +63,6 @@
 .clips-panel__automatic-fields .unit-input { width: 100%; }
 
 .clips-panel__clips-section > .ui-section__heading { min-width: 0; }
-/* The settings content is 2.5px taller than its reserved loading slot. */
-.clips-panel__clips-section { margin-top: calc(var(--spacing-s5) + 2.5px); }
 
 .clips-panel__refresh-actions {
   display: flex;
@@ -116,7 +118,7 @@
 }
 
 .clips-panel__settings-refresh-message [role="alert"] { overflow-wrap: anywhere; }
-.clips-panel__settings-load-state { height: var(--clips-panel-settings-reserve-height); --clips-panel-settings-reserve-height: 658px; }
+.clips-panel__settings-load-state { height: var(--clips-panel-settings-reserve-height); --clips-panel-settings-reserve-height: 627px; }
 .clips-panel__settings-load-state .ui-load-state__reserved-lines > span:nth-child(n + 13) { display: none; }
 
 .clips-panel .ui-load-state__inline-error {
@@ -184,7 +186,7 @@
 .clips-panel__clip-link:hover { border-color: var(--color-accent); color: var(--color-accent); }
 
 @media (max-width: 600px) {
-  .clips-panel__settings-load-state { --clips-panel-settings-reserve-height: 850px; }
+  .clips-panel__settings-load-state { --clips-panel-settings-reserve-height: 851px; }
   .clips-panel__settings-load-state .ui-load-state__reserved-lines > span:nth-child(n + 13) { display: block; }
   .clips-panel__settings-load-state .ui-load-state__reserved-lines > span:nth-child(n + 16) { display: none; }
   .clips-panel .page-header.module-detail-heading { grid-template-columns: minmax(0, 1fr); }

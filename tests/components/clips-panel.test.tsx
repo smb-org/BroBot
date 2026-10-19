@@ -2,6 +2,7 @@ import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { moduleQueryKey } from "../../src/dashboard/data";
+import { runDashboardNavigationGuards } from "../../src/dashboard/ui/navigation-guard";
 import { UiProvider } from "../../src/dashboard/ui";
 import ClipsPanel from "../../src/modules/clips/panel";
 import type { ClipsSettings, SessionClipList } from "../../src/modules/clips/contracts";
@@ -47,26 +48,65 @@ describe("clips panel", () => {
     vi.unstubAllGlobals();
   });
 
-  it("shows stored settings in visible disabled controls with no save or restore path", async () => {
+  it("shows editable command and chat-link settings while automatic clips remain locked", async () => {
     renderPanel();
 
     expect(await screen.findByRole("heading", { name: "Chatbefehl !clip", level: 2 })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Clip-Link im Chat posten", level: 2 })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Automatische Clip-Einstellungen", level: 2 })).toBeInTheDocument();
-    expect(screen.getAllByText("Kommt in einer späteren Version.", { exact: true })).toHaveLength(3);
+    expect(screen.getAllByText("Kommt in einer späteren Version.", { exact: true })).toHaveLength(1);
 
-    for (const id of ["clips-command-role", "clips-command-cooldown", "clips-chat-message", "clips-auto-threshold", "clips-auto-cooldown"]) {
+    for (const id of ["clips-auto-threshold", "clips-auto-cooldown"]) {
       expect(document.getElementById(id)).toBeDisabled();
     }
-    expect(screen.getByRole("switch", { name: "Aktiviert" })).toBeDisabled();
+    expect(document.getElementById("clips-command-role")).toBeEnabled();
+    expect(document.getElementById("clips-command-cooldown")).toBeEnabled();
+    expect(document.getElementById("clips-chat-message")).toBeEnabled();
+    expect(screen.getByRole("switch", { name: "Aktiviert" })).toBeEnabled();
     expect(screen.getByRole("switch", { name: "Automatische Clips" })).toBeDisabled();
-    expect(screen.getByRole("combobox", { name: "Mindestrolle" })).toBeDisabled();
+    expect(screen.getByRole("combobox", { name: "Mindestrolle" })).toBeEnabled();
     expect(document.getElementById("clips-command-cooldown")).toHaveValue(180);
     expect(document.getElementById("clips-chat-message")).toHaveValue(settings.chatLinkTemplate);
     expect(document.getElementById("clips-auto-threshold")).toHaveValue(3.5);
     expect(document.getElementById("clips-auto-cooldown")).toHaveValue(1200);
-    expect(screen.queryByRole("button", { name: "Speichern" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Speichern" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Weitere Aktionen" })).not.toBeInTheDocument();
+  });
+
+  it("hides the valid cooldown error reserve but leaves validation errors visible", async () => {
+    const view = renderPanel();
+    const cooldown = await screen.findByRole("spinbutton", { name: "Abklingzeit" });
+    const errorSlot = view.container.querySelector<HTMLElement>("#clips-command-cooldown-error");
+    expect(errorSlot).not.toBeNull();
+    expect(errorSlot).not.toHaveAttribute("role", "alert");
+
+    fireEvent.change(cooldown, { target: { value: "" } });
+    const validationError = await screen.findByRole("alert");
+    expect(validationError).toHaveClass("unit-input__error");
+    expect(window.getComputedStyle(validationError).display).not.toBe("none");
+  });
+
+  it("guards navigation and browser unload while settings contain an unsaved draft", async () => {
+    renderPanel();
+    const messageField = await screen.findByLabelText("Chatnachricht");
+    fireEvent.change(messageField, { target: { value: "Draft: {clip.url}" } });
+
+    let proceeded = false;
+    runDashboardNavigationGuards(() => { proceeded = true; }, () => undefined);
+    expect(await screen.findByRole("dialog")).toHaveTextContent("Ungespeicherte Änderungen");
+    expect(screen.getByRole("button", { name: "Speichern und wechseln" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Weiter bearbeiten" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(proceeded).toBe(false);
+    const unload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
+
+    runDashboardNavigationGuards(() => { proceeded = true; }, () => undefined);
+    fireEvent.click(await screen.findByRole("button", { name: "Verwerfen und wechseln" }));
+    await waitFor(() => expect(proceeded).toBe(true));
+    expect(messageField).toHaveValue(settings.chatLinkTemplate);
   });
 
   it("clears a settings refresh error after the query recovers", async () => {

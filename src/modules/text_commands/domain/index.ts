@@ -1,6 +1,7 @@
 import type { ModuleChatStatus } from "../contract";
 import { TEXT_COMMAND_TIER_CHAT_STATUSES, type TextCommandMinimumTier } from "../contracts";
 import { renderTemplate } from "../contract";
+import { chatStatusMeetsMinimumTier } from "../../contract";
 
 export const COMMAND_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 
@@ -53,8 +54,7 @@ export const initialTextCommandRevision = (createdAt: string): number => {
  */
 export const statusForTier = TEXT_COMMAND_TIER_CHAT_STATUSES;
 
-export const chatStatusMeetsTier = (
+export const chatStatusMeetsTier = chatStatusMeetsMinimumTier as (
   status: readonly ModuleChatStatus[] | null,
   minimumTier: TextCommandMinimumTier,
-): boolean => minimumTier === "everyone"
-  || (status !== null && status.some((entry) => statusForTier[minimumTier].includes(entry)));
+) => boolean;

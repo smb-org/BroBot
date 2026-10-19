@@ -1,11 +1,10 @@
 import { Hono, type Context } from "hono";
 
 import {
-  decryptStoredToken,
   fetchChannelStatus,
   TwitchApiError,
 } from "../bot-maintenance";
-import { getTokenEncryptionKeys } from "../auth/crypto";
+import { readBotCredentials } from "../auth/bot-credentials";
 import { getPlatformUserIds } from "../config";
 import { canConnectBot } from "../auth/bot-authorization";
 import {
@@ -47,9 +46,8 @@ import { EVENT_TONES, MANAGING_ROLES, canManage, type EventCode, type EventTone 
 import { auditSubjectUserId, isAuditArea } from "../../dashboard/audit/areas";
 import { apiErrorDetail } from "../../modules/contract";
 import type { PanelAuditFilters, PanelEventFilters, PanelEventOrigin } from "../../panel-contract";
-import { createClip, type CreateClipResult } from "../clip";
+import { createAndPostConfiguredClipLink } from "../clip";
 import { fetchTwitchUserByLogin, sendShoutout, type ShoutoutSendResult } from "../shoutout";
-import { writeModuleAudit } from "../module-audit";
 import { publishOverlayHostEvent } from "../realtime";
 import { notifyModuleScheduleInputsChanged } from "../module-schedules";
 import { clearTimerScheduleReconciliation, timerScheduleReconciliationMutation } from "../../modules/contracts/timer-schedule-reconciliation";
@@ -64,6 +62,7 @@ import { readChannelStreamState } from "../db/stream-state";
 import { measureServerTiming } from "../server-timing";
 import { DEFAULT_CHANNEL_TIME_ZONE, validChannelTimeZone } from "../../modules/contract";
 import { readCompletePanelResourceRevisions } from "../panel-resources";
+import { clipsSettingsSchema } from "../../modules/clips/contracts";
 
 interface PanelEnvironment {
   Bindings: Env;
@@ -209,13 +208,6 @@ const laterIso = (now: string, milliseconds: number): string =>
   new Date(Date.parse(now) + milliseconds).toISOString();
 
 const canCheckModeratorStatus = canManage;
-
-const readBotCredentials = async (environment: Env): Promise<{ userId: string; accessToken: string } | null> => {
-  const identity = await getBotIdentity(environment.DB);
-  if (identity === null) return null;
-  const accessToken = await decryptStoredToken(identity.accessTokenCiphertext, getTokenEncryptionKeys(environment));
-  return accessToken === null ? null : { userId: identity.userId, accessToken };
-};
 
 const clipStatusFor = (reason: string | null): 400 | 401 | 429 | 502 | 503 => {
   if (reason === "not_live") return 400;
@@ -526,31 +518,38 @@ panelRouter.post(
       return context.json({ error: "module_disabled" }, 409);
     }
     const triggerId = `clip:${crypto.randomUUID()}`;
-    const credentials = await readBotCredentials(context.env);
-    const result: CreateClipResult = credentials === null
-      ? { created: false, reason: "bot_identity_missing", detail: {}, clipId: null, editUrl: null }
-      : await createClip(context.env, credentials.accessToken, channelId, fetch);
+    let rawSettings: unknown;
+    try {
+      rawSettings = JSON.parse(clipsModule.settings);
+    } catch {
+      return context.json({ error: "module_settings_invalid" }, 500);
+    }
+    const parsedSettings = clipsSettingsSchema.safeParse(rawSettings);
+    if (!parsedSettings.success) return context.json({ error: "module_settings_invalid" }, 500);
+    const action = await createAndPostConfiguredClipLink(
+      context.env,
+      channelId,
+      actor.userId,
+      parsedSettings.data,
+      fetch,
+      triggerId,
+    );
 
-    if (!result.created) {
+    if (action.diagnostics.length > 0) {
       await writeModuleDiagnostics(context.env.DB, channelId, "host", triggerId, context.get("actor").userId, [
-        { code: "host.clip.failed" satisfies EventCode, detail: { reason: result.reason, ...result.detail } },
+        ...action.diagnostics,
       ], now);
-      return context.json({
-        error: result.reason === "not_live" ? "clip_stream_offline" : "clip_create_failed",
-        reason: result.reason,
-        detail: apiErrorDetail(result.detail),
-      }, clipStatusFor(result.reason));
     }
 
-    await writeModuleAudit(context.env.DB, context.get("actor").userId, now, {
-      channelId,
-      moduleId: null,
-      action: "clip.created",
-      before: null,
-      after: { clipId: result.clipId, availabilityConfirmed: true },
-    });
+    if (!action.clip.created) {
+      return context.json({
+        error: action.clip.reason === "not_live" ? "clip_stream_offline" : "clip_create_failed",
+        reason: action.clip.reason,
+        detail: apiErrorDetail(action.clip.detail),
+      }, clipStatusFor(action.clip.reason));
+    }
 
-    return context.json({ clipId: result.clipId, editUrl: result.editUrl });
+    return context.json({ clipId: action.clip.clipId, editUrl: action.clip.editUrl });
   },
 );
 
