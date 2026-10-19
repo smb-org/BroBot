@@ -55,7 +55,7 @@ const readHistory = (channelId: string): HistoryItem[] => {
           (request.streamState !== "online" && request.streamState !== "offline") ||
           typeof request.sharedChat !== "boolean") return [];
       const onlyModule = isRecord(request.only) ? request.only.moduleId : null;
-      const only: DryRunRequest["only"] = onlyModule === "text_commands" || onlyModule === "faq"
+      const only: DryRunRequest["only"] = onlyModule === "text_commands" || onlyModule === "faq" || onlyModule === "chat_voting" || onlyModule === "votekick"
         ? { moduleId: onlyModule, ...(isRecord(request.only) && typeof request.only.entryId === "string" ? { entryId: request.only.entryId } : {}) }
         : undefined;
       const game = isRecord(request.game) && typeof request.game.id === "string" && typeof request.game.name === "string"
@@ -95,10 +95,12 @@ const formatTime = (value: string, language: DashboardLanguage): string => {
 const moduleName = (id: string, labels: ReturnType<typeof dashboardTexts>, language: DashboardLanguage): string =>
   id === "text_commands" ? labels.testArea.textCommands
     : id === "faq" ? labels.testArea.faq
-      : moduleNavigationName(id, language);
+      : id === "chat_voting" ? labels.testArea.chatVoting
+        : id === "votekick" ? labels.testArea.votekick
+          : moduleNavigationName(id, language);
 
 const resultItems = (response: DryRunResponse | null): ResultItem[] => response?.modules
-  .filter((module) => module.status === "reacts" || module.status === "blocked")
+  .filter((module) => module.status === "reacts" || module.status === "blocked" || module.status === "indeterminate")
   .flatMap((module) => module.entries.map((report) => ({
     key: module.moduleId + ":" + report.entry.id,
     moduleId: module.moduleId,
@@ -110,7 +112,35 @@ const firstBlockReason = (report: DryRunEntryReport, labels: ReturnType<typeof d
   return block === undefined ? labels.testArea.blocked : labels.testArea.blockReason(block.code, block.detail);
 };
 
-const matchLabel = (report: DryRunEntryReport, labels: ReturnType<typeof dashboardTexts>): string => {
+const firstBallotEffect = (report: DryRunEntryReport): Extract<DryRunEffect, { kind: "ballot" }> | undefined =>
+  report.effects.find((effect): effect is Extract<DryRunEffect, { kind: "ballot" }> => effect.kind === "ballot");
+
+const votekickTargetFromMessage = (message: string): string | null => {
+  const match = /^!votekick\s+(@?[^\s]+)/iu.exec(message.trim());
+  return match?.[1]?.replace(/^@/u, "") ?? null;
+};
+
+const entryLabel = (item: ResultItem): string => {
+  const ballot = firstBallotEffect(item.report);
+  return item.moduleId === "chat_voting" && ballot !== undefined && ballot.action !== "start"
+    ? ballot.label
+    : item.report.entry.label;
+};
+
+const matchLabel = (report: DryRunEntryReport, labels: ReturnType<typeof dashboardTexts>, message: string): string => {
+  const ballot = firstBallotEffect(report);
+  if (report.moduleId === "chat_voting" && report.entry.kind === "chat_vote") {
+    if (ballot?.action === "count" && ballot.choice !== undefined) {
+      return /^\d+$/u.test(ballot.choice) ? labels.testArea.matchVoteChoice(ballot.choice) : labels.testArea.matchVoteTerm(ballot.choice);
+    }
+    if (ballot?.action === "overflow") return labels.testArea.matchVoteOverflow;
+    return labels.testArea.matchVoteCommand;
+  }
+  if (report.moduleId === "votekick" && report.entry.kind === "votekick") {
+    if (ballot?.action === "count" && ballot.choice !== undefined) return labels.testArea.matchVotekickChoice(ballot.choice);
+    const target = ballot?.action === "start" ? ballot.label : votekickTargetFromMessage(message);
+    if (target !== null) return labels.testArea.matchVotekickTarget(target);
+  }
   const match = report.match;
   if (match.kind === "command_name" || match.kind === "alias") {
     return match.kind === "command_name" ? labels.testArea.matchCommand : labels.testArea.matchAlias(match.token);
@@ -188,6 +218,8 @@ function ContextFields({
     { value: "all", label: texts.allModules },
     { value: "text_commands", label: texts.textCommands },
     { value: "faq", label: texts.faq },
+    { value: "chat_voting", label: texts.chatVoting },
+    { value: "votekick", label: texts.votekick },
   ];
   const searchGames = useCallback((query: string) => searchChannelGames(channelId, query), [channelId]);
   const lookupGames = useCallback((ids: readonly string[]) => lookupChannelGames(channelId, ids), [channelId]);
@@ -271,13 +303,13 @@ function ContextFields({
       value={moduleFilter}
       onChange={(value) => {
         if (lockedModule !== null) return;
-        setModuleFilter(value === "text_commands" || value === "faq" ? value : "all");
+        setModuleFilter(value === "text_commands" || value === "faq" || value === "chat_voting" || value === "votekick" ? value : "all");
       }}
       options={moduleOptions}
       disabled={lockedModule !== null}
       compact
     />
-    {lockedModule === null ? null : <div className="test-area__deep-link"><Badge tone="brand">{lockedModule === "faq" ? texts.faq : texts.textCommands}</Badge><Button variant="subtle" size="compact" onClick={onClearFilter}>{texts.clearEntryFilter}</Button></div>}
+    {lockedModule === null ? null : <div className="test-area__deep-link"><Badge tone="brand">{lockedModule === "text_commands" ? texts.textCommands : lockedModule === "faq" ? texts.faq : lockedModule === "chat_voting" ? texts.chatVoting : texts.votekick}</Badge><Button variant="subtle" size="compact" onClick={onClearFilter}>{texts.clearEntryFilter}</Button></div>}
   </>;
 }
 
@@ -315,6 +347,18 @@ function effectSuppression(effect: DryRunEffect, labels: ReturnType<typeof dashb
 
 function effectLabel(effect: DryRunEffect, labels: ReturnType<typeof dashboardTexts>): string {
   const texts = labels.testArea;
+  if (effect.kind === "ballot") {
+    const actionLabel = effect.action === "count" ? texts.ballotCountEffect(effect.moduleId, effect.choice)
+      : effect.action === "start" ? texts.ballotStartEffect(effect.moduleId, effect.label)
+        : effect.action === "overflow" ? texts.ballotOverflowEffect
+          : texts.ballotFinalizeEffect(effect.moduleId, effect.label);
+    return [
+      actionLabel,
+      effect.counts === undefined || effect.counts.length === 0 ? null : texts.ballotCounts(effect.moduleId, effect.counts),
+      effect.terms === undefined || effect.terms.length === 0 ? null : texts.ballotTerms(effect.terms),
+      effect.more === undefined || effect.more <= 0 ? null : texts.ballotMore(effect.more),
+    ].filter((part): part is string => part !== null).join(" · ");
+  }
   const label = (() => {
     switch (effect.kind) {
     case "chat": return effect.reply ? texts.replyToMessage : texts.chatEffect;
@@ -329,6 +373,19 @@ function effectLabel(effect: DryRunEffect, labels: ReturnType<typeof dashboardTe
   return [label, condition, effectSuppression(effect, labels)].filter((part): part is string => part !== null).join(" · ");
 }
 
+function ballotStatusLabel(effect: Extract<DryRunEffect, { kind: "ballot" }>, labels: ReturnType<typeof dashboardTexts>): string {
+  const texts = labels.testArea;
+  switch (effect.action) {
+  case "count":
+    return effect.moduleId === "chat_voting" && effect.choice !== undefined
+      ? texts.wouldCountVote(effect.choice)
+      : texts.wouldCountVotekickVote;
+  case "start": return texts.wouldStartBallot(effect.moduleId);
+  case "overflow": return texts.wouldOverflowBallot;
+  case "finalize": return texts.wouldFinalizeBallot(effect.moduleId);
+  }
+}
+
 function MatchExplanation({ report, message, labels }: {
   report: DryRunEntryReport;
   message: string;
@@ -336,6 +393,24 @@ function MatchExplanation({ report, message, labels }: {
 }): ReactElement {
   const match = report.match;
   const texts = labels.testArea;
+  const ballot = firstBallotEffect(report);
+  let specificExplanation: string | null = null;
+  if (report.moduleId === "chat_voting" && report.entry.kind === "chat_vote") {
+    specificExplanation = ballot?.action === "count" && ballot.choice !== undefined
+      ? /^\d+$/u.test(ballot.choice) ? texts.voteChoiceWhy(message, ballot.choice) : texts.voteTermWhy(message, ballot.choice)
+      : ballot?.action === "overflow" ? texts.voteOverflowWhy(message)
+        : ballot?.action === "finalize" ? texts.voteFinalizeWhy(message) : texts.voteCommandWhy(message);
+  } else if (report.moduleId === "votekick" && report.entry.kind === "votekick") {
+    if (ballot?.action === "count" && ballot.choice !== undefined) {
+      specificExplanation = texts.votekickChoiceWhy(message, ballot.choice);
+    } else if (ballot?.action === "finalize") {
+      specificExplanation = texts.votekickFinalizeWhy(message);
+    } else {
+      const target = ballot?.action === "start" ? ballot.label : votekickTargetFromMessage(message);
+      if (target !== null) specificExplanation = texts.votekickTargetWhy(message, target);
+    }
+  }
+  if (specificExplanation !== null) return <p className="test-area__match-explanation">{specificExplanation}</p>;
   const token = match.kind === "keyword" || match.kind === "regex" ? match.pattern : match.token;
   const label = match.kind === "keyword" ? texts.matchKeywordLabel
     : match.kind === "regex" ? texts.matchRegexLabel
@@ -366,10 +441,10 @@ function ResultDetail({ item, message, response, labels, language, onOpenEditor 
   return <div className="test-area__detail-content">
     <header className="test-area__detail-head">
       <div className="test-area__detail-heading">
-        <h2>{report.entry.label}</h2>
+        <h2>{entryLabel(item)}</h2>
         <div className="test-area__detail-meta">
-          <Badge tone={moduleBadgeTone(moduleId)} className="test-area__module-badge">{report.entry.kind === "faq_entry" ? texts.faqEntry : texts.textCommand}</Badge>
-          <span>{matchLabel(report, labels)}</span>
+          <Badge tone={moduleBadgeTone(moduleId)} className="test-area__module-badge">{report.entry.kind === "faq_entry" ? texts.faqEntry : report.entry.kind === "text_command" ? texts.textCommand : moduleName(moduleId, labels, language)}</Badge>
+          <span>{matchLabel(report, labels, message)}</span>
         </div>
       </div>
       {onOpenEditor === undefined || editorModuleId === null ? null : <Button
@@ -578,6 +653,11 @@ export function TestAreaPage({
   const response = snapshot?.response ?? null;
   const fires = visibleRows.filter((row) => row.report.outcome === "fires").length;
   const blocked = visibleRows.filter((row) => row.report.outcome === "blocked").length;
+  const indeterminate = visibleRows.filter((row) => row.report.outcome === "indeterminate").length;
+  const resultSummary = [
+    fires + blocked === 0 ? null : texts.reactionsSummary(fires, blocked),
+    indeterminate === 0 ? null : texts.indeterminateSummary(indeterminate),
+  ].filter((part): part is string => part !== null).join(" · ");
   const responseModules = response?.modules.filter((module) => snapshot?.request.only === undefined || module.moduleId === snapshot.request.only.moduleId) ?? [];
   const silentModules = responseModules.filter((module) => module.status === "silent").map((module) => moduleName(module.moduleId, labels, language));
   const errorModules = responseModules.filter((module) => module.status === "error" || module.status === "not_testable").map((module) => moduleName(module.moduleId, labels, language));
@@ -590,8 +670,8 @@ export function TestAreaPage({
   const liveSummary = pending ? texts.loading
     : error !== null ? texts.errorTitle
       : response === null ? ""
-        : errorModules.length > 0 ? texts.incompleteTitle + (fires + blocked > 0 ? ": " + texts.reactionsSummary(fires, blocked) : "")
-          : fires + blocked === 0 ? texts.emptyTitle : texts.reactionsSummary(fires, blocked);
+        : errorModules.length > 0 ? texts.incompleteTitle + (resultSummary.length > 0 ? ": " + resultSummary : "")
+          : visibleRows.length === 0 ? texts.emptyTitle : resultSummary;
   const selectedBadges = badges.length === 0 ? texts.badgeNames.viewer : badges.map((badge) => texts.badgeNames[badge]).join(" · ");
   const contextStream = [streamState === "online" ? texts.online : texts.offline, game?.name].filter(Boolean).join(" · ");
   const lockedModule = deepLinkOnly?.moduleId ?? null;
@@ -622,9 +702,13 @@ export function TestAreaPage({
 
   const rowElement = (item: ResultItem): ReactElement => {
     const isBlocked = item.report.outcome === "blocked";
+    const isIndeterminate = item.report.outcome === "indeterminate";
+    const ballot = firstBallotEffect(item.report);
     const hasSuppressedEffects = item.report.effects.some((effect) => "suppressedBy" in effect && effect.suppressedBy !== null);
     const isMutedReply = response?.controls.muted === true && item.report.effects.some((effect) => effect.kind === "chat" || effect.kind === "announcement");
-    const statusText = isBlocked ? texts.blocked : firingLabel(item.report, labels, isMutedReply);
+    const statusText = isBlocked ? texts.blocked
+      : isIndeterminate ? texts.indeterminate
+        : ballot === undefined ? firingLabel(item.report, labels, isMutedReply) : ballotStatusLabel(ballot, labels);
     return <button
       key={item.key}
       type="button"
@@ -636,11 +720,11 @@ export function TestAreaPage({
       }}
     >
       <span className="test-area__row-main">
-        <span className="test-area__row-title"><Badge tone={moduleBadgeTone(item.moduleId)} className="test-area__module-badge">{moduleName(item.moduleId, labels, language)}</Badge><strong>{item.report.entry.label}</strong></span>
-        <small>{matchLabel(item.report, labels)}</small>
+        <span className="test-area__row-title"><Badge tone={moduleBadgeTone(item.moduleId)} className="test-area__module-badge">{moduleName(item.moduleId, labels, language)}</Badge><strong>{entryLabel(item)}</strong></span>
+        <small>{matchLabel(item.report, labels, detailMessage)}</small>
       </span>
       <span className={"test-area__row-outcome" + (isMutedReply ? " is-muted" : "")}>
-        <StatusLed state={isBlocked ? "warn" : hasSuppressedEffects ? "off" : "ok"} label={statusText} dotOnly />
+        <StatusLed state={isBlocked ? "warn" : isIndeterminate || hasSuppressedEffects ? "off" : "ok"} label={statusText} dotOnly />
         <span>{statusText}</span>
       </span>
     </button>;
@@ -712,7 +796,7 @@ export function TestAreaPage({
         <header className="test-area__results-head">
           <div className="test-area__results-title">
             <h2>{texts.result}</h2>
-            <span>{response === null || fires + blocked === 0 ? texts.resultCount(0) : texts.reactionsSummary(fires, blocked)}</span>
+            <span>{response === null || resultSummary.length === 0 ? texts.resultCount(0) : resultSummary}</span>
             {pending ? <span className="test-area__loading-label"><StatusLed state="loading" label={texts.loading} dotOnly />{texts.loading}</span> : null}
             {muted ? <Badge tone="amber">{texts.muted}</Badge> : null}
             {paused ? <Badge>{texts.paused}</Badge> : null}
@@ -793,7 +877,7 @@ export function TestAreaPage({
       </Dialog>
       <Dialog
         opened={mobileDetailOpen && selectedItem !== null && response !== null}
-        title={selectedItem?.report.entry.label ?? texts.result}
+        title={selectedItem === null ? texts.result : entryLabel(selectedItem)}
         className="test-area__dialog test-area__detail-dialog"
         headerActions={selectedItem !== null && response !== null && onOpenEditor !== undefined &&
           (selectedItem.moduleId === "faq" || selectedItem.moduleId === "text_commands")

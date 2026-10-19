@@ -77,18 +77,21 @@ export const createE2ESessionCredentials = (): { cookie: string; csrfToken: stri
   return { cookie, csrfToken };
 };
 
-export const seedE2EOverlay = (): void => {
+export const seedE2EOverlay = (channelId = e2eChannelId): void => {
+  const overlayId = channelId === e2eChannelId ? e2eOverlayId : `overlay-${channelId}`;
+  const channelLogin = channelId === e2eChannelId ? "kanal-e2e" : `e2e-${channelId.slice(-12)}`;
+  const overlayToken = channelId === e2eChannelId ? e2eOverlayToken : `${e2eOverlayToken}-${channelId}`;
   const pepper = Buffer.from(e2eWorkerEnvironment.OVERLAY_TOKEN_PEPPER ?? "", "base64url");
-  const tokenHash = createHmac("sha256", pepper).update(e2eOverlayToken).digest("base64url");
+  const tokenHash = createHmac("sha256", pepper).update(overlayToken).digest("base64url");
   const createdAt = new Date().toISOString();
   const sql = `
-    DELETE FROM channels WHERE channel_id = '${e2eChannelId}';
+    DELETE FROM channels WHERE channel_id = '${channelId}';
     DELETE FROM auth_sessions WHERE session_id = 'session-e2e';
     DELETE FROM twitch_login_identity WHERE user_id = 'user-e2e';
     INSERT INTO channels (channel_id, login, display_name, language, created_at, updated_at)
-      VALUES ('${e2eChannelId}', 'kanal-e2e', 'E2E Kanal', 'en', '${createdAt}', '${createdAt}');
+      VALUES ('${channelId}', '${channelLogin}', 'E2E Kanal', 'en', '${createdAt}', '${createdAt}');
     INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
-      VALUES ('${e2eChannelId}', 'user-e2e', 'manager', '${createdAt}', '${createdAt}');
+      VALUES ('${channelId}', 'user-e2e', 'manager', '${createdAt}', '${createdAt}');
     INSERT INTO twitch_login_identity
       (user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
        expires_at, status, created_at, updated_at)
@@ -97,19 +100,19 @@ export const seedE2EOverlay = (): void => {
     INSERT INTO auth_sessions (session_id, user_id, login, expires_at, created_at, updated_at)
       VALUES ('session-e2e', 'user-e2e', 'e2e-tester', '2099-01-01T00:00:00.000Z', '${createdAt}', '${createdAt}');
     INSERT INTO overlays (overlay_id, channel_id, name, width, height, css, revision, created_at, updated_at)
-      VALUES ('${e2eOverlayId}', '${e2eChannelId}', 'E2E Overlay', 1920, 1080, '', 1, '${createdAt}', '${createdAt}');
+      VALUES ('${overlayId}', '${channelId}', 'E2E Overlay', 1920, 1080, '', 1, '${createdAt}', '${createdAt}');
     INSERT INTO channel_variables (channel_id, name, value, description, reset_on_stream_start, created_at, updated_at)
-      VALUES ('${e2eChannelId}', 'score', 7, '', 0, '${createdAt}', '${createdAt}');
+      VALUES ('${channelId}', 'score', 7, '', 0, '${createdAt}', '${createdAt}');
     INSERT INTO overlay_elements
       (element_id, channel_id, overlay_id, kind, label, variable_name, text, config_json,
        x, y, scale_percent, z, in_composition)
-      VALUES ('element-e2e', '${e2eChannelId}', '${e2eOverlayId}', 'variable', 'Score', 'score',
+      VALUES ('element-e2e-${channelId}', '${channelId}', '${overlayId}', 'variable', 'Score', 'score',
         'Score {value}', '{}', 0, 0, 100, 0, 1);
     INSERT INTO overlay_tokens
       (token_id, channel_id, token_hash, expires_at, created_at, revoked_at, revocation_reason,
        last_used_at, overlay_id, label, secret_envelope)
-      VALUES ('token-e2e', '${e2eChannelId}', '${tokenHash}', NULL, '${createdAt}', NULL, NULL,
-        NULL, '${e2eOverlayId}', 'Playwright E2E', NULL);
+      VALUES ('token-e2e-${channelId}', '${channelId}', '${tokenHash}', NULL, '${createdAt}', NULL, NULL,
+        NULL, '${overlayId}', 'Playwright E2E', NULL);
   `;
   const wrangler = (arguments_: string[]): void => {
     const result = spawnSync("./node_modules/.bin/wrangler", arguments_, {
@@ -148,16 +151,16 @@ export const seedE2EOverlay = (): void => {
   wrangler(["--cwd", "dist/brobot_local", "--config", "wrangler.json", "d1", "execute", "DB", "--local", "--yes", "--persist-to", e2eWorkerPersist, "--command", sql]);
 };
 
-export const seedE2ETestArea = (): void => {
-  seedE2EOverlay();
+export const seedE2ETestArea = (channelId = e2eChannelId): void => {
+  seedE2EOverlay(channelId);
   const createdAt = new Date().toISOString();
   const sql = `
     INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
-      VALUES ('${e2eChannelId}', 'text_commands', 1, '{}');
+      VALUES ('${channelId}', 'text_commands', 1, '{}');
     INSERT INTO text_commands (channel_id, command_name, response_text, aliases_json, created_at, updated_at)
-      VALUES ('${e2eChannelId}', 'discord', 'Discord: discord.gg/e2e', '["dc"]', '${createdAt}', '${createdAt}');
+      VALUES ('${channelId}', 'discord', 'Discord: discord.gg/e2e', '["dc"]', '${createdAt}', '${createdAt}');
     INSERT INTO text_command_aliases (channel_id, alias, command_name)
-      VALUES ('${e2eChannelId}', 'dc', 'discord');
+      VALUES ('${channelId}', 'dc', 'discord');
   `;
   const result = spawnSync("./node_modules/.bin/wrangler", [
     "--cwd", "dist/brobot_local", "--config", "wrangler.json", "d1", "execute", "DB", "--local", "--yes",

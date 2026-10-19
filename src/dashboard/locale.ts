@@ -859,6 +859,8 @@ export interface DashboardTexts {
     allModules: string;
     textCommands: string;
     faq: string;
+    chatVoting: string;
+    votekick: string;
     run: string;
     history: string;
     historyEmpty: string;
@@ -885,6 +887,8 @@ export interface DashboardTexts {
     errorDescription: string;
     noDetails: string;
     blocked: string;
+    indeterminate: string;
+    indeterminateSummary: (count: number) => string;
     fires: string;
     wouldReply: string;
     wouldReplyMuted: string;
@@ -899,6 +903,12 @@ export interface DashboardTexts {
     quoted: (token: string) => string;
     matchKeyword: (pattern: string) => string;
     matchRegex: (pattern: string) => string;
+    matchVoteCommand: string;
+    matchVoteChoice: (choice: string) => string;
+    matchVoteTerm: (term: string) => string;
+    matchVoteOverflow: string;
+    matchVotekickTarget: (target: string) => string;
+    matchVotekickChoice: (choice: string) => string;
     textCommand: string;
     faqEntry: string;
     why: string;
@@ -916,6 +926,26 @@ export interface DashboardTexts {
     blocks: string;
     wouldDo: string;
     openEditor: string;
+    voteCommandWhy: (message: string) => string;
+    voteChoiceWhy: (message: string, choice: string) => string;
+    voteTermWhy: (message: string, term: string) => string;
+    voteOverflowWhy: (message: string) => string;
+    voteFinalizeWhy: (message: string) => string;
+    votekickTargetWhy: (message: string, target: string) => string;
+    votekickChoiceWhy: (message: string, choice: string) => string;
+    votekickFinalizeWhy: (message: string) => string;
+    wouldCountVote: (choice: string) => string;
+    wouldCountVotekickVote: string;
+    wouldStartBallot: (moduleId: "chat_voting" | "votekick") => string;
+    wouldOverflowBallot: string;
+    wouldFinalizeBallot: (moduleId: "chat_voting" | "votekick") => string;
+    ballotCountEffect: (moduleId: "chat_voting" | "votekick", choice?: string) => string;
+    ballotStartEffect: (moduleId: "chat_voting" | "votekick", label: string) => string;
+    ballotOverflowEffect: string;
+    ballotFinalizeEffect: (moduleId: "chat_voting" | "votekick", label: string) => string;
+    ballotCounts: (moduleId: "chat_voting" | "votekick", counts: readonly number[]) => string;
+    ballotTerms: (terms: readonly { term: string; count: number; approved: boolean }[]) => string;
+    ballotMore: (count: number) => string;
     syntheticSenderNote: (login: string) => string;
     chatEffect: string;
     announcementEffect: string;
@@ -1417,6 +1447,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       allModules: "Alle chatlesenden Module",
       textCommands: "Textbefehle",
       faq: "FAQ",
+      chatVoting: "Abstimmung",
+      votekick: "Votekick",
       run: "Prüfen",
       history: "Verlauf",
       historyEmpty: "Hier erscheinen die letzten zehn Prüfungen dieser Sitzung.",
@@ -1446,6 +1478,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       errorDescription: "Die Nachricht konnte nicht geprüft werden. Versuche es erneut.",
       noDetails: "Keine passenden Details für diese Nachricht.",
       blocked: "Blockiert",
+      indeterminate: "Noch offen",
+      indeterminateSummary: (count) => formatNumber(count, "de") + (count === 1 ? " Ergebnis noch offen" : " Ergebnisse noch offen"),
       fires: "Würde auslösen",
       wouldReply: "Würde antworten",
       wouldReplyMuted: "Würde antworten (stumm)",
@@ -1460,6 +1494,12 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       quoted: (token) => "„" + token + "“",
       matchKeyword: (pattern) => "Schlüsselwort „" + pattern + "“",
       matchRegex: (pattern) => "Regulärer Ausdruck „" + pattern + "“",
+      matchVoteCommand: "Abstimmungsbefehl",
+      matchVoteChoice: (choice) => "Option " + choice,
+      matchVoteTerm: (term) => "Begriff „" + term + "“",
+      matchVoteOverflow: "Freitextstimme",
+      matchVotekickTarget: (target) => "Ziel „" + target + "“",
+      matchVotekickChoice: (choice) => choice === "yes" ? "Ja-Stimme" : "Nein-Stimme",
       textCommand: "Textbefehl",
       faqEntry: "FAQ",
       why: "Warum",
@@ -1478,6 +1518,34 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       blocks: "Blockiert",
       wouldDo: "Würde tun",
       openEditor: "Im Editor öffnen",
+      voteCommandWhy: (message) => "Die Nachricht „" + message + "“ startet oder verwaltet eine Abstimmung.",
+      voteChoiceWhy: (message, choice) => "Die Nachricht „" + message + "“ wählt Option " + choice + ".",
+      voteTermWhy: (message, term) => "Die Nachricht „" + message + "“ stimmt für den Begriff „" + term + "“.",
+      voteOverflowWhy: (message) => "Die Nachricht „" + message + "“ zählt als weitere Stimme in der Abstimmung.",
+      voteFinalizeWhy: (message) => "Die Nachricht „" + message + "“ beendet die Abstimmung.",
+      votekickTargetWhy: (message, target) => "Die Nachricht „" + message + "“ nennt das Ziel „" + target + "“.",
+      votekickChoiceWhy: (message, choice) => "Die Nachricht „" + message + "“ stimmt für " + (choice === "yes" ? "Ja" : "Nein") + ".",
+      votekickFinalizeWhy: (message) => "Die Nachricht „" + message + "“ beendet den Votekick.",
+      wouldCountVote: (choice) => "Würde Stimme " + choice + " zählen",
+      wouldCountVotekickVote: "Würde Votekick-Stimme zählen",
+      wouldStartBallot: (moduleId) => moduleId === "votekick" ? "Würde Votekick starten" : "Würde Abstimmung starten",
+      wouldOverflowBallot: "Würde unter „weitere“ zählen",
+      wouldFinalizeBallot: (moduleId) => moduleId === "votekick" ? "Würde Votekick beenden" : "Würde Abstimmung beenden",
+      ballotCountEffect: (moduleId, choice) => moduleId === "votekick"
+        ? "Stimme würde als „" + (choice === "yes" ? "Ja" : "Nein") + "“ zum Votekick gezählt"
+        : "Stimme würde der laufenden Abstimmung zugeordnet",
+      ballotStartEffect: (moduleId, label) => moduleId === "votekick"
+        ? "Votekick für „" + label + "“ würde starten"
+        : "Abstimmung „" + label + "“ würde starten",
+      ballotOverflowEffect: "Stimme würde unter „weitere“ zählen",
+      ballotFinalizeEffect: (moduleId, label) => moduleId === "votekick"
+        ? "Votekick für „" + label + "“ würde beendet"
+        : "Abstimmung „" + label + "“ würde beendet",
+      ballotCounts: (moduleId, counts) => "Stimmen: " + counts.map((count, index) =>
+        (moduleId === "votekick" ? index === 0 ? "Ja" : "Nein" : "Option " + String(index + 1)) + ": " + formatNumber(count, "de"),
+      ).join(" · "),
+      ballotTerms: (terms) => terms.map(({ term, count }) => term + " · " + formatNumber(count, "de")).join(" · "),
+      ballotMore: (count) => formatNumber(count, "de") + (count === 1 ? " weiterer Begriff" : " weitere Begriffe"),
       syntheticSenderNote: (login) => "Ausgewertet mit dem synthetischen Testabsender " + login + ".",
       chatEffect: "Chatnachricht würde gesendet",
       announcementEffect: "Ankündigung würde gesendet",
@@ -1978,6 +2046,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       allModules: "All chat-reading modules",
       textCommands: "Text commands",
       faq: "FAQ",
+      chatVoting: "Voting",
+      votekick: "Votekick",
       run: "Check",
       history: "History",
       historyEmpty: "The last ten checks from this session appear here.",
@@ -2007,6 +2077,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       errorDescription: "The message could not be checked. Try again.",
       noDetails: "No matching details for this message.",
       blocked: "Blocked",
+      indeterminate: "Not settled yet",
+      indeterminateSummary: (count) => formatNumber(count, "en") + (count === 1 ? " uncertain result" : " uncertain results"),
       fires: "Would trigger",
       wouldReply: "Would reply",
       wouldReplyMuted: "Would reply (muted)",
@@ -2021,6 +2093,12 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       quoted: (token) => "“" + token + "”",
       matchKeyword: (pattern) => "Keyword “" + pattern + "”",
       matchRegex: (pattern) => "Regular expression “" + pattern + "”",
+      matchVoteCommand: "Voting command",
+      matchVoteChoice: (choice) => "Option " + choice,
+      matchVoteTerm: (term) => "Term “" + term + "”",
+      matchVoteOverflow: "Free-text vote",
+      matchVotekickTarget: (target) => "Target “" + target + "”",
+      matchVotekickChoice: (choice) => choice === "yes" ? "Yes vote" : "No vote",
       textCommand: "Text command",
       faqEntry: "FAQ",
       why: "Why",
@@ -2039,6 +2117,34 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       blocks: "Blocked",
       wouldDo: "Would do",
       openEditor: "Open in editor",
+      voteCommandWhy: (message) => "The message “" + message + "” starts or manages a vote.",
+      voteChoiceWhy: (message, choice) => "The message “" + message + "” selects option " + choice + ".",
+      voteTermWhy: (message, term) => "The message “" + message + "” votes for the term “" + term + "”.",
+      voteOverflowWhy: (message) => "The message “" + message + "” counts as an additional vote in the ballot.",
+      voteFinalizeWhy: (message) => "The message “" + message + "” ends the vote.",
+      votekickTargetWhy: (message, target) => "The message “" + message + "” names the target “" + target + "”.",
+      votekickChoiceWhy: (message, choice) => "The message “" + message + "” votes " + (choice === "yes" ? "yes" : "no") + ".",
+      votekickFinalizeWhy: (message) => "The message “" + message + "” ends the votekick.",
+      wouldCountVote: (choice) => "Would count vote " + choice,
+      wouldCountVotekickVote: "Would count votekick vote",
+      wouldStartBallot: (moduleId) => moduleId === "votekick" ? "Would start votekick" : "Would start vote",
+      wouldOverflowBallot: "Would count under “more”",
+      wouldFinalizeBallot: (moduleId) => moduleId === "votekick" ? "Would end votekick" : "Would end vote",
+      ballotCountEffect: (moduleId, choice) => moduleId === "votekick"
+        ? "Vote would count as “" + (choice === "yes" ? "yes" : "no") + "” in the votekick"
+        : "Vote would be added to the running ballot",
+      ballotStartEffect: (moduleId, label) => moduleId === "votekick"
+        ? "Votekick for “" + label + "” would start"
+        : "Vote “" + label + "” would start",
+      ballotOverflowEffect: "Vote would count under “more”",
+      ballotFinalizeEffect: (moduleId, label) => moduleId === "votekick"
+        ? "Votekick for “" + label + "” would end"
+        : "Vote “" + label + "” would end",
+      ballotCounts: (moduleId, counts) => "Votes: " + counts.map((count, index) =>
+        (moduleId === "votekick" ? index === 0 ? "Yes" : "No" : "Option " + String(index + 1)) + ": " + formatNumber(count, "en"),
+      ).join(" · "),
+      ballotTerms: (terms) => terms.map(({ term, count }) => term + " · " + formatNumber(count, "en")).join(" · "),
+      ballotMore: (count) => formatNumber(count, "en") + (count === 1 ? " more term" : " more terms"),
       syntheticSenderNote: (login) => "Evaluated with the synthetic test sender " + login + ".",
       chatEffect: "Chat message would be sent",
       announcementEffect: "Announcement would be sent",
