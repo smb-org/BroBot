@@ -254,6 +254,19 @@ test("cockpit warnings use the header row without leaving a band or shifting the
     const wall = page.locator(".live-cockpit__wall");
     await expect(slot).toHaveAttribute("data-warning-count", "0");
     await expect(wall).toBeVisible();
+    const headerHeight = () => page.locator(".live-cockpit-header").evaluate((element) => element.getBoundingClientRect().height);
+    // Indicators, title and category must have rendered and the header height must hold across two reads.
+    const waitForSettledHeader = async (): Promise<void> => {
+      await expect(page.getByText("Overlays · Nicht eingerichtet")).toBeVisible();
+      await expect(page.locator(".live-cockpit-broadcast__title-row > strong")).not.toHaveText("");
+      let previous = -1;
+      await expect.poll(async () => {
+        const current = await headerHeight();
+        const stable = current === previous;
+        previous = current;
+        return stable;
+      }).toBe(true);
+    };
     const readLayout = () => page.evaluate(() => {
       const header = document.querySelector<HTMLElement>(".live-cockpit-header");
       const slot = document.querySelector<HTMLElement>(".live-cockpit__warning-slot");
@@ -270,6 +283,7 @@ test("cockpit warnings use the header row without leaving a band or shifting the
         slotInHeader: slot.closest(".live-cockpit-header") === header,
       };
     });
+    await waitForSettledHeader();
     const emptyState = await readLayout();
     expect(emptyState.slotInHeader).toBe(true);
     expect(emptyState.slotDisplay).toBe("flex");
@@ -283,6 +297,7 @@ test("cockpit warnings use the header row without leaving a band or shifting the
     await expect(slot).toHaveAttribute("data-warning-count", "1");
     await expect(slot.locator(".live-cockpit__warning-summary > .ui-button:first-child")).toContainText(deDashboard.liveCockpit.locationMissing);
     await expect(slot.getByRole("button", { name: deDashboard.liveCockpit.configureLocation })).toBeVisible();
+    await waitForSettledHeader();
     const warningState = await readLayout();
     expect(warningState.slotInHeader).toBe(true);
     expect(warningState.slotVisibility).toBe("visible");
