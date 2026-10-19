@@ -384,6 +384,9 @@ describe("game rounds in the worker Durable Object", () => {
   });
 
   it(`schedules pending point reconciliation immediately without waiting for D1 (${testCard("active point work retries D1 reconciliation from a durable alarm", "startup blocks on D1 before unrelated channel work can run")})`, async () => {
+    vi.useFakeTimers();
+    // Keep the platform alarm pending while the test inspects its persisted schedule.
+    vi.setSystemTime(Date.now() + 30 * 24 * 60 * 60_000);
     const channelId = `round-pending-recovery-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const database = (env as unknown as { DB: D1Database }).DB;
@@ -418,6 +421,7 @@ describe("game rounds in the worker Durable Object", () => {
           handler: "host:points_activation_reconciliation",
         });
         expect(alarmTable["points:activation_reconciliation"]?.deadline).toBeLessThanOrEqual(Date.now());
+        await deferPointAlarmWithin(state);
       });
     } finally {
       mutableEnv.DB = originalDatabase;
@@ -545,8 +549,7 @@ describe("game rounds in the worker Durable Object", () => {
 
     await expect(capturePointError(object, (target) => target.openGameRound(pointTestModule, "r".repeat(65), roundData)))
       .resolves.toBe("invalid_round_id");
-    await object.openGameRound(pointTestModule, validRound, roundData);
-    await object.markGameRoundAnnounced(pointTestModule, validRound, Date.now() + 60_000, `round:${validRound}`);
+    await openAnnouncedRound(object, pointTestModule, validRound, roundData, Date.now() + 60_000);
 
     await expect(capturePointError(object, (target) => target.joinGameRound(
       pointTestModule, validRound, "msg:invalid-account", "a".repeat(33), "nachtfalke", 1, {},
@@ -591,7 +594,10 @@ describe("game rounds in the worker Durable Object", () => {
     await object.setGameModuleGate(pointTestModule, true, 2);
 
     await evictDurableObject(object as unknown as DurableObjectStub);
-    await expect(object.pointBalance(pointTestModule, accountId)).resolves.toBe(20);
+    await runPointObject(object, async (target, state) => {
+      await expect(target.pointBalance(pointTestModule, accountId)).resolves.toBe(20);
+      await deferPointAlarmWithin(state);
+    });
     await expect(object.pointHistory(pointTestModule, accountId)).resolves.toMatchObject({ rows: [
       { operationId: `round:${roundId}:refund:${accountId}`, kind: "refund", delta: 7 },
       { operationId: `msg:boundary-stake`, kind: "stake", delta: -7 },
@@ -652,6 +658,9 @@ describe("game rounds in the worker Durable Object", () => {
   });
 
   it(`persists and sends one host cancellation notice with the refund (${testCard("a disabled game refunds escrow and announces cancellation once", "a refund has no durable notice or a retry posts it twice")})`, async () => {
+    vi.useFakeTimers();
+    // Keep the immediate cancellation notice alarm pending during its inline D1 flush.
+    vi.setSystemTime(Date.now() + 30 * 24 * 60 * 60_000);
     const channelId = `round-cancellation-notice-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const database = (env as unknown as { DB: D1Database }).DB;
@@ -675,10 +684,12 @@ describe("game rounds in the worker Durable Object", () => {
       settlement: { kind: "test", params: { payouts: [] } },
     }, Date.now() + 60_000);
     await object.joinGameRound(pointTestModule, "round-cancellation-notice", "msg:stake", "viewer-a", "nachtfalke", 5, {});
-    await object.setGameModuleGate(pointTestModule, true, 11);
-
-    await expect(object.cancelOpenGameRounds(pointTestModule, 11)).resolves.toBe(1);
-    await expect(object.cancelOpenGameRounds(pointTestModule, 11)).resolves.toBe(0);
+    await runPointObject(object, async (target, state) => {
+      await target.setGameModuleGate(pointTestModule, true, 11);
+      await expect(target.cancelOpenGameRounds(pointTestModule, 11)).resolves.toBe(1);
+      await expect(target.cancelOpenGameRounds(pointTestModule, 11)).resolves.toBe(0);
+      await deferPointAlarmWithin(state);
+    });
 
     await expect(object.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(20);
     expect(sentTexts).toEqual(["Runde abgebrochen, Einsätze erstattet."]);
@@ -1082,6 +1093,9 @@ describe("game rounds in the worker Durable Object", () => {
   });
 
   it(`recovers a gate-close cancellation after the route crashes before its refund RPC (${testCard("the close intent blocks settlement and startup recovery refunds escrow", "a crashed disable settles or strands an open stake")})`, async () => {
+    vi.useFakeTimers();
+    // Keep the recovered cancellation notice alarm pending beyond this test.
+    vi.setSystemTime(Date.now() + 30 * 24 * 60 * 60_000);
     const channelId = `round-cancel-recovery-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
@@ -1100,7 +1114,10 @@ describe("game rounds in the worker Durable Object", () => {
     }))).resolves.toBe("round_cancellation_pending");
     await evictDurableObject(object as unknown as DurableObjectStub);
 
-    await expect(object.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(20);
+    await runPointObject(object, async (target, state) => {
+      await expect(target.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(20);
+      await deferPointAlarmWithin(state);
+    });
     await expect(runPointObject(object, (_target, state) => state.storage.sql.exec<{ state: string }>(
       "SELECT state FROM game_rounds WHERE round_id = ?", "round-cancel-recovery",
     ).one().state)).resolves.toBe("cancelled");
@@ -1508,6 +1525,9 @@ describe("game rounds in the worker Durable Object", () => {
   });
 
   it(`reconciles a later platform alarm on first points access after eviction (${testCard("the first points access replaces the platform alarm with the earliest stored schedule", "eviction leaves an immediately due announcement behind a later alarm")})`, async () => {
+    vi.useFakeTimers();
+    // Keep the restored immediate alarm pending while the test inspects it.
+    vi.setSystemTime(Date.now() + 30 * 24 * 60 * 60_000);
     const channelId = `round-earliest-alarm-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
@@ -1533,6 +1553,7 @@ describe("game rounds in the worker Durable Object", () => {
       const reconciledAlarmAt = await state.storage.getAlarm();
       expect(reconciledAlarmAt).not.toBeNull();
       expect(reconciledAlarmAt).toBeLessThan(laterAlarmAt);
+      await deferPointAlarmWithin(state);
     });
   });
 
