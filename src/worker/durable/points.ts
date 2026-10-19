@@ -1020,6 +1020,20 @@ export const claimPointCooldownSync = (sql: PointsSql, moduleId: string, key: st
   return true;
 };
 
+/** Reads a cooldown without initializing the points schema or modifying its deadline. */
+export const pointCooldownRemainingSync = (sql: PointsSql, moduleId: string, key: string, now: number): number => {
+  if (moduleId.length === 0 || key.length === 0 || !Number.isFinite(now)) throw new Error("invalid_cooldown");
+  const schemaPresent = sql.exec<{ present: number }>(
+    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'game_cooldowns') AS present",
+  ).one().present === 1;
+  if (!schemaPresent) return 0;
+  const fullKey = `${moduleId}:${key}`;
+  const previous = sql.exec<{ until_at: string }>("SELECT until_at FROM game_cooldowns WHERE key = ?", fullKey).toArray()[0];
+  if (previous === undefined) return 0;
+  const deadline = Date.parse(previous.until_at);
+  return Number.isFinite(deadline) && deadline > now ? Math.ceil((deadline - now) / 1_000) : 0;
+};
+
 const parseRoundOpenData = (value: unknown): { data: unknown; durationS: number; announceText: string; settlement: { kind: string; params: unknown } } => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("invalid_round");
   const data = value as PointRoundOpenData;

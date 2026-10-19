@@ -202,7 +202,18 @@ export const sendChatMessage = async (
     // clearing it and risking a duplicate post.
     const delivery = result.reason === "timeout" || result.reason === "network_error" ? "ambiguous" : "rejected";
     await afterPost?.(delivery, result.reason);
-    return { sent: false, truncated: preparedText.truncated, delivery, reason: result.reason, detail: { ...textDetail, status: result.status, twitchMessage: result.message } };
+    return {
+      sent: false,
+      truncated: preparedText.truncated,
+      delivery,
+      reason: result.reason,
+      detail: {
+        ...textDetail,
+        status: result.status,
+        twitchMessage: result.message,
+        ...(result.retryAfter === undefined ? {} : { retryAfter: result.retryAfter }),
+      },
+    };
   }
 
   const body = isRecord(result.data) ? result.data : {};

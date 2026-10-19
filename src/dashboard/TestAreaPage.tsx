@@ -9,7 +9,7 @@ import {
   type PanelBroadcastGame,
 } from "./api";
 import { apiErrorText, dashboardTexts, eventText, type DashboardLanguage } from "./locale";
-import { moduleNavigationName } from "./module-labels";
+import { moduleName as sharedModuleName, moduleNavigationName } from "./module-labels";
 import { formatCharacterTotal } from "./ui/text-length";
 import {
   Badge,
@@ -55,7 +55,7 @@ const readHistory = (channelId: string): HistoryItem[] => {
           (request.streamState !== "online" && request.streamState !== "offline") ||
           typeof request.sharedChat !== "boolean") return [];
       const onlyModule = isRecord(request.only) ? request.only.moduleId : null;
-      const only: DryRunRequest["only"] = onlyModule === "text_commands" || onlyModule === "faq" || onlyModule === "chat_voting" || onlyModule === "votekick"
+      const only: DryRunRequest["only"] = onlyModule === "text_commands" || onlyModule === "faq" || onlyModule === "chat_voting" || onlyModule === "votekick" || onlyModule === "clips"
         ? { moduleId: onlyModule, ...(isRecord(request.only) && typeof request.only.entryId === "string" ? { entryId: request.only.entryId } : {}) }
         : undefined;
       const game = isRecord(request.game) && typeof request.game.id === "string" && typeof request.game.name === "string"
@@ -186,6 +186,7 @@ const highlightedText = (text: string, ranges: readonly (readonly [number, numbe
 
 function ContextFields({
   labels,
+  language,
   channelId,
   message,
   setMessage,
@@ -206,6 +207,7 @@ function ContextFields({
   onGameChange,
 }: {
   labels: ReturnType<typeof dashboardTexts>;
+  language: DashboardLanguage;
   channelId: string;
   message: string;
   setMessage: (value: string) => void;
@@ -229,6 +231,7 @@ function ContextFields({
   const roleOptions = badgeValues.map((value) => ({ value, label: texts.badgeNames[value] }));
   const moduleOptions = [
     { value: "all", label: texts.allModules },
+    { value: "clips", label: sharedModuleName("clips", language) },
     { value: "text_commands", label: texts.textCommands },
     { value: "faq", label: texts.faq },
     { value: "chat_voting", label: texts.chatVoting },
@@ -316,7 +319,7 @@ function ContextFields({
       value={moduleFilter}
       onChange={(value) => {
         if (lockedModule !== null) return;
-        setModuleFilter(value === "text_commands" || value === "faq" || value === "chat_voting" || value === "votekick" ? value : "all");
+        setModuleFilter(value === "text_commands" || value === "faq" || value === "chat_voting" || value === "votekick" || value === "clips" ? value : "all");
       }}
       options={moduleOptions}
       disabled={lockedModule !== null}
@@ -379,6 +382,7 @@ function effectLabel(effect: DryRunEffect, labels: ReturnType<typeof dashboardTe
     case "announcement": return texts.announcementEffect;
     case "timeout": return texts.timeoutEffect(effect.minSeconds, effect.maxSeconds, effect.reason);
     case "shoutout": return texts.shoutoutEffect(effect.targetLogin);
+    case "clip": return texts.clipEffect;
     case "variable": return texts.variableEffect(effect.name, effect.from, effect.to);
     case "cooldown": return effect.scope === "user" ? texts.userCooldownEffect(effect.seconds) : texts.cooldownEffect(effect.seconds);
     }
@@ -459,7 +463,7 @@ function ResultDetail({ item, message, response, labels, language, onOpenEditor 
       <div className="test-area__detail-heading">
         <h2>{entryLabel(item, labels)}</h2>
         <div className="test-area__detail-meta">
-          <Badge tone={moduleBadgeTone(moduleId)} className="test-area__module-badge">{report.entry.kind === "faq_entry" ? texts.faqEntry : report.entry.kind === "text_command" ? texts.textCommand : moduleName(moduleId, labels, language)}</Badge>
+          <Badge tone={moduleBadgeTone(moduleId)} className="test-area__module-badge">{report.entry.kind === "faq_entry" ? texts.faqEntry : report.entry.kind === "text_command" ? texts.textCommand : sharedModuleName(moduleId, language)}</Badge>
           <span>{matchLabel(report, labels, message)}</span>
         </div>
       </div>
@@ -699,6 +703,7 @@ export function TestAreaPage({
   const lockedModule = deepLinkOnly?.moduleId ?? null;
   const contextProps = {
     labels,
+    language,
     channelId,
     message,
     setMessage,
@@ -742,7 +747,7 @@ export function TestAreaPage({
       }}
     >
       <span className="test-area__row-main">
-        <span className="test-area__row-title"><Badge tone={moduleBadgeTone(item.moduleId)} className="test-area__module-badge">{moduleName(item.moduleId, labels, language)}</Badge><strong>{entryLabel(item, labels)}</strong></span>
+        <span className="test-area__row-title"><Badge tone={moduleBadgeTone(item.moduleId)} className="test-area__module-badge">{sharedModuleName(item.moduleId, language)}</Badge><strong>{entryLabel(item, labels)}</strong></span>
         <small>{matchLabel(item.report, labels, detailMessage)}</small>
       </span>
       <span className={"test-area__row-outcome" + (isMutedReply ? " is-muted" : "")}>

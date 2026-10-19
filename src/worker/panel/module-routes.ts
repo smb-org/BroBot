@@ -795,10 +795,6 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
     const storedSettings = module.settingsSchema.safeParse(rawStoredSettings);
     if (!storedSettings.success) return context.json({ error: "module_settings_invalid" }, 500);
     const lockedFields = [
-      "commandMinimumRole",
-      "commandCooldownSeconds",
-      "postClipLinkInChat",
-      "chatLinkTemplate",
       "automaticClipsEnabled",
       "automaticThresholdMultiplier",
       "automaticCooldownSeconds",

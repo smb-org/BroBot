@@ -2,7 +2,7 @@ import type { EventCode } from "./values";
 import type { ChatOutputTarget } from "./values";
 import type { ModuleDiagnostic } from "../modules/contract";
 
-export type DryRunEntryKind = "text_command" | "faq_entry" | "chat_vote" | "votekick";
+export type DryRunEntryKind = "text_command" | "faq_entry" | "chat_vote" | "votekick" | "clip";
 
 export type DryRunMatch =
   | { kind: "command_name" | "alias"; token: string }
@@ -34,6 +34,8 @@ export type DryRunBlockCode =
   | "faq.shadowed"
   | "faq.command_prefix"
   | "faq.own_message"
+  | "clips.permission_denied"
+  | "clips.cooldown"
   | "host.module_disabled"
   | "host.channel_paused";
 
@@ -53,6 +55,7 @@ export type DryRunEffect =
   | { kind: "timeout"; minSeconds: number; maxSeconds: number; reason: string; suppressedBy?: "channel_muted" | "channel_paused" }
   | { kind: "shoutout"; targetLogin: string; suppressedBy?: "module_disabled" | "channel_paused" | "channel_muted" }
   | { kind: "variable"; name: string; from: number; to: number }
+  | { kind: "clip" }
   | { kind: "cooldown"; scope: "global" | "user"; seconds: number }
   | {
     kind: "ballot";
@@ -93,7 +96,7 @@ export interface DryRunRequest {
   streamState: "online" | "offline";
   game: { id: string; name: string } | null;
   sharedChat: boolean;
-  only?: { moduleId: "text_commands" | "faq" | "chat_voting" | "votekick"; entryId?: string };
+  only?: { moduleId: "text_commands" | "faq" | "chat_voting" | "votekick" | "clips"; entryId?: string };
 }
 
 export interface DryRunResponse {

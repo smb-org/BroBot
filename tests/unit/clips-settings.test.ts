@@ -10,7 +10,7 @@ describe("clips settings", () => {
       commandMinimumRole: "viewer",
       commandCooldownSeconds: 60,
       postClipLinkInChat: true,
-      chatLinkTemplate: "Clip aus dem Stream: {clip.title} {clip.url}",
+      chatLinkTemplate: "Clip from the stream: {clip.title} {clip.url}",
       automaticClipsEnabled: false,
       automaticThresholdMultiplier: 2.5,
       automaticCooldownSeconds: 900,
@@ -26,7 +26,7 @@ describe("clips settings", () => {
     expect(clipsSettingsSchema.safeParse({ automaticThresholdMultiplier: 0 }).success).toBe(false);
   });
 
-  it("keeps unreleased clip settings visible with neutral bilingual copy", () => {
+  it("keeps automatic clip settings locked with neutral bilingual copy", () => {
     expect(clipsPanelTexts("de").lockedLaterVersion).toBe("Kommt in einer späteren Version.");
     expect(clipsPanelTexts("en").lockedLaterVersion).toBe("Coming in a later version.");
     for (const language of ["de", "en"] as const) {
@@ -36,8 +36,12 @@ describe("clips settings", () => {
     }
   });
 
-  it("does not register a chat command before its behavior is available", () => {
-    expect(clipsModule.chatCommands).toBeUndefined();
+  it("registers the clip command with configurable role requirements", () => {
+    expect(clipsModule.chatCommands).toContainEqual(expect.objectContaining({
+      name: "!clip",
+      minimumChatStatus: "configurable",
+    }));
+    expect(clipsModule.eventSubTypes).toContain("channel.chat.message");
   });
 
   it("owns its settings in the custom panel with bilingual labels and hints", () => {

@@ -1093,6 +1093,7 @@ export interface DashboardTexts {
     announcementEffect: string;
     timeoutEffect: (minimum: number, maximum: number, reason: string) => string;
     shoutoutEffect: (login: string) => string;
+    clipEffect: string;
     variableEffect: (name: string, from: number, to: number) => string;
     cooldownEffect: (seconds: number) => string;
     userCooldownEffect: (seconds: number) => string;
@@ -1702,6 +1703,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       announcementEffect: "Ankündigung würde gesendet",
       timeoutEffect: (minimum, maximum, reason) => "Timeout " + formatNumber(minimum, "de") + (minimum === maximum ? "" : "–" + formatNumber(maximum, "de")) + " s" + (reason.length === 0 ? "" : " · " + reason),
       shoutoutEffect: (login) => "Shoutout für " + login + " würde ausgelöst",
+      clipEffect: "Ein Clip würde erstellt",
       variableEffect: (name, from, to) => "Variable " + name + " würde von " + formatNumber(from, "de") + " auf " + formatNumber(to, "de") + " wechseln",
       cooldownEffect: (seconds) => "Abklingzeit " + formatNumber(seconds, "de") + " s würde starten",
       userCooldownEffect: (seconds) => "Persönliche Abklingzeit " + formatNumber(seconds, "de") + " s würde starten",
@@ -1731,6 +1733,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
           case "faq.shadowed": return "Ein früherer FAQ-Eintrag hat Vorrang.";
           case "faq.command_prefix": return "Nachrichten mit ! am Anfang werden übersprungen.";
           case "faq.own_message": return "Eigene Bot-Nachrichten werden übersprungen.";
+          case "clips.permission_denied": return "Der Absender erfüllt die Mindestrolle für !clip nicht.";
+          case "clips.cooldown": return "!clip ist noch " + (seconds === null ? "abgekühlt" : formatNumber(seconds, "de") + " s abgekühlt") + ".";
           case "host.module_disabled": return "Das Modul ist deaktiviert.";
           case "host.channel_paused": return "Automatische Aktionen sind pausiert.";
         }
@@ -2311,6 +2315,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       announcementEffect: "Announcement would be sent",
       timeoutEffect: (minimum, maximum, reason) => "Timeout " + formatNumber(minimum, "en") + (minimum === maximum ? "" : "–" + formatNumber(maximum, "en")) + " s" + (reason.length === 0 ? "" : " · " + reason),
       shoutoutEffect: (login) => "Shoutout for " + login + " would trigger",
+      clipEffect: "A clip would be created",
       variableEffect: (name, from, to) => "Variable " + name + " would change from " + formatNumber(from, "en") + " to " + formatNumber(to, "en"),
       cooldownEffect: (seconds) => "Cooldown of " + formatNumber(seconds, "en") + " s would start",
       userCooldownEffect: (seconds) => "Per-person cooldown of " + formatNumber(seconds, "en") + " s would start",
@@ -2340,6 +2345,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
           case "faq.shadowed": return "An earlier FAQ entry takes priority.";
           case "faq.command_prefix": return "Messages starting with ! are skipped.";
           case "faq.own_message": return "The bot's own messages are skipped.";
+          case "clips.permission_denied": return "The sender does not meet the minimum role for !clip.";
+          case "clips.cooldown": return "!clip is on cooldown" + (seconds === null ? "." : " for " + formatNumber(seconds, "en") + " s.");
           case "host.module_disabled": return "The module is disabled.";
           case "host.channel_paused": return "Automatic actions are paused.";
         }

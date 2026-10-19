@@ -18,9 +18,11 @@ export interface ClipsPanelTexts {
   commandRole: string;
   roleOptions: readonly ClipRoleOption[];
   commandCooldown: string;
+  commandCooldownError: string;
   chatLink: string;
   chatLinkEnabled: string;
   chatMessage: string;
+  chatMessageHint: string;
   lockedLaterVersion: string;
   automatic: string;
   automaticSection: string;
@@ -30,6 +32,12 @@ export interface ClipsPanelTexts {
   clipsLoading: string;
   settingsLoading: string;
   settingsLoadError: string;
+  settingsSaveError: string;
+  settingsConflict: string;
+  save: string;
+  discard: string;
+  saved: string;
+  saving: string;
   clipsLoadError: string;
 }
 
@@ -52,9 +60,11 @@ const catalog: LocaleCatalog<ClipsPanelTexts> = {
       { value: "broadcaster", label: "Broadcaster" },
     ],
     commandCooldown: "Abklingzeit",
+    commandCooldownError: "Eine ganze Zahl zwischen 0 und 86.400 eingeben.",
     chatLink: "Clip-Link im Chat posten",
     chatLinkEnabled: "Aktiviert",
     chatMessage: "Chatnachricht",
+    chatMessageHint: "Verfügbare Werte: {clip.title} und {clip.url}.",
     lockedLaterVersion: "Kommt in einer späteren Version.",
     automatic: "Automatische Clips",
     automaticSection: "Automatische Clip-Einstellungen",
@@ -64,6 +74,12 @@ const catalog: LocaleCatalog<ClipsPanelTexts> = {
     clipsLoading: "Clips dieser Stream-Sitzung werden geladen.",
     settingsLoading: "Clip-Einstellungen werden geladen.",
     settingsLoadError: "Die Clip-Einstellungen konnten nicht geladen werden.",
+    settingsSaveError: "Die Clip-Einstellungen konnten nicht gespeichert werden.",
+    settingsConflict: "Die Clip-Einstellungen wurden zwischenzeitlich geändert. Lade die Seite neu.",
+    save: "Speichern",
+    discard: "Verwerfen",
+    saved: "Einstellungen gespeichert.",
+    saving: "Wird gespeichert …",
     clipsLoadError: "Die Clips dieser Sitzung konnten nicht geladen werden.",
   },
   en: {
@@ -84,9 +100,11 @@ const catalog: LocaleCatalog<ClipsPanelTexts> = {
       { value: "broadcaster", label: "Broadcaster" },
     ],
     commandCooldown: "Cooldown",
+    commandCooldownError: "Enter a whole number from 0 to 86,400.",
     chatLink: "Post the clip link in chat",
     chatLinkEnabled: "Enabled",
     chatMessage: "Chat message",
+    chatMessageHint: "Available values: {clip.title} and {clip.url}.",
     lockedLaterVersion: "Coming in a later version.",
     automatic: "Automatic clips",
     automaticSection: "Automatic clip settings",
@@ -96,6 +114,12 @@ const catalog: LocaleCatalog<ClipsPanelTexts> = {
     clipsLoading: "Loading clips from this stream session.",
     settingsLoading: "Loading clip settings.",
     settingsLoadError: "Clip settings could not be loaded.",
+    settingsSaveError: "Clip settings could not be saved.",
+    settingsConflict: "Clip settings changed while you were editing. Reload the page.",
+    save: "Save",
+    discard: "Discard",
+    saved: "Clip settings saved.",
+    saving: "Saving …",
     clipsLoadError: "Clips for this session could not be loaded.",
   },
 };
