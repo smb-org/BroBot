@@ -22,14 +22,14 @@ const json = (value: unknown, status = 200) => ({
   body: JSON.stringify(value),
 });
 
-const moduleState = (enabled: boolean, settings = DEFAULT_CHAT_VOTING_SETTINGS) => ({
-  id: "chat_voting",
+const moduleState = (id: string, enabled: boolean, settings: unknown = DEFAULT_CHAT_VOTING_SETTINGS) => ({
+  id,
   enabled,
   settings: JSON.stringify(settings),
   mandatory: false,
 });
 
-const channelState = (location: { name: string; latitude: number; longitude: number; timeZone: string } | null, enabled: boolean, belaboxWarning: boolean) => ({
+const channelState = (location: { name: string; latitude: number; longitude: number; timeZone: string } | null, enabled: boolean, belaboxWarning: boolean, fullNavigation: boolean) => ({
   channelId,
   login: "layout-channel",
   displayName: "Layout Channel",
@@ -49,12 +49,11 @@ const channelState = (location: { name: string; latitude: number; longitude: num
     mute: { active: false, until: null, mode: null },
     pause: { active: false, until: null, mode: null },
   },
-  modules: [moduleState(enabled), ...(belaboxWarning ? [{
-    id: "belabox",
-    enabled: true,
-    settings: JSON.stringify({ lowBitrateKbps: 1_000, recoverBitrateKbps: 1_200 }),
-    mandatory: false,
-  }] : [])],
+  modules: [
+    moduleState("chat_voting", enabled),
+    ...(fullNavigation ? [moduleState("text_commands", true, {}), moduleState("faq", true, {}), moduleState("votekick", true, {})] : []),
+    ...(belaboxWarning ? [moduleState("belabox", true, { lowBitrateKbps: 1_000, recoverBitrateKbps: 1_200 })] : []),
+  ],
   tokens: {
     botExpiresAt: "2099-10-19T09:00:00.000Z",
     loginStatus: "connected",
@@ -66,10 +65,11 @@ const channelState = (location: { name: string; latitude: number; longitude: num
 
 const mockDashboard = async (page: Page, options: {
   location?: { name: string; latitude: number; longitude: number; timeZone: string } | null;
-  events?: readonly Record<string, unknown>[];
+  auditEntries?: readonly Record<string, unknown>[];
   chatVoting?: boolean;
   overview?: boolean;
   belaboxWarning?: boolean;
+  fullNavigation?: boolean;
 } = {}) => {
   let location = options.location === undefined
     ? { name: "Berlin, Germany", latitude: 52.52, longitude: 13.405, timeZone: "Europe/Berlin" }
@@ -79,7 +79,7 @@ const mockDashboard = async (page: Page, options: {
   let settingsRevision = 1;
   let moduleToggleRequests = 0;
 
-  const state = () => channelState(location, chatVotingEnabled, options.belaboxWarning ?? false);
+  const state = () => channelState(location, chatVotingEnabled, options.belaboxWarning ?? false, options.fullNavigation ?? false);
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const { pathname } = new URL(request.url());
@@ -95,14 +95,17 @@ const mockDashboard = async (page: Page, options: {
       const channel = state();
       return route.fulfill(json({ ...channel, activeModules: chatVotingEnabled ? [{ moduleId: "chat_voting", settings: channel.modules[0]?.settings ?? "{}" }] : [] }));
     }
-    if (pathname === `/api/channels/${channelId}/modules`) return route.fulfill(json({ modules: [moduleState(chatVotingEnabled, settings)] }));
+    if (pathname === `/api/channels/${channelId}/modules`) return route.fulfill(json({ modules: [moduleState("chat_voting", chatVotingEnabled, settings)] }));
     if (pathname === `/api/channels/${channelId}/revisions`) return route.fulfill(json({ revisions: { chat_voting: settingsRevision } }));
     if (pathname === `/api/channels/${channelId}/settings`) return route.fulfill(json({
       timeZone: "Europe/Berlin", revision: 1, location, locationRevision: 1,
       defaultChatTarget: "source_only", defaultChatTargetRevision: 1,
     }));
+    if (pathname === `/api/channels/${channelId}/broadcast`) return route.fulfill(json({
+      title: "", game: null, manageScopeAvailable: false,
+    }));
     if (pathname === `/api/channels/${channelId}/overlays`) return route.fulfill(json({ overlays: [], maximum: 20, elementMaximum: 20 }));
-    if (pathname === `/api/channels/${channelId}/events`) return route.fulfill(json({ entries: options.events ?? [], nextCursor: null }));
+    if (pathname === `/api/channels/${channelId}/events`) return route.fulfill(json({ entries: [], nextCursor: null }));
     if (pathname === `/api/channels/${channelId}/modules/belabox/status`) return route.fulfill(json({
       configured: true, updatedAt: timestamp, mode: "relay",
       sample: {
@@ -126,7 +129,7 @@ const mockDashboard = async (page: Page, options: {
       const body = request.postDataJSON() as { enabled?: boolean };
       if (typeof body.enabled === "boolean") chatVotingEnabled = body.enabled;
       moduleToggleRequests += 1;
-      return route.fulfill(json({ module: moduleState(chatVotingEnabled, settings), revision: 2 }));
+      return route.fulfill(json({ module: moduleState("chat_voting", chatVotingEnabled, settings), revision: 2 }));
     }
     if (pathname === `/api/channels/${channelId}/modules/chat_voting/current`) {
       return route.fulfill(json({ vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 120 }));
@@ -135,7 +138,7 @@ const mockDashboard = async (page: Page, options: {
       return route.fulfill(json({ templates: [], count: 0, maximum: 100 }));
     }
     if (pathname === `/api/channels/${channelId}/template-variables`) return route.fulfill(json({ variables: [] }));
-    if (pathname === `/api/channels/${channelId}/audit-log`) return route.fulfill(json({ entries: [], nextCursor: null }));
+    if (pathname === `/api/channels/${channelId}/audit-log`) return route.fulfill(json({ entries: options.auditEntries ?? [], nextCursor: null }));
     return route.fulfill(json({}));
   });
 
@@ -164,16 +167,36 @@ test("enabled module tiles use the success surface token", async ({ page }) => {
   expect(colors.actual).toBe(colors.expected);
 });
 
-test("coordinate-shaped location names fall back to a place label in the header", async ({ page }) => {
-  await mockDashboard(page, { location: { name: "52.52, 13.40", latitude: 52.52, longitude: 13.4, timeZone: "Europe/Berlin" } });
-  await page.setViewportSize({ width: 1280, height: 800 });
+test("coordinate-only locations keep an icon chip without moving the desktop header", async ({ page }) => {
+  const api = await mockDashboard(page);
+  await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto(`/channels/${channelId}?lang=de`);
-  const location = page.locator(".dashboard-header__location-name");
-  await expect(location).toBeVisible();
-  await expect(location).toContainText(deDashboard.header.locationMenu.locationFallback);
+  const initialLocation = page.locator(".dashboard-header__location");
+  const initialName = initialLocation.locator(".dashboard-header__location-name");
+  await expect(initialName).toHaveText("Berlin");
+  expect(await initialName.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  const initialGeometry = await page.evaluate(() => ({
+    locationWidth: document.querySelector(".dashboard-header__location")?.getBoundingClientRect().width ?? -1,
+    modeLeft: document.querySelector(".dashboard-header__mode")?.getBoundingClientRect().left ?? -1,
+  }));
+
+  api.setLocation({ name: "52.52, 13.40", latitude: 52.52, longitude: 13.4, timeZone: "Europe/Berlin" });
+  await page.reload();
+  const location = page.locator(".dashboard-header__location");
+  await expect(location).toHaveClass(/dashboard-header__location--icon-only/u);
+  await expect(location).toHaveAttribute("aria-label", `${deDashboard.header.locationMenu.locationFallback}, 52.52, 13.40`);
+  await expect(location).toHaveAttribute("title", "52.52, 13.40");
+  await expect(location).not.toContainText(deDashboard.header.locationMenu.locationFallback);
   await expect(location).not.toContainText("52.52, 13.40");
+  const coordinateGeometry = await page.evaluate(() => ({
+    locationWidth: document.querySelector(".dashboard-header__location")?.getBoundingClientRect().width ?? -1,
+    modeLeft: document.querySelector(".dashboard-header__mode")?.getBoundingClientRect().left ?? -1,
+  }));
+  expect(coordinateGeometry.locationWidth).toBe(initialGeometry.locationWidth);
+  expect(coordinateGeometry.modeLeft).toBe(initialGeometry.modeLeft);
   await location.click();
-  await expect(page.getByText("52.52, 13.40")).toBeVisible();
+  await expect(page.locator(".dashboard-header__location-menu-label--title")).toHaveText(deDashboard.header.locationMenu.locationFallback);
+  await expect(page.locator(".dashboard-header__location-menu-label--coordinates")).toHaveText("52.52, 13.40");
 });
 
 test("disabling chat voting confirms before leaving its unsaved settings draft", async ({ page }) => {
@@ -220,9 +243,9 @@ test("chat voting keeps saved settings after it is disabled and re-enabled", asy
   await expect(page.getByRole("textbox", { name: chatVotingStartTextLabel })).toHaveValue("Save draft before activation");
 });
 
-test("the cockpit keeps a compact warning slot without shifting the action wall", async ({ page }) => {
+test("cockpit warnings use the header row without leaving a band or shifting the tiles", async ({ page }) => {
   const api = await mockDashboard(page);
-  for (const [width, height, maximumSlotHeight] of [[1920, 1080, 56], [1280, 800, 56], [390, 844, 56]] as const) {
+  for (const [width, height] of [[1920, 1080], [1280, 800], [390, 844]] as const) {
     api.setLocation({ name: "Berlin, Germany", latitude: 52.52, longitude: 13.405, timeZone: "Europe/Berlin" });
     await page.setViewportSize({ width, height });
     await page.goto(`/channels/${channelId}?lang=de`);
@@ -230,36 +253,40 @@ test("the cockpit keeps a compact warning slot without shifting the action wall"
     const wall = page.locator(".live-cockpit__wall");
     await expect(slot).toHaveAttribute("data-warning-count", "0");
     await expect(wall).toBeVisible();
-    const emptyState = await page.evaluate(() => {
-      const cockpit = document.querySelector<HTMLElement>(".live-cockpit");
-      if (cockpit === null) throw new Error("The cockpit is missing.");
+    const readLayout = () => page.evaluate(() => {
+      const header = document.querySelector<HTMLElement>(".live-cockpit-header");
+      const slot = document.querySelector<HTMLElement>(".live-cockpit__warning-slot");
+      const wall = document.querySelector<HTMLElement>(".live-cockpit__wall");
+      if (header === null || slot === null || wall === null) throw new Error("The cockpit layout is incomplete.");
+      const slotStyle = getComputedStyle(slot);
       return {
-        slotHeight: document.querySelector(".live-cockpit__warning-slot")?.getBoundingClientRect().height ?? -1,
-        warningTrackHeight: Number.parseFloat(getComputedStyle(cockpit).gridTemplateRows.split(/\s+/)[1] ?? "-1"),
-        wallTop: document.querySelector(".live-cockpit__wall")?.getBoundingClientRect().top ?? -1,
+        headerBottom: header.getBoundingClientRect().bottom,
+        wallTop: wall.getBoundingClientRect().top,
+        slotHeight: slot.getBoundingClientRect().height,
+        slotDisplay: slotStyle.display,
+        slotVisibility: slotStyle.visibility,
+        slotBackground: slotStyle.backgroundColor,
+        slotInHeader: slot.parentElement === header,
       };
     });
-    expect(emptyState.slotHeight).toBeLessThanOrEqual(maximumSlotHeight);
-    expect(emptyState.warningTrackHeight).toBe(emptyState.slotHeight);
-    if (width <= 767) await expect(slot.locator(".live-cockpit__warning-summary")).toBeHidden();
+    const emptyState = await readLayout();
+    expect(emptyState.slotInHeader).toBe(true);
+    expect(emptyState.slotDisplay).toBe(width <= 767 ? "flex" : "none");
+    expect(emptyState.slotVisibility).toBe(width <= 767 ? "hidden" : "visible");
+    expect(emptyState.slotBackground).toBe("rgba(0, 0, 0, 0)");
+    expect(emptyState.slotHeight).toBe(width <= 767 ? 44 : 0);
+    expect(Math.abs(emptyState.wallTop - emptyState.headerBottom - (width <= 767 ? 8 : 12))).toBeLessThanOrEqual(1);
 
     api.setLocation(null);
     await page.reload();
     await expect(slot).toHaveAttribute("data-warning-count", "1");
-    if (width <= 767) {
-      await expect(slot.getByRole("button")).toHaveText(deDashboard.liveCockpit.locationMissing);
-    }
-    const warningState = await page.evaluate(() => {
-      const cockpit = document.querySelector<HTMLElement>(".live-cockpit");
-      if (cockpit === null) throw new Error("The cockpit is missing.");
-      return {
-        slotHeight: document.querySelector(".live-cockpit__warning-slot")?.getBoundingClientRect().height ?? -1,
-        warningTrackHeight: Number.parseFloat(getComputedStyle(cockpit).gridTemplateRows.split(/\s+/)[1] ?? "-1"),
-        wallTop: document.querySelector(".live-cockpit__wall")?.getBoundingClientRect().top ?? -1,
-      };
-    });
-    expect(warningState.slotHeight).toBe(emptyState.slotHeight);
-    expect(warningState.warningTrackHeight).toBe(emptyState.warningTrackHeight);
+    await expect(slot.locator(".live-cockpit__warning-summary > .ui-button:first-child")).toContainText(deDashboard.liveCockpit.locationMissing);
+    await expect(slot.getByRole("button", { name: deDashboard.liveCockpit.configureLocation })).toBeVisible();
+    const warningState = await readLayout();
+    expect(warningState.slotInHeader).toBe(true);
+    expect(warningState.slotVisibility).toBe("visible");
+    expect(warningState.slotHeight).toBe(width <= 767 ? 44 : 36);
+    expect(warningState.headerBottom).toBe(emptyState.headerBottom);
     expect(warningState.wallTop).toBe(emptyState.wallTop);
   }
 });
@@ -276,12 +303,12 @@ test("mobile cockpit warnings stay compact and offer full details", async ({ pag
     const slot = document.querySelector<HTMLElement>(".live-cockpit__warning-slot");
     if (cockpit === null || slot === null) throw new Error("The cockpit warning slot is missing.");
     return {
-      warningTrackHeight: Number.parseFloat(getComputedStyle(cockpit).gridTemplateRows.split(/\s+/)[1] ?? "-1"),
       slotHeight: slot.getBoundingClientRect().height,
+      slotInHeader: slot.parentElement === document.querySelector(".live-cockpit-header"),
     };
   });
-  expect(geometry.warningTrackHeight).toBe(56);
-  expect(geometry.slotHeight).toBe(56);
+  expect(geometry.slotHeight).toBe(44);
+  expect(geometry.slotInHeader).toBe(true);
   const summary = slot.getByRole("button", { name: deDashboard.liveCockpit.warningSummary("2") });
   await expect(summary).toBeVisible();
   await summary.click();
@@ -295,22 +322,25 @@ test("mobile cockpit warnings stay compact and offer full details", async ({ pag
   await expect(details.getByRole("button", { name: deDashboard.liveCockpit.openBelabox })).toBeVisible();
 });
 
-test("mobile protocol table headers align with the full-width rows", async ({ page }) => {
-  await mockDashboard(page, { events: [{
-    eventId: "event-490", createdAt: timestamp, moduleId: "host", triggerId: "trigger-490",
-    code: "host.chat.failed", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null,
+test("mobile audit log headers span the same width as audit rows", async ({ page }) => {
+  await mockDashboard(page, { auditEntries: [{
+    auditId: "audit-490", actorUserId: "member-490", actorLogin: "mira_fox", actorDisplayName: "Mira Fox",
+    actorKind: "member", createdAt: timestamp, moduleId: null, action: "member.role_changed",
+    before: JSON.stringify({ role: "manager" }), after: JSON.stringify({ role: "operator" }),
+    subjectUserId: "member-491", subjectLogin: "pixelpilz", subjectDisplayName: "Pixelpilz",
   }] });
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(`/channels/${channelId}/events?lang=de`);
-  const table = page.locator(".event-table .data-table__table");
+  await page.goto(`/channels/${channelId}/audit?lang=de`);
+  await expect(page.getByRole("heading", { name: deDashboard.audit.title })).toBeVisible();
+  const table = page.locator(".audit-sentence-list .data-table__table");
   const headerRow = table.locator("thead tr");
-  const eventRow = table.locator("tbody tr:not(.data-table__day-row)").first();
-  await expect(eventRow).toBeVisible();
+  const auditRow = table.locator("tbody tr:not(.data-table__day-row):not(.data-table__empty-row)").first();
+  await expect(auditRow).toBeVisible();
   const geometry = await page.evaluate(() => {
-    const table = document.querySelector<HTMLElement>(".event-table .data-table__table");
-    const header = document.querySelector<HTMLElement>(".event-table .data-table__table thead tr");
-    const row = document.querySelector<HTMLElement>(".event-table .data-table__table tbody tr:not(.data-table__day-row):not(.data-table__empty-row)");
-    if (table === null || header === null || row === null) throw new Error("The event table is incomplete.");
+    const table = document.querySelector<HTMLElement>(".audit-sentence-list .data-table__table");
+    const header = document.querySelector<HTMLElement>(".audit-sentence-list .data-table__table thead tr");
+    const row = document.querySelector<HTMLElement>(".audit-sentence-list .data-table__table tbody tr:not(.data-table__day-row):not(.data-table__empty-row)");
+    if (table === null || header === null || row === null) throw new Error("The audit table is incomplete.");
     const rect = (element: HTMLElement) => {
       const { x, right, width } = element.getBoundingClientRect();
       return { x, right, width };
@@ -319,27 +349,46 @@ test("mobile protocol table headers align with the full-width rows", async ({ pa
   });
   expect(Math.abs(geometry.header.x - geometry.row.x)).toBeLessThanOrEqual(1);
   expect(Math.abs(geometry.header.right - geometry.row.right)).toBeLessThanOrEqual(1);
+  expect(Math.abs(geometry.header.width - geometry.table.width)).toBeLessThanOrEqual(1);
   expect(geometry.header.right).toBeLessThanOrEqual(geometry.pageWidth + 1);
-  expect(await headerRow.locator("th").allTextContents()).toContain(deDashboard.events.time);
+  expect(await headerRow.locator("th:visible").allTextContents()).toEqual([deDashboard.events.time, deDashboard.audit.area]);
 });
 
-test("the sidebar search footer does not cover the selected navigation row", async ({ page }) => {
-  await mockDashboard(page);
-  await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto(`/channels/${channelId}/audit?lang=de`);
+for (const height of [800, 600]) {
+test(`the test area navigation row stays clear of the fixed sidebar footer at 1280x${String(height)}`, async ({ page }) => {
+  await mockDashboard(page, { fullNavigation: true });
+  await page.setViewportSize({ width: 1280, height });
+  await page.goto(`/channels/${channelId}/test-area?lang=de`);
+  await expect(page.getByRole("heading", { name: deDashboard.navigation.testArea })).toBeVisible();
+  for (const category of ["chat", "participation", "data", "stream", "admin"]) {
+    await expect(page.locator(`.sidebar__group[data-category='${category}']`)).toHaveCount(1);
+  }
   const selected = page.locator(".sidebar-nav-link[aria-current='page']");
   const footer = page.locator(".sidebar__footer");
   await expect(selected).toBeVisible();
   await expect(footer).toBeVisible();
-  await selected.scrollIntoViewIfNeeded();
   const geometry = await page.evaluate(() => {
     const selected = document.querySelector<HTMLElement>(".sidebar-nav-link[aria-current='page']");
+    const scrollArea = document.querySelector<HTMLElement>(".sidebar__scroll");
     const footer = document.querySelector<HTMLElement>(".sidebar__footer");
-    if (selected === null || footer === null) throw new Error("The sidebar navigation is incomplete.");
+    if (selected === null || scrollArea === null || footer === null) throw new Error("The sidebar navigation is incomplete.");
     return {
+      selectedTop: selected.getBoundingClientRect().top,
       selectedBottom: selected.getBoundingClientRect().bottom,
+      scrollTop: scrollArea.getBoundingClientRect().top,
+      scrollBottom: scrollArea.getBoundingClientRect().bottom,
+      scrollOffset: scrollArea.scrollTop,
+      overflows: scrollArea.scrollHeight > scrollArea.clientHeight,
       footerTop: footer.getBoundingClientRect().top,
     };
   });
-  expect(geometry.selectedBottom).toBeLessThanOrEqual(geometry.footerTop - 4);
+  if (height === 600) {
+    // The list cannot fit here, so the active link must have been scrolled into view.
+    expect(geometry.overflows).toBe(true);
+    expect(geometry.scrollOffset).toBeGreaterThan(0);
+  }
+  expect(geometry.scrollBottom).toBeLessThanOrEqual(geometry.footerTop + 1);
+  expect(geometry.selectedTop).toBeGreaterThanOrEqual(geometry.scrollTop + 4);
+  expect(geometry.selectedBottom).toBeLessThanOrEqual(Math.min(geometry.scrollBottom, geometry.footerTop) - 4);
 });
+}

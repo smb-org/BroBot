@@ -839,6 +839,8 @@ export interface DashboardTexts {
     sidebarSetupDescription: string;
     sidebarSearch: string;
     moduleOff: string;
+    pageErrorTitle: string;
+    pageErrorDescription: string;
   };
   testArea: {
     title: string;
@@ -1429,6 +1431,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       signingOut: "Abmeldung …", signOut: "Abmelden",
       openSidebar: "Seitenleiste öffnen", closeSidebar: "Seitenleiste schließen",
       sidebarSetupHeading: "Einrichten", sidebarSetupDescription: "Alles für deinen Stream.", sidebarSearch: "Alles durchsuchen", moduleOff: "Aus",
+      pageErrorTitle: "Dieser Bereich konnte nicht angezeigt werden.",
+      pageErrorDescription: "Ein unerwarteter Fehler ist aufgetreten. Lade die Seite neu.",
     },
     testArea: {
       title: "Testbereich",
@@ -2034,6 +2038,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       signingOut: "Signing out …", signOut: "Sign out",
       openSidebar: "Open sidebar", closeSidebar: "Close sidebar",
       sidebarSetupHeading: "Setup", sidebarSetupDescription: "Everything for your stream.", sidebarSearch: "Search everything", moduleOff: "Off",
+      pageErrorTitle: "This page could not be displayed.",
+      pageErrorDescription: "An unexpected error occurred. Reload the page to try again.",
     },
     testArea: {
       title: "Test area",

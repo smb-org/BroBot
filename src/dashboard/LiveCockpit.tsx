@@ -198,6 +198,7 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
     ...(overview.location == null ? [{ key: "location", title: labels.locationMissing, description: labels.locationMissingDescription, action: labels.configureLocation, run: () => onNavigate({ kind: "channel", channelId: overview.channelId, section: "location-weather" }) }] : []),
     ...(belaboxWeak ? [{ key: "belabox", title: labels.belaboxWeak, description: labels.belaboxWeakDescription(formatNumber(Math.round(sampleBitrate))), action: labels.openBelabox, run: () => onNavigate({ kind: "module", channelId: overview.channelId, moduleId: "belabox" }) }] : []),
   ];
+  const locationWarning = warnings.find((warning) => warning.key === "location");
   const renderWarning = (warning: (typeof warnings)[number]): ReactElement =>
     <div className="live-cockpit__location-warning" role="status" key={warning.key}>
       <div><strong>{warning.title}</strong><span>{warning.description}</span></div>
@@ -247,17 +248,20 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
             ? <StatusLed state="warn" label={`${labels.overlays} · ${labels.overlaysNotSetUp}`} />
             : <StatusLed state={overlayCount > 0 ? "ok" : "off"} label={`${labels.overlays} · ${overlayCount === 0 ? labels.overlaysNotSetUp : labels.overlaysCount(formatNumber(overlayCount))}`} />}
       </div>
+      <div className="live-cockpit__warning-slot" data-slot="warning-banner" data-warning-count={warnings.length} aria-live="polite">
+        {warnings.length === 0 ? null : <div className="live-cockpit__warning-summary">
+          <Button variant="secondary" icon="warning" ariaHasPopup="dialog" ariaExpanded={warningDetailsOpen}
+            onClick={() => { setWarningDetailsOpen(true); }}>
+            <span>{warnings.length === 1 ? warnings[0]?.title : labels.warningSummary(formatNumber(warnings.length))}</span>
+            <Icon name="more" size={16} />
+          </Button>
+          {locationWarning === undefined ? null : <Button className="live-cockpit__location-action" variant="primary" icon="map-pin"
+            onClick={() => { setWarningDetailsOpen(false); locationWarning.run(); }}>
+            {locationWarning.action}
+          </Button>}
+        </div>}
+      </div>
     </header>
-    <div className="live-cockpit__warning-slot" data-slot="warning-banner" data-warning-count={warnings.length} aria-live="polite">
-      {warnings.map(renderWarning)}
-      {warnings.length === 0 ? null : <div className="live-cockpit__warning-summary">
-        <Button variant="secondary" icon="warning" ariaHasPopup="dialog" ariaExpanded={warningDetailsOpen}
-          onClick={() => { setWarningDetailsOpen(true); }}>
-          <span>{warnings.length === 1 ? warnings[0]?.title : labels.warningSummary(formatNumber(warnings.length))}</span>
-          <Icon name="more" size={16} />
-        </Button>
-      </div>}
-    </div>
     <Dialog opened={warningDetailsOpen} title={labels.warningDetailsTitle} className="live-cockpit__warning-dialog"
       onClose={() => { setWarningDetailsOpen(false); }}>
       <div className="live-cockpit__warning-details">

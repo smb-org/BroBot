@@ -69,6 +69,7 @@ import { loadingState, type LoadState } from "./load-state";
 import { queryKeys } from "./data/keys";
 import { dashboardAuthenticationRequiredEvent, dispatchDashboardAuthenticationRequired } from "./data/events";
 import { DashboardDataProvider } from "./data/provider";
+import { DashboardPageErrorBoundary } from "./DashboardPageErrorBoundary";
 
 writePalette(readPalette());
 
@@ -1497,6 +1498,18 @@ export const DashboardApp = (): ReactElement => {
           focusKey={dashboardRouteFocusKey(route)}
         >
           <div className="main-content">
+        <DashboardPageErrorBoundary key={routeKey} fallback={<UiLoadState
+          variant="panel-720"
+          status="error"
+          loading={null}
+          empty={null}
+          error={null}
+          queryError={{
+            title: dashboardTexts().navigation.pageErrorTitle,
+            message: dashboardTexts().navigation.pageErrorDescription,
+            onRetry: () => window.location.reload(),
+          }}
+        >{null}</UiLoadState>}>
         {!showBotBlocking && route.kind === "overview" ? <OverviewPage channelState={channels} onNavigate={navigate} /> : null}
         {route.kind === "platform" && isPlatform ? <PlatformPage onAuthenticationRequired={requestLogin} /> : null}
         {!showBotBlocking && isChannelOrModuleRoute && selectedChannel === null && channels.status !== "success" ? (
@@ -1615,6 +1628,7 @@ export const DashboardApp = (): ReactElement => {
           }}
           onOpenVariable={(channelId, name) => { setPendingVariableSelection({ channelId, name }); }}
         />
+        </DashboardPageErrorBoundary>
           </div>
         </Shell>
     </UiProvider>
