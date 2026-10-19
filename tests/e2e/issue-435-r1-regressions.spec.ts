@@ -510,7 +510,11 @@ test("the cockpit warning slot keeps its tile geometry when the location warning
     await installLiveCockpitMocks(page, { channelId });
     await page.goto(`/channels/${channelId}`);
     const slot = page.locator(".live-cockpit__warning-slot");
-    await expect(slot.locator(".live-cockpit__location-warning")).toBeVisible();
+    if (viewport.width <= 767) {
+      await expect(slot.locator(".live-cockpit__warning-summary")).toBeVisible();
+    } else {
+      await expect(slot.locator(".live-cockpit__location-warning")).toBeVisible();
+    }
     const beforeSlot = await slot.boundingBox();
     const beforeWall = await page.locator(".live-cockpit__wall").boundingBox();
     expect(beforeSlot).not.toBeNull();
@@ -518,6 +522,7 @@ test("the cockpit warning slot keeps its tile geometry when the location warning
     await slot.evaluate((element) => {
       element.dataset.warningCount = "0";
       element.querySelector(".live-cockpit__location-warning")?.remove();
+      element.querySelector(".live-cockpit__warning-summary")?.remove();
     });
     const afterSlot = await slot.boundingBox();
     const afterWall = await page.locator(".live-cockpit__wall").boundingBox();

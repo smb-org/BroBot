@@ -1312,6 +1312,9 @@ export interface DashboardTexts {
     belaboxWeak: string;
     belaboxWeakDescription: (bitrate: string) => string;
     openBelabox: string;
+    warningSummary: (count: string) => string;
+    warningDetailsTitle: string;
+    noWarnings: string;
     actionDraftDiscardTitle: string;
     actionDraftDiscardDescription: string;
     actionDraftDiscard: string;
@@ -1919,6 +1922,9 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       belaboxWeak: "BELABOX-Verbindung schwach",
       belaboxWeakDescription: (bitrate) => `Aktuelle Bitrate: ${bitrate} kbit/s.`,
       openBelabox: "BELABOX öffnen",
+      warningSummary: (count) => count + " Hinweise ansehen",
+      warningDetailsTitle: "Live-Cockpit Hinweise",
+      noWarnings: "Keine aktiven Hinweise.",
       actionDraftDiscardTitle: "Eingaben verwerfen?",
       actionDraftDiscardDescription: "Deine Eingaben gehen verloren, wenn du diese Aktion schließt.",
       actionDraftDiscard: "Eingaben verwerfen",
@@ -2513,6 +2519,9 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       belaboxWeak: "BELABOX connection is weak",
       belaboxWeakDescription: (bitrate) => `Current bitrate: ${bitrate} kbps.`,
       openBelabox: "Open BELABOX",
+      warningSummary: (count) => "View " + count + " warnings",
+      warningDetailsTitle: "Live cockpit warnings",
+      noWarnings: "No active warnings.",
       actionDraftDiscardTitle: "Discard your changes?",
       actionDraftDiscardDescription: "Your entries will be lost if you close this action.",
       actionDraftDiscard: "Discard entries",

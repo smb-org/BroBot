@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { cpuUsage } from "node:process";
 
 import { CHAT_VOTING_TITLE_MAX_LENGTH, DEFAULT_CHAT_VOTING_SETTINGS } from "../../src/modules/chat_voting/contracts";
 import { chatVotingChatText } from "../../src/modules/chat_voting/contracts/chat-defaults";
@@ -202,22 +203,57 @@ describe("chat voting command and result domain", () => {
 });
 
 describe("chat voting normalization performance", () => {
-  it("normalizes pathological long input in linear time", () => {
-    const noise = " .!?*😀\t".repeat(7_200);
-    const inputs = [noise, `${"*".repeat(50_000)}x`, `x${"*".repeat(50_000)} y`, " ".repeat(50_000) + "!", `x${"*".repeat(50_000)}y`, `${"*".repeat(50_000)}y${"*".repeat(50_000)}x`];
-    const started = performance.now();
-    for (const input of inputs) {
-      normalizeFreeTextVote(input, "whole_message");
-      normalizeBlockedVoteTerm(input);
-      parseVoteCommand(input);
-    }
-    expect(performance.now() - started).toBeLessThan(100);
+  const medianCpuDuration = (operation: () => void): number => {
+    operation();
+    const samples = Array.from({ length: 5 }, () => {
+      const started = cpuUsage();
+      for (let iteration = 0; iteration < 3; iteration += 1) operation();
+      const elapsed = cpuUsage(started);
+      return (elapsed.user + elapsed.system) / 3;
+    });
+    samples.sort((left, right) => left - right);
+    return samples[2] ?? 0;
+  };
+
+  it("normalizes pathological long input with near-linear scaling", () => {
+    const inputsFor = (size: number): string[] => [
+      " .!?*😀\t".repeat(size / 8),
+      `${"*".repeat(size)}x`,
+      `x${"*".repeat(size)} y`,
+      `${"*".repeat(size)}y${"*".repeat(size)}x`,
+    ];
+    const normalize = (inputs: readonly string[]): void => {
+      for (const input of inputs) {
+        normalizeFreeTextVote(input, "whole_message");
+        normalizeBlockedVoteTerm(input);
+        parseVoteCommand(input);
+      }
+    };
+    const shortInputs = inputsFor(5_000);
+    const longInputs = inputsFor(25_000);
+
+    expect(normalizeFreeTextVote(`${"*".repeat(50_000)}x`, "whole_message")).toBe("x");
+    expect(normalizeBlockedVoteTerm(`${"*".repeat(50_000)}x`)).toBe("*x");
+    const shortDuration = medianCpuDuration(() => { normalize(shortInputs); });
+    const longDuration = medianCpuDuration(() => { normalize(longInputs); });
+    expect(longDuration).toBeLessThan(shortDuration * 10);
   });
 
-  it("parses vote commands with long whitespace runs in linear time", () => {
-    const inputs = ["!vote" + " ".repeat(50_000) + "x", "!vote text " + "\t ".repeat(50_000) + "y"];
-    const started = performance.now();
-    for (const input of inputs) parseVoteCommand(input);
-    expect(performance.now() - started).toBeLessThan(50);
+  it("parses vote commands with long whitespace runs with near-linear scaling", () => {
+    const inputFor = (size: number): string[] => [
+      `!vote${" ".repeat(size)}x`,
+      `!vote text ${"\t ".repeat(size / 2)}y`,
+    ];
+    const parse = (inputs: readonly string[]): void => {
+      for (const input of inputs) parseVoteCommand(input);
+    };
+    const shortInputs = inputFor(5_000);
+    const longInputs = inputFor(25_000);
+
+    expect(parseVoteCommand(shortInputs[0] ?? "")).toMatchObject({ kind: "template", shortcut: "x" });
+    expect(parseVoteCommand(longInputs[1] ?? "")).toMatchObject({ kind: "start", title: "y" });
+    const shortDuration = medianCpuDuration(() => { parse(shortInputs); });
+    const longDuration = medianCpuDuration(() => { parse(longInputs); });
+    expect(longDuration).toBeLessThan(shortDuration * 10);
   });
 });

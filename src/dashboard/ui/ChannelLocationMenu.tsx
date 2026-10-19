@@ -19,7 +19,11 @@ const coordinatesForDisplay = (location: PanelChannelLocation): string =>
 // United States"); the header shows only the first segment, keeps the full
 // name as the title and menu heading, and (see below) folds it into the
 // accessible name too when it was shortened.
-const displayLocationName = (name: string, fallback: string): string => name.trim() || fallback;
+const coordinateLikeName = /^\s*[+-]?\d+(?:\.\d+)?\s*,\s*[+-]?\d+(?:\.\d+)?\s*$/;
+const displayLocationName = (name: string, fallback: string): string => {
+  const trimmed = name.trim();
+  return trimmed === "" || coordinateLikeName.test(trimmed) ? fallback : trimmed;
+};
 const shortLocationName = (name: string, fallback: string): string => displayLocationName(name, fallback).split(",")[0]?.trim() || fallback;
 
 export function ChannelLocationMenu({ location, messages }: {
