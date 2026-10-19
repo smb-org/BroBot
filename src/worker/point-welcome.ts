@@ -14,10 +14,12 @@ export const appendPointWelcome = (
   action: ModuleAction,
   pending: PendingPointWelcome | undefined,
   attributions: readonly string[] = [],
-  handledMessageId?: string,
+  commandResponseMessageId?: string,
 ): ModuleAction => {
-  const responseMessageId = action.kind === "chat" ? action.replyToMessageId ?? handledMessageId : undefined;
-  if (action.kind !== "chat" || pending === undefined || pending.used || responseMessageId !== pending.messageId) return action;
+  if (action.kind !== "chat" || pending === undefined || pending.used) return action;
+  const respondsToViewer = action.replyToMessageId === pending.messageId ||
+    action.replyToMessageId === undefined && commandResponseMessageId === pending.messageId;
+  if (!respondsToViewer) return action;
   const text = reserveChatTextBeforeSuffix(action.text, ` · ${pending.text}`, attributions);
   if (text === null) return action;
   pending.used = true;

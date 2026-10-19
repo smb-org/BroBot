@@ -330,6 +330,21 @@ export const needsActiveChatterTracking = (
     (module.mandatory === true || enabledModuleIds.has(module.id)));
 };
 
+const commandRouteMatchesModule = (
+  module: BotModule,
+  event: Pick<ModuleEvent, "payload" | "subscriptionType">,
+): boolean => {
+  if (event.subscriptionType !== "channel.chat.message") return false;
+  const message = event.payload.message;
+  if (typeof message !== "object" || message === null || Array.isArray(message)) return false;
+  const text: unknown = Reflect.get(message, "text");
+  if (typeof text !== "string") return false;
+  const commandName = text.trim().split(/\s+/u, 1)[0]?.toLowerCase();
+  if (commandName === undefined || !commandName.startsWith("!")) return false;
+  if (module.id === "text_commands") return true;
+  return module.chatCommands?.some((command) => command.name.toLowerCase() === commandName) === true;
+};
+
 // The `ursache`/`typ`/`meldung` detail keys below stay: they land in
 // event_log.detail_json (a wire/stored shape), and this file lives outside
 // `src/modules`, so the frozen detailKeys() test in
@@ -345,6 +360,7 @@ const runActions = async (
   sourceBroadcasterUserId?: string | null,
   pendingWelcome?: PendingPointWelcome,
   handledMessageId?: string,
+  commandResponseActions: WeakSet<ModuleAction> = new WeakSet(),
 ): Promise<ModuleDiagnostic[]> => {
   const diagnostics: ModuleDiagnostic[] = [];
   const pendingActions = [...actions];
@@ -357,7 +373,8 @@ const runActions = async (
     let action = pendingActions[index];
     if (action === undefined) continue;
     const isModerationFollowUp = moderationFollowUps.has(action);
-    action = appendPointWelcome(action, pendingWelcome, attributions, handledMessageId);
+    const commandResponseMessageId = commandResponseActions.has(action) ? handledMessageId : undefined;
+    action = appendPointWelcome(action, pendingWelcome, attributions, commandResponseMessageId);
     const reportDelivery = async (delivery: ModuleChatDelivery): Promise<void> => {
       if (action.kind !== "chat" || action.onDelivery === undefined) return;
       try {
@@ -982,6 +999,7 @@ export const dispatchEventSubNotification = async (
   for (const { module, settings } of matches) {
     const diagnostics: ModuleDiagnostic[] = [];
     let result: ModuleResult | null = null;
+    const isCommandResponseHandler = commandRouteMatchesModule(module, event);
 
     try {
       const activation = dispatchState.activations.find((candidate) => candidate.moduleId === module.id);
@@ -1130,6 +1148,12 @@ export const dispatchEventSubNotification = async (
         overlayIdsByVariable.set(change.name, change.overlayIds);
       }
       try {
+        const commandResponseActions = new WeakSet<ModuleAction>();
+        if (isCommandResponseHandler) {
+          for (const action of result.actions) {
+            if (action.kind === "chat") commandResponseActions.add(action);
+          }
+        }
         diagnostics.push(...await runActions(
           environment,
           event.channelId,
@@ -1141,6 +1165,7 @@ export const dispatchEventSubNotification = async (
           textValue(event.payload.source_broadcaster_user_id),
           pendingWelcome,
           messageId ?? undefined,
+          commandResponseActions,
         ));
       } catch (error: unknown) {
         diagnostics.push({ code: "host.action.failed" satisfies EventCode, detail: { message: errorMessage(error) } });

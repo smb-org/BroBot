@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { BallotCastResult, BallotFinalizeRule, BallotOpenResult } from "../../src/modules/contract";
+import type { BallotCastResult, BallotFinalizeRule, BallotOpenResult, BotModule } from "../../src/modules/contract";
+import { pointsModule } from "../../src/modules/points";
+import { DEFAULT_POINTS_SETTINGS } from "../../src/modules/points/contracts";
 import { votekickModule } from "../../src/modules/votekick";
 import {
   closeStoredBallot,
@@ -69,6 +71,9 @@ type DispatchBallotObject = {
   castBallot: ReturnType<typeof vi.fn<(
     moduleId: string, ballotId: string, userId: string, choice: number,
   ) => Promise<BallotCastResult>>>;
+  finalizeBallot: ReturnType<typeof vi.fn<(
+    moduleId: string, ballotId: string,
+  ) => Promise<{ outcome: "passed" | "expired" | "not_open" | "open"; counts: readonly number[]; revision: number }>>>;
 };
 
 const memoryBallotStorage = (): TestBallotStorage => {
@@ -284,7 +289,14 @@ const setup = async (
   return { database, runtime, fetcher, ballotObject, storage };
 };
 
-const chat = async (runtime: Env, fetcher: typeof fetch, text: string, chatterId: string, badges: readonly string[] = []): Promise<void> => {
+const chat = async (
+  runtime: Env,
+  fetcher: typeof fetch,
+  text: string,
+  chatterId: string,
+  badges: readonly string[] = [],
+  options: { modules?: readonly BotModule[]; messageId?: string } = {},
+): Promise<void> => {
   await dispatchEventSubNotification(runtime, {
     channelId: "channel-a",
     subscriptionType: "channel.chat.message",
@@ -295,9 +307,10 @@ const chat = async (runtime: Env, fetcher: typeof fetch, text: string, chatterId
       message: { text },
       chatter_user_id: chatterId,
       chatter_user_login: chatterId,
+      ...(options.messageId === undefined ? {} : { message_id: options.messageId }),
       badges: badges.map((set_id) => ({ set_id })),
     },
-  }, fetcher, [votekickModule]);
+  }, fetcher, options.modules ?? [votekickModule]);
 };
 
 const log = async (database: TestD1Database): Promise<readonly { module_id: string; code: string; detail_json: string }[]> =>
@@ -313,6 +326,62 @@ afterEach(() => {
 });
 
 describe("Votekick dispatch integration", () => {
+  it("keeps a pending welcome off an ordinary message's recovered Votekick result (protects=a newcomer's pending welcome stays pending when ordinary chat recovers an existing Votekick; fails_when=the recovery output includes the welcome or successful delivery acknowledges it; no_claim=the real Votekick handler runs against an in-memory Durable Object and HTTP transport)", async () => {
+    const { database, runtime, fetcher, ballotObject } = await setup();
+    await database.prepare("UPDATE channel_modules SET settings = ? WHERE channel_id = 'channel-a' AND module_id = 'votekick'")
+      .bind(JSON.stringify({ ...votekickModule.defaultSettings, passText: "Votekick recovery result" })).run();
+    await database.prepare("INSERT INTO bot_channel_status (channel_id, is_moderator, checked_at, reason) VALUES ('channel-a', 1, ?, NULL)")
+      .bind(new Date().toISOString()).run();
+    await database.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('channel-a', 'points', 1, ?)")
+      .bind(JSON.stringify(DEFAULT_POINTS_SETTINGS)).run();
+    let newcomerWelcomePending = true;
+    const object = runtime.CHANNEL.get(runtime.CHANNEL.idFromName("channel-a")) as unknown as {
+      touchPointAccount: (moduleId: string, accountId: string, login: string, startBonus: number) => Promise<{ welcomePending: boolean; startBonus: number | null }>;
+      acknowledgePointWelcome: (moduleId: string, accountId: string) => Promise<void>;
+      creditPointActivity: (...args: unknown[]) => Promise<{ credited: number }>;
+    };
+    object.touchPointAccount = vi.fn((_moduleId: string, accountId: string, _login: string, startBonus: number) =>
+      Promise.resolve(accountId === "newcomer-a" && newcomerWelcomePending
+        ? { welcomePending: true, startBonus }
+        : { welcomePending: false, startBonus: null }));
+    object.acknowledgePointWelcome = vi.fn((_moduleId: string, accountId: string) => {
+      if (accountId === "newcomer-a") newcomerWelcomePending = false;
+      return Promise.resolve();
+    });
+    object.creditPointActivity = vi.fn(() => Promise.resolve({ credited: 5 }));
+    const originalFetch = fetcher.getMockImplementation();
+    if (originalFetch === undefined) throw new Error("Expected the fake Twitch transport implementation.");
+    fetcher.mockImplementation((input, init) => requestUrl(input).includes("/helix/chat/messages")
+      ? Promise.resolve(new Response(JSON.stringify({ data: [{ is_sent: true, message_id: "recovered-result" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }))
+      : originalFetch(input, init));
+
+    await chat(runtime, fetcher, "!votekick sampleviewer", "starter-a", ["vip"]);
+    await expect(database.prepare("SELECT status FROM votekicks WHERE channel_id = 'channel-a'").first())
+      .resolves.toEqual({ status: "running" });
+    ballotObject.finalizeBallot.mockResolvedValue({ outcome: "passed", counts: [3, 0], revision: 3 });
+    await chat(runtime, fetcher, "hello", "newcomer-a", [], {
+      modules: [votekickModule, pointsModule],
+      messageId: "newcomer-message",
+    });
+    await expect(database.prepare("SELECT status FROM votekicks WHERE channel_id = 'channel-a'").first())
+      .resolves.toEqual({ status: "passed" });
+
+    const sentMessage = fetcher.mock.calls
+      .filter(([input]) => requestUrl(input).includes("/helix/chat/messages"))
+      .map(([, init]) => {
+        if (typeof init?.body !== "string") return null;
+        return JSON.parse(init.body) as { message?: unknown };
+      })
+      .find((body) => typeof body?.message === "string" && body.message.includes("Votekick recovery result"));
+    expect(sentMessage?.message).toBe("Votekick recovery result");
+    expect(object.acknowledgePointWelcome).not.toHaveBeenCalled();
+    await expect(object.touchPointAccount("points", "newcomer-a", "newcomer-a", 100))
+      .resolves.toEqual({ welcomePending: true, startBonus: 100 });
+  });
+
   it("passes a committed final vote reclaimed after expiry and dispatches one timeout", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-10-04T10:00:00.000Z"));
