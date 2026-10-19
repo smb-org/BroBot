@@ -207,6 +207,7 @@ export const forcePointAlarm = async (
   object: PointsWorkerObject,
   roundId: string,
   prepare?: (target: PointsWorkerObject, state: DurableObjectState) => Promise<void> | void,
+  options: { preservePlatformAlarm?: boolean } = {},
 ): Promise<boolean> => {
   await runPointObject(object, async (target, state) => {
     // runInDurableObject enters through the object input gate. Remove the
@@ -216,7 +217,13 @@ export const forcePointAlarm = async (
     await prepare?.(target, state);
     await schedulePointAlarmWithin(state, roundId);
   });
-  return await runPointAlarm(object);
+  const ran = await runPointAlarm(object);
+  if (options.preservePlatformAlarm !== true) {
+    // Alarm handlers re-arm the real platform timer at their retry deadline.
+    // Park it again so a slow test runner cannot race the next explicitly forced step.
+    await runPointObject(object, async (_target, state) => deferPointAlarmWithin(state));
+  }
+  return ran;
 };
 
 export const openAnnouncedRound = async (
