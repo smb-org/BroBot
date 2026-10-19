@@ -402,10 +402,14 @@ export const applyPointOperationSync = (
     return { replayed: true, result: JSON.parse(previous.result_json) as unknown, balances: recordedBalancesSync(sql, operationId), deltas };
   }
 
-  const gameAccounts = new Set<string>();
+  const gameAccounts = new Map<string, string | null>();
   if (kind === "game") {
     for (const movement of movements) {
-      if (!movement.accountId.startsWith("__")) gameAccounts.add(movement.accountId);
+      if (!movement.accountId.startsWith("__")) {
+        const previousLogin = gameAccounts.get(movement.accountId);
+        const login = "delta" in movement ? movement.login : undefined;
+        gameAccounts.set(movement.accountId, login ?? previousLogin ?? null);
+      }
     }
   }
   const deltas = expandedMovementsSync(sql, movements, now);
@@ -452,8 +456,9 @@ export const applyPointOperationSync = (
     );
   }
   if (kind === "game") {
+    for (const [accountId, login] of gameAccounts) ensureAccountSync(sql, accountId, login, now);
     const month = now.slice(0, 7);
-    for (const accountId of gameAccounts) incrementMonthlySync(sql, accountId, month, deltas.get(accountId) ?? 0, now);
+    for (const accountId of gameAccounts.keys()) incrementMonthlySync(sql, accountId, month, deltas.get(accountId) ?? 0, now);
   }
   invariantSync(sql);
   return {

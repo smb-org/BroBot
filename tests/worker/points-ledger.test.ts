@@ -210,6 +210,27 @@ describe("points ledger in the worker Durable Object", () => {
     await expect(object.pointSummary(pointTestModule)).resolves.toMatchObject({ jackpots: { test_game: 1 } });
   });
 
+  it(`creates a rankable account after a zero-payout first game (${testCard("zero-net participants exist in ranking, rank lookup, account listing, and summary", "rankOf counts a participant missing from the ranking and account APIs", "a zero-payout first game has no prior account setup")})`, async () => {
+    const channelId = `points-zero-payout-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    const month = utcMonth();
+
+    await object.applyPointOperation(pointTestModule, "game-zero", "game", [
+      { accountId: "viewer-zero", delta: 0, login: "funkenfuchs" },
+      { accountId: "__house", delta: 0 },
+    ], { payout: 0 });
+
+    await expect(object.pointRanking(pointTestModule, month, 10)).resolves.toEqual([
+      { accountId: "viewer-zero", login: "funkenfuchs", net: 0 },
+    ]);
+    await expect(object.pointRankOf(pointTestModule, "viewer-zero", month)).resolves.toEqual({ rank: 1, net: 0 });
+    await expect(object.listPointAccounts(pointTestModule, { sort: "month", limit: 10 })).resolves.toMatchObject({
+      rows: [{ accountId: "viewer-zero", login: "funkenfuchs", balance: 0, monthNet: 0 }],
+    });
+    await expect(object.pointSummary(pointTestModule)).resolves.toMatchObject({ accounts: 1 });
+  });
+
   it(`credits at most once per message-time window and clips to the UTC daily cap (${testCard("activity uses UTC message timestamps and cap remaining", "offline messages or retries create extra points")})`, async () => {
     const channelId = `points-activity-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);

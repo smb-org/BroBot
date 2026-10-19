@@ -138,7 +138,7 @@ describe("module activation in the repository", () => {
     await expect(auditCount(database)).resolves.toBe(2);
   });
 
-  it("persists the disable revision atomically and retains it after re-enabling", async () => {
+  it("persists the disable revision atomically and retains it after re-enabling (protects=last_disabled_revision records the disable across re-enable; fails_when=a later enable erases the cancellation revision; no_claim=TestD1 repository state only, no route or Durable Object recovery)", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "manager");

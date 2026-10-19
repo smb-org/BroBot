@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
-import { runInDurableObject } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import { POINTS_CANCELLATION_NOTICE_ALARM_PREFIX } from "../../src/worker/durable/points";
 
 const migrationSources = import.meta.glob<string>("../../migrations/*.sql", {
   query: "?raw",
@@ -129,12 +130,15 @@ export const stubPointRoundChat = (
   Object.assign(target, { moduleAlarmContext: () => ({ sendChat }) });
 };
 
-export const forcePointAlarmWithin = async (
-  target: PointsWorkerObject,
+export const deferPointAlarmWithin = async (state: DurableObjectState): Promise<void> => {
+  await state.storage.setAlarm(Date.now() + 30 * 24 * 60 * 60_000);
+};
+
+const scheduleAlarmKeyWithin = async (
   state: DurableObjectState,
-  roundId: string,
+  alarmKey: string,
 ): Promise<void> => {
-  const alarmKey = `points:round:${roundId}`;
+  await deferPointAlarmWithin(state);
   const table = state.storage.kv.get<Record<string, {
     deadline: number;
     handler: string;
@@ -146,10 +150,33 @@ export const forcePointAlarmWithin = async (
   if (entry === undefined) throw new Error("The point round alarm was not scheduled.");
   Reflect.deleteProperty(entry, "nextAttemptAt");
   Reflect.deleteProperty(entry, "claimUntil");
-  table[alarmKey] = { ...entry, deadline: Date.now() };
+  table[alarmKey] = { ...entry, deadline: Math.max(1, Date.now() - 365 * 24 * 60 * 60_000) };
   state.storage.kv.put("channel:alarm_schedule", table);
-  await state.storage.setAlarm(Date.now());
-  await (target as unknown as { alarm(): Promise<void> }).alarm();
+};
+
+export const schedulePointAlarmWithin = async (
+  state: DurableObjectState,
+  roundId: string,
+): Promise<void> => scheduleAlarmKeyWithin(state, `points:round:${roundId}`);
+
+export const schedulePointCancellationNoticeAlarmWithin = async (
+  state: DurableObjectState,
+  moduleId: string,
+  revision: number,
+): Promise<void> => scheduleAlarmKeyWithin(
+  state,
+  `${POINTS_CANCELLATION_NOTICE_ALARM_PREFIX}${encodeURIComponent(moduleId)}:${String(revision)}`,
+);
+
+export const runPointAlarm = async (object: PointsWorkerObject): Promise<void> => {
+  const ran = await runDurableObjectAlarm(object as unknown as DurableObjectStub);
+  if (!ran) throw new Error("The point test expected a scheduled Durable Object alarm.");
+  await runPointObject(object, (_target, state) => deferPointAlarmWithin(state));
+};
+
+export const forcePointAlarm = async (object: PointsWorkerObject, roundId: string): Promise<void> => {
+  await runPointObject(object, (_target, state) => schedulePointAlarmWithin(state, roundId));
+  await runPointAlarm(object);
 };
 
 export const openAnnouncedRound = async (
@@ -158,8 +185,9 @@ export const openAnnouncedRound = async (
   roundId: string,
   data: unknown,
   deadlineAt: number,
-): Promise<void> => runPointObject(object, async (target) => {
+): Promise<void> => runPointObject(object, async (target, state) => {
   stubPointRoundChat(target, () => Promise.resolve({ sent: false, retryable: true, reason: "rate_limited", delivery: "rate_limited" }));
   await target.openGameRound(moduleId, roundId, data);
   await target.markGameRoundAnnounced(moduleId, roundId, deadlineAt, `round:${roundId}`);
+  await deferPointAlarmWithin(state);
 });

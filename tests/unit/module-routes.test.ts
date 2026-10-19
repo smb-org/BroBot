@@ -806,7 +806,7 @@ describe("Module management in the panel", () => {
       .resolves.toEqual({ enabled: 1 });
   });
 
-  it("reconciles round cancellation when the durable gate already has the disable revision", async () => {
+  it(`reconciles round cancellation when the durable gate already has the disable revision (${dependencyTestCard("a route retry still requests cancellation when the gate already has the matching close revision", "a duplicate gate result suppresses a needed escrow refund", "fake ChannelObject methods report an already closed gate and record cancellation without worker storage")})`, async () => {
     addDependencyTestModules();
     await insertChannel(database, "channel-demo");
     await insertLoginIdentityAndSession(database, "user-1");
@@ -836,7 +836,7 @@ describe("Module management in the panel", () => {
     expect(cancelOpenRounds).toHaveBeenLastCalledWith("test_game_requires_points", 2);
   });
 
-  it("retries cancellation after a post-commit disable retry keeps the original revision", async () => {
+  it(`retries cancellation after a post-commit disable retry keeps the original revision (${dependencyTestCard("a repeated disable retries cancellation with the original revision after failure", "a committed disable cannot recover refunds after one cancellation RPC fails", "fake ChannelObject methods model one failed refund call followed by success")})`, async () => {
     addDependencyTestModules();
     await insertChannel(database, "channel-demo");
     await insertLoginIdentityAndSession(database, "user-1");
