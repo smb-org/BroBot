@@ -1498,7 +1498,7 @@ export const DashboardApp = (): ReactElement => {
           focusKey={dashboardRouteFocusKey(route)}
         >
           <div className="main-content">
-        <DashboardPageErrorBoundary key={routeKey} fallback={<UiLoadState
+        <DashboardPageErrorBoundary key={dashboardRouteFocusKey(route)} fallback={<UiLoadState
           variant="panel-720"
           status="error"
           loading={null}
@@ -1607,6 +1607,7 @@ export const DashboardApp = (): ReactElement => {
         /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "audit" && selectedChannel !== null ? <AuditPage key={route.channelId} channelId={route.channelId} filters={auditFilters} onFiltersChange={updateAuditFilters} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "events" && selectedChannel !== null ? <EventsPage key={route.channelId} channelId={route.channelId} filters={eventFilters} moduleOptions={selectedChannel.modules ?? modules.data?.modules ?? []} onFiltersChange={updateEventFilters} /> : null}
+        </DashboardPageErrorBoundary>
         <ChannelCommandPalette
           key={`command-palette-${paletteChannel?.channelId ?? "none"}`}
           open={commandPaletteOpen}
@@ -1628,7 +1629,6 @@ export const DashboardApp = (): ReactElement => {
           }}
           onOpenVariable={(channelId, name) => { setPendingVariableSelection({ channelId, name }); }}
         />
-        </DashboardPageErrorBoundary>
           </div>
         </Shell>
     </UiProvider>
