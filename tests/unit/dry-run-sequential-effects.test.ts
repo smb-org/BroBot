@@ -5,7 +5,9 @@ import { votekickModule } from "../../src/modules/votekick";
 import { faqModule } from "../../src/modules/faq";
 import { textCommandModule } from "../../src/modules/text_commands";
 import { createTextCommandRepository } from "../../src/modules/text_commands/adapters/d1";
+import { createVotekickRepository } from "../../src/modules/votekick/adapters/d1";
 import { dryRunChatMessage } from "../../src/worker/dry-run";
+import type { ModuleDryRunBallotSnapshot } from "../../src/modules/contract";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { upsertBotIdentity } from "../../src/worker/db/bot-identity";
 import { insertAppAccessToken, insertChannel, insertLoginIdentityAndSession } from "./fixtures";
@@ -51,6 +53,9 @@ interface ScenarioOptions {
   muted?: boolean;
   textCommandText?: string;
   startText?: string;
+  passText?: string;
+  commandHasVariableAction?: boolean;
+  ballotSnapshot?: ModuleDryRunBallotSnapshot;
 }
 
 const createScenario = async (withFaq: boolean, options: ScenarioOptions = {}) => {
@@ -81,6 +86,7 @@ const createScenario = async (withFaq: boolean, options: ScenarioOptions = {}) =
     minNetVotes: 3,
     percent: 5,
     startText: options.startText ?? "Kick start, score {var.score}",
+    ...(options.passText === undefined ? {} : { passText: options.passText }),
   })).run();
   if (options.paused === true || options.muted === true) {
     await database.prepare(
@@ -101,7 +107,7 @@ const createScenario = async (withFaq: boolean, options: ScenarioOptions = {}) =
     text: options.textCommandText ?? "Score {var.score}",
     kind: "text",
     cooldownSeconds: 0,
-    variableAction: { name: "score", operation: "add", amount: 1 },
+    ...(options.commandHasVariableAction === false ? {} : { variableAction: { name: "score", operation: "add" as const, amount: 1 } }),
     now: NOW,
   }, { userId: "operator-user" });
 
@@ -112,7 +118,7 @@ const createScenario = async (withFaq: boolean, options: ScenarioOptions = {}) =
   const channelObject = {
     getActiveChatterCountSnapshot: vi.fn().mockResolvedValue(1),
     getActiveChatterSnapshot: vi.fn((userId: string) => Promise.resolve(userId === "target-user" ? targetActivity : null)),
-    readBallotDryRunSnapshot: vi.fn().mockResolvedValue(null),
+    readBallotDryRunSnapshot: vi.fn().mockResolvedValue(options.ballotSnapshot ?? null),
     hasOpenBallotSnapshot: vi.fn().mockResolvedValue(false),
   };
   const env = {
@@ -156,6 +162,20 @@ const seedGreetingTextBlock = async (database: TestD1Database): Promise<void> =>
     .bind(CHANNEL_ID, NOW, NOW).run();
   await database.prepare("INSERT INTO text_block_variants (channel_id, block_name, variant_id, position, conditions_json, texts_json, last_chosen_index) VALUES (?, 'greeting', 'default', 0, '{}', '[\"Hello\",\"Welcome\"]', 0)")
     .bind(CHANNEL_ID).run();
+};
+
+const seedRunningVotekick = async (database: TestD1Database): Promise<void> => {
+  await createVotekickRepository(database as unknown as D1Database).admit(CHANNEL_ID, {
+    id: "running-votekick",
+    targetUserId: "target-user",
+    targetLogin: "target",
+    initiatorUserId: "starter-user",
+    threshold: 3,
+    yesVotes: 0,
+    ballotRevision: 1,
+    startedAt: "2026-10-19T11:59:00.000Z",
+    endsAt: "2026-10-19T12:01:00.000Z",
+  }, NOW, 0, 0);
 };
 
 const request = {
@@ -244,7 +264,7 @@ describe("dry-run sequential module effects", () => {
     }
   });
 
-  it("discards shared state when muted FAQ delivery releases its claim", async () => {
+  it("keeps rendered text-block choices when muted FAQ delivery releases its claim", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW));
     const { database, env, fetcher } = await createScenario(true, { muted: true });
@@ -292,7 +312,100 @@ describe("dry-run sequential module effects", () => {
 
       expect(faqEntry?.effects).toContainEqual(expect.objectContaining({ kind: "chat", text: "Welcome", suppressedBy: "channel_muted" }));
       expect(faqEntry?.effects.some(({ kind }) => kind === "cooldown")).toBe(false);
-      expect(probeEntry?.effects).toContainEqual(expect.objectContaining({ kind: "chat", text: "Probe Welcome" }));
+      expect(probeEntry?.effects).toContainEqual(expect.objectContaining({ kind: "chat", text: "Probe Hello" }));
+    } finally {
+      database.close();
+    }
+  });
+
+  it("uses the FAQ render choice for a later passing votekick even when its cooldown claim fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const ballotSnapshot: ModuleDryRunBallotSnapshot = {
+      counts: [3, 0],
+      revision: 2,
+      expiresAt: Date.parse("2026-10-19T12:01:00.000Z"),
+      isActive: true,
+    };
+    const { database, env, fetcher } = await createScenario(true, {
+      passText: "Pass {text.greeting}",
+      ballotSnapshot,
+    });
+    try {
+      await seedGreetingTextBlock(database);
+      await seedRunningVotekick(database);
+      await database.prepare("UPDATE faq_entries SET answer_text = '{text.greeting}', last_used_at = ? WHERE faq_id = 'faq-votekick'")
+        .bind(NOW).run();
+      const result = await dryRunChatMessage(
+        env,
+        CHANNEL_ID,
+        { ...request, text: "votekick" },
+        fetcher,
+        [faqModule, votekickModule],
+      );
+      const faqEntry = result.modules.find(({ moduleId }) => moduleId === "faq")?.entries[0];
+      const votekickEntry = result.modules.find(({ moduleId }) => moduleId === "votekick")?.entries[0];
+
+      expect(faqEntry).toMatchObject({ outcome: "blocked", blocks: [{ code: "faq.cooldown" }] });
+      expect(votekickEntry?.effects).toContainEqual(expect.objectContaining({ kind: "chat", text: "Pass Hello" }));
+      await expect(database.prepare("SELECT last_chosen_index FROM text_block_variants WHERE block_name = 'greeting'").first())
+        .resolves.toEqual({ last_chosen_index: 0 });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps muted command render choices without variable or cooldown effects", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const { database, env, fetcher } = await createScenario(false, {
+      muted: true,
+      textCommandText: "Command {text.greeting}",
+      commandHasVariableAction: false,
+    });
+    const blockProbeModule: typeof textCommandModule = {
+      ...textCommandModule,
+      id: "state_probe",
+      templateContext: "event",
+      dryRunChatMessage: async (_event, context) => {
+        const rendered = await context.renderTemplate("Probe {text.greeting}", {}, undefined, "chat");
+        return [{
+          moduleId: "state_probe",
+          entry: { kind: "faq_entry", id: "state-probe", label: "State probe" },
+          outcome: "fires",
+          match: { kind: "keyword", pattern: "votekick" },
+          blocks: [],
+          effects: [{
+            kind: "chat",
+            text: rendered.text,
+            target: "source_only",
+            postsTo: "this_chat",
+            reply: false,
+            suppressedBy: null,
+            automated: false,
+          }],
+          templateNotes: rendered.diagnostics,
+        }];
+      },
+    };
+    try {
+      await seedGreetingTextBlock(database);
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'state_probe', 1, '{}')",
+      ).bind(CHANNEL_ID).run();
+      const result = await dryRunChatMessage(env, CHANNEL_ID, request, fetcher, [textCommandModule, blockProbeModule]);
+      const commandEntry = result.modules.find(({ moduleId }) => moduleId === "text_commands")?.entries[0];
+      const probeEntry = result.modules.find(({ moduleId }) => moduleId === "state_probe")?.entries[0];
+
+      expect(commandEntry?.effects).toContainEqual(expect.objectContaining({
+        kind: "chat",
+        text: "Command Welcome",
+        suppressedBy: "channel_muted",
+      }));
+      expect(commandEntry?.effects.some(({ kind }) => kind === "variable" || kind === "cooldown")).toBe(false);
+      expect(probeEntry?.effects).toContainEqual(expect.objectContaining({ kind: "chat", text: "Probe Hello" }));
+      await expect(database.prepare("SELECT last_chosen_index FROM text_block_variants WHERE block_name = 'greeting'").first())
+        .resolves.toEqual({ last_chosen_index: 0 });
     } finally {
       database.close();
     }

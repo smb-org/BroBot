@@ -141,8 +141,18 @@ export const dryRunChatMessage = async (
     }
     const moduleDisabled = !enabledModuleIds.has(module.id);
     const channelPaused = !moduleDisabled && dispatchState.controls.pause.active && !selectedModuleIds.has(module.id);
+    const productionSelected = selectedModuleIds.has(module.id);
     const moduleTextBlockSelectionState = new Map(textBlockSelectionState);
     const moduleSimulatedChannelVariables = new Map(simulatedChannelVariables);
+    // Shared-state commit boundaries mirrored from production:
+    // | Kind | Production persists it when |
+    // | Text-block choice | Persisted while production-selected modules render; disabled/paused modules do not run, and delivery suppression or claim release does not undo it. |
+    // | Variable change | Its atomic command claim succeeds; delivery suppression does not release that claim. |
+    // | Cooldown | Its claim succeeds; FAQ releases it only after a definite failed or unattempted delivery. |
+    let commitsSharedState = {
+      textBlockChoices: productionSelected,
+      variableChanges: false,
+    };
     const readSimulatedChannelVariables = async (names: readonly string[]): Promise<Readonly<Record<string, number>>> => {
       const values = await readVariables(db, channelId, names);
       return Object.fromEntries([...new Set(names)].flatMap((name) => {
@@ -239,29 +249,21 @@ export const dryRunChatMessage = async (
           dispatchState.controls.mute.active,
           dispatchState.controls.pause.active,
         ));
-      const productionSelected = selectedModuleIds.has(module.id);
-      if (productionSelected) {
+      commitsSharedState = {
+        textBlockChoices: productionSelected,
+        variableChanges: productionSelected && evaluatedReports.some(({ outcome, effects }) =>
+          outcome === "fires" && effects.some((effect) => effect.kind === "variable"),
+        ),
+      };
+      if (commitsSharedState.variableChanges) {
         for (const report of evaluatedReports) {
           if (report.outcome !== "fires") continue;
           for (const effect of report.effects) {
             if (effect.kind === "variable") moduleSimulatedChannelVariables.set(effect.name, effect.to);
           }
         }
-        const commitsSharedState = evaluatedReports.some(({ effects }) => effects.some((effect) => {
-          switch (effect.kind) {
-            case "chat":
-            case "announcement":
-              return effect.suppressedBy === null;
-            case "shoutout":
-            case "timeout":
-              return effect.suppressedBy === undefined;
-            default:
-              return true;
-          }
-        }));
-        if (commitsSharedState) {
-          for (const [key, index] of moduleTextBlockSelectionState) textBlockSelectionState.set(key, index);
-        }
+      }
+      if (productionSelected) {
         for (const [name, value] of moduleSimulatedChannelVariables) simulatedChannelVariables.set(name, value);
       }
       const entries = request.only?.entryId === undefined
@@ -277,6 +279,10 @@ export const dryRunChatMessage = async (
         entries: [],
         error: writeBlocked ? "write_blocked" : "module_error",
       });
+    } finally {
+      if (commitsSharedState.textBlockChoices) {
+        for (const [key, index] of moduleTextBlockSelectionState) textBlockSelectionState.set(key, index);
+      }
     }
   }
 
