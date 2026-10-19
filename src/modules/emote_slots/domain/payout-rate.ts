@@ -1,4 +1,4 @@
-import type { EmoteSlotSettings } from "../contracts";
+import { emoteSlotSettingsSchema, type EmoteSlotSettings } from "../contracts";
 
 interface ExactRate {
   numerator: bigint;
@@ -66,6 +66,12 @@ export const calculateSlotPayoutRate = (settings: Pick<EmoteSlotSettings,
     allowed: !isLocked,
     status: isLocked ? "locked" : isInTarget ? "target" : "warning",
   };
+};
+
+/** Calculates the rate only when the complete draft satisfies the settings schema. */
+export const calculateSlotPayoutRateForDraft = (draft: unknown): SlotPayoutRate | null => {
+  const parsed = emoteSlotSettingsSchema.safeParse(draft);
+  return parsed.success ? calculateSlotPayoutRate(parsed.data) : null;
 };
 
 export const formatSlotPayoutRate = (rate: SlotPayoutRate, language: "de" | "en"): string =>

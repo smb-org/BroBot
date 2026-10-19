@@ -128,6 +128,7 @@ export interface SettingsEditorProps<Settings extends object> {
   readOnly?: boolean;
   readOnlySectionOnly?: boolean;
   disabled?: boolean;
+  clampNumberOnBlur?: boolean;
   enabledLabel?: string;
   disabledLabel?: string;
   fieldErrors?: Readonly<Record<string, string>>;
@@ -150,6 +151,7 @@ export function SettingsEditor<Settings extends object>({
   readOnly = false,
   readOnlySectionOnly = false,
   disabled = false,
+  clampNumberOnBlur = true,
   enabledLabel,
   disabledLabel,
   fieldErrors = {},
@@ -244,6 +246,7 @@ export function SettingsEditor<Settings extends object>({
         step={field.step}
         value={typeof fieldValue === "number" ? fieldValue : ""}
         disabled={disabled}
+        clampOnBlur={clampNumberOnBlur}
         onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
       />;
     }

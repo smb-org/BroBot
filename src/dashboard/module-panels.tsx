@@ -5,6 +5,7 @@ import { MODULE_NAVIGATION_CATEGORIES } from "../modules/contract";
 import type { ModulePanelProperties, ModuleRegisteredTemplateVariable } from "../modules/contract";
 import type { BelaboxSettings } from "../modules/belabox/contracts";
 import type { BelaboxStatusResponse } from "../modules/belabox/contracts";
+import { calculateSlotPayoutRateForDraft } from "../modules/emote_slots/domain/payout-rate";
 import { textCommandListChatCommand } from "../modules/text_commands/contracts/chat-commands";
 import type { TextCommandPanelData } from "../modules/text_commands/panel/service";
 import { loadModulePanel, loadModuleSettingsEditor, ModuleChunkLoadError, retryModuleChunkLoad } from "./module-panel-loaders";
@@ -211,6 +212,7 @@ interface ModulePanelMountProperties {
   canManage?: boolean;
   canOperate?: boolean;
   botIsModerator?: boolean | null;
+  viewerIsBot?: boolean;
   /** Deep-link target from the command palette (#164); passed through to the panel unchanged. */
   initialSelection?: string;
   onOpenTestArea?: (moduleId: "text_commands" | "faq", entryId: string) => void;
@@ -231,11 +233,12 @@ interface ModuleSettingsPageOptions {
   pageActions?: ReactNode;
 }
 
-const ModuleSettingsEditor = ({ module, channelId, canManageContent, language, settingsSaveTarget, page }: {
+const ModuleSettingsEditor = ({ module, channelId, canManageContent, language, viewerIsBot = false, settingsSaveTarget, page }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
   language: DashboardLanguage;
+  viewerIsBot?: boolean;
   settingsSaveTarget?: HTMLElement | null;
   page?: ModuleSettingsPageOptions;
 }): ReactElement | null => module.settingsEditor === undefined ? null : <ModuleSettingsEditorQuery
@@ -244,6 +247,7 @@ const ModuleSettingsEditor = ({ module, channelId, canManageContent, language, s
   channelId={channelId}
   canManageContent={canManageContent}
   language={language}
+  viewerIsBot={viewerIsBot}
   {...(settingsSaveTarget === undefined ? {} : { settingsSaveTarget })}
   {...(page === undefined ? {} : { page })}
 />;
@@ -258,11 +262,12 @@ const persistedSettings = (moduleId: string, settings: Record<string, unknown>):
   return persisted;
 };
 
-const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, language, settingsSaveTarget, page }: {
+const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, language, viewerIsBot, settingsSaveTarget, page }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
   language: DashboardLanguage;
+  viewerIsBot: boolean;
   settingsSaveTarget?: HTMLElement | null;
   page?: ModuleSettingsPageOptions;
 }): ReactElement => {
@@ -338,6 +343,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       channelId={channelId}
       canManageContent={canManageContent}
       language={language}
+      viewerIsBot={viewerIsBot}
       {...(settingsSaveTarget === undefined ? {} : { settingsSaveTarget })}
       definition={loaded.definition}
       copy={copy}
@@ -419,11 +425,12 @@ const BelaboxSettingsPanelMount = ({ module, channelId, language, canManageConte
   />;
 };
 
-const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, language, definition, copy, retryLabel, channelVariables, registeredTemplateVariables, initial, initialRevision, settingsSaveTarget, onReload, page }: {
+const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, language, viewerIsBot, definition, copy, retryLabel, channelVariables, registeredTemplateVariables, initial, initialRevision, settingsSaveTarget, onReload, page }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
   language: DashboardLanguage;
+  viewerIsBot: boolean;
   definition: SettingsEditorDefinition<unknown>;
   copy: SettingsEditorCatalog;
   retryLabel: string;
@@ -507,6 +514,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     })];
   })) as Readonly<Partial<Record<string, readonly (TemplateTextFieldVariable & { maxLength: number; fallbackWhenAbsent?: number })[]>>>;
   const templateVariableOptions: Readonly<Partial<Record<string, readonly TemplateTextFieldVariable[]>>> = templateMetadata;
+  const slotRate = module.id === "emote_slots" ? calculateSlotPayoutRateForDraft(currentValue) : null;
   const settingsEditor = (sectionId: string, fieldErrors: Readonly<Record<string, string>>): ReactElement => (
     <SettingsEditor
       key={sectionId}
@@ -524,11 +532,12 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       templateMetadata={templateMetadata}
       templateMessages={copy.templateMessages}
       messagePreviewLayout={page === undefined ? "stacked" : "side-by-side"}
-      fieldErrors={module.id === "emote_slots" && module.validateSettings?.(currentValue) === "payout_rate_too_high"
+      fieldErrors={module.id === "emote_slots" && slotRate?.status === "locked"
         && ["minStake", "jackpotSeed"].includes([...touchedFields].at(-1) ?? "")
         ? { ...fieldErrors, [[...touchedFields].at(-1) ?? ""]: emoteSlotsCatalog[language].panel.quoteFieldError }
         : fieldErrors}
-      customContext={{ channelId, language, rateLocked: module.validateSettings?.(currentValue) === "payout_rate_too_high",
+      clampNumberOnBlur={module.id !== "emote_slots"}
+      customContext={{ channelId, language, viewerIsBot, rateLocked: slotRate?.status === "locked",
         rateLockReason: module.id === "emote_slots" ? emoteSlotsCatalog[language].panel.quoteFieldError : undefined,
         lastTouchedField: [...touchedFields].at(-1) }}
       disabled={pending}
@@ -738,7 +747,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   const navigationGuard = useDraftGuard(dirty, save, discard);
   useEffect(() => registerDashboardNavigationGuard(navigationGuard.guardSwitch), [navigationGuard.guardSwitch]);
   const notifyPageSaveError = page !== undefined;
-  const slotRateLocked = module.id === "emote_slots" && module.validateSettings?.(currentValue) === "payout_rate_too_high";
+  const slotRateLocked = module.id === "emote_slots" && (slotRate === null || !slotRate.allowed);
   const slotRateLockReason = emoteSlotsCatalog[language].panel.quoteLockedReason;
   useEffect(() => {
     if (notifyPageSaveError && error !== undefined && error.length < 80) notify({ tone: "error", message: error });
@@ -883,7 +892,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   </>;
 };
 
-export const ModulePanelMount = ({ channelId, activeModules, settingsSaveTarget = null, streamSessionIdentity, suspendModuleId, canManage = true, canOperate = true, botIsModerator = null, initialSelection, onOpenTestArea, chatVotingTab = "votes" }: ModulePanelMountProperties): ReactElement => {
+export const ModulePanelMount = ({ channelId, activeModules, settingsSaveTarget = null, streamSessionIdentity, suspendModuleId, canManage = true, canOperate = true, botIsModerator = null, viewerIsBot = false, initialSelection, onOpenTestArea, chatVotingTab = "votes" }: ModulePanelMountProperties): ReactElement => {
   const registeredViews = activeModules.flatMap((activeModule) => {
     const module = MODULES.find((candidate) => candidate.id === activeModule.moduleId);
     if (module === undefined) return [];
@@ -911,6 +920,7 @@ export const ModulePanelMount = ({ channelId, activeModules, settingsSaveTarget 
           canManage={canManage}
           canOperate={canOperate}
           botIsModerator={botIsModerator}
+          viewerIsBot={viewerIsBot}
           suspendToParent={module.id === suspendModuleId}
           {...(initialSelection === undefined ? {} : { initialSelection })}
           {...(onOpenTestArea === undefined ? {} : { onOpenTestArea })}
@@ -920,13 +930,14 @@ export const ModulePanelMount = ({ channelId, activeModules, settingsSaveTarget 
   );
 };
 
-const MountedModuleView = ({ module, channelId, streamSessionIdentity, canManage, canOperate, botIsModerator, suspendToParent, settingsSaveTarget, initialSelection, onOpenTestArea, chatVotingTab }: {
+const MountedModuleView = ({ module, channelId, streamSessionIdentity, canManage, canOperate, botIsModerator, viewerIsBot, suspendToParent, settingsSaveTarget, initialSelection, onOpenTestArea, chatVotingTab }: {
   module: (typeof MODULES)[number];
   channelId: string;
   streamSessionIdentity?: string;
   canManage: boolean;
   canOperate: boolean;
   botIsModerator: boolean | null;
+  viewerIsBot: boolean;
   suspendToParent: boolean;
   settingsSaveTarget: HTMLElement | null;
   initialSelection?: string;
@@ -939,6 +950,7 @@ const MountedModuleView = ({ module, channelId, streamSessionIdentity, canManage
     channelId={channelId}
     canManageContent={canManage}
     language={dashboardLanguage()}
+    viewerIsBot={viewerIsBot}
     settingsSaveTarget={settingsSaveTarget}
   />;
   const chatVotingView = module.id === "chat_voting";
@@ -1163,6 +1175,7 @@ interface ModulePageProperties {
   error?: string | null;
   busy?: boolean;
   botIsModerator?: boolean | null;
+  viewerIsBot?: boolean;
   onNavigate: (route: DashboardRoute) => void;
   onToggle: () => void;
   /** Deep-link target from the command palette (#164), e.g. a text command name. */
@@ -1171,7 +1184,7 @@ interface ModulePageProperties {
   suspendPanelUntilReady?: boolean;
 }
 
-export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModules, streamSessionIdentity, loading = false, error = null, busy = false, botIsModerator = null, onNavigate, onToggle, initialSelection, suspendPanelUntilReady = false }: ModulePageProperties): ReactElement => {
+export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModules, streamSessionIdentity, loading = false, error = null, busy = false, botIsModerator = null, viewerIsBot = false, onNavigate, onToggle, initialSelection, suspendPanelUntilReady = false }: ModulePageProperties): ReactElement => {
   const texts = dashboardTexts();
   const labels = workspaceTexts();
   const details = moduleDetails(moduleId);
@@ -1222,6 +1235,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
         channelId={channelId}
         canManageContent={ownRole !== "operator"}
         language={dashboardLanguage()}
+        viewerIsBot={viewerIsBot}
         page={{
           title: details.name,
           subtitle: details.description,
@@ -1306,7 +1320,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
         {stateMessage === null ? (
           registered?.panel === undefined && registered?.settingsEditor === undefined ? (showActiveView ? <p className="module-state">{texts.module.noView}</p> : null) : !showActiveView ? null : (
             <section className={`module-detail__content${viewLoading ? " stale" : ""}`} aria-label={labels.content}>
-              <ModulePanelMount key={`${channelId}:${moduleId}`} channelId={channelId} activeModules={[activeModule]} settingsSaveTarget={settingsSaveTarget} {...(streamSessionIdentity === undefined ? {} : { streamSessionIdentity })} {...(suspendPanelUntilReady ? { suspendModuleId: moduleId } : {})} canManage={ownRole !== "operator"} canOperate={true} botIsModerator={botIsModerator} {...(initialSelection === undefined ? {} : { initialSelection })} onOpenTestArea={(targetModuleId, entryId) => onNavigate({ kind: "channel", channelId, section: "test-area", only: { moduleId: targetModuleId, entryId } })} {...(moduleId === "chat_voting" ? { chatVotingTab } : {})} />
+              <ModulePanelMount key={`${channelId}:${moduleId}`} channelId={channelId} activeModules={[activeModule]} settingsSaveTarget={settingsSaveTarget} {...(streamSessionIdentity === undefined ? {} : { streamSessionIdentity })} {...(suspendPanelUntilReady ? { suspendModuleId: moduleId } : {})} canManage={ownRole !== "operator"} canOperate={true} botIsModerator={botIsModerator} viewerIsBot={viewerIsBot} {...(initialSelection === undefined ? {} : { initialSelection })} onOpenTestArea={(targetModuleId, entryId) => onNavigate({ kind: "channel", channelId, section: "test-area", only: { moduleId: targetModuleId, entryId } })} {...(moduleId === "chat_voting" ? { chatVotingTab } : {})} />
             </section>
           )
         ) : (

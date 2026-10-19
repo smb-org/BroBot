@@ -53,7 +53,7 @@ const listEmotes = async (context: SlotContext): Promise<EmoteResponse> => {
   let status: EmoteResponse["twitch"]["status"] = "ok";
   const scopes = credentials?.scopes ?? [];
   if (credentials === null || !scopes.includes("user:read:emotes")) {
-    status = global?.ok === false || global === null ? "unavailable" : "reconnect_required";
+    status = "reconnect_required";
   } else {
     const userEmotes = await context.get("getUserEmotes")({
       clientId,
@@ -65,7 +65,7 @@ const listEmotes = async (context: SlotContext): Promise<EmoteResponse> => {
     if (userEmotes?.ok) for (const emote of userEmotes.data) twitchItems.set(emote.id, slotEmote(emote));
   }
   const value: EmoteResponse = { emoji: { items: emojiItems }, twitch: { status, items: [...twitchItems.values()] } };
-  if (status !== "reconnect_required") emoteCache.set(channelId, { expiresAt: Date.now() + 10 * 60_000, value });
+  if (status === "ok") emoteCache.set(channelId, { expiresAt: Date.now() + 10 * 60_000, value });
   return value;
 };
 

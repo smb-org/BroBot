@@ -303,6 +303,60 @@ describe("emote slot Twitch emote route", () => {
     expect(userCalls).toBe(1);
   });
 
+  it(`keeps reconnect required separate from Helix failure and fetches user emotes after grant (${testCard("a missing user:read:emotes scope with failing global Helix stays reconnect_required and the next granted request fetches user emotes", "the first response says unavailable or its result is cached so the later request skips user emotes", "mutable credentials and Helix availability reproduce reconnect across two requests on the same channel")})`, async () => {
+    const channelId = `slot-emotes-reconnect-helix-${crypto.randomUUID()}`;
+    clearEmoteSlotEmoteCache(channelId);
+    const scopes: string[] = [];
+    let globalHelixAvailable = false;
+    let userCalls = 0;
+    const global = () => Promise.resolve(globalHelixAvailable
+      ? helixOk([{ id: "global-1", name: "globalwave" }])
+      : helixFail());
+    const user = () => {
+      userCalls += 1;
+      return Promise.resolve(helixOk([{ id: "channel-1", name: "channelwave" }]));
+    };
+
+    const first = await emoteRoute({ channelId, scopes, global, user });
+    const firstBody = await responseBody<{ twitch: { status: string; items: unknown[] } }>(first);
+    scopes.push("user:read:emotes");
+    globalHelixAvailable = true;
+    const second = await emoteRoute({ channelId, scopes, global, user });
+    const secondBody = await responseBody<{ twitch: { status: string; items: Array<{ twitchId?: string }> } }>(second);
+
+    expect(firstBody.twitch.status).toBe("reconnect_required");
+    expect(secondBody.twitch.status).toBe("ok");
+    expect(secondBody.twitch.items.map(({ twitchId }) => twitchId)).toEqual(["global-1", "channel-1"]);
+    expect(userCalls).toBe(1);
+  });
+
+  it(`does not cache an unavailable Helix response (${testCard("the same channel recovers to ok on its next request after Helix recovers", "a transient unavailable response remains cached and prevents the recovered Helix calls", "the route receives stable granted credentials while the Helix test capability changes outcome")})`, async () => {
+    const channelId = `slot-emotes-unavailable-retry-${crypto.randomUUID()}`;
+    clearEmoteSlotEmoteCache(channelId);
+    let helixAvailable = false;
+    let globalCalls = 0;
+    let userCalls = 0;
+    const global = () => {
+      globalCalls += 1;
+      return Promise.resolve(helixAvailable ? helixOk([{ id: "global-1", name: "globalwave" }]) : helixFail());
+    };
+    const user = () => {
+      userCalls += 1;
+      return Promise.resolve(helixAvailable ? helixOk([{ id: "channel-1", name: "channelwave" }]) : helixFail());
+    };
+    const first = await emoteRoute({ channelId, scopes: ["user:read:emotes"], global, user });
+    const firstBody = await responseBody<{ twitch: { status: string } }>(first);
+    helixAvailable = true;
+    const second = await emoteRoute({ channelId, scopes: ["user:read:emotes"], global, user });
+    const secondBody = await responseBody<{ twitch: { status: string; items: unknown[] } }>(second);
+
+    expect(firstBody.twitch.status).toBe("unavailable");
+    expect(secondBody.twitch.status).toBe("ok");
+    expect(secondBody.twitch.items).toHaveLength(2);
+    expect(globalCalls).toBe(2);
+    expect(userCalls).toBe(2);
+  });
+
   it(`returns emoji with unavailable Twitch status on Helix errors (${testCard("a Helix failure is represented as a 200 unavailable result with emoji still usable", "Helix failure escapes as a 5xx or removes the emoji group", "both Helix endpoints fail through mocked host capabilities")})`, async () => {
     const channelId = `slot-emotes-unavailable-${crypto.randomUUID()}`;
     clearEmoteSlotEmoteCache(channelId);

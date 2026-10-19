@@ -172,3 +172,105 @@ test("slot quote states stay fixed, lock unsafe saves, and persist explicit edit
   await expect(pageRoot.locator(".slot-rate-line")).toContainText(changedRate);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
+
+test("invalid numeric drafts stay visible and lock the quote without rendering a rate (protects=non-integer, empty, and out-of-range Slot numbers show field errors, preserve the draft, and lock saving with the reserved reason; fails_when=invalid input throws during render, changes to a valid value, leaves the quote active, or can be saved; no_claim=server-side settings validation)", async ({ page }) => {
+  await installSlotPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`/channels/${CHANNEL_ID}/modules/emote_slots`);
+
+  const pageRoot = page.locator(".module-detail--settings-page");
+  const rate = pageRoot.locator(".slot-rate-line");
+  const save = pageRoot.getByRole("button", { name: EDITOR_COPY.saveLabel });
+  const quoteLockedReason = SLOT_COPY.quoteLockedReason;
+  const minStake = pageRoot.getByLabel(SLOT_COPY.minStake, { exact: true });
+  await minStake.fill("1.5");
+  await expect(minStake).toHaveAttribute("aria-invalid", "true");
+  await expect(rate).toHaveAttribute("data-status", "invalid");
+  await expect(rate).toContainText(SLOT_COPY.quoteInvalid);
+  await expect(minStake).toHaveValue("1.5");
+  await expect(save).toBeDisabled();
+  await expect(save).toHaveAttribute("title", quoteLockedReason);
+
+  await minStake.fill("15");
+  const seed = pageRoot.getByLabel(SLOT_COPY.seed, { exact: true });
+  await seed.fill("");
+  await expect(seed).toHaveAttribute("aria-invalid", "true");
+  await expect(rate).toHaveAttribute("data-status", "invalid");
+  await expect(seed).toHaveValue("");
+  await seed.press("Tab");
+  await expect(seed).toHaveValue("");
+  await expect(save).toBeDisabled();
+
+  await seed.fill("500");
+  const share = pageRoot.getByLabel(SLOT_COPY.share, { exact: true });
+  await share.fill("7.001");
+  await expect(share).toHaveAttribute("aria-invalid", "true");
+  await expect(rate).toHaveAttribute("data-status", "invalid");
+  await expect(share).toHaveValue("7.001");
+  await share.press("Tab");
+  await expect(share).toHaveValue("7.001");
+  await expect(save).toBeDisabled();
+
+  const cooldown = pageRoot.getByLabel(SLOT_COPY.cooldown, { exact: true });
+  await cooldown.fill("3601");
+  await expect(cooldown).toHaveAttribute("aria-invalid", "true");
+  await expect(rate).toHaveAttribute("data-status", "invalid");
+  await expect(cooldown).toHaveValue("3601");
+  await cooldown.press("Tab");
+  await expect(cooldown).toHaveValue("3601");
+  await expect(save).toBeDisabled();
+});
+
+test("Slot numeric errors keep every following control in place (protects=stakes, seed, share, cooldown, and reel errors reserve their Slot-only height including rate-lock messages; fails_when=any following control shifts after a field error appears; no_claim=layout behavior on other dashboard pages)", async ({ page }) => {
+  await installSlotPage(page);
+  await page.setViewportSize({ width: 390, height: 1600 });
+  await page.goto(`/channels/${CHANNEL_ID}/modules/emote_slots`);
+
+  const pageRoot = page.locator(".module-detail--settings-page");
+  const position = async (locator: ReturnType<Page["locator"]>): Promise<number> => locator.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const container = element.closest(".settings-page__columns");
+    return Math.round((rect.y - (container?.getBoundingClientRect().y ?? 0) + (container?.scrollTop ?? 0)) * 100) / 100;
+  });
+
+  const minStake = pageRoot.getByLabel(SLOT_COPY.minStake, { exact: true });
+  const maxStake = pageRoot.getByLabel(SLOT_COPY.maxStake, { exact: true });
+  const maxStakeY = await position(maxStake);
+  await minStake.fill("1.5");
+  await expect(minStake).toHaveAttribute("aria-invalid", "true");
+  expect(await position(maxStake)).toBe(maxStakeY);
+  await minStake.fill("15");
+
+  const rate = pageRoot.locator(".slot-rate-line");
+  const seed = pageRoot.getByLabel(SLOT_COPY.seed, { exact: true });
+  const announce = pageRoot.getByLabel(SLOT_COPY.announce, { exact: true });
+  const announceY = await position(announce);
+  await seed.fill("1000000");
+  await expect(rate).toHaveAttribute("data-status", "locked");
+  await expect(seed).toHaveAttribute("aria-invalid", "true");
+  expect(await position(announce)).toBe(announceY);
+  await seed.fill("500");
+
+  const share = pageRoot.getByLabel(SLOT_COPY.share, { exact: true });
+  await share.fill("20");
+  await expect(rate).toHaveAttribute("data-status", "locked");
+  await expect(share).toHaveAttribute("aria-invalid", "true");
+  expect(await position(announce)).toBe(announceY);
+  await share.fill("7");
+
+  const cooldown = pageRoot.getByLabel(SLOT_COPY.cooldown, { exact: true });
+  const chatTarget = pageRoot.getByLabel(SLOT_COPY.targetLabel, { exact: true });
+  const chatTargetY = await position(chatTarget);
+  await cooldown.fill("3601");
+  await expect(cooldown).toHaveAttribute("aria-invalid", "true");
+  expect(await position(chatTarget)).toBe(chatTargetY);
+
+  const firstWeight = pageRoot.getByLabel(SLOT_COPY.weightAria.replace("{name}", DEFAULT_SETTINGS.symbols[0]?.name ?? ""));
+  const secondRowWeight = pageRoot.getByLabel(SLOT_COPY.weightAria.replace("{name}", DEFAULT_SETTINGS.symbols[1]?.name ?? ""));
+  const secondRowY = await position(secondRowWeight);
+  await firstWeight.fill("1.5");
+  await expect(firstWeight).toHaveAttribute("aria-invalid", "true");
+  await expect(firstWeight.locator("xpath=../../..").locator(".unit-input__error")).toBeVisible();
+  expect(await position(secondRowWeight)).toBe(secondRowY);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});

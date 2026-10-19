@@ -3,7 +3,7 @@ import { DEFAULT_EMOTE_SLOT_SETTINGS, EMOTE_SLOTS_MODULE_ID, emoteSlotDefaultSet
 import { emoteSlotsCatalog } from "./locale";
 import { emoteSlotsRoutes } from "./routes";
 import { processEmoteSlotMessage } from "./service";
-import { calculateSlotPayoutRate } from "./domain/payout-rate";
+import { calculateSlotPayoutRateForDraft } from "./domain/payout-rate";
 
 export const emoteSlotsModule: BotModule<typeof emoteSlotSettingsSchema> = {
   id: EMOTE_SLOTS_MODULE_ID,
@@ -27,7 +27,10 @@ export const emoteSlotsModule: BotModule<typeof emoteSlotSettingsSchema> = {
   settingsSchema: emoteSlotSettingsSchema,
   defaultSettings: DEFAULT_EMOTE_SLOT_SETTINGS,
   defaultSettingsForLanguage: emoteSlotDefaultSettingsForLanguage,
-  validateSettings: (settings) => calculateSlotPayoutRate(settings).allowed ? null : "payout_rate_too_high",
+  validateSettings: (settings) => {
+    const rate = calculateSlotPayoutRateForDraft(settings);
+    return rate === null ? "invalid_settings" : rate.allowed ? null : "payout_rate_too_high";
+  },
   routes: emoteSlotsRoutes,
   defaultEnabled: false,
   settingsEditorPlacement: "page",

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 
-import { calculateSlotPayoutRate, formatSlotPayoutRate } from "../domain/payout-rate";
+import { calculateSlotPayoutRateForDraft, formatSlotPayoutRate } from "../domain/payout-rate";
 import { DEFAULT_EMOTE_SLOT_SETTINGS, type EmoteSlotSettings, type EmoteSlotSymbol } from "../contracts";
 import { emoteSlotsCatalog } from "../locale";
 import { emoteSlotTemplateMessages } from "./locale";
-import { Button, FieldError, GroupedPicker, Icon, NativeRadio, StatusLed, TemplateTextField, UnitInput, type GroupedPickerEntry, type GroupedPickerGroup } from "../../../dashboard/ui";
+import { Button, Dialog, FieldError, GroupedPicker, Icon, NativeRadio, StatusLed, TemplateTextField, UnitInput, type GroupedPickerEntry, type GroupedPickerGroup } from "../../../dashboard/ui";
 
 import "./slot-fields.css";
 
@@ -42,6 +42,7 @@ const isSlotEmoteResponse = (value: unknown): value is SlotEmoteResponse => {
 interface SlotFieldContext {
   channelId: string;
   language: "de" | "en";
+  viewerIsBot?: boolean;
   rateLocked?: boolean;
   rateLockReason?: string;
   lastTouchedField?: string;
@@ -79,6 +80,7 @@ const statusLine = (
   count: number,
   language: "de" | "en",
   group: "emoji" | "twitch" = "twitch",
+  onReconnect: () => void = () => undefined,
 ): ReactElement => {
   const copy = copyFor(language);
   const text = status === "loading" ? copy.loadingEmotes
@@ -87,7 +89,7 @@ const statusLine = (
         : copy[group === "emoji" ? "countAvailable" : "emotesAvailable"].replace("{count}", String(count));
   return <span className="slot-picker-status" aria-live="polite">
     <span>{text}</span>
-    {status === "reconnect_required" ? <a href="/auth/bot/login">{copy.reconnect}</a> : null}
+    {status === "reconnect_required" ? <Button variant="subtle" size="compact" onClick={onReconnect}>{copy.reconnect}</Button> : null}
   </span>;
 };
 
@@ -118,6 +120,7 @@ export function SlotReelTable({
   const [loading, setLoading] = useState(true);
   const [unavailable, setUnavailable] = useState(false);
   const [pickerRow, setPickerRow] = useState<number | null>(null);
+  const [reconnectDialogOpen, setReconnectDialogOpen] = useState(false);
   useEffect(() => {
     let active = true;
     const channelId = parsedContext?.channelId;
@@ -137,7 +140,7 @@ export function SlotReelTable({
     return () => { active = false; };
   }, [parsedContext?.channelId]);
 
-  const rate = useMemo(() => calculateSlotPayoutRate(parsedSettings ?? DEFAULT_EMOTE_SLOT_SETTINGS), [parsedSettings]);
+  const rate = useMemo(() => calculateSlotPayoutRateForDraft(parsedSettings ?? DEFAULT_EMOTE_SLOT_SETTINGS), [parsedSettings]);
   if (parsedSettings === null || !Array.isArray(value)) return null;
   const emojiEntries: GroupedPickerEntry<SlotEmote>[] = (emotes?.emoji.items ?? []).map((emote) => ({
     id: emote.code,
@@ -159,11 +162,12 @@ export function SlotReelTable({
       id: "twitch",
       label: copy.twitch,
       entries: twitchEntries,
-      footer: statusLine(parsedContext?.channelId === undefined || unavailable ? "unavailable" : loading ? "loading" : emotes?.twitch.status ?? "unavailable", twitchEntries.length, language, "twitch"),
+      footer: statusLine(parsedContext?.channelId === undefined || unavailable ? "unavailable" : loading ? "loading" : emotes?.twitch.status ?? "unavailable", twitchEntries.length, language, "twitch", () => setReconnectDialogOpen(true)),
     },
   ];
-  const status = rate.status === "locked" ? "error" : rate.status === "warning" ? "warn" : "ok";
-  const rateLabel = rate.status === "locked" ? copy.quoteLocked : rate.status === "warning" ? copy.quoteWarning : copy.quoteTarget;
+  const status = rate === null ? "off" : rate.status === "locked" ? "error" : rate.status === "warning" ? "warn" : "ok";
+  const rateStatus = rate === null ? "invalid" : rate.status;
+  const rateLabel = rate === null ? copy.quoteInvalid : rate.status === "locked" ? copy.quoteLocked : rate.status === "warning" ? copy.quoteWarning : copy.quoteTarget;
   const choose = (index: number, entry: GroupedPickerEntry<SlotEmote>): void => {
     if (entry.value === undefined) return;
     const nextSymbol = entry.value;
@@ -175,18 +179,25 @@ export function SlotReelTable({
     }).symbols);
     setPickerRow(null);
   };
-  const numberValue = (value: number, onValue: (next: number) => void, ariaLabel: string, min: number, max: number): ReactElement =>
+  const numberValue = (value: unknown, onValue: (next: number | "") => void, ariaLabel: string, min: number, max: number, error: string | undefined): ReactElement =>
     <UnitInput
       label={copy.weight}
       ariaLabel={ariaLabel}
-      value={value}
-      onChange={(next) => { if (typeof next === "number" && Number.isSafeInteger(next)) onValue(next); }}
+      value={typeof value === "number" && Number.isFinite(value) ? value : ""}
+      onChange={onValue}
       min={min}
       max={max}
       step={1}
+      clampOnBlur={false}
+      {...(error === undefined ? {} : { error })}
       disabled={disabled || readOnly}
       id={`slot-number-${ariaLabel.replace(/\s+/gu, "-")}`}
     />;
+  const numericError = (value: unknown, min: number, max: number, message: string): string | undefined =>
+    typeof value !== "number" || !Number.isInteger(value) || value < min || value > max ? message : undefined;
+  const updateNumber = (index: number, key: "weight" | "triple", next: number | ""): void => {
+    onChange(parsedSettings.symbols.map((symbol, row) => row === index ? { ...symbol, [key]: next } : symbol));
+  };
 
   return <div className="slot-reel-field" data-testid="slot-reel-field">
     <div className="slot-reel-scroll">
@@ -204,10 +215,10 @@ export function SlotReelTable({
             <span className="slot-symbol-name">{symbol.name}</span>
           </span></td>
           <td><span className="slot-source-badge">{symbol.source === "emoji" ? copy.emoji : copy.twitch}</span></td>
-          <td>{numberValue(symbol.weight, (weight) => onChange(updateSymbol(parsedSettings, index, { weight }).symbols),
-            copy.weightAria.replace("{name}", symbol.name), 1, 99)}</td>
+          <td>{numberValue(symbol.weight, (next) => updateNumber(index, "weight", next),
+            copy.weightAria.replace("{name}", symbol.name), 1, 99, numericError(symbol.weight, 1, 99, copy.weightError))}</td>
           <td>{symbol.isJackpot ? <span className="slot-jackpot-row">{copy.jackpotRow}</span> : <div className="slot-multiplier"><span aria-hidden="true">×</span>{numberValue(symbol.triple,
-            (triple) => onChange(updateSymbol(parsedSettings, index, { triple }).symbols), copy.tripleAria.replace("{name}", symbol.name), 2, 500)}</div>}</td>
+            (next) => updateNumber(index, "triple", next), copy.tripleAria.replace("{name}", symbol.name), 2, 500, numericError(symbol.triple, 2, 500, copy.tripleError))}</div>}</td>
           <td><NativeRadio className="slot-jackpot-radio" name="slot-jackpot-symbol" value={symbol.id}
             checked={symbol.isJackpot} disabled={disabled || readOnly}
             onChange={() => onChange(parsedSettings.symbols.map((item) => ({ ...item, isJackpot: item.id === symbol.id })))}
@@ -225,11 +236,17 @@ export function SlotReelTable({
       </table>
       </div>
     </div>
-    <div className="slot-rate-line" data-status={rate.status}>
-      <span>{copy.quote} <span className="slot-rate-value">{formatSlotPayoutRate(rate, language)}</span></span>
+    <div className="slot-rate-line" data-status={rateStatus}>
+      <span>{copy.quote} <span className="slot-rate-value">{rate === null ? copy.quoteInvalid : formatSlotPayoutRate(rate, language)}</span></span>
       <StatusLed state={status} label={rateLabel} />
     </div>
-    <FieldError message={rate.status === "locked" && parsedContext?.lastTouchedField === "symbols" ? copy.quoteFieldError : error} />
+    <FieldError message={rate?.status === "locked" && parsedContext?.lastTouchedField === "symbols" ? copy.quoteFieldError : error} />
+    <Dialog opened={reconnectDialogOpen} title={copy.reconnectDialogTitle} onClose={() => setReconnectDialogOpen(false)}>
+      <p>{copy.reconnectDialogDescription}</p>
+      {parsedContext?.viewerIsBot === true ? <div className="slot-reconnect-dialog__actions">
+        <Button variant="primary" onClick={() => { window.location.href = "/auth/bot/login"; }}>{copy.reconnectDialogAuthorize}</Button>
+      </div> : null}
+    </Dialog>
   </div>;
 }
 
@@ -252,8 +269,9 @@ export function SlotShareField({
 }): ReactElement {
   const language = (context as SlotFieldContext | undefined)?.language ?? "de";
   const copy = copyFor(language);
-  const value = typeof settings.jackpotShareBp === "number" ? settings.jackpotShareBp / 100 : 0;
-  const rateLocked = calculateSlotPayoutRate(settings).status === "locked";
+  const value = typeof settings.jackpotShareBp === "number" ? settings.jackpotShareBp / 100 : "";
+  const rate = calculateSlotPayoutRateForDraft(settings);
+  const rateLocked = rate?.status === "locked";
   const fieldError = rateLocked && (context as SlotFieldContext | undefined)?.lastTouchedField === "jackpotShareBp"
     ? copy.quoteFieldError
     : error;
@@ -262,10 +280,11 @@ export function SlotShareField({
     label={label}
     ariaLabel={label}
     value={value}
-    onChange={(next) => { if (typeof next === "number" && Number.isFinite(next)) onChange(Math.round(next * 100)); }}
+    onChange={(next) => { onChange(next === "" ? "" : next * 100); }}
     min={0}
     max={20}
     step={0.01}
+    clampOnBlur={false}
     unit="%"
     hint={copy.share}
     {...(fieldError === undefined ? {} : { error: fieldError })}

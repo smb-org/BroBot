@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { SaveStatus, UiProvider } from "../../src/dashboard/ui";
 import { emoteSlotDefaultSettingsForLanguage } from "../../src/modules/emote_slots/contracts";
@@ -91,5 +91,62 @@ describe("emote slot settings controls", () => {
     expect(button).toHaveAttribute("title", reason);
     expect(button.querySelector("svg")).not.toBeNull();
     expect(screen.getByText(reason)).toBeInTheDocument();
+  });
+
+  it("shows bot reconnect instructions to channel users without exposing bot authorization (protects=channel users can find the bot-account recovery instructions without opening a bot-only route; fails_when=the picker links directly to bot authorization or omits the instructions dialog; no_claim=the bot-account OAuth flow itself)", async () => {
+    const copy = emoteSlotsCatalog.de.panel;
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        emoji: { items: [] },
+        twitch: { status: "reconnect_required", items: [] },
+      }),
+    })));
+    const settings = emoteSlotDefaultSettingsForLanguage("de");
+    render(<UiProvider><SlotReelTable
+      settings={settings}
+      value={settings.symbols}
+      onChange={() => undefined}
+      disabled={false}
+      readOnly={false}
+      label={copy.ariaLabel}
+      context={{ channelId: "slot_channel_user_demo", language: "de", viewerIsBot: false }}
+    /></UiProvider>);
+
+    fireEvent.click(screen.getByRole("button", { name: `${copy.chooseSymbol}: ${settings.symbols[0]?.name ?? ""}` }));
+    await screen.findByText(copy.emotesReconnect);
+    fireEvent.click(screen.getByRole("button", { name: copy.reconnect }));
+
+    expect(screen.getByRole("dialog", { name: copy.reconnectDialogTitle })).toBeInTheDocument();
+    expect(screen.getByText(copy.reconnectDialogDescription)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: copy.reconnect })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: copy.reconnectDialogAuthorize })).not.toBeInTheDocument();
+  });
+
+  it("offers direct bot authorization only in the bot account session (protects=the existing bot-session-only authorization affordance; fails_when=ordinary sessions receive the authorization action or the bot session cannot open it; no_claim=server-side authorization guards)", async () => {
+    const copy = emoteSlotsCatalog.de.panel;
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        emoji: { items: [] },
+        twitch: { status: "reconnect_required", items: [] },
+      }),
+    })));
+    const settings = emoteSlotDefaultSettingsForLanguage("de");
+    render(<UiProvider><SlotReelTable
+      settings={settings}
+      value={settings.symbols}
+      onChange={() => undefined}
+      disabled={false}
+      readOnly={false}
+      label={copy.ariaLabel}
+      context={{ channelId: "slot_bot_user_demo", language: "de", viewerIsBot: true }}
+    /></UiProvider>);
+
+    fireEvent.click(screen.getByRole("button", { name: `${copy.chooseSymbol}: ${settings.symbols[0]?.name ?? ""}` }));
+    await screen.findByText(copy.emotesReconnect);
+    fireEvent.click(screen.getByRole("button", { name: copy.reconnect }));
+
+    expect(screen.getByRole("button", { name: copy.reconnectDialogAuthorize })).toBeInTheDocument();
   });
 });
