@@ -29,8 +29,22 @@ import { channelStateQuery } from "../../src/worker/panel/repository";
 import { apiSourceReferenceQuery } from "../../src/modules/api_source/routes";
 import { CLAIM_ELIGIBLE_SQL, textCommandSelectColumns } from "../../src/modules/text_commands/adapters/d1";
 import { FAQ_CLAIM_ELIGIBLE_SQL } from "../../src/modules/faq/adapters/d1";
+import {
+  votekickAdmissionReasonSql,
+  votekickFinalizeClaimPredicate,
+  votekickFinishClaimPredicate,
+  votekickMarkLiftedPredicate,
+} from "../../src/modules/votekick/adapters/d1";
 import { blockUsageExistsSql, textBlockCategorySelectColumns, textBlockSelectColumns } from "../../src/modules/text_library/adapters/d1";
-import { chatVoteSelectColumns, chatVoteTemplateSelectColumns } from "../../src/modules/chat_voting/repository";
+import {
+  chatVoteAlarmClosePredicate,
+  chatVoteExtensionPredicate,
+  chatVoteExtensionRollbackPredicate,
+  chatVoteFinishPredicate,
+  chatVoteResultDeliveryPredicate,
+  chatVoteSelectColumns,
+  chatVoteTemplateSelectColumns,
+} from "../../src/modules/chat_voting/repository";
 import {
   belaboxExpectedOpenStreamSetGuard,
   belaboxHistoryModuleRevisionGuard,
@@ -172,6 +186,12 @@ const sqlGetFixtures = new Map<string, string>([
     updatedAt: now,
   }).sql],
   ["rowColumns", "votekick_id, target_user_id, target_login, initiator_user_id, status, threshold, yes_votes, no_votes, ballot_revision, duration_seconds, started_at, expires_at, ended_at, lifted_at"],
+  ["votekickAdmissionReasonSql(\"admitted\")", votekickAdmissionReasonSql("admitted")],
+  ["votekickAdmissionReasonSql(\"busy\")", votekickAdmissionReasonSql("busy")],
+  ["votekickFinalizePredicate.sql", votekickFinalizeClaimPredicate("channel-id", "vote-id").sql],
+  ["votekickFinishPredicate.sql", votekickFinishClaimPredicate("channel-id", "vote-id", "passed", 5).sql],
+  ["votekickCancelPredicate.sql", votekickFinalizeClaimPredicate("channel-id", "vote-id").sql],
+  ["votekickLiftPredicate.sql", votekickMarkLiftedPredicate("channel-id", "vote-id").sql],
   ["selectFaqEntries", `SELECT faq.faq_id, faq.name, faq.enabled, faq.matcher_type, faq.matcher_json, faq.answer_text, faq.cooldown_seconds,
                                  faq.games_json, faq.chat_target, entry_order.sort_order, faq.revision, faq.last_used_at, faq.created_at, faq.updated_at
                             FROM faq_entries AS faq
@@ -182,6 +202,12 @@ const sqlGetFixtures = new Map<string, string>([
   ["blockUsageExistsSql", blockUsageExistsSql],
   ["chatVoteSelectColumns", chatVoteSelectColumns],
   ["chatVoteTemplateSelectColumns", chatVoteTemplateSelectColumns],
+  ["readOnlyPredicateSql", chatVoteFinishPredicate("channel-id", "poll-id").sql],
+  ["alarmClosePredicate.sql", chatVoteAlarmClosePredicate("channel-id", "poll-id", now, now).sql],
+  ["extensionPredicate.sql", chatVoteExtensionPredicate("channel-id", "poll-id", now, authorizeModuleMutation("channel-id", actor, now)).sql],
+  ["extensionRollbackPredicate.sql", chatVoteExtensionRollbackPredicate("channel-id", "poll-id", now, 1).sql],
+  ["chatVoteFinishGuard.sql", chatVoteFinishPredicate("channel-id", "poll-id").sql],
+  ["resultDeliveryPredicate.sql", chatVoteResultDeliveryPredicate("channel-id", "poll-id").sql],
   ["belaboxHistoryStatusGuard", belaboxHistoryStatusGuard],
   ["belaboxHistoryModuleRevisionGuard", belaboxHistoryModuleRevisionGuard],
   ["belaboxStreamStateSnapshotGuard", belaboxStreamStateSnapshotGuard],
@@ -191,6 +217,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["guard", authorizeModuleMutation("channel-id", actor, now).sql],
   ["channelBotConsentCondition(\"channel\")", channelBotConsentCondition("channel")],
   ["authorization.sql", authorizeModuleMutation("channel-id", actor, now).sql],
+  ["predicateSql", "1 = 1"],
   ["blockGuard.sql", textBlockWriteGuard("channel-id", 1, ["{text.welcome}"]).sql],
   ["textBlockGuard?.sql ?? \"\"", textBlockWriteGuard("channel-id", 1, ["{text.welcome}"]).sql],
   ["stateGuard?.sql ?? \"\"", `AND EXISTS (

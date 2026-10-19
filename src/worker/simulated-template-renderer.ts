@@ -64,6 +64,7 @@ export interface SimulatedTemplateInput {
 
 export interface SimulatedTemplateRendererOptions {
   db?: D1Database;
+  readChannelVariables?: (names: readonly string[]) => Promise<Readonly<Record<string, number>>>;
   externalFetchBudget?: ModuleExternalFetchBudget;
   runModuleAlarm?: ModuleTemplateValueContext["runModuleAlarm"] | null;
   readOnly?: boolean;
@@ -152,7 +153,7 @@ export const createSimulatedTemplateRenderer = async (
     chattersTotal: () => Promise.resolve(null),
     userCreatedAt: simulation.userCreatedAt ?? (() => Promise.resolve(null)),
     channelLanguage: () => Promise.resolve(channelLanguage?.language === "en" ? "en" : "de"),
-    readChannelVariables: (names) => readChannelVariables(db, channelId, names),
+    readChannelVariables: options.readChannelVariables ?? ((names) => readChannelVariables(db, channelId, names)),
     now: () => simulation.now,
   });
   return render;

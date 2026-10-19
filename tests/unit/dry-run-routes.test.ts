@@ -167,6 +167,31 @@ describe("dry-run route", () => {
     }
   });
 
+  it("accepts chat voting and votekick module filters", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, CHANNEL_ID);
+      await insertLoginIdentityAndSession(database, OPERATOR_ID);
+      await insertMember(database, CHANNEL_ID, OPERATOR_ID, "operator");
+      const chatVoting = await panelRouter.fetch(await requestFor(OPERATOR_ID, {
+        ...validRequest,
+        text: "!vote help",
+        only: { moduleId: "chat_voting" },
+      }), environmentFor(database));
+      const votekick = await panelRouter.fetch(await requestFor(OPERATOR_ID, {
+        ...validRequest,
+        only: { moduleId: "votekick" },
+      }), environmentFor(database));
+
+      expect(chatVoting.status).toBe(200);
+      expect(await chatVoting.json()).toMatchObject({ modules: [{ moduleId: "chat_voting" }] });
+      expect(votekick.status).toBe(200);
+      expect(await votekick.json()).toMatchObject({ modules: [{ moduleId: "votekick" }] });
+    } finally {
+      database.close();
+    }
+  });
+
   it("rejects an operator who is a member of a different channel", async () => {
     const database = new TestD1Database();
     try {

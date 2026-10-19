@@ -251,6 +251,7 @@ const channelObjectFor = (stream: DurableTimerState["stream"]): {
   Reflect.set(object, "env", { DB: database });
   Reflect.set(object, "alarmScheduleQueue", Promise.resolve());
   Reflect.set(object, "timerScheduleReconciliationQueue", Promise.resolve());
+  Reflect.set(object, "timerScheduleInitialization", null);
   const schedule = emptyDurableTimerState();
   schedule.initialized = true;
   schedule.stream = stream;

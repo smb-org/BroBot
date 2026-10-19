@@ -264,6 +264,10 @@ describe("game rounds in the worker Durable Object", () => {
     await object.resolveGameRound(pointTestModule, "round-history-only", {
       kind: "test", params: { payouts: [{ accountId: "viewer-a", amount: 5 }] },
     });
+    await runPointObject(object, async (target) => {
+      const internals = target as unknown as { recordChatActivity(): Promise<number> };
+      await expect(internals.recordChatActivity()).resolves.toBe(1);
+    });
 
     const mutableEnv = env as unknown as { DB: D1Database };
     const originalDatabase = mutableEnv.DB;
@@ -272,7 +276,7 @@ describe("game rounds in the worker Durable Object", () => {
       await evictDurableObject(object as unknown as DurableObjectStub);
       await runPointObject(object, async (target) => {
         const internals = target as unknown as { recordChatActivity(): Promise<number> };
-        await expect(internals.recordChatActivity()).resolves.toBe(1);
+        await expect(internals.recordChatActivity()).resolves.toBe(2);
       });
     } finally {
       mutableEnv.DB = originalDatabase;
@@ -293,6 +297,10 @@ describe("game rounds in the worker Durable Object", () => {
       announceText: "The pending round starts",
       settlement: { kind: "test", params: { payouts: [] } },
     }, Date.now() + 60_000);
+    await runPointObject(object, async (target) => {
+      const internals = target as unknown as { recordChatActivity(): Promise<number> };
+      await expect(internals.recordChatActivity()).resolves.toBe(1);
+    });
 
     const mutableEnv = env as unknown as { DB: D1Database };
     const originalDatabase = mutableEnv.DB;
@@ -301,7 +309,8 @@ describe("game rounds in the worker Durable Object", () => {
       await evictDurableObject(object as unknown as DurableObjectStub);
       await runPointObject(object, async (target, state) => {
         const internals = target as unknown as { recordChatActivity(): Promise<number> };
-        await expect(internals.recordChatActivity()).resolves.toBe(1);
+        await expect(internals.recordChatActivity()).resolves.toBe(2);
+        await expect(target.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(0);
         const alarmTable = state.storage.kv.get<Record<string, { deadline: number; handler: string }>>(
           "channel:alarm_schedule",
         ) ?? {};
@@ -349,6 +358,7 @@ describe("game rounds in the worker Durable Object", () => {
 
     await evictDurableObject(object as unknown as DurableObjectStub);
     await runPointObject(object, async (target, state) => {
+      await expect(target.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(20);
       const internals = target as unknown as { recordChatActivity(): Promise<number> };
       await expect(internals.recordChatActivity()).resolves.toBe(1);
       const alarmTable = state.storage.kv.get<Record<string, { deadline: number; handler: string }>>(
@@ -761,7 +771,7 @@ describe("game rounds in the worker Durable Object", () => {
     }))).resolves.toBe("round_closed");
   });
 
-  it(`restores a lost round schedule and platform alarm before resolving (${testCard("startup restores a deleted schedule entry and alarm, then resolves the expired round", "a round stays open after both persisted alarm records are removed")})`, async () => {
+  it(`restores a lost round schedule and platform alarm on first points access after eviction (${testCard("the first points access after eviction restores a deleted schedule entry and alarm", "a round stays open after both persisted alarm records are removed")})`, async () => {
     const channelId = `round-recovery-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
@@ -785,7 +795,8 @@ describe("game rounds in the worker Durable Object", () => {
       state.storage.kv.put("channel:alarm_schedule", alarmTable);
     });
     await evictDurableObject(object as unknown as DurableObjectStub);
-    await runPointObject(object, async (_target, state) => {
+    await runPointObject(object, async (target, state) => {
+      await target.pointBalance(pointTestModule, "viewer-a");
       const alarmTable = state.storage.kv.get<Record<string, { deadline: number; handler: string }>>(
         "channel:alarm_schedule",
       ) ?? {};
@@ -880,7 +891,7 @@ describe("game rounds in the worker Durable Object", () => {
     expect(history.rows.some((row) => row.kind === "refund" && row.delta === 10)).toBe(true);
   });
 
-  it(`defers startup cancellation notices to the alarm (${testCard("startup refunds and schedules without calling the chat sender", "DO initialization waits for external cancellation notice delivery", "hostChatMock supplies a confirmed send; startup itself is asserted to make no transport call")})`, async () => {
+  it(`defers cancellation notices to the alarm after lazy recovery (${testCard("the first points access refunds and schedules without calling the chat sender", "point recovery waits for external cancellation notice delivery", "hostChatMock supplies a confirmed send; points recovery itself is asserted to make no transport call")})`, async () => {
     const channelId = `round-cancel-startup-notice-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
@@ -894,7 +905,10 @@ describe("game rounds in the worker Durable Object", () => {
     await object.joinGameRound(pointTestModule, "round-cancel-startup-notice", "msg:stake", "viewer-a", "nachtfalke", 5, {});
     await object.setGameModuleGate(pointTestModule, true, 14);
     await evictDurableObject(object as unknown as DurableObjectStub);
-    await runPointObject(object, (_target, state) => deferPointAlarmWithin(state));
+    await runPointObject(object, async (target, state) => {
+      await expect(target.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(20);
+      await deferPointAlarmWithin(state);
+    });
     hostChatMock.send.mockImplementation(async (...args: Parameters<typeof sendChatMessage>) => {
       const [, , text, , , stillValid, claimBeforePost, , afterPost] = args;
       expect(await (stillValid?.() ?? Promise.resolve(true))).toBe(true);
@@ -1273,7 +1287,7 @@ describe("game rounds in the worker Durable Object", () => {
     expect(sendChat).toHaveBeenCalledOnce();
   });
 
-  it(`reconciles a later platform alarm to a persisted earlier round after restart (${testCard("startup replaces the platform alarm with the earliest stored schedule", "restart leaves an immediately due announcement behind a later alarm")})`, async () => {
+  it(`reconciles a later platform alarm on first points access after eviction (${testCard("the first points access replaces the platform alarm with the earliest stored schedule", "eviction leaves an immediately due announcement behind a later alarm")})`, async () => {
     const channelId = `round-earliest-alarm-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
@@ -1294,7 +1308,8 @@ describe("game rounds in the worker Durable Object", () => {
     });
 
     await evictDurableObject(object as unknown as DurableObjectStub);
-    await runPointObject(object, async (_target, state) => {
+    await runPointObject(object, async (target, state) => {
+      await target.pointBalance(pointTestModule, "viewer-a");
       const reconciledAlarmAt = await state.storage.getAlarm();
       expect(reconciledAlarmAt).not.toBeNull();
       expect(reconciledAlarmAt).toBeLessThan(laterAlarmAt);

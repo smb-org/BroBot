@@ -53,6 +53,25 @@ describe("timer schedule reconciliation outbox", () => {
     expect(reconcile).toHaveBeenCalledTimes(2);
   });
 
+  it("bootstraps cold channels that have configured timers without a schedule mirror", async () => {
+    const database = await createDatabase();
+    const timestamp = "2026-10-18T12:00:00.000Z";
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'timers', 1, '{}')",
+    ).bind(CHANNEL_ID).run();
+    await database.prepare(
+      `INSERT INTO timers
+        (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, revision,
+         next_run_at, next_run_state, schedule_mirror_sequence, created_at, updated_at)
+       VALUES ('cold-timer', ?, 'Cold timer', 1, 'Hello!', 'interval', ?, 1, NULL, NULL, 0, ?, ?)`,
+    ).bind(CHANNEL_ID, JSON.stringify({ type: "interval", offline: { minutes: 30 } }), timestamp, timestamp).run();
+    const reconcile = vi.fn<(reason: TimerScheduleReconciliationRow["reason"]) => Promise<void>>().mockResolvedValue(undefined);
+
+    await maintainTimerSchedules(environmentFor(database as unknown as D1Database, reconcile));
+
+    expect(reconcile).toHaveBeenCalledWith("activation");
+  });
+
   it("does not clear a newer mutation that arrives while an older repair is running", async () => {
     const database = await createDatabase();
     await timerScheduleReconciliationMutation(database as unknown as D1Database, CHANNEL_ID, "mutation-old", "2026-10-13T12:00:00.000Z").run();

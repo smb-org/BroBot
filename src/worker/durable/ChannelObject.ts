@@ -65,13 +65,14 @@ import type {
   ModuleAlarmIdentity,
   ModuleAlarmPlan,
   ModuleBallotAccess,
-  ModulePointsAccess,
-  PointJoinResult,
+  ModuleDryRunBallotSnapshot,
   ModuleExternalFetchBudget,
+  ModulePointsAccess,
+  ModuleScheduleInputChangeReason,
+  PointJoinResult,
   PointsApplyResult,
   PointsKind,
   PointsMovement,
-  ModuleScheduleInputChangeReason,
 } from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
 import {
@@ -142,6 +143,7 @@ import {
   hardDeleteFinalizedStoredBallot,
   openStoredBallot,
   readStoredBallot,
+  readStoredBallotDryRunSnapshot,
   readStoredBallotSnapshot,
   setStoredBallotBlockedTerms,
 } from "./ballots";
@@ -599,33 +601,45 @@ export class ChannelObject extends DurableObject<Env> {
   private belaboxPollQueue: Promise<void> = Promise.resolve();
   private alarmScheduleQueue: Promise<void> = Promise.resolve();
   private timerScheduleReconciliationQueue: Promise<void> = Promise.resolve();
+  private timerScheduleInitialization: Promise<void> | null = null;
   private activeChatterSchemaReady = false;
   private pointsSchemaReady = false;
+  private pointsInitialized = false;
+  private pointsInitialization: Promise<void> | null = null;
   // ponytail: This Set is per-instance memory and is empty after hibernation, so the residual window is bounded by the security alarm. Persist token IDs in DO storage if that window needs to be shorter.
   private recentlyBoundOverlayTokenIds = new Set<string>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
-    this.ensurePointsSchema();
-    if (ctx.storage.kv.get(LEGACY_ACTIVE_CHATTER_STREAM_KEY) !== undefined) {
-      this.ensureActiveChatterTable();
-      ctx.storage.transactionSync(() => {
-        if (this.activeChatterKeyRowSync() === null) this.clearActiveChatterStateSync();
-        else ctx.storage.kv.delete(LEGACY_ACTIVE_CHATTER_STREAM_KEY);
-      });
-    }
-    // Cloudflare-documented Durable Object init: the input gate blocks all events until this completes.
-    void ctx.blockConcurrencyWhile(async () => { // NOSONAR
-      await this.ensureTimerSchedulesInitialized();
-      await this.recoverPointRoundAlarms();
-    });
   }
 
   private ensurePointsSchema(): void {
     if (this.pointsSchemaReady) return;
     ensurePointsSchema(this.ctx.storage.sql);
     this.pointsSchemaReady = true;
+  }
+
+  private async ensurePointsInitialized(): Promise<void> {
+    const pendingInitialization = this.pointsInitialization;
+    if (pendingInitialization !== null) {
+      await pendingInitialization;
+      return;
+    }
+    if (this.pointsInitialized) return;
+    const initialization = this.initializePoints();
+    this.pointsInitialization = initialization;
+    try {
+      await initialization;
+      this.pointsInitialized = true;
+    } finally {
+      if (this.pointsInitialization === initialization) this.pointsInitialization = null;
+    }
+  }
+
+  private async initializePoints(): Promise<void> {
+    this.ensurePointsSchema();
+    await this.recoverPointRoundAlarms();
   }
 
   private ownChannelId(): string | null {
@@ -679,6 +693,15 @@ export class ChannelObject extends DurableObject<Env> {
       )`,
     );
     this.activeChatterSchemaReady = true;
+  }
+
+  private reconcileLegacyActiveChatterStream(): void {
+    if (this.ctx.storage.kv.get(LEGACY_ACTIVE_CHATTER_STREAM_KEY) === undefined) return;
+    this.ensureActiveChatterTable();
+    this.ctx.storage.transactionSync(() => {
+      if (this.activeChatterKeyRowSync() === null) this.clearActiveChatterStateSync();
+      else this.ctx.storage.kv.delete(LEGACY_ACTIVE_CHATTER_STREAM_KEY);
+    });
   }
 
   private incrementChatActivityCountSync(): number {
@@ -1069,7 +1092,22 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   private async ensureTimerSchedulesInitialized(): Promise<void> {
+    const pendingInitialization = this.timerScheduleInitialization;
+    if (pendingInitialization !== null) {
+      await pendingInitialization;
+      return;
+    }
     if (this.timerScheduleStateSync().initialized) return;
+    const initialization = this.initializeTimerSchedules();
+    this.timerScheduleInitialization = initialization;
+    try {
+      await initialization;
+    } finally {
+      if (this.timerScheduleInitialization === initialization) this.timerScheduleInitialization = null;
+    }
+  }
+
+  private async initializeTimerSchedules(): Promise<void> {
     const [configs, stream, legacyActivityBaselines] = await Promise.all([
       this.readTimerConfigsFromDatabase(),
       this.readTimerStreamFromDatabase(),
@@ -1078,48 +1116,48 @@ export class ChannelObject extends DurableObject<Env> {
     const inputs = await this.timerScheduleInputs(configs, Date.now());
     const changedTimerIds: string[] = [];
     this.ctx.storage.transactionSync(() => {
-      const state = this.timerScheduleStateSync();
-      if (state.initialized) return;
-      if (stream.generation >= state.stream.generation) state.stream = stream;
-      state.initialized = true;
-      for (const config of configs) {
-        if (this.timerTombstoneRevision(state, config.id) >= config.revision) continue;
-        const existing = state.timers[config.id];
-        if (existing !== undefined && existing.config.revision >= config.revision) continue;
-        const entry = existing ?? this.newDurableTimerEntry(config, state);
-        entry.config = config;
-        entry.activityBaselines = { ...state.activityCounts };
-        const legacyBaseline = legacyActivityBaselines.get(config.id);
-        if (config.trigger.type === "interval" && state.stream.state === "online" &&
-            legacyBaseline?.streamId === state.stream.streamId && legacyBaseline.count !== null) {
-          entry.activityBaselines.live = Math.min(state.activityCounts.live, legacyBaseline.count);
+        const state = this.timerScheduleStateSync();
+        if (state.initialized) return;
+        if (stream.generation >= state.stream.generation) state.stream = stream;
+        state.initialized = true;
+        for (const config of configs) {
+          if (this.timerTombstoneRevision(state, config.id) >= config.revision) continue;
+          const existing = state.timers[config.id];
+          if (existing !== undefined && existing.config.revision >= config.revision) continue;
+          const entry = existing ?? this.newDurableTimerEntry(config, state);
+          entry.config = config;
+          entry.activityBaselines = { ...state.activityCounts };
+          const legacyBaseline = legacyActivityBaselines.get(config.id);
+          if (config.trigger.type === "interval" && state.stream.state === "online" &&
+              legacyBaseline?.streamId === state.stream.streamId && legacyBaseline.count !== null) {
+            entry.activityBaselines.live = Math.min(state.activityCounts.live, legacyBaseline.count);
+          }
+          if (config.trigger.type === "stream_start" && state.stream.state === "online" &&
+              state.stream.streamId !== null && state.stream.startedAt !== null &&
+              this.importLegacyTimerSendClaim(config.id,
+                Date.parse(state.stream.startedAt) + triggerDelayMs(config.trigger),
+                state.stream.streamId, "stream_start") === "sent") {
+            entry.completedStreamId = state.stream.streamId;
+          }
+          const existingOccurrence = existing?.plannedOccurrence;
+          const persistedOccurrence = existingOccurrence?.identity.revision === config.revision
+            ? existingOccurrence
+            : this.previousTimerOccurrenceFromAlarm(config, state.stream, inputs, legacyBaseline?.nextRunStreamId);
+          if (persistedOccurrence === null) {
+            this.setTimerPlanSync(entry, makeTimerPlan(config, state.stream, null, inputs, "reset", entry.completedStreamId));
+          } else {
+            entry.plannedOccurrence = persistedOccurrence;
+            entry.planSequence = persistedOccurrence.sequence;
+            entry.inFlightClaim = null;
+            entry.refreshAt = null;
+            entry.mirrorSequence += 1;
+          }
+          state.timers[config.id] = entry;
+          this.writeTimerAlarmEntriesSync(config.id, entry);
+          changedTimerIds.push(config.id);
         }
-        if (config.trigger.type === "stream_start" && state.stream.state === "online" &&
-            state.stream.streamId !== null && state.stream.startedAt !== null &&
-            this.importLegacyTimerSendClaim(config.id,
-              Date.parse(state.stream.startedAt) + triggerDelayMs(config.trigger),
-              state.stream.streamId, "stream_start") === "sent") {
-          entry.completedStreamId = state.stream.streamId;
-        }
-        const existingOccurrence = existing?.plannedOccurrence;
-        const persistedOccurrence = existingOccurrence?.identity.revision === config.revision
-          ? existingOccurrence
-          : this.previousTimerOccurrenceFromAlarm(config, state.stream, inputs, legacyBaseline?.nextRunStreamId);
-        if (persistedOccurrence === null) {
-          this.setTimerPlanSync(entry, makeTimerPlan(config, state.stream, null, inputs, "reset", entry.completedStreamId));
-        } else {
-          entry.plannedOccurrence = persistedOccurrence;
-          entry.planSequence = persistedOccurrence.sequence;
-          entry.inFlightClaim = null;
-          entry.refreshAt = null;
-          entry.mirrorSequence += 1;
-        }
-        state.timers[config.id] = entry;
-        this.writeTimerAlarmEntriesSync(config.id, entry);
-        changedTimerIds.push(config.id);
-      }
-      this.writeTimerDurableStateSync(state);
-      this.ctx.storage.kv.put(LEGACY_TIMER_CLAIMS_IMPORTED_KEY, true);
+        this.writeTimerDurableStateSync(state);
+        this.ctx.storage.kv.put(LEGACY_TIMER_CLAIMS_IMPORTED_KEY, true);
     });
     await Promise.all(changedTimerIds.map((timerId) => this.writeTimerMirror(timerId)));
     await this.scheduleEarliestAlarm();
@@ -1646,6 +1684,19 @@ export class ChannelObject extends DurableObject<Env> {
     if (row === undefined || !/^[0-9a-f]{64}$/iu.test(row.key_hex)) return null;
     const createdAt = Date.parse(row.created_at);
     return Number.isFinite(createdAt) ? { keyHex: row.key_hex, createdAt } : null;
+  }
+
+  private activeChatterKeyRowSnapshot(): { keyHex: string; createdAt: number } | null {
+    try {
+      const row = this.ctx.storage.sql.exec<{ key_hex: string; created_at: string }>(
+        `SELECT key_hex, created_at FROM ${ACTIVE_CHATTER_KEY_TABLE} WHERE slot = 1`,
+      ).toArray()[0];
+      if (row === undefined || !/^[0-9a-f]{64}$/iu.test(row.key_hex)) return null;
+      const createdAt = Date.parse(row.created_at);
+      return Number.isFinite(createdAt) ? { keyHex: row.key_hex, createdAt } : null;
+    } catch {
+      return null;
+    }
   }
 
   private activeChatterNextSweepSync(keyCreatedAt: number): number | null {
@@ -2654,6 +2705,8 @@ export class ChannelObject extends DurableObject<Env> {
     chatterUserId: string | null = null,
     needsActiveChatters = false,
   ): Promise<number> {
+    await this.ensureTimerSchedulesInitialized();
+    this.reconcileLegacyActiveChatterStream();
     const now = Date.now();
     const nowIso = new Date(now).toISOString();
     const userIdForTracking = needsActiveChatters && typeof chatterUserId === "string" && chatterUserId.length > 0
@@ -2746,6 +2799,45 @@ export class ChannelObject extends DurableObject<Env> {
     return activity === undefined
       ? null
       : { firstSeenAt: activity.first_seen_at, lastSeenAt: activity.last_seen_at };
+  }
+
+  /** Reads active chatter state without initializing storage tables or changing alarms. */
+  public async getActiveChatterSnapshot(userId: string): Promise<ActiveChatterActivity | null> {
+    if (userId.length === 0) return null;
+    const key = this.activeChatterKeyRowSnapshot();
+    if (key === null || Date.now() - key.createdAt >= ACTIVE_CHATTER_KEY_ROTATION_MS) return null;
+    try {
+      const hmac = await activeChatterKey(key.keyHex, this.ownChannelId() ?? "", userId);
+      const activity = this.ctx.storage.sql.exec<{ first_seen_at: string; last_seen_at: string }>(
+        `SELECT first_seen_at, last_seen_at FROM ${ACTIVE_CHATTER_TABLE}
+         WHERE hmac = ? AND last_seen_at >= ?`,
+        hmac,
+        new Date(Date.now() - ACTIVE_CHATTER_RETENTION_MS).toISOString(),
+      ).toArray()[0];
+      return activity === undefined
+        ? null
+        : { firstSeenAt: activity.first_seen_at, lastSeenAt: activity.last_seen_at };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Reads the active chatter count without initializing storage tables or changing alarms. */
+  public getActiveChatterCountSnapshot(windowMs: number): Promise<number> {
+    if (!Number.isFinite(windowMs) || windowMs <= 0) return Promise.resolve(0);
+    const now = Date.now();
+    const key = this.activeChatterKeyRowSnapshot();
+    if (key === null || now - key.createdAt >= ACTIVE_CHATTER_KEY_ROTATION_MS) return Promise.resolve(0);
+    const cutoff = Math.max(now - windowMs, now - ACTIVE_CHATTER_RETENTION_MS);
+    try {
+      const result = this.ctx.storage.sql.exec<{ count: number }>(
+        `SELECT COUNT(*) AS count FROM ${ACTIVE_CHATTER_TABLE} WHERE last_seen_at >= ?`,
+        new Date(cutoff).toISOString(),
+      ).one();
+      return Promise.resolve(result.count);
+    } catch {
+      return Promise.resolve(0);
+    }
   }
 
   private async expireActiveChatters(_deadline: number, now: number): Promise<void> {
@@ -3053,7 +3145,7 @@ export class ChannelObject extends DurableObject<Env> {
     movements: PointsMovement[],
     result: unknown,
   ): Promise<PointsApplyResult> {
-    this.ensurePointsSchema();
+    await this.ensurePointsInitialized();
     const payloadHash = await pointPayloadHash({ moduleId, operationId, kind, movements, result });
     const applied = this.ctx.storage.transactionSync(() => applyPointOperationSync(
       this.ctx.storage.sql,
@@ -3074,8 +3166,8 @@ export class ChannelObject extends DurableObject<Env> {
     login: string,
     startBonus: number,
   ): Promise<{ welcomePending: boolean }> {
+    await this.ensurePointsInitialized();
     assertPointAccountId(accountId);
-    this.ensurePointsSchema();
     const operationId = `bonus:${accountId}`;
     const movements: PointsMovement[] = [
       { accountId, delta: startBonus, login },
@@ -3099,11 +3191,10 @@ export class ChannelObject extends DurableObject<Env> {
     ));
   }
 
-  public acknowledgePointWelcome(_moduleId: string, accountId: string): Promise<void> {
+  public async acknowledgePointWelcome(_moduleId: string, accountId: string): Promise<void> {
+    await this.ensurePointsInitialized();
     assertPointAccountId(accountId);
-    this.ensurePointsSchema();
     this.ctx.storage.transactionSync(() => { acknowledgeWelcomeSync(this.ctx.storage.sql, accountId, new Date().toISOString()); });
-    return Promise.resolve();
   }
 
   public async creditPointActivity(
@@ -3114,8 +3205,8 @@ export class ChannelObject extends DurableObject<Env> {
     live: boolean,
     rules: { amount: number; windowMinutes: number; dailyCap: number },
   ): Promise<{ credited: number }> {
+    await this.ensurePointsInitialized();
     assertPointAccountId(accountId);
-    this.ensurePointsSchema();
     const windowStart = Math.floor(messageAt / (rules.windowMinutes * 60_000)) * rules.windowMinutes * 60_000;
     const operationId = `activity:${accountId}:${String(windowStart)}`;
     const payloadHash = await pointPayloadHash({ moduleId, operationId, kind: "activity", accountId });
@@ -3132,75 +3223,74 @@ export class ChannelObject extends DurableObject<Env> {
     ));
   }
 
-  public pointBalance(_moduleId: string, accountId: string): Promise<number> {
+  public async pointBalance(_moduleId: string, accountId: string): Promise<number> {
+    await this.ensurePointsInitialized();
     assertPointAccountId(accountId);
-    this.ensurePointsSchema();
-    return Promise.resolve(pointBalance(this.ctx.storage.sql, accountId));
+    return pointBalance(this.ctx.storage.sql, accountId);
   }
 
-  public listPointAccounts(
+  public async listPointAccounts(
     _moduleId: string,
     query: { sort: "balance" | "month"; search?: string; cursor?: string; limit: number },
   ): Promise<Awaited<ReturnType<ModulePointsAccess["listAccounts"]>>> {
-    this.ensurePointsSchema();
-    return Promise.resolve(listPointAccounts(this.ctx.storage.sql, query, new Date().toISOString().slice(0, 7)));
+    await this.ensurePointsInitialized();
+    return listPointAccounts(this.ctx.storage.sql, query, new Date().toISOString().slice(0, 7));
   }
 
-  public pointHistory(
+  public async pointHistory(
     _moduleId: string,
     accountId: string,
     cursor?: string,
     limit?: number,
   ): Promise<Awaited<ReturnType<ModulePointsAccess["history"]>>> {
+    await this.ensurePointsInitialized();
     assertPointAccountId(accountId);
-    this.ensurePointsSchema();
-    return Promise.resolve(pointHistory(this.ctx.storage.sql, accountId, cursor, limit));
+    return pointHistory(this.ctx.storage.sql, accountId, cursor, limit);
   }
 
-  public pointSummary(_moduleId: string): Promise<Awaited<ReturnType<ModulePointsAccess["summary"]>>> {
+  public async pointSummary(_moduleId: string): Promise<Awaited<ReturnType<ModulePointsAccess["summary"]>>> {
+    await this.ensurePointsInitialized();
     void _moduleId;
-    this.ensurePointsSchema();
-    return Promise.resolve(pointSummary(this.ctx.storage.sql));
+    return pointSummary(this.ctx.storage.sql);
   }
 
-  public pointRanking(
+  public async pointRanking(
     _moduleId: string,
     month: string,
     limit: number,
   ): Promise<Awaited<ReturnType<ModulePointsAccess["ranking"]>>> {
-    this.ensurePointsSchema();
-    return Promise.resolve(pointRanking(this.ctx.storage.sql, month, limit));
+    await this.ensurePointsInitialized();
+    return pointRanking(this.ctx.storage.sql, month, limit);
   }
 
-  public pointRankOf(
+  public async pointRankOf(
     _moduleId: string,
     accountId: string,
     month: string,
   ): Promise<Awaited<ReturnType<ModulePointsAccess["rankOf"]>>> {
+    await this.ensurePointsInitialized();
     assertPointAccountId(accountId);
-    this.ensurePointsSchema();
-    return Promise.resolve(pointRankOf(this.ctx.storage.sql, accountId, month));
+    return pointRankOf(this.ctx.storage.sql, accountId, month);
   }
 
-  public markPointAuditWritten(moduleId: string, operationId: string): Promise<void> {
-    this.ensurePointsSchema();
+  public async markPointAuditWritten(moduleId: string, operationId: string): Promise<void> {
+    await this.ensurePointsInitialized();
     this.ctx.storage.transactionSync(() => { pointAuditWrittenSync(this.ctx.storage.sql, moduleId, operationId); });
-    return Promise.resolve();
   }
 
-  public pendingPointAudits(moduleId: string): Promise<Awaited<ReturnType<ModulePointsAccess["pendingAudits"]>>> {
-    this.ensurePointsSchema();
-    return Promise.resolve(pendingPointAudits(this.ctx.storage.sql, moduleId));
+  public async pendingPointAudits(moduleId: string): Promise<Awaited<ReturnType<ModulePointsAccess["pendingAudits"]>>> {
+    await this.ensurePointsInitialized();
+    return pendingPointAudits(this.ctx.storage.sql, moduleId);
   }
 
-  public claimPointCooldown(moduleId: string, key: string, seconds: number): Promise<boolean> {
-    this.ensurePointsSchema();
-    return Promise.resolve(this.ctx.storage.transactionSync(() => claimPointCooldownSync(this.ctx.storage.sql, moduleId, key, seconds, Date.now())));
+  public async claimPointCooldown(moduleId: string, key: string, seconds: number): Promise<boolean> {
+    await this.ensurePointsInitialized();
+    return this.ctx.storage.transactionSync(() => claimPointCooldownSync(this.ctx.storage.sql, moduleId, key, seconds, Date.now()));
   }
 
   public async openGameRound(moduleId: string, roundId: string, data: unknown): Promise<void> {
+    await this.ensurePointsInitialized();
     assertPointRoundId(roundId);
-    this.ensurePointsSchema();
     const alarmKey = pointRoundAlarmKey(roundId);
     this.ctx.storage.transactionSync(() => {
       const opened = openPointRoundSync(this.ctx.storage.sql, moduleId, roundId, data, new Date().toISOString(), POINT_SETTLEMENTS);
@@ -3210,8 +3300,8 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async markGameRoundAnnounced(moduleId: string, roundId: string, deadlineAt: number, alarmKey: string): Promise<void> {
+    await this.ensurePointsInitialized();
     assertPointRoundId(roundId);
-    this.ensurePointsSchema();
     this.ctx.storage.transactionSync(() => {
       markPointRoundAnnouncedSync(this.ctx.storage.sql, moduleId, roundId, deadlineAt, alarmKey);
       this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), deadlineAt);
@@ -3228,9 +3318,9 @@ export class ChannelObject extends DurableObject<Env> {
     stake: number,
     data: unknown,
   ): Promise<PointJoinResult> {
+    await this.ensurePointsInitialized();
     assertPointRoundId(roundId);
     assertPointAccountId(accountId);
-    this.ensurePointsSchema();
     const payloadHash = await pointPayloadHash({ moduleId, roundId, operationId, accountId, login, stake, data });
     return this.ctx.storage.transactionSync(() => joinPointRoundSync(
       this.ctx.storage.sql,
@@ -3252,8 +3342,8 @@ export class ChannelObject extends DurableObject<Env> {
     roundId: string,
     settlement: { kind: string; params: unknown },
   ): Promise<PointsApplyResult> {
+    await this.ensurePointsInitialized();
     assertPointRoundId(roundId);
-    this.ensurePointsSchema();
     await this.reconcilePointModuleActivation(moduleId, true);
     const operationId = `round:${roundId}:resolve`;
     const payloadHash = await pointPayloadHash({ moduleId, operationId, kind: "resolve", roundId, settlement });
@@ -3286,6 +3376,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async cancelOpenGameRounds(moduleId: string, revision: number): Promise<number> {
+    await this.ensurePointsInitialized();
     return await this.cancelOpenGameRoundsInternal(moduleId, revision, true);
   }
 
@@ -3365,7 +3456,7 @@ export class ChannelObject extends DurableObject<Env> {
     flushCancellationNotices: boolean,
     lastDisabledRevision: number | null = null,
   ): Promise<{ applied: boolean }> {
-    this.ensurePointsSchema();
+    await this.ensurePointsInitialized();
     if (lastDisabledRevision !== null && (!Number.isSafeInteger(lastDisabledRevision) || lastDisabledRevision < 1)) {
       throw new Error("invalid_revision");
     }
@@ -3416,6 +3507,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   private async flushPointCancellationNotices(): Promise<void> {
+    await this.ensurePointsInitialized();
     const channelId = this.ownChannelId();
     if (channelId === null) return;
     const notices = pendingPointRoundCancellationNotices(this.ctx.storage.sql);
@@ -3535,6 +3627,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   private async handlePointRoundAlarm(alarmKey: string, now: number): Promise<void> {
+    await this.ensurePointsInitialized();
     for (const cancellation of pendingPointRoundCancellations(this.ctx.storage.sql)) {
       await this.cancelOpenGameRounds(cancellation.moduleId, cancellation.revision);
     }
@@ -3767,6 +3860,16 @@ export class ChannelObject extends DurableObject<Env> {
     return await readStoredBallotSnapshot(this.ballotStorage(moduleId), moduleId, ballotId);
   }
 
+  public async readBallotDryRunSnapshot(
+    moduleId: string,
+    ballotId: string,
+    voterId?: string,
+  ): Promise<ModuleDryRunBallotSnapshot | null> {
+    return await readStoredBallotDryRunSnapshot(
+      this.ballotStorage(moduleId), moduleId, ballotId, this.ownChannelId() ?? undefined, voterId,
+    );
+  }
+
   public async hasOpenBallot(): Promise<boolean> {
     const hasOpen = await hasOpenStoredBallot(this.ballotStorage(CHAT_VOTING_MODULE_ID), async (transaction, moduleId, ballotId, hardDeleteAt) => {
       await this.writeBallotAlarmInTransaction(
@@ -3961,6 +4064,7 @@ export class ChannelObject extends DurableObject<Env> {
       [POINTS_ACTIVATION_RECONCILIATION_ALARM_HANDLER, {
         retryDelaysMs: [POINTS_ANNOUNCE_RETRY_MS],
         handle: async () => {
+          await this.ensurePointsInitialized();
           await this.reconcilePointModuleActivationsDuringRecovery();
           for (const cancellation of pendingPointRoundCancellations(this.ctx.storage.sql)) {
             await this.cancelOpenGameRoundsInternal(cancellation.moduleId, cancellation.revision, false);
@@ -4863,6 +4967,10 @@ export class ChannelObject extends DurableObject<Env> {
 
   override async alarm(): Promise<void> {
     await withCommittedPanelResourceDrain(async () => {
+      const alarmTable = await this.ctx.storage.transaction((transaction) => readAlarmScheduleTable(transaction));
+      const hasTimerAlarms = Object.keys(alarmTable).some((key) =>
+        key.startsWith(`${TIMER_ALARM_PREFIX}timer:`) || key.startsWith(`${TIMER_ALARM_PREFIX}mirror:`));
+      if (hasTimerAlarms) await this.ensureTimerSchedulesInitialized();
       const now = Date.now();
       const nowIso = new Date(now).toISOString();
       const externalFetchBudget = createModuleExternalFetchBudget();
