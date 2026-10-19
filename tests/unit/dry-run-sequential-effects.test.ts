@@ -432,6 +432,98 @@ describe("dry-run sequential module effects", () => {
     }
   });
 
+  it("filters votekick reports after projecting the preceding text command variable change", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const { database, env, fetcher } = await createScenario(false, { startText: "Kick score {var.score}" });
+    const productionOrder = [textCommandModule, votekickModule];
+    try {
+      const unfiltered = await dryRunChatMessage(env, CHANNEL_ID, request, fetcher, productionOrder);
+      const filtered = await dryRunChatMessage(
+        env,
+        CHANNEL_ID,
+        { ...request, only: { moduleId: "votekick" } },
+        fetcher,
+        productionOrder,
+      );
+      const expected = unfiltered.modules.filter(({ moduleId }) => moduleId === "votekick");
+
+      expect(unfiltered.modules.find(({ moduleId }) => moduleId === "text_commands")?.entries[0]?.effects)
+        .toContainEqual({ kind: "variable", name: "score", from: 41, to: 42 });
+      expect(expected[0]?.entries[0]?.effects).toContainEqual(expect.objectContaining({ kind: "chat", text: "Kick score 42" }));
+      expect(filtered.modules).toEqual(expected);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("filters votekick reports after committing the preceding text-block choice", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const { database, env, fetcher } = await createScenario(false, {
+      textCommandText: "Command {text.greeting}",
+      commandHasVariableAction: false,
+      startText: "Kick {text.greeting}",
+    });
+    const productionOrder = [textCommandModule, votekickModule];
+    try {
+      await seedGreetingTextBlock(database);
+      const unfiltered = await dryRunChatMessage(env, CHANNEL_ID, request, fetcher, productionOrder);
+      const filtered = await dryRunChatMessage(
+        env,
+        CHANNEL_ID,
+        { ...request, only: { moduleId: "votekick" } },
+        fetcher,
+        productionOrder,
+      );
+      const expected = unfiltered.modules.filter(({ moduleId }) => moduleId === "votekick");
+
+      expect(unfiltered.modules.find(({ moduleId }) => moduleId === "text_commands")?.entries[0]?.effects)
+        .toContainEqual(expect.objectContaining({ kind: "chat", text: "Command Welcome" }));
+      expect(expected[0]?.entries[0]?.effects).toContainEqual(expect.objectContaining({ kind: "chat", text: "Kick Hello" }));
+      expect(filtered.modules).toEqual(expected);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("filters FAQ entries after evaluating the FAQ against the preceding variable projection", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const { database, env, fetcher } = await createScenario(true);
+    const faqReadScores: number[] = [];
+    const faqWithProjectionProbe: typeof faqModule = {
+      ...faqModule,
+      dryRunChatMessage: async (event, context) => {
+        faqReadScores.push((await context.readChannelVariables(["score"])).score ?? -1);
+        return await faqModule.dryRunChatMessage?.(event, context) ?? [];
+      },
+    };
+    const productionOrder = [textCommandModule, faqWithProjectionProbe, votekickModule];
+    try {
+      const unfiltered = await dryRunChatMessage(env, CHANNEL_ID, request, fetcher, productionOrder);
+      const filtered = await dryRunChatMessage(
+        env,
+        CHANNEL_ID,
+        { ...request, only: { moduleId: "faq", entryId: "faq-votekick" } },
+        fetcher,
+        productionOrder,
+      );
+      const expected = unfiltered.modules
+        .filter(({ moduleId }) => moduleId === "faq")
+        .map((module) => ({
+          ...module,
+          entries: module.entries.filter(({ entry }) => entry.id === "faq-votekick"),
+        }));
+
+      expect(faqReadScores).toEqual([42, 42]);
+      expect(expected[0]?.entries.map(({ entry }) => entry.id)).toContain("faq-votekick");
+      expect(filtered.modules).toEqual(expected);
+    } finally {
+      database.close();
+    }
+  });
+
   it("exposes the earlier text-command projection to the FAQ adapter for the same command message", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW));

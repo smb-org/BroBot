@@ -126,12 +126,9 @@ export const dryRunChatMessage = async (
   const simulatedChannelVariables = new Map<string, number>();
 
   const chatModules = registry.filter((module) => (module.eventSubTypes ?? []).includes(CHAT_EVENT));
-  const modulesToReport = request.only === undefined
-    ? chatModules
-    : chatModules.filter((module) => module.id === request.only?.moduleId);
   const modules: DryRunModuleReport[] = [];
 
-  for (const module of modulesToReport) {
+  for (const module of chatModules) {
     const dryRun = module.dryRunChatMessage as ((event: ModuleEvent, context: ModuleDryRunContext) => Promise<readonly DryRunEntryReport[]>) | undefined;
     if (dryRun === undefined) {
       modules.push(module.dryRunSilentReason === undefined
@@ -266,10 +263,7 @@ export const dryRunChatMessage = async (
       if (productionSelected) {
         for (const [name, value] of moduleSimulatedChannelVariables) simulatedChannelVariables.set(name, value);
       }
-      const entries = request.only?.entryId === undefined
-        ? evaluatedReports
-        : evaluatedReports.filter((entry) => entry.entry.id === request.only?.entryId);
-      modules.push({ moduleId: module.id, status: moduleStatusFor(entries), entries });
+      modules.push({ moduleId: module.id, status: moduleStatusFor(evaluatedReports), entries: evaluatedReports });
     } catch (error: unknown) {
       const writeBlocked = error instanceof DryRunWriteError;
       console.error("Chat dry-run module evaluation failed.", { channelId, moduleId: module.id, error });
@@ -286,10 +280,24 @@ export const dryRunChatMessage = async (
     }
   }
 
+  const filteredModules = request.only === undefined
+    ? modules
+    : modules
+      .filter(({ moduleId }) => moduleId === request.only?.moduleId)
+      .map((module) => {
+        if (request.only?.entryId === undefined) return module;
+        const entries = module.entries.filter((entry) => entry.entry.id === request.only?.entryId);
+        return {
+          ...module,
+          status: module.status === "error" ? module.status : moduleStatusFor(entries),
+          entries,
+        };
+      });
+
   return {
     evaluatedAt,
     controls: { muted: dispatchState.controls.mute.active, paused: dispatchState.controls.pause.active },
     sender: { userId: syntheticUserId, resolved: false, perUserCooldownsUseSyntheticId: true },
-    modules,
+    modules: filteredModules,
   };
 };
