@@ -345,7 +345,7 @@ function MatchExplanation({ report, message, labels }: {
     return start < 0 ? [] : [[start, start + token.length] as const];
   })();
   return <p className="test-area__match-explanation">
-    <span>{label} </span><code>„{token}“</code>
+    <span>{label} </span><code>{texts.quoted(token)}</code>
     <span> {texts.inMessage} </span><code>{highlightedText(message, ranges)}</code>
   </p>;
 }

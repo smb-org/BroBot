@@ -897,6 +897,7 @@ export interface DashboardTexts {
     inMessage: string;
     matchCommand: string;
     matchAlias: (token: string) => string;
+    quoted: (token: string) => string;
     matchKeyword: (pattern: string) => string;
     matchRegex: (pattern: string) => string;
     textCommand: string;
@@ -1426,10 +1427,10 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       inputsChangedHint: "Eingaben geändert – Prüfen aktualisiert das Ergebnis",
       result: "Ergebnis",
       reactionsSummary: (fires, blocked) => [
-        fires === 0 ? null : String(fires) + (fires === 1 ? " reagiert" : " reagieren"),
-        blocked === 0 ? null : String(blocked) + " blockiert",
+        fires === 0 ? null : formatNumber(fires, "de") + (fires === 1 ? " reagiert" : " reagieren"),
+        blocked === 0 ? null : formatNumber(blocked, "de") + " blockiert",
       ].filter((part): part is string => part !== null).join(" · "),
-      resultCount: (count) => String(count) + (count === 1 ? " Treffer" : " Treffer"),
+      resultCount: (count) => formatNumber(count, "de") + (count === 1 ? " Treffer" : " Treffer"),
       noReactionModules: (modules) => "Ohne Reaktion: " + modules,
       noDryRunModules: (modules) => "Noch ohne Trockenlauf: " + modules,
       moduleError: (modules) => "Fehler bei: " + modules,
@@ -1458,6 +1459,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       inMessage: "in der Nachricht",
       matchCommand: "Befehlsname",
       matchAlias: (token) => "Alias „" + token + "“",
+      quoted: (token) => "„" + token + "“",
       matchKeyword: (pattern) => "Schlüsselwort „" + pattern + "“",
       matchRegex: (pattern) => "Regulärer Ausdruck „" + pattern + "“",
       textCommand: "Textbefehl",
@@ -1481,11 +1483,11 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       syntheticSenderNote: (login) => "Ausgewertet mit dem synthetischen Testabsender " + login + ".",
       chatEffect: "Chatnachricht würde gesendet",
       announcementEffect: "Ankündigung würde gesendet",
-      timeoutEffect: (minimum, maximum, reason) => "Timeout " + String(minimum) + (minimum === maximum ? "" : "–" + String(maximum)) + " s" + (reason.length === 0 ? "" : " · " + reason),
+      timeoutEffect: (minimum, maximum, reason) => "Timeout " + formatNumber(minimum, "de") + (minimum === maximum ? "" : "–" + formatNumber(maximum, "de")) + " s" + (reason.length === 0 ? "" : " · " + reason),
       shoutoutEffect: (login) => "Shoutout für " + login + " würde ausgelöst",
-      variableEffect: (name, from, to) => "Variable " + name + " würde von " + String(from) + " auf " + String(to) + " wechseln",
-      cooldownEffect: (seconds) => "Abklingzeit " + String(seconds) + " s würde starten",
-      userCooldownEffect: (seconds) => "Persönliche Abklingzeit " + String(seconds) + " s würde starten",
+      variableEffect: (name, from, to) => "Variable " + name + " würde von " + formatNumber(from, "de") + " auf " + formatNumber(to, "de") + " wechseln",
+      cooldownEffect: (seconds) => "Abklingzeit " + formatNumber(seconds, "de") + " s würde starten",
+      userCooldownEffect: (seconds) => "Persönliche Abklingzeit " + formatNumber(seconds, "de") + " s würde starten",
       blockReason: (code, detail) => {
         const seconds = typeof detail?.remainingSeconds === "number" ? detail.remainingSeconds : null;
         switch (code) {
@@ -1493,14 +1495,14 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
           case "text_commands.permission_denied": return "Der Absender erfüllt die Mindestrolle nicht.";
           case "text_commands.stream_state": return "Der Streamstatus passt nicht zur Einstellung.";
           case "text_commands.game_filter": return "Das aktuelle Spiel passt nicht zum Filter.";
-          case "text_commands.cooldown": return "Abklingzeit" + (seconds === null ? "" : ": noch " + String(seconds) + " s") + ".";
-          case "text_commands.user_cooldown": return "Abklingzeit pro Person" + (seconds === null ? "" : ": noch " + String(seconds) + " s") + ".";
+          case "text_commands.cooldown": return "Abklingzeit" + (seconds === null ? "" : ": noch " + formatNumber(seconds, "de") + " s") + ".";
+          case "text_commands.user_cooldown": return "Abklingzeit pro Person" + (seconds === null ? "" : ": noch " + formatNumber(seconds, "de") + " s") + ".";
           case "text_commands.argument_invalid": return "Die Argumente sind ungültig.";
           case "text_commands.argument_missing": return "Ein erforderliches Argument fehlt.";
           case "faq.permission_denied": return "Der Absender erfüllt die Mindestrolle nicht.";
           case "faq.game_filter": return "Das aktuelle Spiel passt nicht zum Filter.";
-          case "faq.cooldown": return "Abklingzeit" + (seconds === null ? "" : ": noch " + String(seconds) + " s") + ".";
-          case "faq.person_cooldown": return "Abklingzeit pro Person" + (seconds === null ? "" : ": noch " + String(seconds) + " s") + ".";
+          case "faq.cooldown": return "Abklingzeit" + (seconds === null ? "" : ": noch " + formatNumber(seconds, "de") + " s") + ".";
+          case "faq.person_cooldown": return "Abklingzeit pro Person" + (seconds === null ? "" : ": noch " + formatNumber(seconds, "de") + " s") + ".";
           case "faq.shadowed": return "Ein früherer FAQ-Eintrag hat Vorrang.";
           case "faq.command_prefix": return "Nachrichten mit ! am Anfang werden übersprungen.";
           case "faq.own_message": return "Eigene Bot-Nachrichten werden übersprungen.";
@@ -1979,10 +1981,10 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       inputsChangedHint: "Inputs changed – Check updates the result",
       result: "Result",
       reactionsSummary: (fires, blocked) => [
-        fires === 0 ? null : String(fires) + (fires === 1 ? " reaction" : " reactions"),
-        blocked === 0 ? null : String(blocked) + " blocked",
+        fires === 0 ? null : formatNumber(fires, "en") + (fires === 1 ? " reaction" : " reactions"),
+        blocked === 0 ? null : formatNumber(blocked, "en") + " blocked",
       ].filter((part): part is string => part !== null).join(" · "),
-      resultCount: (count) => String(count) + (count === 1 ? " result" : " results"),
+      resultCount: (count) => formatNumber(count, "en") + (count === 1 ? " result" : " results"),
       noReactionModules: (modules) => "No reaction: " + modules,
       noDryRunModules: (modules) => "Dry run coming later: " + modules,
       moduleError: (modules) => "Errors in: " + modules,
@@ -2011,6 +2013,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       inMessage: "in the message",
       matchCommand: "Command name",
       matchAlias: (token) => "Alias “" + token + "”",
+      quoted: (token) => "“" + token + "”",
       matchKeyword: (pattern) => "Keyword “" + pattern + "”",
       matchRegex: (pattern) => "Regular expression “" + pattern + "”",
       textCommand: "Text command",
@@ -2034,11 +2037,11 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       syntheticSenderNote: (login) => "Evaluated with the synthetic test sender " + login + ".",
       chatEffect: "Chat message would be sent",
       announcementEffect: "Announcement would be sent",
-      timeoutEffect: (minimum, maximum, reason) => "Timeout " + String(minimum) + (minimum === maximum ? "" : "–" + String(maximum)) + " s" + (reason.length === 0 ? "" : " · " + reason),
+      timeoutEffect: (minimum, maximum, reason) => "Timeout " + formatNumber(minimum, "en") + (minimum === maximum ? "" : "–" + formatNumber(maximum, "en")) + " s" + (reason.length === 0 ? "" : " · " + reason),
       shoutoutEffect: (login) => "Shoutout for " + login + " would trigger",
-      variableEffect: (name, from, to) => "Variable " + name + " would change from " + String(from) + " to " + String(to),
-      cooldownEffect: (seconds) => "Cooldown of " + String(seconds) + " s would start",
-      userCooldownEffect: (seconds) => "Per-person cooldown of " + String(seconds) + " s would start",
+      variableEffect: (name, from, to) => "Variable " + name + " would change from " + formatNumber(from, "en") + " to " + formatNumber(to, "en"),
+      cooldownEffect: (seconds) => "Cooldown of " + formatNumber(seconds, "en") + " s would start",
+      userCooldownEffect: (seconds) => "Per-person cooldown of " + formatNumber(seconds, "en") + " s would start",
       blockReason: (code, detail) => {
         const seconds = typeof detail?.remainingSeconds === "number" ? detail.remainingSeconds : null;
         switch (code) {
@@ -2046,14 +2049,14 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
           case "text_commands.permission_denied": return "The sender does not meet the minimum role.";
           case "text_commands.stream_state": return "The stream state does not match the setting.";
           case "text_commands.game_filter": return "The current game does not match the filter.";
-          case "text_commands.cooldown": return "Cooldown" + (seconds === null ? "" : ": " + String(seconds) + " s left") + ".";
-          case "text_commands.user_cooldown": return "Per-person cooldown" + (seconds === null ? "" : ": " + String(seconds) + " s left") + ".";
+          case "text_commands.cooldown": return "Cooldown" + (seconds === null ? "" : ": " + formatNumber(seconds, "en") + " s left") + ".";
+          case "text_commands.user_cooldown": return "Per-person cooldown" + (seconds === null ? "" : ": " + formatNumber(seconds, "en") + " s left") + ".";
           case "text_commands.argument_invalid": return "The arguments are invalid.";
           case "text_commands.argument_missing": return "A required argument is missing.";
           case "faq.permission_denied": return "The sender does not meet the minimum role.";
           case "faq.game_filter": return "The current game does not match the filter.";
-          case "faq.cooldown": return "Cooldown" + (seconds === null ? "" : ": " + String(seconds) + " s left") + ".";
-          case "faq.person_cooldown": return "Per-person cooldown" + (seconds === null ? "" : ": " + String(seconds) + " s left") + ".";
+          case "faq.cooldown": return "Cooldown" + (seconds === null ? "" : ": " + formatNumber(seconds, "en") + " s left") + ".";
+          case "faq.person_cooldown": return "Per-person cooldown" + (seconds === null ? "" : ": " + formatNumber(seconds, "en") + " s left") + ".";
           case "faq.shadowed": return "An earlier FAQ entry takes priority.";
           case "faq.command_prefix": return "Messages starting with ! are skipped.";
           case "faq.own_message": return "The bot's own messages are skipped.";
