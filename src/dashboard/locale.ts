@@ -38,6 +38,7 @@ export const pointsDashboardTexts = {
       correction: "Korrektur",
       amount: "Betrag ±",
       reason: "Grund",
+      reasonTooLong: "Der Grund darf höchstens 160 Zeichen lang sein.",
       newBalance: (balance: number, currency: string) => `Neuer Stand: ${new Intl.NumberFormat("de-DE").format(balance)} ${currency}`,
       negative: "Stand darf nicht unter 0 fallen",
       save: "Speichern",
@@ -46,6 +47,8 @@ export const pointsDashboardTexts = {
       unsaved: "Ungespeichert",
       saving: "Wird gespeichert …",
       history: "Verlauf",
+      historyLoading: "Verlauf wird geladen …",
+      historyError: "Verlauf konnte nicht geladen werden.",
       time: "Zeit",
       source: "Quelle",
       movement: "Bewegung",
@@ -98,6 +101,7 @@ export const pointsDashboardTexts = {
       correction: "Correction",
       amount: "Amount ±",
       reason: "Reason",
+      reasonTooLong: "The reason must be 160 characters or fewer.",
       newBalance: (balance: number, currency: string) => `New balance: ${new Intl.NumberFormat("en-US").format(balance)} ${currency}`,
       negative: "Balance cannot fall below 0",
       save: "Save",
@@ -106,6 +110,8 @@ export const pointsDashboardTexts = {
       unsaved: "Unsaved",
       saving: "Saving …",
       history: "History",
+      historyLoading: "Loading history …",
+      historyError: "History could not be loaded.",
       time: "Time",
       source: "Source",
       movement: "Movement",
@@ -3815,12 +3821,14 @@ export const memberAsWord = (language: DashboardLanguage = dashboardLanguage()):
  */
 type AuditFieldKey =
   | "role" | "enabled" | "fullConsent" | "revocationReason" | "expiresAt" | "createdAt" | "revokedAt"
+  | "delta" | "reason"
   | "length" | "retryAfter" | "clipId" | "tokenId" | "login" | "displayName" | "leadSeconds" | "name"
   | "value" | "description" | "overlayId" | "categoryId" | "gameId" | "title" | "timeZone" | "locationName" | "locationTimeZone" | "latitude" | "longitude" | "width" | "height" | "revision" | "elementCount";
 
 const auditFieldLabels: LocaleCatalog<Record<AuditFieldKey, string>> = {
   de: {
     role: "Rolle", enabled: "Aktiv", fullConsent: "Vollzustimmung", revocationReason: "Widerrufsgrund",
+    delta: "Betrag", reason: "Grund",
     expiresAt: "Gültig bis", createdAt: "Erstellt am", revokedAt: "Widerrufen am", length: "Länge (Sekunden)", retryAfter: "Erneut möglich ab",
     clipId: "Clip-ID", tokenId: "Token-ID", login: "Login", displayName: "Anzeigename", leadSeconds: "Vorlaufzeit",
     name: "Objektname", value: "Wert", description: "Beschreibung", overlayId: "Overlay-ID", categoryId: "Kategorie-ID", gameId: "Twitch-Kategorie-ID", title: "Streamtitel",
@@ -3829,6 +3837,7 @@ const auditFieldLabels: LocaleCatalog<Record<AuditFieldKey, string>> = {
   },
   en: {
     role: "Role", enabled: "Enabled", fullConsent: "Full consent", revocationReason: "Revocation reason",
+    delta: "Amount", reason: "Reason",
     expiresAt: "Valid until", createdAt: "Created at", revokedAt: "Revoked at", length: "Length (seconds)", retryAfter: "Retry after",
     clipId: "Clip ID", tokenId: "Token ID", login: "Login", displayName: "Display name", leadSeconds: "lead time",
     name: "Object name", value: "Value", description: "Description", overlayId: "Overlay ID", categoryId: "Category ID", gameId: "Twitch category ID", title: "Stream title",

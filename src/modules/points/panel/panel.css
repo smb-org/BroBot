@@ -40,6 +40,10 @@
 .points-correction__fields { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(240px, 2fr); gap: var(--s3); max-width: 560px; }
 .points-correction__preview { min-height: 20px; margin: 0; color: var(--text-2); font-size: 12px; line-height: 20px; }
 .points-correction__preview.is-invalid { color: var(--error-text); }
+.points-history__content { min-height: 420px; }
+.points-history__state { box-sizing: border-box; display: flex; min-height: 420px; align-items: center; justify-content: flex-start; gap: var(--s3); margin: 0; color: var(--text-2); }
+.points-history__state--error { color: var(--error-text); }
+.points-history__state--error p { margin: 0; }
 .points-history__table { min-width: 0; }
 .points-settings { gap: var(--s5); }
 .points-settings > .page-header { margin-bottom: 0; padding-bottom: var(--s4); }

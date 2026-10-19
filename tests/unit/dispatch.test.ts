@@ -5,6 +5,8 @@ import type { BotModule, ModuleEvent, ModuleExecutionContext, ModuleResult } fro
 import { belaboxModule } from "../../src/modules/belabox";
 import { BELABOX_DEFAULT_SETTINGS, BELABOX_STATS_URL_SECRET } from "../../src/modules/belabox/contracts";
 import { channelEventsModule } from "../../src/modules/channel_events";
+import { pointsModule } from "../../src/modules/points";
+import { DEFAULT_POINTS_SETTINGS } from "../../src/modules/points/contracts";
 import { dispatchEventSubNotification, needsActiveChatterTracking, selectModulesForEvent } from "../../src/worker/dispatch";
 import {
   upsertBotIdentity,
@@ -57,6 +59,9 @@ const environment = (database: TestD1Database, publish = vi.fn()) => {
     getChatActivityCount: vi.fn().mockResolvedValue(0),
     getTwitchRateLimitRetryAfter: vi.fn().mockResolvedValue(null),
     setTwitchRateLimitRetryAfter: vi.fn().mockResolvedValue(undefined),
+    touchPointAccount: vi.fn().mockResolvedValue({ welcomePending: true }),
+    acknowledgePointWelcome: vi.fn().mockResolvedValue(undefined),
+    creditPointActivity: vi.fn().mockResolvedValue({ credited: 5 }),
     scheduleModuleAlarm: vi.fn().mockResolvedValue(undefined),
     clearModuleAlarm: vi.fn().mockResolvedValue(undefined),
     getModuleAlarmDeadline: vi.fn().mockResolvedValue(null),
@@ -322,6 +327,46 @@ describe("module selection", () => {
 });
 
 describe("dispatch and execution", () => {
+  it("sends a real points chat event as a threaded welcome reply", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      await activate(database, "kanal-a", pointsModule.id);
+      await database.prepare("UPDATE channel_modules SET settings = ? WHERE channel_id = ? AND module_id = ?")
+        .bind(JSON.stringify(DEFAULT_POINTS_SETTINGS), "kanal-a", pointsModule.id).run();
+      const runtime = environment(database);
+      const fetcher = sent();
+
+      await dispatchEventSubNotification(runtime, {
+        channelId: "kanal-a",
+        subscriptionType: CHAT_TYPE,
+        triggerId: "twitch-chat-message-486",
+        payload: {
+          broadcaster_user_id: "kanal-a",
+          broadcaster_user_login: "kanal_demo",
+          chatter_user_id: "viewer-1",
+          chatter_user_login: "nachtfalke",
+          message_id: "twitch-message-486",
+          message: { text: "!spiele", fragments: [{ type: "text", text: "!spiele" }] },
+        },
+        receivedAt: NOW,
+        eventSubTimestamp: NOW,
+      }, fetcher, [pointsModule]);
+
+      const chatBody = fetcher.mock.calls.map((_call, index) => bodyOf(fetcher, index))
+        .find((body) => typeof body.message === "string");
+      expect(typeof chatBody?.message).toBe("string");
+      expect(String(chatBody?.message)).toContain("Startguthaben 100 Punkte");
+      expect(chatBody?.reply_parent_message_id).toBe("twitch-message-486");
+      const object = runtime.CHANNEL.get(runtime.CHANNEL.idFromName("kanal-a")) as unknown as {
+        acknowledgePointWelcome: ReturnType<typeof vi.fn>;
+      };
+      expect(object.acknowledgePointWelcome).toHaveBeenCalledWith("points", "viewer-1");
+    } finally {
+      database.close();
+    }
+  });
+
   it("passes the chatter id through the existing channel object call when tracking is declared", async () => {
     const database = new TestD1Database();
     try {

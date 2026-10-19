@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const POINTS_MODULE_ID = "points";
+export const MAX_POINTS_ADJUSTMENT_REASON_LENGTH = 160;
 
 export const pointsSettingsSchema = z.object({
   currencyName: z.string().trim().min(1).max(24),

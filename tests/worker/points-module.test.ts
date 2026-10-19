@@ -20,9 +20,10 @@ const makeEvent = (text: string, login = "nachtfalke", timestamp = "2026-10-19T1
   subscriptionType: "channel.chat.message",
   triggerId: `message-${login}`,
   payload: {
+    message_id: `message-${login}`,
     chatter_user_id: "viewer_demo",
     chatter_user_login: login,
-    message: { text, message_id: `message-${login}` },
+    message: { text },
   },
   settings: DEFAULT_POINTS_SETTINGS,
   receivedAt: timestamp,
@@ -78,6 +79,7 @@ describe("points module worker events", () => {
     const reply = results.flatMap((result) => result.actions).find((action) => action.kind === "chat");
     expect(reply?.kind).toBe("chat");
     if (reply?.kind !== "chat") throw new Error("The points command did not produce a chat reply.");
+    expect(reply.replyToMessageId).toBe("message-nachtfalke");
     const pending = {
       accountId: "viewer_demo",
       messageId: "message-nachtfalke",

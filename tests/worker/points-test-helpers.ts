@@ -16,7 +16,7 @@ interface PointMovement {
 }
 
 export interface PointsWorkerObject {
-  applyPointOperation(moduleId: string, operationId: string, kind: string, movements: PointMovement[], result: unknown): Promise<{
+  applyPointOperation(moduleId: string, operationId: string, kind: string, movements: PointMovement[], result: unknown, identity?: unknown): Promise<{
     replayed: boolean;
     result: unknown;
     balances: Record<string, number>;

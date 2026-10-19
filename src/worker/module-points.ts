@@ -35,8 +35,8 @@ export const modulePoints = (
   }
   const object = namespace.get(namespace.idFromName(channelId));
   return {
-    apply: (operationId, kind: PointsKind, movements: PointsMovement[], result) =>
-      object.applyPointOperation(moduleId, operationId, kind, movements, result),
+    apply: (operationId, kind: PointsKind, movements: PointsMovement[], result, payloadIdentity) =>
+      object.applyPointOperation(moduleId, operationId, kind, movements, result, payloadIdentity),
     touchAccount: (accountId, login, startBonus) => object.touchPointAccount(moduleId, accountId, login, startBonus),
     ackWelcome: (accountId) => object.acknowledgePointWelcome(moduleId, accountId),
     creditActivity: (accountId, login, messageAt, live, rules) =>

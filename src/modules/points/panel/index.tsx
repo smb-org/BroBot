@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 
+import { PanelApiError } from "../../../contracts/panel-error";
 import { useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { dashboardCommonTexts, dashboardLanguage, formatNumber, pointsDashboardTexts } from "../../../dashboard/locale";
 import { ActionMenu } from "../../../dashboard/ui/ActionMenu";
@@ -15,7 +16,7 @@ import { SegmentChoice } from "../../../dashboard/ui/SegmentChoice";
 import { PageHeader } from "../../../dashboard/ui/PageHeader";
 import type { ModulePanelProperties } from "../../contract";
 import type { PointsSettings } from "../contracts";
-import { DEFAULT_POINTS_SETTINGS, pointsSettingsSchema } from "../contracts";
+import { DEFAULT_POINTS_SETTINGS, MAX_POINTS_ADJUSTMENT_REASON_LENGTH, pointsSettingsSchema } from "../contracts";
 import type { PointsAccount, PointsHistoryRow } from "./service";
 import { adjustPoints, loadPointsAccounts, loadPointsHistory, loadPointsRank, loadPointsSettings, loadPointsSummary, savePointsSettings } from "./service";
 import "./panel.css";
@@ -42,6 +43,22 @@ const monthLabel = (month: string, language: "de" | "en"): string => new Intl.Da
   month: "long", timeZone: "UTC",
 }).format(new Date(`${month}-01T00:00:00.000Z`));
 
+interface CorrectionRequest {
+  operationId: string;
+  delta: number;
+  reason: string;
+}
+
+interface AccountCorrectionState {
+  pending: CorrectionRequest | null;
+  committedBalance: number | null;
+  error?: string | undefined;
+  status?: string | undefined;
+  submitting: boolean;
+}
+
+const emptyCorrectionState = (): AccountCorrectionState => ({ pending: null, committedBalance: null, submitting: false });
+
 function PointsPanelContent({ channelId, language, canManage = true, resolveModuleName }: ModulePanelProperties): ReactElement {
   const locale = language ?? dashboardLanguage();
   const labels = pointsDashboardTexts[locale].panel;
@@ -54,6 +71,7 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
   const [historyCursor, setHistoryCursor] = useState<string | undefined>();
   const [historyCursorStack, setHistoryCursorStack] = useState<(string | undefined)[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedIdRef = useRef<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsEdit, setSettingsEdit] = useState<{ revision: number; settings: PointsSettings } | null>(null);
   const [settingsError, setSettingsError] = useState<string | undefined>();
@@ -61,18 +79,21 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [delta, setDelta] = useState("");
   const [reason, setReason] = useState("");
-  const [adjustError, setAdjustError] = useState<string | undefined>();
-  const [adjustStatus, setAdjustStatus] = useState<string | undefined>();
-  const [adjustPending, setAdjustPending] = useState(false);
-  const [pendingAdjustment, setPendingAdjustment] = useState<{ operationId: string; delta: number; reason: string } | null>(null);
-  const [committedBalance, setCommittedBalance] = useState<number | null>(null);
+  const [corrections, setCorrections] = useState<Record<string, AccountCorrectionState>>({});
+  const updateCorrection = useCallback((accountId: string, update: Partial<AccountCorrectionState>): void => {
+    setCorrections((previous) => ({
+      ...previous,
+      [accountId]: { ...emptyCorrectionState(), ...previous[accountId], ...update },
+    }));
+  }, []);
 
   const accountsQuery = useModuleQuery(channelId, "points", `accounts:${sort}:${search}:${accountCursor ?? "first"}`,
     (signal) => loadPointsAccounts(channelId, sort, search, accountCursor, signal));
   const summaryQuery = useModuleQuery(channelId, "points", "summary", (signal) => loadPointsSummary(channelId, signal));
   const settingsQuery = useModuleQuery(channelId, "points", "settings", (signal) => loadPointsSettings(channelId, signal));
   const selected = accountsQuery.data?.rows.find((account) => account.accountId === selectedId) ?? null;
-  const selectedBalance = selected === null ? 0 : committedBalance ?? selected.balance;
+  const selectedCorrection = selected === null ? emptyCorrectionState() : corrections[selected.accountId] ?? emptyCorrectionState();
+  const selectedBalance = selected === null ? 0 : selectedCorrection.committedBalance ?? selected.balance;
   const rankQuery = useModuleQuery(channelId, "points", `rank:${selectedId ?? "none"}`,
     (signal) => selectedId === null ? Promise.resolve({ rank: null, net: 0 }) : loadPointsRank(channelId, selectedId, signal),
     { enabled: selectedId !== null });
@@ -83,10 +104,12 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
   const summary = summaryQuery.data;
   const history = historyQuery.data?.rows ?? [];
   const deltaNumber = Number(delta);
+  const pendingAdjustment = selectedCorrection.pending;
+  const adjustPending = selectedCorrection.submitting;
   const correctionValid = selected !== null && Number.isSafeInteger(deltaNumber) && delta.trim().length > 0 && deltaNumber !== 0 &&
-    selected.balance + deltaNumber >= 0 && reason.trim().length > 0;
+    selectedBalance + deltaNumber >= 0 && reason.trim().length > 0 && reason.trim().length <= MAX_POINTS_ADJUSTMENT_REASON_LENGTH;
   // Once booked (audit pending), selectedBalance already includes the draft amount.
-  const newBalance = committedBalance !== null || !Number.isSafeInteger(deltaNumber) ? selectedBalance : selectedBalance + deltaNumber;
+  const newBalance = selectedCorrection.committedBalance !== null || !Number.isSafeInteger(deltaNumber) ? selectedBalance : selectedBalance + deltaNumber;
   const settingsDataRevision = settingsQuery.data?.revision ?? null;
   const settingsRevision = settingsDataRevision === null
     ? settingsEdit?.revision ?? null
@@ -108,10 +131,6 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
     setHistoryCursorStack([]);
     setDelta("");
     setReason("");
-    setAdjustError(undefined);
-    setAdjustStatus(undefined);
-    setPendingAdjustment(null);
-    setCommittedBalance(null);
   };
 
   const changeSearch = (value: string): void => {
@@ -126,12 +145,14 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
 
   const selectAccount = (accountId: string): void => {
     if (selectedId !== accountId) resetDetailDraft();
+    selectedIdRef.current = accountId;
     setSelectedId(accountId);
     setSettingsOpen(false);
   };
 
   const closeDetail = (): void => {
     resetDetailDraft();
+    selectedIdRef.current = null;
     setSelectedId(null);
     setSettingsOpen(false);
   };
@@ -169,39 +190,40 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
     setSettingsSaved(false);
   };
 
-  const performAdjustment = useCallback(async (request: { operationId: string; delta: number; reason: string }): Promise<void> => {
-    if (selected === null || !canManage || adjustPending) return;
-    setAdjustPending(true);
-    setAdjustError(undefined);
-    setAdjustStatus(undefined);
+  const performAdjustment = useCallback(async (accountId: string, request: CorrectionRequest): Promise<void> => {
+    if (!canManage || corrections[accountId]?.submitting === true) return;
+    updateCorrection(accountId, { submitting: true, error: undefined, status: undefined });
     try {
-      const result = await adjustPoints(channelId, selected.accountId, request.operationId, request.delta, request.reason);
+      const result = await adjustPoints(channelId, accountId, request.operationId, request.delta, request.reason);
       if (result.auditPending) {
-        setCommittedBalance(result.balance);
-        setPendingAdjustment(request);
-        setAdjustStatus(labels.correctionBookedPending);
+        updateCorrection(accountId, { committedBalance: result.balance, pending: request, status: labels.correctionBookedPending });
       } else {
-        setCommittedBalance(null);
         await queryClient.invalidateQueries({ queryKey: ["channel", channelId, "module", "points"] });
-        setPendingAdjustment(null);
-        setAdjustStatus(labels.saved);
-        setDelta("");
-        setReason("");
+        updateCorrection(accountId, { committedBalance: null, pending: null, status: labels.saved });
+        if (selectedIdRef.current === accountId) {
+          setDelta("");
+          setReason("");
+        }
       }
     } catch (error) {
-      const code = error instanceof Error && "code" in error ? String(error.code) : "";
-      setAdjustError(code === "insufficient_balance" ? labels.negative : labels.correctionError);
+      const code = error instanceof PanelApiError ? error.code : "";
+      const definiteRejection = error instanceof PanelApiError && error.status >= 400 && error.status < 500;
+      updateCorrection(accountId, {
+        pending: definiteRejection ? null : request,
+        error: code === "insufficient_balance" ? labels.negative : labels.correctionError,
+        status: undefined,
+      });
     } finally {
-      setAdjustPending(false);
+      updateCorrection(accountId, { submitting: false });
     }
-  }, [adjustPending, canManage, channelId, labels.correctionBookedPending, labels.correctionError, labels.negative, labels.saved, queryClient, selected]);
+  }, [canManage, channelId, corrections, labels.correctionBookedPending, labels.correctionError, labels.negative, labels.saved, queryClient, updateCorrection]);
 
   const saveAdjustment = useCallback((): void => {
     if (!correctionValid) return;
     const request = { operationId: randomId(), delta: deltaNumber, reason: reason.trim() };
-    setPendingAdjustment(request);
-    void performAdjustment(request);
-  }, [correctionValid, deltaNumber, performAdjustment, reason]);
+    updateCorrection(selected.accountId, { pending: request });
+    void performAdjustment(selected.accountId, request);
+  }, [correctionValid, deltaNumber, performAdjustment, reason, selected, updateCorrection]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -226,9 +248,9 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
 
   const month = summary?.month ?? new Date().toISOString().slice(0, 7);
   const correctionDirty = delta.trim().length > 0 || reason.trim().length > 0;
-  const correctionWarnings = adjustStatus === undefined
+  const correctionWarnings = selectedCorrection.status === undefined
     ? correctionDirty ? [labels.unsaved] : []
-    : adjustStatus === labels.saved ? [] : [adjustStatus];
+    : selectedCorrection.status === labels.saved ? [] : [selectedCorrection.status];
   const detail = settingsOpen ? <section className="points-settings" aria-label={labels.settingsTitle}>
     <PageHeader
       title={labels.settingsTitle}
@@ -285,22 +307,21 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
           dirty={correctionDirty}
           persistent
           pending={adjustPending}
-          {...(adjustError === undefined ? {} : { error: adjustError })}
-          saved={adjustStatus === labels.saved && !correctionDirty}
+          {...(selectedCorrection.error === undefined ? {} : { error: selectedCorrection.error })}
+          saved={selectedCorrection.status === labels.saved && !correctionDirty}
           warnings={correctionWarnings}
           warningStatusLabel={(warnings, justSaved) => justSaved ? labels.saved : warnings[0] ?? ""}
-          saveDisabled={!canManage || (pendingAdjustment === null && !correctionValid)}
-          discardDisabled={pendingAdjustment !== null}
+          saveDisabled={!canManage || adjustPending || (pendingAdjustment === null && !correctionValid)}
+          discardDisabled={pendingAdjustment !== null || adjustPending}
           onSave={() => {
             if (pendingAdjustment === null) saveAdjustment();
-            else void performAdjustment(pendingAdjustment);
+            else void performAdjustment(selected.accountId, pendingAdjustment);
           }}
           onDiscard={() => {
-            if (pendingAdjustment !== null) return;
+            if (pendingAdjustment !== null || adjustPending) return;
             setDelta("");
             setReason("");
-            setAdjustError(undefined);
-            setAdjustStatus(undefined);
+            updateCorrection(selected.accountId, { error: undefined, status: undefined });
           }}
           saveLabel={pendingAdjustment === null ? labels.save : labels.retry}
           discardLabel={labels.discard}
@@ -312,6 +333,7 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
           items={[{ label: labels.settings, onSelect: () => {
             resetDetailDraft();
             setSettingsOpen(true);
+            selectedIdRef.current = null;
             setSelectedId(null);
           } }]}
         />
@@ -320,8 +342,15 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
     <section className="points-correction" aria-labelledby="points-correction-title">
       <h3 id="points-correction-title">{labels.correction}</h3>
       <div className="points-correction__fields">
-        <Field label={labels.amount} value={delta} onChange={(value) => { setDelta(value); setAdjustError(undefined); setAdjustStatus(undefined); }} disabled={!canManage || adjustPending || pendingAdjustment !== null} mono {...(newBalance < 0 ? { error: labels.negative } : {})} />
-        <Field label={labels.reason} value={reason} onChange={(value) => { setReason(value); setAdjustError(undefined); setAdjustStatus(undefined); }} disabled={!canManage || adjustPending || pendingAdjustment !== null} required />
+        <Field label={labels.amount} value={delta} onChange={(value) => {
+          setDelta(value);
+          updateCorrection(selected.accountId, { error: undefined, status: undefined });
+        }} disabled={!canManage || adjustPending || pendingAdjustment !== null} mono {...(newBalance < 0 ? { error: labels.negative } : {})} />
+        <Field label={labels.reason} value={reason} onChange={(value) => {
+          setReason(value);
+          updateCorrection(selected.accountId, { error: undefined, status: undefined });
+        }} disabled={!canManage || adjustPending || pendingAdjustment !== null} required
+          {...(reason.trim().length > MAX_POINTS_ADJUSTMENT_REASON_LENGTH ? { error: labels.reasonTooLong } : {})} />
       </div>
       <p className={`points-correction__preview${newBalance < 0 ? " is-invalid" : ""}`} role="status">
         {labels.newBalance(newBalance, settingsQuery.data?.settings.currencyName ?? DEFAULT_POINTS_SETTINGS.currencyName)}
@@ -342,25 +371,36 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
           setHistoryCursor(next);
         }}>{labels.next}</Button>
       </ListPaginationFooter>
-      <DataTable
-        ariaLabel={labels.history}
-        rows={history.map((row) => ({
-          id: row.operationId,
-          at: row.at,
-          moduleGroup: row.moduleId,
-          source: historySource(row, locale, resolveModuleName),
-          delta: row.delta,
-          balanceAfter: row.balanceAfter,
-        }))}
-        columns={[
-          { key: "source", label: labels.source, render: (row) => row.source },
-          { key: "delta", label: labels.movement, render: (row) => <span className="mono">{row.delta > 0 ? "+" : ""}{formatNumber(row.delta, locale)}</span>, width: "100px" },
-          { key: "balance", label: labels.balanceAfter, render: (row) => <span className="mono">{formatNumber(row.balanceAfter, locale)}</span>, width: "110px" },
-        ]}
-        timeZone="UTC"
-        emptyLabel={labels.historyEmpty}
-        className="points-history__table"
-      />
+      <div className="points-history__content" aria-live="polite">
+        {historyQuery.isLoading || (historyQuery.isFetching && historyQuery.data === undefined)
+          ? <p className="points-history__state" role="status">{labels.historyLoading}</p>
+          : historyQuery.isError
+            ? <div className="points-history__state points-history__state--error">
+              <p role="alert">{labels.historyError}</p>
+              <Button variant="neutral" disabled={historyQuery.isFetching} onClick={() => { void historyQuery.refetch(); }}>
+                {labels.retry}
+              </Button>
+            </div>
+            : <DataTable
+              ariaLabel={labels.history}
+              rows={history.map((row) => ({
+                id: row.operationId,
+                at: row.at,
+                moduleGroup: row.moduleId,
+                source: historySource(row, locale, resolveModuleName),
+                delta: row.delta,
+                balanceAfter: row.balanceAfter,
+              }))}
+              columns={[
+                { key: "source", label: labels.source, render: (row) => row.source },
+                { key: "delta", label: labels.movement, render: (row) => <span className="mono">{row.delta > 0 ? "+" : ""}{formatNumber(row.delta, locale)}</span>, width: "100px" },
+                { key: "balance", label: labels.balanceAfter, render: (row) => <span className="mono">{formatNumber(row.balanceAfter, locale)}</span>, width: "110px" },
+              ]}
+              timeZone="UTC"
+              emptyLabel={labels.historyEmpty}
+              className="points-history__table"
+            />}
+      </div>
     </section>
   </section>;
 
@@ -434,6 +474,7 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
     <Button variant={settingsOpen ? "secondary" : "neutral"} ariaPressed={settingsOpen} onClick={() => {
       resetDetailDraft();
       setSettingsOpen((value) => !value);
+      selectedIdRef.current = null;
       setSelectedId(null);
     }}>{labels.settings}</Button>
     <Button variant="neutral" onClick={createTimer}><Icon name="clock-hour-4" size={16} />{labels.timer}</Button>

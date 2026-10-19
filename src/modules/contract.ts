@@ -976,7 +976,8 @@ export type PointJoinResult =
   | { status: "already_joined" | "round_closed" };
 
 export interface ModulePointsAccess {
-  apply: (operationId: string, kind: PointsKind, movements: PointsMovement[], result: unknown) => Promise<PointsApplyResult>;
+  /** Optional stable request identity for operations whose persisted result contains server-generated metadata. */
+  apply: (operationId: string, kind: PointsKind, movements: PointsMovement[], result: unknown, payloadIdentity?: unknown) => Promise<PointsApplyResult>;
   touchAccount: (accountId: string, login: string, startBonus: number) => Promise<{ welcomePending: boolean }>;
   ackWelcome: (accountId: string) => Promise<void>;
   creditActivity: (

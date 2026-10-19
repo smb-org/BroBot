@@ -951,8 +951,7 @@ export const dispatchEventSubNotification = async (
   const pointsMatch = matches.find(({ module }) => module.id === "points");
   const chatterUserId = textValue(event.payload.chatter_user_id);
   const chatterLogin = textValue(event.payload.chatter_user_login);
-  const eventMessage = recordValue(event.payload.message) ? event.payload.message : null;
-  const messageId = eventMessage === null ? null : textValue(eventMessage.message_id);
+  const messageId = textValue(event.payload.message_id);
   const sourceBroadcasterUserId = textValue(event.payload.source_broadcaster_user_id);
   if (pointsMatch !== undefined && event.subscriptionType === "channel.chat.message" && chatterUserId !== null &&
       chatterLogin !== null && messageId !== null && (sourceBroadcasterUserId === null || sourceBroadcasterUserId === event.channelId)) {

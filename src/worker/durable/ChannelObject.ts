@@ -3177,7 +3177,8 @@ export class ChannelObject extends DurableObject<Env> {
 
   private pointAccess(moduleId: string): ModulePointsAccess {
     return {
-      apply: (operationId, kind, movements, result) => this.applyPointOperation(moduleId, operationId, kind, movements, result),
+      apply: (operationId, kind, movements, result, payloadIdentity) =>
+        this.applyPointOperation(moduleId, operationId, kind, movements, result, payloadIdentity),
       touchAccount: (accountId, login, startBonus) => this.touchPointAccount(moduleId, accountId, login, startBonus),
       ackWelcome: (accountId) => this.acknowledgePointWelcome(moduleId, accountId),
       creditActivity: (accountId, login, messageAt, live, rules) =>
@@ -3210,11 +3211,14 @@ export class ChannelObject extends DurableObject<Env> {
     kind: PointsKind,
     movements: PointsMovement[],
     result: unknown,
+    payloadIdentity?: unknown,
   ): Promise<PointsApplyResult> {
     await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     const canonicalResult = canonicalPointResult(result);
-    const payloadHash = await pointPayloadHash({ moduleId, operationId, kind, movements, result: canonicalResult.value });
+    const payloadHash = await pointPayloadHash(payloadIdentity === undefined
+      ? { moduleId, operationId, kind, movements, result: canonicalResult.value }
+      : { moduleId, operationId, kind, movements, identity: payloadIdentity });
     const applied = this.ctx.storage.transactionSync(() => applyPointOperationSync(
       this.ctx.storage.sql,
       moduleId,

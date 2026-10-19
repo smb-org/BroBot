@@ -77,6 +77,33 @@ describe("points ledger in the worker Durable Object", () => {
     await expect(object.pointSummary(pointTestModule)).resolves.toMatchObject({ circulation: 85, accounts: 1 });
   });
 
+  it(`replays concurrent identical admin corrections with the first metadata (${testCard("correction identity ignores server-generated result metadata while the ledger atomically books once", "identical concurrent corrections conflict because their timestamps differ or both book")})`, async () => {
+    const channelId = `points-admin-replay-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    await object.touchPointAccount(pointTestModule, "viewer-a", "nachtfalke", 50);
+    const operationId = "admin:01234567-89ab-42cd-8abc-0123456789ab";
+    const movements = [{ accountId: "viewer-a", delta: 12 }, { accountId: "__house", delta: -12 }];
+    const identity = { accountId: "viewer-a", delta: 12, reason: "stream prize", actorId: "manager-demo" };
+
+    const results = await Promise.all([
+      object.applyPointOperation(pointTestModule, operationId, "admin", movements, {
+        ...identity, actorLogin: "kanal_demo", createdAt: "2026-10-19T12:00:00.000Z",
+      }, identity),
+      object.applyPointOperation(pointTestModule, operationId, "admin", movements, {
+        ...identity, actorLogin: "kanal_demo", createdAt: "2026-10-19T12:00:01.000Z",
+      }, identity),
+    ]);
+
+    expect(results.map(({ replayed }) => replayed).sort((left, right) => Number(left) - Number(right))).toEqual([false, true]);
+    expect(results[0].result).toEqual(results[1].result);
+    await expect(object.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(62);
+    const history = await object.pointHistory(pointTestModule, "viewer-a");
+    const correctionRows = history.rows.filter((row) => row.operationId === operationId);
+    expect(correctionRows).toHaveLength(1);
+    expect(correctionRows[0]).toMatchObject({ kind: "admin", delta: 12, detail: results[0].result });
+  });
+
   it(`nets large repeated deltas exactly before booking (${testCard("same-account movements use exact net totals even when intermediate sums exceed safe integer precision", "viewer and house deltas drift by one after [M, 2, -M] cancellation")})`, async () => {
     const channelId = `points-large-netting-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);

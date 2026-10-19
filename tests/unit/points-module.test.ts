@@ -14,9 +14,10 @@ const messageEvent = (text: string, settings: PointsSettings = DEFAULT_POINTS_SE
   subscriptionType: "channel.chat.message",
   triggerId: "message_demo",
   payload: {
+    message_id: "message_demo",
     chatter_user_id: "viewer_demo",
     chatter_user_login: "nachtfalke",
-    message: { text, message_id: "message_demo" },
+    message: { text },
   },
   settings,
   receivedAt: "2026-10-19T12:00:00.000Z",
@@ -89,6 +90,7 @@ describe("points module", () => {
     const games = await processPointsMessage(messageEvent("!spiele"), context);
 
     expect(balance.actions[0]).toMatchObject({ kind: "chat", text: "240 Punkte · diesen Monat +40 · Platz 4", automated: false });
+    expect(balance.actions[0]).toMatchObject({ replyToMessageId: "message_demo" });
     expect(top.actions[0]).toMatchObject({ kind: "chat", text: `Top im ${localizedMonth(currentMonth, "de")}: 1. pixelpilz +1.420 · 2. nachtfalke +880 · 3. kanal_demo +410 Punkte` });
     expect(games.actions[0]).toMatchObject({ kind: "chat", text: "Noch sind keine Spiele aktiv. · Startguthaben 100 Punkte · !punkte" });
     expect(points.balance).toHaveBeenCalledWith("viewer_demo");

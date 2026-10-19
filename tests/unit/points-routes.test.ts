@@ -26,15 +26,17 @@ const createHarness = (options: { role?: "manager" | "operator"; failFirstAudit?
   const database = new TestD1Database();
   databases.push(database);
   const operations = new Map<string, Operation>();
+  const operationIdentities = new Map<string, unknown>();
   const pending = new Map<string, Operation>();
   let balance = options.initialBalance ?? 50;
   let failFirstAudit = options.failFirstAudit ?? false;
   const pointAccess = {
-    apply: vi.fn((operationId: string, _kind: string, movements: { accountId: string; delta?: number }[], result: unknown) => {
+    apply: vi.fn((operationId: string, _kind: string, movements: { accountId: string; delta?: number }[], result: unknown, payloadIdentity?: unknown) => {
       const existing = operations.get(operationId);
       if (existing !== undefined) {
         const detail = result as Operation;
-        if (existing.accountId !== detail.accountId || existing.delta !== detail.delta || existing.reason !== detail.reason) {
+        if (existing.accountId !== detail.accountId || existing.delta !== detail.delta || existing.reason !== detail.reason ||
+          JSON.stringify(operationIdentities.get(operationId)) !== JSON.stringify(payloadIdentity)) {
           throw new Error("operation_conflict");
         }
         return Promise.resolve({ replayed: true, result: existing, balances: { [existing.accountId]: balance } });
@@ -44,6 +46,7 @@ const createHarness = (options: { role?: "manager" | "operator"; failFirstAudit?
       if (balance + (userMovement.delta ?? 0) < 0) throw new Error("insufficient_balance");
       const detail = result as Operation;
       operations.set(operationId, detail);
+      if (payloadIdentity !== undefined) operationIdentities.set(operationId, payloadIdentity);
       pending.set(operationId, detail);
       balance += userMovement.delta ?? 0;
       return Promise.resolve({ replayed: false, result: detail, balances: { [detail.accountId]: balance } });
@@ -62,7 +65,7 @@ const createHarness = (options: { role?: "manager" | "operator"; failFirstAudit?
     claimCooldown: vi.fn(() => Promise.resolve(true)),
     rounds: {} as ModulePointsAccess["rounds"],
   } satisfies ModulePointsAccess;
-  const auditWriter: ModuleRouteEnvironment["Variables"]["writeModuleAudit"] = vi.fn(async (
+  const auditWriter = vi.fn<ModuleRouteEnvironment["Variables"]["writeModuleAudit"]>(async (
     entry: Parameters<ModuleRouteEnvironment["Variables"]["writeModuleAudit"]>[0],
     changedAt: Parameters<ModuleRouteEnvironment["Variables"]["writeModuleAudit"]>[1],
     options: Parameters<ModuleRouteEnvironment["Variables"]["writeModuleAudit"]>[2],
@@ -128,6 +131,33 @@ describe("points routes", () => {
       "SELECT COUNT(*) AS count FROM audit_log WHERE channel_id = ? AND action = 'points_adjusted'",
     ).bind(CHANNEL_ID).first()).resolves.toEqual({ count: 1 });
     expect([...harness.operations.keys()]).toEqual([OPERATION_ID]);
+  });
+
+  it("passes correction identity to the ledger and audits its persisted replay result", async () => {
+    const harness = createHarness();
+    await insertChannel(harness.database, CHANNEL_ID);
+    const persistedAt = "2026-10-19T11:59:00.000Z";
+    harness.pointAccess.apply.mockImplementation((_operationId, _kind, movements, result) => {
+      const detail = result as Operation;
+      const userMovement = movements.find((movement) => movement.accountId !== "__house");
+      if (userMovement === undefined) throw new Error("invalid_account");
+      const persistedResult = { ...detail, actorLogin: "original_login", createdAt: persistedAt };
+      harness.operations.set(detail.operationId, persistedResult);
+      harness.pending.set(detail.operationId, persistedResult);
+      return Promise.resolve({ replayed: true, result: persistedResult, balances: { [detail.accountId]: 62 } });
+    });
+    const body = { operationId: "01234567-89ab-42cd-8abc-0123456789ab", delta: 12, reason: "stream prize" };
+
+    const response = await harness.app.fetch(harness.request("/accounts/viewer_demo/adjust", body), {
+      DB: harness.database as unknown as D1Database,
+    });
+
+    expect(response.status).toBe(200);
+    expect(harness.pointAccess.apply.mock.calls[0]?.[4]).toEqual({
+      accountId: "viewer_demo", delta: 12, reason: "stream prize", actorId: ACTOR_ID,
+    });
+    expect(harness.auditWriter.mock.calls[0]?.[1]).toBe(persistedAt);
+    expect(harness.auditWriter.mock.calls[0]?.[0].after).toMatchObject({ accountLogin: "pixelpilz", delta: 12, reason: "stream prize" });
   });
 
   it("completes a pending correction audit on manager account load (protects=page reload reconciles a committed pending audit once; fails_when=load omits or duplicates points_adjusted; no_claim=the ledger's pending audit list is represented by an in-memory fake)", async () => {

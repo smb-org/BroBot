@@ -25,7 +25,9 @@ const AREA_ICONS: Record<AuditArea, IconName> = {
 export const auditAreaIcon = (area: AuditArea): IconName => AREA_ICONS[area];
 
 /** Structural addressing/bookkeeping keys never worth showing as a "changed field". */
-const STRUCTURAL_KEYS = new Set(["channelId", "moduleId", "userId", "createdAt", "updatedAt"]);
+const STRUCTURAL_KEYS = new Set([
+  "channelId", "moduleId", "userId", "createdAt", "updatedAt", "operationId", "accountId", "accountLogin", "actorId", "actorLogin",
+]);
 
 const parseObject = (json: string): Record<string, unknown> | null => {
   try {
@@ -157,6 +159,10 @@ export const auditSubjectText = (entry: PanelAuditEntry, language: DashboardLang
   const area = auditAreaForAction(entry.action);
   const record = parseObject(entry.after) ?? parseObject(entry.before);
   if (area === "module") {
+    if (entry.action === "points_adjusted") {
+      const login = recordText(record, "accountLogin");
+      return login === null ? recordText(record, "accountId") : `@${login}`;
+    }
     // A `${moduleId}.settings_changed` action's label already embeds the
     // module name (`labels.ts`'s `auditActionLabel` -> `moduleSettingsChangedText`,
     // e.g. "Settings changed: Ad breaks") -- appending it again here would
@@ -217,6 +223,12 @@ const memberSubject = (entry: PanelAuditEntry, language: DashboardLanguage): str
 const auditObject = (entry: PanelAuditEntry, language: DashboardLanguage): string => {
   const before = parseObject(entry.before);
   const after = parseObject(entry.after);
+  if (entry.action === "points_adjusted") {
+    const login = recordText(after, "accountLogin");
+    return login === null
+      ? recordText(after, "accountId") ?? auditObjectFallback(entry.action, language)
+      : `@${login}`;
+  }
   if (entry.action.startsWith("member.")) return memberSubject(entry, language);
   if (entry.action === "module.enabled" || entry.action === "module.disabled") {
     return entry.moduleId == null ? auditObjectFallback(entry.action, language) : moduleName(entry.moduleId, language);

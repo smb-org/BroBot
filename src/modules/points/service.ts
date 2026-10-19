@@ -5,6 +5,8 @@ import { pointsCatalog } from "./locale";
 const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 
+const textValue = (value: unknown): string | null => typeof value === "string" && value.length > 0 ? value : null;
+
 const messageText = (event: ModuleEvent): string | null => {
   const message = record(event.payload.message);
   return typeof message?.text === "string" ? message.text.trim() : null;
@@ -94,14 +96,13 @@ export const processPointsMessage = async (
     reply = `${catalog.games(games)}${welcome.welcomePending ? "" : ` · ${catalog.startBonus(event.settings.startBonus, event.settings.currencyName)}`} · !punkte`;
   }
 
-  const message = record(event.payload.message);
-  const messageId = typeof message?.message_id === "string" ? message.message_id : undefined;
+  const messageId = textValue(event.payload.message_id);
   return {
     actions: reply === null ? [] : [{
       kind: "chat",
       text: reply,
       automated: false,
-      ...(messageId === undefined ? {} : { replyToMessageId: messageId }),
+      ...(messageId === null ? {} : { replyToMessageId: messageId }),
     }],
     diagnostics: [],
   };

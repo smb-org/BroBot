@@ -3,7 +3,7 @@ import { Hono, type Context } from "hono";
 import { canManage } from "../../contracts/values";
 import type { ModuleRouteEnvironment } from "../contract";
 import type { ModulePointsAccess } from "../contract";
-import { POINTS_MODULE_ID } from "./contracts";
+import { MAX_POINTS_ADJUSTMENT_REASON_LENGTH, POINTS_MODULE_ID } from "./contracts";
 
 type PointsContext = Context<ModuleRouteEnvironment>;
 
@@ -41,6 +41,9 @@ const parsePending = (operationId: string, detail: unknown): PendingAdjustment |
 
 const writeAdjustmentAudit = async (context: PointsContext, adjustment: PendingAdjustment): Promise<void> => {
   const operationId = adjustment.operationId;
+  const account = (await points(context).listAccounts({ sort: "balance", search: adjustment.accountId, limit: 50 }))
+    .rows.find((row) => row.accountId === adjustment.accountId);
+  if (account === undefined) throw new Error("points_account_missing");
   await context.get("writeModuleAudit")({
     channelId: channelIdFrom(context),
     moduleId: POINTS_MODULE_ID,
@@ -49,6 +52,8 @@ const writeAdjustmentAudit = async (context: PointsContext, adjustment: PendingA
     after: {
       operationId,
       accountId: adjustment.accountId,
+      accountLogin: account.login,
+      actorId: adjustment.actorId,
       delta: adjustment.delta,
       reason: adjustment.reason,
       actorLogin: adjustment.actorLogin,
@@ -114,7 +119,8 @@ pointsRoutes.post("/accounts/:accountId/adjust", async (context) => {
   if (!isRecord(body) || typeof body.operationId !== "string" ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(body.operationId) ||
       !Number.isSafeInteger(body.delta) || body.delta === 0 ||
-      typeof body.reason !== "string" || body.reason.trim().length === 0 || body.reason.trim().length > 160) {
+      typeof body.reason !== "string" || body.reason.trim().length === 0 ||
+      body.reason.trim().length > MAX_POINTS_ADJUSTMENT_REASON_LENGTH) {
     return context.json({ error: "points_adjustment_invalid" }, 400);
   }
   const accountId = context.req.param("accountId");
@@ -123,25 +129,28 @@ pointsRoutes.post("/accounts/:accountId/adjust", async (context) => {
   const operationId = `admin:${body.operationId}`;
   const delta = body.delta as number;
   const reason = body.reason.trim();
+  const actorId = context.get("actor").userId;
   const access = points(context);
   const previous = (await access.pendingAudits()).find((item) => item.operationId === operationId);
   const previousDetail = previous === undefined ? null : parsePending(operationId, previous.detail);
   const previousMatches = previousDetail !== null && previousDetail.accountId === accountId &&
-    previousDetail.delta === delta && previousDetail.reason === reason;
+    previousDetail.delta === delta && previousDetail.reason === reason && previousDetail.actorId === actorId;
 
   // A manager retry can arrive after another page load already reconciled the
   // audit. The audit metadata carries the durable replay identity and payload.
   await completePendingAudits(context);
   const auditedRow = await context.env.DB.prepare(
-    `SELECT after_json FROM audit_log
+    `SELECT after_json, actor_user_id FROM audit_log
       WHERE channel_id = ? AND module_id = ? AND action = ?
         AND json_extract(after_json, '$.operationId') = ?
       LIMIT 1`,
-  ).bind(channelIdFrom(context), POINTS_MODULE_ID, "points_adjusted", operationId).first<{ after_json: string | null }>();
+  ).bind(channelIdFrom(context), POINTS_MODULE_ID, "points_adjusted", operationId)
+    .first<{ after_json: string | null; actor_user_id: string | null }>();
   if (auditedRow !== null) {
     let audited: unknown;
     try { audited = JSON.parse(auditedRow.after_json ?? "null") as unknown; } catch { audited = null; }
-    if (!isRecord(audited) || audited.accountId !== accountId || audited.delta !== delta || audited.reason !== reason) {
+    if (!isRecord(audited) || audited.accountId !== accountId || audited.delta !== delta || audited.reason !== reason ||
+        auditedRow.actor_user_id !== actorId) {
       return context.json({ error: "operation_conflict" }, 409);
     }
     return context.json({ balance: await access.balance(accountId), auditPending: false });
@@ -158,23 +167,27 @@ pointsRoutes.post("/accounts/:accountId/adjust", async (context) => {
   };
 
   try {
-    await access.apply(operationId, "admin", [
+    const applied = await access.apply(operationId, "admin", [
       { accountId, delta },
       { accountId: "__house", delta: -delta },
-    ], detail);
+    ], detail, { accountId, delta, reason, actorId });
+    const appliedDetail = parsePending(operationId, applied.result);
+    if (appliedDetail === null || appliedDetail.accountId !== accountId || appliedDetail.delta !== delta ||
+        appliedDetail.reason !== reason || appliedDetail.actorId !== actorId) {
+      throw new Error("operation_conflict");
+    }
+    const balance = await access.balance(accountId);
+    try {
+      await writeAdjustmentAudit(context, appliedDetail);
+      return context.json({ balance, auditPending: false });
+    } catch {
+      return context.json({ balance, auditPending: true }, 202);
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("insufficient_balance")) return context.json({ error: "insufficient_balance" }, 400);
     if (message.includes("operation_conflict")) return context.json({ error: "operation_conflict" }, 409);
     if (message.includes("invalid_account")) return context.json({ error: "points_account_missing" }, 404);
     throw error;
-  }
-
-  const balance = await access.balance(accountId);
-  try {
-    await writeAdjustmentAudit(context, detail);
-    return context.json({ balance, auditPending: false });
-  } catch {
-    return context.json({ balance, auditPending: true }, 202);
   }
 });
