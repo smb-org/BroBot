@@ -3,7 +3,7 @@ import "./panel.css";
 
 import { dashboardCommonTexts, dashboardLanguage, serverFieldErrorText, type DashboardLanguage } from "../../../dashboard/locale";
 import {
-  ActionMenu, Badge, ChatTargetField, ChatPreview, ChipGroup, ChipsInput, CollectionPage, ConfirmDialog, EmptyState,
+  ActionMenu, Badge, Button, ChatTargetField, ChatPreview, ChipGroup, ChipsInput, CollectionPage, ConfirmDialog, EmptyState,
   Field, FieldPair, GameMultiSelect, LoadState, LoadStateLines, ListToolbar, PageHeader, RuleNote,
   mapServerFieldErrors, registerDashboardNavigationGuard, RoleThreshold, SaveStatus, Section, SegmentChoice, Select, StatusLed,
   SwitchSection, TemplateTextField, TimeoutDurationRangeFields, UnitInput, useDraft, useDraftGuard, useInspectorSelection, notify,
@@ -233,9 +233,10 @@ interface TextCommandEditorProperties {
     updateCache: (current: unknown, result: Value) => unknown,
   ) => Promise<Value>;
   onDeleted: (token: number) => void;
+  onOpenTestArea?: (moduleId: "text_commands" | "faq", entryId: string) => void;
 }
 
-const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, registeredVariables, registeredVariablesLoaded, registeredVariablesPending, registeredVariablesRefreshError, onRetryRegisteredVariables, initial, command, commands, channelVariables, canManageContent, canOperate, botIsModerator, onClose, onGuardChange, onRefresh, onSaved, generation, onWrite, onDeleted }: TextCommandEditorProperties): ReactElement => {
+const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, registeredVariables, registeredVariablesLoaded, registeredVariablesPending, registeredVariablesRefreshError, onRetryRegisteredVariables, initial, command, commands, channelVariables, canManageContent, canOperate, botIsModerator, onClose, onGuardChange, onRefresh, onSaved, generation, onWrite, onDeleted, onOpenTestArea }: TextCommandEditorProperties): ReactElement => {
   const labels = useMemo(() => textCommandsTexts(language), [language]);
   const searchGames = useCallback((query: string) => searchTextGames(channelId, query), [channelId]);
   const lookupGames = useCallback((ids: readonly string[]) => lookupTextGames(channelId, ids), [channelId]);
@@ -1039,6 +1040,14 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
   const pageMeta = command === null ? undefined : <span>{labels.lastUsed} {relativeTime(command.lastUsedAt, labels)} · {labels.useCount(command.useCount)}</span>;
   const common = dashboardCommonTexts(resolvedLanguage);
   const pageActions = <>
+    <div className="text-command-test-area-action">
+      <Button
+        variant="neutral"
+        disabled={command === null || dirty || pending || onOpenTestArea === undefined}
+        onClick={() => { if (command !== null) onOpenTestArea?.("text_commands", command.name); }}
+      >{labels.testAreaAction}</Button>
+      {command === null || dirty ? <span>{dirty ? labels.testAreaDirty : labels.testAreaSavedOnly}</span> : null}
+    </div>
     {command === null ? null : <ActionMenu
       label={common.moreActions}
       items={[{ label: labels.delete, danger: true, disabled: !canManageContent || pending, onSelect: requestDelete }]}
@@ -1197,6 +1206,7 @@ const TextCommandsPanel = (props: {
   botIsModerator?: boolean | null;
   onCloseInspector?: () => void;
   initialSelection?: string;
+  onOpenTestArea?: (moduleId: "text_commands" | "faq", entryId: string) => void;
 }): ReactElement => <TextCommandsPanelContent key={props.channelId} {...props} />;
 
 const TextCommandsPanelContent = ({
@@ -1207,6 +1217,7 @@ const TextCommandsPanelContent = ({
   botIsModerator = null,
   onCloseInspector,
   initialSelection,
+  onOpenTestArea,
 }: {
   channelId: string;
   language?: DashboardLanguage | undefined;
@@ -1215,6 +1226,7 @@ const TextCommandsPanelContent = ({
   botIsModerator?: boolean | null;
   onCloseInspector?: () => void;
   initialSelection?: string;
+  onOpenTestArea?: (moduleId: "text_commands" | "faq", entryId: string) => void;
 }): ReactElement => {
   const labels = textCommandsTexts(language);
   const resolvedLanguage = language ?? dashboardLanguage();
@@ -1458,6 +1470,7 @@ const TextCommandsPanelContent = ({
     generation={generation}
     onWrite={write}
     onDeleted={handleDeleted}
+    {...(onOpenTestArea === undefined ? {} : { onOpenTestArea })}
   /> : createOpen ? <TextCommandEditor
     key={`create-${String(selectionVersion)}`}
     channelId={channelId}

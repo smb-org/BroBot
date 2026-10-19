@@ -3,6 +3,7 @@ import { browserModuleLanguage, type ModuleChatCommandThreshold, type ModuleChat
 import type { ApiSourceFailureReason } from "../modules/api_source/contracts";
 import type { SystemVariableName } from "../template-variables";
 import type { GameSingleValueMessages } from "./ui/GameMultiSelect";
+import type { DryRunBlockCode } from "../contracts/dry-run";
 
 export type DashboardLanguage = ModuleLanguage;
 export type LocaleCatalog<T> = Record<DashboardLanguage, T>;
@@ -817,6 +818,7 @@ export interface DashboardTexts {
     locationWeather: string;
     members: string;
     variables: string;
+    testArea: string;
     overlays: string;
     overlaysChecking: string;
     module: string;
@@ -837,6 +839,125 @@ export interface DashboardTexts {
     sidebarSetupDescription: string;
     sidebarSearch: string;
     moduleOff: string;
+  };
+  testArea: {
+    title: string;
+    subtitle: string;
+    context: string;
+    message: string;
+    messagePlaceholder: string;
+    sender: string;
+    senderHint: string;
+    badges: string;
+    badgeNames: { subscriber: string; vip: string; moderator: string; broadcaster: string; viewer: string };
+    stream: string;
+    online: string;
+    offline: string;
+    game: GameSingleValueMessages;
+    sharedChat: string;
+    module: string;
+    allModules: string;
+    textCommands: string;
+    faq: string;
+    chatVoting: string;
+    votekick: string;
+    votekickEntryLabel: string;
+    run: string;
+    history: string;
+    historyEmpty: string;
+    historyReplay: (message: string, sender: string) => string;
+    editContext: string;
+    clearEntryFilter: string;
+    inputsChangedHint: string;
+    result: string;
+    reactionsSummary: (fires: number, blocked: number) => string;
+    resultCount: (count: number) => string;
+    noReactionModules: (modules: string) => string;
+    moduleError: (modules: string) => string;
+    muted: string;
+    paused: string;
+    idleTitle: string;
+    idleDescription: string;
+    loading: string;
+    retry: string;
+    emptyTitle: string;
+    emptyDescription: string;
+    incompleteTitle: string;
+    incompleteDescription: string;
+    errorTitle: string;
+    errorDescription: string;
+    noDetails: string;
+    blocked: string;
+    indeterminate: string;
+    targetCheckPending: string;
+    untitledVote: string;
+    indeterminateSummary: (count: number) => string;
+    fires: string;
+    wouldReply: string;
+    wouldReplyMuted: string;
+    wouldAct: string;
+    matchCommandLabel: string;
+    matchAliasLabel: string;
+    matchKeywordLabel: string;
+    matchRegexLabel: string;
+    inMessage: string;
+    matchCommand: string;
+    matchAlias: (token: string) => string;
+    quoted: (token: string) => string;
+    matchKeyword: (pattern: string) => string;
+    matchRegex: (pattern: string) => string;
+    matchVoteCommand: string;
+    matchVoteChoice: (choice: string) => string;
+    matchVoteTerm: (term: string) => string;
+    matchVoteOverflow: string;
+    matchVotekickTarget: (target: string) => string;
+    matchVotekickChoice: (choice: string) => string;
+    textCommand: string;
+    faqEntry: string;
+    why: string;
+    answer: string;
+    templateNotes: string;
+    preview: string;
+    botSpeaker: string;
+    chatTarget: string;
+    thisChat: string;
+    sharedChats: string;
+    replyToMessage: string;
+    suppressedAnswer: string;
+    suppressedEffect: (reason: "module_disabled" | "channel_paused" | "channel_muted") => string;
+    effectCondition: (condition: "on_success" | "on_failure") => string;
+    blocks: string;
+    wouldDo: string;
+    openEditor: string;
+    voteCommandWhy: (message: string) => string;
+    voteChoiceWhy: (message: string, choice: string) => string;
+    voteTermWhy: (message: string, term: string) => string;
+    voteOverflowWhy: (message: string) => string;
+    voteFinalizeWhy: (message: string) => string;
+    votekickTargetWhy: (message: string, target: string) => string;
+    votekickChoiceWhy: (message: string, choice: string) => string;
+    votekickFinalizeWhy: (message: string) => string;
+    wouldCountVote: (choice: string, kind?: "option" | "term") => string;
+    wouldCountVotekickVote: string;
+    wouldStartBallot: (moduleId: "chat_voting" | "votekick") => string;
+    wouldOverflowBallot: string;
+    wouldFinalizeBallot: (moduleId: "chat_voting" | "votekick") => string;
+    ballotCountEffect: (moduleId: "chat_voting" | "votekick", choice?: string) => string;
+    ballotStartEffect: (moduleId: "chat_voting" | "votekick", label: string) => string;
+    ballotOverflowEffect: string;
+    ballotFinalizeEffect: (moduleId: "chat_voting" | "votekick", label: string) => string;
+    ballotCounts: (moduleId: "chat_voting" | "votekick", counts: readonly number[]) => string;
+    ballotTerms: (terms: readonly { term: string; count: number; approved: boolean }[]) => string;
+    ballotMore: (count: number) => string;
+    syntheticSenderNote: (login: string) => string;
+    chatEffect: string;
+    announcementEffect: string;
+    timeoutEffect: (minimum: number, maximum: number, reason: string) => string;
+    shoutoutEffect: (login: string) => string;
+    variableEffect: (name: string, from: number, to: number) => string;
+    cooldownEffect: (seconds: number) => string;
+    userCooldownEffect: (seconds: number) => string;
+    blockReason: (code: DryRunBlockCode, detail?: Readonly<Record<string, string | number | boolean | null>>) => string;
   };
   overview: {
     oneChannelAvailable: string;
@@ -1297,7 +1418,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     navigation: {
       mainNavigation: "Hauptnavigation", overview: "Übersicht", live: "Live", setup: "Einrichten", channel: "Kanal", system: "System", locationWeather: "Ort & Wetter",
-      members: "Mitglieder", variables: "Variablen", module: "Module", audit: "Protokoll", selectChannel: "Kanal auswählen",
+      members: "Mitglieder", variables: "Variablen", module: "Module", audit: "Protokoll", selectChannel: "Kanal auswählen", testArea: "Testbereich",
       accountMenu: "Konto", appearance: "Darstellung", appearanceNightShift: "Nachtschicht", appearanceIndigoNight: "Indigo-Nacht",
       manageModules: "Module verwalten", moduleCategories: { chat: "Chat", participation: "Mitmachen", twitch: "Twitch", data: "Daten", stream: "Stream", admin: "Verwaltung" },
       overlays: "Overlays",
@@ -1305,6 +1426,170 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       signingOut: "Abmeldung …", signOut: "Abmelden",
       openSidebar: "Seitenleiste öffnen", closeSidebar: "Seitenleiste schließen",
       sidebarSetupHeading: "Einrichten", sidebarSetupDescription: "Alles für deinen Stream.", sidebarSearch: "Alles durchsuchen", moduleOff: "Aus",
+    },
+    testArea: {
+      title: "Testbereich",
+      subtitle: "Probenachricht im Trockenlauf – nichts wird gesendet oder gespeichert. Verlauf nur in dieser Sitzung.",
+      context: "Kontext",
+      message: "Nachricht",
+      messagePlaceholder: "Chatnachricht eingeben",
+      sender: "Absender",
+      senderHint: "Fiktiver Testabsender für persönliche Abklingzeiten",
+      badges: "Abzeichen",
+      badgeNames: { subscriber: "Sub", vip: "VIP", moderator: "Mod", broadcaster: "Broadcaster", viewer: "Zuschauer" },
+      stream: "Stream",
+      online: "Live",
+      offline: "Offline",
+      game: {
+        label: "Spiel", hint: "Nur der Trockenlauf-Kontext ändert sich.", search: "Spiel suchen", searchHint: "Mindestens zwei Zeichen eingeben.",
+        loading: "Spiele werden geladen …", empty: "Keine Spiele gefunden.", error: "Spiele konnten nicht geladen werden.",
+        suggestions: "Vorgeschlagene Spiele", allGames: "Alle Spiele", remove: (name) => name + " entfernen",
+      },
+      sharedChat: "Geteilter Chat",
+      module: "Module",
+      allModules: "Alle chatlesenden Module",
+      textCommands: "Textbefehle",
+      faq: "FAQ",
+      chatVoting: "Abstimmung",
+      votekick: "Votekick",
+      votekickEntryLabel: "Spieler melden",
+      run: "Prüfen",
+      history: "Verlauf",
+      historyEmpty: "Hier erscheinen die letzten zehn Prüfungen dieser Sitzung.",
+      historyReplay: (message, sender) => message + " von " + sender + " erneut prüfen",
+      editContext: "Ändern",
+      clearEntryFilter: "Eintragsfilter aufheben",
+      inputsChangedHint: "Eingaben geändert – Prüfen aktualisiert das Ergebnis",
+      result: "Ergebnis",
+      reactionsSummary: (fires, blocked) => [
+        fires === 0 ? null : formatNumber(fires, "de") + (fires === 1 ? " reagiert" : " reagieren"),
+        blocked === 0 ? null : formatNumber(blocked, "de") + " blockiert",
+      ].filter((part): part is string => part !== null).join(" · "),
+      resultCount: (count) => formatNumber(count, "de") + " Treffer",
+      noReactionModules: (modules) => "Ohne Reaktion: " + modules,
+      moduleError: (modules) => "Fehler bei: " + modules,
+      muted: "Stumm",
+      paused: "Pausiert",
+      idleTitle: "Bereit für einen Trockenlauf",
+      idleDescription: "Gib eine Nachricht ein und wähle „Prüfen“.",
+      loading: "Wird geprüft …",
+      retry: "Erneut prüfen",
+      emptyTitle: "Keine Reaktion gefunden",
+      emptyDescription: "Für diese Nachricht gibt es keinen passenden Chat-Auslöser.",
+      incompleteTitle: "Ergebnis unvollständig",
+      incompleteDescription: "Mindestens ein Modul konnte die Nachricht nicht vollständig prüfen. Die angezeigten Ergebnisse können unvollständig sein.",
+      errorTitle: "Trockenlauf fehlgeschlagen",
+      errorDescription: "Die Nachricht konnte nicht geprüft werden. Versuche es erneut.",
+      noDetails: "Keine passenden Details für diese Nachricht.",
+      blocked: "Blockiert",
+      indeterminate: "Noch offen",
+      targetCheckPending: "Noch offen",
+      untitledVote: "Abstimmung",
+      indeterminateSummary: (count) => formatNumber(count, "de") + (count === 1 ? " Ergebnis noch offen" : " Ergebnisse noch offen"),
+      fires: "Würde auslösen",
+      wouldReply: "Würde antworten",
+      wouldReplyMuted: "Würde antworten (stumm)",
+      wouldAct: "Würde auslösen",
+      matchCommandLabel: "Befehlsname",
+      matchAliasLabel: "Alias",
+      matchKeywordLabel: "Schlüsselwort",
+      matchRegexLabel: "Regulärer Ausdruck",
+      inMessage: "in der Nachricht",
+      matchCommand: "Befehlsname",
+      matchAlias: (token) => "Alias „" + token + "“",
+      quoted: (token) => "„" + token + "“",
+      matchKeyword: (pattern) => "Schlüsselwort „" + pattern + "“",
+      matchRegex: (pattern) => "Regulärer Ausdruck „" + pattern + "“",
+      matchVoteCommand: "Abstimmungsbefehl",
+      matchVoteChoice: (choice) => "Option " + choice,
+      matchVoteTerm: (term) => "Begriff „" + term + "“",
+      matchVoteOverflow: "Freitextstimme",
+      matchVotekickTarget: (target) => "Ziel „" + target + "“",
+      matchVotekickChoice: (choice) => choice === "yes" ? "Ja-Stimme" : "Nein-Stimme",
+      textCommand: "Textbefehl",
+      faqEntry: "FAQ",
+      why: "Warum",
+      answer: "Antwort",
+      templateNotes: "Vorlagenhinweise",
+      preview: "Vorschau",
+      botSpeaker: "BroBot",
+      chatTarget: "Chat-Ziel",
+      thisChat: "dieser Chat",
+      sharedChats: "alle geteilten Chats",
+      replyToMessage: "Antwort auf diese Nachricht",
+      suppressedAnswer: "Würde nicht gesendet: Kanal ist stummgeschaltet.",
+      suppressedEffect: (reason) => reason === "module_disabled" ? "Unterdrückt: Modul deaktiviert"
+        : reason === "channel_paused" ? "Unterdrückt: Kanal pausiert" : "Unterdrückt: Kanal stummgeschaltet",
+      effectCondition: (condition) => condition === "on_success" ? "Nur bei Erfolg" : "Nur bei Fehler",
+      blocks: "Blockiert",
+      wouldDo: "Würde tun",
+      openEditor: "Im Editor öffnen",
+      voteCommandWhy: (message) => "Die Nachricht „" + message + "“ startet oder verwaltet eine Abstimmung.",
+      voteChoiceWhy: (message, choice) => "Die Nachricht „" + message + "“ wählt Option " + choice + ".",
+      voteTermWhy: (message, term) => "Die Nachricht „" + message + "“ stimmt für den Begriff „" + term + "“.",
+      voteOverflowWhy: (message) => "Die Nachricht „" + message + "“ zählt als weitere Stimme in der Abstimmung.",
+      voteFinalizeWhy: (message) => "Die Nachricht „" + message + "“ beendet die Abstimmung.",
+      votekickTargetWhy: (message, target) => "Die Nachricht „" + message + "“ nennt das Ziel „" + target + "“.",
+      votekickChoiceWhy: (message, choice) => "Die Nachricht „" + message + "“ stimmt für " + (choice === "yes" ? "Ja" : "Nein") + ".",
+      votekickFinalizeWhy: (message) => "Die Nachricht „" + message + "“ beendet den Votekick.",
+      wouldCountVote: (choice, kind) => kind === "term" ? "Würde Begriff „" + choice + "“ zählen" : "Würde Stimme " + choice + " zählen",
+      wouldCountVotekickVote: "Würde Votekick-Stimme zählen",
+      wouldStartBallot: (moduleId) => moduleId === "votekick" ? "Würde Votekick starten" : "Würde Abstimmung starten",
+      wouldOverflowBallot: "Würde unter „weitere“ zählen",
+      wouldFinalizeBallot: (moduleId) => moduleId === "votekick" ? "Würde Votekick beenden" : "Würde Abstimmung beenden",
+      ballotCountEffect: (moduleId, choice) => moduleId === "votekick"
+        ? "Stimme würde als „" + (choice === "yes" ? "Ja" : "Nein") + "“ zum Votekick gezählt"
+        : "Stimme würde der laufenden Abstimmung zugeordnet",
+      ballotStartEffect: (moduleId, label) => moduleId === "votekick"
+        ? "Votekick für „" + label + "“ würde starten"
+        : "Abstimmung „" + label + "“ würde starten",
+      ballotOverflowEffect: "Stimme würde unter „weitere“ zählen",
+      ballotFinalizeEffect: (moduleId, label) => moduleId === "votekick"
+        ? "Votekick für „" + label + "“ würde beendet"
+        : "Abstimmung „" + label + "“ würde beendet",
+      ballotCounts: (moduleId, counts) => "Stimmen: " + counts.map((count, index) =>
+        (moduleId === "votekick" ? index === 0 ? "Ja" : "Nein" : "Option " + String(index + 1)) + ": " + formatNumber(count, "de"),
+      ).join(" · "),
+      ballotTerms: (terms) => terms.map(({ term, count }) => term + " · " + formatNumber(count, "de")).join(" · "),
+      ballotMore: (count) => formatNumber(count, "de") + (count === 1 ? " weitere Stimme" : " weitere Stimmen"),
+      syntheticSenderNote: (login) => "Ausgewertet mit dem synthetischen Testabsender " + login + ".",
+      chatEffect: "Chatnachricht würde gesendet",
+      announcementEffect: "Ankündigung würde gesendet",
+      timeoutEffect: (minimum, maximum, reason) => "Timeout " + formatNumber(minimum, "de") + (minimum === maximum ? "" : "–" + formatNumber(maximum, "de")) + " s" + (reason.length === 0 ? "" : " · " + reason),
+      shoutoutEffect: (login) => "Shoutout für " + login + " würde ausgelöst",
+      variableEffect: (name, from, to) => "Variable " + name + " würde von " + formatNumber(from, "de") + " auf " + formatNumber(to, "de") + " wechseln",
+      cooldownEffect: (seconds) => "Abklingzeit " + formatNumber(seconds, "de") + " s würde starten",
+      userCooldownEffect: (seconds) => "Persönliche Abklingzeit " + formatNumber(seconds, "de") + " s würde starten",
+      blockReason: (code, detail) => {
+        const seconds = typeof detail?.remainingSeconds === "number" ? detail.remainingSeconds : null;
+        switch (code) {
+          case "text_commands.disabled": return "Textbefehl ist deaktiviert.";
+          case "text_commands.permission_denied": return "Der Absender erfüllt die Mindestrolle nicht.";
+          case "text_commands.stream_state": return "Der Streamstatus passt nicht zur Einstellung.";
+          case "text_commands.game_filter": return "Das aktuelle Spiel passt nicht zum Filter.";
+          case "text_commands.cooldown": return "Abklingzeit" + (seconds === null ? "" : ": noch " + formatNumber(seconds, "de") + " s") + ".";
+          case "text_commands.user_cooldown": return "Abklingzeit pro Person" + (seconds === null ? "" : ": noch " + formatNumber(seconds, "de") + " s") + ".";
+          case "text_commands.argument_invalid": return "Die Argumente sind ungültig.";
+          case "text_commands.argument_missing": return "Ein erforderliches Argument fehlt.";
+          case "chat_voting.permission_denied": return "Der Absender erfüllt die Mindestrolle nicht.";
+          case "chat_voting.vote_unavailable": return "Die Abstimmung ist gerade nicht verfügbar.";
+          case "votekick.permission_denied": return "Der Absender erfüllt die Mindestrolle nicht.";
+          case "votekick.target_protected": return "Das Ziel ist geschützt.";
+          case "votekick.target_inactive": return "Das Ziel ist im Chat nicht aktiv.";
+          case "votekick.cooldown": return "Abklingzeit" + (seconds === null ? "" : ": noch " + formatNumber(seconds, "de") + " s") + ".";
+          case "votekick.ballot_busy": return "Es läuft bereits eine Abstimmung.";
+          case "votekick.unavailable": return "Votekick ist gerade nicht verfügbar.";
+          case "faq.permission_denied": return "Der Absender erfüllt die Mindestrolle nicht.";
+          case "faq.game_filter": return "Das aktuelle Spiel passt nicht zum Filter.";
+          case "faq.cooldown": return "Abklingzeit" + (seconds === null ? "" : ": noch " + formatNumber(seconds, "de") + " s") + ".";
+          case "faq.person_cooldown": return "Abklingzeit pro Person" + (seconds === null ? "" : ": noch " + formatNumber(seconds, "de") + " s") + ".";
+          case "faq.shadowed": return "Ein früherer FAQ-Eintrag hat Vorrang.";
+          case "faq.command_prefix": return "Nachrichten mit ! am Anfang werden übersprungen.";
+          case "faq.own_message": return "Eigene Bot-Nachrichten werden übersprungen.";
+          case "host.module_disabled": return "Das Modul ist deaktiviert.";
+          case "host.channel_paused": return "Automatische Aktionen sind pausiert.";
+        }
+      },
     },
     overview: {
       oneChannelAvailable: "1 Kanal freigegeben",
@@ -1735,7 +2020,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     navigation: {
       mainNavigation: "Main navigation", overview: "Overview", live: "Live", setup: "Setup", channel: "Channel", system: "System", locationWeather: "Location & weather",
-      members: "Members", variables: "Variables", module: "Modules", audit: "Log", selectChannel: "Select channel",
+      members: "Members", variables: "Variables", module: "Modules", audit: "Log", selectChannel: "Select channel", testArea: "Test area",
       accountMenu: "Account", appearance: "Appearance", appearanceNightShift: "Night shift", appearanceIndigoNight: "Indigo night",
       manageModules: "Manage modules", moduleCategories: { chat: "Chat", participation: "Participation", twitch: "Twitch", data: "Data", stream: "Stream", admin: "Administration" },
       overlays: "Overlays",
@@ -1743,6 +2028,170 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       signingOut: "Signing out …", signOut: "Sign out",
       openSidebar: "Open sidebar", closeSidebar: "Close sidebar",
       sidebarSetupHeading: "Setup", sidebarSetupDescription: "Everything for your stream.", sidebarSearch: "Search everything", moduleOff: "Off",
+    },
+    testArea: {
+      title: "Test area",
+      subtitle: "Dry-run a sample message. Nothing is sent or saved. History stays in this session.",
+      context: "Context",
+      message: "Message",
+      messagePlaceholder: "Enter a chat message",
+      sender: "Sender",
+      senderHint: "Fictional test sender for per-person cooldowns",
+      badges: "Badges",
+      badgeNames: { subscriber: "Sub", vip: "VIP", moderator: "Mod", broadcaster: "Broadcaster", viewer: "Viewer" },
+      stream: "Stream",
+      online: "Live",
+      offline: "Offline",
+      game: {
+        label: "Game", hint: "Only the dry-run context changes.", search: "Search games", searchHint: "Enter at least two characters.",
+        loading: "Loading games …", empty: "No games found.", error: "Games could not be loaded.",
+        suggestions: "Suggested games", allGames: "All games", remove: (name) => "Remove " + name,
+      },
+      sharedChat: "Shared chat",
+      module: "Modules",
+      allModules: "All chat-reading modules",
+      textCommands: "Text commands",
+      faq: "FAQ",
+      chatVoting: "Voting",
+      votekick: "Votekick",
+      votekickEntryLabel: "Report player",
+      run: "Check",
+      history: "History",
+      historyEmpty: "The last ten checks from this session appear here.",
+      historyReplay: (message, sender) => "Check " + message + " from " + sender + " again",
+      editContext: "Edit",
+      clearEntryFilter: "Clear entry filter",
+      inputsChangedHint: "Inputs changed – Check updates the result",
+      result: "Result",
+      reactionsSummary: (fires, blocked) => [
+        fires === 0 ? null : formatNumber(fires, "en") + (fires === 1 ? " reaction" : " reactions"),
+        blocked === 0 ? null : formatNumber(blocked, "en") + " blocked",
+      ].filter((part): part is string => part !== null).join(" · "),
+      resultCount: (count) => formatNumber(count, "en") + (count === 1 ? " result" : " results"),
+      noReactionModules: (modules) => "No reaction: " + modules,
+      moduleError: (modules) => "Errors in: " + modules,
+      muted: "Muted",
+      paused: "Paused",
+      idleTitle: "Ready for a dry run",
+      idleDescription: "Enter a message and choose “Check”.",
+      loading: "Checking …",
+      retry: "Check again",
+      emptyTitle: "No reaction found",
+      emptyDescription: "No chat trigger matches this message.",
+      incompleteTitle: "Incomplete result",
+      incompleteDescription: "At least one module could not check the message fully. The results shown may be incomplete.",
+      errorTitle: "Dry run failed",
+      errorDescription: "The message could not be checked. Try again.",
+      noDetails: "No matching details for this message.",
+      blocked: "Blocked",
+      indeterminate: "Not settled yet",
+      targetCheckPending: "Pending",
+      untitledVote: "Untitled vote",
+      indeterminateSummary: (count) => formatNumber(count, "en") + (count === 1 ? " uncertain result" : " uncertain results"),
+      fires: "Would trigger",
+      wouldReply: "Would reply",
+      wouldReplyMuted: "Would reply (muted)",
+      wouldAct: "Would trigger",
+      matchCommandLabel: "Command name",
+      matchAliasLabel: "Alias",
+      matchKeywordLabel: "Keyword",
+      matchRegexLabel: "Regular expression",
+      inMessage: "in the message",
+      matchCommand: "Command name",
+      matchAlias: (token) => "Alias “" + token + "”",
+      quoted: (token) => "“" + token + "”",
+      matchKeyword: (pattern) => "Keyword “" + pattern + "”",
+      matchRegex: (pattern) => "Regular expression “" + pattern + "”",
+      matchVoteCommand: "Voting command",
+      matchVoteChoice: (choice) => "Option " + choice,
+      matchVoteTerm: (term) => "Term “" + term + "”",
+      matchVoteOverflow: "Free-text vote",
+      matchVotekickTarget: (target) => "Target “" + target + "”",
+      matchVotekickChoice: (choice) => choice === "yes" ? "Yes vote" : "No vote",
+      textCommand: "Text command",
+      faqEntry: "FAQ",
+      why: "Why",
+      answer: "Answer",
+      templateNotes: "Template notes",
+      preview: "Preview",
+      botSpeaker: "BroBot",
+      chatTarget: "Chat target",
+      thisChat: "this chat",
+      sharedChats: "all shared chats",
+      replyToMessage: "Reply to this message",
+      suppressedAnswer: "Would not be sent: channel is muted.",
+      suppressedEffect: (reason) => reason === "module_disabled" ? "Suppressed: module disabled"
+        : reason === "channel_paused" ? "Suppressed: channel paused" : "Suppressed: channel is muted",
+      effectCondition: (condition) => condition === "on_success" ? "Only on success" : "Only on failure",
+      blocks: "Blocked",
+      wouldDo: "Would do",
+      openEditor: "Open in editor",
+      voteCommandWhy: (message) => "The message “" + message + "” starts or manages a vote.",
+      voteChoiceWhy: (message, choice) => "The message “" + message + "” selects option " + choice + ".",
+      voteTermWhy: (message, term) => "The message “" + message + "” votes for the term “" + term + "”.",
+      voteOverflowWhy: (message) => "The message “" + message + "” counts as an additional vote in the ballot.",
+      voteFinalizeWhy: (message) => "The message “" + message + "” ends the vote.",
+      votekickTargetWhy: (message, target) => "The message “" + message + "” names the target “" + target + "”.",
+      votekickChoiceWhy: (message, choice) => "The message “" + message + "” votes " + (choice === "yes" ? "yes" : "no") + ".",
+      votekickFinalizeWhy: (message) => "The message “" + message + "” ends the votekick.",
+      wouldCountVote: (choice, kind) => kind === "term" ? "Would count term “" + choice + "”" : "Would count vote " + choice,
+      wouldCountVotekickVote: "Would count votekick vote",
+      wouldStartBallot: (moduleId) => moduleId === "votekick" ? "Would start votekick" : "Would start vote",
+      wouldOverflowBallot: "Would count under “more”",
+      wouldFinalizeBallot: (moduleId) => moduleId === "votekick" ? "Would end votekick" : "Would end vote",
+      ballotCountEffect: (moduleId, choice) => moduleId === "votekick"
+        ? "Vote would count as “" + (choice === "yes" ? "yes" : "no") + "” in the votekick"
+        : "Vote would be added to the running ballot",
+      ballotStartEffect: (moduleId, label) => moduleId === "votekick"
+        ? "Votekick for “" + label + "” would start"
+        : "Vote “" + label + "” would start",
+      ballotOverflowEffect: "Vote would count under “more”",
+      ballotFinalizeEffect: (moduleId, label) => moduleId === "votekick"
+        ? "Votekick for “" + label + "” would end"
+        : "Vote “" + label + "” would end",
+      ballotCounts: (moduleId, counts) => "Votes: " + counts.map((count, index) =>
+        (moduleId === "votekick" ? index === 0 ? "Yes" : "No" : "Option " + String(index + 1)) + ": " + formatNumber(count, "en"),
+      ).join(" · "),
+      ballotTerms: (terms) => terms.map(({ term, count }) => term + " · " + formatNumber(count, "en")).join(" · "),
+      ballotMore: (count) => formatNumber(count, "en") + (count === 1 ? " more vote" : " more votes"),
+      syntheticSenderNote: (login) => "Evaluated with the synthetic test sender " + login + ".",
+      chatEffect: "Chat message would be sent",
+      announcementEffect: "Announcement would be sent",
+      timeoutEffect: (minimum, maximum, reason) => "Timeout " + formatNumber(minimum, "en") + (minimum === maximum ? "" : "–" + formatNumber(maximum, "en")) + " s" + (reason.length === 0 ? "" : " · " + reason),
+      shoutoutEffect: (login) => "Shoutout for " + login + " would trigger",
+      variableEffect: (name, from, to) => "Variable " + name + " would change from " + formatNumber(from, "en") + " to " + formatNumber(to, "en"),
+      cooldownEffect: (seconds) => "Cooldown of " + formatNumber(seconds, "en") + " s would start",
+      userCooldownEffect: (seconds) => "Per-person cooldown of " + formatNumber(seconds, "en") + " s would start",
+      blockReason: (code, detail) => {
+        const seconds = typeof detail?.remainingSeconds === "number" ? detail.remainingSeconds : null;
+        switch (code) {
+          case "text_commands.disabled": return "Text command is disabled.";
+          case "text_commands.permission_denied": return "The sender does not meet the minimum role.";
+          case "text_commands.stream_state": return "The stream state does not match the setting.";
+          case "text_commands.game_filter": return "The current game does not match the filter.";
+          case "text_commands.cooldown": return "Cooldown" + (seconds === null ? "" : ": " + formatNumber(seconds, "en") + " s left") + ".";
+          case "text_commands.user_cooldown": return "Per-person cooldown" + (seconds === null ? "" : ": " + formatNumber(seconds, "en") + " s left") + ".";
+          case "text_commands.argument_invalid": return "The arguments are invalid.";
+          case "text_commands.argument_missing": return "A required argument is missing.";
+          case "chat_voting.permission_denied": return "The sender does not meet the minimum role.";
+          case "chat_voting.vote_unavailable": return "Voting is not available right now.";
+          case "votekick.permission_denied": return "The sender does not meet the minimum role.";
+          case "votekick.target_protected": return "The target is protected.";
+          case "votekick.target_inactive": return "The target is not active in chat.";
+          case "votekick.cooldown": return "Cooldown" + (seconds === null ? "" : ": " + formatNumber(seconds, "en") + " s left") + ".";
+          case "votekick.ballot_busy": return "A vote is already running.";
+          case "votekick.unavailable": return "Votekick is not available right now.";
+          case "faq.permission_denied": return "The sender does not meet the minimum role.";
+          case "faq.game_filter": return "The current game does not match the filter.";
+          case "faq.cooldown": return "Cooldown" + (seconds === null ? "" : ": " + formatNumber(seconds, "en") + " s left") + ".";
+          case "faq.person_cooldown": return "Per-person cooldown" + (seconds === null ? "" : ": " + formatNumber(seconds, "en") + " s left") + ".";
+          case "faq.shadowed": return "An earlier FAQ entry takes priority.";
+          case "faq.command_prefix": return "Messages starting with ! are skipped.";
+          case "faq.own_message": return "The bot's own messages are skipped.";
+          case "host.module_disabled": return "The module is disabled.";
+          case "host.channel_paused": return "Automatic actions are paused.";
+        }
+      },
     },
     overview: {
       oneChannelAvailable: "1 channel available",

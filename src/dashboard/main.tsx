@@ -55,6 +55,7 @@ import { EventsPage } from "./events/EventsPage";
 import { emptyEventFilter, eventFilterIsActive } from "./events/model";
 import { AuditPage } from "./audit/AuditPage";
 import { ChannelVariablesPage } from "./ChannelVariablesPage";
+import { TestAreaPage } from "./TestAreaPage";
 import { ChannelDefaultsEditor } from "./ChannelDefaultsEditor";
 import { ChannelLocationPage } from "./ChannelLocationPage";
 import { LiveCockpit } from "./LiveCockpit";
@@ -1546,6 +1547,17 @@ export const DashboardApp = (): ReactElement => {
           ? <ChannelLocationPage key={route.channelId} channelId={route.channelId} role={selectedChannel.role} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "members" && selectedChannel !== null ? <MembersPage key={route.channelId} channelId={route.channelId} ownRole={selectedChannel.role} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "variables" && selectedChannel !== null ? <ChannelVariablesPage key={route.channelId} channelId={route.channelId} canManage={canManage(selectedChannel.role)} onOpenCommand={(name) => { setPendingModuleSelection({ channelId: route.channelId, moduleId: "text_commands", value: name }); navigate({ kind: "module", channelId: route.channelId, moduleId: "text_commands" }); }} onOpenOverlay={(overlayId, initialVariable, initialOverlayName) => { navigate({ kind: "channel", channelId: route.channelId, section: "overlays", editorOverlayId: overlayId, ...(initialVariable === undefined ? {} : { initialVariable }), ...(overlayId === "new" && initialOverlayName !== undefined ? { initialOverlayName } : {}) }); }} onInitialSelectionConsumed={(name) => { setPendingVariableSelection((pending) => pending?.channelId === route.channelId && pending.name === name ? null : pending); }} {...(pendingVariableSelection?.channelId === route.channelId ? { initialSelection: pendingVariableSelection.name } : {})} /> : null}
+        {!showChannelNotReleased && route.kind === "channel" && route.section === "test-area" && selectedChannel !== null ? <TestAreaPage
+          key={`${route.channelId}:${route.only?.moduleId ?? "all"}:${route.only?.entryId ?? ""}`}
+          channelId={route.channelId}
+          language={dashboardLanguage()}
+          {...(selectedChannel.streamState === undefined ? {} : { initialStreamState: selectedChannel.streamState })}
+          {...(route.only === undefined ? {} : { only: route.only })}
+          onOpenEditor={(moduleId, entryId) => {
+            setPendingModuleSelection({ channelId: route.channelId, moduleId, value: entryId });
+            navigate({ kind: "module", channelId: route.channelId, moduleId });
+          }}
+        /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "overlays" && selectedChannel !== null
           ? route.editorOverlayId === undefined
             ? <OverlaysPage key={dashboardRoutePath(route)} channelId={route.channelId} canManage={canManage(selectedChannel.role)} onOpenEditor={(overlayId) => { navigate({ kind: "channel", channelId: route.channelId, section: "overlays", editorOverlayId: overlayId }); }} {...(route.overlayId === undefined ? {} : { initialSelection: route.overlayId })} />

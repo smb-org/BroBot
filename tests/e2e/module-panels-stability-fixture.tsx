@@ -30,8 +30,8 @@ export const RealtimeHarness = ({ children }: { children: ReactNode }) => {
 const panel = panelName === "api_source" ? <ApiSourcePanel channelId={channelId} language={language} canManage={canManage} />
   : panelName === "belabox" ? <BelaboxPanel channelId={channelId} language={language} canManage />
   : panelName === "chat_voting" ? <ChatVotingPanel channelId={channelId} language={language} canOperate />
-      : panelName === "faq" ? <FaqPanel channelId={channelId} language={language} />
-        : panelName === "text_commands" ? <TextCommandsPanel channelId={channelId} language={language} />
+      : panelName === "faq" ? <FaqPanel channelId={channelId} language={language} onOpenTestArea={() => undefined} />
+        : panelName === "text_commands" ? <TextCommandsPanel channelId={channelId} language={language} onOpenTestArea={() => undefined} />
           : panelName === "text_library" ? <TextLibraryPanel channelId={channelId} language={language} canManage={canManage} />
           : panelName === "timers" ? <TimersPanel channelId={channelId} language={language} canManage={canManage} />
             : <p>Choose a module panel.</p>;

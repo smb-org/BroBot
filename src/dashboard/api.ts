@@ -21,6 +21,7 @@ import type {
 } from "../panel-contract";
 import type { ChannelControlDuration, ChannelRole, ChatOutputTarget, OverlayElementKind } from "../contracts/values";
 import type { ModuleRegisteredTemplateVariable } from "../modules/contract";
+import type { DryRunRequest, DryRunResponse } from "../contracts/dry-run";
 
 import { PanelApiError } from "../contracts/panel-error";
 
@@ -82,6 +83,12 @@ export const requestJson = async <T>(input: string, init?: RequestInit): Promise
   if (response.status === 204) return undefined as T;
   return response.json();
 };
+
+export const dryRunChatMessage = (
+  channelId: string,
+  request: DryRunRequest,
+  signal?: AbortSignal,
+): Promise<DryRunResponse> => requestMutation<DryRunResponse>(channelPath(channelId, "dry-run"), "POST", request, signal);
 
 const requestOptions = (signal: AbortSignal | undefined): RequestInit | undefined =>
   signal === undefined ? undefined : { signal };
@@ -520,14 +527,16 @@ export const searchTwitchUser = async (
 const requestMutation = <T>(
   path: string,
   method: "POST" | "PATCH" | "DELETE" | "PUT",
-  body?: Record<string, unknown>,
-): Promise<T> => requestJson<{ token: string }>("/api/csrf").then(({ token }) => requestJson<T>(path, {
+  body?: object,
+  signal?: AbortSignal,
+): Promise<T> => requestJson<{ token: string }>("/api/csrf", requestOptions(signal)).then(({ token }) => requestJson<T>(path, {
   method,
   headers: {
     ...(body === undefined ? {} : { "Content-Type": "application/json" }),
     "X-CSRF-Token": token,
   },
   ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  ...requestOptions(signal),
 }));
 
 export const addChannelMember = (

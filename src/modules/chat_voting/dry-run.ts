@@ -257,12 +257,17 @@ export const dryRunChatVotingMessage = async (
       const cast = openVote === null ? undefined : castResults.get(openVote.id);
       const overflow = cast?.status === "overflow";
       const savedTerms = Array.isArray(terms) && terms.every(isChatVoteTerm) ? terms : undefined;
+      const hasTitle = openVote?.title !== null && openVote?.title !== undefined && openVote.title.trim().length > 0;
       effects.push({
         kind: "ballot",
         moduleId: "chat_voting",
         action: overflow ? "overflow" : "count",
         label: openVote?.title ?? "Abstimmung",
-        ...(overflow ? {} : { choice: textBallot ?? String(ballotChoice?.choice ?? text.trim()) }),
+        ...(!hasTitle ? { untitled: true } : {}),
+        ...(overflow ? {} : {
+          choice: textBallot ?? String(ballotChoice?.choice ?? text.trim()),
+          choiceKind: textBallot === null ? "option" : "term",
+        }),
         ...(Array.isArray(counts) && counts.every((count) => typeof count === "number") ? { counts } : {}),
         ...(savedTerms === undefined ? {} : { terms: savedTerms }),
         ...(typeof more === "number" ? { more } : {}),

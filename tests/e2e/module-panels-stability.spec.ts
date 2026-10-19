@@ -480,10 +480,11 @@ test("FAQ collection tests the draft, saves explicitly, and undoes an immediate 
   });
 
   await gotoPanel(page, "faq", "en");
-  const sample = page.getByRole("textbox", { name: "Test a sample message" });
-  await sample.fill("hello everyone");
-  await expect(page.locator(".faq-panel__sample-result")).toHaveText("Matched by “hello”.");
+  const testAreaAction = page.getByRole("button", { name: "Check in test area" });
+  await expect(testAreaAction).toBeEnabled();
   await page.getByRole("textbox", { name: "Answer", exact: true }).fill("Welcome to the channel!");
+  await expect(testAreaAction).toBeDisabled();
+  await expect(page.getByText("Save or discard changes before checking.")).toBeVisible();
   await page.getByRole("button", { name: "Save" }).click();
   await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
 

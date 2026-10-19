@@ -162,7 +162,7 @@ describe("editor field seam", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("keeps the same cover footprint for suggestions and selected games without box art", async () => {
+  it("omits missing box art for suggestions and selected games", async () => {
     const messages: GameMultiSelectMessages = {
       label: "Games", hint: "Filter by game.", search: "Search games", searchHint: "Search for a game.",
       loading: "Searching…", empty: "No games found.", error: "Search failed.", suggestions: "Suggestions", allGames: "All games", limitReached: "You can select up to 10 games.",
@@ -175,11 +175,10 @@ describe("editor field seam", () => {
     fireEvent.focus(screen.getByRole("searchbox", { name: "Games" }));
     fireEvent.change(screen.getByRole("searchbox", { name: "Games" }), { target: { value: "Unlisted" } });
     const option = await screen.findByRole("option", { name: /Unlisted Game/u, hidden: true });
-    const selectedPlaceholder = document.querySelector<HTMLElement>(".ui-game-multi-select__chip .ui-game-multi-select__cover-placeholder");
-    const suggestionPlaceholder = option.querySelector<HTMLElement>(".ui-game-multi-select__cover-placeholder");
-
-    expect(selectedPlaceholder).toHaveStyle({ width: "20px", height: "27px" });
-    expect(suggestionPlaceholder).toHaveStyle({ width: "28px", height: "38px" });
+    expect(document.querySelector(".ui-game-multi-select__chip .ui-game-multi-select__cover-placeholder")).not.toBeInTheDocument();
+    expect(option.querySelector(".ui-game-multi-select__cover-placeholder")).not.toBeInTheDocument();
+    expect(document.querySelector(".ui-game-multi-select__chip .ui-game-multi-select__cover")).not.toBeInTheDocument();
+    expect(option.querySelector(".ui-game-multi-select__cover")).not.toBeInTheDocument();
   });
 
   it("closes game results on Escape from the input or an option and when focus leaves the picker", async () => {

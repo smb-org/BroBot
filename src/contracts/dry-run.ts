@@ -60,6 +60,8 @@ export type DryRunEffect =
     action: "start" | "count" | "overflow" | "finalize";
     label: string;
     choice?: string;
+    choiceKind?: "option" | "term";
+    untitled?: boolean;
     counts?: readonly number[];
     terms?: readonly { term: string; count: number; approved: boolean }[];
     more?: number;
