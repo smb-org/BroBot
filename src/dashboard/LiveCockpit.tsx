@@ -226,40 +226,42 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
       <LiveCockpitBroadcast key={overview.channelId} channelId={overview.channelId} role={overview.role}
         onQueryStateChange={onBroadcastQueryStateChange}
         onSaved={(text) => { showFooterMessage({ text }); }} />
-      <div className="live-cockpit-header__indicators" aria-label={labels.statusIndicators}>
-        <StatusLed state={botConnected ? "ok" : "off"} label={`${labels.bot} · ${botConnected ? labels.botConnected : labels.botUnavailable}`} />
-        <StatusLed
-          state={!belaboxEnabled || belaboxObservation?.configured === false ? "off" : belaboxUnavailable || belaboxObservation === null ? "warn" : belaboxObservation.phase === "low" ? "warn" : sampleConnected ? "ok" : "warn"}
-          label={`${labels.belabox} · ${!belaboxEnabled
-            ? labels.belaboxDisabled
-            : belaboxObservation === null
-              ? labels.belaboxChecking
-              : belaboxObservation.configured === false
-                ? labels.belaboxNotConfigured
-                : belaboxUnavailable
-                  ? labels.belaboxUnavailable
-                  : sampleConnected
-                    ? labels.belaboxConnected(formatNumber(Math.round(sampleBitrate)))
-                    : labels.belaboxDisconnected}`}
-        />
-        {overlaysQuery.isPending
-          ? <StatusLed state="loading" label={`${labels.overlays} · ${labels.overlaysChecking}`} />
-          : overlayCount === null
-            ? <StatusLed state="warn" label={`${labels.overlays} · ${labels.overlaysNotSetUp}`} />
-            : <StatusLed state={overlayCount > 0 ? "ok" : "off"} label={`${labels.overlays} · ${overlayCount === 0 ? labels.overlaysNotSetUp : labels.overlaysCount(formatNumber(overlayCount))}`} />}
-      </div>
-      <div className="live-cockpit__warning-slot" data-slot="warning-banner" data-warning-count={warnings.length} aria-live="polite">
-        {warnings.length === 0 ? null : <div className="live-cockpit__warning-summary">
-          <Button variant="secondary" icon="warning" ariaHasPopup="dialog" ariaExpanded={warningDetailsOpen}
-            onClick={() => { setWarningDetailsOpen(true); }}>
-            <span>{warnings.length === 1 ? warnings[0]?.title : labels.warningSummary(formatNumber(warnings.length))}</span>
-            <Icon name="more" size={16} />
-          </Button>
-          {locationWarning === undefined ? null : <Button className="live-cockpit__location-action" variant="primary" icon="map-pin"
-            onClick={() => { setWarningDetailsOpen(false); locationWarning.run(); }}>
-            {locationWarning.action}
-          </Button>}
-        </div>}
+      <div className="live-cockpit-header__status" data-has-warnings={warnings.length > 0}>
+        <div className="live-cockpit-header__indicators" aria-label={labels.statusIndicators}>
+          <StatusLed state={botConnected ? "ok" : "off"} label={`${labels.bot} · ${botConnected ? labels.botConnected : labels.botUnavailable}`} />
+          <StatusLed
+            state={!belaboxEnabled || belaboxObservation?.configured === false ? "off" : belaboxUnavailable || belaboxObservation === null ? "warn" : belaboxObservation.phase === "low" ? "warn" : sampleConnected ? "ok" : "warn"}
+            label={`${labels.belabox} · ${!belaboxEnabled
+              ? labels.belaboxDisabled
+              : belaboxObservation === null
+                ? labels.belaboxChecking
+                : belaboxObservation.configured === false
+                  ? labels.belaboxNotConfigured
+                  : belaboxUnavailable
+                    ? labels.belaboxUnavailable
+                    : sampleConnected
+                      ? labels.belaboxConnected(formatNumber(Math.round(sampleBitrate)))
+                      : labels.belaboxDisconnected}`}
+          />
+          {overlaysQuery.isPending
+            ? <StatusLed state="loading" label={`${labels.overlays} · ${labels.overlaysChecking}`} />
+            : overlayCount === null
+              ? <StatusLed state="warn" label={`${labels.overlays} · ${labels.overlaysNotSetUp}`} />
+              : <StatusLed state={overlayCount > 0 ? "ok" : "off"} label={`${labels.overlays} · ${overlayCount === 0 ? labels.overlaysNotSetUp : labels.overlaysCount(formatNumber(overlayCount))}`} />}
+        </div>
+        <div className="live-cockpit__warning-slot" data-slot="warning-banner" data-warning-count={warnings.length} aria-live="polite">
+          {warnings.length === 0 ? null : <div className="live-cockpit__warning-summary">
+            <Button variant="secondary" icon="warning" ariaHasPopup="dialog" ariaExpanded={warningDetailsOpen}
+              onClick={() => { setWarningDetailsOpen(true); }}>
+              <span>{warnings.length === 1 ? warnings[0]?.title : labels.warningSummary(formatNumber(warnings.length))}</span>
+              <Icon name="more" size={16} />
+            </Button>
+            {locationWarning === undefined ? null : <Button className="live-cockpit__location-action" variant="primary" icon="map-pin"
+              onClick={() => { setWarningDetailsOpen(false); locationWarning.run(); }}>
+              {locationWarning.action}
+            </Button>}
+          </div>}
+        </div>
       </div>
     </header>
     <Dialog opened={warningDetailsOpen} title={labels.warningDetailsTitle} className="live-cockpit__warning-dialog"

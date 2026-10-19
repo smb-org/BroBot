@@ -27,7 +27,7 @@ export interface LiveCockpitMockOptions {
   votekick?: Record<string, unknown> | null;
   shoutoutFailureReason?: string;
   currentStateError?: boolean;
-  belaboxStatus?: { errorCode?: string | null; fetchFailureNotice?: boolean };
+  belaboxStatus?: { errorCode?: string | null; fetchFailureNotice?: boolean; bitrateKbps?: number };
   waitForCurrentState?: () => Promise<void>;
   waitForOverlays?: () => Promise<void>;
   onVoteClose?: (pollId: string) => void;
@@ -49,6 +49,7 @@ export interface LiveCockpitMockController {
     defaultChatTarget: string;
     defaultChatTargetRevision: number;
   };
+  setLocation: (location: NonNullable<LiveCockpitMockOptions["location"]> | null) => void;
 }
 
 export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMockOptions): Promise<LiveCockpitMockController> => {
@@ -181,7 +182,7 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
     if (pathname === "/api/csrf") return route.fulfill(json({ token: "csrf-live-regression" }));
     if (pathname === `${channelPrefix}/modules/belabox/status`) {
       return route.fulfill(json({
-        configured: true, updatedAt: now, mode: "stats_url", sample: { connected: true, bitrateKbps: 4_000, at: now },
+        configured: true, updatedAt: now, mode: "stats_url", sample: { connected: true, bitrateKbps: options.belaboxStatus?.bitrateKbps ?? 4_000, at: now },
         errorCode: options.belaboxStatus?.errorCode ?? null, polling: true, pollingDesired: true, streamId: "stream-a",
         belaboxStreamId: "stream-a", alertNotice: null, fetchFailureNotice: options.belaboxStatus?.fetchFailureNotice ?? false,
         intervalSeconds: 5,
@@ -216,5 +217,9 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
     overviewRequestCount: () => overviewRequests,
     setControls: (nextControls) => { controls = nextControls; },
     settingsState: () => settings,
+    setLocation: (location) => {
+      channel.location = location;
+      settings = { ...settings, location };
+    },
   };
 };

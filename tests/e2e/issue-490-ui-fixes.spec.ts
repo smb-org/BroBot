@@ -266,7 +266,7 @@ test("cockpit warnings use the header row without leaving a band or shifting the
         slotDisplay: slotStyle.display,
         slotVisibility: slotStyle.visibility,
         slotBackground: slotStyle.backgroundColor,
-        slotInHeader: slot.parentElement === header,
+        slotInHeader: slot.closest(".live-cockpit-header") === header,
       };
     });
     const emptyState = await readLayout();
@@ -304,7 +304,7 @@ test("mobile cockpit warnings stay compact and offer full details", async ({ pag
     if (cockpit === null || slot === null) throw new Error("The cockpit warning slot is missing.");
     return {
       slotHeight: slot.getBoundingClientRect().height,
-      slotInHeader: slot.parentElement === document.querySelector(".live-cockpit-header"),
+      slotInHeader: slot.closest(".live-cockpit-header") === document.querySelector(".live-cockpit-header"),
     };
   });
   expect(geometry.slotHeight).toBe(44);
