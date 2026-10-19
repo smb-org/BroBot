@@ -16,10 +16,13 @@ const numberForUrl = (value: number): string => String(value);
 const coordinatesForDisplay = (location: PanelChannelLocation): string =>
   `${location.latitude.toFixed(2)}, ${location.longitude.toFixed(2)}`;
 // The stored name is a full geocoded address ("Springfield, Illinois,
-// United States"); the header shows only the first segment, keeps the full
-// name as the title and menu heading, and (see below) folds it into the
-// accessible name too when it was shortened.
-const displayLocationName = (name: string, fallback: string): string => name.trim() || fallback;
+// United States"); the header shows only the first segment while the menu
+// retains the full name and coordinates.
+const coordinateLikeName = /^\s*[+-]?\d+(?:\.\d+)?\s*,\s*[+-]?\d+(?:\.\d+)?\s*$/;
+const displayLocationName = (name: string, fallback: string): string => {
+  const trimmed = name.trim();
+  return trimmed === "" || coordinateLikeName.test(trimmed) ? fallback : trimmed;
+};
 const shortLocationName = (name: string, fallback: string): string => displayLocationName(name, fallback).split(",")[0]?.trim() || fallback;
 
 export function ChannelLocationMenu({ location, messages }: {
@@ -28,9 +31,35 @@ export function ChannelLocationMenu({ location, messages }: {
 }): ReactElement {
   const [opened, setOpened] = useState(false);
   const [copyStatus, setCopyStatus] = useState<"copied" | "failed" | null>(null);
+  const hasPlaceName = location.name.trim().length > 0 && !coordinateLikeName.test(location.name);
   const fullName = displayLocationName(location.name, messages.locationFallback);
   const shortName = shortLocationName(location.name, messages.locationFallback);
   const namedLocation = { ...location, name: fullName };
+  const trigger = hasPlaceName
+    ? <Button
+        className="dashboard-header__location"
+        variant="subtle"
+        ariaHasPopup="menu"
+        ariaExpanded={opened}
+        title={fullName}
+        onClick={() => setCopyStatus(null)}
+      >
+        <span className="dashboard-header__location-label">
+          <span className="dashboard-header__location-name">{shortName}</span>
+        </span>
+        {shortName === fullName ? null : <span className="sr-only">, {fullName}</span>}
+      </Button>
+    : <Button
+        className="dashboard-header__location dashboard-header__location--icon-only"
+        variant="subtle"
+        icon="map-pin"
+        iconOnly
+        ariaLabel={`${messages.locationFallback}, ${coordinatesForDisplay(location)}`}
+        ariaHasPopup="menu"
+        ariaExpanded={opened}
+        title={coordinatesForDisplay(location)}
+        onClick={() => setCopyStatus(null)}
+      />;
 
   useEffect(() => {
     if (copyStatus === null) return undefined;
@@ -70,24 +99,7 @@ export function ChannelLocationMenu({ location, messages }: {
   return (
     <div data-ui="" className="dashboard-header__location-wrap">
       <MenuPrimitive.Root open={opened} onOpenChange={setOpened}>
-        <MenuPrimitive.Trigger render={<Button
-            className="dashboard-header__location"
-            variant="subtle"
-            ariaHasPopup="menu"
-            ariaExpanded={opened}
-            title={fullName}
-            onClick={() => setCopyStatus(null)}
-          >
-            <span className="dashboard-header__location-label">
-              <span className="dashboard-header__location-name">{shortName}</span>
-            </span>
-            {/* No aria-label override: the accessible name is derived from
-                this content, so it starts with the visible label (WCAG
-                2.5.3). The full name is appended only when it was actually
-                shortened -- visually hidden, never duplicating a name that's
-                already fully visible. */}
-            {shortName === fullName ? null : <span className="sr-only">, {fullName}</span>}
-          </Button>} />
+        <MenuPrimitive.Trigger render={trigger} />
         <MenuPrimitive.Portal>
           <MenuPrimitive.Positioner side="bottom" align="start" sideOffset={4} className="z-[var(--layer-popover)]" style={{ zIndex: "var(--layer-popover)" }}>
             <MenuPrimitive.Popup data-ui="" className="dashboard-header__location-menu">

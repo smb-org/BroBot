@@ -92,10 +92,18 @@ describe("ChannelLocationMenu", () => {
     expect(screen.getByRole("button", { name: /Regensburg/ })).toHaveTextContent("Regensburg");
   });
 
-  it("shows a readable fallback when a stored location has no name", () => {
-    render(<UiProvider><ChannelLocationMenu location={{ ...location, name: "  " }} messages={messages} /></UiProvider>);
+  it("keeps coordinate-only location details behind an icon-only header control", async () => {
+    render(<UiProvider><ChannelLocationMenu location={{ ...location, name: "49.01, 12.10" }} messages={messages} /></UiProvider>);
 
-    expect(screen.getByRole("button", { name: "Location" })).toHaveTextContent("Location");
-    expect(screen.getByRole("button", { name: "Location" })).not.toHaveTextContent("49.01, 12.10");
+    const trigger = screen.getByRole("button", { name: "Location, 49.01, 12.10" });
+    expect(trigger).toHaveClass("dashboard-header__location--icon-only");
+    expect(trigger).toHaveAttribute("title", "49.01, 12.10");
+    expect(trigger).not.toHaveTextContent("Location");
+    expect(trigger).not.toHaveTextContent("49.01, 12.10");
+    expect(trigger.querySelector(".lucide-map-pin")).not.toBeNull();
+
+    fireEvent.click(trigger);
+    expect(await screen.findByText("Location")).toBeInTheDocument();
+    expect(await screen.findByText("49.01, 12.10")).toBeInTheDocument();
   });
 });
