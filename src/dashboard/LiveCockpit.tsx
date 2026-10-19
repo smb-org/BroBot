@@ -226,7 +226,7 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
       <LiveCockpitBroadcast key={overview.channelId} channelId={overview.channelId} role={overview.role}
         onQueryStateChange={onBroadcastQueryStateChange}
         onSaved={(text) => { showFooterMessage({ text }); }} />
-      <div className="live-cockpit-header__status" data-has-warnings={warnings.length > 0}>
+      <div className="live-cockpit-header__status">
         <div className="live-cockpit-header__indicators" aria-label={labels.statusIndicators}>
           <StatusLed state={botConnected ? "ok" : "off"} label={`${labels.bot} · ${botConnected ? labels.botConnected : labels.botUnavailable}`} />
           <StatusLed
@@ -249,7 +249,8 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
               ? <StatusLed state="warn" label={`${labels.overlays} · ${labels.overlaysNotSetUp}`} />
               : <StatusLed state={overlayCount > 0 ? "ok" : "off"} label={`${labels.overlays} · ${overlayCount === 0 ? labels.overlaysNotSetUp : labels.overlaysCount(formatNumber(overlayCount))}`} />}
         </div>
-        <div className="live-cockpit__warning-slot" data-slot="warning-banner" data-warning-count={warnings.length} aria-live="polite">
+        <div className="live-cockpit__warning-slot" data-slot="warning-banner" data-warning-count={warnings.length}
+          aria-live="polite" aria-hidden={warnings.length === 0} inert={warnings.length === 0}>
           {warnings.length === 0 ? null : <div className="live-cockpit__warning-summary">
             <Button variant="secondary" icon="warning" ariaHasPopup="dialog" ariaExpanded={warningDetailsOpen}
               onClick={() => { setWarningDetailsOpen(true); }}>

@@ -7,7 +7,8 @@ import { chatVotingSettingsEditorCatalog } from "../../src/modules/chat_voting/p
 test.use({ locale: "de-DE", timezoneId: "Europe/Berlin" });
 
 const channelId = "issue-490-ui";
-const timestamp = "2026-10-19T09:00:00.000Z";
+// Relative to now: a fixed instant ages into the maintenance-overdue window and the channel tile stops being healthy.
+const timestamp = new Date().toISOString();
 const deDashboard = dashboardTexts("de");
 const deChatVoting = chatVotingSettingsEditorCatalog("de");
 const chatVotingMessagesTabLabel = deChatVoting.sections.messages;
@@ -271,10 +272,10 @@ test("cockpit warnings use the header row without leaving a band or shifting the
     });
     const emptyState = await readLayout();
     expect(emptyState.slotInHeader).toBe(true);
-    expect(emptyState.slotDisplay).toBe(width <= 767 ? "flex" : "none");
-    expect(emptyState.slotVisibility).toBe(width <= 767 ? "hidden" : "visible");
+    expect(emptyState.slotDisplay).toBe("flex");
+    expect(emptyState.slotVisibility).toBe("hidden");
     expect(emptyState.slotBackground).toBe("rgba(0, 0, 0, 0)");
-    expect(emptyState.slotHeight).toBe(width <= 767 ? 44 : 0);
+    expect(emptyState.slotHeight).toBe(width <= 767 ? 44 : 36);
     expect(Math.abs(emptyState.wallTop - emptyState.headerBottom - (width <= 767 ? 8 : 12))).toBeLessThanOrEqual(1);
 
     api.setLocation(null);
