@@ -937,7 +937,7 @@ export interface DashboardTexts {
     votekickTargetWhy: (message: string, target: string) => string;
     votekickChoiceWhy: (message: string, choice: string) => string;
     votekickFinalizeWhy: (message: string) => string;
-    wouldCountVote: (choice: string) => string;
+    wouldCountVote: (choice: string, kind?: "option" | "term") => string;
     wouldCountVotekickVote: string;
     wouldStartBallot: (moduleId: "chat_voting" | "votekick") => string;
     wouldOverflowBallot: string;
@@ -1532,7 +1532,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       votekickTargetWhy: (message, target) => "Die Nachricht „" + message + "“ nennt das Ziel „" + target + "“.",
       votekickChoiceWhy: (message, choice) => "Die Nachricht „" + message + "“ stimmt für " + (choice === "yes" ? "Ja" : "Nein") + ".",
       votekickFinalizeWhy: (message) => "Die Nachricht „" + message + "“ beendet den Votekick.",
-      wouldCountVote: (choice) => "Würde Stimme " + choice + " zählen",
+      wouldCountVote: (choice, kind) => kind === "term" ? "Würde Begriff „" + choice + "“ zählen" : "Würde Stimme " + choice + " zählen",
       wouldCountVotekickVote: "Würde Votekick-Stimme zählen",
       wouldStartBallot: (moduleId) => moduleId === "votekick" ? "Würde Votekick starten" : "Würde Abstimmung starten",
       wouldOverflowBallot: "Würde unter „weitere“ zählen",
@@ -1551,7 +1551,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         (moduleId === "votekick" ? index === 0 ? "Ja" : "Nein" : "Option " + String(index + 1)) + ": " + formatNumber(count, "de"),
       ).join(" · "),
       ballotTerms: (terms) => terms.map(({ term, count }) => term + " · " + formatNumber(count, "de")).join(" · "),
-      ballotMore: (count) => formatNumber(count, "de") + (count === 1 ? " weiterer Begriff" : " weitere Begriffe"),
+      ballotMore: (count) => formatNumber(count, "de") + (count === 1 ? " weitere Stimme" : " weitere Stimmen"),
       syntheticSenderNote: (login) => "Ausgewertet mit dem synthetischen Testabsender " + login + ".",
       chatEffect: "Chatnachricht würde gesendet",
       announcementEffect: "Ankündigung würde gesendet",
@@ -2134,7 +2134,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       votekickTargetWhy: (message, target) => "The message “" + message + "” names the target “" + target + "”.",
       votekickChoiceWhy: (message, choice) => "The message “" + message + "” votes " + (choice === "yes" ? "yes" : "no") + ".",
       votekickFinalizeWhy: (message) => "The message “" + message + "” ends the votekick.",
-      wouldCountVote: (choice) => "Would count vote " + choice,
+      wouldCountVote: (choice, kind) => kind === "term" ? "Would count term “" + choice + "”" : "Would count vote " + choice,
       wouldCountVotekickVote: "Would count votekick vote",
       wouldStartBallot: (moduleId) => moduleId === "votekick" ? "Would start votekick" : "Would start vote",
       wouldOverflowBallot: "Would count under “more”",
@@ -2153,7 +2153,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         (moduleId === "votekick" ? index === 0 ? "Yes" : "No" : "Option " + String(index + 1)) + ": " + formatNumber(count, "en"),
       ).join(" · "),
       ballotTerms: (terms) => terms.map(({ term, count }) => term + " · " + formatNumber(count, "en")).join(" · "),
-      ballotMore: (count) => formatNumber(count, "en") + (count === 1 ? " more term" : " more terms"),
+      ballotMore: (count) => formatNumber(count, "en") + (count === 1 ? " more vote" : " more votes"),
       syntheticSenderNote: (login) => "Evaluated with the synthetic test sender " + login + ".",
       chatEffect: "Chat message would be sent",
       announcementEffect: "Announcement would be sent",

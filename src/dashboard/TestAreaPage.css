@@ -414,7 +414,7 @@
 
 .test-area__result-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(112px, 34%);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   width: 100%;
@@ -459,6 +459,7 @@
 
 .test-area__row-title strong {
   min-width: 0;
+  flex: 0 1 auto;
   overflow: hidden;
   font-size: 12px;
   font-weight: 600;
@@ -491,7 +492,7 @@
 .test-area__row-outcome.is-muted { color: var(--text-3); }
 
 .test-area__row-outcome > span:last-child {
-  min-width: 0;
+  flex: none;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -903,6 +904,7 @@
   }
 
   .test-area__row-title { gap: 5px; }
+  .test-area__row-outcome > span:last-child { min-width: 0; flex: 0 1 auto; }
   .test-area__row-title strong { font-size: 11px; }
   .test-area__row-main > small { font-size: 9px; }
   .test-area__row-outcome { gap: 4px; font-size: 10px; }

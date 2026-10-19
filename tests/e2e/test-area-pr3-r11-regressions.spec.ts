@@ -39,7 +39,7 @@ const voteCount = (choice = "2", choiceKind?: "option" | "term", label = "Liebli
     action: "count" as const,
     label,
     choice,
-    counts: [1234, 2345],
+    ...(choiceKind === "term" ? { terms: [{ term: choice, count: 1, approved: true }] } : { counts: [1234, 2345] }),
   }, choiceKind === undefined ? {} : { choiceKind });
   return responseFor(report("chat_voting", { kind: "chat_vote", id: "chat-vote-message", label: "Stimme !vote 2" }, { effect }));
 };
@@ -133,6 +133,7 @@ test("describes a numeric free-text vote using its ballot choice metadata", asyn
   await runMessage(page, "123");
 
   await expect(page.locator(".test-area__row-main small")).toHaveText("Begriff „123“");
+  await expect(page.locator(".test-area__row-outcome")).toContainText("Würde Begriff „123“ zählen");
   await expect(page.locator(".test-area__detail")).toContainText("stimmt für den Begriff „123“");
 });
 

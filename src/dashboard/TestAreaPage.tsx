@@ -392,7 +392,7 @@ function ballotStatusLabel(effect: Extract<DryRunEffect, { kind: "ballot" }>, la
   switch (effect.action) {
   case "count":
     return effect.moduleId === "chat_voting" && effect.choice !== undefined
-      ? texts.wouldCountVote(effect.choice)
+      ? texts.wouldCountVote(effect.choice, effect.choiceKind)
       : texts.wouldCountVotekickVote;
   case "start": return texts.wouldStartBallot(effect.moduleId);
   case "overflow": return texts.wouldOverflowBallot;

@@ -10,10 +10,10 @@ describe("test area voting copy", () => {
       .toBe("Votes: Option 1: 1,234 · Option 2: 2,345");
   });
 
-  it("uses singular and plural terms for ballot overflow in both catalogs", () => {
-    expect(dashboardTexts("de").testArea.ballotMore(1)).toBe("1 weiterer Begriff");
-    expect(dashboardTexts("de").testArea.ballotMore(4)).toBe("4 weitere Begriffe");
-    expect(dashboardTexts("en").testArea.ballotMore(1)).toBe("1 more term");
-    expect(dashboardTexts("en").testArea.ballotMore(4)).toBe("4 more terms");
+  it("uses singular and plural votes for ballot overflow in both catalogs", () => {
+    expect(dashboardTexts("de").testArea.ballotMore(1)).toBe("1 weitere Stimme");
+    expect(dashboardTexts("de").testArea.ballotMore(4)).toBe("4 weitere Stimmen");
+    expect(dashboardTexts("en").testArea.ballotMore(1)).toBe("1 more vote");
+    expect(dashboardTexts("en").testArea.ballotMore(4)).toBe("4 more votes");
   });
 });
