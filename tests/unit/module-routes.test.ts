@@ -765,7 +765,7 @@ describe("Module management in the panel", () => {
     await expect(auditCount(database)).resolves.toBe(0);
   });
 
-  it(`blocks disabling points while a dependent is enabled and gates a game disable (${dependencyTestCard("points stays enabled until dependents are off and disable calls gate before cancellation", "a dependent runs without points or an open round avoids refund", "the fake ChannelObject records calls but does not execute real round storage")})`, async () => {
+  it(`blocks disabling points and carries a game's last disable revision into re-enable (${dependencyTestCard("the route passes last_disabled_revision when reopening a dependent game", "re-enable opens a gate without cancelling rounds from a missed disable", "the fake ChannelObject verifies the route RPC arguments; the Durable Object refund behavior has a separate worker test")})`, async () => {
     addDependencyTestModules();
     await insertChannel(database, "channel-demo");
     await insertLoginIdentityAndSession(database, "user-1");
@@ -799,9 +799,16 @@ describe("Module management in the panel", () => {
       environment,
     );
     expect(disableGame.status).toBe(200);
-    expect(setGate).toHaveBeenLastCalledWith("test_game_requires_points", true, 2);
+    expect(setGate).toHaveBeenLastCalledWith("test_game_requires_points", true, 2, 2);
     expect(cancelOpenRounds).toHaveBeenCalledTimes(1);
     expect(cancelOpenRounds).toHaveBeenLastCalledWith("test_game_requires_points", 2);
+
+    const reenableGame = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/channel-demo/modules/test_game_requires_points", "PATCH", { enabled: true }),
+      environment,
+    );
+    expect(reenableGame.status).toBe(200);
+    expect(setGate).toHaveBeenLastCalledWith("test_game_requires_points", false, 3, 2);
     await expect(database.prepare("SELECT enabled FROM channel_modules WHERE channel_id = 'channel-demo' AND module_id = 'points'").first())
       .resolves.toEqual({ enabled: 1 });
   });
@@ -831,7 +838,7 @@ describe("Module management in the panel", () => {
     );
 
     expect(disable.status).toBe(200);
-    expect(setGate).toHaveBeenLastCalledWith("test_game_requires_points", true, 2);
+    expect(setGate).toHaveBeenLastCalledWith("test_game_requires_points", true, 2, 2);
     expect(cancelOpenRounds).toHaveBeenCalledOnce();
     expect(cancelOpenRounds).toHaveBeenLastCalledWith("test_game_requires_points", 2);
   });
@@ -875,7 +882,7 @@ describe("Module management in the panel", () => {
 
     expect(first.status).toBe(500);
     expect(retry.status).toBe(200);
-    expect(setGate).toHaveBeenLastCalledWith("test_game_requires_points", true, 2);
+    expect(setGate).toHaveBeenLastCalledWith("test_game_requires_points", true, 2, 2);
     expect(cancelOpenRounds).toHaveBeenCalledTimes(2);
     expect(cancelOpenRounds).toHaveBeenLastCalledWith("test_game_requires_points", 2);
   });

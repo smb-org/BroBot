@@ -29,6 +29,7 @@ const record = (channelId: string, moduleId: string, enabled: boolean): ChannelM
   settings: SETTINGS,
   revision: 1,
   settingsRevision: 1,
+  lastDisabledRevision: null,
 });
 
 const auditCount = async (database: TestD1Database): Promise<number> => {
@@ -132,9 +133,14 @@ describe("module activation in the repository", () => {
       NOW,
     );
 
-    expect(changed).toBe(2);
+    expect(changed).toEqual({ revision: 2, lastDisabledRevision: 2 });
     await expect(getChannelModuleForChannel(asD1(database), "kanal-a", "test-modul"))
-      .resolves.toEqual({ ...record("kanal-a", "test-modul", false), initialized: true, revision: 2 });
+      .resolves.toEqual({
+        ...record("kanal-a", "test-modul", false),
+        initialized: true,
+        revision: 2,
+        lastDisabledRevision: 2,
+      });
     await expect(auditCount(database)).resolves.toBe(2);
   });
 
@@ -157,10 +163,11 @@ describe("module activation in the repository", () => {
       "SELECT revision, last_disabled_revision FROM channel_modules WHERE channel_id = ? AND module_id = ?",
     ).bind("kanal-a", "test-modul").first()).resolves.toEqual({ revision: 2, last_disabled_revision: 2 });
 
-    await updateChannelModuleEnabledStateWithAudit(
+    const reenabled = await updateChannelModuleEnabledStateWithAudit(
       asD1(database), actorFor("user-1"), "kanal-a", "test-modul", true, "module.enabled", NOW,
       [], 2,
     );
+    expect(reenabled).toEqual({ revision: 3, lastDisabledRevision: 2 });
     await expect(database.prepare(
       "SELECT revision, last_disabled_revision FROM channel_modules WHERE channel_id = ? AND module_id = ?",
     ).bind("kanal-a", "test-modul").first()).resolves.toEqual({ revision: 3, last_disabled_revision: 2 });

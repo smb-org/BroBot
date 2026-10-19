@@ -2946,6 +2946,11 @@ export class ChannelObject extends DurableObject<Env> {
     flushCancellationNotices: boolean,
     lastDisabledRevision: number | null = null,
   ): Promise<void> {
+    if (enabled && lastDisabledRevision !== null) {
+      await this.setGameModuleGateInternal(moduleId, false, revision, flushCancellationNotices, lastDisabledRevision);
+      return;
+    }
+
     if (lastDisabledRevision !== null) {
       const currentGate = this.ctx.storage.sql.exec<{ revision: number }>(
         "SELECT revision FROM module_gates WHERE module_id = ?",
@@ -3030,7 +3035,8 @@ export class ChannelObject extends DurableObject<Env> {
           this.joinGameRound(moduleId, roundId, operationId, accountId, login, stake, data),
         resolve: (roundId, settlement) => this.resolveGameRound(moduleId, roundId, settlement),
         cancelOpenRounds: (revision) => this.cancelOpenGameRounds(moduleId, revision),
-        setGate: (closed, revision) => this.setGameModuleGate(moduleId, closed, revision),
+        setGate: (closed, revision, lastDisabledRevision) =>
+          this.setGameModuleGate(moduleId, closed, revision, lastDisabledRevision),
       },
     };
   }
@@ -3338,8 +3344,13 @@ export class ChannelObject extends DurableObject<Env> {
     return cancelled;
   }
 
-  public async setGameModuleGate(moduleId: string, closed: boolean, revision: number): Promise<{ applied: boolean }> {
-    return await this.setGameModuleGateInternal(moduleId, closed, revision, true);
+  public async setGameModuleGate(
+    moduleId: string,
+    closed: boolean,
+    revision: number,
+    lastDisabledRevision: number | null = null,
+  ): Promise<{ applied: boolean }> {
+    return await this.setGameModuleGateInternal(moduleId, closed, revision, true, lastDisabledRevision);
   }
 
   private async setGameModuleGateInternal(
@@ -3347,19 +3358,26 @@ export class ChannelObject extends DurableObject<Env> {
     closed: boolean,
     revision: number,
     flushCancellationNotices: boolean,
+    lastDisabledRevision: number | null = null,
   ): Promise<{ applied: boolean }> {
     this.ensurePointsSchema();
+    if (lastDisabledRevision !== null && (!Number.isSafeInteger(lastDisabledRevision) || lastDisabledRevision < 1)) {
+      throw new Error("invalid_revision");
+    }
     const cancellation = closed
       ? undefined
       : pendingPointRoundCancellations(this.ctx.storage.sql).find((entry) => entry.moduleId === moduleId);
-    const roundIds = cancellation === undefined
+    const cancellationRevision = !closed
+      ? Math.max(lastDisabledRevision ?? 0, cancellation?.revision ?? 0) || null
+      : null;
+    const roundIds = cancellationRevision === null
       ? []
       : this.ctx.storage.sql.exec<{ round_id: string }>(
         `SELECT round_id FROM game_rounds
           WHERE module_id = ? AND gate_revision < ? AND state IN ('announcing', 'open', 'resolving')
           ORDER BY created_at, round_id`,
         moduleId,
-        cancellation.revision,
+        cancellationRevision,
       ).toArray().map(({ round_id }) => round_id);
     const refundRequests = pointRoundRefundRequests(this.ctx.storage.sql, moduleId, roundIds);
     const hashes = new Map<string, string>();
@@ -3381,13 +3399,13 @@ export class ChannelObject extends DurableObject<Env> {
         const hash = hashes.get(value.operationId);
         if (hash === undefined) throw new Error("refund_retry_required");
         return hash;
-      }, now);
-      if (applied.applied && !closed) this.ensurePointCancellationNoticeAlarmsSync();
+      }, now, lastDisabledRevision);
+      if (!closed && cancellationRevision !== null) this.ensurePointCancellationNoticeAlarmsSync();
       return applied;
     });
-    if (result.applied && !closed) {
+    if (!closed && (result.applied || cancellationRevision !== null)) {
       await this.scheduleEarliestAlarm();
-      if (flushCancellationNotices) await this.flushPointCancellationNotices();
+      if (flushCancellationNotices && cancellationRevision !== null) await this.flushPointCancellationNotices();
     }
     return result;
   }

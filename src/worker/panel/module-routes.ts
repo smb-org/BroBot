@@ -935,6 +935,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   }
   const settings = existing === null ? defaultSettingsJson : existing.settings;
   let revision: number | null;
+  let lastDisabledRevision = existing?.lastDisabledRevision ?? null;
   if (existing === null && enabled) {
     if (expectedRevision !== undefined) return context.json({ error: "module_changed_concurrently" }, 409);
     revision = await createChannelModuleWithAudit(
@@ -948,7 +949,8 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
     );
   } else if (existing !== null) {
     if (retryingPostCommit) revision = existing.revision;
-    else revision = await updateChannelModuleEnabledStateWithAudit(
+    else {
+      const activation = await updateChannelModuleEnabledStateWithAudit(
         context.env.DB,
         actor,
         channelId,
@@ -961,6 +963,9 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
         initialize,
         stateGuard,
       );
+      revision = activation?.revision ?? null;
+      lastDisabledRevision = activation?.lastDisabledRevision ?? null;
+    }
   } else {
     return context.json({ error: "module_changed_concurrently" }, 409);
   }
@@ -986,7 +991,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   if ((module.requiresModules?.length ?? 0) > 0 || module.id === "points") {
     try {
       const points = context.get("points")(channelId);
-      await points.rounds.setGate(!enabled, revision);
+      await points.rounds.setGate(!enabled, revision, lastDisabledRevision);
       if (!enabled && (module.requiresModules?.length ?? 0) > 0) {
         await points.rounds.cancelOpenRounds(revision);
       }

@@ -1,10 +1,11 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import {
   insertPointChannel,
   pointObject,
   pointTestModule,
   capturePointError,
+  clearPointObjectAlarms,
   runPointObject,
   runMigrations,
   testCard,
@@ -14,6 +15,7 @@ const now = (): number => Date.now();
 const utcMonth = (): string => new Date().toISOString().slice(0, 7);
 
 beforeAll(runMigrations);
+afterEach(clearPointObjectAlarms);
 
 describe("points ledger in the worker Durable Object", () => {
   it(`serializes parallel jackpot shares against refills (${testCard("all concurrent pot shares use the current pot balance", "two viewers can both receive the same jackpot balance")})`, async () => {

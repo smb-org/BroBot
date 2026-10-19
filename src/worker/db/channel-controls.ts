@@ -27,6 +27,7 @@ interface DispatchChannelStateRow extends ChannelControlFields {
   enabled: number | null;
   settings: string | null;
   revision: number | null;
+  last_disabled_revision: number | null;
   stream_state: string | null;
   stream_started_at: string | null;
   stream_id: string | null;
@@ -40,7 +41,7 @@ interface CurrentStreamFields {
 
 export interface DispatchChannelState {
   controls: PanelChannelControls;
-  activations: { moduleId: string; enabled: boolean; settings: string; revision: number }[];
+  activations: { moduleId: string; enabled: boolean; settings: string; revision: number; lastDisabledRevision: number | null }[];
   streamState: string | null;
   streamStartedAt: string | null;
   streamId: string | null;
@@ -136,6 +137,7 @@ export const readDispatchChannelState = async (
 ): Promise<DispatchChannelState> => {
   const rows = await db.prepare(
     `SELECT channel_modules.module_id, channel_modules.enabled, channel_modules.settings, channel_modules.revision,
+            channel_modules.last_disabled_revision,
             channel_controls.muted, channel_controls.muted_until, channel_controls.mute_until_stream_end,
             channel_controls.mute_stream_started_at, channel_controls.mute_stream_id,
             channel_controls.paused, channel_controls.paused_until, channel_controls.pause_until_stream_end,
@@ -154,7 +156,13 @@ export const readDispatchChannelState = async (
     controls: first === undefined ? mapRow(null, now, false) : mapRow(first, now, false),
     activations: rows.results.flatMap((row) => row.module_id === null || row.enabled === null || row.settings === null || row.revision === null
       ? []
-      : [{ moduleId: row.module_id, enabled: row.enabled === 1, settings: row.settings, revision: row.revision }]),
+      : [{
+        moduleId: row.module_id,
+        enabled: row.enabled === 1,
+        settings: row.settings,
+        revision: row.revision,
+        lastDisabledRevision: row.last_disabled_revision,
+      }]),
     streamState: first?.stream_state ?? null,
     streamStartedAt: first?.stream_started_at ?? null,
     streamId: first?.stream_id ?? null,

@@ -49,7 +49,7 @@ export interface PointsWorkerObject {
     balances: Record<string, number>;
   }>;
   cancelOpenGameRounds(moduleId: string, revision: number): Promise<number>;
-  setGameModuleGate(moduleId: string, closed: boolean, revision: number): Promise<{ applied: boolean }>;
+  setGameModuleGate(moduleId: string, closed: boolean, revision: number, lastDisabledRevision?: number | null): Promise<{ applied: boolean }>;
   claimGameCooldown(moduleId: string, key: string, seconds: number): Promise<boolean>;
   markPointAuditWritten(moduleId: string, operationId: string): Promise<void>;
   pendingPointAudits(moduleId: string): Promise<Array<{ operationId: string; detail: unknown }>>;
@@ -86,8 +86,22 @@ export const insertPointChannel = async (channelId: string): Promise<void> => {
   ).bind(channelId, channelId, channelId, now, now).run();
 };
 
-export const pointObject = (channelId: string): PointsWorkerObject =>
-  channelNamespace.get(channelNamespace.idFromName(channelId)) as unknown as PointsWorkerObject;
+const trackedPointObjects = new Set<DurableObjectStub>();
+
+export const pointObject = (channelId: string): PointsWorkerObject => {
+  const stub = channelNamespace.get(channelNamespace.idFromName(channelId));
+  trackedPointObjects.add(stub);
+  return stub as unknown as PointsWorkerObject;
+};
+
+/** Drops the platform alarm of every object a test created, so none fires after the test file ends. */
+export const clearPointObjectAlarms = async (): Promise<void> => {
+  const stubs = [...trackedPointObjects];
+  trackedPointObjects.clear();
+  await Promise.all(stubs.map((stub) => runInDurableObject(stub, async (_instance, state) => {
+    await state.storage.deleteAlarm();
+  })));
+};
 
 export const pointTestModule = "test_game";
 
@@ -109,6 +123,7 @@ export const capturePointError = async (
   },
 );
 
+/** The input gate waits for any in-flight alarm callback before state is edited. */
 export const runPointObject = <T>(
   object: PointsWorkerObject,
   action: (target: PointsWorkerObject, state: DurableObjectState) => Promise<T> | T,
@@ -152,9 +167,13 @@ const scheduleAlarmKeyWithin = async (
   Reflect.deleteProperty(entry, "claimUntil");
   table[alarmKey] = { ...entry, deadline: Math.max(1, Date.now() - 365 * 24 * 60 * 60_000) };
   state.storage.kv.put("channel:alarm_schedule", table);
+  const persistedEntry = state.storage.kv.get<typeof table>("channel:alarm_schedule")?.[alarmKey];
+  if (persistedEntry === undefined || persistedEntry.deadline > Date.now()) {
+    throw new Error("The point test alarm schedule was not persisted as due.");
+  }
 };
 
-export const schedulePointAlarmWithin = async (
+const schedulePointAlarmWithin = async (
   state: DurableObjectState,
   roundId: string,
 ): Promise<void> => scheduleAlarmKeyWithin(state, `points:round:${roundId}`);
@@ -168,15 +187,26 @@ export const schedulePointCancellationNoticeAlarmWithin = async (
   `${POINTS_CANCELLATION_NOTICE_ALARM_PREFIX}${encodeURIComponent(moduleId)}:${String(revision)}`,
 );
 
-export const runPointAlarm = async (object: PointsWorkerObject): Promise<void> => {
+export const runPointAlarm = async (object: PointsWorkerObject): Promise<boolean> => {
   const ran = await runDurableObjectAlarm(object as unknown as DurableObjectStub);
   if (!ran) throw new Error("The point test expected a scheduled Durable Object alarm.");
-  await runPointObject(object, (_target, state) => deferPointAlarmWithin(state));
+  return ran;
 };
 
-export const forcePointAlarm = async (object: PointsWorkerObject, roundId: string): Promise<void> => {
-  await runPointObject(object, (_target, state) => schedulePointAlarmWithin(state, roundId));
-  await runPointAlarm(object);
+export const forcePointAlarm = async (
+  object: PointsWorkerObject,
+  roundId: string,
+  prepare?: (target: PointsWorkerObject, state: DurableObjectState) => Promise<void> | void,
+): Promise<boolean> => {
+  await runPointObject(object, async (target, state) => {
+    // runInDurableObject enters through the object input gate. Remove the
+    // platform alarm before changing persisted test state or scheduling its one
+    // explicit replacement below.
+    await state.storage.deleteAlarm();
+    await prepare?.(target, state);
+    await schedulePointAlarmWithin(state, roundId);
+  });
+  return await runPointAlarm(object);
 };
 
 export const openAnnouncedRound = async (

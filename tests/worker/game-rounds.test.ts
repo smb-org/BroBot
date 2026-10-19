@@ -18,13 +18,13 @@ import {
   pointObject,
   pointTestModule,
   capturePointError,
+  clearPointObjectAlarms,
   deferPointAlarmWithin,
   forcePointAlarm,
   openAnnouncedRound,
   runPointObject,
   runPointAlarm,
   schedulePointCancellationNoticeAlarmWithin,
-  schedulePointAlarmWithin,
   stubPointRoundChat,
   runMigrations,
   testCard,
@@ -32,8 +32,12 @@ import {
 } from "./points-test-helpers";
 
 beforeAll(runMigrations);
-afterEach(() => {
-  vi.useRealTimers();
+afterEach(async () => {
+  try {
+    await clearPointObjectAlarms();
+  } finally {
+    vi.useRealTimers();
+  }
   hostChatMock.send.mockReset();
   hostChatMock.send.mockImplementation(() => Promise.resolve({
     sent: false,
@@ -167,13 +171,15 @@ describe("game rounds in the worker Durable Object", () => {
       settlement: { kind: "test", params: { payouts: [] } },
     }, Date.now() + 60_000);
     await object.joinGameRound(pointTestModule, "round-d1-disable", "msg:stake", "viewer-a", "nachtfalke", 5, {});
-    await runPointObject(object, (_target, state) => {
-      state.storage.sql.exec("UPDATE game_rounds SET deadline_at = ? WHERE round_id = ?", Date.now() - 1, "round-d1-disable");
-    });
-
     await database.prepare("UPDATE channel_modules SET enabled = 0, revision = 2 WHERE channel_id = ? AND module_id = ?")
       .bind(channelId, pointTestModule).run();
-    await forcePointAlarm(object, "round-d1-disable");
+    expect(await forcePointAlarm(object, "round-d1-disable", (_target, state) => {
+      state.storage.sql.exec(
+        "UPDATE game_rounds SET deadline_at = ? WHERE round_id = ?",
+        Date.now() - 60_000,
+        "round-d1-disable",
+      );
+    })).toBe(true);
 
     await expect(object.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(20);
     await expect(runPointObject(object, (_target, state) => state.storage.sql.exec<{ state: string }>(
@@ -181,7 +187,7 @@ describe("game rounds in the worker Durable Object", () => {
     ).one().state)).resolves.toBe("cancelled");
   });
 
-  it(`recovers a disable missed before re-enable and settles the newer round (${testCard("last disabled revision refunds only rounds opened before it", "re-enable hides an undelivered disable and lets its earlier round settle")})`, async () => {
+  it(`refunds a disable missed before re-enable before opening a new round (${testCard("re-enable immediately refunds every round opened before last_disabled_revision", "an old stake remains debited until a later alarm")})`, async () => {
     const channelId = `round-missed-disable-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const database = (env as unknown as { DB: D1Database }).DB;
@@ -191,12 +197,14 @@ describe("game rounds in the worker Durable Object", () => {
     const object = pointObject(channelId);
     await object.setGameModuleGate(pointTestModule, false, 1);
     await object.touchPointAccount(pointTestModule, "viewer-a", "nachtfalke", 20);
+    await object.touchPointAccount(pointTestModule, "viewer-b", "pixelpilz", 20);
     await openAnnouncedRound(object, pointTestModule, "round-before-missed-disable", {
       durationS: 60,
       announceText: "The earlier round starts",
       settlement: { kind: "test", params: { payouts: [] } },
     }, Date.now() + 60_000);
     await object.joinGameRound(pointTestModule, "round-before-missed-disable", "msg:old-stake", "viewer-a", "nachtfalke", 5, {});
+    await object.joinGameRound(pointTestModule, "round-before-missed-disable", "msg:other-old-stake", "viewer-b", "pixelpilz", 7, {});
 
     await database.prepare(
       "UPDATE channel_modules SET enabled = 0, revision = 2, last_disabled_revision = 2 WHERE channel_id = ? AND module_id = ?",
@@ -204,7 +212,16 @@ describe("game rounds in the worker Durable Object", () => {
     await database.prepare(
       "UPDATE channel_modules SET enabled = 1, revision = 3 WHERE channel_id = ? AND module_id = ?",
     ).bind(channelId, pointTestModule).run();
-    await object.setGameModuleGate(pointTestModule, false, 3);
+    await object.setGameModuleGate(pointTestModule, false, 3, 2);
+
+    await expect(object.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(20);
+    await expect(object.pointBalance(pointTestModule, "viewer-b")).resolves.toBe(20);
+    await expect(runPointObject(object, (_target, state) => state.storage.sql.exec<{ state: string }>(
+      "SELECT state FROM game_rounds WHERE round_id = ?", "round-before-missed-disable",
+    ).one().state)).resolves.toBe("cancelled");
+    await expect(object.joinGameRound(
+      pointTestModule, "round-before-missed-disable", "msg:late-old-stake", "viewer-a", "nachtfalke", 5, {},
+    )).resolves.toEqual({ status: "round_closed" });
 
     await openAnnouncedRound(object, pointTestModule, "round-after-missed-disable", {
       durationS: 60,
@@ -317,7 +334,8 @@ describe("game rounds in the worker Durable Object", () => {
     await database.prepare(
       "UPDATE channel_modules SET enabled = 0, revision = 2, last_disabled_revision = 2 WHERE channel_id = ? AND module_id = ?",
     ).bind(channelId, pointTestModule).run();
-    await runPointObject(object, (_target, state) => {
+    await runPointObject(object, async (_target, state) => {
+      await state.storage.deleteAlarm();
       state.storage.sql.exec("UPDATE module_gates SET closed = 1, revision = 2 WHERE module_id = ?", pointTestModule);
       state.storage.sql.exec(
         "INSERT INTO game_round_cancellations (module_id, revision) VALUES (?, ?) ON CONFLICT(module_id) DO UPDATE SET revision = excluded.revision",
@@ -342,7 +360,7 @@ describe("game rounds in the worker Durable Object", () => {
       expect(alarmTable["points:activation_reconciliation"]?.deadline).toBeLessThanOrEqual(Date.now());
       await deferPointAlarmWithin(state);
     });
-    await runPointAlarm(object);
+    expect(await runPointAlarm(object)).toBe(true);
 
     await expect(object.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(20);
     await openAnnouncedRound(object, pointTestModule, "round-after-reenable", {
@@ -509,7 +527,7 @@ describe("game rounds in the worker Durable Object", () => {
       await target.openGameRound(pointTestModule, roundId, roundData);
       await deferPointAlarmWithin(state);
     });
-    await forcePointAlarm(object, roundId);
+    expect(await forcePointAlarm(object, roundId)).toBe(true);
 
     expect(posted).toEqual([]);
     await expect(runPointObject(object, (_target, state) => state.storage.sql.exec<{ state: string }>(
@@ -648,7 +666,7 @@ describe("game rounds in the worker Durable Object", () => {
       await state.storage.delete(AUTOMATED_CHAT_OUTPUT_LAST_ATTEMPT_STORAGE_KEY);
       await schedulePointCancellationNoticeAlarmWithin(state, pointTestModule, 13);
     });
-    await runPointAlarm(object);
+    expect(await runPointAlarm(object)).toBe(true);
 
     const completedAfterRetry = await runPointObject(object, (_target, state) => state.storage.sql.exec<{
       completed_at: string | null;
@@ -743,11 +761,13 @@ describe("game rounds in the worker Durable Object", () => {
     }))).resolves.toBe("round_closed");
   });
 
-  it(`reconciles an expired open round through the Durable Object alarm (${testCard("a delivered round deadline survives a DO wake and resolves", "an open round has no outcome after its deadline")})`, async () => {
+  it(`restores a lost round schedule and platform alarm before resolving (${testCard("startup restores a deleted schedule entry and alarm, then resolves the expired round", "a round stays open after both persisted alarm records are removed")})`, async () => {
     const channelId = `round-recovery-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
     await object.touchPointAccount(pointTestModule, "viewer-a", "nachtfalke", 20);
+    vi.useFakeTimers();
+    const deadlineAt = Date.now() + 5_000;
     await runPointObject(object, async (target, state) => {
       stubPointRoundChat(target, () => Promise.resolve({ sent: false, retryable: true, reason: "rate_limited", delivery: "rate_limited" }));
       await target.openGameRound(pointTestModule, "round-recovery", {
@@ -757,13 +777,37 @@ describe("game rounds in the worker Durable Object", () => {
       });
       await target.markGameRoundAnnounced(pointTestModule, "round-recovery", Date.now() + 500, "round:recovery");
       await target.joinGameRound(pointTestModule, "round-recovery", "msg:stake", "viewer-a", "nachtfalke", 5, {});
-      state.storage.sql.exec("UPDATE game_rounds SET deadline_at = ? WHERE round_id = ?", Date.now() - 1, "round-recovery");
-      await schedulePointAlarmWithin(state, "round-recovery");
+      await state.storage.deleteAlarm();
+      state.storage.sql.exec("UPDATE game_rounds SET deadline_at = ? WHERE round_id = ?", deadlineAt, "round-recovery");
+      const alarmTable = state.storage.kv.get<Record<string, unknown>>("channel:alarm_schedule") ?? {};
+      expect(alarmTable["points:round:round-recovery"]).toBeDefined();
+      Reflect.deleteProperty(alarmTable, "points:round:round-recovery");
+      state.storage.kv.put("channel:alarm_schedule", alarmTable);
     });
     await evictDurableObject(object as unknown as DurableObjectStub);
-    await runPointAlarm(object);
+    await runPointObject(object, async (_target, state) => {
+      const alarmTable = state.storage.kv.get<Record<string, { deadline: number; handler: string }>>(
+        "channel:alarm_schedule",
+      ) ?? {};
+      expect(alarmTable["points:round:round-recovery"]).toEqual({
+        deadline: deadlineAt,
+        handler: "host:points_round",
+        revision: 1,
+      });
+      const platformAlarmAt = await state.storage.getAlarm();
+      expect(platformAlarmAt).not.toBeNull();
+      expect(platformAlarmAt).toBeLessThanOrEqual(deadlineAt);
+      // Keep the platform from auto-delivering while this test advances its clock;
+      // runDurableObjectAlarm below explicitly drives the restored persisted schedule.
+      await state.storage.setAlarm(deadlineAt + 60_000);
+    });
+    vi.setSystemTime(deadlineAt + 1);
+    expect(await runPointAlarm(object)).toBe(true);
 
     await expect(object.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(20);
+    await expect(runPointObject(object, (_target, state) => state.storage.sql.exec<{ state: string }>(
+      "SELECT state FROM game_rounds WHERE round_id = ?", "round-recovery",
+    ).one().state)).resolves.toBe("resolved");
     await expect(object.pointRanking(pointTestModule, new Date().toISOString().slice(0, 7), 10)).resolves.toEqual([
       { accountId: "viewer-a", login: "nachtfalke", net: 0 },
     ]);
@@ -875,7 +919,7 @@ describe("game rounds in the worker Durable Object", () => {
     ).one());
     expect(pendingNotice).toEqual({ state: "cancelled", completed_at: null });
 
-    await runPointAlarm(object);
+    expect(await runPointAlarm(object)).toBe(true);
 
     expect(sentTexts).toHaveLength(1);
     expect(hostChatMock.send).toHaveBeenCalledOnce();
@@ -894,14 +938,13 @@ describe("game rounds in the worker Durable Object", () => {
     await object.joinGameRound(pointTestModule, "round-cancel-alarm", "msg:stake", "viewer-a", "pixelpilz", 10, {});
     await object.setGameModuleGate(pointTestModule, true, 8);
 
-    await runPointObject(object, (_target, state) => {
+    expect(await forcePointAlarm(object, "round-cancel-alarm", (_target, state) => {
       state.storage.sql.exec(
         "UPDATE game_rounds SET deadline_at = ? WHERE round_id = ?",
-        Date.now() - 1,
+        Date.now() - 60_000,
         "round-cancel-alarm",
       );
-    });
-    await forcePointAlarm(object, "round-cancel-alarm");
+    })).toBe(true);
 
     await expect(object.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(20);
     await expect(runPointObject(object, (_target, state) => state.storage.sql.exec<{ state: string }>(
@@ -931,7 +974,7 @@ describe("game rounds in the worker Durable Object", () => {
       announce_attempts: number;
     }>("SELECT state, announce_attempts FROM game_rounds WHERE round_id = ?", "round-rate-limit").one());
     while (round.state !== "cancelled" && round.announce_attempts < 6) {
-      await forcePointAlarm(object, "round-rate-limit");
+      expect(await forcePointAlarm(object, "round-rate-limit")).toBe(true);
       round = await runPointObject(object, (_target, state) => state.storage.sql.exec<{
         state: string;
         announce_attempts: number;
@@ -963,7 +1006,7 @@ describe("game rounds in the worker Durable Object", () => {
       });
       await deferPointAlarmWithin(state);
     });
-    await forcePointAlarm(object, "round-ambiguous-http");
+    expect(await forcePointAlarm(object, "round-ambiguous-http")).toBe(true);
 
     const recovered = await runPointObject(object, (_target, state) => state.storage.sql.exec<{
       state: string;
@@ -1045,13 +1088,14 @@ describe("game rounds in the worker Durable Object", () => {
         announceText: "The round starts",
         settlement: { kind: "test", params: { payouts: [] } },
       });
-      await deferPointAlarmWithin(state);
+      await state.storage.deleteAlarm();
       state.storage.kv.put("channel:alarm_schedule", {
         "channel:active_chatters_expiry": { deadline: startedAt - 1, handler: "channel.active_chatters_expiry", revision: 1 },
         "points:round:round-fresh-attempt-time": { deadline: startedAt, handler: "host:points_round", revision: 1 },
       });
+      await deferPointAlarmWithin(state);
     });
-    await runPointAlarm(object);
+    expect(await runPointAlarm(object)).toBe(true);
 
     const attempt = await runPointObject(object, (_target, state) => state.storage.sql.exec<{
       state: string;
@@ -1089,7 +1133,7 @@ describe("game rounds in the worker Durable Object", () => {
       });
       await deferPointAlarmWithin(state);
     });
-    await forcePointAlarm(object, "round-delayed-delivery");
+    expect(await forcePointAlarm(object, "round-delayed-delivery")).toBe(true);
 
     const round = await runPointObject(object, (_target, state) => state.storage.sql.exec<{
       state: string;
@@ -1121,7 +1165,7 @@ describe("game rounds in the worker Durable Object", () => {
       });
       await deferPointAlarmWithin(state);
     });
-    await forcePointAlarm(object, "round-delayed-rate-limit");
+    expect(await forcePointAlarm(object, "round-delayed-rate-limit")).toBe(true);
     const alarm = await runPointObject(object, (_target, state) => state.storage.kv.get<Record<string, { deadline: number }>>(
       "channel:alarm_schedule",
     )?.["points:round:round-delayed-rate-limit"]);
@@ -1176,6 +1220,7 @@ describe("game rounds in the worker Durable Object", () => {
       Object.assign(target, {
         recordPointRoundAnnouncement: () => Promise.reject(new Error("simulated_crash_after_send")),
       });
+      await state.storage.deleteAlarm();
       state.storage.transactionSync(() => {
         state.storage.sql.exec(
           `INSERT INTO game_rounds
@@ -1190,21 +1235,20 @@ describe("game rounds in the worker Durable Object", () => {
           "The round starts",
         );
       });
-      await deferPointAlarmWithin(state);
-        state.storage.kv.put("channel:alarm_schedule", {
+      state.storage.kv.put("channel:alarm_schedule", {
         [alarmKey]: { deadline: Date.now(), handler: "host:points_round", revision: 1 },
       });
+      await deferPointAlarmWithin(state);
     });
-    await forcePointAlarm(object, roundId);
+    expect(await forcePointAlarm(object, roundId)).toBe(true);
     expect(sendChat).toHaveBeenCalledOnce();
 
-    const attemptAt = await runPointObject(object, (target, state) => {
+    let attemptAt = 0;
+    expect(await forcePointAlarm(object, roundId, (target, state) => {
       Object.assign(target, { recordPointRoundAnnouncement: recordAnnouncement });
-      const recoveryAt = Date.now() - 31_000;
-      state.storage.sql.exec("UPDATE game_rounds SET last_attempt_at = ? WHERE round_id = ?", recoveryAt, roundId);
-      return recoveryAt;
-    });
-    await forcePointAlarm(object, roundId);
+      attemptAt = Date.now() - 31_000;
+      state.storage.sql.exec("UPDATE game_rounds SET last_attempt_at = ? WHERE round_id = ?", attemptAt, roundId);
+    })).toBe(true);
     const recovered = await runPointObject(object, (_target, state) => state.storage.sql.exec<{
       state: string;
       announce_state: string;
@@ -1243,7 +1287,7 @@ describe("game rounds in the worker Durable Object", () => {
       await deferPointAlarmWithin(state);
     });
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      await forcePointAlarm(object, "round-sixth-crash");
+      expect(await forcePointAlarm(object, "round-sixth-crash")).toBe(true);
       expect(sendChat).toHaveBeenCalledTimes(attempt + 1);
     }
     let recordAnnouncement!: (...args: unknown[]) => Promise<void>;
@@ -1256,23 +1300,23 @@ describe("game rounds in the worker Durable Object", () => {
             : recordAnnouncement.call(target, roundId, stateName, at),
       });
     });
-    await forcePointAlarm(object, "round-sixth-crash");
-    const { currentAttempt, ambiguousAt } = await runPointObject(object, (target, state) => {
+    expect(await forcePointAlarm(object, "round-sixth-crash")).toBe(true);
+    let currentAttempt: number | null = null;
+    let ambiguousAt = 0;
+    expect(await forcePointAlarm(object, "round-sixth-crash", (target, state) => {
       Object.assign(target, { recordPointRoundAnnouncement: recordAnnouncement });
       expect(sendChat).toHaveBeenCalledTimes(6);
 
-      const currentAttempt = state.storage.sql.exec<{ last_attempt_at: number }>(
+      currentAttempt = state.storage.sql.exec<{ last_attempt_at: number }>(
         "SELECT last_attempt_at FROM game_rounds WHERE round_id = ?", "round-sixth-crash",
       ).one().last_attempt_at;
-      const ambiguousAt = Date.now() - 31_000;
+      ambiguousAt = Date.now() - 31_000;
       state.storage.sql.exec(
         "UPDATE game_rounds SET last_attempt_at = ? WHERE round_id = ?",
         ambiguousAt,
         "round-sixth-crash",
       );
-      return { currentAttempt, ambiguousAt };
-    });
-    await forcePointAlarm(object, "round-sixth-crash");
+    })).toBe(true);
     const recovered = await runPointObject(object, (_target, state) => state.storage.sql.exec<{
       state: string;
       announce_state: string;
@@ -1321,14 +1365,13 @@ describe("game rounds in the worker Durable Object", () => {
     }, Date.now() + 60_000);
     await object.joinGameRound(pointTestModule, "round-settlement-failure", "msg:stake", "viewer-a", "nachtfalke", 10, {});
 
-    await runPointObject(object, (_target, state) => {
+    expect(await forcePointAlarm(object, "round-settlement-failure", (_target, state) => {
       state.storage.sql.exec(
         "UPDATE game_rounds SET deadline_at = ? WHERE round_id = ?",
-        Date.now() - 1,
+        Date.now() - 60_000,
         "round-settlement-failure",
       );
-    });
-    await forcePointAlarm(object, "round-settlement-failure");
+    })).toBe(true);
     await expect(runPointObject(object, (_target, state) => state.storage.sql.exec<{ state: string }>(
       "SELECT state FROM game_rounds WHERE round_id = ?", "round-settlement-failure",
     ).one().state)).resolves.toBe("cancelled");
@@ -1365,9 +1408,9 @@ describe("game rounds in the worker Durable Object", () => {
       });
       await deferPointAlarmWithin(state);
     });
-    await forcePointAlarm(object, "round-ambiguous-time");
+    expect(await forcePointAlarm(object, "round-ambiguous-time")).toBe(true);
     vi.setSystemTime(start + 5_000);
-    await forcePointAlarm(object, "round-ambiguous-time");
+    expect(await forcePointAlarm(object, "round-ambiguous-time")).toBe(true);
     const round = await runPointObject(object, (_target, state) => state.storage.sql.exec<{
       state: string;
       announce_state: string;

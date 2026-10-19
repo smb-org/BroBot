@@ -777,22 +777,43 @@ export const setGameModuleGateSync = (
   revision: number,
   hashFor: (value: unknown) => string,
   now = new Date().toISOString(),
+  lastDisabledRevision: number | null = null,
 ): { applied: boolean } => {
   if (!Number.isSafeInteger(revision) || revision < 1) throw new Error("invalid_revision");
-  const existing = sql.exec<{ revision: number; closed: number }>(
-    "SELECT revision, closed FROM module_gates WHERE module_id = ?",
-    moduleId,
-  ).toArray()[0];
-  if (existing !== undefined && revision <= existing.revision) return { applied: false };
+  if (lastDisabledRevision !== null && (!Number.isSafeInteger(lastDisabledRevision) || lastDisabledRevision < 1)) {
+    throw new Error("invalid_revision");
+  }
   if (!closed) {
     const cancellation = sql.exec<{ revision: number }>(
       "SELECT revision FROM game_round_cancellations WHERE module_id = ?",
       moduleId,
     ).toArray()[0];
-    if (cancellation !== undefined) {
-      const roundIds = sql.exec<{ round_id: string }>(
-        `SELECT round_id FROM game_rounds WHERE module_id = ? AND state IN ('announcing', 'open', 'resolving') ORDER BY created_at, round_id`,
+    const cancellationRevision = Math.max(lastDisabledRevision ?? 0, cancellation?.revision ?? 0) || null;
+    if (cancellationRevision !== null) {
+      const currentGate = sql.exec<{ revision: number }>(
+        "SELECT revision FROM module_gates WHERE module_id = ?",
         moduleId,
+      ).toArray()[0];
+      if (currentGate === undefined || currentGate.revision <= cancellationRevision) {
+        sql.exec(
+          `INSERT INTO module_gates (module_id, closed, revision) VALUES (?, 1, ?)
+           ON CONFLICT(module_id) DO UPDATE SET closed = 1, revision = excluded.revision`,
+          moduleId,
+          cancellationRevision,
+        );
+      }
+      sql.exec(
+        `INSERT INTO game_round_cancellations (module_id, revision) VALUES (?, ?)
+         ON CONFLICT(module_id) DO UPDATE SET revision = excluded.revision`,
+        moduleId,
+        cancellationRevision,
+      );
+      const roundIds = sql.exec<{ round_id: string }>(
+        `SELECT round_id FROM game_rounds
+          WHERE module_id = ? AND gate_revision < ? AND state IN ('announcing', 'open', 'resolving')
+          ORDER BY created_at, round_id`,
+        moduleId,
+        cancellationRevision,
       ).toArray().map(({ round_id }) => round_id);
       cancelPointRoundsSync(
         sql,
@@ -800,10 +821,15 @@ export const setGameModuleGateSync = (
         now,
         hashFor,
         roundIds,
-        cancellation.revision,
+        cancellationRevision,
       );
     }
   }
+  const existing = sql.exec<{ revision: number; closed: number }>(
+    "SELECT revision, closed FROM module_gates WHERE module_id = ?",
+    moduleId,
+  ).toArray()[0];
+  if (existing !== undefined && revision <= existing.revision) return { applied: false };
   sql.exec(
     `INSERT INTO module_gates (module_id, closed, revision) VALUES (?, ?, ?)
      ON CONFLICT(module_id) DO UPDATE SET closed = excluded.closed, revision = excluded.revision`,

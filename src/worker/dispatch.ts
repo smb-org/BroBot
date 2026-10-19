@@ -951,7 +951,7 @@ export const dispatchEventSubNotification = async (
       const activation = dispatchState.activations.find((candidate) => candidate.moduleId === module.id);
       const points = modulePoints(environment.CHANNEL, event.channelId, module.id);
       if (module.requiresModules?.includes("points") === true && activation !== undefined) {
-        await points.rounds.setGate(!activation.enabled, activation.revision);
+        await points.rounds.setGate(!activation.enabled, activation.revision, activation.lastDisabledRevision);
       }
       const validatedSettings: unknown = module.settingsSchema.parse(JSON.parse(settings));
       const moduleEvent: ModuleEvent = {
