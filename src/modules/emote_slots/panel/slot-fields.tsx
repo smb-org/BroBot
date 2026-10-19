@@ -221,7 +221,10 @@ export function SlotReelTable({
             (next) => updateNumber(index, "triple", next), copy.tripleAria.replace("{name}", symbol.name), 2, 500, numericError(symbol.triple, 2, 500, copy.tripleError))}</div>}</td>
           <td><NativeRadio className="slot-jackpot-radio" name="slot-jackpot-symbol" value={symbol.id}
             checked={symbol.isJackpot} disabled={disabled || readOnly}
-            onChange={() => onChange(parsedSettings.symbols.map((item) => ({ ...item, isJackpot: item.id === symbol.id })))}
+            onChange={() => onChange(parsedSettings.symbols.map((item) => item.id === symbol.id
+              // The jackpot row hides its multiplier, so an invalid one would lock save invisibly.
+              ? { ...item, isJackpot: true, triple: numericError(item.triple, 2, 500, "") === undefined ? item.triple : 2 }
+              : { ...item, isJackpot: false }))}
             ariaLabel={copy.jackpotAria.replace("{name}", symbol.name)} /></td>
           <td><GroupedPicker
             groups={groups}
@@ -249,6 +252,13 @@ export function SlotReelTable({
     </Dialog>
   </div>;
 }
+
+// Rounds to whole basis points; excess precision (7.001 %) stays fractional so the integer schema rejects it.
+const percentToBasisPoints = (percent: number): number => {
+  const scaled = percent * 100;
+  const rounded = Math.round(scaled);
+  return Math.abs(scaled - rounded) < 1e-6 ? rounded : scaled;
+};
 
 export function SlotShareField({
   settings,
@@ -280,7 +290,7 @@ export function SlotShareField({
     label={label}
     ariaLabel={label}
     value={value}
-    onChange={(next) => { onChange(next === "" ? "" : next * 100); }}
+    onChange={(next) => { onChange(next === "" ? "" : percentToBasisPoints(next)); }}
     min={0}
     max={20}
     step={0.01}

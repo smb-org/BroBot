@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useState } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { SaveStatus, UiProvider } from "../../src/dashboard/ui";
-import { emoteSlotDefaultSettingsForLanguage } from "../../src/modules/emote_slots/contracts";
+import { emoteSlotDefaultSettingsForLanguage, emoteSlotSettingsSchema } from "../../src/modules/emote_slots/contracts";
 import { emoteSlotsCatalog } from "../../src/modules/emote_slots/locale";
 import { emoteSlotSettingsEditorCatalog } from "../../src/modules/emote_slots/panel/locale";
-import { SlotReelTable } from "../../src/modules/emote_slots/panel/slot-fields";
+import { SlotReelTable, SlotShareField } from "../../src/modules/emote_slots/panel/slot-fields";
 import type { EmoteSlotSettings } from "../../src/modules/emote_slots/contracts";
 
 afterEach(() => {
@@ -33,6 +34,52 @@ const renderReelTable = (settings: EmoteSlotSettings) => render(<UiProvider>
 </UiProvider>);
 
 describe("emote slot settings controls", () => {
+  it.each([
+    ["8.03", 803], ["1.1", 110], ["7", 700],
+  ])("converts a %s percent jackpot share to whole basis points (protects=decimal percentages become integers the schema accepts; fails_when=floating-point residue such as 802.9999999999999 reaches the draft; no_claim=locale-specific decimal input handling of the browser)", (typed, expected) => {
+    const onChange = vi.fn();
+    const settings = { ...emoteSlotDefaultSettingsForLanguage("de"), jackpotShareBp: 100 };
+    render(<UiProvider><SlotShareField settings={settings} onChange={onChange} disabled={false} readOnly={false} label="Share" context={{ channelId: "slot_component_demo", language: "de" }} /></UiProvider>);
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Share" }), { target: { value: typed } });
+
+    expect(onChange).toHaveBeenLastCalledWith(expected);
+  });
+
+  it("keeps excess jackpot share precision fractional so the schema rejects it (protects=7.001 percent is not silently rounded; fails_when=sub-basis-point input is rounded to an accepted integer; no_claim=the wording of the field error)", () => {
+    const onChange = vi.fn();
+    const settings = { ...emoteSlotDefaultSettingsForLanguage("de"), jackpotShareBp: 100 };
+    render(<UiProvider><SlotShareField settings={settings} onChange={onChange} disabled={false} readOnly={false} label="Share" context={{ channelId: "slot_component_demo", language: "de" }} /></UiProvider>);
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Share" }), { target: { value: "7.001" } });
+    const sent = onChange.mock.lastCall?.[0] as number;
+
+    expect(Number.isInteger(sent)).toBe(false);
+    expect(emoteSlotSettingsSchema.safeParse({ ...settings, jackpotShareBp: sent }).success).toBe(false);
+  });
+
+  it("normalizes a cleared multiplier when its row becomes the jackpot (protects=selecting a row with an invalid hidden multiplier leaves a valid draft; fails_when=the hidden triple stays empty and keeps the settings invalid; no_claim=save button rendering)", () => {
+    const base = emoteSlotDefaultSettingsForLanguage("de");
+    const copy = emoteSlotsCatalog.de.panel;
+    const first = base.symbols[0]?.name ?? "";
+    const second = base.symbols[1]?.name ?? "";
+    function Harness() {
+      const [symbols, setSymbols] = useState(base.symbols);
+      return <UiProvider>
+        <SlotReelTable settings={{ ...base, symbols }} value={symbols} onChange={(next) => { setSymbols(next as typeof symbols); }}
+          disabled={false} readOnly={false} label="Reels" context={{ channelId: "slot_component_demo", language: "de", lastTouchedField: "symbols" }} />
+        <output data-testid="valid">{String(emoteSlotSettingsSchema.safeParse({ ...base, symbols }).success)}</output>
+      </UiProvider>;
+    }
+    stubEmoteList();
+    render(<Harness />);
+    fireEvent.change(screen.getByRole("spinbutton", { name: copy.tripleAria.replace("{name}", first) }), { target: { value: "" } });
+    expect(screen.getByTestId("valid")).toHaveTextContent("false");
+    fireEvent.click(screen.getByRole("radio", { name: copy.jackpotAria.replace("{name}", first) }));
+
+    expect(screen.getByTestId("valid")).toHaveTextContent("true");
+    fireEvent.click(screen.getByRole("radio", { name: copy.jackpotAria.replace("{name}", second) }));
+    expect(screen.getByRole("spinbutton", { name: copy.tripleAria.replace("{name}", first) })).toHaveValue(2);
+  });
+
   it("exposes accessible names for reel weights, triples, and jackpot radios (protects=every reel control has a symbol-specific accessible name; fails_when=a numeric or radio input is unnamed or names the wrong row; no_claim=keyboard picker interaction)", () => {
     stubEmoteList();
     const settings = emoteSlotDefaultSettingsForLanguage("de");
