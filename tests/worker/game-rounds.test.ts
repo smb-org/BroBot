@@ -125,6 +125,58 @@ describe("game rounds in the worker Durable Object", () => {
     ]);
   });
 
+  it(`refunds and cancels a round when monthly net overflows during alarm settlement (${testCard("an unrecoverable monthly overflow refunds escrow and removes the expired round alarm", "the failed settlement remains open and retries every five seconds")})`, async () => {
+    const channelId = `round-monthly-overflow-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    const max = Number.MAX_SAFE_INTEGER;
+    await object.applyPointOperation(pointTestModule, "seed-monthly-overflow", "game", [
+      { accountId: "viewer-a", delta: max },
+      { accountId: "__house", delta: -max },
+    ], { reason: "seed monthly net" });
+    await object.applyPointOperation(pointTestModule, "reduce-monthly-overflow-balance", "bonus", [
+      { accountId: "viewer-a", delta: -(max - 1) },
+      { accountId: "__house", delta: max - 1 },
+    ], { reason: "leave one point for the stake" });
+
+    const roundId = "round-monthly-overflow";
+    const remainingRoundId = "round-monthly-overflow-remaining";
+    const roundDeadline = Date.now() + 60_000;
+    const remainingDeadline = roundDeadline + 60_000;
+    await openAnnouncedRound(object, pointTestModule, roundId, {
+      durationS: 60,
+      announceText: "The round starts",
+      settlement: { kind: "test", params: { payouts: [{ accountId: "viewer-a", amount: 3 }] } },
+    }, roundDeadline);
+    await object.joinGameRound(pointTestModule, roundId, "msg:monthly-overflow-stake", "viewer-a", "nachtfalke", 1, {});
+    await openAnnouncedRound(object, pointTestModule, remainingRoundId, {
+      durationS: 60,
+      announceText: "The next round starts",
+      settlement: { kind: "test", params: { payouts: [] } },
+    }, remainingDeadline);
+
+    await expect(forcePointAlarm(object, roundId, (_target, objectState) => {
+      objectState.storage.sql.exec(
+        "UPDATE game_rounds SET deadline_at = ? WHERE round_id = ?",
+        Date.now() - 1,
+        roundId,
+      );
+    })).resolves.toBe(true);
+
+    await expect(object.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(1);
+    const state = await runPointObject(object, async (_target, objectState) => ({
+      roundState: objectState.storage.sql.exec<{ state: string }>(
+        "SELECT state FROM game_rounds WHERE round_id = ?", roundId,
+      ).one().state,
+      schedule: objectState.storage.kv.get<Record<string, { deadline: number }>>("channel:alarm_schedule") ?? {},
+      platformAlarm: await objectState.storage.getAlarm(),
+    }));
+    expect(state.roundState).toBe("cancelled");
+    expect(state.schedule[`points:round:${roundId}`]).toBeUndefined();
+    expect(state.schedule[`points:round:${remainingRoundId}`]?.deadline).toBe(remainingDeadline);
+    expect(state.platformAlarm).toBe(remainingDeadline);
+  });
+
   it(`refunds each open participant once when a module closes (${testCard("module shutdown returns every escrowed stake exactly once", "a participant is refunded twice or remains short")})`, async () => {
     const channelId = `round-refund-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);

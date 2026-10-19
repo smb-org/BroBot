@@ -3450,7 +3450,8 @@ export class ChannelObject extends DurableObject<Env> {
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       if (reason === "round_cancellation_pending") throw error;
-      if (reason === "settlement_missing" || reason === "settlement_unknown" || reason === "settlement_execution_failed") {
+      if (reason === "settlement_missing" || reason === "settlement_unknown" || reason === "settlement_execution_failed" ||
+          reason === "monthly_overflow") {
         await this.cancelPointRounds(moduleId, [roundId]);
         throw new Error("round_cancelled", { cause: error });
       }
