@@ -889,6 +889,8 @@ export interface DashboardTexts {
     noDetails: string;
     blocked: string;
     indeterminate: string;
+    targetCheckPending: string;
+    untitledVote: string;
     indeterminateSummary: (count: number) => string;
     fires: string;
     wouldReply: string;
@@ -1481,6 +1483,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       noDetails: "Keine passenden Details für diese Nachricht.",
       blocked: "Blockiert",
       indeterminate: "Noch offen",
+      targetCheckPending: "Noch offen",
+      untitledVote: "Abstimmung",
       indeterminateSummary: (count) => formatNumber(count, "de") + (count === 1 ? " Ergebnis noch offen" : " Ergebnisse noch offen"),
       fires: "Würde auslösen",
       wouldReply: "Würde antworten",
@@ -2081,6 +2085,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       noDetails: "No matching details for this message.",
       blocked: "Blocked",
       indeterminate: "Not settled yet",
+      targetCheckPending: "Pending",
+      untitledVote: "Untitled vote",
       indeterminateSummary: (count) => formatNumber(count, "en") + (count === 1 ? " uncertain result" : " uncertain results"),
       fires: "Would trigger",
       wouldReply: "Would reply",

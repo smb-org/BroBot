@@ -161,7 +161,7 @@ test("shows a counted chat vote with localized counts and the vote-specific expl
   await expect(detail).toContainText("Die Nachricht „!vote 2“ wählt Option 2.");
   await expect(detail).toContainText("Stimme würde der laufenden Abstimmung zugeordnet");
   await expect(detail).toContainText("Option 1: 1.234 · Option 2: 2.345");
-  await expect(detail.getByRole("button", { name: "Im Editor öffnen" })).toHaveCount(0);
+  await expect(detail.getByRole("button", { name: "Im Editor öffnen" })).toBeVisible();
 
   await page.getByLabel("Module").click();
   await expect(page.getByRole("option", { name: "Abstimmung" })).toBeVisible();
@@ -200,7 +200,7 @@ test("shows a votekick target row and target-specific explanation without a dead
   await expect(detail.getByRole("heading", { name: "Spieler melden" })).toBeVisible();
   await expect(detail).toContainText("Die Nachricht „!votekick spieler_demo“ nennt das Ziel „spieler_demo“.");
   await expect(detail).toContainText("Ja: 1 · Nein: 0");
-  await expect(detail.getByRole("button", { name: "Im Editor öffnen" })).toHaveCount(0);
+  await expect(detail.getByRole("button", { name: "Im Editor öffnen" })).toBeVisible();
 });
 
 test("marks a deferred votekick target as neutral and shows its send-time note", async ({ page }) => {

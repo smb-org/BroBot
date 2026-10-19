@@ -172,7 +172,7 @@ export const parseDashboardRoute = (pathname: string, search = ""): DashboardRou
     const params = new URLSearchParams(search);
     const moduleId = params.get("onlyModule");
     const entryId = params.get("onlyEntryId");
-    if (moduleId !== "text_commands" && moduleId !== "faq") return route;
+    if (moduleId !== "text_commands" && moduleId !== "faq" && moduleId !== "chat_voting" && moduleId !== "votekick") return route;
     return { ...route, only: { moduleId, ...(entryId === null || entryId.length === 0 ? {} : { entryId }) } };
   }
   return route;

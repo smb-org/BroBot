@@ -491,7 +491,10 @@
 .test-area__row-outcome.is-muted { color: var(--text-3); }
 
 .test-area__row-outcome > span:last-child {
-  overflow-wrap: anywhere;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .test-area__state-slot {

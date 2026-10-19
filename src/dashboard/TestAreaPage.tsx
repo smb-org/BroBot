@@ -120,6 +120,14 @@ const votekickTargetFromMessage = (message: string): string | null => {
   return match?.[1]?.replace(/^@/u, "") ?? null;
 };
 
+const editorModuleFor = (moduleId: string): DryRunModuleId | null =>
+  moduleId === "text_commands" || moduleId === "faq" || moduleId === "chat_voting" || moduleId === "votekick"
+    ? moduleId
+    : null;
+
+const isVotekickTargetCheckNote = (note: DryRunEntryReport["templateNotes"][number]): boolean =>
+  note.code === "template.deferred_live" && note.detail?.name === "votekick.target";
+
 const entryLabel = (item: ResultItem, labels: ReturnType<typeof dashboardTexts>): string => {
   const ballot = firstBallotEffect(item.report);
   const isVotekickTargetCommand = item.moduleId === "votekick" && ballot === undefined &&
@@ -128,7 +136,7 @@ const entryLabel = (item: ResultItem, labels: ReturnType<typeof dashboardTexts>)
     return labels.testArea.votekickEntryLabel;
   }
   return item.moduleId === "chat_voting" && ballot !== undefined && ballot.action !== "start"
-    ? ballot.label
+    ? ballot.untitled === true ? labels.testArea.untitledVote : ballot.label
     : item.report.entry.label;
 };
 
@@ -136,7 +144,7 @@ const matchLabel = (report: DryRunEntryReport, labels: ReturnType<typeof dashboa
   const ballot = firstBallotEffect(report);
   if (report.moduleId === "chat_voting" && report.entry.kind === "chat_vote") {
     if (ballot?.action === "count" && ballot.choice !== undefined) {
-      return /^\d+$/u.test(ballot.choice) ? labels.testArea.matchVoteChoice(ballot.choice) : labels.testArea.matchVoteTerm(ballot.choice);
+      return ballot.choiceKind === "term" ? labels.testArea.matchVoteTerm(ballot.choice) : labels.testArea.matchVoteChoice(ballot.choice);
     }
     if (ballot?.action === "overflow") return labels.testArea.matchVoteOverflow;
     return labels.testArea.matchVoteCommand;
@@ -353,10 +361,11 @@ function effectSuppression(effect: DryRunEffect, labels: ReturnType<typeof dashb
 function effectLabel(effect: DryRunEffect, labels: ReturnType<typeof dashboardTexts>): string {
   const texts = labels.testArea;
   if (effect.kind === "ballot") {
+    const ballotLabel = effect.untitled === true ? texts.untitledVote : effect.label;
     const actionLabel = effect.action === "count" ? texts.ballotCountEffect(effect.moduleId, effect.choice)
-      : effect.action === "start" ? texts.ballotStartEffect(effect.moduleId, effect.label)
+      : effect.action === "start" ? texts.ballotStartEffect(effect.moduleId, ballotLabel)
         : effect.action === "overflow" ? texts.ballotOverflowEffect
-          : texts.ballotFinalizeEffect(effect.moduleId, effect.label);
+          : texts.ballotFinalizeEffect(effect.moduleId, ballotLabel);
     return [
       actionLabel,
       effect.counts === undefined || effect.counts.length === 0 ? null : texts.ballotCounts(effect.moduleId, effect.counts),
@@ -402,7 +411,7 @@ function MatchExplanation({ report, message, labels }: {
   let specificExplanation: string | null = null;
   if (report.moduleId === "chat_voting" && report.entry.kind === "chat_vote") {
     specificExplanation = ballot?.action === "count" && ballot.choice !== undefined
-      ? /^\d+$/u.test(ballot.choice) ? texts.voteChoiceWhy(message, ballot.choice) : texts.voteTermWhy(message, ballot.choice)
+      ? ballot.choiceKind === "term" ? texts.voteTermWhy(message, ballot.choice) : texts.voteChoiceWhy(message, ballot.choice)
       : ballot?.action === "overflow" ? texts.voteOverflowWhy(message)
         : ballot?.action === "finalize" ? texts.voteFinalizeWhy(message) : texts.voteCommandWhy(message);
   } else if (report.moduleId === "votekick" && report.entry.kind === "votekick") {
@@ -440,9 +449,11 @@ function ResultDetail({ item, message, response, labels, language, onOpenEditor 
 }): ReactElement {
   const { report, moduleId } = item;
   const texts = labels.testArea;
+  const targetCheckNotes = report.templateNotes.filter(isVotekickTargetCheckNote);
+  const templateNotes = report.templateNotes.filter((note) => !isVotekickTargetCheckNote(note));
   const chatEffects = report.effects.filter((effect): effect is Extract<DryRunEffect, { kind: "chat" | "announcement" }> =>
     effect.kind === "chat" || effect.kind === "announcement");
-  const editorModuleId: DryRunModuleId | null = moduleId === "text_commands" || moduleId === "faq" ? moduleId : null;
+  const editorModuleId = editorModuleFor(moduleId);
   return <div className="test-area__detail-content">
     <header className="test-area__detail-head">
       <div className="test-area__detail-heading">
@@ -486,10 +497,16 @@ function ResultDetail({ item, message, response, labels, language, onOpenEditor 
           </div>)}
         </div>
       </section>}
-      {report.templateNotes.length === 0 ? null : <section className="test-area__detail-section">
+      {targetCheckNotes.length === 0 ? null : <section className="test-area__detail-section">
+        <h3>{texts.targetCheckPending}</h3>
+        <ul className="test-area__template-notes">
+          {targetCheckNotes.map((note, index) => <li key={note.code + ":" + String(index)}>{eventText(note.code, note.detail ?? {}, language)}</li>)}
+        </ul>
+      </section>}
+      {templateNotes.length === 0 ? null : <section className="test-area__detail-section">
         <h3>{texts.templateNotes}</h3>
         <ul className="test-area__template-notes">
-          {report.templateNotes.map((note, index) => <li key={note.code + ":" + String(index)}>{eventText(note.code, note.detail ?? {}, language)}</li>)}
+          {templateNotes.map((note, index) => <li key={note.code + ":" + String(index)}>{eventText(note.code, note.detail ?? {}, language)}</li>)}
         </ul>
       </section>}
       {report.outcome === "blocked" ? <section className="test-area__detail-section">
@@ -745,6 +762,7 @@ export function TestAreaPage({
       {...(onOpenEditor === undefined ? {} : { onOpenEditor })}
     />
     : <div className="test-area__detail-placeholder">{texts.noDetails}</div>;
+  const mobileEditorModuleId = selectedItem === null ? null : editorModuleFor(selectedItem.moduleId);
 
   return <ToolPage
     kind="test"
@@ -884,12 +902,11 @@ export function TestAreaPage({
         opened={mobileDetailOpen && selectedItem !== null && response !== null}
         title={selectedItem === null ? texts.result : entryLabel(selectedItem, labels)}
         className="test-area__dialog test-area__detail-dialog"
-        headerActions={selectedItem !== null && response !== null && onOpenEditor !== undefined &&
-          (selectedItem.moduleId === "faq" || selectedItem.moduleId === "text_commands")
+        headerActions={selectedItem !== null && response !== null && onOpenEditor !== undefined && mobileEditorModuleId !== null
           ? <Button
             variant="subtle"
             size="compact"
-            onClick={() => onOpenEditor(selectedItem.moduleId as DryRunModuleId, selectedItem.report.entry.id)}
+            onClick={() => onOpenEditor(mobileEditorModuleId, selectedItem.report.entry.id)}
           >{texts.openEditor}<Icon name="external" /></Button>
           : null}
         onClose={() => setMobileDetailOpen(false)}
