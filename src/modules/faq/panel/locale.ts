@@ -45,14 +45,9 @@ export interface FaqTexts {
   matcherValidationReasons: Record<FaqMatcherValidationReasonCode, string>;
   keywordChipMessages: ChipsInputMessages;
   removePattern: (pattern: string) => string;
-  sampleMessage: string;
-  testSample: string;
-  sampleMessageHint: string;
-  sampleMessageInvalid: string;
-  sampleMessageEmpty: string;
-  sampleMessageCommand: string;
-  sampleMessageNoMatch: string;
-  sampleMessageMatch: (pattern: string) => string;
+  testAreaAction: string;
+  testAreaDirty: string;
+  testAreaSavedOnly: string;
   minimumTier: string;
   rolesSectionTitle: string;
   tierOptions: readonly { value: FaqMinimumTier; label: string; inclusion: string }[];
@@ -141,9 +136,7 @@ const catalog: LocaleCatalog<FaqTexts> = {
       faq_keywords_invalid: "Gib 1 bis 20 gültige Schlüsselwörter oder Wortgruppen ein.",
     },
     keywordChipMessages: { countLabel: formatCount, atLimitHint: "Maximal 20 Auslöser. Entferne einen zum Austauschen.", duplicateWarning: (entry) => `„${entry}“ ist bereits hinzugefügt.` },
-    removePattern: (pattern) => `${pattern} entfernen`, sampleMessage: "Beispielnachricht testen", testSample: "Beispiel testen", sampleMessageHint: "Die Prüfung verwendet genau diesen Eintrag und läuft beim Tippen.", sampleMessageInvalid: "Korrigiere den Auslöser, um ihn zu testen.",
-    sampleMessageEmpty: "Gib eine Nachricht ein, um den Auslöser zu testen.", sampleMessageCommand: "Nachrichten mit ! am Anfang werden übersprungen.", sampleMessageNoMatch: "Kein Auslöser passt zu dieser Nachricht.",
-    sampleMessageMatch: (pattern) => `Treffer durch „${pattern}“.`,
+    removePattern: (pattern) => `${pattern} entfernen`, testAreaAction: "Im Testbereich prüfen", testAreaDirty: "Speichere oder verwerfe Änderungen, bevor du prüfst.", testAreaSavedOnly: "Nur gespeicherte Antworten können geprüft werden.",
     minimumTier: "Mindestrolle", rolesSectionTitle: "Wer darf auslösen", tierOptions: [
       { value: "everyone", label: "Alle", inclusion: "Alle Zuschauer und Rollen dürfen auslösen." },
       { value: "subscriber", label: "Abonnenten", inclusion: "Abonnenten, Moderatoren und Broadcaster dürfen auslösen. VIPs nicht." },
@@ -189,9 +182,7 @@ const catalog: LocaleCatalog<FaqTexts> = {
       faq_keywords_invalid: "Enter 1 to 20 valid keywords or phrases.",
     },
     keywordChipMessages: { countLabel: formatCount, atLimitHint: "Up to 20 triggers. Remove one to replace it.", duplicateWarning: (entry) => `“${entry}” has already been added.` },
-    removePattern: (pattern) => `Remove ${pattern}`, sampleMessage: "Test a sample message", testSample: "Test sample", sampleMessageHint: "This checks only this entry and updates as you type.", sampleMessageInvalid: "Fix the trigger before testing it.",
-    sampleMessageEmpty: "Enter a message to test the trigger.", sampleMessageCommand: "Messages starting with ! are skipped.", sampleMessageNoMatch: "No trigger matches this message.",
-    sampleMessageMatch: (pattern) => `Matched by “${pattern}”.`,
+    removePattern: (pattern) => `Remove ${pattern}`, testAreaAction: "Check in test area", testAreaDirty: "Save or discard changes before checking.", testAreaSavedOnly: "Only saved answers can be checked.",
     minimumTier: "Minimum role", rolesSectionTitle: "Who can trigger it", tierOptions: [
       { value: "everyone", label: "Everyone", inclusion: "Every viewer and role can trigger it." },
       { value: "subscriber", label: "Subscribers", inclusion: "Subscribers, moderators, and broadcasters can trigger it. VIPs cannot." },

@@ -4,12 +4,14 @@ import { dashboardCommonTexts } from "../locale";
 import { Icon } from "./Icon";
 import { DialogContent, DialogHeader, DialogPrimitive, DialogTitle } from "./primitives/dialog";
 
-export function Dialog({ opened, title, children, onClose, pending = false }: {
+export function Dialog({ opened, title, children, onClose, pending = false, className, headerActions }: {
   opened: boolean;
   title: string;
   children: ReactNode;
   onClose: () => void;
   pending?: boolean;
+  className?: string;
+  headerActions?: ReactNode;
 }): ReactElement {
   const closeLabel = dashboardCommonTexts().close;
   const handleOpenChange: NonNullable<ComponentProps<typeof DialogPrimitive.Root>["onOpenChange"]> = (nextOpen, eventDetails) => {
@@ -21,9 +23,10 @@ export function Dialog({ opened, title, children, onClose, pending = false }: {
   };
 
   return <DialogPrimitive.Root open={opened} onOpenChange={handleOpenChange}>
-    <DialogContent className="ui-dialog">
+    <DialogContent className={["ui-dialog", className].filter(Boolean).join(" ")}>
       <DialogHeader className="ui-dialog__header">
         <DialogTitle>{title}</DialogTitle>
+        {headerActions}
         <button className="ui-dialog__close" type="button" aria-label={closeLabel} disabled={pending} onClick={onClose}><Icon name="close" /></button>
       </DialogHeader>
       <div className="ui-dialog__body">{children}</div>

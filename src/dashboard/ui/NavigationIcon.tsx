@@ -1,5 +1,5 @@
 import {
-  BookOpenText, Braces, Clapperboard, CloudSun, Database, Megaphone, MessageCircleQuestion,
+  BookOpenText, Braces, Clapperboard, CloudSun, Database, FlaskConical, Megaphone, MessageCircleQuestion,
   MessageSquareText, Radio, RadioTower, ScrollText, Settings, Settings2, ShieldAlert, Signal, Timer,
   ToggleRight, UsersRound, Vote,
 } from "lucide-react";
@@ -14,6 +14,7 @@ const iconByKind: Readonly<Record<string, LucideIcon>> = {
   overlays: Settings2,
   system: Settings,
   variable: Braces,
+  test: FlaskConical,
   audit: ScrollText,
   texts: BookOpenText,
   timers: Timer,

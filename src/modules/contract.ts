@@ -1422,6 +1422,8 @@ export interface ModulePanelProperties {
    *  mount (e.g. text_commands selects the command by name); most modules
    *  ignore it. */
   initialSelection?: string;
+  /** Opens a saved chat trigger in the dry-run workspace. */
+  onOpenTestArea?: (moduleId: "text_commands" | "faq", entryId: string) => void;
 }
 
 type ModuleImmediateActionIcon = "ad" | "shoutout" | "clip" | "broadcast" | "vote" | "boss" | "blitz";

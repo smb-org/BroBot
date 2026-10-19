@@ -1,0 +1,920 @@
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode, type SyntheticEvent } from "react";
+
+import type { DryRunEffect, DryRunEntryReport, DryRunRequest, DryRunResponse } from "../contracts/dry-run";
+import {
+  dryRunChatMessage,
+  fetchChannelBroadcast,
+  lookupChannelGames,
+  searchChannelGames,
+  type PanelBroadcastGame,
+} from "./api";
+import { apiErrorText, dashboardTexts, eventText, type DashboardLanguage } from "./locale";
+import { moduleNavigationName } from "./module-labels";
+import { formatCharacterTotal } from "./ui/text-length";
+import {
+  Badge,
+  Button,
+  ChatPreview,
+  ChipGroup,
+  Dialog,
+  Field,
+  GameMultiSelect,
+  Icon,
+  NavigationIcon,
+  SegmentChoice,
+  Select,
+  StatusLed,
+  SwitchRow,
+  ToolPage,
+} from "./ui";
+import "./TestAreaPage.css";
+
+type DryRunModuleId = NonNullable<DryRunRequest["only"]>["moduleId"];
+type ModuleFilter = "all" | DryRunModuleId;
+type HistoryItem = { channelId: string; request: DryRunRequest; createdAt: string };
+type ResultItem = { key: string; moduleId: string; report: DryRunEntryReport };
+type ResultSnapshot = { response: DryRunResponse; request: DryRunRequest };
+type StreamState = DryRunRequest["streamState"];
+
+const historyKey = (channelId: string): string => "test-area-history:" + encodeURIComponent(channelId);
+const HISTORY_LIMIT = 10;
+const DEFAULT_MESSAGE = "!dc hallo";
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const readHistory = (channelId: string): HistoryItem[] => {
+  try {
+    const raw: unknown = JSON.parse(window.sessionStorage.getItem(historyKey(channelId)) ?? "null");
+    if (!Array.isArray(raw)) return [];
+    return raw.flatMap((item): HistoryItem[] => {
+      if (!isRecord(item) || item.channelId !== channelId || !isRecord(item.request) || typeof item.createdAt !== "string") return [];
+      const request = item.request;
+      if (typeof request.text !== "string" || !isRecord(request.sender) ||
+          typeof request.sender.login !== "string" || !Array.isArray(request.sender.statuses) ||
+          (request.streamState !== "online" && request.streamState !== "offline") ||
+          typeof request.sharedChat !== "boolean") return [];
+      const onlyModule = isRecord(request.only) ? request.only.moduleId : null;
+      const only: DryRunRequest["only"] = onlyModule === "text_commands" || onlyModule === "faq" || onlyModule === "chat_voting" || onlyModule === "votekick"
+        ? { moduleId: onlyModule, ...(isRecord(request.only) && typeof request.only.entryId === "string" ? { entryId: request.only.entryId } : {}) }
+        : undefined;
+      const game = isRecord(request.game) && typeof request.game.id === "string" && typeof request.game.name === "string"
+        ? { id: request.game.id, name: request.game.name }
+        : null;
+      const statuses = request.sender.statuses.filter((status): status is NonNullable<DryRunRequest["sender"]["statuses"][number]> =>
+        status === "subscriber" || status === "vip" || status === "moderator" || status === "broadcaster");
+      return [{
+        channelId,
+        request: {
+          text: request.text,
+          sender: { login: request.sender.login, statuses },
+          streamState: request.streamState,
+          game,
+          sharedChat: request.sharedChat,
+          ...(only === undefined ? {} : { only }),
+        },
+        createdAt: item.createdAt,
+      }];
+    }).slice(0, HISTORY_LIMIT);
+  } catch {
+    return [];
+  }
+};
+
+const badgeValues = ["subscriber", "vip", "moderator", "broadcaster"] as const;
+
+const formatTime = (value: string, language: DashboardLanguage): string => {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+  return new Intl.DateTimeFormat(language === "de" ? "de-DE" : "en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+};
+
+const moduleName = (id: string, labels: ReturnType<typeof dashboardTexts>, language: DashboardLanguage): string =>
+  id === "text_commands" ? labels.testArea.textCommands
+    : id === "faq" ? labels.testArea.faq
+      : id === "chat_voting" ? labels.testArea.chatVoting
+        : id === "votekick" ? labels.testArea.votekick
+          : moduleNavigationName(id, language);
+
+const resultItems = (response: DryRunResponse | null): ResultItem[] => response?.modules
+  .filter((module) => module.status === "reacts" || module.status === "blocked" || module.status === "indeterminate")
+  .flatMap((module) => module.entries.map((report) => ({
+    key: module.moduleId + ":" + report.entry.id,
+    moduleId: module.moduleId,
+    report,
+  }))) ?? [];
+
+const firstBlockReason = (report: DryRunEntryReport, labels: ReturnType<typeof dashboardTexts>): string => {
+  const block = report.blocks[0];
+  return block === undefined ? labels.testArea.blocked : labels.testArea.blockReason(block.code, block.detail);
+};
+
+const firstBallotEffect = (report: DryRunEntryReport): Extract<DryRunEffect, { kind: "ballot" }> | undefined =>
+  report.effects.find((effect): effect is Extract<DryRunEffect, { kind: "ballot" }> => effect.kind === "ballot");
+
+const votekickTargetFromMessage = (message: string): string | null => {
+  const match = /^!votekick\s+(@?[^\s]+)/iu.exec(message.trim());
+  return match?.[1]?.replace(/^@/u, "") ?? null;
+};
+
+const editorModuleFor = (moduleId: string): DryRunModuleId | null =>
+  moduleId === "text_commands" || moduleId === "faq" || moduleId === "chat_voting" || moduleId === "votekick"
+    ? moduleId
+    : null;
+
+const isVotekickTargetCheckNote = (note: DryRunEntryReport["templateNotes"][number]): boolean =>
+  note.code === "template.deferred_live" && note.detail?.name === "votekick.target";
+
+const entryLabel = (item: ResultItem, labels: ReturnType<typeof dashboardTexts>): string => {
+  const ballot = firstBallotEffect(item.report);
+  const isVotekickTargetCommand = item.moduleId === "votekick" && ballot === undefined &&
+    item.report.match.kind === "command_name" && item.report.match.token === "!votekick";
+  if (item.moduleId === "votekick" && (ballot?.action === "start" || isVotekickTargetCommand)) {
+    return labels.testArea.votekickEntryLabel;
+  }
+  return item.moduleId === "chat_voting" && ballot !== undefined && ballot.action !== "start"
+    ? ballot.untitled === true ? labels.testArea.untitledVote : ballot.label
+    : item.report.entry.label;
+};
+
+const matchLabel = (report: DryRunEntryReport, labels: ReturnType<typeof dashboardTexts>, message: string): string => {
+  const ballot = firstBallotEffect(report);
+  if (report.moduleId === "chat_voting" && report.entry.kind === "chat_vote") {
+    if (ballot?.action === "count" && ballot.choice !== undefined) {
+      return ballot.choiceKind === "term" ? labels.testArea.matchVoteTerm(ballot.choice) : labels.testArea.matchVoteChoice(ballot.choice);
+    }
+    if (ballot?.action === "overflow") return labels.testArea.matchVoteOverflow;
+    return labels.testArea.matchVoteCommand;
+  }
+  if (report.moduleId === "votekick" && report.entry.kind === "votekick") {
+    if (ballot?.action === "count" && ballot.choice !== undefined) return labels.testArea.matchVotekickChoice(ballot.choice);
+    const target = ballot?.action === "start" ? ballot.label : votekickTargetFromMessage(message);
+    if (target !== null) return labels.testArea.matchVotekickTarget(target);
+  }
+  const match = report.match;
+  if (match.kind === "command_name" || match.kind === "alias") {
+    return match.kind === "command_name" ? labels.testArea.matchCommand : labels.testArea.matchAlias(match.token);
+  }
+  if (match.kind === "keyword") return labels.testArea.matchKeyword(match.pattern);
+  return labels.testArea.matchRegex((match as Extract<DryRunEntryReport["match"], { kind: "regex" }>).pattern);
+};
+
+const firingLabel = (report: DryRunEntryReport, labels: ReturnType<typeof dashboardTexts>, muted: boolean): string =>
+  report.effects.some((effect) => effect.kind === "chat" || effect.kind === "announcement")
+    ? muted ? labels.testArea.wouldReplyMuted : labels.testArea.wouldReply
+    : labels.testArea.wouldAct;
+
+const moduleBadgeTone = (moduleId: string): "chat" | "participation" =>
+  moduleId === "chat_voting" || moduleId === "votekick" ? "participation" : "chat";
+
+const highlightedText = (text: string, ranges: readonly (readonly [number, number])[]): ReactNode[] => {
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  for (const [rawStart, rawEnd] of [...ranges].sort((left, right) => left[0] - right[0])) {
+    const start = Math.max(cursor, Math.min(text.length, rawStart));
+    const end = Math.max(start, Math.min(text.length, rawEnd));
+    if (start > cursor) parts.push(text.slice(cursor, start));
+    if (end > start) parts.push(<mark key={String(start) + ":" + String(end)}>{text.slice(start, end)}</mark>);
+    cursor = end;
+  }
+  if (cursor < text.length) parts.push(text.slice(cursor));
+  return parts;
+};
+
+function ContextFields({
+  labels,
+  channelId,
+  message,
+  setMessage,
+  sender,
+  setSender,
+  badges,
+  setBadges,
+  streamState,
+  setStreamState,
+  game,
+  setGame,
+  sharedChat,
+  setSharedChat,
+  moduleFilter,
+  setModuleFilter,
+  lockedModule,
+  onClearFilter,
+  onGameChange,
+}: {
+  labels: ReturnType<typeof dashboardTexts>;
+  channelId: string;
+  message: string;
+  setMessage: (value: string) => void;
+  sender: string;
+  setSender: (value: string) => void;
+  badges: readonly DryRunRequest["sender"]["statuses"][number][];
+  setBadges: (value: readonly DryRunRequest["sender"]["statuses"][number][]) => void;
+  streamState: StreamState;
+  setStreamState: (value: StreamState) => void;
+  game: PanelBroadcastGame | null;
+  setGame: (value: PanelBroadcastGame | null) => void;
+  sharedChat: boolean;
+  setSharedChat: (value: boolean) => void;
+  moduleFilter: ModuleFilter;
+  setModuleFilter: (value: ModuleFilter) => void;
+  lockedModule: DryRunModuleId | null;
+  onClearFilter: () => void;
+  onGameChange: () => void;
+}): ReactElement {
+  const texts = labels.testArea;
+  const roleOptions = badgeValues.map((value) => ({ value, label: texts.badgeNames[value] }));
+  const moduleOptions = [
+    { value: "all", label: texts.allModules },
+    { value: "text_commands", label: texts.textCommands },
+    { value: "faq", label: texts.faq },
+    { value: "chat_voting", label: texts.chatVoting },
+    { value: "votekick", label: texts.votekick },
+  ];
+  const searchGames = useCallback((query: string) => searchChannelGames(channelId, query), [channelId]);
+  const lookupGames = useCallback((ids: readonly string[]) => lookupChannelGames(channelId, ids), [channelId]);
+  const updateMessage = (value: string): void => {
+    setMessage(value.slice(0, 500));
+  };
+  const updateSender = (value: string): void => {
+    setSender(value.toLowerCase().replace(/[^a-z0-9_]/gu, "").slice(0, 25));
+  };
+  const updateBadges = (value: readonly string[]): void => {
+    setBadges(value.filter((entry): entry is DryRunRequest["sender"]["statuses"][number] =>
+      badgeValues.some((badge) => badge === entry)));
+  };
+
+  return <>
+    <Field
+      label={texts.message}
+      value={message}
+      onChange={updateMessage}
+      placeholder={texts.messagePlaceholder}
+      autoComplete="off"
+      maxLength={500}
+      countWhenNearLimitOnly
+      countLabel={(count, maximum) => String(count) + "/" + String(maximum)}
+      mono
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          event.currentTarget.form?.requestSubmit();
+        }
+      }}
+    />
+    <Field
+      label={texts.sender}
+      hint={texts.senderHint}
+      value={sender}
+      onChange={updateSender}
+      autoComplete="off"
+      maxLength={25}
+      countWhenNearLimitOnly
+      countLabel={(count, maximum) => String(count) + "/" + String(maximum)}
+      mono
+    />
+    <div className="test-area__badge-field">
+      <span className="ui-field__label">{texts.badges}</span>
+      <ChipGroup
+        ariaLabel={texts.badges}
+        value={null}
+        onChange={() => undefined}
+        selectedValues={badges}
+        onSelectedValuesChange={updateBadges}
+        options={roleOptions}
+        className="test-area__badges"
+      />
+    </div>
+    <SegmentChoice
+      label={texts.stream}
+      value={streamState}
+      onChange={setStreamState}
+      options={[
+        { value: "online", label: texts.online },
+        { value: "offline", label: texts.offline },
+      ]}
+    />
+    <GameMultiSelect
+      searchGames={searchGames}
+      lookupGames={lookupGames}
+      value={game === null ? [] : [game]}
+      onChange={(next) => { onGameChange(); setGame(next[0] ?? null); }}
+      messages={texts.game}
+      singleValue
+      compact
+    />
+    <SwitchRow
+      label={texts.sharedChat}
+      checked={sharedChat}
+      onChange={setSharedChat}
+    />
+    <Select
+      label={texts.module}
+      value={moduleFilter}
+      onChange={(value) => {
+        if (lockedModule !== null) return;
+        setModuleFilter(value === "text_commands" || value === "faq" || value === "chat_voting" || value === "votekick" ? value : "all");
+      }}
+      options={moduleOptions}
+      disabled={lockedModule !== null}
+      compact
+    />
+    {lockedModule === null ? null : <div className="test-area__deep-link"><Badge tone="brand">{lockedModule === "text_commands" ? texts.textCommands : lockedModule === "faq" ? texts.faq : lockedModule === "chat_voting" ? texts.chatVoting : texts.votekick}</Badge><Button variant="subtle" size="compact" onClick={onClearFilter}>{texts.clearEntryFilter}</Button></div>}
+  </>;
+}
+
+function HistoryList({ items, labels, language, onReplay }: {
+  items: readonly HistoryItem[];
+  labels: ReturnType<typeof dashboardTexts>;
+  language: DashboardLanguage;
+  onReplay: (item: HistoryItem) => void;
+}): ReactElement {
+  const texts = labels.testArea;
+  if (items.length === 0) return <p className="test-area__history-empty">{texts.historyEmpty}</p>;
+  return <ul className="test-area__history-list">
+    {items.map((item, index) => {
+      const when = formatTime(item.createdAt, language);
+      return <li key={item.createdAt + ":" + String(index)}>
+        <button
+          className="test-area__history-item"
+          type="button"
+          aria-label={texts.historyReplay(item.request.text, item.request.sender.login)}
+          onClick={() => onReplay(item)}
+        >
+          <span className="test-area__history-message">{item.request.text}</span>
+          <span className="test-area__history-meta"><span>{item.request.sender.login}</span><time dateTime={item.createdAt}>{when}</time></span>
+          <Icon name="reload" />
+        </button>
+      </li>;
+    })}
+  </ul>;
+}
+
+function effectSuppression(effect: DryRunEffect, labels: ReturnType<typeof dashboardTexts>): string | null {
+  if (!("suppressedBy" in effect) || effect.suppressedBy === null) return null;
+  return labels.testArea.suppressedEffect(effect.suppressedBy);
+}
+
+function effectLabel(effect: DryRunEffect, labels: ReturnType<typeof dashboardTexts>): string {
+  const texts = labels.testArea;
+  if (effect.kind === "ballot") {
+    const ballotLabel = effect.untitled === true ? texts.untitledVote : effect.label;
+    const actionLabel = effect.action === "count" ? texts.ballotCountEffect(effect.moduleId, effect.choice)
+      : effect.action === "start" ? texts.ballotStartEffect(effect.moduleId, ballotLabel)
+        : effect.action === "overflow" ? texts.ballotOverflowEffect
+          : texts.ballotFinalizeEffect(effect.moduleId, ballotLabel);
+    return [
+      actionLabel,
+      effect.counts === undefined || effect.counts.length === 0 ? null : texts.ballotCounts(effect.moduleId, effect.counts),
+      effect.terms === undefined || effect.terms.length === 0 ? null : texts.ballotTerms(effect.terms),
+      effect.more === undefined || effect.more <= 0 ? null : texts.ballotMore(effect.more),
+    ].filter((part): part is string => part !== null).join(" · ");
+  }
+  const label = (() => {
+    switch (effect.kind) {
+    case "chat": return effect.reply ? texts.replyToMessage : texts.chatEffect;
+    case "announcement": return texts.announcementEffect;
+    case "timeout": return texts.timeoutEffect(effect.minSeconds, effect.maxSeconds, effect.reason);
+    case "shoutout": return texts.shoutoutEffect(effect.targetLogin);
+    case "variable": return texts.variableEffect(effect.name, effect.from, effect.to);
+    case "cooldown": return effect.scope === "user" ? texts.userCooldownEffect(effect.seconds) : texts.cooldownEffect(effect.seconds);
+    }
+  })();
+  const condition = "when" in effect ? texts.effectCondition(effect.when) : null;
+  return [label, condition, effectSuppression(effect, labels)].filter((part): part is string => part !== null).join(" · ");
+}
+
+function ballotStatusLabel(effect: Extract<DryRunEffect, { kind: "ballot" }>, labels: ReturnType<typeof dashboardTexts>): string {
+  const texts = labels.testArea;
+  switch (effect.action) {
+  case "count":
+    return effect.moduleId === "chat_voting" && effect.choice !== undefined
+      ? texts.wouldCountVote(effect.choice, effect.choiceKind)
+      : texts.wouldCountVotekickVote;
+  case "start": return texts.wouldStartBallot(effect.moduleId);
+  case "overflow": return texts.wouldOverflowBallot;
+  case "finalize": return texts.wouldFinalizeBallot(effect.moduleId);
+  }
+}
+
+function MatchExplanation({ report, message, labels }: {
+  report: DryRunEntryReport;
+  message: string;
+  labels: ReturnType<typeof dashboardTexts>;
+}): ReactElement {
+  const match = report.match;
+  const texts = labels.testArea;
+  const ballot = firstBallotEffect(report);
+  let specificExplanation: string | null = null;
+  if (report.moduleId === "chat_voting" && report.entry.kind === "chat_vote") {
+    specificExplanation = ballot?.action === "count" && ballot.choice !== undefined
+      ? ballot.choiceKind === "term" ? texts.voteTermWhy(message, ballot.choice) : texts.voteChoiceWhy(message, ballot.choice)
+      : ballot?.action === "overflow" ? texts.voteOverflowWhy(message)
+        : ballot?.action === "finalize" ? texts.voteFinalizeWhy(message) : texts.voteCommandWhy(message);
+  } else if (report.moduleId === "votekick" && report.entry.kind === "votekick") {
+    if (ballot?.action === "count" && ballot.choice !== undefined) {
+      specificExplanation = texts.votekickChoiceWhy(message, ballot.choice);
+    } else if (ballot?.action === "finalize") {
+      specificExplanation = texts.votekickFinalizeWhy(message);
+    } else {
+      const target = ballot?.action === "start" ? ballot.label : votekickTargetFromMessage(message);
+      if (target !== null) specificExplanation = texts.votekickTargetWhy(message, target);
+    }
+  }
+  if (specificExplanation !== null) return <p className="test-area__match-explanation">{specificExplanation}</p>;
+  const token = match.kind === "keyword" || match.kind === "regex" ? match.pattern : match.token;
+  const label = match.kind === "keyword" ? texts.matchKeywordLabel
+    : match.kind === "regex" ? texts.matchRegexLabel
+      : match.kind === "alias" ? texts.matchAliasLabel : texts.matchCommandLabel;
+  const ranges = match.kind === "regex" ? match.ranges : (() => {
+    const start = message.toLocaleLowerCase().indexOf(token.toLocaleLowerCase());
+    return start < 0 ? [] : [[start, start + token.length] as const];
+  })();
+  return <p className="test-area__match-explanation">
+    <span>{label} </span><code>{texts.quoted(token)}</code>
+    <span> {texts.inMessage} </span><code>{highlightedText(message, ranges)}</code>
+  </p>;
+}
+
+function ResultDetail({ item, message, response, labels, language, onOpenEditor }: {
+  item: ResultItem;
+  message: string;
+  response: DryRunResponse;
+  labels: ReturnType<typeof dashboardTexts>;
+  language: DashboardLanguage;
+  onOpenEditor?: (moduleId: DryRunModuleId, entryId: string) => void;
+}): ReactElement {
+  const { report, moduleId } = item;
+  const texts = labels.testArea;
+  const targetCheckNotes = report.templateNotes.filter(isVotekickTargetCheckNote);
+  const templateNotes = report.templateNotes.filter((note) => !isVotekickTargetCheckNote(note));
+  const chatEffects = report.effects.filter((effect): effect is Extract<DryRunEffect, { kind: "chat" | "announcement" }> =>
+    effect.kind === "chat" || effect.kind === "announcement");
+  const editorModuleId = editorModuleFor(moduleId);
+  return <div className="test-area__detail-content">
+    <header className="test-area__detail-head">
+      <div className="test-area__detail-heading">
+        <h2>{entryLabel(item, labels)}</h2>
+        <div className="test-area__detail-meta">
+          <Badge tone={moduleBadgeTone(moduleId)} className="test-area__module-badge">{report.entry.kind === "faq_entry" ? texts.faqEntry : report.entry.kind === "text_command" ? texts.textCommand : moduleName(moduleId, labels, language)}</Badge>
+          <span>{matchLabel(report, labels, message)}</span>
+        </div>
+      </div>
+      {onOpenEditor === undefined || editorModuleId === null ? null : <Button
+        variant="subtle"
+        size="compact"
+        className="test-area__editor-button"
+        onClick={() => onOpenEditor(editorModuleId, report.entry.id)}
+      >{texts.openEditor}<Icon name="external" /></Button>}
+    </header>
+    <div className="test-area__detail-scroll">
+      <section className="test-area__detail-section">
+        <h3>{texts.why}</h3>
+        <MatchExplanation report={report} message={message} labels={labels} />
+        <p className="test-area__detail-note">{texts.syntheticSenderNote(response.sender.userId.replace(/^dry-run:/u, ""))}</p>
+      </section>
+      {chatEffects.length === 0 ? null : <section className="test-area__detail-section">
+        <h3>{texts.answer}</h3>
+        <div className="test-area__answer-list">
+          {chatEffects.map((chatEffect, index) => <div className="test-area__answer-item" key={chatEffect.kind + ":" + String(index)}>
+            <ChatPreview
+              label={texts.preview}
+              speaker={texts.botSpeaker}
+              text={chatEffect.text}
+              countLabel={formatCharacterTotal(chatEffect.text.length, language)}
+            />
+            {chatEffect.when === undefined ? null : <p className="test-area__effect-qualifier">{texts.effectCondition(chatEffect.when)}</p>}
+            {chatEffect.suppressedBy === null ? null : <p className="test-area__muted-note">
+              {chatEffect.suppressedBy === "channel_muted" ? texts.suppressedAnswer : texts.suppressedEffect(chatEffect.suppressedBy)}
+            </p>}
+            <div className="test-area__chat-target">
+              <span>{texts.chatTarget}</span>
+              <Badge>{chatEffect.postsTo === "all_shared_chats" ? texts.sharedChats : texts.thisChat}</Badge>
+            </div>
+          </div>)}
+        </div>
+      </section>}
+      {targetCheckNotes.length === 0 ? null : <section className="test-area__detail-section">
+        <h3>{texts.targetCheckPending}</h3>
+        <ul className="test-area__template-notes">
+          {targetCheckNotes.map((note, index) => <li key={note.code + ":" + String(index)}>{eventText(note.code, note.detail ?? {}, language)}</li>)}
+        </ul>
+      </section>}
+      {templateNotes.length === 0 ? null : <section className="test-area__detail-section">
+        <h3>{texts.templateNotes}</h3>
+        <ul className="test-area__template-notes">
+          {templateNotes.map((note, index) => <li key={note.code + ":" + String(index)}>{eventText(note.code, note.detail ?? {}, language)}</li>)}
+        </ul>
+      </section>}
+      {report.outcome === "blocked" ? <section className="test-area__detail-section">
+        <h3>{texts.blocks}</h3>
+        <p className="test-area__reason"><Icon name="warning" />{firstBlockReason(report, labels)}</p>
+      </section> : null}
+      {report.outcome === "fires" && report.effects.length > 0 ? <section className="test-area__detail-section">
+        <h3>{texts.wouldDo}</h3>
+        <ul className="test-area__effect-list">
+          {report.effects.map((effect, index) => {
+            const suppressed = effectSuppression(effect, labels) !== null;
+            return <li className={suppressed ? "is-suppressed" : undefined} key={effect.kind + ":" + String(index)}>
+              <Icon name={suppressed ? "minus" : "copied"} {...(suppressed ? { className: "test-area__effect-icon--suppressed" } : {})} />{effectLabel(effect, labels)}
+            </li>;
+          })}
+        </ul>
+      </section> : null}
+    </div>
+  </div>;
+}
+
+export function TestAreaPage({
+  channelId,
+  language = "de",
+  initialStreamState,
+  only,
+  onOpenEditor,
+}: {
+  channelId: string;
+  language?: DashboardLanguage;
+  initialStreamState?: "online" | "offline" | null;
+  only?: DryRunRequest["only"];
+  onOpenEditor?: (moduleId: DryRunModuleId, entryId: string) => void;
+}): ReactElement {
+  const labels = dashboardTexts(language);
+  const texts = labels.testArea;
+  const [message, setMessage] = useState(DEFAULT_MESSAGE);
+  const [sender, setSender] = useState("viewer_42");
+  const [badges, setBadges] = useState<readonly DryRunRequest["sender"]["statuses"][number][]>(["subscriber"]);
+  const [streamState, setStreamState] = useState<StreamState>(initialStreamState ?? "online");
+  const [game, setGame] = useState<PanelBroadcastGame | null>(null);
+  const [sharedChat, setSharedChat] = useState(false);
+  const [moduleFilter, setModuleFilter] = useState<ModuleFilter>(only?.moduleId ?? "all");
+  const [deepLinkOnly, setDeepLinkOnly] = useState<DryRunRequest["only"]>(only?.entryId === undefined ? undefined : only);
+  const [history, setHistory] = useState<HistoryItem[]>(() => readHistory(channelId));
+  const historyRef = useRef(history);
+  const [snapshot, setSnapshot] = useState<ResultSnapshot | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [mobileContextOpen, setMobileContextOpen] = useState(false);
+  const [mobileHistoryOpen, setMobileHistoryOpen] = useState(false);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const gameChanged = useRef(false);
+  const sequence = useRef(0);
+  const controller = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    gameChanged.current = false;
+    const requestController = new AbortController();
+    void fetchChannelBroadcast(channelId, requestController.signal).then((broadcast) => {
+      if (active && !gameChanged.current) setGame(broadcast.game);
+    }).catch(() => undefined);
+    return () => {
+      active = false;
+      requestController.abort();
+    };
+  }, [channelId]);
+
+  useEffect(() => () => {
+    sequence.current += 1;
+    controller.current?.abort();
+  }, []);
+
+  const currentRequest = (): DryRunRequest => {
+    const requestedOnly = deepLinkOnly ?? (moduleFilter === "all" ? undefined : { moduleId: moduleFilter });
+    return {
+      text: message,
+      sender: { login: sender.trim() || "viewer_42", statuses: [...badges] },
+      streamState,
+      game: game === null ? null : { id: game.id, name: game.name },
+      sharedChat,
+      ...(requestedOnly === undefined ? {} : { only: requestedOnly }),
+    };
+  };
+  const snapshotStale = snapshot !== null && JSON.stringify(snapshot.request) !== JSON.stringify(currentRequest());
+  const allRows = useMemo(() => resultItems(snapshot?.response ?? null), [snapshot]);
+  const visibleRows = useMemo(() => {
+    const only = snapshot?.request.only;
+    return allRows.filter((row) => (only === undefined || row.moduleId === only.moduleId) &&
+      (only?.entryId === undefined || row.report.entry.id === only.entryId));
+  }, [allRows, snapshot]);
+  const selectedItem = visibleRows.find((row) => row.key === selectedKey)
+    ?? visibleRows.find((row) => row.report.outcome === "fires")
+    ?? visibleRows[0]
+    ?? null;
+
+  const updateHistory = useCallback((request: DryRunRequest): void => {
+    const item = { channelId, request, createdAt: new Date().toISOString() };
+    const next = [item, ...historyRef.current].slice(0, HISTORY_LIMIT);
+    historyRef.current = next;
+    setHistory(next);
+    try {
+      window.sessionStorage.setItem(historyKey(channelId), JSON.stringify(next));
+    } catch {
+      // Session storage can be unavailable in private or restricted contexts.
+    }
+  }, [channelId]);
+
+  const submitRequest = async (request: DryRunRequest, record = true): Promise<void> => {
+    if (record) updateHistory(request);
+    const requestSequence = sequence.current + 1;
+    sequence.current = requestSequence;
+    controller.current?.abort();
+    const requestController = new AbortController();
+    controller.current = requestController;
+    setPending(true);
+    setError(null);
+    try {
+      const response = await dryRunChatMessage(channelId, request, requestController.signal);
+      if (sequence.current !== requestSequence) return;
+      setSnapshot({ response, request });
+      const rows = resultItems(response);
+      const firstFiring = rows.find((row) => row.report.outcome === "fires");
+      setSelectedKey((firstFiring ?? rows[0])?.key ?? null);
+    } catch (cause) {
+      if (sequence.current !== requestSequence || requestController.signal.aborted) return;
+      const code = isRecord(cause) && typeof cause.code === "string" ? cause.code : null;
+      setSnapshot(null);
+      setSelectedKey(null);
+      setError(apiErrorText(code, texts.errorDescription));
+    } finally {
+      if (sequence.current === requestSequence) setPending(false);
+    }
+  };
+
+  const handleSubmit = (event: SyntheticEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    const request = currentRequest();
+    if (request.text.trim().length === 0) return;
+    void submitRequest(request);
+  };
+
+  const replay = (item: HistoryItem): void => {
+    if (item.channelId !== channelId) return;
+    const request = item.request;
+    gameChanged.current = true;
+    setMessage(request.text);
+    setSender(request.sender.login);
+    setBadges(request.sender.statuses);
+    setStreamState(request.streamState);
+    setGame(request.game);
+    setSharedChat(request.sharedChat);
+    setDeepLinkOnly(request.only?.entryId === undefined ? undefined : request.only);
+    setModuleFilter(request.only?.moduleId ?? "all");
+    setMobileHistoryOpen(false);
+    void submitRequest(request);
+  };
+
+  const changeModuleFilter = (value: ModuleFilter): void => {
+    setDeepLinkOnly(undefined);
+    setModuleFilter(value);
+  };
+
+  const response = snapshot?.response ?? null;
+  const fires = visibleRows.filter((row) => row.report.outcome === "fires").length;
+  const blocked = visibleRows.filter((row) => row.report.outcome === "blocked").length;
+  const indeterminate = visibleRows.filter((row) => row.report.outcome === "indeterminate").length;
+  const resultSummary = [
+    fires + blocked === 0 ? null : texts.reactionsSummary(fires, blocked),
+    indeterminate === 0 ? null : texts.indeterminateSummary(indeterminate),
+  ].filter((part): part is string => part !== null).join(" · ");
+  const responseModules = response?.modules.filter((module) => snapshot?.request.only === undefined || module.moduleId === snapshot.request.only.moduleId) ?? [];
+  const silentModules = responseModules.filter((module) => module.status === "silent").map((module) => moduleName(module.moduleId, labels, language));
+  const errorModules = responseModules.filter((module) => module.status === "error" || module.status === "not_testable").map((module) => moduleName(module.moduleId, labels, language));
+  const state: "idle" | "loading" | "result" | "empty" | "incomplete" | "error" =
+    pending ? "loading" : error !== null ? "error" : response === null ? "idle"
+      : errorModules.length > 0 ? "incomplete" : visibleRows.length === 0 ? "empty" : "result";
+  const detailMessage = snapshot?.request.text ?? message;
+  const muted = response?.controls.muted === true;
+  const paused = response?.controls.paused === true;
+  const liveSummary = pending ? texts.loading
+    : error !== null ? texts.errorTitle
+      : response === null ? ""
+        : errorModules.length > 0 ? texts.incompleteTitle + (resultSummary.length > 0 ? ": " + resultSummary : "")
+          : visibleRows.length === 0 ? texts.emptyTitle : resultSummary;
+  const selectedBadges = badges.length === 0 ? texts.badgeNames.viewer : badges.map((badge) => texts.badgeNames[badge]).join(" · ");
+  const contextStream = [streamState === "online" ? texts.online : texts.offline, game?.name].filter(Boolean).join(" · ");
+  const lockedModule = deepLinkOnly?.moduleId ?? null;
+  const contextProps = {
+    labels,
+    channelId,
+    message,
+    setMessage,
+    sender,
+    setSender,
+    badges,
+    setBadges,
+    streamState,
+    setStreamState,
+    game,
+    setGame,
+    sharedChat,
+    setSharedChat,
+    moduleFilter,
+    setModuleFilter: changeModuleFilter,
+    lockedModule,
+    onClearFilter: () => {
+      setDeepLinkOnly(undefined);
+      setModuleFilter("all");
+    },
+    onGameChange: () => { gameChanged.current = true; },
+  };
+
+  const rowElement = (item: ResultItem): ReactElement => {
+    const isBlocked = item.report.outcome === "blocked";
+    const isIndeterminate = item.report.outcome === "indeterminate";
+    const ballot = firstBallotEffect(item.report);
+    const hasSuppressedEffects = item.report.effects.some((effect) => "suppressedBy" in effect && effect.suppressedBy !== null);
+    const isMutedReply = response?.controls.muted === true && item.report.effects.some((effect) => effect.kind === "chat" || effect.kind === "announcement");
+    const statusText = isBlocked ? texts.blocked
+      : isIndeterminate ? texts.indeterminate
+        : ballot === undefined ? firingLabel(item.report, labels, isMutedReply) : ballotStatusLabel(ballot, labels);
+    return <button
+      key={item.key}
+      type="button"
+      className="test-area__result-row"
+      aria-current={selectedItem?.key === item.key ? "true" : undefined}
+      onClick={() => {
+        setSelectedKey(item.key);
+        if (window.innerWidth <= 1279) setMobileDetailOpen(true);
+      }}
+    >
+      <span className="test-area__row-main">
+        <span className="test-area__row-title"><Badge tone={moduleBadgeTone(item.moduleId)} className="test-area__module-badge">{moduleName(item.moduleId, labels, language)}</Badge><strong>{entryLabel(item, labels)}</strong></span>
+        <small>{matchLabel(item.report, labels, detailMessage)}</small>
+      </span>
+      <span className={"test-area__row-outcome" + (isMutedReply ? " is-muted" : "")}>
+        <StatusLed state={isBlocked ? "warn" : isIndeterminate || hasSuppressedEffects ? "off" : "ok"} label={statusText} dotOnly />
+        <span>{statusText}</span>
+      </span>
+    </button>;
+  };
+
+  const detail = selectedItem !== null && response !== null
+    ? <ResultDetail
+      item={selectedItem}
+      message={detailMessage}
+      response={response}
+      labels={labels}
+      language={language}
+      {...(onOpenEditor === undefined ? {} : { onOpenEditor })}
+    />
+    : <div className="test-area__detail-placeholder">{texts.noDetails}</div>;
+  const mobileEditorModuleId = selectedItem === null ? null : editorModuleFor(selectedItem.moduleId);
+
+  return <ToolPage
+    kind="test"
+    icon={<NavigationIcon kind="test" className="module-heading-glyph" />}
+    title={texts.title}
+    subtitle={texts.subtitle}
+  >
+    <div className="test-area">
+      <aside className="test-area__context" aria-label={texts.context}>
+        <form className="test-area__context-form" onSubmit={handleSubmit}>
+          <div className="test-area__context-fields"><ContextFields {...contextProps} /></div>
+          <div className="test-area__context-footer">
+            <Button type="submit" variant="primary" className="test-area__run-button" disabled={message.trim().length === 0}>
+              <Icon name="tabMessages" />{texts.run}
+            </Button>
+          </div>
+        </form>
+        <section className="test-area__history" aria-label={texts.history}>
+          <h2>{texts.history}<span>{history.length}</span></h2>
+          <HistoryList items={history} labels={labels} language={language} onReplay={replay} />
+        </section>
+      </aside>
+
+      <section className={"test-area__results" + (snapshotStale ? " is-stale" : "")} aria-label={texts.result} aria-busy={pending}>
+        <div className="test-area__mobile-controls">
+          <form className="test-area__mobile-message" onSubmit={handleSubmit}>
+            <Field
+              label={texts.message}
+              value={message}
+              onChange={(value) => setMessage(value.slice(0, 500))}
+              placeholder={texts.messagePlaceholder}
+              autoComplete="off"
+              maxLength={500}
+              countWhenNearLimitOnly
+              countLabel={(count, maximum) => String(count) + "/" + String(maximum)}
+              mono
+            />
+            <Button type="submit" variant="primary" className="test-area__run-button" disabled={message.trim().length === 0}>
+              <Icon name="tabMessages" />{texts.run}
+            </Button>
+          </form>
+          <div className="test-area__mobile-context-summary">
+            <span className="test-area__mobile-context-copy">
+              <span><strong>{sender || "viewer_42"}</strong> · {selectedBadges}</span>
+              <span>{contextStream}</span>
+            </span>
+            <div>
+              <Button variant="subtle" size="compact" onClick={() => setMobileContextOpen(true)}>{texts.editContext}</Button>
+              <Button variant="subtle" size="compact" onClick={() => setMobileHistoryOpen(true)}><Icon name="clock-hour-4" />{texts.history}</Button>
+            </div>
+          </div>
+        </div>
+
+        <header className="test-area__results-head">
+          <div className="test-area__results-title">
+            <h2>{texts.result}</h2>
+            <span>{response === null || resultSummary.length === 0 ? texts.resultCount(0) : resultSummary}</span>
+            {pending ? <span className="test-area__loading-label"><StatusLed state="loading" label={texts.loading} dotOnly />{texts.loading}</span> : null}
+            {muted ? <Badge tone="amber">{texts.muted}</Badge> : null}
+            {paused ? <Badge>{texts.paused}</Badge> : null}
+          </div>
+          <span className="sr-only" data-testid="test-area-live-summary" role="status" aria-live="polite" aria-atomic="true">{liveSummary}</span>
+          <p className="test-area__meta-line" title={silentModules.length === 0 ? "" : silentModules.join(", ")}>
+            {silentModules.length === 0 ? <span aria-hidden="true">&nbsp;</span> : texts.noReactionModules(silentModules.join(", "))}
+          </p>
+          <p className="test-area__meta-line" title={errorModules.join(", ")}>
+            {errorModules.length === 0 ? <span aria-hidden="true">&nbsp;</span> : texts.moduleError(errorModules.join(", "))}
+          </p>
+          <p
+            className="test-area__meta-line test-area__scope-hint"
+            data-testid="test-area-stale-result-hint"
+            data-visible={snapshotStale}
+            aria-hidden={!snapshotStale}
+            title={snapshotStale ? texts.inputsChangedHint : ""}
+            {...(snapshotStale ? { role: "status", "aria-live": "polite" as const } : {})}
+          >{snapshotStale ? texts.inputsChangedHint : <span aria-hidden="true">&nbsp;</span>}</p>
+        </header>
+        <div className={"test-area__results-slot" + (pending && response !== null ? " is-pending" : "") + (state === "incomplete" ? " is-incomplete" : "") + (snapshotStale ? " is-stale" : "")} data-testid="test-area-results-slot" data-state={state} aria-busy={pending}>
+          {state === "idle" ? <div className="test-area__state-slot">
+            <Icon name="tabMessages" size={20} />
+            <strong>{texts.idleTitle}</strong>
+            <p>{texts.idleDescription}</p>
+          </div> : null}
+          {state === "loading" && response === null ? <div className="test-area__state-slot" role="status">
+            <StatusLed state="loading" label={texts.loading} dotOnly />
+            <strong>{texts.loading}</strong>
+          </div> : null}
+          {state === "error" ? <div className="test-area__state-slot" role="alert">
+            <Icon name="warning" size={20} />
+            <strong>{texts.errorTitle}</strong>
+            <p>{error ?? texts.errorDescription}</p>
+            <Button variant="neutral" size="compact" onClick={() => { void submitRequest(currentRequest()); }}>{texts.retry}</Button>
+          </div> : null}
+          {state === "empty" ? <div className="test-area__state-slot" role="status">
+            <Icon name="copied" size={20} />
+            <strong>{texts.emptyTitle}</strong>
+            <p>{texts.emptyDescription}</p>
+          </div> : null}
+          {state === "incomplete" ? <div className="test-area__state-slot" role="status">
+            <Icon name="warning" size={20} />
+            <strong>{texts.incompleteTitle}</strong>
+            <p>{texts.incompleteDescription}</p>
+          </div> : null}
+          {state === "result" || state === "incomplete" || state === "loading" && response !== null
+            ? <div className="test-area__result-scroll">{visibleRows.map(rowElement)}</div>
+            : null}
+        </div>
+      </section>
+
+      <aside className={"test-area__detail" + (snapshotStale ? " is-stale" : "")} aria-label={texts.noDetails}>{detail}</aside>
+
+      <Dialog
+        opened={mobileContextOpen}
+        title={texts.context}
+        className="test-area__dialog test-area__context-dialog"
+        onClose={() => setMobileContextOpen(false)}
+      >
+        <form
+          className="test-area__context-dialog-form"
+          onSubmit={(event) => {
+            handleSubmit(event);
+            if (message.trim().length > 0) setMobileContextOpen(false);
+          }}
+        >
+          <div className="test-area__dialog-fields"><ContextFields {...contextProps} /></div>
+        </form>
+      </Dialog>
+      <Dialog
+        opened={mobileHistoryOpen}
+        title={texts.history}
+        className="test-area__dialog test-area__history-dialog"
+        onClose={() => setMobileHistoryOpen(false)}
+      >
+        <HistoryList items={history} labels={labels} language={language} onReplay={replay} />
+      </Dialog>
+      <Dialog
+        opened={mobileDetailOpen && selectedItem !== null && response !== null}
+        title={selectedItem === null ? texts.result : entryLabel(selectedItem, labels)}
+        className="test-area__dialog test-area__detail-dialog"
+        headerActions={selectedItem !== null && response !== null && onOpenEditor !== undefined && mobileEditorModuleId !== null
+          ? <Button
+            variant="subtle"
+            size="compact"
+            onClick={() => onOpenEditor(mobileEditorModuleId, selectedItem.report.entry.id)}
+          >{texts.openEditor}<Icon name="external" /></Button>
+          : null}
+        onClose={() => setMobileDetailOpen(false)}
+      >
+        {selectedItem !== null && response !== null
+          ? <ResultDetail item={selectedItem} message={detailMessage} response={response} labels={labels} language={language} />
+          : null}
+      </Dialog>
+    </div>
+  </ToolPage>;
+}

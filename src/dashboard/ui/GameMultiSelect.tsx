@@ -1,6 +1,4 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
-import { ImageOff } from "lucide-react";
-
 import { PopoverPrimitive } from "./primitives/popover";
 import { FieldError } from "./FieldError";
 
@@ -41,12 +39,11 @@ const coverUrl = (game: GameMultiSelectGame, width: number, height: number): str
   }
 };
 
-const GameCover = ({ game, width, height }: { game: GameMultiSelectGame; width: number; height: number }): ReactElement => {
-  const [failed, setFailed] = useState(false);
-  const src = failed ? null : coverUrl(game, width, height);
-  return src === null
-    ? <span className="ui-game-multi-select__cover-placeholder" aria-hidden="true" style={{ width, height }}><ImageOff size={Math.min(width - 4, 18)} /></span>
-    : <img
+const GameCover = ({ game, width, height }: { game: GameMultiSelectGame; width: number; height: number }): ReactElement | null => {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+  const src = coverUrl(game, width, height);
+  return src === null || failedSrc === src ? null : <img
       className="ui-game-multi-select__cover"
       src={src}
       width={width}
@@ -54,7 +51,9 @@ const GameCover = ({ game, width, height }: { game: GameMultiSelectGame; width: 
       loading="lazy"
       decoding="async"
       alt=""
-      onError={() => setFailed(true)}
+      style={{ visibility: loadedSrc === src ? "visible" : "hidden" }}
+      onLoad={() => setLoadedSrc(src)}
+      onError={() => setFailedSrc(src)}
     />;
 };
 

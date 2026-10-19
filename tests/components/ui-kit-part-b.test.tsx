@@ -116,7 +116,7 @@ describe("Part B shared UI", () => {
 
     expect(await screen.findByText("10 von 10")).toBeInTheDocument();
     expect(screen.getByText(messages.limitReached)).toBeInTheDocument();
-    expect(document.querySelector(".ui-game-multi-select__cover-placeholder svg")).toBeInTheDocument();
+    expect(document.querySelector(".ui-game-multi-select__cover-placeholder svg")).not.toBeInTheDocument();
     const eleventhOption = screen.getByRole("option", { name: "Game Eleven", hidden: true });
     expect(eleventhOption).toBeDisabled();
     fireEvent.click(eleventhOption);

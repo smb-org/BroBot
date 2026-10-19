@@ -24,6 +24,9 @@ export interface TextCommandsTexts {
   useCount: (count: number) => string;
   details: (name: string) => string;
   add: string;
+  testAreaAction: string;
+  testAreaDirty: string;
+  testAreaSavedOnly: string;
   empty: string;
   loadError: string;
   templateVariablesLoadError: string;
@@ -194,7 +197,7 @@ const templateMessages: LocaleCatalog<TemplateTextFieldMessages> = {
 
 const catalog: LocaleCatalog<TextCommandsTexts> = {
   de: {
-    title: "Textbefehle", search: "Befehle suchen", statusFilter: "Status", filterAll: "Alle", filterActive: "Aktiv", filterInactive: "Inaktiv", allModules: "Alle Module", usedModuleVariables: "Verwendet Modul-Variablen", entryCount: (count) => `${String(count)} ${count === 1 ? "Eintrag" : "Einträge"}`, triggerSection: "Auslöser", selectionPrompt: "Textbefehl auswählen", selectionDescription: "Wähle links einen Textbefehl aus oder lege einen neuen an.", noResponse: "Kein Antworttext", useCount: (count) => `${String(count)}× benutzt`, details: (name) => `Eigenschaften von !${name}`, add: "Befehl anlegen", empty: "Noch keine Textbefehle angelegt.",
+    title: "Textbefehle", search: "Befehle suchen", statusFilter: "Status", filterAll: "Alle", filterActive: "Aktiv", filterInactive: "Inaktiv", allModules: "Alle Module", usedModuleVariables: "Verwendet Modul-Variablen", entryCount: (count) => `${String(count)} ${count === 1 ? "Eintrag" : "Einträge"}`, triggerSection: "Auslöser", selectionPrompt: "Textbefehl auswählen", selectionDescription: "Wähle links einen Textbefehl aus oder lege einen neuen an.", noResponse: "Kein Antworttext", useCount: (count) => `${String(count)}× benutzt`, details: (name) => `Eigenschaften von !${name}`, add: "Befehl anlegen", testAreaAction: "Im Testbereich prüfen", testAreaDirty: "Speichere oder verwerfe Änderungen, bevor du prüfst.", testAreaSavedOnly: "Nur gespeicherte Befehle können geprüft werden.", empty: "Noch keine Textbefehle angelegt.",
     loadError: "Die Textbefehle konnten nicht geladen werden.", templateVariablesLoadError: "Vorlagenvariablen konnten nicht geladen werden.",
     saveError: "Der Textbefehl konnte nicht gespeichert werden.", deleteError: "Der Textbefehl konnte nicht gelöscht werden.",
     name: "Befehlsname", aliases: "Weitere Auslöser", aliasPlaceholder: "Alias eingeben", templateFieldLabels: { usageText: "Antwort bei fehlenden oder ungültigen Argumenten" }, usageAdvanced: "Erweitert", usageTextHint: "Wird gesendet, wenn erforderliche Argumente fehlen oder ungültig sind.", textBlockDescription: "Textbaustein", createVariable: "Variable anlegen",
@@ -291,7 +294,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     argsEveryoneWarning: "Mit {args} kann jede Person im Chat Text an den Bot übergeben.",
   },
   en: {
-    title: "Text commands", search: "Search commands", statusFilter: "Status", filterAll: "All", filterActive: "Active", filterInactive: "Inactive", allModules: "All modules", usedModuleVariables: "Uses module variables", entryCount: (count) => `${String(count)} ${count === 1 ? "entry" : "entries"}`, triggerSection: "Triggers", selectionPrompt: "Select a text command", selectionDescription: "Select a text command on the left or create a new one.", noResponse: "No response text", useCount: (count) => `${String(count)}× used`, details: (name) => `Properties for !${name}`, add: "Add command", empty: "No text commands yet.",
+    title: "Text commands", search: "Search commands", statusFilter: "Status", filterAll: "All", filterActive: "Active", filterInactive: "Inactive", allModules: "All modules", usedModuleVariables: "Uses module variables", entryCount: (count) => `${String(count)} ${count === 1 ? "entry" : "entries"}`, triggerSection: "Triggers", selectionPrompt: "Select a text command", selectionDescription: "Select a text command on the left or create a new one.", noResponse: "No response text", useCount: (count) => `${String(count)}× used`, details: (name) => `Properties for !${name}`, add: "Add command", testAreaAction: "Check in test area", testAreaDirty: "Save or discard changes before checking.", testAreaSavedOnly: "Only saved commands can be checked.", empty: "No text commands yet.",
     loadError: "The text commands could not be loaded.", templateVariablesLoadError: "Template variables could not be loaded.",
     saveError: "The text command could not be saved.", deleteError: "The text command could not be deleted.",
     name: "Command name", aliases: "Other triggers", aliasPlaceholder: "Add alias", templateFieldLabels: { usageText: "Reply when arguments are missing or invalid" }, usageAdvanced: "Advanced", usageTextHint: "Sent when required arguments are missing or invalid.", textBlockDescription: "Text block", createVariable: "Create variable",

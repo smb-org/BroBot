@@ -610,7 +610,7 @@ test("FAQ mobile editor scrolls its final field above the fixed save bar", async
   expect(orderNoteGeometry.textHeight, JSON.stringify(orderNoteGeometry)).toBeGreaterThan(18);
 
   await page.locator(".faq-panel__entry").filter({ hasText: "Begrüßung" }).click();
-  for (const selector of [".faq-panel__entry-name", ".faq-panel__sample-message"]) {
+  for (const selector of [".faq-panel__entry-name"]) {
     const countGeometry = await page.locator(selector).evaluate((field) => {
       const hint = field.querySelector<HTMLElement>(".ui-field__hint");
       const count = field.querySelector<HTMLElement>(".ui-field__count");
@@ -628,7 +628,7 @@ test("FAQ mobile editor scrolls its final field above the fixed save bar", async
   }
   const faqHeaderGeometry = await page.evaluate(() => {
     const header = document.querySelector<HTMLElement>(".faq-panel__detail > .page-header");
-    const testAction = document.querySelector<HTMLElement>(".faq-panel__detail .page-header__page-actions > button");
+    const testAction = document.querySelector<HTMLElement>(".faq-panel__detail .page-header__page-actions button");
     const firstSection = document.querySelector<HTMLElement>(".faq-panel__editor .faq-panel__editor-grid > .faq-panel__column > .ui-section");
     if (header === null || testAction === null || firstSection === null) throw new Error("The FAQ editor header geometry is incomplete.");
     return {

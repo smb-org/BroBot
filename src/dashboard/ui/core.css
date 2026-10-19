@@ -325,8 +325,7 @@ form.content-section { display: grid; gap: var(--s4); }
 .ui-game-multi-select__single-value > button:disabled { cursor: not-allowed; }
 .ui-game-multi-select__chip { display: inline-flex; min-width: 0; min-height: 31px; align-items: center; gap: var(--s1); padding: 2px var(--s1) 2px 4px; border: 1px solid var(--line); border-radius: var(--r-control); color: var(--text-2); background: var(--surface-well); font-size: 12px; }
 .ui-game-multi-select__chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ui-game-multi-select__cover, .ui-game-multi-select__cover-placeholder { display: block; flex: none; border-radius: var(--r-control); object-fit: cover; }
-.ui-game-multi-select__cover-placeholder { display: grid; place-items: center; box-sizing: border-box; border: 1px solid var(--line-strong); color: var(--text-3); background: var(--surface-raised); }
+.ui-game-multi-select__cover { display: block; flex: none; border-radius: var(--r-control); object-fit: cover; }
 .ui-game-multi-select__chip button { display: grid; width: 26px; height: 26px; flex: none; place-items: center; padding: 0; border: 0; border-radius: var(--r-control); color: var(--text-2); background: transparent; cursor: pointer; font-size: 16px; line-height: 1; }
 .ui-game-multi-select__chip button:hover:not(:disabled) { color: var(--error); background: var(--error-surface); }
 .ui-game-multi-select__chip button:disabled { cursor: not-allowed; }
@@ -351,9 +350,13 @@ form.content-section { display: grid; gap: var(--s4); }
 .ui-game-multi-select--compact .ui-game-multi-select__search > input { box-sizing: border-box; height: 44px; min-width: 0; text-overflow: ellipsis; }
 .ui-game-multi-select--compact .ui-game-multi-select__selected { position: absolute; z-index: 1; top: 4px; left: 4px; display: flex; width: calc(50% - 8px); height: 36px; flex-wrap: nowrap; gap: 2px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .ui-game-multi-select--compact .ui-game-multi-select__chip { display: flex; box-sizing: border-box; min-width: calc(6ch + 49px); min-height: 26px; max-width: 100%; flex: 0 1 auto; padding: 1px 2px 1px 3px; gap: 3px; font-size: 11px; }
+.ui-game-multi-select--compact .ui-game-multi-select__chip:not(:has(.ui-game-multi-select__cover)) { min-width: calc(6ch + 34px); }
 .ui-game-multi-select--compact .ui-game-multi-select__chip-name { flex: 1 1 auto; min-width: 6ch; }
 .ui-game-multi-select--compact .ui-game-multi-select__chip button { width: 20px; height: 22px; }
 .ui-game-multi-select--compact:has(.ui-game-multi-select__chip) .ui-game-multi-select__search > input { padding-left: calc(50% + var(--s2)); }
+.ui-game-multi-select--compact.ui-game-multi-select--single-value .ui-game-multi-select__single-value { min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.ui-game-multi-select--compact.ui-game-multi-select--single-value:has(.ui-game-multi-select__single-value) .ui-game-multi-select__search > input:placeholder-shown:not(:focus),
+.ui-game-multi-select--compact.ui-game-multi-select--single-value:has(.ui-game-multi-select__single-value) .ui-game-multi-select__search > input:placeholder-shown:not(:focus)::placeholder { color: transparent; }
 .ui-token-chip { display: inline-flex; max-width: 100%; min-height: 28px; align-items: center; gap: var(--s1); padding: 2px var(--s2); border: 1px solid var(--line); border-radius: var(--r-control); color: var(--text-2); background: var(--surface-well); cursor: pointer; vertical-align: middle; }
 .ui-token-chip:hover { border-color: var(--line-strong); color: var(--text); background: var(--surface-hover); }
 .ui-token-chip:focus-visible { outline: 2px solid var(--brand-text); outline-offset: 2px; }
@@ -1408,6 +1411,8 @@ body:has(.module-detail--settings-page) .ui-toast-host { top: auto; bottom: var(
 }
 .ui-badge { display: inline-flex; min-height: 20px; align-items: center; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: var(--r-control); color: var(--text-2); font-size: 12px; line-height: 1.4; white-space: nowrap; }
 .ui-badge--brand { border-color: var(--brand-line); color: var(--brand-text); background: var(--tint-1); }
+.ui-badge--chat { border-color: var(--badge-chat-line); color: var(--badge-chat); background: var(--badge-chat-fill); }
+.ui-badge--participation { border-color: var(--badge-participation-line); color: var(--badge-participation); background: var(--badge-participation-fill); }
 .ui-badge--green { border-color: color-mix(in srgb, var(--green) 45%, var(--line)); color: var(--green); }
 .ui-badge--amber { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); color: var(--warn); }
 .ui-badge--red { border-color: color-mix(in srgb, var(--error) 45%, var(--line)); color: var(--error-text); }

@@ -126,17 +126,17 @@ for (const width of [390, 1280]) test(`compact game chips keep readable names an
       const selected = element.parentElement;
       const name = element.querySelector<HTMLElement>(".ui-game-multi-select__chip-name");
       const remove = element.querySelector<HTMLElement>("button");
-      const cover = element.querySelector<HTMLElement>(".ui-game-multi-select__cover, .ui-game-multi-select__cover-placeholder");
-      if (selected === null || name === null || remove === null || cover === null) throw new Error("Compact game chip parts are missing.");
+      const cover = element.querySelector<HTMLElement>(".ui-game-multi-select__cover");
+      const placeholder = element.querySelector(".ui-game-multi-select__cover-placeholder");
+      if (selected === null || name === null || remove === null) throw new Error("Compact game chip parts are missing.");
       const selectedBounds = selected.getBoundingClientRect();
       const chipBounds = element.getBoundingClientRect();
       const removeBounds = remove.getBoundingClientRect();
-      const coverBounds = cover.getBoundingClientRect();
       return {
         // Above 640px the selected area scrolls instead of wrapping, so chips may extend past it.
         chipWithinSelected: viewport > 640 || (chipBounds.left >= selectedBounds.left - 1 && chipBounds.right <= selectedBounds.right + 1),
         removeWithinChip: removeBounds.left >= chipBounds.left - 1 && removeBounds.right <= chipBounds.right + 1,
-        coverVisibleWithinChip: coverBounds.width > 0 && coverBounds.height > 0 && coverBounds.left >= chipBounds.left - 1 && coverBounds.right <= chipBounds.right + 1,
+        missingArtHasNoPlaceholder: cover !== null || placeholder === null,
         nameHasSixChMinimum: name.clientWidth + 1 >= sixChWidth,
         nameUsesEllipsis: getComputedStyle(name).textOverflow === "ellipsis",
       };
@@ -145,7 +145,7 @@ for (const width of [390, 1280]) test(`compact game chips keep readable names an
   expect(geometry).toEqual(games.map(() => ({
     chipWithinSelected: true,
     removeWithinChip: true,
-    coverVisibleWithinChip: true,
+    missingArtHasNoPlaceholder: true,
     nameHasSixChMinimum: true,
     nameUsesEllipsis: true,
   })));

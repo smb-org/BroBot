@@ -4,6 +4,7 @@ import { jsonResponse } from "./fixtures";
 
 import {
   addChannelMember,
+  dryRunChatMessage,
   fetchAuditLog,
   fetchChannelOverview,
   fetchEvents,
@@ -180,6 +181,38 @@ describe("dashboard API request boundary", () => {
       expect.objectContaining({
         method: "DELETE",
         headers: { "X-CSRF-Token": "csrf-token-3" },
+      }),
+    );
+  });
+
+  it("sends dry-run with CSRF while forwarding cancellation to both requests", async () => {
+    const controller = new AbortController();
+    const request = {
+      text: "!dc hallo",
+      sender: { login: "viewer_42", statuses: ["subscriber"] as const },
+      streamState: "online" as const,
+      game: null,
+      sharedChat: false,
+    };
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ token: "csrf-dry-run" }))
+      .mockResolvedValueOnce(jsonResponse({ evaluatedAt: "2030-01-01T12:00:00.000Z", controls: { muted: false, paused: false }, sender: { userId: "dry-run:viewer_42", resolved: false, perUserCooldownsUseSyntheticId: true }, modules: [] }));
+    vi.stubGlobal("fetch", fetcher);
+
+    await dryRunChatMessage("kanal-a", request, controller.signal);
+
+    expect(fetcher).toHaveBeenNthCalledWith(
+      1,
+      new URL("/api/csrf", window.location.origin),
+      { credentials: "same-origin", signal: controller.signal },
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
+      2,
+      new URL("/api/channels/kanal-a/dry-run", window.location.origin),
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": "csrf-dry-run" },
+        signal: controller.signal,
       }),
     );
   });
