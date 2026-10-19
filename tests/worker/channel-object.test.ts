@@ -219,6 +219,9 @@ const objectFor = (
     failNextChatterDelete: () => { failNextChatterDelete = true; },
   };
   storage.sql.exec.mockImplementation((query: string, ...bindings: unknown[]) => {
+    if (/SELECT EXISTS\(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'game_rounds'\) AS present/iu.test(query)) {
+      return { toArray: () => [{ present: 0 }], one: () => ({ present: 0 }) };
+    }
     if (/^\s*CREATE TABLE\b/iu.test(query)) {
       return { toArray: () => [], one: () => undefined };
     }
@@ -408,6 +411,8 @@ const objectFor = (
   (object as unknown as { adScheduleOperationQueue: Promise<void> }).adScheduleOperationQueue = Promise.resolve();
   (object as unknown as { belaboxPollQueue: Promise<void> }).belaboxPollQueue = Promise.resolve();
   (object as unknown as { alarmScheduleQueue: Promise<void> }).alarmScheduleQueue = Promise.resolve();
+  (object as unknown as { pointRoundRecoveryInitialized: boolean }).pointRoundRecoveryInitialized = false;
+  (object as unknown as { pointRoundRecoveryInitialization: Promise<void> | null }).pointRoundRecoveryInitialization = null;
   (object as unknown as { timerScheduleInitialization: Promise<void> | null }).timerScheduleInitialization = Promise.resolve();
   (object as unknown as { recentlyBoundOverlayTokenIds: Set<string> }).recentlyBoundOverlayTokenIds = new Set();
   return object;

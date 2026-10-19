@@ -316,15 +316,26 @@ const recordedBalancesSync = (sql: PointsSql, operationId: string): Record<strin
 };
 
 const incrementMonthlySync = (sql: PointsSql, accountId: string, month: string, net: number, at: string): void => {
+  if (!Number.isSafeInteger(net)) throw new Error("monthly_overflow");
+  const existing = sql.exec<{ net_won: string }>(
+    "SELECT CAST(net_won AS TEXT) AS net_won FROM point_monthly WHERE account_id = ? AND month = ?",
+    accountId,
+    month,
+  ).toArray()[0];
+  const next = BigInt(existing?.net_won ?? "0") + BigInt(net);
+  if (next < BigInt(Number.MIN_SAFE_INTEGER) || next > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error("monthly_overflow");
+  }
   sql.exec(
     `INSERT INTO point_monthly (account_id, month, net_won, reached_at) VALUES (?, ?, ?, ?)
      ON CONFLICT(account_id, month) DO UPDATE SET
-       net_won = net_won + excluded.net_won,
-       reached_at = CASE WHEN excluded.net_won = 0 THEN point_monthly.reached_at ELSE excluded.reached_at END`,
+       net_won = excluded.net_won,
+       reached_at = CASE WHEN ? = 0 THEN point_monthly.reached_at ELSE excluded.reached_at END`,
     accountId,
     month,
-    net,
+    Number(next),
     at,
+    net,
   );
 };
 

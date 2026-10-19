@@ -824,6 +824,11 @@ describe("game rounds in the worker Durable Object", () => {
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
     await object.pointBalance(pointTestModule, "viewer-a");
+    await openAnnouncedRound(object, pointTestModule, "round-recovery-retry", {
+      durationS: 60,
+      announceText: "The retry round starts",
+      settlement: { kind: "test", params: { payouts: [] } },
+    }, Date.now() + 60_000);
     await evictDurableObject(object as unknown as DurableObjectStub);
 
     await runPointObject(object, async (target) => {
@@ -855,6 +860,11 @@ describe("game rounds in the worker Durable Object", () => {
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
     await object.pointBalance(pointTestModule, "viewer-a");
+    await openAnnouncedRound(object, pointTestModule, "round-recovery-concurrent", {
+      durationS: 60,
+      announceText: "The concurrent round starts",
+      settlement: { kind: "test", params: { payouts: [] } },
+    }, Date.now() + 60_000);
     await evictDurableObject(object as unknown as DurableObjectStub);
 
     await runPointObject(object, async (target) => {
@@ -882,7 +892,7 @@ describe("game rounds in the worker Durable Object", () => {
     });
   });
 
-  it(`restores a lost round schedule and platform alarm on first points access after eviction (${testCard("the first points access after eviction restores a deleted schedule entry and alarm", "a round stays open after both persisted alarm records are removed")})`, async () => {
+  it(`restores a lost round schedule and platform alarm after an unrelated request wakes the object (${testCard("an unrelated request after eviction restores a deleted schedule entry and alarm", "a round stays open after both persisted alarm records are removed")})`, async () => {
     const channelId = `round-recovery-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
@@ -907,7 +917,7 @@ describe("game rounds in the worker Durable Object", () => {
     });
     await evictDurableObject(object as unknown as DurableObjectStub);
     await runPointObject(object, async (target, state) => {
-      await target.pointBalance(pointTestModule, "viewer-a");
+      await target.getPanelResourceRevisions();
       const alarmTable = state.storage.kv.get<Record<string, { deadline: number; handler: string }>>(
         "channel:alarm_schedule",
       ) ?? {};
@@ -933,6 +943,44 @@ describe("game rounds in the worker Durable Object", () => {
     await expect(object.pointRanking(pointTestModule, new Date().toISOString().slice(0, 7), 10)).resolves.toEqual([
       { accountId: "viewer-a", login: "nachtfalke", net: 0 },
     ]);
+  });
+
+  it(`keeps dry-run snapshot RPCs from recovering a missing point alarm (${testCard("read-only dry-run snapshots do not write recovered round schedules or platform alarms", "a dry-run snapshot mutates local point recovery state", "the test invokes the same read-only RPCs used by dry-run before inspecting persisted SQLite and alarm state")})`, async () => {
+    const channelId = `round-dry-run-snapshot-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    await object.touchPointAccount(pointTestModule, "viewer-a", "nachtfalke", 20);
+    const roundId = "round-dry-run-snapshot";
+    await openAnnouncedRound(object, pointTestModule, roundId, {
+      durationS: 60,
+      announceText: "The round starts",
+      settlement: { kind: "test", params: { payouts: [] } },
+    }, Date.now() + 60_000);
+    await object.joinGameRound(pointTestModule, roundId, "msg:dry-run-stake", "viewer-a", "nachtfalke", 5, {});
+    await runPointObject(object, async (_target, state) => {
+      await state.storage.deleteAlarm();
+      const table = state.storage.kv.get<Record<string, unknown>>("channel:alarm_schedule") ?? {};
+      Reflect.deleteProperty(table, `points:round:${roundId}`);
+      state.storage.kv.put("channel:alarm_schedule", table);
+    });
+    await evictDurableObject(object as unknown as DurableObjectStub);
+
+    await Promise.all([
+      object.readBallotSnapshot("chat_voting", "missing-poll"),
+      object.readBallotDryRunSnapshot("chat_voting", "missing-poll", "viewer-a"),
+      object.hasOpenBallotSnapshot(),
+      object.getActiveChatterSnapshot("viewer-a"),
+      object.getActiveChatterCountSnapshot(60_000),
+    ]);
+
+    await runPointObject(object, async (_target, state) => {
+      const table = state.storage.kv.get<Record<string, unknown>>("channel:alarm_schedule") ?? {};
+      expect(table[`points:round:${roundId}`]).toBeUndefined();
+      await expect(state.storage.getAlarm()).resolves.toBeNull();
+      expect(state.storage.sql.exec<{ state: string }>(
+        "SELECT state FROM game_rounds WHERE round_id = ?", roundId,
+      ).one().state).toBe("open");
+    });
   });
 
   it(`cancels a round when disabling its gate and rejects the next join (${testCard("closeGate precedes the join transaction and refunds existing stakes", "a post-close join books or an existing stake remains in escrow")})`, async () => {

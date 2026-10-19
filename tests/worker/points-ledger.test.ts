@@ -109,6 +109,47 @@ describe("points ledger in the worker Durable Object", () => {
     });
   });
 
+  it(`rejects a game operation that overflows the cumulative monthly net atomically (${testCard("monthly game net stays within the safe-integer range and failed bookings roll back", "game credit MAX_SAFE_INTEGER, admin debit MAX_SAFE_INTEGER, then game credit 2 stores an inexact monthly score and rank 2 for the sole account")})`, async () => {
+    const channelId = `points-monthly-overflow-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    const max = Number.MAX_SAFE_INTEGER;
+
+    await object.applyPointOperation(pointTestModule, "game-monthly-max", "game", [
+      { accountId: "viewer-a", delta: max, login: "nachtfalke" },
+      { accountId: "__house", delta: -max },
+    ], { payout: max });
+    await object.applyPointOperation(pointTestModule, "admin-monthly-reset", "admin", [
+      { accountId: "viewer-a", delta: -max },
+      { accountId: "__house", delta: max },
+    ], { reason: "reset balance" });
+
+    await expect(capturePointError(object, (target) => target.applyPointOperation(
+      pointTestModule,
+      "game-monthly-overflow",
+      "game",
+      [
+        { accountId: "viewer-a", delta: 2, login: "nachtfalke" },
+        { accountId: "__house", delta: -2 },
+      ],
+      { payout: 2 },
+    ))).resolves.toBe("monthly_overflow");
+
+    await expect(object.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(0);
+    await expect(object.pointRankOf(pointTestModule, "viewer-a", utcMonth())).resolves.toEqual({
+      rank: 1,
+      net: max,
+    });
+    const history = await object.pointHistory(pointTestModule, "viewer-a");
+    expect(history.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ operationId: "game-monthly-max", delta: max }),
+      expect.objectContaining({ operationId: "admin-monthly-reset", delta: -max }),
+    ]));
+    await expect(runPointObject(object, (_target, state) => state.storage.sql.exec<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM point_operations WHERE operation_id = ?", "game-monthly-overflow",
+    ).one().count)).resolves.toBe(0);
+  });
+
   it(`returns the same JSON result on first execution and replay (${testCard("an operation returns exactly the representation persisted as JSON", "undefined returns before persistence as undefined and replays as null")})`, async () => {
     const channelId = `points-result-canonical-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);

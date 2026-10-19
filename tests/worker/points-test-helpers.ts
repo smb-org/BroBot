@@ -37,6 +37,12 @@ export interface PointsWorkerObject {
   pointSummary(moduleId: string): Promise<{ circulation: number; jackpots: Record<string, number>; inRounds: number; accounts: number; month: string }>;
   pointRanking(moduleId: string, month: string, limit: number): Promise<Array<{ accountId: string; login: string; net: number }>>;
   pointRankOf(moduleId: string, accountId: string, month: string): Promise<{ rank: number | null; net: number }>;
+  getPanelResourceRevisions(): Promise<Record<string, number>>;
+  getActiveChatterSnapshot(userId: string): Promise<{ firstSeenAt: string; lastSeenAt: string } | null>;
+  getActiveChatterCountSnapshot(windowMs: number): Promise<number>;
+  readBallotSnapshot(moduleId: string, ballotId: string): Promise<unknown>;
+  readBallotDryRunSnapshot(moduleId: string, ballotId: string, voterId?: string): Promise<unknown>;
+  hasOpenBallotSnapshot(): Promise<boolean>;
   openGameRound(moduleId: string, roundId: string, data: unknown): Promise<void>;
   markGameRoundAnnounced(moduleId: string, roundId: string, deadlineAt: number, alarmKey: string): Promise<void>;
   joinGameRound(moduleId: string, roundId: string, operationId: string, accountId: string, login: string, stake: number, data: unknown): Promise<{

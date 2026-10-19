@@ -607,6 +607,8 @@ export class ChannelObject extends DurableObject<Env> {
   private pointsSchemaReady = false;
   private pointsInitialized = false;
   private pointsInitialization: Promise<void> | null = null;
+  private pointRoundRecoveryInitialized = false;
+  private pointRoundRecoveryInitialization: Promise<void> | null = null;
   // ponytail: This Set is per-instance memory and is empty after hibernation, so the residual window is bounded by the security alarm. Persist token IDs in DO storage if that window needs to be shorter.
   private recentlyBoundOverlayTokenIds = new Set<string>();
 
@@ -638,9 +640,46 @@ export class ChannelObject extends DurableObject<Env> {
     }
   }
 
+  /** Restores local point alarms on the first non-snapshot entry after activation. */
+  private async ensurePointRoundRecovery(): Promise<void> {
+    const pendingInitialization = this.pointRoundRecoveryInitialization;
+    if (pendingInitialization !== null) {
+      await pendingInitialization;
+      return;
+    }
+    if (this.pointRoundRecoveryInitialized) return;
+    const initializedSchema = this.ctx.storage.sql.exec<{ present: number }>(
+      "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'game_rounds') AS present",
+    ).one().present === 1;
+    if (!initializedSchema) {
+      this.pointRoundRecoveryInitialized = true;
+      return;
+    }
+
+    const hasActiveRounds = this.ctx.storage.sql.exec<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM game_rounds WHERE state IN ('announcing', 'open', 'resolving')",
+    ).one().count > 0;
+    const hasPendingCancellations = pendingPointRoundCancellations(this.ctx.storage.sql).length > 0;
+    const hasPendingNotices = pendingPointRoundCancellationNotices(this.ctx.storage.sql).length > 0;
+    const hasActivationReconciliation = this.pointActivationReconciliationModulesSync().length > 0;
+    if (!hasActiveRounds && !hasPendingCancellations && !hasPendingNotices && !hasActivationReconciliation) {
+      this.pointRoundRecoveryInitialized = true;
+      return;
+    }
+
+    const initialization = this.recoverPointRoundAlarms();
+    this.pointRoundRecoveryInitialization = initialization;
+    try {
+      await initialization;
+      this.pointRoundRecoveryInitialized = true;
+    } finally {
+      if (this.pointRoundRecoveryInitialization === initialization) this.pointRoundRecoveryInitialization = null;
+    }
+  }
+
   private async initializePoints(): Promise<void> {
     this.ensurePointsSchema();
-    await this.recoverPointRoundAlarms();
+    await this.ensurePointRoundRecovery();
   }
 
   private ownChannelId(): string | null {
@@ -1166,6 +1205,7 @@ export class ChannelObject extends DurableObject<Env> {
 
   /** Applies a committed timer config revision in the channel's single scheduler. */
   public async upsertTimerConfig(config: DurableTimerConfig): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await this.ensureTimerSchedulesInitialized();
     await this.transitionTimerStream(await this.readTimerStreamFromDatabase());
     const inputs = await this.timerScheduleInputs([config], Date.now());
@@ -1192,6 +1232,7 @@ export class ChannelObject extends DurableObject<Env> {
 
   /** Removes a committed D1 timer and fences any config snapshot read before its delete. */
   public async deleteTimerConfig(timerId: string, expectedRevision: number): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await this.ensureTimerSchedulesInitialized();
     await this.transitionTimerStream(await this.readTimerStreamFromDatabase());
     const changed = this.ctx.storage.transactionSync(() => {
@@ -1211,6 +1252,7 @@ export class ChannelObject extends DurableObject<Env> {
 
   /** Commits an accepted EventSub or Helix stream transition before replanning stream-scoped timers. */
   public async transitionTimerStream(stream: DurableTimerStream): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await this.ensureTimerSchedulesInitialized();
     const now = Date.now();
     const changedTimerIds: string[] = [];
@@ -1240,6 +1282,7 @@ export class ChannelObject extends DurableObject<Env> {
 
   /** Replans host-owned timer inputs after activation, timezone, event-time, or repair notifications. */
   public async reconcileTimerSchedules(reason: ModuleScheduleInputChangeReason): Promise<void> {
+    await this.ensurePointRoundRecovery();
     const previous = this.timerScheduleReconciliationQueue;
     let release!: () => void;
     this.timerScheduleReconciliationQueue = new Promise<void>((resolve) => { release = resolve; });
@@ -1481,6 +1524,7 @@ export class ChannelObject extends DurableObject<Env> {
     identity?: ModuleAlarmIdentity | null,
     planSequence?: number,
   ): Promise<"retain" | undefined> {
+    await this.ensurePointRoundRecovery();
     if (key.startsWith("mirror:")) {
       const timerId = key.slice("mirror:".length).split(":")[0] ?? "";
       if (timerId.length > 0) await this.writeTimerMirror(timerId);
@@ -1809,6 +1853,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async reconcileCachedAdPrewarning(grantedScopes?: readonly string[]): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await this.withAdScheduleOperation(async () => {
       // Read after entering the queue: an EventSub or Helix schedule save that
       // was queued first must be the value reconciled by this panel read.
@@ -1838,6 +1883,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async getCachedAdSchedule(): Promise<CachedAdSchedule | null> {
+    await this.ensurePointRoundRecovery();
     const channelId = this.ownChannelId();
     if (channelId === null) return null;
     const cache = await this.ctx.storage.get<CachedAdSchedule>(AD_SCHEDULE_CACHE_KEY);
@@ -1850,6 +1896,7 @@ export class ChannelObject extends DurableObject<Env> {
     expectedStreamId: string | null,
     now: number,
   ): Promise<OverlayStreamDetailsCache | null> {
+    await this.ensurePointRoundRecovery();
     const channelId = this.ownChannelId();
     if (channelId === null) return null;
     const cached = await this.ctx.storage.get<CachedOverlayStreamDetails>(OVERLAY_STREAM_DETAILS_CACHE_KEY);
@@ -1914,6 +1961,7 @@ export class ChannelObject extends DurableObject<Env> {
    * changes are not time-critical enough to warrant their own constant.
    */
   public async getCachedChannelGameId(now: number): Promise<string | null> {
+    await this.ensurePointRoundRecovery();
     const channelId = this.ownChannelId();
     if (channelId === null) return null;
     const cached = await this.ctx.storage.get<CachedChannelGameId>(CHANNEL_GAME_ID_CACHE_KEY);
@@ -1964,17 +2012,20 @@ export class ChannelObject extends DurableObject<Env> {
    * instead of waiting out the cache TTL (or spending another Helix call).
    */
   public async updateCachedChannelGameId(gameId: string | null, now: number): Promise<void> {
+    await this.ensurePointRoundRecovery();
     const channelId = this.ownChannelId();
     if (channelId === null) return;
     await this.ctx.storage.put(CHANNEL_GAME_ID_CACHE_KEY, { checkedAt: now, gameId, failed: false } satisfies CachedChannelGameId);
   }
 
   public async getAdScheduleGeneration(): Promise<number> {
+    await this.ensurePointRoundRecovery();
     return await this.ctx.storage.get<number>(AD_SCHEDULE_GENERATION_KEY) ?? 0;
   }
 
   /** Refreshes stale countdown data at most once per minute for this channel. */
   public async refreshAdScheduleForCountdown(): Promise<AdScheduleRefreshResult | null> {
+    await this.ensurePointRoundRecovery();
     const now = Date.now();
     const cached = await this.getCachedAdSchedule();
     const cachedAt = cached === null ? Number.NaN : Date.parse(cached.asOf);
@@ -1999,6 +2050,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async refreshAdSchedule(grantedScopes?: readonly string[]): Promise<AdScheduleRefreshResult> {
+    await this.ensurePointRoundRecovery();
     const now = Date.now();
     if (this.adScheduleRefresh !== null && now - this.adScheduleRefreshStartedAt < AD_SCHEDULE_REFRESH_TIMEOUT_MS) {
       return this.adScheduleRefresh;
@@ -2075,6 +2127,7 @@ export class ChannelObject extends DurableObject<Env> {
     expectedGeneration?: number,
     reconcileAlarm = true,
   ): Promise<CachedAdSchedule | null> {
+    await this.ensurePointRoundRecovery();
     const saved = await this.saveAdSchedule(schedule, asOf, grantedScopes, expectedGeneration, reconcileAlarm);
     if (saved === null) return null;
     await this.ctx.storage.delete(AD_COUNTDOWN_REFRESH_RETRY_COUNT_KEY);
@@ -2082,6 +2135,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async getTwitchRateLimitRetryAfter(now = Date.now()): Promise<number | null> {
+    await this.ensurePointRoundRecovery();
     const retryAfter = await this.ctx.storage.get<number>(TWITCH_RETRY_AFTER_KEY);
     return typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter > now
       ? retryAfter
@@ -2089,6 +2143,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async setTwitchRateLimitRetryAfter(retryAfter: number): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await this.ctx.storage.transaction(async (transaction) => {
       await transaction.put(TWITCH_RETRY_AFTER_KEY, retryAfter);
       await bumpDurablePanelResources(transaction, ["module:ads:schedule"]);
@@ -2189,6 +2244,7 @@ export class ChannelObject extends DurableObject<Env> {
 
   /** A durable short lease coalesces overview-triggered refreshes across Worker isolates. */
   public async beginStreamStateRefresh(now = Date.now()): Promise<string | null> {
+    await this.ensurePointRoundRecovery();
     const token = crypto.randomUUID();
     return this.ctx.storage.transaction(async (transaction) => {
       const current = await transaction.get<StreamRefreshLease>(STREAM_REFRESH_LEASE_KEY);
@@ -2199,6 +2255,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async endStreamStateRefresh(token: string): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await this.ctx.storage.transaction(async (transaction) => {
       const current = await transaction.get<StreamRefreshLease>(STREAM_REFRESH_LEASE_KEY);
       if (current?.token === token) await transaction.delete(STREAM_REFRESH_LEASE_KEY);
@@ -2706,6 +2763,7 @@ export class ChannelObject extends DurableObject<Env> {
     chatterUserId: string | null = null,
     needsActiveChatters = false,
   ): Promise<number> {
+    await this.ensurePointRoundRecovery();
     await this.ensureTimerSchedulesInitialized();
     this.reconcileLegacyActiveChatterStream();
     const now = Date.now();
@@ -2763,6 +2821,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async clearActiveChatters(): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await this.ctx.blockConcurrencyWhile(async () => {
       this.ctx.storage.transactionSync(() => {
         this.clearActiveChatterStateSync();
@@ -2771,7 +2830,8 @@ export class ChannelObject extends DurableObject<Env> {
     });
   }
 
-  public getActiveChatterCount(windowMs: number): Promise<number> {
+  public async getActiveChatterCount(windowMs: number): Promise<number> {
+    await this.ensurePointRoundRecovery();
     if (!Number.isFinite(windowMs) || windowMs <= 0) return Promise.resolve(0);
     const now = Date.now();
     const key = this.activeChatterKeyRowSync();
@@ -2786,6 +2846,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async getActiveChatter(userId: string): Promise<ActiveChatterActivity | null> {
+    await this.ensurePointRoundRecovery();
     if (userId.length === 0) return null;
     this.ensureActiveChatterTable();
     const key = this.activeChatterKeyRowSync();
@@ -2863,18 +2924,22 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async claimAutomatedChatOutput(): Promise<boolean> {
+    await this.ensurePointRoundRecovery();
     return claimAutomatedChatOutput(this.ctx.storage, Date.now());
   }
 
   public async isRecentBotChatMessage(senderId: string | null, text: string): Promise<boolean> {
+    await this.ensurePointRoundRecovery();
     return isRecentBotChatMessage(this.ctx.storage, senderId, text, Date.now());
   }
 
   public async recordBotChatMessage(senderId: string, text: string): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await recordRecentBotChatMessage(this.ctx.storage, senderId, text, Date.now());
   }
 
   public async getChatActivityCount(): Promise<number> {
+    await this.ensurePointRoundRecovery();
     const current = await this.ctx.storage.get<number>(CHAT_ACTIVITY_COUNT_KEY);
     return typeof current === "number" && Number.isSafeInteger(current) && current >= 0 ? current : 0;
   }
@@ -3146,6 +3211,7 @@ export class ChannelObject extends DurableObject<Env> {
     movements: PointsMovement[],
     result: unknown,
   ): Promise<PointsApplyResult> {
+    await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     const canonicalResult = canonicalPointResult(result);
     const payloadHash = await pointPayloadHash({ moduleId, operationId, kind, movements, result: canonicalResult.value });
@@ -3169,6 +3235,7 @@ export class ChannelObject extends DurableObject<Env> {
     login: string,
     startBonus: number,
   ): Promise<{ welcomePending: boolean }> {
+    await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     assertPointAccountId(accountId);
     const operationId = `bonus:${accountId}`;
@@ -3195,6 +3262,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async acknowledgePointWelcome(_moduleId: string, accountId: string): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     assertPointAccountId(accountId);
     this.ctx.storage.transactionSync(() => { acknowledgeWelcomeSync(this.ctx.storage.sql, accountId, new Date().toISOString()); });
@@ -3208,6 +3276,7 @@ export class ChannelObject extends DurableObject<Env> {
     live: boolean,
     rules: { amount: number; windowMinutes: number; dailyCap: number },
   ): Promise<{ credited: number }> {
+    await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     assertPointAccountId(accountId);
     const windowStart = Math.floor(messageAt / (rules.windowMinutes * 60_000)) * rules.windowMinutes * 60_000;
@@ -3227,6 +3296,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async pointBalance(_moduleId: string, accountId: string): Promise<number> {
+    await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     assertPointAccountId(accountId);
     return pointBalance(this.ctx.storage.sql, accountId);
@@ -3236,6 +3306,7 @@ export class ChannelObject extends DurableObject<Env> {
     _moduleId: string,
     query: { sort: "balance" | "month"; search?: string; cursor?: string; limit: number },
   ): Promise<Awaited<ReturnType<ModulePointsAccess["listAccounts"]>>> {
+    await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     return listPointAccounts(this.ctx.storage.sql, query, new Date().toISOString().slice(0, 7));
   }
@@ -3246,12 +3317,14 @@ export class ChannelObject extends DurableObject<Env> {
     cursor?: string,
     limit?: number,
   ): Promise<Awaited<ReturnType<ModulePointsAccess["history"]>>> {
+    await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     assertPointAccountId(accountId);
     return pointHistory(this.ctx.storage.sql, accountId, cursor, limit);
   }
 
   public async pointSummary(_moduleId: string): Promise<Awaited<ReturnType<ModulePointsAccess["summary"]>>> {
+    await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     void _moduleId;
     return pointSummary(this.ctx.storage.sql);
@@ -3262,6 +3335,7 @@ export class ChannelObject extends DurableObject<Env> {
     month: string,
     limit: number,
   ): Promise<Awaited<ReturnType<ModulePointsAccess["ranking"]>>> {
+    await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     return pointRanking(this.ctx.storage.sql, month, limit);
   }
@@ -3271,27 +3345,32 @@ export class ChannelObject extends DurableObject<Env> {
     accountId: string,
     month: string,
   ): Promise<Awaited<ReturnType<ModulePointsAccess["rankOf"]>>> {
+    await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     assertPointAccountId(accountId);
     return pointRankOf(this.ctx.storage.sql, accountId, month);
   }
 
   public async markPointAuditWritten(moduleId: string, operationId: string): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     this.ctx.storage.transactionSync(() => { pointAuditWrittenSync(this.ctx.storage.sql, moduleId, operationId); });
   }
 
   public async pendingPointAudits(moduleId: string): Promise<Awaited<ReturnType<ModulePointsAccess["pendingAudits"]>>> {
+    await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     return pendingPointAudits(this.ctx.storage.sql, moduleId);
   }
 
   public async claimPointCooldown(moduleId: string, key: string, seconds: number): Promise<boolean> {
+    await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     return this.ctx.storage.transactionSync(() => claimPointCooldownSync(this.ctx.storage.sql, moduleId, key, seconds, Date.now()));
   }
 
   public async openGameRound(moduleId: string, roundId: string, data: unknown): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     assertPointRoundId(roundId);
     const alarmKey = pointRoundAlarmKey(roundId);
@@ -3303,6 +3382,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async markGameRoundAnnounced(moduleId: string, roundId: string, deadlineAt: number, alarmKey: string): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     assertPointRoundId(roundId);
     this.ctx.storage.transactionSync(() => {
@@ -3321,6 +3401,7 @@ export class ChannelObject extends DurableObject<Env> {
     stake: number,
     data: unknown,
   ): Promise<PointJoinResult> {
+    await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     assertPointRoundId(roundId);
     assertPointAccountId(accountId);
@@ -3345,6 +3426,7 @@ export class ChannelObject extends DurableObject<Env> {
     roundId: string,
     settlement: { kind: string; params: unknown },
   ): Promise<PointsApplyResult> {
+    await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     assertPointRoundId(roundId);
     await this.reconcilePointModuleActivation(moduleId, true);
@@ -3379,6 +3461,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async cancelOpenGameRounds(moduleId: string, revision: number): Promise<number> {
+    await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     return await this.cancelOpenGameRoundsInternal(moduleId, revision, true);
   }
@@ -3449,6 +3532,7 @@ export class ChannelObject extends DurableObject<Env> {
     revision: number,
     lastDisabledRevision: number | null = null,
   ): Promise<{ applied: boolean }> {
+    await this.ensurePointRoundRecovery();
     return await this.setGameModuleGateInternal(moduleId, closed, revision, true, lastDisabledRevision);
   }
 
@@ -3591,6 +3675,7 @@ export class ChannelObject extends DurableObject<Env> {
     alarmKey: string,
     invocation?: unknown,
   ): Promise<unknown> {
+    await this.ensurePointRoundRecovery();
     const module = MODULES.find((candidate) => candidate.id === moduleId);
     const registration = module?.alarms?.find((candidate) => candidate.key === handlerKey);
     if (registration === undefined || alarmKey.length === 0 || alarmKey.length > 256) {
@@ -3748,6 +3833,7 @@ export class ChannelObject extends DurableObject<Env> {
     passRule?: BallotFinalizeRule,
     termFilter?: BallotTermFilter,
   ): Promise<BallotOpenResult> {
+    await this.ensurePointRoundRecovery();
     const channelId = this.ownChannelId();
     if (channelId === null) throw new Error("Ballots require a named Durable Object.");
     const requestedAlarmKey = ballotExpiryAlarmKey(moduleId, ballotId);
@@ -3789,6 +3875,7 @@ export class ChannelObject extends DurableObject<Env> {
     choice: number,
     options?: { onlyIfNew?: boolean },
   ): Promise<BallotCastResult> {
+    await this.ensurePointRoundRecovery();
     const channelId = this.ownChannelId();
     if (channelId === null) return { status: "not_open", counts: [], revision: 0 };
     const result = await castStoredBallot(this.ballotStorage(moduleId), channelId, moduleId, ballotId, userId, choice, options);
@@ -3805,6 +3892,7 @@ export class ChannelObject extends DurableObject<Env> {
     term: string,
     matchText?: string,
   ): Promise<BallotCastResult> {
+    await this.ensurePointRoundRecovery();
     const channelId = this.ownChannelId();
     if (channelId === null) return { status: "not_open", counts: [], revision: 0 };
     const result = await castStoredBallotTerm(this.ballotStorage(moduleId), channelId, moduleId, ballotId, userId, term, matchText);
@@ -3819,6 +3907,7 @@ export class ChannelObject extends DurableObject<Env> {
     ballotId: string,
     blockedTerms: readonly string[],
   ): Promise<BallotSnapshot | null> {
+    await this.ensurePointRoundRecovery();
     const snapshot = await setStoredBallotBlockedTerms(this.ballotStorage(moduleId), moduleId, ballotId, blockedTerms);
     if (snapshot !== null) await this.notifyCommittedPanelResources();
     return snapshot;
@@ -3829,6 +3918,7 @@ export class ChannelObject extends DurableObject<Env> {
     ballotId: string,
     term: string,
   ): ReturnType<typeof approveStoredBallotTerm> {
+    await this.ensurePointRoundRecovery();
     const channelId = this.ownChannelId();
     if (channelId === null || moduleId !== CHAT_VOTING_MODULE_ID) {
       return { status: "not_open", snapshot: null };
@@ -3847,6 +3937,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async readBallot(moduleId: string, ballotId: string): Promise<BallotSnapshot | null> {
+    await this.ensurePointRoundRecovery();
     const snapshot = await readStoredBallot(this.ballotStorage(moduleId), moduleId, ballotId, async (transaction, finalizedModuleId, finalizedBallotId, hardDeleteAt) => {
       await this.writeBallotAlarmInTransaction(
         transaction,
@@ -3876,6 +3967,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async hasOpenBallot(): Promise<boolean> {
+    await this.ensurePointRoundRecovery();
     const hasOpen = await hasOpenStoredBallot(this.ballotStorage(CHAT_VOTING_MODULE_ID), async (transaction, moduleId, ballotId, hardDeleteAt) => {
       await this.writeBallotAlarmInTransaction(
         transaction,
@@ -3893,6 +3985,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async closeBallot(moduleId: string, ballotId: string): Promise<BallotSnapshot | null> {
+    await this.ensurePointRoundRecovery();
     const result = await closeStoredBallot(this.ballotStorage(moduleId), moduleId, ballotId);
     if (result !== null) await this.notifyCommittedPanelResources();
     await this.clearAlarmEntry(ballotExpiryAlarmKey(moduleId, ballotId));
@@ -3900,6 +3993,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async finalizeBallot(moduleId: string, ballotId: string): Promise<BallotFinalizeResult> {
+    await this.ensurePointRoundRecovery();
     const result = await finalizeStoredBallot(this.ballotStorage(moduleId), moduleId, ballotId, async (transaction, finalizedModuleId, finalizedBallotId, hardDeleteAt) => {
       await this.writeBallotAlarmInTransaction(
         transaction,
@@ -3915,6 +4009,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async acknowledgeClosedBallot(moduleId: string, ballotId: string): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await forgetClosedStoredBallot(this.ctx.storage, moduleId, ballotId);
   }
 
@@ -4001,11 +4096,13 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async getPanelResourceRevisions(): Promise<PanelResourceRevisionVector> {
+    await this.ensurePointRoundRecovery();
     return await this.ctx.storage.get<PanelResourceRevisionVector>(PANEL_DURABLE_REVISIONS_KEY) ?? {};
   }
 
   /** Delivers only advanced, data-free resources to panel principals in this channel. */
   public async reconcilePanelResources(revisions: PanelResourceRevisionVector): Promise<void> {
+    await this.ensurePointRoundRecovery();
     const channelId = this.ownChannelId();
     if (channelId === null) return;
     const durableRevisions = await this.getPanelResourceRevisions();
@@ -4320,6 +4417,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async scheduleAdPrewarning(dueAtMs: number): Promise<void> {
+    await this.ensurePointRoundRecovery();
     if (!Number.isFinite(dueAtMs)) {
       await this.clearAdPrewarning();
       return;
@@ -4328,6 +4426,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async clearAdPrewarning(): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await this.clearAlarmEntry(AD_PREWARNING_DEADLINE_KEY);
     // The send claim for the occurrence just cleared is kept, not deleted: a
     // re-arm for that same due-at ms (e.g. an unrelated schedule refresh
@@ -4352,6 +4451,7 @@ export class ChannelObject extends DurableObject<Env> {
     identity?: ModuleAlarmIdentity,
     planSequence?: number,
   ): Promise<void> {
+    await this.ensurePointRoundRecovery();
     const registration = MODULES.find((module) => module.id === moduleId)?.alarms?.find((alarm) => alarm.key === handlerKey);
     if (registration === undefined || alarmKey.length === 0) {
       throw new Error(`Unknown module alarm ${moduleId}.${handlerKey}.`);
@@ -4391,11 +4491,13 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async reconcileLegacyChatVoteResultDeliveries(): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await this.reconcileLegacyChatVoteResultDeliveriesFor(await this.retainedLegacyChatVoteResultPollIds());
   }
 
   /** Returns the current retry/execution time for one module alarm, if scheduled. */
   public async getModuleAlarmDeadline(moduleId: string, alarmKey: string): Promise<number | null> {
+    await this.ensurePointRoundRecovery();
     if (!MODULES.some((module) => module.id === moduleId) || alarmKey.length === 0) return null;
     const stored = await this.ctx.storage.get(ALARM_TABLE_KEY);
     if (!isRecord(stored)) return null;
@@ -4406,6 +4508,7 @@ export class ChannelObject extends DurableObject<Env> {
 
   /** Returns the identity and sequence stored on one module alarm entry. */
   public async getModuleAlarmPlan(moduleId: string, alarmKey: string): Promise<ModuleAlarmPlan | null> {
+    await this.ensurePointRoundRecovery();
     if (!MODULES.some((module) => module.id === moduleId) || alarmKey.length === 0) return null;
     const stored = await this.ctx.storage.get(ALARM_TABLE_KEY);
     if (!isRecord(stored)) return null;
@@ -4426,6 +4529,7 @@ export class ChannelObject extends DurableObject<Env> {
     expectedIdentity?: ModuleAlarmIdentity | null,
     planSequence?: number,
   ): Promise<void> {
+    await this.ensurePointRoundRecovery();
     if (!MODULES.some((module) => module.id === moduleId) || alarmKey.length === 0) {
       throw new Error(`Unknown module alarm key ${moduleId}.${alarmKey}.`);
     }
@@ -4435,6 +4539,7 @@ export class ChannelObject extends DurableObject<Env> {
 
   /** Queues a generic replan after a host or module changes schedule inputs. */
   public async notifyScheduleInputsChanged(reason: ModuleScheduleInputChangeReason): Promise<void> {
+    await this.ensurePointRoundRecovery();
     await this.scheduleAlarmEntry(
       `${MODULE_SCHEDULE_INPUTS_CHANGED_KEY}:${reason}`,
       MODULE_SCHEDULE_INPUTS_CHANGED_HANDLER,
@@ -4443,6 +4548,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   override async fetch(request: Request): Promise<Response> {
+    await this.ensurePointRoundRecovery();
     const rawPrincipal = request.headers.get(REALTIME_PRINCIPAL_HEADER);
     let principal: RealtimePrincipal | null = null;
     if (rawPrincipal !== null) {
@@ -4572,6 +4678,7 @@ export class ChannelObject extends DurableObject<Env> {
   public async publish(
     messages: readonly RealtimeMessage[],
   ): Promise<void> {
+    await this.ensurePointRoundRecovery();
     if (messages.length === 0) return Promise.resolve();
     const ownChannelId = this.ownChannelId();
     if (ownChannelId === null || messages.some((message) => message.channelId !== ownChannelId)) {
@@ -4708,6 +4815,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async revokeSession(sessionId: string): Promise<void> {
+    await this.ensurePointRoundRecovery();
     for (const webSocket of this.ctx.getWebSockets(`session:${sessionId}`)) {
       closeSocket(webSocket, SOCKET_REVOKED_CODE, "Session revoked");
     }
@@ -4715,6 +4823,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async revokeUser(userId: string): Promise<void> {
+    await this.ensurePointRoundRecovery();
     for (const webSocket of this.ctx.getWebSockets(`user:${userId}`)) {
       const principal = readAttachment(webSocket);
       if (principal?.kind === "panel" && principal.userId === userId) {
@@ -4734,6 +4843,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async revokeToken(tokenId: string): Promise<boolean> {
+    await this.ensurePointRoundRecovery();
     const now = Date.now();
     await this.pruneRevokedTokenMarkers(now);
     // A short-lived marker blocks handshakes already in flight while the
@@ -4760,6 +4870,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async closeUnboundOverlayTokenSockets(tokenId: string): Promise<boolean> {
+    await this.ensurePointRoundRecovery();
     const ownChannelId = this.ownChannelId();
     this.recentlyBoundOverlayTokenIds.add(tokenId);
     let closed = true;
@@ -4972,6 +5083,7 @@ export class ChannelObject extends DurableObject<Env> {
 
   override async alarm(): Promise<void> {
     await withCommittedPanelResourceDrain(async () => {
+      await this.ensurePointRoundRecovery();
       const alarmTable = await this.ctx.storage.transaction((transaction) => readAlarmScheduleTable(transaction));
       const hasTimerAlarms = Object.keys(alarmTable).some((key) =>
         key.startsWith(`${TIMER_ALARM_PREFIX}timer:`) || key.startsWith(`${TIMER_ALARM_PREFIX}mirror:`));
