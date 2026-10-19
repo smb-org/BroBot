@@ -1103,6 +1103,9 @@ describe("game rounds in the worker Durable Object", () => {
   });
 
   it(`defers cancellation notices to the alarm after lazy recovery (${testCard("the first points access refunds and schedules without calling the chat sender", "point recovery waits for external cancellation notice delivery", "hostChatMock supplies a confirmed send; points recovery itself is asserted to make no transport call")})`, async () => {
+    vi.useFakeTimers();
+    // Keep the platform alarm pending until runPointAlarm explicitly invokes it below.
+    vi.setSystemTime(Date.now() + 30 * 24 * 60 * 60_000);
     const channelId = `round-cancel-startup-notice-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
