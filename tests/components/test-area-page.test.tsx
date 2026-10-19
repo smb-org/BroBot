@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { dryRunChatMessage, fetchChannelBroadcast, lookupChannelGames, searchChannelGames } from "../../src/dashboard/api";
 import type { DryRunRequest, DryRunResponse } from "../../src/contracts/dry-run";
+
+type DryRunModuleId = NonNullable<DryRunRequest["only"]>["moduleId"];
 import { TestAreaPage } from "../../src/dashboard/TestAreaPage";
 
 vi.mock("../../src/dashboard/api", () => ({
@@ -50,14 +52,14 @@ const response = (overrides: Partial<DryRunResponse> = {}): DryRunResponse => ({
       }],
     },
     { moduleId: "chat_voting", status: "silent", entries: [] },
-    { moduleId: "votekick", status: "not_testable", entries: [] },
+    { moduleId: "votekick", status: "silent", entries: [] },
   ],
   ...overrides,
 });
 
 const renderPage = (options: {
   only?: DryRunRequest["only"];
-  onOpenEditor?: (moduleId: "text_commands" | "faq", entryId: string) => void;
+  onOpenEditor?: (moduleId: DryRunModuleId, entryId: string) => void;
 } = {}) => render(<TestAreaPage
   channelId="channel-a"
   language="de"
@@ -119,7 +121,6 @@ describe("test area page", () => {
 
     await waitFor(() => expect(document.querySelector(".test-area__results-title")).toHaveTextContent("1 reagiert · 1 blockiert"));
     expect(screen.getByText(/^Ohne Reaktion:/u)).toBeInTheDocument();
-    expect(screen.getByText("Noch ohne Trockenlauf: Votekick")).toBeInTheDocument();
     expect(screen.queryByText("Nicht testbar")).not.toBeInTheDocument();
     expect(firingRow()).toHaveAttribute("aria-current", "true");
   });

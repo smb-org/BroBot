@@ -580,8 +580,7 @@ export function TestAreaPage({
   const blocked = visibleRows.filter((row) => row.report.outcome === "blocked").length;
   const responseModules = response?.modules.filter((module) => snapshot?.request.only === undefined || module.moduleId === snapshot.request.only.moduleId) ?? [];
   const silentModules = responseModules.filter((module) => module.status === "silent").map((module) => moduleName(module.moduleId, labels, language));
-  const notTestableModules = responseModules.filter((module) => module.status === "not_testable").map((module) => moduleName(module.moduleId, labels, language));
-  const errorModules = responseModules.filter((module) => module.status === "error").map((module) => moduleName(module.moduleId, labels, language));
+  const errorModules = responseModules.filter((module) => module.status === "error" || module.status === "not_testable").map((module) => moduleName(module.moduleId, labels, language));
   const state: "idle" | "loading" | "result" | "empty" | "incomplete" | "error" =
     pending ? "loading" : error !== null ? "error" : response === null ? "idle"
       : errorModules.length > 0 ? "incomplete" : visibleRows.length === 0 ? "empty" : "result";
@@ -722,10 +721,8 @@ export function TestAreaPage({
           <p className="test-area__meta-line" title={silentModules.length === 0 ? "" : silentModules.join(", ")}>
             {silentModules.length === 0 ? <span aria-hidden="true">&nbsp;</span> : texts.noReactionModules(silentModules.join(", "))}
           </p>
-          <p className="test-area__meta-line" title={[...notTestableModules, ...errorModules].join(", ")}>
-            {notTestableModules.length === 0 && errorModules.length === 0
-              ? <span aria-hidden="true">&nbsp;</span>
-              : <>{notTestableModules.length === 0 ? null : texts.noDryRunModules(notTestableModules.join(", "))}{notTestableModules.length > 0 && errorModules.length > 0 ? " · " : null}{errorModules.length === 0 ? null : texts.moduleError(errorModules.join(", "))}</>}
+          <p className="test-area__meta-line" title={errorModules.join(", ")}>
+            {errorModules.length === 0 ? <span aria-hidden="true">&nbsp;</span> : texts.moduleError(errorModules.join(", "))}
           </p>
           <p
             className="test-area__meta-line test-area__scope-hint"

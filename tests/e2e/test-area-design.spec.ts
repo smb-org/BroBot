@@ -42,7 +42,7 @@ const response: DryRunResponse = {
       }],
     },
     { moduleId: "chat_voting", status: "silent", entries: [] },
-    { moduleId: "votekick", status: "not_testable", entries: [] },
+    { moduleId: "votekick", status: "silent", entries: [] },
   ],
 };
 

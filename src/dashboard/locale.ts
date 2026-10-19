@@ -870,7 +870,6 @@ export interface DashboardTexts {
     reactionsSummary: (fires: number, blocked: number) => string;
     resultCount: (count: number) => string;
     noReactionModules: (modules: string) => string;
-    noDryRunModules: (modules: string) => string;
     moduleError: (modules: string) => string;
     muted: string;
     paused: string;
@@ -1430,9 +1429,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         fires === 0 ? null : formatNumber(fires, "de") + (fires === 1 ? " reagiert" : " reagieren"),
         blocked === 0 ? null : formatNumber(blocked, "de") + " blockiert",
       ].filter((part): part is string => part !== null).join(" · "),
-      resultCount: (count) => formatNumber(count, "de") + (count === 1 ? " Treffer" : " Treffer"),
+      resultCount: (count) => formatNumber(count, "de") + " Treffer",
       noReactionModules: (modules) => "Ohne Reaktion: " + modules,
-      noDryRunModules: (modules) => "Noch ohne Trockenlauf: " + modules,
       moduleError: (modules) => "Fehler bei: " + modules,
       muted: "Stumm",
       paused: "Pausiert",
@@ -1499,6 +1497,14 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
           case "text_commands.user_cooldown": return "Abklingzeit pro Person" + (seconds === null ? "" : ": noch " + formatNumber(seconds, "de") + " s") + ".";
           case "text_commands.argument_invalid": return "Die Argumente sind ungültig.";
           case "text_commands.argument_missing": return "Ein erforderliches Argument fehlt.";
+          case "chat_voting.permission_denied": return "Der Absender erfüllt die Mindestrolle nicht.";
+          case "chat_voting.vote_unavailable": return "Die Abstimmung ist gerade nicht verfügbar.";
+          case "votekick.permission_denied": return "Der Absender erfüllt die Mindestrolle nicht.";
+          case "votekick.target_protected": return "Das Ziel ist geschützt.";
+          case "votekick.target_inactive": return "Das Ziel ist im Chat nicht aktiv.";
+          case "votekick.cooldown": return "Abklingzeit" + (seconds === null ? "" : ": noch " + formatNumber(seconds, "de") + " s") + ".";
+          case "votekick.ballot_busy": return "Es läuft bereits eine Abstimmung.";
+          case "votekick.unavailable": return "Votekick ist gerade nicht verfügbar.";
           case "faq.permission_denied": return "Der Absender erfüllt die Mindestrolle nicht.";
           case "faq.game_filter": return "Das aktuelle Spiel passt nicht zum Filter.";
           case "faq.cooldown": return "Abklingzeit" + (seconds === null ? "" : ": noch " + formatNumber(seconds, "de") + " s") + ".";
@@ -1986,7 +1992,6 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       ].filter((part): part is string => part !== null).join(" · "),
       resultCount: (count) => formatNumber(count, "en") + (count === 1 ? " result" : " results"),
       noReactionModules: (modules) => "No reaction: " + modules,
-      noDryRunModules: (modules) => "Dry run coming later: " + modules,
       moduleError: (modules) => "Errors in: " + modules,
       muted: "Muted",
       paused: "Paused",
@@ -2053,6 +2058,14 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
           case "text_commands.user_cooldown": return "Per-person cooldown" + (seconds === null ? "" : ": " + formatNumber(seconds, "en") + " s left") + ".";
           case "text_commands.argument_invalid": return "The arguments are invalid.";
           case "text_commands.argument_missing": return "A required argument is missing.";
+          case "chat_voting.permission_denied": return "The sender does not meet the minimum role.";
+          case "chat_voting.vote_unavailable": return "Voting is not available right now.";
+          case "votekick.permission_denied": return "The sender does not meet the minimum role.";
+          case "votekick.target_protected": return "The target is protected.";
+          case "votekick.target_inactive": return "The target is not active in chat.";
+          case "votekick.cooldown": return "Cooldown" + (seconds === null ? "" : ": " + formatNumber(seconds, "en") + " s left") + ".";
+          case "votekick.ballot_busy": return "A vote is already running.";
+          case "votekick.unavailable": return "Votekick is not available right now.";
           case "faq.permission_denied": return "The sender does not meet the minimum role.";
           case "faq.game_filter": return "The current game does not match the filter.";
           case "faq.cooldown": return "Cooldown" + (seconds === null ? "" : ": " + formatNumber(seconds, "en") + " s left") + ".";

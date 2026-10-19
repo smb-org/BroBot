@@ -42,7 +42,7 @@ const firingResponse = (muted = false): DryRunResponse => ({
       }],
     },
     { moduleId: "chat_voting", status: "silent", entries: [] },
-    { moduleId: "votekick", status: "not_testable", entries: [] },
+    { moduleId: "votekick", status: "silent", entries: [] },
   ],
 });
 
@@ -200,7 +200,6 @@ test("submits one synthetic chat message and shows the selected firing row witho
   const firingRow = page.getByRole("button", { name: /!discord/u });
   await expect(firingRow).toBeVisible();
   await expect(firingRow).toHaveAttribute("aria-current", "true");
-  await expect(page.getByText("Noch ohne Trockenlauf: Votekick")).toBeVisible();
   expect(harness.requestBody()).toMatchObject({
     text: "!dc hallo",
     sender: { login: "viewer_42", statuses: ["subscriber"] },

@@ -41,7 +41,7 @@ const response: DryRunResponse = {
       }],
     },
     { moduleId: "chat_voting", status: "silent", entries: [] },
-    { moduleId: "votekick", status: "not_testable", entries: [] },
+    { moduleId: "votekick", status: "silent", entries: [] },
   ],
 };
 
@@ -79,7 +79,6 @@ test("test area follows the browser language when switching from English back to
   await english.page.getByRole("button", { name: "Check", exact: true }).click();
   await expect(english.page.getByRole("heading", { name: "Result" })).toBeVisible();
   await expect(english.page.locator(".test-area__results-title")).toContainText("1 reaction · 1 blocked");
-  await expect(english.page.getByText("Dry run coming later: Votekick")).toBeVisible();
   await expect(english.page.getByRole("button", { name: /!discord/u })).toContainText("Text commands");
   await expect(english.page.getByRole("button", { name: /!discord/u })).toContainText("Would reply");
   await english.page.getByRole("button", { name: /Begrüßung/u }).click();
@@ -96,7 +95,6 @@ test("test area follows the browser language when switching from English back to
   await german.page.getByRole("button", { name: "Prüfen", exact: true }).click();
   await expect(german.page.getByRole("heading", { name: "Ergebnis" })).toBeVisible();
   await expect(german.page.locator(".test-area__results-title")).toContainText("1 reagiert · 1 blockiert");
-  await expect(german.page.getByText("Noch ohne Trockenlauf: Votekick")).toBeVisible();
   await german.page.getByRole("button", { name: /Begrüßung/u }).click();
   await expect(german.page.locator(".test-area__detail")).toContainText("Warum");
   await expect(german.page.locator(".test-area__detail")).toContainText("Abklingzeit pro Person: noch 42 s.");
