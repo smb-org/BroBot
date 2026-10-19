@@ -668,6 +668,21 @@ export interface ModuleExecutionContext {
   getAlarmPlan?: (alarmKey: string) => Promise<ModuleAlarmPlan | null>;
 }
 
+export interface ModuleDryRunBallotSnapshot extends BallotSnapshot {
+  /** The ballot-local term filter, available only to simulate a free-text cast. */
+  blockedTerms?: readonly string[] | null;
+  /** Approved free-text terms retained after their last voter switches away. */
+  approvedTerms?: readonly string[];
+  /** Absolute deadline from the stored ballot. */
+  expiresAt?: number;
+  /** Prior choice for the one simulated sender, without exposing other voter ids. */
+  previousChoice?: number | string;
+  /** False when the host could not resolve the sender id needed to check their prior choice. */
+  previousChoiceKnown?: boolean;
+  /** Whether this ballot still owns the channel-wide ballot lock. */
+  isActive?: boolean;
+}
+
 /** Read-only capabilities available while a chat message is being simulated. */
 export type ModuleDryRunContext = Pick<ModuleExecutionContext,
   | "DB"
@@ -677,6 +692,8 @@ export type ModuleDryRunContext = Pick<ModuleExecutionContext,
   | "channelGameId"
   | "channelLanguage"
   | "channelTimeZone"
+  | "lookupUserByLogin"
+  | "isChannelModerator"
   | "readChannelVariables"
   | "renderTemplate"
   | "followedAt"
@@ -685,6 +702,19 @@ export type ModuleDryRunContext = Pick<ModuleExecutionContext,
 > & {
   /** Host-resolved default chat target, so modules do not need another lookup. */
   defaultChatTarget: ChatOutputTarget;
+  /** Read-only ballot snapshots; the dry-run context never exposes ballot mutation methods. */
+  ballots?: {
+    readSnapshot: (ballotId: string, voterId?: string) => Promise<ModuleDryRunBallotSnapshot | null>;
+    hasOpenBallotSnapshot: () => Promise<boolean>;
+  };
+  /** Returns true when a lookup was deliberately deferred because no valid cached credential exists. */
+  isUserLookupDeferred?: (login: string) => boolean;
+  /** Marks a cast as indeterminate when the sender's previous ballot choice is unknown. */
+  markBallotChoiceUnresolved?: () => void;
+  /** Returns true when this message's ballot result depends on an unknown previous choice. */
+  isBallotChoiceUnresolved?: () => boolean;
+  /** Durable Object activity reads that do not initialize tables, write state, or schedule alarms. */
+  activeChatters?: Pick<ModuleExecutionContext["activeChatters"], "count" | "seen">;
 };
 
 /** Durable storage and alarm access given to a module alarm handler. */
@@ -908,7 +938,7 @@ export interface ModuleBallotAccess {
   /** Reads whether any module currently owns the channel's exclusive ballot. */
   hasOpenBallot?: () => Promise<boolean>;
   /** Reads a snapshot without finalizing an expired ballot or changing its alarm. */
-  readSnapshot?: (ballotId: string) => Promise<BallotSnapshot | null>;
+  readSnapshot?: (ballotId: string) => Promise<ModuleDryRunBallotSnapshot | null>;
   /** Reads channel-wide availability without finalizing or cleaning up a ballot. */
   hasOpenBallotSnapshot?: () => Promise<boolean>;
   close: (ballotId: string) => Promise<BallotSnapshot | null>;
@@ -1720,6 +1750,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
     event: ModuleEvent<z.output<SettingsSchema>>,
     context: ModuleExecutionContext,
   ) => ModuleResult | Promise<ModuleResult>;
+  /** Explains why a chat subscription has no single-message reaction. */
+  dryRunSilentReason?: "activity_tracking";
   /** Reuses the production service with read-only adapters and describes its effects without executing them. */
   dryRunChatMessage?: (
     event: ModuleEvent<z.output<SettingsSchema>>,

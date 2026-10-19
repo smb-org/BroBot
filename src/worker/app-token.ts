@@ -97,6 +97,21 @@ const decryptAppAccessToken = async (
     : null;
 };
 
+/** Reads an already cached app token without refreshing or mutating D1. */
+export const readCachedAppAccessToken = async (
+  db: D1Database,
+  environment: AppTokenEnvironment,
+  now: string,
+): Promise<string | null> => {
+  const stored = await getStoredAppAccessToken(db);
+  if (stored === null || shouldRefreshAppAccessToken(stored.expiresAt, now)) return null;
+  try {
+    return await decryptAppAccessToken(stored.accessTokenCiphertext, getTokenEncryptionKeys(environment));
+  } catch {
+    return null;
+  }
+};
+
 const rotateWithRetry = async (
   db: D1Database,
   expectedCiphertext: string | null,

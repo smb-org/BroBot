@@ -36,11 +36,21 @@ export const fetchTwitchUserByLogin = async (
     ? await getAppAccessToken(environment, new Date().toISOString(), fetcher)
     : await readStoredBotAccessToken(environment);
   if (accessToken === null) throw new Error("A Twitch access token for user search is missing.");
+  return await fetchTwitchUserByLoginWithToken(fetcher, environment.TWITCH_CLIENT_ID, login, accessToken);
+};
+
+/** Resolves a Twitch user using a caller-supplied credential without accessing the environment. */
+export const fetchTwitchUserByLoginWithToken = async (
+  fetcher: typeof fetch,
+  clientId: string,
+  login: string,
+  accessToken: string,
+): Promise<TwitchUser | null> => {
   const result = await helixRequest<Record<string, unknown>>({
     url: "https://api.twitch.tv/helix/users",
     query: { login },
     accessToken,
-    clientId: environment.TWITCH_CLIENT_ID,
+    clientId,
     fetcher,
   });
   if (!result.ok) throw new Error("Twitch user search failed.");
