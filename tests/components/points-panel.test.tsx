@@ -299,4 +299,49 @@ describe("points panel", () => {
     fireEvent.click(saveButton);
     expect(mocks.adjustPoints).not.toHaveBeenCalled();
   });
+
+  it("does not add a booked correction to the balance again (protects=the overflow check validates the committed balance once the correction is booked with audit pending; fails_when=the preview reports a safe-range overflow after the booking already includes the delta; no_claim=the account and correction results are service mocks)", async () => {
+    const account = { accountId: "viewer_edge", login: "funkenflug", balance: Number.MAX_SAFE_INTEGER - 1, monthNet: 0 };
+    mocks.loadPointsAccounts.mockResolvedValue({ rows: [account] });
+    mocks.loadPointsAccount.mockResolvedValue({ accountId: account.accountId, login: account.login, balance: account.balance });
+    mocks.adjustPoints.mockResolvedValue({ balance: Number.MAX_SAFE_INTEGER, auditPending: true });
+
+    const view = renderWithQuery(<UiProvider><PointsPanel channelId="kanal_demo" language="en" canManage /></UiProvider>);
+    const edgeAccount = await screen.findByText("funkenflug", { exact: true });
+    fireEvent.click(edgeAccount.closest("button") as HTMLButtonElement);
+    fireEvent.change(screen.getByLabelText("Amount ±"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "booked at the edge" } });
+    const detailHeader = view.container.querySelector(".points-detail__header");
+    if (!(detailHeader instanceof HTMLElement)) throw new Error("The selected account detail header is missing.");
+    fireEvent.click(within(detailHeader).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mocks.adjustPoints).toHaveBeenCalledOnce());
+    const preview = view.container.querySelector(".points-correction__preview");
+    if (preview === null) throw new Error("The correction preview slot is missing.");
+    await waitFor(() => expect(preview).not.toHaveTextContent("safe range"));
+    expect(preview).toHaveTextContent(/9,?007,?199,?254,?740,?991/u);
+  });
+
+  it("keeps Retry enabled for a booked correction at the safe-range edge (protects=a booked correction with audit pending stays retryable because validity uses the committed balance; fails_when=Retry or Save is disabled after the booking already includes the delta; no_claim=the account and correction results are service mocks)", async () => {
+    const account = { accountId: "viewer_edge", login: "funkenflug", balance: Number.MAX_SAFE_INTEGER - 1, monthNet: 0 };
+    mocks.loadPointsAccounts.mockResolvedValue({ rows: [account] });
+    mocks.loadPointsAccount.mockResolvedValue({ accountId: account.accountId, login: account.login, balance: account.balance });
+    mocks.adjustPoints.mockResolvedValue({ balance: Number.MAX_SAFE_INTEGER, auditPending: true });
+
+    const view = renderWithQuery(<UiProvider><PointsPanel channelId="kanal_demo" language="en" canManage /></UiProvider>);
+    const edgeAccount = await screen.findByText("funkenflug", { exact: true });
+    fireEvent.click(edgeAccount.closest("button") as HTMLButtonElement);
+    fireEvent.change(screen.getByLabelText("Amount ±"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "retry at the edge" } });
+    const detailHeader = view.container.querySelector(".points-detail__header");
+    if (!(detailHeader instanceof HTMLElement)) throw new Error("The selected account detail header is missing.");
+    const header = within(detailHeader);
+    fireEvent.click(header.getByRole("button", { name: "Save" }));
+
+    const retry = await header.findByRole("button", { name: "Retry" });
+    expect(retry).toBeEnabled();
+    fireEvent.click(retry);
+    await waitFor(() => expect(mocks.adjustPoints).toHaveBeenCalledTimes(2));
+    expect(mocks.adjustPoints.mock.calls[1]?.[2]).toBe(mocks.adjustPoints.mock.calls[0]?.[2]);
+  });
 });

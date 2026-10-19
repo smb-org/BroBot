@@ -417,6 +417,67 @@ describe("dispatch and execution", () => {
     }
   });
 
+  it("keeps the welcome off a threaded moderation follow-up (protects=moderation follow-up replies never carry the points welcome and never acknowledge it so it stays pending; fails_when=a threaded timeout reply gets the welcome text or acknowledgePointWelcome is called; no_claim=Helix and chat responses use HTTP doubles)", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      await database.prepare(
+        `INSERT INTO bot_channel_status (channel_id, is_moderator, checked_at, reason)
+         VALUES ('kanal-a', 1, ?, NULL)`,
+      ).bind(NOW).run();
+      await activate(database, "kanal-a", pointsModule.id);
+      await database.prepare("UPDATE channel_modules SET settings = ? WHERE channel_id = ? AND module_id = ?")
+        .bind(JSON.stringify(DEFAULT_POINTS_SETTINGS), "kanal-a", pointsModule.id).run();
+      const module = fakeModule("moderation-no-welcome", () => ({
+        actions: [{
+          kind: "timeout",
+          userId: "fictional-viewer-timeout",
+          durationSeconds: 30,
+          reason: "test",
+          onSuccess: { kind: "chat", text: "Timeout applied", replyToMessageId: "twitch-message-mod" },
+        }],
+        diagnostics: [],
+      }));
+      await activate(database, "kanal-a", module.id);
+      const runtime = environment(database);
+      const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => Promise.resolve(
+        requestedUrl(input).includes("/helix/moderation/bans")
+          ? new Response(null, { status: 204 })
+          : new Response(JSON.stringify({ data: [{ is_sent: true }] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          })));
+
+      await dispatchEventSubNotification(runtime, {
+        channelId: "kanal-a",
+        subscriptionType: CHAT_TYPE,
+        triggerId: "moderation-no-welcome",
+        payload: {
+          broadcaster_user_id: "kanal-a",
+          broadcaster_user_login: "kanal_demo",
+          chatter_user_id: "viewer-1",
+          chatter_user_login: "nachtfalke",
+          message_id: "twitch-message-mod",
+          message: { text: "hello", fragments: [{ type: "text", text: "hello" }] },
+        },
+        receivedAt: NOW,
+        eventSubTimestamp: NOW,
+      }, fetcher, [pointsModule, module]);
+
+      const chatBodies = fetcher.mock.calls.map((_call, index) => bodyOf(fetcher, index))
+        .filter((body) => typeof body.message === "string");
+      expect(chatBodies).toHaveLength(1);
+      expect(String(chatBodies[0]?.message)).toContain("Timeout applied");
+      expect(String(chatBodies[0]?.message)).not.toContain(pointsCatalog.de.chat.startBonus(100, DEFAULT_POINTS_SETTINGS.currencyName));
+      const object = runtime.CHANNEL.get(runtime.CHANNEL.idFromName("kanal-a")) as unknown as {
+        acknowledgePointWelcome: ReturnType<typeof vi.fn>;
+      };
+      expect(object.acknowledgePointWelcome).not.toHaveBeenCalled();
+    } finally {
+      database.close();
+    }
+  });
+
   it.each(["mute", "pause"] as const)(
     "suppresses a threaded moderation reply with a welcome note after %s activates (protects=moderation follow-ups recheck channel controls after welcome decoration; fails_when=the reply is sent after mute or pause activates during Helix; no_claim=Helix and chat responses use controlled HTTP doubles)",
     async (control) => {

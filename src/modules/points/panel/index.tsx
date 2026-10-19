@@ -127,11 +127,11 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
   const deltaNumber = Number(delta);
   const pendingAdjustment = selectedCorrection.pending;
   const adjustPending = selectedCorrection.submitting;
-  const correctionValid = selected !== null && Number.isSafeInteger(deltaNumber) && delta.trim().length > 0 && deltaNumber !== 0 &&
-    Number.isSafeInteger(selectedBalance + deltaNumber) && selectedBalance + deltaNumber >= 0 && reason.trim().length > 0 && reason.trim().length <= MAX_POINTS_ADJUSTMENT_REASON_LENGTH;
   // Once booked (audit pending), selectedBalance already includes the draft amount.
   const newBalance = selectedCorrection.committedBalance !== null || !Number.isSafeInteger(deltaNumber) ? selectedBalance : selectedBalance + deltaNumber;
-  const balanceOverflow = selected !== null && Number.isSafeInteger(deltaNumber) && !Number.isSafeInteger(selectedBalance + deltaNumber);
+  const correctionValid = selected !== null && Number.isSafeInteger(deltaNumber) && delta.trim().length > 0 && deltaNumber !== 0 &&
+    Number.isSafeInteger(newBalance) && newBalance >= 0 && reason.trim().length > 0 && reason.trim().length <= MAX_POINTS_ADJUSTMENT_REASON_LENGTH;
+  const balanceOverflow = selected !== null && Number.isSafeInteger(deltaNumber) && !Number.isSafeInteger(newBalance);
   const settingsDataRevision = settingsQuery.data?.revision ?? null;
   const settingsDirty = settingsEdit !== null && JSON.stringify(settingsEdit.settings) !== JSON.stringify(settingsEdit.base);
   const settingsRevision = settingsDirty ? settingsEdit.revision : settingsDataRevision ?? settingsEdit?.revision ?? null;
