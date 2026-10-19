@@ -125,6 +125,8 @@ test("cockpit warnings flow below the mobile status indicators at 640 to 767 pix
     api.setLocation({ name: "Berlin, Germany", latitude: 52.52, longitude: 13.405, timeZone: "Europe/Berlin" });
     await page.reload();
     await expect(warningSlot).toHaveAttribute("data-warning-count", "0");
+    // Wait for the settled indicator text so wrapping matches the warning state.
+    await expect(page.getByText("Overlays · Nicht eingerichtet")).toBeVisible();
     const emptyGeometry = await readLayout();
     expect(emptyGeometry.slotDisplay).toBe("flex");
     expect(emptyGeometry.slotVisibility).toBe("hidden");
