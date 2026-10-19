@@ -976,6 +976,8 @@ export interface DashboardTexts {
     sidebarSetupDescription: string;
     sidebarSearch: string;
     moduleOff: string;
+    pageErrorTitle: string;
+    pageErrorDescription: string;
   };
   testArea: {
     title: string;
@@ -1450,6 +1452,9 @@ export interface DashboardTexts {
     belaboxWeak: string;
     belaboxWeakDescription: (bitrate: string) => string;
     openBelabox: string;
+    warningSummary: (count: string) => string;
+    warningDetailsTitle: string;
+    noWarnings: string;
     actionDraftDiscardTitle: string;
     actionDraftDiscardDescription: string;
     actionDraftDiscard: string;
@@ -1564,6 +1569,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       signingOut: "Abmeldung …", signOut: "Abmelden",
       openSidebar: "Seitenleiste öffnen", closeSidebar: "Seitenleiste schließen",
       sidebarSetupHeading: "Einrichten", sidebarSetupDescription: "Alles für deinen Stream.", sidebarSearch: "Alles durchsuchen", moduleOff: "Aus",
+      pageErrorTitle: "Dieser Bereich konnte nicht angezeigt werden.",
+      pageErrorDescription: "Ein unerwarteter Fehler ist aufgetreten. Lade die Seite neu.",
     },
     testArea: {
       title: "Testbereich",
@@ -2059,6 +2066,9 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       belaboxWeak: "BELABOX-Verbindung schwach",
       belaboxWeakDescription: (bitrate) => `Aktuelle Bitrate: ${bitrate} kbit/s.`,
       openBelabox: "BELABOX öffnen",
+      warningSummary: (count) => count + " Hinweise ansehen",
+      warningDetailsTitle: "Live-Cockpit Hinweise",
+      noWarnings: "Keine aktiven Hinweise.",
       actionDraftDiscardTitle: "Eingaben verwerfen?",
       actionDraftDiscardDescription: "Deine Eingaben gehen verloren, wenn du diese Aktion schließt.",
       actionDraftDiscard: "Eingaben verwerfen",
@@ -2168,6 +2178,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       signingOut: "Signing out …", signOut: "Sign out",
       openSidebar: "Open sidebar", closeSidebar: "Close sidebar",
       sidebarSetupHeading: "Setup", sidebarSetupDescription: "Everything for your stream.", sidebarSearch: "Search everything", moduleOff: "Off",
+      pageErrorTitle: "This page could not be displayed.",
+      pageErrorDescription: "An unexpected error occurred. Reload the page to try again.",
     },
     testArea: {
       title: "Test area",
@@ -2655,6 +2667,9 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       belaboxWeak: "BELABOX connection is weak",
       belaboxWeakDescription: (bitrate) => `Current bitrate: ${bitrate} kbps.`,
       openBelabox: "Open BELABOX",
+      warningSummary: (count) => "View " + count + " warnings",
+      warningDetailsTitle: "Live cockpit warnings",
+      noWarnings: "No active warnings.",
       actionDraftDiscardTitle: "Discard your changes?",
       actionDraftDiscardDescription: "Your entries will be lost if you close this action.",
       actionDraftDiscard: "Discard entries",

@@ -406,7 +406,6 @@ const EventsPageContent = (properties: EventsPageContentProperties): ReactElemen
     scrollToBeginning,
   });
   return <EventsPageFilterState
-    key={identityKey}
     {...contentProperties}
     identityKey={identityKey}
     filters={filters}
@@ -444,6 +443,7 @@ const EventsPageFilterState = ({
 }): ReactElement => {
   const texts = dashboardTexts();
   const groupingTimeZone = channelTimeZone ?? "UTC";
+  const [snapshotIdentityKey, setSnapshotIdentityKey] = useState(identityKey);
   const [snapshot, setSnapshot] = useState<EventDisplaySnapshot>(() => ({
     entries,
     days: eventDayGroups(eventGroups(entries), groupingTimeZone),
@@ -453,6 +453,18 @@ const EventsPageFilterState = ({
   }));
   const [followIdentityQuery, setFollowIdentityQuery] = useState(fetching || queryStale);
   const [wasReaderAtTop, setWasReaderAtTop] = useState(readerAtTop);
+  const identityChanged = snapshotIdentityKey !== identityKey;
+  if (identityChanged) {
+    setSnapshotIdentityKey(identityKey);
+    setSnapshot({
+      entries,
+      days: eventDayGroups(eventGroups(entries), groupingTimeZone),
+      pageCount: pages.length,
+      paginationIds: new Set(),
+      timeZone: groupingTimeZone,
+    });
+    setFollowIdentityQuery(true);
+  }
   let followsIdentityQuery = followIdentityQuery;
   if (readerAtTop && !wasReaderAtTop) {
     setWasReaderAtTop(true);
@@ -461,7 +473,7 @@ const EventsPageFilterState = ({
     followsIdentityQuery = false;
     if (followIdentityQuery) setFollowIdentityQuery(false);
   }
-  const followsQuery = readerAtTop || followsIdentityQuery;
+  const followsQuery = identityChanged || readerAtTop || followsIdentityQuery;
   if (followsQuery) {
     if (snapshot.entries !== entries || snapshot.pageCount !== pages.length || snapshot.timeZone !== groupingTimeZone) {
       setSnapshot({ entries, days: eventDayGroups(eventGroups(entries), groupingTimeZone), pageCount: pages.length, paginationIds: new Set(), timeZone: groupingTimeZone });

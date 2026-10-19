@@ -69,6 +69,7 @@ import { loadingState, type LoadState } from "./load-state";
 import { queryKeys } from "./data/keys";
 import { dashboardAuthenticationRequiredEvent, dispatchDashboardAuthenticationRequired } from "./data/events";
 import { DashboardDataProvider } from "./data/provider";
+import { DashboardPageErrorBoundary } from "./DashboardPageErrorBoundary";
 
 writePalette(readPalette());
 
@@ -1497,6 +1498,18 @@ export const DashboardApp = (): ReactElement => {
           focusKey={dashboardRouteFocusKey(route)}
         >
           <div className="main-content">
+        <DashboardPageErrorBoundary key={dashboardRouteFocusKey(route)} fallback={<UiLoadState
+          variant="panel-720"
+          status="error"
+          loading={null}
+          empty={null}
+          error={null}
+          queryError={{
+            title: dashboardTexts().navigation.pageErrorTitle,
+            message: dashboardTexts().navigation.pageErrorDescription,
+            onRetry: () => window.location.reload(),
+          }}
+        >{null}</UiLoadState>}>
         {!showBotBlocking && route.kind === "overview" ? <OverviewPage channelState={channels} onNavigate={navigate} /> : null}
         {route.kind === "platform" && isPlatform ? <PlatformPage onAuthenticationRequired={requestLogin} /> : null}
         {!showBotBlocking && isChannelOrModuleRoute && selectedChannel === null && channels.status !== "success" ? (
@@ -1594,6 +1607,7 @@ export const DashboardApp = (): ReactElement => {
         /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "audit" && selectedChannel !== null ? <AuditPage key={route.channelId} channelId={route.channelId} filters={auditFilters} onFiltersChange={updateAuditFilters} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "events" && selectedChannel !== null ? <EventsPage key={route.channelId} channelId={route.channelId} filters={eventFilters} moduleOptions={selectedChannel.modules ?? modules.data?.modules ?? []} onFiltersChange={updateEventFilters} /> : null}
+        </DashboardPageErrorBoundary>
         <ChannelCommandPalette
           key={`command-palette-${paletteChannel?.channelId ?? "none"}`}
           open={commandPaletteOpen}

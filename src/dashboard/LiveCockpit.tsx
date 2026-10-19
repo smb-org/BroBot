@@ -9,7 +9,7 @@ import type { DashboardRoute } from "./router";
 import { dashboardTexts, formatNumber } from "./locale";
 import { useEventsQuery, useOverlaysQuery } from "./data/lists";
 import { queryKeys } from "./data/keys";
-import { Button, Icon, StatusLed } from "./ui";
+import { Button, Dialog, Icon, StatusLed } from "./ui";
 import { ImmediateActions } from "./ImmediateActions";
 import { LiveCockpitEventFeed, LiveCockpitTiles } from "./LiveCockpitParts";
 import "./cockpit.css";
@@ -64,6 +64,7 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
   const texts = dashboardTexts();
   const labels = texts.liveCockpit;
   const [now, setNow] = useState(() => Date.now());
+  const [warningDetailsOpen, setWarningDetailsOpen] = useState(false);
   const queryClient = useQueryClient();
   const [broadcastQueryState, setBroadcastQueryState] = useState<{ channelId: string; state: "pending" | "ready" | "error" } | null>(null);
   const moduleState = useMemo(() => new Map(modules.map((module) => [module.id, module.enabled])), [modules]);
@@ -197,6 +198,15 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
     ...(overview.location == null ? [{ key: "location", title: labels.locationMissing, description: labels.locationMissingDescription, action: labels.configureLocation, run: () => onNavigate({ kind: "channel", channelId: overview.channelId, section: "location-weather" }) }] : []),
     ...(belaboxWeak ? [{ key: "belabox", title: labels.belaboxWeak, description: labels.belaboxWeakDescription(formatNumber(Math.round(sampleBitrate))), action: labels.openBelabox, run: () => onNavigate({ kind: "module", channelId: overview.channelId, moduleId: "belabox" }) }] : []),
   ];
+  const locationWarning = warnings.find((warning) => warning.key === "location");
+  const renderWarning = (warning: (typeof warnings)[number]): ReactElement =>
+    <div className="live-cockpit__location-warning" role="status" key={warning.key}>
+      <div><strong>{warning.title}</strong><span>{warning.description}</span></div>
+      <Button {...(warning.key === "location"
+        ? { className: "live-cockpit__location-action", icon: "map-pin" as const, variant: "primary" as const }
+        : { variant: "secondary" as const, size: "compact" as const })}
+        onClick={() => { setWarningDetailsOpen(false); warning.run(); }}>{warning.action}</Button>
+    </div>;
   const refreshLiveData = (): void => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.channel(overview.channelId, "live-cockpit") });
   };
@@ -216,37 +226,51 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
       <LiveCockpitBroadcast key={overview.channelId} channelId={overview.channelId} role={overview.role}
         onQueryStateChange={onBroadcastQueryStateChange}
         onSaved={(text) => { showFooterMessage({ text }); }} />
-      <div className="live-cockpit-header__indicators" aria-label={labels.statusIndicators}>
-        <StatusLed state={botConnected ? "ok" : "off"} label={`${labels.bot} · ${botConnected ? labels.botConnected : labels.botUnavailable}`} />
-        <StatusLed
-          state={!belaboxEnabled || belaboxObservation?.configured === false ? "off" : belaboxUnavailable || belaboxObservation === null ? "warn" : belaboxObservation.phase === "low" ? "warn" : sampleConnected ? "ok" : "warn"}
-          label={`${labels.belabox} · ${!belaboxEnabled
-            ? labels.belaboxDisabled
-            : belaboxObservation === null
-              ? labels.belaboxChecking
-              : belaboxObservation.configured === false
-                ? labels.belaboxNotConfigured
-                : belaboxUnavailable
-                  ? labels.belaboxUnavailable
-                  : sampleConnected
-                    ? labels.belaboxConnected(formatNumber(Math.round(sampleBitrate)))
-                    : labels.belaboxDisconnected}`}
-        />
-        {overlaysQuery.isPending
-          ? <StatusLed state="loading" label={`${labels.overlays} · ${labels.overlaysChecking}`} />
-          : overlayCount === null
-            ? <StatusLed state="warn" label={`${labels.overlays} · ${labels.overlaysNotSetUp}`} />
-            : <StatusLed state={overlayCount > 0 ? "ok" : "off"} label={`${labels.overlays} · ${overlayCount === 0 ? labels.overlaysNotSetUp : labels.overlaysCount(formatNumber(overlayCount))}`} />}
+      <div className="live-cockpit-header__status">
+        <div className="live-cockpit-header__indicators" aria-label={labels.statusIndicators}>
+          <StatusLed state={botConnected ? "ok" : "off"} label={`${labels.bot} · ${botConnected ? labels.botConnected : labels.botUnavailable}`} />
+          <StatusLed
+            state={!belaboxEnabled || belaboxObservation?.configured === false ? "off" : belaboxUnavailable || belaboxObservation === null ? "warn" : belaboxObservation.phase === "low" ? "warn" : sampleConnected ? "ok" : "warn"}
+            label={`${labels.belabox} · ${!belaboxEnabled
+              ? labels.belaboxDisabled
+              : belaboxObservation === null
+                ? labels.belaboxChecking
+                : belaboxObservation.configured === false
+                  ? labels.belaboxNotConfigured
+                  : belaboxUnavailable
+                    ? labels.belaboxUnavailable
+                    : sampleConnected
+                      ? labels.belaboxConnected(formatNumber(Math.round(sampleBitrate)))
+                      : labels.belaboxDisconnected}`}
+          />
+          {overlaysQuery.isPending
+            ? <StatusLed state="loading" label={`${labels.overlays} · ${labels.overlaysChecking}`} />
+            : overlayCount === null
+              ? <StatusLed state="warn" label={`${labels.overlays} · ${labels.overlaysNotSetUp}`} />
+              : <StatusLed state={overlayCount > 0 ? "ok" : "off"} label={`${labels.overlays} · ${overlayCount === 0 ? labels.overlaysNotSetUp : labels.overlaysCount(formatNumber(overlayCount))}`} />}
+        </div>
+        <div className="live-cockpit__warning-slot" data-slot="warning-banner" data-warning-count={warnings.length}
+          aria-live="polite" aria-hidden={warnings.length === 0} inert={warnings.length === 0}>
+          {warnings.length === 0 ? null : <div className="live-cockpit__warning-summary">
+            <Button variant="secondary" icon="warning" ariaHasPopup="dialog" ariaExpanded={warningDetailsOpen}
+              onClick={() => { setWarningDetailsOpen(true); }}>
+              <span>{warnings.length === 1 ? warnings[0]?.title : labels.warningSummary(formatNumber(warnings.length))}</span>
+              <Icon name="more" size={16} />
+            </Button>
+            {locationWarning === undefined ? null : <Button className="live-cockpit__location-action" variant="primary" icon="map-pin"
+              onClick={() => { setWarningDetailsOpen(false); locationWarning.run(); }}>
+              {locationWarning.action}
+            </Button>}
+          </div>}
+        </div>
       </div>
     </header>
-    <div className="live-cockpit__warning-slot" data-slot="warning-banner" data-warning-count={warnings.length} aria-live="polite">
-      {warnings.map((warning) => <div className="live-cockpit__location-warning" role="status" key={warning.key}>
-        <div><strong>{warning.title}</strong><span>{warning.description}</span></div>
-        <Button {...(warning.key === "location"
-          ? { className: "live-cockpit__location-action", icon: "map-pin" as const, variant: "primary" as const }
-          : { variant: "secondary" as const, size: "compact" as const })} onClick={warning.run}>{warning.action}</Button>
-      </div>)}
-    </div>
+    <Dialog opened={warningDetailsOpen} title={labels.warningDetailsTitle} className="live-cockpit__warning-dialog"
+      onClose={() => { setWarningDetailsOpen(false); }}>
+      <div className="live-cockpit__warning-details">
+        {warnings.length === 0 ? <p>{labels.noWarnings}</p> : warnings.map(renderWarning)}
+      </div>
+    </Dialog>
     <div className="live-cockpit__wall">
       <ImmediateActions
         channelId={overview.channelId}

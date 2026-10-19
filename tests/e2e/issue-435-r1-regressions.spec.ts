@@ -510,22 +510,33 @@ test("the cockpit warning slot keeps its tile geometry when the location warning
     await installLiveCockpitMocks(page, { channelId });
     await page.goto(`/channels/${channelId}`);
     const slot = page.locator(".live-cockpit__warning-slot");
-    await expect(slot.locator(".live-cockpit__location-warning")).toBeVisible();
+    await expect(slot.locator(".live-cockpit__warning-summary")).toBeVisible();
+    await expect(slot.getByRole("button", { name: "Einrichten" })).toBeVisible();
     const beforeSlot = await slot.boundingBox();
     const beforeWall = await page.locator(".live-cockpit__wall").boundingBox();
+    const beforeHeader = await page.locator(".live-cockpit-header").boundingBox();
     expect(beforeSlot).not.toBeNull();
     expect(beforeWall).not.toBeNull();
+    expect(beforeHeader).not.toBeNull();
     await slot.evaluate((element) => {
       element.dataset.warningCount = "0";
       element.querySelector(".live-cockpit__location-warning")?.remove();
+      element.querySelector(".live-cockpit__warning-summary")?.remove();
     });
     const afterSlot = await slot.boundingBox();
     const afterWall = await page.locator(".live-cockpit__wall").boundingBox();
-    expect(afterSlot).not.toBeNull();
+    const afterHeader = await page.locator(".live-cockpit-header").boundingBox();
     expect(afterWall).not.toBeNull();
-    if (beforeSlot !== null && afterSlot !== null && beforeWall !== null && afterWall !== null) {
-      expect(Math.abs(beforeSlot.height - afterSlot.height)).toBeLessThanOrEqual(1);
+    expect(afterHeader).not.toBeNull();
+    if (beforeWall !== null && afterWall !== null && beforeHeader !== null && afterHeader !== null) {
+      expect(Math.abs(beforeHeader.height - afterHeader.height)).toBeLessThanOrEqual(1);
+      expect(Math.abs(beforeHeader.y + beforeHeader.height - (afterHeader.y + afterHeader.height))).toBeLessThanOrEqual(1);
       expect(Math.abs(beforeWall.y - afterWall.y)).toBeLessThanOrEqual(1);
+    }
+    if (viewport.width <= 767) {
+      // On mobile the empty slot stays rendered (hidden) so its height is reserved.
+      expect(afterSlot).not.toBeNull();
+      if (beforeSlot !== null && afterSlot !== null) expect(Math.abs(beforeSlot.height - afterSlot.height)).toBeLessThanOrEqual(1);
     }
     await page.unrouteAll({ behavior: "wait" });
   }

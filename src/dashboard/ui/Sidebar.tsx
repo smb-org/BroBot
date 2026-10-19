@@ -1,4 +1,4 @@
-import { type MouseEvent, type ReactNode } from "react";
+import { type MouseEvent, type ReactNode, useLayoutEffect, useRef } from "react";
 
 import { StatusLed, type StatusLedState } from "./StatusLed";
 import { Icon } from "./Icon";
@@ -42,6 +42,24 @@ const stopAndNavigate = (entry: SidebarEntry, onEntryNavigate: () => void) =>
   };
 
 export function Sidebar({ groups, onOpenCommandPalette, onEntryNavigate, setupHeading, setupDescription, paletteLabel, paletteShortcut }: SidebarProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const activeHref = groups.flatMap((group) => group.entries).find((entry) => entry.active)?.href ?? "";
+  const navigationSignature = groups.map((group) => `${group.id}:${group.entries.map((entry) => entry.id).join(",")}`).join("|");
+
+  useLayoutEffect(() => {
+    const scrollArea = scrollRef.current;
+    if (scrollArea === null) return;
+    const activeEntry = scrollArea.querySelector<HTMLElement>(".sidebar-nav-link[aria-current='page']");
+    if (activeEntry === null) return;
+
+    const scrollAreaBounds = scrollArea.getBoundingClientRect();
+    const entryBounds = activeEntry.getBoundingClientRect();
+    const visibleTop = scrollAreaBounds.top + 8;
+    const visibleBottom = scrollAreaBounds.bottom - 8;
+    if (entryBounds.top < visibleTop) scrollArea.scrollTop -= visibleTop - entryBounds.top;
+    else if (entryBounds.bottom > visibleBottom) scrollArea.scrollTop += entryBounds.bottom - visibleBottom;
+  }, [activeHref, navigationSignature]);
+
   const renderEntry = (entry: SidebarEntry): ReactNode => {
     const accessibleName = entry.led === undefined ? entry.label : `${entry.label} · ${entry.led.word}`;
     return (
@@ -72,7 +90,7 @@ export function Sidebar({ groups, onOpenCommandPalette, onEntryNavigate, setupHe
           <h1 className="sidebar__title">{setupHeading}</h1>
           <p className="sidebar__description">{setupDescription}</p>
         </header>
-        <div className="sidebar__scroll">
+        <div className="sidebar__scroll" ref={scrollRef}>
           {groups.map((group) => (
             <section aria-labelledby={`sidebar-heading-${group.id}`} className="sidebar__group" data-category={group.category} key={group.id}>
               <h2 className="sidebar__heading" id={`sidebar-heading-${group.id}`}>

@@ -431,6 +431,7 @@ pre {
 .dashboard-header__location { display: flex; align-items: center; justify-content: flex-start; width: 100%; min-width: 0; max-width: 100%; min-height: 44px; height: 44px; padding: 0 var(--s2); }
 /* Keep the new button label shrinkable so long channel names ellipsize in the fixed header cell. */
 .dashboard-header__location.ui-button { justify-content: flex-start; overflow: hidden; }
+.dashboard-header__location--icon-only.ui-button { justify-content: center; padding-inline: 0; }
 .dashboard-header__location.ui-button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .dashboard-header__location-label { display: flex; align-items: baseline; min-width: 0; }
 /* The name shrinks and gets the ellipsis; the coordinates never shrink, so a
@@ -515,7 +516,7 @@ pre {
 .sidebar__palette-icon { flex: none; }
 .sidebar__palette-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar__palette-shortcut { flex: none; margin-left: auto; }
-.sidebar__scroll { flex: 1; min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; scrollbar-width: none; }
+.sidebar__scroll { box-sizing: border-box; flex: 1; min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding-block: 4px 8px; scroll-padding-block: 8px; scrollbar-width: none; }
 .sidebar__scroll::-webkit-scrollbar { display: none; width: 0; }
 .sidebar__group { display: flex; flex: none; flex-direction: column; gap: 2px; }
 .sidebar__heading { display: flex; align-items: center; gap: 7px; margin: 0; padding: 12px 8px 5px; color: var(--text-3); font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }

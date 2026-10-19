@@ -230,14 +230,14 @@ test("action rows and warning controls share their grid gaps and center line", a
   expect(firstRowLabels.length).toBeGreaterThanOrEqual(2);
   expect(Math.max(...firstRowLabels.map((entry) => entry.labelTop)) - Math.min(...firstRowLabels.map((entry) => entry.labelTop))).toBeLessThanOrEqual(1);
 
-  const warning = page.locator(".live-cockpit__location-warning");
+  const warning = page.locator(".live-cockpit__warning-summary");
   const locationButton = warning.getByRole("button", { name: "Einrichten" });
   await expect(locationButton).toBeVisible();
   await expect(locationButton.locator("svg")).toHaveCount(1);
   const warningButtonBackground = await locationButton.evaluate((element) => getComputedStyle(element).backgroundColor);
   expect(warningButtonBackground).not.toBe("rgba(0, 0, 0, 0)");
   const centerDiff = await warning.evaluate((element) => {
-    const button = element.querySelector("button");
+    const button = element.querySelector(".live-cockpit__location-action");
     if (button === null) return Number.POSITIVE_INFINITY;
     const warningBox = element.getBoundingClientRect();
     const buttonBox = button.getBoundingClientRect();
