@@ -645,7 +645,7 @@ export const listPointAccounts = (
       (COALESCE(monthly.net_won, 0) = ? AND COALESCE(monthly.reached_at, '') = ? AND account.account_id > ?))`);
     values.push(cursor.value, cursor.value, cursor.reachedAt ?? "", cursor.value, cursor.reachedAt ?? "", cursor.accountId);
   }
-  const monthJoin = query.sort === "month" ? "LEFT JOIN point_monthly AS monthly ON monthly.account_id = account.account_id AND monthly.month = ?" : "LEFT JOIN point_monthly AS monthly ON monthly.account_id = account.account_id AND monthly.month = ?";
+  const monthJoin = "LEFT JOIN point_monthly AS monthly ON monthly.account_id = account.account_id AND monthly.month = ?";
   values.unshift(month);
   const rows = sql.exec<{
     account_id: string;
