@@ -3,6 +3,8 @@ import { expect, test, type Page } from "@playwright/test";
 import type { DryRunResponse } from "../../src/contracts/dry-run";
 import { installLiveCockpitMocks } from "./live-cockpit-regression-fixtures";
 
+test.use({ locale: "de-DE" });
+
 const CHANNEL_ID = "test-area-design";
 
 const response: DryRunResponse = {

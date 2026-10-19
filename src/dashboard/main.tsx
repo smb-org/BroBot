@@ -1550,7 +1550,7 @@ export const DashboardApp = (): ReactElement => {
         {!showChannelNotReleased && route.kind === "channel" && route.section === "test-area" && selectedChannel !== null ? <TestAreaPage
           key={`${route.channelId}:${route.only?.moduleId ?? "all"}:${route.only?.entryId ?? ""}`}
           channelId={route.channelId}
-          language={selectedChannel.language}
+          language={dashboardLanguage()}
           {...(selectedChannel.streamState === undefined ? {} : { initialStreamState: selectedChannel.streamState })}
           {...(route.only === undefined ? {} : { only: route.only })}
           onOpenEditor={(moduleId, entryId) => {

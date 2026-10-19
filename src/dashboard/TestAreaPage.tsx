@@ -727,15 +727,16 @@ export function TestAreaPage({
               ? <span aria-hidden="true">&nbsp;</span>
               : <>{notTestableModules.length === 0 ? null : texts.noDryRunModules(notTestableModules.join(", "))}{notTestableModules.length > 0 && errorModules.length > 0 ? " · " : null}{errorModules.length === 0 ? null : texts.moduleError(errorModules.join(", "))}</>}
           </p>
-        </header>
-        <div className={"test-area__results-slot" + (pending && response !== null ? " is-pending" : "") + (state === "incomplete" ? " is-incomplete" : "") + (snapshotStale ? " is-stale" : "")} data-testid="test-area-results-slot" data-state={state} aria-busy={pending}>
-          <div
-            className="test-area__scope-hint"
+          <p
+            className="test-area__meta-line test-area__scope-hint"
             data-testid="test-area-stale-result-hint"
             data-visible={snapshotStale}
             aria-hidden={!snapshotStale}
+            title={snapshotStale ? texts.inputsChangedHint : ""}
             {...(snapshotStale ? { role: "status", "aria-live": "polite" as const } : {})}
-          >{snapshotStale ? texts.inputsChangedHint : " "}</div>
+          >{snapshotStale ? texts.inputsChangedHint : <span aria-hidden="true">&nbsp;</span>}</p>
+        </header>
+        <div className={"test-area__results-slot" + (pending && response !== null ? " is-pending" : "") + (state === "incomplete" ? " is-incomplete" : "") + (snapshotStale ? " is-stale" : "")} data-testid="test-area-results-slot" data-state={state} aria-busy={pending}>
           {state === "idle" ? <div className="test-area__state-slot">
             <Icon name="tabMessages" size={20} />
             <strong>{texts.idleTitle}</strong>
