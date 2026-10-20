@@ -1,12 +1,15 @@
 import { Hono, type Context } from "hono";
 
 import type { ModuleRouteEnvironment, ModuleTwitchEmote } from "../contract";
+import { fetchSevenTvEmotes, clearSevenTvEmoteCache } from "./seven-tv";
+import type { SevenTvEmoteResponse } from "./seven-tv";
 
 type SlotContext = Context<ModuleRouteEnvironment>;
-type SlotEmote = { source: "emoji" | "twitch"; code: string; twitchId?: string; name: string; imageUrl?: string };
+type SlotEmote = { source: "emoji" | "twitch" | "seven_tv"; code: string; twitchId?: string; sevenTvId?: string; name: string; imageUrl?: string };
 type EmoteResponse = {
   emoji: { items: SlotEmote[] };
   twitch: { status: "ok" | "reconnect_required" | "unavailable"; items: SlotEmote[] };
+  sevenTv: SevenTvEmoteResponse;
 };
 
 const emojiItems: SlotEmote[] = [
@@ -43,9 +46,10 @@ const listEmotes = async (context: SlotContext): Promise<EmoteResponse> => {
   const { channelId, clientId } = moduleContext(context);
   const cached = emoteCache.get(channelId);
   if (cached !== undefined && cached.expiresAt > Date.now()) return cached.value;
-  const [credentials, appToken] = await Promise.all([
+  const [credentials, appToken, sevenTv] = await Promise.all([
     (context.get("botCredentials")?.(channelId) ?? Promise.resolve(null)).catch(() => null),
     context.get("getAppAccessToken")(context.env, new Date().toISOString()).catch(() => null),
+    fetchSevenTvEmotes(channelId),
   ]);
   const global = appToken === null ? null : await context.get("getGlobalEmotes")({ clientId, accessToken: appToken }).catch(() => null);
   const twitchItems = new Map<string, SlotEmote>();
@@ -64,7 +68,11 @@ const listEmotes = async (context: SlotContext): Promise<EmoteResponse> => {
     if (userEmotes?.ok === false || userEmotes === null || global?.ok === false || global === null) status = "unavailable";
     if (userEmotes?.ok) for (const emote of userEmotes.data) twitchItems.set(emote.id, slotEmote(emote));
   }
-  const value: EmoteResponse = { emoji: { items: emojiItems }, twitch: { status, items: [...twitchItems.values()] } };
+  const value: EmoteResponse = {
+    emoji: { items: emojiItems },
+    twitch: { status, items: [...twitchItems.values()] },
+    sevenTv,
+  };
   if (status === "ok") emoteCache.set(channelId, { expiresAt: Date.now() + 10 * 60_000, value });
   return value;
 };
@@ -72,6 +80,7 @@ const listEmotes = async (context: SlotContext): Promise<EmoteResponse> => {
 export const clearEmoteSlotEmoteCache = (channelId?: string): void => {
   if (channelId === undefined) emoteCache.clear();
   else emoteCache.delete(channelId);
+  clearSevenTvEmoteCache(channelId);
 };
 
 export const emoteSlotsRoutes = new Hono<ModuleRouteEnvironment>();
@@ -80,7 +89,11 @@ emoteSlotsRoutes.get("/emotes", async (context) => {
   try {
     return context.json(await listEmotes(context));
   } catch {
-    return context.json({ emoji: { items: emojiItems }, twitch: { status: "unavailable", items: [] } } satisfies EmoteResponse);
+    return context.json({
+      emoji: { items: emojiItems },
+      twitch: { status: "unavailable", items: [] },
+      sevenTv: { status: "unavailable", setName: null, items: [] },
+    } satisfies EmoteResponse);
   }
 });
 

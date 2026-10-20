@@ -10,6 +10,9 @@ export interface OverlayEditorSize {
   height: number;
 }
 
+export const isModuleOverlayElementAddable = (hideWhenModuleDisabled: boolean | undefined, moduleEnabled: boolean): boolean =>
+  hideWhenModuleDisabled !== true || moduleEnabled;
+
 export interface OverlayEditorPositionLimits extends OverlayEditorPosition {
   minX: number;
 }

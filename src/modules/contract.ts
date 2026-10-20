@@ -299,6 +299,8 @@ export interface ModuleOverlayElementDefinition {
   /** Localized one-line description shown in the overlay element palette. */
   editorDescription?: Readonly<Record<ModuleLanguage, string>>;
   editorModuleLabel?: Readonly<Record<ModuleLanguage, string>>;
+  /** Omits this element from the add palette while its module is disabled. */
+  hideWhenModuleDisabled?: boolean;
   parseConfig: (raw: unknown) => JsonObject | null;
   /** The module initial state uses host template, condition, or channel context. */
   initialStateNeedsContext?: boolean;

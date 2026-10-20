@@ -231,7 +231,7 @@ describe("emote slot settlements in the worker Durable Object", () => {
     await expect(object.pointHistory(slotModule, "viewer_demo")).resolves.toMatchObject({ rows: [expect.objectContaining({ kind: "bonus" })] });
   });
 
-  it(`delivers the stored result once and sends nothing on EventSub replay (${testCard("the chat module formats the committed result and emits no action for a replay", "a replay generates a fresh chat reply or formats values that differ from the stored result", "action descriptions are inspected before Twitch delivery")})`, async () => {
+  it(`delivers the stored result once and sends nothing on EventSub replay (${testCard("the booked spin emits matching chat and overlay results once, and a replay emits nothing", "chat or overlay values differ from the committed settlement, or a replay adds actions", "action descriptions are inspected before Twitch delivery")})`, async () => {
     const channelId = `slot-chat-replay-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
@@ -246,8 +246,26 @@ describe("emote slot settlements in the worker Durable Object", () => {
     const kind = isJackpot ? "jackpot" : stored.pair ? "pair" : stored.net > 0 ? "win" : "loss";
     const second = await processEmoteSlotMessage(event, context);
 
-    expect(first.actions).toHaveLength(1);
-    expect(first.actions[0]).toMatchObject({ text: formatSlotReply(stored, DEFAULT_EMOTE_SLOT_SETTINGS.symbols, "de", "pixelpilz", kind) });
+    expect(first.actions).toHaveLength(2);
+    expect(first.actions[0]).toMatchObject({
+      kind: "chat",
+      text: formatSlotReply(stored, DEFAULT_EMOTE_SLOT_SETTINGS.symbols, "de", "pixelpilz", kind),
+    });
+    expect(first.actions[1]).toMatchObject({
+      kind: "overlay",
+      type: "spin",
+      elementKind: "emote_slots.slot",
+      payload: {
+        spinId: event.triggerId,
+        symbols: stored.symbols.map((index) => ({
+          source: "emoji",
+          code: DEFAULT_EMOTE_SLOT_SETTINGS.symbols[index]?.code,
+        })),
+        net: stored.net,
+        jackpot: stored.jackpotAfter,
+        jackpotHit: stored.jackpotWin > 0,
+      },
+    });
     expect(second.actions).toEqual([]);
     await expect(pointOperation(object, "msg:message-slot-delivery")).resolves.toMatchObject({ kind: "game", result: stored });
   });

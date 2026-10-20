@@ -4,6 +4,7 @@ import { emoteSlotsCatalog } from "./locale";
 import { emoteSlotsRoutes } from "./routes";
 import { processEmoteSlotMessage } from "./service";
 import { calculateSlotPayoutRateForDraft } from "./domain/payout-rate";
+import { emoteSlotOverlayElements } from "./overlay/element";
 
 export const emoteSlotsModule: BotModule<typeof emoteSlotSettingsSchema> = {
   id: EMOTE_SLOTS_MODULE_ID,
@@ -34,6 +35,7 @@ export const emoteSlotsModule: BotModule<typeof emoteSlotSettingsSchema> = {
   routes: emoteSlotsRoutes,
   defaultEnabled: false,
   settingsEditorPlacement: "page",
+  overlayElements: emoteSlotOverlayElements,
   settingsEditor: () => import("./panel/settings-editor"),
   eventSubTypes: ["channel.chat.message"],
   dryRunSilentReason: "instant_settlement",

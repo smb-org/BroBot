@@ -1,0 +1,68 @@
+@layer components.overlay {
+  .emote-slot-overlay {
+    box-sizing: border-box;
+    display: grid;
+    width: 640px;
+    height: 160px;
+    grid-template-rows: 64px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    padding: 16px 20px;
+    border: 2px solid var(--content-game-reel-border);
+    border-radius: 12px;
+    background-color: var(--content-game-reel-background);
+    color: var(--content-game-reel-text);
+    font-family: Archivo, system-ui, sans-serif;
+  }
+
+  .emote-slot-overlay__spin { display: flex; align-items: center; gap: 16px; min-width: 0; }
+  .emote-slot-overlay__reels { display: flex; min-width: 0; align-items: center; gap: 8px; }
+  .emote-slot-overlay__reel {
+    box-sizing: border-box;
+    display: grid;
+    width: 64px;
+    height: 64px;
+    flex: none;
+    place-items: center;
+    overflow: hidden;
+    border: 2px solid var(--content-game-reel-border);
+    border-radius: 6px;
+    background-color: var(--content-game-reel-background);
+    color: var(--content-game-reel-text);
+    font-size: 38px;
+  }
+  .emote-slot-overlay__reel img { width: 52px; height: 52px; object-fit: contain; }
+  .emote-slot-overlay__glyph { font-size: 38px; line-height: 1; }
+  .emote-slot-overlay__reel--code { border-style: dashed; border-color: var(--content-game-reel-secondary); }
+  .emote-slot-overlay__code { max-width: 100%; max-height: 100%; overflow: hidden; font-size: 14px; line-height: 1.15; overflow-wrap: anywhere; text-align: center; white-space: normal; }
+  .emote-slot-overlay__result { display: grid; flex: 1; min-width: 0; gap: 0; text-align: right; }
+  .emote-slot-overlay__values { display: flex; align-items: baseline; justify-content: flex-end; min-width: 0; gap: 12px; }
+  .emote-slot-overlay__login { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 34px; font-weight: 700; line-height: 1.2; }
+  .emote-slot-overlay__jackpot { display: flex; align-items: center; justify-content: space-between; min-width: 0; }
+  .emote-slot-overlay__secondary { color: var(--content-game-reel-secondary); font-size: 22px; line-height: 1.2; }
+  .emote-slot-overlay__main { color: var(--content-game-reel-text); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 34px; font-weight: 600; line-height: 1.2; white-space: nowrap; }
+  .emote-slot-overlay--jackpot .emote-slot-overlay__jackpot .emote-slot-overlay__main { animation: emote-slot-jackpot-highlight 3s ease-out both; }
+
+  .emote-slot-overlay[data-reduced-motion="false"] .emote-slot-overlay__reel { animation: emote-slot-reel-stop 720ms ease-out both; }
+  .emote-slot-overlay[data-reduced-motion="false"] .emote-slot-overlay__reel:nth-child(2) { animation-duration: 840ms; animation-delay: 180ms; }
+  .emote-slot-overlay[data-reduced-motion="false"] .emote-slot-overlay__reel:nth-child(3) { animation-duration: 960ms; animation-delay: 240ms; }
+  .emote-slot-overlay-editor input[type="color"] { box-sizing: border-box; width: 64px; height: 32px; padding: 2px; }
+  .emote-slot-overlay-editor__contrast { min-height: 18px; margin: 0; color: var(--color-success-text); font-size: 12px; }
+  .emote-slot-overlay-editor__contrast[data-status="warning"] { color: var(--color-orange-text); }
+
+  @keyframes emote-slot-reel-stop {
+    0% { transform: translateY(-24px); filter: blur(3px); opacity: 0.35; }
+    72% { transform: translateY(4px); filter: blur(0); opacity: 1; }
+    100% { transform: translateY(0); filter: none; opacity: 1; }
+  }
+  @keyframes emote-slot-jackpot-highlight {
+    from { transform: scale(1.04); color: var(--content-game-reel-highlight); }
+    to { transform: scale(1); color: var(--content-game-reel-text); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .emote-slot-overlay__reel,
+    .emote-slot-overlay__jackpot,
+    .emote-slot-overlay__jackpot .emote-slot-overlay__main { animation: none !important; }
+  }
+}

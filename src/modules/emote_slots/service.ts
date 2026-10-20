@@ -3,6 +3,9 @@ import type { EmoteSlotSettings } from "./contracts";
 import { formatSlotReply, parseSlotStake, slotErrorReply } from "./domain/chat";
 import { drawSlotSymbols } from "./domain/random";
 import { slotSettlementTable, type SlotSettlementResult } from "./domain/settlement";
+import { isSevenTvSymbolMissing } from "./domain/seven-tv";
+import { fetchSevenTvEmotes } from "./seven-tv";
+import { EMOTE_SLOT_OVERLAY_ELEMENT_KIND } from "./overlay/kinds";
 
 const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -108,6 +111,37 @@ export const processEmoteSlotMessage = async (
   const action = isJackpot && event.settings.announceJackpot
     ? { kind: "announcement" as const, text: reply, target: event.settings.chatTarget, automated: false }
     : { kind: "chat" as const, text: reply, target: event.settings.chatTarget, replyToMessageId: messageId, automated: false };
-  return { actions: [action], diagnostics: [] };
+  const sevenTvSymbols = event.settings.symbols.filter(({ source }) => source === "seven_tv");
+  const activeSevenTv = sevenTvSymbols.length === 0 ? null : await fetchSevenTvEmotes(event.channelId);
+  const overlaySymbols = result.symbols.map((symbolIndex) => {
+    const symbol = event.settings.symbols[symbolIndex];
+    if (symbol === undefined) return { source: "emoji", code: "?" };
+    const missing = symbol.source === "seven_tv" && (activeSevenTv === null || activeSevenTv.status !== "ok" ||
+      isSevenTvSymbolMissing(symbol, activeSevenTv.items));
+    return {
+      source: symbol.source,
+      code: symbol.code,
+      ...(symbol.twitchId === undefined ? {} : { twitchId: symbol.twitchId }),
+      ...(symbol.sevenTvId === undefined ? {} : { sevenTvId: symbol.sevenTvId }),
+      ...(missing ? { missing: true } : {}),
+    };
+  });
+  const overlayAction = {
+    kind: "overlay" as const,
+    type: "spin",
+    elementKind: EMOTE_SLOT_OVERLAY_ELEMENT_KIND,
+    payload: {
+      spinId: event.triggerId,
+      login,
+      language,
+      outcome: textKind,
+      spunAt: Number.isFinite(Date.parse(event.receivedAt)) ? event.receivedAt : new Date().toISOString(),
+      symbols: overlaySymbols,
+      net: result.net,
+      jackpot: result.jackpotAfter,
+      jackpotHit: result.jackpotWin > 0,
+    },
+  };
+  return { actions: [action, overlayAction], diagnostics: [] };
 };
 

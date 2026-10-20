@@ -88,6 +88,7 @@ const ALLOWLIST: Record<string, string> = {
   "src/modules/votekick/contracts/catalog.ts": "Bilingual DE/EN votekick module navigation catalogue; only its `de` half is German.",
   "src/modules/emote_slots/locale.ts": "Bilingual DE/EN emote slot module catalogue; only its `de` half is German.",
   "src/modules/emote_slots/panel/locale.ts": "Bilingual DE/EN emote slot settings catalogue; only its `de` half is German.",
+  "src/modules/emote_slots/overlay/locale.ts": "Bilingual DE/EN emote slot overlay text catalogue; only its `de` half is German.",
   "src/modules/votekick/overlay/locale.ts": "Bilingual DE/EN votekick overlay text catalogue; only its `de` half is German.",
   "src/modules/votekick/panel/locale.ts": "Bilingual DE/EN votekick panel text catalogue; only its `de` half is German.",
   "src/modules/template-language.ts": "Bilingual DE/EN catalog for runtime system-variable wording; only its `de` half is German.",

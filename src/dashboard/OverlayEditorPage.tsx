@@ -15,7 +15,7 @@ import { MODULES } from "../modules/registry";
 import { ModuleOverlayElementEditor } from "./ModuleOverlayElementEditor";
 import { ModuleIcon } from "./module-panels";
 import variableViewCss from "../overlay/variable.css?inline";
-import { clampOverlayEditorPosition, overlayEditorMeasuredSize, UNMEASURED_ELEMENT_FALLBACK_SIZE, type OverlayEditorSize } from "./overlay-editor-model";
+import { clampOverlayEditorPosition, isModuleOverlayElementAddable, overlayEditorMeasuredSize, UNMEASURED_ELEMENT_FALLBACK_SIZE, type OverlayEditorSize } from "./overlay-editor-model";
 import {
   parseOverlayStyleBlock,
   replaceOverlayStyleBlock,
@@ -245,6 +245,7 @@ interface ModuleElementOption {
   navigationCategory: ModuleNavigationCategory;
   defaultSize: { width: number; height: number };
   defaultConfig: EditorJsonObject;
+  hideWhenModuleDisabled?: boolean;
   previewState?: ModuleOverlayElementDefinition["previewState"];
   parseConfig: (raw: unknown) => EditorJsonObject | null;
   description: (language: "de" | "en") => string;
@@ -260,6 +261,7 @@ const MODULE_ELEMENT_OPTIONS: readonly ModuleElementOption[] = MODULE_OVERLAY_EL
     navigationCategory: module?.navigationCategory ?? MODULE_NAVIGATION_CATEGORIES[0],
     defaultSize: definition.defaultSize,
     defaultConfig: definition.defaultConfig,
+    ...(definition.hideWhenModuleDisabled === true ? { hideWhenModuleDisabled: true } : {}),
     ...(definition.previewState === undefined ? {} : { previewState: definition.previewState }),
     parseConfig: definition.parseConfig,
     description: (language) => definition.editorDescription?.[language] ?? "",
@@ -587,7 +589,7 @@ function OverlayEditorWorkspace({
       currentValue: formatNumber(liveVariables[name] ?? value),
       icon: <Icon name="variable" size={20} />,
     })),
-    ...MODULE_ELEMENT_OPTIONS.map((option) => {
+    ...MODULE_ELEMENT_OPTIONS.filter((option) => isModuleOverlayElementAddable(option.hideWhenModuleDisabled, moduleIsEnabled(option.moduleId))).map((option) => {
       const name = option.moduleName(language);
       const enabled = moduleIsEnabled(option.moduleId);
       return {
