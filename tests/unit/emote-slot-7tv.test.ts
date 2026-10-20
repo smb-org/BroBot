@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { isSevenTvSymbolMissing, parseSevenTvActiveSet } from "../../src/modules/emote_slots/domain/seven-tv";
 import { DEFAULT_EMOTE_SLOT_SETTINGS, emoteSlotSettingsSchema } from "../../src/modules/emote_slots/contracts";
@@ -7,8 +7,27 @@ import type { SlotSettlementResult } from "../../src/modules/emote_slots/domain/
 import { emoteSlotOverlayElement } from "../../src/modules/emote_slots/overlay/element";
 import { mergeSlotOverlayRealtimeState } from "../../src/modules/emote_slots/overlay/state";
 import { isModuleOverlayElementAddable } from "../../src/dashboard/overlay-editor-model";
+import { clearSevenTvEmoteCache, fetchSevenTvEmotes } from "../../src/modules/emote_slots/seven-tv";
 
 describe("active 7TV set", () => {
+  it.each([
+    ["invalid JSON", "not-json"],
+    ["a null document", "null"],
+    ["an empty object", "{}"],
+    ["a schema mismatch", "{\"emote_set\":{}}"],
+  ])("treats %s with HTTP 200 as unavailable and retries it (protects=malformed successful HTTP responses do not mark a saved symbol absent or poison the provider cache; fails_when=the response becomes no_account or the second lookup reuses the malformed result; no_claim=the live 7TV response schema beyond the covered invalid shapes)", async (_description, body) => {
+    const userId = `fictional-${_description.replaceAll(" ", "-")}-payload-user`;
+    clearSevenTvEmoteCache(userId);
+    const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(new Response(body, { status: 200 })));
+
+    const first = await fetchSevenTvEmotes(userId, fetcher);
+    const second = await fetchSevenTvEmotes(userId, fetcher);
+
+    expect(first).toEqual({ status: "unavailable", setName: null, items: [] });
+    expect(second).toEqual({ status: "unavailable", setName: null, items: [] });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
   it("reads only the active set and preserves its display name (protects=the picker receives the channel's active emotes and set name; fails_when=non-active user emotes leak into the list or the active set name is lost; no_claim=the live 7TV endpoint response shape beyond the covered fields)", () => {
     const result = parseSevenTvActiveSet({
       emote_set: {

@@ -27,6 +27,7 @@ export const fetchSevenTvEmotes = async (
   const cached = sevenTvCache.get(twitchUserId);
   if (cached !== undefined && cached.expiresAt > Date.now()) return cached.value;
 
+  const fetchedAt = Date.now();
   let value: SevenTvEmoteResponse;
   try {
     const response = await fetcher(`https://7tv.io/v3/users/twitch/${encodeURIComponent(twitchUserId)}`, {
@@ -48,12 +49,16 @@ export const fetchSevenTvEmotes = async (
         } else {
           let parsed: unknown;
           try { parsed = JSON.parse(body) as unknown; } catch { parsed = null; }
-          const activeSet = parseSevenTvActiveSet(parsed);
-          value = !isRecord(parsed) || parsed.emote_set === null || parsed.emote_set === undefined
-            ? emptyResponse("no_account")
-            : activeSet === null
+          if (!isRecord(parsed)) {
+            value = emptyResponse("unavailable");
+          } else if (Object.hasOwn(parsed, "emote_set") && parsed.emote_set === null) {
+            value = emptyResponse("no_account");
+          } else {
+            const activeSet = parseSevenTvActiveSet(parsed);
+            value = activeSet === null
               ? emptyResponse("unavailable")
               : { status: "ok", setName: activeSet.setName, items: activeSet.items };
+          }
         }
       }
     }
@@ -61,7 +66,9 @@ export const fetchSevenTvEmotes = async (
     value = emptyResponse("unavailable");
   }
 
-  sevenTvCache.set(twitchUserId, { expiresAt: Date.now() + SEVEN_TV_CACHE_TTL_MS, value });
+  if (value.status !== "unavailable") {
+    sevenTvCache.set(twitchUserId, { expiresAt: fetchedAt + SEVEN_TV_CACHE_TTL_MS, value });
+  }
   return value;
 };
 

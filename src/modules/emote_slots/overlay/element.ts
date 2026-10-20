@@ -1,5 +1,5 @@
 import type { JsonObject, ModuleLanguage } from "../../contract";
-import { DEFAULT_SLOT_OVERLAY_CONFIG, mergeSlotOverlayRealtimeState, parseSlotOverlayConfig } from "./state";
+import { DEFAULT_SLOT_OVERLAY_CONFIG, mergeSlotOverlayRealtimeState, parseSlotOverlayConfig, SLOT_OVERLAY_EDITOR_PREVIEW_SPIN_ID } from "./state";
 import { emoteSlotOverlayLabels } from "./locale";
 import { EMOTE_SLOT_OVERLAY_ELEMENT_KIND } from "./kinds";
 
@@ -13,7 +13,7 @@ export const emoteSlotOverlayElement = {
   defaultConfig: DEFAULT_SLOT_OVERLAY_CONFIG,
   hideWhenModuleDisabled: true,
   previewState: (_config: JsonObject, language: ModuleLanguage, now: number): JsonObject => ({
-    spinId: "overlay-editor-preview",
+    spinId: SLOT_OVERLAY_EDITOR_PREVIEW_SPIN_ID,
     login: "pixelwanderer",
     language,
     outcome: "win",

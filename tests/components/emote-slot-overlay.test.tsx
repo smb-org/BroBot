@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { JsonObject } from "../../src/modules/contract";
 import SlotOverlayEditor from "../../src/modules/emote_slots/overlay/editor";
+import { emoteSlotOverlayElement } from "../../src/modules/emote_slots/overlay/element";
 import { DEFAULT_SLOT_OVERLAY_CONFIG } from "../../src/modules/emote_slots/overlay/state";
 import SlotOverlay from "../../src/modules/emote_slots/overlay/slot";
 
@@ -18,6 +19,15 @@ const spinState = (spinId: string, symbols: string[], spunAt: string, jackpot = 
   jackpotHit: jackpot,
 });
 
+const setReducedMotion = (matches: boolean): void => {
+  vi.stubGlobal("matchMedia", vi.fn(() => ({
+    matches,
+    media: "(prefers-reduced-motion: reduce)",
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  })));
+};
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -25,9 +35,10 @@ afterEach(() => {
 });
 
 describe("emote slot overlay", () => {
-  it("shows booked spin symbols and net result, then hides after six seconds (protects=the latest booked spin displays its three reels and net result for six seconds; fails_when=the spin is invisible, a symbol or result is missing, or the bar remains after six seconds; no_claim=realtime transport delivery to an OBS browser source)", () => {
+  it("shows booked spin symbols and net result for six seconds after the reel animation (protects=the latest booked spin displays its three reels and net result through the reel animation and for six seconds afterward; fails_when=the spin hides during animation or remains after its six-second presentation window; no_claim=realtime transport delivery to an OBS browser source)", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+    setReducedMotion(false);
 
     const { container } = render(<SlotOverlay config={{}} state={{ ...spinState("spin-one", ["🍒", "🔔", "💎"], "2030-01-01T00:00:00.000Z"), language: "de" }} now={Date.now()} language="de" />);
 
@@ -36,7 +47,28 @@ describe("emote slot overlay", () => {
     expect(screen.getByText("💎")).toBeInTheDocument();
     expect(screen.getByText("+70")).toBeInTheDocument();
     expect(screen.getByText("1.256")).toBeInTheDocument();
-    act(() => { vi.advanceTimersByTime(6_000); });
+    act(() => { vi.advanceTimersByTime(7_199); });
+    expect(container.querySelector(".emote-slot-overlay")).not.toBeNull();
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(container.querySelector(".emote-slot-overlay")).toBeNull();
+  });
+
+  it("restarts the presentation window for a replacement spin independent of spunAt (protects=each replacement remains visible through its reel animation and six-second result window; fails_when=the earlier deadline or an old spunAt timestamp hides the replacement; no_claim=server event ordering)", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+    setReducedMotion(false);
+    const spunAt = "2030-01-01T00:00:00.000Z";
+    const first = spinState("spin-first", ["🍒", "🍋", "🔔"], spunAt);
+    const second = spinState("spin-second", ["💎", "💎", "💎"], spunAt, true);
+    const { rerender, container } = render(<SlotOverlay config={{}} state={first} now={Date.now()} language="en" />);
+
+    act(() => { vi.advanceTimersByTime(5_000); });
+    rerender(<SlotOverlay config={{}} state={second} now={Date.now()} language="en" />);
+    act(() => { vi.advanceTimersByTime(1_200); });
+    expect(container.querySelector(".emote-slot-overlay")?.getAttribute("data-spin-id")).toBe("spin-second");
+    act(() => { vi.advanceTimersByTime(5_999); });
+    expect(container.querySelector(".emote-slot-overlay")?.getAttribute("data-spin-id")).toBe("spin-second");
+    act(() => { vi.advanceTimersByTime(1); });
     expect(container.querySelector(".emote-slot-overlay")).toBeNull();
   });
 
@@ -54,7 +86,7 @@ describe("emote slot overlay", () => {
     expect(screen.getByText("Jackpot")).toBeInTheDocument();
   });
 
-  it("keeps the spin static when reduced motion is requested (protects=users who request reduced motion see the result without reel animation; fails_when=the reduced-motion preference leaves animated reel state enabled; no_claim=animation performance on real browsers)", () => {
+  it("keeps the spin static and visible for six seconds with reduced motion (protects=reduced-motion users see a static result for six seconds independent of spunAt; fails_when=reels animate or the result expires before its presentation window; no_claim=animation performance on real browsers)", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
     vi.stubGlobal("matchMedia", vi.fn(() => ({
@@ -64,9 +96,37 @@ describe("emote slot overlay", () => {
       removeEventListener: vi.fn(),
     })));
 
-    render(<SlotOverlay config={{}} state={spinState("spin-static", ["🍒", "🍒", "🍒"], "2030-01-01T00:00:00.000Z")} now={Date.now()} language="en" />);
+    const { container } = render(<SlotOverlay config={{}} state={spinState("spin-static", ["🍒", "🍒", "🍒"], "2029-12-31T23:59:50.000Z")} now={Date.now()} language="en" />);
     expect(screen.getByRole("group", { name: "Slot result" })).toHaveAttribute("data-reduced-motion", "true");
     expect(screen.getByText("+70")).toBeInTheDocument();
+    act(() => { vi.advanceTimersByTime(5_999); });
+    expect(container.querySelector(".emote-slot-overlay")).not.toBeNull();
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(container.querySelector(".emote-slot-overlay")).toBeNull();
+  });
+
+  it("keeps the editor preview visible without an expiry (protects=the overlay editor can leave its preview mounted while positioning it; fails_when=the fixed preview disappears after the live-spin timeout; no_claim=editor canvas persistence across page reloads)", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+    const preview = emoteSlotOverlayElement.previewState({}, "en", Date.now());
+    const { container } = render(<SlotOverlay config={{}} state={preview} now={Date.now()} language="en" />);
+
+    act(() => { vi.advanceTimersByTime(60_000); });
+
+    expect(container.querySelector(".emote-slot-overlay")?.getAttribute("data-spin-id")).toBe("overlay-editor-preview");
+  });
+
+  it("restarts the jackpot highlight subtree for every new jackpot spin (protects=each jackpot result gets a fresh three-second highlight; fails_when=consecutive jackpots reuse the same animated result node; no_claim=animation rendering quality on every browser and display)", () => {
+    const first = spinState("jackpot-first", ["💎", "💎", "💎"], "2030-01-01T00:00:00.000Z", true);
+    const second = spinState("jackpot-second", ["👑", "👑", "👑"], "2030-01-01T00:00:01.000Z", true);
+    const { container, rerender } = render(<SlotOverlay config={{}} state={first} now={Date.now()} language="en" />);
+    const firstHighlight = container.querySelector(".emote-slot-overlay__jackpot .emote-slot-overlay__main");
+
+    rerender(<SlotOverlay config={{}} state={second} now={Date.now()} language="en" />);
+
+    const secondHighlight = container.querySelector(".emote-slot-overlay__jackpot .emote-slot-overlay__main");
+    expect(secondHighlight).not.toBe(firstHighlight);
+    expect(secondHighlight).toHaveTextContent("1,256");
   });
 
 

@@ -2,7 +2,7 @@ import { useEffect, useState, type CSSProperties, type ReactElement } from "reac
 
 import type { ModuleOverlayElementProps } from "../../contract";
 import { emoteSlotOverlayLabels } from "./locale";
-import { DEFAULT_SLOT_OVERLAY_CONFIG, isSlotOverlayState, parseSlotOverlayConfig } from "./state";
+import { DEFAULT_SLOT_OVERLAY_CONFIG, isSlotOverlayState, parseSlotOverlayConfig, SLOT_OVERLAY_EDITOR_PREVIEW_SPIN_ID } from "./state";
 import type { SlotOverlaySymbol } from "./state";
 
 import "./slot.css";
@@ -40,6 +40,9 @@ const emoteImageUrl = (symbol: SlotOverlaySymbol): string | null => {
   return null;
 };
 
+const SLOT_REEL_ANIMATION_END_MS = 1_200;
+const SLOT_RESULT_VISIBLE_MS = 6_000;
+
 const ReelSymbol = ({ symbol, index }: { symbol: SlotOverlaySymbol; index: number }): ReactElement => {
   const [imageFailed, setImageFailed] = useState(false);
   const src = imageFailed ? null : emoteImageUrl(symbol);
@@ -58,17 +61,16 @@ const SlotOverlay = ({ config, state }: ModuleOverlayElementProps): ReactElement
   const language = validState?.language ?? "de";
   const labels = emoteSlotOverlayLabels(language);
   const spinId = validState?.spinId;
-  const spunAt = validState?.spunAt;
+  const isEditorPreview = spinId === SLOT_OVERLAY_EDITOR_PREVIEW_SPIN_ID;
 
   useEffect(() => {
-    if (spinId === undefined || spunAt === undefined) return;
-    const expiresAt = Date.parse(spunAt) + 6_000;
-    const remaining = Math.max(0, expiresAt - Date.now());
-    const timer = window.setTimeout(() => { setExpiredSpinId(spinId); }, remaining);
+    if (spinId === undefined || spinId === SLOT_OVERLAY_EDITOR_PREVIEW_SPIN_ID) return;
+    const presentationDuration = reducedMotion ? 0 : SLOT_REEL_ANIMATION_END_MS;
+    const timer = window.setTimeout(() => { setExpiredSpinId(spinId); }, presentationDuration + SLOT_RESULT_VISIBLE_MS);
     return () => { window.clearTimeout(timer); };
-  }, [spinId, spunAt]);
+  }, [spinId, reducedMotion]);
 
-  if (validState === null || expiredSpinId === validState.spinId) return null;
+  if (validState === null || (!isEditorPreview && expiredSpinId === validState.spinId)) return null;
 
   const style = {
     "--content-game-reel-background": overlayConfig.backgroundColor,
@@ -95,7 +97,7 @@ const SlotOverlay = ({ config, state }: ModuleOverlayElementProps): ReactElement
     </div>
     <div className="emote-slot-overlay__jackpot">
       <span className="emote-slot-overlay__secondary">{labels.jackpot}</span>
-      <strong className="emote-slot-overlay__main">{formatNumber(validState.jackpot, language)}</strong>
+      <strong key={validState.spinId} className="emote-slot-overlay__main">{formatNumber(validState.jackpot, language)}</strong>
     </div>
   </section>;
 };

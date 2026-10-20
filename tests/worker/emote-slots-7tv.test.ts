@@ -3,10 +3,14 @@ import { Hono } from "hono";
 
 import type { ModuleRouteEnvironment } from "../../src/modules/contract";
 import { emoteSlotsRoutes, clearEmoteSlotEmoteCache } from "../../src/modules/emote_slots/routes";
+import { fetchSevenTvEmotes } from "../../src/modules/emote_slots/seven-tv";
 
 const app = new Hono<ModuleRouteEnvironment>();
+let successfulTwitchCredentials = false;
 app.use("*", async (context, next) => {
-  context.set("botCredentials", () => Promise.resolve(null));
+  context.set("botCredentials", () => Promise.resolve(successfulTwitchCredentials
+    ? { userId: "fictional-broadcaster", accessToken: "fictional-token", scopes: ["user:read:emotes"] }
+    : null));
   context.set("getAppAccessToken", () => Promise.resolve("app-token"));
   context.set("getGlobalEmotes", () => Promise.resolve({ ok: true, status: 200, data: [] }));
   context.set("getUserEmotes", () => Promise.resolve({ ok: true, status: 200, data: [] }));
@@ -25,6 +29,8 @@ const hasEmojiItems = (value: unknown): boolean => isRecord(value) && isRecord(v
 
 afterEach(() => {
   clearEmoteSlotEmoteCache();
+  successfulTwitchCredentials = false;
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -77,5 +83,29 @@ describe("emote slot 7TV route", () => {
       twitch: { status: "reconnect_required", items: [] },
     });
     expect(hasEmojiItems(body)).toBe(true);
+  });
+
+  it("keeps provider results on their original independent expiries (protects=an expired 7TV result refreshes while a valid Twitch result remains cached; fails_when=the route extends a cached 7TV result past its original ten-minute expiry; no_claim=live provider freshness outside the configured cache lifetime)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+    successfulTwitchCredentials = true;
+    const providerFetch = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ emote_set: { id: "set-night", name: "Night Shift", emotes: [] } }))
+      .mockResolvedValueOnce(Response.json({ emote_set: { id: "set-morning", name: "Morning Shift", emotes: [] } }));
+    vi.stubGlobal("fetch", providerFetch);
+
+    await fetchSevenTvEmotes("123456", providerFetch);
+    vi.setSystemTime(new Date("2030-01-01T00:09:00.000Z"));
+    const pickerResponse = await requestEmotes();
+    expect(parseJsonUnknown(await pickerResponse.text())).toMatchObject({ sevenTv: { setName: "Night Shift" } });
+    expect(providerFetch).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(new Date("2030-01-01T00:11:00.000Z"));
+    const refreshedResponse = await requestEmotes();
+    expect(parseJsonUnknown(await refreshedResponse.text())).toMatchObject({
+      twitch: { status: "ok" },
+      sevenTv: { status: "ok", setName: "Morning Shift" },
+    });
+    expect(providerFetch).toHaveBeenCalledTimes(2);
   });
 });

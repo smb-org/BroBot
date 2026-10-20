@@ -11,6 +11,7 @@ type EmoteResponse = {
   twitch: { status: "ok" | "reconnect_required" | "unavailable"; items: SlotEmote[] };
   sevenTv: SevenTvEmoteResponse;
 };
+type TwitchEmoteGroup = EmoteResponse["twitch"];
 
 const emojiItems: SlotEmote[] = [
   { source: "emoji", code: "🍒", name: "Cherry" },
@@ -27,7 +28,7 @@ const emojiItems: SlotEmote[] = [
   { source: "emoji", code: "❤️", name: "Heart" },
 ];
 
-const emoteCache = new Map<string, { expiresAt: number; value: EmoteResponse }>();
+const twitchEmoteCache = new Map<string, { expiresAt: number; value: TwitchEmoteGroup }>();
 
 const moduleContext = (context: SlotContext): { channelId: string; clientId: string } => ({
   channelId: context.req.param("channelId") ?? "",
@@ -44,12 +45,19 @@ const slotEmote = (emote: ModuleTwitchEmote): SlotEmote => ({
 
 const listEmotes = async (context: SlotContext): Promise<EmoteResponse> => {
   const { channelId, clientId } = moduleContext(context);
-  const cached = emoteCache.get(channelId);
-  if (cached !== undefined && cached.expiresAt > Date.now()) return cached.value;
+  const cachedTwitch = twitchEmoteCache.get(channelId);
+  const sevenTvPromise = fetchSevenTvEmotes(channelId);
+  if (cachedTwitch !== undefined && cachedTwitch.expiresAt > Date.now()) {
+    return {
+      emoji: { items: emojiItems },
+      twitch: cachedTwitch.value,
+      sevenTv: await sevenTvPromise,
+    };
+  }
   const [credentials, appToken, sevenTv] = await Promise.all([
     (context.get("botCredentials")?.(channelId) ?? Promise.resolve(null)).catch(() => null),
     context.get("getAppAccessToken")(context.env, new Date().toISOString()).catch(() => null),
-    fetchSevenTvEmotes(channelId),
+    sevenTvPromise,
   ]);
   const global = appToken === null ? null : await context.get("getGlobalEmotes")({ clientId, accessToken: appToken }).catch(() => null);
   const twitchItems = new Map<string, SlotEmote>();
@@ -73,13 +81,16 @@ const listEmotes = async (context: SlotContext): Promise<EmoteResponse> => {
     twitch: { status, items: [...twitchItems.values()] },
     sevenTv,
   };
-  if (status === "ok") emoteCache.set(channelId, { expiresAt: Date.now() + 10 * 60_000, value });
+  if (status === "ok") twitchEmoteCache.set(channelId, {
+    expiresAt: Date.now() + 10 * 60_000,
+    value: value.twitch,
+  });
   return value;
 };
 
 export const clearEmoteSlotEmoteCache = (channelId?: string): void => {
-  if (channelId === undefined) emoteCache.clear();
-  else emoteCache.delete(channelId);
+  if (channelId === undefined) twitchEmoteCache.clear();
+  else twitchEmoteCache.delete(channelId);
   clearSevenTvEmoteCache(channelId);
 };
 

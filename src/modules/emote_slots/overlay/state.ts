@@ -20,6 +20,8 @@ export interface SlotOverlayState {
   jackpotHit: boolean;
 }
 
+export const SLOT_OVERLAY_EDITOR_PREVIEW_SPIN_ID = "overlay-editor-preview";
+
 export const DEFAULT_SLOT_OVERLAY_CONFIG = {
   backgroundColor: "#090C10",
   textColor: "#F2F5F9",
