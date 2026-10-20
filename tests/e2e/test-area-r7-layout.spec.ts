@@ -94,11 +94,19 @@ const expectLongResultsStayContained = async (page: Page, width: number, height:
       resultScrollHeight: results?.scrollHeight ?? 0,
       resultClientHeight: results?.clientHeight ?? 0,
       mainScrollTop: document.querySelector<HTMLElement>(".dashboard-shell__main")?.scrollTop ?? -1,
+      gapBelowWorkspace: (() => {
+        const workspace = document.querySelector<HTMLElement>(".test-area");
+        const content = document.querySelector<HTMLElement>(".main-content");
+        if (workspace === null || content === null) return Number.POSITIVE_INFINITY;
+        const innerBottom = content.getBoundingClientRect().bottom - Number.parseFloat(getComputedStyle(content).paddingBottom);
+        return innerBottom - workspace.getBoundingClientRect().bottom;
+      })(),
     };
   });
 
   expect(layout.documentHeight).toBeLessThanOrEqual(layout.viewportHeight + 1);
   expect(layout.resultScrollHeight).toBeGreaterThan(layout.resultClientHeight);
+  expect(layout.gapBelowWorkspace).toBeLessThanOrEqual(2);
   expect(layout.mainScrollTop).toBe(initialMainScrollTop);
   await expect(runButton).toBeInViewport({ ratio: 1 });
 };

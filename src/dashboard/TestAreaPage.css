@@ -835,8 +835,8 @@
   }
 
   .tool-page:has(.test-area) { height: auto; }
-  .tool-page__body:has(.test-area) { overflow: visible; }
-  .test-area { height: auto; overflow: visible; }
+  .tool-page__body:has(.test-area) { display: flex; flex-direction: column; overflow: visible; }
+  .test-area { flex: 1 1 auto; height: auto; overflow: visible; }
   .test-area__results,
   .test-area__detail { contain: size; }
 }
