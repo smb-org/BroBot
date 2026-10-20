@@ -28,6 +28,45 @@ describe("active 7TV set", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  it("accepts supported large 7TV responses and rejects bodies above the bound (protects=the active set and all 1,000 emotes survive a realistic multi-megabyte response while bodies above 8 MB stay unavailable; fails_when=the supported response is unavailable, an emote is dropped, or an oversized body is accepted; no_claim=provider fields outside the emote set)", async () => {
+    const userId = "fictional-large-payload-user";
+    clearSevenTvEmoteCache(userId);
+    const body = JSON.stringify({
+      emote_set: {
+        name: "Night Shift",
+        emotes: Array.from({ length: 1_000 }, (_, index) => ({
+          id: `emote-${String(index)}`,
+          name: `code-${String(index)}`,
+          providerMetadata: "x".repeat(2_500),
+        })),
+      },
+    });
+    const byteLength = new TextEncoder().encode(body).byteLength;
+    expect(byteLength).toBeGreaterThan(2_500_000);
+    expect(byteLength).toBeLessThan(8_000_000);
+    const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(new Response(body, {
+      status: 200,
+      headers: { "Content-Length": String(byteLength) },
+    })));
+
+    const result = await fetchSevenTvEmotes(userId, fetcher);
+
+    expect(result.status).toBe("ok");
+    expect(result.items).toHaveLength(1_000);
+
+    const oversizedUserId = "fictional-oversized-payload-user";
+    clearSevenTvEmoteCache(oversizedUserId);
+    const oversizedBody = JSON.stringify({
+      emote_set: { name: "Night Shift", emotes: [] },
+      providerMetadata: "x".repeat(8 * 1024 * 1024),
+    });
+    expect(new TextEncoder().encode(oversizedBody).byteLength).toBeGreaterThan(8 * 1024 * 1024);
+    const oversizedFetcher = vi.fn<typeof fetch>(() => Promise.resolve(new Response(oversizedBody, { status: 200 })));
+    await expect(fetchSevenTvEmotes(oversizedUserId, oversizedFetcher)).resolves.toMatchObject({
+      status: "unavailable", setName: null, items: [],
+    });
+  });
+
   it("reads only the active set and preserves its display name (protects=the picker receives the channel's active emotes and set name; fails_when=non-active user emotes leak into the list or the active set name is lost; no_claim=the live 7TV endpoint response shape beyond the covered fields)", () => {
     const result = parseSevenTvActiveSet({
       emote_set: {
@@ -50,24 +89,49 @@ describe("active 7TV set", () => {
     });
   });
 
-  it("rejects malformed active emotes instead of returning partial untrusted entries (protects=every 7TV picker entry has a safe id and code from the active set; fails_when=a malformed active-set item is exposed as selectable; no_claim=provider availability and route fallback behavior)", () => {
+  it("skips an unrepresentable alias and keeps normal 7TV aliases usable (protects=one alias longer than the slot code limit cannot disable the other active emotes; fails_when=the set is null or the normal alias is missing; no_claim=how 7TV chooses aliases or emote image availability)", () => {
+    const longAlias = "x".repeat(100);
+    const result = parseSevenTvActiveSet({
+      emote_set: {
+        name: "Night Shift",
+        emotes: [
+          { id: "emote-long-alias", name: longAlias },
+          { id: "emote-normal-alias", name: "pixelwave" },
+        ],
+      },
+    });
+
+    expect(result).toMatchObject({
+      setName: "Night Shift",
+      items: [{ sevenTvId: "emote-normal-alias", code: "pixelwave" }],
+    });
+  });
+
+  it("skips malformed active emotes without disabling the set (protects=unrepresentable provider entries are never selectable while the active set remains available; fails_when=the invalid entry is exposed or the set is rejected; no_claim=provider availability and route fallback behavior)", () => {
     expect(parseSevenTvActiveSet({
       emote_set: { id: "set-active", name: "Night Shift", emotes: [{ id: "bad/id", name: "unsafe" }] },
-    })).toBeNull();
+    })).toEqual({ setName: "Night Shift", items: [] });
   });
 
   it("marks a saved symbol missing when its id is absent from the active set (protects=removed 7TV symbols are distinguishable from active symbols after a fresh lookup; fails_when=a stale saved id is treated as active; no_claim=whether the emote was removed from all of 7TV)", () => {
     expect(isSevenTvSymbolMissing(
-      { source: "seven_tv", sevenTvId: "emote-old" },
-      [{ source: "seven_tv", sevenTvId: "emote-new" }],
+      { source: "seven_tv", sevenTvId: "emote-old", code: "oldwave" },
+      [{ source: "seven_tv", sevenTvId: "emote-new", code: "newwave" }],
     )).toBe(true);
   });
 
   it("keeps a saved symbol active when its id is in the fetched set (protects=the stale-symbol notice is reserved for ids absent from the active 7TV set; fails_when=an active id is marked missing; no_claim=image CDN delivery)", () => {
     expect(isSevenTvSymbolMissing(
-      { source: "seven_tv", sevenTvId: "emote-active" },
-      [{ source: "seven_tv", sevenTvId: "emote-active" }],
+      { source: "seven_tv", sevenTvId: "emote-active", code: "pixelwave" },
+      [{ source: "seven_tv", sevenTvId: "emote-active", code: "pixelwave" }],
     )).toBe(false);
+  });
+
+  it("marks a saved 7TV alias missing when its id remains but its code was renamed (protects=a saved 7TV symbol is active only when both its provider id and exact code remain in the active set; fails_when=an id-only match hides the missing notice after an alias rename; no_claim=whether the renamed alias still exists elsewhere on 7TV)", () => {
+    expect(isSevenTvSymbolMissing(
+      { source: "seven_tv", sevenTvId: "emote-shared", code: "oldwave" },
+      [{ source: "seven_tv", sevenTvId: "emote-shared", code: "newwave" }],
+    )).toBe(true);
   });
 
   it("accepts a 7TV symbol in saved slot settings (protects=saved reel settings can identify a 7TV emote by its provider id; fails_when=the settings schema rejects a valid seven_tv symbol or drops its id; no_claim=whether the symbol is currently in the active set)", () => {

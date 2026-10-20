@@ -10,6 +10,7 @@ import {
   mergeModuleOverlayElementState,
   moduleOverlayElementKindForMessage,
   moduleOverlayMessageRequiresStateReload,
+  preserveModuleOverlayElementStateOnReload,
 } from "../modules/overlay-element-registry";
 
 const LazyLegacyOverlayEntry = lazy(async () => {
@@ -149,6 +150,32 @@ const applyModuleMessage = (
         if (element.kind !== kind || element.moduleEnabled !== true) return element;
         const previousState = element.state ?? null;
         return { ...element, state: mergeModuleOverlayElementState(kind, previousState, payload) };
+      }),
+    },
+  };
+};
+
+const preserveElementStateAcrossBootstrap = (
+  previous: OverlayBootstrapData | null,
+  next: OverlayBootstrapData,
+): OverlayBootstrapData => {
+  if (previous?.overlay === null || previous?.overlay === undefined || next.overlay === null ||
+      previous.overlay.id !== next.overlay.id) return next;
+  const previousElements = new Map(previous.overlay.elements.map((element) => [element.id, element]));
+  return {
+    ...next,
+    overlay: {
+      ...next.overlay,
+      elements: next.overlay.elements.map((element) => {
+        if (element.moduleEnabled !== true || !element.inComposition) return element;
+        const previousElement = previousElements.get(element.id);
+        if (previousElement?.kind !== element.kind || previousElement.moduleEnabled !== true || !previousElement.inComposition) return element;
+        const state = preserveModuleOverlayElementStateOnReload(
+          element.kind,
+          previousElement.state ?? null,
+          element.state ?? null,
+        );
+        return state === undefined ? element : { ...element, state };
       }),
     },
   };
@@ -301,9 +328,10 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
         }
         const parsedBootstrap = parseBootstrap(payload);
         if (parsedBootstrap === null) throw new Error("Overlay bootstrap response had an invalid shape.");
+        const retained = preserveElementStateAcrossBootstrap(bootstrapRef.current, parsedBootstrap);
         const next = pendingModuleMessages.reduce(
           (current, received) => applyModuleMessage(current, received),
-          applyPendingVariableChanges(parsedBootstrap, pendingVariableChanges),
+          applyPendingVariableChanges(retained, pendingVariableChanges),
         );
         pendingModuleMessages.length = 0;
         pendingVariableChanges.clear();

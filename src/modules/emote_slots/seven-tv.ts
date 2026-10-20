@@ -1,4 +1,5 @@
 import { parseSevenTvActiveSet, type SevenTvSlotEmote } from "./domain/seven-tv";
+import { readBoundedJsonResponse } from "../contract";
 
 export type SevenTvEmoteResponse = {
   status: "ok" | "no_account" | "unavailable";
@@ -8,6 +9,7 @@ export type SevenTvEmoteResponse = {
 
 const SEVEN_TV_CACHE_TTL_MS = 10 * 60_000;
 const SEVEN_TV_TIMEOUT_MS = 1_800;
+const SEVEN_TV_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const sevenTvCache = new Map<string, { expiresAt: number; value: SevenTvEmoteResponse }>();
 
 const emptyResponse = (status: "no_account" | "unavailable"): SevenTvEmoteResponse => ({
@@ -39,27 +41,16 @@ export const fetchSevenTvEmotes = async (
     } else if (!response.ok) {
       value = emptyResponse("unavailable");
     } else {
-      const contentLength = Number(response.headers.get("Content-Length"));
-      if (Number.isFinite(contentLength) && contentLength > 1_000_000) {
+      const parsed = await readBoundedJsonResponse(response, SEVEN_TV_MAX_RESPONSE_BYTES);
+      if (!isRecord(parsed)) {
         value = emptyResponse("unavailable");
+      } else if (Object.hasOwn(parsed, "emote_set") && parsed.emote_set === null) {
+        value = emptyResponse("no_account");
       } else {
-        const body = await response.text();
-        if (new TextEncoder().encode(body).byteLength > 1_000_000) {
-          value = emptyResponse("unavailable");
-        } else {
-          let parsed: unknown;
-          try { parsed = JSON.parse(body) as unknown; } catch { parsed = null; }
-          if (!isRecord(parsed)) {
-            value = emptyResponse("unavailable");
-          } else if (Object.hasOwn(parsed, "emote_set") && parsed.emote_set === null) {
-            value = emptyResponse("no_account");
-          } else {
-            const activeSet = parseSevenTvActiveSet(parsed);
-            value = activeSet === null
-              ? emptyResponse("unavailable")
-              : { status: "ok", setName: activeSet.setName, items: activeSet.items };
-          }
-        }
+        const activeSet = parseSevenTvActiveSet(parsed);
+        value = activeSet === null
+          ? emptyResponse("unavailable")
+          : { status: "ok", setName: activeSet.setName, items: activeSet.items };
       }
     }
   } catch {

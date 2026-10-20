@@ -29,7 +29,7 @@ export const parseSevenTvActiveSet = (value: unknown): SevenTvActiveSet | null =
 
   const items: SevenTvSlotEmote[] = [];
   for (const entry of activeSet.emotes) {
-    if (!isRecord(entry) || !safeEmoteId(entry.id) || !safeEmoteName(entry.name)) return null;
+    if (!isRecord(entry) || !safeEmoteId(entry.id) || !safeEmoteName(entry.name)) continue;
     items.push({
       source: "seven_tv",
       code: entry.name,
@@ -42,7 +42,7 @@ export const parseSevenTvActiveSet = (value: unknown): SevenTvActiveSet | null =
 };
 
 export const isSevenTvSymbolMissing = (
-  symbol: { source: string; sevenTvId?: string | undefined },
-  activeItems: readonly { source: string; sevenTvId?: string | undefined }[],
+  symbol: { source: string; sevenTvId?: string | undefined; code: string },
+  activeItems: readonly { source: string; sevenTvId?: string | undefined; code: string }[],
 ): boolean => symbol.source === "seven_tv" && (symbol.sevenTvId === undefined ||
-  !activeItems.some((item) => item.source === "seven_tv" && item.sevenTvId === symbol.sevenTvId));
+  !activeItems.some((item) => item.source === "seven_tv" && item.sevenTvId === symbol.sevenTvId && item.code === symbol.code));

@@ -38,3 +38,14 @@ export const mergeModuleOverlayElementState = (
   incoming: Readonly<Record<string, unknown>>,
 ): Readonly<Record<string, unknown>> => MODULE_OVERLAY_ELEMENTS.find(({ definition }) => definition.kind === elementKind)
   ?.definition.mergeRealtimeState?.(current, incoming) ?? incoming;
+
+export const preserveModuleOverlayElementStateOnReload = (
+  elementKind: string,
+  previous: Readonly<Record<string, unknown>> | null,
+  incoming: Readonly<Record<string, unknown>> | null,
+): Readonly<Record<string, unknown>> | null | undefined => {
+  const definition = MODULE_OVERLAY_ELEMENTS.find(({ definition: candidate }) => candidate.kind === elementKind)?.definition;
+  if (definition?.preserveRealtimeStateOnReload !== true || previous === null) return undefined;
+  if (incoming === null) return previous;
+  return definition.mergeRealtimeState?.(previous, incoming) ?? incoming;
+};

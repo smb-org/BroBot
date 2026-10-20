@@ -91,6 +91,65 @@ describe("emote slot settings controls", () => {
     expect(screen.getByRole("radio", { name: copy.jackpotAria.replace("{name}", settings.symbols[0]?.name ?? "") })).toHaveAttribute("type", "radio");
   });
 
+  it("navigates 7TV aliases with the same emote id by their distinct codes (protects=each unique 7TV id and code pair has a unique picker identity and ArrowDown reaches every alias; fails_when=the aliases share a DOM id or keyboard navigation cannot activate the second one; no_claim=provider ordering beyond the returned alias order)", async () => {
+    const copy = emoteSlotsCatalog.de.panel;
+    const settings = emoteSlotDefaultSettingsForLanguage("de");
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        emoji: { items: [] },
+        twitch: { status: "ok", items: [] },
+        sevenTv: {
+          status: "ok",
+          setName: "Night Shift",
+          items: [
+            { source: "seven_tv", code: "oldwave", sevenTvId: "emote-shared", name: "oldwave" },
+            { source: "seven_tv", code: "newwave", sevenTvId: "emote-shared", name: "newwave" },
+            { source: "seven_tv", code: "oldwave", sevenTvId: "emote-shared", name: "oldwave" },
+          ],
+        },
+      }),
+    })));
+    renderReelTable(settings);
+    fireEvent.click(screen.getByRole("button", { name: `${copy.chooseSymbol}: ${settings.symbols[0]?.name ?? ""}` }));
+    const search = await screen.findByRole("combobox", { name: copy.picker.searchLabel });
+    expect(screen.getAllByRole("option", { hidden: true })).toHaveLength(2);
+    const oldAlias = screen.getByRole("option", { name: /oldwave/u, hidden: true });
+    const newAlias = screen.getByRole("option", { name: /newwave/u, hidden: true });
+
+    expect(oldAlias.id).not.toBe(newAlias.id);
+    expect(oldAlias).toHaveAttribute("aria-selected", "true");
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+
+    expect(oldAlias).toHaveAttribute("aria-selected", "false");
+    expect(newAlias).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("shows the missing notice and saved-code fallback after an active 7TV alias is renamed (protects=the saved id and exact code pair controls active membership and preserves the configured code for chat and reel fallback; fails_when=the same id with a new alias hides the notice or displays the renamed code; no_claim=provider state while the emote route is unavailable)", async () => {
+    const copy = emoteSlotsCatalog.de.panel;
+    const defaults = emoteSlotDefaultSettingsForLanguage("de");
+    const symbols = defaults.symbols.map((symbol, index) => index === 0
+      ? { ...symbol, source: "seven_tv" as const, code: "oldwave", sevenTvId: "emote-shared", name: "oldwave" }
+      : symbol);
+    const settings = { ...defaults, symbols };
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        emoji: { items: [] },
+        twitch: { status: "ok", items: [] },
+        sevenTv: {
+          status: "ok",
+          setName: "Night Shift",
+          items: [{ source: "seven_tv", code: "newwave", sevenTvId: "emote-shared", name: "newwave" }],
+        },
+      }),
+    })));
+    const { container } = renderReelTable(settings);
+
+    expect(await screen.findByText(copy.sevenTvMissing)).toHaveClass("slot-symbol-missing");
+    expect(container.querySelector('.slot-symbol-placeholder[title="oldwave"]')).toBeInTheDocument();
+  });
+
   it("shows target, warning, and locked rate LED states without moving the table (protects=three payout-rate states and the causing-field error; fails_when=a rate is mislabeled, allowed when locked, or loses its reserved line; no_claim=page-level save lifecycle)", () => {
     stubEmoteList();
     const settings = emoteSlotDefaultSettingsForLanguage("de");

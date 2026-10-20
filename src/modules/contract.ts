@@ -313,6 +313,8 @@ export interface ModuleOverlayElementDefinition {
     current: Readonly<Record<string, unknown>> | null,
     incoming: Readonly<Record<string, unknown>>,
   ) => Readonly<Record<string, unknown>>;
+  /** Keeps transient realtime state during bootstrap reloads while the same enabled element remains. */
+  preserveRealtimeStateOnReload?: boolean;
   /** Host state changes that cause a generic module state message for this element. */
   reloadStateOnHostEvents?: readonly ModuleOverlayHostEvent[];
   initialState?: (

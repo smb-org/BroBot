@@ -32,6 +32,7 @@ export const emoteSlotOverlayElement = {
   editorModuleLabel: { de: german.elementLabel, en: english.elementLabel },
   mergeRealtimeStateOnModuleMessages: ["modul.emote_slots.spin"],
   mergeRealtimeState: mergeSlotOverlayRealtimeState,
+  preserveRealtimeStateOnReload: true,
   parseConfig: (raw: unknown) => parseSlotOverlayConfig(raw),
   load: () => import("./slot"),
   editor: () => import("./editor"),

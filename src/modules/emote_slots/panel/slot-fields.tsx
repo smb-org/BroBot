@@ -188,13 +188,20 @@ export function SlotReelTable({
     icon: emote.imageUrl === undefined ? <Icon name="styleFont" /> : <SlotEmoteImage src={emote.imageUrl} code={emote.code} picker />,
     value: emote,
   }));
-  const sevenTvEntries: GroupedPickerEntry<SlotEmote>[] = (emotes?.sevenTv?.items ?? []).map((emote) => ({
-    id: emote.sevenTvId ?? emote.code,
-    label: emote.name,
-    description: emote.code,
-    icon: emote.imageUrl === undefined ? <Icon name="styleFont" /> : <SlotEmoteImage src={emote.imageUrl} code={emote.code} picker />,
-    value: emote,
-  }));
+  const sevenTvEntries: GroupedPickerEntry<SlotEmote>[] = [];
+  const seenSevenTvPairs = new Set<string>();
+  for (const emote of emotes?.sevenTv?.items ?? []) {
+    const id = emote.sevenTvId === undefined ? emote.code : `${emote.sevenTvId}:${emote.code}`;
+    if (seenSevenTvPairs.has(id)) continue;
+    seenSevenTvPairs.add(id);
+    sevenTvEntries.push({
+      id,
+      label: emote.name,
+      description: emote.code,
+      icon: emote.imageUrl === undefined ? <Icon name="styleFont" /> : <SlotEmoteImage src={emote.imageUrl} code={emote.code} picker />,
+      value: emote,
+    });
+  }
   const requestReconnect = (): void => {
     setReconnectAfterPickerClose(true);
     setPickerRow(null);

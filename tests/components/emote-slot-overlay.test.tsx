@@ -153,6 +153,23 @@ describe("emote slot overlay", () => {
     expect(screen.getByText("pixelwave").parentElement).toHaveClass("emote-slot-overlay__reel--code");
   });
 
+  it("shows the saved code when a renamed 7TV alias is marked missing (protects=the overlay uses the configured alias as a dashed code fallback when its saved id and code pair is inactive; fails_when=the missing 7TV symbol requests an image or omits its saved code; no_claim=the provider lookup that supplies the missing marker)", () => {
+    const state = {
+      ...spinState("spin-renamed-alias", ["oldwave", "🍒", "🔔"], "2030-01-01T00:00:00.000Z"),
+      symbols: [
+        { source: "seven_tv", code: "oldwave", sevenTvId: "emote-shared", missing: true },
+        { source: "emoji", code: "🍒" },
+        { source: "emoji", code: "🔔" },
+      ],
+    };
+    const { container } = render(<SlotOverlay config={{}} state={state} now={Date.now()} language="en" />);
+    const firstReel = container.querySelector('[data-reel-index="0"]');
+
+    expect(firstReel).toHaveClass("emote-slot-overlay__reel--code");
+    expect(firstReel?.querySelector("img")).toBeNull();
+    expect(firstReel).toHaveTextContent("oldwave");
+  });
+
   it("warns when an edited text color falls below 4.5:1 contrast (protects=overlay color edits disclose text contrast below the minimum and remain explicitly editable; fails_when=low-contrast text is accepted without a warning; no_claim=color perception on every display)", () => {
     const onChange = vi.fn<(config: JsonObject) => void>();
     const { rerender } = render(<SlotOverlayEditor config={DEFAULT_SLOT_OVERLAY_CONFIG} onChange={onChange} language="en" />);
