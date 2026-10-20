@@ -71,6 +71,7 @@ import type {
   ModulePointsAccess,
   ModuleScheduleInputChangeReason,
   PointJoinResult,
+  PointSettlementCooldown,
   PointsApplyResult,
   PointsKind,
   PointsMovement,
@@ -186,6 +187,7 @@ import {
   pointHistory,
   pointPayloadHash,
   pointCooldownRemainingSync,
+  settlePointOperationSync,
   pointRankOf,
   pointRanking,
   pointRoundAlarmKey,
@@ -201,7 +203,7 @@ import {
   setGameModuleGateSync,
   touchPointAccountSync,
 } from "./points";
-import { POINT_SETTLEMENTS } from "./point-settlements";
+import { INSTANT_SETTLEMENTS, POINT_SETTLEMENTS } from "./point-settlements";
 
 const SECURITY_ALARM_INTERVAL_MS = 15 * 60 * 1000;
 const SECURITY_RETRY_INTERVAL_MS = 60 * 1000;
@@ -3235,6 +3237,8 @@ export class ChannelObject extends DurableObject<Env> {
     return {
       apply: (operationId, kind, movements, result, payloadIdentity) =>
         this.applyPointOperation(moduleId, operationId, kind, movements, result, payloadIdentity),
+      settle: (operationId, kind, actor, stake, params, options) =>
+        this.settlePointOperation(moduleId, operationId, kind, actor, stake, params, options),
       touchAccount: (accountId, login, startBonus) => this.touchPointAccount(moduleId, accountId, login, startBonus),
       ackWelcome: (accountId) => this.acknowledgePointWelcome(moduleId, accountId),
       creditActivity: (accountId, login, messageAt, live, rules) =>
@@ -3286,6 +3290,33 @@ export class ChannelObject extends DurableObject<Env> {
       payloadHash,
       new Date().toISOString(),
       canonicalResult,
+    ));
+    return { replayed: applied.replayed, result: applied.result, balances: applied.balances };
+  }
+
+  public async settlePointOperation(
+    moduleId: string,
+    operationId: string,
+    kind: string,
+    actor: { accountId: string; login: string },
+    stake: number,
+    params: unknown,
+    options: { payloadIdentity: unknown; cooldown?: PointSettlementCooldown },
+  ): Promise<PointsApplyResult> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    const payloadHash = await pointPayloadHash({ moduleId, kind, identity: options.payloadIdentity });
+    const applied = this.ctx.storage.transactionSync(() => settlePointOperationSync(
+      this.ctx.storage.sql,
+      moduleId,
+      operationId,
+      actor,
+      stake,
+      params,
+      INSTANT_SETTLEMENTS.get(kind),
+      payloadHash,
+      new Date().toISOString(),
+      options.cooldown,
     ));
     return { replayed: applied.replayed, result: applied.result, balances: applied.balances };
   }

@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import { Fragment, type ReactElement } from "react";
 
 import { worstCaseTemplateLength } from "../../template";
 import type { PanelTemplateWarning } from "../../panel-contract";
@@ -21,6 +21,10 @@ import { TimeoutDurationRangeFields, type TimeoutDurationRangeValue } from "./Ti
 import { RoleThreshold } from "./RoleThreshold";
 import { RuleNote } from "./RuleNote";
 
+type BivariantSettingsCustomFieldRender<Settings> = {
+  bivarianceHack(args: SettingsCustomFieldProps<Settings>): ReactElement | null;
+}["bivarianceHack"];
+
 export type SettingsFieldSpec<Settings> =
   | { kind: "number"; key: keyof Settings & string; unit?: string; min: number; max: number; step: number; validate?: (value: number, settings: Settings) => boolean }
   | { kind: "timeoutDurationRange"; key: keyof Settings & string; min: number; max: number; showLabels?: boolean }
@@ -32,7 +36,20 @@ export type SettingsFieldSpec<Settings> =
   | { kind: "roleThreshold"; key: keyof Settings & string; options: readonly { value: string }[] }
   | { kind: "segment"; key: keyof Settings & string; options: readonly { value: string | number }[] }
   | { kind: "choice"; key: keyof Settings & string; options: readonly { value: string; icon?: IconName }[] }
+  | { kind: "custom"; key: keyof Settings & string; render: BivariantSettingsCustomFieldRender<Settings> }
   | { kind: "switchCard"; key: keyof Settings & string; children?: readonly SettingsFieldSpec<Settings>[] };
+
+export interface SettingsCustomFieldProps<Settings> {
+  settings: Settings;
+  value: unknown;
+  onChange: (value: unknown) => void;
+  disabled: boolean;
+  readOnly: boolean;
+  error?: string;
+  label: string;
+  hint: string;
+  context?: unknown;
+}
 
 export interface SettingsEditorSpec<Settings> {
   sections: readonly { id: string; icon: IconName; fields: readonly SettingsFieldSpec<Settings>[]; note?: string }[];
@@ -89,6 +106,8 @@ export interface SettingsEditorCatalog extends SettingsEditorTexts {
 export interface SettingsEditorDefinition<Settings> {
   spec: SettingsEditorSpec<Settings>;
   locales: Readonly<Record<"de" | "en", SettingsEditorCatalog>>;
+  /** Groups page editor sections into stable dashboard columns. */
+  pageColumns?: readonly (readonly string[])[];
   registeredTemplateVariableFields?: readonly (keyof Settings & string)[];
   layout?: "tabs" | "columns";
   savePosition?: "header" | "footer" | "page-header";
@@ -109,12 +128,14 @@ export interface SettingsEditorProps<Settings extends object> {
   readOnly?: boolean;
   readOnlySectionOnly?: boolean;
   disabled?: boolean;
+  clampNumberOnBlur?: boolean;
   enabledLabel?: string;
   disabledLabel?: string;
   fieldErrors?: Readonly<Record<string, string>>;
   onIssuesChange?: (key: keyof Settings & string, issues: { unknown: readonly string[]; worstCaseExceeded: boolean }) => void;
   idPrefix?: string;
   effectiveDefaultChatTarget?: ChatOutputTarget;
+  customContext?: unknown;
 }
 
 export function SettingsEditor<Settings extends object>({
@@ -130,12 +151,14 @@ export function SettingsEditor<Settings extends object>({
   readOnly = false,
   readOnlySectionOnly = false,
   disabled = false,
+  clampNumberOnBlur = true,
   enabledLabel,
   disabledLabel,
   fieldErrors = {},
   onIssuesChange,
   idPrefix = "settings",
   effectiveDefaultChatTarget,
+  customContext,
 }: SettingsEditorProps<Settings>): ReactElement {
   const section = spec.sections.find((candidate) => candidate.id === sectionId);
 
@@ -144,8 +167,19 @@ export function SettingsEditor<Settings extends object>({
     if (copy === undefined) return null;
     const id = `${idPrefix}-${field.key}`;
     const fieldValue = settings[field.key];
-    if (readOnly) return renderReadOnlyField(field, copy, fieldValue, enabledLabel, disabledLabel);
     const error = fieldErrors[field.key];
+    if (field.kind === "custom") return <Fragment key={field.key}>{field.render({
+      settings,
+      value: fieldValue,
+      onChange: (next) => { onChange(field.key, next as Settings[typeof field.key]); },
+      disabled,
+      readOnly,
+      ...(error === undefined ? {} : { error }),
+      label: copy.label,
+      hint: copy.hint,
+      ...(customContext === undefined ? {} : { context: customContext }),
+    })}</Fragment>;
+    if (readOnly) return renderReadOnlyField(field, copy, fieldValue, enabledLabel, disabledLabel);
     if (field.kind === "chatTarget") {
       return (
         <ChatTargetField
@@ -212,6 +246,7 @@ export function SettingsEditor<Settings extends object>({
         step={field.step}
         value={typeof fieldValue === "number" ? fieldValue : ""}
         disabled={disabled}
+        clampOnBlur={clampNumberOnBlur}
         onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
       />;
     }
@@ -406,6 +441,16 @@ export function SettingsEditor<Settings extends object>({
     const copy = texts.fields[field.key];
     if (copy === undefined) return null;
     const value = settings[field.key];
+    if (field.kind === "custom") return field.render({
+      settings,
+      value,
+      onChange: () => undefined,
+      disabled: true,
+      readOnly: true,
+      label: copy.label,
+      hint: copy.hint,
+      ...(customContext === undefined ? {} : { context: customContext }),
+    });
     if (field.kind === "switchCard" && field.children !== undefined) {
       return <div key={field.key}>
         <dt>{copy.label}</dt>

@@ -375,6 +375,30 @@ const realtimeForms = {
 
 const expectedModuleSettings = {
   channel_events: {},
+  emote_slots: {
+    symbols: [
+      { id: "cherry", source: "emoji", code: "🍒", name: "Cherry", weight: 4, triple: 7, isJackpot: false },
+      { id: "lemon", source: "emoji", code: "🍋", name: "Lemon", weight: 4, triple: 7, isJackpot: false },
+      { id: "bell", source: "emoji", code: "🔔", name: "Bell", weight: 3, triple: 12, isJackpot: false },
+      { id: "star", source: "emoji", code: "⭐", name: "Star", weight: 2, triple: 20, isJackpot: false },
+      { id: "diamond", source: "emoji", code: "💎", name: "Diamond", weight: 2, triple: 20, isJackpot: false },
+      { id: "seven", source: "emoji", code: "7️⃣", name: "Seven", weight: 1, triple: 2, isJackpot: true },
+    ],
+    minStake: 15,
+    defaultStake: 50,
+    maxStake: 500,
+    jackpotSeed: 500,
+    jackpotShareBp: 700,
+    announceJackpot: true,
+    cooldownSeconds: 30,
+    chatTarget: "where_asked",
+    texts: {
+      win: "{slot.symbols}  {slot.net} · Balance {slot.balance} · Jackpot {slot.jackpot}",
+      loss: "{slot.symbols}  {slot.net} · Balance {slot.balance} · Jackpot {slot.jackpot}",
+      pair: "{slot.symbols}  Stake back · {slot.net} · Balance {slot.balance} · Jackpot {slot.jackpot}",
+      jackpot: "{slot.symbols}  JACKPOT! {user} wins {slot.net} · Jackpot now {slot.jackpot}",
+    },
+  },
   chat_voting: {
     autoCloseSeconds: 120,
     startText: "Abstimmung gestartet: {vote.title} – {vote.options} – läuft {vote.duration}",
@@ -841,6 +865,7 @@ describe("serialized contract shapes", () => {
         "chat_voting",
         "clips",
         "currency",
+        "emote_slots",
         "faq",
         "moon",
         "points",

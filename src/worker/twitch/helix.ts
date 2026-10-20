@@ -3,6 +3,8 @@ import type {
   HelixRequest,
   HelixRequestOptions,
   HelixResult,
+  ModuleTwitchEmote,
+  ModuleTwitchEmoteList,
 } from "../../modules/contract";
 
 export type { HelixRequest, HelixResult } from "../../modules/contract";
@@ -159,3 +161,26 @@ export const helixPages = async <Item>(
     cursor = next;
   }
 };
+
+const fetchEmotePages: ModuleTwitchEmoteList = async ({ clientId, accessToken, userId, broadcasterId }) => {
+  const path = userId === undefined ? "chat/emotes/global" : "chat/emotes/user";
+  const query = userId === undefined ? {} : { user_id: userId, broadcaster_id: broadcasterId };
+  return helixPages<ModuleTwitchEmote>((cursor) => helixRequest<HelixPage<ModuleTwitchEmote>>({
+    url: `https://api.twitch.tv/helix/${path}`,
+    clientId,
+    accessToken,
+    query: { ...query, after: cursor ?? undefined },
+  }));
+};
+
+export const getUserEmotes: ModuleTwitchEmoteList = (options) => {
+  if (options.userId === undefined || options.broadcasterId === undefined) {
+    return Promise.resolve({ ok: false, status: null, reason: "invalid_response", message: null, body: {} });
+  }
+  return fetchEmotePages(options);
+};
+
+export const getGlobalEmotes: ModuleTwitchEmoteList = (options) => fetchEmotePages({
+  clientId: options.clientId,
+  accessToken: options.accessToken,
+});

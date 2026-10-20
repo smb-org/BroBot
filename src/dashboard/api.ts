@@ -582,6 +582,9 @@ export const getChannelModuleSettings = (channelId: string, moduleId: string, si
   requestOptions(signal),
 );
 
+export const getChannelModuleSummary = <Summary,>(channelId: string, moduleId: string, signal?: AbortSignal): Promise<Summary> =>
+  requestJson<Summary>(`${modulePath(channelId, moduleId)}/summary`, requestOptions(signal));
+
 export const getChannelTemplateVariables = async (
   channelId: string,
   signal?: AbortSignal,

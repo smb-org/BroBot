@@ -19,6 +19,7 @@ export interface UnitInputProps {
   placeholder?: string;
   error?: string;
   disabled?: boolean;
+  clampOnBlur?: boolean;
   required?: boolean;
   name?: string;
   onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
@@ -26,7 +27,7 @@ export interface UnitInputProps {
 
 const clampValue = (value: number, min: number | undefined, max: number | undefined): number => Math.max(min ?? Number.NEGATIVE_INFINITY, Math.min(max ?? Number.POSITIVE_INFINITY, value));
 
-export function UnitInput({ id: suppliedId, label, ariaLabel, unit, value, onChange, min, max, step = 1, suggestions = [], hint, placeholder, error, disabled = false, required = false, name, onKeyDown }: UnitInputProps) {
+export function UnitInput({ id: suppliedId, label, ariaLabel, unit, value, onChange, min, max, step = 1, suggestions = [], hint, placeholder, error, disabled = false, clampOnBlur = true, required = false, name, onKeyDown }: UnitInputProps) {
   const generatedId = useId();
   const id = suppliedId ?? generatedId;
   const disabledReason = useDisabledFieldReason();
@@ -34,7 +35,7 @@ export function UnitInput({ id: suppliedId, label, ariaLabel, unit, value, onCha
   const errorId = `${id}-error`;
   const describedBy = [descriptionId, error === undefined ? null : errorId, disabledReason?.id].filter((part): part is string => part !== null && part !== undefined).join(" ");
   const onBlur = (): void => {
-    if (typeof value !== "number") return;
+    if (!clampOnBlur || typeof value !== "number") return;
     const clamped = clampValue(value, min, max);
     if (clamped !== value) onChange(clamped);
   };

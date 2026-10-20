@@ -11,6 +11,7 @@ export const modulePoints = (
   if (namespace === undefined) {
     return {
       apply: () => unavailable(),
+      settle: () => unavailable(),
       touchAccount: () => unavailable(),
       ackWelcome: () => unavailable(),
       creditActivity: () => unavailable(),
@@ -38,6 +39,8 @@ export const modulePoints = (
   return {
     apply: (operationId, kind: PointsKind, movements: PointsMovement[], result, payloadIdentity) =>
       object.applyPointOperation(moduleId, operationId, kind, movements, result, payloadIdentity),
+    settle: (operationId, kind, actor, stake, params, options) =>
+      object.settlePointOperation(moduleId, operationId, kind, actor, stake, params, options),
     touchAccount: (accountId, login, startBonus) => object.touchPointAccount(moduleId, accountId, login, startBonus),
     ackWelcome: (accountId) => object.acknowledgePointWelcome(moduleId, accountId),
     creditActivity: (accountId, login, messageAt, live, rules) =>

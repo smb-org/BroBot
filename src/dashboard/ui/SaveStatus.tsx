@@ -34,6 +34,7 @@ export interface SaveStatusProps {
   pendingLabel: string;
   saveDescribedBy?: string;
   saveTitle?: string;
+  saveLocked?: boolean;
 }
 
 export function SaveStatus({
@@ -62,6 +63,7 @@ export function SaveStatus({
   pendingLabel,
   saveDescribedBy,
   saveTitle,
+  saveLocked = false,
 }: SaveStatusProps) {
   const lastToastedMessage = useRef<string | null>(null);
   const longError = conflict?.message ?? error;
@@ -80,6 +82,7 @@ export function SaveStatus({
   if (!persistent && !dirty && !saved) return null;
 
   const warningStatus = warnings.length === 0 ? null : warningStatusLabel?.(warnings, saved && !dirty) ?? warnings[0];
+  const invalidLockReason = saveLocked && invalid && dirty ? invalidMessage : undefined;
   const statusText = conflict !== undefined
     ? `× ${conflict.message}`
     : pending
@@ -97,6 +100,7 @@ export function SaveStatus({
   const isSaveDisabled = pending || saveDisabled || conflict !== undefined || !dirty;
   const showButtons = dirty || persistent;
   const footerOnly = statusText === null && footer !== undefined && conflict === undefined;
+  const showFooter = footer !== undefined && conflict === undefined && invalidLockReason === undefined;
   return (
     <div data-ui="" className={`ui-save-bar${persistent ? " ui-save-bar--persistent" : ""}${error === undefined ? "" : " ui-save-bar--error"}`} aria-busy={pending}>
       <div className={`ui-save-bar__status${footerOnly ? " ui-save-bar__status--footer-only" : ""}`} role="status" aria-live="polite">
@@ -104,7 +108,7 @@ export function SaveStatus({
         {statusText === null ? null : <div className="ui-save-bar__message" style={{ color: conflict !== undefined || error !== undefined || (invalid && dirty) ? colors.errorText : warningStatus !== null ? colors.amber : colors.text3 }}>
           {typeof statusText === "string" ? <TruncatedText className="ui-save-bar__message-copy" text={statusText} /> : statusText}
         </div>}
-        {footer === undefined || conflict !== undefined ? null : <div className="ui-save-bar__footer" title={typeof footer === "string" ? footer : undefined}>{footer}</div>}
+        {!showFooter ? null : <div className="ui-save-bar__footer" title={typeof footer === "string" ? footer : undefined}>{footer}</div>}
       </div>
       {showButtons || destructive !== undefined ? (
         <div className={`ui-save-bar__actions${destructive === undefined ? "" : " ui-save-bar__actions--destructive"}`}>
@@ -113,12 +117,13 @@ export function SaveStatus({
             {showButtons && (conflict === undefined || discardOnConflict) ? <Button className="ui-save-bar__discard" variant="subtle" onClick={onDiscard} disabled={!dirty || pending || discardDisabled} ariaLabel={discardLabel} title={discardLabel}>{discardLabel}</Button> : null}
             {showButtons ? conflict === undefined ? <Button
               className="ui-save-bar__save"
-              variant={persistent && invalid ? "neutral" : "primary"}
+              variant={persistent && (invalid || saveLocked) ? "neutral" : "primary"}
+              {...(saveLocked ? { icon: "lock" as const } : {})}
               onClick={invalidAction && onInvalidSave !== undefined ? onInvalidSave : onSave}
               disabled={isSaveDisabled && !invalidAction}
               ariaDisabled={invalidAction}
               ariaLabel={saveLabel}
-              title={saveTitle ?? saveLabel}
+              title={invalidLockReason ?? saveTitle ?? saveLabel}
               {...(saveDescribedBy === undefined ? {} : { describedBy: saveDescribedBy })}
             >
               <span className="ui-save-bar__save-labels">

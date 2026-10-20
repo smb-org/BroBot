@@ -1,0 +1,84 @@
+@layer components.module {
+.settings-page--slot .settings-page__columns { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: max-content max-content; overflow-y: auto; align-content: start; }
+.settings-page--slot .settings-page__column { overflow: visible; }
+.settings-page--slot .settings-page__column:first-child { grid-column: 1 / -1; }
+.settings-page--slot .settings-page__column-stack { display: flex; min-width: 0; flex-direction: column; gap: 24px; }
+.settings-page--slot .page-header__icon, .settings-page--slot .page-header__copy > p { display: none; }
+.settings-page--slot > .page-header { grid-template-columns: minmax(0, 1fr) auto; }
+.slot-reel-field { min-width: 0; }
+.slot-reel-scroll { min-width: 0; overflow-x: auto; }
+.slot-reel-table { width: 100%; min-width: 640px; border-collapse: collapse; table-layout: fixed; }
+.slot-reel-table th { padding: 8px 6px; color: var(--text-3); font-size: 11px; font-weight: 600; text-align: left; }
+.slot-reel-table td { box-sizing: border-box; height: 56px; padding: 4px 6px; border-top: 1px solid var(--line); }
+.slot-reel-table th:nth-child(2) { width: 74px; }
+.slot-reel-table th:nth-child(3), .slot-reel-table th:nth-child(4) { width: 76px; }
+.slot-reel-table th:nth-child(5) { width: 62px; }
+.slot-reel-table th:nth-child(6) { width: 132px; }
+.slot-symbol { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.slot-symbol-glyph, .slot-symbol img { width: 28px; height: 28px; flex: none; font-size: 22px; object-fit: contain; }
+.slot-symbol-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.slot-source-badge { display: inline-flex; align-items: center; padding: 1px 7px; border: 1px solid var(--line); border-radius: 4px; color: var(--text-2); font-size: 11px; white-space: nowrap; }
+.slot-reel-table .unit-input { width: 56px; min-width: 0; gap: 0; }
+.slot-visually-hidden, .slot-reel-table .unit-input > .ui-field__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.slot-reel-table .unit-input__control { height: 32px; }
+.slot-reel-table .unit-input__input { box-sizing: border-box; height: 32px; padding: 0 6px; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; text-align: right; appearance: textfield; }
+.slot-reel-table .unit-input__input::-webkit-inner-spin-button { appearance: none; }
+.slot-reel-table .unit-input__description { display: none; }
+.slot-reel-table .unit-input__error { display: flex; min-height: 18px; height: 18px; align-items: center; overflow: hidden; white-space: nowrap; }
+.slot-reel-table .unit-input__error > .ui-truncated-text::before { display: block; overflow: hidden; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.slot-multiplier { position: relative; width: 56px; }
+.slot-multiplier > span { position: absolute; z-index: 1; left: 7px; top: 6px; pointer-events: none; font-family: "IBM Plex Mono", ui-monospace, monospace; }
+.slot-multiplier .unit-input__input { padding-left: 18px; }
+.slot-jackpot-radio { width: 16px; height: 16px; margin: 0; accent-color: var(--brand); cursor: pointer; }
+.slot-jackpot-radio:disabled { cursor: not-allowed; }
+.slot-jackpot-row { color: var(--text-2); font-size: 12px; }
+.slot-rate-line { display: flex; height: 40px; align-items: center; gap: 12px; white-space: nowrap; font-size: 12px; }
+.slot-rate-value { margin-left: 8px; font-family: "IBM Plex Mono", ui-monospace, monospace; }
+.settings-page--slot .unit-input__error { min-height: 54px; height: 54px; align-items: flex-start; overflow: hidden; white-space: normal; }
+.settings-page--slot .unit-input__error > .ui-truncated-text::before { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 18px; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
+.settings-page--slot .slot-reel-table .unit-input__error { min-height: 18px; height: 18px; align-items: center; overflow: hidden; white-space: nowrap; }
+.settings-page--slot .slot-reel-table .unit-input__error > .ui-truncated-text::before { display: block; overflow: hidden; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.settings-page--slot .slot-reel-field > .ui-field-error { min-height: 54px; height: 54px; align-items: flex-start; overflow: hidden; white-space: normal; }
+.settings-page--slot .slot-reel-field > .ui-field-error > .ui-truncated-text::before { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 18px; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
+.slot-picker-status { display: flex; min-height: 42px; align-items: center; justify-content: space-between; gap: 8px; color: var(--text-3); font-size: 11px; line-height: 1.35; }
+.slot-picker-status a, .slot-picker-status .ui-button { flex: none; color: var(--accent); }
+.slot-reconnect-dialog__actions { display: flex; justify-content: flex-end; margin-top: 20px; }
+.slot-picker-emoji { font-size: 18px; }
+.settings-page--slot .page-header__save { width: 430px; min-width: 430px; }
+.settings-page--slot .ui-save-bar__status { box-sizing: border-box; width: 174px; min-width: 174px; height: 32px; overflow: hidden; }
+.settings-page--slot .ui-save-bar__message { min-width: 0; overflow: hidden; line-height: 1.3; }
+.settings-page--slot .ui-save-bar__message-copy.ui-truncated-text { overflow: hidden; }
+.settings-page--slot .ui-save-bar__message-copy.ui-truncated-text::before { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.3; text-overflow: ellipsis; white-space: normal; overflow-wrap: normal; word-break: normal; }
+.settings-page--slot .ui-save-bar__save { width: 164px; }
+.settings-page--slot .slot-jackpot-meta { display: inline-block; width: 220px; min-height: 18px; overflow: hidden; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.settings-page--slot .ui-section--inspector { padding: 0; border: 0; }
+.settings-page--slot .ui-section--inspector .ui-section__heading { padding-bottom: 0; border: 0; margin-bottom: 12px; }
+.settings-page--slot [data-section="stakes"] .ui-section__content,
+.settings-page--slot [data-section="jackpot"] .ui-section__content { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
+.settings-page--slot .unit-input { width: 100%; }
+.settings-page--slot .slot-reel-table .unit-input { width: 56px; }
+.settings-page--slot .unit-input__description { display: none; }
+.settings-page--slot [data-section="stakes"] .unit-input:nth-child(3),
+.settings-page--slot [data-section="jackpot"] .ui-section__content > :nth-child(3) { grid-column: 1 / -1; }
+.slot-texts-field { display: grid; gap: 12px; }
+.slot-texts-field .ui-template-text-field-layout__pair { grid-template-columns: minmax(0, 1.3fr) minmax(0, .9fr); gap: 8px; }
+.slot-texts-field .template-text-field__input { height: 72px; min-height: 72px; max-height: 72px; resize: none; field-sizing: fixed; }
+.slot-texts-field .ui-template-text-field__warnings { height: 24px; overflow-y: auto; }
+.slot-texts-field .ui-template-text-field__label { padding-right: 120px; white-space: nowrap; }
+.slot-texts-field .ui-chat-preview { height: 90px; overflow: hidden; grid-template-columns: minmax(0, 1fr); grid-template-rows: 16px minmax(0, 1fr); }
+.slot-texts-field .ui-chat-preview__count { display: none; }
+.slot-texts-field .ui-chat-preview__message { max-height: 4.2em; -webkit-line-clamp: 3; }
+@media (min-width: 1750px) {
+  .settings-page--slot .settings-page__columns { grid-template-columns: minmax(640px, 1.4fr) minmax(0, 1fr) minmax(0, 1.1fr); grid-template-rows: minmax(0, 1fr); }
+  .settings-page--slot .settings-page__column { overflow-y: auto; }
+  .settings-page--slot .settings-page__column:first-child { grid-column: auto; }
+}
+@media (max-width: 1020px) {
+  .settings-page--slot .settings-page__columns { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto; }
+  .settings-page--slot .settings-page__column:first-child { grid-column: auto; }
+}
+@media (max-width: 768px) {
+  .settings-page--slot .page-header__save { width: auto; min-width: 0; }
+  .settings-page--slot .ui-save-bar__status { width: auto; min-width: 0; }
+}
+}

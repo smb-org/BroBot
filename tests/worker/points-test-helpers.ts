@@ -21,6 +21,12 @@ export interface PointsWorkerObject {
     result: unknown;
     balances: Record<string, number>;
   }>;
+  settlePointOperation(moduleId: string, operationId: string, kind: string, actor: { accountId: string; login: string }, stake: number,
+    params: unknown, options: { payloadIdentity: unknown; cooldown?: { key: string; seconds: number } }): Promise<{
+      replayed: boolean;
+      result: unknown;
+      balances: Record<string, number>;
+    }>;
   touchPointAccount(moduleId: string, accountId: string, login: string, startBonus: number): Promise<{
     welcomePending: boolean;
     startBonus: number | null;
