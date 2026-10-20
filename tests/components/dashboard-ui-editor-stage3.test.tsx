@@ -726,6 +726,44 @@ describe("template field", () => {
     expect(screen.getByRole("textbox", { name: "Reply" })).toHaveValue("Hi {viewers}");
   });
 
+  it("places the complete chat preview and character count below the textarea and before the help text", () => {
+    const longMessage = "A complete preview message that continues beyond the old two-line limit without being clipped or shortened.";
+    const { container } = renderUi(
+      <TemplateTextField
+        label="Reply"
+        hint="What the bot writes."
+        value={longMessage}
+        maxLength={500}
+        onChange={() => {}}
+        preview={(template) => template}
+        previewLabel="Preview"
+        previewSpeaker="BroBot"
+        messages={templateTextFieldMessages}
+      />,
+    );
+
+    const field = container.querySelector(".ui-template-text-field");
+    const textarea = screen.getByRole("textbox", { name: "Reply" });
+    const labelRow = container.querySelector(".ui-template-text-field__label-row");
+    const previewHeader = container.querySelector(".ui-template-text-field__preview-header");
+    const previewMessage = container.querySelector(".ui-template-text-field__preview-message");
+    const previewText = container.querySelector(".ui-template-text-field__preview-text");
+    const help = container.querySelector(".ui-template-text-field__helper-row");
+    if (field === null || labelRow === null || previewHeader === null || previewMessage === null || previewText === null || help === null) {
+      throw new Error("The template field is missing its label row, preview, or help text.");
+    }
+    expect(previewHeader).toHaveTextContent("Preview");
+    expect(previewHeader).toHaveTextContent(`${String(longMessage.length)} von 500 Zeichen`);
+    expect(previewMessage).toHaveTextContent(`BroBot: ${longMessage}`);
+    expect(previewText.textContent).toBe(longMessage);
+    expect(previewText).not.toHaveTextContent("…");
+    expect(previewMessage).not.toHaveClass("ui-chat-preview__message");
+    expect(labelRow.compareDocumentPosition(textarea) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(textarea.compareDocumentPosition(previewHeader) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(previewHeader.compareDocumentPosition(previewMessage) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(previewMessage.compareDocumentPosition(help) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+  });
+
   it("repairs an unknown variable name without dropping its arguments", () => {
     const variables: readonly TemplateTextFieldVariable[] = [
       { name: "currency.convert", description: "Converts an amount", sample: "11,50 €", parameters: "currency_pair", parameter: { value: "USD EUR" } },

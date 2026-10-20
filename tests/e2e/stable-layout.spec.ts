@@ -40,10 +40,13 @@ test("field error and warning slots keep their layout boxes stable", async ({ pa
   expect(afterWarning?.height).toBe(before[3]);
 
   const preview = page.locator(".ui-chat-preview");
-  const previewHeight = (await preview.boundingBox())?.height;
+  const previewMessage = preview.locator(".ui-chat-preview__message");
+  const previewMessageHeight = (await previewMessage.boundingBox())?.height;
   await page.getByRole("button", { name: "Toggle preview" }).click();
   await expect(preview.locator(".ui-chat-preview__text")).toHaveAttribute("title", /long preview/u);
-  expect((await preview.boundingBox())?.height).toBe(previewHeight);
+  expect((await previewMessage.boundingBox())?.height).toBeGreaterThan(previewMessageHeight ?? 0);
+  expect(await previewMessage.evaluate((element) => element.scrollHeight <= element.clientHeight)).toBe(true);
+  expect(await previewMessage.evaluate((element) => getComputedStyle(element).webkitLineClamp)).not.toBe("2");
   expect(await preview.locator(".ui-chat-preview__count").evaluate((element) => getComputedStyle(element).whiteSpace)).toBe("nowrap");
 
   await page.getByRole("button", { name: "Open dialog" }).click();

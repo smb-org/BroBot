@@ -168,13 +168,14 @@ const saveScreenshot = async (page: Page, info: TestInfo, name: string): Promise
 };
 
 const expectIncompleteResultsLayout = async (page: Page): Promise<void> => {
-  const warning = page.locator(".test-area__results-slot > .test-area__state-slot");
+  const warning = page.getByTestId("test-area-incomplete-result-hint");
   await expect(warning).toContainText("Ergebnis unvollständig");
   await expect(page.getByRole("button", { name: /!discord/u })).toBeVisible();
   const layout = await page.evaluate(() => {
     const slot = document.querySelector<HTMLElement>(".test-area__results-slot");
-    if (slot === null) return null;
-    const warningElement = slot.querySelector<HTMLElement>(".test-area__state-slot");
+    const header = document.querySelector<HTMLElement>(".test-area__results-head");
+    if (slot === null || header === null) return null;
+    const warningElement = header.querySelector<HTMLElement>("[data-testid='test-area-incomplete-result-hint']");
     const listElement = slot.querySelector<HTMLElement>(".test-area__result-scroll");
     if (warningElement === null || listElement === null) return null;
     const slotRect = slot.getBoundingClientRect();

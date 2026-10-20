@@ -11,7 +11,7 @@ export interface ChatPreviewProps {
   countLabel: ReactNode;
 }
 
-/** Fixed-height display of a two-line chat message with its preview label. */
+/** Display a chat message with its preview label and character count. */
 export function ChatPreview({ label, speaker, text, emptyText, countLabel }: ChatPreviewProps): ReactElement {
   const isEmpty = text.trim().length === 0 && emptyText !== undefined;
   const displayText = isEmpty ? emptyText : text;

@@ -156,9 +156,11 @@ describe("test area result and channel regressions", () => {
     renderPage();
     run();
 
-    const slot = await screen.findByTestId("test-area-results-slot");
+    const hint = await screen.findByTestId("test-area-incomplete-result-hint");
+    const slot = screen.getByTestId("test-area-results-slot");
+    await waitFor(() => expect(hint).toHaveTextContent("Ergebnis unvollständig"));
+    expect(hint).toHaveAttribute("role", "status");
     expect(slot).toHaveAttribute("data-state", "incomplete");
-    expect(slot).toHaveTextContent("Ergebnis unvollständig");
     expect(slot).not.toHaveTextContent("Keine Reaktion gefunden");
   });
 
@@ -172,6 +174,7 @@ describe("test area result and channel regressions", () => {
     run();
 
     expect(await screen.findByTestId("test-area-results-slot")).toHaveAttribute("data-state", "incomplete");
+    expect(await screen.findByTestId("test-area-incomplete-result-hint")).toHaveTextContent("Ergebnis unvollständig");
     expect(await screen.findByRole("button", { name: /!discord/u })).toBeInTheDocument();
   });
 

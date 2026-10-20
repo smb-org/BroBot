@@ -189,34 +189,61 @@ test("slot quote states stay fixed, lock unsafe saves, and persist explicit edit
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
-test("keeps shared slot chat previews on whole lines at desktop sizes", async ({ page }) => {
+test("shows complete full-width slot previews below their textareas at desktop sizes", async ({ page }) => {
   await installSlotPage(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`/channels/${CHANNEL_ID}/modules/emote_slots`);
 
-  const jackpotPreview = page.locator(".slot-texts-field .ui-chat-preview").nth(3);
-  const jackpotPreviewMessage = jackpotPreview.locator(".ui-chat-preview__message");
+  const fields = page.locator(".slot-texts-field .ui-template-text-field");
+  const jackpotField = fields.nth(3);
+  const jackpotPreview = jackpotField.locator(".ui-template-text-field__preview");
+  const jackpotPreviewText = jackpotPreview.locator(".ui-template-text-field__preview-text");
   const jackpotText = page.getByRole("textbox", { name: SLOT_COPY.jackpotText, exact: true });
   await expect(jackpotPreview).toBeVisible();
-  const heightBeforeEdit = await jackpotPreviewMessage.evaluate((element) => element.getBoundingClientRect().height);
-  await jackpotText.fill("{slot.symbols}  {slot.net} · Stand {slot.balance} · Jackpot {slot.jackpot} Zusatztext für eine stabile Vorschau");
-  await expect(jackpotPreview.locator(".ui-chat-preview__text")).toContainText("Zusatztext für eine stabile Vorschau");
-  const heightAfterEdit = await jackpotPreviewMessage.evaluate((element) => element.getBoundingClientRect().height);
-  expect(heightAfterEdit).toBe(heightBeforeEdit);
+  const completeMessage = "{slot.symbols}  {slot.net} · Stand {slot.balance} · Jackpot {slot.jackpot} Zusatztext für eine vollständige und ungekürzte Vorschau im Chat";
+  await jackpotText.fill(completeMessage);
+  await expect(jackpotPreviewText).toContainText("Zusatztext für eine vollständige und ungekürzte Vorschau im Chat");
+  await expect(jackpotPreviewText).not.toContainText("…");
 
   for (const viewport of [
     { width: 1440, height: 900 },
     { width: 1920, height: 1080 },
   ]) {
     await page.setViewportSize(viewport);
-    const metrics = await page.locator(".slot-texts-field .ui-chat-preview__message").evaluateAll((messages) => messages.map((message) => {
-      const lineHeight = Number.parseFloat(getComputedStyle(message).lineHeight);
-      return { height: message.getBoundingClientRect().height, lineHeight };
+    const metrics = await fields.evaluateAll((templateFields) => templateFields.map((field) => {
+      const textarea = field.querySelector("textarea")?.getBoundingClientRect();
+      const preview = field.querySelector<HTMLElement>(".ui-template-text-field__preview");
+      const message = field.querySelector<HTMLElement>(".ui-template-text-field__preview-message");
+      const previewRect = preview?.getBoundingClientRect();
+      const messageRect = message?.getBoundingClientRect();
+      const style = message === null ? null : getComputedStyle(message);
+      return textarea === undefined || previewRect === undefined || messageRect === undefined || style === null ? null : {
+        textareaWidth: textarea.width,
+        textareaLeft: textarea.left,
+        textareaBottom: textarea.bottom,
+        previewWidth: previewRect.width,
+        previewLeft: previewRect.left,
+        previewTop: previewRect.top,
+        messageHeight: messageRect.height,
+        messageClientHeight: message?.clientHeight ?? 0,
+        messageScrollHeight: message?.scrollHeight ?? 0,
+        lineClamp: style.webkitLineClamp,
+        maxHeight: style.maxHeight,
+        overflow: style.overflow,
+        textOverflow: style.textOverflow,
+      };
     }));
     expect(metrics).toHaveLength(4);
     for (const metric of metrics) {
-      expect(metric.lineHeight).toBeGreaterThan(0);
-      expect(metric.height / metric.lineHeight).toBeCloseTo(Math.round(metric.height / metric.lineHeight), 5);
+      expect(metric).not.toBeNull();
+      expect(Math.abs((metric?.previewWidth ?? 0) - (metric?.textareaWidth ?? 0))).toBeLessThanOrEqual(1);
+      expect(Math.abs((metric?.previewLeft ?? 0) - (metric?.textareaLeft ?? 0))).toBeLessThanOrEqual(1);
+      expect(metric?.previewTop).toBeGreaterThanOrEqual((metric?.textareaBottom ?? 0) - 1);
+      expect(metric?.messageScrollHeight).toBeLessThanOrEqual((metric?.messageClientHeight ?? 0) + 1);
+      expect(metric?.lineClamp).not.toBe("3");
+      expect(metric?.maxHeight).toBe("none");
+      expect(metric?.overflow).toBe("visible");
+      expect(metric?.textOverflow).not.toBe("ellipsis");
     }
   }
 });

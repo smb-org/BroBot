@@ -124,7 +124,6 @@ export interface SettingsEditorProps<Settings extends object> {
   variables?: Readonly<Partial<Record<keyof Settings & string, readonly TemplateTextFieldVariable[]>>>;
   templateMetadata?: Readonly<Partial<Record<keyof Settings & string, readonly (TemplateTextFieldVariable & { maxLength: number; fallbackWhenAbsent?: number })[]>>>;
   templateMessages: TemplateTextFieldMessages;
-  messagePreviewLayout?: "stacked" | "side-by-side";
   readOnly?: boolean;
   readOnlySectionOnly?: boolean;
   disabled?: boolean;
@@ -147,7 +146,6 @@ export function SettingsEditor<Settings extends object>({
   variables,
   templateMetadata,
   templateMessages,
-  messagePreviewLayout = "stacked",
   readOnly = false,
   readOnlySectionOnly = false,
   disabled = false,
@@ -296,12 +294,12 @@ export function SettingsEditor<Settings extends object>({
       const metadata = templateMetadata?.[field.key];
       const fieldVariables = variables?.[field.key] ?? metadata?.map(({ name, description, sample }) => ({ name, description, sample }));
       return (
-        <InspectorFieldRow key={field.key} label={copy.label} help={copy.hint}>
+        <InspectorFieldRow key={field.key} label={copy.label} help={copy.hint} className="inspector-field-row--stacked inspector-field-row--template">
           <TemplateTextField
             id={id}
             name={field.key}
             label={copy.label}
-            hint={field.optional ? copy.optionalHint ?? "" : ""}
+            hint={copy.hint}
             {...(error === undefined ? {} : { error })}
             value={typeof fieldValue === "string" ? fieldValue : ""}
             disabled={disabled}
@@ -337,7 +335,7 @@ export function SettingsEditor<Settings extends object>({
           id={id}
           name={field.key}
           label={copy.label}
-          hint={copy.optionalHint ?? ""}
+          hint={copy.hint}
           {...(error === undefined ? {} : { error })}
           value={template}
           disabled={disabled}
@@ -346,7 +344,6 @@ export function SettingsEditor<Settings extends object>({
           {...(metadata === undefined ? {} : { worstCaseLength: worstCaseTemplateLength(template, metadata) })}
           {...(fieldVariables === undefined ? {} : { variables: fieldVariables })}
           preview={field.preview}
-          previewLayout={messagePreviewLayout}
           required={false}
           onIssuesChange={(issues) => { onIssuesChange?.(field.key, issues); }}
           {...(copy.previewLabel === undefined ? {} : { previewLabel: copy.previewLabel })}
