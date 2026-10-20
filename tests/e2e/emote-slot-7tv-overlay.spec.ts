@@ -218,6 +218,35 @@ test("revision remount resumes reel and jackpot animations from elapsed presenta
   expect.soft(Number(activeTimesAfterRemount.highlight)).toBeGreaterThanOrEqual(Number(activeTimesBeforeRemount.highlight));
 });
 
+test("unrelated rerenders do not advance a mounted spin's reel or jackpot animation (protects=reel and highlight animation progress stays continuous when unrelated component state rerenders during a spin; fails_when=a rerender jumps either animation ahead; no_claim=animation smoothness on every OBS device)", async ({ page }) => {
+  await page.goto("/tests/e2e/emote-slot-overlay-fixture.html");
+  const overlay = page.getByTestId("emote-slot-overlay");
+  await page.getByRole("button", { name: "Trigger progress spin" }).click();
+  await expect(overlay).toHaveAttribute("data-spin-id", "fixture-spin-progress");
+  await expect(overlay).toHaveAttribute("data-reel-animation-running", "true");
+  await expect(overlay).toHaveAttribute("data-jackpot-animation-running", "true");
+  await page.waitForTimeout(420);
+
+  const readProgress = (): Promise<{ reel: number; highlight: number }> => overlay.evaluate((node) => {
+    const reel = node.querySelector<HTMLElement>("[data-reel-index='0']");
+    const highlight = node.querySelector<HTMLElement>(".emote-slot-overlay__jackpot .emote-slot-overlay__main");
+    return {
+      reel: reel?.getAnimations().find((animation) => animation.playState === "running")?.effect?.getComputedTiming().progress ?? -1,
+      highlight: highlight?.getAnimations().find((animation) => animation.playState === "running")?.effect?.getComputedTiming().progress ?? -1,
+    };
+  });
+  const beforeRerender = await readProgress();
+  expect(beforeRerender.reel).toBeGreaterThan(0.2);
+  expect(beforeRerender.reel).toBeLessThan(0.9);
+  expect(beforeRerender.highlight).toBeGreaterThan(0.05);
+  expect(beforeRerender.highlight).toBeLessThan(0.3);
+
+  await page.getByRole("button", { name: "Rerender without changing spin" }).click();
+  const afterRerender = await readProgress();
+  expect(afterRerender.reel - beforeRerender.reel).toBeLessThan(0.15);
+  expect(afterRerender.highlight - beforeRerender.highlight).toBeLessThan(0.06);
+});
+
 test("settled reel and jackpot highlight stay static after a revision remount (protects=elapsed reel and jackpot animations remain settled while the result is still visible; fails_when=revision remount starts a reel or jackpot highlight animation again; no_claim=exact compositor timing on every Chromium platform)", async ({ page }) => {
   await page.goto("/tests/e2e/emote-slot-overlay-fixture.html");
   const overlay = page.getByTestId("emote-slot-overlay");

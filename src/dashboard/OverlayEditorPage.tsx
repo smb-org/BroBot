@@ -45,6 +45,20 @@ import { queryKeys } from "./data/keys";
 import { Button, CodeField, ColorField, ConfirmDialog, Field, Icon, LoadState, UnitInput, ToolPage, Select, StepDialog, notify, type IconName, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
 import "./overlay-editor.css";
 
+const installPreviewStylesheet = (
+  frameDocument: Document,
+  attribute: "data-brobot-overlay-tally-css" | "data-brobot-overlay-slot-css",
+  css: string,
+): void => {
+  let style = frameDocument.head.querySelector<HTMLStyleElement>(`style[${attribute}]`);
+  if (style === null) {
+    style = frameDocument.createElement("style");
+    style.setAttribute(attribute, "");
+    frameDocument.head.appendChild(style);
+  }
+  style.textContent = css;
+};
+
 interface OverlayEditorPageProperties {
   channelId: string;
   overlayId: string;
@@ -688,15 +702,13 @@ function OverlayEditorWorkspace({
     root.setAttribute("role", "application");
     root.setAttribute("aria-label", labels.editorPreviewCanvas);
     root.tabIndex = 0;
-    void import("../overlay/tally/overlay-tally.css?inline").then(({ default: overlayTallyCss }) => {
+    void Promise.all([
+      import("../overlay/tally/overlay-tally.css?inline"),
+      import("../modules/emote_slots/overlay/slot.css?inline"),
+    ]).then(([{ default: overlayTallyCss }, { default: slotCss }]) => {
       if (!frame.isConnected || frame.contentDocument !== frameDocument) return;
-      let overlayTallyStyle = frameDocument.head.querySelector<HTMLStyleElement>("style[data-brobot-overlay-tally-css]");
-      if (overlayTallyStyle === null) {
-        overlayTallyStyle = frameDocument.createElement("style");
-        overlayTallyStyle.dataset.brobotOverlayTallyCss = "";
-        frameDocument.head.appendChild(overlayTallyStyle);
-      }
-      overlayTallyStyle.textContent = overlayTallyCss;
+      installPreviewStylesheet(frameDocument, "data-brobot-overlay-tally-css", overlayTallyCss);
+      installPreviewStylesheet(frameDocument, "data-brobot-overlay-slot-css", slotCss);
       canvasRef.current = root;
       previewFrameRootRef.current = root;
       setPreviewFrameRoot(root);

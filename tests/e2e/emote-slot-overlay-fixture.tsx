@@ -38,12 +38,25 @@ const secondSpin: JsonObject = {
   jackpotHit: true,
 };
 
+const progressSpin: JsonObject = {
+  ...secondSpin,
+  spinId: "fixture-spin-progress",
+  symbols: [
+    { source: "emoji", code: "🍒" },
+    { source: "emoji", code: "🔔" },
+    { source: "emoji", code: "🍒" },
+  ],
+};
+
 export const Fixture = () => {
   const [state, setState] = useState(firstSpin);
   const [revision, setRevision] = useState(0);
-  return <main>
+  const [unrelatedRevision, setUnrelatedRevision] = useState(0);
+  return <main data-unrelated-revision={unrelatedRevision}>
     <div style={{ position: "absolute", left: 32, bottom: 32 }}><SlotOverlay key={revision} config={{}} state={state} now={fixtureNow} language="en" elementId="fictional-slot-overlay-element" /></div>
     <button type="button" onClick={() => { setState(secondSpin); }}>Trigger next spin</button>
+    <button type="button" onClick={() => { setState(progressSpin); }}>Trigger progress spin</button>
+    <button type="button" onClick={() => { setUnrelatedRevision((current) => current + 1); }}>Rerender without changing spin</button>
     <button type="button" onClick={() => { setRevision((current) => current + 1); }}>Remount overlay revision</button>
   </main>;
 };

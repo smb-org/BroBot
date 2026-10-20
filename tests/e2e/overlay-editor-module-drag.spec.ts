@@ -38,7 +38,7 @@ const box = async (locator: Locator): Promise<{ x: number; y: number; width: num
   return { x: round(rect.x), y: round(rect.y), width: round(rect.width), height: round(rect.height) };
 });
 
-test("module overlay elements have visible previews and drag by their measured bounds", async ({ page }) => {
+test("module overlay previews retain their styling and drag by measured bounds (protects=the real editor preview applies module layout styles before measuring and dragging slot elements; fails_when=the slot preview collapses or loses its opaque background; no_claim=physical canvas display at every browser zoom)", async ({ page }) => {
   await page.route("**/api/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === "/api/channels") {
@@ -68,6 +68,7 @@ test("module overlay elements have visible previews and drag by their measured b
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ modules: [
         { id: "ads", enabled: true, settings: "{}" },
         { id: "chat_voting", enabled: true, settings: "{}" },
+        { id: "emote_slots", enabled: true, settings: "{}" },
         { id: "text_library", enabled: true, settings: "{}" },
       ] }) });
       return;
@@ -118,4 +119,11 @@ test("module overlay elements have visible previews and drag by their measured b
   await expect(textBlock).toContainText("Choose a text block");
   await expect.poll(async () => (await textBlock.boundingBox())?.height ?? 0).toBeGreaterThan(0);
   await dragElement(page, textBlock);
+
+  await addElement.click();
+  await page.getByRole("option", { name: /^Slot\b/u }).click();
+  const slot = frame.locator('[data-kind="emote_slots.slot"] .emote-slot-overlay');
+  await expect(slot).toBeVisible();
+  await expect.poll(() => slot.evaluate((element) => ({ width: element.getBoundingClientRect().width, height: element.getBoundingClientRect().height }))).toEqual({ width: 640, height: 160 });
+  await expect.poll(() => slot.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgb(9, 12, 16)");
 });

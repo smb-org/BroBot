@@ -136,6 +136,8 @@ const SlotOverlay = ({ config, state, elementId = "standalone-slot" }: ModuleOve
     : getPresentation(elementId, spinId, (reducedMotion ? 0 : SLOT_REEL_ANIMATION_END_MS) + SLOT_RESULT_VISIBLE_MS);
   const presentation = presentationSnapshot?.presentation ?? null;
   const presentationElapsed = presentationSnapshot?.elapsed ?? 0;
+  const [animationOffset, setAnimationOffset] = useState(() => ({ spinId, elapsed: presentationElapsed }));
+  if (animationOffset.spinId !== spinId) setAnimationOffset({ spinId, elapsed: presentationElapsed });
   const reelAnimationRunning = !reducedMotion && presentationElapsed < SLOT_REEL_ANIMATION_END_MS;
   const jackpotHighlightRunning = !reducedMotion && validState?.jackpotHit === true && presentationElapsed < SLOT_JACKPOT_HIGHLIGHT_END_MS;
 
@@ -158,7 +160,7 @@ const SlotOverlay = ({ config, state, elementId = "standalone-slot" }: ModuleOve
     "--content-game-reel-secondary": overlayConfig.secondaryColor,
     "--content-game-reel-highlight": overlayConfig.highlightColor,
     "--content-game-reel-border": overlayConfig.borderColor,
-    "--slot-presentation-elapsed": `${String(presentationElapsed)}ms`,
+    "--slot-presentation-elapsed": `${String(animationOffset.elapsed)}ms`,
   } as CSSProperties;
 
   return <section className={`emote-slot-overlay${validState.jackpotHit ? " emote-slot-overlay--jackpot" : ""}`}
