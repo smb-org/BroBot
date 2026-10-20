@@ -3778,7 +3778,9 @@ export class ChannelObject extends DurableObject<Env> {
         if (hash === undefined) throw new Error("refund_retry_required");
         return hash;
       }, now, lastDisabledRevision, (roundId) => {
-        this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
+        if (pointRoundRow(this.ctx.storage.sql, roundId)?.prepare_state === "pending") {
+          this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), Date.now());
+        } else this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
       });
       if (!closed && cancellationRevision !== null) this.ensurePointCancellationNoticeAlarmsSync();
       return applied;
@@ -4104,7 +4106,6 @@ export class ChannelObject extends DurableObject<Env> {
       result: attempt.result,
       resolvedAt: attempt.round.resolved_at ?? new Date().toISOString(),
     };
-    await module.onPointRoundResolved?.(context, result);
     const formatted = await formatter(context, result);
     const rowIsCurrent = (): boolean => {
       const current = pointRoundRow(this.ctx.storage.sql, roundId);

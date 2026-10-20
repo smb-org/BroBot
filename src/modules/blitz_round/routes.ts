@@ -5,7 +5,7 @@ import type { ModuleRouteEnvironment } from "../contract";
 import { BLITZ_QUESTION_MAXIMUM_COUNT, BLITZ_ROUND_MODULE_ID } from "./contracts";
 import { validateBlitzQuestion } from "./domain/questions";
 import { createBlitzQuestionRepository } from "./adapters/d1";
-import { loadBlitzModuleActivationRevision, loadEnabledBlitzSettings, openBlitzRound } from "./service";
+import { loadEnabledBlitzSettings, openBlitzRound } from "./service";
 
 type BlitzRouteContext = Context<ModuleRouteEnvironment>;
 
@@ -135,15 +135,12 @@ blitzRoundRoutes.post("/start", async (context) => {
   const channelId = channelIdFrom(context);
   const settings = await loadEnabledBlitzSettings(context.env.DB, channelId);
   if (settings === null) return context.json({ error: "module_disabled" }, 409);
-  const activationRevision = await loadBlitzModuleActivationRevision(context.env.DB, channelId);
-  if (activationRevision === null) return context.json({ error: "module_disabled" }, 409);
   const language = (await context.env.DB.prepare("SELECT language FROM channels WHERE channel_id = ?")
     .bind(channelId).first<{ language: "de" | "en" }>())?.language ?? "de";
   try {
     const opened = await openBlitzRound({
       channelId,
       startedBy: context.get("actor").userId,
-      moduleActivationRevision: activationRevision,
       settings,
       language,
       points: context.get("points")(channelId),

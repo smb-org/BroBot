@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
+import { runDashboardNavigationGuards } from "../../src/dashboard/ui/navigation-guard";
 import BlitzRoundPanel from "../../src/modules/blitz_round/panel";
 import { BLITZ_QUESTION_PAGE_SIZE, type BlitzQuestion, type BlitzRoundSettings } from "../../src/modules/blitz_round/contracts";
 import { jsonResponse } from "../unit/fixtures";
@@ -39,9 +40,9 @@ const parseUrl = (input: RequestInfo | URL): URL => input instanceof Request
   ? new URL(input.url)
   : input instanceof URL ? input : new URL(input, "https://brobot.example");
 
-const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Promise<void>, stalePatch = false, settingsConflict = false, patchDeleted = false, legacySettings = false) => {
+const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Promise<void>, stalePatch = false, settingsConflict = false, patchDeleted = false) => {
   let questions = [...initialQuestions];
-  let settings = { ...initialSettings, ...(legacySettings ? { autoStart: true, autoStartIntervalMinutes: 30 } : {}) };
+  let settings = { ...initialSettings };
   let settingsRevision = 1;
   let conflictPending = settingsConflict;
   const submittedSettingsRevisions: number[] = [];
@@ -139,6 +140,21 @@ describe("Blitz Round collection panel", () => {
     expect(document.querySelector(".blitz-panel__answers")).toBe(slot);
   });
 
+  it("shows a field error for an accepted answer that normalizes to empty [protects=punctuation-only quiz answers remain in the accepted-answer field with visible validation feedback; fails_when=the answer is committed without an error or its rejection is shown on another field; no_claim=does not test matching after a round starts]", async () => {
+    installPanelFetch([sampleQuestion]);
+    mountPanel();
+    await screen.findByRole("textbox", { name: "Word" });
+    fireEvent.click(screen.getByRole("button", { name: "Quiz" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Question" }), { target: { value: "Which star?" } });
+    const answers = screen.getByRole("textbox", { name: "Accepted answers" });
+    fireEvent.change(answers, { target: { value: "?" } });
+    fireEvent.keyDown(answers, { key: "Enter" });
+
+    expect(answers).toHaveValue("?");
+    expect(within(screen.getByRole("group", { name: "Accepted answers" })).getByRole("alert"))
+      .toHaveTextContent("Each answer must contain 1 to 60 characters and be unique.");
+  });
+
   it("keeps question edits local until explicit save [protects=type, prompt, answers and enabled state save together; fails_when=edits are posted before Save or an invalid draft is accepted; no_claim=does not test authorization guards on the route]", async () => {
     const api = installPanelFetch([sampleQuestion]);
     mountPanel();
@@ -175,6 +191,58 @@ describe("Blitz Round collection panel", () => {
 
     await waitFor(() => expect(api.getQuestions().some((entry) => entry.prompt === "Which star is closest?")).toBe(true));
     expect(await screen.findByText("Round settings", { exact: true })).toBeInTheDocument();
+  });
+
+  it("guards dashboard navigation while a question draft is unsaved [protects=dashboard navigation waits for question draft confirmation and the editor unregisters its guard on unmount; fails_when=the dashboard proceeds without confirmation or a removed editor still intercepts navigation; no_claim=the route transition is exercised through the production navigation guard registry]", async () => {
+    installPanelFetch([sampleQuestion]);
+    const view = mountPanel();
+    await screen.findByRole("textbox", { name: "Word" });
+    fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "STONE" } });
+
+    let navigations = 0;
+    const navigate = (): void => { navigations += 1; };
+    act(() => { runDashboardNavigationGuards(navigate, () => undefined); });
+    expect(navigations).toBe(0);
+    const confirmation = await screen.findByRole("dialog", { name: "Save changes?" });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Keep editing" }));
+    expect(navigations).toBe(0);
+    expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("STONE");
+
+    act(() => { runDashboardNavigationGuards(navigate, () => undefined); });
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Save changes?" })).getByRole("button", { name: "Discard" }));
+    expect(navigations).toBe(1);
+    expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("CLOUD");
+
+    view.unmount();
+    act(() => { runDashboardNavigationGuards(navigate, () => undefined); });
+    expect(navigations).toBe(2);
+  });
+
+  it("guards dashboard navigation while settings are unsaved [protects=dashboard navigation waits for settings draft confirmation and the editor unregisters its guard on unmount; fails_when=the dashboard proceeds without confirmation or a removed settings editor still intercepts navigation; no_claim=the route transition is exercised through the production navigation guard registry]", async () => {
+    installPanelFetch([sampleQuestion]);
+    const view = mountPanel();
+    await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const prize = await screen.findByRole("spinbutton", { name: "Prize" });
+    fireEvent.change(prize, { target: { value: "75" } });
+
+    let navigations = 0;
+    const navigate = (): void => { navigations += 1; };
+    act(() => { runDashboardNavigationGuards(navigate, () => undefined); });
+    expect(navigations).toBe(0);
+    const confirmation = await screen.findByRole("dialog", { name: "Save changes?" });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Keep editing" }));
+    expect(navigations).toBe(0);
+    expect(screen.getByRole("spinbutton", { name: "Prize" })).toHaveValue(75);
+
+    act(() => { runDashboardNavigationGuards(navigate, () => undefined); });
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Save changes?" })).getByRole("button", { name: "Discard" }));
+    expect(navigations).toBe(1);
+    expect(screen.getByRole("spinbutton", { name: "Prize" })).toHaveValue(50);
+
+    view.unmount();
+    act(() => { runDashboardNavigationGuards(navigate, () => undefined); });
+    expect(navigations).toBe(2);
   });
 
   it("keeps a requested existing question selected after saving another question [protects=save-and-switch finishes on the requested existing destination; fails_when=the saved question overrides the pending destination; no_claim=HTTP is mocked and does not verify production authentication]", async () => {
@@ -327,23 +395,6 @@ describe("Blitz Round collection panel", () => {
     await waitFor(() => expect(api.getSettings().prize).toBe(90));
     expect(api.submittedSettingsRevisions).toEqual([1, 2]);
     expect(api.getSettingsRevision()).toBe(3);
-  });
-
-  it("loads saved settings containing retired automatic-start keys [protects=stored settings with removed keys still load and save using the current settings shape; fails_when=legacy keys make settings invalid or leak into a later save; no_claim=the stored JSON and PATCH response are simulated by the panel HTTP stub]", async () => {
-    const api = installPanelFetch([sampleQuestion], undefined, false, false, false, true);
-    mountPanel();
-    await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-
-    const prize = await screen.findByRole("spinbutton", { name: "Prize" });
-    expect(prize).toHaveValue(50);
-    expect(screen.queryByRole("switch", { name: "Start automatically" })).not.toBeInTheDocument();
-    fireEvent.change(prize, { target: { value: "70" } });
-    fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
-
-    await waitFor(() => expect(api.getSettings().prize).toBe(70));
-    expect(api.getSettings()).not.toHaveProperty("autoStart");
-    expect(api.getSettings()).not.toHaveProperty("autoStartIntervalMinutes");
   });
 
   it("offers save as new when the edited question was deleted elsewhere [protects=deleted question conflicts retain the draft and expose fixed-place save-as-new and discard choices; fails_when=PATCH deletion shows only a generic error or loses the draft; no_claim=deletion and recreation are simulated by an in-memory HTTP stub]", async () => {

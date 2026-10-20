@@ -270,7 +270,7 @@ describe("blitz answers in the channel Durable Object", () => {
     expect(operation.count).toBe(0);
   });
 
-  it("runs the actual module from pool selection through both alarm-delivered lines [protects=round opening stores its activation revision, post-open question writes reconcile, and answer and result delivery complete; fails_when=the round loses its activation generation, templates stay unrendered, or settlement fails; no_claim=only the external sendChat transport is mocked]", async () => {
+  it("runs the actual module from pool selection through both alarm-delivered lines [protects=post-open question writes reconcile and answer and result delivery complete; fails_when=templates stay unrendered or settlement fails; no_claim=only the external sendChat transport is mocked]", async () => {
     const channelId = `blitz-flow-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const worker = env as unknown as { DB: D1Database; CHANNEL: Env["CHANNEL"] };
@@ -288,10 +288,8 @@ describe("blitz answers in the channel Durable Object", () => {
     });
     const points = modulePoints(worker.CHANNEL, channelId, "blitz_round");
     vi.spyOn(repository, "markUsed").mockRejectedValueOnce(new Error("fictional question write outage"));
-    const opened = await openBlitzRound({ channelId, repository, points, settings, language: "en", moduleActivationRevision: 7 } as unknown as Parameters<typeof openBlitzRound>[0]);
-    expect(Reflect.get(opened.data, "moduleActivationRevision")).toBe(7);
+    const opened = await openBlitzRound({ channelId, repository, points, settings, language: "en" });
     await expect(points.rounds.active()).resolves.toMatchObject({ state: "announcing", deadlineAt: null });
-    await expect(points.rounds.active()).resolves.toMatchObject({ data: { moduleActivationRevision: 7 } });
     await forcePointAlarm(object, opened.roundId);
     await expect(points.rounds.active()).resolves.toMatchObject({ state: "open", deadlineAt: Date.now() + 60_000 });
     expect(sendChat.mock.calls[0]?.[0]).toBe("Blitz round! Quiz: Which star? · First correct answers share 50. (60 s)");
@@ -387,7 +385,7 @@ describe("blitz answers in the channel Durable Object", () => {
     expect(sendChat).not.toHaveBeenCalled();
   });
 
-  it("reconciles accepted start metadata even when disabled before announcement [protects=cancel-before-announce retains the question-use and audit intent across restart; fails_when=cancellation drops accepted start metadata or sends a disabled announcement; no_claim=does not exercise the dashboard disable HTTP endpoint]", async () => {
+  it("preserves preparation reconciliation through a rapid disable and re-enable [protects=a pending preparation alarm survives re-enable cancellation and reconciles accepted start metadata after restart; fails_when=the re-enable cancellation clears the pending alarm before the question-use write and start audit are reconciled; no_claim=directly drives durable gate revisions without exercising the dashboard toggle endpoint]", async () => {
     const channelId = `blitz-cancel-prepare-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const worker = env as unknown as { DB: D1Database; CHANNEL: Env["CHANNEL"] };
@@ -399,11 +397,21 @@ describe("blitz answers in the channel Durable Object", () => {
     vi.spyOn(repository, "markUsed").mockRejectedValueOnce(new Error("fictional question write outage"));
     const object = blitzObject(pointObject(channelId));
     const points = modulePoints(worker.CHANNEL, channelId, "blitz_round");
-    const opened = await openBlitzRound({ channelId, repository, points, settings, language: "en", moduleActivationRevision: 1 });
+    const opened = await openBlitzRound({ channelId, repository, points, settings, language: "en" });
     await worker.DB.prepare("UPDATE channel_modules SET enabled = 0, revision = 2 WHERE channel_id = ? AND module_id = 'blitz_round'")
       .bind(channelId).run();
     await points.rounds.setGate(true, 2);
-    await points.rounds.cancelOpenRounds(2);
+    await worker.DB.prepare("UPDATE channel_modules SET enabled = 1, revision = 3 WHERE channel_id = ? AND module_id = 'blitz_round'")
+      .bind(channelId).run();
+    await points.rounds.setGate(false, 3, 2);
+    const pending = await runPointObject(object, (_target, state) => ({
+      round: state.storage.sql.exec<{ state: string; prepare_state: string }>(
+        "SELECT state, prepare_state FROM game_rounds WHERE round_id = ?", opened.roundId,
+      ).one(),
+      alarm: state.storage.kv.get<Record<string, { deadline: number }>>("channel:alarm_schedule")?.[`points:round:${opened.roundId}`] ?? null,
+    }));
+    expect(pending.round).toEqual({ state: "cancelled", prepare_state: "pending" });
+    expect(pending.alarm).not.toBeNull();
     await evictDurableObject(object as unknown as DurableObjectStub);
     const sendChat = vi.fn<ModuleAlarmContext["sendChat"]>(() => Promise.resolve({ sent: true, retryable: false, reason: null, delivery: "delivered" }));
     await runPointObject(object, async (target, state) => {

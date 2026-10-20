@@ -27,4 +27,9 @@ describe("blitz question validation", () => {
     });
     expect(validateBlitzQuestion({ kind: "quiz", prompt: "Question?", answers: ["Cloud", "cloud"], enabled: true })).toMatchObject({ ok: false, code: "answer_invalid" });
   });
+
+  it("rejects accepted answers that normalize to an empty value [protects=every accepted quiz answer can match a nonempty normalized chat message; fails_when=a punctuation-only answer passes validation even though answer matching always rejects it; no_claim=does not test the persisted question route]", () => {
+    expect(validateBlitzQuestion({ kind: "quiz", prompt: "Which star?", answers: ["?"], enabled: true }))
+      .toEqual({ ok: false, code: "answer_invalid" });
+  });
 });

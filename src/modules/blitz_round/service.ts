@@ -22,7 +22,6 @@ export const loadEnabledBlitzSettings = async (db: D1Database, channelId: string
 export interface OpenBlitzRoundInput {
   channelId: string;
   startedBy?: string;
-  moduleActivationRevision: number;
   settings: BlitzRoundSettings;
   language: ModuleLanguage;
   points: ModulePointsAccess;
@@ -35,15 +34,6 @@ export interface OpenedBlitzRound {
   data: BlitzRoundData;
 }
 
-export const loadBlitzModuleActivationRevision = async (db: D1Database, channelId: string): Promise<number | null> => {
-  const row = await db.prepare(
-    "SELECT last_disabled_revision AS activation_generation FROM channel_modules WHERE channel_id = ? AND module_id = ? AND enabled = 1",
-  ).bind(channelId, BLITZ_ROUND_MODULE_ID).first<{ activation_generation: number | null }>();
-  if (row === null) return null;
-  if (row.activation_generation === null) return 0;
-  return Number.isSafeInteger(row.activation_generation) ? row.activation_generation : null;
-};
-
 export const openBlitzRound = async (input: OpenBlitzRoundInput): Promise<OpenedBlitzRound> => {
   const question = await input.repository.pick(input.channelId);
   if (question === null) throw new Error("question_pool_empty");
@@ -55,7 +45,6 @@ export const openBlitzRound = async (input: OpenBlitzRoundInput): Promise<Opened
     questionId: question.id,
     openedAt,
     ...(input.startedBy === undefined ? {} : { startedBy: input.startedBy }),
-    moduleActivationRevision: input.moduleActivationRevision,
     kind: question.kind,
     prompt,
     answer,

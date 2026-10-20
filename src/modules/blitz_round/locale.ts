@@ -67,7 +67,6 @@ export interface BlitzTexts {
   solvedText: string;
   timeoutText: string;
   roundTextHint: string;
-  settingsSaved: string;
   settingsError: string;
   settingsConflict: string;
   reloadSettings: string;
@@ -174,7 +173,6 @@ const catalog: LocaleCatalog<BlitzTexts> = {
     solvedText: "Auflösung bei richtigen Antworten",
     timeoutText: "Auflösung ohne Gewinner",
     roundTextHint: "Variablen: {blitz.type}, {blitz.prompt}, {blitz.answer}, {blitz.prize}, {blitz.seconds}, {blitz.winners}, {blitz.share}",
-    settingsSaved: "Einstellungen gespeichert.",
     settingsError: "Die Einstellungen konnten nicht gespeichert werden.",
     settingsConflict: "Die Rundeneinstellungen wurden anderswo geändert. Lade den gespeicherten Stand, bevor du weiterarbeitest.",
     reloadSettings: "Serverstand laden",
@@ -284,7 +282,6 @@ const catalog: LocaleCatalog<BlitzTexts> = {
     solvedText: "Result when viewers answer correctly",
     timeoutText: "Result when nobody wins",
     roundTextHint: "Variables: {blitz.type}, {blitz.prompt}, {blitz.answer}, {blitz.prize}, {blitz.seconds}, {blitz.winners}, {blitz.share}",
-    settingsSaved: "Settings saved.",
     settingsError: "The settings could not be saved.",
     settingsConflict: "Round settings changed elsewhere. Load the saved version before continuing.",
     reloadSettings: "Load server settings",

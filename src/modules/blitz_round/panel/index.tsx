@@ -3,10 +3,11 @@ import { useCallback, useEffect, useRef, useState, type ReactElement } from "rea
 import { moduleQueryKey, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import {
   Badge, Button, ChipsInput, CollectionPage, ConfirmDialog, Field, Icon, PageHeader,
-  SegmentChoice, SwitchSection, TemplateTextField, UnitInput, useDraft, useDraftGuard,
+  registerDashboardNavigationGuard, SegmentChoice, SwitchSection, TemplateTextField, UnitInput, useDraft, useDraftGuard,
 } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import { validateBlitzQuestion } from "../domain/questions";
+import { normalizeBlitzAnswer } from "../domain/round";
 import { blitzTexts } from "../locale";
 import { BLITZ_QUESTION_PAGE_SIZE, blitzRoundSettingsSchema, type BlitzQuestion, type BlitzQuestionInput, type BlitzQuestionKind, type BlitzQuestionPage, type BlitzRoundSettings } from "../contracts";
 import {
@@ -359,6 +360,7 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
     registerSwitch(guardSwitch);
     return () => { registerSwitch(null); };
   }, [guardSwitch, registerSwitch]);
+  useEffect(() => registerDashboardNavigationGuard(guardSwitch), [guardSwitch]);
 
   const typeOptions = [
     { value: "scramble" as const, label: labels.scramble },
@@ -423,7 +425,7 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
         max={10}
         separator="comma"
         removeLabel={labels.removeAnswer}
-        validate={(answer) => answer.length > 60 ? labels.validationError("answer_invalid") : null}
+        validate={(answer) => answer.length > 60 || normalizeBlitzAnswer(answer).length === 0 ? labels.validationError("answer_invalid") : null}
         messages={{
           countLabel: (count, maximum) => `${String(count)} / ${String(maximum)}`,
           atLimitHint: labels.validationError("answer_count_invalid"),
@@ -554,6 +556,7 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
   };
   const guard = useDraftGuard(draft.dirty, save, reset);
   const { guardSwitch } = guard;
+  useEffect(() => registerDashboardNavigationGuard(guardSwitch), [guardSwitch]);
   useEffect(() => {
     registerSwitch(guardSwitch);
     return () => { registerSwitch(null); };

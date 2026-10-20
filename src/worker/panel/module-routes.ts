@@ -1016,13 +1016,6 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       return context.json({ error: "module_gate_update_failed" }, 500);
     }
   }
-  if (!enabled && module.onDisable !== undefined && (existing?.enabled === true || retryingPostCommit)) {
-    try {
-      await module.onDisable({ runModuleAlarm: context.get("runModuleAlarm") }, channelId);
-    } catch {
-      return context.json({ error: "module_deactivation_failed" }, 500);
-    }
-  }
   if (module.id === "belabox" && module.settingsChangedAlarm !== undefined) {
     await runModuleAlarmAfterMutation(
       context,

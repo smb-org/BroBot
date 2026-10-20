@@ -48,7 +48,6 @@ export interface BlitzRoundData {
   questionId?: string;
   openedAt?: string;
   startedBy?: string;
-  moduleActivationRevision?: number;
   kind: BlitzQuestionKind;
   prompt: string;
   answer: string;

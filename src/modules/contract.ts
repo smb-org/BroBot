@@ -1456,11 +1456,6 @@ export interface ModuleEnableContext {
   now: string;
 }
 
-/** Host services available when a committed module deactivation needs to clear module-owned durable state. */
-interface ModuleDisableContext {
-  runModuleAlarm: ModuleRouteVariables["runModuleAlarm"];
-}
-
 /** Shared props for lazily loaded panel views. */
 export interface ModulePanelProperties {
   channelId: string;
@@ -1901,7 +1896,6 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
     context: ModuleAlarmContext,
     round: ModulePointRoundAnnouncement,
   ) => Promise<{ text: string; attributions?: readonly string[]; target?: ChatOutputTarget } | null>;
-  onPointRoundResolved?: (context: ModuleAlarmContext, round: ModulePointRoundResult) => Promise<void>;
   /** Hourly module-owned cleanup run by the host through the registry. */
   scheduledMaintenance?: (db: D1Database, now: string) => Promise<void>;
   /** Generic event-time sources that scheduled modules may select. */
@@ -1931,8 +1925,6 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
     context: ModuleEnableContext,
     channelId: string,
   ) => readonly D1PreparedStatement[] | undefined | Promise<readonly D1PreparedStatement[] | undefined>;
-  /** Called after a committed disable so module-owned durable state can be reconciled through the channel object. */
-  onDisable?: (context: ModuleDisableContext, channelId: string) => void | Promise<void>;
   // Module migrations and further action kinds join the contract once the
   // first module needs them. Command processing launched with
   // ModuleResult.

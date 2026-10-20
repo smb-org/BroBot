@@ -1,4 +1,5 @@
 import type { BlitzQuestionInput, BlitzQuestionValidationCode } from "../contracts";
+import { normalizeBlitzAnswer } from "./round";
 
 export type BlitzQuestionValidation =
   | { ok: true; value: BlitzQuestionInput }
@@ -36,6 +37,7 @@ export const validateBlitzQuestion = (value: unknown): BlitzQuestionValidation =
   }
   const seen = new Set<string>();
   for (const answer of answers) {
+    if (normalizeBlitzAnswer(answer).length === 0) return { ok: false, code: "answer_invalid" };
     const key = answer.toLocaleLowerCase("de-DE");
     if (seen.has(key)) return { ok: false, code: "answer_invalid" };
     seen.add(key);
