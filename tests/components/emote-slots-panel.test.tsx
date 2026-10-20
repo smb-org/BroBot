@@ -199,6 +199,48 @@ describe("emote slot settings controls", () => {
     expect(screen.getByText(reason)).toBeInTheDocument();
   });
 
+  it.each([
+    ["de", 1, 3, "1 Symbol verfügbar", "3 Emotes verfügbar"],
+    ["de", 3, 1, "3 Symbole verfügbar", "1 Emote verfügbar"],
+    ["en", 1, 3, "1 symbol available", "3 emotes available"],
+    ["en", 3, 1, "3 symbols available", "1 emote available"],
+  ] as const)("uses singular and plural picker counts in %s for %i emoji and %i Twitch emotes (protects=footer counts read grammatically for one and many; fails_when=a count of one keeps the plural noun; no_claim=other locales' plural categories)", async (language, emojiCount, twitchCount, emojiText, twitchText) => {
+    const copy = emoteSlotsCatalog[language].panel;
+    const settings = emoteSlotDefaultSettingsForLanguage(language);
+    const emoji = Array.from({ length: emojiCount }, (_, i) => ({ source: "emoji", code: ["🍒", "🍋", "🔔"][i], name: `Emoji ${String(i)}` }));
+    const twitch = Array.from({ length: twitchCount }, (_, i) => ({ source: "twitch", code: `kappa${String(i)}`, twitchId: `t${String(i)}`, name: `kappa${String(i)}` }));
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ emoji: { items: emoji }, twitch: { status: "ok", items: twitch } }),
+    })));
+    render(<UiProvider><SlotReelTable
+      settings={settings}
+      value={settings.symbols}
+      onChange={() => undefined}
+      disabled={false}
+      readOnly={false}
+      label={copy.ariaLabel}
+      context={{ channelId: "slot_plural_demo", language, lastTouchedField: "symbols" }}
+    /></UiProvider>);
+
+    fireEvent.click(screen.getByRole("button", { name: `${copy.chooseSymbol}: ${settings.symbols[0]?.name ?? ""}` }));
+    await screen.findByText(twitchText);
+    expect(screen.getByText(emojiText)).toBeInTheDocument();
+  });
+
+  it("lists emoji picker entries without repeating the glyph as a description (protects=each emoji appears once per option; fails_when=the glyph is also rendered as secondary text; no_claim=Twitch or 7TV entry layout)", async () => {
+    const copy = emoteSlotsCatalog.de.panel;
+    const settings = emoteSlotDefaultSettingsForLanguage("de");
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ emoji: { items: [{ source: "emoji", code: "🍒", name: "Cherry" }] }, twitch: { status: "ok", items: [] } }),
+    })));
+    renderReelTable(settings);
+    fireEvent.click(screen.getByRole("button", { name: `${copy.chooseSymbol}: ${settings.symbols[0]?.name ?? ""}` }));
+    const option = (await screen.findByText("Cherry")).closest("[role='option']");
+    expect((option?.textContent ?? "").split("🍒").length).toBe(2);
+  });
+
   it("shows bot reconnect instructions to channel users without exposing bot authorization (protects=channel users can find the bot-account recovery instructions without opening a bot-only route; fails_when=the picker links directly to bot authorization or omits the instructions dialog; no_claim=the bot-account OAuth flow itself)", async () => {
     const copy = emoteSlotsCatalog.de.panel;
     vi.stubGlobal("fetch", vi.fn(() => Promise.resolve({

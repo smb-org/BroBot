@@ -97,7 +97,7 @@ const statusLine = (
   const text = status === "loading" ? copy.loadingEmotes
     : status === "unavailable" ? copy.emotesUnavailable
       : status === "reconnect_required" ? copy.emotesReconnect
-        : copy[group === "emoji" ? "countAvailable" : "emotesAvailable"].replace("{count}", String(count));
+        : copy[`${group === "emoji" ? "countAvailable" : "emotesAvailable"}${new Intl.PluralRules(language).select(count) === "one" ? "One" : ""}`].replace("{count}", String(count));
   return <span className="slot-picker-status" aria-live="polite">
     <span>{text}</span>
     {status === "reconnect_required" ? <Button variant="subtle" size="compact" onClick={onReconnect}>{copy.reconnect}</Button> : null}
@@ -177,14 +177,12 @@ export function SlotReelTable({
   const emojiEntries: GroupedPickerEntry<SlotEmote>[] = (emotes?.emoji.items ?? []).map((emote) => ({
     id: emote.code,
     label: emote.name,
-    description: emote.code,
     icon: <span className="slot-picker-emoji" aria-hidden="true">{emote.code}</span>,
     value: emote,
   }));
   const twitchEntries: GroupedPickerEntry<SlotEmote>[] = (emotes?.twitch.items ?? []).map((emote) => ({
     id: emote.twitchId ?? emote.code,
     label: emote.name,
-    description: emote.code,
     icon: emote.imageUrl === undefined ? <Icon name="styleFont" /> : <SlotEmoteImage src={emote.imageUrl} code={emote.code} picker />,
     value: emote,
   }));
@@ -197,7 +195,6 @@ export function SlotReelTable({
     sevenTvEntries.push({
       id,
       label: emote.name,
-      description: emote.code,
       icon: emote.imageUrl === undefined ? <Icon name="styleFont" /> : <SlotEmoteImage src={emote.imageUrl} code={emote.code} picker />,
       value: emote,
     });
