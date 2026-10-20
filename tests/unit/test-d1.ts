@@ -130,8 +130,14 @@ export class TestPreparedStatement {
 export class TestD1Database {
   public readonly sqlite = new DatabaseSync(":memory:");
 
-  public constructor() {
+  public constructor(schemaSnapshot?: Uint8Array) {
     this.sqlite.exec("PRAGMA foreign_keys = ON");
+    if (schemaSnapshot !== undefined) {
+      // Restore an already migrated schema when tests need isolated database copies.
+      this.sqlite.deserialize(schemaSnapshot);
+      this.sqlite.exec("PRAGMA foreign_keys = ON");
+      return;
+    }
     // Files are read rather than enumerated: a name list in the test
     // eventually falls behind the directory, and that only surfaces
     // when a migration silently fails to run.

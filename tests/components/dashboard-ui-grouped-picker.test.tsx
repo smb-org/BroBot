@@ -190,12 +190,19 @@ describe("GroupedPicker", () => {
     await waitFor(() => expect(exitAnimations.length).toBeGreaterThan(0));
     fireEvent.click(trigger);
     expect(trigger).toHaveAttribute("aria-expanded", "true");
-    act(() => { for (const finishExit of exitAnimations.splice(0)) finishExit(); });
+    await act(async () => {
+      for (const finishExit of exitAnimations.splice(0)) finishExit();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
     fireEvent.click(screen.getByText("Programmatic close"));
     await waitFor(() => expect(exitAnimations.length).toBeGreaterThan(0));
-    act(() => { for (const finishExit of exitAnimations.splice(0)) finishExit(); });
+    await act(async () => {
+      for (const finishExit of exitAnimations.splice(0)) finishExit();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
     await waitFor(() => expect(screen.queryByRole("listbox", { name: "Choose an element", hidden: true })).not.toBeInTheDocument());
-    await new Promise((resolve) => setTimeout(resolve, 300));
     expect(document.activeElement).not.toBe(trigger);
     } finally {
       if (originalGetAnimations === undefined) delete (Element.prototype as Partial<Element>).getAnimations;
@@ -237,18 +244,43 @@ describe("GroupedPicker", () => {
   });
 
   it("does not move focus to the trigger after the exit when focus went elsewhere meanwhile", async () => {
-    renderPicker(<>
-      <textarea aria-label="Editor" />
-      <GroupedPicker groups={groups} messages={messages} trigger={<button type="button">Add element</button>} onSelect={() => {}} />
-    </>);
-    fireEvent.click(screen.getByRole("button", { name: "Add element" }));
-    const search = await screen.findByRole("combobox", { name: "Search elements" });
-    fireEvent.keyDown(search, { key: "Escape" });
-    const editor = screen.getByRole("textbox", { name: "Editor" });
-    editor.focus();
-    await waitFor(() => expect(screen.queryByRole("combobox", { name: "Search elements" })).not.toBeInTheDocument());
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(document.activeElement).toBe(editor);
+    const exitAnimations: Array<() => void> = [];
+    const originalGetAnimations = Object.getOwnPropertyDescriptor(Element.prototype, "getAnimations");
+    Object.defineProperty(Element.prototype, "getAnimations", {
+      configurable: true,
+      value(this: Element) {
+        if (!this.hasAttribute("data-ending-style")) return [];
+        return [{
+          effect: {
+            getTiming: () => ({ duration: 150, iterations: 1 }),
+            getComputedTiming: () => ({ duration: 150, iterations: 1 }),
+          },
+          finished: new Promise<void>((resolve) => { exitAnimations.push(resolve); }),
+        }];
+      },
+    });
+    try {
+      renderPicker(<>
+        <textarea aria-label="Editor" />
+        <GroupedPicker groups={groups} messages={messages} trigger={<button type="button">Add element</button>} onSelect={() => {}} />
+      </>);
+      fireEvent.click(screen.getByRole("button", { name: "Add element" }));
+      const search = await screen.findByRole("combobox", { name: "Search elements" });
+      fireEvent.keyDown(search, { key: "Escape" });
+      await waitFor(() => expect(exitAnimations.length).toBeGreaterThan(0));
+      const editor = screen.getByRole("textbox", { name: "Editor" });
+      editor.focus();
+      await act(async () => {
+        for (const finishExit of exitAnimations.splice(0)) finishExit();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      await waitFor(() => expect(screen.queryByRole("combobox", { name: "Search elements" })).not.toBeInTheDocument());
+      expect(document.activeElement).toBe(editor);
+    } finally {
+      if (originalGetAnimations === undefined) delete (Element.prototype as Partial<Element>).getAnimations;
+      else Object.defineProperty(Element.prototype, "getAnimations", originalGetAnimations);
+    }
   });
 
   it("restores focus to the trigger after a zero-duration (reduced motion) exit on small screens", async () => {
@@ -277,10 +309,46 @@ describe("GroupedPicker", () => {
       await screen.findByRole("combobox", { name: "Search elements" });
       fireEvent.click(screen.getByRole("button", { name: "Close", hidden: true }));
       await waitFor(() => expect(screen.queryByRole("combobox", { name: "Search elements" })).not.toBeInTheDocument());
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Add element" }));
+      await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Add element" })));
     } finally {
       window.matchMedia = originalMatchMedia;
+    }
+  });
+
+  it("clears the pending exit timer when unmounted", async () => {
+    vi.useFakeTimers();
+    const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+    const getComputedStyle = window.getComputedStyle.bind(window);
+    vi.spyOn(window, "getComputedStyle").mockImplementation((element) => {
+      const styles = getComputedStyle(element);
+      if (!element.classList.contains("ui-grouped-picker__popover")) return styles;
+      Object.defineProperties(styles, {
+        transitionDuration: { configurable: true, value: "500ms" },
+        transitionDelay: { configurable: true, value: "0s" },
+      });
+      return styles;
+    });
+    const setTimeout = vi.spyOn(window, "setTimeout");
+    const clearTimeout = vi.spyOn(window, "clearTimeout");
+    try {
+      const { unmount } = renderPicker(<GroupedPicker groups={groups} messages={messages} trigger={<button type="button">Add element</button>} onSelect={() => {}} />);
+      fireEvent.click(screen.getByRole("button", { name: "Add element" }));
+      fireEvent.keyDown(screen.getByRole("combobox", { name: "Search elements" }), { key: "Escape" });
+      await act(async () => { await vi.advanceTimersByTimeAsync(20); });
+
+      const closeTimerIndexes = setTimeout.mock.calls.flatMap(([, delay], index) => delay === 500 ? [index] : []);
+      expect(closeTimerIndexes).toHaveLength(1);
+      const closeTimer = setTimeout.mock.results[closeTimerIndexes[0] ?? -1]?.value as ReturnType<typeof window.setTimeout> | undefined;
+      unmount();
+      expect(clearTimeout).toHaveBeenCalledWith(closeTimer);
+      Object.defineProperty(globalThis, "document", { configurable: true, value: undefined });
+      await vi.advanceTimersByTimeAsync(500);
+    } finally {
+      if (originalDocument !== undefined) Object.defineProperty(globalThis, "document", originalDocument);
+      else Reflect.deleteProperty(globalThis, "document");
+      cleanup();
+      vi.useRealTimers();
+      vi.restoreAllMocks();
     }
   });
 });
