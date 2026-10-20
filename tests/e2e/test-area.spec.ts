@@ -222,6 +222,27 @@ test("keeps the incomplete result icon in the title row above the full-width res
   await expectIncompleteResultsLayout(page);
 });
 
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+  test(`anchors the incomplete result hint popover to its icon and keeps it narrow at ${String(viewport.width)} by ${String(viewport.height)}`, async ({ page }) => {
+    await openTestArea(page, { ...viewport, response: partialFailureResponse() });
+    await submitMessage(page);
+    const trigger = page.getByTestId("test-area-incomplete-result-hint");
+    await trigger.hover();
+    const content = page.locator(".ui-popover__content");
+    await expect(content).toBeVisible();
+    const box = await content.boundingBox();
+    const triggerBox = await trigger.boundingBox();
+    expect(box).not.toBeNull();
+    expect(triggerBox).not.toBeNull();
+    expect(box?.width ?? Infinity).toBeLessThanOrEqual(361);
+    expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(viewport.width);
+    if (viewport.width === 1440) {
+      expect(Math.abs((box?.x ?? 0) + (box?.width ?? 0) - ((triggerBox?.x ?? 0) + (triggerBox?.width ?? 0)))).toBeLessThanOrEqual(24);
+    }
+  });
+}
+
 test.describe("test area screenshot captures", () => {
   test.use({ locale: "de-DE" });
   test.skip(process.env.TEST_AREA_CAPTURE !== "1", "Run explicitly to capture reviewed test area screenshots.");

@@ -349,7 +349,6 @@
 }
 
 .test-area__results-hint-slot > .ui-popover { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
-.test-area__results-hint-slot .ui-popover__content { max-width: min(360px, calc(100vw - 24px)); overflow-wrap: anywhere; }
 .test-area__result-hint-trigger--warning { color: var(--warn); }
 .test-area__results-hint-slot .ui-popover-trigger:hover,
 .test-area__results-hint-slot .ui-popover-trigger:focus-visible { color: var(--text); }

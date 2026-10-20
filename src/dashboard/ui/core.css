@@ -168,6 +168,9 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 .ui-popover-trigger:hover,
 .ui-popover-trigger:focus-visible { color: var(--error); }
 .ui-popover-trigger:focus-visible { outline: 2px solid var(--brand-text); outline-offset: 2px; }
+/* The content is portaled to the body, so it needs its own cap: without it a
+   long hint renders as one line as wide as the viewport. */
+.ui-popover__content { max-width: min(360px, calc(100vw - 24px)); overflow-wrap: anywhere; }
 /* Both the cause and an appended Twitch/local message are external text
    with no length guarantee up to the 300-char cap (`worker/event-log.ts`);
    `overflow-wrap: anywhere` keeps one long unbroken run from pushing past
