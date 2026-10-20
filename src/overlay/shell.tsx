@@ -158,6 +158,7 @@ const applyModuleMessage = (
 const preserveElementStateAcrossBootstrap = (
   previous: OverlayBootstrapData | null,
   next: OverlayBootstrapData,
+  elementId: string | null,
 ): OverlayBootstrapData => {
   if (previous?.overlay === null || previous?.overlay === undefined || next.overlay === null ||
       previous.overlay.id !== next.overlay.id) return next;
@@ -167,9 +168,11 @@ const preserveElementStateAcrossBootstrap = (
     overlay: {
       ...next.overlay,
       elements: next.overlay.elements.map((element) => {
-        if (element.moduleEnabled !== true || !element.inComposition) return element;
+        const isRenderedElement = element.inComposition || element.id === elementId;
+        if (element.moduleEnabled !== true || !isRenderedElement) return element;
         const previousElement = previousElements.get(element.id);
-        if (previousElement?.kind !== element.kind || previousElement.moduleEnabled !== true || !previousElement.inComposition) return element;
+        const wasRenderedElement = previousElement?.inComposition === true || previousElement?.id === elementId;
+        if (previousElement?.kind !== element.kind || previousElement.moduleEnabled !== true || !wasRenderedElement) return element;
         const state = preserveModuleOverlayElementStateOnReload(
           element.kind,
           previousElement.state ?? null,
@@ -328,7 +331,7 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
         }
         const parsedBootstrap = parseBootstrap(payload);
         if (parsedBootstrap === null) throw new Error("Overlay bootstrap response had an invalid shape.");
-        const retained = preserveElementStateAcrossBootstrap(bootstrapRef.current, parsedBootstrap);
+        const retained = preserveElementStateAcrossBootstrap(bootstrapRef.current, parsedBootstrap, elementId);
         const next = pendingModuleMessages.reduce(
           (current, received) => applyModuleMessage(current, received),
           applyPendingVariableChanges(retained, pendingVariableChanges),
@@ -444,7 +447,7 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
       stopTimelineRefreshTimer();
       stopRealtime();
     };
-  }, [bindingVersion, token]);
+  }, [bindingVersion, elementId, token]);
 
   useEffect(() => {
     const css = bootstrap?.overlay?.css;

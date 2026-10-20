@@ -222,6 +222,7 @@ type JsonValue = string | number | boolean | null | readonly JsonValue[] | { rea
 export type JsonObject = Readonly<Record<string, JsonValue>>;
 
 export interface ModuleOverlayElementProps {
+  elementId?: string;
   config: Readonly<Record<string, unknown>>;
   state: Readonly<Record<string, unknown>> | null;
   now: number;

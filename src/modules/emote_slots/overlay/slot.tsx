@@ -43,6 +43,61 @@ const emoteImageUrl = (symbol: SlotOverlaySymbol): string | null => {
 const SLOT_REEL_ANIMATION_END_MS = 1_200;
 const SLOT_RESULT_VISIBLE_MS = 6_000;
 
+interface SlotPresentationDeadline {
+  deadline: number;
+  expirationTimer: number | null;
+}
+
+const presentationDeadlines = new Map<string, SlotPresentationDeadline>();
+const expiredSpinKeys = new Set<string>();
+const activeSpinIdsByElement = new Map<string, string>();
+
+const presentationKey = (elementId: string, spinId: string): string => JSON.stringify([elementId, spinId]);
+
+const clearPresentationFor = (elementId: string, spinId: string): void => {
+  const key = presentationKey(elementId, spinId);
+  const presentation = presentationDeadlines.get(key);
+  if (presentation?.expirationTimer !== null && presentation?.expirationTimer !== undefined && typeof window !== "undefined") {
+    window.clearTimeout(presentation.expirationTimer);
+  }
+  presentationDeadlines.delete(key);
+  expiredSpinKeys.delete(key);
+};
+
+const expirePresentation = (elementId: string, spinId: string): void => {
+  const key = presentationKey(elementId, spinId);
+  const presentation = presentationDeadlines.get(key);
+  if (presentation?.expirationTimer !== null && presentation?.expirationTimer !== undefined && typeof window !== "undefined") {
+    window.clearTimeout(presentation.expirationTimer);
+  }
+  presentationDeadlines.delete(key);
+  expiredSpinKeys.add(key);
+};
+
+const getPresentationDeadline = (elementId: string, spinId: string, duration: number): number | null => {
+  const activeSpinId = activeSpinIdsByElement.get(elementId);
+  if (activeSpinId !== undefined && activeSpinId !== spinId) clearPresentationFor(elementId, activeSpinId);
+  activeSpinIdsByElement.set(elementId, spinId);
+
+  const key = presentationKey(elementId, spinId);
+  if (expiredSpinKeys.has(key)) return null;
+  const existing = presentationDeadlines.get(key);
+  if (existing !== undefined) {
+    if (existing.deadline <= Date.now()) {
+      expirePresentation(elementId, spinId);
+      return null;
+    }
+    return existing.deadline;
+  }
+
+  const deadline = Date.now() + duration;
+  const expirationTimer = typeof window === "undefined" ? null : window.setTimeout(() => {
+    expirePresentation(elementId, spinId);
+  }, duration);
+  presentationDeadlines.set(key, { deadline, expirationTimer });
+  return deadline;
+};
+
 const ReelSymbol = ({ symbol, index }: { symbol: SlotOverlaySymbol; index: number }): ReactElement => {
   const [imageFailed, setImageFailed] = useState(false);
   const src = imageFailed ? null : emoteImageUrl(symbol);
@@ -53,7 +108,7 @@ const ReelSymbol = ({ symbol, index }: { symbol: SlotOverlaySymbol; index: numbe
   </span>;
 };
 
-const SlotOverlay = ({ config, state }: ModuleOverlayElementProps): ReactElement | null => {
+const SlotOverlay = ({ config, state, elementId = "standalone-slot" }: ModuleOverlayElementProps): ReactElement | null => {
   const reducedMotion = useReducedMotion();
   const [expiredSpinId, setExpiredSpinId] = useState<string | null>(null);
   const overlayConfig = parseSlotOverlayConfig(config) ?? DEFAULT_SLOT_OVERLAY_CONFIG;
@@ -62,15 +117,22 @@ const SlotOverlay = ({ config, state }: ModuleOverlayElementProps): ReactElement
   const labels = emoteSlotOverlayLabels(language);
   const spinId = validState?.spinId;
   const isEditorPreview = spinId === SLOT_OVERLAY_EDITOR_PREVIEW_SPIN_ID;
+  const presentationDeadline = spinId === undefined || isEditorPreview
+    ? null
+    : getPresentationDeadline(elementId, spinId, (reducedMotion ? 0 : SLOT_REEL_ANIMATION_END_MS) + SLOT_RESULT_VISIBLE_MS);
 
   useEffect(() => {
     if (spinId === undefined || spinId === SLOT_OVERLAY_EDITOR_PREVIEW_SPIN_ID) return;
-    const presentationDuration = reducedMotion ? 0 : SLOT_REEL_ANIMATION_END_MS;
-    const timer = window.setTimeout(() => { setExpiredSpinId(spinId); }, presentationDuration + SLOT_RESULT_VISIBLE_MS);
+    if (presentationDeadline === null) return;
+    const remainingDuration = Math.max(0, presentationDeadline - Date.now());
+    const timer = window.setTimeout(() => {
+      expirePresentation(elementId, spinId);
+      setExpiredSpinId(spinId);
+    }, remainingDuration);
     return () => { window.clearTimeout(timer); };
-  }, [spinId, reducedMotion]);
+  }, [elementId, presentationDeadline, spinId]);
 
-  if (validState === null || (!isEditorPreview && expiredSpinId === validState.spinId)) return null;
+  if (validState === null || (!isEditorPreview && (presentationDeadline === null || expiredSpinId === validState.spinId))) return null;
 
   const style = {
     "--content-game-reel-background": overlayConfig.backgroundColor,
