@@ -107,6 +107,39 @@ const mockDashboard = async (page: Page, initialModules: PanelModuleState[], ini
   };
 };
 
+const moduleRowGeometry = async (page: Page): Promise<Array<{ href: string; top: number; height: number }>> => page
+  .locator(".module-workspace__group .list-row")
+  .evaluateAll((rows) => rows.map((row) => {
+    const link = row.querySelector("a[href]");
+    const rect = row.getBoundingClientRect();
+    let ancestor = row.parentElement;
+    let nestedScrollTop = 0;
+    while (ancestor !== null && ancestor !== document.body && ancestor !== document.documentElement) {
+      nestedScrollTop += ancestor.scrollTop;
+      ancestor = ancestor.parentElement;
+    }
+    return {
+      href: link?.getAttribute("href") ?? "",
+      top: Math.round((rect.top + window.scrollY + nestedScrollTop) * 100) / 100,
+      height: Math.round(rect.height * 100) / 100,
+    };
+  }));
+
+const pointsHeaderGeometry = async (page: Page): Promise<{ top: number; height: number; contentTop: number }> => page
+  .locator(".module-detail--points")
+  .evaluate((section) => {
+    const header = section.querySelector(":scope > .module-detail-heading");
+    const content = header?.nextElementSibling;
+    if (header === null || content === null || content === undefined) throw new Error("Points module header or content is missing.");
+    const headerRect = header.getBoundingClientRect();
+    const contentRect = content.getBoundingClientRect();
+    return {
+      top: Math.round((headerRect.top + window.scrollY) * 100) / 100,
+      height: Math.round(headerRect.height * 100) / 100,
+      contentTop: Math.round((contentRect.top + window.scrollY) * 100) / 100,
+    };
+  });
+
 test("locks dependency switches in the reserved reasons and captures both required views (protects=managers see why Slot cannot activate without points and why points cannot deactivate while Slot is active, without a layout shift or request; fails_when=either switch is enabled, the reserved reason is absent, a disabled switch sends a request, or any requested screenshot has the wrong viewport; no_claim=behavior for dependency changes committed by another manager)", async ({ page }, testInfo) => {
   const api = await mockDashboard(page, moduleStates(false, false));
   mkdirSync("test-results/issue-504-ui", { recursive: true });
@@ -145,6 +178,65 @@ test("locks dependency switches in the reserved reasons and captures both requir
     });
   }
   expect(api.toggleRequests).toEqual([]);
+});
+
+test("keeps module rows and following row tops stable while Points and Slot toggle (protects=dependency participants reserve their reason line while unrelated module rows keep their existing height at 1440 and 1920; fails_when=any module row top or height changes as Points or Slot toggles, or a dependency-disabled switch sends a request; no_claim=layout at viewport widths other than 1440 and 1920)", async ({ page }) => {
+  const api = await mockDashboard(page, moduleStates(false, false));
+
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1920, height: 1080 }]) {
+    api.setModules(false, false);
+    await page.setViewportSize(viewport);
+    await page.goto(`/channels/${channelId}/modules?lang=de`);
+    const slotSwitch = page.getByRole("switch", { name: "Slot: Aus" });
+    await expect(slotSwitch).toBeDisabled();
+    const initialGeometry = await moduleRowGeometry(page);
+    expect(initialGeometry.some(({ href }) => href.endsWith("/text_commands"))).toBe(true);
+
+    const requestsBeforeBlockedAttempt = [...api.toggleRequests];
+    await slotSwitch.click({ force: true });
+    expect(api.toggleRequests).toEqual(requestsBeforeBlockedAttempt);
+    expect(await moduleRowGeometry(page)).toEqual(initialGeometry);
+
+    await page.getByRole("switch", { name: "Punkte: Aus" }).click();
+    await expect(page.getByRole("switch", { name: "Punkte: Läuft" })).toBeChecked();
+    await expect(slotSwitch).toBeEnabled();
+    expect(await moduleRowGeometry(page)).toEqual(initialGeometry);
+
+    await slotSwitch.click();
+    await expect(page.getByRole("switch", { name: "Slot: Läuft" })).toBeChecked();
+    await expect(page.getByText("Erst ausschalten: Slot", { exact: true })).toBeVisible();
+    expect(await moduleRowGeometry(page)).toEqual(initialGeometry);
+
+    await page.getByRole("switch", { name: "Slot: Läuft" }).click();
+    await expect(page.getByRole("switch", { name: "Slot: Aus" })).not.toBeChecked();
+    expect(await moduleRowGeometry(page)).toEqual(initialGeometry);
+
+    await page.getByRole("switch", { name: "Punkte: Läuft" }).click();
+    await expect(page.getByRole("switch", { name: "Punkte: Aus" })).not.toBeChecked();
+    expect(await moduleRowGeometry(page)).toEqual(initialGeometry);
+  }
+
+  expect(api.toggleRequests).toEqual([
+    "points", "emote_slots", "emote_slots", "points",
+    "points", "emote_slots", "emote_slots", "points",
+  ]);
+});
+
+test("keeps the Points page header and following content in place across Slot state changes (protects=the dependency header reason keeps its line at 1440 and 1920 while Slot is enabled or disabled; fails_when=the module header height or following content top changes between locked and unlocked states; no_claim=other module headers or viewport sizes)", async ({ page }) => {
+  const api = await mockDashboard(page, moduleStates(true, true));
+
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1920, height: 1080 }]) {
+    api.setModules(true, true);
+    await page.setViewportSize(viewport);
+    await page.goto(`/channels/${channelId}/modules/points?lang=de`);
+    await expect(page.getByText("Erst ausschalten: Slot", { exact: true })).toBeVisible();
+    const dependentGeometry = await pointsHeaderGeometry(page);
+
+    api.setModules(true, false);
+    await page.goto(`/channels/${channelId}/modules/points?lang=de`);
+    await expect(page.getByText("Erst ausschalten: Slot", { exact: true })).toHaveCount(0);
+    expect(await pointsHeaderGeometry(page)).toEqual(dependentGeometry);
+  }
 });
 
 test("shows the missing requirement when another manager disables points first (protects=the module_requires race response gives a localized dependency toast instead of a generic API failure; fails_when=the toast shows the generic change failure or no requirement name; no_claim=the other manager's current module state)", async ({ page }) => {

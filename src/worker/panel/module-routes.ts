@@ -38,7 +38,7 @@ import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../../template-variables";
 import { listChannelVariables } from "../db/channel-variables";
 import { findChannelVariable } from "../db/channel-variables";
 import { measureServerTiming, recordServerTiming, scheduleBackgroundWork } from "../server-timing";
-import { publishOverlayChanged, publishOverlayHostEvent as publishOverlayHostEventHint, publishRealtimeMessages } from "../realtime";
+import { publishOverlayChangedWithResult, publishOverlayHostEvent as publishOverlayHostEventHint, publishRealtimeMessages } from "../realtime";
 import { prepareModuleOverlayRealtimeMessage } from "../module-overlay-realtime";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../../modules/contract";
 import { readChannelLocation } from "../db/channel-settings";
@@ -1071,8 +1071,10 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
     }
     const overlaysToPublish = affectedOverlays;
     if (overlaysToPublish !== null) {
-      await runPostCommitStep(module.id, "overlay_publish", () =>
-        publishOverlayChanged(context.env.CHANNEL, channelId, overlaysToPublish));
+      await runPostCommitStep(module.id, "overlay_publish", async () => {
+        const result = await publishOverlayChangedWithResult(context.env.CHANNEL, channelId, overlaysToPublish);
+        if (!result.ok) throw result.error;
+      });
     }
   }
   await runPostCommitStep(module.id, "eventsub_reconciliation", () =>

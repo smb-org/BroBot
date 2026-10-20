@@ -807,6 +807,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .page-header__meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-top: 4px; color: var(--text-3); font-size: 12px; overflow-wrap: anywhere; }
 .page-header__lock { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .page-header__lock .ui-icon { flex: none; }
+.page-header__lock--reserved { display: inline-block; flex: none; width: 18px; height: 18px; }
 .page-header__module-switch { display: flex; flex: none; align-items: center; }
 .module-status-switch { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; color: var(--text-2); font-size: 12px; white-space: nowrap; }
 .module-status-switch.is-on { color: var(--text); }

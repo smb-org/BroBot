@@ -1168,6 +1168,53 @@ describe("Module management in the panel", () => {
     }
   });
 
+  it(`logs a terminal overlay publish failure once and keeps activation successful (${dependencyTestCard("the committed activation returns 200 and logs module test-modul with overlay_publish after both publish attempts fail", "the activation omits its error log, logs the wrong step, retries an unexpected number of times, or returns an API error", "the real module route and SQLite mutation use a fake Durable Object publish method that rejects twice")})`, async () => {
+    await insertChannel(database, "channel-demo");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "channel-demo", "user-1", "broadcaster");
+    await database.prepare(
+      `INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+       VALUES ('overlay-module', 'channel-demo', 'Module overlay', '2026-09-18T00:00:00.000Z', '2026-09-18T00:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind)
+       VALUES ('element-module', 'channel-demo', 'overlay-module', 'test-modul.countdown')`,
+    ).run();
+    const publish = vi.fn(() => Promise.reject(new Error("overlay_publish_failure")));
+    environment = {
+      ...environment,
+      CHANNEL: {
+        idFromName: vi.fn(() => "channel-object"),
+        get: vi.fn(() => ({ publish, notifyScheduleInputsChanged: vi.fn(() => Promise.resolve()) })),
+      },
+    } as unknown as Env;
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    try {
+      const response = await panelRouter.fetch(
+        await requestFor("user-1", "/api/channels/channel-demo/modules/test-modul", "PATCH", { enabled: true }),
+        environment,
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({ module: { id: "test-modul", enabled: true }, revision: 1 });
+      await expect(database.prepare(
+        "SELECT enabled FROM channel_modules WHERE channel_id = 'channel-demo' AND module_id = 'test-modul'",
+      ).first()).resolves.toEqual({ enabled: 1 });
+      expect(publish).toHaveBeenCalledTimes(2);
+      expect(consoleError).toHaveBeenCalledExactlyOnceWith("Module activation post-commit step failed.", {
+        moduleId: "test-modul",
+        step: "overlay_publish",
+        error: "overlay_publish_failure",
+      });
+      expect(consoleWarn).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+      consoleWarn.mockRestore();
+    }
+  });
+
   it("rejects disabling mandatory channel events with the closed API error", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");

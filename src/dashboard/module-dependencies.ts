@@ -9,6 +9,12 @@ const moduleIsEnabled = (modules: readonly PanelModuleState[], moduleId: string)
 const dependencyNames = (moduleIds: readonly string[], language: DashboardLanguage): string =>
   moduleIds.map((moduleId) => moduleName(moduleId, language)).join(", ");
 
+export const moduleParticipatesInDependency = (moduleId: string): boolean => {
+  const definition = MODULES.find((module) => module.id === moduleId);
+  return (definition?.requiresModules?.length ?? 0) > 0
+    || MODULES.some((module) => module.requiresModules?.includes(moduleId) === true);
+};
+
 const serverDependentModules = (details: unknown): string[] | null => {
   if (typeof details !== "object" || details === null || Array.isArray(details)) return null;
   const values: unknown = Reflect.get(details, "dependentModules");

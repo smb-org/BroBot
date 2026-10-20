@@ -17,7 +17,7 @@ import { PanelApiError, getChannelModuleSettings, getChannelModuleSummary, getCh
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "./data";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber, serverFieldErrorText, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
-import { moduleDependencyLockReason } from "./module-dependencies";
+import { moduleDependencyLockReason, moduleParticipatesInDependency } from "./module-dependencies";
 import { templateTextLength } from "../template";
 import { modulePermissionsAreMissing } from "./channel-health";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
@@ -230,6 +230,7 @@ interface ModuleSettingsPageOptions {
   switchDisabled: boolean;
   switchBusy: boolean;
   lockHint?: string;
+  reserveLockHint?: boolean;
   onNavigate: (route: DashboardRoute) => void;
   pageActions?: ReactNode;
 }
@@ -323,6 +324,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       switchDisabled={page.switchDisabled}
       switchBusy={page.switchBusy}
       {...(page.lockHint === undefined ? {} : { lockHint: page.lockHint })}
+      {...(page.reserveLockHint === true ? { reserveLockHint: true } : {})}
       overflow={<ModuleListLink channelId={channelId} onNavigate={page.onNavigate} />}
       {...(page.pageActions === undefined ? {} : { pageActions: page.pageActions })}
       columns={[state]}
@@ -808,6 +810,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     switchDisabled={page.switchDisabled || pending || urlRemovalPending}
     switchBusy={page.switchBusy}
     {...(page.lockHint === undefined ? {} : { lockHint: page.lockHint })}
+    {...(page.reserveLockHint === true ? { reserveLockHint: true } : {})}
     {...(pageSave === undefined ? {} : { save: pageSave })}
     overflow={<ModuleListLink channelId={channelId} onNavigate={page.onNavigate} />}
     {...(page.pageActions === undefined ? {} : { pageActions: page.pageActions })}
@@ -1047,6 +1050,7 @@ const ModuleWorkspaceRow = ({
   const route: DashboardRoute = { kind: "module", channelId, moduleId };
   const dependencyReason = mandatory ? null : moduleDependencyLockReason(moduleId, !rawEnabled, modules);
   const lockedReason = mandatory ? undefined : dependencyReason ?? (manageable ? undefined : texts.module.managementLocked);
+  const reserveDependencyReason = moduleParticipatesInDependency(moduleId);
 
   return (
     <ListRow
@@ -1056,7 +1060,7 @@ const ModuleWorkspaceRow = ({
       title={details.name}
       description={<>
         {details.description}
-        {lockedReason === undefined ? null : <span className="module-workspace__lock-reason"><LockedReason id={`module-lock-${moduleId}`} reason={lockedReason} /></span>}
+        {lockedReason === undefined && !reserveDependencyReason ? null : <span className="module-workspace__lock-reason"><LockedReason id={`module-lock-${moduleId}`} {...(lockedReason === undefined ? {} : { reason: lockedReason })} /></span>}
       </>}
       status={mandatory
         ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} showReason />
@@ -1212,6 +1216,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   const mandatoryReason = registered?.mandatoryReason?.[dashboardLanguage()] ?? labels.mandatoryReason;
   const enabled = mandatory || moduleState?.enabled === true;
   const manageable = canManageModules(ownRole);
+  const reserveDependencyHint = moduleParticipatesInDependency(moduleId);
   const dependencyLockReason = mandatory ? null : moduleDependencyLockReason(moduleId, !enabled, modules);
   const headerLockHint = dependencyLockReason ?? (manageable ? null : texts.module.managementLocked);
   const disabledReason = mandatory ? mandatoryReason : dependencyLockReason ?? (manageable ? null : texts.module.managementLocked);
@@ -1257,6 +1262,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
           switchDisabled: !manageable || switchDisabled || busy || mandatory,
           switchBusy: busy,
           ...(disabledReason === null ? {} : { lockHint: disabledReason }),
+          ...(reserveDependencyHint ? { reserveLockHint: true } : {}),
           onNavigate,
           ...(moduleId === "emote_slots" && registered.chatCommands?.length ? { pageActions: <ChatCommandsHelp commands={registered.chatCommands} language={dashboardLanguage()} /> } : {}),
         }}
@@ -1287,6 +1293,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
             switchBusy: busy,
             ...(mandatory ? { moduleSwitch: <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} /> } : {}),
             ...(headerLockHint === null || (dependencyLockReason === null && ((registered?.settingsEditor !== undefined && showActiveView && moduleId !== "chat_voting") || (registered?.panelManagesSettings && moduleState?.enabled !== false && moduleId !== "clips"))) ? {} : { lockHint: headerLockHint }),
+            ...(reserveDependencyHint ? { reserveLockHint: true } : {}),
           })}
           {...(moduleId === "chat_voting" ? {
             pageActions: <>
