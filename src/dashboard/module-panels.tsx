@@ -1022,6 +1022,7 @@ const ModuleWorkspaceRow = ({
   moduleId,
   rawEnabled,
   missingScopes,
+  scopeMetadataUnknown,
   manageable,
   modules,
   busy,
@@ -1032,6 +1033,7 @@ const ModuleWorkspaceRow = ({
   moduleId: string;
   rawEnabled: boolean;
   missingScopes: string[];
+  scopeMetadataUnknown: boolean;
   manageable: boolean;
   modules: PanelModuleState[];
   busy: boolean;
@@ -1045,8 +1047,9 @@ const ModuleWorkspaceRow = ({
   const mandatory = definition?.mandatory === true;
   const mandatoryReason = definition?.mandatoryReason?.[dashboardLanguage()] ?? labels.mandatoryReason;
   const permissionsMissing = modulePermissionsAreMissing({ missingBroadcasterScopes: missingScopes });
-  const effectiveEnabled = (rawEnabled || mandatory) && !permissionsMissing;
-  const state = permissionsMissing ? labels.disabled : statusWord(effectiveEnabled);
+  const permissionsUnknown = scopeMetadataUnknown;
+  const effectiveEnabled = (rawEnabled || mandatory) && !permissionsMissing && !permissionsUnknown;
+  const state = permissionsUnknown ? texts.module.scopeStatusUnknown : permissionsMissing ? labels.disabled : statusWord(effectiveEnabled);
   const route: DashboardRoute = { kind: "module", channelId, moduleId };
   const dependencyReason = mandatory ? null : moduleDependencyLockReason(moduleId, !rawEnabled, modules);
   const lockedReason = mandatory ? undefined : dependencyReason ?? (manageable ? undefined : texts.module.managementLocked);
@@ -1064,9 +1067,9 @@ const ModuleWorkspaceRow = ({
       </>}
       status={mandatory
         ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} showReason />
-        : <StatusLed state={permissionsMissing ? "warn" : effectiveEnabled ? "ok" : "off"} label={state} />}
+        : <StatusLed state={permissionsMissing || permissionsUnknown ? "warn" : effectiveEnabled ? "ok" : "off"} label={state} />}
       action={mandatory ? null : <div className="module-switch-control">
-        <SwitchPrimitive aria-label={`${details.name}: ${statusWord(rawEnabled)}`} aria-describedby={lockedReason === undefined ? undefined : `module-lock-${moduleId}`} aria-busy={busy} checked={rawEnabled} disabled={!manageable || dependencyReason !== null || busy} onCheckedChange={onToggle} />
+        <SwitchPrimitive aria-label={`${details.name}: ${statusWord(rawEnabled)}`} aria-describedby={lockedReason === undefined ? undefined : `module-lock-${moduleId}`} aria-busy={busy} checked={rawEnabled} disabled={!manageable || dependencyReason !== null || busy || (permissionsUnknown && !rawEnabled)} onCheckedChange={onToggle} />
       </div>}
     />
   );
@@ -1130,6 +1133,7 @@ const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onToggleMod
               moduleId={module.id}
               rawEnabled={rawEnabled}
               missingScopes={state?.missingBroadcasterScopes ?? []}
+              scopeMetadataUnknown={state?.broadcasterScopeMetadataUnknown === true}
               manageable={manageable}
               modules={modules}
               busy={busyModules.has(module.id)}
@@ -1159,6 +1163,7 @@ export const ModuleWorkspace = ({ channelId, ownRole, modules, loading = false, 
         subtitle={`${labels.activeCount(MODULES.filter((module) => {
           const state = modules.find((candidate) => candidate.id === module.id);
           return (state?.mandatory === true || module.mandatory === true || state?.enabled === true)
+            && state?.broadcasterScopeMetadataUnknown !== true
             && !modulePermissionsAreMissing({ missingBroadcasterScopes: state?.missingBroadcasterScopes ?? [] });
         }).length)}${loading ? ` · ${dashboardTexts().module.load}` : ""}`}
         columns={[<ModuleToggleList key={channelId} channelId={channelId} ownRole={ownRole} modules={modules} onNavigate={onNavigate} onToggleModule={onToggleModule} />]}
@@ -1223,9 +1228,10 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   const switchDisabled = mandatory || registered === undefined || moduleState === undefined || dependencyLockReason !== null;
   const missingScopes = moduleState?.missingBroadcasterScopes ?? [];
   const permissionsMissing = modulePermissionsAreMissing(moduleState);
+  const permissionsUnknown = moduleState?.broadcasterScopeMetadataUnknown === true;
   const requiredScopes = moduleState?.requiredBroadcasterScopes ?? registered?.broadcasterScopes ?? [];
   const missingScopeSet = new Set(missingScopes);
-  const effectiveEnabled = enabled && !permissionsMissing;
+  const effectiveEnabled = enabled && !permissionsMissing && !permissionsUnknown;
   const [settingsSaveTarget, setSettingsSaveTarget] = useState<HTMLDivElement | null>(null);
   const [chatVotingTab, setChatVotingTab] = useState<"votes" | "settings">("votes");
   const viewLoading = loading || moduleState === undefined || ((registered?.panel !== undefined || registered?.settingsEditor !== undefined) && enabled && activeModule === undefined);
@@ -1233,18 +1239,20 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
 
   const stateMessage = registered === undefined
     ? labels.unknown(details.name)
-    : permissionsMissing
+    : permissionsUnknown
+      ? texts.module.scopeStatusUnknown
+      : permissionsMissing
       ? texts.module.scopesMissing(details.name)
       : moduleState?.enabled === false
         ? labels.switchedOff(details.name)
         : null;
-  const stateTone = registered === undefined || permissionsMissing ? "notice" : "neutral";
+  const stateTone = registered === undefined || permissionsMissing || permissionsUnknown ? "notice" : "neutral";
 
   useEffect(() => {
     if (error !== null) notify({ tone: "error", message: error });
   }, [error]);
 
-  if ((moduleId === "ads" || moduleId === "raid" || moduleId === "belabox" || registered?.settingsEditorPlacement === "page") && registered?.settingsEditor !== undefined && !permissionsMissing) {
+  if ((moduleId === "ads" || moduleId === "raid" || moduleId === "belabox" || registered?.settingsEditorPlacement === "page") && registered?.settingsEditor !== undefined && !permissionsMissing && !permissionsUnknown) {
     return <section className="module-detail module-detail--settings-page" aria-label={details.name}>
       <ModuleSettingsEditor
         module={registered}
@@ -1259,7 +1267,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
           icon: iconFor(moduleId, "module-heading-glyph"),
           active: enabled,
           onToggle: (nextEnabled) => { if (nextEnabled !== enabled) onToggle(); },
-          switchDisabled: !manageable || switchDisabled || busy || mandatory,
+          switchDisabled: !manageable || switchDisabled || busy || permissionsUnknown,
           switchBusy: busy,
           ...(disabledReason === null ? {} : { lockHint: disabledReason }),
           ...(reserveDependencyHint ? { reserveLockHint: true } : {}),
@@ -1289,7 +1297,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
               else onToggle();
             },
             switchTitle: `${details.name}: ${statusWord(effectiveEnabled)}`,
-            switchDisabled: !manageable || switchDisabled || busy || mandatory,
+            switchDisabled: !manageable || switchDisabled || busy || permissionsUnknown,
             switchBusy: busy,
             ...(mandatory ? { moduleSwitch: <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} /> } : {}),
             ...(headerLockHint === null || (dependencyLockReason === null && ((registered?.settingsEditor !== undefined && showActiveView && moduleId !== "chat_voting") || (registered?.panelManagesSettings && moduleState?.enabled !== false && moduleId !== "clips"))) ? {} : { lockHint: headerLockHint }),

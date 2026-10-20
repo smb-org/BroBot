@@ -105,6 +105,13 @@ const dependentGameTestModule: BotModule<typeof dependencyTestSchema> = {
   defaultSettings: {},
   requiresModules: ["points"],
 };
+const scopedTestModule: BotModule<typeof dependencyTestSchema> = {
+  id: "scoped-test-module",
+  navigationCategory: "participation",
+  settingsSchema: dependencyTestSchema,
+  defaultSettings: {},
+  broadcasterScopes: ["channel:manage:polls"],
+};
 
 const addDependencyTestModules = (): void => {
   registeredModules.push(dependencyPointsModule, dependentGameTestModule);
@@ -1212,6 +1219,60 @@ describe("Module management in the panel", () => {
     } finally {
       consoleError.mockRestore();
       consoleWarn.mockRestore();
+    }
+  });
+
+  it(`marks failed post-commit scope metadata as unknown (${dependencyTestCard("the route returns the committed module state with unknown scope metadata and logs the response_state failure", "the request fails after commit, returns empty scope fields without an unknown marker, or skips or mislabels the log", "the real route and SQLite mutation run while the post-commit broadcaster identity lookup throws")})`, async () => {
+    registeredModules.push(scopedTestModule);
+    await insertChannel(database, "channel-demo");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "channel-demo", "user-1", "broadcaster");
+    const failingDatabase = {
+      prepare: (sql: string) => {
+        if (sql.includes("SELECT scopes_json, status") && sql.includes("twitch_login_identity")) {
+          throw new Error("scope_lookup_failure");
+        }
+        return database.prepare(sql);
+      },
+      batch: (statements: D1PreparedStatement[]) => database.batch(statements as unknown as TestPreparedStatement[]),
+    } as unknown as D1Database;
+    environment = { ...environment, DB: failingDatabase };
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      const response = await panelRouter.fetch(
+        await requestFor("user-1", "/api/channels/channel-demo/modules/scoped-test-module", "PATCH", { enabled: true }),
+        environment,
+      );
+      const body = await response.json<{
+        module: {
+          id: string;
+          enabled: boolean;
+          broadcasterScopeMetadataUnknown?: boolean;
+          requiredBroadcasterScopes?: string[];
+          missingBroadcasterScopes?: string[];
+        };
+        revision: number;
+      }>();
+
+      expect(response.status).toBe(200);
+      expect(body).toMatchObject({
+        module: { id: "scoped-test-module", enabled: true, broadcasterScopeMetadataUnknown: true },
+        revision: 1,
+      });
+      expect(body.module).not.toHaveProperty("requiredBroadcasterScopes");
+      expect(body.module).not.toHaveProperty("missingBroadcasterScopes");
+      await expect(database.prepare(
+        "SELECT enabled FROM channel_modules WHERE channel_id = 'channel-demo' AND module_id = 'scoped-test-module'",
+      ).first()).resolves.toEqual({ enabled: 1 });
+      expect(consoleError).toHaveBeenCalledExactlyOnceWith("Module activation post-commit step failed.", {
+        moduleId: "scoped-test-module",
+        step: "response_state",
+        error: "scope_lookup_failure",
+      });
+    } finally {
+      registeredModules.pop();
+      consoleError.mockRestore();
     }
   });
 

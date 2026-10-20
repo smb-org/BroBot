@@ -1084,7 +1084,10 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
     updatedModule = await moduleStateFor(context.env.DB, channelId, module, enabled, settings);
   } catch (error) {
     logPostCommitFailure(module.id, "response_state", error);
-    updatedModule = moduleState(module.id, enabled, settings, module.mandatory === true);
+    updatedModule = {
+      ...moduleState(module.id, enabled, settings, module.mandatory === true),
+      broadcasterScopeMetadataUnknown: true,
+    };
   }
   return context.json({
     module: updatedModule,

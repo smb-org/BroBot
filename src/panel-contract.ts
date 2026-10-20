@@ -157,6 +157,8 @@ export interface PanelModuleState {
   requiredBroadcasterScopes?: string[];
   /** Declared scopes the broadcaster identity does not currently prove. */
   missingBroadcasterScopes?: string[];
+  /** Present when a committed mutation could not reload this module's scope metadata. */
+  broadcasterScopeMetadataUnknown?: true;
 }
 
 export interface PanelModulesResponse {

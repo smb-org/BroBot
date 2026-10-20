@@ -86,6 +86,18 @@ export function PageHeader({
       ? <>{meta}{meta === undefined ? null : " "}<span className="page-header__lock page-header__lock--reserved" aria-hidden="true" /></>
       : meta
     : <>{meta}{meta === undefined ? null : " "}<span className="page-header__lock"><Icon name="lock" size={16} />{lockHint}</span></>;
+  const metaContent = reserveLockHint
+    ? <div className="page-header__meta">
+      {meta === undefined || meta === null || meta === "" ? null : <div className="page-header__meta-content">{meta}</div>}
+      <div className="page-header__lock-row">
+        {lockHint === undefined
+          ? <span className="page-header__lock--reserved" aria-hidden="true" />
+          : <span className="page-header__lock"><Icon name="lock" size={16} /><span>{lockHint}</span></span>}
+      </div>
+    </div>
+    : headerMeta === undefined || headerMeta === null || headerMeta === ""
+      ? null
+      : <div className="page-header__meta">{headerMeta}</div>;
   const Heading = headingLevel;
 
   return (
@@ -100,7 +112,7 @@ export function PageHeader({
           {(badges ?? badge) === undefined || (badges ?? badge) === null ? null : <div className="page-header__badges">{badges ?? badge}</div>}
         </div>
         {subtitle === undefined || subtitle === null || subtitle === "" ? null : <p>{subtitle}</p>}
-        {headerMeta === undefined || headerMeta === null || headerMeta === "" ? null : <div className="page-header__meta">{headerMeta}</div>}
+        {metaContent}
       </div>
       <HeaderActions
         saveStatus={saveStatus}

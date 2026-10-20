@@ -46,11 +46,24 @@ const refreshAfterModuleToggle = async (queryClient: QueryClient, channelId: str
   ]);
 };
 
+const mergeUnknownScopeMetadata = (updated: PanelModuleState, previous: PanelModuleState | undefined): PanelModuleState => {
+  if (updated.broadcasterScopeMetadataUnknown !== true || previous === undefined ||
+      previous.broadcasterScopeMetadataUnknown === true || previous.requiredBroadcasterScopes === undefined ||
+      previous.missingBroadcasterScopes === undefined) return updated;
+  const known = { ...updated };
+  delete known.broadcasterScopeMetadataUnknown;
+  return {
+    ...known,
+    requiredBroadcasterScopes: [...previous.requiredBroadcasterScopes],
+    missingBroadcasterScopes: [...previous.missingBroadcasterScopes],
+  };
+};
+
 const withModuleState = (modules: readonly PanelModuleState[] | undefined, updated: PanelModuleState): PanelModuleState[] => {
   const current = [...(modules ?? [])];
   const index = current.findIndex(({ id }) => id === updated.id);
   if (index < 0) return [...current, updated];
-  current[index] = updated;
+  current[index] = mergeUnknownScopeMetadata(updated, current[index]);
   return current;
 };
 
@@ -85,29 +98,41 @@ const applyModuleResponse = (queryClient: QueryClient, channelId: string, update
   const current = statesByChannel.get(channelId) ?? new Map<string, AppliedModuleState>();
   const known = current.get(updated.id);
   if (known !== undefined && revision < known.revision) return;
+  const cachedModules = queryClient.getQueryData<PanelModulesResponse>(queryKeys.channel(channelId, "modules"))?.modules;
+  const cachedOverview = queryClient.getQueryData<PanelChannelOverview>(queryKeys.channel(channelId, "overview"))?.modules;
+  const cachedChannels = queryClient.getQueryData<PanelChannelsResponse>(queryKeys.channels())?.channels
+    .find((channel) => channel.channelId === channelId)?.modules;
+  const previousScopeState = [
+    known?.module,
+    cachedModules?.find(({ id }) => id === updated.id),
+    cachedOverview?.find(({ id }) => id === updated.id),
+    cachedChannels?.find(({ id }) => id === updated.id),
+  ].find((module) => module !== undefined && module.broadcasterScopeMetadataUnknown !== true &&
+    module.requiredBroadcasterScopes !== undefined && module.missingBroadcasterScopes !== undefined);
+  const module = mergeUnknownScopeMetadata(updated, previousScopeState);
   const generationsByChannel = moduleToggleGenerations.get(queryClient) ?? new Map<string, number>();
   const generation = (generationsByChannel.get(channelId) ?? 0) + 1;
   generationsByChannel.set(channelId, generation);
   moduleToggleGenerations.set(queryClient, generationsByChannel);
-  current.set(updated.id, { revision, generation, module: updated });
+  current.set(module.id, { revision, generation, module });
   statesByChannel.set(channelId, current);
   appliedModuleStates.set(queryClient, statesByChannel);
 
   queryClient.setQueryData<PanelModulesResponse>(queryKeys.channel(channelId, "modules"), (current) =>
-    current === undefined ? current : { ...current, modules: withModuleState(current.modules, updated) });
+    current === undefined ? current : { ...current, modules: withModuleState(current.modules, module) });
 
   queryClient.setQueryData<PanelChannelsResponse>(queryKeys.channels(), (current) => current === undefined ? current : ({
     ...current,
     channels: current.channels.map((channel) => channel.channelId !== channelId
       ? channel
-      : { ...channel, modules: withModuleState(channel.modules, updated) }),
+      : { ...channel, modules: withModuleState(channel.modules, module) }),
   }));
 
   queryClient.setQueryData<PanelChannelOverview>(queryKeys.channel(channelId, "overview"), (current) => {
     if (current === undefined) return current;
-    const activeModules = current.activeModules.filter(({ moduleId }) => moduleId !== updated.id);
-    if (updated.enabled) activeModules.push({ moduleId: updated.id, settings: updated.settings });
-    return { ...current, modules: withModuleState(current.modules, updated), activeModules };
+    const activeModules = current.activeModules.filter(({ moduleId }) => moduleId !== module.id);
+    if (module.enabled) activeModules.push({ moduleId: module.id, settings: module.settings });
+    return { ...current, modules: withModuleState(current.modules, module), activeModules };
   });
 };
 

@@ -140,6 +140,19 @@ const pointsHeaderGeometry = async (page: Page): Promise<{ top: number; height: 
     };
   });
 
+const slotHeaderGeometry = async (page: Page): Promise<{ top: number; height: number; contentTop: number }> => {
+  const [header, content] = await Promise.all([
+    page.locator(".settings-page--slot > .page-header").boundingBox(),
+    page.locator(".settings-page--slot > .settings-page__columns").boundingBox(),
+  ]);
+  if (header === null || content === null) throw new Error("Slot settings header or content is missing.");
+  return {
+    top: Math.round(header.y * 100) / 100,
+    height: Math.round(header.height * 100) / 100,
+    contentTop: Math.round(content.y * 100) / 100,
+  };
+};
+
 test("locks dependency switches in the reserved reasons and captures both required views (protects=managers see why Slot cannot activate without points and why points cannot deactivate while Slot is active, without a layout shift or request; fails_when=either switch is enabled, the reserved reason is absent, a disabled switch sends a request, or any requested screenshot has the wrong viewport; no_claim=behavior for dependency changes committed by another manager)", async ({ page }, testInfo) => {
   const api = await mockDashboard(page, moduleStates(false, false));
   mkdirSync("test-results/issue-504-ui", { recursive: true });
@@ -237,6 +250,36 @@ test("keeps the Points page header and following content in place across Slot st
     await expect(page.getByText("Erst ausschalten: Slot", { exact: true })).toHaveCount(0);
     expect(await pointsHeaderGeometry(page)).toEqual(dependentGeometry);
   }
+});
+
+test("keeps the Slot header stable while Points toggles at narrow and desktop widths (protects=Slot jackpot metadata and dependency reason keep the metadata, header, and following content at the same height at 390, 768, 1440, and 1920 pixels; fails_when=any of those positions shifts as Points toggles; no_claim=Slot header behavior at untested widths or when the Slot module itself toggles)", async ({ page }) => {
+  const api = await mockDashboard(page, moduleStates(false, false));
+
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 768, height: 1024 },
+    { width: 1440, height: 900 },
+    { width: 1920, height: 1080 },
+  ]) {
+    api.setModules(false, false);
+    await page.setViewportSize(viewport);
+    await page.goto(`/channels/${channelId}/modules/emote_slots?lang=de`);
+    await expect(page.getByText("Benötigt: Punkte", { exact: true })).toBeVisible();
+    await expect(page.locator(".slot-jackpot-meta")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Walzen", exact: true })).toBeVisible();
+    const lockedGeometry = await slotHeaderGeometry(page);
+
+    await page.goto(`/channels/${channelId}/modules?lang=de`);
+    await page.getByRole("switch", { name: "Punkte: Aus" }).click();
+    await expect(page.getByRole("switch", { name: "Punkte: Läuft" })).toBeChecked();
+    await page.goto(`/channels/${channelId}/modules/emote_slots?lang=de`);
+    await expect(page.getByText("Benötigt: Punkte", { exact: true })).toHaveCount(0);
+    await expect(page.locator(".slot-jackpot-meta")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Walzen", exact: true })).toBeVisible();
+    expect(await slotHeaderGeometry(page)).toEqual(lockedGeometry);
+  }
+
+  expect(api.toggleRequests).toEqual(["points", "points", "points", "points"]);
 });
 
 test("shows the missing requirement when another manager disables points first (protects=the module_requires race response gives a localized dependency toast instead of a generic API failure; fails_when=the toast shows the generic change failure or no requirement name; no_claim=the other manager's current module state)", async ({ page }) => {
