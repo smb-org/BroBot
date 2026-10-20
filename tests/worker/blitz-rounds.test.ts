@@ -562,7 +562,7 @@ describe("blitz answers in the channel Durable Object", () => {
     await expect(object.pointBalance("blitz_round", "viewer_one")).resolves.toBe(50);
   });
 
-  it("terminates result delivery suppressed by a disabled module [protects=a committed result suppressed while disabled is marked delivered with no alarm and is never announced after re-enable; fails_when=module_disabled leaves a retry alarm or the stale result is formatted and sent after re-enable; no_claim=sendChat models the suppression result from the persisted module flag while the worker settlement and delivery state remain real]", async () => {
+  it("terminates result delivery suppressed by a disabled module [protects=a committed result suppressed while disabled is marked suppressed with no alarm and is never announced after re-enable; fails_when=the disabled result leaves a retry alarm or is announced after re-enable; no_claim=the persisted worker gate suppresses before transport while the settlement remains real]", async () => {
     const channelId = `blitz-disabled-result-${crypto.randomUUID()}`;
     const roundId = "blitz-disabled-result";
     const worker = env as unknown as { DB: D1Database };
@@ -607,8 +607,8 @@ describe("blitz answers in the channel Durable Object", () => {
       ).one().count,
       roundAlarm: state.storage.kv.get<Record<string, unknown>>("channel:alarm_schedule")?.[`points:round:${roundId}`] ?? null,
     }));
-    expect(afterSuppression).toEqual({ deliveryState: "delivered", operationCount: 1, roundAlarm: null });
-    expect(sendChat).toHaveBeenCalledOnce();
+    expect(afterSuppression).toEqual({ deliveryState: "suppressed", operationCount: 1, roundAlarm: null });
+    expect(sendChat).not.toHaveBeenCalled();
 
     await worker.DB.prepare("UPDATE channel_modules SET enabled = 1, revision = 3 WHERE channel_id = ? AND module_id = 'blitz_round'")
       .bind(channelId).run();
@@ -621,9 +621,73 @@ describe("blitz answers in the channel Durable Object", () => {
       roundAlarm: state.storage.kv.get<Record<string, unknown>>("channel:alarm_schedule")?.[`points:round:${roundId}`] ?? null,
     }));
 
-    expect(afterReEnable).toEqual({ deliveryState: "delivered", roundAlarm: null });
-    expect(formatResult).toHaveBeenCalledOnce();
+    expect(afterReEnable).toEqual({ deliveryState: "suppressed", roundAlarm: null });
+    expect(formatResult).not.toHaveBeenCalled();
+    expect(sendChat).not.toHaveBeenCalled();
+    await expect(object.pointBalance("blitz_round", "viewer_one")).resolves.toBe(50);
+  });
+
+  it("suppresses a pending result across a rapid disable and re-enable [protects=disable revision 2 terminates retries for a round opened at revision 1 while retaining its single settlement; fails_when=re-enable revives the stale result announcement, leaves its alarm scheduled, or changes the committed payout; no_claim=gate revisions and sendChat are driven through a real ChannelObject with mocked transport]", async () => {
+    const channelId = `blitz-disable-result-${crypto.randomUUID()}`;
+    const roundId = "blitz-disabled-result-retry";
+    const settlement = { kind: "blitz", params: { prize: 50 } };
+    await insertPointChannel(channelId);
+    const object = blitzObject(pointObject(channelId));
+    const sendChat = vi.fn<ModuleAlarmContext["sendChat"]>()
+      .mockResolvedValueOnce({ sent: false, retryable: false, reason: "network_error", delivery: "failed" })
+      .mockResolvedValue({ sent: true, retryable: false, reason: null, delivery: "delivered" });
+    vi.spyOn(blitzRoundModule, "formatPointRoundResult").mockResolvedValue({ text: "Correct: CLOUD" });
+
+    await runPointObject(object, async (target, state) => {
+      await target.setGameModuleGate("blitz_round", false, 1);
+      stubPointRoundChat(target, () => sendChat("fictional result", "fictional-result-key"));
+      await target.openGameRound("blitz_round", roundId, {
+        durationS: 60,
+        announceText: "Blitz round starts",
+        answer: "CLOUD",
+        settlement,
+      });
+      await target.markGameRoundAnnounced("blitz_round", roundId, Date.now() + 60_000, `round:${roundId}`);
+      await blitzObject(target).answerGameRound("blitz_round", roundId, "msg:disable-result-retry", "viewer_one", "frostfern", 5, Date.now());
+      await deferPointAlarmWithin(state);
+    });
+
+    await object.resolveGameRound("blitz_round", roundId, settlement);
+    await forcePointAlarm(object, roundId);
     expect(sendChat).toHaveBeenCalledOnce();
+    await expect(object.pointBalance("blitz_round", "viewer_one")).resolves.toBe(50);
+
+    await object.setGameModuleGate("blitz_round", true, 2);
+    await object.setGameModuleGate("blitz_round", false, 3, 2);
+    const suppressed = await runPointObject(object, async (_target, state) => ({
+      round: state.storage.sql.exec<{
+        gate_revision: number;
+        state: string;
+        resolve_delivery_state: string;
+      }>("SELECT gate_revision, state, resolve_delivery_state FROM game_rounds WHERE round_id = ?", roundId).one(),
+      operationCount: state.storage.sql.exec<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM point_operations WHERE operation_id = ?", `round:${roundId}:resolve`,
+      ).one().count,
+      scheduledAlarm: state.storage.kv.get<Record<string, unknown>>("channel:alarm_schedule")?.[`points:round:${roundId}`] ?? null,
+      platformAlarm: await state.storage.getAlarm(),
+    }));
+
+    expect(suppressed).toEqual({
+      round: { gate_revision: 1, state: "resolved", resolve_delivery_state: "suppressed" },
+      operationCount: 1,
+      scheduledAlarm: null,
+      platformAlarm: null,
+    });
+    expect(sendChat).toHaveBeenCalledOnce();
+    await object.resolveGameRound("blitz_round", roundId, settlement);
+    const afterReplay = await runPointObject(object, async (_target, state) => ({
+      deliveryState: state.storage.sql.exec<{ resolve_delivery_state: string }>(
+        "SELECT resolve_delivery_state FROM game_rounds WHERE round_id = ?", roundId,
+      ).one().resolve_delivery_state,
+      scheduledAlarm: state.storage.kv.get<Record<string, unknown>>("channel:alarm_schedule")?.[`points:round:${roundId}`] ?? null,
+      platformAlarm: await state.storage.getAlarm(),
+    }));
+    expect(afterReplay).toEqual({ deliveryState: "suppressed", scheduledAlarm: null, platformAlarm: null });
     await expect(object.pointBalance("blitz_round", "viewer_one")).resolves.toBe(50);
   });
 });

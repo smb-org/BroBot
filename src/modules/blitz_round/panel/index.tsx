@@ -493,6 +493,7 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
   const draft = useDraft(settings);
   const [currentRevision, setCurrentRevision] = useState(revision);
   const [saving, setSaving] = useState(false);
+  const savePromise = useRef<Promise<string | null> | null>(null);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [serverConflict, setServerConflict] = useState(false);
@@ -501,31 +502,37 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
 
   const reset = (): void => { draft.reset(); setError(undefined); setSaved(false); };
 
-  const save = async (): Promise<string | null> => {
-    if (!canManage || !valid) return labels.settingsError;
+  const save = (): Promise<string | null> => {
+    if (savePromise.current !== null) return savePromise.current;
+    if (!canManage || !valid) return Promise.resolve(labels.settingsError);
     setSaving(true);
     setError(undefined);
     setSaved(false);
-    try {
-      const result = await runModuleQueryWrite(queryClient, channelId, "blitz_round", "settings", () => saveBlitzSettings(channelId, currentRevision, draft.value), {
-        baselineRevision: currentRevision,
-        updateCache: (_current, next) => next,
-      });
-      draft.accept(result.settings);
-      setCurrentRevision(result.revision);
-      onSaved(result.settings, result.revision);
-      setServerConflict(false);
-      setSaved(true);
-      return null;
-    } catch (failure: unknown) {
-      const conflicted = blitzErrorCode(failure) === "module_settings_changed_concurrently";
-      const message = conflicted ? labels.settingsConflict : labels.settingsError;
-      if (conflicted) setServerConflict(true);
-      setError(message);
-      return message;
-    } finally {
-      setSaving(false);
-    }
+    const request = (async (): Promise<string | null> => {
+      try {
+        const result = await runModuleQueryWrite(queryClient, channelId, "blitz_round", "settings", () => saveBlitzSettings(channelId, currentRevision, draft.value), {
+          baselineRevision: currentRevision,
+          updateCache: (_current, next) => next,
+        });
+        draft.accept(result.settings);
+        setCurrentRevision(result.revision);
+        onSaved(result.settings, result.revision);
+        setServerConflict(false);
+        setSaved(true);
+        return null;
+      } catch (failure: unknown) {
+        const conflicted = blitzErrorCode(failure) === "module_settings_changed_concurrently";
+        const message = conflicted ? labels.settingsConflict : labels.settingsError;
+        if (conflicted) setServerConflict(true);
+        setError(message);
+        return message;
+      } finally {
+        setSaving(false);
+        savePromise.current = null;
+      }
+    })();
+    savePromise.current = request;
+    return request;
   };
 
   const reloadCurrent = (): void => {
@@ -600,6 +607,7 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
       confirmLabel={labels.discard}
       cancelLabel={labels.continueEditing}
       alternative={{ label: labels.save, onClick: () => { void guard.saveAndSwitch(); } }}
+      pending={guard.saving || saving}
       {...(guard.saveError === undefined ? {} : { error: guard.saveError })}
       onCancel={guard.continueEditing}
       onConfirm={guard.discardAndSwitch}

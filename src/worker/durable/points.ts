@@ -51,7 +51,7 @@ interface RoundRow extends Record<string, string | number | null> {
   announce_attempts: number;
   last_attempt_at: number | null;
   prepare_state: "pending" | "delivered";
-  resolve_delivery_state: "pending" | "sending" | "delivered";
+  resolve_delivery_state: "pending" | "sending" | "delivered" | "suppressed";
   resolve_delivery_attempts: number;
   resolve_delivery_last_attempt_at: number | null;
   resolved_at: string | null;
@@ -274,7 +274,8 @@ export const ensurePointsSchema = (sql: PointsSql): void => {
   sql.exec(`CREATE TABLE IF NOT EXISTS module_gates (
     module_id TEXT PRIMARY KEY,
     closed INTEGER NOT NULL,
-    revision INTEGER NOT NULL
+    revision INTEGER NOT NULL,
+    last_disabled_revision INTEGER NOT NULL DEFAULT 0
   )`);
   sql.exec(`CREATE TABLE IF NOT EXISTS game_round_cancellations (
     module_id TEXT PRIMARY KEY,
@@ -305,6 +306,10 @@ export const ensurePointsSchema = (sql: PointsSql): void => {
   }
   if (!gameRoundColumns.some(({ name }) => name === "resolved_at")) {
     sql.exec("ALTER TABLE game_rounds ADD COLUMN resolved_at TEXT");
+  }
+  const moduleGateColumns = sql.exec<{ name: string }>("PRAGMA table_info(module_gates)").toArray();
+  if (!moduleGateColumns.some(({ name }) => name === "last_disabled_revision")) {
+    sql.exec("ALTER TABLE module_gates ADD COLUMN last_disabled_revision INTEGER NOT NULL DEFAULT 0");
   }
   if (!gameRoundColumns.some(({ name }) => name === "gate_revision")) {
     sql.exec("ALTER TABLE game_rounds ADD COLUMN gate_revision INTEGER NOT NULL DEFAULT 0");
@@ -948,6 +953,7 @@ export const setGameModuleGateSync = (
   now = new Date().toISOString(),
   lastDisabledRevision: number | null = null,
   onRoundCancelled?: (roundId: string) => void,
+  onRoundSuppressed?: (roundId: string) => void,
 ): { applied: boolean } => {
   if (!Number.isSafeInteger(revision) || revision < 1) throw new Error("invalid_revision");
   if (lastDisabledRevision !== null && (!Number.isSafeInteger(lastDisabledRevision) || lastDisabledRevision < 1)) {
@@ -966,9 +972,11 @@ export const setGameModuleGateSync = (
       ).toArray()[0];
       if (currentGate === undefined || currentGate.revision <= cancellationRevision) {
         sql.exec(
-          `INSERT INTO module_gates (module_id, closed, revision) VALUES (?, 1, ?)
-           ON CONFLICT(module_id) DO UPDATE SET closed = 1, revision = excluded.revision`,
+          `INSERT INTO module_gates (module_id, closed, revision, last_disabled_revision) VALUES (?, 1, ?, ?)
+           ON CONFLICT(module_id) DO UPDATE SET closed = 1, revision = excluded.revision,
+             last_disabled_revision = MAX(module_gates.last_disabled_revision, excluded.last_disabled_revision)`,
           moduleId,
+          cancellationRevision,
           cancellationRevision,
         );
       }
@@ -996,17 +1004,29 @@ export const setGameModuleGateSync = (
       );
     }
   }
-  const existing = sql.exec<{ revision: number; closed: number }>(
-    "SELECT revision, closed FROM module_gates WHERE module_id = ?",
+  const existing = sql.exec<{ revision: number; closed: number; last_disabled_revision: number }>(
+    "SELECT revision, closed, last_disabled_revision FROM module_gates WHERE module_id = ?",
     moduleId,
   ).toArray()[0];
-  if (existing !== undefined && revision <= existing.revision) return { applied: false };
+  const disableRevision = closed
+    ? revision
+    : Math.max(lastDisabledRevision ?? 0, existing?.last_disabled_revision ?? 0) || null;
+  if (disableRevision !== null) suppressPointRoundResultDeliveriesSync(sql, moduleId, disableRevision, onRoundSuppressed);
+  if (existing !== undefined && revision <= existing.revision) {
+    if (disableRevision !== null && disableRevision > existing.last_disabled_revision) {
+      sql.exec("UPDATE module_gates SET last_disabled_revision = ? WHERE module_id = ?", disableRevision, moduleId);
+    }
+    return { applied: false };
+  }
+  const nextDisabledRevision = Math.max(existing?.last_disabled_revision ?? 0, closed ? revision : lastDisabledRevision ?? 0);
   sql.exec(
-    `INSERT INTO module_gates (module_id, closed, revision) VALUES (?, ?, ?)
-     ON CONFLICT(module_id) DO UPDATE SET closed = excluded.closed, revision = excluded.revision`,
+    `INSERT INTO module_gates (module_id, closed, revision, last_disabled_revision) VALUES (?, ?, ?, ?)
+     ON CONFLICT(module_id) DO UPDATE SET closed = excluded.closed, revision = excluded.revision,
+       last_disabled_revision = excluded.last_disabled_revision`,
     moduleId,
     closed ? 1 : 0,
     revision,
+    nextDisabledRevision,
   );
   if (closed) {
     sql.exec(
@@ -1103,6 +1123,39 @@ export const pointRoundRow = (sql: PointsSql, roundId: string): RoundRow | null 
        FROM game_rounds WHERE round_id = ?`,
     roundId,
   ).toArray()[0] ?? null;
+
+export const pointRoundDeliveryGateIsCurrentSync = (sql: PointsSql, round: Pick<RoundRow, "module_id" | "gate_revision">): boolean => {
+  const gate = sql.exec<{ closed: number; last_disabled_revision: number }>(
+    "SELECT closed, last_disabled_revision FROM module_gates WHERE module_id = ?",
+    round.module_id,
+  ).toArray()[0];
+  return gate === undefined || (gate.closed === 0 && round.gate_revision >= gate.last_disabled_revision);
+};
+
+const suppressPointRoundResultDeliveriesSync = (
+  sql: PointsSql,
+  moduleId: string,
+  disableRevision: number,
+  onRoundSuppressed?: (roundId: string) => void,
+): string[] => {
+  const roundIds = sql.exec<{ round_id: string }>(
+    `SELECT round_id FROM game_rounds
+      WHERE module_id = ? AND gate_revision < ? AND state = 'resolved'
+        AND resolve_delivery_state IN ('pending', 'sending')
+      ORDER BY created_at, round_id`,
+    moduleId,
+    disableRevision,
+  ).toArray().map(({ round_id }) => round_id);
+  for (const roundId of roundIds) {
+    sql.exec(
+      `UPDATE game_rounds SET resolve_delivery_state = 'suppressed'
+        WHERE round_id = ? AND state = 'resolved' AND resolve_delivery_state IN ('pending', 'sending')`,
+      roundId,
+    );
+    onRoundSuppressed?.(roundId);
+  }
+  return roundIds;
+};
 
 export const openPointRoundSync = (
   sql: PointsSql,
@@ -1586,18 +1639,28 @@ export const recoverablePointRounds = (sql: PointsSql): RoundRow[] =>
             announce_text, announce_state, announce_attempts, last_attempt_at,
             prepare_state, resolve_delivery_state, resolve_delivery_attempts, resolve_delivery_last_attempt_at, resolved_at
        FROM game_rounds
-      WHERE prepare_state = 'pending' OR state IN ('announcing', 'open') OR (state = 'resolved' AND resolve_delivery_state != 'delivered')
+      WHERE prepare_state = 'pending' OR state IN ('announcing', 'open')
+         OR (state = 'resolved' AND resolve_delivery_state IN ('pending', 'sending'))
       ORDER BY created_at, round_id`,
   ).toArray();
 
 export const beginPointRoundResolutionDeliverySync = (sql: PointsSql, roundId: string, now: number): {
   round: RoundRow | null;
   result: unknown;
-  outcome: "attempt" | "pending" | "delivered" | "ignored";
+  outcome: "attempt" | "pending" | "delivered" | "suppressed" | "ignored";
 } => {
   const round = pointRoundRow(sql, roundId);
   if (round === null || round.state !== "resolved") return { round, result: null, outcome: "ignored" };
   if (round.resolve_delivery_state === "delivered") return { round, result: null, outcome: "delivered" };
+  if (round.resolve_delivery_state === "suppressed") return { round, result: null, outcome: "suppressed" };
+  if (!pointRoundDeliveryGateIsCurrentSync(sql, round)) {
+    sql.exec(
+      `UPDATE game_rounds SET resolve_delivery_state = 'suppressed'
+        WHERE round_id = ? AND state = 'resolved' AND resolve_delivery_state IN ('pending', 'sending')`,
+      roundId,
+    );
+    return { round: { ...round, resolve_delivery_state: "suppressed" }, result: null, outcome: "suppressed" };
+  }
   if (round.resolve_delivery_state === "sending" && round.resolve_delivery_last_attempt_at !== null &&
       now - round.resolve_delivery_last_attempt_at < POINTS_ANNOUNCE_AMBIGUOUS_MS) {
     return { round, result: null, outcome: "pending" };
@@ -1628,11 +1691,12 @@ export const beginPointRoundResolutionDeliverySync = (sql: PointsSql, roundId: s
 export const recordPointRoundResolutionDeliverySync = (
   sql: PointsSql,
   roundId: string,
-  delivered: boolean,
+  state: "delivered" | "pending" | "suppressed",
 ): void => {
   sql.exec(
-    `UPDATE game_rounds SET resolve_delivery_state = ? WHERE round_id = ? AND state = 'resolved'`,
-    delivered ? "delivered" : "pending",
+    `UPDATE game_rounds SET resolve_delivery_state = ?
+      WHERE round_id = ? AND state = 'resolved' AND resolve_delivery_state != 'suppressed'`,
+    state,
     roundId,
   );
 };

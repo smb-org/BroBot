@@ -40,7 +40,7 @@ const parseUrl = (input: RequestInfo | URL): URL => input instanceof Request
   ? new URL(input.url)
   : input instanceof URL ? input : new URL(input, "https://brobot.example");
 
-const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Promise<void>, stalePatch = false, settingsConflict = false, patchDeleted = false) => {
+const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Promise<void>, stalePatch = false, settingsConflict = false, patchDeleted = false, settingsPatchGate?: Promise<void>) => {
   let questions = [...initialQuestions];
   let settings = { ...initialSettings };
   let settingsRevision = 1;
@@ -55,16 +55,21 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
     if (url.pathname.endsWith("/modules/blitz_round/settings") && method === "PATCH") {
       const body = JSON.parse(typeof init?.body === "string" ? init.body : "null") as { revision: number; settings: BlitzRoundSettings };
       submittedSettingsRevisions.push(body.revision);
-      if (conflictPending) {
-        conflictPending = false;
-        settings = { ...settings, prize: 80 };
-        settingsRevision = 2;
-        return Promise.resolve(jsonResponse({ error: "module_settings_changed_concurrently" }, 409));
-      }
-      if (body.revision !== settingsRevision) return Promise.resolve(jsonResponse({ error: "module_settings_changed_concurrently" }, 409));
-      settings = { ...body.settings };
-      settingsRevision += 1;
-      return Promise.resolve(jsonResponse({ settings, revision: settingsRevision }));
+      const patch = (): Response => {
+        if (conflictPending) {
+          conflictPending = false;
+          settings = { ...settings, prize: 80 };
+          settingsRevision = 2;
+          return jsonResponse({ error: "module_settings_changed_concurrently" }, 409);
+        }
+        if (body.revision !== settingsRevision) return jsonResponse({ error: "module_settings_changed_concurrently" }, 409);
+        settings = { ...body.settings };
+        settingsRevision += 1;
+        return jsonResponse({ settings, revision: settingsRevision });
+      };
+      return settingsPatchGate === undefined
+        ? Promise.resolve(patch())
+        : settingsPatchGate.then(patch);
     }
     if (url.pathname.includes("/modules/blitz_round/questions/") && method === "GET") {
       const id = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
@@ -196,6 +201,38 @@ describe("Blitz Round collection panel", () => {
 
     await waitFor(() => expect(api.getQuestions().some((entry) => entry.prompt === "Which star is closest?")).toBe(true));
     expect(await screen.findByText("Round settings", { exact: true })).toBeInTheDocument();
+  });
+
+  it("locks settings confirmation during a delayed PATCH and shares its save [protects=Save-and-switch keeps Discard disabled while the settings PATCH is pending and repeated Save clicks issue one request; fails_when=Discard navigates away during the pending write or two PATCH requests race; no_claim=the delayed PATCH is an in-memory HTTP stub and does not test network cancellation]", async () => {
+    let releasePatch!: () => void;
+    const patchGate = new Promise<void>((resolve) => { releasePatch = resolve; });
+    const api = installPanelFetch([], undefined, false, false, false, patchGate);
+    mountPanel();
+    await screen.findByText("Add a word scramble or quiz question so chat can join in.");
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await screen.findByText("Round settings", { exact: true });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Prize" }), { target: { value: "75" } });
+    const settingsBack = screen.getAllByRole("button", { name: "Back to questions" }).at(-1);
+    if (settingsBack === undefined) throw new Error("The settings back button was not found.");
+    fireEvent.click(settingsBack);
+    const guard = await screen.findByRole("dialog", { name: "Save changes?" });
+    const save = within(guard).getByRole("button", { name: /^Save$/u });
+    act(() => {
+      fireEvent.click(save);
+      fireEvent.click(save);
+    });
+    await waitFor(() => expect(api.requests.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1));
+
+    const discard = within(guard).getByRole("button", { name: "Discard" });
+    expect(discard).toBeDisabled();
+    discard.click();
+    expect(screen.getByRole("dialog", { name: "Save changes?" })).toBeInTheDocument();
+    expect(api.getSettings().prize).toBe(50);
+
+    act(() => { releasePatch(); });
+    await waitFor(() => expect(api.getSettings().prize).toBe(75));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Save changes?" })).not.toBeInTheDocument());
+    expect(api.requests.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1);
   });
 
   it("guards dashboard navigation while a question draft is unsaved [protects=dashboard navigation waits for question draft confirmation and the editor unregisters its guard on unmount; fails_when=the dashboard proceeds without confirmation or a removed editor still intercepts navigation; no_claim=the route transition is exercised through the production navigation guard registry]", async () => {

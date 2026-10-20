@@ -198,6 +198,7 @@ import {
   pointRankOf,
   pointRanking,
   pointRoundAlarmKey,
+  pointRoundDeliveryGateIsCurrentSync,
   pointRoundRefundRequests,
   pointRoundRow,
   pendingPointRoundCancellations,
@@ -725,7 +726,7 @@ export class ChannelObject extends DurableObject<Env> {
     this.ensurePointsSchema();
     const hasActiveRounds = this.ctx.storage.sql.exec<{ count: number }>(
       `SELECT COUNT(*) AS count FROM game_rounds WHERE state IN ('announcing', 'open', 'resolving')
-        OR prepare_state = 'pending' OR (state = 'resolved' AND resolve_delivery_state != 'delivered')`,
+        OR prepare_state = 'pending' OR (state = 'resolved' AND resolve_delivery_state IN ('pending', 'sending'))`,
     ).one().count > 0;
     const hasPendingCancellations = pendingPointRoundCancellations(this.ctx.storage.sql).length > 0;
     const hasPendingNotices = pendingPointRoundCancellationNotices(this.ctx.storage.sql).length > 0;
@@ -3631,12 +3632,13 @@ export class ChannelObject extends DurableObject<Env> {
           new Date().toISOString(),
         );
         if (MODULES.find((module) => module.id === moduleId)?.formatPointRoundResult === undefined) {
-          recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, true);
+          recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, "delivered");
         }
         const round = pointRoundRow(this.ctx.storage.sql, roundId);
         const alarmKey = pointRoundAlarmKey(roundId);
-        if (round?.resolve_delivery_state === "delivered") this.clearPointRoundAlarmSync(alarmKey);
-        else this.writePointRoundAlarmSync(alarmKey, Date.now());
+        if (round?.resolve_delivery_state === "delivered" || round?.resolve_delivery_state === "suppressed") {
+          this.clearPointRoundAlarmSync(alarmKey);
+        } else this.writePointRoundAlarmSync(alarmKey, Date.now());
         return value;
       });
     } catch (error) {
@@ -3783,12 +3785,14 @@ export class ChannelObject extends DurableObject<Env> {
         if (pointRoundRow(this.ctx.storage.sql, roundId)?.prepare_state === "pending") {
           this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), Date.now());
         } else this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
+      }, (roundId) => {
+        this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
       });
       if (!closed && cancellationRevision !== null) this.ensurePointCancellationNoticeAlarmsSync();
       return applied;
     });
+    await this.scheduleEarliestAlarm();
     if (!closed && (result.applied || cancellationRevision !== null)) {
-      await this.scheduleEarliestAlarm();
       if (flushCancellationNotices && cancellationRevision !== null) await this.flushPointCancellationNotices();
     }
     return result;
@@ -3943,8 +3947,9 @@ export class ChannelObject extends DurableObject<Env> {
       return;
     }
     if (round.state === "resolved") {
-      if (round.resolve_delivery_state !== "delivered") await this.deliverPointRoundResult(roundId);
-      else this.ctx.storage.transactionSync(() => { this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId)); });
+      if (round.resolve_delivery_state === "pending" || round.resolve_delivery_state === "sending") {
+        await this.deliverPointRoundResult(roundId);
+      } else this.ctx.storage.transactionSync(() => { this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId)); });
       return;
     }
     if (round.state === "open") {
@@ -4071,7 +4076,7 @@ export class ChannelObject extends DurableObject<Env> {
   private async deliverPointRoundResult(roundId: string): Promise<void> {
     const attempt = this.ctx.storage.transactionSync(() =>
       beginPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, Date.now()));
-    if (attempt.outcome === "delivered" || attempt.outcome === "ignored") {
+    if (attempt.outcome === "delivered" || attempt.outcome === "suppressed" || attempt.outcome === "ignored") {
       this.ctx.storage.transactionSync(() => { this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId)); });
       await this.scheduleEarliestAlarm();
       return;
@@ -4086,7 +4091,7 @@ export class ChannelObject extends DurableObject<Env> {
     const formatter = module?.formatPointRoundResult;
     if (module === undefined || formatter === undefined) {
       this.ctx.storage.transactionSync(() => {
-        recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, true);
+        recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, "delivered");
         this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
       });
       await this.scheduleEarliestAlarm();
@@ -4112,11 +4117,12 @@ export class ChannelObject extends DurableObject<Env> {
     const rowIsCurrent = (): boolean => {
       const current = pointRoundRow(this.ctx.storage.sql, roundId);
       return current !== null && current.state === "resolved" && current.resolve_delivery_state === "sending" &&
-        current.resolve_delivery_attempts === attempt.round?.resolve_delivery_attempts;
+        current.resolve_delivery_attempts === attempt.round?.resolve_delivery_attempts &&
+        pointRoundDeliveryGateIsCurrentSync(this.ctx.storage.sql, current);
     };
     if (formatted === null || formatted.text.length === 0) {
       this.ctx.storage.transactionSync(() => {
-        recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, true);
+        recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, "delivered");
         this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
       });
       await this.scheduleEarliestAlarm();
@@ -4132,8 +4138,9 @@ export class ChannelObject extends DurableObject<Env> {
     const delivered = delivery.sent || delivery.delivery === "delivered";
     const permanentlySuppressed = delivery.reason === "module_disabled";
     const complete = delivered || permanentlySuppressed;
+    const deliveryState = delivered ? "delivered" : permanentlySuppressed ? "suppressed" : "pending";
     this.ctx.storage.transactionSync(() => {
-      recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, complete);
+      recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, deliveryState);
       if (complete) this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
       else this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), Date.now() + POINTS_ANNOUNCE_RETRY_MS);
     });
