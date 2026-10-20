@@ -41,11 +41,23 @@
   .emote-slot-overlay__jackpot { display: flex; align-items: center; justify-content: space-between; min-width: 0; }
   .emote-slot-overlay__secondary { color: var(--content-game-reel-secondary); font-size: 22px; line-height: 1.2; }
   .emote-slot-overlay__main { color: var(--content-game-reel-text); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 34px; font-weight: 600; line-height: 1.2; white-space: nowrap; }
-  .emote-slot-overlay--jackpot .emote-slot-overlay__jackpot .emote-slot-overlay__main { animation: emote-slot-jackpot-highlight 3s ease-out both; }
+  .emote-slot-overlay[data-jackpot-animation-running="true"] .emote-slot-overlay__jackpot .emote-slot-overlay__main {
+    animation: emote-slot-jackpot-highlight 3s ease-out both;
+    animation-delay: calc(0ms - var(--slot-presentation-elapsed));
+  }
 
-  .emote-slot-overlay[data-reduced-motion="false"] .emote-slot-overlay__reel { animation: emote-slot-reel-stop 720ms ease-out both; }
-  .emote-slot-overlay[data-reduced-motion="false"] .emote-slot-overlay__reel:nth-child(2) { animation-duration: 840ms; animation-delay: 180ms; }
-  .emote-slot-overlay[data-reduced-motion="false"] .emote-slot-overlay__reel:nth-child(3) { animation-duration: 960ms; animation-delay: 240ms; }
+  .emote-slot-overlay[data-reel-animation-running="true"] .emote-slot-overlay__reel {
+    animation: emote-slot-reel-stop 720ms ease-out both;
+    animation-delay: calc(0ms - var(--slot-presentation-elapsed));
+  }
+  .emote-slot-overlay[data-reel-animation-running="true"] .emote-slot-overlay__reel:nth-child(2) {
+    animation-duration: 840ms;
+    animation-delay: calc(180ms - var(--slot-presentation-elapsed));
+  }
+  .emote-slot-overlay[data-reel-animation-running="true"] .emote-slot-overlay__reel:nth-child(3) {
+    animation-duration: 960ms;
+    animation-delay: calc(240ms - var(--slot-presentation-elapsed));
+  }
   .emote-slot-overlay-editor input[type="color"] { box-sizing: border-box; width: 64px; height: 32px; padding: 2px; }
   .emote-slot-overlay-editor__contrast { min-height: 18px; margin: 0; color: var(--color-success-text); font-size: 12px; }
   .emote-slot-overlay-editor__contrast[data-status="warning"] { color: var(--color-orange-text); }

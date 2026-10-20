@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { JsonObject } from "../../src/modules/contract";
 import SlotOverlayEditor from "../../src/modules/emote_slots/overlay/editor";
 import { emoteSlotOverlayElement } from "../../src/modules/emote_slots/overlay/element";
-import { DEFAULT_SLOT_OVERLAY_CONFIG } from "../../src/modules/emote_slots/overlay/state";
+import { DEFAULT_SLOT_OVERLAY_CONFIG, slotOverlayContrastRatio } from "../../src/modules/emote_slots/overlay/state";
 import SlotOverlay from "../../src/modules/emote_slots/overlay/slot";
 
 const spinState = (spinId: string, symbols: string[], spunAt: string, jackpot = false): JsonObject => ({
@@ -181,5 +181,36 @@ describe("emote slot overlay", () => {
     rerender(<SlotOverlayEditor config={{ ...DEFAULT_SLOT_OVERLAY_CONFIG, textColor: "#090c10" }} onChange={onChange} language="en" />);
     expect(screen.getByRole("status")).toHaveAttribute("data-status", "warning");
     expect(screen.getByRole("status")).toHaveTextContent("at least 4.5:1 is required");
+  });
+
+  it("uses a content highlight color that stays readable against the default background (protects=the jackpot highlight starts with a content color above 4.5:1 and ends with readable normal text; fails_when=the default highlight is a UI role color or either endpoint falls below 4.5:1; no_claim=every intermediate rendered pixel on every display)", () => {
+    expect(DEFAULT_SLOT_OVERLAY_CONFIG.highlightColor.toLowerCase()).toBe("#2ed3a3");
+    expect(slotOverlayContrastRatio(DEFAULT_SLOT_OVERLAY_CONFIG.highlightColor, DEFAULT_SLOT_OVERLAY_CONFIG.backgroundColor)).toBeGreaterThanOrEqual(4.5);
+    expect(slotOverlayContrastRatio(DEFAULT_SLOT_OVERLAY_CONFIG.textColor, DEFAULT_SLOT_OVERLAY_CONFIG.backgroundColor)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("warns when a custom jackpot highlight falls below 4.5:1 while normal text remains readable (protects=the editor includes the animated jackpot color in its lowest text contrast; fails_when=an unreadable custom highlight reports the combination as OK; no_claim=contrast perception on every display)", () => {
+    const readableTextOnWhite = {
+      ...DEFAULT_SLOT_OVERLAY_CONFIG,
+      backgroundColor: "#ffffff",
+      textColor: "#000000",
+      secondaryColor: "#000000",
+      highlightColor: "#3fcf7f",
+    };
+    expect(slotOverlayContrastRatio(readableTextOnWhite.textColor, readableTextOnWhite.backgroundColor)).toBeGreaterThanOrEqual(4.5);
+    expect(slotOverlayContrastRatio(readableTextOnWhite.secondaryColor, readableTextOnWhite.backgroundColor)).toBeGreaterThanOrEqual(4.5);
+    expect(slotOverlayContrastRatio(readableTextOnWhite.highlightColor, readableTextOnWhite.backgroundColor)).toBeLessThan(4.5);
+
+    const onChange = vi.fn<(config: JsonObject) => void>();
+    const { rerender } = render(<SlotOverlayEditor config={readableTextOnWhite} onChange={onChange} language="en" />);
+
+    expect(screen.getByLabelText("Jackpot highlight color")).toHaveValue("#3fcf7f");
+    expect(screen.getByRole("status")).toHaveAttribute("data-status", "warning");
+    expect(screen.getByRole("status")).toHaveTextContent("at least 4.5:1 is required");
+
+    fireEvent.change(screen.getByLabelText("Jackpot highlight color"), { target: { value: "#000000" } });
+    expect(onChange).toHaveBeenCalledWith({ ...readableTextOnWhite, highlightColor: "#000000" });
+    rerender(<SlotOverlayEditor config={{ ...readableTextOnWhite, highlightColor: "#000000" }} onChange={onChange} language="en" />);
+    expect(screen.getByRole("status")).toHaveAttribute("data-status", "ok");
   });
 });

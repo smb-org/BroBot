@@ -40,9 +40,11 @@ const secondSpin: JsonObject = {
 
 export const Fixture = () => {
   const [state, setState] = useState(firstSpin);
+  const [revision, setRevision] = useState(0);
   return <main>
-    <div style={{ position: "absolute", left: 32, bottom: 32 }}><SlotOverlay config={{}} state={state} now={fixtureNow} language="en" /></div>
+    <div style={{ position: "absolute", left: 32, bottom: 32 }}><SlotOverlay key={revision} config={{}} state={state} now={fixtureNow} language="en" elementId="fictional-slot-overlay-element" /></div>
     <button type="button" onClick={() => { setState(secondSpin); }}>Trigger next spin</button>
+    <button type="button" onClick={() => { setRevision((current) => current + 1); }}>Remount overlay revision</button>
   </main>;
 };
 

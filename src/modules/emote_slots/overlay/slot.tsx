@@ -41,14 +41,21 @@ const emoteImageUrl = (symbol: SlotOverlaySymbol): string | null => {
 };
 
 const SLOT_REEL_ANIMATION_END_MS = 1_200;
+const SLOT_JACKPOT_HIGHLIGHT_END_MS = 3_000;
 const SLOT_RESULT_VISIBLE_MS = 6_000;
 
-interface SlotPresentationDeadline {
+interface SlotPresentation {
+  startedAt: number;
   deadline: number;
   expirationTimer: number | null;
 }
 
-const presentationDeadlines = new Map<string, SlotPresentationDeadline>();
+interface SlotPresentationSnapshot {
+  presentation: SlotPresentation;
+  elapsed: number;
+}
+
+const presentations = new Map<string, SlotPresentation>();
 const expiredSpinKeys = new Set<string>();
 const activeSpinIdsByElement = new Map<string, string>();
 
@@ -56,46 +63,53 @@ const presentationKey = (elementId: string, spinId: string): string => JSON.stri
 
 const clearPresentationFor = (elementId: string, spinId: string): void => {
   const key = presentationKey(elementId, spinId);
-  const presentation = presentationDeadlines.get(key);
+  const presentation = presentations.get(key);
   if (presentation?.expirationTimer !== null && presentation?.expirationTimer !== undefined && typeof window !== "undefined") {
     window.clearTimeout(presentation.expirationTimer);
   }
-  presentationDeadlines.delete(key);
+  presentations.delete(key);
   expiredSpinKeys.delete(key);
 };
 
 const expirePresentation = (elementId: string, spinId: string): void => {
   const key = presentationKey(elementId, spinId);
-  const presentation = presentationDeadlines.get(key);
+  const presentation = presentations.get(key);
   if (presentation?.expirationTimer !== null && presentation?.expirationTimer !== undefined && typeof window !== "undefined") {
     window.clearTimeout(presentation.expirationTimer);
   }
-  presentationDeadlines.delete(key);
+  presentations.delete(key);
   expiredSpinKeys.add(key);
 };
 
-const getPresentationDeadline = (elementId: string, spinId: string, duration: number): number | null => {
+const snapshotPresentation = (presentation: SlotPresentation): SlotPresentationSnapshot => ({
+  presentation,
+  elapsed: Math.max(0, Date.now() - presentation.startedAt),
+});
+
+const getPresentation = (elementId: string, spinId: string, duration: number): SlotPresentationSnapshot | null => {
   const activeSpinId = activeSpinIdsByElement.get(elementId);
   if (activeSpinId !== undefined && activeSpinId !== spinId) clearPresentationFor(elementId, activeSpinId);
   activeSpinIdsByElement.set(elementId, spinId);
 
   const key = presentationKey(elementId, spinId);
   if (expiredSpinKeys.has(key)) return null;
-  const existing = presentationDeadlines.get(key);
+  const existing = presentations.get(key);
   if (existing !== undefined) {
     if (existing.deadline <= Date.now()) {
       expirePresentation(elementId, spinId);
       return null;
     }
-    return existing.deadline;
+    return snapshotPresentation(existing);
   }
 
-  const deadline = Date.now() + duration;
+  const startedAt = Date.now();
+  const deadline = startedAt + duration;
   const expirationTimer = typeof window === "undefined" ? null : window.setTimeout(() => {
     expirePresentation(elementId, spinId);
   }, duration);
-  presentationDeadlines.set(key, { deadline, expirationTimer });
-  return deadline;
+  const presentation = { startedAt, deadline, expirationTimer };
+  presentations.set(key, presentation);
+  return snapshotPresentation(presentation);
 };
 
 const ReelSymbol = ({ symbol, index }: { symbol: SlotOverlaySymbol; index: number }): ReactElement => {
@@ -117,22 +131,26 @@ const SlotOverlay = ({ config, state, elementId = "standalone-slot" }: ModuleOve
   const labels = emoteSlotOverlayLabels(language);
   const spinId = validState?.spinId;
   const isEditorPreview = spinId === SLOT_OVERLAY_EDITOR_PREVIEW_SPIN_ID;
-  const presentationDeadline = spinId === undefined || isEditorPreview
+  const presentationSnapshot = spinId === undefined || isEditorPreview
     ? null
-    : getPresentationDeadline(elementId, spinId, (reducedMotion ? 0 : SLOT_REEL_ANIMATION_END_MS) + SLOT_RESULT_VISIBLE_MS);
+    : getPresentation(elementId, spinId, (reducedMotion ? 0 : SLOT_REEL_ANIMATION_END_MS) + SLOT_RESULT_VISIBLE_MS);
+  const presentation = presentationSnapshot?.presentation ?? null;
+  const presentationElapsed = presentationSnapshot?.elapsed ?? 0;
+  const reelAnimationRunning = !reducedMotion && presentationElapsed < SLOT_REEL_ANIMATION_END_MS;
+  const jackpotHighlightRunning = !reducedMotion && validState?.jackpotHit === true && presentationElapsed < SLOT_JACKPOT_HIGHLIGHT_END_MS;
 
   useEffect(() => {
     if (spinId === undefined || spinId === SLOT_OVERLAY_EDITOR_PREVIEW_SPIN_ID) return;
-    if (presentationDeadline === null) return;
-    const remainingDuration = Math.max(0, presentationDeadline - Date.now());
+    if (presentation === null) return;
+    const remainingDuration = Math.max(0, presentation.deadline - Date.now());
     const timer = window.setTimeout(() => {
       expirePresentation(elementId, spinId);
       setExpiredSpinId(spinId);
     }, remainingDuration);
     return () => { window.clearTimeout(timer); };
-  }, [elementId, presentationDeadline, spinId]);
+  }, [elementId, presentation, spinId]);
 
-  if (validState === null || (!isEditorPreview && (presentationDeadline === null || expiredSpinId === validState.spinId))) return null;
+  if (validState === null || (!isEditorPreview && (presentation === null || expiredSpinId === validState.spinId))) return null;
 
   const style = {
     "--content-game-reel-background": overlayConfig.backgroundColor,
@@ -140,10 +158,12 @@ const SlotOverlay = ({ config, state, elementId = "standalone-slot" }: ModuleOve
     "--content-game-reel-secondary": overlayConfig.secondaryColor,
     "--content-game-reel-highlight": overlayConfig.highlightColor,
     "--content-game-reel-border": overlayConfig.borderColor,
+    "--slot-presentation-elapsed": `${String(presentationElapsed)}ms`,
   } as CSSProperties;
 
   return <section className={`emote-slot-overlay${validState.jackpotHit ? " emote-slot-overlay--jackpot" : ""}`}
     style={style} role="group" aria-label={labels.result} data-testid="emote-slot-overlay"
+    data-reel-animation-running={String(reelAnimationRunning)} data-jackpot-animation-running={String(jackpotHighlightRunning)}
     data-spin-id={validState.spinId} data-reduced-motion={String(reducedMotion)}>
     <div className="emote-slot-overlay__spin">
     <div className="emote-slot-overlay__reels" aria-label={validState.symbols.map(({ code }) => code).join(" ")}>

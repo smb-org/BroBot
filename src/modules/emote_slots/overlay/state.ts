@@ -26,7 +26,7 @@ export const DEFAULT_SLOT_OVERLAY_CONFIG = {
   backgroundColor: "#090C10",
   textColor: "#F2F5F9",
   secondaryColor: "#C9D1DB",
-  highlightColor: "#3FCF7F",
+  highlightColor: "#2ED3A3",
   borderColor: "#353E4B",
 } as const;
 

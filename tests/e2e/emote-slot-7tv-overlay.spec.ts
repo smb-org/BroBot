@@ -185,6 +185,53 @@ test("overlay follows the reference and channel locale (protects=two-row layout,
   await page.screenshot({ path: testInfo.outputPath("slot-overlay-replaced-spin.png"), fullPage: false, animations: "disabled" });
 });
 
+test("revision remount resumes reel and jackpot animations from elapsed presentation time (protects=an overlay revision preserves a live spin's reel and jackpot highlight progress; fails_when=the remounted reel or jackpot highlight starts near time zero; no_claim=animation smoothness on every OBS device)", async ({ page }) => {
+  await page.goto("/tests/e2e/emote-slot-overlay-fixture.html");
+  const overlay = page.getByTestId("emote-slot-overlay");
+  await page.getByRole("button", { name: "Trigger next spin" }).click();
+  await expect(overlay).toHaveAttribute("data-spin-id", "fixture-spin-two");
+  await page.waitForTimeout(450);
+
+  const activeTimesBeforeRemount = await overlay.evaluate((node) => {
+    const reel = node.querySelector<HTMLElement>("[data-reel-index='0']");
+    const highlight = node.querySelector<HTMLElement>(".emote-slot-overlay__jackpot .emote-slot-overlay__main");
+    return {
+      reel: reel?.getAnimations().find((animation) => animation.playState === "running")?.effect?.getComputedTiming().progress,
+      highlight: highlight?.getAnimations().find((animation) => animation.playState === "running")?.effect?.getComputedTiming().progress,
+    };
+  });
+  expect(Number(activeTimesBeforeRemount.reel)).toBeGreaterThan(0.1);
+  expect(Number(activeTimesBeforeRemount.highlight)).toBeGreaterThan(0.1);
+
+  await page.getByRole("button", { name: "Remount overlay revision" }).click();
+  await page.waitForTimeout(80);
+
+  const activeTimesAfterRemount = await overlay.evaluate((node) => {
+    const reel = node.querySelector<HTMLElement>("[data-reel-index='0']");
+    const highlight = node.querySelector<HTMLElement>(".emote-slot-overlay__jackpot .emote-slot-overlay__main");
+    return {
+      reel: reel?.getAnimations().find((animation) => animation.playState === "running")?.effect?.getComputedTiming().progress,
+      highlight: highlight?.getAnimations().find((animation) => animation.playState === "running")?.effect?.getComputedTiming().progress,
+    };
+  });
+  expect.soft(Number(activeTimesAfterRemount.reel)).toBeGreaterThanOrEqual(Number(activeTimesBeforeRemount.reel));
+  expect.soft(Number(activeTimesAfterRemount.highlight)).toBeGreaterThanOrEqual(Number(activeTimesBeforeRemount.highlight));
+});
+
+test("settled reel and jackpot highlight stay static after a revision remount (protects=elapsed reel and jackpot animations remain settled while the result is still visible; fails_when=revision remount starts a reel or jackpot highlight animation again; no_claim=exact compositor timing on every Chromium platform)", async ({ page }) => {
+  await page.goto("/tests/e2e/emote-slot-overlay-fixture.html");
+  const overlay = page.getByTestId("emote-slot-overlay");
+  await page.getByRole("button", { name: "Trigger next spin" }).click();
+  await expect(overlay).toHaveAttribute("data-spin-id", "fixture-spin-two");
+  await page.waitForTimeout(3_200);
+
+  await page.getByRole("button", { name: "Remount overlay revision" }).click();
+
+  await expect(overlay).toBeVisible();
+  await page.waitForTimeout(80);
+  await expect.poll(() => overlay.evaluate((node) => node.getAnimations({ subtree: true }).filter((animation) => animation.playState === "running").length)).toBe(0);
+});
+
 test("7TV status space stays fixed across loading and provider states (protects=loading, long active-set names, no account, and unavailable keep identical picker and status geometry; fails_when=provider content moves or resizes the picker or its status footer; no_claim=layout at mobile widths)", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.emulateMedia({ reducedMotion: "reduce" });

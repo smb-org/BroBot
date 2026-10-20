@@ -14,11 +14,12 @@ const SlotOverlayEditor = ({ config, onChange, language = "en", readOnly = false
   const values = parseSlotOverlayConfig(config) ?? DEFAULT_SLOT_OVERLAY_CONFIG;
   const textContrast = slotOverlayContrastRatio(values.textColor, values.backgroundColor);
   const secondaryContrast = slotOverlayContrastRatio(values.secondaryColor, values.backgroundColor);
-  const lowestContrast = Math.min(textContrast, secondaryContrast);
+  const highlightContrast = slotOverlayContrastRatio(values.highlightColor, values.backgroundColor);
+  const lowestContrast = Math.min(textContrast, secondaryContrast, highlightContrast);
   const contrastLabel = lowestContrast.toFixed(1);
   const isLowContrast = lowestContrast < 4.5;
   const disabledProps = readOnly ? { title: readOnlyReason, "aria-describedby": readOnlyReason === undefined ? undefined : "overlay-editor-readonly-reason" } : {};
-  const updateColor = (key: "backgroundColor" | "textColor" | "secondaryColor", next: string): void => {
+  const updateColor = (key: "backgroundColor" | "textColor" | "secondaryColor" | "highlightColor", next: string): void => {
     if (readOnly || !/^#[0-9a-f]{6}$/iu.test(next)) return;
     onChange(slotOverlayConfigToJson({ ...values, [key]: next }));
   };
@@ -42,6 +43,12 @@ const SlotOverlayEditor = ({ config, onChange, language = "en", readOnly = false
       <input type="color" aria-label={labels.secondaryColor} value={values.secondaryColor}
         disabled={readOnly} {...disabledProps}
         onChange={(event) => updateColor("secondaryColor", event.currentTarget.value)} />
+    </label>
+    <label className="config-field config-field--narrow">
+      <span>{labels.highlightColor}</span>
+      <input type="color" aria-label={labels.highlightColor} value={values.highlightColor}
+        disabled={readOnly} {...disabledProps}
+        onChange={(event) => updateColor("highlightColor", event.currentTarget.value)} />
     </label>
     <p className="emote-slot-overlay-editor__contrast" data-status={isLowContrast ? "warning" : "ok"} role="status" aria-live="polite">
       {isLowContrast ? labels.contrastWarning(contrastLabel) : labels.contrastGood(contrastLabel)}
