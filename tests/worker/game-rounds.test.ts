@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { evictDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import type { ModuleAlarmContext, ModuleAlarmDefinition, ModuleExternalFetchBudget } from "../../src/modules/contract";
@@ -31,7 +31,14 @@ import {
   type PointsWorkerObject,
 } from "./points-test-helpers";
 
+const ALARM_SAFE_TEST_START = Date.UTC(2100, 0, 1);
+
 beforeAll(runMigrations);
+beforeEach(() => {
+  // Keep every alarm scheduled by a test RPC ahead of workerd's native clock.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(ALARM_SAFE_TEST_START);
+});
 afterEach(async () => {
   try {
     await clearPointObjectAlarms();
@@ -384,9 +391,6 @@ describe("game rounds in the worker Durable Object", () => {
   });
 
   it(`schedules pending point reconciliation immediately without waiting for D1 (${testCard("active point work retries D1 reconciliation from a durable alarm", "startup blocks on D1 before unrelated channel work can run")})`, async () => {
-    vi.useFakeTimers();
-    // Keep the platform alarm pending while the test inspects its persisted schedule.
-    vi.setSystemTime(Date.now() + 30 * 24 * 60 * 60_000);
     const channelId = `round-pending-recovery-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const database = (env as unknown as { DB: D1Database }).DB;
@@ -429,9 +433,6 @@ describe("game rounds in the worker Durable Object", () => {
   });
 
   it(`reconciles a pending disable after a missed re-enable across eviction (${testCard("startup keeps cancellation intent until an immediate activation alarm reads D1", "local cancellation drains before re-enable revision 3 reaches the gate")})`, async () => {
-    vi.useFakeTimers();
-    // Keep the platform alarm pending until the test explicitly invokes it.
-    vi.setSystemTime(Date.now() + 30 * 24 * 60 * 60_000);
     const channelId = `round-missed-reenable-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const database = (env as unknown as { DB: D1Database }).DB;
@@ -567,9 +568,6 @@ describe("game rounds in the worker Durable Object", () => {
   });
 
   it(`cancels and recovers a round at the maximum supported identifier lengths (${testCard("boundary-length identifiers remain cancellable after restart", "a valid maximum-length refund fails during startup recovery")})`, async () => {
-    vi.useFakeTimers();
-    // Keep the platform alarm pending until the test explicitly invokes it.
-    vi.setSystemTime(Date.now() + 30 * 24 * 60 * 60_000);
     const channelId = `round-id-max-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const database = (env as unknown as { DB: D1Database }).DB;
@@ -658,9 +656,6 @@ describe("game rounds in the worker Durable Object", () => {
   });
 
   it(`persists and sends one host cancellation notice with the refund (${testCard("a disabled game refunds escrow and announces cancellation once", "a refund has no durable notice or a retry posts it twice")})`, async () => {
-    vi.useFakeTimers();
-    // Keep the immediate cancellation notice alarm pending during its inline D1 flush.
-    vi.setSystemTime(Date.now() + 30 * 24 * 60 * 60_000);
     const channelId = `round-cancellation-notice-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const database = (env as unknown as { DB: D1Database }).DB;
@@ -966,7 +961,6 @@ describe("game rounds in the worker Durable Object", () => {
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
     await object.touchPointAccount(pointTestModule, "viewer-a", "nachtfalke", 20);
-    vi.useFakeTimers();
     const deadlineAt = Date.now() + 5_000;
     await runPointObject(object, async (target, state) => {
       stubPointRoundChat(target, () => Promise.resolve({ sent: false, retryable: true, reason: "rate_limited", delivery: "rate_limited" }));
@@ -1093,9 +1087,6 @@ describe("game rounds in the worker Durable Object", () => {
   });
 
   it(`recovers a gate-close cancellation after the route crashes before its refund RPC (${testCard("the close intent blocks settlement and startup recovery refunds escrow", "a crashed disable settles or strands an open stake")})`, async () => {
-    vi.useFakeTimers();
-    // Keep the recovered cancellation notice alarm pending beyond this test.
-    vi.setSystemTime(Date.now() + 30 * 24 * 60 * 60_000);
     const channelId = `round-cancel-recovery-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
@@ -1126,9 +1117,6 @@ describe("game rounds in the worker Durable Object", () => {
   });
 
   it(`defers cancellation notices to the alarm after lazy recovery (${testCard("the first points access refunds and schedules without calling the chat sender", "point recovery waits for external cancellation notice delivery", "hostChatMock supplies a confirmed send; points recovery itself is asserted to make no transport call")})`, async () => {
-    vi.useFakeTimers();
-    // Keep the platform alarm pending until runPointAlarm explicitly invokes it below.
-    vi.setSystemTime(Date.now() + 30 * 24 * 60 * 60_000);
     const channelId = `round-cancel-startup-notice-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
@@ -1414,9 +1402,7 @@ describe("game rounds in the worker Durable Object", () => {
   );
 
   it(`timestamps a point announcement after a slower alarm handler in the same invocation (${testCard("each announcement uses its own attempt timestamp", "a slow earlier handler consumes the round duration")})`, async () => {
-    vi.useFakeTimers();
-    const startedAt = Date.parse("2026-10-12T12:00:00.000Z");
-    vi.setSystemTime(startedAt);
+    const startedAt = Date.now();
     const channelId = `round-fresh-attempt-time-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
@@ -1463,9 +1449,7 @@ describe("game rounds in the worker Durable Object", () => {
   });
 
   it(`starts the round deadline after a delayed confirmed announcement (${testCard("confirmed delivery starts the configured round duration", "send latency consumes the round duration")})`, async () => {
-    vi.useFakeTimers();
-    const startedAt = Date.parse("2026-10-12T12:00:00.000Z");
-    vi.setSystemTime(startedAt);
+    const startedAt = Date.now();
     const channelId = `round-delayed-delivery-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
@@ -1495,9 +1479,7 @@ describe("game rounds in the worker Durable Object", () => {
   });
 
   it(`schedules a delayed rate-limit retry from the rejection time (${testCard("a definite rate limit waits five seconds after the response", "send latency consumes the retry delay")})`, async () => {
-    vi.useFakeTimers();
-    const startedAt = Date.parse("2026-10-12T12:00:00.000Z");
-    vi.setSystemTime(startedAt);
+    const startedAt = Date.now();
     const channelId = `round-delayed-rate-limit-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
@@ -1525,9 +1507,6 @@ describe("game rounds in the worker Durable Object", () => {
   });
 
   it(`reconciles a later platform alarm on first points access after eviction (${testCard("the first points access replaces the platform alarm with the earliest stored schedule", "eviction leaves an immediately due announcement behind a later alarm")})`, async () => {
-    vi.useFakeTimers();
-    // Keep the restored immediate alarm pending while the test inspects it.
-    vi.setSystemTime(Date.now() + 30 * 24 * 60 * 60_000);
     const channelId = `round-earliest-alarm-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
