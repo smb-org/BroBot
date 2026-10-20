@@ -186,20 +186,55 @@ const expectMobileToastOverlay = async (page: Page): Promise<void> => {
   expect(position).toBe("fixed");
 };
 
-test("Ads template editors stack their preview when the column is narrow", async ({ page }) => {
-  await installModule(page, "ads", "ready", 860, 800);
+test("Ads template previews show the complete chat message below the full-width textarea at desktop sizes", async ({ page }) => {
+  await installModule(page, "ads", "ready", 1440, 900);
   await expect(page.getByRole("heading", { level: 1, name: "Werbung" })).toBeVisible();
-  const editors = page.locator(".ui-template-text-field-layout__pair");
-  await expect(editors.first()).toBeVisible();
-  const layouts = await editors.evaluateAll((pairs) => pairs.map((pair) => {
-    const textarea = pair.querySelector("textarea")?.getBoundingClientRect();
-    const preview = pair.querySelector(".ui-chat-preview")?.getBoundingClientRect();
-    const section = pair.closest(".ui-section--inspector, .config-section, section")?.getBoundingClientRect();
-    return { textareaWidth: textarea?.width ?? 0, previewRight: preview?.right ?? 0, sectionRight: section?.right ?? 0 };
-  }));
-  for (const layout of layouts) {
-    expect(layout.textareaWidth).toBeGreaterThanOrEqual(200);
-    expect(layout.previewRight).toBeLessThanOrEqual(layout.sectionRight + 1);
+  const message = page.getByRole("textbox", { name: "Automatische Werbepause", exact: true });
+  const field = page.locator(".ui-template-text-field").filter({ has: message });
+  const preview = field.locator(".ui-template-text-field__preview");
+  const previewText = preview.locator(".ui-template-text-field__preview-text");
+  const completeMessage = `${"Eine vollständige Vorschau, die weiterläuft ".repeat(8)}und bis zum Ende sichtbar bleibt.`;
+  await message.fill(completeMessage);
+
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1920, height: 1080 }]) {
+    await page.setViewportSize(viewport);
+    await expect(preview.locator(".ui-template-text-field__preview-label")).toHaveText("Vorschau");
+    await expect(preview.locator(".ui-template-text-field__count")).toContainText("von 500 Zeichen");
+    await expect(previewText).toContainText(completeMessage);
+    await expect(previewText).not.toContainText("…");
+    const layout = await field.evaluate((element) => {
+      const textarea = element.querySelector("textarea")?.getBoundingClientRect();
+      const previewNode = element.querySelector<HTMLElement>(".ui-template-text-field__preview");
+      const messageNode = element.querySelector<HTMLElement>(".ui-template-text-field__preview-message");
+      const previewRect = previewNode?.getBoundingClientRect();
+      const messageRect = messageNode?.getBoundingClientRect();
+      const style = messageNode === null ? null : getComputedStyle(messageNode);
+      return textarea === undefined || previewRect === undefined || messageRect === undefined || style === null ? null : {
+        textareaWidth: textarea.width,
+        textareaLeft: textarea.left,
+        textareaBottom: textarea.bottom,
+        previewWidth: previewRect.width,
+        previewLeft: previewRect.left,
+        previewTop: previewRect.top,
+        messageHeight: messageRect.height,
+        messageClientHeight: messageNode?.clientHeight ?? 0,
+        messageScrollHeight: messageNode?.scrollHeight ?? 0,
+        lineClamp: style.webkitLineClamp,
+        maxHeight: style.maxHeight,
+        overflow: style.overflow,
+        textOverflow: style.textOverflow,
+      };
+    });
+    expect(layout).not.toBeNull();
+    expect(Math.abs((layout?.previewWidth ?? 0) - (layout?.textareaWidth ?? 0))).toBeLessThanOrEqual(1);
+    expect(Math.abs((layout?.previewLeft ?? 0) - (layout?.textareaLeft ?? 0))).toBeLessThanOrEqual(1);
+    expect(layout?.previewTop).toBeGreaterThanOrEqual((layout?.textareaBottom ?? 0) - 1);
+    expect(layout?.messageHeight).toBeGreaterThan(36);
+    expect(layout?.messageScrollHeight).toBeLessThanOrEqual((layout?.messageClientHeight ?? 0) + 1);
+    expect(layout?.lineClamp).not.toBe("2");
+    expect(layout?.maxHeight).toBe("none");
+    expect(layout?.overflow).toBe("visible");
+    expect(layout?.textOverflow).not.toBe("ellipsis");
   }
 });
 

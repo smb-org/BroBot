@@ -1,14 +1,12 @@
 import { RichTextarea, type CaretPosition, type RichTextareaHandle } from "rich-textarea";
-import { useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ReactElement, type ReactNode, type SyntheticEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactElement, type ReactNode, type SyntheticEvent } from "react";
 
 import { closestTemplateVariable, templateTextLength, tokenizeTemplate, unknownTemplateVariables, type TemplateToken, type TemplateVariable } from "../../template";
 import type { TemplateVariableGroup } from "../../contracts/values";
 import { Button } from "./Button";
-import { ChatPreview } from "./ChatPreview";
 import { FieldError } from "./FieldError";
 import { Icon } from "./Icon";
 import { InlineSuggestionPicker, InlineSuggestionPickerTarget } from "./InlineSuggestionPicker";
-import { TruncatedText } from "./TruncatedText";
 import { describedHelper, useDisabledFieldReason } from "./DisabledFieldReason";
 import { insertTextareaText } from "./textarea-insertion";
 import {
@@ -58,9 +56,9 @@ interface TemplateTextFieldProps {
   variables?: readonly TemplateTextFieldVariable[];
   preview?: (template: string, values: Readonly<Record<string, string>>) => string;
   previewLabel?: string;
+  previewStatus?: ReactNode;
   previewSpeaker?: string;
   previewEmptyText?: string;
-  previewLayout?: "stacked" | "side-by-side";
   insertVariableLabel?: string;
   onIssuesChange?: (issues: { unknown: readonly string[]; worstCaseExceeded: boolean }) => void;
   disabled?: boolean;
@@ -142,9 +140,9 @@ export function TemplateTextField({
   variables,
   preview,
   previewLabel,
+  previewStatus,
   previewSpeaker,
   previewEmptyText,
-  previewLayout = "stacked",
   insertVariableLabel,
   onIssuesChange,
   disabled = false,
@@ -186,11 +184,9 @@ export function TemplateTextField({
     () => variables === undefined ? [] : tokenizeTemplate(value, declarations).filter((part) => part.kind === "unknown"),
     [declarations, value, variables],
   );
-  const deferredValue = useDeferredValue(value);
   const previewText = preview === undefined
     ? undefined
-    : preview(deferredValue, Object.fromEntries((variables ?? []).map((variable) => [variable.name, variable.sample])));
-  const previewCount = previewText?.length ?? 0;
+    : preview(value, Object.fromEntries((variables ?? []).map((variable) => [variable.name, variable.sample])));
   const suggestionGroups = useMemo(() => {
     if (query === null || variables === undefined) return [];
     const pickerMessages = messages.picker;
@@ -353,23 +349,39 @@ export function TemplateTextField({
       {messages.countLabel(count, maxLength)}
     </span>
   );
+  const helperCopyIsPresent = effectiveError !== undefined || hint.trim().length > 0 || disabledReason !== null;
+  const previewIsEmpty = (previewText ?? "").trim().length === 0 && previewEmptyText !== undefined;
+  const previewDisplayText = previewIsEmpty ? previewEmptyText : previewText ?? "";
   const previewNode = preview === undefined || previewLabel === undefined || previewSpeaker === undefined ? null : (
-    <ChatPreview label={previewLabel} speaker={previewSpeaker} text={previewText ?? ""}
-      {...(previewEmptyText === undefined ? {} : { emptyText: previewEmptyText })}
-      countLabel={messages.previewCountLabel(previewCount)} />
+    <div className="ui-template-text-field__preview">
+      <div className="ui-template-text-field__preview-header">
+        <span className="ui-template-text-field__preview-label">{previewLabel}</span>
+        {previewStatus}
+        {countNode}
+      </div>
+      <p className="ui-template-text-field__preview-message" title={previewIsEmpty ? previewDisplayText : `${previewSpeaker}: ${previewDisplayText}`}>
+        {previewIsEmpty ? null : <>
+          <span className="ui-template-text-field__preview-speaker">{previewSpeaker}</span>
+          <span className="ui-template-text-field__preview-colon" aria-hidden="true">:</span>{" "}
+        </>}
+        <span className={`ui-template-text-field__preview-text${previewIsEmpty ? " ui-template-text-field__preview-text--empty" : ""}`} title={previewDisplayText}>{previewDisplayText}</span>
+      </p>
+    </div>
   );
+  const helperRowIsPresent = helperCopyIsPresent || (previewNode === null && countNode !== null);
 
   const description: ReactNode = (
     <div className="ui-template-text-field__description-content">
-      <div className="ui-template-text-field__helper-row">
-        <span className="ui-template-text-field__helper-copy">
-          {effectiveError === undefined
-            ? <TruncatedText text={hint} />
-            : <FieldError id={`${id}-error`} className="ui-template-text-field__helper-error" message={effectiveError} />}
+      {previewNode}
+      {helperRowIsPresent ? <div className="ui-template-text-field__helper-row">
+        {helperCopyIsPresent ? <span className="ui-template-text-field__helper-copy">
+          {effectiveError !== undefined
+            ? <FieldError id={`${id}-error`} className="ui-template-text-field__helper-error" message={effectiveError} />
+            : hint.trim().length > 0 ? <span className="ui-template-text-field__helper-text">{hint}</span> : null}
           {describedHelper(null, disabledReason, `template-text-field-${id}`)}
-        </span>
-        {countNode}
-      </div>
+        </span> : null}
+        {previewNode === null ? countNode : null}
+      </div> : null}
       <div className="ui-template-text-field__warnings" id={`${id}-warnings`} aria-live="polite">
           {insertionLimitReached ? (
             <div className="ui-template-text-field__warning" role="status"><Icon name="warning" size={16} /><span>{messages.insertionLimit}</span></div>
@@ -395,7 +407,6 @@ export function TemplateTextField({
             <div className="ui-template-text-field__warning"><Icon name="warning" size={16} /><span>{messages.worstCaseLength(worstCase, maxLength)}</span></div>
           ) : null}
       </div>
-      {previewLayout === "stacked" ? previewNode : null}
     </div>
   );
 
@@ -437,17 +448,19 @@ export function TemplateTextField({
       {({ activeOptionId, handleKeyDown: handlePickerKeyDown, close }) => {
       const inputWrapper = (
       <div data-ui="" className="ui-template-text-field" id={`${id}-field`}>
-        <label className="ui-template-text-field__label" htmlFor={id}>
-          {label}{required ? <span aria-hidden="true"> *</span> : null}
-        </label>
-        {insertVariableLabel === undefined ? null : <Button
-          className="ui-template-text-field__insert-variable"
-          size="compact"
-          variant="subtle"
-          type="button"
-          disabled={disabled || readOnly || variables === undefined}
-          onClick={openVariablePicker}
-        >{insertVariableLabel}</Button>}
+        <div className="ui-template-text-field__label-row">
+          <label className="ui-template-text-field__label" htmlFor={id}>
+            {label}{required ? <span aria-hidden="true"> *</span> : null}
+          </label>
+          {insertVariableLabel === undefined ? null : <Button
+            className="ui-template-text-field__insert-variable"
+            size="compact"
+            variant="subtle"
+            type="button"
+            disabled={disabled || readOnly || variables === undefined}
+            onClick={openVariablePicker}
+          >{insertVariableLabel}</Button>}
+        </div>
         <div ref={frameRef} className="template-text-field" data-composing={composing ? "true" : undefined} data-readonly={readOnly ? "true" : undefined}>
           <RichTextarea
             data-ui=""
@@ -501,9 +514,7 @@ export function TemplateTextField({
         <div className="ui-template-text-field__description" id={`${id}-description`}>{description}</div>
       </div>
       );
-      return previewLayout === "side-by-side"
-        ? <div className="ui-template-text-field-layout"><div className="ui-template-text-field-layout__pair">{inputWrapper}{previewNode}</div></div>
-        : inputWrapper;
+      return inputWrapper;
       }}
     </InlineSuggestionPicker>
   );

@@ -259,13 +259,14 @@ test("FAQ game search opens on its first click and narrow chat controls stay rea
   expect(targetText.scrollWidth).toBeLessThanOrEqual(targetText.clientWidth);
   await expect(value).toHaveCSS("text-overflow", "ellipsis");
 
-  const helper = page.locator(".ui-template-text-field__helper-row .ui-truncated-text").first();
+  const helper = page.locator(".ui-template-text-field__helper-row .ui-template-text-field__helper-text").first();
   const helperStyle = await helper.evaluate((element) => {
-    const style = getComputedStyle(element, "::before");
-    return { whiteSpace: style.whiteSpace, lineClamp: style.webkitLineClamp };
+    const style = getComputedStyle(element);
+    return { whiteSpace: style.whiteSpace, textOverflow: style.textOverflow, scrollWidth: element.scrollWidth, clientWidth: element.clientWidth };
   });
   expect(helperStyle.whiteSpace).toBe("normal");
-  expect(helperStyle.lineClamp).toBe("2");
+  expect(helperStyle.textOverflow).not.toBe("ellipsis");
+  expect(helperStyle.scrollWidth).toBeLessThanOrEqual(helperStyle.clientWidth);
 
   await target.click();
   const selectedTarget = page.locator(".ui-chat-target-field__options .ui-chat-target-field__option").nth(1);
