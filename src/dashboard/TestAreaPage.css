@@ -828,15 +828,17 @@
   .test-area__context .test-area__run-button { height: 34px; min-height: 34px; }
 }
 
-@media (min-width: 821px) and (max-height: 680px) {
+@media (min-width: 821px) {
   .main-content:has(.test-area) {
     height: auto;
     min-height: calc(100dvh - var(--app-shell-header-height));
   }
 
-  .tool-page:has(.test-area) { height: auto; min-height: 0; }
-  .tool-page__body:has(.test-area) { flex: 0 0 auto; overflow: visible; }
-  .test-area { height: auto; min-height: max-content; overflow: visible; }
+  .tool-page:has(.test-area) { height: auto; }
+  .tool-page__body:has(.test-area) { overflow: visible; }
+  .test-area { height: auto; overflow: visible; }
+  .test-area__results,
+  .test-area__detail { contain: size; }
 }
 
 @media (max-width: 820px) {
