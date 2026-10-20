@@ -5,13 +5,10 @@ export const BLITZ_ROUND_MODULE_ID = "blitz_round";
 export const BLITZ_QUESTION_MAXIMUM_COUNT = 500;
 export const BLITZ_QUESTION_PAGE_SIZE = 25;
 export const BLITZ_GRACE_SECONDS = 5;
-export const BLITZ_AUTO_START_ALARM = "auto-start";
 
 export const blitzRoundSettingsSchema = z.object({
   prize: z.number().int().min(1).max(10_000).default(50),
   answerTimeSeconds: z.number().int().min(15).max(300).default(60),
-  autoStart: z.boolean().default(false),
-  autoStartIntervalMinutes: z.number().int().min(15).max(240).default(15),
   chatTarget: z.enum(["all_chats", "source_only", "where_asked"]).nullable().default(null),
   startText: z.string().min(1).max(500).default(""),
   solvedText: z.string().min(1).max(500).default(""),

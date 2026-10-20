@@ -387,38 +387,6 @@ describe("blitz answers in the channel Durable Object", () => {
     expect(sendChat).not.toHaveBeenCalled();
   });
 
-  it("retains a live auto-start interval after a definite announcement cancellation [protects=the real module watchdog recovers automatic starts after transport rejects the announcement; fails_when=a cancelled round leaves auto-start waiting forever; no_claim=stream state and sendChat are mocked, not Twitch services]", async () => {
-    const channelId = `blitz-cancel-auto-${crypto.randomUUID()}`;
-    await insertPointChannel(channelId);
-    const worker = env as unknown as { DB: D1Database; CHANNEL: Env["CHANNEL"] };
-    const settings = { ...blitzRoundDefaultsForLanguage("en"), autoStart: true };
-    await worker.DB.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'blitz_round', 1, ?, 1)")
-      .bind(channelId, JSON.stringify(settings)).run();
-    const repository = createBlitzQuestionRepository(worker.DB);
-    await repository.create(channelId, { kind: "quiz", prompt: "Which star?", answers: ["Sun"], enabled: true }, new Date().toISOString());
-    const object = blitzObject(pointObject(channelId));
-    await runPointObject(object, (target) => {
-      const runtime = target as unknown as { moduleAlarmContext: (...args: unknown[]) => ModuleAlarmContext };
-      const original = runtime.moduleAlarmContext.bind(runtime);
-      vi.spyOn(runtime, "moduleAlarmContext").mockImplementation((...args) => ({ ...original(...args),
-        streamState: () => Promise.resolve("online"),
-        sendChat: () => Promise.resolve({ sent: false, retryable: false, reason: "rejected", delivery: "failed" }),
-      }));
-    });
-    const points = modulePoints(worker.CHANNEL, channelId, "blitz_round");
-    const opened = await openBlitzRound({ channelId, repository, points, settings, language: "en", moduleActivationRevision: 1 });
-    await forcePointAlarm(object, opened.roundId);
-    await expect(points.rounds.active()).resolves.toBeNull();
-    vi.setSystemTime(Date.now() + 60_000);
-    await runPointObject(object, async (target) => {
-      await (target as unknown as { runModuleAlarm: (module: string, handler: string, key: string) => Promise<unknown> })
-        .runModuleAlarm("blitz_round", "auto-start", "auto-start");
-    });
-    const deadline = await runPointObject(object, (_target, state) =>
-      state.storage.kv.get<Record<string, { deadline: number }>>("channel:alarm_schedule")?.["module:blitz_round:auto-start"]?.deadline);
-    expect(deadline).toBe(Date.now() + 15 * 60_000);
-  });
-
   it("reconciles accepted start metadata even when disabled before announcement [protects=cancel-before-announce retains the question-use and audit intent across restart; fails_when=cancellation drops accepted start metadata or sends a disabled announcement; no_claim=does not exercise the dashboard disable HTTP endpoint]", async () => {
     const channelId = `blitz-cancel-prepare-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
@@ -480,7 +448,6 @@ describe("blitz answers in the channel Durable Object", () => {
       stubPointRoundChat(target, () => Promise.resolve({ sent: true, delivery: "delivered" }));
     });
     vi.spyOn(blitzRoundModule, "formatPointRoundResult").mockResolvedValue({ text: "Correct: CLOUD" });
-    vi.spyOn(blitzRoundModule, "onPointRoundResolved").mockResolvedValue(undefined);
     await forcePointAlarm(object, roundId);
     await expect(object.pointBalance("blitz_round", "viewer_one")).resolves.toBe(50);
     const row = await runPointObject(object, (_target, state) => state.storage.sql.exec<{ resolve_delivery_state: string; operation_count: number }>(
@@ -490,7 +457,7 @@ describe("blitz answers in the channel Durable Object", () => {
     expect(row).toEqual({ resolve_delivery_state: "delivered", operation_count: 1 });
   });
 
-  it("retries the stored result line without booking the prize twice [protects=resolution delivery retries send the committed result while the ledger operation remains singular; fails_when=the stored line is not retried or the payout repeats; no_claim=sendChat and the module resolution hook are mocked, so external chat and auto-start scheduling are not claimed]", async () => {
+  it("retries the stored result line without booking the prize twice [protects=resolution delivery retries send the committed result while the ledger operation remains singular; fails_when=the stored line is not retried or the payout repeats; no_claim=sendChat is mocked]", async () => {
     const channelId = `blitz-delivery-${crypto.randomUUID()}`;
     const roundId = "blitz-delivery-retry";
     await insertPointChannel(channelId);
@@ -503,7 +470,6 @@ describe("blitz answers in the channel Durable Object", () => {
         : { sent: true, retryable: false, reason: null, delivery: "delivered" as const });
     });
     vi.spyOn(blitzRoundModule, "formatPointRoundResult").mockResolvedValue({ text: "Correct: CLOUD · frostfern · +50 each" });
-    vi.spyOn(blitzRoundModule, "onPointRoundResolved").mockResolvedValue(undefined);
 
     await runPointObject(object, async (target, state) => {
       stubPointRoundChat(target, sendChat);

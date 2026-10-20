@@ -99,13 +99,8 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
     return saved;
   }, [channelId, questionsQuery, selectedId]);
 
-  const reloadQuestion = async (questionId: string): Promise<BlitzQuestion | null> => {
-    let latest: BlitzQuestion;
-    try {
-      latest = await loadBlitzQuestion(channelId, questionId);
-    } catch {
-      return null;
-    }
+  const reloadQuestion = async (questionId: string): Promise<BlitzQuestion> => {
+    const latest = await loadBlitzQuestion(channelId, questionId);
     queryClient.setQueryData(moduleQueryKey(channelId, "blitz_round", "questions:1:"), (current: BlitzQuestionPage | undefined) => {
       if (current === undefined) return current;
       return { ...current, questions: current.questions.map((question) => question.id === questionId ? latest : question) };
@@ -237,7 +232,7 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
   onSave: (draft: Draft, revision?: number, saveAsNew?: boolean) => Promise<BlitzQuestion | null>;
   onSaved: (question: BlitzQuestion) => void;
   onDelete: (revision: number) => Promise<void>;
-  onReload: (questionId: string) => Promise<BlitzQuestion | null>;
+  onReload: (questionId: string) => Promise<BlitzQuestion>;
   onDiscardDeleted: () => void;
   onOpenSettings: () => void;
   registerSwitch: (switcher: ((proceed: () => void) => void) | null) => void;
@@ -320,16 +315,15 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
     setSaving(true);
     setSaveError(undefined);
     void onReload(question.id).then((latest) => {
-      if (latest === null) {
-        setSaveError(labels.loadError);
-        return;
-      }
       draft.accept(fromQuestion(latest));
       setPendingAnswer("");
       setServerConflict(false);
       setAttempted(false);
-    }).catch(() => {
-      setSaveError(labels.loadError);
+    }).catch((failure: unknown) => {
+      if (blitzErrorCode(failure) === "question_not_found") {
+        setServerDeleted(true);
+        setSaveError(labels.questionDeletedConflict);
+      } else setSaveError(labels.loadError);
     }).finally(() => {
       setSaving(false);
     });
@@ -585,8 +579,6 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
           reserveError
         />
       </div>
-      <SwitchSection title={labels.autoStart} checked={draft.value.autoStart} onChange={(autoStart) => { draft.setValue((current) => ({ ...current, autoStart })); }} hint={labels.autoStartHint} disabled={!canManage || saving} />
-      <UnitInput label={labels.autoStartInterval} unit={labels.minutesUnit} value={draft.value.autoStartIntervalMinutes} min={15} max={240} disabled={!canManage || saving || !draft.value.autoStart} onChange={(value) => { if (typeof value === "number") draft.setValue((current) => ({ ...current, autoStartIntervalMinutes: value })); }} />
       <TemplateSetting language={language} label={labels.startText} value={draft.value.startText} onChange={(startText) => { draft.setValue((current) => ({ ...current, startText })); }} disabled={!canManage || saving} hint={labels.roundTextHint} />
       <TemplateSetting language={language} label={labels.solvedText} value={draft.value.solvedText} onChange={(solvedText) => { draft.setValue((current) => ({ ...current, solvedText })); }} disabled={!canManage || saving} hint={labels.roundTextHint} />
       <TemplateSetting language={language} label={labels.timeoutText} value={draft.value.timeoutText} onChange={(timeoutText) => { draft.setValue((current) => ({ ...current, timeoutText })); }} disabled={!canManage || saving} hint={labels.roundTextHint} />

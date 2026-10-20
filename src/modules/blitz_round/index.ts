@@ -6,7 +6,6 @@ import { blitzActionTexts, blitzRoundDefaultsForLanguage, blitzRoundTypeLabel, b
 import { blitzRoundRoutes } from "./routes";
 import { processBlitzMessage } from "./service";
 import { blitzStarterSeedStatement } from "./seed-words";
-import { handleBlitzAutoStartAlarm, onBlitzRoundResolved, configureBlitzAutoStart } from "./auto-start";
 import type { BlitzRoundData } from "./contracts";
 import { type BlitzWinner } from "./domain/round";
 
@@ -41,7 +40,6 @@ const announcementText = async (
 ): Promise<{ text: string; attributions?: readonly string[]; target?: Exclude<BlitzRoundData["chatTarget"], null> } | null> => {
   const data = roundData(round.data);
   if (data === null) return null;
-  await configureBlitzAutoStart(context, "activation");
   const rendered = await context.renderTemplate(round.text, roundVariables(data));
   return { text: rendered.text, ...(rendered.attributions === undefined ? {} : { attributions: rendered.attributions }), ...(data.chatTarget === null ? {} : { target: data.chatTarget }) };
 };
@@ -103,23 +101,13 @@ export const blitzRoundModule: BotModule<typeof blitzRoundSettingsSchema> = {
   panel: () => import("./panel"),
   panelManagesSettings: true,
   routes: blitzRoundRoutes,
-  settingsChangedAlarm: { handlerKey: "auto-start", alarmKey: "settings-changed" },
   eventSubTypes: ["channel.chat.message"],
   onEnable: ({ DB, now, actor, authorizeMutation }, channelId) => [
     blitzStarterSeedStatement(DB, channelId, now, authorizeMutation(channelId, actor, now)),
   ],
-  onDisable: async ({ runModuleAlarm }, channelId) => {
-    await runModuleAlarm(channelId, BLITZ_ROUND_MODULE_ID, "auto-start", "auto-start");
-  },
-  alarms: [{
-    key: "auto-start",
-    handle: handleBlitzAutoStartAlarm,
-    onScheduleInputsChanged: (context, reason) => configureBlitzAutoStart(context, reason),
-  }],
   onPointRoundOpened: reconcileOpenedRound,
   formatPointRoundAnnouncement: announcementText,
   formatPointRoundResult: resultText,
-  onPointRoundResolved: onBlitzRoundResolved,
   handleEvent: (event, context) => processBlitzMessage(event, context),
   actions: [{
     id: "start-blitz-round",

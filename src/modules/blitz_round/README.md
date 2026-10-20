@@ -7,8 +7,8 @@ core for durable game state. It requires the points module.
 
 - Enabling an empty pool seeds 30 starter words in the activation batch, using
   the host authorization predicate. Re-enabling a populated pool leaves it alone.
-- Manual and automatic starts select the enabled question with the oldest use
-  time. The DO atomically rejects another announcing or open round for this
+- Starts select the enabled question with the oldest use time. The DO atomically
+  rejects another announcing or open round for this
   module. Stored round data includes the question ID and opening timestamp.
   A durable preparation intent reconciles its use time and idempotent start audit,
   including cancellation before announcement;
@@ -29,20 +29,10 @@ core for durable game state. It requires the points module.
   existing send uncertainty window; the ledger operation cannot repeat.
 - Disabling cancels active rounds without refund operations for zero stakes.
 
-## Scheduling
-
-One module alarm tracks the remaining live time until the next automatic round.
-Offline transitions preserve the remainder. Manual starts suppress that alarm
-until resolution. While waiting, the same alarm checks once per minute for a
-cancelled round and schedules a fresh live interval if needed. Resolution records
-its identity and timestamp. Delivery retries preserve the next timer and repair
-interrupted alarm scheduling. Settings updates use a distinct invocation key from
-scheduled alarms and preserve elapsed live time after a resolution.
-
 ## Pool and panel
 
 Question mutations use the FAQ authorization and audit batch pattern. The pool
 cap is enforced in the insert statement. Revision triggers refresh mounted panel
 queries. The collection page uses the shared draft guard and SaveStatus header;
-search, pagination, and save actions stay above scrollable content. Answer chips,
-validation feedback, and auto-start controls have reserved space.
+search, pagination, and save actions stay above scrollable content. Answer chips
+and validation feedback have reserved space.

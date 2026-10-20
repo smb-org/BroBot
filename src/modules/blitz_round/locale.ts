@@ -30,8 +30,6 @@ export interface BlitzTexts {
   settingsUnsavedDescription: string;
   continueEditing: string;
   secondsUnit: string;
-  minutesUnit: string;
-  autoStartHint: string;
   scramble: string;
   quiz: string;
   word: string;
@@ -60,8 +58,6 @@ export interface BlitzTexts {
   settingsSection: string;
   prize: string;
   answerTime: string;
-  autoStart: string;
-  autoStartInterval: string;
   chatTarget: string;
   channelDefault: string;
   allChats: string;
@@ -132,8 +128,6 @@ const catalog: LocaleCatalog<BlitzTexts> = {
     settingsUnsavedDescription: "Du hast ungespeicherte Rundeneinstellungen.",
     continueEditing: "Weiter bearbeiten",
     secondsUnit: "Sekunden",
-    minutesUnit: "Minuten",
-    autoStartHint: "Starte Runden nur, wenn der Kanal live ist.",
     scramble: "Wortsalat",
     quiz: "Quiz",
     word: "Wort",
@@ -171,8 +165,6 @@ const catalog: LocaleCatalog<BlitzTexts> = {
     settingsSection: "Rundeneinstellungen",
     prize: "Preisgeld",
     answerTime: "Antwortzeit",
-    autoStart: "Automatisch starten",
-    autoStartInterval: "Abstand zwischen Runden",
     chatTarget: "Chat-Ziel",
     channelDefault: "Kanalstandard",
     allChats: "Alle Chats",
@@ -246,8 +238,6 @@ const catalog: LocaleCatalog<BlitzTexts> = {
     settingsUnsavedDescription: "Round settings have unsaved changes.",
     continueEditing: "Keep editing",
     secondsUnit: "seconds",
-    minutesUnit: "minutes",
-    autoStartHint: "Rounds start only while the channel is live.",
     scramble: "Word scramble",
     quiz: "Quiz",
     word: "Word",
@@ -285,8 +275,6 @@ const catalog: LocaleCatalog<BlitzTexts> = {
     settingsSection: "Round settings",
     prize: "Prize",
     answerTime: "Answer time",
-    autoStart: "Start automatically",
-    autoStartInterval: "Time between rounds",
     chatTarget: "Chat target",
     channelDefault: "Channel default",
     allChats: "All chats",

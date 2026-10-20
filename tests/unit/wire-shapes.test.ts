@@ -376,7 +376,7 @@ const realtimeForms = {
 
 const expectedModuleSettings = {
   blitz_round: {
-    prize: 50, answerTimeSeconds: 60, autoStart: false, autoStartIntervalMinutes: 15, chatTarget: null,
+    prize: 50, answerTimeSeconds: 60, chatTarget: null,
     startText: blitzTexts("de").startTextDefault,
     solvedText: blitzTexts("de").solvedTextDefault,
     timeoutText: blitzTexts("de").timeoutTextDefault,

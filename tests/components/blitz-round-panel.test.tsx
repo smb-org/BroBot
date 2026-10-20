@@ -10,8 +10,6 @@ import { renderWithQuery } from "../query-test-utils";
 const initialSettings: BlitzRoundSettings = {
   prize: 50,
   answerTimeSeconds: 60,
-  autoStart: false,
-  autoStartIntervalMinutes: 15,
   chatTarget: null,
   startText: "Blitz round! {blitz.type}: {blitz.prompt}",
   solvedText: "Correct: {blitz.answer} · {blitz.winners}",
@@ -41,9 +39,9 @@ const parseUrl = (input: RequestInfo | URL): URL => input instanceof Request
   ? new URL(input.url)
   : input instanceof URL ? input : new URL(input, "https://brobot.example");
 
-const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Promise<void>, stalePatch = false, settingsConflict = false, patchDeleted = false) => {
+const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Promise<void>, stalePatch = false, settingsConflict = false, patchDeleted = false, legacySettings = false) => {
   let questions = [...initialQuestions];
-  let settings = { ...initialSettings };
+  let settings = { ...initialSettings, ...(legacySettings ? { autoStart: true, autoStartIntervalMinutes: 30 } : {}) };
   let settingsRevision = 1;
   let conflictPending = settingsConflict;
   const submittedSettingsRevisions: number[] = [];
@@ -108,7 +106,7 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
     return Promise.resolve(jsonResponse({ error: "not_found" }, 404));
   });
   vi.stubGlobal("fetch", requests);
-  return { requests, getQuestions: () => questions, getSettings: () => settings, getSettingsRevision: () => settingsRevision, submittedSettingsRevisions };
+  return { requests, getQuestions: () => questions, deleteQuestion: (id: string) => { questions = questions.filter((question) => question.id !== id); }, getSettings: () => settings, getSettingsRevision: () => settingsRevision, submittedSettingsRevisions };
 };
 
 const mountPanel = () => renderWithQuery(<UiProvider><BlitzRoundPanel channelId="fictional_channel" language="en" /></UiProvider>);
@@ -252,6 +250,26 @@ describe("Blitz Round collection panel", () => {
     expect(api.getQuestions()[0]?.revision).toBe(2);
   });
 
+  it("recovers a deleted question after conflict reload and keeps the draft [protects=a 404 during conflict reload enters save-as-new recovery with the typed draft intact; fails_when=reload treats question_not_found as a generic load error or removes the draft recovery choices; no_claim=the manager deletion is simulated by the component HTTP stub and does not exercise concurrent D1 writes]", async () => {
+    const api = installPanelFetch([sampleQuestion], undefined, true);
+    mountPanel();
+    await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "STONE" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText("This question changed while you were editing it. Reload the saved version before continuing.");
+
+    api.deleteQuestion(sampleQuestion.id);
+    fireEvent.click(screen.getByRole("button", { name: "Reload question" }));
+
+    expect(await screen.findByText("This question was deleted elsewhere. Save your draft as a new question or discard it.")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("STONE");
+    expect(screen.getByRole("button", { name: "Save as new question" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Discard" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save as new question" }));
+
+    await waitFor(() => expect(api.getQuestions().some((question) => question.prompt === "STONE")).toBe(true));
+  });
+
   it("reloads a conflicted question by id when it falls beyond the first page [protects=question conflict recovery fetches the selected entity independently of pagination; fails_when=reload searches only page one and leaves a stale draft that cannot continue; no_claim=the paginated question list and HTTP responses use an in-memory stub]", async () => {
     const questions = Array.from({ length: 26 }, (_, index): BlitzQuestion => ({
       ...sampleQuestion,
@@ -309,6 +327,23 @@ describe("Blitz Round collection panel", () => {
     await waitFor(() => expect(api.getSettings().prize).toBe(90));
     expect(api.submittedSettingsRevisions).toEqual([1, 2]);
     expect(api.getSettingsRevision()).toBe(3);
+  });
+
+  it("loads saved settings containing retired automatic-start keys [protects=stored settings with removed keys still load and save using the current settings shape; fails_when=legacy keys make settings invalid or leak into a later save; no_claim=the stored JSON and PATCH response are simulated by the panel HTTP stub]", async () => {
+    const api = installPanelFetch([sampleQuestion], undefined, false, false, false, true);
+    mountPanel();
+    await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    const prize = await screen.findByRole("spinbutton", { name: "Prize" });
+    expect(prize).toHaveValue(50);
+    expect(screen.queryByRole("switch", { name: "Start automatically" })).not.toBeInTheDocument();
+    fireEvent.change(prize, { target: { value: "70" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
+
+    await waitFor(() => expect(api.getSettings().prize).toBe(70));
+    expect(api.getSettings()).not.toHaveProperty("autoStart");
+    expect(api.getSettings()).not.toHaveProperty("autoStartIntervalMinutes");
   });
 
   it("offers save as new when the edited question was deleted elsewhere [protects=deleted question conflicts retain the draft and expose fixed-place save-as-new and discard choices; fails_when=PATCH deletion shows only a generic error or loses the draft; no_claim=deletion and recreation are simulated by an in-memory HTTP stub]", async () => {
