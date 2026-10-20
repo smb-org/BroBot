@@ -172,14 +172,38 @@ export function GroupedPicker<T = unknown>({
   // Close records a generation; reopening invalidates any pending final-focus restoration.
   const focusGeneration = useRef(0);
   const pendingFocusGeneration = useRef<number | null>(null);
+  const mounted = useRef(false);
+  const pendingAnimationFrames = useRef(new Set<number>());
+  const pendingExitTimers = useRef(new Set<number>());
+  const scheduleAnimationFrame = (callback: () => void): void => {
+    const frame = window.requestAnimationFrame(() => {
+      pendingAnimationFrames.current.delete(frame);
+      if (mounted.current) callback();
+    });
+    pendingAnimationFrames.current.add(frame);
+  };
+  useEffect(() => {
+    mounted.current = true;
+    const animationFrames = pendingAnimationFrames.current;
+    const exitTimers = pendingExitTimers.current;
+    return () => {
+      mounted.current = false;
+      focusGeneration.current += 1;
+      pendingFocusGeneration.current = null;
+      for (const frame of animationFrames) window.cancelAnimationFrame(frame);
+      animationFrames.clear();
+      for (const timer of exitTimers) window.clearTimeout(timer);
+      exitTimers.clear();
+    };
+  }, []);
   // `onDismissFocus` (variable picker) is called on the next frame after close, as before: the caller
   // owns its own selection handling. Default trigger restoration waits for the focus trap to settle.
   const restoreFocus = (): void => {
-    if (onDismissFocus !== undefined) window.requestAnimationFrame(onDismissFocus);
+    if (onDismissFocus !== undefined) scheduleAnimationFrame(onDismissFocus);
     else pendingFocusGeneration.current = focusGeneration.current;
   };
   const finishRestoreFocus = useCallback((): void => {
-    if (pendingFocusGeneration.current !== focusGeneration.current) return;
+    if (!mounted.current || pendingFocusGeneration.current !== focusGeneration.current) return;
     pendingFocusGeneration.current = null;
     const activeElement = document.activeElement;
     const focusIsInClosingSurface = popoverPopupRef.current?.contains(activeElement) === true || sheetPopupRef.current?.contains(activeElement) === true;
@@ -210,7 +234,7 @@ export function GroupedPicker<T = unknown>({
     handleOpenedChange(false);
     restoreFocus();
     const generation = focusGeneration.current;
-    window.requestAnimationFrame(() => {
+    scheduleAnimationFrame(() => {
       const popup = popoverPopupRef.current;
       const getAnimations: unknown = popup === null ? undefined : Reflect.get(popup, "getAnimations");
       const animations = typeof getAnimations === "function" && popup !== null
@@ -222,9 +246,15 @@ export function GroupedPicker<T = unknown>({
       const duration = transitionDurationMs(popup);
       const exitEnd = animations.length > 0
         ? Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)))
-        : new Promise<void>((resolve) => { window.setTimeout(resolve, duration); });
+        : new Promise<void>((resolve) => {
+          const timer = window.setTimeout(() => {
+            pendingExitTimers.current.delete(timer);
+            resolve();
+          }, duration);
+          pendingExitTimers.current.add(timer);
+        });
       void exitEnd.then(() => {
-        if (generation !== focusGeneration.current) return;
+        if (!mounted.current || generation !== focusGeneration.current) return;
         popoverActionsRef.current?.unmount();
         finishRestoreFocus();
       });
