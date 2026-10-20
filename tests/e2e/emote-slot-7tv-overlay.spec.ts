@@ -111,7 +111,7 @@ test("picker lists only the active 7TV set and keeps stale symbols saveable (pro
   expect(savedSettings?.symbols[0]).toMatchObject({ source: "seven_tv", code: "oldwave" });
 });
 
-test("overlay follows the reference and channel locale (protects=two-row layout, minimum type and image sizes, truncated login, localized outcome and numbers, opaque contrast, and dashed fallbacks survive replacement; fails_when=the bar is oversized, text is undersized, dashboard locale leaks, or failed images remain; no_claim=OBS transport and real CDN availability)", async ({ page }, testInfo: TestInfo) => {
+test("overlay follows the reference and channel locale (protects=two-row layout, single-line ellipsised long codes, minimum type and image sizes, truncated login, localized outcome and numbers, opaque contrast, and dashed fallbacks survive replacement; fails_when=a long fallback code wraps over two lines, the bar is oversized, text is undersized, dashboard locale leaks, or failed images remain; no_claim=OBS transport and real CDN availability)", async ({ page }, testInfo: TestInfo) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   await mockImages(page);
@@ -177,9 +177,17 @@ test("overlay follows the reference and channel locale (protects=two-row layout,
   await expect(overlay).toContainText("1.300");
   await expect(overlay.locator(".emote-slot-overlay__outcome")).toHaveText(emoteSlotOverlayLabels("de").outcomes.pair);
   await expect(overlay.locator("img")).toHaveCount(0);
-  for (const code of ["ghostwave", "moonwave", "pixelwave"]) {
+  const longCode = overlay.getByText("ghostwave_extra_long", { exact: true });
+  await expect(longCode).toBeVisible();
+  await expect(longCode).toHaveAttribute("title", "ghostwave_extra_long");
+  await expect(longCode).toHaveCSS("white-space", "nowrap");
+  await expect(longCode).toHaveCSS("text-overflow", "ellipsis");
+  const longBox = await longCode.boundingBox();
+  const lineHeight = await longCode.evaluate((node) => parseFloat(getComputedStyle(node).lineHeight));
+  expect(longBox?.height).toBeLessThan(2 * lineHeight);
+  for (const code of ["ghostwave_extra_long", "moonwave", "pixelwave"]) {
     await expect(overlay.getByText(code, { exact: true })).toBeVisible();
-    expect(await overlay.getByText(code, { exact: true }).evaluate((node) => node.scrollWidth <= node.clientWidth && node.scrollHeight <= node.clientHeight)).toBe(true);
+    expect(await overlay.getByText(code, { exact: true }).evaluate((node) => node.scrollHeight <= node.clientHeight)).toBe(true);
     await expect(overlay.getByText(code, { exact: true }).locator("..")).toHaveCSS("border-top-style", "dashed");
   }
   await page.screenshot({ path: testInfo.outputPath("slot-overlay-replaced-spin.png"), fullPage: false, animations: "disabled" });

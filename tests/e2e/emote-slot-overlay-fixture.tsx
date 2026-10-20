@@ -29,7 +29,7 @@ const secondSpin: JsonObject = {
   outcome: "pair",
   spunAt: new Date(fixtureNow + 1_000).toISOString(),
   symbols: [
-    { source: "seven_tv", code: "ghostwave", sevenTvId: "removed-emote", missing: true },
+    { source: "seven_tv", code: "ghostwave_extra_long", sevenTvId: "removed-emote", missing: true },
     { source: "twitch", code: "moonwave", twitchId: "failed-emote" },
     { source: "seven_tv", code: "pixelwave", sevenTvId: "failed-emote" },
   ],

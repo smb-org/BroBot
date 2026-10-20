@@ -34,7 +34,7 @@
   .emote-slot-overlay__reel img { width: 52px; height: 52px; object-fit: contain; }
   .emote-slot-overlay__glyph { font-size: 38px; line-height: 1; }
   .emote-slot-overlay__reel--code { border-style: dashed; border-color: var(--content-game-reel-secondary); }
-  .emote-slot-overlay__code { max-width: 100%; max-height: 100%; overflow: hidden; font-size: 14px; line-height: 1.15; overflow-wrap: anywhere; text-align: center; white-space: normal; }
+  .emote-slot-overlay__code { box-sizing: border-box; max-width: 100%; padding-inline: 2px; overflow: hidden; font-size: 14px; line-height: 1.15; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
   .emote-slot-overlay__result { display: grid; flex: 1; min-width: 0; gap: 0; text-align: right; }
   .emote-slot-overlay__values { display: flex; align-items: baseline; justify-content: flex-end; min-width: 0; gap: 12px; }
   .emote-slot-overlay__login { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 34px; font-weight: 700; line-height: 1.2; }
