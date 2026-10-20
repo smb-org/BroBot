@@ -99,4 +99,32 @@ describe("blitz question HTTP writes", () => {
     expect(await database.prepare("SELECT COUNT(*) AS count FROM blitz_questions WHERE channel_id = ?").bind(channelId).first())
       .toEqual({ count: 1 });
   });
+
+  it("loads a question by id independent of list pagination [protects=conflict recovery can fetch the selected question even when it is outside page one; fails_when=the by-id route is missing or returns a different question; no_claim=uses the SQLite D1 harness and does not exercise production authentication]", async () => {
+    const env = await setup("manager");
+    const create = await panelRouter.fetch(await request("fictional_editor", "POST", "", quiz), env);
+    const created = await create.json<{ question: { id: string } }>();
+
+    const response = await panelRouter.fetch(await request("fictional_editor", "GET", `/${created.question.id}`), env);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ question: { id: created.question.id, prompt: quiz.prompt } });
+  });
+
+  it("returns question_deleted for stale PATCH and DELETE after another manager removed the question [protects=deleted question edits and removals use the recoverable conflict contract; fails_when=either stale mutation returns 404 or lacks the question_deleted code; no_claim=uses the SQLite D1 harness and does not simulate separate database connections]", async () => {
+    const env = await setup("manager");
+    const create = await panelRouter.fetch(await request("fictional_editor", "POST", "", quiz), env);
+    const created = await create.json<{ question: { id: string } }>();
+    const suffix = `/${created.question.id}`;
+    const remove = await panelRouter.fetch(await request("fictional_editor", "DELETE", `${suffix}?revision=1`), env);
+    expect(remove.status).toBe(200);
+
+    const patch = await panelRouter.fetch(await request("fictional_editor", "PATCH", suffix, { ...quiz, revision: 1 }), env);
+    const removeAgain = await panelRouter.fetch(await request("fictional_editor", "DELETE", `${suffix}?revision=1`), env);
+
+    expect(patch.status).toBe(409);
+    await expect(patch.json()).resolves.toMatchObject({ error: "question_deleted" });
+    expect(removeAgain.status).toBe(409);
+    await expect(removeAgain.json()).resolves.toMatchObject({ error: "question_deleted" });
+  });
 });

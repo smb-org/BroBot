@@ -1,7 +1,7 @@
 import type { ModuleAlarmContext, ModulePointRoundResult, ModuleScheduleInputChangeReason } from "../contract";
 import { BLITZ_AUTO_START_ALARM } from "./contracts";
 import { createBlitzQuestionRepository } from "./adapters/d1";
-import { openBlitzRound, loadEnabledBlitzSettings } from "./service";
+import { openBlitzRound, loadBlitzModuleActivationRevision, loadEnabledBlitzSettings } from "./service";
 
 const AUTO_START_STATE_KEY = "auto-start-state";
 const MINUTE_MS = 60_000;
@@ -109,13 +109,6 @@ const reconcileResolvedRound = async (
   });
 };
 
-const moduleActivationRevision = async (context: ModuleAlarmContext): Promise<number | null> => {
-  const row = await context.DB.prepare(
-    "SELECT revision FROM channel_modules WHERE channel_id = ? AND module_id = 'blitz_round'",
-  ).bind(context.channelId).first<{ revision: number }>();
-  return row !== null && Number.isSafeInteger(row.revision) ? row.revision : null;
-};
-
 export const configureBlitzAutoStart = async (
   context: ModuleAlarmContext,
   reason: ModuleScheduleInputChangeReason | "settings",
@@ -127,7 +120,7 @@ export const configureBlitzAutoStart = async (
   }
   const existing = await readState(context);
   const currentActivationRevision = reason === "activation"
-    ? await moduleActivationRevision(context)
+    ? await loadBlitzModuleActivationRevision(context.DB, context.channelId)
     : existing?.moduleActivationRevision ?? null;
   const active = await context.points.rounds.active();
   if (active !== null) {
@@ -171,7 +164,12 @@ export const configureBlitzAutoStart = async (
       return;
     }
   }
-  if (existing !== null && reason !== "settings") return;
+  if (existing !== null && reason !== "settings") {
+    // Scheduling is idempotent; replay the persisted deadline after a prior
+    // state write whose alarm creation failed.
+    await storeState(context, existing);
+    return;
+  }
   if (existing !== null && existing.lastResolvedAt !== null) {
     const remainingMs = Math.max(0, (existing.paused ? existing.remainingMs
       : Math.max(0, (existing.deadlineAt ?? Date.now()) - Date.now())) +
@@ -246,9 +244,12 @@ export const handleBlitzAutoStartAlarm = async (
     return;
   }
   try {
+    const activationRevision = await loadBlitzModuleActivationRevision(context.DB, context.channelId);
+    if (activationRevision === null) throw new Error("module_disabled");
     const opened = await openBlitzRound({
       channelId: context.channelId,
       settings,
+      moduleActivationRevision: activationRevision,
       language: await context.channelLanguage(),
       points: context.points,
       repository: createBlitzQuestionRepository(context.DB),
@@ -281,7 +282,12 @@ export const onBlitzRoundResolved = async (
     return;
   }
   const existing = await readState(context);
+  const activationRevision = await loadBlitzModuleActivationRevision(context.DB, context.channelId);
+  const roundData = typeof round.data === "object" && round.data !== null && !Array.isArray(round.data)
+    ? round.data as Record<string, unknown>
+    : null;
+  if (activationRevision === null || roundData?.moduleActivationRevision !== activationRevision) return;
   const resolvedAt = Date.parse(round.resolvedAt);
   const baselineAt = Number.isFinite(resolvedAt) ? resolvedAt : Date.now();
-  await reconcileResolvedRound(context, round.roundId, baselineAt, settings.autoStartIntervalMinutes, existing);
+  await reconcileResolvedRound(context, round.roundId, baselineAt, settings.autoStartIntervalMinutes, existing, activationRevision);
 };

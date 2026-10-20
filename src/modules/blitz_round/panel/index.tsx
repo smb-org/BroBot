@@ -8,9 +8,9 @@ import {
 import type { ModulePanelProperties } from "../../contract";
 import { validateBlitzQuestion } from "../domain/questions";
 import { blitzTexts } from "../locale";
-import { BLITZ_QUESTION_PAGE_SIZE, blitzRoundSettingsSchema, type BlitzQuestion, type BlitzQuestionInput, type BlitzQuestionKind, type BlitzRoundSettings } from "../contracts";
+import { BLITZ_QUESTION_PAGE_SIZE, blitzRoundSettingsSchema, type BlitzQuestion, type BlitzQuestionInput, type BlitzQuestionKind, type BlitzQuestionPage, type BlitzRoundSettings } from "../contracts";
 import {
-  blitzErrorCode, createBlitzQuestion, deleteBlitzQuestion, loadBlitzQuestions, loadBlitzSettings,
+  blitzErrorCode, createBlitzQuestion, deleteBlitzQuestion, loadBlitzQuestion, loadBlitzQuestions, loadBlitzSettings,
   saveBlitzSettings, updateBlitzQuestion,
 } from "./service";
 import { blitzTemplateMessages } from "./locale";
@@ -47,6 +47,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [newQuestionSession, setNewQuestionSession] = useState(0);
   const [selectedQuestion, setSelectedQuestion] = useState<BlitzQuestion | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -80,6 +81,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
     setPage(1);
     setShowSettings(false);
     setSelectedId(NEW_QUESTION);
+    setNewQuestionSession((session) => session + 1);
     setSelectedQuestion(null);
     setDetailOpen(true);
   });
@@ -87,10 +89,10 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   const openSettings = (): void => { setShowSettings(true); setDetailOpen(true); };
   const closeSettings = (): void => requestSwitch(() => { setShowSettings(false); setDetailOpen(true); });
 
-  const saveQuestion = useCallback(async (draft: Draft, revision?: number): Promise<BlitzQuestion | null> => {
+  const saveQuestion = useCallback(async (draft: Draft, revision?: number, saveAsNew = false): Promise<BlitzQuestion | null> => {
     const input = questionInput(draft);
     if (input === null) return null;
-    const saved = selectedId === NEW_QUESTION
+    const saved = selectedId === NEW_QUESTION || saveAsNew
       ? await createBlitzQuestion(channelId, input)
       : await updateBlitzQuestion(channelId, selectedId ?? "", revision ?? 1, input);
     await questionsQuery.refetch();
@@ -98,11 +100,32 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   }, [channelId, questionsQuery, selectedId]);
 
   const reloadQuestion = async (questionId: string): Promise<BlitzQuestion | null> => {
-    const refreshed = await loadBlitzQuestions(channelId, 1, "");
-    queryClient.setQueryData(moduleQueryKey(channelId, "blitz_round", "questions:1:"), refreshed);
-    const latest = refreshed.questions.find((question) => question.id === questionId) ?? null;
-    if (latest !== null) setSelectedQuestion(latest);
+    let latest: BlitzQuestion;
+    try {
+      latest = await loadBlitzQuestion(channelId, questionId);
+    } catch {
+      return null;
+    }
+    queryClient.setQueryData(moduleQueryKey(channelId, "blitz_round", "questions:1:"), (current: BlitzQuestionPage | undefined) => {
+      if (current === undefined) return current;
+      return { ...current, questions: current.questions.map((question) => question.id === questionId ? latest : question) };
+    });
+    setSelectedQuestion(latest);
     return latest;
+  };
+
+  const reloadSettings = async (): Promise<{ settings: BlitzRoundSettings; revision: number }> => {
+    const latest = await loadBlitzSettings(channelId);
+    queryClient.setQueryData(moduleQueryKey(channelId, "blitz_round", "settings"), latest);
+    return latest;
+  };
+
+  const discardDeletedQuestion = (): void => {
+    setSelectedId(NEW_QUESTION);
+    setNewQuestionSession((session) => session + 1);
+    setSelectedQuestion(null);
+    setShowSettings(false);
+    setDetailOpen(true);
   };
 
   const selectSavedQuestion = (saved: BlitzQuestion): void => {
@@ -171,13 +194,13 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   const detail = showSettings
     ? settingsQuery.data === undefined
       ? <div className="blitz-panel__settings-loading" aria-live="polite">{settingsQuery.isError ? labels.loadError : labels.saving}</div>
-      : <SettingsEditor channelId={channelId} language={language === "en" ? "en" : "de"} settings={settingsQuery.data.settings} revision={settingsQuery.data.revision} canManage={canManage} onBack={closeSettings} registerSwitch={(switcher) => { switchRef.current = switcher; }} onSaved={(settings, revision) => {
+      : <SettingsEditor channelId={channelId} language={language === "en" ? "en" : "de"} settings={settingsQuery.data.settings} revision={settingsQuery.data.revision} canManage={canManage} onBack={closeSettings} onReload={reloadSettings} registerSwitch={(switcher) => { switchRef.current = switcher; }} onSaved={(settings, revision) => {
         queryClient.setQueryData(moduleQueryKey(channelId, "blitz_round", "settings"), { settings, revision });
       }} />
     : selectedId === null
       ? <div className="blitz-panel__placeholder"><PageHeader title={labels.title} subtitle={labels.noSelection} /></div>
       : <QuestionEditor
-        key={`${selectedId}:${String(currentQuestion?.revision ?? 0)}`}
+        key={`${selectedId}:${String(currentQuestion?.revision ?? 0)}:${selectedId === NEW_QUESTION ? String(newQuestionSession) : ""}`}
         question={currentQuestion}
         isNew={selectedId === NEW_QUESTION}
         language={language === "en" ? "en" : "de"}
@@ -186,6 +209,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
         onSaved={selectSavedQuestion}
         onDelete={onDeleted}
         onReload={reloadQuestion}
+        onDiscardDeleted={discardDeletedQuestion}
         onOpenSettings={openSettings}
         registerSwitch={(switcher) => { switchRef.current = switcher; }}
       />;
@@ -205,15 +229,16 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   </div>;
 }
 
-function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved, onDelete, onReload, onOpenSettings, registerSwitch }: {
+function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved, onDelete, onReload, onDiscardDeleted, onOpenSettings, registerSwitch }: {
   question: BlitzQuestion | null;
   isNew: boolean;
   language: "de" | "en";
   canManage: boolean;
-  onSave: (draft: Draft, revision?: number) => Promise<BlitzQuestion | null>;
+  onSave: (draft: Draft, revision?: number, saveAsNew?: boolean) => Promise<BlitzQuestion | null>;
   onSaved: (question: BlitzQuestion) => void;
   onDelete: (revision: number) => Promise<void>;
   onReload: (questionId: string) => Promise<BlitzQuestion | null>;
+  onDiscardDeleted: () => void;
   onOpenSettings: () => void;
   registerSwitch: (switcher: ((proceed: () => void) => void) | null) => void;
 }): ReactElement {
@@ -223,6 +248,7 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | undefined>();
   const [serverConflict, setServerConflict] = useState(false);
+  const [serverDeleted, setServerDeleted] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | undefined>();
   const [attempted, setAttempted] = useState(false);
@@ -238,7 +264,7 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
   const guard = useDraftGuard(draft.dirty || pendingAnswer.trim().length > 0, () => saveRef.current(), reset);
   const { guardSwitch } = guard;
 
-  const save = async (): Promise<string | null> => {
+  const save = async (saveAsNew = false): Promise<string | null> => {
     if (saveInFlight.current !== null) return saveInFlight.current;
     const operation = (async (): Promise<string | null> => {
       setAttempted(true);
@@ -255,7 +281,7 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
       }
       setSaving(true);
       try {
-        const saved = await onSave(draft.value, question?.revision);
+        const saved = await onSave(draft.value, question?.revision, saveAsNew);
         if (saved === null) {
           setSaveError(labels.saveError);
           return labels.saveError;
@@ -264,15 +290,18 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
         setPendingAnswer("");
         setAttempted(false);
         setServerConflict(false);
+        setServerDeleted(false);
         onSaved(saved);
         guard.completeSwitch();
         return null;
       } catch (failure: unknown) {
         const code = blitzErrorCode(failure);
         const message = code === "question_limit_reached" ? labels.questionLimit
-          : code === "question_conflict" ? labels.conflict : labels.saveError;
+          : code === "question_conflict" ? labels.conflict
+            : code === "question_deleted" ? labels.questionDeletedConflict : labels.saveError;
         setSaveError(message);
         if (code === "question_conflict") setServerConflict(true);
+        if (code === "question_deleted") setServerDeleted(true);
         return message;
       } finally {
         setSaving(false);
@@ -306,6 +335,8 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
     });
   };
 
+  const saveDeletedAsNew = (): void => { void save(true); };
+
   const remove = async (): Promise<void> => {
     if (question === null) return;
     setSaving(true);
@@ -318,6 +349,10 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
       if (code === "question_conflict") {
         setServerConflict(true);
         setSaveError(labels.conflict);
+        setDeleteOpen(false);
+      } else if (code === "question_deleted") {
+        setServerDeleted(true);
+        setSaveError(labels.questionDeletedConflict);
         setDeleteOpen(false);
       } else setDeleteError(labels.deleteError);
     } finally {
@@ -340,13 +375,15 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
     dirty: draft.dirty || pendingAnswer.trim().length > 0,
     persistent: true,
     pending: saving,
-    ...(serverConflict && !isNew ? { conflict: { message: labels.conflict, reloadLabel: labels.reload, onReload: reloadCurrent } } : {}),
+    discardOnConflict: serverDeleted,
+    ...(serverDeleted && !isNew ? { conflict: { message: labels.questionDeletedConflict, reloadLabel: labels.saveAsNew, onReload: saveDeletedAsNew } }
+      : serverConflict && !isNew ? { conflict: { message: labels.conflict, reloadLabel: labels.reload, onReload: reloadCurrent } } : {}),
     ...(saveError === undefined ? {} : { error: saveError }),
     invalid,
     invalidMessage: labels.invalidAnswer,
     onSave: () => { void save(); },
     onInvalidSave: () => { setAttempted(true); },
-    onDiscard: reset,
+    onDiscard: serverDeleted ? onDiscardDeleted : reset,
     saveLabel: labels.save,
     discardLabel: labels.discard,
     savedLabel: labels.saved,
@@ -438,13 +475,14 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
   </div>;
 }
 
-function SettingsEditor({ channelId, language, settings, revision, canManage, onBack, registerSwitch, onSaved }: {
+function SettingsEditor({ channelId, language, settings, revision, canManage, onBack, onReload, registerSwitch, onSaved }: {
   channelId: string;
   language: "de" | "en";
   settings: BlitzRoundSettings;
   revision: number;
   canManage: boolean;
   onBack: () => void;
+  onReload: () => Promise<{ settings: BlitzRoundSettings; revision: number }>;
   registerSwitch: (switcher: ((proceed: () => void) => void) | null) => void;
   onSaved: (settings: BlitzRoundSettings, revision: number) => void;
 }): ReactElement {
@@ -455,6 +493,7 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const [serverConflict, setServerConflict] = useState(false);
   const parsed = blitzRoundSettingsSchema.safeParse(draft.value);
   const valid = parsed.success;
 
@@ -473,14 +512,34 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
       draft.accept(result.settings);
       setCurrentRevision(result.revision);
       onSaved(result.settings, result.revision);
+      setServerConflict(false);
       setSaved(true);
       return null;
-    } catch {
-      setError(labels.settingsError);
-      return labels.settingsError;
+    } catch (failure: unknown) {
+      const conflicted = blitzErrorCode(failure) === "module_settings_changed_concurrently";
+      const message = conflicted ? labels.settingsConflict : labels.settingsError;
+      if (conflicted) setServerConflict(true);
+      setError(message);
+      return message;
     } finally {
       setSaving(false);
     }
+  };
+
+  const reloadCurrent = (): void => {
+    setSaving(true);
+    setError(undefined);
+    void onReload().then((latest) => {
+      draft.accept(latest.settings);
+      setCurrentRevision(latest.revision);
+      onSaved(latest.settings, latest.revision);
+      setServerConflict(false);
+      setSaved(false);
+    }).catch(() => {
+      setError(labels.loadError);
+    }).finally(() => {
+      setSaving(false);
+    });
   };
 
   const saveProps = {
@@ -488,6 +547,7 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
     persistent: true,
     pending: saving,
     saved,
+    ...(serverConflict ? { conflict: { message: labels.settingsConflict, reloadLabel: labels.reloadSettings, onReload: reloadCurrent } } : {}),
     ...(error === undefined ? {} : { error }),
     invalid: !valid,
     invalidMessage: labels.settingsError,

@@ -20,7 +20,7 @@ const setup = () => {
   let activationRevision = 1;
   const context = {
     DB: {
-      prepare: () => ({ bind: () => ({ first: () => Promise.resolve({ revision: activationRevision }) }) }),
+      prepare: () => ({ bind: () => ({ first: () => Promise.resolve({ activation_generation: activationRevision }) }) }),
     }, channelId: "fictional_channel", alarmIdentity: null,
     storage: {
       get: (key: string) => Promise.resolve(storage.get(key)),
@@ -38,7 +38,12 @@ const setup = () => {
   vi.mocked(openBlitzRound).mockResolvedValue({ roundId: "fictional-round" } as Awaited<ReturnType<typeof openBlitzRound>>);
   return { context, settings, storage, scheduled, setOnline: (value: boolean) => { online = value; }, setActive: (value: typeof active) => { active = value; }, setActivationRevision: (value: number) => { activationRevision = value; } };
 };
-const resolved = (roundId: string): ModulePointRoundResult => ({ roundId, resolvedAt: new Date().toISOString(), data: {}, result: {} });
+const resolved = (roundId: string, activationRevision = 1): ModulePointRoundResult => ({
+  roundId,
+  resolvedAt: new Date().toISOString(),
+  data: { moduleActivationRevision: activationRevision },
+  result: {},
+});
 
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime("2030-01-01T00:00:00.000Z"); });
 afterEach(() => { vi.useRealTimers(); vi.resetAllMocks(); });
@@ -113,6 +118,21 @@ describe("blitz automatic starts", () => {
     vi.advanceTimersByTime(minute);
     await onBlitzRoundResolved(fixture.context, result);
     expect(fixture.scheduled.get("auto-start")).toBe(Date.parse(result.resolvedAt) + 15 * minute);
+    expect(schedule).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-arms the persisted activation deadline after scheduling fails [protects=activation retry restores the stored auto-start deadline without resetting its baseline; fails_when=retry returns early with persisted state and no alarm or changes the deadline; no_claim=uses in-memory storage and an injected scheduler failure]", async () => {
+    const fixture = setup();
+    const schedule = vi.spyOn(fixture.context, "schedule").mockRejectedValueOnce(new Error("scheduler unavailable"));
+
+    await expect(configureBlitzAutoStart(fixture.context, "activation")).rejects.toThrow("scheduler unavailable");
+    const persisted = fixture.storage.get("auto-start-state") as { deadlineAt: number };
+    expect(persisted.deadlineAt).toBe(Date.now() + 15 * minute);
+
+    vi.advanceTimersByTime(3 * minute);
+    await configureBlitzAutoStart(fixture.context, "activation");
+
+    expect(fixture.scheduled.get("auto-start")).toBe(persisted.deadlineAt);
     expect(schedule).toHaveBeenCalledTimes(2);
   });
 
@@ -218,6 +238,25 @@ describe("blitz automatic starts", () => {
 
     expect(fixture.scheduled.get("auto-start")).toBe(Date.now() + 15 * minute);
     expect(fixture.storage.get("auto-start-state")).toMatchObject({ moduleActivationRevision: 2 });
+  });
+
+  it("ignores a prior activation's delayed result after a new baseline [protects=resolution callbacks from older module activation generations cannot shorten the current deadline; fails_when=an old result is reconciled using the new state generation and makes the timer due early; no_claim=uses mocked module revisions and does not exercise concurrent Durable Object delivery]", async () => {
+    const fixture = setup();
+    const oldResult = resolved("old-activation-round", 1);
+    await configureBlitzAutoStart(fixture.context, "activation");
+
+    fixture.settings.autoStart = false;
+    await configureBlitzAutoStart(fixture.context, "settings");
+    vi.advanceTimersByTime(5 * minute);
+    fixture.settings.autoStart = true;
+    fixture.setActivationRevision(2);
+    await configureBlitzAutoStart(fixture.context, "activation");
+    const newDeadline = fixture.scheduled.get("auto-start");
+
+    vi.advanceTimersByTime(10 * minute);
+    await onBlitzRoundResolved(fixture.context, oldResult);
+
+    expect(fixture.scheduled.get("auto-start")).toBe(newDeadline);
   });
 
   it("uses resolution reconciliation during activation recovery [protects=activation recovery records the recovered round and fresh baseline before a delayed result hook; fails_when=the late hook replaces the activation recovery deadline; no_claim=uses an in-memory scheduler and module revision]", async () => {

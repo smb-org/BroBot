@@ -41,18 +41,35 @@ const parseUrl = (input: RequestInfo | URL): URL => input instanceof Request
   ? new URL(input.url)
   : input instanceof URL ? input : new URL(input, "https://brobot.example");
 
-const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Promise<void>, stalePatch = false) => {
+const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Promise<void>, stalePatch = false, settingsConflict = false, patchDeleted = false) => {
   let questions = [...initialQuestions];
   let settings = { ...initialSettings };
+  let settingsRevision = 1;
+  let conflictPending = settingsConflict;
+  const submittedSettingsRevisions: number[] = [];
   const requests = vi.fn<typeof fetch>((input, init) => {
     const url = parseUrl(input);
     const method = init?.method ?? (input instanceof Request ? input.method : "GET");
     if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "fictional-csrf-token" }));
-    if (url.pathname.endsWith("/modules/blitz_round/settings") && method === "GET") return Promise.resolve(jsonResponse({ settings, revision: 1 }));
+    if (url.pathname.endsWith("/modules/blitz_round/settings") && method === "GET") return Promise.resolve(jsonResponse({ settings, revision: settingsRevision }));
     if (url.pathname.endsWith("/modules/blitz_round/settings") && method === "PATCH") {
-      const body = JSON.parse(typeof init?.body === "string" ? init.body : "null") as { settings: BlitzRoundSettings };
+      const body = JSON.parse(typeof init?.body === "string" ? init.body : "null") as { revision: number; settings: BlitzRoundSettings };
+      submittedSettingsRevisions.push(body.revision);
+      if (conflictPending) {
+        conflictPending = false;
+        settings = { ...settings, prize: 80 };
+        settingsRevision = 2;
+        return Promise.resolve(jsonResponse({ error: "module_settings_changed_concurrently" }, 409));
+      }
+      if (body.revision !== settingsRevision) return Promise.resolve(jsonResponse({ error: "module_settings_changed_concurrently" }, 409));
       settings = { ...body.settings };
-      return Promise.resolve(jsonResponse({ settings, revision: 2 }));
+      settingsRevision += 1;
+      return Promise.resolve(jsonResponse({ settings, revision: settingsRevision }));
+    }
+    if (url.pathname.includes("/modules/blitz_round/questions/") && method === "GET") {
+      const id = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
+      const question = questions.find((candidate) => candidate.id === id);
+      return Promise.resolve(question === undefined ? jsonResponse({ error: "question_not_found" }, 404) : jsonResponse({ question }));
     }
     if (url.pathname.endsWith("/modules/blitz_round/questions") && method === "GET") {
       const page = Number(url.searchParams.get("page") ?? "1");
@@ -69,6 +86,10 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
       const id = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
       const body = JSON.parse(typeof init?.body === "string" ? init.body : "null") as Partial<BlitzQuestion>;
       const existing = questions.find((candidate) => candidate.id === id);
+      if (patchDeleted) {
+        questions = questions.filter((candidate) => candidate.id !== id);
+        return Promise.resolve(jsonResponse({ error: "question_deleted" }, 409));
+      }
       if (existing === undefined) throw new Error("question_missing");
       if (stalePatch) {
         const latest = { ...existing, prompt: "MOON", answers: ["MOON"], revision: existing.revision + 1 };
@@ -87,7 +108,7 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
     return Promise.resolve(jsonResponse({ error: "not_found" }, 404));
   });
   vi.stubGlobal("fetch", requests);
-  return { requests, getQuestions: () => questions, getSettings: () => settings };
+  return { requests, getQuestions: () => questions, getSettings: () => settings, getSettingsRevision: () => settingsRevision, submittedSettingsRevisions };
 };
 
 const mountPanel = () => renderWithQuery(<UiProvider><BlitzRoundPanel channelId="fictional_channel" language="en" /></UiProvider>);
@@ -229,6 +250,81 @@ describe("Blitz Round collection panel", () => {
 
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("MOON"));
     expect(api.getQuestions()[0]?.revision).toBe(2);
+  });
+
+  it("reloads a conflicted question by id when it falls beyond the first page [protects=question conflict recovery fetches the selected entity independently of pagination; fails_when=reload searches only page one and leaves a stale draft that cannot continue; no_claim=the paginated question list and HTTP responses use an in-memory stub]", async () => {
+    const questions = Array.from({ length: 26 }, (_, index): BlitzQuestion => ({
+      ...sampleQuestion,
+      id: `fictional-question-${String(index + 1).padStart(2, "0")}`,
+      kind: "quiz",
+      prompt: `Which planet is number ${String(index + 1)}?`,
+      answers: ["Saturn"],
+    }));
+    const api = installPanelFetch(questions, undefined, true);
+    mountPanel();
+    await screen.findByRole("button", { name: /Which planet is number 1\?/u });
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    await screen.findByRole("button", { name: /Which planet is number 26\?/u });
+    fireEvent.click(screen.getByRole("button", { name: /Which planet is number 26\?/u }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Question" }), { target: { value: "Which planet has rings?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText("This question changed while you were editing it. Reload the saved version before continuing.");
+
+    fireEvent.click(screen.getByRole("button", { name: "Reload question" }));
+
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Question" })).toHaveValue("MOON"));
+    expect(api.requests.mock.calls.some(([input]) => parseUrl(input as RequestInfo).pathname.endsWith("/fictional-question-26"))).toBe(true);
+  });
+
+  it("starts a clean draft after saving while switching to New question [protects=each new-question session has independent editor state; fails_when=the New question editor key is reused and shows the just-saved draft; no_claim=the create request is served by an in-memory HTTP stub]", async () => {
+    installPanelFetch();
+    mountPanel();
+    await screen.findByText("Add a word scramble or quiz question so chat can join in.");
+    fireEvent.click(screen.getByRole("button", { name: "New question" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "STONE" } });
+    fireEvent.click(screen.getByRole("button", { name: "New question" }));
+    const guard = await screen.findByRole("dialog", { name: "Save changes?" });
+    fireEvent.click(within(guard).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Save changes?" })).not.toBeInTheDocument());
+    expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("");
+  });
+
+  it("keeps settings drafts through a conflict and saves with the reloaded revision [protects=the settings conflict choice preserves local edits and reload adopts the latest server revision; fails_when=conflict hides recovery, discards the draft, or retries with the stale revision; no_claim=concurrent saves are simulated by an in-memory HTTP stub]", async () => {
+    const api = installPanelFetch([sampleQuestion], undefined, false, true);
+    mountPanel();
+    await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const prize = await screen.findByRole("spinbutton", { name: "Prize" });
+    fireEvent.change(prize, { target: { value: "75" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
+
+    expect(await screen.findByText("Round settings changed elsewhere. Load the saved version before continuing.")).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "Prize" })).toHaveValue(75);
+    fireEvent.click(screen.getByRole("button", { name: "Load server settings" }));
+    await waitFor(() => expect(screen.getByRole("spinbutton", { name: "Prize" })).toHaveValue(80));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Prize" }), { target: { value: "90" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
+
+    await waitFor(() => expect(api.getSettings().prize).toBe(90));
+    expect(api.submittedSettingsRevisions).toEqual([1, 2]);
+    expect(api.getSettingsRevision()).toBe(3);
+  });
+
+  it("offers save as new when the edited question was deleted elsewhere [protects=deleted question conflicts retain the draft and expose fixed-place save-as-new and discard choices; fails_when=PATCH deletion shows only a generic error or loses the draft; no_claim=deletion and recreation are simulated by an in-memory HTTP stub]", async () => {
+    const api = installPanelFetch([sampleQuestion], undefined, false, false, true);
+    mountPanel();
+    await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "STONE" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("This question was deleted elsewhere. Save your draft as a new question or discard it.")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("STONE");
+    expect(screen.getByRole("button", { name: "Save as new question" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Discard" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save as new question" }));
+
+    await waitFor(() => expect(api.getQuestions().some((question) => question.prompt === "STONE")).toBe(true));
   });
 
   it("selects the first remaining question after deleting the only item on the last page [protects=deleting question 26 from a 26-question pool clamps to page 1 and selects its first question; fails_when=the panel remains on invalid page 2 or shows an empty detail; no_claim=the paginated repository is mocked]", async () => {

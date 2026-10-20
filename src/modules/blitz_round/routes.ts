@@ -5,7 +5,7 @@ import type { ModuleRouteEnvironment } from "../contract";
 import { BLITZ_QUESTION_MAXIMUM_COUNT, BLITZ_ROUND_MODULE_ID } from "./contracts";
 import { validateBlitzQuestion } from "./domain/questions";
 import { createBlitzQuestionRepository } from "./adapters/d1";
-import { loadEnabledBlitzSettings, openBlitzRound } from "./service";
+import { loadBlitzModuleActivationRevision, loadEnabledBlitzSettings, openBlitzRound } from "./service";
 
 type BlitzRouteContext = Context<ModuleRouteEnvironment>;
 
@@ -23,6 +23,11 @@ blitzRoundRoutes.get("/questions", async (context) => {
   const page = Number.isSafeInteger(rawPage) && rawPage > 0 ? rawPage : 1;
   const search = context.req.query("q") ?? "";
   return context.json(await repository(context).list(channelIdFrom(context), page, search));
+});
+
+blitzRoundRoutes.get("/questions/:questionId", async (context) => {
+  const question = await repository(context).get(channelIdFrom(context), context.req.param("questionId"));
+  return question === null ? context.json({ error: "question_not_found" }, 404) : context.json({ question });
 });
 
 blitzRoundRoutes.get("/availability", async (context) => {
@@ -67,7 +72,7 @@ blitzRoundRoutes.patch("/questions/:questionId", async (context) => {
   const questionId = context.req.param("questionId");
   const questionRepository = repository(context);
   const existing = await questionRepository.get(channelId, questionId);
-  if (existing === null) return context.json({ error: "question_not_found" }, 404);
+  if (existing === null) return context.json({ error: "question_deleted" }, 409);
   const requestBody = await body(context.req.raw);
   if (!isRecord(requestBody) || !Number.isSafeInteger(requestBody.revision) || (requestBody.revision as number) < 1) {
     return context.json({ error: "question_invalid" }, 400);
@@ -91,7 +96,7 @@ blitzRoundRoutes.patch("/questions/:questionId", async (context) => {
   const [result] = await context.env.DB.batch([mutation, auditStatement]);
   if ((result?.meta.changes ?? 0) === 0) {
     const current = await questionRepository.get(channelId, questionId);
-    if (current === null) return context.json({ error: "question_not_found" }, 409);
+    if (current === null) return context.json({ error: "question_deleted" }, 409);
     if (current.revision !== expectedRevision) return context.json({ error: "question_conflict", current }, 409);
     return denied(context);
   }
@@ -104,7 +109,7 @@ blitzRoundRoutes.delete("/questions/:questionId", async (context) => {
   const questionId = context.req.param("questionId");
   const questionRepository = repository(context);
   const existing = await questionRepository.get(channelId, questionId);
-  if (existing === null) return context.json({ error: "question_not_found" }, 404);
+  if (existing === null) return context.json({ error: "question_deleted" }, 409);
   const revision = Number(context.req.query("revision"));
   if (!Number.isSafeInteger(revision) || revision < 1) return context.json({ error: "question_invalid" }, 400);
   const now = new Date().toISOString();
@@ -119,7 +124,7 @@ blitzRoundRoutes.delete("/questions/:questionId", async (context) => {
   const [result] = await context.env.DB.batch([mutation, auditStatement]);
   if ((result?.meta.changes ?? 0) === 0) {
     const current = await questionRepository.get(channelId, questionId);
-    if (current === null) return context.json({ error: "question_not_found" }, 409);
+    if (current === null) return context.json({ error: "question_deleted" }, 409);
     if (current.revision !== revision) return context.json({ error: "question_conflict", current }, 409);
     return denied(context);
   }
@@ -130,12 +135,15 @@ blitzRoundRoutes.post("/start", async (context) => {
   const channelId = channelIdFrom(context);
   const settings = await loadEnabledBlitzSettings(context.env.DB, channelId);
   if (settings === null) return context.json({ error: "module_disabled" }, 409);
+  const activationRevision = await loadBlitzModuleActivationRevision(context.env.DB, channelId);
+  if (activationRevision === null) return context.json({ error: "module_disabled" }, 409);
   const language = (await context.env.DB.prepare("SELECT language FROM channels WHERE channel_id = ?")
     .bind(channelId).first<{ language: "de" | "en" }>())?.language ?? "de";
   try {
     const opened = await openBlitzRound({
       channelId,
       startedBy: context.get("actor").userId,
+      moduleActivationRevision: activationRevision,
       settings,
       language,
       points: context.get("points")(channelId),

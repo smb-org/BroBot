@@ -45,6 +45,8 @@ export interface BlitzTexts {
   saving: string;
   saveError: string;
   conflict: string;
+  questionDeletedConflict: string;
+  saveAsNew: string;
   reload: string;
   validationError: (code: BlitzQuestionValidationCode) => string;
   delete: string;
@@ -71,6 +73,8 @@ export interface BlitzTexts {
   roundTextHint: string;
   settingsSaved: string;
   settingsError: string;
+  settingsConflict: string;
+  reloadSettings: string;
   noSelection: string;
   loadError: string;
   retry: string;
@@ -143,6 +147,8 @@ const catalog: LocaleCatalog<BlitzTexts> = {
     saving: "Wird gespeichert …",
     saveError: "Die Frage konnte nicht gespeichert werden.",
     conflict: "Die Frage wurde in der Zwischenzeit geändert. Lade sie neu, bevor du weiterarbeitest.",
+    questionDeletedConflict: "Diese Frage wurde anderswo gelöscht. Speichere deinen Entwurf als neue Frage oder verwerfe ihn.",
+    saveAsNew: "Als neue Frage speichern",
     reload: "Frage neu laden",
     validationError: (code) => ({
       invalid_question: "Prüfe die Angaben zur Frage.",
@@ -178,6 +184,8 @@ const catalog: LocaleCatalog<BlitzTexts> = {
     roundTextHint: "Variablen: {blitz.type}, {blitz.prompt}, {blitz.answer}, {blitz.prize}, {blitz.seconds}, {blitz.winners}, {blitz.share}",
     settingsSaved: "Einstellungen gespeichert.",
     settingsError: "Die Einstellungen konnten nicht gespeichert werden.",
+    settingsConflict: "Die Rundeneinstellungen wurden anderswo geändert. Lade den gespeicherten Stand, bevor du weiterarbeitest.",
+    reloadSettings: "Serverstand laden",
     noSelection: "Wähle eine Frage aus oder erstelle eine neue.",
     loadError: "Der Fragenpool konnte nicht geladen werden.",
     retry: "Erneut laden",
@@ -253,6 +261,8 @@ const catalog: LocaleCatalog<BlitzTexts> = {
     saving: "Saving …",
     saveError: "The question could not be saved.",
     conflict: "This question changed while you were editing it. Reload the saved version before continuing.",
+    questionDeletedConflict: "This question was deleted elsewhere. Save your draft as a new question or discard it.",
+    saveAsNew: "Save as new question",
     reload: "Reload question",
     validationError: (code) => ({
       invalid_question: "Check the question details.",
@@ -288,6 +298,8 @@ const catalog: LocaleCatalog<BlitzTexts> = {
     roundTextHint: "Variables: {blitz.type}, {blitz.prompt}, {blitz.answer}, {blitz.prize}, {blitz.seconds}, {blitz.winners}, {blitz.share}",
     settingsSaved: "Settings saved.",
     settingsError: "The settings could not be saved.",
+    settingsConflict: "Round settings changed elsewhere. Load the saved version before continuing.",
+    reloadSettings: "Load server settings",
     noSelection: "Choose a question or create a new one.",
     loadError: "The question pool could not be loaded.",
     retry: "Reload",
