@@ -239,7 +239,7 @@ itself.
 
 ## Development
 
-Requirements (`package.json`): Node.js `>=24.0.0`, pnpm `>=12.0.0` (the repo
+Requirements (`package.json`): Node.js `>=24.16.0`, pnpm `>=12.0.0` (the repo
 pins `pnpm@12.1.0` via `packageManager`).
 
 ```bash
