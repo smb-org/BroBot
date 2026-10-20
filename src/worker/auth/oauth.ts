@@ -6,6 +6,7 @@ export const LOGIN_SCOPES = ["user:read:moderated_channels", "channel:bot"] as c
 export const BOT_SCOPES = [
   "user:bot",
   "user:read:chat",
+  "user:read:emotes",
   "user:write:chat",
   "moderator:manage:shoutouts",
   "moderator:manage:announcements",

@@ -35,6 +35,7 @@ const makeEvent = (text: string, login = "nachtfalke", timestamp = "2026-10-19T1
 const contextFor = (object: PointsWorkerObject, live: "online" | "offline" = "online"): ModuleExecutionContext => {
   const access: ModulePointsAccess = {
     apply: (operationId, kind, movements, result) => object.applyPointOperation(moduleId, operationId, kind, movements, result),
+    settle: (operationId, kind, actor, stake, params, options) => object.settlePointOperation(moduleId, operationId, kind, actor, stake, params, options),
     touchAccount: (accountId, login, startBonus) => object.touchPointAccount(moduleId, accountId, login, startBonus),
     ackWelcome: (accountId) => object.acknowledgePointWelcome(moduleId, accountId),
     creditActivity: (accountId, login, messageAt, isLive, rules) => object.creditPointActivity(moduleId, accountId, login, messageAt, isLive, rules),

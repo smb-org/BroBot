@@ -1,4 +1,6 @@
 import type { PointSettlement, PointSettlementInput } from "./points";
+import type { InstantPointSettlement } from "./points";
+import { settleSlot } from "../../modules/emote_slots/domain/settlement";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -25,4 +27,8 @@ const testSettlement: PointSettlement = ({ round, participants, params }: PointS
 
 export const POINT_SETTLEMENTS: ReadonlyMap<string, PointSettlement> = new Map([
   ["test", testSettlement],
+]);
+
+export const INSTANT_SETTLEMENTS: ReadonlyMap<string, InstantPointSettlement> = new Map([
+  ["slot", settleSlot],
 ]);

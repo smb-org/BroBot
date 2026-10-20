@@ -46,6 +46,7 @@ export interface GroupedPickerProps<T = unknown> {
   opened?: boolean;
   defaultOpened?: boolean;
   onOpenedChange?: (opened: boolean) => void;
+  onCloseComplete?: () => void;
   disabled?: boolean;
   /** Focus target after selecting or dismissing with Escape. Defaults to the trigger. */
   onDismissFocus?: () => void;
@@ -112,6 +113,7 @@ export function GroupedPicker<T = unknown>({
   opened: suppliedOpened,
   defaultOpened = false,
   onOpenedChange,
+  onCloseComplete,
   disabled = false,
   onDismissFocus,
   renderEntryContent,
@@ -438,7 +440,12 @@ export function GroupedPicker<T = unknown>({
   return (
     <>
       <span className="ui-grouped-picker__trigger" ref={triggerRef}>
-        <PopoverPrimitive.Root actionsRef={popoverActionsRef} open={opened && !isSmallScreen} onOpenChange={handlePopoverOpenedChange} onOpenChangeComplete={(nextOpened) => { if (!nextOpened) finishRestoreFocus(); }} modal="trap-focus">
+        <PopoverPrimitive.Root actionsRef={popoverActionsRef} open={opened && !isSmallScreen} onOpenChange={handlePopoverOpenedChange} onOpenChangeComplete={(nextOpened) => {
+          if (!nextOpened) {
+            finishRestoreFocus();
+            onCloseComplete?.();
+          }
+        }} modal="trap-focus">
           <PopoverPrimitive.Trigger render={interactiveTrigger} />
           <PopoverPrimitive.Portal>
             <PopoverPrimitive.Positioner side="bottom" align="end" sideOffset={4} collisionPadding={12} className="z-[var(--layer-popover)]" style={{ zIndex: "var(--layer-popover)" }}>
@@ -450,7 +457,12 @@ export function GroupedPicker<T = unknown>({
           </PopoverPrimitive.Portal>
         </PopoverPrimitive.Root>
       </span>
-      <DialogPrimitive.Root open={opened && isSmallScreen} onOpenChange={(next) => { if (!next) close(true); }} onOpenChangeComplete={(nextOpened) => { if (!nextOpened) finishRestoreFocus(); }}>
+      <DialogPrimitive.Root open={opened && isSmallScreen} onOpenChange={(next) => { if (!next) close(true); }} onOpenChangeComplete={(nextOpened) => {
+        if (!nextOpened) {
+          finishRestoreFocus();
+          onCloseComplete?.();
+        }
+      }}>
         <DialogPrimitive.Portal>
           <DialogPrimitive.Backdrop data-ui="" className="ui-grouped-picker__backdrop" />
           <DialogPrimitive.Popup ref={sheetPopupRef} data-ui="" aria-labelledby={`${sheetPanelId}-title`} className="ui-grouped-picker__drawer-content" initialFocus={false} finalFocus={false}>

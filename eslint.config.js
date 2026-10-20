@@ -33,6 +33,7 @@ const moduleSharedImportPattern = [
   "(?:\\.\\./)+contract",
   "contract",
   "contracts",
+  "locale",
   "domain",
   "service",
   "repository",
