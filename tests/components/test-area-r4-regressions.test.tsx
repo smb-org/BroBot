@@ -196,8 +196,11 @@ describe("test area result and channel regressions", () => {
 
     first.unmount();
     renderPage({ channelId: "channel-b" });
-    const history = screen.getByRole("region", { name: "Verlauf" });
-    expect(within(history).queryByRole("button")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Verlauf · 0" }));
+    const history = screen.getByRole("dialog", { name: "Verlauf" });
+    expect(within(history).queryByRole("button", { name: /erneut prüfen/u })).not.toBeInTheDocument();
+    fireEvent.click(within(history).getByRole("button", { name: "Schließen" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Verlauf" })).not.toBeInTheDocument());
     vi.clearAllMocks();
     run();
     await waitFor(() => expect(dryRunChatMessage).toHaveBeenCalledWith("channel-b", expect.anything(), expect.anything()));

@@ -82,13 +82,17 @@ describe("FAQ panel", () => {
     renderFaqPanel("de", { onOpenTestArea });
 
     const action = await screen.findByRole("button", { name: "Im Testbereich prüfen" });
+    const reservedReason = document.querySelector(".page-header__action-hint > #faq-test-area-reason");
+    expect(reservedReason).toBeInTheDocument();
+    expect(reservedReason).toHaveAttribute("aria-hidden", "true");
     expect(action).toBeEnabled();
     fireEvent.click(action);
     expect(onOpenTestArea).toHaveBeenCalledWith("faq", "entry-1");
 
     fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Changed draft" } });
     expect(action).toBeDisabled();
-    expect(screen.getByText("Speichere oder verwerfe Änderungen, bevor du prüfst.")).toBeInTheDocument();
+    expect(reservedReason).toHaveTextContent("Speichere oder verwerfe Änderungen, bevor du prüfst.");
+    expect(reservedReason).toHaveAttribute("aria-hidden", "false");
   });
 
   it("saves answer, enabled state, and role threshold together with the entry revision", async () => {

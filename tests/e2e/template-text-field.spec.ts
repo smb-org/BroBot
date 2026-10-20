@@ -180,10 +180,9 @@ test("template hint and character counter occupy separate space at 390px", async
   await input.fill("Hello {usr} welcome ");
   const geometry = await page.evaluate(() => {
     const row = document.querySelector(".ui-template-text-field__helper-row");
-    const hint = row?.querySelector(":scope > span:first-child");
-    const visibleHint = row?.querySelector(".ui-truncated-text");
+    const hint = row?.querySelector(".ui-template-text-field__helper-text");
     const count = row?.querySelector(".ui-template-text-field__count");
-    if (!(row instanceof HTMLElement) || !(hint instanceof HTMLElement) || !(visibleHint instanceof HTMLElement) || !(count instanceof HTMLElement)) {
+    if (!(row instanceof HTMLElement) || !(hint instanceof HTMLElement) || !(count instanceof HTMLElement)) {
       throw new Error("The template field helper elements are missing.");
     }
     const bounds = (element: HTMLElement) => {
@@ -194,10 +193,10 @@ test("template hint and character counter occupy separate space at 390px", async
       row: bounds(row),
       hint: bounds(hint),
       count: bounds(count),
-      hintWhiteSpace: getComputedStyle(visibleHint, "::before").whiteSpace,
+      hintFullyVisible: hint.scrollHeight <= hint.clientHeight + 1,
     };
   });
   expect(geometry.hint.bottom).toBeLessThanOrEqual(geometry.count.top + 0.5);
   expect(geometry.count.right).toBeLessThanOrEqual(geometry.row.right + 0.5);
-  expect(geometry.hintWhiteSpace).toBe("normal");
+  expect(geometry.hintFullyVisible).toBe(true);
 });

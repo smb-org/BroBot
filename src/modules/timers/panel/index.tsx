@@ -584,6 +584,7 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
                 variables={data?.variables ?? []}
                 preview={() => previewText}
                 previewLabel={labels.preview}
+                previewStatus={<span className="timer-editor__preview-status" role={previewBusy ? "status" : undefined}>{previewBusy ? labels.previewLoading : ""}</span>}
                 previewSpeaker={labels.previewBot}
                 messages={labels.templateMessages}
                 minRows={3}
@@ -594,7 +595,6 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
                 {attemptedSave && draft.messageText.trim().length === 0 ? labels.messageRequired : ""}
               </p>
             </div>
-            <span className="timer-editor__preview-status" role={previewBusy ? "status" : undefined}>{previewBusy ? labels.previewLoading : ""}</span>
           </div>
         </Section>
 

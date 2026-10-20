@@ -38,8 +38,7 @@
 }
 
 .test-area__context {
-  gap: 14px;
-  overflow: hidden;
+  overflow: visible;
   padding: 16px 16px 8px 0;
   border-right: 1px solid var(--line);
 }
@@ -50,7 +49,7 @@
   flex-direction: column;
   gap: 8px;
   min-width: 0;
-  min-height: auto;
+  min-height: 0;
   overflow: visible;
 }
 
@@ -60,12 +59,16 @@
   align-content: start;
   gap: 8px;
   min-width: 0;
-  min-height: auto;
+  min-height: 0;
   overflow: visible;
 }
 
 .test-area__context-footer {
+  display: grid;
   flex: 0 0 auto;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
 }
 
 .test-area__context-form .ui-field__input,
@@ -191,34 +194,6 @@
   gap: 7px;
 }
 
-.test-area__history {
-  display: flex;
-  min-height: 0;
-  flex: 1 1 auto;
-  flex-direction: column;
-  overflow: hidden;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
-}
-
-.test-area__history > h2 {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: baseline;
-  gap: 8px;
-  margin: 0 0 6px;
-  color: var(--text-2);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.test-area__history > h2 span {
-  color: var(--text-3);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 400;
-}
-
 .test-area__history-empty {
   margin: 0;
   color: var(--text-3);
@@ -228,13 +203,10 @@
 
 .test-area__history-list {
   display: grid;
-  flex: 1 1 auto;
   align-content: start;
   gap: 2px;
-  min-height: 0;
   margin: 0;
   padding: 0 2px 4px 0;
-  overflow-y: auto;
   list-style: none;
 }
 
@@ -848,12 +820,23 @@
 }
 
 @media (min-width: 821px) and (max-height: 850px) {
-  .test-area__context { gap: 8px; padding-top: 12px; padding-bottom: 6px; }
+  .test-area__context { padding-top: 12px; padding-bottom: 6px; }
   .test-area__context-form { gap: 8px; }
   .test-area__context-form .ui-field__input,
   .test-area__context-form .ui-select__trigger { min-height: 32px; }
   .test-area__context-form .ui-game-multi-select--compact .ui-game-multi-select__search > input { height: 32px; min-height: 32px; }
   .test-area__context .test-area__run-button { height: 34px; min-height: 34px; }
+}
+
+@media (min-width: 821px) and (max-height: 680px) {
+  .main-content:has(.test-area) {
+    height: auto;
+    min-height: calc(100dvh - var(--app-shell-header-height));
+  }
+
+  .tool-page:has(.test-area) { height: auto; min-height: 0; }
+  .tool-page__body:has(.test-area) { flex: 0 0 auto; overflow: visible; }
+  .test-area { height: auto; min-height: max-content; overflow: visible; }
 }
 
 @media (max-width: 820px) {

@@ -479,6 +479,8 @@ describe("Timers panel", () => {
     await screen.findByRole("textbox", { name: "Message" });
     const preview = document.querySelector(".ui-template-text-field__preview");
     if (!(preview instanceof HTMLElement)) throw new Error("The timer preview is missing.");
+    const previewStatus = preview.querySelector(".timer-editor__preview-status");
+    expect(previewStatus?.parentElement).toHaveClass("ui-template-text-field__preview-header");
     await within(preview).findByText("Resolved welcome message");
     expect(previewCalls).toBe(1);
 

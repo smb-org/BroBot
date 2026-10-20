@@ -388,6 +388,7 @@ function FaqPanelContent({ channelId, language, canManage = true, initialSelecti
     ? <div className="faq-panel__placeholder"><PageHeader title={labels.title} subtitle={labels.noSelection} /></div>
     : <div className="faq-panel__detail">
       <PageHeader
+        className="page-header--editor"
         title={draft.name.trim() || labels.newEntry}
         active={draft.enabled}
         onToggle={(enabled) => { patchDraft({ enabled }); }}
@@ -396,14 +397,15 @@ function FaqPanelContent({ channelId, language, canManage = true, initialSelecti
         {...(selectedEntry === undefined ? {} : { meta: labels.priorityMeta(selectedIndex + 1) })}
         badges={<Badge>{draft.matcherType === "regex" ? labels.regexCompact : labels.keywordsCompact}</Badge>}
         {...(canManage ? {} : { lockHint: labels.roleLocked })}
-        pageActions={<div className="faq-panel__test-area-action">
+        pageActions={<div className="editor-test-area-action">
           <Button
             variant="neutral"
+            {...(dirty || selectedEntry === undefined ? { describedBy: "faq-test-area-reason" } : {})}
             disabled={testAreaDisabled}
             onClick={() => { if (selectedEntry !== undefined) onOpenTestArea?.("faq", selectedEntry.id); }}
           >{labels.testAreaAction}</Button>
-          {testAreaDisabled ? <span>{dirty ? labels.testAreaDirty : labels.testAreaSavedOnly}</span> : null}
         </div>}
+        actionHint={<span id="faq-test-area-reason" aria-hidden={!dirty && selectedEntry !== undefined}>{dirty ? labels.testAreaDirty : selectedEntry === undefined ? labels.testAreaSavedOnly : ""}</span>}
         {...(selectedEntry === undefined ? {} : {
           overflow: <Button className="faq-panel__delete-action" variant="subtle" danger="subtle" size="compact" disabled={!canManage || deleting} onClick={openDelete}>
             <Icon name="remove" size={16} />{labels.delete}

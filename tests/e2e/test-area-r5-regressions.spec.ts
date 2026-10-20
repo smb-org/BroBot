@@ -193,6 +193,13 @@ test("keeps the first result row close to its heading and stationary when hints 
       expect(contextGap).not.toBeNull();
       expect(contextGap ?? 0).toBeGreaterThanOrEqual(0);
       expect(contextGap ?? 0).toBeLessThanOrEqual(16);
+
+      const fieldLayout = await page.locator(".test-area__context-fields").evaluate((fields) => ({
+        overflowY: getComputedStyle(fields).overflowY,
+        scrolls: fields.scrollHeight > fields.clientHeight,
+      }));
+      expect(fieldLayout.overflowY).not.toMatch(/auto|scroll/u);
+      expect(fieldLayout.scrolls).toBe(false);
     }
 
     const firstRow = page.locator(".test-area__result-row").first();

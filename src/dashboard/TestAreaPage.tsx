@@ -783,12 +783,11 @@ export function TestAreaPage({
             <Button type="submit" variant="primary" className="test-area__run-button" disabled={message.trim().length === 0}>
               <Icon name="tabMessages" />{texts.run}
             </Button>
+            <Button variant="subtle" size="compact" className="test-area__history-button" onClick={() => setMobileHistoryOpen(true)}>
+              <Icon name="clock-hour-4" />{texts.history} · {history.length}
+            </Button>
           </div>
         </form>
-        <section className="test-area__history" aria-label={texts.history}>
-          <h2>{texts.history}<span>{history.length}</span></h2>
-          <HistoryList items={history} labels={labels} language={language} onReplay={replay} />
-        </section>
       </aside>
 
       <section className={"test-area__results" + (snapshotStale ? " is-stale" : "")} aria-label={texts.result} aria-busy={pending}>

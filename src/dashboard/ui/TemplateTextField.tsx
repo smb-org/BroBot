@@ -56,6 +56,7 @@ interface TemplateTextFieldProps {
   variables?: readonly TemplateTextFieldVariable[];
   preview?: (template: string, values: Readonly<Record<string, string>>) => string;
   previewLabel?: string;
+  previewStatus?: ReactNode;
   previewSpeaker?: string;
   previewEmptyText?: string;
   insertVariableLabel?: string;
@@ -139,6 +140,7 @@ export function TemplateTextField({
   variables,
   preview,
   previewLabel,
+  previewStatus,
   previewSpeaker,
   previewEmptyText,
   insertVariableLabel,
@@ -353,6 +355,7 @@ export function TemplateTextField({
     <div className="ui-template-text-field__preview">
       <div className="ui-template-text-field__preview-header">
         <span className="ui-template-text-field__preview-label">{previewLabel}</span>
+        {previewStatus}
         {countNode}
       </div>
       <p className="ui-template-text-field__preview-message" title={previewIsEmpty ? previewDisplayText : `${previewSpeaker}: ${previewDisplayText}`}>

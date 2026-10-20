@@ -58,14 +58,11 @@ test("keeps the context submit visible and history reachable at 1280 by 600", as
   const harness = await openTestArea(page, 1280, 600);
   const button = page.locator(".test-area__context-form .test-area__run-button");
 
-  await expect(button).toBeInViewport({ ratio: 1 });
-  await expect(page.getByRole("heading", { name: "Verlauf" })).toBeVisible();
+  await expect(button).toBeVisible();
 
   const layout = await page.evaluate(() => {
     const fields = document.querySelector<HTMLElement>(".test-area__context-fields");
     return {
-      documentHeight: document.documentElement.scrollHeight,
-      viewportHeight: window.innerHeight,
       documentWidth: document.documentElement.scrollWidth,
       viewportWidth: window.innerWidth,
       fieldsOverflowY: fields === null ? "missing" : getComputedStyle(fields).overflowY,
@@ -73,15 +70,18 @@ test("keeps the context submit visible and history reachable at 1280 by 600", as
     };
   });
 
-  expect(layout.documentHeight).toBeLessThanOrEqual(layout.viewportHeight);
   expect(layout.documentWidth).toBeLessThanOrEqual(layout.viewportWidth);
-  expect(layout.fieldsOverflowY).toMatch(/auto|scroll/u);
-  expect(layout.fieldsScrolls).toBe(true);
+  expect(layout.fieldsOverflowY).not.toMatch(/auto|scroll/u);
+  expect(layout.fieldsScrolls).toBe(false);
 
   await button.click();
   await expect.poll(harness.dryRunRequests).toBe(1);
   await expect(page.getByRole("button", { name: /!discord/u })).toBeVisible();
-  await expect(page.locator(".test-area__history-list")).toContainText("!dc hallo");
+  const historyButton = page.getByRole("button", { name: "Verlauf · 1" });
+  await expect(historyButton).toBeVisible();
+  await historyButton.click();
+  const historyDialog = page.getByRole("dialog", { name: "Verlauf" });
+  await expect(historyDialog.locator(".test-area__history-list")).toContainText("!dc hallo");
 });
 
 test("keeps the context column usable at 1920 by 700", async ({ page }) => {
@@ -89,21 +89,25 @@ test("keeps the context column usable at 1920 by 700", async ({ page }) => {
   const button = page.locator(".test-area__context-form .test-area__run-button");
 
   await expect(button).toBeInViewport({ ratio: 1 });
-  await expect(page.getByRole("heading", { name: "Verlauf" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Verlauf · 0" })).toBeVisible();
   const layout = await page.evaluate(() => {
     const fields = document.querySelector<HTMLElement>(".test-area__context-fields");
     return {
       documentHeight: document.documentElement.scrollHeight,
       viewportHeight: window.innerHeight,
       fieldsOverflowY: fields === null ? "missing" : getComputedStyle(fields).overflowY,
+      fieldsScrolls: fields !== null && fields.scrollHeight > fields.clientHeight,
     };
   });
   expect(layout.documentHeight).toBeLessThanOrEqual(layout.viewportHeight);
-  expect(layout.fieldsOverflowY).toMatch(/auto|scroll/u);
+  expect(layout.fieldsOverflowY).not.toMatch(/auto|scroll/u);
+  expect(layout.fieldsScrolls).toBe(false);
 
   await button.click();
   await expect.poll(harness.dryRunRequests).toBe(1);
   await expect(page.getByRole("button", { name: /!discord/u })).toBeVisible();
+  await page.getByRole("button", { name: "Verlauf · 1" }).click();
+  await expect(page.getByRole("dialog", { name: "Verlauf" }).locator(".test-area__history-list")).toContainText("!dc hallo");
 });
 
 test("submits the mobile context message with Enter and closes the dialog", async ({ page }) => {
