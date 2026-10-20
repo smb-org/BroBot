@@ -1305,7 +1305,6 @@ export interface DashboardTexts {
     discardAndSwitch: string;
     saveAndSwitch: string;
     scopesMissing: (name: string) => string;
-    scopeStatusUnknown: string;
     requestScopeConsent: string;
     scopeConsentLocked: string;
     scopeList: string;
@@ -1912,7 +1911,6 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       unsavedChangesDescription: "Du hast ungespeicherte Moduleinstellungen. Was möchtest du tun?",
       continueEditing: "Weiter bearbeiten", discardAndSwitch: "Verwerfen und wechseln", saveAndSwitch: "Speichern und wechseln",
       scopesMissing: (name) => `Das Modul „${name}“ ist deaktiviert, weil Broadcaster-Berechtigungen fehlen.`,
-      scopeStatusUnknown: "Der Status der Broadcaster-Berechtigungen konnte nicht überprüft werden.",
       requestScopeConsent: "Broadcaster-Berechtigungen erteilen",
       scopeConsentLocked: "Nur der Broadcaster dieses Kanals darf diese Zustimmung erteilen.",
       scopeList: "Benötigte Broadcaster-Berechtigungen",
@@ -2518,7 +2516,6 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       unsavedChangesDescription: "You have unsaved module settings. What would you like to do?",
       continueEditing: "Continue editing", discardAndSwitch: "Discard and switch", saveAndSwitch: "Save and switch",
       scopesMissing: (name) => `The module “${name}” is disabled because broadcaster permissions are missing.`,
-      scopeStatusUnknown: "Broadcaster permission status could not be verified.",
       requestScopeConsent: "Grant broadcaster permissions",
       scopeConsentLocked: "Only this channel’s broadcaster may grant this consent.",
       scopeList: "Required broadcaster permissions",
