@@ -30,6 +30,7 @@ interface BlitzPointRoundObject extends PointsWorkerObject {
     accountId: string,
     login: string,
     graceS: number,
+    messageAt: number,
   ): Promise<{ status: "recorded" | "already_answered" | "round_closed"; replayed: boolean; first: boolean }>;
   activeGameRound(moduleId: string): Promise<{
     roundId: string;
@@ -73,7 +74,7 @@ describe("blitz answers in the channel Durable Object", () => {
     const object = blitzObject(pointObject(channelId));
     await openAnswerRound(object, "blitz-first");
 
-    const result = await object.answerGameRound(pointTestModule, "blitz-first", "msg:first", "viewer_one", "frostfern", 5);
+    const result = await object.answerGameRound(pointTestModule, "blitz-first", "msg:first", "viewer_one", "frostfern", 5, Date.now());
     const state = await runPointObject(object, (_target, durableState) => ({
       round: durableState.storage.sql.exec<{ deadline_at: number }>(
         "SELECT deadline_at FROM game_rounds WHERE round_id = ?", "blitz-first",
@@ -94,7 +95,7 @@ describe("blitz answers in the channel Durable Object", () => {
     const object = blitzObject(pointObject(channelId));
     const deadline = Date.now() + 2_000;
     await openAnswerRound(object, "blitz-near-timeout", pointTestModule, deadline);
-    await expect(object.answerGameRound(pointTestModule, "blitz-near-timeout", "msg:near", "viewer_one", "frostfern", 5))
+    await expect(object.answerGameRound(pointTestModule, "blitz-near-timeout", "msg:near", "viewer_one", "frostfern", 5, Date.now()))
       .resolves.toMatchObject({ status: "recorded", first: true });
     await expect(object.activeGameRound(pointTestModule)).resolves.toMatchObject({ deadlineAt: deadline });
   });
@@ -104,7 +105,7 @@ describe("blitz answers in the channel Durable Object", () => {
     await insertPointChannel(channelId);
     const object = blitzObject(pointObject(channelId));
     await openAnswerRound(object, "blitz-cancel");
-    await object.answerGameRound(pointTestModule, "blitz-cancel", "msg:cancel", "viewer_one", "frostfern", 5);
+    await object.answerGameRound(pointTestModule, "blitz-cancel", "msg:cancel", "viewer_one", "frostfern", 5, Date.now());
     await object.setGameModuleGate(pointTestModule, true, 1);
     await expect(object.cancelOpenGameRounds(pointTestModule, 1)).resolves.toBe(1);
     await expect(object.cancelOpenGameRounds(pointTestModule, 1)).resolves.toBe(0);
@@ -123,10 +124,10 @@ describe("blitz answers in the channel Durable Object", () => {
     await openAnswerRound(object, "blitz-concurrent");
 
     const results = await Promise.all([
-      object.answerGameRound(pointTestModule, "blitz-concurrent", "msg:one", "viewer_one", "frostfern", 5),
-      object.answerGameRound(pointTestModule, "blitz-concurrent", "msg:two", "viewer_two", "moonmoss", 5),
+      object.answerGameRound(pointTestModule, "blitz-concurrent", "msg:one", "viewer_one", "frostfern", 5, Date.now()),
+      object.answerGameRound(pointTestModule, "blitz-concurrent", "msg:two", "viewer_two", "moonmoss", 5, Date.now()),
     ]);
-    const replay = await object.answerGameRound(pointTestModule, "blitz-concurrent", "msg:one", "viewer_one", "frostfern", 5);
+    const replay = await object.answerGameRound(pointTestModule, "blitz-concurrent", "msg:one", "viewer_one", "frostfern", 5, Date.now());
     const participantCount = await runPointObject(object, (_target, durableState) =>
       durableState.storage.sql.exec<{ count: number }>(
         "SELECT COUNT(*) AS count FROM game_round_participants WHERE round_id = ?", "blitz-concurrent",
@@ -143,9 +144,9 @@ describe("blitz answers in the channel Durable Object", () => {
     await insertPointChannel(channelId);
     const object = blitzObject(pointObject(channelId));
     await openAnswerRound(object, "blitz-duplicate");
-    await object.answerGameRound(pointTestModule, "blitz-duplicate", "msg:first", "viewer_one", "frostfern", 5);
+    await object.answerGameRound(pointTestModule, "blitz-duplicate", "msg:first", "viewer_one", "frostfern", 5, Date.now());
 
-    const second = await object.answerGameRound(pointTestModule, "blitz-duplicate", "msg:second", "viewer_one", "frostfern", 5);
+    const second = await object.answerGameRound(pointTestModule, "blitz-duplicate", "msg:second", "viewer_one", "frostfern", 5, Date.now());
     const participantCount = await runPointObject(object, (_target, state) => state.storage.sql.exec<{ count: number }>(
       "SELECT COUNT(*) AS count FROM game_round_participants WHERE round_id = ?", "blitz-duplicate",
     ).one().count);
@@ -159,7 +160,7 @@ describe("blitz answers in the channel Durable Object", () => {
     await insertPointChannel(channelId);
     const object = blitzObject(pointObject(channelId));
     await openAnswerRound(object, "blitz-closed");
-    await object.answerGameRound(pointTestModule, "blitz-closed", "msg:first", "viewer_one", "frostfern", 5);
+    await object.answerGameRound(pointTestModule, "blitz-closed", "msg:first", "viewer_one", "frostfern", 5, Date.now());
     await runPointObject(object, async (target, state) => {
       await state.storage.deleteAlarm();
       state.storage.sql.exec("UPDATE game_rounds SET deadline_at = ? WHERE round_id = ?", Date.now() - 1, "blitz-closed");
@@ -167,8 +168,8 @@ describe("blitz answers in the channel Durable Object", () => {
       void target;
     });
 
-    const late = await object.answerGameRound(pointTestModule, "blitz-closed", "msg:late", "viewer_two", "moonmoss", 5);
-    const replay = await object.answerGameRound(pointTestModule, "blitz-closed", "msg:late", "viewer_two", "moonmoss", 5);
+    const late = await object.answerGameRound(pointTestModule, "blitz-closed", "msg:late", "viewer_two", "moonmoss", 5, Date.now());
+    const replay = await object.answerGameRound(pointTestModule, "blitz-closed", "msg:late", "viewer_two", "moonmoss", 5, Date.now());
     const participantCount = await runPointObject(object, (_target, state) => state.storage.sql.exec<{ count: number }>(
       "SELECT COUNT(*) AS count FROM game_round_participants WHERE round_id = ?", "blitz-closed",
     ).one().count);
@@ -217,8 +218,8 @@ describe("blitz answers in the channel Durable Object", () => {
       settlement: { kind: "blitz", params: { prize: 50 } },
     });
     await object.markGameRoundAnnounced("blitz_round", "blitz-settlement", Date.now() + 60_000, "round:blitz-settlement");
-    await object.answerGameRound("blitz_round", "blitz-settlement", "msg:first", "viewer_one", "frostfern", 5);
-    await object.answerGameRound("blitz_round", "blitz-settlement", "msg:second", "viewer_two", "moonmoss", 5);
+    await object.answerGameRound("blitz_round", "blitz-settlement", "msg:first", "viewer_one", "frostfern", 5, Date.now());
+    await object.answerGameRound("blitz_round", "blitz-settlement", "msg:second", "viewer_two", "moonmoss", 5, Date.now());
 
     const first = await object.resolveGameRound("blitz_round", "blitz-settlement", { kind: "blitz", params: { prize: 50 } });
     const replay = await object.resolveGameRound("blitz_round", "blitz-settlement", { kind: "blitz", params: { prize: 50 } });
@@ -308,6 +309,44 @@ describe("blitz answers in the channel Durable Object", () => {
     const audits = await worker.DB.prepare("SELECT COUNT(*) AS count FROM audit_log WHERE channel_id = ? AND action = ?")
       .bind(channelId, "blitz_round.started").first<{ count: number }>();
     expect(audits?.count).toBe(1);
+  });
+
+  it("rejects a matching message timestamped before the start line was delivered [protects=answers sent before the persisted announcement timestamp are recorded as round_closed without adding a participant; fails_when=a delayed pre-round EventSub message wins the open round; no_claim=sendChat delivery is mocked and EventSub signature verification is outside this module worker test]", async () => {
+    const channelId = `blitz-pre-announcement-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const worker = env as unknown as { DB: D1Database; CHANNEL: Env["CHANNEL"] };
+    const settings = blitzRoundDefaultsForLanguage("en");
+    await worker.DB.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'blitz_round', 1, ?, 1)")
+      .bind(channelId, JSON.stringify(settings)).run();
+    const repository = createBlitzQuestionRepository(worker.DB);
+    await repository.create(channelId, { kind: "quiz", prompt: "Which star?", answers: ["Sun"], enabled: true }, new Date().toISOString());
+    const object = blitzObject(pointObject(channelId));
+    const sendChat = vi.fn<ModuleAlarmContext["sendChat"]>(() => Promise.resolve({ sent: true, retryable: false, reason: null, delivery: "delivered" }));
+    await runPointObject(object, (target) => {
+      const runtime = target as unknown as { moduleAlarmContext: (...args: unknown[]) => ModuleAlarmContext };
+      const original = runtime.moduleAlarmContext.bind(runtime);
+      vi.spyOn(runtime, "moduleAlarmContext").mockImplementation((...args) => ({ ...original(...args), sendChat }));
+    });
+    const points = modulePoints(worker.CHANNEL, channelId, "blitz_round");
+    const opened = await openBlitzRound({ channelId, repository, points, settings, language: "en" });
+    await forcePointAlarm(object, opened.roundId);
+
+    await processBlitzMessage({ channelId, subscriptionType: "channel.chat.message", triggerId: "fictional-trigger",
+      receivedAt: new Date().toISOString(), eventSubTimestamp: new Date(Date.now() - 5_000).toISOString(),
+      actor: null, chatStatus: ["viewer"], settings,
+      payload: { message_id: "fictional-pre-announcement-answer", chatter_user_id: "viewer_one", chatter_user_login: "frostfern", message: { text: "Sun" } },
+    }, { points, botUserId: () => Promise.resolve("fictional_bot") });
+
+    const answer = await runPointObject(object, (_target, state) => ({
+      row: state.storage.sql.exec<{ status: string }>(
+        "SELECT status FROM game_round_answers WHERE operation_id = ?", "msg:fictional-pre-announcement-answer",
+      ).toArray()[0] ?? null,
+      participants: state.storage.sql.exec<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM game_round_participants WHERE round_id = ?", opened.roundId,
+      ).one().count,
+    }));
+
+    expect(answer).toEqual({ row: { status: "round_closed" }, participants: 0 });
   });
 
   it("retries failed preparation without claiming an unseen announcement [protects=formatter failure cannot begin answer time even after the send ambiguity window; fails_when=preparation failure is mistaken for an attempted chat send; no_claim=the formatter and external transport are deliberately fault-injected]", async () => {
@@ -439,7 +478,7 @@ describe("blitz answers in the channel Durable Object", () => {
     await openAnnouncedRound(object, "blitz_round", roundId, { durationS: 60, announceText: "Round starts", answer: "CLOUD", settlement }, Date.now() + 60_000);
     await evictDurableObject(object as unknown as DurableObjectStub);
     await expect(object.activeGameRound("blitz_round")).resolves.toMatchObject({ roundId, state: "open", data: { answer: "CLOUD" } });
-    await object.answerGameRound("blitz_round", roundId, "msg:recover", "viewer_one", "frostfern", 5);
+    await object.answerGameRound("blitz_round", roundId, "msg:recover", "viewer_one", "frostfern", 5, Date.now());
     await object.resolveGameRound("blitz_round", roundId, settlement);
     await runPointObject(object, async (_target, state) => {
       await state.storage.deleteAlarm();
@@ -488,7 +527,7 @@ describe("blitz answers in the channel Durable Object", () => {
         settlement: { kind: "blitz", params: { prize: 50 } },
       });
       await target.markGameRoundAnnounced("blitz_round", roundId, Date.now() + 60_000, `round:${roundId}`);
-      await blitzObject(target).answerGameRound("blitz_round", roundId, "msg:result-winner", "viewer_one", "frostfern", 5);
+      await blitzObject(target).answerGameRound("blitz_round", roundId, "msg:result-winner", "viewer_one", "frostfern", 5, Date.now());
       await deferPointAlarmWithin(state);
     });
 

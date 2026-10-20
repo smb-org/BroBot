@@ -70,12 +70,15 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
     else switchRef.current(proceed);
   };
 
-  const chooseQuestion = (question: BlitzQuestion): void => requestSwitch(() => {
-    setShowSettings(false);
-    setSelectedId(question.id);
-    setSelectedQuestion(question);
-    setDetailOpen(true);
-  });
+  const chooseQuestion = (question: BlitzQuestion): void => {
+    if (selectedId === question.id && !showSettings && detailOpen) return;
+    requestSwitch(() => {
+      setShowSettings(false);
+      setSelectedId(question.id);
+      setSelectedQuestion(question);
+      setDetailOpen(true);
+    });
+  };
 
   const newQuestion = (): void => requestSwitch(() => {
     setSearch("");

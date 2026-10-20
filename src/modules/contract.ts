@@ -1061,7 +1061,7 @@ export interface ModulePointsAccess {
     active: () => Promise<PointActiveRound | null>;
     markAnnounced: (roundId: string, deadlineAt: number, alarmKey: string) => Promise<void>;
     join: (roundId: string, operationId: string, accountId: string, login: string, stake: number, data: unknown) => Promise<PointJoinResult>;
-    answer: (roundId: string, operationId: string, accountId: string, login: string, graceS: number) => Promise<PointRoundAnswerResult>;
+    answer: (roundId: string, operationId: string, accountId: string, login: string, graceS: number, messageAt: number) => Promise<PointRoundAnswerResult>;
     resolve: (roundId: string, settlement: { kind: string; params: unknown }) => Promise<PointsApplyResult>;
     cancelOpenRounds: (revision: number) => Promise<number>;
     setGate: (closed: boolean, revision: number, lastDisabledRevision?: number | null) => Promise<{ applied: boolean }>;

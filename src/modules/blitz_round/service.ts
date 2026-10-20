@@ -92,9 +92,11 @@ export const processBlitzMessage = async (
   if (typeof sourceBroadcasterId === "string" && sourceBroadcasterId !== event.channelId) return { actions: [], diagnostics: [] };
   const active = await context.points.rounds.active();
   if (active === null || active.state !== "open") return { actions: [], diagnostics: [] };
+  const messageAt = Date.parse(event.eventSubTimestamp ?? event.receivedAt);
+  if (!Number.isSafeInteger(messageAt) || messageAt < 0) return { actions: [], diagnostics: [] };
   const data = record(active.data) as Partial<BlitzRoundData> | null;
   if (data === null || !Array.isArray(data.answers) || !data.answers.every((answer) => typeof answer === "string") ||
       !blitzAnswerMatches(message, data.answers)) return { actions: [], diagnostics: [] };
-  await context.points.rounds.answer(active.roundId, `msg:${messageId}`, userId, login, BLITZ_GRACE_SECONDS);
+  await context.points.rounds.answer(active.roundId, `msg:${messageId}`, userId, login, BLITZ_GRACE_SECONDS, messageAt);
   return { actions: [], diagnostics: [] };
 };

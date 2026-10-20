@@ -41,6 +41,7 @@ interface RoundRow extends Record<string, string | number | null> {
   gate_revision: number;
   state: string;
   deadline_at: number | null;
+  announcement_at: string | null;
   alarm_key: string | null;
   data_json: string;
   created_at: string;
@@ -228,6 +229,7 @@ export const ensurePointsSchema = (sql: PointsSql): void => {
     gate_revision INTEGER NOT NULL DEFAULT 0,
     state TEXT NOT NULL,
     deadline_at INTEGER,
+    announcement_at TEXT,
     alarm_key TEXT,
     data_json TEXT NOT NULL,
     created_at TEXT NOT NULL,
@@ -288,6 +290,9 @@ export const ensurePointsSchema = (sql: PointsSql): void => {
   const gameRoundColumns = sql.exec<{ name: string }>("PRAGMA table_info(game_rounds)").toArray();
   if (!gameRoundColumns.some(({ name }) => name === "prepare_state")) {
     sql.exec("ALTER TABLE game_rounds ADD COLUMN prepare_state TEXT NOT NULL DEFAULT 'delivered'");
+  }
+  if (!gameRoundColumns.some(({ name }) => name === "announcement_at")) {
+    sql.exec("ALTER TABLE game_rounds ADD COLUMN announcement_at TEXT");
   }
   if (!gameRoundColumns.some(({ name }) => name === "resolve_delivery_state")) {
     sql.exec("ALTER TABLE game_rounds ADD COLUMN resolve_delivery_state TEXT NOT NULL DEFAULT 'delivered'");
@@ -1092,7 +1097,7 @@ export const pointRoundAlarmKey = (roundId: string): string => `${POINTS_ROUND_A
 
 export const pointRoundRow = (sql: PointsSql, roundId: string): RoundRow | null =>
   sql.exec<RoundRow>(
-    `SELECT round_id, module_id, gate_revision, state, deadline_at, alarm_key, data_json, created_at, duration_s,
+    `SELECT round_id, module_id, gate_revision, state, deadline_at, announcement_at, alarm_key, data_json, created_at, duration_s,
             announce_text, announce_state, announce_attempts, last_attempt_at,
             prepare_state, resolve_delivery_state, resolve_delivery_attempts, resolve_delivery_last_attempt_at, resolved_at
        FROM game_rounds WHERE round_id = ?`,
@@ -1157,12 +1162,17 @@ export const markPointRoundAnnouncedSync = (
   if (!Number.isFinite(deadlineAt)) throw new Error("invalid_deadline");
   const row = pointRoundRow(sql, roundId);
   if (row === null || row.module_id !== moduleId) throw new Error("round_not_found");
-  if (row.state === "open" && row.deadline_at === deadlineAt) return;
+  const announcementAt = new Date(deadlineAt - row.duration_s * 1_000).toISOString();
+  if (row.state === "open" && row.deadline_at === deadlineAt) {
+    sql.exec("UPDATE game_rounds SET announcement_at = COALESCE(announcement_at, ?) WHERE round_id = ?", announcementAt, roundId);
+    return;
+  }
   if (row.state !== "announcing") throw new Error("round_closed");
   sql.exec(
-    `UPDATE game_rounds SET state = 'open', announce_state = 'delivered', deadline_at = ?, alarm_key = ?
+    `UPDATE game_rounds SET state = 'open', announce_state = 'delivered', deadline_at = ?, announcement_at = ?, alarm_key = ?
       WHERE round_id = ? AND module_id = ? AND state = 'announcing'`,
     deadlineAt,
+    announcementAt,
     alarmKey,
     roundId,
     moduleId,
@@ -1272,6 +1282,7 @@ export const answerPointRoundSync = (
   accountId: string,
   login: string,
   graceS: number,
+  messageAt: number,
   payloadHash: string,
   nowMs: number,
   now: string,
@@ -1293,7 +1304,8 @@ export const answerPointRoundSync = (
     }
     return { status: previous.status, replayed: true, first: previous.first_answer === 1, deadlineAt: null };
   }
-  if (pointKindFor(accountId) !== "viewer" || login.length === 0 || !Number.isSafeInteger(graceS) || graceS < 0 || graceS > 300) {
+  if (pointKindFor(accountId) !== "viewer" || login.length === 0 || !Number.isSafeInteger(graceS) || graceS < 0 || graceS > 300 ||
+      !Number.isSafeInteger(messageAt) || messageAt < 0) {
     throw new Error("invalid_round_answer");
   }
   checkModuleGateSync(sql, moduleId);
@@ -1301,7 +1313,13 @@ export const answerPointRoundSync = (
   let status: PointRoundAnswerResult["status"] = "round_closed";
   let first = false;
   let deadlineAt: number | null = null;
-  if (round !== null && round.module_id === moduleId && round.state === "open" && round.deadline_at !== null && round.deadline_at > nowMs) {
+  let announcementAt: number | null = null;
+  if (round !== null) {
+    if (round.announcement_at !== null) announcementAt = Date.parse(round.announcement_at);
+    else if (round.deadline_at !== null) announcementAt = round.deadline_at - round.duration_s * 1_000;
+  }
+  if (round !== null && round.module_id === moduleId && round.state === "open" && round.deadline_at !== null && round.deadline_at > nowMs &&
+      (announcementAt === null || (Number.isFinite(announcementAt) && messageAt >= announcementAt))) {
     const participant = sql.exec<{ account_id: string }>(
       "SELECT account_id FROM game_round_participants WHERE round_id = ? AND account_id = ?",
       roundId,
@@ -1548,14 +1566,14 @@ export const recordPointAnnouncementSync = (
     sql.exec("UPDATE game_rounds SET announce_state = 'failed' WHERE round_id = ?", roundId);
     return { moduleId: round.module_id, deadlineAt: null, alarmKey: round.alarm_key, cancelled: true };
   }
-  const effectiveAt = deliveredAt;
-  const deadlineAt = effectiveAt + round.duration_s * 1_000;
+  const deadlineAt = deliveredAt + round.duration_s * 1_000;
   const alarmKey = pointRoundAlarmKey(roundId);
   sql.exec(
-    `UPDATE game_rounds SET announce_state = ?, state = 'open', deadline_at = ?, alarm_key = ?
+    `UPDATE game_rounds SET announce_state = ?, state = 'open', deadline_at = ?, announcement_at = ?, alarm_key = ?
       WHERE round_id = ?`,
     state,
     deadlineAt,
+    new Date(deliveredAt).toISOString(),
     alarmKey,
     roundId,
   );
@@ -1564,7 +1582,7 @@ export const recordPointAnnouncementSync = (
 
 export const recoverablePointRounds = (sql: PointsSql): RoundRow[] =>
   sql.exec<RoundRow>(
-    `SELECT round_id, module_id, gate_revision, state, deadline_at, alarm_key, data_json, created_at, duration_s,
+    `SELECT round_id, module_id, gate_revision, state, deadline_at, announcement_at, alarm_key, data_json, created_at, duration_s,
             announce_text, announce_state, announce_attempts, last_attempt_at,
             prepare_state, resolve_delivery_state, resolve_delivery_attempts, resolve_delivery_last_attempt_at, resolved_at
        FROM game_rounds

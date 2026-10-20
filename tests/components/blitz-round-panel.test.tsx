@@ -46,6 +46,7 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
   let settingsRevision = 1;
   let conflictPending = settingsConflict;
   const submittedSettingsRevisions: number[] = [];
+  const submittedQuestionRevisions: number[] = [];
   const requests = vi.fn<typeof fetch>((input, init) => {
     const url = parseUrl(input);
     const method = init?.method ?? (input instanceof Request ? input.method : "GET");
@@ -84,6 +85,7 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
     if (url.pathname.includes("/modules/blitz_round/questions/") && method === "PATCH") {
       const id = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
       const body = JSON.parse(typeof init?.body === "string" ? init.body : "null") as Partial<BlitzQuestion>;
+      if (typeof body.revision === "number") submittedQuestionRevisions.push(body.revision);
       const existing = questions.find((candidate) => candidate.id === id);
       if (patchDeleted) {
         questions = questions.filter((candidate) => candidate.id !== id);
@@ -94,6 +96,9 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
         const latest = { ...existing, prompt: "MOON", answers: ["MOON"], revision: existing.revision + 1 };
         questions = questions.map((candidate) => candidate.id === id ? latest : candidate);
         return Promise.resolve(jsonResponse({ error: "question_conflict", current: latest }, 409));
+      }
+      if (body.revision !== existing.revision) {
+        return Promise.resolve(jsonResponse({ error: "question_conflict", current: existing }, 409));
       }
       const updated = { ...existing, ...body, revision: existing.revision + 1 };
       questions = questions.map((candidate) => candidate.id === id ? updated : candidate);
@@ -107,7 +112,7 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
     return Promise.resolve(jsonResponse({ error: "not_found" }, 404));
   });
   vi.stubGlobal("fetch", requests);
-  return { requests, getQuestions: () => questions, deleteQuestion: (id: string) => { questions = questions.filter((question) => question.id !== id); }, getSettings: () => settings, getSettingsRevision: () => settingsRevision, submittedSettingsRevisions };
+  return { requests, getQuestions: () => questions, deleteQuestion: (id: string) => { questions = questions.filter((question) => question.id !== id); }, getSettings: () => settings, getSettingsRevision: () => settingsRevision, submittedSettingsRevisions, submittedQuestionRevisions };
 };
 
 const mountPanel = () => renderWithQuery(<UiProvider><BlitzRoundPanel channelId="fictional_channel" language="en" /></UiProvider>);
@@ -274,6 +279,29 @@ describe("Blitz Round collection panel", () => {
     const requestedQuestion = await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
     await waitFor(() => expect(requestedQuestion).toHaveAttribute("aria-current", "true"));
     expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("CLOUD");
+  });
+
+  it("reselects the edited question without restoring its stale revision [protects=clicking the selected row leaves the editor draft in place and later saves use revisions 1 then 2 with the latest prompt as the heading; fails_when=reselection queues the captured question snapshot so the next PATCH reuses revision 1; no_claim=question responses use an in-memory HTTP stub and do not verify production authentication or D1 isolation]", async () => {
+    const api = installPanelFetch([sampleQuestion]);
+    mountPanel();
+    const selectedRow = await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    fireEvent.click(selectedRow);
+    fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "STORM" } });
+    fireEvent.click(selectedRow);
+    const reselectOpenedSaveGuard = screen.queryByRole("dialog", { name: "Save changes?" }) !== null;
+
+    const firstGuard = screen.queryByRole("dialog", { name: "Save changes?" });
+    if (firstGuard === null) fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
+    else fireEvent.click(within(firstGuard).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.submittedQuestionRevisions).toHaveLength(1));
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "RIVER" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
+
+    await waitFor(() => expect(api.submittedQuestionRevisions).toHaveLength(2));
+    expect(api.submittedQuestionRevisions).toEqual([1, 2]);
+    expect(reselectOpenedSaveGuard).toBe(false);
+    expect(document.querySelector(".collection-page__detail .page-header__title-row")?.textContent).toContain("RIVER");
   });
 
   it("sends one create when Save is clicked twice in the unsaved-changes dialog [protects=an in-flight save-and-switch cannot re-enter question creation; fails_when=two POST requests create duplicate questions; no_claim=the HTTP response is held in memory and production request retries are not exercised]", async () => {

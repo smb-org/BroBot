@@ -17,7 +17,7 @@ it("records matching chat messages without posting a reply [protects=only normal
   expect(await processBlitzMessage(message("rain"), context)).toEqual({ actions: [], diagnostics: [] });
   expect(answer).not.toHaveBeenCalled();
   expect(await processBlitzMessage(message("  C.LOUD!! "), context)).toEqual({ actions: [], diagnostics: [] });
-  expect(answer).toHaveBeenCalledExactlyOnceWith("fictional-round", "msg:fictional-message", "fictional_viewer", "frostfern", 5);
+  expect(answer).toHaveBeenCalledExactlyOnceWith("fictional-round", "msg:fictional-message", "fictional_viewer", "frostfern", 5, Date.parse("2030-01-01T00:00:00.000Z"));
   const foreign = message("cloud");
   foreign.payload = { ...foreign.payload, source_broadcaster_user_id: "other_fictional_channel" };
   await processBlitzMessage(foreign, context);

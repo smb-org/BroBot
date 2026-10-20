@@ -63,8 +63,8 @@ export const modulePoints = (
       markAnnounced: (roundId, deadlineAt, alarmKey) => object.markGameRoundAnnounced(moduleId, roundId, deadlineAt, alarmKey),
       join: (roundId, operationId, accountId, login, stake, data) =>
         object.joinGameRound(moduleId, roundId, operationId, accountId, login, stake, data),
-      answer: (roundId, operationId, accountId, login, graceS) =>
-        object.answerGameRound(moduleId, roundId, operationId, accountId, login, graceS),
+      answer: (roundId, operationId, accountId, login, graceS, messageAt) =>
+        object.answerGameRound(moduleId, roundId, operationId, accountId, login, graceS, messageAt),
       resolve: (roundId, settlement) => object.resolveGameRound(moduleId, roundId, settlement),
       cancelOpenRounds: (revision) => object.cancelOpenGameRounds(moduleId, revision),
       setGate: (closed, revision, lastDisabledRevision) => object.setGameModuleGate(moduleId, closed, revision, lastDisabledRevision),

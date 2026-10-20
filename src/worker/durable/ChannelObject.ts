@@ -3274,8 +3274,8 @@ export class ChannelObject extends DurableObject<Env> {
         markAnnounced: (roundId, deadlineAt, alarmKey) => this.markGameRoundAnnounced(moduleId, roundId, deadlineAt, alarmKey),
         join: (roundId, operationId, accountId, login, stake, data) =>
           this.joinGameRound(moduleId, roundId, operationId, accountId, login, stake, data),
-        answer: (roundId, operationId, accountId, login, graceS) =>
-          this.answerGameRound(moduleId, roundId, operationId, accountId, login, graceS),
+        answer: (roundId, operationId, accountId, login, graceS, messageAt) =>
+          this.answerGameRound(moduleId, roundId, operationId, accountId, login, graceS, messageAt),
         resolve: (roundId, settlement) => this.resolveGameRound(moduleId, roundId, settlement),
         cancelOpenRounds: (revision) => this.cancelOpenGameRounds(moduleId, revision),
         setGate: (closed, revision, lastDisabledRevision) =>
@@ -3577,12 +3577,13 @@ export class ChannelObject extends DurableObject<Env> {
     accountId: string,
     login: string,
     graceS: number,
+    messageAt: number,
   ): Promise<PointRoundAnswerResult> {
     await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     assertPointRoundId(roundId);
     assertPointAccountId(accountId);
-    const payloadHash = await pointPayloadHash({ moduleId, roundId, operationId, accountId, login, graceS });
+    const payloadHash = await pointPayloadHash({ moduleId, roundId, operationId, accountId, login, graceS, messageAt });
     const answer = this.ctx.storage.transactionSync(() => {
       const result = answerPointRoundSync(
         this.ctx.storage.sql,
@@ -3592,6 +3593,7 @@ export class ChannelObject extends DurableObject<Env> {
         accountId,
         login,
         graceS,
+        messageAt,
         payloadHash,
         Date.now(),
         new Date().toISOString(),
