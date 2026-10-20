@@ -445,3 +445,14 @@ test("Slot numeric errors keep every following control in place (protects=stakes
   expect(await position(secondRowWeight)).toBe(secondRowY);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
+
+test("jackpot header shows zero before the first funded spin (protects=a loaded points summary without an emote_slots entry renders the jackpot amount 0; fails_when=the header shows the label with an empty amount; no_claim=jackpot funding and settlement)", async ({ page }) => {
+  await installSlotPage(page);
+  await page.route(`**${pointsSummaryPath}`, (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ jackpots: {} }),
+  }));
+  await page.goto(`/channels/${CHANNEL_ID}/modules/emote_slots`);
+  await expect(page.locator(".slot-jackpot-meta")).toHaveText(SLOT_COPY.jackpotCurrent.replace("{amount}", "0"));
+});

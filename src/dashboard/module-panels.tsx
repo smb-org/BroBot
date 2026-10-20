@@ -142,7 +142,7 @@ export const ModuleHeading = ({ kind, title, subtitle, actions }: {
 const SlotJackpotMeta = ({ channelId, language }: { channelId: string; language: DashboardLanguage }): ReactElement => {
   const query = useModuleQuery(channelId, "points", "summary", (signal) =>
     getChannelModuleSummary<{ jackpots: Record<string, number> }>(channelId, "points", signal));
-  const jackpot = query.data?.jackpots.emote_slots;
+  const jackpot = query.data === undefined ? undefined : (query.data.jackpots.emote_slots ?? 0);
   const amount = jackpot === undefined ? "\u00a0" : formatNumber(jackpot, language);
   const text = emoteSlotsCatalog[language].panel.jackpotCurrent.replace("{amount}", amount);
   return <span className="slot-jackpot-meta" aria-live="polite" title={jackpot === undefined ? undefined : text}>{text}</span>;
