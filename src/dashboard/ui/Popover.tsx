@@ -7,9 +7,12 @@ export interface PopoverProps {
   triggerLabel: string;
   icon: IconName;
   children: ReactNode;
+  testId?: string;
+  triggerClassName?: string;
+  contentRole?: "tooltip" | "dialog";
 }
 
-export function Popover({ triggerLabel, icon, children }: PopoverProps): ReactElement {
+export function Popover({ triggerLabel, icon, children, testId, triggerClassName, contentRole = "tooltip" }: PopoverProps): ReactElement {
   const [opened, setOpened] = useState(false);
   const hoveredRef = useRef(false);
   const focusedRef = useRef(false);
@@ -49,10 +52,14 @@ export function Popover({ triggerLabel, icon, children }: PopoverProps): ReactEl
     <div data-ui="" className="ui-popover">
       <PopoverPrimitive.Trigger
         data-ui=""
+        data-testid={testId}
         type="button"
-        className="ui-popover-trigger"
+        className={triggerClassName === undefined ? "ui-popover-trigger" : `ui-popover-trigger ${triggerClassName}`}
         aria-label={triggerLabel}
-        aria-describedby={opened ? contentId : undefined}
+        aria-haspopup={contentRole === "dialog" ? "dialog" : undefined}
+        aria-expanded={contentRole === "dialog" ? opened : undefined}
+        aria-describedby={contentRole === "tooltip" && opened ? contentId : undefined}
+        aria-controls={contentRole === "dialog" && opened ? contentId : undefined}
         onMouseEnter={() => { dismissedRef.current = false; hoveredRef.current = true; cancelClose(); setOpened(true); }}
         onMouseLeave={() => { dismissedRef.current = false; hoveredRef.current = false; scheduleClose(); }}
         onFocus={() => { focusedRef.current = true; cancelClose(); if (!dismissedRef.current) setOpened(true); }}
@@ -73,7 +80,7 @@ export function Popover({ triggerLabel, icon, children }: PopoverProps): ReactEl
       >
         <Icon name={icon} size={16} />
       </PopoverPrimitive.Trigger>
-      <PopoverContent id={contentId} role="tooltip" initialFocus={false} side="top" align="end" className="ui-popover__content" onClick={(event) => { event.stopPropagation(); }} onMouseEnter={() => { dismissedRef.current = false; hoveredRef.current = true; cancelClose(); setOpened(true); }} onMouseLeave={() => { dismissedRef.current = false; hoveredRef.current = false; scheduleClose(); }}>
+      <PopoverContent id={contentId} role={contentRole} aria-label={contentRole === "dialog" ? triggerLabel : undefined} initialFocus={false} side="top" align="end" className="ui-popover__content" onClick={(event) => { event.stopPropagation(); }} onMouseEnter={() => { dismissedRef.current = false; hoveredRef.current = true; cancelClose(); setOpened(true); }} onMouseLeave={() => { dismissedRef.current = false; hoveredRef.current = false; scheduleClose(); }}>
         {children}
       </PopoverContent>
     </div>

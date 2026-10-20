@@ -859,7 +859,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
                               }),
                               ...data.blocks.filter((block) => !reservedNames.has(block.name)).map((block) => ({ name: `text.${block.name}`, label: `text.${block.name}`, description: labels.variableDescription(block.name), sample: block.variants.flatMap((entry) => entry.texts)[0] ?? "", group: "channel" as const, isTextBlock: true })),
                             ]} messages={{
-                              countLabel: (count, maximum) => `${String(count)} / ${String(maximum)}`,
+                              countLabel: (count, maximum) => language === "en" ? `${String(count)} of ${String(maximum)} characters` : `${String(count)} von ${String(maximum)} Zeichen`,
                               previewCountLabel: (count) => String(count),
                               openBrace: labels.openBrace,
                               unknownVariable: labels.unknownVariable,
@@ -912,7 +912,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
                   {matchingVariant === null ? <p className="muted">{blockUnavailableForGame ? labels.blockUnavailableForGame : labels.noMatchingVariant}</p> : <>
                     <p className="muted" style={{ minHeight: "var(--s6)", margin: 0 }}>{labels.selectedVariant(isDefaultVariant(matchingVariant, draft) ? labels.defaultVariant : labels.variant(draft.variants.findIndex((variant) => variant.id === matchingVariant.id) + 1))}</p>
                     <div className="text-library__preview-output">
-                      <ChatPreview label={labels.preview} text={previewText} speaker="Bot" countLabel={String(previewText.length)} />
+                      <ChatPreview label={labels.preview} text={previewText} speaker="Bot" />
                     </div>
                   </>}
                 </div>

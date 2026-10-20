@@ -168,20 +168,23 @@ const saveScreenshot = async (page: Page, info: TestInfo, name: string): Promise
 };
 
 const expectIncompleteResultsLayout = async (page: Page): Promise<void> => {
-  const warning = page.locator(".test-area__results-slot > .test-area__state-slot");
-  await expect(warning).toContainText("Ergebnis unvollständig");
+  const warning = page.getByTestId("test-area-incomplete-result-hint");
+  await expect(warning).toHaveAccessibleName(/Ergebnis unvollständig.*Mindestens ein Modul konnte die Nachricht nicht vollständig prüfen/u);
   await expect(page.getByRole("button", { name: /!discord/u })).toBeVisible();
   const layout = await page.evaluate(() => {
     const slot = document.querySelector<HTMLElement>(".test-area__results-slot");
-    if (slot === null) return null;
-    const warningElement = slot.querySelector<HTMLElement>(".test-area__state-slot");
+    const header = document.querySelector<HTMLElement>(".test-area__results-head");
+    if (slot === null || header === null) return null;
+    const warningElement = header.querySelector<HTMLElement>("[data-testid='test-area-incomplete-result-hint']");
     const listElement = slot.querySelector<HTMLElement>(".test-area__result-scroll");
     if (warningElement === null || listElement === null) return null;
     const slotRect = slot.getBoundingClientRect();
+    const headerRect = header.getBoundingClientRect();
     const warningRect = warningElement.getBoundingClientRect();
     const listRect = listElement.getBoundingClientRect();
     return {
-      warningBottom: warningRect.bottom,
+      headingTop: header.querySelector("h2")?.getBoundingClientRect().top ?? Number.POSITIVE_INFINITY,
+      headerTop: headerRect.top,
       listTop: listRect.top,
       slotWidth: slotRect.width,
       warningWidth: warningRect.width,
@@ -189,8 +192,8 @@ const expectIncompleteResultsLayout = async (page: Page): Promise<void> => {
     };
   });
   expect(layout).not.toBeNull();
-  expect(layout?.warningBottom).toBeLessThanOrEqual((layout?.listTop ?? 0) + 1);
-  expect(layout?.warningWidth).toBeCloseTo(layout?.slotWidth ?? 0, 0);
+  expect((layout?.headingTop ?? Infinity) - (layout?.headerTop ?? 0)).toBeLessThanOrEqual(12);
+  expect(layout?.warningWidth).toBeLessThan(48);
   expect(layout?.listWidth).toBeCloseTo(layout?.slotWidth ?? 0, 0);
 };
 
@@ -213,11 +216,32 @@ test("submits one synthetic chat message and shows the selected firing row witho
   await expectNoWholePageScroll(page);
 });
 
-test("places the incomplete warning above the full-width result list at 1280 by 800", async ({ page }) => {
+test("keeps the incomplete result icon in the title row above the full-width result list at 1280 by 800", async ({ page }) => {
   await openTestArea(page, { width: 1280, height: 800, response: partialFailureResponse() });
   await submitMessage(page);
   await expectIncompleteResultsLayout(page);
 });
+
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+  test(`anchors the incomplete result hint popover to its icon and keeps it narrow at ${String(viewport.width)} by ${String(viewport.height)}`, async ({ page }) => {
+    await openTestArea(page, { ...viewport, response: partialFailureResponse() });
+    await submitMessage(page);
+    const trigger = page.getByTestId("test-area-incomplete-result-hint");
+    await trigger.hover();
+    const content = page.locator(".ui-popover__content");
+    await expect(content).toBeVisible();
+    const box = await content.boundingBox();
+    const triggerBox = await trigger.boundingBox();
+    expect(box).not.toBeNull();
+    expect(triggerBox).not.toBeNull();
+    expect(box?.width ?? Infinity).toBeLessThanOrEqual(361);
+    expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(viewport.width);
+    if (viewport.width === 1440) {
+      expect(Math.abs((box?.x ?? 0) + (box?.width ?? 0) - ((triggerBox?.x ?? 0) + (triggerBox?.width ?? 0)))).toBeLessThanOrEqual(24);
+    }
+  });
+}
 
 test.describe("test area screenshot captures", () => {
   test.use({ locale: "de-DE" });
@@ -228,6 +252,13 @@ test.describe("test area screenshot captures", () => {
     await submitMessage(page);
     await expect(page.getByRole("button", { name: /!discord/u })).toHaveAttribute("aria-current", "true");
     await saveScreenshot(page, info, "result-selected-firing-1920x1080");
+  });
+
+  test("1440 by 900 result with the firing row selected", async ({ page }, info) => {
+    await openTestArea(page, { width: 1440, height: 900 });
+    await submitMessage(page);
+    await expect(page.getByRole("button", { name: /!discord/u })).toHaveAttribute("aria-current", "true");
+    await saveScreenshot(page, info, "result-selected-firing-1440x900");
   });
 
   test("1280 by 800 result with the firing row selected", async ({ page }, info) => {

@@ -87,8 +87,8 @@ describe("Testbereich result scope and history replay", () => {
 
     const hint = screen.getByTestId("test-area-stale-result-hint");
     expect(screen.getByTestId("test-area-results-slot")).toBe(slot);
-    expect(hint).toHaveAttribute("data-visible", "true");
-    expect(hint).toHaveTextContent("Eingaben geändert – Prüfen aktualisiert das Ergebnis");
+    expect(hint).toHaveAccessibleName("Eingaben geändert – Prüfen aktualisiert das Ergebnis");
+    expect(screen.getByTestId("test-area-stale-result-announcement")).toHaveTextContent("Eingaben geändert – Prüfen aktualisiert das Ergebnis");
     expect(slot).toHaveAttribute("data-state", "result");
     expect(screen.getByRole("button", { name: /Begrüßung/u })).toBeInTheDocument();
     expect(screen.queryByText("Keine Reaktion gefunden")).not.toBeInTheDocument();
@@ -107,7 +107,7 @@ describe("Testbereich result scope and history replay", () => {
 
     const hint = screen.getByTestId("test-area-stale-result-hint");
     expect(screen.getByTestId("test-area-results-slot")).toBe(slot);
-    expect(hint).toHaveAttribute("data-visible", "true");
+    expect(hint).toHaveAccessibleName("Eingaben geändert – Prüfen aktualisiert das Ergebnis");
     expect(screen.getByRole("button", { name: /Begrüßung/u })).toBeInTheDocument();
   });
 
@@ -115,6 +115,7 @@ describe("Testbereich result scope and history replay", () => {
     saveHistory(savedRequest({ moduleId: "faq" }));
     renderPage();
 
+    fireEvent.click(screen.getByRole("button", { name: "Verlauf · 1" }));
     fireEvent.click(screen.getByRole("button", { name: "!dc hallo von viewer_17 erneut prüfen" }));
 
     await waitFor(() => expect(dryRunChatMessage).toHaveBeenCalled());
@@ -126,6 +127,7 @@ describe("Testbereich result scope and history replay", () => {
     saveHistory(savedRequest({ moduleId: "faq", entryId: "faq-a" }));
     renderPage();
 
+    fireEvent.click(screen.getByRole("button", { name: "Verlauf · 1" }));
     fireEvent.click(screen.getByRole("button", { name: "!dc hallo von viewer_17 erneut prüfen" }));
 
     await waitFor(() => expect(dryRunChatMessage).toHaveBeenCalledWith(

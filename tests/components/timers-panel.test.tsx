@@ -21,6 +21,7 @@ const toolbarButton = (name: string): HTMLElement => {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -476,8 +477,10 @@ describe("Timers panel", () => {
 
     renderWithQuery(<UiProvider><TimersPanel channelId="channel-a" language="en" /></UiProvider>);
     await screen.findByRole("textbox", { name: "Message" });
-    const preview = document.querySelector(".timer-editor__preview");
+    const preview = document.querySelector(".ui-template-text-field__preview");
     if (!(preview instanceof HTMLElement)) throw new Error("The timer preview is missing.");
+    const previewStatus = preview.querySelector(".timer-editor__preview-status");
+    expect(previewStatus?.parentElement).toHaveClass("ui-template-text-field__preview-header");
     await within(preview).findByText("Resolved welcome message");
     expect(previewCalls).toBe(1);
 
@@ -518,7 +521,7 @@ describe("Timers panel", () => {
 
     const { queryClient } = renderWithQuery(<UiProvider><TimersPanel channelId="channel-a" language="en" /></UiProvider>);
     await screen.findByRole("textbox", { name: "Message" });
-    const preview = document.querySelector(".timer-editor__preview");
+    const preview = document.querySelector(".ui-template-text-field__preview");
     if (!(preview instanceof HTMLElement)) throw new Error("The timer preview is missing.");
     await within(preview).findByText("Hello old");
     expect(previewCalls).toBe(1);
@@ -572,7 +575,7 @@ describe("Timers panel", () => {
 
     const { queryClient } = renderWithQuery(<UiProvider><TimersPanel channelId="channel-a" language="en" /></UiProvider>);
     await screen.findByRole("textbox", { name: "Message" });
-    const preview = document.querySelector(".timer-editor__preview");
+    const preview = document.querySelector(".ui-template-text-field__preview");
     if (!(preview instanceof HTMLElement)) throw new Error("The timer preview is missing.");
     await within(preview).findByText("Day greeting");
     expect(previewCalls).toBe(1);
@@ -594,6 +597,62 @@ describe("Timers panel", () => {
     });
     await within(preview).findByText("Night greeting");
     expect(previewCalls).toBe(2);
+  });
+
+  it("shows the full expanded text without clipping once a delayed preview arrives", async () => {
+    const timer: Timer = {
+      id: "timer-delayed-preview", name: "Delayed preview", enabled: true, messageText: "{text.sun_greeting}", chatTarget: "source_only",
+      trigger: { type: "interval", live: { minutes: 30 } }, revision: 1, nextRunAt: null, nextRunState: null,
+      lastRunAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
+    };
+    const expandedMessage = "Night greeting ".repeat(30);
+    let sunPhase: "day" | "night" = "day";
+    let resolveNightPreview: ((response: Response) => void) | null = null;
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+      if (url.pathname.endsWith("/template-preview")) {
+        if (sunPhase === "night") return new Promise<Response>((resolve) => { resolveNightPreview = resolve; });
+        return Promise.resolve(jsonResponse({ text: "Day greeting", diagnostics: [] }));
+      }
+      if (url.pathname.endsWith("/timers")) return Promise.resolve(jsonResponse({ timers: [timer] }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({
+        timeZone: "UTC", revision: 1, location: null, locationRevision: 1,
+        defaultChatTarget: "source_only", defaultChatTargetRevision: 1,
+      }));
+      if (url.pathname.endsWith("/event-time-sources")) return Promise.resolve(jsonResponse({ sources: [] }));
+      if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
+      if (url.pathname.endsWith("/modules/text_library/library")) return Promise.resolve(jsonResponse({ blocks: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const { queryClient } = renderWithQuery(<UiProvider><TimersPanel channelId="channel-a" language="en" /></UiProvider>);
+    await screen.findByRole("textbox", { name: "Message" });
+    const preview = document.querySelector(".ui-template-text-field__preview");
+    if (!(preview instanceof HTMLElement)) throw new Error("The timer preview is missing.");
+    const previewMessage = preview.querySelector(".ui-template-text-field__preview-message");
+    if (!(previewMessage instanceof HTMLElement)) throw new Error("The timer preview message is missing.");
+    await within(preview).findByText("Day greeting");
+
+    sunPhase = "night";
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: moduleQueryKey("channel-a", "timers", "panel"), exact: true });
+    });
+    await waitFor(() => expect(fetcher.mock.calls.filter(([input]) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      return url.pathname.endsWith("/template-preview");
+    })).toHaveLength(2));
+    expect(within(preview).getByText("Day greeting")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveNightPreview?.(jsonResponse({ text: expandedMessage, diagnostics: [] }));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(previewMessage.querySelector(".ui-template-text-field__preview-text")?.textContent).toBe(expandedMessage));
+    expect(previewMessage).toHaveAttribute("title", `Bot: ${expandedMessage}`);
+    expect(getComputedStyle(previewMessage).overflowY).not.toMatch(/auto|scroll|hidden/);
+    expect(previewMessage.scrollHeight).toBeLessThanOrEqual(previewMessage.clientHeight + 1);
   });
 
   it("shows timer details as a read-only property list for operators", async () => {

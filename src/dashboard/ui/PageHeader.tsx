@@ -26,6 +26,7 @@ function ModuleStatusSwitch({ title, active, onToggle, disabled = false, busy = 
 }
 
 export interface PageHeaderProps {
+  className?: string;
   kind?: string;
   title: string;
   titleContent?: ReactNode;
@@ -45,12 +46,14 @@ export interface PageHeaderProps {
   saveTargetRef?: RefCallback<HTMLDivElement>;
   actions?: ReactNode;
   pageActions?: ReactNode;
+  actionHint?: ReactNode;
   overflow?: ReactNode;
   lockHint?: string;
   headingLevel?: "h1" | "h2" | "h3";
 }
 
 export function PageHeader({
+  className,
   kind = "module",
   title,
   titleContent,
@@ -70,6 +73,7 @@ export function PageHeader({
   saveTargetRef,
   actions,
   pageActions,
+  actionHint,
   overflow,
   lockHint,
   headingLevel = "h1",
@@ -83,7 +87,7 @@ export function PageHeader({
   const Heading = headingLevel;
 
   return (
-    <header data-ui="" className="page-header module-detail-heading">
+    <header data-ui="" className={`page-header module-detail-heading${className === undefined ? "" : ` ${className}`}`}>
       {icon === null ? null : <div className="page-header__icon module-detail__icon module-detail-heading__icon" aria-hidden="true">
         {icon === undefined ? <NavigationIcon kind={kind} className="module-heading-glyph" /> : icon}
       </div>}
@@ -104,6 +108,7 @@ export function PageHeader({
         {...(overflow === undefined ? {} : { overflow })}
         moreActionsLabel={common.moreActions}
       />
+      {actionHint === undefined || actionHint === null ? null : <div className="page-header__action-hint">{actionHint}</div>}
     </header>
   );
 }

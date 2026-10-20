@@ -153,7 +153,7 @@ test("keeps the first result row fixed when an input makes the result stale", as
   const afterY = await firstRow.evaluate((row) => row.getBoundingClientRect().y);
   expect(afterY).toBe(beforeY);
   await expect(page.locator(".test-area__results-head").getByTestId("test-area-stale-result-hint"))
-    .toHaveText("Eingaben geändert – Prüfen aktualisiert das Ergebnis");
+    .toHaveAccessibleName("Eingaben geändert – Prüfen aktualisiert das Ergebnis");
   await expect(page.getByTestId("test-area-results-slot").getByTestId("test-area-stale-result-hint")).toHaveCount(0);
   await close();
 });

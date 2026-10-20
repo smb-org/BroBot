@@ -763,6 +763,11 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
         maxLength={500}
         minRows={field === "text" ? 2 : 3}
         variables={templateVariables(field)}
+        {...(field === "text" ? {
+          preview: () => previewTemplate("text"),
+          previewLabel: labels.previewLabel,
+          previewSpeaker: labels.previewSpeaker,
+        } : {})}
         {...(field === "text" ? { insertVariableLabel: labels.insertVariable } : {})}
         disabled={!canManageContent || pending}
         messages={labels.templateMessages}
@@ -888,12 +893,6 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
           ? <ChatPreview label={labels.previewLabel} speaker={labels.previewSpeaker} text={listPreview} countLabel={labels.templateMessages.previewCountLabel(listPreview.length)} />
           : <div className="text-command-response-fields">
             {templateEditor("text", draft.kind === "timeout" ? labels.responseOptional : labels.response)}
-            <ChatPreview
-              label={labels.previewLabel}
-              speaker={labels.previewSpeaker}
-              text={previewTemplate("text")}
-              countLabel={labels.templateMessages.previewCountLabel(previewTemplate("text").length)}
-            />
           </div>}
         {hasCurrencyToken ? <div className="text-command-currency-slot">
           <Select
@@ -1039,20 +1038,22 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
   };
   const pageMeta = command === null ? undefined : <span>{labels.lastUsed} {relativeTime(command.lastUsedAt, labels)} · {labels.useCount(command.useCount)}</span>;
   const common = dashboardCommonTexts(resolvedLanguage);
+  const testAreaReason = command === null ? labels.testAreaSavedOnly : dirty ? labels.testAreaDirty : "";
   const pageActions = <>
-    <div className="text-command-test-area-action">
+    <div className="editor-test-area-action">
       <Button
         variant="neutral"
+        {...(testAreaReason.length === 0 ? {} : { describedBy: "text-command-test-area-reason" })}
         disabled={command === null || dirty || pending || onOpenTestArea === undefined}
         onClick={() => { if (command !== null) onOpenTestArea?.("text_commands", command.name); }}
       >{labels.testAreaAction}</Button>
-      {command === null || dirty ? <span>{dirty ? labels.testAreaDirty : labels.testAreaSavedOnly}</span> : null}
     </div>
     {command === null ? null : <ActionMenu
       label={common.moreActions}
       items={[{ label: labels.delete, danger: true, disabled: !canManageContent || pending, onSelect: requestDelete }]}
     />}
   </>;
+  const pageActionHint = <span id="text-command-test-area-reason" aria-hidden={testAreaReason.length === 0}>{testAreaReason}</span>;
   const rawChatTarget = draft.chatTarget as string | null;
   const effectiveChatTarget = rawChatTarget === null || rawChatTarget === "channel_default"
     ? channelDefaultChatTarget
@@ -1129,6 +1130,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
     }
   }}>
     <PageHeader
+      className="page-header--editor"
       kind="module"
       icon={null}
       title={labels.title}
@@ -1145,6 +1147,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
       } : {})}
       saveStatus={saveStatus}
       actions={pageActions}
+      actionHint={pageActionHint}
     />
     <div className={`text-command-editor__scroll${canManageContent ? "" : " text-command-editor__scroll--readonly"}`}>
       {canManageContent ? <>
