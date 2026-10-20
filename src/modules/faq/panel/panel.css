@@ -317,10 +317,6 @@
   min-width: 0;
 }
 
-.faq-panel__answer-preview .ui-chat-preview {
-  align-self: start;
-}
-
 .faq-panel__answer-preview .ui-template-text-field__description-content {
   display: flex;
   flex-direction: column;

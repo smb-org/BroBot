@@ -7,7 +7,6 @@ import { Button } from "./Button";
 import { FieldError } from "./FieldError";
 import { Icon } from "./Icon";
 import { InlineSuggestionPicker, InlineSuggestionPickerTarget } from "./InlineSuggestionPicker";
-import { TruncatedText } from "./TruncatedText";
 import { describedHelper, useDisabledFieldReason } from "./DisabledFieldReason";
 import { insertTextareaText } from "./textarea-insertion";
 import {
@@ -372,7 +371,7 @@ export function TemplateTextField({
       <div className="ui-template-text-field__helper-row">
         <span className="ui-template-text-field__helper-copy">
           {effectiveError === undefined
-            ? <TruncatedText text={hint} />
+            ? <span className="ui-template-text-field__helper-text">{hint}</span>
             : <FieldError id={`${id}-error`} className="ui-template-text-field__helper-error" message={effectiveError} />}
           {describedHelper(null, disabledReason, `template-text-field-${id}`)}
         </span>

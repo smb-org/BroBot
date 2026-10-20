@@ -60,11 +60,12 @@
 .settings-page--slot .unit-input__description { display: none; }
 .settings-page--slot [data-section="stakes"] .unit-input:nth-child(3),
 .settings-page--slot [data-section="jackpot"] .ui-section__content > :nth-child(3) { grid-column: 1 / -1; }
-.slot-texts-field { display: grid; gap: 12px; }
+.slot-texts-field { display: grid; gap: 0; }
 .slot-texts-field .template-text-field__input { height: 72px; min-height: 72px; max-height: 72px; resize: none; field-sizing: fixed; }
+.slot-texts-field .ui-template-text-field__description-content { gap: 0; }
+.slot-texts-field .ui-template-text-field__helper-row { display: none; }
 .slot-texts-field .ui-template-text-field__warnings { height: 24px; overflow-y: auto; }
 .slot-texts-field .ui-template-text-field__label { padding-right: 120px; white-space: nowrap; }
-.slot-texts-field .ui-chat-preview__count { display: none; }
 @media (min-width: 1750px) {
   .settings-page--slot .settings-page__columns { grid-template-columns: minmax(640px, 1.4fr) minmax(0, 1fr) minmax(0, 1.1fr); grid-template-rows: minmax(0, 1fr); }
   .settings-page--slot .settings-page__column { overflow-y: auto; }

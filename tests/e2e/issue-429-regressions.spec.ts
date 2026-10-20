@@ -221,28 +221,33 @@ test("blocked save expands Advanced settings and focuses its first invalid field
   expect(counts.patches).toBe(0);
 });
 
-test("FAQ answer counter shares the helper line above its reserved warning slot", async ({ page }) => {
+test("FAQ answer counter shares its preview header and warning slot stays reserved", async ({ page }) => {
   await mockDashboard(page);
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto(`/channels/${channelId}/modules/faq`);
   await page.locator(".faq-panel__entry").filter({ hasText: "Begrüßung" }).click();
 
-  const geometry = await page.locator(".faq-panel__answer-preview .ui-template-text-field__helper-row").evaluate((row) => {
-    const copy = row.querySelector<HTMLElement>(".ui-template-text-field__helper-copy");
-    const count = row.querySelector<HTMLElement>(".ui-template-text-field__count");
-    const warnings = row.parentElement?.querySelector<HTMLElement>(".ui-template-text-field__warnings");
-    if (copy === null || count === null || warnings === null || warnings === undefined) throw new Error("FAQ answer helper geometry is incomplete.");
+  const geometry = await page.locator(".faq-panel__answer-preview .ui-template-text-field").evaluate((field) => {
+    const header = field.querySelector<HTMLElement>(".ui-template-text-field__preview-header");
+    if (header === null) throw new Error("FAQ answer preview header is missing.");
+    const label = header.querySelector<HTMLElement>(".ui-template-text-field__preview-label");
+    const count = header.querySelector<HTMLElement>(".ui-template-text-field__count");
+    const message = field.querySelector<HTMLElement>(".ui-template-text-field__preview-message");
+    const helper = field.querySelector<HTMLElement>(".ui-template-text-field__helper-row");
+    const warnings = field.querySelector<HTMLElement>(".ui-template-text-field__warnings");
+    if (label === null || count === null || message === null || helper === null || warnings === null) throw new Error("FAQ answer preview geometry is incomplete.");
     const bounds = (element: Element) => {
       const rect = element.getBoundingClientRect();
       return { top: rect.top, right: rect.right, bottom: rect.bottom, height: rect.height };
     };
-    return { row: bounds(row), copy: bounds(copy), count: bounds(count), warnings: bounds(warnings) };
+    return { header: bounds(header), label: bounds(label), count: bounds(count), message: bounds(message), helper: bounds(helper), warnings: bounds(warnings) };
   });
 
-  expect(Math.abs(geometry.count.top - geometry.copy.top)).toBeLessThanOrEqual(2);
-  expect(Math.abs(geometry.count.right - geometry.row.right)).toBeLessThanOrEqual(1);
-  expect(geometry.count.bottom).toBeLessThanOrEqual(geometry.row.bottom + 1);
-  expect(geometry.warnings.top).toBeGreaterThanOrEqual(geometry.row.bottom);
+  expect(Math.abs(geometry.count.top - geometry.label.top)).toBeLessThanOrEqual(2);
+  expect(Math.abs(geometry.count.right - geometry.header.right)).toBeLessThanOrEqual(1);
+  expect(geometry.count.bottom).toBeLessThanOrEqual(geometry.header.bottom + 1);
+  expect(geometry.helper.top).toBeGreaterThanOrEqual(geometry.message.bottom);
+  expect(geometry.warnings.top).toBeGreaterThanOrEqual(geometry.helper.bottom);
   expect(geometry.warnings.height).toBeGreaterThanOrEqual(24);
 });
 
@@ -254,10 +259,10 @@ test("FAQ answer preview stacks below its full-width editor without overflowing 
 
   const geometry = await page.evaluate(() => {
     const answer = document.querySelector<HTMLElement>(".faq-panel__answer-preview .template-text-field__input");
-    const preview = document.querySelector<HTMLElement>(".faq-panel__answer-preview > .ui-chat-preview");
-    const count = document.querySelector<HTMLElement>(".faq-panel__answer-preview .ui-template-text-field__count");
+    const preview = document.querySelector<HTMLElement>(".faq-panel__answer-preview .ui-template-text-field__preview");
+    const count = document.querySelector<HTMLElement>(".faq-panel__answer-preview .ui-template-text-field__preview-header .ui-template-text-field__count");
     const helper = document.querySelector<HTMLElement>(".faq-panel__answer-preview .ui-template-text-field__helper-copy");
-    const visibleHelper = helper?.querySelector<HTMLElement>(".ui-truncated-text");
+    const visibleHelper = helper?.querySelector<HTMLElement>(".ui-template-text-field__helper-text");
     if (answer === null || preview === null || count === null || helper === null || visibleHelper === null || visibleHelper === undefined) {
       throw new Error("FAQ answer layout geometry is incomplete.");
     }
@@ -276,7 +281,7 @@ test("FAQ answer preview stacks below its full-width editor without overflowing 
 
   expect(geometry.preview.top).toBeGreaterThanOrEqual(geometry.answer.bottom);
   expect(Math.abs(geometry.preview.left - geometry.answer.left)).toBeLessThanOrEqual(1);
-  expect(Math.abs(geometry.preview.width - geometry.answer.width)).toBeLessThanOrEqual(2);
+  expect(Math.abs(geometry.preview.width - geometry.answer.width)).toBeLessThanOrEqual(1);
   expect(geometry.count.left).toBeGreaterThanOrEqual(geometry.answer.left - 1);
   expect(geometry.count.right).toBeLessThanOrEqual(geometry.answer.right + 1);
   expect(geometry.helper.scrollWidth).toBeLessThanOrEqual(geometry.helper.clientWidth);
@@ -496,12 +501,12 @@ test("command editor error and response layouts stay aligned", async ({ page }) 
   await openTextCommand(page, 1920, 1080);
 
   const insertVariable = page.getByRole("button", { name: "Variable einfügen", exact: true });
-  const preview = page.locator(".text-command-response-fields > .ui-chat-preview");
+  const preview = page.locator(".text-command-response-fields .ui-template-text-field__preview");
   const desktopAlignment = await page.evaluate(() => {
     const textarea = document.querySelector<HTMLElement>("#command-text");
     const label = document.querySelector<HTMLElement>(".command-template-editor .ui-template-text-field__label");
     const button = document.querySelector<HTMLElement>(".text-command-editor .ui-template-text-field__insert-variable");
-    const previewNode = document.querySelector<HTMLElement>(".text-command-response-fields > .ui-chat-preview");
+    const previewNode = document.querySelector<HTMLElement>(".text-command-response-fields .ui-template-text-field__preview");
     if (textarea === null || label === null || button === null || previewNode === null) throw new Error("Command response geometry is incomplete.");
     const rect = (element: HTMLElement) => {
       const box = element.getBoundingClientRect();
@@ -510,14 +515,16 @@ test("command editor error and response layouts stay aligned", async ({ page }) 
     return { textarea: rect(textarea), label: rect(label), button: rect(button), preview: rect(previewNode) };
   });
   expect(Math.abs((desktopAlignment.button.y + desktopAlignment.button.height / 2) - (desktopAlignment.label.y + desktopAlignment.label.height / 2))).toBeLessThanOrEqual(2);
-  expect(Math.abs(desktopAlignment.preview.y - desktopAlignment.textarea.y)).toBeLessThanOrEqual(2);
+  expect(desktopAlignment.preview.y).toBeGreaterThanOrEqual(desktopAlignment.textarea.bottom);
+  expect(Math.abs(desktopAlignment.preview.x - desktopAlignment.textarea.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(desktopAlignment.preview.width - desktopAlignment.textarea.width)).toBeLessThanOrEqual(1);
   await expect(insertVariable).toBeVisible();
   await expect(preview).toBeVisible();
 
   await page.setViewportSize({ width: 1280, height: 800 });
   const narrowAlignment = await page.evaluate(() => {
     const textarea = document.querySelector<HTMLElement>("#command-text");
-    const previewNode = document.querySelector<HTMLElement>(".text-command-response-fields > .ui-chat-preview");
+    const previewNode = document.querySelector<HTMLElement>(".text-command-response-fields .ui-template-text-field__preview");
     const helper = document.querySelector<HTMLElement>("#command-text-description .ui-template-text-field__helper-row");
     if (textarea === null || previewNode === null || helper === null) throw new Error("Narrow command response geometry is incomplete.");
     const textareaBox = textarea.getBoundingClientRect();
@@ -530,7 +537,7 @@ test("command editor error and response layouts stay aligned", async ({ page }) 
   });
   expect(narrowAlignment.preview.y).toBeGreaterThanOrEqual(narrowAlignment.textarea.bottom);
   expect(Math.abs(narrowAlignment.preview.x - narrowAlignment.textarea.x)).toBeLessThanOrEqual(1);
-  expect(Math.abs(narrowAlignment.preview.width - narrowAlignment.textarea.width)).toBeLessThanOrEqual(2);
+  expect(Math.abs(narrowAlignment.preview.width - narrowAlignment.textarea.width)).toBeLessThanOrEqual(1);
   expect(narrowAlignment.helper.scrollWidth).toBeLessThanOrEqual(narrowAlignment.helper.clientWidth);
 
   await page.setViewportSize({ width: 1920, height: 1080 });
@@ -681,10 +688,9 @@ test("FAQ mobile editor scrolls its final field above the fixed save bar", async
   expect(finalGeometry.targetBottom).toBeLessThanOrEqual(Math.min(finalGeometry.scrollBottomEdge, finalGeometry.saveTop) - 8);
 
   const faqCounterFont = await page.locator(".faq-panel__entry-name .ui-field__count").evaluate((element) => getComputedStyle(element).fontFamily);
-  const faqTemplateCounter = page.locator(".faq-panel__detail .ui-template-text-field__count").first();
-  const faqPreviewCounter = page.locator(".faq-panel__detail .ui-chat-preview__count").first();
+  const faqTemplateCounter = page.locator(".faq-panel__detail .ui-template-text-field__count");
+  await expect(faqTemplateCounter).toHaveCount(1);
   expect(await faqTemplateCounter.evaluate((element) => getComputedStyle(element).fontFamily)).toBe(faqCounterFont);
-  expect(await faqPreviewCounter.evaluate((element) => getComputedStyle(element).fontFamily)).toBe(faqCounterFont);
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/channels/${channelId}/modules/text_commands`);

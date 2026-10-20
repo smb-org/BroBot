@@ -763,6 +763,11 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
         maxLength={500}
         minRows={field === "text" ? 2 : 3}
         variables={templateVariables(field)}
+        {...(field === "text" ? {
+          preview: () => previewTemplate("text"),
+          previewLabel: labels.previewLabel,
+          previewSpeaker: labels.previewSpeaker,
+        } : {})}
         {...(field === "text" ? { insertVariableLabel: labels.insertVariable } : {})}
         disabled={!canManageContent || pending}
         messages={labels.templateMessages}
@@ -888,12 +893,6 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
           ? <ChatPreview label={labels.previewLabel} speaker={labels.previewSpeaker} text={listPreview} countLabel={labels.templateMessages.previewCountLabel(listPreview.length)} />
           : <div className="text-command-response-fields">
             {templateEditor("text", draft.kind === "timeout" ? labels.responseOptional : labels.response)}
-            <ChatPreview
-              label={labels.previewLabel}
-              speaker={labels.previewSpeaker}
-              text={previewTemplate("text")}
-              countLabel={labels.templateMessages.previewCountLabel(previewTemplate("text").length)}
-            />
           </div>}
         {hasCurrencyToken ? <div className="text-command-currency-slot">
           <Select

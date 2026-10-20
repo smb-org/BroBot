@@ -147,7 +147,7 @@ const catalog: LocaleCatalog<TimersTexts> = {
     inputDependentText: "Geplante Nachrichten können keine Eingaben aus einem Chatbefehl verwenden.",
     limitReached: "Ein Kanal kann höchstens 50 Timer haben.",
     templateMessages: {
-      countLabel: (count, max) => `${String(count)}/${String(max)}`,
+      countLabel: (count, max) => `${String(count)} von ${String(max)} Zeichen`,
       previewCountLabel: (count) => count,
       openBrace: "Offene Variable: Schließe die geschweifte Klammer mit } ab.",
       unknownVariable: (name, suggestion) => suggestion === null ? `Unbekannte Variable {${name}}.` : `Unbekannte Variable {${name}} – meintest du {${suggestion}}?`,
@@ -245,7 +245,7 @@ const catalog: LocaleCatalog<TimersTexts> = {
     inputDependentText: "Scheduled messages cannot use input from a chat command.",
     limitReached: "A channel can have up to 50 timers.",
     templateMessages: {
-      countLabel: (count, max) => `${String(count)}/${String(max)}`,
+      countLabel: (count, max) => `${String(count)} of ${String(max)} characters`,
       previewCountLabel: (count) => count,
       openBrace: "Unclosed variable: add a closing brace }.",
       unknownVariable: (name, suggestion) => suggestion === null ? `Unknown variable {${name}}.` : `Unknown variable {${name}} — did you mean {${suggestion}}?`,

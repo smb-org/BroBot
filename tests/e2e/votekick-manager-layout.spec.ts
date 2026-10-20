@@ -112,9 +112,9 @@ for (const viewport of viewports) {
     for (const layout of fieldLayouts) expect(layout.controlTop).toBeGreaterThanOrEqual(layout.labelBottom);
     const messageHeight = await editor.locator(".template-text-field__input").first().evaluate((element) => element.getBoundingClientRect().height);
     expect(messageHeight).toBeLessThanOrEqual(80);
-    const previewLayout = await editor.locator(".inspector-field-row:has(.ui-chat-preview)").first().evaluate((row) => {
+    const previewLayout = await editor.locator(".inspector-field-row:has(.ui-template-text-field__preview)").first().evaluate((row) => {
       const control = row.querySelector(".inspector-field-row__control");
-      const preview = row.querySelector(".ui-chat-preview");
+      const preview = row.querySelector(".ui-template-text-field__preview");
       if (!(control instanceof HTMLElement) || !(preview instanceof HTMLElement)) throw new Error("A message preview is missing.");
       return { controlLeft: control.getBoundingClientRect().left, previewLeft: preview.getBoundingClientRect().left };
     });

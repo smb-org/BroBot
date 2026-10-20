@@ -4,7 +4,6 @@ import { refetchModuleQueryData, runModuleQueryWrite, useChannelSettings, useDas
 import {
   Badge,
   Button,
-  ChatPreview,
   ChatTargetField,
   ChipsInput,
   CollectionPage,
@@ -492,16 +491,13 @@ function FaqPanelContent({ channelId, language, canManage = true, initialSelecti
                   onChange={(answerText) => { patchDraft({ answerText }); }}
                   maxLength={FAQ_ANSWER_MAX_LENGTH}
                   variables={data?.variables ?? []}
+                  preview={() => answerPreview}
+                  previewLabel={labels.previewLabel}
+                  previewSpeaker={labels.previewSpeaker}
                   messages={labels.templateMessages}
                   minRows={4}
                   disabled={!canManage || saving}
                   required
-                />
-                <ChatPreview
-                  label={labels.previewLabel}
-                  speaker={labels.previewSpeaker}
-                  text={answerPreview}
-                  countLabel={labels.templateMessages.previewCountLabel(answerPreview.length)}
                 />
               </div>
               <FieldPair>

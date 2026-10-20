@@ -177,7 +177,7 @@ test("keeps the first result row close to its heading and stationary when hints 
       .evaluate((header) => header.getBoundingClientRect().height);
     expect(pageHeaderHeightAfterRun).toBe(pageHeaderHeightBeforeRun);
 
-    const expectedResultsHeaderHeight = viewport.width <= 820 ? 92 : 70;
+    const expectedResultsHeaderHeight = viewport.width <= 820 ? 97 : 70;
     const resultsHeaderHeight = await page.locator(".test-area__results-head")
       .evaluate((header) => header.getBoundingClientRect().height);
     expect(resultsHeaderHeight).toBe(expectedResultsHeaderHeight);
