@@ -70,8 +70,6 @@
 .settings-page--slot [data-section="jackpot"] .ui-section__content > :nth-child(3) { grid-column: 1 / -1; }
 .slot-texts-field { display: grid; gap: 0; }
 .slot-texts-field .template-text-field__input { height: 72px; min-height: 72px; max-height: 72px; resize: none; field-sizing: fixed; }
-.slot-texts-field .ui-template-text-field__description-content { gap: 0; }
-.slot-texts-field .ui-template-text-field__helper-row { display: none; }
 .slot-texts-field .ui-template-text-field__warnings { height: 24px; overflow-y: auto; }
 .slot-texts-field .ui-template-text-field__label { padding-right: 120px; white-space: nowrap; }
 @media (min-width: 1750px) {

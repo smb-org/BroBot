@@ -273,6 +273,12 @@ describe("editor field seam", () => {
     expectHelperAfterField(screen.getByRole("textbox", { name: "Reply" }), "What the bot says.");
   });
 
+  it("omits the template helper row when it has no hint, error, count, or disabled reason", () => {
+    const { container } = renderUi(<TemplateTextField label="Reply" hint="" value="Hello" onChange={() => {}} messages={templateTextFieldMessages} />);
+
+    expect(container.querySelector(".ui-template-text-field__helper-row")).toBeNull();
+  });
+
   it("clamps the value on blur and applies a suggested value with the unit outside the input", () => {
     function Harness() {
       const [value, setValue] = useState<number | "">(5);

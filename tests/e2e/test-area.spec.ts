@@ -169,7 +169,7 @@ const saveScreenshot = async (page: Page, info: TestInfo, name: string): Promise
 
 const expectIncompleteResultsLayout = async (page: Page): Promise<void> => {
   const warning = page.getByTestId("test-area-incomplete-result-hint");
-  await expect(warning).toContainText("Ergebnis unvollständig");
+  await expect(warning).toHaveAccessibleName(/Ergebnis unvollständig.*Mindestens ein Modul konnte die Nachricht nicht vollständig prüfen/u);
   await expect(page.getByRole("button", { name: /!discord/u })).toBeVisible();
   const layout = await page.evaluate(() => {
     const slot = document.querySelector<HTMLElement>(".test-area__results-slot");
@@ -179,10 +179,12 @@ const expectIncompleteResultsLayout = async (page: Page): Promise<void> => {
     const listElement = slot.querySelector<HTMLElement>(".test-area__result-scroll");
     if (warningElement === null || listElement === null) return null;
     const slotRect = slot.getBoundingClientRect();
+    const headerRect = header.getBoundingClientRect();
     const warningRect = warningElement.getBoundingClientRect();
     const listRect = listElement.getBoundingClientRect();
     return {
-      warningBottom: warningRect.bottom,
+      headingTop: header.querySelector("h2")?.getBoundingClientRect().top ?? Number.POSITIVE_INFINITY,
+      headerTop: headerRect.top,
       listTop: listRect.top,
       slotWidth: slotRect.width,
       warningWidth: warningRect.width,
@@ -190,8 +192,8 @@ const expectIncompleteResultsLayout = async (page: Page): Promise<void> => {
     };
   });
   expect(layout).not.toBeNull();
-  expect(layout?.warningBottom).toBeLessThanOrEqual((layout?.listTop ?? 0) + 1);
-  expect(layout?.warningWidth).toBeCloseTo(layout?.slotWidth ?? 0, 0);
+  expect((layout?.headingTop ?? Infinity) - (layout?.headerTop ?? 0)).toBeLessThanOrEqual(12);
+  expect(layout?.warningWidth).toBeLessThan(48);
   expect(layout?.listWidth).toBeCloseTo(layout?.slotWidth ?? 0, 0);
 };
 
@@ -214,7 +216,7 @@ test("submits one synthetic chat message and shows the selected firing row witho
   await expectNoWholePageScroll(page);
 });
 
-test("places the incomplete warning above the full-width result list at 1280 by 800", async ({ page }) => {
+test("keeps the incomplete result icon in the title row above the full-width result list at 1280 by 800", async ({ page }) => {
   await openTestArea(page, { width: 1280, height: 800, response: partialFailureResponse() });
   await submitMessage(page);
   await expectIncompleteResultsLayout(page);

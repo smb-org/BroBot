@@ -177,11 +177,6 @@ test("keeps the first result row close to its heading and stationary when hints 
       .evaluate((header) => header.getBoundingClientRect().height);
     expect(pageHeaderHeightAfterRun).toBe(pageHeaderHeightBeforeRun);
 
-    const expectedResultsHeaderHeight = viewport.width <= 820 ? 97 : 70;
-    const resultsHeaderHeight = await page.locator(".test-area__results-head")
-      .evaluate((header) => header.getBoundingClientRect().height);
-    expect(resultsHeaderHeight).toBe(expectedResultsHeaderHeight);
-
     if (viewport.width > 820) {
       const contextGap = await page.evaluate(() => {
         const moduleField = document.querySelector<HTMLElement>(".test-area__context-fields .ui-select");
@@ -205,19 +200,21 @@ test("keeps the first result row close to its heading and stationary when hints 
     const firstRow = page.locator(".test-area__result-row").first();
     await expect(firstRow).toBeVisible();
     const geometry = await page.evaluate(() => {
+      const header = document.querySelector<HTMLElement>(".test-area__results-head");
+      const heading = document.querySelector<HTMLElement>(".test-area__results-title h2");
       const title = document.querySelector<HTMLElement>(".test-area__results-title");
-      const metadata = document.querySelector<HTMLElement>(".test-area__results-meta");
       const row = document.querySelector<HTMLElement>(".test-area__result-row");
-      if (title === null || metadata === null || row === null) return null;
+      if (header === null || heading === null || title === null || row === null) return null;
       return {
-        metadataBottom: metadata.getBoundingClientRect().bottom,
-        titleTop: title.getBoundingClientRect().top,
+        headerTop: header.getBoundingClientRect().top,
+        headingTop: heading.getBoundingClientRect().top,
         titleBottom: title.getBoundingClientRect().bottom,
         rowTop: row.getBoundingClientRect().top,
       };
     });
     expect(geometry, `${String(viewport.width)} by ${String(viewport.height)} results geometry`).not.toBeNull();
-    expect((geometry?.titleTop ?? 0) - (geometry?.metadataBottom ?? 0)).toBeGreaterThanOrEqual(2);
+    expect((geometry?.headingTop ?? 0) - (geometry?.headerTop ?? 0)).toBeGreaterThanOrEqual(0);
+    expect((geometry?.headingTop ?? 0) - (geometry?.headerTop ?? 0)).toBeLessThanOrEqual(12);
     const gap = (geometry?.rowTop ?? 0) - (geometry?.titleBottom ?? 0);
     expect(gap).toBeGreaterThanOrEqual(4);
     expect(gap).toBeLessThanOrEqual(12);
@@ -225,14 +222,14 @@ test("keeps the first result row close to its heading and stationary when hints 
     const rowTopBeforeHint = await firstRow.evaluate((row) => row.getBoundingClientRect().top);
     await message.fill(`!dc geaendert-${String(viewport.width)}`);
     await expect(page.locator(".test-area__results-head").getByTestId("test-area-stale-result-hint"))
-      .toHaveText("Eingaben geändert – Prüfen aktualisiert das Ergebnis");
+      .toHaveAccessibleName("Eingaben geändert – Prüfen aktualisiert das Ergebnis");
     const rowTopAfterHint = await firstRow.evaluate((row) => row.getBoundingClientRect().top);
     expect(rowTopAfterHint).toBe(rowTopBeforeHint);
 
     await message.fill("!dc partialfailure");
     await run(page);
     const failureHint = page.getByTestId("test-area-incomplete-result-hint");
-    await expect(failureHint).toContainText("Ergebnis unvollständig");
+    await expect(failureHint).toHaveAccessibleName(/Ergebnis unvollständig.*Mindestens ein Modul konnte die Nachricht nicht vollständig prüfen.*Fehler bei: FAQ/u);
     const rowTopWithFailureHint = await firstRow.evaluate((row) => row.getBoundingClientRect().top);
     expect(rowTopWithFailureHint).toBe(rowTopBeforeHint);
 
@@ -240,27 +237,7 @@ test("keeps the first result row close to its heading and stationary when hints 
     const staleHint = page.getByTestId("test-area-stale-result-hint");
     await expect(staleHint).toBeVisible();
     await expect(failureHint).toBeVisible();
-    const titleAndHintGeometry = await page.evaluate(() => {
-      const title = document.querySelector<HTMLElement>(".test-area__results-title");
-      const warning = document.querySelector<HTMLElement>("[data-testid='test-area-incomplete-result-hint']");
-      const stale = document.querySelector<HTMLElement>("[data-testid='test-area-stale-result-hint']");
-      if (title === null || warning === null || stale === null) return null;
-      return {
-        titleTop: title.getBoundingClientRect().top,
-        warningBottom: warning.getBoundingClientRect().bottom,
-        staleBottom: stale.getBoundingClientRect().bottom,
-        warningFontSize: getComputedStyle(warning).fontSize,
-        warningColor: getComputedStyle(warning).color,
-        staleColor: getComputedStyle(stale).color,
-      };
-    });
-    expect(titleAndHintGeometry).not.toBeNull();
-    expect(titleAndHintGeometry?.titleTop ?? 0).toBeGreaterThanOrEqual(Math.max(
-      titleAndHintGeometry?.warningBottom ?? 0,
-      titleAndHintGeometry?.staleBottom ?? 0,
-    ));
-    expect(titleAndHintGeometry?.warningFontSize).toBe("12px");
-    expect(titleAndHintGeometry?.warningColor).not.toBe(titleAndHintGeometry?.staleColor);
+    await expect(staleHint).toHaveAccessibleName("Eingaben geändert – Prüfen aktualisiert das Ergebnis");
     expect(await firstRow.evaluate((row) => row.getBoundingClientRect().top)).toBe(rowTopBeforeHint);
 
     const gapWithFailureHint = await page.evaluate(() => {

@@ -120,7 +120,7 @@ describe("test area page", () => {
     run();
 
     await waitFor(() => expect(document.querySelector(".test-area__results-title")).toHaveTextContent("1 reagiert · 1 blockiert"));
-    expect(screen.getByText(/^Ohne Reaktion:/u)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Ohne Reaktion:/u })).toBeInTheDocument();
     expect(screen.queryByText("Nicht testbar")).not.toBeInTheDocument();
     expect(firingRow()).toHaveAttribute("aria-current", "true");
   });

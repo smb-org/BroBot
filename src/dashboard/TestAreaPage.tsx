@@ -21,6 +21,7 @@ import {
   GameMultiSelect,
   Icon,
   NavigationIcon,
+  Popover,
   SegmentChoice,
   Select,
   StatusLed,
@@ -687,6 +688,9 @@ export function TestAreaPage({
   const responseModules = response?.modules.filter((module) => snapshot?.request.only === undefined || module.moduleId === snapshot.request.only.moduleId) ?? [];
   const silentModules = responseModules.filter((module) => module.status === "silent").map((module) => moduleName(module.moduleId, labels, language));
   const errorModules = responseModules.filter((module) => module.status === "error" || module.status === "not_testable").map((module) => moduleName(module.moduleId, labels, language));
+  const silentHint = silentModules.length === 0 ? "" : texts.noReactionModules(silentModules.join(", "));
+  const incompleteHint = errorModules.length === 0 ? "" : `${texts.incompleteTitle}. ${texts.incompleteDescription} ${texts.moduleError(errorModules.join(", "))}`;
+  const staleHint = snapshotStale ? texts.inputsChangedHint : "";
   const state: "idle" | "loading" | "result" | "empty" | "incomplete" | "error" =
     pending ? "loading" : error !== null ? "error" : response === null ? "idle"
       : errorModules.length > 0 ? "incomplete" : visibleRows.length === 0 ? "empty" : "result";
@@ -822,39 +826,28 @@ export function TestAreaPage({
 
         <header className="test-area__results-head">
           <div className="test-area__results-title">
-            <h2>{texts.result}</h2>
-            <span>{response === null || resultSummary.length === 0 ? texts.resultCount(0) : resultSummary}</span>
-            {pending ? <span className="test-area__loading-label"><StatusLed state="loading" label={texts.loading} dotOnly />{texts.loading}</span> : null}
-            {muted ? <Badge tone="amber">{texts.muted}</Badge> : null}
-            {paused ? <Badge>{texts.paused}</Badge> : null}
+            <div className="test-area__results-title-copy">
+              <h2>{texts.result}</h2>
+              <span className="test-area__results-summary">{response === null || resultSummary.length === 0 ? texts.resultCount(0) : resultSummary}</span>
+              {pending ? <span className="test-area__loading-label"><StatusLed state="loading" label={texts.loading} dotOnly />{texts.loading}</span> : null}
+              {muted ? <Badge tone="amber">{texts.muted}</Badge> : null}
+              {paused ? <Badge>{texts.paused}</Badge> : null}
+            </div>
+            <div className="test-area__results-hint-slots">
+              <span className="test-area__results-hint-slot">
+                {silentHint.length === 0 ? null : <Popover triggerLabel={silentHint} icon="info" contentRole="dialog" triggerClassName="test-area__result-hint-trigger">{silentHint}</Popover>}
+              </span>
+              <span className="test-area__results-hint-slot">
+                {incompleteHint.length === 0 ? null : <Popover triggerLabel={incompleteHint} icon="warning" contentRole="dialog" testId="test-area-incomplete-result-hint" triggerClassName="test-area__result-hint-trigger test-area__result-hint-trigger--warning">{incompleteHint}</Popover>}
+              </span>
+              <span className="test-area__results-hint-slot">
+                {staleHint.length === 0 ? null : <Popover triggerLabel={staleHint} icon="reload" contentRole="dialog" testId="test-area-stale-result-hint" triggerClassName="test-area__result-hint-trigger">{staleHint}</Popover>}
+              </span>
+            </div>
           </div>
-          <div className="test-area__results-meta">
-            <span className="sr-only" data-testid="test-area-live-summary" role="status" aria-live="polite" aria-atomic="true">{liveSummary}</span>
-            <p className="test-area__meta-line" title={silentModules.length === 0 ? "" : silentModules.join(", ")}>
-              {silentModules.length === 0 ? <span aria-hidden="true">&nbsp;</span> : texts.noReactionModules(silentModules.join(", "))}
-            </p>
-            <p
-              className="test-area__meta-line test-area__meta-line--warning"
-              data-testid="test-area-incomplete-result-hint"
-              data-visible={errorModules.length > 0}
-              aria-hidden={errorModules.length === 0}
-              aria-label={errorModules.length === 0 ? undefined : `${texts.incompleteTitle}. ${texts.incompleteDescription} ${texts.moduleError(errorModules.join(", "))}`}
-              title={errorModules.length === 0 ? "" : `${texts.incompleteDescription} ${texts.moduleError(errorModules.join(", "))}`}
-              {...(errorModules.length > 0 ? { role: "status", "aria-live": "polite" as const } : {})}
-            >
-              {errorModules.length === 0
-                ? <span aria-hidden="true">&nbsp;</span>
-                : `${texts.incompleteTitle} · ${errorModules.map((moduleId) => moduleName(moduleId, labels, language)).join(", ")}`}
-            </p>
-            <p
-              className="test-area__meta-line test-area__scope-hint"
-              data-testid="test-area-stale-result-hint"
-              data-visible={snapshotStale}
-              aria-hidden={!snapshotStale}
-              title={snapshotStale ? texts.inputsChangedHint : ""}
-              {...(snapshotStale ? { role: "status", "aria-live": "polite" as const } : {})}
-            >{snapshotStale ? texts.inputsChangedHint : <span aria-hidden="true">&nbsp;</span>}</p>
-          </div>
+          <span className="sr-only" data-testid="test-area-live-summary" role="status" aria-live="polite" aria-atomic="true">{liveSummary}</span>
+          <span className="sr-only" data-testid="test-area-incomplete-result-announcement" role="status" aria-live="polite" aria-atomic="true">{incompleteHint}</span>
+          <span className="sr-only" data-testid="test-area-stale-result-announcement" role="status" aria-live="polite" aria-atomic="true">{staleHint}</span>
         </header>
         <div className={"test-area__results-slot" + (pending && response !== null ? " is-pending" : "") + (snapshotStale ? " is-stale" : "")} data-testid="test-area-results-slot" data-state={state} aria-busy={pending}>
           {state === "idle" ? <div className="test-area__state-slot">

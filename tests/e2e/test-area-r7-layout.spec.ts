@@ -29,22 +29,25 @@ const response: DryRunResponse = {
   }],
 };
 
-const responseWithRows = (count: number): DryRunResponse => {
-  const module = response.modules[0];
-  const entry = module?.entries[0];
-  if (module === undefined || entry === undefined) throw new Error("The test-area response fixture is incomplete.");
-
-  return {
-    ...response,
-    modules: [{
-      ...module,
-      entries: Array.from({ length: count }, (_, index) => ({
-        ...entry,
-        entry: { ...entry.entry, id: `discord-${String(index)}`, label: `!discord-${String(index)}` },
-      })),
-    }],
-  };
-};
+const faqResponseWithRows = (count: number): DryRunResponse => ({
+  ...response,
+  modules: [{
+    moduleId: "faq",
+    status: "reacts",
+    entries: Array.from({ length: count }, (_, index) => ({
+      moduleId: "faq",
+      entry: { kind: "faq_entry", id: `faq-${String(index)}`, label: `FAQ answer ${String(index + 1)}` },
+      outcome: index === 0 ? "fires" as const : "blocked" as const,
+      match: { kind: "keyword" as const, pattern: "hallo" },
+      blocks: index === 0 ? [] : [{ code: "faq.shadowed" as const, detail: { byEntryId: "faq-0" } }],
+      effects: index === 0 ? [{
+        kind: "chat" as const, text: "Die ausgewählte FAQ-Antwort", target: "where_asked" as const,
+        postsTo: "this_chat" as const, reply: true, suppressedBy: null, automated: true,
+      }] : [],
+      templateNotes: [],
+    })),
+  }],
+});
 
 const openTestArea = async (
   page: Page,
@@ -77,7 +80,7 @@ const openTestArea = async (
 };
 
 const expectLongResultsStayContained = async (page: Page, width: number, height: number): Promise<void> => {
-  const harness = await openTestArea(page, width, height, responseWithRows(40));
+  const harness = await openTestArea(page, width, height, faqResponseWithRows(40));
   const runButton = page.locator(".test-area__context-form .test-area__run-button");
   await expect(runButton).toBeInViewport({ ratio: 1 });
   const initialMainScrollTop = await page.locator(".dashboard-shell__main").evaluate((main) => main.scrollTop);

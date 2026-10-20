@@ -349,6 +349,7 @@ export function TemplateTextField({
       {messages.countLabel(count, maxLength)}
     </span>
   );
+  const helperCopyIsPresent = effectiveError !== undefined || hint.trim().length > 0 || disabledReason !== null;
   const previewIsEmpty = (previewText ?? "").trim().length === 0 && previewEmptyText !== undefined;
   const previewDisplayText = previewIsEmpty ? previewEmptyText : previewText ?? "";
   const previewNode = preview === undefined || previewLabel === undefined || previewSpeaker === undefined ? null : (
@@ -367,19 +368,20 @@ export function TemplateTextField({
       </p>
     </div>
   );
+  const helperRowIsPresent = helperCopyIsPresent || (previewNode === null && countNode !== null);
 
   const description: ReactNode = (
     <div className="ui-template-text-field__description-content">
       {previewNode}
-      <div className="ui-template-text-field__helper-row">
-        <span className="ui-template-text-field__helper-copy">
-          {effectiveError === undefined
-            ? <span className="ui-template-text-field__helper-text">{hint}</span>
-            : <FieldError id={`${id}-error`} className="ui-template-text-field__helper-error" message={effectiveError} />}
+      {helperRowIsPresent ? <div className="ui-template-text-field__helper-row">
+        {helperCopyIsPresent ? <span className="ui-template-text-field__helper-copy">
+          {effectiveError !== undefined
+            ? <FieldError id={`${id}-error`} className="ui-template-text-field__helper-error" message={effectiveError} />
+            : hint.trim().length > 0 ? <span className="ui-template-text-field__helper-text">{hint}</span> : null}
           {describedHelper(null, disabledReason, `template-text-field-${id}`)}
-        </span>
+        </span> : null}
         {previewNode === null ? countNode : null}
-      </div>
+      </div> : null}
       <div className="ui-template-text-field__warnings" id={`${id}-warnings`} aria-live="polite">
           {insertionLimitReached ? (
             <div className="ui-template-text-field__warning" role="status"><Icon name="warning" size={16} /><span>{messages.insertionLimit}</span></div>

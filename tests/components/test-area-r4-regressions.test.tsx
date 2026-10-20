@@ -151,17 +151,42 @@ describe("test area result and channel regressions", () => {
 
   it("shows module failures as incomplete results instead of a confirmed no-match state", async () => {
     vi.mocked(dryRunChatMessage).mockResolvedValue(response({
-      modules: [{ moduleId: "faq", status: "error", error: "module_error", entries: [] }],
+      modules: [
+        { moduleId: "text_commands", status: "silent", entries: [] },
+        { moduleId: "faq", status: "error", error: "module_error", entries: [] },
+      ],
     }));
     renderPage();
     run();
 
     const hint = await screen.findByTestId("test-area-incomplete-result-hint");
     const slot = screen.getByTestId("test-area-results-slot");
-    await waitFor(() => expect(hint).toHaveTextContent("Ergebnis unvollständig"));
-    expect(hint).toHaveAttribute("role", "status");
+    await waitFor(() => expect(hint).toHaveAccessibleName(/Ergebnis unvollständig.*Mindestens ein Modul konnte die Nachricht nicht vollständig prüfen.*Fehler bei: FAQ/u));
+    expect(hint).toHaveRole("button");
+    const announcement = screen.getByTestId("test-area-incomplete-result-announcement");
+    expect(announcement).toHaveAttribute("role", "status");
+    expect(announcement).toHaveAttribute("aria-live", "polite");
+    expect(announcement).toHaveTextContent("Ergebnis unvollständig");
     expect(slot).toHaveAttribute("data-state", "incomplete");
     expect(slot).not.toHaveTextContent("Keine Reaktion gefunden");
+
+    const silentHint = screen.getByRole("button", { name: "Ohne Reaktion: Textbefehle" });
+    fireEvent.click(silentHint);
+    expect(await screen.findByRole("dialog", { name: "Ohne Reaktion: Textbefehle" })).toHaveTextContent("Ohne Reaktion: Textbefehle");
+    fireEvent.click(document.body);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Ohne Reaktion: Textbefehle" })).not.toBeInTheDocument());
+
+    hint.focus();
+    expect(hint).toHaveFocus();
+    const focusedPopover = await screen.findByRole("dialog", { name: /Ergebnis unvollständig/u });
+    expect(focusedPopover).toHaveTextContent("Mindestens ein Modul konnte die Nachricht nicht vollständig prüfen.");
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /Ergebnis unvollständig/u })).not.toBeInTheDocument());
+
+    fireEvent.click(hint);
+    expect(await screen.findByRole("dialog", { name: /Ergebnis unvollständig/u })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /Ergebnis unvollständig/u })).not.toBeInTheDocument());
   });
 
   it("keeps successful rows visible when another module failed", async () => {
@@ -174,7 +199,7 @@ describe("test area result and channel regressions", () => {
     run();
 
     expect(await screen.findByTestId("test-area-results-slot")).toHaveAttribute("data-state", "incomplete");
-    expect(await screen.findByTestId("test-area-incomplete-result-hint")).toHaveTextContent("Ergebnis unvollständig");
+    expect(await screen.findByTestId("test-area-incomplete-result-hint")).toHaveAccessibleName(/Ergebnis unvollständig/u);
     expect(await screen.findByRole("button", { name: /!discord/u })).toBeInTheDocument();
   });
 

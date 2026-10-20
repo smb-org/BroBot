@@ -87,8 +87,8 @@ describe("Testbereich result scope and history replay", () => {
 
     const hint = screen.getByTestId("test-area-stale-result-hint");
     expect(screen.getByTestId("test-area-results-slot")).toBe(slot);
-    expect(hint).toHaveAttribute("data-visible", "true");
-    expect(hint).toHaveTextContent("Eingaben geändert – Prüfen aktualisiert das Ergebnis");
+    expect(hint).toHaveAccessibleName("Eingaben geändert – Prüfen aktualisiert das Ergebnis");
+    expect(screen.getByTestId("test-area-stale-result-announcement")).toHaveTextContent("Eingaben geändert – Prüfen aktualisiert das Ergebnis");
     expect(slot).toHaveAttribute("data-state", "result");
     expect(screen.getByRole("button", { name: /Begrüßung/u })).toBeInTheDocument();
     expect(screen.queryByText("Keine Reaktion gefunden")).not.toBeInTheDocument();
@@ -107,7 +107,7 @@ describe("Testbereich result scope and history replay", () => {
 
     const hint = screen.getByTestId("test-area-stale-result-hint");
     expect(screen.getByTestId("test-area-results-slot")).toBe(slot);
-    expect(hint).toHaveAttribute("data-visible", "true");
+    expect(hint).toHaveAccessibleName("Eingaben geändert – Prüfen aktualisiert das Ergebnis");
     expect(screen.getByRole("button", { name: /Begrüßung/u })).toBeInTheDocument();
   });
 

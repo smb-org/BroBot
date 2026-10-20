@@ -21,6 +21,7 @@ const glyphs = {
   broadcast: RadioTower, "broadcast-off": Radio, "volume-3": Volume2,
   "volume-off": VolumeX, "player-pause": Pause, "player-play": Play,
   "clock-hour-4": Clock,
+  info: Info,
   cause: Info,
   edit: Pencil,
   more: MoreVertical,
