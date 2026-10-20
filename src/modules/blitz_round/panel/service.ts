@@ -39,11 +39,11 @@ const mutate = async <Value,>(channelId: string, path: string, method: "POST" | 
 export const createBlitzQuestion = async (channelId: string, input: BlitzQuestionInput): Promise<BlitzQuestion> =>
   (await mutate<{ question: BlitzQuestion }>(channelId, "/questions", "POST", input)).question;
 
-export const updateBlitzQuestion = async (channelId: string, id: string, input: BlitzQuestionInput): Promise<BlitzQuestion> =>
-  (await mutate<{ question: BlitzQuestion }>(channelId, `/questions/${encodeURIComponent(id)}`, "PATCH", input)).question;
+export const updateBlitzQuestion = async (channelId: string, id: string, revision: number, input: BlitzQuestionInput): Promise<BlitzQuestion> =>
+  (await mutate<{ question: BlitzQuestion }>(channelId, `/questions/${encodeURIComponent(id)}`, "PATCH", { ...input, revision })).question;
 
-export const deleteBlitzQuestion = async (channelId: string, id: string): Promise<void> => {
-  await mutate<{ removed: boolean }>(channelId, `/questions/${encodeURIComponent(id)}`, "DELETE");
+export const deleteBlitzQuestion = async (channelId: string, id: string, revision: number): Promise<void> => {
+  await mutate<{ removed: boolean }>(channelId, `/questions/${encodeURIComponent(id)}?revision=${String(revision)}`, "DELETE");
 };
 
 export const saveBlitzSettings = async (channelId: string, revision: number, settings: BlitzRoundSettings): Promise<{ settings: BlitzRoundSettings; revision: number }> => {

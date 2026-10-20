@@ -44,6 +44,8 @@ export interface BlitzTexts {
   saved: string;
   saving: string;
   saveError: string;
+  conflict: string;
+  reload: string;
   validationError: (code: BlitzQuestionValidationCode) => string;
   delete: string;
   deleteTitle: string;
@@ -140,6 +142,8 @@ const catalog: LocaleCatalog<BlitzTexts> = {
     saved: "Gespeichert",
     saving: "Wird gespeichert …",
     saveError: "Die Frage konnte nicht gespeichert werden.",
+    conflict: "Die Frage wurde in der Zwischenzeit geändert. Lade sie neu, bevor du weiterarbeitest.",
+    reload: "Frage neu laden",
     validationError: (code) => ({
       invalid_question: "Prüfe die Angaben zur Frage.",
       invalid_kind: "Wähle Wortsalat oder Quiz.",
@@ -248,6 +252,8 @@ const catalog: LocaleCatalog<BlitzTexts> = {
     saved: "Saved",
     saving: "Saving …",
     saveError: "The question could not be saved.",
+    conflict: "This question changed while you were editing it. Reload the saved version before continuing.",
+    reload: "Reload question",
     validationError: (code) => ({
       invalid_question: "Check the question details.",
       invalid_kind: "Choose word scramble or quiz.",

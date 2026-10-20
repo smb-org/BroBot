@@ -10,6 +10,8 @@ import { loadEnabledBlitzSettings, openBlitzRound } from "./service";
 type BlitzRouteContext = Context<ModuleRouteEnvironment>;
 
 const body = async (request: Request): Promise<unknown> => request.json().catch(() => null);
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 const channelIdFrom = (context: BlitzRouteContext): string => context.req.param("channelId") ?? "";
 const repository = (context: BlitzRouteContext) => createBlitzQuestionRepository(context.env.DB);
 const denied = (context: BlitzRouteContext): Response => context.json({ error: "blitz_management_denied" }, 403);
@@ -63,45 +65,64 @@ blitzRoundRoutes.patch("/questions/:questionId", async (context) => {
   if (!canManage(context.get("channelRole"))) return denied(context);
   const channelId = channelIdFrom(context);
   const questionId = context.req.param("questionId");
-  const existing = await repository(context).get(channelId, questionId);
+  const questionRepository = repository(context);
+  const existing = await questionRepository.get(channelId, questionId);
   if (existing === null) return context.json({ error: "question_not_found" }, 404);
-  const parsed = validateBlitzQuestion(await body(context.req.raw));
+  const requestBody = await body(context.req.raw);
+  if (!isRecord(requestBody) || !Number.isSafeInteger(requestBody.revision) || (requestBody.revision as number) < 1) {
+    return context.json({ error: "question_invalid" }, 400);
+  }
+  const expectedRevision = requestBody.revision as number;
+  const parsed = validateBlitzQuestion(requestBody);
   if (!parsed.ok) return context.json({ error: parsed.code }, 400);
   const now = new Date().toISOString();
   const input = parsed.value;
   const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
-    `UPDATE blitz_questions SET kind = ?, prompt = ?, answers_json = ?, enabled = ?, updated_at = ?
-      WHERE channel_id = ? AND question_id = ? ${authorization.sql}`,
+    `UPDATE blitz_questions SET kind = ?, prompt = ?, answers_json = ?, enabled = ?, revision = revision + 1, updated_at = ?
+      WHERE channel_id = ? AND question_id = ? AND revision = ? ${authorization.sql}`,
   ).bind(input.kind, input.prompt, JSON.stringify(input.answers), input.enabled ? 1 : 0, now,
-    channelId, questionId, ...authorization.values);
+    channelId, questionId, expectedRevision, ...authorization.values);
   const auditStatement = context.get("prepareModuleAudit")({
     channelId, moduleId: BLITZ_ROUND_MODULE_ID, action: "blitz_round.question.updated",
     before: { questionId, kind: existing.kind, prompt: existing.prompt, answers: existing.answers, enabled: existing.enabled },
     after: { questionId, ...input },
   }, now);
   const [result] = await context.env.DB.batch([mutation, auditStatement]);
-  if ((result?.meta.changes ?? 0) === 0) return denied(context);
-  return context.json({ question: await repository(context).get(channelId, questionId) });
+  if ((result?.meta.changes ?? 0) === 0) {
+    const current = await questionRepository.get(channelId, questionId);
+    if (current === null) return context.json({ error: "question_not_found" }, 409);
+    if (current.revision !== expectedRevision) return context.json({ error: "question_conflict", current }, 409);
+    return denied(context);
+  }
+  return context.json({ question: await questionRepository.get(channelId, questionId) });
 });
 
 blitzRoundRoutes.delete("/questions/:questionId", async (context) => {
   if (!canManage(context.get("channelRole"))) return denied(context);
   const channelId = channelIdFrom(context);
   const questionId = context.req.param("questionId");
-  const existing = await repository(context).get(channelId, questionId);
+  const questionRepository = repository(context);
+  const existing = await questionRepository.get(channelId, questionId);
   if (existing === null) return context.json({ error: "question_not_found" }, 404);
+  const revision = Number(context.req.query("revision"));
+  if (!Number.isSafeInteger(revision) || revision < 1) return context.json({ error: "question_invalid" }, 400);
   const now = new Date().toISOString();
   const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
-    `DELETE FROM blitz_questions WHERE channel_id = ? AND question_id = ? ${authorization.sql}`,
-  ).bind(channelId, questionId, ...authorization.values);
+    `DELETE FROM blitz_questions WHERE channel_id = ? AND question_id = ? AND revision = ? ${authorization.sql}`,
+  ).bind(channelId, questionId, revision, ...authorization.values);
   const auditStatement = context.get("prepareModuleAudit")({
     channelId, moduleId: BLITZ_ROUND_MODULE_ID, action: "blitz_round.question.deleted",
     before: { questionId, kind: existing.kind, prompt: existing.prompt, answers: existing.answers, enabled: existing.enabled }, after: null,
   }, now);
   const [result] = await context.env.DB.batch([mutation, auditStatement]);
-  if ((result?.meta.changes ?? 0) === 0) return denied(context);
+  if ((result?.meta.changes ?? 0) === 0) {
+    const current = await questionRepository.get(channelId, questionId);
+    if (current === null) return context.json({ error: "question_not_found" }, 409);
+    if (current.revision !== revision) return context.json({ error: "question_conflict", current }, 409);
+    return denied(context);
+  }
   return context.json({ removed: true });
 });
 

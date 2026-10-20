@@ -108,6 +108,9 @@ export const blitzRoundModule: BotModule<typeof blitzRoundSettingsSchema> = {
   onEnable: ({ DB, now, actor, authorizeMutation }, channelId) => [
     blitzStarterSeedStatement(DB, channelId, now, authorizeMutation(channelId, actor, now)),
   ],
+  onDisable: async ({ runModuleAlarm }, channelId) => {
+    await runModuleAlarm(channelId, BLITZ_ROUND_MODULE_ID, "auto-start", "auto-start");
+  },
   alarms: [{
     key: "auto-start",
     handle: handleBlitzAutoStartAlarm,

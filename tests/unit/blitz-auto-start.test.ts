@@ -17,8 +17,11 @@ const setup = () => {
   const scheduled = new Map<string, number>();
   let online = true;
   let active: { roundId: string } | null = null;
+  let activationRevision = 1;
   const context = {
-    DB: {}, channelId: "fictional_channel", alarmIdentity: null,
+    DB: {
+      prepare: () => ({ bind: () => ({ first: () => Promise.resolve({ revision: activationRevision }) }) }),
+    }, channelId: "fictional_channel", alarmIdentity: null,
     storage: {
       get: (key: string) => Promise.resolve(storage.get(key)),
       put: (key: string, value: unknown) => { storage.set(key, value); return Promise.resolve(); },
@@ -33,7 +36,7 @@ const setup = () => {
   const settings = { ...blitzRoundDefaultsForLanguage("en"), autoStart: true };
   vi.mocked(loadEnabledBlitzSettings).mockImplementation(() => Promise.resolve(settings));
   vi.mocked(openBlitzRound).mockResolvedValue({ roundId: "fictional-round" } as Awaited<ReturnType<typeof openBlitzRound>>);
-  return { context, settings, scheduled, setOnline: (value: boolean) => { online = value; }, setActive: (value: typeof active) => { active = value; } };
+  return { context, settings, storage, scheduled, setOnline: (value: boolean) => { online = value; }, setActive: (value: typeof active) => { active = value; }, setActivationRevision: (value: number) => { activationRevision = value; } };
 };
 const resolved = (roundId: string): ModulePointRoundResult => ({ roundId, resolvedAt: new Date().toISOString(), data: {}, result: {} });
 
@@ -161,6 +164,30 @@ describe("blitz automatic starts", () => {
     expect(fixture.scheduled.get("auto-start")).toBe(preservedDeadline);
   });
 
+  it("keeps watchdog recovery identity through offline time and a delayed result hook [protects=watchdog reconciliation records a recovered round baseline that a later result replay cannot replace; fails_when=offline time consumes the replacement interval after a delayed hook; no_claim=uses an in-memory scheduler and does not exercise Durable Object alarm dispatch]", async () => {
+    const fixture = setup();
+    const round = resolved("watchdog-offline-round");
+    fixture.setActive({ roundId: round.roundId });
+    await configureBlitzAutoStart(fixture.context, "activation");
+
+    vi.advanceTimersByTime(minute);
+    fixture.setActive(null);
+    await handleBlitzAutoStartAlarm(fixture.context, "auto-start", Date.now());
+
+    vi.advanceTimersByTime(5 * minute);
+    fixture.setOnline(false);
+    await configureBlitzAutoStart(fixture.context, "stream_state");
+    vi.advanceTimersByTime(60 * minute);
+    fixture.setOnline(true);
+    await configureBlitzAutoStart(fixture.context, "stream_state");
+    const recoveredDeadline = fixture.scheduled.get("auto-start");
+    expect(recoveredDeadline).toBe(Date.now() + 10 * minute);
+
+    await onBlitzRoundResolved(fixture.context, round);
+
+    expect(fixture.scheduled.get("auto-start")).toBe(recoveredDeadline);
+  });
+
   it("starts a fresh interval after automatic start is disabled and enabled again [protects=each enable establishes its own live-time baseline; fails_when=the first start after enable at minute 10 fires at minute 20 instead of 25; no_claim=module settings and round opening are mocked]", async () => {
     const fixture = setup();
     await configureBlitzAutoStart(fixture.context, "activation");
@@ -179,6 +206,43 @@ describe("blitz automatic starts", () => {
     vi.advanceTimersByTime(minute);
     await handleBlitzAutoStartAlarm(fixture.context, "auto-start", Date.now());
     expect(openBlitzRound).toHaveBeenCalledOnce();
+  });
+
+  it("restarts from the new activation generation even when stale scheduler state survives [protects=a changed module activation revision establishes a fresh live baseline; fails_when=an old deadline remains active after a new activation generation; no_claim=the durable state and channel module revision are mocked]", async () => {
+    const fixture = setup();
+    await configureBlitzAutoStart(fixture.context, "activation");
+    vi.advanceTimersByTime(5 * minute);
+    fixture.setActivationRevision(2);
+
+    await configureBlitzAutoStart(fixture.context, "activation");
+
+    expect(fixture.scheduled.get("auto-start")).toBe(Date.now() + 15 * minute);
+    expect(fixture.storage.get("auto-start-state")).toMatchObject({ moduleActivationRevision: 2 });
+  });
+
+  it("uses resolution reconciliation during activation recovery [protects=activation recovery records the recovered round and fresh baseline before a delayed result hook; fails_when=the late hook replaces the activation recovery deadline; no_claim=uses an in-memory scheduler and module revision]", async () => {
+    const fixture = setup();
+    const round = resolved("activation-recovered-round");
+    fixture.setActive({ roundId: round.roundId });
+    await configureBlitzAutoStart(fixture.context, "activation");
+    vi.advanceTimersByTime(5 * minute);
+    fixture.setActive(null);
+    fixture.setActivationRevision(2);
+
+    await configureBlitzAutoStart(fixture.context, "activation");
+
+    const recoveredDeadline = Date.now() + 15 * minute;
+    expect(fixture.scheduled.get("auto-start")).toBe(recoveredDeadline);
+    expect(fixture.storage.get("auto-start-state")).toMatchObject({
+      waitingRoundId: null,
+      moduleActivationRevision: 2,
+      lastResolvedRoundId: round.roundId,
+      lastResolvedAt: new Date(Date.now()).toISOString(),
+    });
+
+    await onBlitzRoundResolved(fixture.context, round);
+
+    expect(fixture.scheduled.get("auto-start")).toBe(recoveredDeadline);
   });
 
   it("resets unsourced settings timers but keeps elapsed live time after a resolution [protects=settings saves use their own baseline before any resolution and preserve resolution timing afterward; fails_when=saving settings delays an existing resolution timer or loses paused time; no_claim=does not verify the settings HTTP revision guard]", async () => {

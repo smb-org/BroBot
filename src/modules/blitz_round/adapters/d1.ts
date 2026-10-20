@@ -9,6 +9,7 @@ import type { BlitzQuestionRepository } from "../repository";
 
 interface BlitzQuestionRow {
   question_id: string;
+  revision: number;
   kind: "scramble" | "quiz";
   prompt: string;
   answers_json: string;
@@ -23,6 +24,7 @@ const mapRow = (row: BlitzQuestionRow): BlitzQuestion => {
   try { answers = JSON.parse(row.answers_json) as unknown; } catch { answers = []; }
   return {
     id: row.question_id,
+    revision: row.revision,
     kind: row.kind,
     prompt: row.prompt,
     answers: Array.isArray(answers) ? answers.filter((answer): answer is string => typeof answer === "string") : [],
@@ -33,7 +35,7 @@ const mapRow = (row: BlitzQuestionRow): BlitzQuestion => {
   };
 };
 
-export const blitzQuestionColumns = `question_id, kind, prompt, answers_json, enabled, last_used_at, created_at, updated_at`;
+export const blitzQuestionColumns = `question_id, revision, kind, prompt, answers_json, enabled, last_used_at, created_at, updated_at`;
 
 const validate = (input: BlitzQuestionInput): BlitzQuestionInput => {
   const checked = validateBlitzQuestion(input);
@@ -76,17 +78,17 @@ export const createBlitzQuestionRepository = (db: D1Database): BlitzQuestionRepo
     if (created === null) throw new Error("question_not_found");
     return created;
   },
-  async update(channelId, questionId, value, now) {
+  async update(channelId, questionId, revision, value, now) {
     const input = validate(value);
     const result = await db.prepare(
-      `UPDATE blitz_questions SET kind = ?, prompt = ?, answers_json = ?, enabled = ?, updated_at = ?
-        WHERE channel_id = ? AND question_id = ?`,
-    ).bind(input.kind, input.prompt, JSON.stringify(input.answers), input.enabled ? 1 : 0, now, channelId, questionId).run();
+      `UPDATE blitz_questions SET kind = ?, prompt = ?, answers_json = ?, enabled = ?, revision = revision + 1, updated_at = ?
+        WHERE channel_id = ? AND question_id = ? AND revision = ?`,
+    ).bind(input.kind, input.prompt, JSON.stringify(input.answers), input.enabled ? 1 : 0, now, channelId, questionId, revision).run();
     return result.meta.changes === 0 ? null : this.get(channelId, questionId);
   },
-  async delete(channelId, questionId) {
-    const result = await db.prepare("DELETE FROM blitz_questions WHERE channel_id = ? AND question_id = ?")
-      .bind(channelId, questionId).run();
+  async delete(channelId, questionId, revision) {
+    const result = await db.prepare("DELETE FROM blitz_questions WHERE channel_id = ? AND question_id = ? AND revision = ?")
+      .bind(channelId, questionId, revision).run();
     return result.meta.changes > 0;
   },
   async enabledCount(channelId) {

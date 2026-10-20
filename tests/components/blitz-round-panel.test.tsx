@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
@@ -20,6 +20,7 @@ const initialSettings: BlitzRoundSettings = {
 
 const sampleQuestion: BlitzQuestion = {
   id: "fictional-question-cloud",
+  revision: 1,
   kind: "scramble",
   prompt: "CLOUD",
   answers: ["CLOUD"],
@@ -29,11 +30,18 @@ const sampleQuestion: BlitzQuestion = {
   updatedAt: "2030-01-01T12:00:00.000Z",
 };
 
+const secondQuestion: BlitzQuestion = {
+  ...sampleQuestion,
+  id: "fictional-question-moon",
+  prompt: "MOON",
+  answers: ["MOON"],
+};
+
 const parseUrl = (input: RequestInfo | URL): URL => input instanceof Request
   ? new URL(input.url)
   : input instanceof URL ? input : new URL(input, "https://brobot.example");
 
-const installPanelFetch = (initialQuestions: BlitzQuestion[] = []) => {
+const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Promise<void>, stalePatch = false) => {
   let questions = [...initialQuestions];
   let settings = { ...initialSettings };
   const requests = vi.fn<typeof fetch>((input, init) => {
@@ -52,17 +60,22 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = []) => {
       return Promise.resolve(jsonResponse({ questions: questions.slice(start, start + BLITZ_QUESTION_PAGE_SIZE), total: questions.length, page }));
     }
     if (url.pathname.endsWith("/modules/blitz_round/questions") && method === "POST") {
-      const body = JSON.parse(typeof init?.body === "string" ? init.body : "null") as Omit<BlitzQuestion, "id" | "lastUsedAt" | "createdAt" | "updatedAt">;
-      const created = { ...body, id: "fictional-question-created", lastUsedAt: null, createdAt: "2030-01-01T12:00:00.000Z", updatedAt: "2030-01-01T12:00:00.000Z" };
+      const body = JSON.parse(typeof init?.body === "string" ? init.body : "null") as Omit<BlitzQuestion, "id" | "revision" | "lastUsedAt" | "createdAt" | "updatedAt">;
+      const created = { ...body, id: "fictional-question-created", revision: 1, lastUsedAt: null, createdAt: "2030-01-01T12:00:00.000Z", updatedAt: "2030-01-01T12:00:00.000Z" };
       questions = [created, ...questions];
-      return Promise.resolve(jsonResponse({ question: created }, 201));
+      return (postGate ?? Promise.resolve()).then(() => jsonResponse({ question: created }, 201));
     }
     if (url.pathname.includes("/modules/blitz_round/questions/") && method === "PATCH") {
       const id = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
       const body = JSON.parse(typeof init?.body === "string" ? init.body : "null") as Partial<BlitzQuestion>;
       const existing = questions.find((candidate) => candidate.id === id);
       if (existing === undefined) throw new Error("question_missing");
-      const updated = { ...existing, ...body };
+      if (stalePatch) {
+        const latest = { ...existing, prompt: "MOON", answers: ["MOON"], revision: existing.revision + 1 };
+        questions = questions.map((candidate) => candidate.id === id ? latest : candidate);
+        return Promise.resolve(jsonResponse({ error: "question_conflict", current: latest }, 409));
+      }
+      const updated = { ...existing, ...body, revision: existing.revision + 1 };
       questions = questions.map((candidate) => candidate.id === id ? updated : candidate);
       return Promise.resolve(jsonResponse({ question: updated }));
     }
@@ -143,6 +156,79 @@ describe("Blitz Round collection panel", () => {
 
     await waitFor(() => expect(api.getQuestions().some((entry) => entry.prompt === "Which star is closest?")).toBe(true));
     expect(await screen.findByText("Round settings", { exact: true })).toBeInTheDocument();
+  });
+
+  it("keeps a requested existing question selected after saving another question [protects=save-and-switch finishes on the requested existing destination; fails_when=the saved question overrides the pending destination; no_claim=HTTP is mocked and does not verify production authentication]", async () => {
+    installPanelFetch([sampleQuestion, secondQuestion]);
+    mountPanel();
+    await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "STONE" } });
+    fireEvent.click(screen.getByRole("button", { name: /Word scramble.*MOON/u }));
+    const guard = await screen.findByRole("dialog", { name: "Save changes?" });
+    fireEvent.click(within(guard).getByRole("button", { name: "Save" }));
+
+    const requestedQuestion = await screen.findByRole("button", { name: /Word scramble.*MOON/u });
+    await waitFor(() => expect(requestedQuestion).toHaveAttribute("aria-current", "true"));
+    expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("MOON");
+  });
+
+  it("keeps an existing question selected after saving a new question [protects=save-and-switch from a new draft finishes on the requested existing destination; fails_when=the newly saved question replaces the pending destination; no_claim=HTTP is mocked and does not verify production authentication]", async () => {
+    installPanelFetch([sampleQuestion]);
+    mountPanel();
+    await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+
+    fireEvent.click(screen.getByRole("button", { name: "New question" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "STONE" } });
+    fireEvent.click(screen.getByRole("button", { name: /Word scramble.*CLOUD/u }));
+    const guard = await screen.findByRole("dialog", { name: "Save changes?" });
+    fireEvent.click(within(guard).getByRole("button", { name: "Save" }));
+
+    const requestedQuestion = await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    await waitFor(() => expect(requestedQuestion).toHaveAttribute("aria-current", "true"));
+    expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("CLOUD");
+  });
+
+  it("sends one create when Save is clicked twice in the unsaved-changes dialog [protects=an in-flight save-and-switch cannot re-enter question creation; fails_when=two POST requests create duplicate questions; no_claim=the HTTP response is held in memory and production request retries are not exercised]", async () => {
+    let releasePost!: () => void;
+    const postGate = new Promise<void>((resolve) => { releasePost = resolve; });
+    const api = installPanelFetch([], postGate);
+    mountPanel();
+    await screen.findByText("Add a word scramble or quiz question so chat can join in.");
+
+    fireEvent.click(screen.getByRole("button", { name: "New question" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "STONE" } });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const guard = await screen.findByRole("dialog", { name: "Save changes?" });
+    const save = within(guard).getByRole("button", { name: "Save" });
+    act(() => {
+      fireEvent.click(save);
+      fireEvent.click(save);
+    });
+
+    expect(save).toBeDisabled();
+    await waitFor(() => expect(api.requests.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(api.requests.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    releasePost();
+    expect(await screen.findByText("Round settings", { exact: true })).toBeInTheDocument();
+  });
+
+  it("keeps a conflicted question draft until the manager chooses reload [protects=stale edits show the fixed save-bar reload action without replacing local text; fails_when=the failed save loses the draft or offers no reload at the fixed save area; no_claim=the simulated conflict uses a local HTTP stub and does not verify D1 transaction isolation]", async () => {
+    const api = installPanelFetch([sampleQuestion], undefined, true);
+    mountPanel();
+    await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    const field = screen.getByRole("textbox", { name: "Word" });
+    fireEvent.change(field, { target: { value: "STONE" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("This question changed while you were editing it. Reload the saved version before continuing.")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("STONE");
+    expect(screen.getByRole("button", { name: "Reload question" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reload question" }));
+
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("MOON"));
+    expect(api.getQuestions()[0]?.revision).toBe(2);
   });
 
   it("selects the first remaining question after deleting the only item on the last page [protects=deleting question 26 from a 26-question pool clamps to page 1 and selects its first question; fails_when=the panel remains on invalid page 2 or shows an empty detail; no_claim=the paginated repository is mocked]", async () => {

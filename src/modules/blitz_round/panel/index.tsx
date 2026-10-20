@@ -87,25 +87,33 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   const openSettings = (): void => { setShowSettings(true); setDetailOpen(true); };
   const closeSettings = (): void => requestSwitch(() => { setShowSettings(false); setDetailOpen(true); });
 
-  const saveQuestion = useCallback(async (draft: Draft): Promise<BlitzQuestion | null> => {
+  const saveQuestion = useCallback(async (draft: Draft, revision?: number): Promise<BlitzQuestion | null> => {
     const input = questionInput(draft);
     if (input === null) return null;
     const saved = selectedId === NEW_QUESTION
       ? await createBlitzQuestion(channelId, input)
-      : await updateBlitzQuestion(channelId, selectedId ?? "", input);
+      : await updateBlitzQuestion(channelId, selectedId ?? "", revision ?? 1, input);
     await questionsQuery.refetch();
     return saved;
   }, [channelId, questionsQuery, selectedId]);
+
+  const reloadQuestion = async (questionId: string): Promise<BlitzQuestion | null> => {
+    const refreshed = await loadBlitzQuestions(channelId, 1, "");
+    queryClient.setQueryData(moduleQueryKey(channelId, "blitz_round", "questions:1:"), refreshed);
+    const latest = refreshed.questions.find((question) => question.id === questionId) ?? null;
+    if (latest !== null) setSelectedQuestion(latest);
+    return latest;
+  };
 
   const selectSavedQuestion = (saved: BlitzQuestion): void => {
     setSelectedId(saved.id);
     setSelectedQuestion(saved);
   };
 
-  const onDeleted = async (): Promise<void> => {
+  const onDeleted = async (revision: number): Promise<void> => {
     const deletingId = selectedId;
     if (deletingId === null || deletingId === NEW_QUESTION) return;
-    await deleteBlitzQuestion(channelId, deletingId);
+    await deleteBlitzQuestion(channelId, deletingId, revision);
     const refreshed = await questionsQuery.refetch();
     const total = refreshed.data?.total ?? 0;
     const nextPage = Math.min(page, Math.max(1, Math.ceil(total / BLITZ_QUESTION_PAGE_SIZE)));
@@ -169,7 +177,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
     : selectedId === null
       ? <div className="blitz-panel__placeholder"><PageHeader title={labels.title} subtitle={labels.noSelection} /></div>
       : <QuestionEditor
-        key={selectedId}
+        key={`${selectedId}:${String(currentQuestion?.revision ?? 0)}`}
         question={currentQuestion}
         isNew={selectedId === NEW_QUESTION}
         language={language === "en" ? "en" : "de"}
@@ -177,6 +185,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
         onSave={saveQuestion}
         onSaved={selectSavedQuestion}
         onDelete={onDeleted}
+        onReload={reloadQuestion}
         onOpenSettings={openSettings}
         registerSwitch={(switcher) => { switchRef.current = switcher; }}
       />;
@@ -196,14 +205,15 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   </div>;
 }
 
-function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved, onDelete, onOpenSettings, registerSwitch }: {
+function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved, onDelete, onReload, onOpenSettings, registerSwitch }: {
   question: BlitzQuestion | null;
   isNew: boolean;
   language: "de" | "en";
   canManage: boolean;
-  onSave: (draft: Draft) => Promise<BlitzQuestion | null>;
+  onSave: (draft: Draft, revision?: number) => Promise<BlitzQuestion | null>;
   onSaved: (question: BlitzQuestion) => void;
-  onDelete: () => Promise<void>;
+  onDelete: (revision: number) => Promise<void>;
+  onReload: (questionId: string) => Promise<BlitzQuestion | null>;
   onOpenSettings: () => void;
   registerSwitch: (switcher: ((proceed: () => void) => void) | null) => void;
 }): ReactElement {
@@ -212,6 +222,7 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
   const [pendingAnswer, setPendingAnswer] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | undefined>();
+  const [serverConflict, setServerConflict] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | undefined>();
   const [attempted, setAttempted] = useState(false);
@@ -223,40 +234,92 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
   const invalid = input === null || (draft.value.kind === "quiz" && pendingAnswer.trim().length > 0);
   const reset = (): void => { draft.reset(); setPendingAnswer(""); setSaveError(undefined); setAttempted(false); };
   const saveRef = useRef<() => Promise<string | null>>(() => Promise.resolve(null));
+  const saveInFlight = useRef<Promise<string | null> | null>(null);
   const guard = useDraftGuard(draft.dirty || pendingAnswer.trim().length > 0, () => saveRef.current(), reset);
   const { guardSwitch } = guard;
 
   const save = async (): Promise<string | null> => {
-    setAttempted(true);
-    setSaveError(undefined);
-    if (!canManage) return labels.roleLocked;
-    if (pendingAnswer.trim().length > 0) {
-      setSaveError(labels.invalidAnswer);
-      return labels.invalidAnswer;
-    }
-    if (!validation.ok) {
-      const message = labels.validationError(validation.code);
-      setSaveError(message);
-      return message;
-    }
-    setSaving(true);
-    try {
-      const saved = await onSave(draft.value);
-      if (saved === null) {
-        setSaveError(labels.saveError);
-        return labels.saveError;
+    if (saveInFlight.current !== null) return saveInFlight.current;
+    const operation = (async (): Promise<string | null> => {
+      setAttempted(true);
+      setSaveError(undefined);
+      if (!canManage) return labels.roleLocked;
+      if (pendingAnswer.trim().length > 0) {
+        setSaveError(labels.invalidAnswer);
+        return labels.invalidAnswer;
       }
-      draft.accept(fromQuestion(saved));
+      if (!validation.ok) {
+        const message = labels.validationError(validation.code);
+        setSaveError(message);
+        return message;
+      }
+      setSaving(true);
+      try {
+        const saved = await onSave(draft.value, question?.revision);
+        if (saved === null) {
+          setSaveError(labels.saveError);
+          return labels.saveError;
+        }
+        draft.accept(fromQuestion(saved));
+        setPendingAnswer("");
+        setAttempted(false);
+        setServerConflict(false);
+        onSaved(saved);
+        guard.completeSwitch();
+        return null;
+      } catch (failure: unknown) {
+        const code = blitzErrorCode(failure);
+        const message = code === "question_limit_reached" ? labels.questionLimit
+          : code === "question_conflict" ? labels.conflict : labels.saveError;
+        setSaveError(message);
+        if (code === "question_conflict") setServerConflict(true);
+        return message;
+      } finally {
+        setSaving(false);
+      }
+    })();
+    saveInFlight.current = operation;
+    try {
+      return await operation;
+    } finally {
+      if (saveInFlight.current === operation) saveInFlight.current = null;
+    }
+  };
+
+  const reloadCurrent = (): void => {
+    if (question === null) return;
+    setSaving(true);
+    setSaveError(undefined);
+    void onReload(question.id).then((latest) => {
+      if (latest === null) {
+        setSaveError(labels.loadError);
+        return;
+      }
+      draft.accept(fromQuestion(latest));
       setPendingAnswer("");
+      setServerConflict(false);
       setAttempted(false);
-      guard.completeSwitch();
-      onSaved(saved);
-      return null;
+    }).catch(() => {
+      setSaveError(labels.loadError);
+    }).finally(() => {
+      setSaving(false);
+    });
+  };
+
+  const remove = async (): Promise<void> => {
+    if (question === null) return;
+    setSaving(true);
+    setDeleteError(undefined);
+    try {
+      await onDelete(question.revision);
+      setDeleteOpen(false);
     } catch (failure: unknown) {
       const code = blitzErrorCode(failure);
-      const message = code === "question_limit_reached" ? labels.questionLimit : labels.saveError;
-      setSaveError(message);
-      return message;
+      if (code === "question_conflict") {
+        setServerConflict(true);
+        setSaveError(labels.conflict);
+        setDeleteOpen(false);
+      } else setDeleteError(labels.deleteError);
     } finally {
       setSaving(false);
     }
@@ -277,6 +340,7 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
     dirty: draft.dirty || pendingAnswer.trim().length > 0,
     persistent: true,
     pending: saving,
+    ...(serverConflict && !isNew ? { conflict: { message: labels.conflict, reloadLabel: labels.reload, onReload: reloadCurrent } } : {}),
     ...(saveError === undefined ? {} : { error: saveError }),
     invalid,
     invalidMessage: labels.invalidAnswer,
@@ -354,9 +418,10 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
       confirmLabel={labels.delete}
       cancelLabel={labels.cancel}
       danger
+      pending={saving}
       {...(deleteError === undefined ? {} : { error: deleteError })}
       onCancel={() => { setDeleteOpen(false); }}
-      onConfirm={() => { void onDelete().then(() => setDeleteOpen(false)).catch(() => setDeleteError(labels.deleteError)); }}
+      onConfirm={() => { void remove(); }}
     />
     <ConfirmDialog
       opened={guard.confirmOpen}
@@ -365,6 +430,7 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
       confirmLabel={labels.discard}
       cancelLabel={labels.continueEditing}
       alternative={{ label: labels.save, onClick: () => { void guard.saveAndSwitch(); } }}
+      pending={guard.saving || saving}
       {...(guard.saveError === undefined ? {} : { error: guard.saveError })}
       onCancel={guard.continueEditing}
       onConfirm={guard.discardAndSwitch}

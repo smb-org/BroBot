@@ -8,6 +8,7 @@ import type { BlitzQuestion } from "../../src/modules/blitz_round/contracts";
 
 const question = (id: string, prompt: string, enabled = true): BlitzQuestion => ({
   id,
+  revision: 1,
   kind: "quiz",
   prompt,
   answers: ["Saturn"],
@@ -40,8 +41,8 @@ const setupPanelRoutes = async (page: Page, initial: BlitzQuestion[], language: 
       return;
     }
     if (request.method() === "POST") {
-      const input = request.postDataJSON() as Omit<BlitzQuestion, "id" | "lastUsedAt" | "createdAt" | "updatedAt">;
-      const created = { ...input, id: `fictional-question-${String(++sequence)}`, lastUsedAt: null, createdAt: "2030-01-01T12:00:00.000Z", updatedAt: "2030-01-01T12:00:00.000Z" };
+      const input = request.postDataJSON() as Omit<BlitzQuestion, "id" | "revision" | "lastUsedAt" | "createdAt" | "updatedAt">;
+      const created = { ...input, id: `fictional-question-${String(++sequence)}`, revision: 1, lastUsedAt: null, createdAt: "2030-01-01T12:00:00.000Z", updatedAt: "2030-01-01T12:00:00.000Z" };
       questions = [created, ...questions];
       await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ question: created }) });
       return;
@@ -51,7 +52,7 @@ const setupPanelRoutes = async (page: Page, initial: BlitzQuestion[], language: 
       const input = request.postDataJSON() as Omit<BlitzQuestion, "id" | "lastUsedAt" | "createdAt" | "updatedAt">;
       const existing = questions.find((entry) => entry.id === id);
       if (existing === undefined) throw new Error("question_missing");
-      const updated = { ...existing, ...input, updatedAt: "2030-01-01T12:01:00.000Z" };
+      const updated = { ...existing, ...input, revision: existing.revision + 1, updatedAt: "2030-01-01T12:01:00.000Z" };
       questions = questions.map((entry) => entry.id === id ? updated : entry);
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ question: updated }) });
       return;

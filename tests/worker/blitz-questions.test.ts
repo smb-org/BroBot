@@ -46,16 +46,20 @@ describe("blitz question D1 repository", () => {
     const created = await repository.create(channelId, {
       kind: "quiz", prompt: "What shines at night?", answers: ["Moon", "Starlight"], enabled: true,
     }, new Date().toISOString());
-    const edited = await repository.update(channelId, created.id, {
+    expect(created.revision).toBe(1);
+    const edited = await repository.update(channelId, created.id, created.revision, {
       kind: "quiz", prompt: "What orbits Earth?", answers: ["Moon"], enabled: false,
     }, new Date().toISOString());
 
-    expect(edited).toMatchObject({ prompt: "What orbits Earth?", enabled: false, answers: ["Moon"] });
+    expect(edited).toMatchObject({ prompt: "What orbits Earth?", enabled: false, answers: ["Moon"], revision: 2 });
     expect(await repository.get(otherChannelId, created.id)).toBeNull();
     expect((await repository.list(channelId, 1, "orbits")).questions).toHaveLength(1);
     expect(await repository.enabledCount(channelId)).toBe(0);
-    expect(await repository.delete(otherChannelId, created.id)).toBe(false);
-    expect(await repository.delete(channelId, created.id)).toBe(true);
+    expect(await repository.update(channelId, created.id, created.revision, {
+      kind: "quiz", prompt: "A stale edit?", answers: ["Sun"], enabled: true,
+    }, new Date().toISOString())).toBeNull();
+    expect(await repository.delete(otherChannelId, created.id, 2)).toBe(false);
+    expect(await repository.delete(channelId, created.id, 2)).toBe(true);
   });
 
   it("enforces the pool cap when concurrent creates compete for the last slot [protects=the D1 insert guard limits each channel to 500 questions atomically; fails_when=both last-slot creates succeed or neither does; no_claim=does not stress distributed D1 write latency]", async () => {

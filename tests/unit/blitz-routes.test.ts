@@ -37,12 +37,12 @@ describe("blitz question HTTP writes", () => {
     expect(create.status).toBe(201);
     const created: { question: { id: string } } = await create.json();
     const suffix = `/${created.question.id}`;
-    const update = await panelRouter.fetch(await request("fictional_editor", "PATCH", suffix, { ...quiz, enabled: false }), env);
+    const update = await panelRouter.fetch(await request("fictional_editor", "PATCH", suffix, { ...quiz, enabled: false, revision: 1 }), env);
     expect(update.status).toBe(200);
-    expect(await update.json()).toMatchObject({ question: { enabled: false } });
+    expect(await update.json()).toMatchObject({ question: { enabled: false, revision: 2 } });
     const invalid = await panelRouter.fetch(await request("fictional_editor", "POST", "", { ...quiz, answers: [] }), env);
     expect(invalid.status).toBe(400);
-    const remove = await panelRouter.fetch(await request("fictional_editor", "DELETE", suffix), env);
+    const remove = await panelRouter.fetch(await request("fictional_editor", "DELETE", `${suffix}?revision=2`), env);
     expect(remove.status).toBe(200);
     expect(await database.prepare("SELECT COUNT(*) AS count FROM blitz_questions WHERE channel_id = ?").bind(channelId).first()).toEqual({ count: 0 });
     const audits = await database.prepare("SELECT action FROM audit_log WHERE channel_id = ? AND module_id = ? ORDER BY rowid").bind(channelId, "blitz_round").all<{ action: string }>();
@@ -56,5 +56,47 @@ describe("blitz question HTTP writes", () => {
     const response = await panelRouter.fetch(await request("fictional_editor", "POST", "", quiz), env);
     expect(response.status).toBe(403);
     expect(await database.prepare("SELECT COUNT(*) AS count FROM blitz_questions").first()).toEqual({ count: 0 });
+  });
+
+  it("rejects a stale question update and returns the latest saved question [protects=the expected revision guards question edits and preserves the winner's corrected answer; fails_when=a stale edit overwrites a newer answer or returns no current entity; no_claim=does not exercise concurrent requests across separate database connections]", async () => {
+    const env = await setup("manager");
+    const create = await panelRouter.fetch(await request("fictional_editor", "POST", "", quiz), env);
+    const created = await create.json<{ question: { id: string } }>();
+    const suffix = `/${created.question.id}`;
+    const firstEdit = await panelRouter.fetch(await request("fictional_editor", "PATCH", suffix, {
+      ...quiz, answers: ["Sun", "Sol"], revision: 1,
+    }), env);
+    expect(firstEdit.status).toBe(200);
+
+    const staleEdit = await panelRouter.fetch(await request("fictional_editor", "PATCH", suffix, {
+      ...quiz, enabled: false, answers: ["Old answer"], revision: 1,
+    }), env);
+
+    expect(staleEdit.status).toBe(409);
+    await expect(staleEdit.json()).resolves.toMatchObject({
+      error: "question_conflict",
+      current: { prompt: quiz.prompt, answers: ["Sun", "Sol"], enabled: true, revision: 2 },
+    });
+  });
+
+  it("rejects a stale question deletion and returns the current question [protects=delete uses the question's expected revision and cannot erase an edit made after the manager loaded it; fails_when=a stale delete removes the newer question or returns no current entity; no_claim=does not exercise concurrent requests across separate database connections]", async () => {
+    const env = await setup("manager");
+    const create = await panelRouter.fetch(await request("fictional_editor", "POST", "", quiz), env);
+    const created = await create.json<{ question: { id: string } }>();
+    const suffix = `/${created.question.id}`;
+    const firstEdit = await panelRouter.fetch(await request("fictional_editor", "PATCH", suffix, {
+      ...quiz, enabled: false, revision: 1,
+    }), env);
+    expect(firstEdit.status).toBe(200);
+
+    const staleDelete = await panelRouter.fetch(await request("fictional_editor", "DELETE", `${suffix}?revision=1`), env);
+
+    expect(staleDelete.status).toBe(409);
+    await expect(staleDelete.json()).resolves.toMatchObject({
+      error: "question_conflict",
+      current: { prompt: quiz.prompt, enabled: false, revision: 2 },
+    });
+    expect(await database.prepare("SELECT COUNT(*) AS count FROM blitz_questions WHERE channel_id = ?").bind(channelId).first())
+      .toEqual({ count: 1 });
   });
 });

@@ -1456,6 +1456,11 @@ export interface ModuleEnableContext {
   now: string;
 }
 
+/** Host services available when a committed module deactivation needs to clear module-owned durable state. */
+interface ModuleDisableContext {
+  runModuleAlarm: ModuleRouteVariables["runModuleAlarm"];
+}
+
 /** Shared props for lazily loaded panel views. */
 export interface ModulePanelProperties {
   channelId: string;
@@ -1926,6 +1931,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
     context: ModuleEnableContext,
     channelId: string,
   ) => readonly D1PreparedStatement[] | undefined | Promise<readonly D1PreparedStatement[] | undefined>;
+  /** Called after a committed disable so module-owned durable state can be reconciled through the channel object. */
+  onDisable?: (context: ModuleDisableContext, channelId: string) => void | Promise<void>;
   // Module migrations and further action kinds join the contract once the
   // first module needs them. Command processing launched with
   // ModuleResult.

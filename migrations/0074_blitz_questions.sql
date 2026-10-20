@@ -5,6 +5,7 @@ CREATE TABLE blitz_questions (
   prompt TEXT NOT NULL,
   answers_json TEXT NOT NULL,
   enabled INTEGER NOT NULL DEFAULT 1,
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
   last_used_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,

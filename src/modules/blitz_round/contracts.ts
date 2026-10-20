@@ -24,6 +24,7 @@ export type BlitzQuestionKind = "scramble" | "quiz";
 
 export interface BlitzQuestion {
   id: string;
+  revision: number;
   kind: BlitzQuestionKind;
   prompt: string;
   answers: string[];
