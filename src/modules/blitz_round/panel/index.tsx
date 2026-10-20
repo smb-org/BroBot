@@ -84,7 +84,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
     setDetailOpen(true);
   });
 
-  const openSettings = (): void => requestSwitch(() => { setShowSettings(true); setDetailOpen(true); });
+  const openSettings = (): void => { setShowSettings(true); setDetailOpen(true); };
   const closeSettings = (): void => requestSwitch(() => { setShowSettings(false); setDetailOpen(true); });
 
   const saveQuestion = useCallback(async (draft: Draft): Promise<BlitzQuestion | null> => {
@@ -94,17 +94,29 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
       ? await createBlitzQuestion(channelId, input)
       : await updateBlitzQuestion(channelId, selectedId ?? "", input);
     await questionsQuery.refetch();
-    setSelectedId(saved.id);
-    setSelectedQuestion(saved);
     return saved;
   }, [channelId, questionsQuery, selectedId]);
+
+  const selectSavedQuestion = (saved: BlitzQuestion): void => {
+    setSelectedId(saved.id);
+    setSelectedQuestion(saved);
+  };
 
   const onDeleted = async (): Promise<void> => {
     const deletingId = selectedId;
     if (deletingId === null || deletingId === NEW_QUESTION) return;
     await deleteBlitzQuestion(channelId, deletingId);
     const refreshed = await questionsQuery.refetch();
-    const next = refreshed.data?.questions[0] ?? null;
+    const total = refreshed.data?.total ?? 0;
+    const nextPage = Math.min(page, Math.max(1, Math.ceil(total / BLITZ_QUESTION_PAGE_SIZE)));
+    const nextPageData = nextPage === page
+      ? refreshed.data
+      : await loadBlitzQuestions(channelId, nextPage, search);
+    if (nextPage !== page && nextPageData !== undefined) {
+      queryClient.setQueryData(moduleQueryKey(channelId, "blitz_round", `questions:${String(nextPage)}:${search}`), nextPageData);
+      setPage(nextPage);
+    }
+    const next = nextPageData?.questions[0] ?? null;
     setSelectedId(next?.id ?? NEW_QUESTION);
     setSelectedQuestion(next);
     setShowSettings(false);
@@ -163,6 +175,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
         language={language === "en" ? "en" : "de"}
         canManage={canManage}
         onSave={saveQuestion}
+        onSaved={selectSavedQuestion}
         onDelete={onDeleted}
         onOpenSettings={openSettings}
         registerSwitch={(switcher) => { switchRef.current = switcher; }}
@@ -183,12 +196,13 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   </div>;
 }
 
-function QuestionEditor({ question, isNew, language, canManage, onSave, onDelete, onOpenSettings, registerSwitch }: {
+function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved, onDelete, onOpenSettings, registerSwitch }: {
   question: BlitzQuestion | null;
   isNew: boolean;
   language: "de" | "en";
   canManage: boolean;
   onSave: (draft: Draft) => Promise<BlitzQuestion | null>;
+  onSaved: (question: BlitzQuestion) => void;
   onDelete: () => Promise<void>;
   onOpenSettings: () => void;
   registerSwitch: (switcher: ((proceed: () => void) => void) | null) => void;
@@ -207,6 +221,10 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onDelete
   });
   const input = questionInput(draft.value);
   const invalid = input === null || (draft.value.kind === "quiz" && pendingAnswer.trim().length > 0);
+  const reset = (): void => { draft.reset(); setPendingAnswer(""); setSaveError(undefined); setAttempted(false); };
+  const saveRef = useRef<() => Promise<string | null>>(() => Promise.resolve(null));
+  const guard = useDraftGuard(draft.dirty || pendingAnswer.trim().length > 0, () => saveRef.current(), reset);
+  const { guardSwitch } = guard;
 
   const save = async (): Promise<string | null> => {
     setAttempted(true);
@@ -231,6 +249,8 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onDelete
       draft.accept(fromQuestion(saved));
       setPendingAnswer("");
       setAttempted(false);
+      guard.completeSwitch();
+      onSaved(saved);
       return null;
     } catch (failure: unknown) {
       const code = blitzErrorCode(failure);
@@ -242,9 +262,7 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onDelete
     }
   };
 
-  const reset = (): void => { draft.reset(); setPendingAnswer(""); setSaveError(undefined); setAttempted(false); };
-  const guard = useDraftGuard(draft.dirty || pendingAnswer.trim().length > 0, save, reset);
-  const { guardSwitch } = guard;
+  useEffect(() => { saveRef.current = save; });
   useEffect(() => {
     registerSwitch(guardSwitch);
     return () => { registerSwitch(null); };
@@ -294,7 +312,7 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onDelete
         value={draft.value.prompt}
         onChange={(prompt) => { draft.setValue((current) => ({ ...current, prompt })); setAttempted(false); }}
         disabled={!canManage || saving}
-        maxLength={120}
+        maxLength={draft.value.kind === "scramble" ? 16 : 120}
         countLabel={(count, maximum) => `${String(count)} / ${String(maximum)}`}
         {...(localError === undefined ? {} : { error: localError })}
       />

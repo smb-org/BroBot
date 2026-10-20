@@ -129,6 +129,28 @@ test("pool CRUD keeps collection geometry steady [protects=question creation, ed
   }
 });
 
+test("desktop question detail keeps title, save cluster, and actions in one header row [protects=Blitz detail header follows the FAQ and Punkte title-save-actions row at 1440 and 1920 pixels; fails_when=the save cluster or actions wrap below the title at desktop widths; no_claim=does not assess narrower layouts or keyboard navigation]", async ({ page }) => {
+  await setupPanelRoutes(page, [question("fictional-header-question", "Which planet has rings?")]);
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1920, height: 1080 }]) {
+    await page.setViewportSize(viewport);
+    await gotoPanel(page);
+    const header = page.locator(".blitz-panel__detail > .page-header");
+    const title = header.getByRole("heading");
+    const save = header.locator(".page-header__save");
+    const actions = header.locator(".page-header__page-actions");
+    const titleBounds = await title.boundingBox();
+    const saveBounds = await save.boundingBox();
+    const actionsBounds = await actions.boundingBox();
+    expect(titleBounds).not.toBeNull();
+    expect(saveBounds).not.toBeNull();
+    expect(actionsBounds).not.toBeNull();
+    expect(Math.abs((titleBounds?.y ?? 0) - (saveBounds?.y ?? 0))).toBeLessThan(20);
+    expect(Math.abs((saveBounds?.y ?? 0) - (actionsBounds?.y ?? 0))).toBeLessThan(8);
+    expect((titleBounds?.x ?? 0) + (titleBounds?.width ?? 0)).toBeLessThan(saveBounds?.x ?? 0);
+    expect((saveBounds?.x ?? 0) + (saveBounds?.width ?? 0)).toBeLessThan(actionsBounds?.x ?? 0);
+  }
+});
+
 test("cockpit action is hidden when disabled and locks enabled modules for running rounds or empty pools [protects=only enabled Blitz modules contribute an action and enabled actions display the required lock reason; fails_when=a disabled module contributes a tile or enabled modules lack their running-round or empty-pool lock; no_claim=does not prove the atomic DO open rejects a simultaneous start]", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.route("**/api/channels/fictional_channel/modules/blitz_round/availability", async (route: Route) => {

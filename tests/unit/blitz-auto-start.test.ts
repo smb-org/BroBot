@@ -141,6 +141,46 @@ describe("blitz automatic starts", () => {
     expect(fixture.scheduled.get("auto-start")).toBe(Date.now() + 15 * minute);
   });
 
+  it("keeps the recovered live remainder when a delayed resolution hook arrives [protects=an offline-to-online recovery and late result hook preserve the same round timer remainder; fails_when=a delayed hook recomputes from resolvedAt and consumes offline time; no_claim=does not exercise Durable Object alarm dispatch or external result delivery]", async () => {
+    const fixture = setup();
+    fixture.setActive({ roundId: "delayed-round" });
+    await configureBlitzAutoStart(fixture.context, "activation");
+    const result = resolved("delayed-round");
+
+    fixture.setOnline(false);
+    fixture.setActive(null);
+    await configureBlitzAutoStart(fixture.context, "stream_state");
+    vi.advanceTimersByTime(60 * minute);
+    fixture.setOnline(true);
+    await configureBlitzAutoStart(fixture.context, "stream_state");
+    vi.advanceTimersByTime(5 * minute);
+    const preservedDeadline = Date.now() + 10 * minute;
+
+    await onBlitzRoundResolved(fixture.context, result);
+
+    expect(fixture.scheduled.get("auto-start")).toBe(preservedDeadline);
+  });
+
+  it("starts a fresh interval after automatic start is disabled and enabled again [protects=each enable establishes its own live-time baseline; fails_when=the first start after enable at minute 10 fires at minute 20 instead of 25; no_claim=module settings and round opening are mocked]", async () => {
+    const fixture = setup();
+    await configureBlitzAutoStart(fixture.context, "activation");
+    vi.advanceTimersByTime(5 * minute);
+    fixture.settings.autoStart = false;
+    await configureBlitzAutoStart(fixture.context, "settings");
+    expect(fixture.scheduled.size).toBe(0);
+
+    vi.advanceTimersByTime(5 * minute);
+    fixture.settings.autoStart = true;
+    await configureBlitzAutoStart(fixture.context, "activation");
+    expect(fixture.scheduled.get("auto-start")).toBe(Date.now() + 15 * minute);
+    vi.advanceTimersByTime(14 * minute);
+    await handleBlitzAutoStartAlarm(fixture.context, "auto-start", Date.now());
+    expect(openBlitzRound).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(minute);
+    await handleBlitzAutoStartAlarm(fixture.context, "auto-start", Date.now());
+    expect(openBlitzRound).toHaveBeenCalledOnce();
+  });
+
   it("resets unsourced settings timers but keeps elapsed live time after a resolution [protects=settings saves use their own baseline before any resolution and preserve resolution timing afterward; fails_when=saving settings delays an existing resolution timer or loses paused time; no_claim=does not verify the settings HTTP revision guard]", async () => {
     const fixture = setup();
     await configureBlitzAutoStart(fixture.context, "activation");

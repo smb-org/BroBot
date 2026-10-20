@@ -98,7 +98,12 @@ export const configureBlitzAutoStart = async (
     return;
   }
   if (existing?.waitingRoundId != null) {
-    await scheduleFromBaseline(context, settings.autoStartIntervalMinutes, Date.now(), existing);
+    // Recovery has closed the wait for this specific round. Mark its identity
+    // before delayed result delivery can recompute the timer from wall time.
+    await scheduleFromBaseline(context, settings.autoStartIntervalMinutes, Date.now(), {
+      ...existing,
+      lastResolvedRoundId: existing.waitingRoundId,
+    });
     return;
   }
   if (reason === "stream_state" && existing !== null) {
