@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactElement } from "react";
 
 import { calculateSlotPayoutRateForDraft, formatSlotPayoutRate } from "../domain/payout-rate";
 import { DEFAULT_EMOTE_SLOT_SETTINGS, type EmoteSlotSettings, type EmoteSlotSymbol } from "../contracts";
+import { isSevenTvSymbolMissing } from "../domain/seven-tv";
 import { emoteSlotsCatalog } from "../locale";
 import { emoteSlotTemplateMessages } from "./locale";
 import { Button, Dialog, FieldError, GroupedPicker, Icon, NativeRadio, StatusLed, TemplateTextField, UnitInput, type GroupedPickerEntry, type GroupedPickerGroup } from "../../../dashboard/ui";
@@ -9,9 +10,10 @@ import { Button, Dialog, FieldError, GroupedPicker, Icon, NativeRadio, StatusLed
 import "./slot-fields.css";
 
 interface SlotEmote {
-  source: "emoji" | "twitch";
+  source: "emoji" | "twitch" | "seven_tv";
   code: string;
   twitchId?: string;
+  sevenTvId?: string;
   name: string;
   imageUrl?: string;
 }
@@ -19,15 +21,20 @@ interface SlotEmote {
 interface SlotEmoteResponse {
   emoji: { items: SlotEmote[] };
   twitch: { status: "ok" | "reconnect_required" | "unavailable"; items: SlotEmote[] };
+  sevenTv?: { status: "ok" | "no_account" | "unavailable"; setName: string | null; items: SlotEmote[] };
 }
 
 const isSlotEmote = (value: unknown): value is SlotEmote => {
   if (typeof value !== "object" || value === null) return false;
   const emote = value as Record<string, unknown>;
-  return (emote.source === "emoji" || emote.source === "twitch") && typeof emote.code === "string" &&
+  return (emote.source === "emoji" || emote.source === "twitch" || emote.source === "seven_tv") && typeof emote.code === "string" &&
     typeof emote.name === "string" && (emote.twitchId === undefined || typeof emote.twitchId === "string") &&
+    (emote.sevenTvId === undefined || typeof emote.sevenTvId === "string") &&
     (emote.imageUrl === undefined || typeof emote.imageUrl === "string");
 };
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const isSlotEmoteResponse = (value: unknown): value is SlotEmoteResponse => {
   if (typeof value !== "object" || value === null) return false;
@@ -35,8 +42,12 @@ const isSlotEmoteResponse = (value: unknown): value is SlotEmoteResponse => {
   if (typeof response.emoji !== "object" || response.emoji === null || typeof response.twitch !== "object" || response.twitch === null) return false;
   const emoji = response.emoji as Record<string, unknown>;
   const twitch = response.twitch as Record<string, unknown>;
+  const sevenTv = response.sevenTv;
   return Array.isArray(emoji.items) && emoji.items.every(isSlotEmote) && Array.isArray(twitch.items) && twitch.items.every(isSlotEmote) &&
-    (twitch.status === "ok" || twitch.status === "reconnect_required" || twitch.status === "unavailable");
+    (twitch.status === "ok" || twitch.status === "reconnect_required" || twitch.status === "unavailable") &&
+    (sevenTv === undefined || isRecord(sevenTv) &&
+      (sevenTv.status === "ok" || sevenTv.status === "no_account" || sevenTv.status === "unavailable") &&
+      (sevenTv.setName === null || typeof sevenTv.setName === "string") && Array.isArray(sevenTv.items) && sevenTv.items.every(isSlotEmote));
 };
 
 interface SlotFieldContext {
@@ -86,11 +97,31 @@ const statusLine = (
   const text = status === "loading" ? copy.loadingEmotes
     : status === "unavailable" ? copy.emotesUnavailable
       : status === "reconnect_required" ? copy.emotesReconnect
-        : copy[group === "emoji" ? "countAvailable" : "emotesAvailable"].replace("{count}", String(count));
+        : copy[`${group === "emoji" ? "countAvailable" : "emotesAvailable"}${new Intl.PluralRules(language).select(count) === "one" ? "One" : ""}`].replace("{count}", String(count));
   return <span className="slot-picker-status" aria-live="polite">
     <span>{text}</span>
     {status === "reconnect_required" ? <Button variant="subtle" size="compact" onClick={onReconnect}>{copy.reconnect}</Button> : null}
   </span>;
+};
+
+const SlotEmoteImage = ({ src, code, picker = false }: { src: string | null; code: string; picker?: boolean }): ReactElement => {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  return src === null || src === failedUrl
+    ? <span className={`slot-symbol-placeholder${picker ? " slot-picker-emote" : ""}`} aria-hidden="true" title={code}>{code}</span>
+    : <img className={picker ? "slot-picker-emote" : undefined} src={src} alt="" onError={() => { setFailedUrl(src); }} />;
+};
+
+const reelImageUrl = (symbol: EmoteSlotSymbol, emotes: SlotEmoteResponse | null): string | null => {
+  if (symbol.source === "twitch" && symbol.twitchId !== undefined) {
+    return emotes?.twitch.items.find((item) => item.twitchId === symbol.twitchId)?.imageUrl ??
+      `https://static-cdn.jtvnw.net/emoticons/v2/${encodeURIComponent(symbol.twitchId)}/default/dark/1.0`;
+  }
+  if (symbol.source === "seven_tv" && symbol.sevenTvId !== undefined) {
+    if (emotes?.sevenTv !== undefined && emotes.sevenTv.status !== "unavailable" && isSevenTvSymbolMissing(symbol, emotes.sevenTv.items)) return null;
+    return emotes?.sevenTv?.items.find((item) => item.sevenTvId === symbol.sevenTvId)?.imageUrl ??
+      `https://cdn.7tv.app/emote/${encodeURIComponent(symbol.sevenTvId)}/2x.webp`;
+  }
+  return null;
 };
 
 export function SlotReelTable({
@@ -146,17 +177,31 @@ export function SlotReelTable({
   const emojiEntries: GroupedPickerEntry<SlotEmote>[] = (emotes?.emoji.items ?? []).map((emote) => ({
     id: emote.code,
     label: emote.name,
-    description: emote.code,
+    searchText: emote.code,
     icon: <span className="slot-picker-emoji" aria-hidden="true">{emote.code}</span>,
     value: emote,
   }));
   const twitchEntries: GroupedPickerEntry<SlotEmote>[] = (emotes?.twitch.items ?? []).map((emote) => ({
     id: emote.twitchId ?? emote.code,
     label: emote.name,
-    description: emote.code,
-    icon: emote.imageUrl === undefined ? <Icon name="styleFont" /> : <img src={emote.imageUrl} alt="" loading="lazy" />,
+    searchText: emote.code,
+    icon: emote.imageUrl === undefined ? <Icon name="styleFont" /> : <SlotEmoteImage src={emote.imageUrl} code={emote.code} picker />,
     value: emote,
   }));
+  const sevenTvEntries: GroupedPickerEntry<SlotEmote>[] = [];
+  const seenSevenTvPairs = new Set<string>();
+  for (const emote of emotes?.sevenTv?.items ?? []) {
+    const id = emote.sevenTvId === undefined ? emote.code : `${emote.sevenTvId}:${emote.code}`;
+    if (seenSevenTvPairs.has(id)) continue;
+    seenSevenTvPairs.add(id);
+    sevenTvEntries.push({
+      id,
+      label: emote.name,
+      searchText: emote.code,
+      icon: emote.imageUrl === undefined ? <Icon name="styleFont" /> : <SlotEmoteImage src={emote.imageUrl} code={emote.code} picker />,
+      value: emote,
+    });
+  }
   const requestReconnect = (): void => {
     setReconnectAfterPickerClose(true);
     setPickerRow(null);
@@ -166,6 +211,16 @@ export function SlotReelTable({
     setReconnectAfterPickerClose(false);
     setReconnectDialogOpen(true);
   };
+  const sevenTvStatusText = parsedContext?.channelId === undefined || unavailable || emotes?.sevenTv?.status === "unavailable"
+    ? copy.sevenTvUnavailable
+    : loading ? copy.sevenTvLoading
+      : emotes?.sevenTv?.status === "no_account" ? copy.sevenTvNoAccount
+        : emotes?.sevenTv?.status === "ok" ? copy.sevenTvActiveSet(emotes.sevenTv.setName ?? "7TV")
+          : copy.sevenTvUnavailable;
+  const sevenTvStatus = <span className="slot-picker-status slot-picker-status--seven-tv" aria-live="polite">
+    <span title={sevenTvStatusText}>{sevenTvStatusText}</span>
+    <span className="slot-picker-status__hint">{copy.sevenTvChatHint}</span>
+  </span>;
   const groups: GroupedPickerGroup<SlotEmote>[] = [
     { id: "emoji", label: copy.emoji, entries: emojiEntries, footer: statusLine("ok", emojiEntries.length, language, "emoji") },
     {
@@ -173,6 +228,12 @@ export function SlotReelTable({
       label: copy.twitch,
       entries: twitchEntries,
       footer: statusLine(parsedContext?.channelId === undefined || unavailable ? "unavailable" : loading ? "loading" : emotes?.twitch.status ?? "unavailable", twitchEntries.length, language, "twitch", requestReconnect),
+    },
+    {
+      id: "seven_tv",
+      label: copy.sevenTv,
+      entries: sevenTvEntries,
+      footer: <span aria-hidden="true" />,
     },
   ];
   const status = rate === null ? "off" : rate.status === "locked" ? "error" : rate.status === "warning" ? "warn" : "ok";
@@ -185,6 +246,7 @@ export function SlotReelTable({
       source: nextSymbol.source,
       code: nextSymbol.code,
       twitchId: nextSymbol.twitchId,
+      sevenTvId: nextSymbol.sevenTvId,
       name: nextSymbol.name,
     }).symbols);
     setPickerRow(null);
@@ -219,12 +281,15 @@ export function SlotReelTable({
         </tr></thead>
         <tbody>{parsedSettings.symbols.map((symbol, index) => <tr key={symbol.id}>
           <td><span className="slot-symbol">
-            {symbol.source === "twitch" && symbol.twitchId !== undefined
-              ? <img src={`https://static-cdn.jtvnw.net/emoticons/v2/${encodeURIComponent(symbol.twitchId)}/default/dark/1.0`} alt="" />
-              : <span className="slot-symbol-glyph" aria-hidden="true">{symbol.code}</span>}
-            <span className="slot-symbol-name">{symbol.name}</span>
+            {symbol.source === "emoji" ? <span className="slot-symbol-glyph" aria-hidden="true">{symbol.code}</span>
+              : <SlotEmoteImage src={reelImageUrl(symbol, emotes)} code={symbol.code} />}
+            <span className="slot-symbol-copy">
+              <span className="slot-symbol-name">{symbol.name}</span>
+              <span className="slot-symbol-missing" aria-live="polite">{symbol.source === "seven_tv" && emotes?.sevenTv !== undefined && emotes.sevenTv.status !== "unavailable" &&
+                isSevenTvSymbolMissing(symbol, emotes.sevenTv.items) ? copy.sevenTvMissing : "\u00a0"}</span>
+            </span>
           </span></td>
-          <td><span className="slot-source-badge">{symbol.source === "emoji" ? copy.emoji : copy.twitch}</span></td>
+          <td><span className="slot-source-badge">{symbol.source === "emoji" ? copy.emoji : symbol.source === "twitch" ? copy.twitch : copy.sevenTv}</span></td>
           <td>{numberValue(symbol.weight, (next) => updateNumber(index, "weight", next),
             copy.weightAria.replace("{name}", symbol.name), 1, 99, numericError(symbol.weight, 1, 99, copy.weightError))}</td>
           <td>{symbol.isJackpot ? <span className="slot-jackpot-row">{copy.jackpotRow}</span> : <div className="slot-multiplier"><span aria-hidden="true">×</span>{numberValue(symbol.triple,
@@ -238,6 +303,7 @@ export function SlotReelTable({
             ariaLabel={copy.jackpotAria.replace("{name}", symbol.name)} /></td>
           <td><GroupedPicker
             groups={groups}
+            footer={sevenTvStatus}
             messages={pickerMessages(language)}
             opened={pickerRow === index}
             onOpenedChange={(opened) => setPickerRow(opened ? index : null)}

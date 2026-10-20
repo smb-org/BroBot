@@ -68,6 +68,7 @@ const renderElement = (
       style={style}
     >
       <Suspense fallback={null}><ModuleElement
+        elementId={element.id}
         config={element.config ?? {}}
         state={element.state ?? null}
         now={Date.now()}

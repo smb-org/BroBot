@@ -15,7 +15,7 @@ import { MODULES } from "../modules/registry";
 import { ModuleOverlayElementEditor } from "./ModuleOverlayElementEditor";
 import { ModuleIcon } from "./module-panels";
 import variableViewCss from "../overlay/variable.css?inline";
-import { clampOverlayEditorPosition, overlayEditorMeasuredSize, UNMEASURED_ELEMENT_FALLBACK_SIZE, type OverlayEditorSize } from "./overlay-editor-model";
+import { clampOverlayEditorPosition, isModuleOverlayElementAddable, overlayEditorMeasuredSize, UNMEASURED_ELEMENT_FALLBACK_SIZE, type OverlayEditorSize } from "./overlay-editor-model";
 import {
   parseOverlayStyleBlock,
   replaceOverlayStyleBlock,
@@ -44,6 +44,20 @@ import { useChannelVariablesQuery, useOverlayAccessesQuery, useOverlayQuery } fr
 import { queryKeys } from "./data/keys";
 import { Button, CodeField, ColorField, ConfirmDialog, Field, Icon, LoadState, UnitInput, ToolPage, Select, StepDialog, notify, type IconName, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
 import "./overlay-editor.css";
+
+const installPreviewStylesheet = (
+  frameDocument: Document,
+  attribute: "data-brobot-overlay-tally-css" | "data-brobot-overlay-slot-css",
+  css: string,
+): void => {
+  let style = frameDocument.head.querySelector<HTMLStyleElement>(`style[${attribute}]`);
+  if (style === null) {
+    style = frameDocument.createElement("style");
+    style.setAttribute(attribute, "");
+    frameDocument.head.appendChild(style);
+  }
+  style.textContent = css;
+};
 
 interface OverlayEditorPageProperties {
   channelId: string;
@@ -245,6 +259,7 @@ interface ModuleElementOption {
   navigationCategory: ModuleNavigationCategory;
   defaultSize: { width: number; height: number };
   defaultConfig: EditorJsonObject;
+  hideWhenModuleDisabled?: boolean;
   previewState?: ModuleOverlayElementDefinition["previewState"];
   parseConfig: (raw: unknown) => EditorJsonObject | null;
   description: (language: "de" | "en") => string;
@@ -260,6 +275,7 @@ const MODULE_ELEMENT_OPTIONS: readonly ModuleElementOption[] = MODULE_OVERLAY_EL
     navigationCategory: module?.navigationCategory ?? MODULE_NAVIGATION_CATEGORIES[0],
     defaultSize: definition.defaultSize,
     defaultConfig: definition.defaultConfig,
+    ...(definition.hideWhenModuleDisabled === true ? { hideWhenModuleDisabled: true } : {}),
     ...(definition.previewState === undefined ? {} : { previewState: definition.previewState }),
     parseConfig: definition.parseConfig,
     description: (language) => definition.editorDescription?.[language] ?? "",
@@ -587,7 +603,7 @@ function OverlayEditorWorkspace({
       currentValue: formatNumber(liveVariables[name] ?? value),
       icon: <Icon name="variable" size={20} />,
     })),
-    ...MODULE_ELEMENT_OPTIONS.map((option) => {
+    ...MODULE_ELEMENT_OPTIONS.filter((option) => isModuleOverlayElementAddable(option.hideWhenModuleDisabled, moduleIsEnabled(option.moduleId))).map((option) => {
       const name = option.moduleName(language);
       const enabled = moduleIsEnabled(option.moduleId);
       return {
@@ -686,15 +702,13 @@ function OverlayEditorWorkspace({
     root.setAttribute("role", "application");
     root.setAttribute("aria-label", labels.editorPreviewCanvas);
     root.tabIndex = 0;
-    void import("../overlay/tally/overlay-tally.css?inline").then(({ default: overlayTallyCss }) => {
+    void Promise.all([
+      import("../overlay/tally/overlay-tally.css?inline"),
+      import("../modules/emote_slots/overlay/slot.css?inline"),
+    ]).then(([{ default: overlayTallyCss }, { default: slotCss }]) => {
       if (!frame.isConnected || frame.contentDocument !== frameDocument) return;
-      let overlayTallyStyle = frameDocument.head.querySelector<HTMLStyleElement>("style[data-brobot-overlay-tally-css]");
-      if (overlayTallyStyle === null) {
-        overlayTallyStyle = frameDocument.createElement("style");
-        overlayTallyStyle.dataset.brobotOverlayTallyCss = "";
-        frameDocument.head.appendChild(overlayTallyStyle);
-      }
-      overlayTallyStyle.textContent = overlayTallyCss;
+      installPreviewStylesheet(frameDocument, "data-brobot-overlay-tally-css", overlayTallyCss);
+      installPreviewStylesheet(frameDocument, "data-brobot-overlay-slot-css", slotCss);
       canvasRef.current = root;
       previewFrameRootRef.current = root;
       setPreviewFrameRoot(root);

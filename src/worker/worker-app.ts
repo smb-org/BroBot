@@ -11,7 +11,7 @@ const overlayContentSecurityPolicy = (publicOrigin: string): string => {
     "form-action 'none'",
     `script-src ${publicUrl.origin}`,
     `style-src ${publicUrl.origin} 'unsafe-inline'`,
-    `img-src ${publicUrl.origin}`,
+    `img-src ${publicUrl.origin} https://static-cdn.jtvnw.net https://cdn.7tv.app`,
     `font-src ${publicUrl.origin}`,
     `connect-src ${publicUrl.origin} ${websocketOrigin}`,
   ].join("; ");

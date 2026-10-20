@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RealtimeEnvelope } from "../../src/realtime-contract";
 import type { OverlayRealtimeCallbacks } from "../../src/overlay/realtime";
+import { emoteSlotOverlayElement } from "../../src/modules/emote_slots/overlay/element";
 
 const realtimeMocks = vi.hoisted(() => ({ connectOverlayRealtime: vi.fn() }));
 
@@ -63,6 +64,44 @@ const overlayPayload = (
   { status: 200, headers: { "Content-Type": "application/json" } },
 );
 
+const slotOverlayPayload = (
+  slot: { state?: Record<string, unknown> | null; moduleEnabled?: boolean; inComposition?: boolean } | null = {},
+  css = "",
+  revision = 1,
+): Response =>
+  new Response(JSON.stringify({
+    language: "en",
+    overlay: {
+      id: "overlay-slot-fixture",
+      revision,
+      width: 1920,
+      height: 1080,
+      css,
+      elements: slot === null ? [] : [{
+        ...element("slot-element", 0, 0, 100, 1, slot.inComposition ?? true, "", "emote_slots.slot"),
+        label: "Slot",
+        variableName: null,
+        text: "",
+        config: {},
+        state: slot.state ?? null,
+        moduleEnabled: slot.moduleEnabled ?? true,
+      }],
+    },
+    variables: {},
+  }), { status: 200, headers: { "Content-Type": "application/json" } });
+
+const slotSpinState = {
+  spinId: "spin-shell-fixture",
+  login: "pixelwanderer",
+  language: "en",
+  outcome: "win",
+  spunAt: "2030-01-01T00:00:00.000Z",
+  symbols: [{ source: "emoji", code: "🍒" }, { source: "emoji", code: "🔔" }, { source: "emoji", code: "💎" }],
+  net: 70,
+  jackpot: 1_256,
+  jackpotHit: false,
+};
+
 const createVariableMessage = (value: number): RealtimeEnvelope<"variables.changed"> => ({
   version: 1,
   id: "fixture-message",
@@ -119,6 +158,215 @@ describe("OverlayShell and OverlayCanvas", () => {
     expect(container.querySelectorAll(".brobot-variable__value")).toHaveLength(3);
     await waitFor(() => expect(document.head.querySelector("style[data-brobot-overlay-css]")?.textContent)
       .toBe(".brobot-overlay { color: white; }"));
+  });
+
+  it("keeps a visible slot spin through a poll-triggered bootstrap reload and its original expiry (protects=a transient spin on an unchanged enabled element remains visible through the original presentation window after bootstrap hydration; fails_when=the poll reload clears the spin early or restarts its expiry; no_claim=spin delivery before the reload or a disabled element's presentation)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+    await emoteSlotOverlayElement.load();
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(slotOverlayPayload())
+      .mockResolvedValue(slotOverlayPayload({}, ".brobot-overlay { color: rgb(1, 2, 3); }"));
+    vi.stubGlobal("fetch", fetcher);
+
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(container.querySelector("[data-element=\"slot-element\"]")).not.toBeNull();
+    act(() => realtimeCallbacks?.onModuleMessage?.({
+      version: 1,
+      id: "message-slot-spin",
+      createdAt: "2030-01-01T00:00:00.000Z",
+      channelId: "fictional-channel",
+      type: "modul.emote_slots.spin",
+      payload: slotSpinState,
+    }));
+    await act(async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); });
+    expect(container.querySelector(".emote-slot-overlay")?.getAttribute("data-spin-id")).toBe("spin-shell-fixture");
+
+    act(() => { vi.advanceTimersByTime(1_000); });
+    act(() => realtimeCallbacks?.onModuleMessage?.({
+      version: 1,
+      id: "message-poll-opened",
+      createdAt: "2030-01-01T00:00:01.000Z",
+      channelId: "fictional-channel",
+      type: "modul.chat_voting.opened",
+      payload: { pollId: "poll-fixture" },
+    }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+      for (let index = 0; index < 20; index += 1) await Promise.resolve();
+    });
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(document.head.querySelector("style[data-brobot-overlay-css]")?.textContent).toBe(".brobot-overlay { color: rgb(1, 2, 3); }");
+    expect(container.querySelector(".emote-slot-overlay")?.getAttribute("data-spin-id")).toBe("spin-shell-fixture");
+    act(() => { vi.advanceTimersByTime(6_100); });
+    expect(container.querySelector(".emote-slot-overlay")).toBeNull();
+  });
+
+  it("expires a slot spin at its original deadline after a revision remount (protects=a spin keeps its first client presentation deadline when an overlay revision remounts it; fails_when=the spin remains visible beyond the original deadline; no_claim=deadline synchronization between separate browser sources)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+    await emoteSlotOverlayElement.load();
+    const spin = { ...slotSpinState, spinId: "spin-before-revision-fixture" };
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(slotOverlayPayload({ state: spin }))
+      .mockResolvedValue(slotOverlayPayload({ state: spin }, ".brobot-overlay { color: white; }", 2));
+    vi.stubGlobal("fetch", fetcher);
+
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
+    await act(async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); });
+    expect(container.querySelector(".emote-slot-overlay")?.getAttribute("data-spin-id")).toBe(spin.spinId);
+
+    act(() => { vi.advanceTimersByTime(1_000); });
+    act(() => realtimeCallbacks?.onOverlayChanged?.({
+      version: 1,
+      id: "fixture-revision-before-expiry",
+      createdAt: "2030-01-01T00:00:01.000Z",
+      channelId: "fixture-channel",
+      type: "overlay.changed",
+      payload: { overlayId: "overlay-slot-fixture", revision: 2 },
+    }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+      for (let index = 0; index < 20; index += 1) await Promise.resolve();
+    });
+    expect(container.querySelector(".emote-slot-overlay")?.getAttribute("data-spin-id")).toBe(spin.spinId);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_950); });
+    expect(container.querySelector(".emote-slot-overlay")).toBeNull();
+  });
+
+  it("keeps an expired slot spin hidden after a revision remount (protects=an expired spin stays hidden when the same state returns in a later overlay revision; fails_when=the revision remount displays that spin again; no_claim=whether the server later emits a new spin with a different spinId)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+    await emoteSlotOverlayElement.load();
+    const spin = { ...slotSpinState, spinId: "spin-after-expiry-fixture" };
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(slotOverlayPayload({ state: spin }))
+      .mockResolvedValue(slotOverlayPayload({ state: spin }, ".brobot-overlay { color: white; }", 2));
+    vi.stubGlobal("fetch", fetcher);
+
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
+    await act(async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); });
+    expect(container.querySelector(".emote-slot-overlay")?.getAttribute("data-spin-id")).toBe(spin.spinId);
+    await act(async () => { await vi.advanceTimersByTimeAsync(7_200); });
+    expect(container.querySelector(".emote-slot-overlay")).toBeNull();
+
+    act(() => realtimeCallbacks?.onOverlayChanged?.({
+      version: 1,
+      id: "fixture-revision-after-expiry",
+      createdAt: "2030-01-01T00:00:07.200Z",
+      channelId: "fixture-channel",
+      type: "overlay.changed",
+      payload: { overlayId: "overlay-slot-fixture", revision: 2 },
+    }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+      for (let index = 0; index < 20; index += 1) await Promise.resolve();
+    });
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(container.querySelector(".emote-slot-overlay")).toBeNull();
+  });
+
+  it("retains a live spin when its enabled standalone slot reloads (protects=the standalone element URL keeps transient slot state across an unrelated bootstrap reload; fails_when=the reloaded canvas loses the active result despite the element remaining enabled; no_claim=state retention for composition elements or other module kinds)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+    await emoteSlotOverlayElement.load();
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(slotOverlayPayload({ inComposition: false }))
+      .mockResolvedValue(slotOverlayPayload({ inComposition: false }, ".brobot-overlay { color: white; }", 2));
+    vi.stubGlobal("fetch", fetcher);
+
+    const { container } = render(<OverlayShell token="fictional-token" elementId="slot-element" />);
+    await act(async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); });
+    expect(container.querySelector('[data-element="slot-element"]')).not.toBeNull();
+    act(() => realtimeCallbacks?.onModuleMessage?.({
+      version: 1,
+      id: "message-standalone-slot-spin",
+      createdAt: "2030-01-01T00:00:00.000Z",
+      channelId: "fictional-channel",
+      type: "modul.emote_slots.spin",
+      payload: { ...slotSpinState, spinId: "spin-standalone-reload-fixture" },
+    }));
+    await act(async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); });
+    expect(container.querySelector(".emote-slot-overlay")?.getAttribute("data-spin-id")).toBe("spin-standalone-reload-fixture");
+
+    act(() => realtimeCallbacks?.onModuleMessage?.({
+      version: 1,
+      id: "message-standalone-unrelated-update",
+      createdAt: "2030-01-01T00:00:01.000Z",
+      channelId: "fictional-channel",
+      type: "modul.chat_voting.opened",
+      payload: { pollId: "fictional-poll" },
+    }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+      for (let index = 0; index < 20; index += 1) await Promise.resolve();
+    });
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[data-element="slot-element"]')).not.toBeNull();
+    expect(container.querySelector(".emote-slot-overlay")?.getAttribute("data-spin-id")).toBe("spin-standalone-reload-fixture");
+  });
+
+  it.each(["disabled", "removed"] as const)("drops a transient slot spin when its element is %s (protects=transient state is discarded when the same enabled element is disabled or removed; fails_when=reenabling or restoring the element revives its old spin; no_claim=state persistence for other overlay element kinds)", async (change) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+    await emoteSlotOverlayElement.load();
+    const secondBootstrap = change === "removed" ? slotOverlayPayload(null) : slotOverlayPayload({ moduleEnabled: false });
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(slotOverlayPayload())
+      .mockResolvedValueOnce(secondBootstrap)
+      .mockResolvedValue(slotOverlayPayload());
+    vi.stubGlobal("fetch", fetcher);
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    act(() => realtimeCallbacks?.onModuleMessage?.({
+      version: 1,
+      id: "message-slot-spin-before-drop",
+      createdAt: "2030-01-01T00:00:00.000Z",
+      channelId: "fictional-channel",
+      type: "modul.emote_slots.spin",
+      payload: slotSpinState,
+    }));
+    await act(async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); });
+    expect(container.querySelector(".emote-slot-overlay")).not.toBeNull();
+    const triggerPollReload = (id: string): void => realtimeCallbacks?.onModuleMessage?.({
+      version: 1,
+      id,
+      createdAt: "2030-01-01T00:00:01.000Z",
+      channelId: "fictional-channel",
+      type: "modul.chat_voting.opened",
+      payload: { pollId: id },
+    });
+
+    act(() => triggerPollReload("message-slot-drop"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+      for (let index = 0; index < 20; index += 1) await Promise.resolve();
+    });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(container.querySelector(".emote-slot-overlay")).toBeNull();
+
+    act(() => triggerPollReload("message-slot-restore"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+      for (let index = 0; index < 20; index += 1) await Promise.resolve();
+    });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(container.querySelector(".emote-slot-overlay")).toBeNull();
   });
 
   it("merges voting tallies in the shell and keeps closed overlay state after delayed messages", async () => {
