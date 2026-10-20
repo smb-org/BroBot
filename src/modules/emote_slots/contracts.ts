@@ -8,16 +8,23 @@ export type EmoteSlotTextKind = "win" | "loss" | "pair" | "jackpot";
 
 const emoteSlotSymbolSchema = z.object({
   id: z.string().trim().min(1).max(48),
-  source: z.enum(["emoji", "twitch"]),
+  source: z.enum(["emoji", "twitch", "seven_tv"]),
   code: z.string().trim().min(1).max(64),
   twitchId: z.string().trim().min(1).max(64).optional(),
+  sevenTvId: z.string().trim().min(1).max(64).optional(),
   name: z.string().trim().min(1).max(80),
   weight: z.number().int().min(1).max(99),
   triple: z.number().int().min(2).max(500),
   isJackpot: z.boolean(),
 }).superRefine((symbol, context) => {
-  if (symbol.source === "emoji" && symbol.twitchId !== undefined) {
-    context.addIssue({ code: "custom", path: ["twitchId"], message: "emoji_symbol_has_twitch_id" });
+  if (symbol.source !== "twitch" && symbol.twitchId !== undefined) {
+    context.addIssue({ code: "custom", path: ["twitchId"], message: "non_twitch_symbol_has_twitch_id" });
+  }
+  if (symbol.source !== "seven_tv" && symbol.sevenTvId !== undefined) {
+    context.addIssue({ code: "custom", path: ["sevenTvId"], message: "non_seven_tv_symbol_has_seven_tv_id" });
+  }
+  if (symbol.source === "seven_tv" && symbol.sevenTvId === undefined) {
+    context.addIssue({ code: "custom", path: ["sevenTvId"], message: "seven_tv_symbol_requires_id" });
   }
 });
 

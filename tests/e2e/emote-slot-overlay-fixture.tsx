@@ -1,0 +1,64 @@
+import { useState } from "react";
+import { createRoot } from "react-dom/client";
+
+import SlotOverlay from "../../src/modules/emote_slots/overlay/slot";
+import type { JsonObject } from "../../src/modules/contract";
+
+const fixtureNow = Date.now();
+
+const firstSpin: JsonObject = {
+  spinId: "fixture-spin-one",
+  login: "pixelwanderer_with_a_long_login",
+  language: "de",
+  outcome: "win",
+  spunAt: new Date(fixtureNow).toISOString(),
+  symbols: [
+    { source: "emoji", code: "🍒" },
+    { source: "seven_tv", code: "pixelwave", sevenTvId: "active-emote" },
+    { source: "twitch", code: "moonwave", twitchId: "moon-wave" },
+  ],
+  net: 70,
+  jackpot: 1_256,
+  jackpotHit: false,
+};
+
+const secondSpin: JsonObject = {
+  spinId: "fixture-spin-two",
+  login: "pixelwanderer",
+  language: "de",
+  outcome: "pair",
+  spunAt: new Date(fixtureNow + 1_000).toISOString(),
+  symbols: [
+    { source: "seven_tv", code: "ghostwave_extra_long", sevenTvId: "removed-emote", missing: true },
+    { source: "twitch", code: "moonwave", twitchId: "failed-emote" },
+    { source: "seven_tv", code: "pixelwave", sevenTvId: "failed-emote" },
+  ],
+  net: 0,
+  jackpot: 1_300,
+  jackpotHit: true,
+};
+
+const progressSpin: JsonObject = {
+  ...secondSpin,
+  spinId: "fixture-spin-progress",
+  symbols: [
+    { source: "emoji", code: "🍒" },
+    { source: "emoji", code: "🔔" },
+    { source: "emoji", code: "🍒" },
+  ],
+};
+
+export const Fixture = () => {
+  const [state, setState] = useState(firstSpin);
+  const [revision, setRevision] = useState(0);
+  const [unrelatedRevision, setUnrelatedRevision] = useState(0);
+  return <main data-unrelated-revision={unrelatedRevision}>
+    <div style={{ position: "absolute", left: 32, bottom: 32 }}><SlotOverlay key={revision} config={{}} state={state} now={fixtureNow} language="en" elementId="fictional-slot-overlay-element" /></div>
+    <button type="button" onClick={() => { setState(secondSpin); }}>Trigger next spin</button>
+    <button type="button" onClick={() => { setState(progressSpin); }}>Trigger progress spin</button>
+    <button type="button" onClick={() => { setUnrelatedRevision((current) => current + 1); }}>Rerender without changing spin</button>
+    <button type="button" onClick={() => { setRevision((current) => current + 1); }}>Remount overlay revision</button>
+  </main>;
+};
+
+createRoot(document.getElementById("root") as HTMLElement).render(<Fixture />);

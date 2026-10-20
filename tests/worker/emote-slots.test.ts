@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 
 import type { ModuleEvent, ModuleExecutionContext, ModulePointsAccess } from "../../src/modules/contract";
@@ -125,7 +125,11 @@ const emoteRoute = (args: {
 };
 
 beforeAll(runMigrations);
-afterEach(clearPointObjectAlarms);
+afterEach(async () => {
+  await clearPointObjectAlarms();
+  clearEmoteSlotEmoteCache();
+  vi.unstubAllGlobals();
+});
 
 describe("emote slot settlements in the worker Durable Object", () => {
   it(`serializes twenty jackpot spins and pays the live pot once per turn (${testCard("20 maximum stakes pay jackpot balances 1,035 then 535 nineteen times with a final 500 pot and zero account sum", "a payout uses a stale jackpot snapshot, duplicates the pot, or changes the house by anything other than -700", "20 forced jackpot settlements run concurrently against one real ChannelObject")})`, async () => {
@@ -231,7 +235,7 @@ describe("emote slot settlements in the worker Durable Object", () => {
     await expect(object.pointHistory(slotModule, "viewer_demo")).resolves.toMatchObject({ rows: [expect.objectContaining({ kind: "bonus" })] });
   });
 
-  it(`delivers the stored result once and sends nothing on EventSub replay (${testCard("the chat module formats the committed result and emits no action for a replay", "a replay generates a fresh chat reply or formats values that differ from the stored result", "action descriptions are inspected before Twitch delivery")})`, async () => {
+  it(`delivers the stored result once and sends nothing on EventSub replay (${testCard("the booked spin emits matching chat and overlay results once, and a replay emits nothing", "chat or overlay values differ from the committed settlement, or a replay adds actions", "action descriptions are inspected before Twitch delivery")})`, async () => {
     const channelId = `slot-chat-replay-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
@@ -246,10 +250,70 @@ describe("emote slot settlements in the worker Durable Object", () => {
     const kind = isJackpot ? "jackpot" : stored.pair ? "pair" : stored.net > 0 ? "win" : "loss";
     const second = await processEmoteSlotMessage(event, context);
 
-    expect(first.actions).toHaveLength(1);
-    expect(first.actions[0]).toMatchObject({ text: formatSlotReply(stored, DEFAULT_EMOTE_SLOT_SETTINGS.symbols, "de", "pixelpilz", kind) });
+    expect(first.actions).toHaveLength(2);
+    expect(first.actions[0]).toMatchObject({
+      kind: "chat",
+      text: formatSlotReply(stored, DEFAULT_EMOTE_SLOT_SETTINGS.symbols, "de", "pixelpilz", kind),
+    });
+    expect(first.actions[1]).toMatchObject({
+      kind: "overlay",
+      type: "spin",
+      elementKind: "emote_slots.slot",
+      payload: {
+        spinId: event.triggerId,
+        symbols: stored.symbols.map((index) => ({
+          source: "emoji",
+          code: DEFAULT_EMOTE_SLOT_SETTINGS.symbols[index]?.code,
+        })),
+        net: stored.net,
+        jackpot: stored.jackpotAfter,
+        jackpotHit: stored.jackpotWin > 0,
+      },
+    });
     expect(second.actions).toEqual([]);
     await expect(pointOperation(object, "msg:message-slot-delivery")).resolves.toMatchObject({ kind: "game", result: stored });
+  });
+
+  it(`keeps chat and overlay on the saved code after a 7TV alias rename (${testCard("a saved oldwave code remains in chat and the overlay marks its same-id newwave alias missing", "the overlay treats the reused id as active or changes the configured chat or overlay code to newwave", "the active provider response contains one renamed alias for the saved id")})`, async () => {
+    const channelId = `slot-alias-rename-${crypto.randomUUID()}`;
+    clearEmoteSlotEmoteCache(channelId);
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    await object.touchPointAccount(pointsModule, "viewer_demo", "pixelpilz", 500);
+    const baseEvent = slotEvent(channelId, "message-slot-alias-rename");
+    const settings: EmoteSlotSettings = {
+      ...baseEvent.settings,
+      symbols: baseEvent.settings.symbols.map((symbol) => ({
+        ...symbol,
+        source: "seven_tv" as const,
+        code: "oldwave",
+        sevenTvId: "emote-shared",
+        name: "oldwave",
+      })),
+    };
+    const event = { ...baseEvent, settings };
+    const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(Response.json({
+      emote_set: { name: "Night Shift", emotes: [{ id: "emote-shared", name: "newwave" }] },
+    })));
+    vi.stubGlobal("fetch", fetcher);
+
+    const result = await processEmoteSlotMessage(event, eventContext(object));
+    const chatAction = result.actions.find((action) => action.kind === "chat");
+    const overlayAction = result.actions.find((action) => action.kind === "overlay");
+
+    expect(chatAction?.kind).toBe("chat");
+    if (chatAction?.kind === "chat") expect(chatAction.text).toContain("oldwave");
+    expect(overlayAction?.kind).toBe("overlay");
+    if (overlayAction?.kind === "overlay") {
+      expect(overlayAction.payload.symbols).toEqual(Array.from({ length: 3 }, () => ({
+        source: "seven_tv",
+        code: "oldwave",
+        sevenTvId: "emote-shared",
+        missing: true,
+      })));
+    }
+    expect(fetcher).toHaveBeenCalledOnce();
+    clearEmoteSlotEmoteCache(channelId);
   });
 });
 

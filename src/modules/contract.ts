@@ -222,6 +222,7 @@ type JsonValue = string | number | boolean | null | readonly JsonValue[] | { rea
 export type JsonObject = Readonly<Record<string, JsonValue>>;
 
 export interface ModuleOverlayElementProps {
+  elementId?: string;
   config: Readonly<Record<string, unknown>>;
   state: Readonly<Record<string, unknown>> | null;
   now: number;
@@ -299,6 +300,8 @@ export interface ModuleOverlayElementDefinition {
   /** Localized one-line description shown in the overlay element palette. */
   editorDescription?: Readonly<Record<ModuleLanguage, string>>;
   editorModuleLabel?: Readonly<Record<ModuleLanguage, string>>;
+  /** Omits this element from the add palette while its module is disabled. */
+  hideWhenModuleDisabled?: boolean;
   parseConfig: (raw: unknown) => JsonObject | null;
   /** The module initial state uses host template, condition, or channel context. */
   initialStateNeedsContext?: boolean;
@@ -311,6 +314,8 @@ export interface ModuleOverlayElementDefinition {
     current: Readonly<Record<string, unknown>> | null,
     incoming: Readonly<Record<string, unknown>>,
   ) => Readonly<Record<string, unknown>>;
+  /** Keeps transient realtime state during bootstrap reloads while the same enabled element remains. */
+  preserveRealtimeStateOnReload?: boolean;
   /** Host state changes that cause a generic module state message for this element. */
   reloadStateOnHostEvents?: readonly ModuleOverlayHostEvent[];
   initialState?: (
