@@ -71,7 +71,10 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   };
 
   const chooseQuestion = (question: BlitzQuestion): void => {
-    if (selectedId === question.id && !showSettings && detailOpen) return;
+    if (selectedId === question.id && !showSettings) {
+      setDetailOpen(true);
+      return;
+    }
     requestSwitch(() => {
       setShowSettings(false);
       setSelectedId(question.id);

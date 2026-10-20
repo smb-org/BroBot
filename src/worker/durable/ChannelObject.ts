@@ -4130,9 +4130,11 @@ export class ChannelObject extends DurableObject<Env> {
       formatted.target,
     );
     const delivered = delivery.sent || delivery.delivery === "delivered";
+    const permanentlySuppressed = delivery.reason === "module_disabled";
+    const complete = delivered || permanentlySuppressed;
     this.ctx.storage.transactionSync(() => {
-      recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, delivered);
-      if (delivered) this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
+      recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, complete);
+      if (complete) this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
       else this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), Date.now() + POINTS_ANNOUNCE_RETRY_MS);
     });
     await this.scheduleEarliestAlarm();

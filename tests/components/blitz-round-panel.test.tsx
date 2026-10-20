@@ -281,11 +281,10 @@ describe("Blitz Round collection panel", () => {
     expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("CLOUD");
   });
 
-  it("reselects the edited question without restoring its stale revision [protects=clicking the selected row leaves the editor draft in place and later saves use revisions 1 then 2 with the latest prompt as the heading; fails_when=reselection queues the captured question snapshot so the next PATCH reuses revision 1; no_claim=question responses use an in-memory HTTP stub and do not verify production authentication or D1 isolation]", async () => {
+  it("reselects the initially selected question without restoring its stale revision [protects=clicking the initially selected row with its detail closed keeps the editor draft and later saves use revisions 1 then 2; fails_when=the row click queues its captured snapshot so the next PATCH reuses revision 1; no_claim=question responses use an in-memory HTTP stub and do not verify production authentication or D1 isolation]", async () => {
     const api = installPanelFetch([sampleQuestion]);
     mountPanel();
     const selectedRow = await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
-    fireEvent.click(selectedRow);
     fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "STORM" } });
     fireEvent.click(selectedRow);
     const reselectOpenedSaveGuard = screen.queryByRole("dialog", { name: "Save changes?" }) !== null;
