@@ -83,6 +83,22 @@ interface ModuleRouteEnvironment {
 const nowIso = (): string => new Date().toISOString();
 const normalizedGameSearchQuery = (query: string): string => query.trim().replace(/\s+/gu, " ").toLowerCase();
 
+const logPostCommitFailure = (moduleId: string, step: string, error: unknown): void => {
+  console.error("Module activation post-commit step failed.", {
+    moduleId,
+    step,
+    error: error instanceof Error ? error.message : String(error),
+  });
+};
+
+const runPostCommitStep = async (moduleId: string, step: string, action: () => Promise<unknown>): Promise<void> => {
+  try {
+    await action();
+  } catch (error) {
+    logPostCommitFailure(moduleId, step, error);
+  }
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -170,7 +186,8 @@ const runModuleAlarmAfterMutation = async (
 ): Promise<void> => {
   try {
     await context.get("runModuleAlarm")(channelId, moduleId, handlerKey, alarmKey);
-  } catch {
+  } catch (error) {
+    logPostCommitFailure(moduleId, "module_alarm", error);
     if (moduleId !== "belabox") return;
     try {
       await writeModuleDiagnostics(
@@ -998,22 +1015,29 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
     if (!enabled && dependentModules.length > 0) {
       const placeholders = dependentModules.map(() => "?").join(", ");
       const requiredBy = await context.env.DB.prepare(
-        `SELECT 1 AS found FROM channel_modules
-          WHERE channel_id = ? AND module_id IN (${placeholders}) AND enabled = 1 LIMIT 1`,
-      ).bind(channelId, ...dependentModules).first<{ found: number }>();
-      if (requiredBy !== null) return context.json({ error: "module_required_by" }, 409);
+        `SELECT module_id FROM channel_modules
+          WHERE channel_id = ? AND module_id IN (${placeholders}) AND enabled = 1
+          ORDER BY module_id`,
+      ).bind(channelId, ...dependentModules).all<{ module_id: string }>();
+      const enabledDependents = new Set(requiredBy.results.map(({ module_id }) => module_id));
+      const enabledDependentModules = dependentModules.filter((dependentModule) => enabledDependents.has(dependentModule));
+      if (enabledDependentModules.length > 0) return context.json({
+        error: "module_required_by",
+        dependentModules: enabledDependentModules,
+      }, 409);
     }
     return context.json({ error: "module_changed_concurrently" }, 409);
   }
   if ((module.requiresModules?.length ?? 0) > 0 || module.id === "points") {
-    try {
+    await runPostCommitStep(module.id, "module_gate_update", async () => {
       const points = context.get("points")(channelId);
       await points.rounds.setGate(!enabled, revision, lastDisabledRevision);
-      if (!enabled && (module.requiresModules?.length ?? 0) > 0) {
+    });
+    if (!enabled && (module.requiresModules?.length ?? 0) > 0) {
+      await runPostCommitStep(module.id, "dependent_round_cancellation", async () => {
+        const points = context.get("points")(channelId);
         await points.rounds.cancelOpenRounds(revision);
-      }
-    } catch {
-      return context.json({ error: "module_gate_update_failed" }, 500);
+      });
     }
   }
   if (module.id === "belabox" && module.settingsChangedAlarm !== undefined) {
@@ -1025,31 +1049,43 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       module.settingsChangedAlarm.alarmKey,
     );
   } else if (enabled && existing?.enabled !== true) {
-    await notifyModuleScheduleInputsChanged(context.env.CHANNEL, channelId, "activation");
+    await runPostCommitStep(module.id, "schedule_notification", () =>
+      notifyModuleScheduleInputsChanged(context.env.CHANNEL, channelId, "activation"));
   }
   const overlayKinds = module.overlayElements?.map(({ kind }) => kind) ?? [];
   if (overlayKinds.length > 0) {
     const placeholders = overlayKinds.map(() => "?").join(", ");
-    const affectedOverlays = await context.env.DB.prepare(
-      `SELECT DISTINCT overlay.overlay_id, overlay.revision
-         FROM overlays AS overlay
-         JOIN overlay_elements AS element
-           ON element.channel_id = overlay.channel_id AND element.overlay_id = overlay.overlay_id
-        WHERE overlay.channel_id = ? AND element.kind IN (${placeholders})
-        ORDER BY overlay.overlay_id`,
-    ).bind(channelId, ...overlayKinds).all<{ overlay_id: string; revision: number }>();
-    await publishOverlayChanged(context.env.CHANNEL, channelId, affectedOverlays.results.map(({ overlay_id, revision }) => ({
-      overlayId: overlay_id,
-      revision,
-    })));
+    let affectedOverlays: Array<{ overlayId: string; revision: number }> | null = null;
+    try {
+      const result = await context.env.DB.prepare(
+        `SELECT DISTINCT overlay.overlay_id, overlay.revision
+           FROM overlays AS overlay
+           JOIN overlay_elements AS element
+             ON element.channel_id = overlay.channel_id AND element.overlay_id = overlay.overlay_id
+          WHERE overlay.channel_id = ? AND element.kind IN (${placeholders})
+          ORDER BY overlay.overlay_id`,
+      ).bind(channelId, ...overlayKinds).all<{ overlay_id: string; revision: number }>();
+      affectedOverlays = result.results.map(({ overlay_id, revision }) => ({ overlayId: overlay_id, revision }));
+    } catch (error) {
+      logPostCommitFailure(module.id, "overlay_lookup", error);
+    }
+    const overlaysToPublish = affectedOverlays;
+    if (overlaysToPublish !== null) {
+      await runPostCommitStep(module.id, "overlay_publish", () =>
+        publishOverlayChanged(context.env.CHANNEL, channelId, overlaysToPublish));
+    }
   }
+  await runPostCommitStep(module.id, "eventsub_reconciliation", () =>
+    maintainEventSubSubscriptions(context.env, now, fetch, channelId));
+  let updatedModule: PanelModuleState;
   try {
-    await maintainEventSubSubscriptions(context.env, now, fetch, channelId);
-  } catch {
-    // The reconciliation writes the error state itself; the module change remains successful.
+    updatedModule = await moduleStateFor(context.env.DB, channelId, module, enabled, settings);
+  } catch (error) {
+    logPostCommitFailure(module.id, "response_state", error);
+    updatedModule = moduleState(module.id, enabled, settings, module.mandatory === true);
   }
   return context.json({
-    module: await moduleStateFor(context.env.DB, channelId, module, enabled, settings),
+    module: updatedModule,
     revision,
   });
 });

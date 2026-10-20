@@ -17,6 +17,7 @@ import { PanelApiError, getChannelModuleSettings, getChannelModuleSummary, getCh
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "./data";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber, serverFieldErrorText, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
+import { moduleDependencyLockReason } from "./module-dependencies";
 import { templateTextLength } from "../template";
 import { modulePermissionsAreMissing } from "./channel-health";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
@@ -1019,6 +1020,7 @@ const ModuleWorkspaceRow = ({
   rawEnabled,
   missingScopes,
   manageable,
+  modules,
   busy,
   onToggle,
   onNavigate,
@@ -1028,6 +1030,7 @@ const ModuleWorkspaceRow = ({
   rawEnabled: boolean;
   missingScopes: string[];
   manageable: boolean;
+  modules: PanelModuleState[];
   busy: boolean;
   onToggle: (nextEnabled: boolean) => void;
   onNavigate: (route: DashboardRoute) => void;
@@ -1042,7 +1045,8 @@ const ModuleWorkspaceRow = ({
   const effectiveEnabled = (rawEnabled || mandatory) && !permissionsMissing;
   const state = permissionsMissing ? labels.disabled : statusWord(effectiveEnabled);
   const route: DashboardRoute = { kind: "module", channelId, moduleId };
-  const lockedReason = mandatory || manageable ? undefined : texts.module.managementLocked;
+  const dependencyReason = mandatory ? null : moduleDependencyLockReason(moduleId, !rawEnabled, modules);
+  const lockedReason = mandatory ? undefined : dependencyReason ?? (manageable ? undefined : texts.module.managementLocked);
 
   return (
     <ListRow
@@ -1058,7 +1062,7 @@ const ModuleWorkspaceRow = ({
         ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} showReason />
         : <StatusLed state={permissionsMissing ? "warn" : effectiveEnabled ? "ok" : "off"} label={state} />}
       action={mandatory ? null : <div className="module-switch-control">
-        <SwitchPrimitive aria-label={`${details.name}: ${statusWord(rawEnabled)}`} aria-describedby={lockedReason === undefined ? undefined : `module-lock-${moduleId}`} aria-busy={busy} checked={rawEnabled} disabled={!manageable || busy} onCheckedChange={onToggle} />
+        <SwitchPrimitive aria-label={`${details.name}: ${statusWord(rawEnabled)}`} aria-describedby={lockedReason === undefined ? undefined : `module-lock-${moduleId}`} aria-busy={busy} checked={rawEnabled} disabled={!manageable || dependencyReason !== null || busy} onCheckedChange={onToggle} />
       </div>}
     />
   );
@@ -1086,7 +1090,7 @@ const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onToggleMod
   const [busyModules, setBusyModules] = useState<ReadonlySet<string>>(new Set());
 
   const toggle = async (moduleId: string, nextEnabled: boolean): Promise<void> => {
-    if (busyModulesRef.current.has(moduleId)) return;
+    if (busyModulesRef.current.has(moduleId) || moduleDependencyLockReason(moduleId, nextEnabled, modules) !== null) return;
     busyModulesRef.current.add(moduleId);
     setBusyModules(new Set(busyModulesRef.current));
     setPendingEnabled((current) => ({ ...current, [moduleId]: nextEnabled }));
@@ -1123,6 +1127,7 @@ const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onToggleMod
               rawEnabled={rawEnabled}
               missingScopes={state?.missingBroadcasterScopes ?? []}
               manageable={manageable}
+              modules={modules}
               busy={busyModules.has(module.id)}
               onToggle={(nextEnabled) => { void toggle(module.id, nextEnabled); }}
               onNavigate={onNavigate}
@@ -1207,14 +1212,10 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   const mandatoryReason = registered?.mandatoryReason?.[dashboardLanguage()] ?? labels.mandatoryReason;
   const enabled = mandatory || moduleState?.enabled === true;
   const manageable = canManageModules(ownRole);
-  const dependentGames = moduleId === "points" ? MODULES.filter((candidate) => candidate.navigationCategory === "games" &&
-    candidate.requiresModules?.includes("points") === true && modules.some((state) => state.id === candidate.id && state.enabled)) : [];
-  const dependentModulesReason = dependentGames.length === 0 ? null : texts.module.dependentModulesLock(
-    dependentGames.map((candidate) => moduleName(candidate.id, dashboardLanguage())).join(", "),
-  );
-  const headerLockHint = dependentModulesReason ?? (manageable ? null : texts.module.managementLocked);
-  const disabledReason = mandatory ? mandatoryReason : dependentModulesReason ?? (manageable ? null : texts.module.managementLocked);
-  const switchDisabled = mandatory || registered === undefined || moduleState === undefined || dependentGames.length > 0;
+  const dependencyLockReason = mandatory ? null : moduleDependencyLockReason(moduleId, !enabled, modules);
+  const headerLockHint = dependencyLockReason ?? (manageable ? null : texts.module.managementLocked);
+  const disabledReason = mandatory ? mandatoryReason : dependencyLockReason ?? (manageable ? null : texts.module.managementLocked);
+  const switchDisabled = mandatory || registered === undefined || moduleState === undefined || dependencyLockReason !== null;
   const missingScopes = moduleState?.missingBroadcasterScopes ?? [];
   const permissionsMissing = modulePermissionsAreMissing(moduleState);
   const requiredScopes = moduleState?.requiredBroadcasterScopes ?? registered?.broadcasterScopes ?? [];
@@ -1285,7 +1286,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
             switchDisabled: !manageable || switchDisabled || busy || mandatory,
             switchBusy: busy,
             ...(mandatory ? { moduleSwitch: <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} /> } : {}),
-            ...(headerLockHint === null || (dependentModulesReason === null && ((registered?.settingsEditor !== undefined && showActiveView && moduleId !== "chat_voting") || (registered?.panelManagesSettings && moduleState?.enabled !== false && moduleId !== "clips"))) ? {} : { lockHint: headerLockHint }),
+            ...(headerLockHint === null || (dependencyLockReason === null && ((registered?.settingsEditor !== undefined && showActiveView && moduleId !== "chat_voting") || (registered?.panelManagesSettings && moduleState?.enabled !== false && moduleId !== "clips"))) ? {} : { lockHint: headerLockHint }),
           })}
           {...(moduleId === "chat_voting" ? {
             pageActions: <>

@@ -52,6 +52,8 @@ const activation = (moduleId: string, enabled = true, settings = '{"prefix":"!"}
 const environment = (database: TestD1Database, publish = vi.fn()) => {
   const channelObject = {
     publish,
+    notifyScheduleInputsChanged: vi.fn().mockResolvedValue(undefined),
+    reconcileTimerSchedules: vi.fn().mockResolvedValue(undefined),
     recordChatActivity: vi.fn().mockResolvedValue(0),
     clearActiveChatters: vi.fn().mockResolvedValue(undefined),
     getActiveChatterCount: vi.fn().mockResolvedValue(0),

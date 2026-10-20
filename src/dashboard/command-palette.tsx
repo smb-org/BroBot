@@ -12,6 +12,7 @@ import { queryKeys } from "./data/keys";
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
 import { apiErrorText, channelVariablesTexts, dashboardLanguage, dashboardTexts, immediateActionUnavailableReasonText } from "./locale";
 import { moduleDescription, moduleName, moduleWorkspaceTexts } from "./module-labels";
+import { moduleDependencyLockReason } from "./module-dependencies";
 import { ModuleIcon, NavigationIcon } from "./module-panels";
 import { dashboardNavigationGroups } from "./nav-pages";
 import { dashboardRoutePath, dashboardRouteRequiresBot, type DashboardRoute } from "./router";
@@ -211,12 +212,16 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
     }
   }, [channelControls, channelId, onRefreshChannelState, queryClient]);
   const toggleAds = useCallback(async (enabled: boolean): Promise<void> => {
-    if (channelId === null) return;
+    if (channelId === null || moduleDependencyLockReason("ads", enabled, modules) !== null) return;
     await onToggleModule(channelId, "ads", enabled);
-  }, [channelId, onToggleModule]);
+  }, [channelId, modules, onToggleModule]);
   const actionItems = useMemo<CommandPaletteItem[]>(() => {
     if (channelId === null) return [];
     const managementLockReason = manageable ? undefined : texts.module.managementLocked;
+    const adsOffDependencyReason = moduleDependencyLockReason("ads", false, modules);
+    const adsOnDependencyReason = moduleDependencyLockReason("ads", true, modules);
+    const adsOffLockReason = adsOffDependencyReason ?? managementLockReason;
+    const adsOnLockReason = adsOnDependencyReason ?? managementLockReason;
     // The quick actions share their module declarations with the live cockpit.
     // Each command uses the declared role and stream-state requirements.
     const adNow = moduleImmediateActionAvailability("ads", "start-commercial", modules, streamState, ownRole);
@@ -270,8 +275,8 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
         // Full phrases, not just "ads": two actions sharing a bare "ads"
         // keyword would both survive a query for either of them.
         keywords: ["ads off", "werbung aus"],
-        disabled: !manageable || !adsEnabled,
-        ...(managementLockReason === undefined ? {} : { disabledReason: managementLockReason }),
+        disabled: !manageable || adsOffDependencyReason !== null || !adsEnabled,
+        ...(adsOffLockReason === undefined ? {} : { disabledReason: adsOffLockReason }),
         icon: <ModuleIcon moduleId="ads" className="command-palette-module-icon" />,
         onTrigger: () => { void toggleAds(false); },
       },
@@ -280,8 +285,8 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
         label: texts.commandPalette.adOn,
         group: texts.commandPalette.groupActions,
         keywords: ["ads on", "werbung an"],
-        disabled: !manageable || adsEnabled,
-        ...(managementLockReason === undefined ? {} : { disabledReason: managementLockReason }),
+        disabled: !manageable || adsOnDependencyReason !== null || adsEnabled,
+        ...(adsOnLockReason === undefined ? {} : { disabledReason: adsOnLockReason }),
         icon: <ModuleIcon moduleId="ads" className="command-palette-module-icon" />,
         onTrigger: () => { void toggleAds(true); },
       },

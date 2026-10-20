@@ -3,6 +3,7 @@ import type { QueryClient, QueryFilters } from "@tanstack/react-query";
 import type { PanelChannelOverview, PanelChannelsResponse, PanelModuleState, PanelModulesResponse } from "../../panel-contract";
 import { PanelApiError, setChannelModuleEnabled } from "../api";
 import { apiErrorText, dashboardTexts } from "../locale";
+import { moduleDependencyErrorMessage } from "../module-dependencies";
 import { moduleName, moduleWorkspaceTexts } from "../module-labels";
 import { dismissToastsForScope, notify } from "../ui/toast-store";
 import { queryKeys } from "./keys";
@@ -110,8 +111,20 @@ const applyModuleResponse = (queryClient: QueryClient, channelId: string, update
   });
 };
 
-const reportToggleError = (error: unknown, scope: string): void => {
+const reportToggleError = (
+  error: unknown,
+  moduleId: string,
+  modules: readonly PanelModuleState[],
+  scope: string,
+): void => {
   const texts = dashboardTexts();
+  const dependencyError = error instanceof PanelApiError
+    ? moduleDependencyErrorMessage(moduleId, error.code, error.details, modules)
+    : null;
+  if (dependencyError !== null) {
+    notify({ tone: "error", message: dependencyError, scope });
+    return;
+  }
   if (error instanceof PanelApiError && error.status === 409) {
     notify({ tone: "error", message: moduleWorkspaceTexts().undoConflict, scope });
     return;
@@ -147,7 +160,10 @@ const undoModuleToggle = async (
     applyModuleResponse(queryClient, channelId, result.module, result.revision);
     await refreshQuietly(queryClient, channelId, scope, shouldShowToast);
   } catch (error: unknown) {
-    if (shouldShowToast()) reportToggleError(error, scope);
+    if (shouldShowToast()) {
+      const modules = queryClient.getQueryData<PanelModulesResponse>(queryKeys.channel(channelId, "modules"))?.modules ?? [];
+      reportToggleError(error, moduleId, modules, scope);
+    }
   }
 };
 

@@ -790,7 +790,7 @@ describe("Module management in the panel", () => {
       environment,
     );
     expect(disablePoints.status).toBe(409);
-    await expect(disablePoints.json()).resolves.toEqual({ error: "module_required_by" });
+    await expect(disablePoints.json()).resolves.toEqual({ error: "module_required_by", dependentModules: ["test_game_requires_points"] });
     expect(setGate).toHaveBeenCalledTimes(2);
     expect(cancelOpenRounds).not.toHaveBeenCalled();
 
@@ -843,7 +843,7 @@ describe("Module management in the panel", () => {
     expect(cancelOpenRounds).toHaveBeenLastCalledWith("test_game_requires_points", 2);
   });
 
-  it(`retries cancellation after a post-commit disable retry keeps the original revision (${dependencyTestCard("a repeated disable retries cancellation with the original revision after failure", "a committed disable cannot recover refunds after one cancellation RPC fails", "fake ChannelObject methods model one failed refund call followed by success")})`, async () => {
+  it(`keeps a committed disable successful and retries cancellation (${dependencyTestCard("a failed post-commit cancellation logs once, keeps the committed disable successful, and a retry recovers refunds with the original revision", "a failed cancellation returns an API error, goes unlogged, changes the committed state, or cannot recover refunds on retry", "fake ChannelObject methods model one failed refund call followed by success")})`, async () => {
     addDependencyTestModules();
     await insertChannel(database, "channel-demo");
     await insertLoginIdentityAndSession(database, "user-1");
@@ -859,32 +859,47 @@ describe("Module management in the panel", () => {
       .mockResolvedValueOnce(1);
     environment.CHANNEL = {
       idFromName: vi.fn((channelId: string) => channelId),
-      get: vi.fn(() => ({ setGameModuleGate: setGate, cancelOpenGameRounds: cancelOpenRounds })),
+      get: vi.fn(() => ({
+        notifyScheduleInputsChanged: vi.fn(() => Promise.resolve()),
+        setGameModuleGate: setGate,
+        cancelOpenGameRounds: cancelOpenRounds,
+      })),
     } as unknown as Env["CHANNEL"];
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
-    for (const moduleId of ["points", "test_game_requires_points"]) {
-      const response = await panelRouter.fetch(
-        await requestFor("user-1", `/api/channels/channel-demo/modules/${moduleId}`, "PATCH", { enabled: true }),
+    try {
+      for (const moduleId of ["points", "test_game_requires_points"]) {
+        const response = await panelRouter.fetch(
+          await requestFor("user-1", `/api/channels/channel-demo/modules/${moduleId}`, "PATCH", { enabled: true }),
+          environment,
+        );
+        expect(response.status).toBe(200);
+      }
+
+      const disableBody = { enabled: false, expectedRevision: 1 };
+      const first = await panelRouter.fetch(
+        await requestFor("user-1", "/api/channels/channel-demo/modules/test_game_requires_points", "PATCH", disableBody),
         environment,
       );
-      expect(response.status).toBe(200);
+      const retry = await panelRouter.fetch(
+        await requestFor("user-1", "/api/channels/channel-demo/modules/test_game_requires_points", "PATCH", disableBody),
+        environment,
+      );
+
+      expect(first.status).toBe(200);
+      expect(retry.status).toBe(200);
+      expect(setGate).toHaveBeenLastCalledWith("test_game_requires_points", true, 2, 2);
+      expect(cancelOpenRounds).toHaveBeenCalledTimes(2);
+      expect(cancelOpenRounds).toHaveBeenLastCalledWith("test_game_requires_points", 2);
+      expect(consoleError).toHaveBeenCalledOnce();
+      expect(consoleError.mock.calls[0]).toEqual(["Module activation post-commit step failed.", {
+        moduleId: "test_game_requires_points",
+        step: "dependent_round_cancellation",
+        error: "simulated_refund_failure",
+      }]);
+    } finally {
+      consoleError.mockRestore();
     }
-
-    const disableBody = { enabled: false, expectedRevision: 1 };
-    const first = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/channel-demo/modules/test_game_requires_points", "PATCH", disableBody),
-      environment,
-    );
-    const retry = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/channel-demo/modules/test_game_requires_points", "PATCH", disableBody),
-      environment,
-    );
-
-    expect(first.status).toBe(500);
-    expect(retry.status).toBe(200);
-    expect(setGate).toHaveBeenLastCalledWith("test_game_requires_points", true, 2, 2);
-    expect(cancelOpenRounds).toHaveBeenCalledTimes(2);
-    expect(cancelOpenRounds).toHaveBeenLastCalledWith("test_game_requires_points", 2);
   });
 
   it(`leaves the game gate open and skips refunds when D1 rejects a disable (${dependencyTestCard("the game remains enabled when its D1 state update fails", "a failed database mutation still closes the gate or refunds escrow", "a SQLite trigger simulates the rejected D1 batch and the fake Durable Object records calls")})`, async () => {
@@ -1039,7 +1054,7 @@ describe("Module management in the panel", () => {
       ...environment,
       CHANNEL: {
         idFromName: vi.fn(() => "channel-object"),
-        get: vi.fn(() => ({ publish })),
+        get: vi.fn(() => ({ publish, notifyScheduleInputsChanged: vi.fn(() => Promise.resolve()) })),
       },
     } as unknown as Env;
 
@@ -1115,6 +1130,42 @@ describe("Module management in the panel", () => {
     );
     expect(disable.status).toBe(200);
     expect(notifyScheduleInputsChanged).not.toHaveBeenCalled();
+  });
+
+  it(`keeps a committed module activation successful when schedule notification fails (${dependencyTestCard("the committed module response survives a post-commit schedule notification failure and logs its module and step", "a schedule RPC rejection changes a completed module mutation into an API error or disappears without an error log", "a route-level schedule RPC rejection is injected after the real SQLite mutation")})`, async () => {
+    await insertChannel(database, "channel-demo");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "channel-demo", "user-1", "broadcaster");
+    const notifyScheduleInputsChanged = vi.fn(() => Promise.reject(new Error("schedule_replan_failure")));
+    environment = {
+      ...environment,
+      CHANNEL: {
+        idFromName: vi.fn(() => "channel-object"),
+        get: vi.fn(() => ({ publish: vi.fn(() => Promise.resolve()), notifyScheduleInputsChanged })),
+      },
+    } as unknown as Env;
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      const response = await panelRouter.fetch(
+        await requestFor("user-1", "/api/channels/channel-demo/modules/test-modul", "PATCH", { enabled: true }),
+        environment,
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({ module: { id: "test-modul", enabled: true }, revision: 1 });
+      await expect(database.prepare(
+        "SELECT enabled FROM channel_modules WHERE channel_id = 'channel-demo' AND module_id = 'test-modul'",
+      ).first()).resolves.toEqual({ enabled: 1 });
+      expect(consoleError).toHaveBeenCalledOnce();
+      expect(consoleError.mock.calls[0]).toEqual(["Module activation post-commit step failed.", {
+        moduleId: "test-modul",
+        step: "schedule_notification",
+        error: "schedule_replan_failure",
+      }]);
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it("rejects disabling mandatory channel events with the closed API error", async () => {
