@@ -5,7 +5,6 @@ import { refetchModuleQueryData, runModuleQueryWrite, useChannelSettings, useDas
 import { dashboardCommonTexts } from "../../../dashboard/locale";
 import {
   ActionMenu,
-  ChatPreview,
   ChatTargetField,
   CollectionPage,
   ConfirmDialog,
@@ -583,6 +582,10 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
                 onChange={(messageText) => { patchDraft({ messageText }); }}
                 maxLength={500}
                 variables={data?.variables ?? []}
+                preview={() => previewText}
+                previewLabel={labels.preview}
+                previewStatus={<span className="timer-editor__preview-status" role={previewBusy ? "status" : undefined}>{previewBusy ? labels.previewLoading : ""}</span>}
+                previewSpeaker={labels.previewBot}
                 messages={labels.templateMessages}
                 minRows={3}
                 disabled={editorPending}
@@ -591,10 +594,6 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
               <p className="form-error timer-editor__field-error" role={attemptedSave && draft.messageText.trim().length === 0 ? "alert" : undefined}>
                 {attemptedSave && draft.messageText.trim().length === 0 ? labels.messageRequired : ""}
               </p>
-            </div>
-            <div className="timer-editor__preview">
-              <ChatPreview label={labels.preview} speaker={labels.previewBot} text={previewText} countLabel={labels.characterCount(previewText.length)} />
-              {previewBusy ? <span className="timer-editor__preview-status" role="status">{labels.previewLoading}</span> : null}
             </div>
           </div>
         </Section>

@@ -2,7 +2,7 @@ import type { DashboardLanguage, LocaleCatalog } from "../../../dashboard/locale
 import type { ChipsInputMessages, GameMultiSelectMessages, TemplateTextFieldMessages } from "../../../dashboard/ui";
 import type { FaqMinimumTier } from "../contracts";
 import type { FaqMatcherValidationReasonCode } from "../domain";
-import { formatCharacterCount, formatCharacterTotal, formatCount } from "../../../dashboard/ui/text-length";
+import { formatCharacterTotal, formatCount } from "../../../dashboard/ui/text-length";
 
 export interface FaqTexts {
   title: string;
@@ -88,7 +88,7 @@ export interface FaqTexts {
 
 const templateMessages: LocaleCatalog<TemplateTextFieldMessages> = {
   de: {
-    countLabel: (count, max) => formatCharacterCount(count, max, "de"),
+    countLabel: (count, max) => `${String(count)} von ${String(max)} Zeichen`,
     previewCountLabel: (count) => formatCharacterTotal(count, "de"),
     openBrace: "Offene Variable: Schließe die geschweifte Klammer mit } ab.",
     unknownVariable: (name, suggestion) => suggestion === null ? `Unbekannte Variable {${name}}.` : `Unbekannte Variable {${name}} – meintest du {${suggestion}}?`,
@@ -102,7 +102,7 @@ const templateMessages: LocaleCatalog<TemplateTextFieldMessages> = {
     },
   },
   en: {
-    countLabel: (count, max) => formatCharacterCount(count, max, "en"),
+    countLabel: (count, max) => `${String(count)} of ${String(max)} characters`,
     previewCountLabel: (count) => formatCharacterTotal(count, "en"),
     openBrace: "Unclosed variable: add a closing brace }.",
     unknownVariable: (name, suggestion) => suggestion === null ? `Unknown variable {${name}}.` : `Unknown variable {${name}} — did you mean {${suggestion}}?`,

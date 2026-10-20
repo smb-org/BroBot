@@ -502,16 +502,13 @@ export function ChatVoteTemplateInspector({
           onChange={(resultText) => { setResultTextError(undefined); updateDraft({ resultText }); }}
           maxLength={500}
           variables={resultTextVariables}
+          preview={() => previewResult}
+          previewLabel={labels.preview}
+          previewSpeaker={labels.bot}
+          previewEmptyText={labels.resultPreviewOff}
           minRows={2}
           messages={resultTextCopy.templateMessages}
           {...(resultTextError === undefined ? {} : { error: resultTextError })}
-        />
-        <ChatPreview
-          label={labels.preview}
-          speaker={labels.bot}
-          text={previewResult}
-          emptyText={labels.resultPreviewOff}
-          countLabel={labels.previewCountLabel(voteLabelLength(previewResult))}
         />
       </div>
 

@@ -35,11 +35,10 @@
   .timer-editor__body > .ui-section > .ui-section__content { gap: 6px; }
   .timer-editor__body .ui-select__description,
   .timer-editor__body .ui-select__error { display: none; }
-  .timer-editor__message-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, .9fr); align-items: start; gap: var(--s4); min-width: 0; }
+  .timer-editor__message-grid { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: var(--s3); min-width: 0; }
   .timer-editor__message-grid > * { min-width: 0; }
-  .timer-editor__preview { position: relative; min-height: 132px; }
-  .timer-editor__preview-status { display: block; min-height: var(--s5); color: var(--text-3); font-size: 11px; }
-  .timer-editor__field-error { min-height: var(--s5); margin: 0; }
+  .timer-editor__preview-status { flex: 1 1 auto; min-width: 0; min-height: 1.4em; overflow: hidden; color: var(--text-3); font-size: var(--text-nav-label); line-height: 1.4; text-align: end; text-overflow: ellipsis; white-space: nowrap; }
+  .timer-editor__field-error { min-height: 1.35em; margin: 0; line-height: 1.35; }
   .timer-editor__intervals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: var(--s4); }
   .timer-editor__unit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s3); min-width: 0; }
   .timer-editor__schedule-fields { display: grid; gap: var(--s3); min-width: 0; }

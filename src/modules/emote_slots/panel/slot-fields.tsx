@@ -441,7 +441,6 @@ export function SlotTextsField({
       preview={(template) => preview(template, kind)}
       previewLabel={copy.preview}
       previewSpeaker={copy.previewSpeaker}
-      previewLayout="side-by-side"
       insertVariableLabel={copy.insertVariable}
       messages={messages}
     />)}

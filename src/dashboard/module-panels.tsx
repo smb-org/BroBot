@@ -534,7 +534,6 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       variables={templateVariableOptions}
       templateMetadata={templateMetadata}
       templateMessages={copy.templateMessages}
-      messagePreviewLayout={page === undefined ? "stacked" : "side-by-side"}
       fieldErrors={module.id === "emote_slots" && slotRate?.status === "locked"
         && ["minStake", "jackpotSeed"].includes([...touchedFields].at(-1) ?? "")
         ? { ...fieldErrors, [[...touchedFields].at(-1) ?? ""]: emoteSlotsCatalog[language].panel.quoteFieldError }
