@@ -27,8 +27,10 @@ export const modulePoints = (
       claimCooldown: () => unavailable(),
       rounds: {
         open: () => unavailable(),
+        active: () => unavailable(),
         markAnnounced: () => unavailable(),
         join: () => unavailable(),
+        answer: () => unavailable(),
         resolve: () => unavailable(),
         cancelOpenRounds: () => unavailable(),
         setGate: () => unavailable(),
@@ -57,9 +59,12 @@ export const modulePoints = (
     claimCooldown: (key, seconds) => object.claimPointCooldown(moduleId, key, seconds),
     rounds: {
       open: (roundId, data) => object.openGameRound(moduleId, roundId, data),
+      active: () => object.activeGameRound(moduleId),
       markAnnounced: (roundId, deadlineAt, alarmKey) => object.markGameRoundAnnounced(moduleId, roundId, deadlineAt, alarmKey),
       join: (roundId, operationId, accountId, login, stake, data) =>
         object.joinGameRound(moduleId, roundId, operationId, accountId, login, stake, data),
+      answer: (roundId, operationId, accountId, login, graceS) =>
+        object.answerGameRound(moduleId, roundId, operationId, accountId, login, graceS),
       resolve: (roundId, settlement) => object.resolveGameRound(moduleId, roundId, settlement),
       cancelOpenRounds: (revision) => object.cancelOpenGameRounds(moduleId, revision),
       setGate: (closed, revision, lastDisabledRevision) => object.setGameModuleGate(moduleId, closed, revision, lastDisabledRevision),

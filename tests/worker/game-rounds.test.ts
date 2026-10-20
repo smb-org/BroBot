@@ -156,7 +156,7 @@ describe("game rounds in the worker Durable Object", () => {
       settlement: { kind: "test", params: { payouts: [{ accountId: "viewer-a", amount: 3 }] } },
     }, roundDeadline);
     await object.joinGameRound(pointTestModule, roundId, "msg:monthly-overflow-stake", "viewer-a", "nachtfalke", 1, {});
-    await openAnnouncedRound(object, pointTestModule, remainingRoundId, {
+    await openAnnouncedRound(object, "other_game", remainingRoundId, {
       durationS: 60,
       announceText: "The next round starts",
       settlement: { kind: "test", params: { payouts: [] } },
@@ -516,6 +516,10 @@ describe("game rounds in the worker Durable Object", () => {
     await database.prepare("UPDATE channel_modules SET enabled = 1, revision = 3 WHERE channel_id = ? AND module_id = ?")
       .bind(channelId, pointTestModule).run();
     await object.setGameModuleGate(pointTestModule, false, 3);
+    // An older settlement may still await cancellation while the next round opens.
+    await runPointObject(object, (_target, state) => {
+      state.storage.sql.exec("UPDATE game_rounds SET state = 'resolving' WHERE round_id = ?", "round-before-disable");
+    });
     await openAnnouncedRound(object, pointTestModule, "round-after-enable", {
       durationS: 60,
       announceText: "The later round starts",
@@ -1581,6 +1585,8 @@ describe("game rounds in the worker Durable Object", () => {
     expect(await forcePointAlarm(object, roundId, (target, state) => {
       Object.assign(target, { recordPointRoundAnnouncement: recordAnnouncement });
       attemptAt = Date.now() - 31_000;
+      // The simulated post-before-state-update crash includes the transport claim.
+      state.storage.kv.put("module_alarm:send_claims", { [`round:${roundId}:announce`]: { status: "sending", at: attemptAt } });
       state.storage.sql.exec("UPDATE game_rounds SET last_attempt_at = ? WHERE round_id = ?", attemptAt, roundId);
     })).toBe(true);
     const recovered = await runPointObject(object, (_target, state) => state.storage.sql.exec<{
@@ -1657,6 +1663,8 @@ describe("game rounds in the worker Durable Object", () => {
         "SELECT last_attempt_at FROM game_rounds WHERE round_id = ?", "round-sixth-crash",
       ).one().last_attempt_at;
       ambiguousAt = Date.now() - 31_000;
+      // Only an actual transport claim can make the interrupted sixth send ambiguous.
+      state.storage.kv.put("module_alarm:send_claims", { "round:round-sixth-crash:announce": { status: "sending", at: ambiguousAt } });
       state.storage.sql.exec(
         "UPDATE game_rounds SET last_attempt_at = ? WHERE round_id = ?",
         ambiguousAt,

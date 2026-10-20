@@ -1,3 +1,4 @@
+import { writeModuleAudit } from "../module-audit";
 import { DurableObject } from "cloudflare:workers";
 
 import type {
@@ -69,8 +70,12 @@ import type {
   ModuleDryRunBallotSnapshot,
   ModuleExternalFetchBudget,
   ModulePointsAccess,
+  ModulePointRoundAnnouncement,
+  ModulePointRoundResult,
   ModuleScheduleInputChangeReason,
+  PointActiveRound,
   PointJoinResult,
+  PointRoundAnswerResult,
   PointSettlementCooldown,
   PointsApplyResult,
   PointsKind,
@@ -167,6 +172,8 @@ import {
   POINTS_ROUND_ALARM_PREFIX,
   acknowledgeWelcomeSync,
   announceAttemptSync,
+  answerPointRoundSync,
+  beginPointRoundResolutionDeliverySync,
   applyPointOperationSync,
   canonicalPointResult,
   assertPointAccountId,
@@ -198,6 +205,7 @@ import {
   pointSummary,
   recoverablePointRounds,
   recordPointAnnouncementSync,
+  recordPointRoundResolutionDeliverySync,
   resolvePointRoundSync,
   settlementFromRoundData,
   setGameModuleGateSync,
@@ -714,8 +722,10 @@ export class ChannelObject extends DurableObject<Env> {
       return;
     }
 
+    this.ensurePointsSchema();
     const hasActiveRounds = this.ctx.storage.sql.exec<{ count: number }>(
-      "SELECT COUNT(*) AS count FROM game_rounds WHERE state IN ('announcing', 'open', 'resolving')",
+      `SELECT COUNT(*) AS count FROM game_rounds WHERE state IN ('announcing', 'open', 'resolving')
+        OR prepare_state = 'pending' OR (state = 'resolved' AND resolve_delivery_state != 'delivered')`,
     ).one().count > 0;
     const hasPendingCancellations = pendingPointRoundCancellations(this.ctx.storage.sql).length > 0;
     const hasPendingNotices = pendingPointRoundCancellationNotices(this.ctx.storage.sql).length > 0;
@@ -2641,6 +2651,10 @@ export class ChannelObject extends DurableObject<Env> {
     const context: ModuleAlarmContext = {
       DB: this.env.DB,
       channelId,
+      writeModuleAudit: (entry, changedAt, options) => writeModuleAudit(
+        this.env.DB, options?.actorUserId ?? "system", changedAt,
+        { ...entry, channelId, moduleId }, options?.actorUserId === undefined ? "system" : "member", options,
+      ),
       alarmIdentity: alarmIdentity ?? null,
       ...(alarmPlanSequence === undefined ? {} : { alarmPlanSequence }),
       ...(streamGeneration === undefined ? {} : { streamGeneration }),
@@ -2758,7 +2772,8 @@ export class ChannelObject extends DurableObject<Env> {
         };
         const claimBeforePost = async (): Promise<boolean | "rate_limited"> => {
           if (!await validateOutput()) return false;
-          return await claimModuleAlarmSend(this.ctx.storage, idempotencyKey, Date.now());
+          return await claimModuleAlarmSend(this.ctx.storage, idempotencyKey, Date.now(),
+            /^round:[^:]+:resolve$/u.test(idempotencyKey) ? POINTS_ANNOUNCE_AMBIGUOUS_MS : undefined);
         };
         const afterPost = async (delivery: "sent" | "rejected" | "ambiguous" | "not_attempted"): Promise<void> => {
           if (delivery !== "not_attempted") await finishModuleAlarmSend(this.ctx.storage, idempotencyKey, delivery, Date.now());
@@ -3255,9 +3270,12 @@ export class ChannelObject extends DurableObject<Env> {
       claimCooldown: (key, seconds) => this.claimPointCooldown(moduleId, key, seconds),
       rounds: {
         open: (roundId, data) => this.openGameRound(moduleId, roundId, data),
+        active: () => this.activeGameRound(moduleId),
         markAnnounced: (roundId, deadlineAt, alarmKey) => this.markGameRoundAnnounced(moduleId, roundId, deadlineAt, alarmKey),
         join: (roundId, operationId, accountId, login, stake, data) =>
           this.joinGameRound(moduleId, roundId, operationId, accountId, login, stake, data),
+        answer: (roundId, operationId, accountId, login, graceS) =>
+          this.answerGameRound(moduleId, roundId, operationId, accountId, login, graceS),
         resolve: (roundId, settlement) => this.resolveGameRound(moduleId, roundId, settlement),
         cancelOpenRounds: (revision) => this.cancelOpenGameRounds(moduleId, revision),
         setGate: (closed, revision, lastDisabledRevision) =>
@@ -3480,9 +3498,36 @@ export class ChannelObject extends DurableObject<Env> {
     const alarmKey = pointRoundAlarmKey(roundId);
     this.ctx.storage.transactionSync(() => {
       const opened = openPointRoundSync(this.ctx.storage.sql, moduleId, roundId, data, new Date().toISOString(), POINT_SETTLEMENTS);
-      if (opened.opened) this.writePointRoundAlarmSync(alarmKey, Date.now());
+      if (opened.opened) {
+        if (MODULES.find((module) => module.id === moduleId)?.onPointRoundOpened !== undefined) {
+          this.ctx.storage.sql.exec("UPDATE game_rounds SET prepare_state = 'pending' WHERE round_id = ?", roundId);
+        }
+        this.writePointRoundAlarmSync(alarmKey, Date.now());
+      }
     });
     await this.scheduleEarliestAlarm();
+  }
+
+  public async activeGameRound(moduleId: string): Promise<PointActiveRound | null> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    const round = this.ctx.storage.sql.exec<{
+      round_id: string;
+      state: "announcing" | "open";
+      deadline_at: number | null;
+      data_json: string;
+    }>(
+      `SELECT round_id, state, deadline_at, data_json FROM game_rounds
+        WHERE module_id = ? AND state IN ('announcing', 'open')
+        ORDER BY created_at, round_id LIMIT 1`,
+      moduleId,
+    ).toArray()[0];
+    return round === undefined ? null : {
+      roundId: round.round_id,
+      state: round.state,
+      data: JSON.parse(round.data_json) as unknown,
+      deadlineAt: round.deadline_at,
+    };
   }
 
   public async markGameRoundAnnounced(moduleId: string, roundId: string, deadlineAt: number, alarmKey: string): Promise<void> {
@@ -3525,6 +3570,41 @@ export class ChannelObject extends DurableObject<Env> {
     ));
   }
 
+  public async answerGameRound(
+    moduleId: string,
+    roundId: string,
+    operationId: string,
+    accountId: string,
+    login: string,
+    graceS: number,
+  ): Promise<PointRoundAnswerResult> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    assertPointRoundId(roundId);
+    assertPointAccountId(accountId);
+    const payloadHash = await pointPayloadHash({ moduleId, roundId, operationId, accountId, login, graceS });
+    const answer = this.ctx.storage.transactionSync(() => {
+      const result = answerPointRoundSync(
+        this.ctx.storage.sql,
+        moduleId,
+        roundId,
+        operationId,
+        accountId,
+        login,
+        graceS,
+        payloadHash,
+        Date.now(),
+        new Date().toISOString(),
+      );
+      if (result.status === "recorded" && result.first && result.deadlineAt !== null) {
+        this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), result.deadlineAt);
+      }
+      return result;
+    });
+    if (answer.status === "recorded" && answer.first) await this.scheduleEarliestAlarm();
+    return { status: answer.status, replayed: answer.replayed, first: answer.first };
+  }
+
   public async resolveGameRound(
     moduleId: string,
     roundId: string,
@@ -3548,7 +3628,13 @@ export class ChannelObject extends DurableObject<Env> {
           payloadHash,
           new Date().toISOString(),
         );
-        this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
+        if (MODULES.find((module) => module.id === moduleId)?.formatPointRoundResult === undefined) {
+          recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, true);
+        }
+        const round = pointRoundRow(this.ctx.storage.sql, roundId);
+        const alarmKey = pointRoundAlarmKey(roundId);
+        if (round?.resolve_delivery_state === "delivered") this.clearPointRoundAlarmSync(alarmKey);
+        else this.writePointRoundAlarmSync(alarmKey, Date.now());
         return value;
       });
     } catch (error) {
@@ -3621,7 +3707,11 @@ export class ChannelObject extends DurableObject<Env> {
         expectedGateRevision,
       );
       if (count > 0) {
-        for (const roundId of roundIds) this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
+        for (const roundId of roundIds) {
+          if (pointRoundRow(this.ctx.storage.sql, roundId)?.prepare_state === "pending") {
+            this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), Date.now());
+          } else this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
+        }
       }
       if (expectedGateRevision !== undefined) this.ensurePointCancellationNoticeAlarmsSync();
       return count;
@@ -3832,9 +3922,27 @@ export class ChannelObject extends DurableObject<Env> {
     if (roundId.length === 0) return;
     let round = pointRoundRow(this.ctx.storage.sql, roundId);
     if (round === null) return;
+    if (round.prepare_state === "pending") {
+      const prepare = MODULES.find((module) => module.id === round?.module_id)?.onPointRoundOpened;
+      await prepare?.(this.moduleAlarmContext(round.module_id, POINTS_ANNOUNCEMENT_REGISTRATION, createModuleExternalFetchBudget()),
+        { roundId, data: JSON.parse(round.data_json) as unknown, text: round.announce_text });
+      this.ctx.storage.transactionSync(() => {
+        this.ctx.storage.sql.exec("UPDATE game_rounds SET prepare_state = 'delivered' WHERE round_id = ?", roundId);
+      });
+    }
     await this.reconcilePointModuleActivation(round.module_id, true);
     round = pointRoundRow(this.ctx.storage.sql, roundId);
-    if (round === null || round.state === "resolved" || round.state === "cancelled") return;
+    if (round === null) return;
+    if (round.state === "cancelled") {
+      this.ctx.storage.transactionSync(() => { this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId)); });
+      await this.scheduleEarliestAlarm();
+      return;
+    }
+    if (round.state === "resolved") {
+      if (round.resolve_delivery_state !== "delivered") await this.deliverPointRoundResult(roundId);
+      else this.ctx.storage.transactionSync(() => { this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId)); });
+      return;
+    }
     if (round.state === "open") {
       if (round.deadline_at === null || round.deadline_at > now) return;
       const settlement = settlementFromRoundData(JSON.parse(round.data_json) as unknown);
@@ -3849,6 +3957,7 @@ export class ChannelObject extends DurableObject<Env> {
         if (error instanceof Error && error.message === "round_cancelled") return;
         throw error;
       }
+      await this.deliverPointRoundResult(roundId);
       return;
     }
     if (round.announce_state === "failed") {
@@ -3859,6 +3968,45 @@ export class ChannelObject extends DurableObject<Env> {
       await this.recordPointRoundAnnouncement(roundId, "failed", now);
       return;
     }
+    if (round.announce_state === "pending" && round.announce_attempts > 0 && round.last_attempt_at !== null) {
+      const sendClaim = await readModuleAlarmSendClaim(this.ctx.storage, `round:${roundId}:announce`);
+      if (sendClaim?.status === "sent") {
+        await this.recordPointRoundAnnouncement(roundId, "delivered", sendClaim.at);
+        return;
+      }
+      if (sendClaim !== null && sendClaim.at !== round.last_attempt_at) {
+        this.ctx.storage.transactionSync(() => {
+          this.ctx.storage.sql.exec("UPDATE game_rounds SET last_attempt_at = ? WHERE round_id = ? AND state = 'announcing'", sendClaim.at, roundId);
+        });
+        round = pointRoundRow(this.ctx.storage.sql, roundId);
+        if (round === null) return;
+      }
+      if (sendClaim === null) {
+        this.ctx.storage.transactionSync(() => {
+          this.ctx.storage.sql.exec(
+            "UPDATE game_rounds SET announce_state = 'rate_limited', announce_attempts = announce_attempts - 1, last_attempt_at = NULL WHERE round_id = ? AND state = 'announcing'",
+            roundId,
+          );
+        });
+        round = pointRoundRow(this.ctx.storage.sql, roundId);
+        if (round === null) return;
+      }
+    }
+    const context = this.moduleAlarmContext(
+      round.module_id,
+      POINTS_ANNOUNCEMENT_REGISTRATION,
+      createModuleExternalFetchBudget(),
+    );
+    const module = MODULES.find((candidate) => candidate.id === round.module_id);
+    const formatAnnouncement = module?.formatPointRoundAnnouncement;
+    const announcement: ModulePointRoundAnnouncement = {
+      roundId,
+      data: JSON.parse(round.data_json) as unknown,
+      text: round.announce_text,
+    };
+    // Preparation has no chat side effect. Persist a send attempt only after it succeeds.
+    const pendingSend = round.announce_state === "pending" && round.announce_attempts > 0 && round.last_attempt_at !== null;
+    const formatted = pendingSend || formatAnnouncement === undefined ? null : await formatAnnouncement(context, announcement);
     const attemptAt = Date.now();
     const attempt = this.ctx.storage.transactionSync(() => {
       const claimed = announceAttemptSync(this.ctx.storage.sql, roundId, attemptAt);
@@ -3886,11 +4034,6 @@ export class ChannelObject extends DurableObject<Env> {
     const attemptRound = attempt.round;
     const attemptNumber = attempt.attempt;
     await this.scheduleEarliestAlarm();
-    const context = this.moduleAlarmContext(
-      attemptRound.module_id,
-      POINTS_ANNOUNCEMENT_REGISTRATION,
-      createModuleExternalFetchBudget(),
-    );
     const attemptTimestamp = attemptRound.last_attempt_at;
     const stillValid = async (): Promise<boolean> => {
       await this.reconcilePointModuleActivation(attemptRound.module_id, true);
@@ -3898,7 +4041,13 @@ export class ChannelObject extends DurableObject<Env> {
       return current !== null && current.state === "announcing" && current.announce_state === "pending" &&
         current.announce_attempts === attemptNumber && current.last_attempt_at === attemptTimestamp;
     };
-    const delivery = await context.sendChat(attemptRound.announce_text, `round:${roundId}:announce`, [], stillValid);
+    const delivery = await context.sendChat(
+      formatted?.text ?? attemptRound.announce_text,
+      `round:${roundId}:announce`,
+      formatted?.attributions,
+      stillValid,
+      formatted?.target,
+    );
     const sendReturnedAt = Date.now();
     if (delivery.delivery === "delivered") {
       await this.recordPointRoundAnnouncement(roundId, "delivered", sendReturnedAt);
@@ -3913,6 +4062,77 @@ export class ChannelObject extends DurableObject<Env> {
     } else {
       await this.recordPointRoundAnnouncement(roundId, "failed", sendReturnedAt);
     }
+  }
+
+  private async deliverPointRoundResult(roundId: string): Promise<void> {
+    const attempt = this.ctx.storage.transactionSync(() =>
+      beginPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, Date.now()));
+    if (attempt.outcome === "delivered" || attempt.outcome === "ignored") {
+      this.ctx.storage.transactionSync(() => { this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId)); });
+      await this.scheduleEarliestAlarm();
+      return;
+    }
+    if (attempt.outcome === "pending" || attempt.round === null) {
+      const retryAt = (attempt.round?.resolve_delivery_last_attempt_at ?? Date.now()) + POINTS_ANNOUNCE_AMBIGUOUS_MS;
+      this.ctx.storage.transactionSync(() => { this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), retryAt); });
+      await this.scheduleEarliestAlarm();
+      return;
+    }
+    const module = MODULES.find((candidate) => candidate.id === attempt.round?.module_id);
+    const formatter = module?.formatPointRoundResult;
+    if (module === undefined || formatter === undefined) {
+      this.ctx.storage.transactionSync(() => {
+        recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, true);
+        this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
+      });
+      await this.scheduleEarliestAlarm();
+      return;
+    }
+    const registration = module.alarms?.[0] ?? {
+      key: "round-result",
+      handle: () => Promise.resolve(undefined),
+    };
+    const context = this.moduleAlarmContext(
+      module.id,
+      registration,
+      createModuleExternalFetchBudget(),
+    );
+    const roundData = JSON.parse(attempt.round.data_json) as unknown;
+    const result: ModulePointRoundResult = {
+      roundId,
+      data: roundData,
+      result: attempt.result,
+      resolvedAt: attempt.round.resolved_at ?? new Date().toISOString(),
+    };
+    await module.onPointRoundResolved?.(context, result);
+    const formatted = await formatter(context, result);
+    const rowIsCurrent = (): boolean => {
+      const current = pointRoundRow(this.ctx.storage.sql, roundId);
+      return current !== null && current.state === "resolved" && current.resolve_delivery_state === "sending" &&
+        current.resolve_delivery_attempts === attempt.round?.resolve_delivery_attempts;
+    };
+    if (formatted === null || formatted.text.length === 0) {
+      this.ctx.storage.transactionSync(() => {
+        recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, true);
+        this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
+      });
+      await this.scheduleEarliestAlarm();
+      return;
+    }
+    const delivery = await context.sendChat(
+      formatted.text,
+      `round:${roundId}:resolve`,
+      formatted.attributions,
+      () => Promise.resolve(rowIsCurrent()),
+      formatted.target,
+    );
+    const delivered = delivery.sent || delivery.delivery === "delivered";
+    this.ctx.storage.transactionSync(() => {
+      recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, delivered);
+      if (delivered) this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
+      else this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), Date.now() + POINTS_ANNOUNCE_RETRY_MS);
+    });
+    await this.scheduleEarliestAlarm();
   }
 
   private ballotAccess(moduleId: string): ModuleBallotAccess {
