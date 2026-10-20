@@ -230,6 +230,13 @@ test.describe("test area screenshot captures", () => {
     await saveScreenshot(page, info, "result-selected-firing-1920x1080");
   });
 
+  test("1440 by 900 result with the firing row selected", async ({ page }, info) => {
+    await openTestArea(page, { width: 1440, height: 900 });
+    await submitMessage(page);
+    await expect(page.getByRole("button", { name: /!discord/u })).toHaveAttribute("aria-current", "true");
+    await saveScreenshot(page, info, "result-selected-firing-1440x900");
+  });
+
   test("1280 by 800 result with the firing row selected", async ({ page }, info) => {
     await openTestArea(page, { width: 1280, height: 800 });
     await submitMessage(page);

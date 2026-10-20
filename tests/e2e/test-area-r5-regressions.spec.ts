@@ -31,7 +31,7 @@ const response = (muted = false): DryRunResponse => ({
         moduleId: "text_commands",
         entry: { kind: "text_command", id: "timeout", label: "!timeout" },
         outcome: "fires",
-        match: { kind: "alias", token: "timeout" },
+        match: { kind: "alias", token: "dc" },
         blocks: [],
         effects: [
           { kind: "timeout", minSeconds: 30, maxSeconds: 30, reason: "Spam", suppressedBy: "channel_muted" },
@@ -150,5 +150,40 @@ test("keeps the shared-chat to module label gap in the same rhythm at desktop an
     });
     expect(gap, label).not.toBeNull();
     expect(gap, label).toBeCloseTo(8, 0);
+  }
+});
+
+test("keeps the first result row close to its heading and stationary when the stale hint appears", async ({ page }) => {
+  await openTestArea(page, 1920, 1080);
+  await run(page);
+
+  const firstRow = page.locator(".test-area__result-row").first();
+  await expect(firstRow).toBeVisible();
+
+  for (const viewport of [
+    { width: 1920, height: 1080 },
+    { width: 1280, height: 800 },
+  ]) {
+    await page.setViewportSize(viewport);
+    const geometry = await page.evaluate(() => {
+      const title = document.querySelector<HTMLElement>(".test-area__results-title");
+      const row = document.querySelector<HTMLElement>(".test-area__result-row");
+      if (title === null || row === null) return null;
+      return {
+        titleBottom: title.getBoundingClientRect().bottom,
+        rowTop: row.getBoundingClientRect().top,
+      };
+    });
+    expect(geometry, `${String(viewport.width)} by ${String(viewport.height)} results geometry`).not.toBeNull();
+    const gap = (geometry?.rowTop ?? 0) - (geometry?.titleBottom ?? 0);
+    expect(gap).toBeGreaterThanOrEqual(4);
+    expect(gap).toBeLessThanOrEqual(12);
+
+    const rowTopBeforeHint = await firstRow.evaluate((row) => row.getBoundingClientRect().top);
+    await page.getByRole("textbox", { name: "Nachricht" }).fill(`!dc geaendert-${String(viewport.width)}`);
+    await expect(page.locator(".test-area__results-head").getByTestId("test-area-stale-result-hint"))
+      .toHaveText("Eingaben geändert – Prüfen aktualisiert das Ergebnis");
+    const rowTopAfterHint = await firstRow.evaluate((row) => row.getBoundingClientRect().top);
+    expect(rowTopAfterHint).toBe(rowTopBeforeHint);
   }
 });

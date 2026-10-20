@@ -189,6 +189,38 @@ test("slot quote states stay fixed, lock unsafe saves, and persist explicit edit
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
+test("keeps shared slot chat previews on whole lines at desktop sizes", async ({ page }) => {
+  await installSlotPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`/channels/${CHANNEL_ID}/modules/emote_slots`);
+
+  const jackpotPreview = page.locator(".slot-texts-field .ui-chat-preview").nth(3);
+  const jackpotPreviewMessage = jackpotPreview.locator(".ui-chat-preview__message");
+  const jackpotText = page.getByRole("textbox", { name: SLOT_COPY.jackpotText, exact: true });
+  await expect(jackpotPreview).toBeVisible();
+  const heightBeforeEdit = await jackpotPreviewMessage.evaluate((element) => element.getBoundingClientRect().height);
+  await jackpotText.fill("{slot.symbols}  {slot.net} · Stand {slot.balance} · Jackpot {slot.jackpot} Zusatztext für eine stabile Vorschau");
+  await expect(jackpotPreview.locator(".ui-chat-preview__text")).toContainText("Zusatztext für eine stabile Vorschau");
+  const heightAfterEdit = await jackpotPreviewMessage.evaluate((element) => element.getBoundingClientRect().height);
+  expect(heightAfterEdit).toBe(heightBeforeEdit);
+
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 1920, height: 1080 },
+  ]) {
+    await page.setViewportSize(viewport);
+    const metrics = await page.locator(".slot-texts-field .ui-chat-preview__message").evaluateAll((messages) => messages.map((message) => {
+      const lineHeight = Number.parseFloat(getComputedStyle(message).lineHeight);
+      return { height: message.getBoundingClientRect().height, lineHeight };
+    }));
+    expect(metrics).toHaveLength(4);
+    for (const metric of metrics) {
+      expect(metric.lineHeight).toBeGreaterThan(0);
+      expect(metric.height / metric.lineHeight).toBeCloseTo(Math.round(metric.height / metric.lineHeight), 5);
+    }
+  }
+});
+
 test("invalid numeric drafts stay visible and lock the quote without rendering a rate (protects=non-integer, empty, and out-of-range Slot numbers show rule-specific field errors, preserve the draft, lock saving with one bounded reason, and show the invalid quote only once; fails_when=invalid input throws during render, changes to a valid value, leaves the quote active, duplicates or overflows the header reason, or can be saved; no_claim=server-side settings validation)", async ({ page }) => {
   await installSlotPage(page);
   await page.setViewportSize({ width: 1440, height: 900 });
