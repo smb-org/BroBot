@@ -177,12 +177,14 @@ export function SlotReelTable({
   const emojiEntries: GroupedPickerEntry<SlotEmote>[] = (emotes?.emoji.items ?? []).map((emote) => ({
     id: emote.code,
     label: emote.name,
+    searchText: emote.code,
     icon: <span className="slot-picker-emoji" aria-hidden="true">{emote.code}</span>,
     value: emote,
   }));
   const twitchEntries: GroupedPickerEntry<SlotEmote>[] = (emotes?.twitch.items ?? []).map((emote) => ({
     id: emote.twitchId ?? emote.code,
     label: emote.name,
+    searchText: emote.code,
     icon: emote.imageUrl === undefined ? <Icon name="styleFont" /> : <SlotEmoteImage src={emote.imageUrl} code={emote.code} picker />,
     value: emote,
   }));
@@ -195,6 +197,7 @@ export function SlotReelTable({
     sevenTvEntries.push({
       id,
       label: emote.name,
+      searchText: emote.code,
       icon: emote.imageUrl === undefined ? <Icon name="styleFont" /> : <SlotEmoteImage src={emote.imageUrl} code={emote.code} picker />,
       value: emote,
     });

@@ -241,6 +241,32 @@ describe("emote slot settings controls", () => {
     expect((option?.textContent ?? "").split("🍒").length).toBe(2);
   });
 
+  it.each(["de", "en"] as const)("finds an emoji by its pasted glyph in the %s picker search (protects=the glyph stays searchable although it is not shown as a description; fails_when=searching the glyph hides the Cherry entry; no_claim=ranking or non-emoji sources)", async (language) => {
+    const copy = emoteSlotsCatalog[language].panel;
+    const settings = emoteSlotDefaultSettingsForLanguage(language);
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ emoji: { items: [{ source: "emoji", code: "🍒", name: "Cherry" }, { source: "emoji", code: "🍋", name: "Lemon" }] }, twitch: { status: "ok", items: [] } }),
+    })));
+    render(<UiProvider><SlotReelTable
+      settings={settings}
+      value={settings.symbols}
+      onChange={() => undefined}
+      disabled={false}
+      readOnly={false}
+      label={copy.ariaLabel}
+      context={{ channelId: "slot_component_demo", language, lastTouchedField: "symbols" }}
+    /></UiProvider>);
+    fireEvent.click(screen.getByRole("button", { name: `${copy.chooseSymbol}: ${settings.symbols[0]?.name ?? ""}` }));
+    const search = await screen.findByRole("combobox", { name: copy.picker.searchLabel });
+    await screen.findAllByRole("option", { hidden: true });
+    fireEvent.change(search, { target: { value: "🍒" } });
+
+    const options = screen.getAllByRole("option", { hidden: true });
+    expect(options).toHaveLength(1);
+    expect(options[0]).toHaveTextContent("Cherry");
+  });
+
   it("shows bot reconnect instructions to channel users without exposing bot authorization (protects=channel users can find the bot-account recovery instructions without opening a bot-only route; fails_when=the picker links directly to bot authorization or omits the instructions dialog; no_claim=the bot-account OAuth flow itself)", async () => {
     const copy = emoteSlotsCatalog.de.panel;
     vi.stubGlobal("fetch", vi.fn(() => Promise.resolve({
