@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { evictDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import type { ModuleAlarmContext, ModuleAlarmDefinition, ModuleExternalFetchBudget } from "../../src/modules/contract";
@@ -31,7 +31,14 @@ import {
   type PointsWorkerObject,
 } from "./points-test-helpers";
 
+const ALARM_SAFE_TEST_START = Date.UTC(2100, 0, 1);
+
 beforeAll(runMigrations);
+beforeEach(() => {
+  // Keep every alarm scheduled by a test RPC ahead of workerd's native clock.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(ALARM_SAFE_TEST_START);
+});
 afterEach(async () => {
   try {
     await clearPointObjectAlarms();
@@ -418,6 +425,7 @@ describe("game rounds in the worker Durable Object", () => {
           handler: "host:points_activation_reconciliation",
         });
         expect(alarmTable["points:activation_reconciliation"]?.deadline).toBeLessThanOrEqual(Date.now());
+        await deferPointAlarmWithin(state);
       });
     } finally {
       mutableEnv.DB = originalDatabase;
@@ -542,8 +550,7 @@ describe("game rounds in the worker Durable Object", () => {
 
     await expect(capturePointError(object, (target) => target.openGameRound(pointTestModule, "r".repeat(65), roundData)))
       .resolves.toBe("invalid_round_id");
-    await object.openGameRound(pointTestModule, validRound, roundData);
-    await object.markGameRoundAnnounced(pointTestModule, validRound, Date.now() + 60_000, `round:${validRound}`);
+    await openAnnouncedRound(object, pointTestModule, validRound, roundData, Date.now() + 60_000);
 
     await expect(capturePointError(object, (target) => target.joinGameRound(
       pointTestModule, validRound, "msg:invalid-account", "a".repeat(33), "nachtfalke", 1, {},
@@ -585,7 +592,10 @@ describe("game rounds in the worker Durable Object", () => {
     await object.setGameModuleGate(pointTestModule, true, 2);
 
     await evictDurableObject(object as unknown as DurableObjectStub);
-    await expect(object.pointBalance(pointTestModule, accountId)).resolves.toBe(20);
+    await runPointObject(object, async (target, state) => {
+      await expect(target.pointBalance(pointTestModule, accountId)).resolves.toBe(20);
+      await deferPointAlarmWithin(state);
+    });
     await expect(object.pointHistory(pointTestModule, accountId)).resolves.toMatchObject({ rows: [
       { operationId: `round:${roundId}:refund:${accountId}`, kind: "refund", delta: 7 },
       { operationId: `msg:boundary-stake`, kind: "stake", delta: -7 },
@@ -669,10 +679,12 @@ describe("game rounds in the worker Durable Object", () => {
       settlement: { kind: "test", params: { payouts: [] } },
     }, Date.now() + 60_000);
     await object.joinGameRound(pointTestModule, "round-cancellation-notice", "msg:stake", "viewer-a", "nachtfalke", 5, {});
-    await object.setGameModuleGate(pointTestModule, true, 11);
-
-    await expect(object.cancelOpenGameRounds(pointTestModule, 11)).resolves.toBe(1);
-    await expect(object.cancelOpenGameRounds(pointTestModule, 11)).resolves.toBe(0);
+    await runPointObject(object, async (target, state) => {
+      await target.setGameModuleGate(pointTestModule, true, 11);
+      await expect(target.cancelOpenGameRounds(pointTestModule, 11)).resolves.toBe(1);
+      await expect(target.cancelOpenGameRounds(pointTestModule, 11)).resolves.toBe(0);
+      await deferPointAlarmWithin(state);
+    });
 
     await expect(object.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(20);
     expect(sentTexts).toEqual(["Runde abgebrochen, Einsätze erstattet."]);
@@ -949,7 +961,6 @@ describe("game rounds in the worker Durable Object", () => {
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
     await object.touchPointAccount(pointTestModule, "viewer-a", "nachtfalke", 20);
-    vi.useFakeTimers();
     const deadlineAt = Date.now() + 5_000;
     await runPointObject(object, async (target, state) => {
       stubPointRoundChat(target, () => Promise.resolve({ sent: false, retryable: true, reason: "rate_limited", delivery: "rate_limited" }));
@@ -1094,7 +1105,10 @@ describe("game rounds in the worker Durable Object", () => {
     }))).resolves.toBe("round_cancellation_pending");
     await evictDurableObject(object as unknown as DurableObjectStub);
 
-    await expect(object.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(20);
+    await runPointObject(object, async (target, state) => {
+      await expect(target.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(20);
+      await deferPointAlarmWithin(state);
+    });
     await expect(runPointObject(object, (_target, state) => state.storage.sql.exec<{ state: string }>(
       "SELECT state FROM game_rounds WHERE round_id = ?", "round-cancel-recovery",
     ).one().state)).resolves.toBe("cancelled");
@@ -1388,9 +1402,7 @@ describe("game rounds in the worker Durable Object", () => {
   );
 
   it(`timestamps a point announcement after a slower alarm handler in the same invocation (${testCard("each announcement uses its own attempt timestamp", "a slow earlier handler consumes the round duration")})`, async () => {
-    vi.useFakeTimers();
-    const startedAt = Date.parse("2026-10-12T12:00:00.000Z");
-    vi.setSystemTime(startedAt);
+    const startedAt = Date.now();
     const channelId = `round-fresh-attempt-time-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
@@ -1437,9 +1449,7 @@ describe("game rounds in the worker Durable Object", () => {
   });
 
   it(`starts the round deadline after a delayed confirmed announcement (${testCard("confirmed delivery starts the configured round duration", "send latency consumes the round duration")})`, async () => {
-    vi.useFakeTimers();
-    const startedAt = Date.parse("2026-10-12T12:00:00.000Z");
-    vi.setSystemTime(startedAt);
+    const startedAt = Date.now();
     const channelId = `round-delayed-delivery-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
@@ -1469,9 +1479,7 @@ describe("game rounds in the worker Durable Object", () => {
   });
 
   it(`schedules a delayed rate-limit retry from the rejection time (${testCard("a definite rate limit waits five seconds after the response", "send latency consumes the retry delay")})`, async () => {
-    vi.useFakeTimers();
-    const startedAt = Date.parse("2026-10-12T12:00:00.000Z");
-    vi.setSystemTime(startedAt);
+    const startedAt = Date.now();
     const channelId = `round-delayed-rate-limit-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const object = pointObject(channelId);
@@ -1524,6 +1532,7 @@ describe("game rounds in the worker Durable Object", () => {
       const reconciledAlarmAt = await state.storage.getAlarm();
       expect(reconciledAlarmAt).not.toBeNull();
       expect(reconciledAlarmAt).toBeLessThan(laterAlarmAt);
+      await deferPointAlarmWithin(state);
     });
   });
 
