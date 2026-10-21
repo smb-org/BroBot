@@ -54,7 +54,7 @@ const ActionButton = ({ action, moduleId, channelId, streamState, botConnected, 
   onActionStart?: (moduleId: string, actionId: string) => number;
   onActionResult?: (moduleId: string, result: ModuleImmediateActionResult, observedAt: number) => void;
   onActionFailure?: (moduleId: string, actionId: string, observedAt: number) => void;
-  onFeedbackMessage?: (message: string, link?: { href: string; label: string }) => void;
+  onFeedbackMessage?: (message: string, link?: { href: string; label: string }, tone?: ModuleImmediateActionResult["tone"]) => void;
 }): ReactElement => {
   const language = dashboardLanguage();
   const texts = dashboardTexts();
@@ -196,7 +196,7 @@ const ActionFrame = ({ action, moduleId, channelId, language, pollId, disabled, 
   onActionStart?: (moduleId: string, actionId: string) => number;
   onActionResult?: (moduleId: string, result: ModuleImmediateActionResult, observedAt: number) => void;
   onActionFailure?: (moduleId: string, actionId: string, observedAt: number) => void;
-  onFeedbackMessage?: (message: string, link?: { href: string; label: string }) => void;
+  onFeedbackMessage?: (message: string, link?: { href: string; label: string }, tone?: ModuleImmediateActionResult["tone"]) => void;
 }): ReactElement => {
   const texts = dashboardTexts();
   const [open, setOpen] = useState(false);
@@ -274,6 +274,7 @@ const ActionFrame = ({ action, moduleId, channelId, language, pollId, disabled, 
       onFeedbackMessage?.(
         actionResult?.message?.[language] ?? texts.streamManager.actionSucceeded(action.name[language]),
         actionResult?.link === undefined ? undefined : { href: actionResult.link.href, label: actionResult.link.label[language] },
+        actionResult?.tone,
       );
       if (actionResult !== undefined) onActionResult?.(moduleId, actionResult, observedAt);
       if (action.content !== undefined) {
@@ -402,7 +403,7 @@ export const ImmediateActions = ({ channelId, streamState, botConnected, role, m
   onActionStart?: (moduleId: string, actionId: string) => number;
   onActionResult?: (moduleId: string, result: ModuleImmediateActionResult, observedAt: number) => void;
   onActionFailure?: (moduleId: string, actionId: string, observedAt: number) => void;
-  onFeedbackMessage?: (message: string, link?: { href: string; label: string }) => void;
+  onFeedbackMessage?: (message: string, link?: { href: string; label: string }, tone?: ModuleImmediateActionResult["tone"]) => void;
 }): ReactElement => {
   const texts = dashboardTexts();
   const moduleStates = new Map(modules.map((module) => [module.id, module.enabled]));

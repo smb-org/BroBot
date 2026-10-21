@@ -298,7 +298,7 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
             recordBelaboxObservation(overview.channelId, (previous) => failedBelaboxObservation(observedAt, previous));
           }
         }}
-        onFeedbackMessage={(text, link) => { showFooterMessage({ text, ...(link === undefined ? {} : { link }) }); }}
+        onFeedbackMessage={(text, link, tone) => { showFooterMessage({ text, ...(link === undefined ? {} : { link }), ...(tone === "info" ? { tone: "warning" } : {}) }); }}
       />
       <LiveCockpitTiles
         key={overview.channelId}

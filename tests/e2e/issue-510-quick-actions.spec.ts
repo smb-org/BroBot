@@ -133,11 +133,9 @@ test("shows both quick actions at desktop and mobile widths and keeps the grid f
   await counter.click();
   const popover = page.getByRole("dialog", { name: "Zähler +1" });
   await expect(popover).toBeVisible();
-  const picker = popover.getByRole("combobox", { name: "Kanalvariable" });
-  await picker.click();
-  await page.getByRole("option", { name: /score/u }).click();
   await popover.getByRole("button", { name: "Ausführen" }).click();
   await expect(page.getByText("Neuer Wert: 5").first()).toBeVisible();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("brobot-dashboard-counter-variable-v1:issue-510-quick-actions"))).toBe("score");
   expect(actions.valueRouteCalls()).toBe(1);
   await expect.poll(() => actionGridBox(page)).toEqual(mobileGrid);
 

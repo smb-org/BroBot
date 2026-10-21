@@ -8,6 +8,8 @@ export const textCommandQuickActionTexts = {
     loadFailed: { de: "Variablen konnten nicht geladen werden.", en: "Variables could not be loaded." },
     variableLabel: { de: "Kanalvariable", en: "Channel variable" },
     selectVariable: { de: "Variable auswählen", en: "Select a variable" },
+    chooseCounterTitle: { de: "Zähler auswählen", en: "Choose counter" },
+    chooseCounterDescription: { de: "Wähle die Kanalvariable aus, die erhöht werden soll.", en: "Choose the channel variable to increment." },
     success: (value: string): Readonly<Record<ModuleLanguage, string>> => ({
       de: `Neuer Wert: ${value}`,
       en: `New value: ${value}`,
@@ -22,8 +24,8 @@ export const textCommandQuickActionTexts = {
     dropped: { de: "Twitch hat die Testnachricht nicht gesendet.", en: "Twitch did not send the test message." },
     identityMissing: { de: "Es ist kein Bot-Konto verbunden.", en: "No bot account is connected." },
     rateLimited: (seconds: string): Readonly<Record<ModuleLanguage, string>> => ({
-      de: `Bitte warte noch ${seconds} s, bevor du eine weitere Testnachricht sendest.`,
-      en: `Wait ${seconds} s before sending another test message.`,
+      de: `Erneut in ${seconds} s`,
+      en: `Retry in ${seconds} s`,
     }),
     error: { de: "Die Testnachricht konnte nicht gesendet werden.", en: "The test message could not be sent." },
   },

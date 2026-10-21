@@ -169,6 +169,24 @@ describe("quick action test-message route", () => {
     expect(mocks.sendChatMessage).toHaveBeenCalledTimes(2);
   });
 
+  it("returns the later upstream retry deadline after a Twitch rate-limit rejection", async () => {
+    await prepareChannel("channel-a");
+    vi.mocked(mocks.sendChatMessage).mockImplementationOnce(async (...args) => {
+      await args[6]?.();
+      return chatResult({
+        sent: false,
+        delivery: "rejected",
+        reason: "rate_limited",
+        detail: { retryAfter: Date.now() + 120_000 },
+      });
+    });
+
+    const response = await send("operator-a", "channel-a");
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ result: "rate_limited", retryAfter: 120 });
+  });
+
   it("rejects a caller who does not have the minimum channel role", async () => {
     await prepareChannel("channel-a");
     await insertLoginIdentityAndSession(database, "outsider");

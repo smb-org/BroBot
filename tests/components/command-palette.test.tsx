@@ -1,9 +1,9 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fetchChannelVariables, setChannelControl } from "../../src/dashboard/api";
+import { changeChannelVariableValue, fetchChannelVariables, setChannelControl } from "../../src/dashboard/api";
 import type { PanelChannelControl, PanelChannelControls } from "../../src/panel-contract";
 import { dashboardTexts } from "../../src/dashboard/locale";
 import { ChannelCommandPalette } from "../../src/dashboard/command-palette";
@@ -13,17 +13,20 @@ import type { DashboardRoute } from "../../src/dashboard/router";
 
 vi.mock("../../src/dashboard/api", async (importOriginal) => ({
   ...await importOriginal<Record<string, unknown>>(),
+  changeChannelVariableValue: vi.fn(),
   fetchChannelVariables: vi.fn(),
   setChannelControl: vi.fn(),
 }));
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
   vi.unstubAllGlobals();
 });
 
 beforeEach(() => {
   vi.mocked(fetchChannelVariables).mockResolvedValue({ count: 0, maximum: 50, variables: [] });
+  vi.mocked(changeChannelVariableValue).mockReset();
 });
 
 const off: PanelChannelControl = { active: false, until: null, mode: null };
@@ -181,5 +184,125 @@ describe("cmdk command palette", () => {
     const message = await screen.findByRole("option", { name: /Send test message|Testnachricht senden/u });
     expect(message.getAttribute("aria-disabled")).toBe("true");
     expect(message.textContent).toMatch(/bot is not connected|Bot ist nicht verbunden/u);
+  });
+
+  it("keeps the counter row height reserved after its variables load", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    let resolveVariables: ((value: Awaited<ReturnType<typeof fetchChannelVariables>>) => void) | undefined;
+    vi.mocked(fetchChannelVariables).mockImplementation(() => new Promise((resolve) => { resolveVariables = resolve; }));
+    render(
+      <QueryClientProvider client={client}><UiProvider><ChannelCommandPalette
+        open
+        onOpenChange={vi.fn()}
+        channelId="kanal-a"
+        ownRole="operator"
+        streamState="online"
+        botConnected
+        modules={[{ id: "text_commands", enabled: true, settings: "{}" }]}
+        onToggleModule={() => Promise.resolve()}
+        onNavigate={vi.fn()}
+        onOpenCommand={vi.fn()}
+        onOpenVariable={vi.fn()}
+      /></UiProvider></QueryClientProvider>,
+    );
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "counter" } });
+    const counter = await screen.findByRole("option", { name: /Counter \+1|Zähler \+1/u });
+    expect(counter.querySelector(".command-palette__item-description")).not.toBeNull();
+    resolveVariables?.({ count: 1, maximum: 50, variables: [{ channelId: "kanal-a", name: "score", value: 4, description: "", resetOnStreamStart: false, createdAt: "", updatedAt: "", usages: [] }] });
+
+    await waitFor(() => expect(counter.getAttribute("aria-disabled")).not.toBe("true"));
+    expect(counter.querySelector(".command-palette__item-description")).not.toBeNull();
+  });
+
+  it("ignores a late counter-variable response from the previous channel", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    let resolveChannelA: ((value: Awaited<ReturnType<typeof fetchChannelVariables>>) => void) | undefined;
+    let resolveChannelB: ((value: Awaited<ReturnType<typeof fetchChannelVariables>>) => void) | undefined;
+    vi.mocked(fetchChannelVariables).mockImplementation((channelId) => new Promise((resolve) => {
+      if (channelId === "kanal-a") resolveChannelA = resolve;
+      else resolveChannelB = resolve;
+    }));
+    vi.mocked(changeChannelVariableValue).mockResolvedValue({
+      variable: { channelId: "kanal-b", name: "score", value: 5, description: "", resetOnStreamStart: false, createdAt: "", updatedAt: "" },
+    });
+    localStorage.setItem("brobot-dashboard-counter-variable-v1:kanal-b", "score");
+
+    const palette = (channelId: string, open: boolean, onOpenChange: (open: boolean) => void) => (
+      <QueryClientProvider client={client}><UiProvider><ChannelCommandPalette
+        open={open}
+        onOpenChange={onOpenChange}
+        channelId={channelId}
+        ownRole="operator"
+        streamState="online"
+        botConnected
+        modules={[{ id: "text_commands", enabled: true, settings: "{}" }]}
+        onToggleModule={() => Promise.resolve()}
+        onNavigate={vi.fn()}
+        onOpenCommand={vi.fn()}
+        onOpenVariable={vi.fn()}
+      /></UiProvider></QueryClientProvider>
+    );
+    const onOpenChange = vi.fn();
+    const view = render(palette("kanal-a", true, onOpenChange));
+    view.rerender(palette("kanal-a", false, onOpenChange));
+    view.rerender(palette("kanal-b", true, onOpenChange));
+
+    await waitFor(() => expect(resolveChannelB).toBeTypeOf("function"));
+    await waitFor(() => expect(resolveChannelA).toBeTypeOf("function"));
+    resolveChannelB?.({ count: 1, maximum: 50, variables: [{ channelId: "kanal-b", name: "score", value: 4, description: "", resetOnStreamStart: false, createdAt: "", updatedAt: "", usages: [] }] });
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "counter" } });
+    const counter = await screen.findByRole("option", { name: /Counter \+1|Zähler \+1/u });
+    await waitFor(() => expect(counter.getAttribute("aria-disabled")).not.toBe("true"));
+    await act(async () => {
+      resolveChannelA?.({ count: 1, maximum: 50, variables: [{ channelId: "kanal-a", name: "lives", value: 2, description: "", resetOnStreamStart: false, createdAt: "", updatedAt: "", usages: [] }] });
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByRole("option", { name: /Counter \+1|Zähler \+1/u }));
+
+    await waitFor(() => expect(changeChannelVariableValue).toHaveBeenCalledWith("kanal-b", "score", "add", 1));
+  });
+
+  it("asks for a counter target before incrementing when no saved target is valid", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    localStorage.removeItem("brobot-dashboard-counter-variable-v1:kanal-a");
+    vi.mocked(fetchChannelVariables).mockResolvedValue({ count: 1, maximum: 50, variables: [{
+      channelId: "kanal-a", name: "score", value: 4, description: "", resetOnStreamStart: false, createdAt: "", updatedAt: "", usages: [],
+    }] });
+    vi.mocked(changeChannelVariableValue).mockResolvedValue({
+      variable: { channelId: "kanal-a", name: "score", value: 5, description: "", resetOnStreamStart: false, createdAt: "", updatedAt: "" },
+    });
+    const Harness = () => {
+      const [open, setOpen] = useState(true);
+      return <QueryClientProvider client={client}><UiProvider><ChannelCommandPalette
+        open={open}
+        onOpenChange={setOpen}
+        channelId="kanal-a"
+        ownRole="operator"
+        streamState="online"
+        botConnected
+        modules={[{ id: "text_commands", enabled: true, settings: "{}" }]}
+        onToggleModule={() => Promise.resolve()}
+        onNavigate={vi.fn()}
+        onOpenCommand={vi.fn()}
+        onOpenVariable={vi.fn()}
+      /></UiProvider></QueryClientProvider>;
+    };
+    render(<Harness />);
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "counter" } });
+    const counter = await screen.findByRole("option", { name: /Counter \+1|Zähler \+1/u });
+    await waitFor(() => expect(counter.getAttribute("aria-disabled")).not.toBe("true"));
+    fireEvent.click(counter);
+
+    expect(changeChannelVariableValue).not.toHaveBeenCalled();
+    const picker = await screen.findByRole("dialog", { name: /Choose counter|Zähler auswählen/u });
+    expect(picker).not.toBeNull();
+    expect(within(picker).getByRole("combobox", { name: /Channel variable|Kanalvariable/u })).not.toBeNull();
+    fireEvent.click(within(picker).getByRole("button", { name: /Run|Ausführen/u }));
+
+    await waitFor(() => expect(changeChannelVariableValue).toHaveBeenCalledWith("kanal-a", "score", "add", 1));
+    expect(localStorage.getItem("brobot-dashboard-counter-variable-v1:kanal-a")).toBe("score");
   });
 });

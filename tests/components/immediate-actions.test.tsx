@@ -5,6 +5,7 @@ import { ImmediateActions } from "../../src/dashboard/ImmediateActions";
 import { changeChannelVariableValue, fetchChannelOverview, fetchChannelVariables, sendTestMessage, type PanelChannelVariable } from "../../src/dashboard/api";
 import { dashboardTexts } from "../../src/dashboard/locale";
 import { loadTextCommandData } from "../../src/modules/text_commands/panel/service";
+import { textCommandQuickActionTexts } from "../../src/modules/text_commands/panel/quick-action-locale";
 import { UiProvider } from "../../src/dashboard/ui";
 import { clickSelectOption } from "../query-test-utils";
 
@@ -38,6 +39,10 @@ beforeEach(() => {
 });
 
 describe("cockpit action role mirror", () => {
+  it("keeps rate-limit feedback concise in German and English", () => {
+    expect(textCommandQuickActionTexts.testMessage.rateLimited("27")).toEqual({ de: "Erneut in 27 s", en: "Retry in 27 s" });
+  });
+
   it("locks manager actions for operators while keeping operator actions available", () => {
     render(
       <UiProvider>
@@ -104,6 +109,27 @@ describe("cockpit action role mirror", () => {
     expect(localStorage.getItem("brobot-dashboard-counter-variable-v1:channel-b")).toBe("score");
   });
 
+  it("remembers the displayed default counter after submitting without changing it", async () => {
+    localStorage.removeItem("brobot-dashboard-counter-variable-v1:channel-a");
+    setChannelVariables([{ channelId: "channel-a", name: "score", value: 4, description: "", resetOnStreamStart: false, createdAt: "", updatedAt: "", usages: [] }]);
+    vi.mocked(changeChannelVariableValue).mockResolvedValue({
+      variable: { channelId: "channel-a", name: "score", value: 5, description: "", resetOnStreamStart: false, createdAt: "", updatedAt: "" },
+    });
+    vi.mocked(fetchChannelOverview).mockResolvedValue({ bot: { status: "connected", reason: null, updatedAt: "" } } as never);
+
+    render(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
+      modules={[{ id: "text_commands", enabled: true }]} botConnected />
+    </UiProvider>);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Counter \+1|Zähler \+1/u }));
+    const picker = await screen.findByRole("combobox", { name: /variable/iu });
+    expect(picker.textContent).toContain("score");
+    fireEvent.click(await screen.findByRole("button", { name: dashboardTexts().streamManager.actionRun }));
+
+    await waitFor(() => expect(changeChannelVariableValue).toHaveBeenCalledWith("channel-a", "score", "add", 1));
+    expect(localStorage.getItem("brobot-dashboard-counter-variable-v1:channel-a")).toBe("score");
+  });
+
   it("keeps counter and test message visible with their unavailable reasons", async () => {
     setChannelVariables([]);
     vi.mocked(fetchChannelOverview).mockResolvedValue({ bot: { status: "not_connected", reason: null, updatedAt: "" } } as never);
@@ -134,5 +160,20 @@ describe("cockpit action role mirror", () => {
     await waitFor(() => expect(sendTestMessage).toHaveBeenCalledWith("channel-a"));
     const feedback = await screen.findByText(/Testnachricht gesendet|Test message sent/u);
     expect(feedback.textContent).toMatch(/Testnachricht gesendet|Test message sent/u);
+  });
+
+  it("shows a short rate-limit notice with the warning tone", async () => {
+    vi.mocked(sendTestMessage).mockResolvedValue({ result: "rate_limited", retryAfter: 27 });
+    const onFeedbackMessage = vi.fn();
+
+    render(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
+      modules={[{ id: "text_commands", enabled: true }]} botConnected onFeedbackMessage={onFeedbackMessage} />
+    </UiProvider>);
+
+    const action = await screen.findByRole("button", { name: /Send test message|Testnachricht senden/u });
+    await waitFor(() => expect((action as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(action);
+
+    await waitFor(() => expect(onFeedbackMessage).toHaveBeenCalledWith("Erneut in 27 s", undefined, "info"));
   });
 });

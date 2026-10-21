@@ -18,6 +18,7 @@ import type { TextCommand } from "./contracts";
 import { moduleVariableRenameTarget } from "../contract";
 import type { ModuleImmediateActionCondition, ModuleVariableReferences } from "../contract";
 import { prepareModerationReason } from "../contracts/moderation";
+import { rememberLastCounterVariable } from "./panel/counter-selection";
 import { textCommandQuickActionTexts } from "./panel/quick-action-locale";
 
 const variableReferences: ModuleVariableReferences = {
@@ -254,6 +255,7 @@ export const textCommandModule: BotModule<typeof settingsSchema> = {
         const variableName = formData.get("variableName");
         if (typeof variableName !== "string" || variableName.length === 0) throw new Error("counter_variable_missing");
         const { variable } = await (await import("../../dashboard/api")).changeChannelVariableValue(channelId, variableName, "add", 1);
+        rememberLastCounterVariable(channelId, variableName);
         return { message: textCommandQuickActionTexts.counter.success(String(variable.value)) };
       },
     },

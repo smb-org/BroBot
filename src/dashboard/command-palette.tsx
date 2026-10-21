@@ -19,7 +19,7 @@ import { ModuleIcon, NavigationIcon } from "./module-panels";
 import { dashboardNavigationGroups } from "./nav-pages";
 import { dashboardRoutePath, dashboardRouteRequiresBot, type DashboardRoute } from "./router";
 import { readRecentTargets, rememberRecentTarget, RECENT_TARGET_LIMIT } from "./command-palette-recents";
-import { notify, CommandPalette, type CommandPaletteItem } from "./ui";
+import { FormDialog, notify, Select, CommandPalette, type CommandPaletteItem } from "./ui";
 
 const SHOUTOUT_KEYWORD = "shoutout";
 
@@ -97,14 +97,28 @@ const recentTargetPathForRoute = (route: DashboardRoute, channelId: string | nul
   return null;
 };
 
+interface ChannelCommandData<T> {
+  channelId: string | null;
+  value: T;
+  loaded: boolean;
+}
+
+interface CounterPickerState {
+  channelId: string;
+  variableName: string | null;
+}
+
 /** Cmd/Ctrl+K finds navigation, text commands, variables, and channel actions. */
 export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, viewerUserId = null, route, isPlatformAdmin = false, botSignedIn, botConnected, streamState, channelControls, onRefreshChannelState, onToggleModule, modules, onNavigate, onOpenCommand, onOpenVariable }: ChannelCommandPaletteProperties): ReactElement => {
   const texts = dashboardTexts();
   const manageable = ownRole !== null && canManage(ownRole);
-  const [commands, setCommands] = useState<TextCommand[]>([]);
-  const [variables, setVariables] = useState<readonly PanelChannelVariable[]>([]);
-  const [variablesLoaded, setVariablesLoaded] = useState(false);
+  const [commandState, setCommandState] = useState<{ channelId: string | null; value: TextCommand[] }>({ channelId, value: [] });
+  const [variableState, setVariableState] = useState<ChannelCommandData<readonly PanelChannelVariable[]>>({ channelId, value: [], loaded: false });
+  const [counterPicker, setCounterPicker] = useState<CounterPickerState | null>(null);
   const [query, setQuery] = useState("");
+  const commands = useMemo(() => commandState.channelId === channelId ? commandState.value : [], [channelId, commandState]);
+  const variables = useMemo(() => variableState.channelId === channelId ? variableState.value : [], [channelId, variableState]);
+  const variablesLoaded = variableState.channelId === channelId && variableState.loaded;
   const currentTargetPath = route === undefined ? null : recentTargetPathForRoute(route, channelId);
   const recentTargetPaths = useMemo(() => {
     const stored = readRecentTargets(viewerUserId, channelId ?? "");
@@ -118,22 +132,27 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
     rememberRecentTarget(viewerUserId, channelId, currentTargetPath);
   }, [channelId, currentTargetPath, viewerUserId]);
 
-  // Loaded on open, not on mount: the command palette stays mounted in the shell
-  // so the sidebar trigger and shortcut work from every route, but most page visits
-  // never open it -- fetching commands/variables eagerly would be a
-  // background request on every navigation for a feature nobody used yet.
-  const loadResultData = useCallback((): void => {
-    if (channelId === null) return;
-    loadTextCommands(channelId).then(setCommands).catch(() => { setCommands([]); });
-    setVariablesLoaded(false);
-    fetchChannelVariables(channelId).then((data) => {
-      setVariables(data.variables);
-      setVariablesLoaded(true);
+  // Load only while open. Scope every response to the request's channel and
+  // abort variable requests when the palette closes or switches channels.
+  useEffect(() => {
+    if (!open || channelId === null) return;
+    let active = true;
+    const controller = new AbortController();
+    void loadTextCommands(channelId).then((value) => {
+      if (active) setCommandState({ channelId, value });
     }).catch(() => {
-      setVariables([]);
-      setVariablesLoaded(true);
+      if (active) setCommandState({ channelId, value: [] });
     });
-  }, [channelId]);
+    void fetchChannelVariables(channelId, controller.signal).then(({ variables: value }) => {
+      if (active) setVariableState({ channelId, value, loaded: true });
+    }).catch(() => {
+      if (active) setVariableState({ channelId, value: [], loaded: true });
+    });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [channelId, open]);
 
   const navigationItems = useMemo<CommandPaletteItem[]>(() => dashboardNavigationGroups(
     { isPlatformAdmin },
@@ -229,6 +248,24 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
     if (channelId === null || moduleDependencyLockReason("ads", enabled, modules) !== null) return;
     await onToggleModule(channelId, "ads", enabled);
   }, [channelId, modules, onToggleModule]);
+  const quickActions = MODULES.find((module) => module.id === "text_commands")?.actions ?? [];
+  const counterAction = quickActions.find((action) => action.id === "counter-plus-one");
+  const testMessageAction = quickActions.find((action) => action.id === "send-test-message");
+  const language = dashboardLanguage();
+  const runCounterAction = useCallback((variableName: string): void => {
+    if (channelId === null || counterAction === undefined) return;
+    const formData = new FormData();
+    formData.set("variableName", variableName);
+    void counterAction.execute({ channelId, language, formData }).then((result) => {
+      notify({ tone: result?.tone ?? "success", message: result?.message?.[language] ?? texts.streamManager.actionSucceeded(counterAction.name[language]) });
+    }).catch(() => {
+      notify({ tone: "error", message: counterAction.errorMessage?.[language] ?? texts.streamManager.actionFailed });
+    });
+  }, [channelId, counterAction, language, texts]);
+  const pickerState = counterPicker?.channelId === channelId ? counterPicker : null;
+  const numericVariables = variables.filter((variable) => Number.isFinite(variable.value));
+  const pickerSelectionIsValid = pickerState?.variableName !== null && pickerState?.variableName !== undefined &&
+    numericVariables.some((variable) => variable.name === pickerState.variableName);
   const actionItems = useMemo<CommandPaletteItem[]>(() => {
     if (channelId === null) return [];
     const managementLockReason = manageable ? undefined : texts.module.managementLocked;
@@ -241,7 +278,6 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
     const adNow = moduleImmediateActionAvailability("ads", "start-commercial", modules, streamState, ownRole);
     const clip = moduleImmediateActionAvailability("clips", "create-clip", modules, streamState, ownRole);
     const shoutout = moduleImmediateActionAvailability("raid", "send-shoutout", modules, streamState, ownRole);
-    const language = dashboardLanguage();
     const counterReason = !variablesLoaded
       ? texts.streamManager.actionLoading
       : variables.some((variable) => Number.isFinite(variable.value))
@@ -341,12 +377,11 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
         onTrigger: () => { void sendManualShoutout(channelId, shoutoutLogin); },
       });
     }
-    const quickActions = MODULES.find((module) => module.id === "text_commands")?.actions ?? [];
-    const counterAction = quickActions.find((action) => action.id === "counter-plus-one");
     if (counter.offered && counterAction !== undefined) {
       items.push({
         id: "action:counter-plus-one",
         label: counterAction.name[language],
+        description: counter.disabledReason ?? "\u00a0",
         group: texts.commandPalette.groupActions,
         keywords: [...textCommandQuickActionTexts.counter.paletteKeywords],
         icon: counterAction.icon,
@@ -356,19 +391,12 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
           if (counter.disabledReason !== null) return;
           const numericVariables = variables.filter((variable) => Number.isFinite(variable.value));
           const savedName = readLastCounterVariable(channelId);
-          const selectedName = numericVariables.find((variable) => variable.name === savedName)?.name ?? numericVariables[0]?.name;
-          if (selectedName === undefined) return;
-          const formData = new FormData();
-          formData.set("variableName", selectedName);
-          void counterAction.execute({ channelId, language, formData }).then((result) => {
-            notify({ tone: result?.tone ?? "success", message: result?.message?.[language] ?? texts.streamManager.actionSucceeded(counterAction.name[language]) });
-          }).catch(() => {
-            notify({ tone: "error", message: counterAction.errorMessage?.[language] ?? texts.streamManager.actionFailed });
-          });
+          const selectedName = numericVariables.find((variable) => variable.name === savedName)?.name;
+          if (selectedName !== undefined) runCounterAction(selectedName);
+          else setCounterPicker({ channelId, variableName: numericVariables[0]?.name ?? null });
         },
       });
     }
-    const testMessageAction = quickActions.find((action) => action.id === "send-test-message");
     if (testMessage.offered && testMessageAction !== undefined) {
       items.push({
         id: "action:send-test-message",
@@ -389,7 +417,7 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
       });
     }
     return items;
-  }, [texts, manageable, adsEnabled, channelId, channelControls, ownRole, shoutoutLogin, streamState, modules, toggleAds, toggleChannelControl, variables, variablesLoaded, botConnected]);
+  }, [texts, manageable, adsEnabled, channelId, channelControls, ownRole, shoutoutLogin, streamState, modules, toggleAds, toggleChannelControl, variables, variablesLoaded, botConnected, counterAction, language, runCounterAction, testMessageAction]);
 
   const targetItems = navigationItems;
   const recentItems = recentTargetPaths.flatMap((path, index) => {
@@ -407,7 +435,7 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
     onOpenChange(nextOpen);
   };
 
-  return (
+  return <>
     <CommandPalette
       items={items}
       emptyMessage={texts.commandPalette.empty}
@@ -420,7 +448,38 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
       onOpenChange={setPaletteOpen}
       query={query}
       onQueryChange={setQuery}
-      onOpen={loadResultData}
     />
-  );
+    <FormDialog
+      opened={pickerState !== null}
+      title={textCommandQuickActionTexts.counter.chooseCounterTitle[language]}
+      description={textCommandQuickActionTexts.counter.chooseCounterDescription[language]}
+      confirmLabel={texts.streamManager.actionRun}
+      cancelLabel={texts.streamManager.actionCancel}
+      confirmDisabled={!pickerSelectionIsValid}
+      onCancel={() => { setCounterPicker(null); }}
+      onConfirm={() => {
+        if (pickerState === null || pickerState.variableName === null || !numericVariables.some((variable) => variable.name === pickerState.variableName)) return;
+        runCounterAction(pickerState.variableName);
+        setCounterPicker(null);
+      }}
+    >
+      <Select
+        label={textCommandQuickActionTexts.counter.variableLabel[language]}
+        name="variableName"
+        value={pickerState?.variableName ?? null}
+        onChange={(variableName) => {
+          if (pickerState === null) return;
+          setCounterPicker({ ...pickerState, variableName });
+        }}
+        options={numericVariables.map((variable) => ({
+          value: variable.name,
+          label: variable.name,
+          description: String(variable.value),
+        }))}
+        placeholder={textCommandQuickActionTexts.counter.selectVariable[language]}
+        disabled={numericVariables.length === 0}
+        required
+      />
+    </FormDialog>
+  </>;
 };

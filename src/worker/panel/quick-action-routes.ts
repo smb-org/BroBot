@@ -26,7 +26,7 @@ quickActionRouter.post(
 
     const language = channel.language === "en" ? "en" : "de";
     const channelObject = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
-    let retryAfter = 30;
+    let localCooldownUntil = 0;
     const result = await sendChatMessage(
       context.env,
       channelId,
@@ -35,9 +35,13 @@ quickActionRouter.post(
       fetch,
       undefined,
       async () => {
-        const claim = await channelObject.claimTestMessageSend(Date.now());
-        if (claim.allowed) return true;
-        retryAfter = claim.retryAfter;
+        const claimAt = Date.now();
+        const claim = await channelObject.claimTestMessageSend(claimAt);
+        if (claim.allowed) {
+          localCooldownUntil = claimAt + 30_000;
+          return true;
+        }
+        localCooldownUntil = claimAt + claim.retryAfter * 1_000;
         return "rate_limited";
       },
     );
@@ -45,7 +49,17 @@ quickActionRouter.post(
     let response: TestMessageResult;
     if (result.sent) response = { result: "sent" };
     else if (result.reason === "bot_identity_missing") response = { result: "identity_missing" };
-    else if (result.reason === "rate_limited") response = { result: "rate_limited", retryAfter };
+    else if (result.reason === "rate_limited") {
+      const upstreamDeadline = result.detail.retryAfter;
+      const localRemaining = Math.max(1, Math.ceil((localCooldownUntil - Date.now()) / 1_000));
+      const upstreamRemaining = typeof upstreamDeadline === "number" && Number.isFinite(upstreamDeadline)
+        ? Math.max(0, Math.ceil((upstreamDeadline - Date.now()) / 1_000))
+        : 0;
+      // The pre-send local reservation remains active after a definite Twitch
+      // rejection; use the later deadline so retries do not hit either limit.
+      const retryAfter = Math.max(localRemaining, upstreamRemaining);
+      response = { result: "rate_limited", retryAfter };
+    }
     else response = { result: "dropped", reason: result.reason ?? "not_sent" };
     return context.json(response);
   },
