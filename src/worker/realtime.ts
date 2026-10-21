@@ -201,23 +201,34 @@ export const overlayChangedMessage = (
   payload: { overlayId, revision },
 });
 
-export const publishOverlayChanged = async (
+export type OverlayChangedPublishResult = { ok: true } | { ok: false; error: unknown };
+
+export const publishOverlayChangedWithResult = async (
   namespace: Env["CHANNEL"] | undefined,
   channelId: string,
   updates: readonly { overlayId: string; revision: number }[],
-): Promise<void> => {
-  if (updates.length === 0) return;
+): Promise<OverlayChangedPublishResult> => {
+  if (updates.length === 0) return { ok: true };
   const messages = updates.map((update) => overlayChangedMessage(channelId, update.overlayId, update.revision));
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       await publishRealtimeMessages(namespace, messages);
-      return;
+      return { ok: true };
     } catch (error: unknown) {
       lastError = error;
     }
   }
-  console.warn("Realtime overlay hint could not be sent after retry.", lastError);
+  return { ok: false, error: lastError };
+};
+
+export const publishOverlayChanged = async (
+  namespace: Env["CHANNEL"] | undefined,
+  channelId: string,
+  updates: readonly { overlayId: string; revision: number }[],
+): Promise<void> => {
+  const result = await publishOverlayChangedWithResult(namespace, channelId, updates);
+  if (!result.ok) console.warn("Realtime overlay hint could not be sent after retry.", result.error);
 };
 
 /** Sends a channel-variable hint best-effort; D1 remains the authoritative state. */

@@ -102,6 +102,21 @@ const belaboxPanelLoader = vi.hoisted(() => vi.fn());
 vi.mock("../../src/modules/registry", () => ({
   MODULES: [
     {
+      id: "points",
+      navigationCategory: "participation",
+      settingsSchema: {},
+      defaultSettings: {},
+      navigationEntries: [{ id: "points", label: { de: "Punkte", en: "Points" }, iconKind: "points", keywords: ["points"] }],
+    },
+    {
+      id: "emote_slots",
+      navigationCategory: "games",
+      requiresModules: ["points"],
+      settingsSchema: {},
+      defaultSettings: {},
+      navigationEntries: [{ id: "slot", label: { de: "Slot", en: "Slot" }, iconKind: "slot", keywords: ["slot"] }],
+    },
+    {
       id: "aktiv",
       navigationCategory: "chat",
       settingsSchema: {},
@@ -354,6 +369,72 @@ describe("Module panel loader", () => {
     fireEvent.click(screen.getByRole("switch", { name: /^aktiv:/i }));
     await waitFor(() => { expect(onToggleModule).toHaveBeenCalledWith("kanal-a", "aktiv", false); });
     expect(onNavigate).toHaveBeenCalledTimes(2);
+  });
+
+  it("locks a module row until its required module is enabled (protects=the Slot switch shows its missing points dependency and cannot send a toggle request; fails_when=the switch stays enabled, omits the dependency reason, or calls the mutation handler; no_claim=server enforcement for a concurrent manager)", () => {
+    const onToggleModule = vi.fn(() => Promise.resolve());
+    renderWithUiProvider(<ModuleWorkspace
+      channelId="kanal-a"
+      ownRole="manager"
+      modules={[
+        { id: "points", enabled: false, settings: "{}" },
+        { id: "emote_slots", enabled: false, settings: "{}" },
+      ]}
+      onNavigate={vi.fn()}
+      onToggleModule={onToggleModule}
+    />);
+
+    const slotSwitch = screen.getByRole("switch", { name: "Slot: Aus" });
+    expect(slotSwitch).toBeDisabled();
+    expect(screen.getByText("Benötigt: Punkte")).toBeInTheDocument();
+    fireEvent.click(slotSwitch);
+    expect(onToggleModule).not.toHaveBeenCalled();
+  });
+
+  it("locks points while an enabled game still depends on them (protects=the points switch names active dependent modules and cannot disable the requirement; fails_when=points can be disabled or its lock reason omits the enabled game; no_claim=which server state wins if managers toggle concurrently)", () => {
+    const onToggleModule = vi.fn(() => Promise.resolve());
+    renderWithUiProvider(<ModuleWorkspace
+      channelId="kanal-a"
+      ownRole="manager"
+      modules={[
+        { id: "points", enabled: true, settings: "{}" },
+        { id: "emote_slots", enabled: true, settings: "{}" },
+      ]}
+      onNavigate={vi.fn()}
+      onToggleModule={onToggleModule}
+    />);
+
+    const pointsSwitch = screen.getByRole("switch", { name: "Punkte: Läuft" });
+    expect(pointsSwitch).toBeDisabled();
+    expect(screen.getByText("Erst ausschalten: Slot")).toBeInTheDocument();
+    fireEvent.click(pointsSwitch);
+    expect(onToggleModule).not.toHaveBeenCalled();
+  });
+
+  it("locks the Slot page header switch when points are disabled (protects=the Slot page header explains its missing points dependency without moving the page; fails_when=the header switch remains enabled or lacks the existing lock hint; no_claim=the browser layout at other viewport sizes)", () => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ settings: {}, revision: 1, variables: [] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }))));
+    const onToggle = vi.fn();
+    renderWithUiProvider(<ModulePage
+      channelId="kanal-a"
+      moduleId="emote_slots"
+      ownRole="manager"
+      modules={[
+        { id: "points", enabled: false, settings: "{}" },
+        { id: "emote_slots", enabled: false, settings: "{}" },
+      ]}
+      activeModules={[]}
+      onNavigate={vi.fn()}
+      onToggle={onToggle}
+    />);
+
+    const slotSwitch = screen.getByRole("switch", { name: "Slot: Aus" });
+    expect(slotSwitch).toBeDisabled();
+    expect(screen.getByText("Benötigt: Punkte")).toBeInTheDocument();
+    fireEvent.click(slotSwitch);
+    expect(onToggle).not.toHaveBeenCalled();
   });
 
   it("shows mandatory channel events as always active without rendering a switch", () => {

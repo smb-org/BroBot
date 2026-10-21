@@ -49,6 +49,7 @@ export interface PageHeaderProps {
   actionHint?: ReactNode;
   overflow?: ReactNode;
   lockHint?: string;
+  reserveLockHint?: boolean;
   headingLevel?: "h1" | "h2" | "h3";
 }
 
@@ -76,6 +77,7 @@ export function PageHeader({
   actionHint,
   overflow,
   lockHint,
+  reserveLockHint = false,
   headingLevel = "h1",
 }: PageHeaderProps): ReactElement {
   const common = dashboardCommonTexts();
@@ -83,7 +85,23 @@ export function PageHeader({
     ? null
     : <ModuleStatusSwitch title={switchTitle} active={active} onToggle={onToggle} disabled={switchDisabled} busy={switchBusy} />);
   const headerActions = actions === undefined ? pageActions : pageActions === undefined ? actions : <>{actions}{pageActions}</>;
-  const headerMeta = lockHint === undefined ? meta : <>{meta}{meta === undefined ? null : " "}<span className="page-header__lock"><Icon name="lock" size={16} />{lockHint}</span></>;
+  const headerMeta = lockHint === undefined
+    ? reserveLockHint
+      ? <>{meta}{meta === undefined ? null : " "}<span className="page-header__lock page-header__lock--reserved" aria-hidden="true" /></>
+      : meta
+    : <>{meta}{meta === undefined ? null : " "}<span className="page-header__lock"><Icon name="lock" size={16} />{lockHint}</span></>;
+  const metaContent = reserveLockHint
+    ? <div className="page-header__meta">
+      {meta === undefined || meta === null || meta === "" ? null : <div className="page-header__meta-content">{meta}</div>}
+      <div className="page-header__lock-row">
+        {lockHint === undefined
+          ? <span className="page-header__lock--reserved" aria-hidden="true" />
+          : <span className="page-header__lock"><Icon name="lock" size={16} /><span>{lockHint}</span></span>}
+      </div>
+    </div>
+    : headerMeta === undefined || headerMeta === null || headerMeta === ""
+      ? null
+      : <div className="page-header__meta">{headerMeta}</div>;
   const Heading = headingLevel;
 
   return (
@@ -98,7 +116,7 @@ export function PageHeader({
           {(badges ?? badge) === undefined || (badges ?? badge) === null ? null : <div className="page-header__badges">{badges ?? badge}</div>}
         </div>
         {subtitle === undefined || subtitle === null || subtitle === "" ? null : <p>{subtitle}</p>}
-        {headerMeta === undefined || headerMeta === null || headerMeta === "" ? null : <div className="page-header__meta">{headerMeta}</div>}
+        {metaContent}
       </div>
       <HeaderActions
         saveStatus={saveStatus}

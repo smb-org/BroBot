@@ -17,6 +17,7 @@ import { PanelApiError, getChannelModuleSettings, getChannelModuleSummary, getCh
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "./data";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber, serverFieldErrorText, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
+import { moduleDependencyLockReason, moduleParticipatesInDependency } from "./module-dependencies";
 import { templateTextLength } from "../template";
 import { modulePermissionsAreMissing } from "./channel-health";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
@@ -229,6 +230,7 @@ interface ModuleSettingsPageOptions {
   switchDisabled: boolean;
   switchBusy: boolean;
   lockHint?: string;
+  reserveLockHint?: boolean;
   onNavigate: (route: DashboardRoute) => void;
   pageActions?: ReactNode;
 }
@@ -322,6 +324,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       switchDisabled={page.switchDisabled}
       switchBusy={page.switchBusy}
       {...(page.lockHint === undefined ? {} : { lockHint: page.lockHint })}
+      {...(page.reserveLockHint === true ? { reserveLockHint: true } : {})}
       overflow={<ModuleListLink channelId={channelId} onNavigate={page.onNavigate} />}
       {...(page.pageActions === undefined ? {} : { pageActions: page.pageActions })}
       columns={[state]}
@@ -806,6 +809,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     switchDisabled={page.switchDisabled || pending || urlRemovalPending}
     switchBusy={page.switchBusy}
     {...(page.lockHint === undefined ? {} : { lockHint: page.lockHint })}
+    {...(page.reserveLockHint === true ? { reserveLockHint: true } : {})}
     {...(pageSave === undefined ? {} : { save: pageSave })}
     overflow={<ModuleListLink channelId={channelId} onNavigate={page.onNavigate} />}
     {...(page.pageActions === undefined ? {} : { pageActions: page.pageActions })}
@@ -1018,6 +1022,7 @@ const ModuleWorkspaceRow = ({
   rawEnabled,
   missingScopes,
   manageable,
+  modules,
   busy,
   onToggle,
   onNavigate,
@@ -1027,6 +1032,7 @@ const ModuleWorkspaceRow = ({
   rawEnabled: boolean;
   missingScopes: string[];
   manageable: boolean;
+  modules: PanelModuleState[];
   busy: boolean;
   onToggle: (nextEnabled: boolean) => void;
   onNavigate: (route: DashboardRoute) => void;
@@ -1041,7 +1047,9 @@ const ModuleWorkspaceRow = ({
   const effectiveEnabled = (rawEnabled || mandatory) && !permissionsMissing;
   const state = permissionsMissing ? labels.disabled : statusWord(effectiveEnabled);
   const route: DashboardRoute = { kind: "module", channelId, moduleId };
-  const lockedReason = mandatory || manageable ? undefined : texts.module.managementLocked;
+  const dependencyReason = mandatory ? null : moduleDependencyLockReason(moduleId, !rawEnabled, modules);
+  const lockedReason = mandatory ? undefined : dependencyReason ?? (manageable ? undefined : texts.module.managementLocked);
+  const reserveDependencyReason = moduleParticipatesInDependency(moduleId);
 
   return (
     <ListRow
@@ -1051,13 +1059,13 @@ const ModuleWorkspaceRow = ({
       title={details.name}
       description={<>
         {details.description}
-        {lockedReason === undefined ? null : <span className="module-workspace__lock-reason"><LockedReason id={`module-lock-${moduleId}`} reason={lockedReason} /></span>}
+        {lockedReason === undefined && !reserveDependencyReason ? null : <span className="module-workspace__lock-reason"><LockedReason id={`module-lock-${moduleId}`} {...(lockedReason === undefined ? {} : { reason: lockedReason })} /></span>}
       </>}
       status={mandatory
         ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} showReason />
         : <StatusLed state={permissionsMissing ? "warn" : effectiveEnabled ? "ok" : "off"} label={state} />}
       action={mandatory ? null : <div className="module-switch-control">
-        <SwitchPrimitive aria-label={`${details.name}: ${statusWord(rawEnabled)}`} aria-describedby={lockedReason === undefined ? undefined : `module-lock-${moduleId}`} aria-busy={busy} checked={rawEnabled} disabled={!manageable || busy} onCheckedChange={onToggle} />
+        <SwitchPrimitive aria-label={`${details.name}: ${statusWord(rawEnabled)}`} aria-describedby={lockedReason === undefined ? undefined : `module-lock-${moduleId}`} aria-busy={busy} checked={rawEnabled} disabled={!manageable || dependencyReason !== null || busy} onCheckedChange={onToggle} />
       </div>}
     />
   );
@@ -1085,7 +1093,7 @@ const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onToggleMod
   const [busyModules, setBusyModules] = useState<ReadonlySet<string>>(new Set());
 
   const toggle = async (moduleId: string, nextEnabled: boolean): Promise<void> => {
-    if (busyModulesRef.current.has(moduleId)) return;
+    if (busyModulesRef.current.has(moduleId) || moduleDependencyLockReason(moduleId, nextEnabled, modules) !== null) return;
     busyModulesRef.current.add(moduleId);
     setBusyModules(new Set(busyModulesRef.current));
     setPendingEnabled((current) => ({ ...current, [moduleId]: nextEnabled }));
@@ -1122,6 +1130,7 @@ const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onToggleMod
               rawEnabled={rawEnabled}
               missingScopes={state?.missingBroadcasterScopes ?? []}
               manageable={manageable}
+              modules={modules}
               busy={busyModules.has(module.id)}
               onToggle={(nextEnabled) => { void toggle(module.id, nextEnabled); }}
               onNavigate={onNavigate}
@@ -1206,14 +1215,11 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   const mandatoryReason = registered?.mandatoryReason?.[dashboardLanguage()] ?? labels.mandatoryReason;
   const enabled = mandatory || moduleState?.enabled === true;
   const manageable = canManageModules(ownRole);
-  const dependentGames = moduleId === "points" ? MODULES.filter((candidate) => candidate.navigationCategory === "games" &&
-    candidate.requiresModules?.includes("points") === true && modules.some((state) => state.id === candidate.id && state.enabled)) : [];
-  const dependentModulesReason = dependentGames.length === 0 ? null : texts.module.dependentModulesLock(
-    dependentGames.map((candidate) => moduleName(candidate.id, dashboardLanguage())).join(", "),
-  );
-  const headerLockHint = dependentModulesReason ?? (manageable ? null : texts.module.managementLocked);
-  const disabledReason = mandatory ? mandatoryReason : dependentModulesReason ?? (manageable ? null : texts.module.managementLocked);
-  const switchDisabled = mandatory || registered === undefined || moduleState === undefined || dependentGames.length > 0;
+  const reserveDependencyHint = moduleParticipatesInDependency(moduleId);
+  const dependencyLockReason = mandatory ? null : moduleDependencyLockReason(moduleId, !enabled, modules);
+  const headerLockHint = dependencyLockReason ?? (manageable ? null : texts.module.managementLocked);
+  const disabledReason = mandatory ? mandatoryReason : dependencyLockReason ?? (manageable ? null : texts.module.managementLocked);
+  const switchDisabled = mandatory || registered === undefined || moduleState === undefined || dependencyLockReason !== null;
   const missingScopes = moduleState?.missingBroadcasterScopes ?? [];
   const permissionsMissing = modulePermissionsAreMissing(moduleState);
   const requiredScopes = moduleState?.requiredBroadcasterScopes ?? registered?.broadcasterScopes ?? [];
@@ -1252,9 +1258,10 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
           icon: iconFor(moduleId, "module-heading-glyph"),
           active: enabled,
           onToggle: (nextEnabled) => { if (nextEnabled !== enabled) onToggle(); },
-          switchDisabled: !manageable || switchDisabled || busy || mandatory,
+          switchDisabled: !manageable || switchDisabled || busy,
           switchBusy: busy,
           ...(disabledReason === null ? {} : { lockHint: disabledReason }),
+          ...(reserveDependencyHint ? { reserveLockHint: true } : {}),
           onNavigate,
           ...(moduleId === "emote_slots" && registered.chatCommands?.length ? { pageActions: <ChatCommandsHelp commands={registered.chatCommands} language={dashboardLanguage()} /> } : {}),
         }}
@@ -1281,10 +1288,11 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
               else onToggle();
             },
             switchTitle: `${details.name}: ${statusWord(effectiveEnabled)}`,
-            switchDisabled: !manageable || switchDisabled || busy || mandatory,
+            switchDisabled: !manageable || switchDisabled || busy,
             switchBusy: busy,
             ...(mandatory ? { moduleSwitch: <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} /> } : {}),
-            ...(headerLockHint === null || (dependentModulesReason === null && ((registered?.settingsEditor !== undefined && showActiveView && moduleId !== "chat_voting") || (registered?.panelManagesSettings && moduleState?.enabled !== false && moduleId !== "clips"))) ? {} : { lockHint: headerLockHint }),
+            ...(headerLockHint === null || (dependencyLockReason === null && ((registered?.settingsEditor !== undefined && showActiveView && moduleId !== "chat_voting") || (registered?.panelManagesSettings && moduleState?.enabled !== false && moduleId !== "clips"))) ? {} : { lockHint: headerLockHint }),
+            ...(reserveDependencyHint ? { reserveLockHint: true } : {}),
           })}
           {...(moduleId === "chat_voting" ? {
             pageActions: <>

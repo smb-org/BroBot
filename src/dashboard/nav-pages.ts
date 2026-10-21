@@ -45,6 +45,7 @@ export interface ModuleNavigationState {
   id: string;
   enabled: boolean;
   missingBroadcasterScopes?: readonly string[];
+  broadcasterScopeMetadataUnknown?: true;
 }
 
 interface NavPageDefinition {
@@ -62,7 +63,7 @@ type ModuleNavigationDefinition = Pick<BotModule, "id" | "navigationCategory" | 
 
 /** Module pages are hidden from the sidebar when disabled, blocked, or unavailable to the current channel member. */
 const moduleNavigationIsVisible = (state: ModuleNavigationState, memberRole: ChannelRole | null): boolean =>
-  memberRole !== null && state.enabled && !modulePermissionsAreMissing(state);
+  memberRole !== null && state.enabled && state.broadcasterScopeMetadataUnknown !== true && !modulePermissionsAreMissing(state);
 
 export const visibleModuleNavigationIds = (
   moduleStates: readonly ModuleNavigationState[],
