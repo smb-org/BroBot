@@ -751,6 +751,7 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
   return <div className="blitz-panel__detail">
     <PageHeader
       kind="blitz"
+      className="page-header--editor"
       title={isNew ? labels.newQuestion : baseQuestion?.prompt ?? labels.title}
       badges={<Badge tone="neutral">{draft.value.kind === "scramble" ? labels.scramble : labels.quiz}</Badge>}
       pageActions={<Button variant="neutral" icon="tabSettings" onClick={requestSettings}>{labels.settings}</Button>}
@@ -931,7 +932,7 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
   }, [guardSwitch, registerSwitch]);
 
   return <div className="blitz-panel__detail blitz-panel__settings">
-    <PageHeader kind="blitz" title={labels.settingsSection} pageActions={<Button variant="neutral" icon="collapse" onClick={() => { guard.guardSwitch(onBack); }}>{labels.back}</Button>} save={saveProps} />
+    <PageHeader kind="blitz" className="page-header--editor" title={labels.settingsSection} pageActions={<Button variant="neutral" icon="collapse" onClick={() => { guard.guardSwitch(onBack); }}>{labels.back}</Button>} save={saveProps} />
     <div className="blitz-panel__settings-form">
       <div className="blitz-panel__settings-grid">
         <UnitInput label={labels.prize} value={draft.value.prize} min={1} max={10_000} disabled={!canManage || saving} onChange={(value) => { if (typeof value === "number") draft.setValue((current) => ({ ...current, prize: value })); }} />

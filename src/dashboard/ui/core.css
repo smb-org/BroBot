@@ -808,7 +808,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 }
 .module-heading-glyph { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .page-header__main, .module-detail-heading__copy { min-width: 0; }
-.page-header--editor { container: page-header-editor / inline-size; grid-template-columns: 56px minmax(0, 1fr) auto; align-items: start; gap: var(--s2) var(--s3); }
+.page-header--editor { container: page-header-editor / inline-size; grid-template-columns: 56px minmax(0, 1fr) auto; align-items: start; gap: var(--s2) var(--s3); flex: none; width: 100%; max-width: none; margin-bottom: var(--s4); padding-bottom: var(--s4); }
 .page-header--editor:not(:has(.page-header__icon)) { grid-template-columns: minmax(0, 1fr) auto; }
 .page-header--editor .page-header__copy { min-width: 0; }
 .page-header--editor .page-header__title-row :is(h1, h2, h3) {

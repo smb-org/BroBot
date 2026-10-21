@@ -111,7 +111,7 @@ export function PageHeader({
       </div>}
       <div className="page-header__main page-header__copy module-detail-heading__copy">
         <div className="page-header__title-row">
-          <Heading>{titleContent ?? title}</Heading>
+          <Heading title={title}>{titleContent ?? title}</Heading>
           {switchControl === null ? null : <div className="page-header__module-switch module-detail__switch">{switchControl}</div>}
           {(badges ?? badge) === undefined || (badges ?? badge) === null ? null : <div className="page-header__badges">{badges ?? badge}</div>}
         </div>
