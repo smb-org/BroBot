@@ -69,7 +69,8 @@ for (const width of [1920, 390]) {
     const usedPaletteColor = popover.getByRole("button", { name: "#ff9f43" });
     await expect(usedPaletteColor).toHaveCSS("background-color", "rgb(255, 159, 67)");
     await expect(usedPaletteColor).toHaveCSS("opacity", "1");
-    await expect(popover.locator(".chat-voting-editor__color-feedback")).toHaveCSS("height", "16px");
+    const colorFeedback = popover.locator(".chat-voting-editor__color-feedback");
+    await expect(colorFeedback).toHaveCSS("height", "32px");
     await popover.getByRole("button", { name: "#ff6fae" }).click();
     expect(await box(page)).toEqual(before);
 
@@ -79,7 +80,9 @@ for (const width of [1920, 390]) {
     expect(await box(page)).toEqual(before);
 
     await popover.getByRole("textbox", { name: "Custom hex color" }).fill("#1c222b");
-    await expect(popover).toContainText("This color needs at least 3:1 contrast");
+    await expect(colorFeedback).toHaveText("Needs 3:1 contrast in the cockpit and overlay bars.");
+    await expect(colorFeedback).toHaveCSS("white-space", "normal");
+    await expect.poll(() => colorFeedback.evaluate((element) => element.scrollHeight <= element.clientHeight)).toBe(true);
     expect(await box(page)).toEqual(before);
 
     await page.keyboard.press("Escape");

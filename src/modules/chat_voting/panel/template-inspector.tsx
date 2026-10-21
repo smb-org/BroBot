@@ -14,7 +14,7 @@ import { chatVoteDurationText, chatVotingSavedPanelTexts } from "./locale-saved"
 import { chatVoteResultPreview } from "./result-preview";
 import { createChatVoteTemplate, loadChatVotingTemplateVariables, saveChatVoteTemplate } from "./service";
 import type { ChatVoteTemplateListState } from "./service";
-import { CHAT_VOTE_PALETTE, chatVoteDefaultColorAt, normalizeChatVoteColor, voteColorContrastIssue } from "../contracts/vote-colors";
+import { CHAT_VOTE_PALETTE, chatVoteDefaultColorAt, nextUnusedChatVoteDefaultColor, normalizeChatVoteColor, voteColorContrastIssue } from "../contracts/vote-colors";
 
 export interface TemplateInspectorActions {
   guardSwitch: (proceed: () => void, cancel?: () => void) => void;
@@ -196,7 +196,12 @@ export function ChatVoteTemplateInspector({
   };
 
   const updateAnswerLabels = (nextLabels: readonly string[], nextColors?: readonly string[]): void => {
-    const colors = nextColors ?? nextLabels.map((_label, index) => draftValue.current.answerColors[index] ?? chatVoteDefaultColorAt(index));
+    const colors = nextColors === undefined ? [] : [...nextColors];
+    if (nextColors === undefined) {
+      nextLabels.forEach((_label, index) => {
+        colors.push(draftValue.current.answerColors[index] ?? nextUnusedChatVoteDefaultColor(colors));
+      });
+    }
     setCustomColorDrafts({});
     updateDraft({ labels: nextLabels, answerColors: colors });
   };
@@ -638,12 +643,18 @@ export function ChatVoteTemplateInspector({
           hint={labels.shortcutHint}
           onChange={(value) => { updateDraft({ shortcut: value.length === 0 ? null : value }); }}
         />
-        <SwitchRow
-          label={labels.offerInCockpit}
-          hint={labels.offerInCockpitHint}
-          checked={draft.value.offerInCockpit}
-          onChange={(offerInCockpit) => { updateDraft({ offerInCockpit }); }}
-        />
+        <div className="chat-voting-editor__cockpit-offer">
+          <SwitchRow
+            label={labels.offerInCockpit}
+            hint={labels.offerInCockpitHint}
+            checked={draft.value.offerInCockpit}
+            invalid={unreachableError !== null}
+            onChange={(offerInCockpit) => { updateDraft({ offerInCockpit }); }}
+          />
+          <span aria-live="polite" className="chat-voting-editor__cockpit-feedback">
+            {unreachableError ?? " "}
+          </span>
+        </div>
       </InspectorSection>
       </> : <>
         <dl className="properties chat-voting-template-inspector__properties">

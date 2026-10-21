@@ -47,7 +47,7 @@
   .chat-voting-editor__color-palette button.is-selected { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--focus); }
   .chat-voting-editor__color-field { gap: var(--s1); min-width: 0; }
   .chat-voting-editor__color-field .ui-field__input { box-sizing: border-box; width: 100%; min-width: 0; padding-inline: var(--s2); font-family: var(--font-mono); }
-  .chat-voting-editor__color-feedback { display: block; height: 16px; min-height: 16px; overflow: hidden; color: var(--error); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+  .chat-voting-editor__color-feedback { display: block; height: 32px; min-height: 32px; overflow: hidden; color: var(--color-error-text); font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
   .chat-voting-editor__color-preview { display: grid; gap: var(--s2); min-width: 0; margin-top: var(--s3); padding: var(--s3); border: 1px solid var(--line); border-radius: var(--r-container); background: var(--surface-well); }
   .chat-voting-editor__color-preview-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); min-width: 0; }
   .chat-voting-editor__color-preview-heading > strong { font-size: 12px; font-weight: 600; }
@@ -75,6 +75,8 @@
   .chat-voting-editor__counted-field > .ui-field__error { position: static; grid-column: 1 / -1; grid-row: 2; min-height: 16px; max-height: 16px; margin: 0; overflow: hidden; font-size: 11px; line-height: 14px; }
   .chat-voting-editor__quick-templates { display: flex; flex-wrap: wrap; gap: var(--s2); }
   .chat-voting-editor__switch-section { margin-block: var(--s3); }
+  .chat-voting-editor__cockpit-offer [data-slot="switch"][aria-invalid="true"] { outline: 2px solid var(--color-error); outline-offset: 2px; }
+  .chat-voting-editor__cockpit-feedback { display: block; height: 16px; min-height: 16px; overflow: hidden; color: var(--color-error-text); font-size: 12px; line-height: 16px; text-overflow: clip; white-space: nowrap; }
   .chat-voting-editor__duration-control { display: grid; gap: var(--s2); min-width: 0; }
   .chat-voting-template-inspector .chat-voting-editor__result-text { display: grid; gap: var(--s3); padding: var(--s4) 0; border-bottom: 1px solid var(--line); }
   .chat-voting-editor__duration-slot { height: 32px; min-height: 32px; }

@@ -192,3 +192,65 @@ test("standard vote options keep the original narrow bars and strip sizing", asy
     expect(measurements.rows[1]).toBeGreaterThan(400);
   }
 });
+
+test("colored strip rows keep counters on one line and labels readable at a 360px overlay width", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const measurements: Array<{
+    documentWidth: number;
+    rowHeights: number[];
+    markerWidths: number[];
+    markerAndGapWidths: number[];
+    labelWidths: number[];
+    labelsTruncate: boolean[];
+    countWhiteSpaces: string[];
+    countHeights: number[];
+  }> = [];
+
+  for (const colored of [false, true]) {
+    const parameters = new URLSearchParams({ preset: "standard", mobile: "1", layout: "strip", colored: colored ? "1" : "0" });
+    await page.goto(`/tests/e2e/chat-voting-overlay-fixture.html?${parameters.toString()}`);
+    const tally = page.locator(".chat-voting-tally");
+    await expect(tally.locator(".chat-voting-tally__option")).toHaveCount(2);
+    measurements.push(await tally.evaluate((element) => {
+      const rows = [...element.querySelectorAll(".chat-voting-tally__option")];
+      const labels = rows.map((row) => row.querySelector(".overlay-tally__label")).filter((label): label is Element => label !== null);
+      const counts = rows.map((row) => row.querySelector(".overlay-tally__count")).filter((count): count is Element => count !== null);
+      const markers = rows.map((row) => row.querySelector(".overlay-tally__color-marker")).filter((marker): marker is Element => marker !== null);
+      return {
+        documentWidth: document.documentElement.scrollWidth,
+        rowHeights: rows.map((row) => row.getBoundingClientRect().height),
+        markerWidths: markers.map((marker) => marker.getBoundingClientRect().width),
+        markerAndGapWidths: markers.map((marker) => {
+          const label = marker.parentElement;
+          return marker.getBoundingClientRect().width + Number.parseFloat(getComputedStyle(label as Element).gap);
+        }),
+        labelWidths: labels.map((label) => label.getBoundingClientRect().width),
+        // A coloured label wraps its text in a copy span; the span is the element that truncates.
+        labelsTruncate: labels.map((label) => {
+          const target = label.querySelector(".overlay-tally__label-copy") ?? label;
+          return target.scrollWidth > target.clientWidth;
+        }),
+        countWhiteSpaces: counts.map((count) => getComputedStyle(count).whiteSpace),
+        countHeights: counts.map((count) => count.getBoundingClientRect().height),
+      };
+    }));
+  }
+
+  const plain = measurements[0];
+  const colored = measurements[1];
+  expect(plain).toBeDefined();
+  expect(colored).toBeDefined();
+  expect(plain?.documentWidth).toBeLessThanOrEqual(390);
+  expect(colored?.documentWidth).toBeLessThanOrEqual(390);
+  // Uncoloured rows keep the original behaviour: no marker, no truncation, text may wrap.
+  expect(plain?.markerWidths).toEqual([]);
+  expect(plain?.labelsTruncate.some(Boolean)).toBe(false);
+  expect(plain?.countWhiteSpaces).toEqual(["normal", "normal"]);
+  // Coloured rows use compact markers, truncate labels and keep counters on one line at equal heights.
+  expect(colored?.markerWidths).toEqual([8, 8]);
+  expect(colored?.markerAndGapWidths.every((width) => width <= 10)).toBe(true);
+  expect(colored?.labelsTruncate.every(Boolean)).toBe(true);
+  expect(colored?.countWhiteSpaces).toEqual(["nowrap", "nowrap"]);
+  expect(new Set(colored?.rowHeights).size).toBe(1);
+  expect(new Set(colored?.countHeights).size).toBe(1);
+});

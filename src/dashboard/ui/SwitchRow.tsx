@@ -10,12 +10,13 @@ export interface SwitchRowProps {
   hint?: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
+  invalid?: boolean;
   disabled?: boolean;
   pending?: boolean;
   lockedReason?: string;
 }
 
-export function SwitchRow({ label, ariaLabel, description, hint, checked, onChange, disabled = false, pending = false, lockedReason }: SwitchRowProps) {
+export function SwitchRow({ label, ariaLabel, description, hint, checked, onChange, invalid = false, disabled = false, pending = false, lockedReason }: SwitchRowProps) {
   const id = useId();
   const labelId = `${id}-label`;
   const descriptionId = `${id}-description`;
@@ -33,6 +34,7 @@ export function SwitchRow({ label, ariaLabel, description, hint, checked, onChan
       aria-label={ariaLabel}
       aria-labelledby={ariaLabel === undefined ? labelId : undefined}
       aria-describedby={describedBy}
+      aria-invalid={invalid || undefined}
       aria-busy={pending}
       checked={checked}
       disabled={blocked}

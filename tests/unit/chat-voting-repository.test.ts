@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { ChatVoteDraft } from "../../src/modules/chat_voting/contracts";
+import { DEFAULT_CHAT_VOTING_SETTINGS } from "../../src/modules/chat_voting/contracts";
 import { createChatVotingRepository } from "../../src/modules/chat_voting/repository";
+import { processChatVotingMessage } from "../../src/modules/chat_voting/service";
+import type { ModuleExecutionContext } from "../../src/modules/contract";
 import { authorizeModuleMutation } from "../../src/worker/module-authorization";
 import { prepareModuleAudit } from "../../src/worker/module-audit";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
@@ -15,7 +18,133 @@ const setChatVotingEnabled = async (database: TestD1Database, enabled: boolean):
   ).bind(Number(enabled)).run();
 };
 
+const processVoteCommand = async (
+  command: string,
+  database: TestD1Database,
+  repository: ReturnType<typeof createChatVotingRepository>,
+) => processChatVotingMessage({
+  channelId: "fictional-channel",
+  subscriptionType: "channel.chat.message",
+  triggerId: "fictional-trigger",
+  payload: { message: { text: command }, chatter_user_id: "fictional-operator" },
+  settings: DEFAULT_CHAT_VOTING_SETTINGS,
+  receivedAt: "2026-10-04T10:00:00.000Z",
+  actor: null,
+  chatStatus: ["moderator"],
+}, repository, {
+  DB: database,
+  ballots: { open: () => Promise.resolve({ status: "opened" as const }) },
+  channelLanguage: () => Promise.resolve("en" as const),
+  scheduleAlarm: () => Promise.resolve(),
+} as unknown as ModuleExecutionContext);
+
 describe("chat voting repository mutation guards", () => {
+  it("starts a template whose old-worker insert defaults to empty colors and whose labels changed after migration", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "fictional-channel");
+      await setChatVotingEnabled(database, true);
+      await database.prepare(
+        `INSERT INTO chat_vote_templates
+           (id, channel_id, shortcut, title, result_text, labels, offer_in_cockpit, free_text_mode, duration_seconds, revision,
+            legacy_alias, last_used_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 1, NULL, 120, 1, NULL, NULL, ?, ?)`,
+      ).bind(
+        "legacy-template-default-colors", "fictional-channel", "dinner", "Dinner", "{vote.result}", JSON.stringify(["Pizza", "Burger"]),
+        "2026-10-04T10:00:00.000Z", "2026-10-04T10:00:00.000Z",
+      ).run();
+      await database.prepare("UPDATE chat_vote_templates SET labels = ? WHERE id = ?")
+        .bind(JSON.stringify(["Pizza", "Burger", "Kebab"]), "legacy-template-default-colors").run();
+      const repository = createChatVotingRepository(database as unknown as D1Database);
+
+      await expect(repository.templates.templateByShortcut("fictional-channel", "dinner"))
+        .resolves.toMatchObject({ labels: ["Pizza", "Burger", "Kebab"], answerColors: ["#5b8cff", "#ff9f43", "#2ed3a3"] });
+
+      const result = await processVoteCommand("!vote dinner", database, repository);
+      expect(result.actions[0]).toMatchObject({ kind: "overlay", type: "opened" });
+      await expect(repository.open("fictional-channel"))
+        .resolves.toMatchObject({ labels: ["Pizza", "Burger", "Kebab"], answerColors: ["#5b8cff", "#ff9f43", "#2ed3a3"] });
+      const written = await database.prepare("SELECT answer_colors_json FROM chat_votes WHERE channel_id = ?")
+        .bind("fictional-channel").first<{ answer_colors_json: string }>();
+      expect(written?.answer_colors_json).toBe('["#5b8cff","#ff9f43","#2ed3a3"]');
+    } finally {
+      database.close();
+    }
+  });
+
+  it("replays a post-migration fixed-answer vote with default empty colors through !vote again", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "fictional-channel");
+      await setChatVotingEnabled(database, true);
+      await database.prepare(
+        `INSERT INTO chat_votes
+           (channel_id, poll_id, kind, option_count, labels_json, status, opened_at, closes_at, closed_at, close_reason, counts_json, voter_count)
+         VALUES (?, ?, 'options', 3, ?, 'closed', ?, ?, ?, 'manual', '[2, 1, 0]', 3)`,
+      ).bind(
+        "fictional-channel", "legacy-closed-vote", JSON.stringify(["Pizza", "Burger", "Kebab"]),
+        "2026-10-04T09:00:00.000Z", "2026-10-04T10:00:00.000Z", "2026-10-04T10:00:00.000Z",
+      ).run();
+      const repository = createChatVotingRepository(database as unknown as D1Database);
+
+      const result = await processVoteCommand("!vote again", database, repository);
+
+      expect(result.actions[0]).toMatchObject({ kind: "overlay", type: "opened" });
+      await expect(repository.open("fictional-channel"))
+        .resolves.toMatchObject({ labels: ["Pizza", "Burger", "Kebab"], answerColors: ["#5b8cff", "#ff9f43", "#2ed3a3"] });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("preserves valid template colors, replaces invalid entries with unused defaults, and drops extras", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "fictional-channel");
+      await database.prepare(
+        `INSERT INTO chat_vote_templates
+           (id, channel_id, shortcut, title, result_text, labels, answer_colors, offer_in_cockpit, free_text_mode, duration_seconds,
+            revision, legacy_alias, last_used_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1, NULL, 120, 1, NULL, NULL, ?, ?)`,
+      ).bind(
+        "legacy-template-mismatched-colors", "fictional-channel", "colors", "Colors", "{vote.result}",
+        JSON.stringify(["Burger", "Kebab", "Tacos"]), JSON.stringify(["#ff9f43", "#2ed3a3", "#000000", "#ff6fae"]),
+        "2026-10-04T10:00:00.000Z", "2026-10-04T10:00:00.000Z",
+      ).run();
+      const repository = createChatVotingRepository(database as unknown as D1Database);
+
+      await expect(repository.templates.template("fictional-channel", "legacy-template-mismatched-colors"))
+        .resolves.toMatchObject({ answerColors: ["#ff9f43", "#2ed3a3", "#5b8cff"] });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("stores a complete normalized color array when a template is written", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "fictional-channel");
+      await setChatVotingEnabled(database, true);
+      const repository = createChatVotingRepository(database as unknown as D1Database);
+
+      await expect(repository.templates.createTemplate("fictional-channel", "template-normalized-write", {
+        shortcut: "normalized",
+        title: "Normalized colors",
+        labels: ["Pizza", "Burger", "Kebab"],
+        answerColors: [],
+        offerInCockpit: true,
+        freeTextMode: null,
+        durationSeconds: 120,
+      }, "2026-10-04T10:00:00.000Z", { sql: "", values: [] })).resolves.toBe("created");
+
+      const written = await database.prepare("SELECT answer_colors FROM chat_vote_templates WHERE id = ?")
+        .bind("template-normalized-write").first<{ answer_colors: string }>();
+      expect(written?.answer_colors).toBe('["#5b8cff","#ff9f43","#2ed3a3"]');
+    } finally {
+      database.close();
+    }
+  });
+
   it("creates, revision-saves, conflicts, deletes, and resolves a legacy alias", async () => {
     const database = new TestD1Database();
     try {

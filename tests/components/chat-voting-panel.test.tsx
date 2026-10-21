@@ -134,7 +134,7 @@ describe("saved chat voting collection", () => {
     fireEvent.change(hex, { target: { value: "#ff9f43" } });
     expect(within(popover).getByText("Jede Antwort braucht eine eigene Farbe.")).toBeInTheDocument();
     fireEvent.change(hex, { target: { value: "#1c222b" } });
-    expect(within(popover).getByText(/mindestens 3:1 Kontrast/u)).toBeInTheDocument();
+    expect(within(popover).getByText("Mindestens 3:1 Kontrast im Cockpit und auf Overlay-Balken.")).toBeInTheDocument();
 
     const preview = screen.getByTestId("chat-vote-color-preview");
     expect(preview).toHaveTextContent("Farben · Vorschau");
@@ -146,6 +146,46 @@ describe("saved chat voting collection", () => {
     await waitFor(() => expect(requests.mock.calls.some(([input, init]) => requestUrl(input).pathname.endsWith("/templates/template-dinner") && init?.method === "PATCH")).toBe(true));
     const savedBody = requests.mock.calls.find(([input, init]) => requestUrl(input).pathname.endsWith("/templates/template-dinner") && init?.method === "PATCH")?.[1]?.body;
     expect(JSON.parse(savedBody as string)).toMatchObject({ answerColors: ["#ff6fae", "#ff9f43"], offerInCockpit: true });
+  });
+
+  it("adds a removed answer with an unused default color while preserving the remaining assignments", async () => {
+    const threeAnswers: ChatVoteTemplate = {
+      ...template,
+      title: "Three answers",
+      labels: ["Pizza", "Burger", "Kebab"],
+      answerColors: ["#5b8cff", "#ff9f43", "#2ed3a3"],
+    };
+    mount({ templates: [threeAnswers] });
+    fireEvent.click(await screen.findByRole("link", { name: /Three answers/u }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Antwort 1 entfernen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Antwort hinzufügen" }));
+
+    expect(screen.getByRole("button", { name: "Farbe für Antwort 1" }).style.backgroundColor).toBe("rgb(255, 159, 67)");
+    expect(screen.getByRole("button", { name: "Farbe für Antwort 2" }).style.backgroundColor).toBe("rgb(46, 211, 163)");
+    expect(screen.getByRole("button", { name: "Farbe für Antwort 3" }).style.backgroundColor).toBe("rgb(91, 140, 255)");
+  });
+
+  it("shows and highlights the missing shortcut or cockpit offer beside its switch", async () => {
+    mount();
+    fireEvent.click(await screen.findByRole("link", { name: /Abendessen/u }));
+    const cockpitSwitch = await screen.findByRole("switch", { name: "Im Cockpit anbieten" });
+
+    fireEvent.click(cockpitSwitch);
+
+    expect(cockpitSwitch.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByText("Kürzel festlegen oder im Cockpit anbieten.").textContent).toBe("Kürzel festlegen oder im Cockpit anbieten.");
+  });
+
+  it("keeps the localized contrast feedback concise and complete", async () => {
+    mount();
+    fireEvent.click(await screen.findByRole("link", { name: /Abendessen/u }));
+    fireEvent.click(await screen.findByRole("button", { name: "Farbe für Antwort 1" }));
+    const popover = await screen.findByRole("dialog", { name: "Farbe für Antwort 1" });
+    fireEvent.change(within(popover).getByRole("textbox", { name: "Eigener Hex-Wert" }), { target: { value: "#1c222b" } });
+
+    expect(popover.querySelector(".chat-voting-editor__color-feedback")?.textContent)
+      .toBe("Mindestens 3:1 Kontrast im Cockpit und auf Overlay-Balken.");
   });
 
   it("keeps a new vote as a two-minute draft until the explicit save action", async () => {

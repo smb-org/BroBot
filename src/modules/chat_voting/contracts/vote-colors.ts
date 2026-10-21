@@ -38,6 +38,13 @@ export const chatVoteDefaultColorAt = (index: number): string => ALL_CHAT_VOTE_C
 export const chatVoteDefaultColors = (count: number): string[] =>
   Array.from({ length: Math.max(0, Math.min(9, count)) }, (_, index) => chatVoteDefaultColorAt(index));
 
+export const nextUnusedChatVoteDefaultColor = (usedColors: readonly string[]): string => {
+  const used = new Set(usedColors.map((color) => normalizeChatVoteColor(color) ?? color));
+  const color = ALL_CHAT_VOTE_COLORS.find((candidate) => !used.has(candidate));
+  if (color === undefined) throw new RangeError("No unused default voting color is available.");
+  return color;
+};
+
 export const voteColorContrastRatio = (color: string, target: VoteColorContrastTarget): number => {
   const normalized = normalizeChatVoteColor(color);
   if (normalized === null) return 0;

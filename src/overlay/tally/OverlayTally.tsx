@@ -158,7 +158,7 @@ export const OverlayTallyOptions = ({
     <div className={classNames("overlay-tally__options", `overlay-tally__options--${layout}`, `overlay-tally__options--${variant}`, classPrefix === undefined ? undefined : `${classPrefix}__options`)} style={optionsStyle}>
       {rows.map((row) => {
         const percent = total === 0 ? 0 : Math.round(row.count * 100 / total);
-        return <div className={classNames("overlay-tally__option", classPrefix === undefined ? undefined : `${classPrefix}__option`)} key={row.id} style={optionStyle}>
+        return <div className={classNames("overlay-tally__option", layout === "strip" && row.color !== undefined ? "overlay-tally__option--colored" : undefined, classPrefix === undefined ? undefined : `${classPrefix}__option`)} key={row.id} style={optionStyle}>
           <div className={classNames("overlay-tally__caption", classPrefix === undefined ? undefined : `${classPrefix}__caption`)} style={variant === "terms" ? { display: "grid", gridTemplateColumns: "minmax(0, 1fr) 10rem", alignItems: "center", gap: "0 0.5em", minWidth: 0, width: "100%", boxSizing: "border-box" } : { display: "flex", justifyContent: "space-between", gap: "0.5em" }}>
             <span className={classNames("overlay-tally__label", layout === "strip" && row.color !== undefined ? "overlay-tally__label--strip-colored" : undefined)} title={row.title} style={variant === "terms" ? { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } : undefined}>
               {layout === "strip" && row.color !== undefined

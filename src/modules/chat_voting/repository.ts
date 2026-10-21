@@ -1,6 +1,7 @@
 import type { ModuleMutationAuthorization } from "../contract";
 import type { ChatVote, ChatVoteCloseReason, ChatVoteDraft, ChatVoteTemplate, ChatVoteTemplateDraft, ChatVoteTerm, ChatVotingKind, ChatVotingTextMode } from "./contracts";
 import type { TextBlockWriteGuard } from "../contracts/text-block-write-guard";
+import { nextUnusedChatVoteDefaultColor, normalizeChatVoteColor, voteColorContrastIssue } from "./contracts/vote-colors";
 
 interface ChatVoteRow {
   channel_id: string;
@@ -54,6 +55,27 @@ const parseStringArray = (value: string | null): string[] | null => {
   } catch { return null; }
 };
 
+const normalizeAnswerColors = (labels: readonly string[], answerColors: readonly string[]): string[] => {
+  const preservedColors = answerColors.slice(0, labels.length).map((color) => {
+    const normalized = normalizeChatVoteColor(color);
+    return normalized !== null && voteColorContrastIssue(normalized) === null ? normalized : undefined;
+  });
+  const seen = new Set<string>();
+  const colorsByIndex = preservedColors.map((color) => {
+    if (color === undefined || seen.has(color)) return undefined;
+    seen.add(color);
+    return color;
+  });
+  const usedColors = new Set(colorsByIndex.filter((color): color is string => color !== undefined));
+  return labels.map((_label, index) => {
+    const preserved = colorsByIndex[index];
+    if (preserved !== undefined) return preserved;
+    const color = nextUnusedChatVoteDefaultColor([...usedColors]);
+    usedColors.add(color);
+    return color;
+  });
+};
+
 const parseNumberArray = (value: string | null): number[] | null => {
   if (value === null) return null;
   try {
@@ -82,13 +104,14 @@ const parseTermArray = (value: string | null): ChatVoteTerm[] | null => {
 };
 
 const mapRow = (row: ChatVoteRow): ChatVote => {
+  const labels = parseStringArray(row.labels_json) ?? [];
   return {
     id: row.poll_id,
     channelId: row.channel_id,
     kind: row.kind,
     optionCount: row.option_count,
-    labels: parseStringArray(row.labels_json) ?? [],
-    answerColors: parseStringArray(row.answer_colors_json) ?? [],
+    labels,
+    answerColors: normalizeAnswerColors(labels, parseStringArray(row.answer_colors_json) ?? []),
     title: row.title,
     resultText: row.result_text,
     textMode: row.text_mode,
@@ -109,23 +132,26 @@ const mapRow = (row: ChatVoteRow): ChatVote => {
   };
 };
 
-const mapTemplateRow = (row: ChatVoteTemplateRow): ChatVoteTemplate => ({
-  id: row.id,
-  channelId: row.channel_id,
-  shortcut: row.shortcut,
-  title: row.title,
-  resultText: row.result_text,
-  labels: parseStringArray(row.labels) ?? [],
-  answerColors: parseStringArray(row.answer_colors) ?? [],
-  offerInCockpit: row.offer_in_cockpit === 1,
-  freeTextMode: row.free_text_mode,
-  durationSeconds: row.duration_seconds,
-  revision: row.revision,
-  legacyAlias: row.legacy_alias,
-  lastUsedAt: row.last_used_at,
-  createdAt: row.created_at,
-  updatedAt: row.updated_at,
-});
+const mapTemplateRow = (row: ChatVoteTemplateRow): ChatVoteTemplate => {
+  const labels = parseStringArray(row.labels) ?? [];
+  return {
+    id: row.id,
+    channelId: row.channel_id,
+    shortcut: row.shortcut,
+    title: row.title,
+    resultText: row.result_text,
+    labels,
+    answerColors: normalizeAnswerColors(labels, parseStringArray(row.answer_colors) ?? []),
+    offerInCockpit: row.offer_in_cockpit === 1,
+    freeTextMode: row.free_text_mode,
+    durationSeconds: row.duration_seconds,
+    revision: row.revision,
+    legacyAlias: row.legacy_alias,
+    lastUsedAt: row.last_used_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+};
 
 export const chatVoteTemplateSelectColumns = `id, channel_id, shortcut, title, result_text, labels, answer_colors, offer_in_cockpit, free_text_mode, duration_seconds,
                                              revision, legacy_alias, last_used_at, created_at, updated_at`;
@@ -455,7 +481,7 @@ const templateRepository = (db: D1Database): ChatVoteTemplateRepository => ({
           ) ${authorization.sql} ${blockGuard.sql}
        ON CONFLICT (channel_id, shortcut) WHERE shortcut IS NOT NULL DO NOTHING`,
      ).bind(id, channelId, draft.shortcut, draft.title, draft.resultText ?? "{vote.result}", JSON.stringify(draft.labels),
-       JSON.stringify(draft.answerColors), Number(draft.offerInCockpit), draft.freeTextMode,
+       JSON.stringify(normalizeAnswerColors(draft.labels, draft.answerColors)), Number(draft.offerInCockpit), draft.freeTextMode,
        draft.durationSeconds, createdAt, createdAt, channelId, channelId, ...authorization.values, ...blockGuard.values);
     const result = audit === undefined ? await mutation.run() : (await db.batch([mutation, audit]))[0];
     if (result === undefined) throw new Error("Template creation mutation returned no D1 result.");
@@ -490,7 +516,7 @@ const templateRepository = (db: D1Database): ChatVoteTemplateRepository => ({
           RETURNING ${chatVoteTemplateSelectColumns}
         `,
        ).bind(draft.shortcut, draft.title, draft.resultText ?? "{vote.result}", JSON.stringify(draft.labels),
-         JSON.stringify(draft.answerColors), Number(draft.offerInCockpit), draft.freeTextMode,
+         JSON.stringify(normalizeAnswerColors(draft.labels, draft.answerColors)), Number(draft.offerInCockpit), draft.freeTextMode,
          draft.durationSeconds, updatedAt, channelId, id, revision, ...authorization.values, ...blockGuard.values);
       const result = audit === undefined ? await mutation.run() : (await db.batch([mutation, audit]))[0];
       if (result === undefined) throw new Error("Template save mutation returned no D1 result.");
@@ -605,7 +631,7 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
       vote.kind,
       vote.optionCount,
       JSON.stringify(vote.labels),
-      JSON.stringify(vote.answerColors),
+      JSON.stringify(normalizeAnswerColors(vote.labels, vote.answerColors)),
       vote.title,
       vote.resultText ?? null,
       vote.textMode ?? null,
