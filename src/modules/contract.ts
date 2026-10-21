@@ -1490,7 +1490,7 @@ export interface ModulePanelProperties {
   onOpenTestArea?: (moduleId: "text_commands" | "faq", entryId: string) => void;
 }
 
-type ModuleImmediateActionIcon = "ad" | "shoutout" | "clip" | "broadcast" | "vote" | "boss" | "blitz";
+type ModuleImmediateActionIcon = "ad" | "shoutout" | "clip" | "broadcast" | "vote" | "boss" | "blitz" | "counter" | "test-message";
 
 type ModuleImmediateActionAvailability = {
   reason: Readonly<Record<ModuleLanguage, string>> | null;
@@ -1503,6 +1503,7 @@ type ModuleImmediateActionAvailability = {
 interface ModuleImmediateActionConditionContext {
   channelId: string;
   streamState: ChannelStreamState | null | undefined;
+  botConnected?: boolean | null | undefined;
   language: ModuleLanguage;
   signal: AbortSignal;
 }
@@ -1524,6 +1525,7 @@ interface ModuleImmediateActionExecutionProperties extends ModuleImmediateAction
 
 export interface ModuleImmediateActionResult {
   message?: Readonly<Record<ModuleLanguage, string>>;
+  tone?: "success" | "info" | "error";
   link?: { href: string; label: Readonly<Record<ModuleLanguage, string>> };
   belaboxSample?: { connected: boolean; bitrateKbps: number; sampledAt: number };
 }

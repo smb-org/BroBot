@@ -22,6 +22,7 @@ import type {
 import type { ChannelControlDuration, ChannelRole, ChatOutputTarget, OverlayElementKind } from "../contracts/values";
 import type { ModuleRegisteredTemplateVariable } from "../modules/contract";
 import type { DryRunRequest, DryRunResponse } from "../contracts/dry-run";
+import type { TestMessageResult } from "../contracts/quick-actions";
 import type { NormalizedWeather } from "../modules/weather/contracts";
 import type { SunDay, SunAltitudeInterval } from "../modules/sun/domain";
 
@@ -710,6 +711,9 @@ export const changeChannelVariableValue = (
   amount: number,
 ): Promise<{ variable: PanelChannelVariableRecord }> =>
   requestMutation(variablesPath(channelId, name, "/value"), "POST", { operation, amount });
+
+export const sendTestMessage = (channelId: string): Promise<TestMessageResult> =>
+  requestMutation(channelPath(channelId, "quick-actions/test-message"), "POST");
 
 export const deleteChannelVariable = (channelId: string, name: string): Promise<undefined> =>
   requestMutation<undefined>(variablesPath(channelId, name), "DELETE");

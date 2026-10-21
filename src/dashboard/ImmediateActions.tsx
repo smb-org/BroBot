@@ -42,11 +42,12 @@ const roleReason = (requiredRole: ChannelRole): string => {
   return texts.operatorOnly;
 };
 
-const ActionButton = ({ action, moduleId, channelId, streamState, role, availabilityRetryGeneration, onAvailabilityStateChange, onActionStart, onActionResult, onActionFailure, onFeedbackMessage }: {
+const ActionButton = ({ action, moduleId, channelId, streamState, botConnected, role, availabilityRetryGeneration, onAvailabilityStateChange, onActionStart, onActionResult, onActionFailure, onFeedbackMessage }: {
   action: ModuleImmediateActionDefinition;
   moduleId: string;
   channelId: string;
   streamState: ChannelStreamState | null | undefined;
+  botConnected?: boolean | null | undefined;
   role: ChannelRole;
   availabilityRetryGeneration: number;
   onAvailabilityStateChange: (actionKey: string, stale: boolean) => void;
@@ -115,7 +116,7 @@ const ActionButton = ({ action, moduleId, channelId, streamState, role, availabi
       try {
         let pollId: string | null = null;
         for (const condition of customConditions) {
-          const result = await condition.check({ channelId, streamState, language, signal: controller.signal });
+          const result = await condition.check({ channelId, streamState, botConnected, language, signal: controller.signal });
           if (!active || controller.signal.aborted) return;
           pollId = result.pollId ?? pollId;
           if (result.reason !== null) {
@@ -152,7 +153,7 @@ const ActionButton = ({ action, moduleId, channelId, streamState, role, availabi
       pendingController?.abort();
       window.clearInterval(interval);
     };
-  }, [actionKey, availabilityRetryGeneration, channelId, customConditions, language, onAvailabilityStateChange, shouldCheckConditions, streamState]);
+  }, [actionKey, availabilityRetryGeneration, botConnected, channelId, customConditions, language, onAvailabilityStateChange, shouldCheckConditions, streamState]);
 
   useEffect(() => {
     if (activeConditionState.until === null || activeConditionState.reason === null || !activeConditionState.reason[language].includes("{time}")) return;
@@ -391,9 +392,10 @@ const ActionFrame = ({ action, moduleId, channelId, language, pollId, disabled, 
   </div>;
 };
 
-export const ImmediateActions = ({ channelId, streamState, role, modules = [], modulesLoaded = true, onActionStart, onActionResult, onActionFailure, onFeedbackMessage }: {
+export const ImmediateActions = ({ channelId, streamState, botConnected, role, modules = [], modulesLoaded = true, onActionStart, onActionResult, onActionFailure, onFeedbackMessage }: {
   channelId: string;
   streamState?: ChannelStreamState | null | undefined;
+  botConnected?: boolean | null;
   role: ChannelRole;
   modules?: readonly Pick<PanelModuleState, "id" | "enabled">[];
   modulesLoaded?: boolean;
@@ -434,7 +436,7 @@ export const ImmediateActions = ({ channelId, streamState, role, modules = [], m
     </header>
     <div className="live-cockpit-actions__grid" role="group" aria-label={texts.streamManager.immediateActions}>
       {modulesLoaded
-        ? actions.map(({ moduleId, action }) => <ActionButton key={`${moduleId}:${action.id}`} action={action} moduleId={moduleId} channelId={channelId} streamState={streamState} role={role} availabilityRetryGeneration={availabilityRetryGeneration} onAvailabilityStateChange={onAvailabilityStateChange}
+        ? actions.map(({ moduleId, action }) => <ActionButton key={`${moduleId}:${action.id}`} action={action} moduleId={moduleId} channelId={channelId} streamState={streamState} botConnected={botConnected} role={role} availabilityRetryGeneration={availabilityRetryGeneration} onAvailabilityStateChange={onAvailabilityStateChange}
           {...(onActionStart === undefined ? {} : { onActionStart })}
           {...(onActionResult === undefined ? {} : { onActionResult })}
           {...(onActionFailure === undefined ? {} : { onActionFailure })}

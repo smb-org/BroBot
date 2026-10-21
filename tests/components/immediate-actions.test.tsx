@@ -1,10 +1,41 @@
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ImmediateActions } from "../../src/dashboard/ImmediateActions";
+import { changeChannelVariableValue, fetchChannelOverview, fetchChannelVariables, sendTestMessage, type PanelChannelVariable } from "../../src/dashboard/api";
+import { dashboardTexts } from "../../src/dashboard/locale";
+import { loadTextCommandData } from "../../src/modules/text_commands/panel/service";
 import { UiProvider } from "../../src/dashboard/ui";
+import { clickSelectOption } from "../query-test-utils";
 
-afterEach(() => { cleanup(); });
+vi.mock("../../src/dashboard/api", async (importOriginal) => ({
+  ...await importOriginal<Record<string, unknown>>(),
+  changeChannelVariableValue: vi.fn(),
+  fetchChannelOverview: vi.fn(),
+  fetchChannelVariables: vi.fn(),
+  sendTestMessage: vi.fn(),
+}));
+
+vi.mock("../../src/modules/text_commands/panel/service", async (importOriginal) => ({
+  ...await importOriginal<Record<string, unknown>>(),
+  loadTextCommandData: vi.fn(),
+}));
+
+const setChannelVariables = (variables: readonly PanelChannelVariable[]): void => {
+  vi.mocked(fetchChannelVariables).mockResolvedValue({ count: variables.length, maximum: 50, variables });
+  vi.mocked(loadTextCommandData).mockResolvedValue({ commands: [], variables: [...variables] });
+};
+
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+});
+
+beforeEach(() => {
+  setChannelVariables([{ channelId: "channel-a", name: "score", value: 4, description: "", resetOnStreamStart: false, createdAt: "", updatedAt: "", usages: [] }]);
+  vi.mocked(changeChannelVariableValue).mockReset();
+  vi.mocked(sendTestMessage).mockReset();
+});
 
 describe("cockpit action role mirror", () => {
   it("locks manager actions for operators while keeping operator actions available", () => {
@@ -21,10 +52,87 @@ describe("cockpit action role mirror", () => {
 
     const adAction = screen.getByRole("button", { name: /Werbung starten|Start ad break/u });
     const clipAction = screen.getByRole("button", { name: /Clip erstellen|Create clip/u });
-    expect(adAction).toBeDisabled();
-    expect(adAction).toHaveAttribute("aria-haspopup", "dialog");
-    expect(clipAction).toBeEnabled();
-    expect(clipAction).not.toHaveAttribute("aria-haspopup");
-    expect(screen.getByText(/Nur Verwalter und Broadcaster dürfen diese Aktion ausführen\.|Only managers and broadcasters may run this action\./u)).toBeVisible();
+    expect((adAction as HTMLButtonElement).disabled).toBe(true);
+    expect(adAction.getAttribute("aria-haspopup")).toBe("dialog");
+    expect((clipAction as HTMLButtonElement).disabled).toBe(false);
+    expect(clipAction.hasAttribute("aria-haspopup")).toBe(false);
+    expect(screen.getByText(/Nur Verwalter und Broadcaster dürfen diese Aktion ausführen\.|Only managers and broadcasters may run this action\./u)).not.toBeNull();
+  });
+
+  it("increments the selected variable through the existing value route and shows its new value", async () => {
+    setChannelVariables([{ channelId: "channel-a", name: "score", value: 4, description: "Score", resetOnStreamStart: false, createdAt: "", updatedAt: "", usages: [] }]);
+    vi.mocked(changeChannelVariableValue).mockResolvedValue({
+      variable: { channelId: "channel-a", name: "score", value: 5, description: "Score", resetOnStreamStart: false, createdAt: "", updatedAt: "" },
+    });
+    vi.mocked(fetchChannelOverview).mockResolvedValue({ bot: { status: "connected", reason: null, updatedAt: "" } } as never);
+
+    render(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
+      modules={[{ id: "text_commands", enabled: true }]} botConnected />
+    </UiProvider>);
+
+    const action = await screen.findByRole("button", { name: /Counter \+1|Zähler \+1/u });
+    await waitFor(() => expect((action as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(action);
+    const picker = await screen.findByRole("combobox", { name: /variable/iu });
+    fireEvent.click(picker);
+    clickSelectOption(await screen.findByRole("option", { name: /score/iu, hidden: true }));
+    fireEvent.click(await screen.findByRole("button", { name: dashboardTexts().streamManager.actionRun }));
+
+    await waitFor(() => expect(changeChannelVariableValue).toHaveBeenCalledOnce());
+    expect(changeChannelVariableValue).toHaveBeenCalledWith("channel-a", "score", "add", 1);
+    expect((await screen.findByText(/Neuer Wert: 5|New value: 5/u)).textContent).toMatch(/Neuer Wert: 5|New value: 5/u);
+  });
+
+  it("remembers the counter variable per channel in the picker", async () => {
+    localStorage.setItem("brobot-dashboard-counter-variable-v1:channel-a", "lives");
+    localStorage.setItem("brobot-dashboard-counter-variable-v1:channel-b", "score");
+    setChannelVariables([
+        { channelId: "channel-a", name: "score", value: 4, description: "", resetOnStreamStart: false, createdAt: "", updatedAt: "", usages: [] },
+        { channelId: "channel-a", name: "lives", value: 3, description: "", resetOnStreamStart: false, createdAt: "", updatedAt: "", usages: [] },
+    ]);
+
+    render(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
+      modules={[{ id: "text_commands", enabled: true }]} botConnected />
+    </UiProvider>);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Counter \+1|Zähler \+1/u }));
+    const picker = await screen.findByRole("combobox", { name: /variable/iu });
+    expect(picker.textContent).toContain("lives");
+    fireEvent.click(picker);
+    clickSelectOption(await screen.findByRole("option", { name: /score/iu, hidden: true }));
+    expect(localStorage.getItem("brobot-dashboard-counter-variable-v1:channel-a")).toBe("score");
+    expect(localStorage.getItem("brobot-dashboard-counter-variable-v1:channel-b")).toBe("score");
+  });
+
+  it("keeps counter and test message visible with their unavailable reasons", async () => {
+    setChannelVariables([]);
+    vi.mocked(fetchChannelOverview).mockResolvedValue({ bot: { status: "not_connected", reason: null, updatedAt: "" } } as never);
+
+    render(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
+      modules={[{ id: "text_commands", enabled: true }]} botConnected={false} />
+    </UiProvider>);
+
+    const counter = await screen.findByRole("button", { name: /Counter \+1|Zähler \+1/u });
+    const testMessage = await screen.findByRole("button", { name: /Send test message|Testnachricht senden/u });
+    await waitFor(() => expect((counter as HTMLButtonElement).disabled).toBe(true));
+    expect((testMessage as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/No numeric channel variables|Keine numerischen Kanalvariablen/u)).not.toBeNull();
+    expect(screen.getByText(/bot is not connected|Bot ist nicht verbunden/u)).not.toBeNull();
+  });
+
+  it("shows the typed sent result for a test message", async () => {
+    vi.mocked(sendTestMessage).mockResolvedValue({ result: "sent" });
+
+    render(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
+      modules={[{ id: "text_commands", enabled: true }]} botConnected />
+    </UiProvider>);
+
+    const action = await screen.findByRole("button", { name: /Send test message|Testnachricht senden/u });
+    await waitFor(() => expect((action as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(action);
+
+    await waitFor(() => expect(sendTestMessage).toHaveBeenCalledWith("channel-a"));
+    const feedback = await screen.findByText(/Testnachricht gesendet|Test message sent/u);
+    expect(feedback.textContent).toMatch(/Testnachricht gesendet|Test message sent/u);
   });
 });

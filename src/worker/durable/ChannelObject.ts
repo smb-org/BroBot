@@ -15,6 +15,7 @@ import {
 } from "../../realtime-contract";
 import { CHANNEL_ROLES, type ChannelRole } from "../../contracts/values";
 import { processAdPrewarning } from "../ad-prewarning";
+import { claimTestMessageSend as claimTestMessageSendInStorage } from "./test-message-rate-limit";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../realtime-protocol";
 import type { AdsSchedule } from "../../modules/ads/contracts";
 import type { ClipsSettings } from "../../modules/clips/contracts";
@@ -696,6 +697,11 @@ export class ChannelObject extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+  }
+
+  /** Atomically reserves one quick-action test message per channel every 30 seconds. */
+  public async claimTestMessageSend(now: number): Promise<{ allowed: true } | { allowed: false; retryAfter: number }> {
+    return claimTestMessageSendInStorage(this.ctx.storage, now);
   }
 
   private ensurePointsSchema(): void {

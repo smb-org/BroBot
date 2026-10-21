@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useState, type ReactElement } from "re
 
 import { MODULES } from "../modules/registry";
 import type { TextCommand } from "../modules/text_commands/contracts";
+import { readLastCounterVariable } from "../modules/text_commands/panel/counter-selection";
+import { textCommandQuickActionTexts } from "../modules/text_commands/panel/quick-action-locale";
 import { loadTextCommands } from "../modules/text_commands/panel/service";
 import { canManage, hasRequiredChannelRole, type ChannelRole } from "../contracts/values";
 import type { PanelChannelControls, PanelModuleState } from "../panel-contract";
@@ -34,6 +36,7 @@ const moduleImmediateActionAvailability = (
   modules: readonly Pick<PanelModuleState, "id" | "enabled">[],
   streamState: "online" | "offline" | null | undefined,
   role: ChannelRole | null,
+  conditionReason: string | null = null,
 ): { offered: boolean; disabledReason: string | null } => {
   const module = MODULES.find((entry) => entry.id === moduleId);
   const action = module?.actions?.find((entry) => entry.id === actionId);
@@ -50,7 +53,9 @@ const moduleImmediateActionAvailability = (
   const availability = evaluateImmediateActionAvailability(action.conditions, streamState);
   return {
     offered: true,
-    disabledReason: availability.reason === null ? null : immediateActionUnavailableReasonText(availability.reason),
+    disabledReason: availability.reason === null
+      ? conditionReason
+      : immediateActionUnavailableReasonText(availability.reason),
   };
 };
 
@@ -65,6 +70,7 @@ interface ChannelCommandPaletteProperties {
   isPlatformAdmin?: boolean;
   /** Whether the installation bot is signed in; undefined while its status is unknown. */
   botSignedIn?: boolean;
+  botConnected?: boolean | null;
   streamState?: "online" | "offline" | null | undefined;
   channelControls?: PanelChannelControls;
   onRefreshChannelState?: () => Promise<void>;
@@ -92,11 +98,12 @@ const recentTargetPathForRoute = (route: DashboardRoute, channelId: string | nul
 };
 
 /** Cmd/Ctrl+K finds navigation, text commands, variables, and channel actions. */
-export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, viewerUserId = null, route, isPlatformAdmin = false, botSignedIn, streamState, channelControls, onRefreshChannelState, onToggleModule, modules, onNavigate, onOpenCommand, onOpenVariable }: ChannelCommandPaletteProperties): ReactElement => {
+export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, viewerUserId = null, route, isPlatformAdmin = false, botSignedIn, botConnected, streamState, channelControls, onRefreshChannelState, onToggleModule, modules, onNavigate, onOpenCommand, onOpenVariable }: ChannelCommandPaletteProperties): ReactElement => {
   const texts = dashboardTexts();
   const manageable = ownRole !== null && canManage(ownRole);
   const [commands, setCommands] = useState<TextCommand[]>([]);
   const [variables, setVariables] = useState<readonly PanelChannelVariable[]>([]);
+  const [variablesLoaded, setVariablesLoaded] = useState(false);
   const [query, setQuery] = useState("");
   const currentTargetPath = route === undefined ? null : recentTargetPathForRoute(route, channelId);
   const recentTargetPaths = useMemo(() => {
@@ -118,7 +125,14 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
   const loadResultData = useCallback((): void => {
     if (channelId === null) return;
     loadTextCommands(channelId).then(setCommands).catch(() => { setCommands([]); });
-    fetchChannelVariables(channelId).then((data) => { setVariables(data.variables); }).catch(() => { setVariables([]); });
+    setVariablesLoaded(false);
+    fetchChannelVariables(channelId).then((data) => {
+      setVariables(data.variables);
+      setVariablesLoaded(true);
+    }).catch(() => {
+      setVariables([]);
+      setVariablesLoaded(true);
+    });
   }, [channelId]);
 
   const navigationItems = useMemo<CommandPaletteItem[]>(() => dashboardNavigationGroups(
@@ -227,6 +241,17 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
     const adNow = moduleImmediateActionAvailability("ads", "start-commercial", modules, streamState, ownRole);
     const clip = moduleImmediateActionAvailability("clips", "create-clip", modules, streamState, ownRole);
     const shoutout = moduleImmediateActionAvailability("raid", "send-shoutout", modules, streamState, ownRole);
+    const language = dashboardLanguage();
+    const counterReason = !variablesLoaded
+      ? texts.streamManager.actionLoading
+      : variables.some((variable) => Number.isFinite(variable.value))
+        ? null
+        : textCommandQuickActionTexts.counter.noVariables[language];
+    const testMessageReason = botConnected === true
+      ? null
+      : textCommandQuickActionTexts.testMessage.botNotConnected[language];
+    const counter = moduleImmediateActionAvailability("text_commands", "counter-plus-one", modules, streamState, ownRole, counterReason);
+    const testMessage = moduleImmediateActionAvailability("text_commands", "send-test-message", modules, streamState, ownRole, testMessageReason);
     const items: CommandPaletteItem[] = [];
     const channelControlLabels = texts.channelControls;
     for (const kind of ["mute", "pause"] as const) {
@@ -316,8 +341,55 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
         onTrigger: () => { void sendManualShoutout(channelId, shoutoutLogin); },
       });
     }
+    const quickActions = MODULES.find((module) => module.id === "text_commands")?.actions ?? [];
+    const counterAction = quickActions.find((action) => action.id === "counter-plus-one");
+    if (counter.offered && counterAction !== undefined) {
+      items.push({
+        id: "action:counter-plus-one",
+        label: counterAction.name[language],
+        group: texts.commandPalette.groupActions,
+        keywords: [...textCommandQuickActionTexts.counter.paletteKeywords],
+        icon: counterAction.icon,
+        disabled: counter.disabledReason !== null,
+        ...(counter.disabledReason === null ? {} : { disabledReason: counter.disabledReason }),
+        onTrigger: () => {
+          if (counter.disabledReason !== null) return;
+          const numericVariables = variables.filter((variable) => Number.isFinite(variable.value));
+          const savedName = readLastCounterVariable(channelId);
+          const selectedName = numericVariables.find((variable) => variable.name === savedName)?.name ?? numericVariables[0]?.name;
+          if (selectedName === undefined) return;
+          const formData = new FormData();
+          formData.set("variableName", selectedName);
+          void counterAction.execute({ channelId, language, formData }).then((result) => {
+            notify({ tone: result?.tone ?? "success", message: result?.message?.[language] ?? texts.streamManager.actionSucceeded(counterAction.name[language]) });
+          }).catch(() => {
+            notify({ tone: "error", message: counterAction.errorMessage?.[language] ?? texts.streamManager.actionFailed });
+          });
+        },
+      });
+    }
+    const testMessageAction = quickActions.find((action) => action.id === "send-test-message");
+    if (testMessage.offered && testMessageAction !== undefined) {
+      items.push({
+        id: "action:send-test-message",
+        label: testMessageAction.name[language],
+        group: texts.commandPalette.groupActions,
+        keywords: ["test message", "testnachricht", "chat"],
+        icon: testMessageAction.icon,
+        disabled: testMessage.disabledReason !== null,
+        ...(testMessage.disabledReason === null ? {} : { disabledReason: testMessage.disabledReason }),
+        onTrigger: () => {
+          if (testMessage.disabledReason !== null) return;
+          void testMessageAction.execute({ channelId, language, formData: new FormData() }).then((result) => {
+            notify({ tone: result?.tone ?? "success", message: result?.message?.[language] ?? texts.streamManager.actionSucceeded(testMessageAction.name[language]) });
+          }).catch(() => {
+            notify({ tone: "error", message: testMessageAction.errorMessage?.[language] ?? texts.streamManager.actionFailed });
+          });
+        },
+      });
+    }
     return items;
-  }, [texts, manageable, adsEnabled, channelId, channelControls, ownRole, shoutoutLogin, streamState, modules, toggleAds, toggleChannelControl]);
+  }, [texts, manageable, adsEnabled, channelId, channelControls, ownRole, shoutoutLogin, streamState, modules, toggleAds, toggleChannelControl, variables, variablesLoaded, botConnected]);
 
   const targetItems = navigationItems;
   const recentItems = recentTargetPaths.flatMap((path, index) => {

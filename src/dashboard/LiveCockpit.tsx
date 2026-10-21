@@ -275,6 +275,7 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
       <ImmediateActions
         channelId={overview.channelId}
         streamState={streamState}
+        botConnected={botConnected}
         role={overview.role}
         modules={modules}
         modulesLoaded={modulesLoaded}
