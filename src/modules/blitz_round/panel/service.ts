@@ -20,8 +20,11 @@ export const loadBlitzQuestions = async (channelId: string, page: number, search
   return readJson<BlitzQuestionPage>(await fetch(`${basePath(channelId)}/questions?${params.toString()}`, signal === undefined ? {} : { signal }));
 };
 
-export const loadBlitzQuestion = async (channelId: string, questionId: string): Promise<BlitzQuestion> =>
-  (await readJson<{ question: BlitzQuestion }>(await fetch(`${basePath(channelId)}/questions/${encodeURIComponent(questionId)}`))).question;
+export const loadBlitzQuestion = async (channelId: string, questionId: string, signal?: AbortSignal): Promise<BlitzQuestion> =>
+  (await readJson<{ question: BlitzQuestion }>(await fetch(
+    `${basePath(channelId)}/questions/${encodeURIComponent(questionId)}`,
+    signal === undefined ? {} : { signal },
+  ))).question;
 
 export const loadBlitzSettings = async (channelId: string, signal?: AbortSignal): Promise<{ settings: BlitzRoundSettings; revision: number }> => {
   const parsed = await readJson<{ settings: unknown; revision: number }>(await fetch(`/api/channels/${encodeURIComponent(channelId)}/modules/blitz_round/settings`, signal === undefined ? {} : { signal }));

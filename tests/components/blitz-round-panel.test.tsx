@@ -37,6 +37,13 @@ const secondQuestion: BlitzQuestion = {
   answers: ["MOON"],
 };
 
+const thirdQuestion: BlitzQuestion = {
+  ...sampleQuestion,
+  id: "fictional-question-axle",
+  prompt: "AXLE",
+  answers: ["AXLE"],
+};
+
 const questionPoolWith26 = (): BlitzQuestion[] => Array.from({ length: 26 }, (_, index): BlitzQuestion => ({
   ...sampleQuestion,
   id: `fictional-question-${String(index + 1).padStart(2, "0")}`,
@@ -49,7 +56,7 @@ const parseUrl = (input: RequestInfo | URL): URL => input instanceof Request
   ? new URL(input.url)
   : input instanceof URL ? input : new URL(input, "https://brobot.example");
 
-const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Promise<void>, stalePatch = false, settingsConflict = false, patchDeleted = false, settingsPatchGate?: Promise<void>, failQuestionListAfterDelete = false, options: { failPostDeleteQuestionLists?: number; postDeleteQuestionListGate?: Promise<void>; postDeleteQuestionListGates?: ReadonlyArray<{ page: number; search: string; gate: Promise<void> }>; failQuestionPage?: number; failQuestionPageRequests?: number; failPostDeleteQuestionPage?: number; failPostDeleteQuestionPageRequests?: number; questionPatchGate?: Promise<void>; failQuestionPatch?: boolean; failSettingsGets?: number; settingsGetGate?: Promise<void>; settingsGetGates?: ReadonlyArray<Promise<void> | undefined>; questionGetGates?: ReadonlyArray<{ questionId: string; gate: Promise<void> }>; deleteGate?: Promise<void> } = {}) => {
+const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Promise<void>, stalePatch = false, settingsConflict = false, patchDeleted = false, settingsPatchGate?: Promise<void>, failQuestionListAfterDelete = false, options: { failPostDeleteQuestionLists?: number; postDeleteQuestionListGate?: Promise<void>; postDeleteQuestionListGates?: ReadonlyArray<{ page: number; search: string; gate: Promise<void> }>; questionListGetGates?: ReadonlyArray<{ page: number; search: string; requestNumber: number; gate: Promise<void>; onStarted?: () => void }>; failQuestionPage?: number; failQuestionPageRequests?: number; failPostDeleteQuestionPage?: number; failPostDeleteQuestionPageRequests?: number; questionPatchGate?: Promise<void>; failQuestionPatch?: boolean; failSettingsGets?: number; settingsGetGate?: Promise<void>; settingsGetGates?: ReadonlyArray<Promise<void> | undefined>; questionGetGates?: ReadonlyArray<{ questionId: string; requestNumber?: number; gate: Promise<void> }>; deleteGate?: Promise<void> } = {}) => {
   let questions = [...initialQuestions];
   let questionDeleted = false;
   let shouldFailQuestionListAfterDelete = failQuestionListAfterDelete;
@@ -57,6 +64,9 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
   let failedRequestedPageLists = 0;
   let failedPostDeletePageLists = 0;
   let postDeleteQuestionListRequests = 0;
+  const questionListRequestCounts = new Map<string, number>();
+  const questionGetRequestCounts = new Map<string, number>();
+  const usedQuestionListGetGates = new Set<number>();
   const usedPostDeleteQuestionListGates = new Set<number>();
   const usedQuestionGetGates = new Set<number>();
   let finishPostDeleteQuestionList!: () => void;
@@ -105,12 +115,14 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
     }
     if (url.pathname.includes("/modules/blitz_round/questions/") && method === "GET") {
       const id = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
+      const requestNumber = (questionGetRequestCounts.get(id) ?? 0) + 1;
+      questionGetRequestCounts.set(id, requestNumber);
       const readQuestion = (): Response => {
         const question = questions.find((candidate) => candidate.id === id);
         return question === undefined ? jsonResponse({ error: "question_not_found" }, 404) : jsonResponse({ question });
       };
       const gatedQuestionIndex = options.questionGetGates?.findIndex((entry, index) =>
-        !usedQuestionGetGates.has(index) && entry.questionId === id) ?? -1;
+        !usedQuestionGetGates.has(index) && entry.questionId === id && (entry.requestNumber ?? 1) === requestNumber) ?? -1;
       if (gatedQuestionIndex >= 0) {
         usedQuestionGetGates.add(gatedQuestionIndex);
         const gate = options.questionGetGates?.[gatedQuestionIndex]?.gate;
@@ -138,6 +150,17 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
       const start = (page - 1) * BLITZ_QUESTION_PAGE_SIZE;
       const snapshot = { questions: matches.slice(start, start + BLITZ_QUESTION_PAGE_SIZE), total: matches.length, page };
       const response = (): Response => jsonResponse(snapshot);
+      const listKey = `${String(page)}:${url.searchParams.get("q") ?? ""}`;
+      const requestNumber = (questionListRequestCounts.get(listKey) ?? 0) + 1;
+      questionListRequestCounts.set(listKey, requestNumber);
+      const gatedQuestionListIndex = options.questionListGetGates?.findIndex((entry, index) =>
+        !usedQuestionListGetGates.has(index) && entry.page === page && entry.search === (url.searchParams.get("q") ?? "") && entry.requestNumber === requestNumber) ?? -1;
+      if (gatedQuestionListIndex >= 0) {
+        usedQuestionListGetGates.add(gatedQuestionListIndex);
+        const gate = options.questionListGetGates?.[gatedQuestionListIndex];
+        gate?.onStarted?.();
+        if (gate !== undefined) return gate.gate.then(response);
+      }
       const gatedListIndex = questionDeleted ? options.postDeleteQuestionListGates?.findIndex((entry, index) =>
         !usedPostDeleteQuestionListGates.has(index) && entry.page === page && entry.search === (url.searchParams.get("q") ?? "")) ?? -1 : -1;
       if (gatedListIndex >= 0) {
@@ -349,7 +372,7 @@ describe("Blitz Round collection panel", () => {
     if (destination === "Settings") expect(await screen.findByText("Round settings", { exact: true })).toBeInTheDocument();
     else if (destination === "another question row") {
       await waitFor(() => expect(screen.getByRole("button", { name: /Word scramble.*MOON/u })).toHaveAttribute("aria-current", "true"));
-      expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("MOON");
+      expect(await screen.findByRole("textbox", { name: "Word" })).toHaveValue("MOON");
     } else if (destination === "New question") {
       expect(await screen.findByRole("heading", { name: "New question" })).toBeInTheDocument();
       expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("");
@@ -397,6 +420,7 @@ describe("Blitz Round collection panel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Back to questions" }));
     fireEvent.click(screen.getByRole("button", { name: /Word scramble.*MOON/u }));
+    await screen.findByRole("textbox", { name: "Word" });
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
 
@@ -419,7 +443,7 @@ describe("Blitz Round collection panel", () => {
 
     const requestedQuestion = await screen.findByRole("button", { name: /Word scramble.*MOON/u });
     await waitFor(() => expect(requestedQuestion).toHaveAttribute("aria-current", "true"));
-    expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("MOON");
+    expect(await screen.findByRole("textbox", { name: "Word" })).toHaveValue("MOON");
   });
 
   it("opens New question requested during a header save [protects=click Save, request New question while the question PATCH is pending, and open a blank question editor after the save resolves; fails_when=the saved revision remounts the editor and drops the pending New question destination; no_claim=the delayed PATCH uses an in-memory HTTP stub and does not verify authentication or D1 writes]", async () => {
@@ -543,6 +567,7 @@ describe("Blitz Round collection panel", () => {
     installPanelFetch([sampleQuestion]);
     const view = mountPanel();
     await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    await screen.findByRole("textbox", { name: "Word" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const prize = await screen.findByRole("spinbutton", { name: "Prize" });
     fireEvent.change(prize, { target: { value: "75" } });
@@ -570,6 +595,7 @@ describe("Blitz Round collection panel", () => {
     installPanelFetch([sampleQuestion, secondQuestion]);
     mountPanel();
     await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    await screen.findByRole("textbox", { name: "Word" });
 
     fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "STONE" } });
     fireEvent.click(screen.getByRole("button", { name: /Word scramble.*MOON/u }));
@@ -594,13 +620,14 @@ describe("Blitz Round collection panel", () => {
 
     const requestedQuestion = await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
     await waitFor(() => expect(requestedQuestion).toHaveAttribute("aria-current", "true"));
-    expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("CLOUD");
+    expect(await screen.findByRole("textbox", { name: "Word" })).toHaveValue("CLOUD");
   });
 
   it("reselects the initially selected question without restoring its stale revision [protects=clicking the initially selected row with its detail closed keeps the editor draft and later saves use revisions 1 then 2; fails_when=the row click queues its captured snapshot so the next PATCH reuses revision 1; no_claim=question responses use an in-memory HTTP stub and do not verify production authentication or D1 isolation]", async () => {
     const api = installPanelFetch([sampleQuestion]);
     mountPanel();
     const selectedRow = await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    await screen.findByRole("textbox", { name: "Word" });
     fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "STORM" } });
     fireEvent.click(selectedRow);
     const reselectOpenedSaveGuard = screen.queryByRole("dialog", { name: "Save changes?" }) !== null;
@@ -661,7 +688,7 @@ describe("Blitz Round collection panel", () => {
       operation === "save as new", operation === "settings save" ? gate : undefined, false, {
         ...(operation === "question save" ? { questionPatchGate: gate } : {}),
         ...(operation === "conflict reload" || operation === "deleted-question recovery"
-          ? { questionGetGates: [{ questionId: sampleQuestion.id, gate }] } : {}),
+          ? { questionGetGates: [{ questionId: sampleQuestion.id, requestNumber: 2, gate }] } : {}),
         ...(operation === "delete" ? { deleteGate: gate } : {}),
         ...(operation === "settings reload" ? { settingsGetGates: [undefined, undefined, gate] } : {}),
         ...(operation === "delete list refetch" ? { postDeleteQuestionListGates: [{ page: 1, search: "", gate }] } : {}),
@@ -753,6 +780,7 @@ describe("Blitz Round collection panel", () => {
         fireEvent.click(screen.getByRole("button", { name: "Next page" }));
         const lastQuestion = await screen.findByRole("button", { name: /Which planet is number 26\?/u });
         fireEvent.click(lastQuestion);
+        await screen.findByRole("textbox", { name: "Question" });
         view.queryClient.removeQueries({ queryKey: ["channel", "fictional_channel", "module", "blitz_round", "questions:1:"] });
         const pageOneGets = (): number => api.requests.mock.calls.filter(([input, init]) => {
           const url = parseUrl(input);
@@ -786,6 +814,7 @@ describe("Blitz Round collection panel", () => {
     const api = installPanelFetch([sampleQuestion], undefined, true);
     mountPanel();
     await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    await screen.findByRole("textbox", { name: "Word" });
     const field = screen.getByRole("textbox", { name: "Word" });
     fireEvent.change(field, { target: { value: "STONE" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -803,6 +832,7 @@ describe("Blitz Round collection panel", () => {
     const api = installPanelFetch([sampleQuestion], undefined, true);
     mountPanel();
     await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    await screen.findByRole("textbox", { name: "Word" });
     fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "STONE" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await screen.findByText("This question changed while you were editing it. Reload the saved version before continuing.");
@@ -833,6 +863,7 @@ describe("Blitz Round collection panel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
     await screen.findByRole("button", { name: /Which planet is number 26\?/u });
     fireEvent.click(screen.getByRole("button", { name: /Which planet is number 26\?/u }));
+    await screen.findByRole("textbox", { name: "Question" });
     fireEvent.change(screen.getByRole("textbox", { name: "Question" }), { target: { value: "Which planet has rings?" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await screen.findByText("This question changed while you were editing it. Reload the saved version before continuing.");
@@ -874,6 +905,7 @@ describe("Blitz Round collection panel", () => {
     const api = installPanelFetch([sampleQuestion], undefined, false, true);
     mountPanel();
     await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    await screen.findByRole("textbox", { name: "Word" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const prize = await screen.findByRole("spinbutton", { name: "Prize" });
     fireEvent.change(prize, { target: { value: "75" } });
@@ -899,6 +931,7 @@ describe("Blitz Round collection panel", () => {
     });
     mountPanel();
     await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    await screen.findByRole("textbox", { name: "Word" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const prize = await screen.findByRole("spinbutton", { name: "Prize" });
     fireEvent.change(prize, { target: { value: "75" } });
@@ -914,6 +947,7 @@ describe("Blitz Round collection panel", () => {
     const settingsBack = screen.getAllByRole("button", { name: "Back to questions" }).at(-1);
     if (settingsBack === undefined) throw new Error("The settings back button was not found.");
     fireEvent.click(settingsBack);
+    await screen.findByRole("textbox", { name: "Word" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const reopenedPrize = await screen.findByRole("spinbutton", { name: "Prize" });
     await waitFor(() => expect(reopenedPrize).toHaveValue(90));
@@ -927,6 +961,7 @@ describe("Blitz Round collection panel", () => {
     const api = installPanelFetch([sampleQuestion], undefined, false, false, true);
     mountPanel();
     await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    await screen.findByRole("textbox", { name: "Word" });
     fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "STONE" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
@@ -981,6 +1016,7 @@ describe("Blitz Round collection panel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
     const lastQuestion = await screen.findByRole("button", { name: /Which planet is number 26\?/u });
     fireEvent.click(lastQuestion);
+    await screen.findByRole("textbox", { name: "Question" });
     fireEvent.click(document.querySelector(".page-header__overflow-trigger") as HTMLButtonElement);
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     const confirmation = await screen.findByRole("dialog", { name: "Delete this question?" });
@@ -999,6 +1035,7 @@ describe("Blitz Round collection panel", () => {
     view.queryClient.setQueryData(["channel", "fictional_channel", "module", "blitz_round", "questions:1:cloud"], {
       questions: [sampleQuestion], total: 1, page: 1,
     } satisfies BlitzQuestionPage);
+    await screen.findByRole("textbox", { name: "Word" });
 
     fireEvent.click(document.querySelector(".page-header__overflow-trigger") as HTMLButtonElement);
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
@@ -1049,6 +1086,7 @@ describe("Blitz Round collection panel", () => {
     }).length;
     const currentListRequestCount = listRequests("");
     const cachedSearchRequestCount = listRequests("cl");
+    await screen.findByRole("textbox", { name: "Word" });
 
     fireEvent.click(document.querySelector(".page-header__overflow-trigger") as HTMLButtonElement);
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
@@ -1065,7 +1103,7 @@ describe("Blitz Round collection panel", () => {
       const staleDeletedRow = screen.queryByRole("button", { name: /Word scramble.*CLOUD/u });
       if (staleDeletedRow !== null) {
         fireEvent.click(staleDeletedRow);
-        expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("CLOUD");
+        expect(await screen.findByRole("textbox", { name: "Word" })).toHaveValue("CLOUD");
       }
       await waitFor(() => expect(listRequests("cl")).toBe(cachedSearchRequestCount + 1));
       act(() => { releaseCachedSearch(); });
@@ -1132,7 +1170,7 @@ describe("Blitz Round collection panel", () => {
 
     const reseededRow = await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
     fireEvent.click(reseededRow);
-    expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("CLOUD");
+    expect(await screen.findByRole("textbox", { name: "Word" })).toHaveValue("CLOUD");
     expect(screen.getByRole("button", { name: /Word scramble.*CLOUD/u })).toHaveAttribute("aria-current", "true");
     remount.unmount();
   });
@@ -1174,6 +1212,7 @@ describe("Blitz Round collection panel", () => {
     });
     const view = mountPanel();
     await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    await screen.findByRole("textbox", { name: "Word" });
 
     fireEvent.click(document.querySelector(".page-header__overflow-trigger") as HTMLButtonElement);
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
@@ -1186,6 +1225,7 @@ describe("Blitz Round collection panel", () => {
         const url = parseUrl(input);
         return url.pathname.endsWith("/modules/blitz_round/questions") && (init?.method ?? "GET") === "GET";
       })).toHaveLength(2));
+      await screen.findByRole("textbox", { name: "Word" });
       fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "STORM" } });
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
       await waitFor(() => expect(api.getQuestions().find((question) => question.id === secondQuestion.id)).toMatchObject({ prompt: "STORM", revision: 2 }));
@@ -1194,7 +1234,7 @@ describe("Blitz Round collection panel", () => {
       await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
       fireEvent.click(screen.getByRole("button", { name: /Word scramble.*STONE/u }));
       fireEvent.click(screen.getByRole("button", { name: /Word scramble.*(?:MOON|STORM)/u }));
-      expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("STORM");
+      expect(await screen.findByRole("textbox", { name: "Word" })).toHaveValue("STORM");
       fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "RIVER" } });
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
@@ -1214,6 +1254,7 @@ describe("Blitz Round collection panel", () => {
     });
     mountPanel();
     await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    await screen.findByRole("textbox", { name: "Word" });
 
     fireEvent.click(document.querySelector(".page-header__overflow-trigger") as HTMLButtonElement);
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
@@ -1226,7 +1267,9 @@ describe("Blitz Round collection panel", () => {
         const url = parseUrl(input);
         return url.pathname.endsWith("/modules/blitz_round/questions") && (init?.method ?? "GET") === "GET";
       })).toHaveLength(2));
+      await screen.findByRole("textbox", { name: "Word" });
       fireEvent.click(screen.getByRole("button", { name: /Word scramble.*STONE/u }));
+      await screen.findByRole("textbox", { name: "Word" });
       fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "STORM" } });
       act(() => { releaseRefresh(); });
 
@@ -1250,6 +1293,7 @@ describe("Blitz Round collection panel", () => {
     await screen.findByRole("button", { name: /Which planet is number 1\?/u });
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
     fireEvent.click(await screen.findByRole("button", { name: /Which planet is number 26\?/u }));
+    await screen.findByRole("textbox", { name: "Question" });
     fireEvent.click(document.querySelector(".page-header__overflow-trigger") as HTMLButtonElement);
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     const confirmation = await screen.findByRole("dialog", { name: "Delete this question?" });
@@ -1273,6 +1317,7 @@ describe("Blitz Round collection panel", () => {
     await screen.findByRole("button", { name: /Which planet is number 1\?/u });
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
     fireEvent.click(await screen.findByRole("button", { name: /Which planet is number 26\?/u }));
+    await screen.findByRole("textbox", { name: "Question" });
     fireEvent.click(document.querySelector(".page-header__overflow-trigger") as HTMLButtonElement);
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     const confirmation = await screen.findByRole("dialog", { name: "Delete this question?" });
@@ -1293,6 +1338,7 @@ describe("Blitz Round collection panel", () => {
     await screen.findByRole("button", { name: /Which planet is number 1\?/u });
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
     fireEvent.click(await screen.findByRole("button", { name: /Which planet is number 26\?/u }));
+    await screen.findByRole("textbox", { name: "Question" });
     fireEvent.click(document.querySelector(".page-header__overflow-trigger") as HTMLButtonElement);
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     const confirmation = await screen.findByRole("dialog", { name: "Delete this question?" });
@@ -1319,6 +1365,7 @@ describe("Blitz Round collection panel", () => {
     await screen.findByRole("button", { name: /Which planet is number 1\?/u });
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
     fireEvent.click(await screen.findByRole("button", { name: /Which planet is number 26\?/u }));
+    await screen.findByRole("textbox", { name: "Question" });
     fireEvent.click(document.querySelector(".page-header__overflow-trigger") as HTMLButtonElement);
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     const confirmation = await screen.findByRole("dialog", { name: "Delete this question?" });
@@ -1381,6 +1428,44 @@ describe("Blitz Round collection panel", () => {
     expect(api.submittedQuestionRevisions).toEqual([1, 2]);
   });
 
+  it("opens current question detail from a stale search before the list refetch finishes [protects=a cached CLOUD row opens the current STORM revision from its detail query and saves with revision 2 while its list refetch is pending; fails_when=the editor copies CLOUD revision 1 from the stale row and shows or submits it; no_claim=the external edit and delayed list response use an in-memory component-test stub]", async () => {
+    let releaseListRefetch!: () => void;
+    let markListRefetchStarted!: () => void;
+    const listRefetchGate = new Promise<void>((resolve) => { releaseListRefetch = resolve; });
+    const listRefetchStarted = new Promise<void>((resolve) => { markListRefetchStarted = resolve; });
+    const api = installPanelFetch([thirdQuestion, sampleQuestion, secondQuestion], undefined, false, false, false, undefined, false, {
+      questionListGetGates: [{ page: 1, search: "o", requestNumber: 2, gate: listRefetchGate, onStarted: markListRefetchStarted }],
+    });
+    const { queryClient } = mountPanel("fictional_channel", undefined, 60_000);
+
+    try {
+      await screen.findByRole("button", { name: /Word scramble.*AXLE/u });
+      const search = screen.getByRole("textbox", { name: "Search questions" });
+      fireEvent.change(search, { target: { value: "o" } });
+      await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+      fireEvent.change(search, { target: { value: "" } });
+      fireEvent.click(await screen.findByRole("button", { name: /Word scramble.*MOON/u }));
+
+      api.updateQuestion(sampleQuestion.id, { prompt: "STORM", answers: ["STORM"], revision: 2 });
+      await queryClient.invalidateQueries({ queryKey: ["channel", "fictional_channel", "module", "blitz_round", "questions:1:o"], exact: true, refetchType: "none" });
+      fireEvent.change(search, { target: { value: "o" } });
+      await listRefetchStarted;
+
+      const cachedCloudRow = screen.getByRole("button", { name: /Word scramble.*CLOUD/u });
+      expect(cachedCloudRow).toBeInTheDocument();
+      fireEvent.click(cachedCloudRow);
+      await waitFor(() => expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("STORM"));
+
+      fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "STORMS" } });
+      fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
+      await waitFor(() => expect(api.getQuestions().find((question) => question.id === sampleQuestion.id)).toMatchObject({ prompt: "STORMS", revision: 3 }));
+      expect(api.submittedQuestionRevisions).toEqual([2]);
+      expect(screen.queryByText("This question changed while you were editing it. Reload the saved version before continuing.")).not.toBeInTheDocument();
+    } finally {
+      releaseListRefetch();
+    }
+  });
+
   it("shows the scramble limit while keeping quiz prompts at 120 characters [protects=scramble word field uses a 16-character limit and quiz prompt uses 120; fails_when=the scramble field advertises a limit its validator rejects; no_claim=does not measure translated glyph widths]", async () => {
     installPanelFetch([sampleQuestion]);
     mountPanel();
@@ -1398,6 +1483,7 @@ describe("Blitz Round collection panel", () => {
     const api = installPanelFetch([sampleQuestion]);
     mountPanel();
     await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    await screen.findByRole("textbox", { name: "Word" });
     fireEvent.click(screen.getByRole("button", { name: /^Settings$/u }));
     expect(await screen.findByText("Round settings", { exact: true })).toBeInTheDocument();
 

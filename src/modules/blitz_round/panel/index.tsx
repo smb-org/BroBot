@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactElement } from "react";
 
-import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { moduleQueryKey, refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { dashboardCommonTexts } from "../../../dashboard/locale";
 import {
   Badge, Button, ChipsInput, CollectionPage, ConfirmDialog, Field, Icon, PageHeader,
@@ -40,6 +40,22 @@ const fromQuestion = (question: BlitzQuestion | null): Draft => question === nul
 const isQuestionListQuery = (channelId: string, query: { queryKey: readonly unknown[] }): boolean =>
   query.queryKey[0] === "channel" && query.queryKey[1] === channelId && query.queryKey[2] === "module" &&
   query.queryKey[3] === "blitz_round" && typeof query.queryKey[4] === "string" && query.queryKey[4].startsWith("questions:");
+
+const questionQueryPart = (questionId: string): string => `question:${questionId}`;
+
+const freshQuestionDetailId = (queryClient: DashboardQueryClient, channelId: string, questionId: string): string | null => {
+  const query = queryClient.getQueryCache().find({
+    queryKey: moduleQueryKey(channelId, "blitz_round", questionQueryPart(questionId)),
+    exact: true,
+  });
+  return query?.state.data !== undefined && !query.isStale() ? questionId : null;
+};
+
+const updateQuestionDetailCache = async (queryClient: DashboardQueryClient, channelId: string, question: BlitzQuestion): Promise<void> => {
+  const queryKey = moduleQueryKey(channelId, "blitz_round", questionQueryPart(question.id));
+  await queryClient.cancelQueries({ queryKey, exact: true });
+  queryClient.setQueryData(queryKey, question);
+};
 
 const getDeletedQuestionIds = (channelId: string): ReadonlySet<string> => deletedQuestionIdsByChannel.get(channelId) ?? EMPTY_DELETED_QUESTION_IDS;
 
@@ -139,10 +155,10 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   const selectedIdRef = useRef<string | null>(null);
   useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
   const [newQuestionSession, setNewQuestionSession] = useState(0);
-  const [selectedQuestion, setSelectedQuestion] = useState<BlitzQuestion | null>(null);
+  const [questionDetailReadyId, setQuestionDetailReadyId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [deleteIntent, setDeleteIntent] = useState<{ questionId: string; opened: boolean } | null>(null);
+  const [deleteIntent, setDeleteIntent] = useState<{ questionId: string; revision: number; opened: boolean } | null>(null);
   const [deletePending, setDeletePending] = useState(false);
   const deletePendingSession = useRef<symbol | null>(null);
   const [deleteError, setDeleteError] = useState<string | undefined>();
@@ -195,6 +211,18 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   const maxPage = knownTotal === undefined ? undefined : Math.max(1, Math.ceil(knownTotal / BLITZ_QUESTION_PAGE_SIZE));
   const effectivePage = maxPage === undefined ? page : Math.min(page, maxPage);
   const questionsQuery = useModuleQuery(channelId, "blitz_round", `questions:${String(effectivePage)}:${search}`, (signal) => loadBlitzQuestions(channelId, effectivePage, search, signal));
+  const selectedQuestionId = selectedId !== null && selectedId !== NEW_QUESTION ? selectedId : null;
+  const selectedQuestionQuery = useModuleQuery(
+    channelId,
+    "blitz_round",
+    selectedQuestionId === null ? "question:none" : questionQueryPart(selectedQuestionId),
+    (signal) => loadBlitzQuestion(channelId, selectedQuestionId ?? "", signal).then((question) => {
+      if (question.id === selectedQuestionId && selectedIdRef.current === question.id) setQuestionDetailReadyId(question.id);
+      return question;
+    }),
+    { enabled: selectedQuestionId !== null },
+  );
+  const questionDetailReady = selectedQuestionId !== null && questionDetailReadyId === selectedQuestionId;
   const settingsQuery = useModuleQuery(channelId, "blitz_round", "settings", (signal) => loadBlitzSettings(channelId, signal));
   const data = questionsQuery.data;
   const questions = (data?.questions ?? []).filter((question) => !deletedQuestionIds.has(question.id));
@@ -213,8 +241,8 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
 
   if (selectedId === null && data !== undefined) {
     const first = questions[0] ?? null;
+    setQuestionDetailReadyId(first === null ? null : freshQuestionDetailId(queryClient, channelId, first.id));
     setSelectedId(first?.id ?? NEW_QUESTION);
-    setSelectedQuestion(first);
   }
 
   const requestSwitch = useCallback((proceed: () => void): void => {
@@ -236,22 +264,24 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
     pendingDeleteSelection.current = null;
     requestSwitch(() => {
       setShowSettings(false);
+      selectedIdRef.current = next.id;
+      setQuestionDetailReadyId(freshQuestionDetailId(queryClient, channelId, next.id));
       setSelectedId(next.id);
-      setSelectedQuestion(next);
     });
-  }, [isCurrentEditorSession, questions, requestSwitch, selectedId]);
+  }, [channelId, isCurrentEditorSession, questions, queryClient, requestSwitch, selectedId]);
 
-  const chooseQuestion = (question: BlitzQuestion): void => {
+  const chooseQuestion = (questionId: string): void => {
     cancelPendingDeleteSelection();
-    if (selectedId === question.id && !showSettings) {
+    if (selectedId === questionId && !showSettings) {
       setDetailOpen(true);
       return;
     }
     requestSwitch(() => {
       setShowSettings(false);
       setDeleteFailure(null);
-      setSelectedId(question.id);
-      setSelectedQuestion(question);
+      selectedIdRef.current = questionId;
+      setQuestionDetailReadyId(freshQuestionDetailId(queryClient, channelId, questionId));
+      setSelectedId(questionId);
       setDetailOpen(true);
     });
   };
@@ -263,9 +293,10 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
       setPage(1);
       setShowSettings(false);
       setDeleteFailure(null);
+      selectedIdRef.current = NEW_QUESTION;
+      setQuestionDetailReadyId(null);
       setSelectedId(NEW_QUESTION);
       setNewQuestionSession((session) => session + 1);
-      setSelectedQuestion(null);
       setDetailOpen(true);
     });
   };
@@ -287,16 +318,16 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
     const saved = selectedId === NEW_QUESTION || saveAsNew
       ? await createBlitzQuestion(channelId, input)
       : await updateBlitzQuestion(channelId, selectedId ?? "", revision ?? 1, input);
+    await updateQuestionDetailCache(queryClient, channelId, saved);
     await queryClient.invalidateQueries({ predicate: (query) => isQuestionListQuery(channelId, query) });
     return isCurrentEditorSession(session) ? saved : null;
   }, [channelId, isCurrentEditorSession, queryClient, selectedId]);
 
   const reloadQuestion = async (questionId: string, session: symbol): Promise<BlitzQuestion> => {
-    const latest = await loadBlitzQuestion(channelId, questionId);
+    const latest = await refetchModuleQueryData<BlitzQuestion>(queryClient, channelId, "blitz_round", questionQueryPart(questionId));
     await queryClient.invalidateQueries({ predicate: (query) => isQuestionListQuery(channelId, query) });
     if (isCurrentEditorSession(session)) {
       setDeleteFailure(null);
-      setSelectedQuestion(latest);
     }
     return latest;
   };
@@ -309,9 +340,10 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   const discardDeletedQuestion = (): void => {
     cancelPendingDeleteSelection();
     setDeleteFailure(null);
+    selectedIdRef.current = NEW_QUESTION;
+    setQuestionDetailReadyId(null);
     setSelectedId(NEW_QUESTION);
     setNewQuestionSession((session) => session + 1);
-    setSelectedQuestion(null);
     setShowSettings(false);
     setDetailOpen(true);
   };
@@ -319,12 +351,14 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   const selectSavedQuestion = (saved: BlitzQuestion): void => {
     cancelPendingDeleteSelection();
     setDeleteFailure(null);
+    setDeleteIntent((intent) => intent?.questionId === saved.id ? { ...intent, revision: saved.revision } : intent);
+    selectedIdRef.current = saved.id;
+    setQuestionDetailReadyId(saved.id);
     setSelectedId(saved.id);
-    setSelectedQuestion(saved);
   };
 
-  const requestDelete = (questionId: string): void => {
-    setDeleteIntent({ questionId, opened: false });
+  const requestDelete = (questionId: string, revision: number): void => {
+    setDeleteIntent({ questionId, revision, opened: false });
     setDeleteError(undefined);
     setDeleteFailure(null);
   };
@@ -335,11 +369,8 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
     setDeleteIntent((intent) => intent?.questionId === questionId ? null : intent);
   };
 
-  const deleteQuestion = deleteIntent === null
-    ? null
-    : selectedQuestion?.id === deleteIntent.questionId
-      ? selectedQuestion
-      : questions.find((question) => question.id === deleteIntent.questionId) ?? null;
+  const currentQuestion = selectedQuestionQuery.data?.id === selectedId ? selectedQuestionQuery.data : null;
+  const deleteQuestion = deleteIntent === null || currentQuestion?.id !== deleteIntent.questionId ? null : currentQuestion;
 
   const confirmDelete = async (): Promise<void> => {
     if (deleteIntent === null || deleteQuestion === null) return;
@@ -352,7 +383,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
     setDeleteError(undefined);
     try {
       try {
-        await deleteBlitzQuestion(channelId, deletingId, deleteQuestion.revision);
+        await deleteBlitzQuestion(channelId, deletingId, deleteIntent.revision);
       } catch (failure: unknown) {
         const code = blitzErrorCode(failure);
         if (code === "question_conflict" || code === "question_deleted") {
@@ -363,19 +394,23 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
       }
 
       setDeleteIntent((intent) => intent?.questionId === deletingId ? null : intent);
+      await queryClient.cancelQueries({ queryKey: moduleQueryKey(channelId, "blitz_round", questionQueryPart(deletingId)), exact: true });
+      queryClient.removeQueries({ queryKey: moduleQueryKey(channelId, "blitz_round", questionQueryPart(deletingId)), exact: true });
       recordDeletedQuestion(channelId, deletingId);
       if (isCurrentSession() && selectedIdRef.current === deletingId) {
         const currentSelection = firstRemainingQuestion(channelId, search, queryClient, getDeletedQuestionIds(channelId));
         if (currentSelection === null) {
           pendingDeleteSelection.current = { questionId: deletingId, session: null };
           deferListRefresh = true;
+          selectedIdRef.current = NEW_QUESTION;
+          setQuestionDetailReadyId(null);
           setSelectedId(NEW_QUESTION);
           setNewQuestionSession((session) => session + 1);
-          setSelectedQuestion(null);
         } else {
           pendingDeleteSelection.current = null;
+          selectedIdRef.current = currentSelection.id;
+          setQuestionDetailReadyId(freshQuestionDetailId(queryClient, channelId, currentSelection.id));
           setSelectedId(currentSelection.id);
-          setSelectedQuestion(currentSelection);
         }
         setShowSettings(false);
       }
@@ -425,7 +460,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
             type="button"
             className={`blitz-panel__row${selectedId === question.id && !showSettings ? " blitz-panel__row--selected" : ""}${question.enabled ? "" : " blitz-panel__row--disabled"}`}
             aria-current={selectedId === question.id && !showSettings ? "true" : undefined}
-            onClick={() => chooseQuestion(question)}
+            onClick={() => chooseQuestion(question.id)}
           >
             <span className={`blitz-panel__indicator${question.enabled ? " blitz-panel__indicator--on" : ""}`} aria-hidden="true" />
             <span className="blitz-panel__row-copy">
@@ -435,19 +470,21 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
           </button>)}
         </div>;
 
-  const currentQuestion = selectedQuestion?.id === selectedId
-    ? selectedQuestion
-    : questions.find((question) => question.id === selectedId) ?? null;
+  const questionReady = selectedQuestionId !== null && questionDetailReady;
   const detail = showSettings
     ? settingsQuery.data === undefined
       ? <div className="blitz-panel__settings-loading" aria-live="polite">{settingsQuery.isError
         ? <><p>{labels.loadError}</p><Button disabled={settingsQuery.isFetching} onClick={() => { void settingsQuery.refetch(); }}>{commonLabels.retry}</Button></>
         : labels.saving}</div>
       : <SettingsEditor channelId={channelId} language={language === "en" ? "en" : "de"} settings={settingsQuery.data.settings} revision={settingsQuery.data.revision} canManage={canManage} onBack={closeSettings} onReload={reloadSettings} registerSwitch={(switcher) => { switchRef.current = switcher; }} registerEditorSession={registerEditorSession} isCurrentEditorSession={isCurrentEditorSession} />
-    : selectedId === null
+      : selectedId === null
       ? <div className="blitz-panel__placeholder"><PageHeader title={labels.title} subtitle={labels.noSelection} /></div>
+      : selectedId !== NEW_QUESTION && !questionReady
+        ? <div className="blitz-panel__settings-loading" aria-live="polite">{selectedQuestionQuery.isError
+          ? <><p>{labels.loadError}</p><Button disabled={selectedQuestionQuery.isFetching} onClick={() => { void selectedQuestionQuery.refetch(); }}>{commonLabels.retry}</Button></>
+          : commonLabels.saving}</div>
       : <QuestionEditor
-        key={`${selectedId}:${String(currentQuestion?.revision ?? 0)}:${selectedId === NEW_QUESTION ? String(newQuestionSession) : ""}`}
+        key={`${selectedId}:${selectedId === NEW_QUESTION ? String(newQuestionSession) : ""}`}
         question={currentQuestion}
         isNew={selectedId === NEW_QUESTION}
         language={language === "en" ? "en" : "de"}
@@ -512,7 +549,7 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
   onSave: (draft: Draft, revision: number | undefined, saveAsNew: boolean, session: symbol) => Promise<BlitzQuestion | null>;
   onSaved: (question: BlitzQuestion, session: symbol) => (() => void) | null;
   deleteFailure: "conflict" | "deleted" | null;
-  onRequestDelete: (questionId: string) => void;
+  onRequestDelete: (questionId: string, revision: number) => void;
   onOpenDelete: (questionId: string) => void;
   onCancelDelete: (questionId: string) => void;
   onReload: (questionId: string, session: symbol) => Promise<BlitzQuestion>;
@@ -527,6 +564,7 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
   onEdit: () => void;
 }): ReactElement {
   const labels = blitzTexts(language);
+  const [baseQuestion, setBaseQuestion] = useState(question);
   const draft = useDraft(fromQuestion(question));
   const [pendingAnswer, setPendingAnswer] = useState("");
   const [saving, setSaving] = useState(false);
@@ -567,12 +605,13 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
       setSaving(true);
       onSavePendingChange(session, true);
       try {
-        const saved = await onSave(draft.value, question?.revision, saveAsNew, session);
+        const saved = await onSave(draft.value, baseQuestion?.revision, saveAsNew, session);
         if (saved === null) {
           if (isCurrentEditorSession(session)) setSaveError(labels.saveError);
           return labels.saveError;
         }
         if (!isCurrentEditorSession(session)) return null;
+        setBaseQuestion(saved);
         draft.accept(fromQuestion(saved));
         setPendingAnswer("");
         setAttempted(false);
@@ -611,12 +650,13 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
   };
 
   const reloadCurrent = (): void => {
-    if (question === null) return;
+    if (baseQuestion === null) return;
     const session = editorSession.current;
     setSaving(true);
     setSaveError(undefined);
-    void onReload(question.id, session).then((latest) => {
+    void onReload(baseQuestion.id, session).then((latest) => {
       if (!isCurrentEditorSession(session)) return;
+      setBaseQuestion(latest);
       draft.accept(fromQuestion(latest));
       setPendingAnswer("");
       setServerConflict(false);
@@ -686,13 +726,13 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
   return <div className="blitz-panel__detail">
     <PageHeader
       kind="blitz"
-      title={isNew ? labels.newQuestion : question?.prompt ?? labels.title}
+      title={isNew ? labels.newQuestion : baseQuestion?.prompt ?? labels.title}
       badges={<Badge tone="neutral">{draft.value.kind === "scramble" ? labels.scramble : labels.quiz}</Badge>}
       pageActions={<Button variant="neutral" icon="tabSettings" onClick={requestSettings}>{labels.settings}</Button>}
       {...(isNew ? {} : { overflow: <Button variant="subtle" danger="subtle" size="compact" onClick={() => {
-        if (question === null) return;
-        onRequestDelete(question.id);
-        guardSwitchWithPendingDestination(() => { onOpenDelete(question.id); }, () => { onCancelDelete(question.id); });
+        if (baseQuestion === null) return;
+        onRequestDelete(baseQuestion.id, baseQuestion.revision);
+        guardSwitchWithPendingDestination(() => { onOpenDelete(baseQuestion.id); }, () => { onCancelDelete(baseQuestion.id); });
       }}><Icon name="remove" size={16} />{labels.delete}</Button> })}
       save={saveProps}
     />

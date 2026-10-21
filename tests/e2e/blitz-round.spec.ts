@@ -35,6 +35,12 @@ const setupPanelRoutes = async (page: Page, initial: BlitzQuestion[], language: 
     const request = route.request();
     const url = new URL(request.url());
     if (request.method() === "GET") {
+      if (!url.pathname.endsWith("/questions")) {
+        const id = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
+        const current = questions.find((entry) => entry.id === id);
+        await route.fulfill({ status: current === undefined ? 404 : 200, contentType: "application/json", body: JSON.stringify(current === undefined ? { error: "question_not_found" } : { question: current }) });
+        return;
+      }
       const search = (url.searchParams.get("q") ?? "").toLowerCase();
       const filtered = questions.filter((entry) => `${entry.prompt} ${entry.answers.join(" ")}`.toLowerCase().includes(search));
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ questions: filtered, total: filtered.length, page: 1 }) });
