@@ -25,7 +25,7 @@ import {
   type CurrencyTokenTarget,
 } from "./editor-state";
 import { commandListReply, TEXT_COMMAND_DEFAULT_TEXTS, TEXT_COMMAND_DEFAULT_USAGE_TEXT } from "../contracts/chat-defaults";
-import { statusForTier, validCommandName } from "../domain";
+import { normalizeCommandName, statusForTier, validCommandName } from "../domain";
 import { invalidTemplateParameters, renderTemplate, templateVariableNames, unknownTemplateVariables, worstCaseTemplateLength, type PanelTemplateWarning, type TemplateVariable } from "../contract";
 import { effectivePanelTemplateVariables, panelTemplateOptions, registeredModuleTemplateGroup } from "../../../dashboard/ui";
 import { createTextCommand, deleteTextCommand, loadTextCommandData, loadRegisteredTemplateVariables, lookupTextGames, saveTextCommand, searchTextGames, setTextCommandEnabled, textBlockNamesForPicker, type TextCommandChannelVariable } from "./service";
@@ -37,8 +37,6 @@ import { templateTextLength } from "../../../contracts/template-text-length";
 import type { ChatOutputTarget } from "../../../contracts/values";
 import type { ModuleRegisteredTemplateVariable } from "../../contract";
 import { formatCharacterCount } from "../../../dashboard/ui/text-length";
-
-const normalizeCommandName = (name: string): string => name.trim().replace(/^!/u, "").toLowerCase();
 
 const updateCommandCache = (current: unknown, command: TextCommand, previousName?: string): TextCommandPanelData => {
   const data = typeof current === "object" && current !== null ? current as Partial<TextCommandPanelData> : {};
@@ -101,10 +99,10 @@ const draftFromCommand = (command: TextCommand): CommandDraft => ({
   },
 });
 
-const newCommandDraft = (): CommandDraft => ({
-  name: "",
+const newCommandDraft = (prefill?: { name: string; text: string }): CommandDraft => ({
+  name: prefill?.name ?? "",
   enabled: true,
-  text: "",
+  text: prefill?.text ?? "",
   usageText: "",
   kind: "text",
   minimumTier: "everyone",
@@ -117,7 +115,7 @@ const newCommandDraft = (): CommandDraft => ({
   chatTarget: null,
   variableAction: null,
   timeoutAction: null,
-  kindDrafts: { text: { text: "", usageText: "", variableAction: null, timeoutAction: null } },
+  kindDrafts: { text: { text: prefill?.text ?? "", usageText: "", variableAction: null, timeoutAction: null } },
 });
 
 type CommandTemplateField = "text" | "usageText" | "timeoutFallbackText";
@@ -1209,6 +1207,8 @@ const TextCommandsPanel = (props: {
   botIsModerator?: boolean | null;
   onCloseInspector?: () => void;
   initialSelection?: string;
+  initialCommand?: { name: string; text: string };
+  onInitialCommandConsumed?: () => void;
   onOpenTestArea?: (moduleId: "text_commands" | "faq", entryId: string) => void;
 }): ReactElement => <TextCommandsPanelContent key={props.channelId} {...props} />;
 
@@ -1220,6 +1220,8 @@ const TextCommandsPanelContent = ({
   botIsModerator = null,
   onCloseInspector,
   initialSelection,
+  initialCommand,
+  onInitialCommandConsumed,
   onOpenTestArea,
 }: {
   channelId: string;
@@ -1229,6 +1231,8 @@ const TextCommandsPanelContent = ({
   botIsModerator?: boolean | null;
   onCloseInspector?: () => void;
   initialSelection?: string;
+  initialCommand?: { name: string; text: string };
+  onInitialCommandConsumed?: () => void;
   onOpenTestArea?: (moduleId: "text_commands" | "faq", entryId: string) => void;
 }): ReactElement => {
   const labels = textCommandsTexts(language);
@@ -1250,6 +1254,7 @@ const TextCommandsPanelContent = ({
   const registeredVariables = useMemo(() => registeredVariablesQuery.data ?? [], [registeredVariablesQuery.data]);
   const { selectedKey: selectedName, select: selectName, rowRef, close: closeSelection } = useInspectorSelection<string>();
   const [createOpen, setCreateOpen] = useState(false);
+  const [createInitialDraft, setCreateInitialDraft] = useState<CommandDraft | null>(null);
   const guardRef = useRef<((proceed: () => void, cancel?: () => void) => void) | null>(null);
   const guardSwitch = useCallback((proceed: () => void, cancel?: () => void): void => {
     const guard = guardRef.current;
@@ -1259,6 +1264,7 @@ const TextCommandsPanelContent = ({
   const registerGuard = useCallback((next: ((proceed: () => void, cancel?: () => void) => void) | null): void => { guardRef.current = next; }, []);
   useEffect(() => registerDashboardNavigationGuard(guardSwitch), [guardSwitch]);
   const initialSelectionApplied = useRef(false);
+  const initialCommandApplied = useRef(false);
 
   const refresh = useCallback(async (force = false): Promise<TextCommand[]> => {
     const cached = queryClient.getQueryData<TextCommandPanelData>(moduleQueryKey(channelId, "text_commands", "commands"));
@@ -1276,6 +1282,7 @@ const TextCommandsPanelContent = ({
     if (token !== generationRef.current) return;
     generationRef.current += 1;
     setCreateOpen(false);
+    setCreateInitialDraft(null);
     if (preserveEditor && selectedName !== null && selectedName !== name) setPreservedRename({ from: selectedName, to: name });
     selectName(name);
     if (!preserveEditor && (selectedName !== name || createOpen)) setSelectionVersion((current) => current + 1);
@@ -1299,8 +1306,35 @@ const TextCommandsPanelContent = ({
   }, [commandsQuery.isError, labels.loadError]);
 
   useEffect(() => {
+    if (initialCommand === undefined || commandsQuery.isPending || commandsQuery.data === undefined || initialCommandApplied.current || createOpen) return;
+    initialCommandApplied.current = true;
+    initialSelectionApplied.current = true;
+    const requestedName = normalizeCommandName(initialCommand.name);
+    const existing = commands.find((command) => normalizeCommandName(command.name) === requestedName ||
+      command.aliases.some((alias) => normalizeCommandName(alias) === requestedName));
+    guardSwitch(() => {
+      generationRef.current += 1;
+      setSelectionVersion((current) => current + 1);
+      if (existing !== undefined) {
+        setCreateOpen(false);
+          setCreateInitialDraft(null);
+        setMobileDetailOpen(true);
+        selectName(existing.name);
+      } else {
+          setCreateInitialDraft(newCommandDraft(initialCommand));
+        closeSelection();
+        setCreateOpen(true);
+        setMobileDetailOpen(true);
+      }
+      onInitialCommandConsumed?.();
+    });
+  }, [closeSelection, commands, commandsQuery.data, commandsQuery.isPending, createOpen, guardSwitch, initialCommand, onInitialCommandConsumed, selectName]);
+
+  useEffect(() => {
+    if (initialCommand !== undefined) return;
     if (commandsQuery.isPending || commandsQuery.data === undefined || initialSelectionApplied.current || createOpen) return;
-    const target = commands.find((command) => command.name === initialSelection) ?? (window.matchMedia("(max-width: 767px)").matches ? undefined : commands[0]);
+    const target = commands.find((command) => command.name === initialSelection) ??
+      (initialSelection === undefined && !window.matchMedia("(max-width: 767px)").matches ? commands[0] : undefined);
     initialSelectionApplied.current = true;
     if (target === undefined || selectedName === target.name) return;
     guardSwitch(() => {
@@ -1309,7 +1343,7 @@ const TextCommandsPanelContent = ({
       setMobileDetailOpen(initialSelection !== undefined);
       selectName(target.name);
     });
-  }, [commands, commandsQuery.data, commandsQuery.isPending, createOpen, guardSwitch, initialSelection, selectName, selectedName]);
+  }, [commands, commandsQuery.data, commandsQuery.isPending, createOpen, guardSwitch, initialCommand, initialSelection, selectName, selectedName]);
 
   const selected = useMemo(() => commands.find((command) => command.name === selectedName)
     ?? (preservedRename?.to === selectedName ? commands.find((command) => command.name === preservedRename.from) ?? null : null), [commands, preservedRename, selectedName]);
@@ -1321,6 +1355,7 @@ const TextCommandsPanelContent = ({
     guardSwitch(() => {
       generationRef.current += 1;
       setCreateOpen(false);
+      setCreateInitialDraft(null);
       closeSelection();
       setMobileDetailOpen(false);
       setSelectionVersion((current) => current + 1);
@@ -1331,6 +1366,7 @@ const TextCommandsPanelContent = ({
     guardSwitch(() => {
       generationRef.current += 1;
       setCreateOpen(false);
+      setCreateInitialDraft(null);
       setMobileDetailOpen(false);
       setSelectionVersion((current) => current + 1);
     });
@@ -1338,6 +1374,7 @@ const TextCommandsPanelContent = ({
   const openCreate = (): void => guardSwitch(() => {
     generationRef.current += 1;
     closeSelection();
+    setCreateInitialDraft(null);
     setCreateOpen(true);
     setMobileDetailOpen(true);
     setSelectionVersion((current) => current + 1);
@@ -1350,6 +1387,7 @@ const TextCommandsPanelContent = ({
     guardSwitch(() => {
       generationRef.current += 1;
       setCreateOpen(false);
+      setCreateInitialDraft(null);
       selectName(name);
       setMobileDetailOpen(true);
       setSelectionVersion((current) => current + 1);
@@ -1484,7 +1522,7 @@ const TextCommandsPanelContent = ({
     registeredVariablesPending={registeredVariablesQuery.isPending}
     registeredVariablesRefreshError={registeredVariablesQuery.isRefetchError}
     onRetryRegisteredVariables={() => { void registeredVariablesQuery.refetch(); }}
-    initial={newCommandDraft()}
+    initial={createInitialDraft ?? newCommandDraft()}
     command={null}
     commands={commands}
     channelVariables={channelVariables}

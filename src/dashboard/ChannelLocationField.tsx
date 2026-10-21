@@ -8,7 +8,7 @@ import {
   type PanelChannelLocationResult,
 } from "./api";
 import { channelSettingsTexts } from "./channel-settings-locale";
-import { Button, ConfirmDialog, Dialog, Field, LoadState, LoadStateLines } from "./ui";
+import { Button, ConfirmDialog, Dialog, Field, LoadState, LoadStateLines, StatusLed } from "./ui";
 
 interface ChannelLocationFieldProperties {
   channelId: string;
@@ -19,7 +19,9 @@ interface ChannelLocationFieldProperties {
   onSelectChannelTimeZone: (timeZone: string) => void;
   canEdit: boolean;
   disabled: boolean;
+  loading?: boolean;
   readOnlyReasonId?: string;
+  initialLoadError?: { title: string; reason: string; retryLabel: string; retrying: boolean; onRetry: () => void };
 }
 
 export const ChannelLocationField = ({
@@ -31,7 +33,9 @@ export const ChannelLocationField = ({
   onSelectChannelTimeZone,
   canEdit,
   disabled,
+  loading = false,
   readOnlyReasonId = "channel-location-read-only",
+  initialLoadError,
 }: ChannelLocationFieldProperties): ReactElement => {
   const labels = channelSettingsTexts(language);
   const [opened, setOpened] = useState(false);
@@ -63,42 +67,51 @@ export const ChannelLocationField = ({
 
   const resultName = (result: PanelChannelLocationResult): string =>
     [result.name, result.admin1, result.country].filter((part): part is string => part !== null && part.length > 0).join(", ");
-  const actionsDisabled = disabled || !canEdit;
+  const actionsDisabled = loading || disabled || !canEdit;
   const resultsStatus = searching ? "loading" : searchFailed ? "error" : query.trim().length >= 2 && results.length > 0 ? "success" : "empty";
+  const timeZoneActionAvailable = value !== null && value.timeZone !== channelTimeZone;
+  const details = value === null ? labels.locationMissingWarning
+    : `${value.latitude.toFixed(2)}, ${value.longitude.toFixed(2)} · ${value.timeZone}`;
 
   return (
-    <div className="channel-location-field" aria-label={labels.location}>
-      <div className="channel-location-field__heading">
-        <div><p className="muted">{labels.locationHint}</p></div>
-        <span className="channel-location-field__current" aria-live="polite">
-          {value === null ? null : <>
-            <strong className="channel-location-field__place" title={value.name}>{value.name}</strong>
-            <span className="muted channel-location-field__coordinates" title={`${String(value.latitude)}, ${String(value.longitude)} · ${value.timeZone}`}>
-              {value.latitude.toFixed(2)}, {value.longitude.toFixed(2)} · {value.timeZone}
-            </span>
-          </>}
-        </span>
+    <div className="channel-location-field" aria-label={labels.location} aria-busy={loading}>
+      <div className={`channel-location-field__status${initialLoadError === undefined && value === null && !loading ? " channel-location-field__status--missing" : ""}${initialLoadError === undefined ? "" : " channel-location-field__status--error"}`}
+        {...(initialLoadError !== undefined ? { role: "alert" } : value === null && !loading ? { role: "status" } : {})} aria-live="polite">
+        {loading ? <span className="channel-location-field__skeleton channel-location-field__skeleton--status" />
+          : initialLoadError !== undefined ? <strong title={initialLoadError.title}>{initialLoadError.title}</strong>
+          : value === null ? <>
+            <StatusLed state="warn" label={labels.locationMissingWarning} dotOnly />
+            <strong title={labels.locationMissing}>{labels.locationMissing}</strong>
+          </>
+            : <strong className="channel-location-field__place" title={value.name}>{value.name}</strong>}
+      </div>
+      <div className="channel-location-field__details" title={loading ? undefined : initialLoadError?.reason ?? details}>
+        {loading ? <span className="channel-location-field__skeleton channel-location-field__skeleton--details" />
+          : initialLoadError?.reason ?? details}
       </div>
       <div className="channel-location-field__actions">
-        <Button variant="secondary" disabled={actionsDisabled}
-          {...(!canEdit ? { describedBy: readOnlyReasonId } : {})}
-          onClick={() => { setOpened(true); setSearchFailed(false); setResults([]); }}>
-          {labels.locationChange}
-        </Button>
-        <Button variant="subtle" className="channel-location-field__remove" disabled={actionsDisabled || value === null}
-          {...(!canEdit ? { describedBy: readOnlyReasonId } : {})}
-          onClick={() => { setRemoveConfirmation(true); }}>
-          {labels.locationRemove}
-        </Button>
+        {initialLoadError !== undefined
+          ? <Button variant="secondary" disabled={initialLoadError.retrying} onClick={initialLoadError.onRetry}>{initialLoadError.retryLabel}</Button>
+          : <>
+            <Button variant="secondary" disabled={actionsDisabled}
+              {...(!canEdit ? { describedBy: readOnlyReasonId } : {})}
+              onClick={() => { setOpened(true); setSearchFailed(false); setResults([]); }}>
+              {labels.locationChange}
+            </Button>
+            <Button variant="subtle" className="channel-location-field__remove" disabled={actionsDisabled || value === null}
+              {...(!canEdit ? { describedBy: readOnlyReasonId } : {})}
+              onClick={() => { setRemoveConfirmation(true); }}>
+              {labels.locationRemove}
+            </Button>
+            <Button variant="secondary" icon="clock-hour-4" title={labels.locationTimeZoneTitle}
+              disabled={actionsDisabled || !timeZoneActionAvailable}
+              {...(!canEdit ? { describedBy: readOnlyReasonId } : {})}
+              onClick={applyTimeZone}>
+              {labels.locationTimeZoneAction}
+            </Button>
+          </>}
       </div>
-      {value === null || value.timeZone === channelTimeZone ? null : <div className="channel-location-field__suggestion">
-          <span>{labels.locationTimeZoneSuggestion(value.timeZone)}</span>
-          <Button variant="secondary" disabled={actionsDisabled}
-            {...(!canEdit ? { describedBy: readOnlyReasonId } : {})}
-            onClick={applyTimeZone}>
-            {labels.locationTimeZoneAction}
-          </Button>
-        </div>}
+      <p className="muted channel-location-field__hint" title={labels.locationHint}>{labels.locationHint}</p>
 
       <Dialog opened={opened} onClose={() => { setOpened(false); }} title={labels.locationChange} pending={searching}>
         <div className="channel-location-dialog">

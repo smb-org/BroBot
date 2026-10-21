@@ -1,13 +1,15 @@
 import { Hono } from "hono";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleRouteEnvironment } from "../../src/modules/contract";
+import * as sunDomain from "../../src/modules/sun/domain";
 import { sunRoutes } from "../../src/modules/sun/routes";
 import { readSunSettings } from "../../src/modules/sun/adapters/d1";
 import { prepareModuleAudit } from "../../src/worker/module-audit";
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { panelRouter } from "../../src/worker/panel/routes";
+import { readChannelLocation } from "../../src/worker/db/channel-settings";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 
@@ -27,6 +29,7 @@ const appFor = (database: D1Database, publishedHostEvents: string[] = []): Hono<
   app.use("*", async (context, next) => {
     context.set("channelRole", "manager");
     context.set("actor", { userId: ACTOR_ID, sessionId: "sun-route-session" });
+    context.set("channelLocation", (channelId) => readChannelLocation(database, channelId));
     context.set("authorizeManagementMutation", () => ({ sql: "AND 1 = 1", values: [] }));
     context.set("prepareModuleAudit", (entry, changedAt) =>
       prepareModuleAudit(database, ACTOR_ID, changedAt, entry));
@@ -50,6 +53,8 @@ const requestFor = (revision: number, nextTexts = errorTexts): Request =>
   });
 
 afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   for (const database of databases.splice(0)) database.close();
 });
 
@@ -172,5 +177,141 @@ describe("sun settings via the real worker router", () => {
         en: "Sun data is currently unavailable.",
       },
     });
+  });
+});
+
+describe("sun today route", () => {
+  it("returns today's solar events and golden and blue hour intervals as ISO instants", async () => {
+    const database = await createDatabase();
+    await database.prepare(
+      "UPDATE channels SET location_name = ?, location_latitude = ?, location_longitude = ?, location_time_zone = ? WHERE channel_id = ?",
+    ).bind("Berlin", 52.52, 13.405, "Europe/Berlin", CHANNEL_ID).run();
+    vi.setSystemTime(new Date("2026-10-21T12:00:00.000Z"));
+    const app = appFor(database as unknown as D1Database);
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/today`), {
+      DB: database as unknown as D1Database,
+    });
+    const body = await response.json<{ status: string; day?: { localDate: string; sunriseAt: string | null; sunsetAt: string | null }; goldenHourIntervals?: { startAt: string; endAt: string }[]; blueHourIntervals?: { startAt: string; endAt: string }[]; nextDawnAt?: string | null }>();
+
+    expect(response.status).toBe(200);
+    expect(body.status).toBe("ok");
+    expect(body.day?.localDate).toBe("2026-10-21");
+    expect(Number.isFinite(Date.parse(body.day?.sunriseAt ?? ""))).toBe(true);
+    expect(Number.isFinite(Date.parse(body.day?.sunsetAt ?? ""))).toBe(true);
+    expect(body.nextDawnAt === null || Date.parse(body.nextDawnAt ?? "") > Date.now()).toBe(true);
+    expect(body.goldenHourIntervals?.every(({ startAt, endAt }) => Date.parse(startAt) < Date.parse(endAt))).toBe(true);
+    expect(body.blueHourIntervals?.every(({ startAt, endAt }) => Date.parse(startAt) < Date.parse(endAt))).toBe(true);
+  });
+
+  it("returns golden intervals overlapping Reykjavik's summer-solstice day across local midnight", async () => {
+    const database = await createDatabase();
+    await database.prepare(
+      "UPDATE channels SET location_name = ?, location_latitude = ?, location_longitude = ?, location_time_zone = ? WHERE channel_id = ?",
+    ).bind("Reykjavik", 64.1466, -21.9426, "Atlantic/Reykjavik", CHANNEL_ID).run();
+    vi.setSystemTime(new Date("2026-06-21T12:00:00.000Z"));
+    const app = appFor(database as unknown as D1Database);
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/today`), {
+      DB: database as unknown as D1Database,
+    });
+    const body = await response.json<{ status: string; goldenHourIntervals?: { startAt: string; endAt: string }[] }>();
+    const intervals = body.goldenHourIntervals ?? [];
+    const expected = [
+      [Date.parse("2026-06-20T22:07:00.000Z"), Date.parse("2026-06-21T04:52:00.000Z")],
+      [Date.parse("2026-06-21T22:07:00.000Z"), Date.parse("2026-06-22T04:52:00.000Z")],
+    ] as const;
+
+    expect(body.status).toBe("ok");
+    expect(intervals).toHaveLength(2);
+    for (const [index, interval] of intervals.entries()) {
+      expect(Date.parse(interval.startAt)).toBeCloseTo(expected[index]?.[0] ?? 0, -6);
+      expect(Date.parse(interval.endAt)).toBeCloseTo(expected[index]?.[1] ?? 0, -6);
+    }
+  });
+
+  it("does not widen the blue-hour scan when Reykjavik has no blue-hour interval", async () => {
+    const database = await createDatabase();
+    await database.prepare(
+      "UPDATE channels SET location_name = ?, location_latitude = ?, location_longitude = ?, location_time_zone = ? WHERE channel_id = ?",
+    ).bind("Reykjavik", 64.15, -21.95, "Atlantic/Reykjavik", CHANNEL_ID).run();
+    vi.setSystemTime(new Date("2026-06-21T12:00:00.000Z"));
+    const calculateIntervals = vi.spyOn(sunDomain, "calculateSunAltitudeIntervals");
+    const app = appFor(database as unknown as D1Database);
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/today`), {
+      DB: database as unknown as D1Database,
+    });
+    const body = await response.json<{ status: string; blueHourIntervals?: { startAt: string; endAt: string }[] }>();
+
+    expect(body.status).toBe("ok");
+    expect(body.blueHourIntervals).toEqual([]);
+    expect(calculateIntervals.mock.calls.filter((call) => call[3] === "blue")).toHaveLength(1);
+  });
+
+  it("reuses solar intervals for the same rounded location, time zone, and local date", async () => {
+    const database = await createDatabase();
+    await database.prepare(
+      "UPDATE channels SET location_name = ?, location_latitude = ?, location_longitude = ?, location_time_zone = ? WHERE channel_id = ?",
+    ).bind("Valdivia", -39.82, -73.24, "America/Santiago", CHANNEL_ID).run();
+    vi.setSystemTime(new Date("2026-11-04T12:00:00.000Z"));
+    const calculateIntervals = vi.spyOn(sunDomain, "calculateSunAltitudeIntervals");
+    const app = appFor(database as unknown as D1Database);
+    const request = () => app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/today`), {
+      DB: database as unknown as D1Database,
+    });
+
+    await request();
+    const callsAfterFirstRequest = calculateIntervals.mock.calls.length;
+    await request();
+
+    expect(callsAfterFirstRequest).toBeGreaterThan(0);
+    expect(calculateIntervals).toHaveBeenCalledTimes(callsAfterFirstRequest);
+  });
+
+  it("returns concrete golden and blue intervals for Berlin's local day", async () => {
+    const database = await createDatabase();
+    await database.prepare(
+      "UPDATE channels SET location_name = ?, location_latitude = ?, location_longitude = ?, location_time_zone = ? WHERE channel_id = ?",
+    ).bind("Berlin", 52.52, 13.405, "Europe/Berlin", CHANNEL_ID).run();
+    vi.setSystemTime(new Date("2026-10-21T12:00:00.000Z"));
+    const app = appFor(database as unknown as D1Database);
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/today`), {
+      DB: database as unknown as D1Database,
+    });
+    const body = await response.json<{
+      status: string;
+      goldenHourIntervals?: { startAt: string; endAt: string }[];
+      blueHourIntervals?: { startAt: string; endAt: string }[];
+    }>();
+    const golden = body.goldenHourIntervals ?? [];
+    const blue = body.blueHourIntervals ?? [];
+    const withinMinutes = (actual: string | undefined, expected: string): boolean =>
+      Math.abs(Date.parse(actual ?? "") - Date.parse(expected)) <= 15 * 60_000;
+
+    expect(body.status).toBe("ok");
+    expect(golden).toHaveLength(2);
+    expect(withinMinutes(golden[0]?.startAt, "2026-10-21T05:18:00.000Z")).toBe(true);
+    expect(withinMinutes(golden[0]?.endAt, "2026-10-21T06:24:00.000Z")).toBe(true);
+    expect(withinMinutes(golden[1]?.startAt, "2026-10-21T15:14:00.000Z")).toBe(true);
+    expect(withinMinutes(golden[1]?.endAt, "2026-10-21T16:20:00.000Z")).toBe(true);
+    expect(blue).toHaveLength(2);
+    expect(withinMinutes(blue[0]?.startAt, "2026-10-21T04:57:00.000Z")).toBe(true);
+    expect(withinMinutes(blue[0]?.endAt, "2026-10-21T05:18:00.000Z")).toBe(true);
+    expect(withinMinutes(blue[1]?.startAt, "2026-10-21T16:20:00.000Z")).toBe(true);
+    expect(withinMinutes(blue[1]?.endAt, "2026-10-21T16:42:00.000Z")).toBe(true);
+  });
+
+  it("returns a missing-location state for channel members without a saved place", async () => {
+    const database = await createDatabase();
+    const app = appFor(database as unknown as D1Database);
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/today`), {
+      DB: database as unknown as D1Database,
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "location_missing" });
   });
 });

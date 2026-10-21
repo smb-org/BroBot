@@ -3,7 +3,7 @@ import type { TemplateVariable, TemplateContext } from "../../template";
 import { effectiveTemplateVariables } from "../../template";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../../template-variables";
 import { channelVariableTemplateDescription, systemTemplateVariableLocale } from "../locale";
-import type { TemplateTextFieldGroupPresentation } from "./template-text-field-model";
+import { templateVariableParameter, type TemplateTextFieldGroupPresentation } from "./template-text-field-model";
 import type { TemplateTextFieldVariable } from "./TemplateTextField";
 
 export interface PanelChannelVariable {
@@ -72,6 +72,7 @@ export const panelTemplateOptions = (
   const moduleByName = new Map(moduleDescriptions.map((variable) => [variable.name, variable]));
   const channelByName = new Map(channelVariables.map((variable) => [`var.${variable.name}`, variable]));
   return declarations.map((variable) => {
+    const parameter = templateVariableParameter(variable.parameters, variable.parameterDefault);
     if (variable.source === "system") {
       const localized = systemTemplateVariableLocale[language][variable.name as keyof typeof systemTemplateVariableLocale.de];
       return {
@@ -82,9 +83,7 @@ export const panelTemplateOptions = (
         group: variable.group ?? "context",
         kind: "system",
         ...(variable.external === undefined ? {} : { external: variable.external }),
-        ...(variable.parameters === "range" ? { parameter: { value: "1-100" } } : {}),
-        ...(variable.parameters === "choices" ? { parameter: { value: "a|b|c" } } : {}),
-        ...(variable.parameters === "currency_pair" ? { parameter: { value: variable.parameterDefault ?? "USD EUR" } } : {}),
+        ...(parameter === undefined ? {} : { parameter }),
       };
     }
     if (variable.source === "channel") {
@@ -115,7 +114,7 @@ export const panelTemplateOptions = (
       ...(sourceGroup === undefined ? {} : { sourceGroup }),
       ...(variable.external === undefined ? {} : { external: variable.external }),
       ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
-      ...(variable.parameters === "currency_pair" ? { parameter: { value: variable.parameterDefault ?? "USD EUR" } } : {}),
+      ...(parameter === undefined ? {} : { parameter }),
     };
   });
 };

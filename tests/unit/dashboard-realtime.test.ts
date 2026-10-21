@@ -532,6 +532,7 @@ describe("dashboard realtime messages", () => {
         moduleQueryKey(revisionChannel, "timers", "panel"),
         moduleQueryKey(revisionChannel, "faq", "panel"),
         moduleQueryKey(revisionChannel, "text_commands", "template-variables"),
+        queryKeys.channel(revisionChannel, "template-variables"),
       ],
       "chat-voting": [moduleQueryKey(revisionChannel, "chat_voting", "panel")],
       votekick: [moduleQueryKey(revisionChannel, "votekick", "panel")],

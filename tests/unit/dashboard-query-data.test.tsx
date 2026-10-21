@@ -542,9 +542,11 @@ describe("dashboard query data layer", () => {
   });
 
   it("invalidates dependent module reads after a write", async () => {
-    const view = renderWithQuery(<p>Ready</p>);
+    const view = renderWithQuery(<p>Ready</p>, {}, { gcTime: 600_000 });
     const dependentKey = moduleQueryKey(channelId, "text_commands", "template-variables");
+    const catalogKey = queryKeys.channel(channelId, "template-variables");
     view.queryClient.setQueryData(dependentKey, [{ name: "text.old", isTextBlock: true }]);
+    view.queryClient.setQueryData(catalogKey, [{ name: "text.old", isTextBlock: true }]);
 
     await runModuleQueryWrite(
       view.queryClient,
@@ -556,10 +558,12 @@ describe("dashboard query data layer", () => {
         baselineRevision: null,
         updateCache: (current) => current,
         relatedParts: [{ moduleId: "text_commands", part: "template-variables" }],
+        relatedQueryKeys: [catalogKey],
       },
     );
 
     expect(view.queryClient.getQueryState(dependentKey)?.isInvalidated).toBe(true);
+    expect(view.queryClient.getQueryState(catalogKey)?.isInvalidated).toBe(true);
     view.unmount();
   });
 

@@ -11,6 +11,8 @@ export type TextCommandInput =
 
 export const validCommandName = (name: string): boolean => COMMAND_NAME_PATTERN.test(name);
 
+export const normalizeCommandName = (name: string): string => name.trim().replace(/^!/u, "").toLowerCase();
+
 export const commandFromMessage = (message: string): TextCommandInput | null => {
   const trimmed = message.trim();
   const firstWord = trimmed.split(/\s+/u)[0];

@@ -173,7 +173,7 @@ test("location page uses the settings-page header gap and aligns the saved place
 
     const headerBox = await page.locator(".channel-location-page .settings-page > .page-header").boundingBox();
     const header = page.locator(".channel-location-page .settings-page > .page-header");
-    const firstSectionHeading = await page.locator(".channel-location-page .settings-page__column:first-child .ui-section__heading").boundingBox();
+    const firstSectionHeading = await page.locator(".channel-location-page .settings-page__column:first-child .ui-section__heading").first().boundingBox();
     const headerBorder = await header.evaluate((element) => Number.parseFloat(getComputedStyle(element).borderBottomWidth));
     expect(headerBox).not.toBeNull();
     expect(firstSectionHeading).not.toBeNull();
@@ -183,16 +183,21 @@ test("location page uses the settings-page header gap and aligns the saved place
       expect(Math.abs(firstSectionHeading.y - dividerY - expectedGap)).toBeLessThanOrEqual(1);
     }
 
-    const current = page.locator(".channel-location-field__current");
+    const status = page.locator(".channel-location-field__status");
+    const details = page.locator(".channel-location-field__details");
     const actions = page.locator(".channel-location-field__actions");
-    const currentBox = await current.boundingBox();
+    const statusBox = await status.boundingBox();
+    const detailsBox = await details.boundingBox();
     const actionsBox = await actions.boundingBox();
-    expect(currentBox).not.toBeNull();
+    expect(statusBox).not.toBeNull();
+    expect(detailsBox).not.toBeNull();
     expect(actionsBox).not.toBeNull();
-    if (currentBox !== null && actionsBox !== null) {
-      expect(Math.abs(currentBox.x - actionsBox.x)).toBeLessThanOrEqual(1);
-      expect(actionsBox.y).toBeGreaterThanOrEqual(currentBox.y + currentBox.height);
-      expect(actionsBox.y - currentBox.y - currentBox.height).toBeLessThanOrEqual(14);
+    if (statusBox !== null && detailsBox !== null && actionsBox !== null) {
+      expect(Math.abs(statusBox.x - actionsBox.x)).toBeLessThanOrEqual(1);
+      expect(Math.abs(detailsBox.x - actionsBox.x)).toBeLessThanOrEqual(1);
+      expect(detailsBox.y).toBeGreaterThanOrEqual(statusBox.y + statusBox.height);
+      expect(actionsBox.y).toBeGreaterThanOrEqual(detailsBox.y + detailsBox.height);
+      expect(actionsBox.y - detailsBox.y - detailsBox.height).toBeLessThanOrEqual(14);
     }
     await assertNoHorizontalOverflow(page);
     await page.unrouteAll({ behavior: "wait" });

@@ -62,6 +62,7 @@ interface ModuleRouteEnvironment {
     "writeModuleDiagnostics" | "broadcasterHasScope" | "broadcasterScopesForChannel"
     | "measureServerTiming" | "recordServerTiming" | "scheduleBackgroundWork" | "getAppAccessToken" | "helixRequest"
     | "listChannelVariables" | "findChannelVariable" | "secrets"
+    | "channelLocation"
     | "externalFetchBudget"
     | "ballots"
     | "points"
@@ -272,6 +273,10 @@ moduleRouter.use("/api/channels/:channelId/modules/*", requireChannelAuthorizati
 moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
   const externalFetchBudget: ModuleExternalFetchBudget = createModuleExternalFetchBudget();
   context.set("externalFetchBudget", externalFetchBudget);
+  context.set("channelLocation", (channelId) => {
+    if (channelId !== context.req.param("channelId")) throw new Error("Channel location access must use the authorized route channel.");
+    return readChannelLocation(context.env.DB, channelId);
+  });
   context.set("ballots", (channelId) => {
     if (channelId !== context.req.param("channelId")) throw new Error("Ballot access must use the authorized route channel.");
     const marker = "/modules/";
