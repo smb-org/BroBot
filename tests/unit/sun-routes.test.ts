@@ -202,6 +202,66 @@ describe("sun today route", () => {
     expect(body.blueHourIntervals?.every(({ startAt, endAt }) => Date.parse(startAt) < Date.parse(endAt))).toBe(true);
   });
 
+  it("returns golden intervals overlapping Reykjavik's summer-solstice day across local midnight", async () => {
+    const database = await createDatabase();
+    await database.prepare(
+      "UPDATE channels SET location_name = ?, location_latitude = ?, location_longitude = ?, location_time_zone = ? WHERE channel_id = ?",
+    ).bind("Reykjavik", 64.1466, -21.9426, "Atlantic/Reykjavik", CHANNEL_ID).run();
+    vi.setSystemTime(new Date("2026-06-21T12:00:00.000Z"));
+    const app = appFor(database as unknown as D1Database);
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/today`), {
+      DB: database as unknown as D1Database,
+    });
+    const body = await response.json<{ status: string; goldenHourIntervals?: { startAt: string; endAt: string }[] }>();
+    const intervals = body.goldenHourIntervals ?? [];
+    const expected = [
+      [Date.parse("2026-06-20T22:07:00.000Z"), Date.parse("2026-06-21T04:52:00.000Z")],
+      [Date.parse("2026-06-21T22:07:00.000Z"), Date.parse("2026-06-22T04:52:00.000Z")],
+    ] as const;
+
+    expect(body.status).toBe("ok");
+    expect(intervals).toHaveLength(2);
+    for (const [index, interval] of intervals.entries()) {
+      expect(Date.parse(interval.startAt)).toBeCloseTo(expected[index]?.[0] ?? 0, -6);
+      expect(Date.parse(interval.endAt)).toBeCloseTo(expected[index]?.[1] ?? 0, -6);
+    }
+  });
+
+  it("returns concrete golden and blue intervals for Berlin's local day", async () => {
+    const database = await createDatabase();
+    await database.prepare(
+      "UPDATE channels SET location_name = ?, location_latitude = ?, location_longitude = ?, location_time_zone = ? WHERE channel_id = ?",
+    ).bind("Berlin", 52.52, 13.405, "Europe/Berlin", CHANNEL_ID).run();
+    vi.setSystemTime(new Date("2026-10-21T12:00:00.000Z"));
+    const app = appFor(database as unknown as D1Database);
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/today`), {
+      DB: database as unknown as D1Database,
+    });
+    const body = await response.json<{
+      status: string;
+      goldenHourIntervals?: { startAt: string; endAt: string }[];
+      blueHourIntervals?: { startAt: string; endAt: string }[];
+    }>();
+    const golden = body.goldenHourIntervals ?? [];
+    const blue = body.blueHourIntervals ?? [];
+    const withinMinutes = (actual: string | undefined, expected: string): boolean =>
+      Math.abs(Date.parse(actual ?? "") - Date.parse(expected)) <= 15 * 60_000;
+
+    expect(body.status).toBe("ok");
+    expect(golden).toHaveLength(2);
+    expect(withinMinutes(golden[0]?.startAt, "2026-10-21T05:18:00.000Z")).toBe(true);
+    expect(withinMinutes(golden[0]?.endAt, "2026-10-21T06:24:00.000Z")).toBe(true);
+    expect(withinMinutes(golden[1]?.startAt, "2026-10-21T15:14:00.000Z")).toBe(true);
+    expect(withinMinutes(golden[1]?.endAt, "2026-10-21T16:20:00.000Z")).toBe(true);
+    expect(blue).toHaveLength(2);
+    expect(withinMinutes(blue[0]?.startAt, "2026-10-21T04:57:00.000Z")).toBe(true);
+    expect(withinMinutes(blue[0]?.endAt, "2026-10-21T05:18:00.000Z")).toBe(true);
+    expect(withinMinutes(blue[1]?.startAt, "2026-10-21T16:20:00.000Z")).toBe(true);
+    expect(withinMinutes(blue[1]?.endAt, "2026-10-21T16:42:00.000Z")).toBe(true);
+  });
+
   it("returns a missing-location state for channel members without a saved place", async () => {
     const database = await createDatabase();
     const app = appFor(database as unknown as D1Database);

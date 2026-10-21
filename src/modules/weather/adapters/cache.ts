@@ -5,7 +5,7 @@ import { WEATHER_PROVIDER_ADAPTERS, WeatherProviderError, type WeatherCoordinate
 const WEATHER_CACHE_TTL_MS = 15 * 60 * 1_000;
 const MET_NORWAY_MAX_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
 const WEATHER_FAILURE_CACHE_TTL_MS = 60 * 1_000;
-const WEATHER_FAILURE_CACHE_MAX_TTL_MS = 15 * 60 * 1_000;
+const WEATHER_FAILURE_CACHE_MAX_TTL_MS = 24 * 60 * 60 * 1_000;
 const WEATHER_FAILURE_CACHE_PAYLOAD = "{\"unavailable\":true}";
 
 interface WeatherCacheRow {

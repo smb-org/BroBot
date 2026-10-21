@@ -153,35 +153,51 @@ const WeatherCard = ({ data, loading, failed, providerFailed, missingLocation, t
 }): ReactElement => {
   const language = dashboardLanguage();
   const texts = locationLiveTexts(language);
-  const weather = data?.weather;
+  const displayData = missingLocation ? null : data;
+  const weather = displayData?.weather;
   const condition = weather === undefined ? null : WEATHER_CONDITION_LABELS[language][weather.condition];
-  const temp = data === null ? <LiveValueSkeleton size="temperature" /> : formatTemperature(data.weather.temperatureC, language, data.showFahrenheit);
-  const feelsLike = data === null ? <LiveValueSkeleton size="short" /> : formatTemperature(data.weather.feelsLikeC, language, data.showFahrenheit);
+  const temp = displayData === null ? <LiveValueSkeleton size="temperature" /> : formatTemperature(displayData.weather.temperatureC, language, displayData.showFahrenheit);
+  const feelsLike = displayData === null ? <LiveValueSkeleton size="short" /> : formatTemperature(displayData.weather.feelsLikeC, language, displayData.showFahrenheit);
   const wind = weather === undefined ? <LiveValueSkeleton /> : formatWind(weather.windSpeedMps, language);
   const updated = weather === undefined ? "—" : texts.updated(
     Math.max(0, Math.floor((now - Date.parse(weather.observedAt)) / 60_000)),
     formatTime(weather.observedAt, timeZone, language),
   );
   const iconName = weather === undefined ? "cloud" : weatherIcon(weather.condition, weather.isDay);
-  if (missingLocation) return <div className="channel-location-weather-card channel-location-weather-card--empty">
-    <MissingLocation channelId={channelId} icon={iconName} message={texts.missingWeatherLocation} texts={texts} />
-  </div>;
   const status = providerFailed ? texts.providerError : failed ? texts.temporaryError : null;
 
-  return <div className="channel-location-weather-card" aria-busy={loading}>
-    <div className="channel-location-weather-card__heading">
-      <span>{data === null ? <LiveValueSkeleton size="wide" /> : texts.currentIn(data.location.name)}</span>
-      <Icon name={iconName} className="channel-location-weather-card__icon" size={20} />
+  return <div className="channel-location-weather-card channel-location-live-card" aria-busy={loading}>
+    <div className="channel-location-live-card__reserve channel-location-live-card__layer" aria-hidden="true">
+      <div className="channel-location-weather-card__heading">
+        <span><LiveValueSkeleton size="wide" /></span>
+        <Icon name="cloud" className="channel-location-weather-card__icon" size={20} />
+      </div>
+      <div className="channel-location-weather-card__temperature"><LiveValueSkeleton size="temperature" /></div>
+      <div className="channel-location-weather-card__condition">
+        <span><LiveValueSkeleton size="wide" /></span>
+        <span><LiveValueSkeleton size="short" /></span>
+      </div>
+      <div className="channel-location-weather-card__footer">
+        <span><Icon name="wind" size={16} /> <LiveValueSkeleton /></span>
+        <span><LiveValueSkeleton size="wide" /></span>
+      </div>
     </div>
-    <div className="channel-location-weather-card__temperature">{temp}</div>
-    <div className="channel-location-weather-card__condition">
-      <span>{condition ?? <LiveValueSkeleton size="wide" />}</span>
-      <span>{texts.feelsLike} {feelsLike}</span>
+    <div className="channel-location-live-card__content channel-location-live-card__layer" aria-hidden={missingLocation || undefined}>
+      <div className="channel-location-weather-card__heading">
+        <span>{displayData === null ? <LiveValueSkeleton size="wide" /> : texts.currentIn(displayData.location.name)}</span>
+        <Icon name={iconName} className="channel-location-weather-card__icon" size={20} />
+      </div>
+      <div className="channel-location-weather-card__temperature">{temp}</div>
+      <div className="channel-location-weather-card__condition">
+        <span>{condition ?? <LiveValueSkeleton size="wide" />}</span>
+        <span>{texts.feelsLike} {feelsLike}</span>
+      </div>
+      <div className="channel-location-weather-card__footer">
+        <span><Icon name="wind" size={16} /> {texts.wind} {wind}</span>
+        <span role={status === null ? undefined : "status"} title={status ?? undefined}>{status ?? (weather === undefined ? <LiveValueSkeleton size="wide" /> : updated)}</span>
+      </div>
     </div>
-    <div className="channel-location-weather-card__footer">
-      <span><Icon name="wind" size={16} /> {texts.wind} {wind}</span>
-      <span role={status === null ? undefined : "status"} title={status ?? undefined}>{status ?? (weather === undefined ? <LiveValueSkeleton size="wide" /> : updated)}</span>
-    </div>
+    {missingLocation && <MissingLocation className="channel-location-live-card__empty" channelId={channelId} icon={iconName} message={texts.missingWeatherLocation} texts={texts} />}
   </div>;
 };
 
@@ -196,26 +212,24 @@ const SunCard = ({ data, loading, failed, missingLocation, timeZone, now, channe
 }): ReactElement => {
   const language = dashboardLanguage();
   const texts = locationLiveTexts(language);
-  const day = data?.day;
-  const events = sunMarkers(data);
+  const displayData = missingLocation ? null : data;
+  const day = displayData?.day;
+  const events = sunMarkers(displayData);
   const markerBounds = events.length < 2 ? null : [events[0]?.time ?? 0, events.at(-1)?.time ?? 0] as const;
   const hasEventRange = events.length >= 2;
   const nowPosition = markerBounds === null || markerBounds[1] <= markerBounds[0]
     ? localTimePosition(now, timeZone)
     : clampPercent(((now - markerBounds[0]) / (markerBounds[1] - markerBounds[0])) * 100);
-  const nextEvent = events.find((event) => event.time > now) ?? (data?.nextDawnAt === null || data?.nextDawnAt === undefined
+  const nextEvent = events.find((event) => event.time > now) ?? (displayData?.nextDawnAt === null || displayData?.nextDawnAt === undefined
     ? undefined
-    : { label: texts.dawn, time: Date.parse(data.nextDawnAt) });
-  const dayLength = data === null ? <LiveValueSkeleton /> : day?.dayLengthMinutes === null || day?.dayLengthMinutes === undefined ? "—" : formatDuration(day.dayLengthMinutes, language);
+    : { label: texts.dawn, time: Date.parse(displayData.nextDawnAt) });
+  const dayLength = displayData === null ? <LiveValueSkeleton /> : day?.dayLengthMinutes === null || day?.dayLengthMinutes === undefined ? "—" : formatDuration(day.dayLengthMinutes, language);
   const readOnlyContent = day === undefined ? "—" : null;
-  if (missingLocation) return <div className="channel-location-sun-card channel-location-live-card--empty">
-    <MissingLocation channelId={channelId} icon="sun" message={texts.missingSunLocation} texts={texts} />
-  </div>;
   const message = failed ? texts.temporaryError : null;
   const nowBeforeDawn = markerBounds !== null && now < markerBounds[0];
   const nowAfterDusk = markerBounds !== null && now > markerBounds[1];
-  const goldenHour = selectCurrentOrNextInterval(data?.goldenHourIntervals ?? [], now);
-  const blueHour = selectCurrentOrNextInterval(data?.blueHourIntervals ?? [], now);
+  const goldenHour = selectCurrentOrNextInterval(displayData?.goldenHourIntervals ?? [], now);
+  const blueHour = selectCurrentOrNextInterval(displayData?.blueHourIntervals ?? [], now);
 
   const displayEvents = [
     { label: texts.dawn, at: day?.dawnAt, color: "var(--content-sun-dawn)" },
@@ -227,27 +241,51 @@ const SunCard = ({ data, loading, failed, missingLocation, timeZone, now, channe
     { label: texts.dusk, at: day?.duskAt, color: "var(--content-sun-dawn)" },
   ];
 
-  return <div className="channel-location-sun-card" aria-busy={loading}>
-    <div className="channel-location-sun-card__heading"><Icon name="sun" size={16} /><span>{day?.localDate ?? <LiveValueSkeleton size="wide" />}</span></div>
-    <div className="channel-location-sun-arc" aria-label={texts.sun}>
+  return <div className="channel-location-sun-card channel-location-live-card" aria-busy={loading}>
+    <div className="channel-location-live-card__reserve channel-location-live-card__layer" aria-hidden="true">
+      <div className="channel-location-sun-card__heading"><Icon name="sun" size={16} /><span><LiveValueSkeleton size="wide" /></span></div>
+      <div className="channel-location-sun-arc" aria-hidden="true">
+        <div className="channel-location-sun-arc__line" />
+        {events.map((event) => <span key={`${event.label}-${event.at}`} className="channel-location-sun-arc__point" title={`${event.label}: ${formatTime(event.at, timeZone, language)}`}
+          style={{ "--position": `${String(markerPosition(event.time, markerBounds))}%`, "--phase-color": event.color } as CSSProperties} />)}
+        <span className="channel-location-sun-arc__now" style={{ "--position": `${String(nowPosition)}%` } as CSSProperties} />
+      </div>
+      <div className="channel-location-sun-arc__labels">
+        <span><LiveValueSkeleton size="short" /></span>
+        <span><LiveValueSkeleton size="short" /></span>
+        <span className={`channel-location-sun-arc__now-label${nowBeforeDawn ? " channel-location-sun-arc__now-label--start" : nowAfterDusk ? " channel-location-sun-arc__now-label--end" : ""}`}
+          style={{ "--position": `${String(nowPosition)}%` } as CSSProperties}><LiveValueSkeleton size="wide" /></span>
+      </div>
+      <div className="channel-location-sun-next"><span><LiveValueSkeleton size="short" /></span><strong><LiveValueSkeleton size="wide" /></strong></div>
+      <dl className="channel-location-sun-events">
+        {displayEvents.map((event) => <div key={event.label}><dt><span style={{ "--phase-color": event.color } as CSSProperties} /><strong><LiveValueSkeleton size="short" /></strong></dt><dd className={`number${event.label === texts.goldenHour ? " channel-location-sun-events__interval channel-location-sun-events__interval--golden" : event.label === texts.blueHour ? " channel-location-sun-events__interval channel-location-sun-events__interval--blue" : ""}`}><LiveValueSkeleton /></dd></div>)}
+        <div><dt><LiveValueSkeleton size="short" /></dt><dd className="number"><LiveValueSkeleton /></dd></div>
+      </dl>
+      <div className="channel-location-live-status" />
+    </div>
+    <div className="channel-location-live-card__content channel-location-live-card__layer" aria-hidden={missingLocation || undefined}>
+      <div className="channel-location-sun-card__heading"><Icon name="sun" size={16} /><span>{day?.localDate ?? <LiveValueSkeleton size="wide" />}</span></div>
+      <div className="channel-location-sun-arc" aria-label={texts.sun}>
       <div className="channel-location-sun-arc__line" />
       {events.map((event) => <span key={`${event.label}-${event.at}`} className="channel-location-sun-arc__point" title={`${event.label}: ${formatTime(event.at, timeZone, language)}`}
         style={{ "--position": `${String(markerPosition(event.time, markerBounds))}%`, "--phase-color": event.color } as CSSProperties} />)}
       <span className="channel-location-sun-arc__now" aria-label={texts.now}
         style={{ "--position": `${String(nowPosition)}%` } as CSSProperties} />
+      </div>
+      <div className="channel-location-sun-arc__labels">
+        <span>{displayData === null ? <LiveValueSkeleton size="short" /> : hasEventRange ? formatTime(events[0]?.at, timeZone, language) : "—"}</span>
+        <span>{displayData === null ? <LiveValueSkeleton size="short" /> : hasEventRange ? formatTime(events.at(-1)?.at, timeZone, language) : "—"}</span>
+        <span className={`channel-location-sun-arc__now-label${nowBeforeDawn ? " channel-location-sun-arc__now-label--start" : nowAfterDusk ? " channel-location-sun-arc__now-label--end" : ""}`}
+          style={{ "--position": `${String(nowPosition)}%` } as CSSProperties}>{texts.now} · {formatTime(new Date(now).toISOString(), timeZone, language)}</span>
+      </div>
+      <div className="channel-location-sun-next"><span>{texts.nextPhase}</span><strong>{displayData === null ? <LiveValueSkeleton size="wide" /> : day?.polarState === "day" ? texts.polarDay : day?.polarState === "night" ? texts.polarNight : nextEvent === undefined ? readOnlyContent : texts.nextPhaseIn(nextEvent.label, formatDuration(Math.ceil((nextEvent.time - now) / 60_000), language))}</strong></div>
+      <dl className="channel-location-sun-events">
+        {displayEvents.map((event) => <div key={event.label}><dt><span style={{ "--phase-color": event.color } as CSSProperties} />{event.label}</dt><dd className={`number${event.label === texts.goldenHour ? " channel-location-sun-events__interval channel-location-sun-events__interval--golden" : event.label === texts.blueHour ? " channel-location-sun-events__interval channel-location-sun-events__interval--blue" : ""}`}>{displayData === null ? <LiveValueSkeleton /> : "value" in event ? event.value : formatTime(event.at, timeZone, language)}</dd></div>)}
+        <div><dt>{texts.dayLength}</dt><dd className="number">{dayLength}</dd></div>
+      </dl>
+      <div className="channel-location-live-status" {...(message === null ? {} : { role: "status" })}>{message}</div>
     </div>
-    <div className="channel-location-sun-arc__labels">
-      <span>{data === null ? <LiveValueSkeleton size="short" /> : hasEventRange ? formatTime(events[0]?.at, timeZone, language) : "—"}</span>
-      <span>{data === null ? <LiveValueSkeleton size="short" /> : hasEventRange ? formatTime(events.at(-1)?.at, timeZone, language) : "—"}</span>
-      <span className={`channel-location-sun-arc__now-label${nowBeforeDawn ? " channel-location-sun-arc__now-label--start" : nowAfterDusk ? " channel-location-sun-arc__now-label--end" : ""}`}
-        style={{ "--position": `${String(nowPosition)}%` } as CSSProperties}>{texts.now} · {formatTime(new Date(now).toISOString(), timeZone, language)}</span>
-    </div>
-    <div className="channel-location-sun-next"><span>{texts.nextPhase}</span><strong>{data === null ? <LiveValueSkeleton size="wide" /> : day?.polarState === "day" ? texts.polarDay : day?.polarState === "night" ? texts.polarNight : nextEvent === undefined ? readOnlyContent : texts.nextPhaseIn(nextEvent.label, formatDuration(Math.ceil((nextEvent.time - now) / 60_000), language))}</strong></div>
-    <dl className="channel-location-sun-events">
-      {displayEvents.map((event) => <div key={event.label}><dt><span style={{ "--phase-color": event.color } as CSSProperties} />{event.label}</dt><dd className={`number${event.label === texts.goldenHour ? " channel-location-sun-events__interval channel-location-sun-events__interval--golden" : event.label === texts.blueHour ? " channel-location-sun-events__interval channel-location-sun-events__interval--blue" : ""}`}>{data === null ? <LiveValueSkeleton /> : "value" in event ? event.value : formatTime(event.at, timeZone, language)}</dd></div>)}
-      <div><dt>{texts.dayLength}</dt><dd className="number">{dayLength}</dd></div>
-    </dl>
-    <div className="channel-location-live-status" {...(message === null ? {} : { role: "status" })}>{message}</div>
+    {missingLocation && <MissingLocation className="channel-location-live-card__empty" channelId={channelId} icon="sun" message={texts.missingSunLocation} texts={texts} />}
   </div>;
 };
 
@@ -262,35 +300,44 @@ const MoonCard = ({ data, loading, failed, missingLocation, timeZone, now, chann
 }): ReactElement => {
   const language = dashboardLanguage();
   const texts = locationLiveTexts(language);
-  const phase = data === null ? <LiveValueSkeleton size="wide" /> : moonModuleCatalog[language].phases[data.phase] ?? data.phase;
-  const nextRise = data?.nextRiseAt === null || data?.nextRiseAt === undefined
-    ? data === null ? <LiveValueSkeleton /> : "—"
-    : texts.inDuration(formatDuration(Math.ceil((Date.parse(data.nextRiseAt) - now) / 60_000), language));
-  if (missingLocation) return <div className="channel-location-moon-card channel-location-live-card--empty">
-    <MissingLocation channelId={channelId} icon="moon" message={texts.missingMoonLocation} texts={texts} />
-  </div>;
+  const displayData = missingLocation ? null : data;
+  const phase = displayData === null ? <LiveValueSkeleton size="wide" /> : moonModuleCatalog[language].phases[displayData.phase] ?? displayData.phase;
+  const nextRise = displayData?.nextRiseAt === null || displayData?.nextRiseAt === undefined
+    ? displayData === null ? <LiveValueSkeleton /> : "—"
+    : texts.inDuration(formatDuration(Math.ceil((Date.parse(displayData.nextRiseAt) - now) / 60_000), language));
   const message = failed ? texts.temporaryError : null;
   const fields = [
-    { label: texts.moonrise, at: data?.riseAt },
-    { label: texts.moonset, at: data?.setAt },
+    { label: texts.moonrise, at: displayData?.riseAt },
+    { label: texts.moonset, at: displayData?.setAt },
     { label: texts.nextRise, value: nextRise },
   ];
 
-  return <div className="channel-location-moon-card" aria-busy={loading}>
-    <div className="channel-location-moon-card__phase"><Icon name="moon" size={20} /><strong>{phase}</strong><span>{data === null ? <LiveValueSkeleton size="short" /> : texts.illumination(data.illumination)}</span></div>
-    <dl className="channel-location-moon-events">
-      {fields.map((field) => <div key={field.label}><dt>{field.label}</dt><dd className="number">{field.value ?? (data === null ? <LiveValueSkeleton /> : formatTime(field.at, timeZone, language))}</dd></div>)}
-    </dl>
-    <div className="channel-location-live-status" {...(message === null ? {} : { role: "status" })}>{message}</div>
+  return <div className="channel-location-moon-card channel-location-live-card" aria-busy={loading}>
+    <div className="channel-location-live-card__reserve channel-location-live-card__layer" aria-hidden="true">
+      <div className="channel-location-moon-card__phase"><Icon name="moon" size={20} /><strong><LiveValueSkeleton size="wide" /></strong><span><LiveValueSkeleton size="short" /></span></div>
+      <dl className="channel-location-moon-events">
+        {fields.map((field) => <div key={field.label}><dt><LiveValueSkeleton size="short" /></dt><dd className="number"><LiveValueSkeleton /></dd></div>)}
+      </dl>
+      <div className="channel-location-live-status" />
+    </div>
+    <div className="channel-location-live-card__content channel-location-live-card__layer" aria-hidden={missingLocation || undefined}>
+      <div className="channel-location-moon-card__phase"><Icon name="moon" size={20} /><strong>{phase}</strong><span>{displayData === null ? <LiveValueSkeleton size="short" /> : texts.illumination(displayData.illumination)}</span></div>
+      <dl className="channel-location-moon-events">
+        {fields.map((field) => <div key={field.label}><dt>{field.label}</dt><dd className="number">{field.value ?? (displayData === null ? <LiveValueSkeleton /> : formatTime(field.at, timeZone, language))}</dd></div>)}
+      </dl>
+      <div className="channel-location-live-status" {...(message === null ? {} : { role: "status" })}>{message}</div>
+    </div>
+    {missingLocation && <MissingLocation className="channel-location-live-card__empty" channelId={channelId} icon="moon" message={texts.missingMoonLocation} texts={texts} />}
   </div>;
 };
 
-const MissingLocation = ({ channelId, icon, message, texts }: {
+const MissingLocation = ({ channelId, icon, message, texts, className }: {
   channelId: string;
   icon: IconName;
   message: string;
   texts: ReturnType<typeof locationLiveTexts>;
-}): ReactElement => <div className="channel-location-live-empty" role="status">
+  className: string;
+}): ReactElement => <div className={`channel-location-live-empty channel-location-live-card__layer ${className}`} role="status">
   <Icon name={icon} size={20} aria-hidden="true" />
   <span>{message} <a href={`/channels/${encodeURIComponent(channelId)}/location-weather#location`}>{texts.setLocation}</a></span>
 </div>;

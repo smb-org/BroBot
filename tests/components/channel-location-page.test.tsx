@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { PanelChannelSettings } from "../../src/dashboard/api";
+import { ChannelLocationLiveCards } from "../../src/dashboard/ChannelLocationLive";
 import { ChannelLocationPage } from "../../src/dashboard/ChannelLocationPage";
 import { channelSettingsTexts } from "../../src/dashboard/channel-settings-locale";
 import { queryKeys } from "../../src/dashboard/data/keys";
@@ -169,8 +170,8 @@ describe("channel location page", () => {
       const card = container.querySelector(".channel-location-weather-card");
       expect(card).not.toBeNull();
       expect(card).toHaveAttribute("aria-busy", "true");
-      expect(card?.children).toHaveLength(4);
-      expect(card?.querySelectorAll(".channel-location-skeleton")).toHaveLength(6);
+      expect(card?.querySelector(":scope > .channel-location-live-card__content")?.children).toHaveLength(4);
+      expect(card?.querySelector(":scope > .channel-location-live-card__content")?.querySelectorAll(".channel-location-skeleton")).toHaveLength(6);
     });
     expect(await screen.findByRole("heading", { name: "Aktuelles Wetter" })).toBeInTheDocument();
     await waitFor(() => resolveWeather(jsonResponse(liveWeather)));
@@ -196,8 +197,8 @@ describe("channel location page", () => {
     });
     const moonCard = container.querySelector(".channel-location-moon-card");
     expect(moonCard).toHaveAttribute("aria-busy", "true");
-    expect(sunCard?.querySelectorAll(".channel-location-sun-events > div")).toHaveLength(8);
-    expect(moonCard?.querySelectorAll(".channel-location-moon-events > div")).toHaveLength(3);
+    expect(sunCard?.querySelector(".channel-location-live-card__content")?.querySelectorAll(".channel-location-sun-events > div")).toHaveLength(8);
+    expect(moonCard?.querySelector(".channel-location-live-card__content")?.querySelectorAll(".channel-location-moon-events > div")).toHaveLength(3);
     expect(screen.getByText("Abenddämmerung").closest("div")?.querySelector(".channel-location-skeleton")).not.toBeNull();
     expect(screen.getByText("Tageslänge").closest("div")?.querySelector(".channel-location-skeleton")).not.toBeNull();
   });
@@ -213,10 +214,10 @@ describe("channel location page", () => {
     expect(screen.getByText("74 % beleuchtet")).toBeInTheDocument();
     expect(screen.getByText("17:40–18:28")).toBeInTheDocument();
     expect(screen.getByText("19:52–20:35")).toBeInTheDocument();
-    expect(container.querySelectorAll(".channel-location-sun-events > div")).toHaveLength(8);
-    expect(container.querySelectorAll(".channel-location-moon-events > div")).toHaveLength(3);
-    expect(container.querySelector(".channel-location-weather-card")?.children).toHaveLength(4);
-    expect(container.querySelectorAll(".channel-location-weather-card .channel-location-skeleton")).toHaveLength(0);
+    expect(container.querySelectorAll(".channel-location-sun-card > .channel-location-live-card__content .channel-location-sun-events > div")).toHaveLength(8);
+    expect(container.querySelectorAll(".channel-location-moon-card > .channel-location-live-card__content .channel-location-moon-events > div")).toHaveLength(3);
+    expect(container.querySelector(".channel-location-weather-card > .channel-location-live-card__content")?.children).toHaveLength(4);
+    expect(container.querySelectorAll(".channel-location-weather-card > .channel-location-live-card__content .channel-location-skeleton")).toHaveLength(0);
     expect(screen.getByText("Abenddämmerung").closest("div")).toHaveTextContent("21:05");
     expect(screen.getByText("Tageslänge").closest("div")).toHaveTextContent("12 Std. 34 Min.");
   });
@@ -239,12 +240,12 @@ describe("channel location page", () => {
     const { container, queryClient } = renderWithQuery(<UiProvider><ChannelLocationPage channelId="channel-a" role="manager" /></UiProvider>);
 
     const sunSlot = await waitFor(() => {
-      const slot = container.querySelector(".channel-location-sun-card .channel-location-live-status");
+      const slot = container.querySelector(".channel-location-sun-card > .channel-location-live-card__content .channel-location-live-status");
       expect(slot).not.toBeNull();
       return slot as HTMLElement;
     });
-    const moonSlot = container.querySelector(".channel-location-moon-card .channel-location-live-status");
-    const weatherSlot = container.querySelector(".channel-location-weather-card__footer > span:last-child");
+    const moonSlot = container.querySelector(".channel-location-moon-card > .channel-location-live-card__content .channel-location-live-status");
+    const weatherSlot = container.querySelector(".channel-location-weather-card > .channel-location-live-card__content .channel-location-weather-card__footer > span:last-child");
     await waitFor(() => {
       expect(container.querySelector(".channel-location-weather-card")).toHaveAttribute("aria-busy", "false");
       expect(container.querySelector(".channel-location-sun-card")).toHaveAttribute("aria-busy", "false");
@@ -271,11 +272,11 @@ describe("channel location page", () => {
       ]);
     });
     await waitFor(() => expect(fetcher.mock.calls.filter(([input]) => inputUrl(input).endsWith("/weather/current")).length).toBe(2));
-    expect(container.querySelector(".channel-location-weather-card__footer > span:last-child")).toBe(weatherSlot);
+    expect(container.querySelector(".channel-location-weather-card > .channel-location-live-card__content .channel-location-weather-card__footer > span:last-child")).toBe(weatherSlot);
     expect(weatherSlot).toHaveTextContent("Wetterdienst gerade nicht erreichbar");
     await waitFor(() => expect(fetcher.mock.calls.filter(([input]) => inputUrl(input).endsWith("/sun/today")).length).toBe(2));
-    expect(container.querySelector(".channel-location-sun-card .channel-location-live-status")).toBe(sunSlot);
-    expect(container.querySelector(".channel-location-moon-card .channel-location-live-status")).toBe(moonSlot);
+    expect(container.querySelector(".channel-location-sun-card > .channel-location-live-card__content .channel-location-live-status")).toBe(sunSlot);
+    expect(container.querySelector(".channel-location-moon-card > .channel-location-live-card__content .channel-location-live-status")).toBe(moonSlot);
     expect(sunSlot).toHaveTextContent("Daten konnten nicht geladen werden.");
     expect(moonSlot).toHaveTextContent("Daten konnten nicht geladen werden.");
 
@@ -288,8 +289,8 @@ describe("channel location page", () => {
         refreshModule("moon"),
       ]);
     });
-    expect(container.querySelector(".channel-location-sun-card .channel-location-live-status")).toBe(sunSlot);
-    expect(container.querySelector(".channel-location-moon-card .channel-location-live-status")).toBe(moonSlot);
+    expect(container.querySelector(".channel-location-sun-card > .channel-location-live-card__content .channel-location-live-status")).toBe(sunSlot);
+    expect(container.querySelector(".channel-location-moon-card > .channel-location-live-card__content .channel-location-live-status")).toBe(moonSlot);
     await waitFor(() => {
       expect(fetcher.mock.calls.filter(([input]) => inputUrl(input).endsWith("/weather/current")).length).toBe(3);
       expect(fetcher.mock.calls.filter(([input]) => inputUrl(input).endsWith("/sun/today")).length).toBe(3);
@@ -370,7 +371,7 @@ describe("channel location page", () => {
     expect(await screen.findByText("17:10–17:58")).toBeInTheDocument();
     expect(screen.getByText("17:52–18:35")).toBeInTheDocument();
     expect(screen.getByText("Goldene Stunde in 3 Std. 10 Min.")).toBeInTheDocument();
-    expect(container.querySelectorAll(".channel-location-sun-arc__point")).toHaveLength(9);
+    expect(container.querySelectorAll(".channel-location-sun-card > .channel-location-live-card__content .channel-location-sun-arc__point")).toHaveLength(9);
   });
 
   it("shows the location settings link in live cards when the saved location is missing", async () => {
@@ -395,6 +396,73 @@ describe("channel location page", () => {
     expect(document.querySelector(".channel-location-moon-card")).not.toHaveTextContent("—");
   });
 
+  it("keeps one stacked sizing layer for every live card through loading, ok, error, and missing states", async () => {
+    let providerFails = false;
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname.endsWith("/weather/current")) return Promise.resolve(jsonResponse(providerFails
+        ? { status: "provider_error", reason: "upstream_unavailable" }
+        : liveWeather));
+      if (url.pathname.endsWith("/sun/today")) return Promise.resolve(providerFails ? jsonResponse({}, 503) : jsonResponse(liveSun));
+      if (url.pathname.endsWith("/moon/today")) return Promise.resolve(providerFails ? jsonResponse({}, 503) : jsonResponse(liveMoon));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const props = { channelId: "channel-a", locationRevision: 1, timeZone: "Europe/Berlin" };
+    const { container, queryClient, rerender } = renderWithQuery(
+      <UiProvider><ChannelLocationLiveCards {...props} locationLoaded={false} hasLocation={false} /></UiProvider>,
+    );
+    const selectors = [".channel-location-weather-card", ".channel-location-sun-card", ".channel-location-moon-card"];
+    const assertLayeredCards = (missing: boolean) => {
+      const cards = selectors.map((selector) => container.querySelector<HTMLElement>(selector));
+      expect(cards.every((card) => card !== null)).toBe(true);
+      for (const card of cards) {
+        expect(card).toHaveClass("channel-location-live-card");
+        const reserve = card?.querySelector<HTMLElement>(":scope > .channel-location-live-card__reserve");
+        expect(reserve).toHaveAttribute("aria-hidden", "true");
+        expect(reserve).toHaveClass("channel-location-live-card__layer");
+        const content = card?.querySelector<HTMLElement>(":scope > .channel-location-live-card__content");
+        expect(content).toHaveClass("channel-location-live-card__layer");
+        if (missing) expect(content).toHaveAttribute("aria-hidden", "true");
+        else expect(content).not.toHaveAttribute("aria-hidden");
+        expect(content).not.toBeNull();
+        expect(Array.from(reserve?.children ?? []).map((child) => child.className))
+          .toEqual(Array.from(content?.children ?? []).map((child) => child.className));
+        const empty = card?.querySelector<HTMLElement>(":scope > .channel-location-live-card__empty");
+        expect(empty !== null).toBe(missing);
+        if (empty !== null && empty !== undefined) {
+          expect(empty).toHaveClass("channel-location-live-card__layer");
+        }
+      }
+      return cards.map((card) => ({
+        card,
+        reserve: card?.querySelector(":scope > .channel-location-live-card__reserve"),
+        content: card?.querySelector(":scope > .channel-location-live-card__content"),
+        rowStructure: Array.from(card?.querySelector<HTMLElement>(":scope > .channel-location-live-card__content")?.children ?? [])
+          .map((child) => child.className),
+      }));
+    };
+
+    const initialLayout = assertLayeredCards(false);
+    rerender(<UiProvider><ChannelLocationLiveCards {...props} locationLoaded={true} hasLocation={true} /></UiProvider>);
+    expect(await screen.findByText("18,4 °C")).toBeInTheDocument();
+    expect(assertLayeredCards(false)).toEqual(initialLayout);
+
+    providerFails = true;
+    await act(async () => {
+      await Promise.all(queryClient.getQueryCache().getAll().map((query) =>
+        queryClient.refetchQueries({ queryKey: query.queryKey, exact: true }),
+      ));
+    });
+    await waitFor(() => expect(screen.getByText("Wetterdienst gerade nicht erreichbar")).toBeInTheDocument());
+    expect(screen.getAllByText("Daten konnten nicht geladen werden.")).toHaveLength(2);
+    expect(assertLayeredCards(false)).toEqual(initialLayout);
+
+    rerender(<UiProvider><ChannelLocationLiveCards {...props} locationLoaded={true} hasLocation={false} /></UiProvider>);
+    expect(await screen.findAllByRole("link", { name: "Standort festlegen" })).toHaveLength(3);
+    expect(assertLayeredCards(true)).toEqual(initialLayout);
+  });
+
   it.each([
     ["de-DE", "gerade aktualisiert"],
     ["en-US", "just updated"],
@@ -417,7 +485,7 @@ describe("channel location page", () => {
     expect(await screen.findByText("Sonne heute")).toBeInTheDocument();
     expect((await screen.findAllByText("Mond")).length).toBeGreaterThan(0);
     expect(screen.getByText("74 % beleuchtet")).toBeInTheDocument();
-    expect(document.querySelector(".channel-location-weather-card")?.children).toHaveLength(4);
+    expect(document.querySelector(".channel-location-weather-card > .channel-location-live-card__content")?.children).toHaveLength(4);
     expect(document.querySelectorAll(".channel-location-weather-card .channel-location-skeleton").length).toBeGreaterThan(0);
   });
 

@@ -181,6 +181,7 @@ describe("current weather route", () => {
   it("caches provider failures for the location cooldown", async () => {
     const database = await createDatabase();
     await setLocation(database);
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-21T12:00:00.000Z"));
     const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(new Response(null, { status: 503 })));
     vi.stubGlobal("fetch", fetcher);
     const app = appFor(database, "operator");
@@ -190,8 +191,14 @@ describe("current weather route", () => {
 
     await request();
     await request();
+    now.mockReturnValue(Date.parse("2026-10-21T12:00:59.000Z"));
+    await request();
 
     expect(fetcher).toHaveBeenCalledTimes(1);
+
+    now.mockReturnValue(Date.parse("2026-10-21T12:01:01.000Z"));
+    await request();
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
   it("honors Retry-After when extending a provider failure cooldown", async () => {
@@ -214,6 +221,57 @@ describe("current weather route", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
 
     now.mockReturnValue(Date.parse("2026-10-21T12:02:01.000Z"));
+    await request();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["numeric seconds", "3600", "2026-10-21T12:16:00.000Z", "2026-10-21T13:00:01.000Z"],
+    ["HTTP-date", "Wed, 21 Oct 2026 12:45:00 GMT", "2026-10-21T12:16:00.000Z", "2026-10-21T12:45:01.000Z"],
+  ])("honors a Retry-After longer than 15 minutes (%s)", async (_label, retryAfter, beforeDeadline, afterDeadline) => {
+    const database = await createDatabase();
+    await setLocation(database);
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-21T12:00:00.000Z"));
+    const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(new Response(null, {
+      status: 429,
+      headers: { "Retry-After": retryAfter },
+    })));
+    vi.stubGlobal("fetch", fetcher);
+    const app = appFor(database, "operator");
+    const request = () => app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/current`), {
+      DB: database as unknown as D1Database,
+    });
+
+    await request();
+    now.mockReturnValue(Date.parse(beforeDeadline));
+    await request();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    now.mockReturnValue(Date.parse(afterDeadline));
+    await request();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("caps an absurd Retry-After cooldown at 24 hours", async () => {
+    const database = await createDatabase();
+    await setLocation(database);
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-21T12:00:00.000Z"));
+    const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(new Response(null, {
+      status: 429,
+      headers: { "Retry-After": "172800" },
+    })));
+    vi.stubGlobal("fetch", fetcher);
+    const app = appFor(database, "operator");
+    const request = () => app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/current`), {
+      DB: database as unknown as D1Database,
+    });
+
+    await request();
+    now.mockReturnValue(Date.parse("2026-10-22T11:59:59.000Z"));
+    await request();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    now.mockReturnValue(Date.parse("2026-10-22T12:00:01.000Z"));
     await request();
     expect(fetcher).toHaveBeenCalledTimes(2);
   });

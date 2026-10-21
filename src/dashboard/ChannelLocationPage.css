@@ -17,8 +17,14 @@
   .channel-location-page__warning span { color: var(--text-2); font-size: 12px; line-height: 1.4; }
   .channel-location-live-column, .channel-location-reference-column { display: grid; align-content: start; gap: var(--s4); min-width: 0; }
   .channel-location-weather-card, .channel-location-sun-card, .channel-location-moon-card { position: relative; box-sizing: border-box; min-width: 0; padding: var(--s3); border-radius: var(--r-container); background: var(--surface-raised); }
+  .channel-location-live-card { display: grid; }
+  .channel-location-live-card__layer { grid-area: 1 / 1; min-width: 0; }
+  .channel-location-live-card__reserve { visibility: hidden; }
+  .channel-location-live-card__content[aria-hidden="true"] { visibility: hidden; }
+  .channel-location-weather-card .channel-location-live-card__reserve,
+  .channel-location-weather-card .channel-location-live-card__content { display: grid; }
+  .channel-location-live-card__empty { z-index: 1; display: grid; align-content: center; }
   .channel-location-weather-card { display: grid; }
-  .channel-location-weather-card--empty { display: flex; align-items: stretch; }
   .channel-location-skeleton { display: inline-block; width: 4.25em; max-width: 100%; height: .85em; vertical-align: middle; border-radius: var(--r-control); background: var(--surface-hover); }
   .channel-location-skeleton--short { width: 2.75em; }
   .channel-location-skeleton--wide { width: 5.75em; }
@@ -35,11 +41,10 @@
   .channel-location-weather-card__footer > span:last-child { flex: 1 1 auto; min-width: 0; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
   .channel-location-live-status { display: flex; width: 100%; height: 1.4em; min-width: 0; align-items: center; margin-top: var(--s2); overflow: hidden; color: var(--text-2); font-size: 12px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
   .channel-location-live-empty { display: grid; width: 100%; min-width: 0; grid-template-columns: auto minmax(0, 1fr); align-content: center; align-items: center; gap: var(--s2); color: var(--text-2); font-size: 12px; line-height: 1.45; }
-  .channel-location-weather-card--empty .channel-location-live-empty > svg { color: var(--content-weather-sun); }
+  .channel-location-weather-card .channel-location-live-empty > svg { color: var(--content-weather-sun); }
   .channel-location-sun-card { min-height: 0; }
-  .channel-location-live-card--empty { display: flex; align-items: stretch; }
-  .channel-location-sun-card.channel-location-live-card--empty .channel-location-live-empty > svg { color: var(--content-sun-icon); }
-  .channel-location-moon-card.channel-location-live-card--empty .channel-location-live-empty > svg { color: var(--content-moon-lit); }
+  .channel-location-sun-card .channel-location-live-empty > svg { color: var(--content-sun-icon); }
+  .channel-location-moon-card .channel-location-live-empty > svg { color: var(--content-moon-lit); }
   .channel-location-sun-card__heading { display: flex; align-items: center; gap: var(--s2); min-height: 24px; color: var(--content-sun-icon); }
   .channel-location-sun-card__heading span { margin-left: auto; color: var(--text-3); font-size: 11px; }
   .channel-location-sun-arc { position: relative; height: 28px; margin: var(--s3) 6px var(--s1); }

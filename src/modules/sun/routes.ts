@@ -5,7 +5,13 @@ import { canManage } from "../../contracts/values";
 import type { ModuleRouteEnvironment } from "../contract";
 import { DEFAULT_SUN_ERROR_TEXTS, readSunSettings } from "./adapters/d1";
 import { SUN_ERROR_TEXT_MAX_LENGTH } from "./contracts";
-import { calculateSunAltitudeIntervals, calculateSunDay, localDateInTimeZone } from "./domain";
+import {
+  calculateSunAltitudeIntervals,
+  calculateSunDay,
+  localDateInTimeZone,
+  localMidnightInTimeZone,
+  shiftLocalDate,
+} from "./domain";
 
 const updateSchema = z.object({
   revision: z.number().int().min(1),
@@ -16,6 +22,34 @@ const channelIdOf = (context: { req: { param: (name: string) => string | undefin
   context.req.param("channelId") ?? "";
 
 const errorText = (value: string, fallback: string): string => value.trim().length === 0 ? fallback : value.trim();
+const MAX_INTERVAL_SEARCH_RADIUS_DAYS = 32;
+
+const intervalsOverlappingLocalDate = (
+  coordinates: { latitude: number; longitude: number; timeZone: string },
+  localDate: string,
+  kind: "golden" | "blue",
+): ReturnType<typeof calculateSunAltitudeIntervals> => {
+  const nextLocalDate = shiftLocalDate(localDate, 1);
+  const dayStart = Date.parse(localMidnightInTimeZone(localDate, coordinates.timeZone));
+  const dayEnd = Date.parse(localMidnightInTimeZone(nextLocalDate, coordinates.timeZone));
+  let radius = 1;
+
+  while (radius <= MAX_INTERVAL_SEARCH_RADIUS_DAYS) {
+    const firstDate = shiftLocalDate(localDate, -radius);
+    const afterLastDate = shiftLocalDate(localDate, radius + 1);
+    const scanStart = Date.parse(localMidnightInTimeZone(firstDate, coordinates.timeZone));
+    const scanEnd = Date.parse(localMidnightInTimeZone(afterLastDate, coordinates.timeZone));
+    const intervals = calculateSunAltitudeIntervals(coordinates, firstDate, radius * 2 + 1, kind);
+    const overlapping = intervals.filter(({ startAt, endAt }) => Date.parse(startAt) < dayEnd && Date.parse(endAt) > dayStart);
+    const fullyScanned = overlapping.length > 0 && overlapping.every(({ startAt, endAt }) =>
+      Date.parse(startAt) > scanStart && Date.parse(endAt) < scanEnd);
+
+    if (fullyScanned || radius === MAX_INTERVAL_SEARCH_RADIUS_DAYS) return overlapping;
+    radius = Math.min(radius * 2, MAX_INTERVAL_SEARCH_RADIUS_DAYS);
+  }
+
+  return [];
+};
 
 export const sunRoutes = new Hono<ModuleRouteEnvironment>();
 
@@ -24,13 +58,12 @@ sunRoutes.get("/today", async (context) => {
   if (location === null) return context.json({ status: "location_missing" as const });
   const localDate = localDateInTimeZone(Date.now(), location.timeZone);
   const coordinates = { latitude: location.latitude, longitude: location.longitude, timeZone: location.timeZone };
-  const [year, month, day] = localDate.split("-").map(Number);
-  const nextLocalDate = new Date(Date.UTC(year ?? 0, (month ?? 1) - 1, (day ?? 1) + 1)).toISOString().slice(0, 10);
+  const nextLocalDate = shiftLocalDate(localDate, 1);
   return context.json({
     status: "ok" as const,
     day: calculateSunDay({ ...coordinates, localDate }),
-    goldenHourIntervals: calculateSunAltitudeIntervals(coordinates, localDate, 1, "golden"),
-    blueHourIntervals: calculateSunAltitudeIntervals(coordinates, localDate, 1, "blue"),
+    goldenHourIntervals: intervalsOverlappingLocalDate(coordinates, localDate, "golden"),
+    blueHourIntervals: intervalsOverlappingLocalDate(coordinates, localDate, "blue"),
     nextDawnAt: calculateSunDay({ ...coordinates, localDate: nextLocalDate }).dawnAt,
   });
 });
