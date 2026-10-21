@@ -811,7 +811,7 @@ export interface ModuleAlarmContext {
     sent: boolean;
     reason: string | null;
     retryable: boolean;
-    delivery: "delivered" | "rate_limited" | "ambiguous" | "failed";
+    delivery: "delivered" | "rate_limited" | "ambiguous" | "not_attempted" | "failed";
     attemptedAt?: number;
   }>;
   /** Monotonic count of accepted chat messages kept in this channel object. */

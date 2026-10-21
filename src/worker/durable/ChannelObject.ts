@@ -216,6 +216,18 @@ import {
 } from "./points";
 import { INSTANT_SETTLEMENTS, POINT_SETTLEMENTS } from "./point-settlements";
 
+type PointRoundChatResult = Awaited<ReturnType<ModuleAlarmContext["sendChat"]>>;
+type PointRoundDeliveryOutcome = "rate_limited" | "failed" | "delivered" | "ambiguous";
+
+const pointRoundDeliveryOutcome = (delivery: PointRoundChatResult): PointRoundDeliveryOutcome => {
+  if (delivery.sent || delivery.delivery === "delivered") return "delivered";
+  if (delivery.delivery === "ambiguous") return "ambiguous";
+  if (delivery.delivery === "rate_limited" || (delivery.delivery === "not_attempted" && delivery.retryable)) {
+    return "rate_limited";
+  }
+  return "failed";
+};
+
 const SECURITY_ALARM_INTERVAL_MS = 15 * 60 * 1000;
 const SECURITY_RETRY_INTERVAL_MS = 60 * 1000;
 const OVERLAY_HANDSHAKE_WINDOW_MS = 60 * 1000;
@@ -2813,7 +2825,8 @@ export class ChannelObject extends DurableObject<Env> {
           ? "delivered"
           : result.reason === "rate_limited" ? "rate_limited"
             : ambiguous ? "ambiguous"
-              : "failed";
+              : result.delivery === "not_attempted" ? "not_attempted"
+                : "failed";
         return { sent: result.sent, reason, retryable, delivery, ...(attemptedAt === undefined ? {} : { attemptedAt }) };
       },
       chatActivityCount: () => this.getChatActivityCount(),
@@ -4062,19 +4075,11 @@ export class ChannelObject extends DurableObject<Env> {
       formatted?.target,
     );
     const sendReturnedAt = Date.now();
-    if (delivery.delivery === "delivered") {
-      await this.recordPointRoundAnnouncement(roundId, "delivered", sendReturnedAt);
-    } else if (delivery.delivery === "rate_limited") {
-      await this.recordPointRoundAnnouncement(roundId, "rate_limited", sendReturnedAt);
-    } else if (delivery.delivery === "ambiguous") {
-      await this.recordPointRoundAnnouncement(
-        roundId,
-        "ambiguous",
-        delivery.attemptedAt ?? attemptAt,
-      );
-    } else {
-      await this.recordPointRoundAnnouncement(roundId, "failed", sendReturnedAt);
-    }
+    await this.recordPointRoundAnnouncement(
+      roundId,
+      pointRoundDeliveryOutcome(delivery),
+      delivery.delivery === "ambiguous" ? delivery.attemptedAt ?? attemptAt : sendReturnedAt,
+    );
   }
 
   private async deliverPointRoundResult(roundId: string): Promise<void> {
@@ -4237,9 +4242,8 @@ export class ChannelObject extends DurableObject<Env> {
       await this.scheduleEarliestAlarm();
       return;
     }
-    const delivered = delivery.sent || delivery.delivery === "delivered";
     const permanentlySuppressed = delivery.reason === "module_disabled";
-    const deliveryStatus = permanentlySuppressed ? "suppressed" : delivered ? "delivered" : delivery.delivery;
+    const deliveryStatus = permanentlySuppressed ? "suppressed" : pointRoundDeliveryOutcome(delivery);
     this.ctx.storage.transactionSync(() => {
       const state = recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, deliveryStatus);
       if (state === "pending") this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), Date.now() + POINTS_ANNOUNCE_RETRY_MS);

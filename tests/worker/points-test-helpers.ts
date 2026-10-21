@@ -155,7 +155,7 @@ export const stubPointRoundChat = (
     retryable?: boolean;
     reason?: string | null;
     attemptedAt?: number;
-    delivery: "delivered" | "rate_limited" | "ambiguous" | "failed";
+    delivery: "delivered" | "rate_limited" | "ambiguous" | "not_attempted" | "failed";
   }>,
 ): void => {
   Object.assign(target, { moduleAlarmContext: () => ({ sendChat }) });

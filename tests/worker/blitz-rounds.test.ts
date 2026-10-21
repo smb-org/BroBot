@@ -7,6 +7,9 @@ import { openBlitzRound, processBlitzMessage } from "../../src/modules/blitz_rou
 import { modulePoints } from "../../src/worker/module-points";
 import { POINTS_ANNOUNCE_MAX_ATTEMPTS, POINTS_ANNOUNCE_RETRY_MS } from "../../src/worker/durable/points";
 import { claimAutomatedChatOutput } from "../../src/worker/durable/automated-chat-output";
+import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
+import { upsertBotIdentity } from "../../src/worker/db/bot-identity";
+import { sendChatMessage } from "../../src/worker/chat";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { blitzRoundModule } from "../../src/modules/blitz_round";
 import {
@@ -562,6 +565,128 @@ describe("blitz answers in the channel Durable Object", () => {
 
     expect(afterRetry).toEqual({ resolve_delivery_state: "delivered", resolve_delivery_attempts: 2, operation_count: 1 });
     expect(sendChat).toHaveBeenCalledTimes(2);
+    await expect(object.pointBalance("blitz_round", "viewer_one")).resolves.toBe(50);
+  });
+
+  it("retries the result after a transient bot identity lookup outage through the production adapter [protects=a retryable pre-transport identity outage keeps result delivery pending for one bounded retry and the committed result reaches chat once; fails_when=the outage marks delivery failed, consumes no retry attempt, leaves no alarm, or emits the result more than once; no_claim=uses the real ChannelObject and production module alarm chat adapter with a one-shot D1 identity lookup failure and mocked Helix fetch, without claiming Twitch delivery]", async () => {
+    const channelId = `blitz-identity-outage-${crypto.randomUUID()}`;
+    const roundId = "blitz-identity-outage";
+    const settlement = { kind: "blitz", params: { prize: 50 } };
+    const worker = env as unknown as Env;
+    await insertPointChannel(channelId);
+    await worker.DB.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'blitz_round', 1, ?, 1)")
+      .bind(channelId, JSON.stringify(blitzRoundDefaultsForLanguage("en"))).run();
+    const now = new Date().toISOString();
+    await upsertBotIdentity(worker.DB, {
+      id: 1,
+      userId: "test-bot-identity-outage",
+      login: "brobot",
+      scopesJson: "[]",
+      accessTokenCiphertext: "unused-bot-token",
+      refreshTokenCiphertext: "unused-bot-refresh-token",
+      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60_000).toISOString(),
+      createdAt: now,
+      updatedAt: now,
+    });
+    const encryptionKeys = worker.SESSION_ENCRYPTION_KEYS;
+    if (encryptionKeys === undefined) throw new Error("The worker test environment has no session encryption key.");
+    const appTokenCiphertext = await encryptJson({ token: "test-app-token" }, parseKeyRing(encryptionKeys));
+    await worker.DB.prepare(
+      `INSERT INTO twitch_app_access_token (id, access_token_ciphertext, expires_at, created_at, updated_at)
+       VALUES (1, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET access_token_ciphertext = excluded.access_token_ciphertext,
+         expires_at = excluded.expires_at, created_at = excluded.created_at, updated_at = excluded.updated_at`,
+    ).bind(appTokenCiphertext, new Date(Date.now() + 365 * 24 * 60 * 60_000).toISOString(), now, now).run();
+
+    let identityLookupOutageInjected = false;
+    const flakyDatabase = new Proxy(worker.DB, {
+      get(database, property) {
+        if (property === "prepare") {
+          return (query: string) => {
+            if (!identityLookupOutageInjected && query.includes("FROM bot_identity")) {
+              return {
+                first: () => {
+                  identityLookupOutageInjected = true;
+                  throw new Error("injected transient bot identity lookup outage");
+                },
+              } as unknown as D1PreparedStatement;
+            }
+            return database.prepare(query);
+          };
+        }
+        return Reflect.get(database, property, database) as unknown;
+      },
+    });
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      data: [{ is_sent: true, message_id: "test-result-message" }],
+    }), { status: 200 }));
+    const productionChat: typeof sendChatMessage = (...args) => {
+      const productionArgs = [...args] as Parameters<typeof sendChatMessage>;
+      productionArgs[0] = { ...args[0], DB: flakyDatabase };
+      productionArgs[4] = fetcher;
+      return sendChatMessage(...productionArgs);
+    };
+    const object = blitzObject(pointObject(channelId));
+    const formatResult = vi.spyOn(blitzRoundModule, "formatPointRoundResult").mockResolvedValue({ text: "Correct: CLOUD" });
+
+    await runPointObject(object, async (target, state) => {
+      const runtime = target as unknown as { moduleAlarmContext: (...args: unknown[]) => ModuleAlarmContext };
+      const original = runtime.moduleAlarmContext.bind(target);
+      vi.spyOn(runtime, "moduleAlarmContext").mockImplementation((...args) => {
+        const productionArgs = [...args];
+        while (productionArgs.length < 6) productionArgs.push(undefined);
+        productionArgs.push(productionChat);
+        return original(...productionArgs);
+      });
+      await target.openGameRound("blitz_round", roundId, {
+        durationS: 60,
+        announceText: "Blitz round starts",
+        answer: "CLOUD",
+        settlement,
+      });
+      await target.markGameRoundAnnounced("blitz_round", roundId, Date.now() + 60_000, `round:${roundId}`);
+      await blitzObject(target).answerGameRound("blitz_round", roundId, "msg:identity-outage", "viewer_one", "frostfern", 5, Date.now());
+      await deferPointAlarmWithin(state);
+    });
+    await object.resolveGameRound("blitz_round", roundId, settlement);
+
+    const firstAttemptAt = Date.now();
+    await forcePointAlarm(object, roundId);
+    const afterOutage = await runPointObject(object, (_target, state) => ({
+      round: state.storage.sql.exec<{ resolve_delivery_state: string; resolve_delivery_attempts: number }>(
+        "SELECT resolve_delivery_state, resolve_delivery_attempts FROM game_rounds WHERE round_id = ?", roundId,
+      ).one(),
+      alarm: state.storage.kv.get<Record<string, { deadline: number }>>("channel:alarm_schedule")?.[`points:round:${roundId}`] ?? null,
+      operationCount: state.storage.sql.exec<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM point_operations WHERE operation_id = ?", `round:${roundId}:resolve`,
+      ).one().count,
+    }));
+
+    expect(identityLookupOutageInjected).toBe(true);
+    expect(afterOutage).toMatchObject({
+      round: { resolve_delivery_state: "pending", resolve_delivery_attempts: 1 },
+      alarm: { deadline: firstAttemptAt + POINTS_ANNOUNCE_RETRY_MS },
+      operationCount: 1,
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+
+    vi.setSystemTime(Date.now() + POINTS_ANNOUNCE_RETRY_MS);
+    await forcePointAlarm(object, roundId);
+    const afterRetry = await runPointObject(object, (_target, state) => state.storage.sql.exec<{
+      resolve_delivery_state: string;
+      resolve_delivery_attempts: number;
+      operation_count: number;
+    }>(
+      `SELECT resolve_delivery_state, resolve_delivery_attempts,
+              (SELECT COUNT(*) FROM point_operations WHERE operation_id = ?) AS operation_count
+         FROM game_rounds WHERE round_id = ?`,
+      `round:${roundId}:resolve`,
+      roundId,
+    ).one());
+
+    expect(afterRetry).toEqual({ resolve_delivery_state: "delivered", resolve_delivery_attempts: 2, operation_count: 1 });
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(formatResult).toHaveBeenCalledTimes(2);
     await expect(object.pointBalance("blitz_round", "viewer_one")).resolves.toBe(50);
   });
 
