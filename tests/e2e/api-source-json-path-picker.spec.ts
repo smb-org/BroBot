@@ -120,3 +120,43 @@ test("expanding tree nodes leaves the dialog and content below the tree in place
   expect(await dialog.boundingBox()).toEqual(dialogBounds);
   expect(await dialog.locator(".api-source-panel__test-result-value").boundingBox()).toEqual(valueBounds);
 });
+
+test("a 24-level response keeps keys, disclosures and leaves visible and clickable at 390px", async ({ page }) => {
+  const levels = 24;
+  let sample: unknown = { leaf: "end" };
+  for (let level = 0; level < levels; level += 1) sample = { a: sample };
+  await installApiMocks(page, sample, () => "end");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openTestStep(page, "$.old.path");
+
+  const dialog = page.getByRole("dialog", { name: "Create data source" });
+  await dialog.getByRole("button", { name: "Test" }).click();
+  const tree = dialog.getByRole("tree", { name: "Sample response as a JSON tree" });
+  await dialog.getByRole("treeitem", { name: /^Sample response · JSON, Object/u }).focus();
+  for (let press = 0; press < levels * 3; press += 1) await page.keyboard.press("ArrowRight");
+
+  const leaf = dialog.getByRole("treeitem", { name: /^leaf, String/u });
+  await expect(leaf).toBeFocused();
+  const deepestBranch = dialog.getByRole("treeitem", { name: /^a, Object/u }).last();
+  const treeBox = await tree.boundingBox();
+  expect(treeBox).not.toBeNull();
+  if (treeBox === null) return;
+  for (const part of [
+    deepestBranch.locator(":scope > .api-source-json-tree__item .api-source-json-tree__disclosure"),
+    deepestBranch.locator(":scope > .api-source-json-tree__item .api-source-json-tree__key"),
+    leaf.locator(":scope > .api-source-json-tree__item .api-source-json-tree__key"),
+    leaf.locator(":scope > .api-source-json-tree__item .api-source-json-tree__value"),
+  ]) {
+    const box = await part.boundingBox();
+    expect(box).not.toBeNull();
+    if (box === null) continue;
+    expect(box.width).toBeGreaterThan(8);
+    expect(box.x).toBeGreaterThanOrEqual(treeBox.x);
+    expect(box.x + box.width).toBeLessThanOrEqual(treeBox.x + treeBox.width);
+    expect(box.y).toBeGreaterThanOrEqual(treeBox.y);
+    expect(box.y + box.height).toBeLessThanOrEqual(treeBox.y + treeBox.height);
+  }
+
+  await leaf.locator(":scope > .api-source-json-tree__item").click();
+  await expect(dialog.getByRole("textbox", { name: "Value from the response" })).toHaveValue(`$${".a".repeat(levels)}.leaf`);
+});
