@@ -341,6 +341,7 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
     <PageHeader
       title={selectedSource.name}
       titleContent={<span className="mono">{selectedSource.name}</span>}
+      titleTooltip={selectedSource.name}
       icon={null}
       headingLevel="h2"
       meta={new URL(selectedSource.url).hostname}

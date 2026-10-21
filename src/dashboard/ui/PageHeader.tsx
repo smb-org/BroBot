@@ -30,6 +30,8 @@ export interface PageHeaderProps {
   kind?: string;
   title: string;
   titleContent?: ReactNode;
+  /** Full text for the heading tooltip when `titleContent` renders something other than `title`. */
+  titleTooltip?: string;
   subtitle?: ReactNode;
   meta?: ReactNode;
   icon?: ReactNode | null;
@@ -58,6 +60,7 @@ export function PageHeader({
   kind = "module",
   title,
   titleContent,
+  titleTooltip,
   subtitle,
   meta,
   icon,
@@ -111,7 +114,7 @@ export function PageHeader({
       </div>}
       <div className="page-header__main page-header__copy module-detail-heading__copy">
         <div className="page-header__title-row">
-          <Heading>{titleContent ?? title}</Heading>
+          <Heading {...(titleContent === undefined ? { title } : titleTooltip === undefined ? {} : { title: titleTooltip })}>{titleContent ?? title}</Heading>
           {switchControl === null ? null : <div className="page-header__module-switch module-detail__switch">{switchControl}</div>}
           {(badges ?? badge) === undefined || (badges ?? badge) === null ? null : <div className="page-header__badges">{badges ?? badge}</div>}
         </div>

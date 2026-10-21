@@ -377,28 +377,6 @@
   }
 }
 
-.faq-panel__detail > .page-header {
-  flex: none;
-  min-width: 0;
-  width: 100%;
-  max-width: none;
-  margin-bottom: 16px;
-  padding-bottom: 16px;
-}
-
-.faq-panel__detail > .page-header .page-header__save {
-  flex: 0 1 auto;
-  width: auto;
-}
-
-.faq-panel__detail > .page-header .page-header__save .ui-save-bar--persistent {
-  min-height: var(--control-height);
-  margin: 0;
-  padding: 0;
-  border-top: 0;
-  background: transparent;
-}
-
 .faq-panel__detail > .page-header .page-header__overflow .faq-panel__delete-action {
   width: 100%;
   justify-content: flex-start;
