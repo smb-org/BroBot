@@ -44,6 +44,7 @@ import { MembersPage } from "./members";
 import { PlatformPage } from "./platform";
 import { channelPanelTexts } from "./labels";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatTimestamp as formatTimestampBase, formatNumber, maintenanceReasonText } from "./locale";
+import { moduleDependencyErrorMessage } from "./module-dependencies";
 import { CHANNEL_CONTROL_DURATIONS, canManage, type ChannelControlDuration, type ChannelRole } from "../contracts/values";
 import { MODULES } from "../modules/registry";
 import { eventSubName, moduleNavigationName, statusWord } from "./module-labels";
@@ -1216,9 +1217,12 @@ export const DashboardApp = (): ReactElement => {
       await toggleModuleWithUndo(queryClient, channelId, moduleId, enabled, () => moduleToastChannelIdRef.current === channelId);
     } catch (error) {
       if (moduleToastChannelIdRef.current === channelId) {
-        notify({ tone: "error", message: error instanceof PanelApiError
+        const errorText = error instanceof PanelApiError
+          ? moduleDependencyErrorMessage(moduleId, error.code, error.details, channel.modules ?? modules.data?.modules ?? [])
+          : null;
+        notify({ tone: "error", message: errorText ?? (error instanceof PanelApiError
           ? apiErrorText(error.code, dashboardTexts().errors.changeFailed)
-          : dashboardTexts().errors.changeFailed, scope: moduleToggleToastScope(channelId) });
+          : dashboardTexts().errors.changeFailed), scope: moduleToggleToastScope(channelId) });
       }
       if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
     } finally {

@@ -1292,6 +1292,7 @@ export interface DashboardTexts {
     available: string;
     load: string;
     managementLocked: string;
+    requiresModulesLock: (modules: string) => string;
     dependentModulesLock: (modules: string) => string;
     noneActive: string;
     noView: string;
@@ -1905,7 +1906,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     module: {
       module: "Modul", available: "Verfügbare Module", load: "Module werden geladen …",
       managementLocked: "Nur Broadcaster und Verwalter dürfen Module ändern.", noneActive: "Keine Module aktiv.",
-      dependentModulesLock: (modules) => `Erst Spiele ausschalten: ${modules}`,
+      requiresModulesLock: (modules) => `Benötigt: ${modules}`,
+      dependentModulesLock: (modules) => `Erst ausschalten: ${modules}`,
       noView: "Für dieses aktive Modul gibt es noch keine Panel-Ansicht.", views: "Modulansichten",
       settingsLoadError: "Moduleinstellungen konnten nicht geladen werden.",
       componentLoadError: "Modulinhalte konnten nicht geladen werden.",
@@ -2515,7 +2517,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     module: {
       module: "Module", available: "Available modules", load: "Loading modules …",
       managementLocked: "Only broadcasters and managers may change modules.", noneActive: "No modules active.",
-      dependentModulesLock: (modules) => `Turn off games first: ${modules}`,
+      requiresModulesLock: (modules) => `Requires: ${modules}`,
+      dependentModulesLock: (modules) => `Turn off first: ${modules}`,
       noView: "This active module does not have a panel view yet.", views: "Module views", settingsLoadError: "Module settings could not be loaded.", componentLoadError: "Module content could not be loaded.",
       unsavedChangesTitle: "Unsaved changes",
       unsavedChangesDescription: "You have unsaved module settings. What would you like to do?",

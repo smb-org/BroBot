@@ -7,9 +7,7 @@ export const notifyModuleScheduleInputsChanged = async (
 ): Promise<void> => {
   if (namespace === undefined) return;
   const object = namespace.get(namespace.idFromName(channelId));
-  const notify = (object as unknown as { notifyScheduleInputsChanged?: (value: ModuleScheduleInputChangeReason) => Promise<void> })
-    .notifyScheduleInputsChanged;
-  if (typeof notify === "function") await notify.call(object, reason);
+  await object.notifyScheduleInputsChanged(reason);
 };
 
 export const reconcileChannelTimerSchedules = async (
@@ -18,7 +16,5 @@ export const reconcileChannelTimerSchedules = async (
 ): Promise<void> => {
   if (namespace === undefined) return;
   const object = namespace.get(namespace.idFromName(channelId));
-  const reconcile = (object as unknown as { reconcileTimerSchedules?: (reason: "activation") => Promise<void> })
-    .reconcileTimerSchedules;
-  if (typeof reconcile === "function") await reconcile.call(object, "activation");
+  await object.reconcileTimerSchedules("activation");
 };

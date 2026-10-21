@@ -88,6 +88,15 @@ describe("dashboard navigation", () => {
     expect(visibleModuleNavigationIds(states, "manager")).not.toContain("timers");
   });
 
+  it("hides modules while their broadcaster permission status is unknown (protects=unknown scope metadata cannot make an enabled module appear active in channel navigation; fails_when=the module link is visible before scope status is known; no_claim=whether the module is visible after scope lookup succeeds)", () => {
+    const states = [{ id: "points", enabled: true, broadcasterScopeMetadataUnknown: true as const }];
+    const groups = navigationFor(states);
+    const points = groups.flatMap(({ entries }) => entries).find(({ moduleId }) => moduleId === "points");
+
+    expect(points).toMatchObject({ moduleId: "points", sidebarVisible: false });
+    expect(visibleModuleNavigationIds(states, "manager")).not.toContain("points");
+  });
+
   it("groups navigation entries in the requested order", () => {
     const groups = navigationFor(MODULES.map(({ id }) => ({ id, enabled: true })));
     expect(groups.map(({ category }) => category)).toEqual([...DASHBOARD_NAVIGATION_CATEGORIES]);

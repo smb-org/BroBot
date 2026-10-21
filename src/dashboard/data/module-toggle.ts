@@ -3,6 +3,7 @@ import type { QueryClient, QueryFilters } from "@tanstack/react-query";
 import type { PanelChannelOverview, PanelChannelsResponse, PanelModuleState, PanelModulesResponse } from "../../panel-contract";
 import { PanelApiError, setChannelModuleEnabled } from "../api";
 import { apiErrorText, dashboardTexts } from "../locale";
+import { moduleDependencyErrorMessage } from "../module-dependencies";
 import { moduleName, moduleWorkspaceTexts } from "../module-labels";
 import { dismissToastsForScope, notify } from "../ui/toast-store";
 import { queryKeys } from "./keys";
@@ -45,11 +46,23 @@ const refreshAfterModuleToggle = async (queryClient: QueryClient, channelId: str
   ]);
 };
 
+const withoutScopeMetadata = (module: PanelModuleState): PanelModuleState => {
+  const state = { ...module };
+  delete state.broadcasterScopeMetadataUnknown;
+  delete state.requiredBroadcasterScopes;
+  delete state.missingBroadcasterScopes;
+  return state;
+};
+
 const withModuleState = (modules: readonly PanelModuleState[] | undefined, updated: PanelModuleState): PanelModuleState[] => {
   const current = [...(modules ?? [])];
   const index = current.findIndex(({ id }) => id === updated.id);
-  if (index < 0) return [...current, updated];
-  current[index] = updated;
+  if (updated.broadcasterScopeMetadataUnknown === true) {
+    const activationState = withoutScopeMetadata(updated);
+    if (index < 0) return [...current, activationState];
+    current[index] = { ...current[index], ...activationState };
+  } else if (index < 0) return [...current, updated];
+  else current[index] = updated;
   return current;
 };
 
@@ -84,34 +97,47 @@ const applyModuleResponse = (queryClient: QueryClient, channelId: string, update
   const current = statesByChannel.get(channelId) ?? new Map<string, AppliedModuleState>();
   const known = current.get(updated.id);
   if (known !== undefined && revision < known.revision) return;
+  const module = updated;
   const generationsByChannel = moduleToggleGenerations.get(queryClient) ?? new Map<string, number>();
   const generation = (generationsByChannel.get(channelId) ?? 0) + 1;
   generationsByChannel.set(channelId, generation);
   moduleToggleGenerations.set(queryClient, generationsByChannel);
-  current.set(updated.id, { revision, generation, module: updated });
+  current.set(module.id, { revision, generation, module });
   statesByChannel.set(channelId, current);
   appliedModuleStates.set(queryClient, statesByChannel);
 
   queryClient.setQueryData<PanelModulesResponse>(queryKeys.channel(channelId, "modules"), (current) =>
-    current === undefined ? current : { ...current, modules: withModuleState(current.modules, updated) });
+    current === undefined ? current : { ...current, modules: withModuleState(current.modules, module) });
 
   queryClient.setQueryData<PanelChannelsResponse>(queryKeys.channels(), (current) => current === undefined ? current : ({
     ...current,
     channels: current.channels.map((channel) => channel.channelId !== channelId
       ? channel
-      : { ...channel, modules: withModuleState(channel.modules, updated) }),
+      : { ...channel, modules: withModuleState(channel.modules, module) }),
   }));
 
   queryClient.setQueryData<PanelChannelOverview>(queryKeys.channel(channelId, "overview"), (current) => {
     if (current === undefined) return current;
-    const activeModules = current.activeModules.filter(({ moduleId }) => moduleId !== updated.id);
-    if (updated.enabled) activeModules.push({ moduleId: updated.id, settings: updated.settings });
-    return { ...current, modules: withModuleState(current.modules, updated), activeModules };
+    const activeModules = current.activeModules.filter(({ moduleId }) => moduleId !== module.id);
+    if (module.enabled) activeModules.push({ moduleId: module.id, settings: module.settings });
+    return { ...current, modules: withModuleState(current.modules, module), activeModules };
   });
 };
 
-const reportToggleError = (error: unknown, scope: string): void => {
+const reportToggleError = (
+  error: unknown,
+  moduleId: string,
+  modules: readonly PanelModuleState[],
+  scope: string,
+): void => {
   const texts = dashboardTexts();
+  const dependencyError = error instanceof PanelApiError
+    ? moduleDependencyErrorMessage(moduleId, error.code, error.details, modules)
+    : null;
+  if (dependencyError !== null) {
+    notify({ tone: "error", message: dependencyError, scope });
+    return;
+  }
   if (error instanceof PanelApiError && error.status === 409) {
     notify({ tone: "error", message: moduleWorkspaceTexts().undoConflict, scope });
     return;
@@ -147,7 +173,10 @@ const undoModuleToggle = async (
     applyModuleResponse(queryClient, channelId, result.module, result.revision);
     await refreshQuietly(queryClient, channelId, scope, shouldShowToast);
   } catch (error: unknown) {
-    if (shouldShowToast()) reportToggleError(error, scope);
+    if (shouldShowToast()) {
+      const modules = queryClient.getQueryData<PanelModulesResponse>(queryKeys.channel(channelId, "modules"))?.modules ?? [];
+      reportToggleError(error, moduleId, modules, scope);
+    }
   }
 };
 
