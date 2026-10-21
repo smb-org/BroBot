@@ -11,6 +11,8 @@ import { blockReferencesInText } from "../contracts/text-block-references";
 import { readTextBlockGraphRevision, textBlockWriteGuard } from "../contracts/text-block-write-guard";
 import type { TextBlockWriteGuard } from "../contracts/text-block-write-guard";
 import { omitUnresolvedChatTemplateReferences } from "../../contracts/chat-template-references";
+import { chatVoteAnswerColorsSchema } from "./contracts/chat-vote-colors-schema";
+import { chatVoteDefaultColors } from "./contracts/vote-colors";
 
 export interface StartChatVoteInput {
   channelId: string;
@@ -18,6 +20,7 @@ export interface StartChatVoteInput {
   optionCount: number;
   durationSeconds: number;
   labels?: readonly string[];
+  answerColors?: readonly string[];
   title?: string | null;
   resultText?: string;
   resultTextTemplate?: ChatVoteResultTextTemplateSnapshot;
@@ -87,6 +90,10 @@ export const startChatVote = async (
     ? labelsForVote(input.settings, chatVotingPresetForKind(kind), input.optionCount, input.language)
     : kind === "free_text" ? null : configuredLabels(input.labels, input.optionCount);
   if (voteLabels === null) throw new RangeError("The selected voting preset has invalid labels.");
+  const parsedAnswerColors = chatVoteAnswerColorsSchema.safeParse(input.answerColors ?? chatVoteDefaultColors(voteLabels.length));
+  if (!parsedAnswerColors.success || parsedAnswerColors.data.length !== voteLabels.length) {
+    throw new RangeError("The selected voting preset has invalid answer colors.");
+  }
   const title = normalizeVoteTitle(input.title ?? "");
   if (title !== null && voteLabelLength(title) > CHAT_VOTING_TITLE_MAX_LENGTH) throw new RangeError("The voting question is too long.");
   if (!Number.isSafeInteger(input.durationSeconds) || input.durationSeconds < 0 || input.durationSeconds > 14_400) {
@@ -105,6 +112,7 @@ export const startChatVote = async (
     kind,
     optionCount: input.optionCount,
     labels: voteLabels,
+    answerColors: parsedAnswerColors.data,
     title,
     resultText: input.resultText ?? input.settings.resultText,
     textMode: kind === "free_text" ? input.textMode ?? "first_word" : null,
@@ -416,6 +424,7 @@ export const processChatVotingMessage = async (
         preset: chatVotingPresetForKind(previous.kind),
         optionCount: previous.optionCount,
         ...(previous.kind === "free_text" ? {} : { labels: previous.labels }),
+        answerColors: previous.answerColors,
         ...(previous.kind === "free_text" ? { textMode: previous.textMode ?? "first_word" } : {}),
         title: previous.title,
         ...(previous.resultText == null ? {} : { resultText: previous.resultText }),
@@ -439,6 +448,7 @@ export const processChatVotingMessage = async (
         optionCount: startCommand.optionCount,
         durationSeconds: startCommand.durationSeconds ?? event.settings.autoCloseSeconds,
         ...(startCommand.labels === undefined ? {} : { labels: startCommand.labels }),
+        ...(startCommand.answerColors === undefined ? {} : { answerColors: startCommand.answerColors }),
         title: startCommand.title,
         ...(startCommand.resultText === undefined ? {} : { resultText: startCommand.resultText }),
         ...(resultTextWriteGuard === undefined ? {} : { resultTextWriteGuard }),

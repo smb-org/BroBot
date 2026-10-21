@@ -79,6 +79,28 @@
   gap: 0.5em;
 }
 
+.overlay-tally__color-marker {
+  width: 0.55em;
+  height: 0.55em;
+  flex: none;
+  border-radius: 50%;
+}
+
+.overlay-tally__label--strip-colored {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.overlay-tally__label-copy {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .overlay-tally__options--terms .overlay-tally__caption {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 10rem;

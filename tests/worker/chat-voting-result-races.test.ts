@@ -62,6 +62,7 @@ const insertClosedPendingVote = async (channelId: string, pollId: string): Promi
     kind: "yes_no",
     optionCount: 2,
     labels: ["Yes", "No"],
+    answerColors: ["#5b8cff", "#ff9f43"],
     title: pollId,
     resultText: `Result for ${pollId}: {text.a}`,
     openedAt: "2026-10-16T09:00:00.000Z",
@@ -188,6 +189,7 @@ describe("chat voting result races in the worker runtime", () => {
       kind: "yes_no",
       optionCount: 2,
       labels: ["Yes", "No"],
+      answerColors: ["#5b8cff", "#ff9f43"],
       title: "Dinner",
       resultText: "Result: {text.old}",
       openedAt: "2026-10-16T09:00:00.000Z",
@@ -302,9 +304,9 @@ describe("chat voting result races in the worker runtime", () => {
           inserted = true;
           await database.prepare(
             `INSERT INTO chat_vote_templates
-              (id, channel_id, shortcut, title, result_text, labels, free_text_mode, duration_seconds,
+              (id, channel_id, shortcut, title, result_text, labels, answer_colors, free_text_mode, duration_seconds,
                revision, legacy_alias, last_used_at, created_at, updated_at)
-             VALUES ('concurrent-result', ?, NULL, 'Concurrent result', ?, '["Yes","No"]', NULL, 120,
+             VALUES ('concurrent-result', ?, NULL, 'Concurrent result', ?, '["Yes","No"]', '["#5b8cff","#ff9f43"]', NULL, 120,
                1, NULL, NULL, '2026-10-16T10:00:01.000Z', '2026-10-16T10:00:01.000Z')`,
           ).bind(channelId, resultText).run();
         }

@@ -199,8 +199,8 @@ const panelWriteRegressions: readonly PanelWriteRegressionCase[] = [
     keys: (id) => [moduleQueryKey(id, "chat_voting", "panel")],
     write: async (database, id) => {
       await database.prepare(
-        `INSERT INTO chat_votes (channel_id, poll_id, kind, option_count, labels_json, status, opened_at, closes_at, close_reason)
-         VALUES (?, 'poll-1', 'yes_no', 2, '["Yes","No"]', 'open', '2026-10-10T00:00:00.000Z', '2026-10-10T00:02:00.000Z', 'manual')`,
+        `INSERT INTO chat_votes (channel_id, poll_id, kind, option_count, labels_json, answer_colors_json, status, opened_at, closes_at, close_reason)
+         VALUES (?, 'poll-1', 'yes_no', 2, '["Yes","No"]', '["#5b8cff","#ff9f43"]', 'open', '2026-10-10T00:00:00.000Z', '2026-10-10T00:02:00.000Z', 'manual')`,
       ).bind(id).run();
     },
   },
@@ -209,8 +209,8 @@ const panelWriteRegressions: readonly PanelWriteRegressionCase[] = [
     keys: (id) => [moduleQueryKey(id, "chat_voting", "panel")],
     write: async (database, id) => {
       await database.prepare(
-        `INSERT INTO chat_votes (channel_id, poll_id, kind, option_count, labels_json, text_mode, term_filter_ready, status, opened_at, closes_at, close_reason)
-         VALUES (?, 'poll-words', 'free_text', 0, '[]', 'first_word', 1, 'open', '2026-10-10T00:00:00.000Z', '2026-10-10T00:02:00.000Z', 'manual')`,
+        `INSERT INTO chat_votes (channel_id, poll_id, kind, option_count, labels_json, answer_colors_json, text_mode, term_filter_ready, status, opened_at, closes_at, close_reason)
+         VALUES (?, 'poll-words', 'free_text', 0, '[]', '[]', 'first_word', 1, 'open', '2026-10-10T00:00:00.000Z', '2026-10-10T00:02:00.000Z', 'manual')`,
       ).bind(id).run();
       await database.prepare(
         `INSERT INTO chat_vote_term_approvals (channel_id, poll_id, term, approved_at, approved_by)
@@ -530,8 +530,8 @@ describe("panel resource revisions", () => {
       ).bind(channelId).run();
       await database.prepare(
         `INSERT INTO chat_votes
-          (channel_id, poll_id, kind, option_count, labels_json, status, opened_at, closes_at, close_reason)
-         VALUES (?, 'expired-poll', 'yes_no', 2, '["Yes","No"]', 'open', ?, ?, 'timer')`,
+          (channel_id, poll_id, kind, option_count, labels_json, answer_colors_json, status, opened_at, closes_at, close_reason)
+         VALUES (?, 'expired-poll', 'yes_no', 2, '["Yes","No"]', '["#5b8cff","#ff9f43"]', 'open', ?, ?, 'timer')`,
       ).bind(channelId, new Date(Date.now() - 120_000).toISOString(), new Date(Date.now() - 60_000).toISOString()).run();
       await database.prepare(
         `INSERT INTO votekicks (channel_id, votekick_id, status, threshold, yes_votes, no_votes, ballot_revision, started_at, expires_at)

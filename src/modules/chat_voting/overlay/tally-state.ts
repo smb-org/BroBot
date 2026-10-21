@@ -1,6 +1,7 @@
 import type { BallotTermCount } from "../../contract";
 import { chatVotingKindForPreset, chatVotingPresetForKind } from "../contracts";
 import type { ChatVotingKind, ChatVotingPreset, ChatVotingTextMode } from "../contracts";
+import { isNormalizedChatVoteColor } from "../contracts/vote-colors";
 
 export interface TallyState {
   pollId: string;
@@ -10,6 +11,7 @@ export interface TallyState {
   title?: string | null;
   status?: "open" | "closing" | "closed";
   labels?: readonly string[];
+  answerColors?: readonly string[];
   kind?: ChatVotingKind;
   preset?: ChatVotingPreset;
   optionCount?: number;
@@ -36,6 +38,9 @@ export const parseTallyState = (value: unknown): TallyState | null => {
   const labels = Array.isArray(state.labels) && state.labels.every((label) => typeof label === "string")
     ? state.labels
     : undefined;
+  const answerColors = Array.isArray(state.answerColors) && state.answerColors.every(isNormalizedChatVoteColor)
+    ? state.answerColors
+    : undefined;
   const terms = Array.isArray(state.terms) && state.terms.every((entry) => {
     const term = record(entry);
     return term !== null && typeof term.term === "string" && Array.from(term.term).length <= 25 &&
@@ -58,6 +63,7 @@ export const parseTallyState = (value: unknown): TallyState | null => {
     ...(state.title === null || typeof state.title === "string" && Array.from(state.title).length <= 80 ? { title: state.title } : {}),
     ...(state.status === "open" || state.status === "closing" || state.status === "closed" ? { status: state.status } : {}),
     ...(labels === undefined ? {} : { labels }),
+    ...(answerColors === undefined ? {} : { answerColors }),
     ...(kind === undefined ? {} : { kind }),
     ...(preset === undefined ? {} : { preset }),
     ...(typeof state.optionCount === "number" && Number.isInteger(state.optionCount) ? { optionCount: state.optionCount } : {}),
@@ -88,6 +94,7 @@ const isTallyState = (value: unknown): value is TallyState => {
       typeof state.requestedDurationSeconds === "number" && Number.isSafeInteger(state.requestedDurationSeconds) && state.requestedDurationSeconds > 0) &&
     (state.title === undefined || state.title === null || typeof state.title === "string" && Array.from(state.title).length <= 80) &&
     (state.labels === undefined || Array.isArray(state.labels) && state.labels.every((label) => typeof label === "string")) &&
+    (state.answerColors === undefined || Array.isArray(state.answerColors) && state.answerColors.every(isNormalizedChatVoteColor)) &&
     (state.kind === undefined || state.kind === "yes_no" || state.kind === "options" || state.kind === "free_text") &&
     (state.preset === undefined || state.preset === "yes_no" || state.preset === "scale_5" || state.preset === "options_n" ||
       state.preset === "digit_01" || state.preset === "digit_12" || state.preset === "free_text") &&

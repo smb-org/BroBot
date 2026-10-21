@@ -16,6 +16,8 @@ const template: ChatVoteTemplate = {
   title: "Abendessen",
   resultText: "Danke fürs Abstimmen! Ergebnis: {vote.result}",
   labels: ["Pizza", "Burger"],
+  answerColors: ["#5b8cff", "#ff9f43"],
+  offerInCockpit: true,
   freeTextMode: null,
   durationSeconds: 120,
   revision: 1,
@@ -114,6 +116,36 @@ describe("saved chat voting collection", () => {
     })).toBe(false);
     expect(screen.queryByRole("button", { name: /start|beenden|freigeben/iu })).not.toBeInTheDocument();
     expect(screen.getByText("Gespeicherte Abstimmungen")).toBeInTheDocument();
+    expect(screen.getByText("Im Cockpit")).toBeInTheDocument();
+  });
+
+  it("edits answer colors, shows duplicate and contrast feedback, previews the colors, and restores defaults", async () => {
+    const chatOnly = { ...template, id: "template-chat-only", title: "Nur Chat", shortcut: "nurchat", offerInCockpit: false };
+    const { requests } = mount({ templates: [template, chatOnly] });
+    expect(await screen.findByRole("link", { name: /Nur Chat/u })).toBeInTheDocument();
+    expect(screen.getByText("Nur Chat", { selector: ".chat-voting-template-list__offer" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("link", { name: /Abendessen/u }));
+    const trigger = await screen.findByRole("button", { name: "Farbe für Antwort 1" });
+    fireEvent.click(trigger);
+    const popover = await screen.findByRole("dialog", { name: "Farbe für Antwort 1" });
+    const hex = within(popover).getByRole("textbox", { name: "Eigener Hex-Wert" });
+
+    fireEvent.change(hex, { target: { value: "#ff9f43" } });
+    expect(within(popover).getByText("Jede Antwort braucht eine eigene Farbe.")).toBeInTheDocument();
+    fireEvent.change(hex, { target: { value: "#1c222b" } });
+    expect(within(popover).getByText(/mindestens 3:1 Kontrast/u)).toBeInTheDocument();
+
+    const preview = screen.getByTestId("chat-vote-color-preview");
+    expect(preview).toHaveTextContent("Farben · Vorschau");
+    fireEvent.click(screen.getByRole("button", { name: "Standard wiederherstellen" }));
+    expect((preview.querySelector(".chat-voting-editor__color-preview-track > span") as HTMLElement).style.backgroundColor).toBe("rgb(91, 140, 255)");
+    fireEvent.click(trigger);
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Farbe für Antwort 1" })).getByRole("button", { name: "#ff6fae" }));
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+    await waitFor(() => expect(requests.mock.calls.some(([input, init]) => requestUrl(input).pathname.endsWith("/templates/template-dinner") && init?.method === "PATCH")).toBe(true));
+    const savedBody = requests.mock.calls.find(([input, init]) => requestUrl(input).pathname.endsWith("/templates/template-dinner") && init?.method === "PATCH")?.[1]?.body;
+    expect(JSON.parse(savedBody as string)).toMatchObject({ answerColors: ["#ff6fae", "#ff9f43"], offerInCockpit: true });
   });
 
   it("keeps a new vote as a two-minute draft until the explicit save action", async () => {

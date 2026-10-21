@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { ActionMenu, Button, ChatPreview, ConfirmDialog, Field, InspectorSection, PageHeader, SaveStatus, SegmentChoice, SwitchSection, TemplateTextField, UnitInput, panelTemplateOptions, registeredModuleTemplateGroup, registerDashboardNavigationGuard, useDraft, useDraftGuard } from "../../../dashboard/ui";
+import { ActionMenu, Button, ChatPreview, ConfirmDialog, Field, InspectorSection, PageHeader, SaveStatus, SegmentChoice, SwitchRow, SwitchSection, TemplateTextField, UnitInput, panelTemplateOptions, registeredModuleTemplateGroup, registerDashboardNavigationGuard, useDraft, useDraftGuard } from "../../../dashboard/ui";
+import { PopoverContent, PopoverPrimitive } from "../../../dashboard/ui/primitives/popover";
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient } from "../../../dashboard/data";
 import { useModuleQuery } from "../../../dashboard/data";
 import { isEventTemplateVariableAvailable } from "../../../contracts/event-template-variables";
@@ -13,6 +14,7 @@ import { chatVoteDurationText, chatVotingSavedPanelTexts } from "./locale-saved"
 import { chatVoteResultPreview } from "./result-preview";
 import { createChatVoteTemplate, loadChatVotingTemplateVariables, saveChatVoteTemplate } from "./service";
 import type { ChatVoteTemplateListState } from "./service";
+import { CHAT_VOTE_PALETTE, chatVoteDefaultColorAt, normalizeChatVoteColor, voteColorContrastIssue } from "../contracts/vote-colors";
 
 export interface TemplateInspectorActions {
   guardSwitch: (proceed: () => void, cancel?: () => void) => void;
@@ -42,6 +44,8 @@ const draftFromTemplate = (template: ChatVoteTemplate): ChatVoteTemplateDraft =>
   title: template.title,
   resultText: template.resultText ?? "{vote.result}",
   labels: [...template.labels],
+  answerColors: [...template.answerColors],
+  offerInCockpit: template.offerInCockpit,
   freeTextMode: template.freeTextMode,
   durationSeconds: template.durationSeconds,
 });
@@ -120,13 +124,28 @@ export function ChatVoteTemplateInspector({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | undefined>();
+  const [customColorDrafts, setCustomColorDrafts] = useState<Readonly<Record<number, string>>>({});
   const deletingRef = useRef(false);
   const dirty = canManageContent && (isNew || draft.dirty);
   const shortcutError = serverShortcutError ?? (draft.value.shortcut === null ? null
     : !isValidTemplateShortcut(draft.value.shortcut) ? labels.shortcutInvalid
       : templates.some((entry) => entry.id !== template.id && entry.shortcut === draft.value.shortcut) ? labels.shortcutDuplicate
         : null);
-  const saveInvalidReason = shortcutError ?? (blankDraft(draft.value) ? labels.emptyDraftError : null);
+  const answerColorAt = (index: number): string => draft.value.answerColors[index] ?? chatVoteDefaultColorAt(index);
+  const answerColorIssue = (index: number): "format" | "contrast" | "duplicate" | null => {
+    const customDraft = customColorDrafts[index];
+    if (customDraft !== undefined && normalizeChatVoteColor(customDraft) === null) return "format";
+    const color = customDraft === undefined ? answerColorAt(index) : normalizeChatVoteColor(customDraft) ?? answerColorAt(index);
+    if (draft.value.answerColors.some((existing, otherIndex) => otherIndex !== index && existing === color)) return "duplicate";
+    return voteColorContrastIssue(color);
+  };
+  const colorError = draft.value.answerColors.length !== draft.value.labels.length
+    ? labels.colorDuplicateError
+    : draft.value.labels.map((_answer, index) => answerColorIssue(index)).map((issue) => issue === "format" ? labels.colorFormatError
+      : issue === "contrast" ? labels.colorContrastError : issue === "duplicate" ? labels.colorDuplicateError : null)
+      .find((message) => message !== null) ?? null;
+  const unreachableError = draft.value.shortcut === null && !draft.value.offerInCockpit ? labels.shortcutOrCockpit : null;
+  const saveInvalidReason = shortcutError ?? unreachableError ?? colorError ?? (blankDraft(draft.value) ? labels.emptyDraftError : null);
   const title = draft.value.title.trim() || labels.untitled;
   const yesNoLabels = language === "de" ? ["Ja", "Nein"] : ["Yes", "No"];
   const isYesNoTemplate = draft.value.freeTextMode === null
@@ -134,6 +153,17 @@ export function ChatVoteTemplateInspector({
     && draft.value.labels.every((label, index) => label.trim().toLocaleLowerCase() === yesNoLabels[index]?.toLocaleLowerCase());
   const previewOptions = draft.value.freeTextMode === null ? draft.value.labels : [];
   const previewText = `${draft.value.title.trim() || labels.previewQuestion}${previewOptions.length === 0 ? "" : ` — ${previewOptions.map((option, index) => `${String(index + 1)}. ${option}`).join(" · ")}`}`;
+  const previewAnswerLabels = draft.value.freeTextMode !== null
+    ? [1, 2, 3].map((number) => labels.freeTextPreview(number))
+    : draft.value.labels.length === 0 ? [labels.ghostYes, labels.ghostNo]
+      : draft.value.labels.map((answer, index) => answer.trim() || labels.answer(index + 1));
+  const previewWeights = previewAnswerLabels.map((_answer, index) => [46, 32, 22, 16, 12, 9, 6, 4, 3][index] ?? 2);
+  const previewWeightTotal = previewWeights.reduce((total, weight) => total + weight, 0);
+  const colorPreviewRows = previewAnswerLabels.map((answer, index) => ({
+    answer,
+    color: draft.value.freeTextMode !== null ? chatVoteDefaultColorAt(index) : answerColorAt(index),
+    percent: Math.round((previewWeights[index] ?? 0) * 100 / previewWeightTotal),
+  }));
   const resultVoteResult = "Pizza: 8 (67%) · Burger: 4 (33%)";
   const previewResult = chatVoteResultPreview(language, draft.value.resultText ?? "{vote.result}", draft.value.title.trim() || null, resultVoteResult, {
     "vote.result": resultVoteResult,
@@ -165,9 +195,28 @@ export function ChatVoteTemplateInspector({
     if ("shortcut" in update) setServerShortcutError(null);
   };
 
+  const updateAnswerLabels = (nextLabels: readonly string[], nextColors?: readonly string[]): void => {
+    const colors = nextColors ?? nextLabels.map((_label, index) => draftValue.current.answerColors[index] ?? chatVoteDefaultColorAt(index));
+    setCustomColorDrafts({});
+    updateDraft({ labels: nextLabels, answerColors: colors });
+  };
+
+  const changeAnswerColor = (index: number, value: string): void => {
+    setCustomColorDrafts((current) => ({ ...current, [index]: value }));
+    const normalized = normalizeChatVoteColor(value);
+    if (normalized === null) return;
+    const nextColors = draftValue.current.labels.map((_label, colorIndex) => draftValue.current.answerColors[colorIndex] ?? chatVoteDefaultColorAt(colorIndex));
+    nextColors[index] = normalized;
+    updateDraft({ answerColors: nextColors });
+  };
+
   const saveDraft = async (): Promise<string | null> => {
     if (!canManageContent || saving || conflict) return labels.saveError;
-    const submitted = { ...draftValue.current, labels: [...draftValue.current.labels] };
+    if (saveInvalidReason !== null) {
+      setSaveError(labels.invalid);
+      return saveInvalidReason;
+    }
+    const submitted = { ...draftValue.current, labels: [...draftValue.current.labels], answerColors: [...draftValue.current.answerColors] };
     if (blankDraft(submitted)) {
       setSaveError(labels.emptyDraftError);
       return labels.emptyDraftError;
@@ -210,6 +259,7 @@ export function ChatVoteTemplateInspector({
         draftValue.current = acceptedDraft;
       }
       setServerShortcutError(null);
+      setCustomColorDrafts({});
       setConflict(false);
       setSaved(true);
       onTemplateSaved(next, template.id);
@@ -249,6 +299,7 @@ export function ChatVoteTemplateInspector({
     setSaveError(undefined);
     setResultTextError(undefined);
     setServerShortcutError(null);
+    setCustomColorDrafts({});
     setConflict(false);
     setSaved(false);
   };
@@ -268,6 +319,7 @@ export function ChatVoteTemplateInspector({
     setSaveError(undefined);
     setResultTextError(undefined);
     setServerShortcutError(null);
+    setCustomColorDrafts({});
     setConflict(false);
   };
 
@@ -346,7 +398,7 @@ export function ChatVoteTemplateInspector({
           warningStatusLabel={(_warnings, justSaved) => justSaved ? labels.saved : labels.unsaved}
           {...(saveError === undefined ? {} : { error: saveError })}
           invalid={saveInvalidReason !== null}
-          {...(saveInvalidReason === null ? {} : { invalidMessage: saveInvalidReason, onInvalidSave: () => { setSaveError(saveInvalidReason); } })}
+          {...(saveInvalidReason === null ? {} : { invalidMessage: labels.invalid, onInvalidSave: () => { setSaveError(labels.invalid); } })}
           {...(conflict ? { conflict: { message: labels.saveConflict, reloadLabel: labels.conflictReload, onReload: () => { void reloadConflict(); } } } : {})}
           discardOnConflict
           onSave={() => { void saveDraft(); }}
@@ -405,16 +457,55 @@ export function ChatVoteTemplateInspector({
               onChange={(value) => {
                 const next = [...draft.value.labels];
                 next[index] = value;
-                updateDraft({ labels: next });
+                  updateAnswerLabels(next);
               }}
             />
+              {draft.value.freeTextMode === null ? <PopoverPrimitive.Root>
+                <PopoverPrimitive.Trigger render={<button
+                  aria-label={labels.colorForAnswer(answerNumber)}
+                  className="chat-voting-editor__color-trigger"
+                  style={{ backgroundColor: answerColorAt(index) }}
+                  type="button"
+                />} />
+                <PopoverContent align="end" side="bottom" role="dialog" aria-label={labels.colorForAnswer(answerNumber)} className="chat-voting-editor__color-popover">
+                  <strong>{labels.colorForAnswer(answerNumber)}</strong>
+                  <div aria-label={labels.paletteColors} className="chat-voting-editor__color-palette" role="group">
+                    {CHAT_VOTE_PALETTE.map((color) => {
+                      const used = draft.value.answerColors.some((existing, colorIndex) => colorIndex !== index && existing === color);
+                      return <button
+                        aria-label={color}
+                        aria-pressed={answerColorAt(index) === color}
+                        className={answerColorAt(index) === color ? "is-selected" : ""}
+                        disabled={used}
+                        key={color}
+                        onClick={() => { changeAnswerColor(index, color); }}
+                        style={{ backgroundColor: color }}
+                        title={color}
+                        type="button"
+                      />;
+                    })}
+                  </div>
+                  <Field
+                    ariaLabel={labels.customHexColor}
+                    className="chat-voting-editor__color-field"
+                    label={labels.customHexColor}
+                    onChange={(value) => { changeAnswerColor(index, value); }}
+                    value={customColorDrafts[index] ?? answerColorAt(index)}
+                  />
+                  <span aria-live="polite" className="chat-voting-editor__color-feedback">
+                    {answerColorIssue(index) === "format" ? labels.colorFormatError
+                      : answerColorIssue(index) === "contrast" ? labels.colorContrastError
+                        : answerColorIssue(index) === "duplicate" ? labels.colorDuplicateError : " "}
+                  </span>
+                </PopoverContent>
+              </PopoverPrimitive.Root> : null}
             <Button
               icon="close"
               iconOnly
               size="compact"
               variant="subtle"
               ariaLabel={labels.removeAnswer(answerNumber)}
-              onClick={() => { updateDraft({ labels: draft.value.labels.filter((_label, labelIndex) => labelIndex !== index) }); }}
+              onClick={() => { updateAnswerLabels(draft.value.labels.filter((_label, labelIndex) => labelIndex !== index), draft.value.answerColors.filter((_color, colorIndex) => colorIndex !== index)); }}
             />
           </div>;
         })}</div>}
@@ -425,8 +516,29 @@ export function ChatVoteTemplateInspector({
             icon="add"
             disabled={draft.value.labels.length >= 9}
             {...(draft.value.labels.length >= 9 ? { title: labels.maxAnswers } : {})}
-            onClick={() => { updateDraft({ labels: [...draft.value.labels, ""] }); }}
+            onClick={() => { updateAnswerLabels([...draft.value.labels, ""]); }}
           >{labels.addAnswer}</Button>
+        </div>
+        <div aria-label={labels.colorPreview} className="chat-voting-editor__color-preview" data-testid="chat-vote-color-preview">
+          <div className="chat-voting-editor__color-preview-heading">
+            <strong>{labels.colorPreview}</strong>
+            <Button
+              icon="reload"
+              size="compact"
+              variant="subtle"
+              disabled={draft.value.freeTextMode !== null}
+              onClick={() => {
+                updateDraft({ answerColors: draft.value.labels.map((_answer, index) => chatVoteDefaultColorAt(index)) });
+                setCustomColorDrafts({});
+              }}
+            >{labels.restoreDefaults}</Button>
+          </div>
+          <div className="chat-voting-editor__color-preview-rows">
+            {colorPreviewRows.map((row, index) => <div className="chat-voting-editor__color-preview-row" key={`preview-${String(index)}`}>
+              <div><strong>{row.answer}</strong><span>{String(row.percent)} %</span></div>
+              <span className="chat-voting-editor__color-preview-track"><span style={{ width: `${String(row.percent)}%`, backgroundColor: row.color }} /></span>
+            </div>)}
+          </div>
         </div>
       </InspectorSection>
       <p className="chat-voting-editor__chat-hint">{isYesNoTemplate ? labels.chatHintYesNo : labels.chatHint}</p>
@@ -434,8 +546,8 @@ export function ChatVoteTemplateInspector({
 
       <InspectorSection title={labels.quickTemplates}>
         <div className="chat-voting-editor__quick-templates">
-          <Button size="compact" variant="neutral" onClick={() => { updateDraft({ labels: language === "de" ? ["Ja", "Nein"] : ["Yes", "No"] }); }}>{labels.yesNo}</Button>
-          <Button size="compact" variant="neutral" onClick={() => { updateDraft({ labels: ["1", "2", "3", "4", "5"] }); }}>{labels.scale}</Button>
+          <Button size="compact" variant="neutral" onClick={() => { const next = language === "de" ? ["Ja", "Nein"] : ["Yes", "No"]; updateAnswerLabels(next, next.map((_answer, index) => chatVoteDefaultColorAt(index))); }}>{labels.yesNo}</Button>
+          <Button size="compact" variant="neutral" onClick={() => { const next = ["1", "2", "3", "4", "5"]; updateAnswerLabels(next, next.map((_answer, index) => chatVoteDefaultColorAt(index))); }}>{labels.scale}</Button>
         </div>
       </InspectorSection>
 
@@ -526,6 +638,12 @@ export function ChatVoteTemplateInspector({
           hint={labels.shortcutHint}
           onChange={(value) => { updateDraft({ shortcut: value.length === 0 ? null : value }); }}
         />
+        <SwitchRow
+          label={labels.offerInCockpit}
+          hint={labels.offerInCockpitHint}
+          checked={draft.value.offerInCockpit}
+          onChange={(offerInCockpit) => { updateDraft({ offerInCockpit }); }}
+        />
       </InspectorSection>
       </> : <>
         <dl className="properties chat-voting-template-inspector__properties">
@@ -534,6 +652,7 @@ export function ChatVoteTemplateInspector({
           <div><dt>{labels.duration}</dt><dd>{chatVoteDurationText(template.durationSeconds, language)}</dd></div>
           <div><dt>{resultTextCopy.label}</dt><dd>{template.resultText ?? "{vote.result}"}</dd></div>
           <div><dt>{labels.shortcut}</dt><dd>{template.shortcut === null ? "—" : `${labels.shortcutPrefix} ${template.shortcut}`}</dd></div>
+          <div><dt>{labels.offerInCockpit}</dt><dd>{template.offerInCockpit ? labels.cockpitOffer : labels.chatOnly}</dd></div>
         </dl>
       </>}
       </div>

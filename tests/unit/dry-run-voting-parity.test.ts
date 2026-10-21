@@ -104,6 +104,7 @@ const seedOpenChatVote = async (database: TestD1Database, channelId: string, clo
     kind: "yes_no",
     optionCount: 2,
     labels: ["Yes", "No"],
+    answerColors: ["#5b8cff", "#ff9f43"],
     title: null,
     resultText: "{vote.result}",
     textMode: null,
@@ -128,6 +129,7 @@ const insertOpenOptionsVote = async (
     kind: "options",
     optionCount: input.labels.length,
     labels: input.labels,
+    answerColors: input.labels.map((_label, index) => ["#5b8cff", "#ff9f43", "#2ed3a3", "#ff6fae", "#ffd45c", "#a47bff", "#68aeff", "#ff665c", "#c3ccdd"][index] ?? "#5b8cff"),
     title: input.title,
     resultText: "{vote.result}",
     textMode: null,
@@ -783,6 +785,7 @@ describe("chat voting and votekick dry-run parity", () => {
         kind: "yes_no",
         optionCount: 2,
         labels: ["Yes", "No"],
+        answerColors: ["#5b8cff", "#ff9f43"],
         title: null,
         resultText: "{vote.result}",
         textMode: null,
@@ -832,6 +835,7 @@ describe("chat voting and votekick dry-run parity", () => {
         kind: "yes_no",
         optionCount: 2,
         labels: ["Yes", "No"],
+        answerColors: ["#5b8cff", "#ff9f43"],
         title: null,
         resultText: "{vote.result}",
         textMode: null,
@@ -1185,6 +1189,7 @@ describe("chat voting and votekick dry-run parity", () => {
         kind: "yes_no",
         optionCount: 2,
         labels: ["Yes", "No"],
+        answerColors: ["#5b8cff", "#ff9f43"],
         title: null,
         resultText: "{vote.result}",
         textMode: null,
@@ -1244,6 +1249,7 @@ describe("chat voting and votekick dry-run parity", () => {
         kind: "yes_no",
         optionCount: 2,
         labels: ["Yes", "No"],
+        answerColors: ["#5b8cff", "#ff9f43"],
         title: null,
         resultText: "{vote.result}",
         textMode: null,
@@ -1676,10 +1682,10 @@ describe("chat voting and votekick dry-run parity", () => {
       const now = new Date().toISOString();
       await database.prepare(
         `INSERT INTO chat_vote_templates
-          (id, channel_id, shortcut, title, result_text, labels, free_text_mode, duration_seconds, revision,
+          (id, channel_id, shortcut, title, result_text, labels, answer_colors, free_text_mode, duration_seconds, revision,
            legacy_alias, last_used_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, NULL, 0, 3, NULL, NULL, ?, ?)`,
-      ).bind("next-template", channelId, "next", "Next", "Result: {vote.result}", '["yes","no"]', now, now).run();
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0, 3, NULL, NULL, ?, ?)`,
+      ).bind("next-template", channelId, "next", "Next", "Result: {vote.result}", '["yes","no"]', '["#5b8cff","#ff9f43"]', now, now).run();
       const prepare = vi.spyOn(database, "prepare");
       const interleavedDatabase = createReadInterleavingDatabase(
         database,
@@ -1729,6 +1735,7 @@ describe("chat voting and votekick dry-run parity", () => {
         kind: "free_text",
         optionCount: 0,
         labels: [],
+        answerColors: [],
         title: "Favorite word",
         resultText: "{vote.result}",
         textMode: "first_word",

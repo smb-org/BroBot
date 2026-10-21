@@ -29,12 +29,12 @@ describe("chat voting repository mutation guards", () => {
         { userId: "fictional-operator", sessionId: "session-fictional-operator" },
         "2026-10-04T10:00:00.000Z",
       );
-      const draft = { shortcut: "essen", title: "Was essen wir?", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120 } as const;
+      const draft = { shortcut: "essen", title: "Was essen wir?", labels: ["Pizza", "Burger"], answerColors: ["#5b8cff", "#ff9f43"], offerInCockpit: true, freeTextMode: null, durationSeconds: 120 } as const;
 
       await expect(repository.templates.createTemplate("fictional-channel", "template-a", draft, "2026-10-04T10:00:00.000Z", authorization))
         .resolves.toBe("created");
       const created = await repository.templates.template("fictional-channel", "template-a");
-      expect(created).toMatchObject({ shortcut: "essen", title: "Was essen wir?", labels: ["Pizza", "Burger"], revision: 1 });
+      expect(created).toMatchObject({ shortcut: "essen", title: "Was essen wir?", labels: ["Pizza", "Burger"], answerColors: ["#5b8cff", "#ff9f43"], offerInCockpit: true, revision: 1 });
       await expect(repository.templates.createTemplate("fictional-channel", "template-b", { ...draft, title: "Other" }, "2026-10-04T10:00:01.000Z", authorization))
         .resolves.toBe("conflict");
 
@@ -68,7 +68,7 @@ describe("chat voting repository mutation guards", () => {
         { userId: "fictional-operator", sessionId: "session-fictional-operator" },
         "2026-10-04T10:00:00.000Z",
       );
-      const draft = { shortcut: null, title: "", labels: [], freeTextMode: null, durationSeconds: 0 } as const;
+      const draft = { shortcut: null, title: "", labels: [], answerColors: [], offerInCockpit: true, freeTextMode: null, durationSeconds: 0 } as const;
       for (let index = 0; index < 100; index += 1) {
         await expect(repository.templates.createTemplate("fictional-channel", `template-${String(index)}`, draft, "2026-10-04T10:00:00.000Z", authorization))
           .resolves.toBe("created");
@@ -94,7 +94,7 @@ describe("chat voting repository mutation guards", () => {
         { userId: "fictional-operator", sessionId: "session-fictional-operator" },
         "2026-10-04T10:00:00.000Z",
       );
-      const draft = { shortcut: null, title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120 } as const;
+      const draft = { shortcut: null, title: "Dinner", labels: ["Pizza", "Burger"], answerColors: ["#5b8cff", "#ff9f43"], offerInCockpit: true, freeTextMode: null, durationSeconds: 120 } as const;
       await repository.templates.createTemplate("fictional-channel", "template-monotonic", draft, "2026-10-04T10:00:00.000Z", authorization);
 
       await repository.templates.markTemplateUsed("fictional-channel", "template-monotonic", "2030-01-01T12:30:00.000Z");
@@ -120,7 +120,7 @@ describe("chat voting repository mutation guards", () => {
         { userId: "fictional-operator", sessionId: "session-fictional-operator" },
         "2026-10-04T10:00:00.000Z",
       );
-      const draft = { shortcut: null, title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120 } as const;
+      const draft = { shortcut: null, title: "Dinner", labels: ["Pizza", "Burger"], answerColors: ["#5b8cff", "#ff9f43"], offerInCockpit: true, freeTextMode: null, durationSeconds: 120 } as const;
       await expect(repository.templates.createTemplate("fictional-channel", "template-guard", draft, "2026-10-04T10:00:00.000Z", authorization))
         .resolves.toBe("created");
 
@@ -147,7 +147,7 @@ describe("chat voting repository mutation guards", () => {
       await repository.templates.createTemplate(
         "fictional-channel",
         "template-race",
-        { shortcut: "essen", title: "Dinner", resultText: "Result: {var.score}", labels: ["Yes", "No"], freeTextMode: null, durationSeconds: 120 },
+        { shortcut: "essen", title: "Dinner", resultText: "Result: {var.score}", labels: ["Yes", "No"], answerColors: ["#5b8cff", "#ff9f43"], offerInCockpit: true, freeTextMode: null, durationSeconds: 120 },
         "2026-10-04T10:00:00.000Z",
         { sql: "", values: [] },
       );
@@ -157,6 +157,7 @@ describe("chat voting repository mutation guards", () => {
         kind: "yes_no",
         optionCount: 2,
         labels: ["Yes", "No"],
+        answerColors: ["#5b8cff", "#ff9f43"],
         title: "Dinner",
         resultText: "Result: {var.score}",
         openedAt: "2026-10-04T10:00:00.000Z",
@@ -196,7 +197,7 @@ describe("chat voting repository mutation guards", () => {
         { userId: "fictional-operator", sessionId: "session-fictional-operator" },
         "2026-10-04T10:00:00.000Z",
       );
-      const initial = { shortcut: "dinner", title: "Dinner", labels: ["Pizza", "Burger"], freeTextMode: null, durationSeconds: 120 } as const;
+      const initial = { shortcut: "dinner", title: "Dinner", labels: ["Pizza", "Burger"], answerColors: ["#5b8cff", "#ff9f43"], offerInCockpit: true, freeTextMode: null, durationSeconds: 120 } as const;
       await createChatVotingRepository(base).templates.createTemplate("fictional-channel", "template-race", initial, "2026-10-04T10:00:00.000Z", authorization);
       let injected = false;
       const concurrentDatabase = {
@@ -247,6 +248,7 @@ describe("chat voting repository mutation guards", () => {
         kind: "yes_no",
         optionCount: 2,
         labels: ["Yes", "No"],
+      answerColors: ["#5b8cff", "#ff9f43"],
         title: "Pizza today?",
         openedAt: "2026-10-04T10:00:00.000Z",
         closesAt: "2026-10-04T14:00:00.000Z",
@@ -282,6 +284,7 @@ describe("chat voting repository mutation guards", () => {
         kind: "yes_no",
         optionCount: 2,
         labels: ["Yes", "No"],
+      answerColors: ["#5b8cff", "#ff9f43"],
         title: null,
         openedAt: "2026-10-04T10:00:00.000Z",
         closesAt: "2026-10-04T14:00:00.000Z",
@@ -318,6 +321,7 @@ describe("chat voting repository mutation guards", () => {
         kind: "yes_no",
         optionCount: 2,
         labels: ["Yes", "No"],
+      answerColors: ["#5b8cff", "#ff9f43"],
         title: null,
         openedAt: "2026-10-04T10:00:00.000Z",
         closesAt: "2026-10-04T14:00:00.000Z",
@@ -356,6 +360,7 @@ describe("chat voting repository mutation guards", () => {
         kind: "yes_no",
         optionCount: 2,
         labels: ["Yes", "No"],
+      answerColors: ["#5b8cff", "#ff9f43"],
         title: null,
         openedAt: "2026-10-04T10:00:00.000Z",
         closesAt: "2026-10-04T14:00:00.000Z",
@@ -397,6 +402,7 @@ describe("chat voting repository mutation guards", () => {
         kind: "yes_no",
         optionCount: 2,
         labels: ["Yes", "No"],
+      answerColors: ["#5b8cff", "#ff9f43"],
         title: null,
         openedAt: "2026-10-04T10:00:00.000Z",
         closesAt: "2026-10-04T14:00:00.000Z",
@@ -430,6 +436,7 @@ describe("chat voting repository mutation guards", () => {
         kind: "yes_no",
         optionCount: 2,
         labels: ["Yes", "No"],
+      answerColors: ["#5b8cff", "#ff9f43"],
         title: null,
         openedAt: "2026-10-04T10:00:00.000Z",
         closesAt: "2026-10-04T14:00:00.000Z",
@@ -456,6 +463,7 @@ describe("chat voting repository mutation guards", () => {
         kind: "yes_no",
         optionCount: 2,
         labels: ["Yes", "No"],
+      answerColors: ["#5b8cff", "#ff9f43"],
         title: null,
         openedAt: "2026-10-04T10:00:00.000Z",
         closesAt: "2026-10-04T14:00:00.000Z",

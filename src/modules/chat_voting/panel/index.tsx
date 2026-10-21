@@ -106,6 +106,8 @@ const ChatVotingCollection = ({ channelId, language = "de", canManage = true, on
         title: "",
         resultText: "{vote.result}",
         labels: [],
+        answerColors: [],
+        offerInCockpit: true,
         freeTextMode: null,
         durationSeconds: DEFAULT_TEMPLATE_DURATION_SECONDS,
         revision: 0,

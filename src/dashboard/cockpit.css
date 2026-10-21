@@ -94,11 +94,6 @@
   .live-vote-tile__option-label span { flex: none; color: var(--text-3); font-variant-numeric: tabular-nums; }
   .live-vote-tile__track { height: 5px; overflow: hidden; border-radius: 99px; background: var(--surface-raised); }
   .live-vote-tile__track > span { display: block; height: 100%; border-radius: inherit; background: var(--brand); }
-  .live-vote-tile__option:nth-child(6n + 2) .live-vote-tile__track > span { background: var(--color-orange); }
-  .live-vote-tile__option:nth-child(6n + 3) .live-vote-tile__track > span { background: var(--green); }
-  .live-vote-tile__option:nth-child(6n + 4) .live-vote-tile__track > span { background: var(--community); }
-  .live-vote-tile__option:nth-child(6n + 5) .live-vote-tile__track > span { background: var(--raid); }
-  .live-vote-tile__option:nth-child(6n) .live-vote-tile__track > span { background: var(--moderation); }
   .live-vote-tile__footer { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); color: var(--text-3); font-size: 10px; }
   .live-vote-tile__footer > div { display: flex; align-items: center; gap: var(--s2); }
   .live-vote-tile__footer .ui-button, .live-votekick-tile .ui-button { min-height: 30px; }

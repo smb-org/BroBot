@@ -7,6 +7,7 @@ export interface OverlayTallyRow {
   label: string;
   count: number;
   title?: string;
+  color?: string;
 }
 
 export interface OverlayTallyProps {
@@ -159,13 +160,17 @@ export const OverlayTallyOptions = ({
         const percent = total === 0 ? 0 : Math.round(row.count * 100 / total);
         return <div className={classNames("overlay-tally__option", classPrefix === undefined ? undefined : `${classPrefix}__option`)} key={row.id} style={optionStyle}>
           <div className={classNames("overlay-tally__caption", classPrefix === undefined ? undefined : `${classPrefix}__caption`)} style={variant === "terms" ? { display: "grid", gridTemplateColumns: "minmax(0, 1fr) 10rem", alignItems: "center", gap: "0 0.5em", minWidth: 0, width: "100%", boxSizing: "border-box" } : { display: "flex", justifyContent: "space-between", gap: "0.5em" }}>
-            <span className="overlay-tally__label" title={row.title} style={variant === "terms" ? { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } : undefined}>{row.label}</span>
+            <span className={classNames("overlay-tally__label", layout === "strip" && row.color !== undefined ? "overlay-tally__label--strip-colored" : undefined)} title={row.title} style={variant === "terms" ? { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } : undefined}>
+              {layout === "strip" && row.color !== undefined
+                ? <><span className="overlay-tally__color-marker" aria-hidden="true" style={{ backgroundColor: row.color }} /><span className="overlay-tally__label-copy">{row.label}</span></>
+                : row.label}
+            </span>
             <span className="overlay-tally__count" style={variant === "terms" ? { minWidth: 0, overflow: "hidden", textOverflow: "clip", textAlign: "right", whiteSpace: "nowrap", fontSize: "0.5em", fontVariantNumeric: "tabular-nums" } : undefined}>
               {String(row.count)}{showPercent ? ` · ${String(percent)}%` : ""}
             </span>
           </div>
           {layout === "bars" ? <div className={classNames("overlay-tally__track", classPrefix === undefined ? undefined : `${classPrefix}__track`)} aria-hidden="true" style={trackStyle}>
-            <span className="overlay-tally__fill" style={{ width: `${String(percent)}%` }} />
+            <span className="overlay-tally__fill" style={{ width: `${String(percent)}%`, ...(row.color === undefined ? {} : { backgroundColor: row.color, opacity: 1 }) }} />
           </div> : null}
         </div>;
       })}

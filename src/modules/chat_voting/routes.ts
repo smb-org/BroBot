@@ -2,7 +2,7 @@ import { Hono } from "hono";
 
 import type { AuditAction } from "../../contracts/values";
 import type { BallotSnapshot, ModuleRouteEnvironment } from "../contract";
-import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, CHAT_VOTE_TEMPLATE_MAXIMUM, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingPresetForKind, chatVotingSettingsSchema, chatVotingStartAnnouncementAlarmKey } from "./contracts";
+import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, CHAT_VOTE_TEMPLATE_MAXIMUM, DEFAULT_CHAT_VOTING_SETTINGS, chatVoteTemplateDraftSchema, chatVotingPresetForKind, chatVotingSettingsSchema, chatVotingStartAnnouncementAlarmKey } from "./contracts";
 import type { ChatVote, ChatVotePreset, ChatVoteTemplate, ChatVoteTemplateDraft, ChatVotingKind } from "./contracts";
 import { createChatVotingRepository } from "./repository";
 import { requestChatVoteClose, requestChatVoteExtension, startChatVote } from "./service";
@@ -10,6 +10,7 @@ import { templateTextLength } from "../../contracts/template-text-length";
 import { chatVoteTemplateConfiguration, configuredLabels, isBlockedFreeTextVote, isValidTemplateShortcut, isValidVoteTitle, labelsForVote, normalizeBlockedVoteTerm, normalizeVoteTitle, templateStartProblem, voteLabelLength } from "./domain";
 import { blockReferencesInText } from "../contracts/text-block-references";
 import { readTextBlockGraphRevision, textBlockWriteGuard } from "../contracts/text-block-write-guard";
+import { chatVoteAnswerColorsSchema } from "./contracts/chat-vote-colors-schema";
 
 const readBody = async (request: Request): Promise<unknown> => request.json().catch(() => null);
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -21,6 +22,8 @@ const templateAuditSnapshot = (template: {
   resultText?: string;
   shortcut: string | null;
   labels: readonly string[];
+  answerColors: readonly string[];
+  offerInCockpit: boolean;
   freeTextMode: "first_word" | "whole_message" | null;
   durationSeconds: number;
   revision: number;
@@ -30,6 +33,8 @@ const templateAuditSnapshot = (template: {
   resultText: template.resultText ?? "{vote.result}",
   shortcut: template.shortcut,
   labels: [...template.labels],
+  answerColors: [...template.answerColors],
+  offerInCockpit: template.offerInCockpit,
   freeTextMode: template.freeTextMode,
   durationSeconds: template.durationSeconds,
   revision: template.revision,
@@ -47,22 +52,14 @@ const getEnabledSettings = async (db: D1Database, channelId: string) => {
 };
 
 const templateDraftFromBody = (body: unknown): ChatVoteTemplateDraft | null => {
-  if (!isRecord(body) || (body.shortcut !== null && typeof body.shortcut !== "string") ||
-      typeof body.title !== "string" || voteLabelLength(body.title) > 80 ||
-      !Array.isArray(body.labels) || body.labels.length > 9 ||
-      body.labels.some((label) => typeof label !== "string" || voteLabelLength(label) > 32) ||
-      (body.resultText !== undefined && (typeof body.resultText !== "string" || templateTextLength(body.resultText) > 500)) ||
-      (body.freeTextMode !== null && body.freeTextMode !== "first_word" && body.freeTextMode !== "whole_message") ||
-      typeof body.durationSeconds !== "number" || !Number.isSafeInteger(body.durationSeconds) || body.durationSeconds < 0 || body.durationSeconds > 14_400) return null;
-  const shortcut = body.shortcut;
-  if (!isValidTemplateShortcut(shortcut)) return null;
+  const parsed = chatVoteTemplateDraftSchema.safeParse(body);
+  if (!parsed.success ||
+      parsed.data.labels.some((label) => voteLabelLength(label) > 32) ||
+      templateTextLength(parsed.data.resultText ?? "{vote.result}") > 500 ||
+      !isValidTemplateShortcut(parsed.data.shortcut)) return null;
   return {
-    shortcut,
-    title: body.title,
-    resultText: typeof body.resultText === "string" ? body.resultText : "{vote.result}",
-    labels: body.labels,
-    freeTextMode: body.freeTextMode,
-    durationSeconds: body.durationSeconds,
+    ...parsed.data,
+    resultText: parsed.data.resultText ?? "{vote.result}",
   };
 };
 
@@ -87,6 +84,7 @@ const chatVoteTallyState = (vote: ChatVote, snapshot: BallotSnapshot) => ({
   title: vote.title,
   status: vote.status,
   labels: [...vote.labels],
+  answerColors: [...vote.answerColors],
   counts: [...snapshot.counts],
   terms: (snapshot.terms ?? []).map((entry) => ({ ...entry })),
   more: snapshot.more ?? 0,
@@ -291,6 +289,14 @@ chatVotingRoutes.post("/start", async (context) => {
     voteLabels = configuredLabels(startBody.labels as string[], optionCount as number) ?? undefined;
     if (voteLabels === undefined) return context.json({ error: "chat_voting_request_invalid" }, 400);
   }
+  let answerColors: string[] | undefined;
+  if (startBody.answerColors !== undefined) {
+    const parsedAnswerColors = chatVoteAnswerColorsSchema.safeParse(startBody.answerColors);
+    if (!parsedAnswerColors.success || parsedAnswerColors.data.length !== (kind === "free_text" ? 0 : optionCount as number)) {
+      return context.json({ error: "chat_voting_request_invalid" }, 400);
+    }
+    answerColors = parsedAnswerColors.data;
+  }
 
   repository ??= createChatVotingRepository(context.env.DB);
   const settings = await getEnabledSettings(context.env.DB, channelId);
@@ -324,6 +330,7 @@ chatVotingRoutes.post("/start", async (context) => {
         },
       }),
       ...(voteLabels === undefined ? {} : { labels: voteLabels }),
+      ...(answerColors === undefined ? {} : { answerColors }),
       ...(kind === "free_text" ? { textMode: textMode ?? "first_word", blockedTerms } : {}),
       ...(resultTextWriteGuard === undefined ? {} : { resultTextWriteGuard }),
       settings,
@@ -361,6 +368,7 @@ chatVotingRoutes.post("/start", async (context) => {
       kind: result.vote.kind,
       optionCount: result.vote.optionCount,
       labels: result.vote.labels,
+      answerColors: result.vote.answerColors,
       title: result.vote.title,
       closesAt: result.vote.closesAt,
     },

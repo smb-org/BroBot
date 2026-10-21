@@ -8,6 +8,7 @@ interface ChatVoteRow {
   kind: ChatVotingKind;
   option_count: number;
   labels_json: string;
+  answer_colors_json: string;
   title: string | null;
   result_text: string | null;
   text_mode: ChatVotingTextMode | null;
@@ -34,6 +35,8 @@ interface ChatVoteTemplateRow {
   title: string;
   result_text: string;
   labels: string;
+  answer_colors: string;
+  offer_in_cockpit: number;
   free_text_mode: ChatVotingTextMode | null;
   duration_seconds: number;
   revision: number;
@@ -85,6 +88,7 @@ const mapRow = (row: ChatVoteRow): ChatVote => {
     kind: row.kind,
     optionCount: row.option_count,
     labels: parseStringArray(row.labels_json) ?? [],
+    answerColors: parseStringArray(row.answer_colors_json) ?? [],
     title: row.title,
     resultText: row.result_text,
     textMode: row.text_mode,
@@ -112,6 +116,8 @@ const mapTemplateRow = (row: ChatVoteTemplateRow): ChatVoteTemplate => ({
   title: row.title,
   resultText: row.result_text,
   labels: parseStringArray(row.labels) ?? [],
+  answerColors: parseStringArray(row.answer_colors) ?? [],
+  offerInCockpit: row.offer_in_cockpit === 1,
   freeTextMode: row.free_text_mode,
   durationSeconds: row.duration_seconds,
   revision: row.revision,
@@ -121,7 +127,7 @@ const mapTemplateRow = (row: ChatVoteTemplateRow): ChatVoteTemplate => ({
   updatedAt: row.updated_at,
 });
 
-export const chatVoteTemplateSelectColumns = `id, channel_id, shortcut, title, result_text, labels, free_text_mode, duration_seconds,
+export const chatVoteTemplateSelectColumns = `id, channel_id, shortcut, title, result_text, labels, answer_colors, offer_in_cockpit, free_text_mode, duration_seconds,
                                              revision, legacy_alias, last_used_at, created_at, updated_at`;
 
 type ChatVoteTemplateWriteStatus = "saved" | "created" | "limit" | "conflict" | "shortcut_conflict" | "missing" | "unauthorized" | "reference_conflict";
@@ -355,6 +361,7 @@ export interface ChatVoteTemplateRepository {
 }
 
 export const chatVoteSelectColumns = `channel_id, poll_id, kind, option_count, labels_json, status,
+                                      answer_colors_json,
                                       title, result_text, opened_at, closes_at, closing_at, deadline_revision, requested_duration_seconds, closed_at,
                                       close_reason, counts_json, voter_count, text_mode, text_results_json, more_terms,
                                       term_filter_ready, result_delivery_pending`;
@@ -438,17 +445,18 @@ const templateRepository = (db: D1Database): ChatVoteTemplateRepository => ({
   async createTemplate(channelId, id, draft, createdAt, authorization, audit, blockGuard = NO_BLOCK_GUARD) {
     const mutation = db.prepare(
       `INSERT INTO chat_vote_templates
-         (id, channel_id, shortcut, title, result_text, labels, free_text_mode, duration_seconds, revision,
+         (id, channel_id, shortcut, title, result_text, labels, answer_colors, offer_in_cockpit, free_text_mode, duration_seconds, revision,
           legacy_alias, last_used_at, created_at, updated_at)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, NULL, ?, ?
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, NULL, ?, ?
         WHERE (SELECT COUNT(*) FROM chat_vote_templates WHERE channel_id = ?) < 100
           AND EXISTS (
             SELECT 1 FROM channel_modules
              WHERE channel_id = ? AND module_id = 'chat_voting' AND enabled = 1
           ) ${authorization.sql} ${blockGuard.sql}
        ON CONFLICT (channel_id, shortcut) WHERE shortcut IS NOT NULL DO NOTHING`,
-    ).bind(id, channelId, draft.shortcut, draft.title, draft.resultText ?? "{vote.result}", JSON.stringify(draft.labels), draft.freeTextMode,
-      draft.durationSeconds, createdAt, createdAt, channelId, channelId, ...authorization.values, ...blockGuard.values);
+     ).bind(id, channelId, draft.shortcut, draft.title, draft.resultText ?? "{vote.result}", JSON.stringify(draft.labels),
+       JSON.stringify(draft.answerColors), Number(draft.offerInCockpit), draft.freeTextMode,
+       draft.durationSeconds, createdAt, createdAt, channelId, channelId, ...authorization.values, ...blockGuard.values);
     const result = audit === undefined ? await mutation.run() : (await db.batch([mutation, audit]))[0];
     if (result === undefined) throw new Error("Template creation mutation returned no D1 result.");
     if (result.meta.changes > 0) return "created";
@@ -471,7 +479,7 @@ const templateRepository = (db: D1Database): ChatVoteTemplateRepository => ({
     try {
       const mutation = db.prepare(
         `UPDATE chat_vote_templates
-            SET shortcut = ?, title = ?, result_text = ?, labels = ?, free_text_mode = ?, duration_seconds = ?,
+            SET shortcut = ?, title = ?, result_text = ?, labels = ?, answer_colors = ?, offer_in_cockpit = ?, free_text_mode = ?, duration_seconds = ?,
                 revision = revision + 1, updated_at = ?
           WHERE channel_id = ? AND id = ? AND revision = ? ${authorization.sql}
             AND EXISTS (
@@ -481,8 +489,9 @@ const templateRepository = (db: D1Database): ChatVoteTemplateRepository => ({
             ) ${blockGuard.sql}
           RETURNING ${chatVoteTemplateSelectColumns}
         `,
-      ).bind(draft.shortcut, draft.title, draft.resultText ?? "{vote.result}", JSON.stringify(draft.labels), draft.freeTextMode,
-        draft.durationSeconds, updatedAt, channelId, id, revision, ...authorization.values, ...blockGuard.values);
+       ).bind(draft.shortcut, draft.title, draft.resultText ?? "{vote.result}", JSON.stringify(draft.labels),
+         JSON.stringify(draft.answerColors), Number(draft.offerInCockpit), draft.freeTextMode,
+         draft.durationSeconds, updatedAt, channelId, id, revision, ...authorization.values, ...blockGuard.values);
       const result = audit === undefined ? await mutation.run() : (await db.batch([mutation, audit]))[0];
       if (result === undefined) throw new Error("Template save mutation returned no D1 result.");
       const row = result.results[0] as ChatVoteTemplateRow | undefined;
@@ -586,9 +595,9 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
     const predicateSql = predicate.sql;
     const statement = db.prepare(
       `INSERT INTO chat_votes
-         (channel_id, poll_id, kind, option_count, labels_json, title, result_text, text_mode, term_filter_ready, status, opened_at, closes_at,
+         (channel_id, poll_id, kind, option_count, labels_json, answer_colors_json, title, result_text, text_mode, term_filter_ready, status, opened_at, closes_at,
           requested_duration_seconds, close_reason)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?
         WHERE ${predicateSql}`,
     ).bind(
       vote.channelId,
@@ -596,6 +605,7 @@ export const createChatVotingRepository = (db: D1Database): ChatVotingRepository
       vote.kind,
       vote.optionCount,
       JSON.stringify(vote.labels),
+      JSON.stringify(vote.answerColors),
       vote.title,
       vote.resultText ?? null,
       vote.textMode ?? null,

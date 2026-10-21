@@ -9,6 +9,8 @@ interface ChatVoteTemplateListLabels {
   incomplete: string;
   shortcutMeta: (shortcut: string) => string;
   templateMeta: (answerCount: number, duration: string) => string;
+  cockpitOffer: string;
+  chatOnly: string;
 }
 
 export interface ChatVoteTemplateListProperties {
@@ -26,7 +28,7 @@ export function ChatVoteTemplateList({ templates, selectedId = null, labels, dur
       const problem = templateStartProblem(template);
       const description = <span>
         {template.shortcut === null ? null : <><span className="mono">{labels.shortcutMeta(template.shortcut)}</span> · </>}
-        {labels.templateMeta(template.freeTextMode === null ? template.labels.length : 0, durationText(template.durationSeconds))}
+        {labels.templateMeta(template.freeTextMode === null ? template.labels.length : 0, durationText(template.durationSeconds))} · <span className="chat-voting-template-list__offer">{template.offerInCockpit ? labels.cockpitOffer : labels.chatOnly}</span>
       </span>;
       return <ListRow
         key={template.id}
