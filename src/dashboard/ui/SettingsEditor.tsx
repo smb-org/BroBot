@@ -1,4 +1,4 @@
-import { Fragment, type ReactElement } from "react";
+import { Fragment, type ReactElement, type ReactNode } from "react";
 
 import { worstCaseTemplateLength } from "../../template";
 import type { PanelTemplateWarning } from "../../panel-contract";
@@ -135,6 +135,7 @@ export interface SettingsEditorProps<Settings extends object> {
   idPrefix?: string;
   effectiveDefaultChatTarget?: ChatOutputTarget;
   customContext?: unknown;
+  afterNote?: ReactNode;
 }
 
 export function SettingsEditor<Settings extends object>({
@@ -157,6 +158,7 @@ export function SettingsEditor<Settings extends object>({
   idPrefix = "settings",
   effectiveDefaultChatTarget,
   customContext,
+  afterNote,
 }: SettingsEditorProps<Settings>): ReactElement {
   const section = spec.sections.find((candidate) => candidate.id === sectionId);
 
@@ -497,6 +499,7 @@ export function SettingsEditor<Settings extends object>({
     <div data-ui="" className="ui-settings-editor" data-section={sectionId} aria-label={section === undefined ? undefined : texts.sections[section.id]}>
       {section === undefined ? null : <InspectorSection title={texts.sections[section.id]}>
         {section.note === undefined || texts.notes?.[section.note] === undefined ? null : <RuleNote>{texts.notes[section.note]}</RuleNote>}
+        {afterNote}
         {section.fields.map(renderField)}
       </InspectorSection>}
     </div>

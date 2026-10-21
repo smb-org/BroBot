@@ -555,10 +555,12 @@ test("issue 509 raid and mutual-lock cards update without moving adjacent conten
     const raidColumn = page.locator(".settings-page__column-stack").first();
     const raidCard = page.getByRole("region", { name: "Zustand" });
     const messageEditor = raidColumn.locator(".ui-settings-editor");
+    const raidCardBefore = await box(page.locator(".raid-state-card--loading"));
     const columnBefore = await box(raidColumn);
     const editorBefore = await box(messageEditor);
     controls.releaseRaidState();
     await expect(raidCard).toContainText("Raid-Erkennung bereit");
+    expect(await box(raidCard)).toEqual(raidCardBefore);
     expect(await box(raidColumn)).toEqual(columnBefore);
     expect(await box(messageEditor)).toEqual(editorBefore);
     await page.evaluate(() => { window.scrollTo(0, 0); });

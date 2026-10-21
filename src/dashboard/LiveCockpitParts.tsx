@@ -235,7 +235,7 @@ export const LiveCockpitTiles = ({
         </div>}
     </section>
     <AdsLiveTile ads={adsSnapshot} now={now} language={dashboardLanguage()} canManage={roleCanSnooze} moduleActive={adsEnabled}
-      loading={loading && adsEnabled && !adsFailed} failed={adsFailed} snoozeFeedback={snoozeFeedback}
+      loading={loading && adsEnabled && !adsFailed} failed={adsFailed} actionPending={busy} snoozeFeedback={snoozeFeedback}
       onSnooze={() => { void doSnoozeAd(); }} />
     <section className="live-cockpit-reserve live-cockpit-next-tile" data-slot="next-up" aria-label={labels.nextUp}>
       <h2>{labels.recentVotekicks}</h2>

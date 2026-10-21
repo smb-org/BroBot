@@ -37,6 +37,9 @@ describe("AdsLiveTile", () => {
 
     rerender(<UiProvider><AdsLiveTile ads={null} now={Date.parse("2030-01-01T00:01:00.000Z")} language="en" canManage failed onSnooze={vi.fn()} /></UiProvider>);
     expect(tile).toHaveTextContent("Ad schedule unavailable");
+    const duration = tile.querySelector(".live-cockpit-ads-tile__duration");
+    if (duration === null) throw new Error("The duration slot must stay reserved.");
+    expect(duration.textContent.trim()).toBe("");
     expect(tile.querySelector(".live-cockpit-ads-tile__reserved")).toBe(reserved);
   });
 
@@ -49,7 +52,7 @@ describe("AdsLiveTile", () => {
 
   it("shows an active break from its event end time", () => {
     render(<UiProvider><AdsLiveTile
-      ads={{ ...schedule, nextAdAt: null, runningBreakEndsAt: "2030-01-01T00:01:30.000Z" }}
+      ads={{ ...schedule, runningBreakEndsAt: "2030-01-01T00:01:30.000Z" }}
       now={Date.parse("2030-01-01T00:00:00.000Z")}
       language="en" canManage onSnooze={vi.fn()}
     /></UiProvider>);
@@ -58,6 +61,24 @@ describe("AdsLiveTile", () => {
     expect(tile).toHaveAttribute("data-state", "running");
     expect(tile).toHaveTextContent("Break running");
     expect(tile).toHaveTextContent("1:30 remaining");
+    expect(screen.getByRole("button", { name: "Snooze" })).toBeDisabled();
+    const duration = tile.querySelector(".live-cockpit-ads-tile__duration");
+    if (duration === null) throw new Error("The duration slot must stay reserved.");
+    expect(duration.textContent.trim()).toBe("");
+  });
+
+  it("describes disabled snooze reasons and disables the action while pending", () => {
+    const { rerender } = render(<UiProvider><AdsLiveTile ads={schedule} now={Date.parse("2030-01-01T00:00:00.000Z")} language="en" canManage={false} onSnooze={vi.fn()} /></UiProvider>);
+    const snooze = screen.getByRole("button", { name: "Snooze" });
+    expect(snooze).toBeDisabled();
+    const describedBy = snooze.getAttribute("aria-describedby");
+    expect(describedBy).not.toBeNull();
+    if (describedBy === null) throw new Error("The disabled action must point to its reason.");
+    expect(document.getElementById(describedBy)).toHaveTextContent(/manager/iu);
+
+    rerender(<UiProvider><AdsLiveTile ads={schedule} now={Date.parse("2030-01-01T00:00:00.000Z")} language="en" canManage actionPending onSnooze={vi.fn()} /></UiProvider>);
+    expect(snooze).toBeDisabled();
+    expect(document.getElementById("live-cockpit-ad-snooze-reason")).toHaveTextContent("A live action is in progress");
   });
 
   it("reserves its content for loading and disabled states", () => {

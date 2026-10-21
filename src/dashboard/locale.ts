@@ -1450,6 +1450,8 @@ export interface DashboardTexts {
     adSnoozeFailed: string;
     adSnoozeRetryAfter: (time: string) => string;
     adSnoozeUnavailable: string;
+    adActionPending: string;
+    adTileTitle: string;
     adTileUpcoming: string;
     adTileImminent: string;
     adTileNoSchedule: string;
@@ -1458,7 +1460,6 @@ export interface DashboardTexts {
     adTileDisabled: string;
     adTileCountdown: (time: string) => string;
     adTileRunning: string;
-    adTileRunningDetails: string;
     adTileRunningCountdown: (time: string) => string;
     adTileJokers: (count: string) => string;
     adTileNoJokers: string;
@@ -2086,6 +2087,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       adSnoozeFailed: "Werbepause konnte nicht verschoben werden.",
       adSnoozeRetryAfter: (time) => `Erneut möglich ab ${time}.`,
       adSnoozeUnavailable: "Werbepause lässt sich nicht weiter verschieben.",
+      adActionPending: "Eine Live-Aktion läuft …",
+      adTileTitle: "Werbepause",
       adTileUpcoming: "Geplant",
       adTileImminent: "Bald",
       adTileNoSchedule: "Keine Werbepause geplant",
@@ -2094,7 +2097,6 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       adTileDisabled: "Werbung ist ausgeschaltet",
       adTileCountdown: (time) => `in ${time}`,
       adTileRunning: "Werbepause läuft",
-      adTileRunningDetails: "Werbepause läuft",
       adTileRunningCountdown: (time) => `Restzeit ${time}`,
       adTileJokers: (count) => `Verschieben: ${count} Joker`,
       adTileNoJokers: "Keine Verschiebungen mehr verfügbar.",
@@ -2709,6 +2711,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       adSnoozeFailed: "The ad break could not be postponed.",
       adSnoozeRetryAfter: (time) => `Try again after ${time}.`,
       adSnoozeUnavailable: "This ad break cannot be postponed again.",
+      adActionPending: "A live action is in progress …",
+      adTileTitle: "Ad break",
       adTileUpcoming: "Scheduled",
       adTileImminent: "Imminent",
       adTileNoSchedule: "No ad break scheduled",
@@ -2717,7 +2721,6 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       adTileDisabled: "Ads are turned off",
       adTileCountdown: (time) => `in ${time}`,
       adTileRunning: "Break running",
-      adTileRunningDetails: "The ad break is running",
       adTileRunningCountdown: (time) => `${time} remaining`,
       adTileJokers: (count) => `Postpone: ${count} ${count === "1" ? "joker" : "jokers"}`,
       adTileNoJokers: "No postponements left.",

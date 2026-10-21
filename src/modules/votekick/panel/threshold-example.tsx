@@ -21,6 +21,5 @@ export const VotekickThresholdExample = ({ minNetVotes, percent, language }: {
   return <div className="votekick-threshold-example" aria-live="polite">
     <span>{words.lead(34)}</span>
     <strong>{words.result(threshold)}</strong>
-    <p>{words.summary(minimum, share)}</p>
   </div>;
 };

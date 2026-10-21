@@ -578,11 +578,11 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       enabledLabel={copy.enabledLabel}
       disabledLabel={copy.disabledLabel}
       {...(effectiveDefaultChatTarget === undefined ? {} : { effectiveDefaultChatTarget })}
+      {...(module.id === "votekick" && sectionId === "settings" ? {
+        afterNote: <VotekickThresholdExample minNetVotes={currentValue.minNetVotes} percent={currentValue.percent} language={language} />,
+      } : {})}
       onIssuesChange={reportTemplateIssues}
     />
-    {module.id === "votekick" && sectionId === "settings"
-      ? <VotekickThresholdExample minNetVotes={currentValue.minNetVotes} percent={currentValue.percent} language={language} />
-      : null}
     </>
   );
   const readOnly = page === undefined && !canManageContent ? {

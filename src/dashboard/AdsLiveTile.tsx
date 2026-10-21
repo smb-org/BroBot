@@ -17,7 +17,7 @@ const countdownFor = (nextAdAt: string, now: number): { seconds: number; text: s
   return { seconds, text: `${String(Math.floor(seconds / 60))}:${String(seconds % 60).padStart(2, "0")}` };
 };
 
-export const AdsLiveTile = ({ ads, now, language, canManage, moduleActive = true, loading = false, failed = false, snoozeFeedback = null, onSnooze }: {
+export const AdsLiveTile = ({ ads, now, language, canManage, moduleActive = true, loading = false, failed = false, actionPending = false, snoozeFeedback = null, onSnooze }: {
   ads: AdsLiveSchedule | null;
   now: number;
   language: DashboardLanguage;
@@ -25,6 +25,7 @@ export const AdsLiveTile = ({ ads, now, language, canManage, moduleActive = true
   moduleActive?: boolean;
   loading?: boolean;
   failed?: boolean;
+  actionPending?: boolean;
   snoozeFeedback?: string | null;
   onSnooze: () => void;
 }): ReactElement => {
@@ -47,28 +48,27 @@ export const AdsLiveTile = ({ ads, now, language, canManage, moduleActive = true
           : state === "imminent" ? labels.adTileImminent
             : state === "running" ? labels.adTileRunning : labels.adTileUpcoming;
   const snoozeCount = ads?.snoozeCount ?? null;
-  const snoozeReason = snoozeFeedback ?? (!canManage ? dashboardTexts(language).streamManager.managerOnly
+  const snoozeReason = snoozeFeedback ?? (actionPending ? labels.adActionPending
+    : !canManage ? dashboardTexts(language).streamManager.managerOnly
     : !moduleActive ? labels.adTileDisabled
+      : failed || invalidSchedule ? labels.adTileScheduleUnavailable
       : ads === null ? labels.adSnoozeUnavailable
         : !ads.snoozeScopeAvailable ? labels.adTileScopeMissing
           : snoozeCount === 0 ? labels.adTileNoJokers
             : snoozeCount === null ? labels.adSnoozeUnavailable
-              : ads.nextAdAt === null ? labels.adSnoozeUnavailable : "");
-  const snoozeDisabled = !canManage || !moduleActive || ads === null || loading || failed || invalidSchedule ||
+              : running || ads.nextAdAt === null ? labels.adSnoozeUnavailable : "");
+  const snoozeDisabled = actionPending || !canManage || !moduleActive || ads === null || loading || failed || invalidSchedule || running ||
     !ads.snoozeScopeAvailable || snoozeCount === null || snoozeCount <= 0 || ads.nextAdAt === null;
-  const details = state === "error" ? labels.adTileScheduleUnavailable
-    : state === "loading" ? " "
-      : state === "disabled" ? labels.adTileDisabled
-        : state === "no_schedule" ? labels.adTileNoSchedule
-          : state === "running" ? labels.adTileRunningDetails
-          : ads?.duration === null || ads?.duration === undefined ? " " : labels.adDuration(String(ads.duration));
+  const details = state === "upcoming" || state === "imminent"
+    ? ads?.duration === null || ads?.duration === undefined ? " " : labels.adDuration(String(ads.duration))
+    : " ";
   const countdown = state === "running" && runningUntil !== null ? labels.adTileRunningCountdown(runningUntil.text)
     : nextUntil === null ? "—" : labels.adTileCountdown(nextUntil.text);
   const reserved = state === "error" ? labels.adTileScheduleUnavailable : " ";
 
   return <section className="live-cockpit-reserve live-cockpit-ads-tile" data-state={state} aria-label={labels.nextAdBreak}>
     <header className="live-cockpit-ads-tile__header">
-      <h2><Icon name="ad" size={16} /> {labels.nextAdBreak}</h2>
+      <h2><Icon name="ad" size={16} /><span>{labels.adTileTitle}</span></h2>
       <span className={`live-cockpit-ads-tile__status${state === "imminent" ? " is-imminent" : state === "error" ? " is-error" : ""}`}>{statusLabel}</span>
     </header>
     <div className="live-cockpit-ads-tile__body">
@@ -77,9 +77,11 @@ export const AdsLiveTile = ({ ads, now, language, canManage, moduleActive = true
     </div>
     <div className="live-cockpit-ads-tile__footer">
       <span className="live-cockpit-ads-tile__jokers">{labels.adTileJokers(snoozeCount === null ? "—" : String(snoozeCount))}</span>
-      <Button size="compact" variant="subtle" disabled={snoozeDisabled} onClick={onSnooze}>{labels.adSnooze}</Button>
+      <Button size="compact" variant="subtle" disabled={snoozeDisabled}
+        {...(snoozeDisabled ? { describedBy: "live-cockpit-ad-snooze-reason" } : {})}
+        onClick={onSnooze}>{labels.adSnooze}</Button>
     </div>
-    <div className="live-cockpit-ads-tile__reason" aria-live="polite">{snoozeReason || " "}</div>
+    <div className="live-cockpit-ads-tile__reason" id="live-cockpit-ad-snooze-reason" aria-live="polite">{snoozeReason || " "}</div>
     <div className="live-cockpit-ads-tile__reserved" aria-live="polite">{reserved}</div>
   </section>;
 };

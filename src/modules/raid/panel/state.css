@@ -1,6 +1,6 @@
 @layer components.modules {
   .raid-state-panel { min-width: 0; }
-  .raid-state-card { display: grid; grid-template-rows: auto minmax(68px, auto) 20px auto; gap: var(--s3); min-width: 0; min-height: 236px; padding: var(--s4); border-radius: var(--r-container); background: var(--surface-well); }
+  .raid-state-card { position: relative; box-sizing: border-box; display: grid; grid-template-rows: auto auto 20px auto; gap: var(--s2); width: 100%; height: 188px; min-width: 0; padding: var(--s4); border-radius: var(--r-container); background: var(--surface-well); }
   .raid-state-card__header { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
   .raid-state-card__header > div { display: grid; gap: var(--s2); min-width: 0; }
   .raid-state-card h2 { margin: 0; color: var(--text); font-size: 14px; font-weight: 600; }
@@ -14,9 +14,9 @@
   .raid-state-card__reserved { min-height: 20px; margin: 0; overflow: hidden; color: var(--error); font-size: 11px; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; }
   .raid-state-card__footnote { margin: 0; color: var(--text-3); font-size: 11px; line-height: 1.4; }
   .raid-state-card--loading { display: block; }
-  .raid-state-card--loading .ui-load-state-lines { height: 100%; }
+  .raid-state-card--loading .ui-load-state__reserved-lines { position: absolute; inset: var(--s4); align-content: center; }
   @media (max-width: 639px) {
-    .raid-state-card { padding: var(--s3); }
-    .raid-state-card__rows > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+    .raid-state-card { height: 200px; padding: var(--s3); }
+    .raid-state-card--loading .ui-load-state__reserved-lines { inset: var(--s3); }
   }
 }

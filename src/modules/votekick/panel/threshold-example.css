@@ -1,6 +1,5 @@
 @layer components.modules {
-  .votekick-threshold-example { display: grid; grid-template-rows: 16px 22px minmax(30px, auto); gap: var(--s1); box-sizing: border-box; min-height: 78px; padding: var(--s3); border-radius: var(--r-control); background: var(--surface-well); }
-  .votekick-threshold-example > span { overflow: hidden; color: var(--text-3); font-size: 11px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
-  .votekick-threshold-example > strong { overflow: hidden; color: var(--text); font-size: 13px; line-height: 22px; text-overflow: ellipsis; white-space: nowrap; }
-  .votekick-threshold-example > p { min-height: 30px; margin: 0; color: var(--text-2); font-size: 11px; line-height: 1.4; }
+  .votekick-threshold-example { display: flex; align-items: center; gap: var(--s2); box-sizing: border-box; width: 100%; height: 32px; min-width: 0; padding-inline: var(--s3); overflow: hidden; border-radius: var(--r-control); background: var(--surface-well); }
+  .votekick-threshold-example > span { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--text-3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+  .votekick-threshold-example > strong { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--text); font-size: 12px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 }

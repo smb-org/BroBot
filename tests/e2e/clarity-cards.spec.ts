@@ -16,19 +16,23 @@ const members = [
 const json = (value: unknown, status = 200) => ({ status, contentType: "application/json", body: JSON.stringify(value) });
 
 interface Controls {
-  setRaidState: (state: "ready" | "empty") => void;
+  setRaidState: (state: "ready" | "empty" | "error") => void;
   holdRaidState: () => void;
   releaseRaidState: () => void;
   setLock: (lock: "idle" | "chat_vote" | "votekick") => void;
   setAds: (ads: "none" | "upcoming" | "running") => void;
+  holdSnooze: () => void;
+  releaseSnooze: () => void;
 }
 
 const installMocks = async (page: Page, role: "manager" | "operator"): Promise<Controls> => {
-  let raidState: "ready" | "empty" = "ready";
+  let raidState: "ready" | "empty" | "error" = "ready";
   let raidGate: Promise<void> = Promise.resolve();
   let releaseRaid = (): void => undefined;
   let lock: "idle" | "chat_vote" | "votekick" = "idle";
   let ads: "none" | "upcoming" | "running" = "none";
+  let snoozeGate: Promise<void> = Promise.resolve();
+  let releaseSnooze = (): void => undefined;
 
   await installLiveCockpitMocks(page, { channelId, role, modules });
   await page.route(`**/api/channels/${channelId}/**`, async (route: Route) => {
@@ -41,6 +45,7 @@ const installMocks = async (page: Page, role: "manager" | "operator"): Promise<C
     if (/^\/modules\/[^/]+\/settings$/u.test(path) && method === "GET") return route.fulfill(json({ settings: {}, revision: 1, variables: [] }));
     if (path === "/modules/raid/state") {
       await raidGate;
+      if (raidState === "error") return route.fulfill(json({ error: "raid_state_unavailable" }, 500));
       return route.fulfill(json(raidState === "ready"
         ? {
           ready: true,
@@ -76,6 +81,14 @@ const installMocks = async (page: Page, role: "manager" | "operator"): Promise<C
         snoozeScopeAvailable: true,
       }));
     }
+    if (path === "/modules/ads/snooze" && method === "POST") {
+      await snoozeGate;
+      return route.fulfill(json({
+        schedule: { nextAdAt: new Date(now + 15 * 60_000).toISOString(), duration: 60, lastAdAt: null, prerollFreeTime: null, snoozeCount: 1, snoozeRefreshAt: null },
+        recentAdBreaks: [],
+        snoozeScopeAvailable: true,
+      }));
+    }
     return route.fallback();
   });
 
@@ -85,6 +98,8 @@ const installMocks = async (page: Page, role: "manager" | "operator"): Promise<C
     releaseRaidState: () => { releaseRaid(); },
     setLock: (next) => { lock = next; },
     setAds: (next) => { ads = next; },
+    holdSnooze: () => { snoozeGate = new Promise<void>((resolve) => { releaseSnooze = resolve; }); },
+    releaseSnooze: () => { releaseSnooze(); },
   };
 };
 
@@ -134,6 +149,24 @@ for (const viewport of viewports) {
       await summary.click();
       await expect(page.locator(".role-matrix__table tbody tr")).toHaveCount(12);
       await expect(page.locator(".role-matrix__table thead th")).toHaveCount(4);
+      const matrixMetrics = await page.locator(".role-matrix__scroll").evaluate((element) => {
+        const firstHeader = element.querySelector("thead th:first-child");
+        const roleHeader = element.querySelector("thead th:nth-child(2)");
+        return {
+          scrollHeight: element.scrollHeight,
+          clientHeight: element.clientHeight,
+          scrollWidth: element.scrollWidth,
+          clientWidth: element.clientWidth,
+          stickyColumn: firstHeader === null ? "" : getComputedStyle(firstHeader).position,
+          stickyLeft: firstHeader === null ? "" : getComputedStyle(firstHeader).left,
+          roleHeaderWhiteSpace: roleHeader === null ? "" : getComputedStyle(roleHeader).whiteSpace,
+        };
+      });
+      expect(matrixMetrics.stickyColumn).toBe("sticky");
+      expect(matrixMetrics.stickyLeft).toBe("0px");
+      expect(matrixMetrics.roleHeaderWhiteSpace).toBe("nowrap");
+      if (viewport.width >= 1280) expect(matrixMetrics.scrollHeight).toBe(matrixMetrics.clientHeight);
+      else expect(matrixMetrics.scrollWidth).toBeGreaterThan(matrixMetrics.clientWidth);
       expect(await box(page.locator(".collection-page__heading--page-header"))).toEqual(before.page);
       expect(await box(summary)).toEqual(before.summary);
       if (viewport.width >= 1280) expect(await boxes(page.locator(".members-collection__rows .list-row"))).toEqual(before.rows);
@@ -162,11 +195,18 @@ for (const viewport of viewports) {
       const column = page.locator(".settings-page__column-stack").first();
       const editors = page.locator(".ui-settings-editor");
       await expect(page.locator(".raid-state-card--loading")).toBeVisible();
+      const loadingCard = await box(page.locator(".raid-state-card--loading"));
       const before = { column: await box(column), editors: await boxes(editors) };
       controls.releaseRaidState();
       await expect(card).toContainText("Raid-Erkennung bereit");
       await expect(card).toContainText("fuchsbau_tv");
       await expect(card).toContainText("Automatische Shoutouts starten ab 3 Raid-Zuschauern.");
+      expect(await box(card)).toEqual(loadingCard);
+      if (viewport.width >= 1280) {
+        const rowsBox = await box(card.locator(".raid-state-card__rows"));
+        const footnoteBox = await box(card.locator(".raid-state-card__footnote"));
+        expect(footnoteBox.y - rowsBox.y - rowsBox.height).toBeLessThanOrEqual(40);
+      }
       expect.soft(await box(column)).toEqual(before.column);
       expect.soft(await boxes(editors)).toEqual(before.editors);
       await expectNoHorizontalScroll(page);
@@ -177,7 +217,11 @@ for (const viewport of viewports) {
       await expect(emptyCard).toContainText("Wartet auf Twitch-Ereignisse");
       await expect(emptyCard).toContainText("Noch kein Raid");
       await expect(emptyCard).toContainText("Noch kein Shoutout");
-      expect((await box(emptyCard)).height).toBe(readyCard.height);
+      expect(await box(emptyCard)).toEqual(readyCard);
+      await open(page, viewport, "/modules/raid", (next) => { next.setRaidState("error"); });
+      const errorCard = page.getByRole("region", { name: "Zustand" });
+      await expect(errorCard).toContainText("Der Raid-Verlauf konnte nicht geladen werden.");
+      expect(await box(errorCard)).toEqual(readyCard);
       await expectNoHorizontalScroll(page);
     });
 
@@ -188,6 +232,7 @@ for (const viewport of viewports) {
       await expect(lock).toContainText("Keine Abstimmung aktiv");
       const columns = page.locator(".ui-editor-shell__columns");
       const lockBefore = await box(lock);
+      expect(lockBefore.height).toBe(96);
       const columnsBefore = await box(columns);
       const example = page.locator(".votekick-threshold-example");
       const bodyBefore = await boxes(page.locator(".ui-editor-shell__column"));
@@ -207,15 +252,17 @@ for (const viewport of viewports) {
 
       // Defaults are 5 net votes and 20 percent; the example uses 34 active chatters.
       await expect(example).toContainText("7 Netto-Ja-Stimmen nötig");
+      await expect(example).toContainText("Beispiel: 34 aktive Chatter");
       const minimum = page.getByLabel("Mindest-Netto-Ja-Stimmen");
       const percent = page.getByLabel("Aktive Chatter in Prozent");
       const exampleBefore = await box(example);
-      // Typing scrolls the inner container, so compare distances between elements, not viewport positions.
-      const distanceToLock = async () => (await box(example)).y - (await box(lock)).y;
-      const below = await distanceToLock();
+      expect(exampleBefore.height).toBe(32);
+      expect(exampleBefore.y).toBeLessThan((await box(minimum)).y);
+      const ruleNote = page.locator('.ui-settings-editor[data-section="settings"] .ui-rule-note');
+      const exampleFollowsRule = await ruleNote.evaluate((element) => element.nextElementSibling?.classList.contains("votekick-threshold-example") ?? false);
+      expect(exampleFollowsRule).toBe(true);
       await minimum.fill("9");
       await expect(example).toContainText("9 Netto-Ja-Stimmen nötig");
-      await expect(example).toContainText("Mindestens 9 Netto-Ja-Stimmen oder 20 % der aktiven Chatter");
       await percent.fill("100");
       await expect(example).toContainText("34 Netto-Ja-Stimmen nötig");
       for (const value of ["1", "10", "100", "1000", "10000", "100000", "", "0", "7"]) {
@@ -229,7 +276,6 @@ for (const viewport of viewports) {
       await minimum.fill("5");
       await expect(example).toContainText("7 Netto-Ja-Stimmen nötig");
       expect((await box(example)).height).toBe(exampleBefore.height);
-      expect(await distanceToLock()).toBe(below);
       await expectNoHorizontalScroll(page);
     });
 
@@ -238,6 +284,10 @@ for (const viewport of viewports) {
       const tile = page.locator(".live-cockpit-ads-tile");
       await expect(tile).toHaveAttribute("data-state", "no_schedule");
       await expect(tile).toContainText("Keine Werbepause geplant");
+      await expect(tile.locator("h2 > span")).toHaveText("Werbepause");
+      expect(await tile.locator("h2 > span").evaluate((element) => getComputedStyle(element).whiteSpace)).toBe("nowrap");
+      expect(await tile.locator(".live-cockpit-ads-tile__status").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+      expect(await tile.locator(".live-cockpit-ads-tile__duration").evaluate((element) => element.textContent.trim())).toBe("");
       await expect(tile.getByRole("button", { name: /verschieben/iu })).toBeDisabled();
       const wall = page.locator(".live-cockpit__wall");
       const children = page.locator(".live-cockpit__wall > *, .live-cockpit__running > *");
@@ -256,6 +306,9 @@ for (const viewport of viewports) {
       await expect(tile).toHaveAttribute("data-state", "running", { timeout: 15_000 });
       await expect(tile).toContainText("Werbepause läuft");
       await expect(tile).toContainText("Restzeit");
+      await expect(tile.getByText("Werbepause läuft", { exact: true })).toHaveCount(1);
+      expect(await tile.locator(".live-cockpit-ads-tile__duration").evaluate((element) => element.textContent.trim())).toBe("");
+      await expect(tile.getByRole("button", { name: /verschieben/iu })).toBeDisabled();
       expect(await box(wall)).toEqual(reference.wall);
       expect(await boxes(children)).toEqual(reference.children);
       expect(await box(tile)).toEqual(reference.tile);
@@ -264,6 +317,18 @@ for (const viewport of viewports) {
       controls.setAds("none");
       await expect(tile).toHaveAttribute("data-state", "no_schedule", { timeout: 15_000 });
       expect(await boxes(children)).toEqual(reference.children);
+    });
+
+    test("cockpit: snooze stays disabled until its request finishes", async ({ page }) => {
+      const controls = await open(page, viewport, "", (next) => { next.setAds("upcoming"); });
+      controls.holdSnooze();
+      const tile = page.locator(".live-cockpit-ads-tile");
+      const snooze = tile.getByRole("button", { name: /verschieben/iu });
+      await expect(snooze).toBeEnabled();
+      await snooze.click();
+      await expect(snooze).toBeDisabled();
+      controls.releaseSnooze();
+      await expect(snooze).toBeEnabled();
     });
 
     test("cockpit: the removed ad entry no longer shows up under Next up", async ({ page }) => {
