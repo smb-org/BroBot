@@ -664,7 +664,7 @@ describe("game rounds in the worker Durable Object", () => {
     await insertPointChannel(channelId);
     const database = (env as unknown as { DB: D1Database }).DB;
     await database.prepare(
-      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, ?, 0, '{}')",
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, ?, 1, '{}')",
     ).bind(channelId, pointTestModule).run();
     const object = pointObject(channelId);
     const sentTexts: string[] = [];
@@ -683,6 +683,9 @@ describe("game rounds in the worker Durable Object", () => {
       settlement: { kind: "test", params: { payouts: [] } },
     }, Date.now() + 60_000);
     await object.joinGameRound(pointTestModule, "round-cancellation-notice", "msg:stake", "viewer-a", "nachtfalke", 5, {});
+    await database.prepare(
+      "UPDATE channel_modules SET enabled = 0, revision = 11, last_disabled_revision = 11 WHERE channel_id = ? AND module_id = ?",
+    ).bind(channelId, pointTestModule).run();
     await runPointObject(object, async (target, state) => {
       await target.setGameModuleGate(pointTestModule, true, 11);
       await expect(target.cancelOpenGameRounds(pointTestModule, 11)).resolves.toBe(1);
@@ -710,7 +713,7 @@ describe("game rounds in the worker Durable Object", () => {
     await insertPointChannel(channelId);
     const database = (env as unknown as { DB: D1Database }).DB;
     await database.prepare(
-      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, ?, 0, '{}')",
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, ?, 1, '{}')",
     ).bind(channelId, pointTestModule).run();
     const object = pointObject(channelId);
     const claimedTexts: string[] = [];
@@ -750,6 +753,9 @@ describe("game rounds in the worker Durable Object", () => {
       settlement: { kind: "test", params: { payouts: [] } },
     }, Date.now() + 60_000);
     await object.joinGameRound(pointTestModule, "round-cancellation-overlap", "msg:stake", "viewer-a", "nachtfalke", 5, {});
+    await database.prepare(
+      "UPDATE channel_modules SET enabled = 0, revision = 13, last_disabled_revision = 13 WHERE channel_id = ? AND module_id = ?",
+    ).bind(channelId, pointTestModule).run();
     await object.setGameModuleGate(pointTestModule, true, 13);
 
     await runPointObject(object, async (target, state) => {

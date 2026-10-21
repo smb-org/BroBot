@@ -3496,6 +3496,7 @@ export class ChannelObject extends DurableObject<Env> {
     await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     assertPointRoundId(roundId);
+    await this.reconcilePointModuleActivation(moduleId, true);
     const alarmKey = pointRoundAlarmKey(roundId);
     this.ctx.storage.transactionSync(() => {
       const opened = openPointRoundSync(this.ctx.storage.sql, moduleId, roundId, data, new Date().toISOString(), POINT_SETTLEMENTS);

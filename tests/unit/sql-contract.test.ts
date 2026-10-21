@@ -291,7 +291,7 @@ const hasSchemaException = (query: SqlContractQuery): boolean => schemaException
   exception.fileName === query.fileName && query.sql.includes(exception.tableName));
 
 describe("SQL contract", () => {
-  it("produces the expected baseline from all migrations", () => {
+  it("produces the expected baseline from all migrations [protects=blitz_questions references its owning channel with cascading deletion in the generated schema; fails_when=the foreign key is absent or uses the wrong parent, column, or delete action; no_claim=does not exercise channel deletion in the worker D1 runtime]", () => {
     const database = prepareBaseline();
     try {
       const objects = database.prepare(
@@ -310,6 +310,12 @@ describe("SQL contract", () => {
       ]));
       expect([...tableColumns("channel_stream_state")]).toEqual(expect.arrayContaining([
         "checked_at", "eventsub_changed_at",
+      ]));
+      const blitzQuestionForeignKeys = database.prepare("PRAGMA foreign_key_list(blitz_questions)").all() as {
+        table: string; from: string; to: string; on_delete: string;
+      }[];
+      expect(blitzQuestionForeignKeys).toEqual(expect.arrayContaining([
+        expect.objectContaining({ table: "channels", from: "channel_id", to: "channel_id", on_delete: "CASCADE" }),
       ]));
     } finally {
       database.close();

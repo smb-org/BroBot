@@ -37,6 +37,26 @@ describe("blitz question D1 repository", () => {
     expect((await createBlitzQuestionRepository(db).list(channelId, 1)).total).toBe(BLITZ_STARTER_WORDS.length);
   });
 
+  it("removes questions with their channel and seeds a recreated channel [protects=deleting a channel cascades its Blitz pool and the actual enable hook seeds the recreated channel; fails_when=old question rows survive deletion or prevent the recreated channel from getting its starter pool; no_claim=channel lifecycle is driven by direct D1 statements rather than the Twitch channel reconciliation flow]", async () => {
+    const channelId = `blitz-recreate-${crypto.randomUUID()}`;
+    const repository = createBlitzQuestionRepository(db);
+    const context = { DB: db, now: new Date().toISOString(), actor: { userId: "fictional_owner" }, authorizeMutation: () => ({ sql: "", values: [] }) };
+    await insertPointChannel(channelId);
+    await db.batch([...await blitzRoundModule.onEnable?.(context, channelId) ?? []]);
+    expect((await repository.list(channelId, 1)).total).toBe(BLITZ_STARTER_WORDS.length);
+
+    await db.prepare("DELETE FROM channels WHERE channel_id = ?").bind(channelId).run();
+    const afterDelete = await db.prepare("SELECT COUNT(*) AS count FROM blitz_questions WHERE channel_id = ?").bind(channelId).first<{ count: number }>();
+    await insertPointChannel(channelId);
+    await db.batch([...await blitzRoundModule.onEnable?.(context, channelId) ?? []]);
+
+    const recreatedPool = await repository.list(channelId, 1);
+    expect(afterDelete).toEqual({ count: 0 });
+    expect(recreatedPool.total).toBe(BLITZ_STARTER_WORDS.length);
+    await expect(db.prepare("SELECT COUNT(*) AS count FROM blitz_questions WHERE channel_id = ? AND question_id = 'seed-wolken'")
+      .bind(channelId).first()).resolves.toEqual({ count: 1 });
+  });
+
   it("creates, edits, disables, searches, and deletes channel-owned questions [protects=question CRUD stays scoped to one channel and preserves enabled state; fails_when=updates leak across channels or disabled rows cannot be searched; no_claim=does not exercise the dashboard form]", async () => {
     const channelId = `blitz-crud-${crypto.randomUUID()}`;
     const otherChannelId = `blitz-other-${crypto.randomUUID()}`;

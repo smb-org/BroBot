@@ -698,6 +698,40 @@ describe("blitz answers in the channel Durable Object", () => {
     await expect(object.pointBalance("blitz_round", "viewer_one")).resolves.toBe(50);
   });
 
+  it("opens Blitz after the re-enable gate RPC fails [protects=round start reconciles enabled revision 3 and last_disabled_revision 2 from D1 after its gate RPC fails with no active rounds; fails_when=the stale closed revision-2 gate rejects the start or remains closed; no_claim=the injected RPC failure is local to a real ChannelObject method in the worker harness rather than a transport outage]", async () => {
+    const channelId = `blitz-reenable-start-${crypto.randomUUID()}`;
+    const worker = env as unknown as { DB: D1Database };
+    await insertPointChannel(channelId);
+    await worker.DB.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'blitz_round', 1, ?, 1)")
+      .bind(channelId, JSON.stringify(blitzRoundDefaultsForLanguage("en"))).run();
+    const object = blitzObject(pointObject(channelId));
+    const roundData = {
+      durationS: 60,
+      announceText: "Blitz round starts",
+      settlement: { kind: "blitz", params: { prize: 50 } },
+    };
+
+    await runPointObject(object, async (target) => {
+      await target.setGameModuleGate("blitz_round", false, 1);
+      await target.setGameModuleGate("blitz_round", true, 2, 2);
+      await worker.DB.prepare("UPDATE channel_modules SET enabled = 0, revision = 2, last_disabled_revision = 2 WHERE channel_id = ? AND module_id = 'blitz_round'")
+        .bind(channelId).run();
+      await worker.DB.prepare("UPDATE channel_modules SET enabled = 1, revision = 3 WHERE channel_id = ? AND module_id = 'blitz_round'")
+        .bind(channelId).run();
+
+      const gateRpc = vi.spyOn(target, "setGameModuleGate").mockRejectedValueOnce(new Error("injected_gate_rpc_failure"));
+      await expect(target.setGameModuleGate("blitz_round", false, 3, 2)).rejects.toThrow("injected_gate_rpc_failure");
+      gateRpc.mockRestore();
+
+      await target.openGameRound("blitz_round", "blitz-reenabled", roundData);
+    });
+
+    await expect(object.activeGameRound("blitz_round")).resolves.toMatchObject({ roundId: "blitz-reenabled", state: "announcing" });
+    await expect(runPointObject(object, (_target, state) => state.storage.sql.exec<{ closed: number; revision: number; last_disabled_revision: number }>(
+      "SELECT closed, revision, last_disabled_revision FROM module_gates WHERE module_id = 'blitz_round'",
+    ).one())).resolves.toEqual({ closed: 0, revision: 3, last_disabled_revision: 2 });
+  });
+
   it("suppresses a pending result across a rapid disable and re-enable [protects=disable revision 2 terminates retries for a round opened at revision 1 while retaining its single settlement; fails_when=re-enable revives the stale result announcement, leaves its alarm scheduled, or changes the committed payout; no_claim=gate revisions and sendChat are driven through a real ChannelObject with mocked transport]", async () => {
     const channelId = `blitz-disable-result-${crypto.randomUUID()}`;
     const roundId = "blitz-disabled-result-retry";

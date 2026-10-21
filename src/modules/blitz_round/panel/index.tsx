@@ -56,6 +56,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   const [deletePending, setDeletePending] = useState(false);
   const [deleteError, setDeleteError] = useState<string | undefined>();
   const [deleteFailure, setDeleteFailure] = useState<"conflict" | "deleted" | null>(null);
+  const [questionListRefreshError, setQuestionListRefreshError] = useState(false);
   const switchRef = useRef<((proceed: () => void) => void) | null>(null);
   const questionsQuery = useModuleQuery(channelId, "blitz_round", `questions:${String(page)}:${search}`, (signal) => loadBlitzQuestions(channelId, page, search, signal));
   const settingsQuery = useModuleQuery(channelId, "blitz_round", "settings", (signal) => loadBlitzSettings(channelId, signal));
@@ -91,6 +92,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   const newQuestion = (): void => requestSwitch(() => {
     setSearch("");
     setPage(1);
+    setQuestionListRefreshError(false);
     setShowSettings(false);
     setDeleteFailure(null);
     setSelectedId(NEW_QUESTION);
@@ -167,51 +169,88 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
     setDeletePending(true);
     setDeleteError(undefined);
     try {
-      await deleteBlitzQuestion(channelId, deleteIntent.questionId, deleteQuestion.revision);
-      const deletingId = deleteIntent.questionId;
-      const refreshed = await questionsQuery.refetch();
-      const total = refreshed.data?.total ?? 0;
-      const nextPage = Math.min(page, Math.max(1, Math.ceil(total / BLITZ_QUESTION_PAGE_SIZE)));
-      const nextPageData = nextPage === page
-        ? refreshed.data
-        : await loadBlitzQuestions(channelId, nextPage, search);
-      if (nextPage !== page && nextPageData !== undefined) {
-        queryClient.setQueryData(moduleQueryKey(channelId, "blitz_round", `questions:${String(nextPage)}:${search}`), nextPageData);
-        setPage(nextPage);
+      try {
+        await deleteBlitzQuestion(channelId, deleteIntent.questionId, deleteQuestion.revision);
+      } catch (failure: unknown) {
+        const code = blitzErrorCode(failure);
+        if (code === "question_conflict" || code === "question_deleted") {
+          setDeleteIntent(null);
+          setDeleteFailure(code === "question_conflict" ? "conflict" : "deleted");
+        } else setDeleteError(labels.deleteError);
+        return;
       }
-      const next = nextPageData?.questions[0] ?? null;
-      setSelectedId(next?.id ?? NEW_QUESTION);
-      setSelectedQuestion(next);
+
+      const deletingId = deleteIntent.questionId;
+      const questionListsFilter = {
+        predicate: (query: { queryKey: readonly unknown[] }) => query.queryKey[0] === "channel" &&
+          query.queryKey[1] === channelId && query.queryKey[2] === "module" && query.queryKey[3] === "blitz_round" &&
+          typeof query.queryKey[4] === "string" && query.queryKey[4].startsWith("questions:"),
+      };
+      queryClient.setQueriesData<BlitzQuestionPage>(questionListsFilter, (current) => current === undefined
+        ? current
+        : {
+          ...current,
+          questions: current.questions.filter((question) => question.id !== deletingId),
+          total: Math.max(0, current.total - (current.questions.some((question) => question.id === deletingId) ? 1 : 0)),
+        });
+      await queryClient.invalidateQueries({ ...questionListsFilter, refetchType: "none" });
+
+      const currentList = queryClient.getQueryData<BlitzQuestionPage>(
+        moduleQueryKey(channelId, "blitz_round", `questions:${String(page)}:${search}`),
+      );
+      const currentSelection = currentList?.questions.find((question) => question.id !== deletingId) ?? null;
+      setSelectedId(currentSelection?.id ?? NEW_QUESTION);
+      setSelectedQuestion(currentSelection);
       setShowSettings(false);
       setDeleteIntent((intent) => intent?.questionId === deletingId ? null : intent);
-    } catch (failure: unknown) {
-      const code = blitzErrorCode(failure);
-      if (code === "question_conflict" || code === "question_deleted") {
-        setDeleteIntent(null);
-        setDeleteFailure(code === "question_conflict" ? "conflict" : "deleted");
-      } else setDeleteError(labels.deleteError);
+
+      try {
+        const refreshed = await questionsQuery.refetch();
+        if (refreshed.isError || refreshed.data === undefined) {
+          setQuestionListRefreshError(true);
+          return;
+        }
+        const nextPage = Math.min(page, Math.max(1, Math.ceil(refreshed.data.total / BLITZ_QUESTION_PAGE_SIZE)));
+        const nextPageData = nextPage === page
+          ? refreshed.data
+          : await loadBlitzQuestions(channelId, nextPage, search);
+        if (nextPage !== page) {
+          queryClient.setQueryData(moduleQueryKey(channelId, "blitz_round", `questions:${String(nextPage)}:${search}`), nextPageData);
+          setPage(nextPage);
+        }
+        const next = nextPageData.questions.find((question) => question.id !== deletingId) ?? null;
+        setSelectedId(next?.id ?? NEW_QUESTION);
+        setSelectedQuestion(next);
+        setQuestionListRefreshError(false);
+      } catch {
+        setQuestionListRefreshError(true);
+      }
     } finally {
       setDeletePending(false);
     }
   };
 
+  const retryQuestionList = (): void => {
+    void questionsQuery.refetch().then((result) => { setQuestionListRefreshError(result.isError); });
+  };
+
   const toolbar = <div className="blitz-panel__toolbar">
     <div className="blitz-panel__toolbar-top">
-      <Field variant="search" label={labels.search} clearLabel={labels.clearSearch} value={search} onChange={(value) => { setSearch(value); setPage(1); }} placeholder={labels.searchPlaceholder} />
+      <Field variant="search" label={labels.search} clearLabel={labels.clearSearch} value={search} onChange={(value) => { setSearch(value); setPage(1); setQuestionListRefreshError(false); }} placeholder={labels.searchPlaceholder} />
       <Button variant="primary" icon="add" disabled={!canManage} onClick={newQuestion}>{labels.addQuestion}</Button>
     </div>
     <div className="blitz-panel__pagination" aria-label={labels.questions}>
-      <Button size="compact" icon="collapse" iconOnly ariaLabel={labels.previousPage} disabled={page <= 1} onClick={() => { setPage((current) => Math.max(1, current - 1)); }} />
+      <Button size="compact" icon="collapse" iconOnly ariaLabel={labels.previousPage} disabled={page <= 1} onClick={() => { setPage((current) => Math.max(1, current - 1)); setQuestionListRefreshError(false); }} />
       <span>{labels.pageCount(page, maxPage)}</span>
-      <Button size="compact" disabled={page >= maxPage} onClick={() => { setPage((current) => Math.min(maxPage, current + 1)); }}>{labels.nextPage}</Button>
+      <Button size="compact" disabled={page >= maxPage} onClick={() => { setPage((current) => Math.min(maxPage, current + 1)); setQuestionListRefreshError(false); }}>{labels.nextPage}</Button>
       <span className="blitz-panel__count">{labels.questionCount(data?.total ?? 0)}</span>
     </div>
   </div>;
 
   const list = questionsQuery.isPending && data === undefined
     ? <div className="blitz-panel__list-placeholder" aria-hidden="true"><span /><span /><span /><span /></div>
-    : questionsQuery.isError && data === undefined
-      ? <div className="blitz-panel__empty"><p>{labels.loadError}</p><Button onClick={() => { void questionsQuery.refetch(); }}>{labels.retry}</Button></div>
+    : questionListRefreshError || (questionsQuery.isError && data === undefined)
+      ? <div className="blitz-panel__empty"><p>{labels.loadError}</p><Button onClick={retryQuestionList}>{labels.retry}</Button></div>
       : questions.length === 0
         ? <div className="blitz-panel__empty"><p>{labels.emptyHint}</p></div>
         : <div className="blitz-panel__list">

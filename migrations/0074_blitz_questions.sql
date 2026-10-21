@@ -1,5 +1,5 @@
 CREATE TABLE blitz_questions (
-  channel_id TEXT NOT NULL,
+  channel_id TEXT NOT NULL REFERENCES channels(channel_id) ON DELETE CASCADE,
   question_id TEXT NOT NULL,
   kind TEXT NOT NULL CHECK (kind IN ('scramble', 'quiz')),
   prompt TEXT NOT NULL,
