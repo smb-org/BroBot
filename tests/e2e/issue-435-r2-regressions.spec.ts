@@ -244,6 +244,7 @@ test("the source wizard submits every step from the keyboard and keeps test outp
 
     await dialog.getByRole("button", { name: "Testen" }).click();
     await expect(output.getByRole("status")).toContainText("Erfolgreich · HTTP 200");
+    expect(await output.locator(".api-source-json-tree__value").first().evaluate((element) => getComputedStyle(element).fontFamily)).toBe(listFont);
     const afterOutput = await output.boundingBox();
     const afterContinue = await continueButton.boundingBox();
     const afterDialog = await dialog.boundingBox();

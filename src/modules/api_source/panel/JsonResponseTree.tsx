@@ -223,7 +223,7 @@ export function JsonResponseTree({ value, loading = false, messages, onSelectPat
         </span>
         <span className="api-source-json-tree__key">{itemLabel}</span>
         <span className="api-source-json-tree__type">{nodeTypeLabel(node.value, messages)}</span>
-        {displayPreview.length === 0 ? null : <code className="api-source-json-tree__value">{displayPreview}</code>}
+        {displayPreview.length === 0 ? null : <code className="api-source-json-tree__value mono">{displayPreview}</code>}
       </div>
       {branch && isExpanded ? <div role="group" className="api-source-json-tree__children">
         {entries.map(([key, child]) => {
