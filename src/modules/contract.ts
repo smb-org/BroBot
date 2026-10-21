@@ -730,6 +730,8 @@ export type ModuleDryRunContext = Pick<ModuleExecutionContext,
 
 /** Durable storage and alarm access given to a module alarm handler. */
 export interface ModuleAlarmContext {
+  /** Replayable audit writes, scoped by the host to this alarm's channel and module. */
+  writeModuleAudit?: WriteModuleAudit;
   DB: D1Database;
   channelId: string;
   /** Full identity and D1 plan sequence for the alarm currently being handled. */
@@ -809,7 +811,7 @@ export interface ModuleAlarmContext {
     sent: boolean;
     reason: string | null;
     retryable: boolean;
-    delivery: "delivered" | "rate_limited" | "ambiguous" | "failed";
+    delivery: "delivered" | "rate_limited" | "ambiguous" | "not_attempted" | "failed";
     attemptedAt?: number;
   }>;
   /** Monotonic count of accepted chat messages kept in this channel object. */
@@ -865,6 +867,19 @@ export interface ModuleAlarmDefinition {
     context: ModuleAlarmContext,
     reason: ModuleScheduleInputChangeReason,
   ) => Promise<void>;
+}
+
+export interface ModulePointRoundResult {
+  roundId: string;
+  data: unknown;
+  result: unknown;
+  resolvedAt: string;
+}
+
+export interface ModulePointRoundAnnouncement {
+  roundId: string;
+  data: unknown;
+  text: string;
 }
 
 /**
@@ -988,6 +1003,19 @@ export type PointJoinResult =
   | { status: "joined"; replayed: boolean }
   | { status: "already_joined" | "round_closed" };
 
+export interface PointRoundAnswerResult {
+  status: "recorded" | "already_answered" | "round_closed";
+  replayed: boolean;
+  first: boolean;
+}
+
+export interface PointActiveRound {
+  roundId: string;
+  state: "announcing" | "open";
+  data: unknown;
+  deadlineAt: number | null;
+}
+
 export interface ModulePointsAccess {
   /** Optional stable request identity for operations whose persisted result contains server-generated metadata. */
   apply: (operationId: string, kind: PointsKind, movements: PointsMovement[], result: unknown, payloadIdentity?: unknown) => Promise<PointsApplyResult>;
@@ -1030,8 +1058,10 @@ export interface ModulePointsAccess {
   claimCooldown: (key: string, seconds: number) => Promise<boolean>;
   rounds: {
     open: (roundId: string, data: unknown) => Promise<void>;
+    active: () => Promise<PointActiveRound | null>;
     markAnnounced: (roundId: string, deadlineAt: number, alarmKey: string) => Promise<void>;
     join: (roundId: string, operationId: string, accountId: string, login: string, stake: number, data: unknown) => Promise<PointJoinResult>;
+    answer: (roundId: string, operationId: string, accountId: string, login: string, graceS: number, messageAt: number) => Promise<PointRoundAnswerResult>;
     resolve: (roundId: string, settlement: { kind: string; params: unknown }) => Promise<PointsApplyResult>;
     cancelOpenRounds: (revision: number) => Promise<number>;
     setGate: (closed: boolean, revision: number, lastDisabledRevision?: number | null) => Promise<{ applied: boolean }>;
@@ -1861,6 +1891,17 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   overlayElements?: readonly ModuleOverlayElementDefinition[];
   /** Durable alarm handlers registered through the shared host contract. */
   alarms?: readonly ModuleAlarmDefinition[];
+  /** Reconciles accepted start metadata, even if the round was cancelled before announcement. */
+  onPointRoundOpened?: (context: ModuleAlarmContext, round: ModulePointRoundAnnouncement) => Promise<void>;
+  /** Formats the persisted result of a resolved points round for retryable chat delivery. */
+  formatPointRoundResult?: (
+    context: ModuleAlarmContext,
+    round: ModulePointRoundResult,
+  ) => Promise<{ text: string; attributions?: readonly string[]; target?: ChatOutputTarget } | null>;
+  formatPointRoundAnnouncement?: (
+    context: ModuleAlarmContext,
+    round: ModulePointRoundAnnouncement,
+  ) => Promise<{ text: string; attributions?: readonly string[]; target?: ChatOutputTarget } | null>;
   /** Hourly module-owned cleanup run by the host through the registry. */
   scheduledMaintenance?: (db: D1Database, now: string) => Promise<void>;
   /** Generic event-time sources that scheduled modules may select. */
@@ -1879,7 +1920,7 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
     context: ModuleExecutionContext,
   ) => ModuleResult | Promise<ModuleResult>;
   /** Explains why a chat subscription has no single-message reaction. */
-  dryRunSilentReason?: "activity_tracking" | "instant_settlement";
+  dryRunSilentReason?: "activity_tracking" | "instant_settlement" | "round_answers";
   /** Reuses the production service with read-only adapters and describes its effects without executing them. */
   dryRunChatMessage?: (
     event: ModuleEvent<z.output<SettingsSchema>>,

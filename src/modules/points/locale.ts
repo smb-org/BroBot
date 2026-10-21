@@ -18,6 +18,7 @@ export const pointsCatalog = {
         : `Top im ${month}: ${entries.map((entry, index) => `${String(index + 1)}. ${entry.login} ${entry.net >= 0 ? "+" : ""}${new Intl.NumberFormat("de-DE").format(entry.net)}`).join(" · ")} ${currency}`,
       games: (games: readonly string[]) => games.length === 0 ? "Noch sind keine Spiele aktiv." : `Aktive Spiele: ${games.join(" · ")}`,
       startBonus: (amount: number, currency: string) => `Startguthaben ${new Intl.NumberFormat("de-DE").format(amount)} ${currency}`,
+      blitzGame: "Blitzrunde (einfach mitraten)",
     },
   },
   en: {
@@ -37,6 +38,7 @@ export const pointsCatalog = {
         : `Top in ${month}: ${entries.map((entry, index) => `${String(index + 1)}. ${entry.login} ${entry.net >= 0 ? "+" : ""}${new Intl.NumberFormat("en-US").format(entry.net)}`).join(" · ")} ${currency}`,
       games: (games: readonly string[]) => games.length === 0 ? "No games are active yet." : `Active games: ${games.join(" · ")}`,
       startBonus: (amount: number, currency: string) => `Start balance ${new Intl.NumberFormat("en-US").format(amount)} ${currency}`,
+      blitzGame: "Blitz Round (just guess along)",
     },
   },
 } satisfies Readonly<Record<ModuleLanguage, object>>;

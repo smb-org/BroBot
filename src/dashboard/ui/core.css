@@ -94,7 +94,6 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; background: var(--background); }
-html:has(.dashboard-shell) { scrollbar-gutter: stable; }
 button:not([data-ui]),
 select:not([data-ui]),
 input:not([data-ui]),
@@ -413,7 +412,8 @@ pre {
 .dashboard-shell__workspace.has-navigation { grid-template-columns: 256px minmax(0, 1fr); }
 .dashboard-shell__navbar { position: relative; z-index: 4; align-self: stretch; width: 256px; height: 100%; min-height: 0; overflow: hidden; border-right: 1px solid var(--line); background: var(--rail); }
 .dashboard-shell__navbar > nav { height: 100%; }
-.dashboard-shell__main { min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; background: var(--background); }
+/* Reserve space on the fixed shell's scroll owner, not the document viewport. */
+.dashboard-shell__main { min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; overscroll-behavior: contain; background: var(--background); }
 .dashboard-shell__burger { display: none; flex: none; align-items: center; justify-content: center; flex-direction: column; gap: 4px; width: 36px; height: 40px; padding: 0; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--surface); cursor: pointer; }
 .dashboard-shell__burger span { display: block; width: 15px; height: 1.5px; border-radius: 2px; background: var(--text-2); }
 .dashboard-shell__drawer-backdrop { display: none; }
