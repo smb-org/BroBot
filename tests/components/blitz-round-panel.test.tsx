@@ -44,6 +44,9 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
   let questions = [...initialQuestions];
   let questionDeleted = false;
   let failedPostDeleteQuestionLists = 0;
+  let postDeleteQuestionListRequests = 0;
+  let finishPostDeleteQuestionList!: () => void;
+  const postDeleteQuestionListFinished = new Promise<void>((resolve) => { finishPostDeleteQuestionList = resolve; });
   let settings = { ...initialSettings };
   let settingsRevision = 1;
   let conflictPending = settingsConflict;
@@ -86,11 +89,17 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
         return Promise.resolve(jsonResponse({ error: "question_list_failed" }, 503));
       }
       const page = Number(url.searchParams.get("page") ?? "1");
+      const needle = (url.searchParams.get("q") ?? "").trim().toLocaleLowerCase("de-DE");
+      const matches = questions.filter((question) => `${question.prompt} ${question.answers.join(" ")}`.toLocaleLowerCase("de-DE").includes(needle));
       const start = (page - 1) * BLITZ_QUESTION_PAGE_SIZE;
-      const response = (): Response => jsonResponse({ questions: questions.slice(start, start + BLITZ_QUESTION_PAGE_SIZE), total: questions.length, page });
-      return questionDeleted && options.postDeleteQuestionListGate !== undefined
-        ? options.postDeleteQuestionListGate.then(response)
-        : Promise.resolve(response());
+      const snapshot = { questions: matches.slice(start, start + BLITZ_QUESTION_PAGE_SIZE), total: matches.length, page };
+      const response = (): Response => jsonResponse(snapshot);
+      const shouldDelay = questionDeleted && options.postDeleteQuestionListGate !== undefined && postDeleteQuestionListRequests++ === 0;
+      if (shouldDelay) {
+        const gate = options.postDeleteQuestionListGate;
+        if (gate !== undefined) return gate.then(() => { finishPostDeleteQuestionList(); return response(); });
+      }
+      return Promise.resolve(response());
     }
     if (url.pathname.endsWith("/modules/blitz_round/questions") && method === "POST") {
       const body = JSON.parse(typeof init?.body === "string" ? init.body : "null") as Omit<BlitzQuestion, "id" | "revision" | "lastUsedAt" | "createdAt" | "updatedAt">;
@@ -134,7 +143,7 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
     return Promise.resolve(jsonResponse({ error: "not_found" }, 404));
   });
   vi.stubGlobal("fetch", requests);
-  return { requests, getQuestions: () => questions, deleteQuestion: (id: string) => { questions = questions.filter((question) => question.id !== id); }, getSettings: () => settings, getSettingsRevision: () => settingsRevision, submittedSettingsRevisions, submittedQuestionRevisions, submittedDeleteRevisions };
+  return { requests, getQuestions: () => questions, deleteQuestion: (id: string) => { questions = questions.filter((question) => question.id !== id); }, getSettings: () => settings, getSettingsRevision: () => settingsRevision, submittedSettingsRevisions, submittedQuestionRevisions, submittedDeleteRevisions, postDeleteQuestionListFinished };
 };
 
 const mountPanel = () => renderWithQuery(<UiProvider><BlitzRoundPanel channelId="fictional_channel" language="en" /></UiProvider>);
@@ -152,6 +161,25 @@ describe("Blitz Round collection panel", () => {
     expect(await screen.findByText("Add a word scramble or quiz question so chat can join in.")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "New question" })).toHaveLength(1);
     expect(screen.getByRole("button", { name: /^Save$/u })).toBeDisabled();
+  });
+
+  it("matches umlauts in question search [protects=lowercase umlaut searches return prompts and answers with uppercase umlauts; fails_when=the search drops or miscases the umlaut and hides its match; no_claim=the dashboard request uses an in-memory API stub rather than D1]", async () => {
+    const bearQuestion: BlitzQuestion = {
+      ...sampleQuestion,
+      id: "fictional-question-bear",
+      kind: "quiz",
+      prompt: "Which animal is a B\u00c4R?",
+      answers: ["B\u00c4R"],
+    };
+    const unrelatedQuestion: BlitzQuestion = { ...secondQuestion, prompt: "MOONLIGHT", answers: ["MOONLIGHT"] };
+    const api = installPanelFetch([bearQuestion, unrelatedQuestion]);
+    mountPanel();
+    await screen.findByRole("button", { name: /Which animal is a B\u00c4R\?/u });
+    fireEvent.change(screen.getByRole("textbox", { name: "Search questions" }), { target: { value: "b\u00e4r" } });
+
+    expect(await screen.findByRole("button", { name: /Which animal is a B\u00c4R\?/u })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /MOONLIGHT/u })).not.toBeInTheDocument();
+    expect(api.requests.mock.calls.some(([input]) => parseUrl(input as RequestInfo).searchParams.get("q") === "b\u00e4r")).toBe(true);
   });
 
   it("shows only the word for scramble while preserving the answer slot [protects=scramble has a Word field and no redundant accepted-answer control, with the same reserved answer slot across types; fails_when=the word is labelled Solution, answers remain exposed, or the slot is removed; no_claim=DOM assertions do not measure browser layout]", async () => {
@@ -519,7 +547,7 @@ describe("Blitz Round collection panel", () => {
     expect(api.getQuestions()).toHaveLength(25);
   });
 
-  it("keeps a committed deletion out of selection and list caches when refresh fails [protects=a successful DELETE removes the question from every cached list, selects a remaining question, and shows the list error with retry; fails_when=the cached deleted row is reselected or the refresh failure is hidden by cached data; no_claim=HTTP responses use an in-memory stub and do not verify production authentication or database behavior]", async () => {
+  it("keeps a committed deletion hidden while cached list data awaits retry [protects=a successful DELETE filters the deleted row from view, selects a remaining question, and shows the list error with retry while cached list data stays untouched; fails_when=the deleted row remains visible or cache contents are manually edited; no_claim=HTTP responses use an in-memory stub and do not verify production authentication or database behavior]", async () => {
     const api = installPanelFetch([sampleQuestion, secondQuestion], undefined, false, false, false, undefined, true);
     const view = mountPanel();
     await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
@@ -542,7 +570,47 @@ describe("Blitz Round collection panel", () => {
         query.queryKey[2] === "module" && query.queryKey[3] === "blitz_round" &&
         typeof query.queryKey[4] === "string" && query.queryKey[4].startsWith("questions:"),
     });
-    expect(cachedLists.every((query) => !view.queryClient.getQueryData<BlitzQuestionPage>(query.queryKey)?.questions.some((question) => question.id === sampleQuestion.id))).toBe(true);
+    expect(cachedLists.some((query) => view.queryClient.getQueryData<BlitzQuestionPage>(query.queryKey)?.questions.some((question) => question.id === sampleQuestion.id))).toBe(true);
+  });
+
+  it("keeps a saved question revision after a delayed delete refresh [protects=deleting A, saving B during its delayed list refresh, and reselecting B preserves B's saved contents and revision; fails_when=the delayed response overwrites B's revision so the next save conflicts; no_claim=the stale response and successful writes are simulated by an in-memory HTTP stub]", async () => {
+    let releaseRefresh!: () => void;
+    const refreshGate = new Promise<void>((resolve) => { releaseRefresh = resolve; });
+    const thirdQuestion: BlitzQuestion = { ...sampleQuestion, id: "fictional-question-stone", prompt: "STONE", answers: ["STONE"] };
+    const api = installPanelFetch([sampleQuestion, secondQuestion, thirdQuestion], undefined, false, false, false, undefined, false, {
+      postDeleteQuestionListGate: refreshGate,
+    });
+    const view = mountPanel();
+    await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+
+    fireEvent.click(document.querySelector(".page-header__overflow-trigger") as HTMLButtonElement);
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    const confirmation = await screen.findByRole("dialog", { name: "Delete this question?" });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Delete" }));
+
+    try {
+      await waitFor(() => expect(api.getQuestions()).toHaveLength(2));
+      await waitFor(() => expect(api.requests.mock.calls.filter(([input, init]) => {
+        const url = parseUrl(input);
+        return url.pathname.endsWith("/modules/blitz_round/questions") && (init?.method ?? "GET") === "GET";
+      })).toHaveLength(2));
+      fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "STORM" } });
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(api.getQuestions().find((question) => question.id === secondQuestion.id)).toMatchObject({ prompt: "STORM", revision: 2 }));
+
+      await act(async () => { releaseRefresh(); await api.postDeleteQuestionListFinished; });
+      await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+      fireEvent.click(screen.getByRole("button", { name: /Word scramble.*STONE/u }));
+      fireEvent.click(screen.getByRole("button", { name: /Word scramble.*(?:MOON|STORM)/u }));
+      expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("STORM");
+      fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "RIVER" } });
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() => expect(api.getQuestions().find((question) => question.id === secondQuestion.id)).toMatchObject({ prompt: "RIVER", revision: 3 }));
+      expect(api.submittedQuestionRevisions).toEqual([1, 2]);
+    } finally {
+      act(() => { releaseRefresh(); });
+    }
   });
 
   it("keeps a newer selection and draft when the post-delete refresh finishes [protects=deleting A then selecting and editing C during a delayed refresh leaves C selected with its draft; fails_when=the stale delete refresh selects B or replaces C's draft; no_claim=the delayed list response is simulated by an in-memory HTTP stub]", async () => {
@@ -577,7 +645,7 @@ describe("Blitz Round collection panel", () => {
     }
   });
 
-  it("clamps to the remaining page when retrying a failed delete refresh [protects=after deleting question 26 and one failed page-2 refresh, retry loads page 1 of the remaining 25 questions; fails_when=retry leaves page 2 selected with an empty list; no_claim=the paginated repository is simulated by an in-memory HTTP stub]", async () => {
+  it("clamps to the remaining page when retrying a failed delete refresh [protects=after deleting question 26 and one failed page-2 refresh, a successful retry derives page 1 and loads the remaining questions; fails_when=retry leaves the panel on an invalid page after refreshed data reports one page; no_claim=the paginated repository is simulated by an in-memory HTTP stub]", async () => {
     const questions = Array.from({ length: 26 }, (_, index): BlitzQuestion => ({
       ...sampleQuestion,
       id: `fictional-question-${String(index + 1).padStart(2, "0")}`,
@@ -596,11 +664,40 @@ describe("Blitz Round collection panel", () => {
     fireEvent.click(within(confirmation).getByRole("button", { name: "Delete" }));
 
     expect(await screen.findByText("The question pool could not be loaded.")).toBeInTheDocument();
-    expect(screen.getByText("Page 2 of 1")).toBeInTheDocument();
+    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Reload" }));
 
     await waitFor(() => expect(screen.getByText("Page 1 of 1")).toBeInTheDocument());
     expect(await screen.findByRole("button", { name: /Which planet is number 1\?/u })).toHaveAttribute("aria-current", "true");
+    expect(api.getQuestions()).toHaveLength(25);
+  });
+
+  it("keeps a new draft while a failed last-page delete refresh retries and derives page one [protects=after deleting question 26, editing the generated new-question draft, and retrying a failed refresh, the panel shows page 1 of 1 with 25 rows and retains the draft; fails_when=retry leaves page 2 of 1 empty or replaces the draft; no_claim=the paginated API and failed response are simulated by an in-memory HTTP stub]", async () => {
+    const questions = Array.from({ length: 26 }, (_, index): BlitzQuestion => ({
+      ...sampleQuestion,
+      id: `fictional-question-${String(index + 1).padStart(2, "0")}`,
+      kind: "quiz",
+      prompt: `Which planet is number ${String(index + 1)}?`,
+      answers: ["Saturn"],
+    }));
+    const api = installPanelFetch(questions, undefined, false, false, false, undefined, false, { failPostDeleteQuestionLists: 1 });
+    mountPanel();
+    await screen.findByRole("button", { name: /Which planet is number 1\?/u });
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Which planet is number 26\?/u }));
+    fireEvent.click(document.querySelector(".page-header__overflow-trigger") as HTMLButtonElement);
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    const confirmation = await screen.findByRole("dialog", { name: "Delete this question?" });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Delete" }));
+
+    expect(await screen.findByText("The question pool could not be loaded.")).toBeInTheDocument();
+    const draft = screen.getByRole("textbox", { name: "Word" });
+    fireEvent.change(draft, { target: { value: "STERN" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+
+    await waitFor(() => expect(screen.getByText("Page 1 of 1")).toBeInTheDocument());
+    expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("STERN");
+    expect(screen.getAllByRole("button", { name: /Which planet is number/u })).toHaveLength(25);
     expect(api.getQuestions()).toHaveLength(25);
   });
 

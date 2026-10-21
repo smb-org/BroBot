@@ -27,17 +27,14 @@ interface Draft {
   enabled: boolean;
 }
 
-interface PostDeleteRefresh {
-  deletingId: string;
-  page: number;
-  search: string;
-  interactionVersion: number;
-}
-
 const blankDraft = (): Draft => ({ kind: "scramble", prompt: "", answers: [], enabled: true });
 const fromQuestion = (question: BlitzQuestion | null): Draft => question === null
   ? blankDraft()
   : { kind: question.kind, prompt: question.prompt, answers: [...question.answers], enabled: question.enabled };
+
+const isQuestionListQuery = (channelId: string, query: { queryKey: readonly unknown[] }): boolean =>
+  query.queryKey[0] === "channel" && query.queryKey[1] === channelId && query.queryKey[2] === "module" &&
+  query.queryKey[3] === "blitz_round" && typeof query.queryKey[4] === "string" && query.queryKey[4].startsWith("questions:");
 
 const questionInput = (draft: Draft): BlitzQuestionInput | null => {
   const answers = draft.kind === "scramble" ? [draft.prompt.toLocaleUpperCase("de-DE")] : draft.answers;
@@ -55,6 +52,8 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedIdRef = useRef<string | null>(null);
+  useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
   const [newQuestionSession, setNewQuestionSession] = useState(0);
   const [selectedQuestion, setSelectedQuestion] = useState<BlitzQuestion | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -63,16 +62,33 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   const [deletePending, setDeletePending] = useState(false);
   const [deleteError, setDeleteError] = useState<string | undefined>();
   const [deleteFailure, setDeleteFailure] = useState<"conflict" | "deleted" | null>(null);
-  const [questionListRefreshError, setQuestionListRefreshError] = useState(false);
-  const navigationEditVersion = useRef(0);
-  const pendingDeleteRefresh = useRef<PostDeleteRefresh | null>(null);
+  const [deletedQuestionIds, setDeletedQuestionIds] = useState<ReadonlySet<string>>(() => new Set());
+  const pendingDeleteSelection = useRef<string | null>(null);
   const switchRef = useRef<((proceed: () => void) => void) | null>(null);
-  const questionsQuery = useModuleQuery(channelId, "blitz_round", `questions:${String(page)}:${search}`, (signal) => loadBlitzQuestions(channelId, page, search, signal));
+  const pageQuery = useModuleQuery(channelId, "blitz_round", `questions:${String(page)}:${search}`, (signal) => loadBlitzQuestions(channelId, page, search, signal));
+  const maxPage = Math.max(1, Math.ceil((pageQuery.data?.total ?? 0) / BLITZ_QUESTION_PAGE_SIZE));
+  const effectivePage = Math.min(page, maxPage);
+  const questionsQuery = useModuleQuery(channelId, "blitz_round", `questions:${String(effectivePage)}:${search}`, (signal) => loadBlitzQuestions(channelId, effectivePage, search, signal));
   const settingsQuery = useModuleQuery(channelId, "blitz_round", "settings", (signal) => loadBlitzSettings(channelId, signal));
   const data = questionsQuery.data;
-  const questions = data?.questions ?? [];
-  const maxPage = Math.max(1, Math.ceil((data?.total ?? 0) / BLITZ_QUESTION_PAGE_SIZE));
-  const markNavigationOrEdit = (): void => { navigationEditVersion.current += 1; };
+  const questions = (data?.questions ?? []).filter((question) => !deletedQuestionIds.has(question.id));
+
+  useEffect(() => {
+    if (deletedQuestionIds.size === 0) return;
+    const removeRefetchedDeletes = (): void => {
+      const cachedQuestionIds = new Set<string>();
+      queryClient.getQueryCache().findAll({ predicate: (query) => isQuestionListQuery(channelId, query) }).forEach((query) => {
+        const cached = query.state.data as BlitzQuestionPage | undefined;
+        if (Array.isArray(cached?.questions)) cached.questions.forEach((question) => cachedQuestionIds.add(question.id));
+      });
+      setDeletedQuestionIds((current) => {
+        const remaining = new Set([...current].filter((questionId) => cachedQuestionIds.has(questionId)));
+        return remaining.size === current.size ? current : remaining;
+      });
+    };
+    removeRefetchedDeletes();
+    return queryClient.getQueryCache().subscribe(removeRefetchedDeletes);
+  }, [channelId, deletedQuestionIds, queryClient]);
 
   if (selectedId === null && data !== undefined) {
     const first = data.questions[0] ?? null;
@@ -80,13 +96,28 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
     setSelectedQuestion(first);
   }
 
-  const requestSwitch = (proceed: () => void): void => {
+  const requestSwitch = useCallback((proceed: () => void): void => {
     if (switchRef.current === null) proceed();
     else switchRef.current(proceed);
-  };
+  }, []);
+
+  const cancelPendingDeleteSelection = (): void => { pendingDeleteSelection.current = null; };
+
+  useEffect(() => {
+    const deletingId = pendingDeleteSelection.current;
+    if (deletingId === null || selectedIdRef.current !== NEW_QUESTION) return;
+    const next = questions.find((question) => question.id !== deletingId);
+    if (next === undefined) return;
+    pendingDeleteSelection.current = null;
+    requestSwitch(() => {
+      setShowSettings(false);
+      setSelectedId(next.id);
+      setSelectedQuestion(next);
+    });
+  }, [questions, requestSwitch, selectedId]);
 
   const chooseQuestion = (question: BlitzQuestion): void => {
-    markNavigationOrEdit();
+    cancelPendingDeleteSelection();
     if (selectedId === question.id && !showSettings) {
       setDetailOpen(true);
       return;
@@ -101,11 +132,10 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   };
 
   const newQuestion = (): void => {
-    markNavigationOrEdit();
+    cancelPendingDeleteSelection();
     requestSwitch(() => {
       setSearch("");
       setPage(1);
-      setQuestionListRefreshError(false);
       setShowSettings(false);
       setDeleteFailure(null);
       setSelectedId(NEW_QUESTION);
@@ -115,9 +145,9 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
     });
   };
 
-  const openSettings = (): void => { markNavigationOrEdit(); setShowSettings(true); setDetailOpen(true); };
+  const openSettings = (): void => { cancelPendingDeleteSelection(); setShowSettings(true); setDetailOpen(true); };
   const closeSettings = (): void => {
-    markNavigationOrEdit();
+    cancelPendingDeleteSelection();
     requestSwitch(() => { setShowSettings(false); setDetailOpen(true); });
   };
 
@@ -149,7 +179,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   };
 
   const discardDeletedQuestion = (): void => {
-    markNavigationOrEdit();
+    cancelPendingDeleteSelection();
     setDeleteFailure(null);
     setSelectedId(NEW_QUESTION);
     setNewQuestionSession((session) => session + 1);
@@ -159,7 +189,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   };
 
   const selectSavedQuestion = (saved: BlitzQuestion): void => {
-    markNavigationOrEdit();
+    cancelPendingDeleteSelection();
     setDeleteFailure(null);
     setSelectedId(saved.id);
     setSelectedQuestion(saved);
@@ -183,47 +213,14 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
       ? selectedQuestion
       : questions.find((question) => question.id === deleteIntent.questionId) ?? null;
 
-  const refreshAfterDelete = async (refresh: PostDeleteRefresh): Promise<void> => {
-    try {
-      const refreshed = await loadBlitzQuestions(channelId, refresh.page, refresh.search);
-      queryClient.setQueryData(
-        moduleQueryKey(channelId, "blitz_round", `questions:${String(refresh.page)}:${refresh.search}`),
-        refreshed,
-      );
-      const nextPage = Math.min(refresh.page, Math.max(1, Math.ceil(refreshed.total / BLITZ_QUESTION_PAGE_SIZE)));
-      const nextPageData = nextPage === refresh.page
-        ? refreshed
-        : await loadBlitzQuestions(channelId, nextPage, refresh.search);
-      if (nextPage !== refresh.page) {
-        queryClient.setQueryData(moduleQueryKey(channelId, "blitz_round", `questions:${String(nextPage)}:${refresh.search}`), nextPageData);
-      }
-      if (navigationEditVersion.current === refresh.interactionVersion) {
-        if (nextPage !== refresh.page) setPage(nextPage);
-        const next = nextPageData.questions.find((question) => question.id !== refresh.deletingId) ?? null;
-        setSelectedId(next?.id ?? NEW_QUESTION);
-        setSelectedQuestion(next);
-        setShowSettings(false);
-      }
-      setQuestionListRefreshError(false);
-      if (pendingDeleteRefresh.current === refresh) pendingDeleteRefresh.current = null;
-    } catch {
-      setQuestionListRefreshError(true);
-    }
-  };
-
   const confirmDelete = async (): Promise<void> => {
     if (deleteIntent === null || deleteQuestion === null) return;
-    const refresh: PostDeleteRefresh = {
-      deletingId: deleteIntent.questionId,
-      page,
-      search,
-      interactionVersion: navigationEditVersion.current,
-    };
+    const deletingId = deleteIntent.questionId;
     setDeletePending(true);
     setDeleteError(undefined);
     try {
       try {
-        await deleteBlitzQuestion(channelId, deleteIntent.questionId, deleteQuestion.revision);
+        await deleteBlitzQuestion(channelId, deletingId, deleteQuestion.revision);
       } catch (failure: unknown) {
         const code = blitzErrorCode(failure);
         if (code === "question_conflict" || code === "question_deleted") {
@@ -233,63 +230,48 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
         return;
       }
 
-      const deletingId = refresh.deletingId;
-      const questionListsFilter = {
-        predicate: (query: { queryKey: readonly unknown[] }) => query.queryKey[0] === "channel" &&
-          query.queryKey[1] === channelId && query.queryKey[2] === "module" && query.queryKey[3] === "blitz_round" &&
-          typeof query.queryKey[4] === "string" && query.queryKey[4].startsWith("questions:"),
-      };
-      queryClient.setQueriesData<BlitzQuestionPage>(questionListsFilter, (current) => current === undefined
-        ? current
-        : {
-          ...current,
-          questions: current.questions.filter((question) => question.id !== deletingId),
-          total: Math.max(0, current.total - (current.questions.some((question) => question.id === deletingId) ? 1 : 0)),
-        });
-      await queryClient.invalidateQueries({ ...questionListsFilter, refetchType: "none" });
-
-      const currentList = queryClient.getQueryData<BlitzQuestionPage>(
-        moduleQueryKey(channelId, "blitz_round", `questions:${String(refresh.page)}:${refresh.search}`),
-      );
-      const currentSelection = currentList?.questions.find((question) => question.id !== deletingId) ?? null;
-      if (navigationEditVersion.current === refresh.interactionVersion) {
-        setSelectedId(currentSelection?.id ?? NEW_QUESTION);
-        setSelectedQuestion(currentSelection);
+      setDeleteIntent(null);
+      setDeletedQuestionIds((current) => new Set(current).add(deletingId));
+      if (selectedIdRef.current === deletingId) {
+        const currentSelection = questions.find((question) => question.id !== deletingId && !deletedQuestionIds.has(question.id));
+        if (currentSelection === undefined) {
+          pendingDeleteSelection.current = deletingId;
+          setSelectedId(NEW_QUESTION);
+          setNewQuestionSession((session) => session + 1);
+          setSelectedQuestion(null);
+        } else {
+          pendingDeleteSelection.current = null;
+          setSelectedId(currentSelection.id);
+          setSelectedQuestion(currentSelection);
+        }
         setShowSettings(false);
       }
-      setDeleteIntent((intent) => intent?.questionId === deletingId ? null : intent);
-      pendingDeleteRefresh.current = refresh;
-      await refreshAfterDelete(refresh);
+      await queryClient.invalidateQueries({ predicate: (query) => isQuestionListQuery(channelId, query) });
     } finally {
       setDeletePending(false);
     }
   };
 
   const retryQuestionList = (): void => {
-    const refresh = pendingDeleteRefresh.current;
-    if (refresh !== null) {
-      void refreshAfterDelete(refresh);
-      return;
-    }
-    void questionsQuery.refetch().then((result) => { setQuestionListRefreshError(result.isError); });
+    void questionsQuery.refetch();
   };
 
   const toolbar = <div className="blitz-panel__toolbar">
     <div className="blitz-panel__toolbar-top">
-      <Field variant="search" label={labels.search} clearLabel={labels.clearSearch} value={search} onChange={(value) => { markNavigationOrEdit(); setSearch(value); setPage(1); setQuestionListRefreshError(false); }} placeholder={labels.searchPlaceholder} />
+      <Field variant="search" label={labels.search} clearLabel={labels.clearSearch} value={search} onChange={(value) => { cancelPendingDeleteSelection(); setSearch(value); setPage(1); }} placeholder={labels.searchPlaceholder} />
       <Button variant="primary" icon="add" disabled={!canManage} onClick={newQuestion}>{labels.addQuestion}</Button>
     </div>
     <div className="blitz-panel__pagination" aria-label={labels.questions}>
-      <Button size="compact" icon="collapse" iconOnly ariaLabel={labels.previousPage} disabled={page <= 1} onClick={() => { markNavigationOrEdit(); setPage((current) => Math.max(1, current - 1)); setQuestionListRefreshError(false); }} />
-      <span>{labels.pageCount(page, maxPage)}</span>
-      <Button size="compact" disabled={page >= maxPage} onClick={() => { markNavigationOrEdit(); setPage((current) => Math.min(maxPage, current + 1)); setQuestionListRefreshError(false); }}>{labels.nextPage}</Button>
-      <span className="blitz-panel__count">{labels.questionCount(data?.total ?? 0)}</span>
+      <Button size="compact" icon="collapse" iconOnly ariaLabel={labels.previousPage} disabled={effectivePage <= 1} onClick={() => { cancelPendingDeleteSelection(); setPage(Math.max(1, effectivePage - 1)); }} />
+      <span>{labels.pageCount(effectivePage, maxPage)}</span>
+      <Button size="compact" disabled={effectivePage >= maxPage} onClick={() => { cancelPendingDeleteSelection(); setPage(Math.min(maxPage, effectivePage + 1)); }}>{labels.nextPage}</Button>
+      <span className="blitz-panel__count">{labels.questionCount(pageQuery.data?.total ?? 0)}</span>
     </div>
   </div>;
 
   const list = questionsQuery.isPending && data === undefined
     ? <div className="blitz-panel__list-placeholder" aria-hidden="true"><span /><span /><span /><span /></div>
-    : questionListRefreshError || (questionsQuery.isError && data === undefined)
+    : questionsQuery.isError
       ? <div className="blitz-panel__empty"><p>{labels.loadError}</p><Button onClick={retryQuestionList}>{labels.retry}</Button></div>
       : questions.length === 0
         ? <div className="blitz-panel__empty"><p>{labels.emptyHint}</p></div>
@@ -336,7 +318,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
         onDiscardDeleted={discardDeletedQuestion}
         onOpenSettings={openSettings}
         registerSwitch={(switcher) => { switchRef.current = switcher; }}
-        onEdit={markNavigationOrEdit}
+        onEdit={cancelPendingDeleteSelection}
       />;
 
   return <div className="blitz-panel">
@@ -349,7 +331,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
       detail={detail}
       detailOpen={detailOpen}
       backLabel={labels.back}
-      onCloseDetail={() => { markNavigationOrEdit(); requestSwitch(() => { setDetailOpen(false); }); }}
+      onCloseDetail={() => { cancelPendingDeleteSelection(); requestSwitch(() => { setDetailOpen(false); }); }}
     />
     <ConfirmDialog
       opened={deleteIntent?.opened === true && deleteQuestion !== null}
