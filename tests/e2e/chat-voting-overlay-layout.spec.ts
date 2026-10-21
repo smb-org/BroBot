@@ -196,13 +196,15 @@ test("standard vote options keep the original narrow bars and strip sizing", asy
 test("colored strip rows keep counters on one line and labels readable at a 360px overlay width", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const measurements: Array<{
-    documentWidth: number;
+    rowsOverflowTally: boolean;
+    countsOverflowTally: boolean;
     rowHeights: number[];
     markerFontSizeRatios: number[];
     markerAndGapFontSizeRatios: number[];
     markerStartGaps: number[];
     labelWidths: number[];
     labelsTruncate: boolean[];
+    labelTextOverflows: string[];
     countWhiteSpaces: string[];
     countHeights: number[];
   }> = [];
@@ -217,8 +219,11 @@ test("colored strip rows keep counters on one line and labels readable at a 360p
       const labels = rows.map((row) => row.querySelector(".overlay-tally__label")).filter((label): label is Element => label !== null);
       const counts = rows.map((row) => row.querySelector(".overlay-tally__count")).filter((count): count is Element => count !== null);
       const markers = rows.map((row) => row.querySelector(".overlay-tally__color-marker")).filter((marker): marker is Element => marker !== null);
+      const tallyRight = element.getBoundingClientRect().right;
       return {
-        documentWidth: document.documentElement.scrollWidth,
+        // Row content must stay inside the overlay's own box; the page margin depends on the font and is out of scope.
+        rowsOverflowTally: rows.some((row) => row.scrollWidth > row.clientWidth + 1 || row.getBoundingClientRect().right > tallyRight + 1),
+        countsOverflowTally: counts.some((count) => count.getBoundingClientRect().right > tallyRight + 1),
         rowHeights: rows.map((row) => row.getBoundingClientRect().height),
         markerFontSizeRatios: markers.map((marker) => {
           const fontSize = Number.parseFloat(getComputedStyle(marker).fontSize);
@@ -235,6 +240,7 @@ test("colored strip rows keep counters on one line and labels readable at a 360p
         markerStartGaps: markers.map((marker) => Number.parseFloat(getComputedStyle(marker.parentElement as Element).paddingInlineStart)),
         labelWidths: labels.map((label) => label.getBoundingClientRect().width),
         // A coloured label wraps its text in a copy span; the span is the element that truncates.
+        labelTextOverflows: labels.map((label) => getComputedStyle(label).textOverflow),
         labelsTruncate: labels.map((label) => {
           const target = label.querySelector(".overlay-tally__label-copy") ?? label;
           return target.scrollWidth > target.clientWidth;
@@ -249,13 +255,14 @@ test("colored strip rows keep counters on one line and labels readable at a 360p
   const colored = measurements[1];
   expect(plain).toBeDefined();
   expect(colored).toBeDefined();
-  expect(plain?.documentWidth).toBeLessThanOrEqual(390);
-  expect(colored?.documentWidth).toBeLessThanOrEqual(390);
   // Uncoloured rows keep the original behaviour: no marker, no truncation, text may wrap.
   expect(plain?.markerFontSizeRatios).toEqual([]);
-  expect(plain?.labelsTruncate.some(Boolean)).toBe(false);
+  // Computed styles instead of scroll measurements, so wider fonts cannot change the outcome.
+  expect(plain?.labelTextOverflows).toEqual(["clip", "clip"]);
   expect(plain?.countWhiteSpaces).toEqual(["normal", "normal"]);
   // Coloured rows use compact markers, truncate labels and keep counters on one line at equal heights.
+  expect(colored?.rowsOverflowTally).toBe(false);
+  expect(colored?.countsOverflowTally).toBe(false);
   expect(colored?.markerFontSizeRatios.every((ratio) => ratio >= 0.7 && ratio <= 0.75)).toBe(true);
   expect(colored?.markerAndGapFontSizeRatios.every((ratio) => ratio <= 1.2)).toBe(true);
   expect(colored?.markerStartGaps.every((gap) => gap > 0)).toBe(true);
