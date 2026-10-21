@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import type { QueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
@@ -40,10 +41,12 @@ const parseUrl = (input: RequestInfo | URL): URL => input instanceof Request
   ? new URL(input.url)
   : input instanceof URL ? input : new URL(input, "https://brobot.example");
 
-const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Promise<void>, stalePatch = false, settingsConflict = false, patchDeleted = false, settingsPatchGate?: Promise<void>, failQuestionListAfterDelete = false, options: { failPostDeleteQuestionLists?: number; postDeleteQuestionListGate?: Promise<void> } = {}) => {
+const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Promise<void>, stalePatch = false, settingsConflict = false, patchDeleted = false, settingsPatchGate?: Promise<void>, failQuestionListAfterDelete = false, options: { failPostDeleteQuestionLists?: number; postDeleteQuestionListGate?: Promise<void>; failQuestionPage?: number; failQuestionPageRequests?: number } = {}) => {
   let questions = [...initialQuestions];
   let questionDeleted = false;
+  let shouldFailQuestionListAfterDelete = failQuestionListAfterDelete;
   let failedPostDeleteQuestionLists = 0;
+  let failedRequestedPageLists = 0;
   let postDeleteQuestionListRequests = 0;
   let finishPostDeleteQuestionList!: () => void;
   const postDeleteQuestionListFinished = new Promise<void>((resolve) => { finishPostDeleteQuestionList = resolve; });
@@ -83,12 +86,16 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
       return Promise.resolve(question === undefined ? jsonResponse({ error: "question_not_found" }, 404) : jsonResponse({ question }));
     }
     if (url.pathname.endsWith("/modules/blitz_round/questions") && method === "GET") {
-      if (failQuestionListAfterDelete && questionDeleted) return Promise.resolve(jsonResponse({ error: "question_list_failed" }, 503));
+      const page = Number(url.searchParams.get("page") ?? "1");
+      if (shouldFailQuestionListAfterDelete && questionDeleted) return Promise.resolve(jsonResponse({ error: "question_list_failed" }, 503));
       if (questionDeleted && failedPostDeleteQuestionLists < (options.failPostDeleteQuestionLists ?? 0)) {
         failedPostDeleteQuestionLists += 1;
         return Promise.resolve(jsonResponse({ error: "question_list_failed" }, 503));
       }
-      const page = Number(url.searchParams.get("page") ?? "1");
+      if (page === options.failQuestionPage && failedRequestedPageLists < (options.failQuestionPageRequests ?? 0)) {
+        failedRequestedPageLists += 1;
+        return Promise.resolve(jsonResponse({ error: "question_list_failed" }, 503));
+      }
       const needle = (url.searchParams.get("q") ?? "").trim().toLocaleLowerCase("de-DE");
       const matches = questions.filter((question) => `${question.prompt} ${question.answers.join(" ")}`.toLocaleLowerCase("de-DE").includes(needle));
       const start = (page - 1) * BLITZ_QUESTION_PAGE_SIZE;
@@ -143,10 +150,14 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
     return Promise.resolve(jsonResponse({ error: "not_found" }, 404));
   });
   vi.stubGlobal("fetch", requests);
-  return { requests, getQuestions: () => questions, deleteQuestion: (id: string) => { questions = questions.filter((question) => question.id !== id); }, getSettings: () => settings, getSettingsRevision: () => settingsRevision, submittedSettingsRevisions, submittedQuestionRevisions, submittedDeleteRevisions, postDeleteQuestionListFinished };
+  return { requests, getQuestions: () => questions, deleteQuestion: (id: string) => { questions = questions.filter((question) => question.id !== id); }, setFailQuestionListAfterDelete: (fails: boolean) => { shouldFailQuestionListAfterDelete = fails; }, getSettings: () => settings, getSettingsRevision: () => settingsRevision, submittedSettingsRevisions, submittedQuestionRevisions, submittedDeleteRevisions, postDeleteQuestionListFinished };
 };
 
-const mountPanel = () => renderWithQuery(<UiProvider><BlitzRoundPanel channelId="fictional_channel" language="en" /></UiProvider>);
+const mountPanel = (channelId = "fictional_channel", queryClient?: QueryClient) => renderWithQuery(
+  <UiProvider><BlitzRoundPanel channelId={channelId} language="en" /></UiProvider>,
+  undefined,
+  queryClient === undefined ? undefined : { queryClient },
+);
 
 afterEach(() => {
   cleanup();
@@ -571,6 +582,66 @@ describe("Blitz Round collection panel", () => {
         typeof query.queryKey[4] === "string" && query.queryKey[4].startsWith("questions:"),
     });
     expect(cachedLists.some((query) => view.queryClient.getQueryData<BlitzQuestionPage>(query.queryKey)?.questions.some((question) => question.id === sampleQuestion.id))).toBe(true);
+
+    api.setFailQuestionListAfterDelete(false);
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("MOON"));
+  });
+
+  it("keeps a deleted question excluded across a failed refresh and panel remount [protects=after deleting A with a failed refresh, remounting against the warm cache selects B and a successful refetch leaves B in the editor; fails_when=A is selected again after remount or remains in the editor after refetch; no_claim=the paginated cache and API responses use an in-memory HTTP stub]", async () => {
+    const channelId = "blitz_deleted_remount_channel";
+    const api = installPanelFetch([sampleQuestion, secondQuestion], undefined, false, false, false, undefined, true);
+    const firstMount = mountPanel(channelId);
+    await screen.findByRole("textbox", { name: "Word" });
+
+    fireEvent.click(document.querySelector(".page-header__overflow-trigger") as HTMLButtonElement);
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    const confirmation = await screen.findByRole("dialog", { name: "Delete this question?" });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Delete" }));
+    expect(await screen.findByText("The question pool could not be loaded.")).toBeInTheDocument();
+    expect(api.getQuestions()).toEqual([secondQuestion]);
+
+    firstMount.unmount();
+    const remount = mountPanel(channelId, firstMount.queryClient);
+    await screen.findByRole("button", { name: "Reload" });
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("MOON"));
+
+    api.setFailQuestionListAfterDelete(false);
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    await waitFor(() => expect(remount.queryClient.getQueryData<BlitzQuestionPage>([
+      "channel", channelId, "module", "blitz_round", "questions:1:",
+    ])?.questions).toEqual([secondQuestion]));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("MOON"));
+    expect(screen.queryByRole("button", { name: /Word scramble.*CLOUD/u })).not.toBeInTheDocument();
+    remount.unmount();
+  });
+
+  it("shows recovery and keeps previous-page navigation after an uncached page fails [protects=with 26 questions, a failed first request for page 2 shows Reload while Previous stays enabled and can return to page 1; fails_when=page 1 silently replaces the failed request and hides Reload or disables Previous; no_claim=the paginated API and one failed page response use an in-memory HTTP stub]", async () => {
+    const questions = Array.from({ length: 26 }, (_, index): BlitzQuestion => ({
+      ...sampleQuestion,
+      id: `fictional-question-${String(index + 1).padStart(2, "0")}`,
+      kind: "quiz",
+      prompt: `Which planet is number ${String(index + 1)}?`,
+      answers: ["Saturn"],
+    }));
+    installPanelFetch(questions, undefined, false, false, false, undefined, false, {
+      failQuestionPage: 2,
+      failQuestionPageRequests: 1,
+    });
+    mountPanel();
+    await screen.findByRole("button", { name: /Which planet is number 1\?/u });
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+
+    expect(await screen.findByText("The question pool could not be loaded.")).toBeInTheDocument();
+    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Previous page" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Reload" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    await screen.findByRole("button", { name: /Which planet is number 26\?/u });
+    fireEvent.click(screen.getByRole("button", { name: "Previous page" }));
+    expect(await screen.findByText("Page 1 of 2")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Which planet is number 1\?/u })).toBeInTheDocument();
   });
 
   it("keeps a saved question revision after a delayed delete refresh [protects=deleting A, saving B during its delayed list refresh, and reselecting B preserves B's saved contents and revision; fails_when=the delayed response overwrites B's revision so the next save conflicts; no_claim=the stale response and successful writes are simulated by an in-memory HTTP stub]", async () => {

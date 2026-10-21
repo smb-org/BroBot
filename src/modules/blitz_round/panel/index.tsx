@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactElement } from "react";
 
 import { moduleQueryKey, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import {
@@ -19,6 +19,10 @@ import { BLITZ_TEMPLATE_VARIABLES } from "../contracts/template-variables";
 import "./panel.css";
 
 const NEW_QUESTION = "__new_blitz_question__";
+type DashboardQueryClient = ReturnType<typeof useDashboardQueryClient>;
+const EMPTY_DELETED_QUESTION_IDS: ReadonlySet<string> = new Set();
+const deletedQuestionIdsByChannel = new Map<string, ReadonlySet<string>>();
+const deletedQuestionIdSubscribers = new Map<string, Set<() => void>>();
 
 interface Draft {
   kind: BlitzQuestionKind;
@@ -35,6 +39,79 @@ const fromQuestion = (question: BlitzQuestion | null): Draft => question === nul
 const isQuestionListQuery = (channelId: string, query: { queryKey: readonly unknown[] }): boolean =>
   query.queryKey[0] === "channel" && query.queryKey[1] === channelId && query.queryKey[2] === "module" &&
   query.queryKey[3] === "blitz_round" && typeof query.queryKey[4] === "string" && query.queryKey[4].startsWith("questions:");
+
+const getDeletedQuestionIds = (channelId: string): ReadonlySet<string> => deletedQuestionIdsByChannel.get(channelId) ?? EMPTY_DELETED_QUESTION_IDS;
+
+const subscribeToDeletedQuestionIds = (channelId: string, subscriber: () => void): (() => void) => {
+  let subscribers = deletedQuestionIdSubscribers.get(channelId);
+  if (subscribers === undefined) {
+    subscribers = new Set();
+    deletedQuestionIdSubscribers.set(channelId, subscribers);
+  }
+  subscribers.add(subscriber);
+  const channelSubscribers = subscribers;
+  return () => {
+    channelSubscribers.delete(subscriber);
+    if (channelSubscribers.size === 0) deletedQuestionIdSubscribers.delete(channelId);
+  };
+};
+
+const updateDeletedQuestionIds = (channelId: string, next: ReadonlySet<string>): void => {
+  const current = getDeletedQuestionIds(channelId);
+  if (next.size === current.size && [...next].every((questionId) => current.has(questionId))) return;
+  if (next.size === 0) deletedQuestionIdsByChannel.delete(channelId);
+  else deletedQuestionIdsByChannel.set(channelId, new Set(next));
+  deletedQuestionIdSubscribers.get(channelId)?.forEach((subscriber) => subscriber());
+};
+
+const recordDeletedQuestion = (channelId: string, questionId: string): void => {
+  updateDeletedQuestionIds(channelId, new Set([...getDeletedQuestionIds(channelId), questionId]));
+};
+
+const reconcileDeletedQuestions = (channelId: string, fetchedQuestions: readonly BlitzQuestion[]): void => {
+  const fetchedIds = new Set(fetchedQuestions.map((question) => question.id));
+  const remaining = new Set([...getDeletedQuestionIds(channelId)].filter((questionId) => fetchedIds.has(questionId)));
+  updateDeletedQuestionIds(channelId, remaining);
+};
+
+const questionListSearch = (query: { queryKey: readonly unknown[] }): string | null => {
+  const listKey = query.queryKey[4];
+  if (typeof listKey !== "string" || !listKey.startsWith("questions:")) return null;
+  const searchSeparator = listKey.indexOf(":", "questions:".length);
+  return searchSeparator === -1 ? null : listKey.slice(searchSeparator + 1);
+};
+
+const questionListPage = (query: { queryKey: readonly unknown[] }): number => {
+  const listKey = query.queryKey[4];
+  if (typeof listKey !== "string" || !listKey.startsWith("questions:")) return Number.MAX_SAFE_INTEGER;
+  const searchSeparator = listKey.indexOf(":", "questions:".length);
+  return Number(listKey.slice("questions:".length, searchSeparator === -1 ? undefined : searchSeparator));
+};
+
+const lastKnownQuestionTotal = (channelId: string, search: string, queryClient: DashboardQueryClient): number | undefined => {
+  let newestTotal: number | undefined;
+  let newestTimestamp = -1;
+  queryClient.getQueryCache().findAll({ predicate: (query) => isQuestionListQuery(channelId, query) && questionListSearch(query) === search })
+    .forEach((query) => {
+      const data = query.state.data as BlitzQuestionPage | undefined;
+      if (data === undefined || !Array.isArray(data.questions) || typeof data.total !== "number") return;
+      if (query.state.dataUpdatedAt < newestTimestamp) return;
+      newestTotal = data.total;
+      newestTimestamp = query.state.dataUpdatedAt;
+    });
+  return newestTotal;
+};
+
+const firstRemainingQuestion = (channelId: string, search: string, queryClient: DashboardQueryClient, excludedIds: ReadonlySet<string>): BlitzQuestion | null => {
+  const cachedLists = queryClient.getQueryCache().findAll({ predicate: (query) => isQuestionListQuery(channelId, query) && questionListSearch(query) === search });
+  cachedLists.sort((left, right) => questionListPage(left) - questionListPage(right));
+  for (const query of cachedLists) {
+    const data = query.state.data as BlitzQuestionPage | undefined;
+    const question = data?.questions.find((candidate) => !excludedIds.has(candidate.id));
+    if (question !== undefined) return question;
+  }
+  return null;
+};
 
 const questionInput = (draft: Draft): BlitzQuestionInput | null => {
   const answers = draft.kind === "scramble" ? [draft.prompt.toLocaleUpperCase("de-DE")] : draft.answers;
@@ -62,36 +139,54 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   const [deletePending, setDeletePending] = useState(false);
   const [deleteError, setDeleteError] = useState<string | undefined>();
   const [deleteFailure, setDeleteFailure] = useState<"conflict" | "deleted" | null>(null);
-  const [deletedQuestionIds, setDeletedQuestionIds] = useState<ReadonlySet<string>>(() => new Set());
+  const subscribeToDeletedIds = useCallback((subscriber: () => void) => subscribeToDeletedQuestionIds(channelId, subscriber), [channelId]);
+  const readDeletedIds = useCallback(() => getDeletedQuestionIds(channelId), [channelId]);
+  const deletedQuestionIds = useSyncExternalStore(subscribeToDeletedIds, readDeletedIds, () => EMPTY_DELETED_QUESTION_IDS);
   const pendingDeleteSelection = useRef<string | null>(null);
   const switchRef = useRef<((proceed: () => void) => void) | null>(null);
   const pageQuery = useModuleQuery(channelId, "blitz_round", `questions:${String(page)}:${search}`, (signal) => loadBlitzQuestions(channelId, page, search, signal));
-  const maxPage = Math.max(1, Math.ceil((pageQuery.data?.total ?? 0) / BLITZ_QUESTION_PAGE_SIZE));
-  const effectivePage = Math.min(page, maxPage);
+  const knownTotal = pageQuery.data?.total ?? lastKnownQuestionTotal(channelId, search, queryClient);
+  const maxPage = knownTotal === undefined ? undefined : Math.max(1, Math.ceil(knownTotal / BLITZ_QUESTION_PAGE_SIZE));
+  const effectivePage = maxPage === undefined ? page : Math.min(page, maxPage);
   const questionsQuery = useModuleQuery(channelId, "blitz_round", `questions:${String(effectivePage)}:${search}`, (signal) => loadBlitzQuestions(channelId, effectivePage, search, signal));
   const settingsQuery = useModuleQuery(channelId, "blitz_round", "settings", (signal) => loadBlitzSettings(channelId, signal));
   const data = questionsQuery.data;
   const questions = (data?.questions ?? []).filter((question) => !deletedQuestionIds.has(question.id));
 
   useEffect(() => {
-    if (deletedQuestionIds.size === 0) return;
-    const removeRefetchedDeletes = (): void => {
-      const cachedQuestionIds = new Set<string>();
-      queryClient.getQueryCache().findAll({ predicate: (query) => isQuestionListQuery(channelId, query) }).forEach((query) => {
-        const cached = query.state.data as BlitzQuestionPage | undefined;
-        if (Array.isArray(cached?.questions)) cached.questions.forEach((question) => cachedQuestionIds.add(question.id));
-      });
-      setDeletedQuestionIds((current) => {
-        const remaining = new Set([...current].filter((questionId) => cachedQuestionIds.has(questionId)));
-        return remaining.size === current.size ? current : remaining;
-      });
-    };
-    removeRefetchedDeletes();
-    return queryClient.getQueryCache().subscribe(removeRefetchedDeletes);
-  }, [channelId, deletedQuestionIds, queryClient]);
+    return queryClient.getQueryCache().subscribe((event) => {
+      if (event.type !== "updated" || event.action.type !== "success" || event.action.manual) return;
+      if (!isQuestionListQuery(channelId, event.query) || questionListSearch(event.query) !== search) return;
+      const refreshed = event.query.state.data as BlitzQuestionPage | undefined;
+      if (!Array.isArray(refreshed?.questions)) return;
+
+      const excludedIds = getDeletedQuestionIds(channelId);
+      if (selectedId !== null && excludedIds.has(selectedId) && !refreshed.questions.some((question) => question.id === selectedId)) {
+        const nextQuestion = firstRemainingQuestion(channelId, search, queryClient, excludedIds);
+        const proceed = (): void => {
+          setDeleteFailure(null);
+          setShowSettings(false);
+          if (nextQuestion === null) {
+            setSelectedId(NEW_QUESTION);
+            setNewQuestionSession((session) => session + 1);
+            setSelectedQuestion(null);
+            setDetailOpen(true);
+          } else {
+            setSelectedId(nextQuestion.id);
+            setSelectedQuestion(nextQuestion);
+          }
+        };
+        setDeleteFailure("deleted");
+        if (switchRef.current === null) proceed();
+        else switchRef.current(proceed);
+      }
+
+      if (excludedIds.size > 0) reconcileDeletedQuestions(channelId, refreshed.questions);
+    });
+  }, [channelId, deletedQuestionIds, queryClient, search, selectedId]);
 
   if (selectedId === null && data !== undefined) {
-    const first = data.questions[0] ?? null;
+    const first = questions[0] ?? null;
     setSelectedId(first?.id ?? NEW_QUESTION);
     setSelectedQuestion(first);
   }
@@ -231,7 +326,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
       }
 
       setDeleteIntent(null);
-      setDeletedQuestionIds((current) => new Set(current).add(deletingId));
+      recordDeletedQuestion(channelId, deletingId);
       if (selectedIdRef.current === deletingId) {
         const currentSelection = questions.find((question) => question.id !== deletingId && !deletedQuestionIds.has(question.id));
         if (currentSelection === undefined) {
@@ -253,7 +348,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   };
 
   const retryQuestionList = (): void => {
-    void questionsQuery.refetch();
+    void pageQuery.refetch();
   };
 
   const toolbar = <div className="blitz-panel__toolbar">
@@ -263,15 +358,15 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
     </div>
     <div className="blitz-panel__pagination" aria-label={labels.questions}>
       <Button size="compact" icon="collapse" iconOnly ariaLabel={labels.previousPage} disabled={effectivePage <= 1} onClick={() => { cancelPendingDeleteSelection(); setPage(Math.max(1, effectivePage - 1)); }} />
-      <span>{labels.pageCount(effectivePage, maxPage)}</span>
-      <Button size="compact" disabled={effectivePage >= maxPage} onClick={() => { cancelPendingDeleteSelection(); setPage(Math.min(maxPage, effectivePage + 1)); }}>{labels.nextPage}</Button>
-      <span className="blitz-panel__count">{labels.questionCount(pageQuery.data?.total ?? 0)}</span>
+      <span>{labels.pageCount(effectivePage, maxPage ?? effectivePage)}</span>
+      <Button size="compact" disabled={maxPage === undefined || effectivePage >= maxPage} onClick={() => { cancelPendingDeleteSelection(); setPage(Math.min(maxPage ?? effectivePage, effectivePage + 1)); }}>{labels.nextPage}</Button>
+      <span className="blitz-panel__count">{labels.questionCount(knownTotal ?? 0)}</span>
     </div>
   </div>;
 
   const list = questionsQuery.isPending && data === undefined
     ? <div className="blitz-panel__list-placeholder" aria-hidden="true"><span /><span /><span /><span /></div>
-    : questionsQuery.isError
+    : pageQuery.isError || questionsQuery.isError
       ? <div className="blitz-panel__empty"><p>{labels.loadError}</p><Button onClick={retryQuestionList}>{labels.retry}</Button></div>
       : questions.length === 0
         ? <div className="blitz-panel__empty"><p>{labels.emptyHint}</p></div>
