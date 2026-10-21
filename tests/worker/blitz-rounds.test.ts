@@ -565,6 +565,190 @@ describe("blitz answers in the channel Durable Object", () => {
     await expect(object.pointBalance("blitz_round", "viewer_one")).resolves.toBe(50);
   });
 
+  it("retries a result after a formatter-side D1 failure without marking it delivered [protects=a formatting failure remains pending, consumes one bounded attempt, and the next alarm sends the committed result once; fails_when=delivery becomes delivered before transport, the retry is not sent once, or settlement is lost; no_claim=uses the real ChannelObject with an injected D1-style formatter rejection and mocked chat transport, without claiming Twitch delivery]", async () => {
+    const channelId = `blitz-format-failure-${crypto.randomUUID()}`;
+    const roundId = "blitz-format-failure";
+    const settlement = { kind: "blitz", params: { prize: 50 } };
+    await insertPointChannel(channelId);
+    const object = blitzObject(pointObject(channelId));
+    const sendChat = vi.fn(() => Promise.resolve({ sent: true, retryable: false, reason: null, delivery: "delivered" as const }));
+    const formatResult = vi.spyOn(blitzRoundModule, "formatPointRoundResult")
+      .mockRejectedValueOnce(new Error("injected_d1_failure_during_result_formatting"))
+      .mockResolvedValue({ text: "Correct: CLOUD" });
+
+    await runPointObject(object, async (target, state) => {
+      stubPointRoundChat(target, sendChat);
+      await target.openGameRound("blitz_round", roundId, {
+        durationS: 60,
+        announceText: "Blitz round starts",
+        answer: "CLOUD",
+        settlement,
+      });
+      await target.markGameRoundAnnounced("blitz_round", roundId, Date.now() + 60_000, `round:${roundId}`);
+      await blitzObject(target).answerGameRound("blitz_round", roundId, "msg:format-failure", "viewer_one", "frostfern", 5, Date.now());
+      await deferPointAlarmWithin(state);
+    });
+    await object.resolveGameRound("blitz_round", roundId, settlement);
+
+    const failedAt = Date.now();
+    await expect(forcePointAlarm(object, roundId)).resolves.toBe(true);
+    const afterFailure = await runPointObject(object, (_target, state) => ({
+      round: state.storage.sql.exec<{ resolve_delivery_state: string; resolve_delivery_attempts: number; data_json: string }>(
+        "SELECT resolve_delivery_state, resolve_delivery_attempts, data_json FROM game_rounds WHERE round_id = ?", roundId,
+      ).one(),
+      settlement: (JSON.parse(state.storage.sql.exec<{ data_json: string }>(
+        "SELECT data_json FROM game_rounds WHERE round_id = ?", roundId,
+      ).one().data_json) as { settlement: unknown }).settlement,
+      operationCount: state.storage.sql.exec<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM point_operations WHERE operation_id = ?", `round:${roundId}:resolve`,
+      ).one().count,
+      alarm: state.storage.kv.get<Record<string, { deadline: number; handler: string; revision: number }>>("channel:alarm_schedule")?.[`points:round:${roundId}`] ?? null,
+    }));
+    expect(afterFailure).toMatchObject({
+      round: { resolve_delivery_state: "pending", resolve_delivery_attempts: 1 },
+      settlement,
+      operationCount: 1,
+      alarm: { deadline: failedAt + POINTS_ANNOUNCE_RETRY_MS, handler: "host:points_round" },
+    });
+    expect(afterFailure.alarm?.revision).toBeGreaterThan(0);
+    expect(sendChat).not.toHaveBeenCalled();
+
+    vi.setSystemTime(failedAt + POINTS_ANNOUNCE_RETRY_MS);
+    await forcePointAlarm(object, roundId);
+    const afterRetry = await runPointObject(object, (_target, state) => state.storage.sql.exec<{
+      resolve_delivery_state: string;
+      resolve_delivery_attempts: number;
+      operation_count: number;
+    }>(
+      `SELECT resolve_delivery_state, resolve_delivery_attempts,
+              (SELECT COUNT(*) FROM point_operations WHERE operation_id = ?) AS operation_count
+         FROM game_rounds WHERE round_id = ?`,
+      `round:${roundId}:resolve`, roundId,
+    ).one());
+
+    expect(afterRetry).toEqual({ resolve_delivery_state: "delivered", resolve_delivery_attempts: 2, operation_count: 1 });
+    expect(formatResult).toHaveBeenCalledTimes(2);
+    expect(sendChat).toHaveBeenCalledOnce();
+    await expect(object.pointBalance("blitz_round", "viewer_one")).resolves.toBe(50);
+  });
+
+  it("retries stale result delivery when its transport claim is absent [protects=an expired sending row without a persisted transport claim returns to bounded retry and sends after recovery; fails_when=recovery marks the result delivered without a claim or settlement is lost; no_claim=uses the real ChannelObject with a manually persisted SQLite sending row, confirms the send through a mock, and creates no transport claim fixture]", async () => {
+    const channelId = `blitz-result-no-claim-${crypto.randomUUID()}`;
+    const roundId = "blitz-result-no-claim";
+    const settlement = { kind: "blitz", params: { prize: 50 } };
+    await insertPointChannel(channelId);
+    const object = blitzObject(pointObject(channelId));
+    const sendChat = vi.fn(() => Promise.resolve({ sent: true, retryable: false, reason: null, delivery: "delivered" as const }));
+    vi.spyOn(blitzRoundModule, "formatPointRoundResult").mockResolvedValue({ text: "Correct: CLOUD" });
+
+    await runPointObject(object, async (target, state) => {
+      stubPointRoundChat(target, sendChat);
+      await target.openGameRound("blitz_round", roundId, {
+        durationS: 60,
+        announceText: "Blitz round starts",
+        answer: "CLOUD",
+        settlement,
+      });
+      await target.markGameRoundAnnounced("blitz_round", roundId, Date.now() + 60_000, `round:${roundId}`);
+      await blitzObject(target).answerGameRound("blitz_round", roundId, "msg:no-claim", "viewer_one", "frostfern", 5, Date.now());
+      await deferPointAlarmWithin(state);
+    });
+    await object.resolveGameRound("blitz_round", roundId, settlement);
+    await runPointObject(object, (_target, state) => {
+      state.storage.sql.exec(
+        `UPDATE game_rounds SET resolve_delivery_state = 'sending', resolve_delivery_attempts = 1,
+                resolve_delivery_last_attempt_at = ? WHERE round_id = ?`,
+        Date.now() - 60_000, roundId,
+      );
+    });
+
+    const recoveredAt = Date.now();
+    await forcePointAlarm(object, roundId);
+    const afterRecovery = await runPointObject(object, (_target, state) => ({
+      round: state.storage.sql.exec<{ resolve_delivery_state: string; resolve_delivery_attempts: number }>(
+        "SELECT resolve_delivery_state, resolve_delivery_attempts FROM game_rounds WHERE round_id = ?", roundId,
+      ).one(),
+      operationCount: state.storage.sql.exec<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM point_operations WHERE operation_id = ?", `round:${roundId}:resolve`,
+      ).one().count,
+      alarm: state.storage.kv.get<Record<string, { deadline: number }>>("channel:alarm_schedule")?.[`points:round:${roundId}`] ?? null,
+    }));
+    expect(afterRecovery).toMatchObject({
+      round: { resolve_delivery_state: "pending" },
+      operationCount: 1,
+      alarm: { deadline: recoveredAt + POINTS_ANNOUNCE_RETRY_MS, handler: "host:points_round" },
+    });
+    expect(sendChat).not.toHaveBeenCalled();
+
+    vi.setSystemTime(recoveredAt + POINTS_ANNOUNCE_RETRY_MS);
+    await forcePointAlarm(object, roundId);
+    await expect(runPointObject(object, (_target, state) => state.storage.sql.exec<{
+      resolve_delivery_state: string;
+      resolve_delivery_attempts: number;
+      operation_count: number;
+    }>(
+      `SELECT resolve_delivery_state, resolve_delivery_attempts,
+              (SELECT COUNT(*) FROM point_operations WHERE operation_id = ?) AS operation_count
+         FROM game_rounds WHERE round_id = ?`,
+      `round:${roundId}:resolve`, roundId,
+    ).one())).resolves.toEqual({ resolve_delivery_state: "delivered", resolve_delivery_attempts: 2, operation_count: 1 });
+    expect(sendChat).toHaveBeenCalledOnce();
+    await expect(object.pointBalance("blitz_round", "viewer_one")).resolves.toBe(50);
+  });
+
+  it("treats only a stale persisted result transport claim as ambiguous delivery [protects=a persisted sending transport claim may complete stale result delivery while retaining settlement; fails_when=a stale row without a transport claim is treated as delivered or a claimed ambiguous send is duplicated; no_claim=uses a real ChannelObject and SQLite row with an explicit send-claim fixture and no second transport call]", async () => {
+    const channelId = `blitz-result-stale-claim-${crypto.randomUUID()}`;
+    const roundId = "blitz-result-stale-claim";
+    const settlement = { kind: "blitz", params: { prize: 50 } };
+    await insertPointChannel(channelId);
+    const object = blitzObject(pointObject(channelId));
+    const sendChat = vi.fn(() => Promise.resolve({ sent: true, retryable: false, reason: null, delivery: "delivered" as const }));
+    vi.spyOn(blitzRoundModule, "formatPointRoundResult").mockResolvedValue({ text: "Correct: CLOUD" });
+
+    await runPointObject(object, async (target, state) => {
+      stubPointRoundChat(target, sendChat);
+      await target.openGameRound("blitz_round", roundId, {
+        durationS: 60,
+        announceText: "Blitz round starts",
+        answer: "CLOUD",
+        settlement,
+      });
+      await target.markGameRoundAnnounced("blitz_round", roundId, Date.now() + 60_000, `round:${roundId}`);
+      await blitzObject(target).answerGameRound("blitz_round", roundId, "msg:stale-claim", "viewer_one", "frostfern", 5, Date.now());
+      await deferPointAlarmWithin(state);
+    });
+    await object.resolveGameRound("blitz_round", roundId, settlement);
+    await runPointObject(object, (_target, state) => {
+      const claimAt = Date.now() - 60_000;
+      state.storage.sql.exec(
+        `UPDATE game_rounds SET resolve_delivery_state = 'sending', resolve_delivery_attempts = 1,
+                resolve_delivery_last_attempt_at = ? WHERE round_id = ?`,
+        claimAt, roundId,
+      );
+      state.storage.kv.put("module_alarm:send_claims", {
+        [`round:${roundId}:resolve`]: { status: "sending", at: claimAt },
+      });
+    });
+
+    await forcePointAlarm(object, roundId);
+    const recovered = await runPointObject(object, (_target, state) => ({
+      round: state.storage.sql.exec<{ resolve_delivery_state: string; resolve_delivery_attempts: number }>(
+        "SELECT resolve_delivery_state, resolve_delivery_attempts FROM game_rounds WHERE round_id = ?", roundId,
+      ).one(),
+      operationCount: state.storage.sql.exec<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM point_operations WHERE operation_id = ?", `round:${roundId}:resolve`,
+      ).one().count,
+      alarm: state.storage.kv.get<Record<string, unknown>>("channel:alarm_schedule")?.[`points:round:${roundId}`] ?? null,
+    }));
+    expect(recovered).toEqual({
+      round: { resolve_delivery_state: "delivered", resolve_delivery_attempts: 1 },
+      operationCount: 1,
+      alarm: null,
+    });
+    expect(sendChat).not.toHaveBeenCalled();
+    await expect(object.pointBalance("blitz_round", "viewer_one")).resolves.toBe(50);
+  });
+
   it("parks a permanently rejected result after one attempt so competing automated output can proceed [protects=an AutoMod-style result rejection is parked with its settlement and alarm cleared so the next automated output can claim the shared allowance; fails_when=the result remains pending, retries, loses its settlement, retains an alarm, or blocks the next allowance claim; no_claim=uses a real ChannelObject and DO storage with a mocked chat transport and does not claim Twitch delivered either line]", async () => {
     const channelId = `blitz-permanent-result-${crypto.randomUUID()}`;
     const roundId = "blitz-permanent-result";

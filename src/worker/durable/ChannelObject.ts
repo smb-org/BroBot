@@ -199,6 +199,7 @@ import {
   pointRanking,
   pointRoundAlarmKey,
   pointRoundDeliveryGateIsCurrentSync,
+  pointRoundResolutionDeliverySync,
   pointRoundRefundRequests,
   pointRoundRow,
   pendingPointRoundCancellations,
@@ -206,6 +207,7 @@ import {
   pointSummary,
   recoverablePointRounds,
   recordPointAnnouncementSync,
+  recordPointRoundResolutionPreparationFailureSync,
   recordPointRoundResolutionDeliverySync,
   resolvePointRoundSync,
   settlementFromRoundData,
@@ -4076,20 +4078,57 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   private async deliverPointRoundResult(roundId: string): Promise<void> {
-    const attempt = this.ctx.storage.transactionSync(() =>
-      beginPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, Date.now()));
-    if (attempt.outcome === "delivered" || attempt.outcome === "suppressed" || attempt.outcome === "failed" || attempt.outcome === "ignored") {
+    const initialRound = pointRoundRow(this.ctx.storage.sql, roundId);
+    if (initialRound?.state === "resolved" && initialRound.resolve_delivery_state === "sending") {
+      const claim = await readModuleAlarmSendClaim(this.ctx.storage, `round:${roundId}:resolve`);
+      const now = Date.now();
+      if (claim !== null) {
+        if (claim.status === "sent" || now - claim.at >= POINTS_ANNOUNCE_AMBIGUOUS_MS) {
+          this.ctx.storage.transactionSync(() => {
+            recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, "delivered");
+            this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
+          });
+          await this.scheduleEarliestAlarm();
+          return;
+        }
+        this.ctx.storage.transactionSync(() => {
+          if (claim.at !== initialRound.resolve_delivery_last_attempt_at) {
+            this.ctx.storage.sql.exec(
+              `UPDATE game_rounds SET resolve_delivery_last_attempt_at = ?
+                WHERE round_id = ? AND state = 'resolved' AND resolve_delivery_state = 'sending'`,
+              claim.at,
+              roundId,
+            );
+          }
+          this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), claim.at + POINTS_ANNOUNCE_AMBIGUOUS_MS);
+        });
+        await this.scheduleEarliestAlarm();
+        return;
+      }
+      const retryAt = now + POINTS_ANNOUNCE_RETRY_MS;
+      this.ctx.storage.transactionSync(() => {
+        const state = recordPointRoundResolutionPreparationFailureSync(this.ctx.storage.sql, roundId, now);
+        if (state === "pending") this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), retryAt);
+        else this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
+      });
+      await this.scheduleEarliestAlarm();
+      return;
+    }
+
+    const prepared = this.ctx.storage.transactionSync(() =>
+      pointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId));
+    if (prepared.outcome === "delivered" || prepared.outcome === "suppressed" || prepared.outcome === "failed" || prepared.outcome === "ignored") {
       this.ctx.storage.transactionSync(() => { this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId)); });
       await this.scheduleEarliestAlarm();
       return;
     }
-    if (attempt.outcome === "pending" || attempt.round === null) {
-      const retryAt = (attempt.round?.resolve_delivery_last_attempt_at ?? Date.now()) + POINTS_ANNOUNCE_AMBIGUOUS_MS;
+    if (prepared.outcome === "pending" || prepared.round === null) {
+      const retryAt = (prepared.round?.resolve_delivery_last_attempt_at ?? Date.now()) + POINTS_ANNOUNCE_AMBIGUOUS_MS;
       this.ctx.storage.transactionSync(() => { this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), retryAt); });
       await this.scheduleEarliestAlarm();
       return;
     }
-    const module = MODULES.find((candidate) => candidate.id === attempt.round?.module_id);
+    const module = MODULES.find((candidate) => candidate.id === prepared.round?.module_id);
     const formatter = module?.formatPointRoundResult;
     if (module === undefined || formatter === undefined) {
       this.ctx.storage.transactionSync(() => {
@@ -4103,26 +4142,33 @@ export class ChannelObject extends DurableObject<Env> {
       key: "round-result",
       handle: () => Promise.resolve(undefined),
     };
-    const context = this.moduleAlarmContext(
-      module.id,
-      registration,
-      createModuleExternalFetchBudget(),
-    );
-    const roundData = JSON.parse(attempt.round.data_json) as unknown;
-    const result: ModulePointRoundResult = {
-      roundId,
-      data: roundData,
-      result: attempt.result,
-      resolvedAt: attempt.round.resolved_at ?? new Date().toISOString(),
-    };
-    const formatted = await formatter(context, result);
-    const rowIsCurrent = async (): Promise<boolean> => {
-      await this.reconcilePointModuleActivation(module.id, true);
-      const current = pointRoundRow(this.ctx.storage.sql, roundId);
-      return current !== null && current.state === "resolved" && current.resolve_delivery_state === "sending" &&
-        current.resolve_delivery_attempts === attempt.round?.resolve_delivery_attempts &&
-        pointRoundDeliveryGateIsCurrentSync(this.ctx.storage.sql, current);
-    };
+    let context: ModuleAlarmContext;
+    let formatted: Awaited<ReturnType<typeof formatter>>;
+    try {
+      context = this.moduleAlarmContext(
+        module.id,
+        registration,
+        createModuleExternalFetchBudget(),
+      );
+      const roundData = JSON.parse(prepared.round.data_json) as unknown;
+      const result: ModulePointRoundResult = {
+        roundId,
+        data: roundData,
+        result: prepared.result,
+        resolvedAt: prepared.round.resolved_at ?? new Date().toISOString(),
+      };
+      formatted = await formatter(context, result);
+    } catch (error) {
+      console.error(`Point round ${roundId} result preparation failed.`, error);
+      const failedAt = Date.now();
+      this.ctx.storage.transactionSync(() => {
+        const state = recordPointRoundResolutionPreparationFailureSync(this.ctx.storage.sql, roundId, failedAt);
+        if (state === "pending") this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), failedAt + POINTS_ANNOUNCE_RETRY_MS);
+        else this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
+      });
+      await this.scheduleEarliestAlarm();
+      return;
+    }
     if (formatted === null || formatted.text.length === 0) {
       this.ctx.storage.transactionSync(() => {
         recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, "delivered");
@@ -4131,13 +4177,66 @@ export class ChannelObject extends DurableObject<Env> {
       await this.scheduleEarliestAlarm();
       return;
     }
-    const delivery = await context.sendChat(
-      formatted.text,
-      `round:${roundId}:resolve`,
-      formatted.attributions,
-      () => Promise.resolve(rowIsCurrent()),
-      formatted.target,
-    );
+
+    const attemptAt = Date.now();
+    const attempt = this.ctx.storage.transactionSync(() => {
+      const started = beginPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, attemptAt);
+      if (started.outcome === "attempt") {
+        this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), attemptAt + POINTS_ANNOUNCE_AMBIGUOUS_MS);
+      }
+      return started;
+    });
+    if (attempt.outcome === "delivered" || attempt.outcome === "suppressed" || attempt.outcome === "failed" || attempt.outcome === "ignored") {
+      this.ctx.storage.transactionSync(() => { this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId)); });
+      await this.scheduleEarliestAlarm();
+      return;
+    }
+    if (attempt.outcome === "pending" || attempt.round === null) {
+      const retryAt = (attempt.round?.resolve_delivery_last_attempt_at ?? Date.now()) + POINTS_ANNOUNCE_AMBIGUOUS_MS;
+      this.ctx.storage.transactionSync(() => { this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), retryAt); });
+      await this.scheduleEarliestAlarm();
+      return;
+    }
+    const rowIsCurrent = async (): Promise<boolean> => {
+      await this.reconcilePointModuleActivation(module.id, true);
+      const current = pointRoundRow(this.ctx.storage.sql, roundId);
+      return current !== null && current.state === "resolved" && current.resolve_delivery_state === "sending" &&
+        current.resolve_delivery_attempts === attempt.round?.resolve_delivery_attempts &&
+        pointRoundDeliveryGateIsCurrentSync(this.ctx.storage.sql, current);
+    };
+    let delivery: Awaited<ReturnType<ModuleAlarmContext["sendChat"]>>;
+    try {
+      await this.scheduleEarliestAlarm();
+      delivery = await context.sendChat(
+        formatted.text,
+        `round:${roundId}:resolve`,
+        formatted.attributions,
+        () => Promise.resolve(rowIsCurrent()),
+        formatted.target,
+      );
+    } catch (error) {
+      const claim = await readModuleAlarmSendClaim(this.ctx.storage, `round:${roundId}:resolve`);
+      if (claim === null) {
+        console.error(`Point round ${roundId} result send failed before a transport claim.`, error);
+        const failedAt = Date.now();
+        this.ctx.storage.transactionSync(() => {
+          const state = recordPointRoundResolutionPreparationFailureSync(this.ctx.storage.sql, roundId, failedAt);
+          if (state === "pending") this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), failedAt + POINTS_ANNOUNCE_RETRY_MS);
+          else this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
+        });
+      } else if (claim.status === "sent") {
+        this.ctx.storage.transactionSync(() => {
+          recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, "delivered");
+          this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
+        });
+      } else {
+        this.ctx.storage.transactionSync(() => {
+          this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), claim.at + POINTS_ANNOUNCE_AMBIGUOUS_MS);
+        });
+      }
+      await this.scheduleEarliestAlarm();
+      return;
+    }
     const delivered = delivery.sent || delivery.delivery === "delivered";
     const permanentlySuppressed = delivery.reason === "module_disabled";
     const deliveryStatus = permanentlySuppressed ? "suppressed" : delivered ? "delivered" : delivery.delivery;

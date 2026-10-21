@@ -1662,6 +1662,32 @@ export const beginPointRoundResolutionDeliverySync = (sql: PointsSql, roundId: s
   result: unknown;
   outcome: "attempt" | "pending" | "delivered" | "suppressed" | "failed" | "ignored";
 } => {
+  const prepared = pointRoundResolutionDeliverySync(sql, roundId);
+  if (prepared.outcome !== "ready") {
+    return { round: prepared.round, result: prepared.result, outcome: prepared.outcome };
+  }
+  sql.exec(
+    `UPDATE game_rounds
+        SET resolve_delivery_state = 'sending',
+            resolve_delivery_attempts = resolve_delivery_attempts + 1,
+            resolve_delivery_last_attempt_at = ?
+      WHERE round_id = ? AND state = 'resolved' AND resolve_delivery_state = 'pending'`,
+    now,
+    roundId,
+  );
+  const round = pointRoundRow(sql, roundId);
+  return {
+    round,
+    result: prepared.result,
+    outcome: "attempt",
+  };
+};
+
+export function pointRoundResolutionDeliverySync(sql: PointsSql, roundId: string): {
+  round: RoundRow | null;
+  result: unknown;
+  outcome: "ready" | "pending" | "delivered" | "suppressed" | "failed" | "ignored";
+} {
   const round = pointRoundRow(sql, roundId);
   if (round === null || round.state !== "resolved") return { round, result: null, outcome: "ignored" };
   if (round.resolve_delivery_state === "delivered") return { round, result: null, outcome: "delivered" };
@@ -1675,17 +1701,7 @@ export const beginPointRoundResolutionDeliverySync = (sql: PointsSql, roundId: s
     );
     return { round: { ...round, resolve_delivery_state: "suppressed" }, result: null, outcome: "suppressed" };
   }
-  if (round.resolve_delivery_state === "sending" && round.resolve_delivery_last_attempt_at !== null) {
-    if (now - round.resolve_delivery_last_attempt_at < POINTS_ANNOUNCE_AMBIGUOUS_MS) {
-      return { round, result: null, outcome: "pending" };
-    }
-    sql.exec(
-      `UPDATE game_rounds SET resolve_delivery_state = 'delivered'
-        WHERE round_id = ? AND state = 'resolved' AND resolve_delivery_state = 'sending'`,
-      roundId,
-    );
-    return { round: { ...round, resolve_delivery_state: "delivered" }, result: null, outcome: "delivered" };
-  }
+  if (round.resolve_delivery_state === "sending") return { round, result: null, outcome: "pending" };
   if (round.resolve_delivery_attempts >= POINTS_ANNOUNCE_MAX_ATTEMPTS) {
     sql.exec(
       `UPDATE game_rounds SET resolve_delivery_state = 'failed'
@@ -1700,28 +1716,55 @@ export const beginPointRoundResolutionDeliverySync = (sql: PointsSql, roundId: s
     round.module_id,
   ).toArray()[0];
   if (operation === undefined) return { round, result: null, outcome: "ignored" };
-  sql.exec(
-    `UPDATE game_rounds
-        SET resolve_delivery_state = 'sending',
-            resolve_delivery_attempts = resolve_delivery_attempts + 1,
-            resolve_delivery_last_attempt_at = ?
-      WHERE round_id = ? AND state = 'resolved'`,
-    now,
-    roundId,
-  );
-  return {
-    round: { ...round, resolve_delivery_state: "sending", resolve_delivery_attempts: round.resolve_delivery_attempts + 1,
-      resolve_delivery_last_attempt_at: now },
-    result: JSON.parse(operation.result_json) as unknown,
-    outcome: "attempt",
-  };
+  return { round, result: JSON.parse(operation.result_json) as unknown, outcome: "ready" };
+}
+
+export const recordPointRoundResolutionPreparationFailureSync = (sql: PointsSql, roundId: string, now: number):
+  RoundRow["resolve_delivery_state"] | null => {
+  const round = pointRoundRow(sql, roundId);
+  if (round === null || round.state !== "resolved" ||
+      (round.resolve_delivery_state !== "pending" && round.resolve_delivery_state !== "sending")) return null;
+  if (!pointRoundDeliveryGateIsCurrentSync(sql, round)) {
+    sql.exec(
+      `UPDATE game_rounds SET resolve_delivery_state = 'suppressed'
+        WHERE round_id = ? AND state = 'resolved' AND resolve_delivery_state IN ('pending', 'sending')`,
+      roundId,
+    );
+    return "suppressed";
+  }
+  if (round.resolve_delivery_state === "pending" && round.resolve_delivery_attempts >= POINTS_ANNOUNCE_MAX_ATTEMPTS) {
+    sql.exec(
+      `UPDATE game_rounds SET resolve_delivery_state = 'failed'
+        WHERE round_id = ? AND state = 'resolved' AND resolve_delivery_state = 'pending'`,
+      roundId,
+    );
+    return "failed";
+  }
+  if (round.resolve_delivery_state === "pending") {
+    sql.exec(
+      `UPDATE game_rounds
+          SET resolve_delivery_attempts = resolve_delivery_attempts + 1,
+              resolve_delivery_last_attempt_at = ?
+        WHERE round_id = ? AND state = 'resolved' AND resolve_delivery_state = 'pending'`,
+      now,
+      roundId,
+    );
+  } else {
+    sql.exec(
+      `UPDATE game_rounds SET resolve_delivery_state = 'pending', resolve_delivery_last_attempt_at = ?
+        WHERE round_id = ? AND state = 'resolved' AND resolve_delivery_state = 'sending'`,
+      now,
+      roundId,
+    );
+  }
+  return recordPointRoundResolutionDeliverySync(sql, roundId, "rate_limited");
 };
 
-export const recordPointRoundResolutionDeliverySync = (
+export function recordPointRoundResolutionDeliverySync(
   sql: PointsSql,
   roundId: string,
   status: PointRoundDeliveryStatus | "suppressed",
-): RoundRow["resolve_delivery_state"] | null => {
+): RoundRow["resolve_delivery_state"] | null {
   const round = pointRoundRow(sql, roundId);
   if (round === null || round.state !== "resolved") return null;
   if (round.resolve_delivery_state === "suppressed") return "suppressed";
@@ -1738,7 +1781,7 @@ export const recordPointRoundResolutionDeliverySync = (
     roundId,
   );
   return state;
-};
+}
 
 export const settlementFromRoundData = (value: unknown): { kind: string; params: unknown } | null => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
