@@ -1782,4 +1782,16 @@ describe("Text command editor", () => {
     expect(await screen.findByRole("region", { name: "Eigenschaften von !clip" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /!clip/u })).toHaveAttribute("aria-current", "true");
   });
+
+  it("does not fall back to a different command when the requested selection is missing", async () => {
+    vi.stubGlobal("fetch", panelFetch({ commands: () => [makeCommand(), makeCommand({ name: "clip" })] }));
+    renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" initialSelection="wetter" /></UiProvider>);
+
+    const list = await commandList();
+    await within(list).findByText("!hallo");
+
+    expect(list.querySelector(".text-command-row[aria-current='true']")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Eigenschaften von !hallo" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Eigenschaften von !clip" })).not.toBeInTheDocument();
+  });
 });

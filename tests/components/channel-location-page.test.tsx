@@ -591,6 +591,25 @@ describe("channel location page", () => {
     expect(document.querySelectorAll(".channel-location-weather-card .channel-location-skeleton").length).toBeGreaterThan(0);
   });
 
+  it.each([
+    ["renamed to forecast", [{ name: "forecast", aliases: [] }]],
+    ["deleted", []],
+  ])("updates the wetter template card when its command is %s", async (_change, commands) => {
+    vi.stubGlobal("fetch", livePageFetcher({ commands: [{ name: "wetter", aliases: [] }] }));
+    const { queryClient } = renderWithQuery(<UiProvider><ChannelLocationPage channelId="channel-a" role="manager" /></UiProvider>);
+
+    const card = (await screen.findByText("!wetter")).closest(".channel-location-command");
+    expect(card).not.toBeNull();
+    expect(await within(card as HTMLElement).findByRole("link", { name: "Vorhanden" })).toBeInTheDocument();
+
+    act(() => {
+      queryClient.setQueryData(queryKeys.module("channel-a", "text_commands", "commands"), { commands, variables: [] });
+    });
+
+    expect(await within(card as HTMLElement).findByRole("button", { name: "Anlegen" })).toBeInTheDocument();
+    expect(within(card as HTMLElement).queryByRole("link", { name: "Vorhanden" })).not.toBeInTheDocument();
+  });
+
   it("matches a template command by alias and opens its canonical command", async () => {
     const onOpenCommand = vi.fn<(name: string) => void>();
     const onCreateCommand = vi.fn<(name: string, response: string) => void>();

@@ -1333,7 +1333,8 @@ const TextCommandsPanelContent = ({
   useEffect(() => {
     if (initialCommand !== undefined) return;
     if (commandsQuery.isPending || commandsQuery.data === undefined || initialSelectionApplied.current || createOpen) return;
-    const target = commands.find((command) => command.name === initialSelection) ?? (window.matchMedia("(max-width: 767px)").matches ? undefined : commands[0]);
+    const target = commands.find((command) => command.name === initialSelection) ??
+      (initialSelection === undefined && !window.matchMedia("(max-width: 767px)").matches ? commands[0] : undefined);
     initialSelectionApplied.current = true;
     if (target === undefined || selectedName === target.name) return;
     guardSwitch(() => {

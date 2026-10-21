@@ -12,7 +12,7 @@ import { weatherModuleCatalog, WEATHER_CONDITION_LABELS } from "../modules/weath
 import { sunModuleCatalog } from "../modules/sun/contracts/catalog";
 import { moonModuleCatalog } from "../modules/moon/contracts/catalog";
 import { normalizeCommandName } from "../modules/text_commands/domain";
-import { loadTextCommands } from "../modules/text_commands/panel/service";
+import { loadTextCommandData } from "../modules/text_commands/panel/service";
 import type { TextCommand } from "../modules/text_commands/contracts";
 import type { WeatherCondition } from "../modules/weather/contracts";
 
@@ -110,10 +110,10 @@ export function ChannelLocationReference({
   const language = dashboardLanguage();
   const texts = locationLiveTexts(language);
   const commandQuery = useQuery({
-    queryKey: queryKeys.module(channelId, "text_commands", "command-list"),
-    queryFn: () => loadTextCommands(channelId),
+    queryKey: queryKeys.module(channelId, "text_commands", "commands"),
+    queryFn: ({ signal }) => loadTextCommandData(channelId, signal),
   });
-  const commands = commandQuery.data ?? EMPTY_COMMANDS;
+  const commands = commandQuery.data?.commands ?? EMPTY_COMMANDS;
   const catalogs = useMemo(() => [
     { id: "weather", label: texts.weatherModule, values: weatherModuleCatalog[language].templateVariables },
     { id: "sun", label: texts.sunModule, values: sunModuleCatalog[language].templateVariables },
