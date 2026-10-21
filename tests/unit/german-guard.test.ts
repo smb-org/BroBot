@@ -26,6 +26,9 @@ import { describe, expect, it } from "vitest";
  * additions are reviewed by hand for that.
  */
 const ALLOWLIST: Record<string, string> = {
+  "src/modules/blitz_round/locale.ts": "Bilingual DE/EN blitz module catalogue; only its de values are German.",
+  "src/modules/blitz_round/panel/locale.ts": "Bilingual DE/EN blitz template editor catalogue; only its de values are German.",
+  "src/modules/blitz_round/seed-words.ts": "Issue 503 explicitly requires German starter word data.",
   "src/dashboard/locale.ts": "Bilingual DE/EN dashboard text catalogue; only its `de` half is German.",
   "src/dashboard/channel-settings-locale.ts": "Bilingual DE/EN channel settings text catalogue; only its `de` half is German.",
   "src/dashboard/labels.ts": "Bilingual DE/EN per-page text catalogue (members, platform, roles); only its `de` half is German.",

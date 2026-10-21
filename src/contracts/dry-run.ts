@@ -84,7 +84,7 @@ export interface DryRunModuleReport {
   moduleId: string;
   status: "reacts" | "blocked" | "indeterminate" | "silent" | "not_testable" | "error";
   entries: readonly DryRunEntryReport[];
-  reasonCode?: "activity_tracking" | "instant_settlement";
+  reasonCode?: "activity_tracking" | "instant_settlement" | "round_answers";
   error?: "write_blocked" | "module_error";
 }
 
