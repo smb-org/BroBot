@@ -73,6 +73,7 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<ApiSourceTestResult>();
+  const [testedInput, setTestedInput] = useState<{ url: string; expression: string }>();
   const [testRequestError, setTestRequestError] = useState<string>();
   const [formError, setFormError] = useState<string | undefined>();
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
@@ -91,6 +92,7 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
     setConfirmDeleteOpen(false);
     setDeleteError(undefined);
     setTestResult(undefined);
+    setTestedInput(undefined);
     setTestRequestError(undefined);
   };
 
@@ -109,6 +111,7 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
     setCreationStep(0);
     setFormError(undefined);
     setTestResult(undefined);
+    setTestedInput(undefined);
     setTestRequestError(undefined);
   };
 
@@ -121,26 +124,31 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
     setDraftOriginal(initialDraft);
     setFormError(undefined);
     setTestResult(undefined);
+    setTestedInput(undefined);
     setTestRequestError(undefined);
   };
 
   const updateDraft = (patch: Partial<SourceDraft>): void => {
     if (draft === null) return;
     setDraft({ ...draft, ...patch });
-    setTestResult(undefined);
+    if (testResult?.status !== "ok") {
+      setTestResult(undefined);
+      setTestedInput(undefined);
+    }
     setTestRequestError(undefined);
   };
 
   const testDraft = async (): Promise<void> => {
     if (draft === null || !canEdit || busy || testing) return;
+    const input = { url: draft.url.trim(), expression: draft.expression.trim() };
     setTesting(true);
     setTestResult(undefined);
+    setTestedInput(undefined);
     setTestRequestError(undefined);
     try {
-      setTestResult(await testApiSource(channelId, {
-        url: draft.url.trim(),
-        expression: draft.expression.trim(),
-      }));
+      const result = await testApiSource(channelId, input);
+      setTestResult(result);
+      if (result.status === "ok") setTestedInput(input);
     } catch (failure: unknown) {
       setTestRequestError(apiErrorCode(failure) === "api_source_management_denied" ? labels.denied : labels.testRequestFailed);
     } finally {
@@ -148,6 +156,8 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
     }
   };
 
+  const testResultIsStale = testResult?.status === "ok" && testedInput !== undefined && draft !== null &&
+    (testedInput.url !== draft.url.trim() || testedInput.expression !== draft.expression.trim());
   const testResultDisplay = <div data-testid="api-source-test-result" className="api-source-panel__test-result">
     <div className="api-source-panel__test-result-status" aria-live="polite">
       {testing ? <p role="status">{labels.testing}</p> : null}
@@ -167,7 +177,11 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
       onSelectPath={(expression) => { updateDraft({ expression }); }}
     />
     <div className="api-source-panel__test-result-value" aria-live="polite">
-      {testResult?.status === "ok" ? <p><span>{labels.resultValue}</span><code className="mono" title={testResult.value}>{testResult.value}</code></p> : null}
+      {testResult?.status === "ok" ? <p>
+        <span>{labels.resultValue}</span>
+        <code className={`mono${testResultIsStale ? " api-source-panel__test-result-value-stale" : ""}`} title={testResult.value}>{testResult.value}</code>
+        {testResultIsStale ? <span role="status">{labels.resultStale}</span> : null}
+      </p> : null}
     </div>
   </div>;
 

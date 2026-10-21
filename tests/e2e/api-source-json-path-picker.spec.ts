@@ -95,6 +95,8 @@ test("selecting a response leaf replaces the expression and re-testing returns i
   await dialog.getByRole("button", { name: "Test" }).click();
   await dialog.getByRole("treeitem", { name: /temperature.*Number.*21/u }).click();
   await expect(dialog.getByRole("textbox", { name: "Value from the response" })).toHaveValue("$.weather.temperature");
+  await expect(dialog.getByRole("treeitem", { name: /status.*String.*sunny/u })).toBeVisible();
+  await expect(dialog.getByText("Needs re-test")).toBeVisible();
   await dialog.getByRole("button", { name: "Test" }).click();
 
   await expect(dialog.locator(".api-source-panel__test-result-value code")).toHaveText("21");

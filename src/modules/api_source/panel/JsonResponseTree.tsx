@@ -16,6 +16,7 @@ export interface ApiSourceJsonTreeMessages {
   moreEntries: (count: number) => string;
   pathTooLong: string;
   pathUnsupported: string;
+  treeBudgetExceeded: string;
 }
 
 interface JsonResponseTreeProps {
@@ -34,6 +35,7 @@ interface TreeNode {
   expanded: boolean;
   children: TreeNode[];
   moreCount: number;
+  expansionBlocked: boolean;
 }
 
 interface PlannedTreeNode {
@@ -46,6 +48,9 @@ const maximumRenderedTreeItems = 500;
 const rootPath: PathSegment[] = [];
 const pathId = (path: readonly PathSegment[]): string => JSON.stringify(path);
 const rootId = pathId(rootPath);
+const pathFromId = (id: string): PathSegment[] => JSON.parse(id) as PathSegment[];
+const isPathPrefix = (prefix: readonly PathSegment[], path: readonly PathSegment[]): boolean =>
+  prefix.length <= path.length && prefix.every((segment, index) => segment === path[index]);
 
 const valueType = (value: unknown): JsonValueType => {
   if (Array.isArray(value)) return "array";
@@ -87,7 +92,7 @@ const initialExpandedNodes = (value: unknown): Set<string> => {
   return expanded;
 };
 
-const createTreePlan = (value: unknown, expanded: ReadonlySet<string>): { root: TreeNode; focusableIds: string[] } => {
+const createTreePlan = (value: unknown, expanded: ReadonlySet<string>, priorityId?: string): { root: TreeNode; focusableIds: string[] } => {
   const build = (current: unknown, path: PathSegment[], key: string, budget: number): PlannedTreeNode | null => {
     if (budget < 1) return null;
 
@@ -124,40 +129,83 @@ const createTreePlan = (value: unknown, expanded: ReadonlySet<string>): { root: 
     }
 
     return {
-      node: { id, key, path, value: current, expanded: children.length > 0, children, moreCount },
+      node: { id, key, path, value: current, expanded: children.length > 0, children, moreCount, expansionBlocked: false },
       itemCount: budget - remaining,
     };
   };
 
-  const plannedRoot = build(value, rootPath, "", maximumRenderedTreeItems);
-  if (plannedRoot === null) throw new Error("The JSON response tree budget must allow the root item.");
+  const makePlan = (): { root: TreeNode; focusableIds: string[] } => {
+    const plannedRoot = build(value, rootPath, "", maximumRenderedTreeItems);
+    if (plannedRoot === null) throw new Error("The JSON response tree budget must allow the root item.");
 
-  const focusableIds: string[] = [];
-  const visit = (node: TreeNode): void => {
-    focusableIds.push(node.id);
-    for (const child of node.children) visit(child);
+    const focusableIds: string[] = [];
+    const visit = (node: TreeNode): void => {
+      focusableIds.push(node.id);
+      for (const child of node.children) visit(child);
+    };
+    visit(plannedRoot.node);
+    return { root: plannedRoot.node, focusableIds };
   };
-  visit(plannedRoot.node);
-  return { root: plannedRoot.node, focusableIds };
+
+  let plan = makePlan();
+  if (priorityId === undefined || !expanded.has(priorityId)) return plan;
+
+  const findNode = (node: TreeNode): TreeNode | undefined => {
+    if (node.id === priorityId) return node;
+    for (const child of node.children) {
+      const match = findNode(child);
+      if (match !== undefined) return match;
+    }
+    return undefined;
+  };
+  let priorityNode = findNode(plan.root);
+  if (priorityNode?.expanded === true || priorityNode === undefined || !isBranch(priorityNode.value)) return plan;
+
+  const priorityPath = pathFromId(priorityId);
+  const compactedExpanded = new Set(expanded);
+  const trimCandidates = [...compactedExpanded].reverse().filter((id) => {
+    const candidatePath = pathFromId(id);
+    return !isPathPrefix(candidatePath, priorityPath) && !isPathPrefix(priorityPath, candidatePath);
+  });
+  for (const candidate of trimCandidates) {
+    compactedExpanded.delete(candidate);
+    plan = createTreePlan(value, compactedExpanded);
+    priorityNode = findNode(plan.root);
+    if (priorityNode?.expanded === true || priorityNode === undefined) break;
+  }
+
+  if (priorityNode !== undefined && !priorityNode.expanded && isBranch(priorityNode.value)) {
+    priorityNode.expansionBlocked = true;
+  }
+  return plan;
 };
 
 export function JsonResponseTree({ value, expression, loading = false, messages, onSelectPath }: JsonResponseTreeProps): ReactElement {
   const defaultExpanded = useMemo(() => initialExpandedNodes(value), [value]);
-  const [expandedState, setExpandedState] = useState(() => ({ value, expanded: defaultExpanded }));
-  const expanded = expandedState.value === value ? expandedState.expanded : defaultExpanded;
-  const treePlan = useMemo(() => createTreePlan(value, expanded), [value, expanded]);
+  const [expandedState, setExpandedState] = useState(() => ({ value, expanded: defaultExpanded, priorityId: undefined as string | undefined }));
+  const currentExpandedState = expandedState.value === value
+    ? expandedState
+    : { value, expanded: defaultExpanded, priorityId: undefined };
+  const { expanded, priorityId } = currentExpandedState;
+  const treePlan = useMemo(() => createTreePlan(value, expanded, priorityId), [value, expanded, priorityId]);
   const focusableIds = treePlan.focusableIds;
   const itemRefs = useRef(new Map<string, HTMLDivElement>());
   const activeIdRef = useRef(rootId);
+  const treeRef = useRef<HTMLDivElement>(null);
+  const focusWithinRef = useRef(false);
 
   useLayoutEffect(() => {
-    const nextId = focusableIds.includes(activeIdRef.current) ? activeIdRef.current : rootId;
+    const activeItemSurvived = focusableIds.includes(activeIdRef.current);
+    const nextId = activeItemSurvived ? activeIdRef.current : rootId;
     activeIdRef.current = nextId;
     for (const id of focusableIds) itemRefs.current.get(id)?.setAttribute("tabindex", id === nextId ? "0" : "-1");
+    if (focusWithinRef.current && (!activeItemSurvived || !treeRef.current?.contains(document.activeElement))) {
+      itemRefs.current.get(nextId)?.focus();
+    }
   }, [focusableIds]);
 
-  const updateExpanded = (nextExpanded: Set<string>): void => {
-    setExpandedState({ value, expanded: nextExpanded });
+  const updateExpanded = (nextExpanded: Set<string>, nextPriorityId: string | undefined): void => {
+    setExpandedState({ value, expanded: nextExpanded, priorityId: nextPriorityId });
   };
 
   const setActiveId = (id: string): void => {
@@ -173,11 +221,11 @@ export function JsonResponseTree({ value, expression, loading = false, messages,
     itemRefs.current.get(id)?.focus();
   };
 
-  const toggleExpanded = (id: string): void => {
+  const toggleExpanded = (id: string, nextIsExpanded: boolean): void => {
     const next = new Set(expanded);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    updateExpanded(next);
+    if (nextIsExpanded) next.add(id);
+    else next.delete(id);
+    updateExpanded(next, nextIsExpanded ? id : undefined);
   };
 
   const renderNode = (node: TreeNode, isRoot = false): ReactElement => {
@@ -185,13 +233,15 @@ export function JsonResponseTree({ value, expression, loading = false, messages,
     const nodeId = node.id;
     const isExpanded = branch && node.expanded;
     const generatedPath = branch ? null : createApiSourceJsonPath(node.path);
-    const disabledReason = generatedPath?.reason === "too_long" ? messages.pathTooLong
+    const disabledReason = node.expansionBlocked ? messages.treeBudgetExceeded
+      : generatedPath?.reason === "too_long" ? messages.pathTooLong
       : generatedPath?.reason === "unsupported" ? messages.pathUnsupported : undefined;
     const fullPreview = previewValue(node.value);
     const isLongString = typeof node.value === "string" && node.value.length > 60;
     const displayPreview = isLongString ? `${fullPreview.slice(0, 60)}…` : fullPreview;
     const itemLabel = isRoot ? messages.responseRoot : node.key.length === 0 ? messages.emptyKey : node.key;
-    const accessibleName = [itemLabel, nodeTypeLabel(node.value, messages), displayPreview].filter(Boolean).join(", ");
+    const accessibleName = [itemLabel, nodeTypeLabel(node.value, messages), displayPreview,
+      node.expansionBlocked ? disabledReason : undefined].filter(Boolean).join(", ");
     const title = disabledReason === undefined
       ? isLongString ? node.value as string : undefined
       : isLongString ? `${disabledReason} ${node.value as string}` : disabledReason;
@@ -212,7 +262,8 @@ export function JsonResponseTree({ value, expression, loading = false, messages,
       }
       if (event.key === "ArrowRight" && branch) {
         event.preventDefault();
-        if (!isExpanded) toggleExpanded(nodeId);
+        if (disabledReason !== undefined) return;
+        if (!isExpanded) toggleExpanded(nodeId, true);
         else {
           const firstChild = node.children[0];
           if (firstChild !== undefined) setFocus(firstChild.id);
@@ -221,13 +272,14 @@ export function JsonResponseTree({ value, expression, loading = false, messages,
       }
       if (event.key === "ArrowLeft") {
         event.preventDefault();
-        if (branch && isExpanded) toggleExpanded(nodeId);
+        if (branch && isExpanded) toggleExpanded(nodeId, false);
         else if (node.path.length > 0) setFocus(pathId(node.path.slice(0, -1)));
         return;
       }
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
-        if (branch) toggleExpanded(nodeId);
+        if (disabledReason !== undefined) return;
+        if (branch) toggleExpanded(nodeId, !isExpanded);
         else if (generatedPath?.expression !== null && generatedPath?.expression !== undefined) {
           onSelectPath(generatedPath.expression);
         }
@@ -261,14 +313,14 @@ export function JsonResponseTree({ value, expression, loading = false, messages,
           event.stopPropagation();
           if (disabledReason !== undefined) return;
           setFocus(nodeId);
-          if (branch) toggleExpanded(nodeId);
+          if (branch) toggleExpanded(nodeId, !isExpanded);
           else if (generatedPath?.expression !== null && generatedPath?.expression !== undefined) {
             onSelectPath(generatedPath.expression);
           }
         }}
       >
         <span className="api-source-json-tree__disclosure" aria-hidden="true">
-          {branch ? <Icon name="collapse" className="api-source-json-tree__icon" /> : null}
+          {branch && disabledReason === undefined ? <Icon name="collapse" className="api-source-json-tree__icon" /> : null}
         </span>
         <span className="api-source-json-tree__key">{itemLabel}</span>
         <span className="api-source-json-tree__type">{nodeTypeLabel(node.value, messages)}</span>
@@ -306,7 +358,19 @@ export function JsonResponseTree({ value, expression, loading = false, messages,
     </div>
     : renderNode(treePlan.root, true);
 
-  return <div className="api-source-json-tree" role="tree" aria-label={messages.treeLabel} data-testid="api-source-json-tree">
+  return <div
+    ref={treeRef}
+    className="api-source-json-tree"
+    role="tree"
+    aria-label={messages.treeLabel}
+    data-testid="api-source-json-tree"
+    onFocusCapture={() => { focusWithinRef.current = true; }}
+    onBlurCapture={(event) => {
+      if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+      if (event.target instanceof Element && !event.target.isConnected) return;
+      focusWithinRef.current = false;
+    }}
+  >
     {root}
   </div>;
 }

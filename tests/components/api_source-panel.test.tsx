@@ -178,6 +178,22 @@ describe("API source panel query lifecycle", () => {
     if (!(temperatureRow instanceof HTMLElement)) throw new Error("Temperature tree row is missing.");
     fireEvent.click(temperatureRow);
     expect(screen.getByRole("textbox", { name: "Value from the response" })).toHaveValue("$.temperature");
+    expect(screen.getByRole("treeitem", { name: /status.*String.*sunny/u })).toBeInTheDocument();
+    expect(resultArea.querySelector(".api-source-panel__test-result-value")).toHaveTextContent(/Resulting value\s*sunny\s*Needs re-test/u);
+    expect(screen.getByText("sunny", { selector: ".api-source-panel__test-result-value code" }))
+      .toHaveClass("api-source-panel__test-result-value-stale");
+
+    const expression = screen.getByRole("textbox", { name: "Value from the response" });
+    fireEvent.change(expression, { target: { value: "$.manual" } });
+    expect(screen.getByRole("treeitem", { name: /temperature.*Number.*21/u })).toBeInTheDocument();
+    expect(resultArea.querySelector(".api-source-panel__test-result-value")).toHaveTextContent(/Resulting value\s*sunny\s*Needs re-test/u);
+
+    const keyboardLeaf = screen.getByRole("treeitem", { name: /temperature.*Number.*21/u });
+    keyboardLeaf.focus();
+    fireEvent.keyDown(keyboardLeaf, { key: "Enter" });
+    expect(keyboardLeaf).toHaveFocus();
+    expect(screen.getByRole("textbox", { name: "Value from the response" })).toHaveValue("$.temperature");
+
     fireEvent.click(screen.getByRole("button", { name: "Test" }));
     expect(await screen.findByText("21", { selector: ".api-source-panel__test-result-value code" })).toBeInTheDocument();
     expect(fetcher).toHaveBeenCalledWith("/api/channels/kanal-a/modules/api_source/sources/test", expect.objectContaining({

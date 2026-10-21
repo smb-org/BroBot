@@ -16,6 +16,7 @@ const messages: ApiSourceJsonTreeMessages = {
   moreEntries: (count) => `+${String(count)} more`,
   pathTooLong: "This path exceeds the expression limit.",
   pathUnsupported: "This path is not supported by the evaluator.",
+  treeBudgetExceeded: "This branch cannot open because the response display limit has been reached.",
 };
 
 describe("API source JSON response tree", () => {
@@ -103,6 +104,18 @@ describe("API source JSON response tree", () => {
 
     expect(screen.getByRole("treeitem", { name: /first/u })).toHaveFocus();
     expect(commitCount).toBe(committedBeforeFocus);
+  });
+
+  it("moves focus to the root when a replacement response removes the focused item", () => {
+    const view = render(<JsonResponseTree value={{ previous: 1 }} expression="" messages={messages} onSelectPath={vi.fn()} />);
+    const previous = screen.getByRole("treeitem", { name: /previous/u });
+    previous.focus();
+    expect(previous).toHaveFocus();
+
+    view.rerender(<JsonResponseTree value={{ current: 2 }} expression="" messages={messages} onSelectPath={vi.fn()} />);
+
+    expect(screen.getByRole("treeitem", { name: /Response/iu })).toHaveFocus();
+    expect(screen.getByRole("treeitem", { name: /current/u })).toBeInTheDocument();
   });
 
   it("selects a leaf path when clicked or activated from the keyboard", () => {
@@ -197,5 +210,22 @@ describe("API source JSON response tree", () => {
 
     expect(screen.getAllByRole("treeitem").length).toBeLessThanOrEqual(500);
     expect(screen.getAllByText(/^\+\d+ more$/u).length).toBeGreaterThan(0);
+  });
+
+  it("prioritizes an explicitly expanded branch at the exact tree item budget", () => {
+    const value = [
+      ...Array.from({ length: 4 }, () => Array.from({ length: 100 }, (_unused, index) => index)),
+      [...Array.from({ length: 93 }, (_unused, index) => index), [99]],
+    ];
+    render(<JsonResponseTree value={value} expression="" messages={messages} onSelectPath={vi.fn()} />);
+
+    expect(screen.getAllByRole("treeitem")).toHaveLength(500);
+    const nestedArray = screen.getByRole("treeitem", { name: /\[93\].*Array/u });
+    expect(nestedArray).toHaveAttribute("aria-expanded", "false");
+    fireEvent.keyDown(nestedArray, { key: "ArrowRight" });
+
+    expect(nestedArray).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("treeitem", { name: /\[0\].*Number.*99/u })).toBeInTheDocument();
+    expect(screen.getAllByRole("treeitem").length).toBeLessThanOrEqual(500);
   });
 });

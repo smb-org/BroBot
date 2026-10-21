@@ -28,6 +28,7 @@ export interface ApiSourcePanelTexts {
   testing: string;
   responseTree: ApiSourceJsonTreeMessages;
   resultValue: string;
+  resultStale: string;
   testSucceeded: (httpStatus: number, bytes: number) => string;
   testRequestFailed: string;
   notTested: string;
@@ -96,8 +97,10 @@ const texts: Readonly<Record<ModuleLanguage, ApiSourcePanelTexts>> = {
       moreEntries: (count) => `+${String(count)} weitere`,
       pathTooLong: "Dieser Pfad überschreitet die erlaubte Ausdruckslänge.",
       pathUnsupported: "Dieser Pfad wird vom Ausdrucksauswerter nicht unterstützt.",
+      treeBudgetExceeded: "Dieser Zweig kann wegen der Anzeigebegrenzung nicht geöffnet werden.",
     },
     resultValue: "Ergebniswert",
+    resultStale: "Bitte erneut testen",
     testSucceeded: (httpStatus, bytes) => `Erfolgreich · HTTP ${String(httpStatus)} · ${String(bytes)} Bytes`,
     testRequestFailed: "Der Test konnte nicht ausgeführt werden.",
     notTested: "Noch nicht abgerufen",
@@ -164,8 +167,10 @@ const texts: Readonly<Record<ModuleLanguage, ApiSourcePanelTexts>> = {
       moreEntries: (count) => `+${String(count)} more`,
       pathTooLong: "This path exceeds the allowed expression length.",
       pathUnsupported: "This path is not supported by the expression evaluator.",
+      treeBudgetExceeded: "This branch cannot open because the response display limit has been reached.",
     },
     resultValue: "Resulting value",
+    resultStale: "Needs re-test",
     testSucceeded: (httpStatus, bytes) => `Success · HTTP ${String(httpStatus)} · ${String(bytes)} bytes`,
     testRequestFailed: "The test request could not be completed.",
     notTested: "Not fetched yet",
