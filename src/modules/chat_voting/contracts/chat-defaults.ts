@@ -40,7 +40,7 @@ type ChatTextCatalog = Readonly<Record<Exclude<ChatTextKey, "started" | "result"
   started: (preset: ChatVotePreset, count: number, textMode: ChatVotingTextMode | null, title: string | null) => string;
   result: (title: string | null, result: string) => string;
   unknownShortcut: (shortcut: string) => string;
-  templateStartProblem: (title: string, problem: "answers" | "duration") => string;
+  templateStartProblem: (title: string, problem: "answers" | "duration" | "unreachable") => string;
 };
 
 const catalog: Readonly<Record<ModuleLanguage, ChatTextCatalog>> = {
@@ -68,7 +68,7 @@ const catalog: Readonly<Record<ModuleLanguage, ChatTextCatalog>> = {
     invalidLabels: "Antworten müssen eindeutig, nicht leer und höchstens 32 Zeichen lang sein.",
     invalidDuration: "Die Dauer muss zwischen einer Sekunde und vier Stunden liegen.",
     unknownShortcut: (shortcut) => `Unbekanntes Abstimmungskürzel: !vote ${shortcut}.`,
-    templateStartProblem: (title, problem) => `„${title || "Ohne Titel"}“ kann nicht starten: ${problem === "answers" ? "Es braucht zwei bis neun eindeutige Antworten." : "Die Dauer muss zwischen einer Sekunde und vier Stunden liegen."}`,
+    templateStartProblem: (title, problem) => `„${title || "Ohne Titel"}“ kann nicht starten: ${problem === "answers" ? "Es braucht zwei bis neun eindeutige Antworten." : problem === "unreachable" ? "Lege ein Kürzel fest oder biete die Abstimmung im Cockpit an." : "Die Dauer muss zwischen einer Sekunde und vier Stunden liegen."}`,
   },
   en: {
     help: "Use !vote <shortcut> for saved votes, !vote yesno|scale|01|12 [question], !vote 2–9 [question], !vote text [word|message] [question], !vote Question? | Answer 1 | Answer 2 [| duration], !vote again, or !vote end.",
@@ -94,7 +94,7 @@ const catalog: Readonly<Record<ModuleLanguage, ChatTextCatalog>> = {
     invalidLabels: "Answers must be unique, nonempty, and at most 32 characters long.",
     invalidDuration: "Duration must be from one second to four hours.",
     unknownShortcut: (shortcut) => `Unknown vote shortcut: !vote ${shortcut}.`,
-    templateStartProblem: (title, problem) => `“${title || "Untitled"}” cannot start: ${problem === "answers" ? "It needs two to nine unique answers." : "Duration must be from one second to four hours."}`,
+    templateStartProblem: (title, problem) => `“${title || "Untitled"}” cannot start: ${problem === "answers" ? "It needs two to nine unique answers." : problem === "unreachable" ? "Add a shortcut or offer the vote in the cockpit." : "Duration must be from one second to four hours."}`,
   },
 };
 
@@ -106,7 +106,7 @@ export const chatVotingChatText = (
   textMode?: ChatVotingTextMode | null,
   title?: string | null,
   result?: string,
-  problem?: "answers" | "duration",
+  problem?: "answers" | "duration" | "unreachable",
 ): string => message === "started"
   ? catalog[language].started(preset ?? "yes_no", optionCount ?? 2, textMode ?? null, title ?? null)
   : message === "result"

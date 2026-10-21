@@ -595,18 +595,18 @@ describe("text library", () => {
     const now = new Date(NOW).toISOString();
     await database.prepare(
       `INSERT INTO chat_vote_templates
-        (id, channel_id, shortcut, title, labels, free_text_mode, duration_seconds, revision, legacy_alias, last_used_at, created_at, updated_at, result_text)
-       VALUES ('template-dinner', ?, NULL, 'Dinner vote', '["Pizza","Burger"]', NULL, 120, 1, NULL, NULL, ?, ?, 'Result: {text.answer}')`,
+        (id, channel_id, shortcut, title, labels, answer_colors, free_text_mode, duration_seconds, revision, legacy_alias, last_used_at, created_at, updated_at, result_text)
+       VALUES ('template-dinner', ?, NULL, 'Dinner vote', '["Pizza","Burger"]', '["#5b8cff","#ff9f43"]', NULL, 120, 1, NULL, NULL, ?, ?, 'Result: {text.answer}')`,
     ).bind(CHANNEL_ID, now, now).run();
     await database.prepare(
       `INSERT INTO chat_votes
-        (channel_id, poll_id, kind, option_count, labels_json, status, opened_at, closes_at, close_reason, title, result_text)
-       VALUES (?, 'poll-open', 'yes_no', 2, '["Yes","No"]', 'open', ?, ?, 'timer', 'Running vote', 'Running: {text.answer}')`,
+        (channel_id, poll_id, kind, option_count, labels_json, answer_colors_json, status, opened_at, closes_at, close_reason, title, result_text)
+       VALUES (?, 'poll-open', 'yes_no', 2, '["Yes","No"]', '["#5b8cff","#ff9f43"]', 'open', ?, ?, 'timer', 'Running vote', 'Running: {text.answer}')`,
     ).bind(CHANNEL_ID, now, new Date(NOW + 120_000).toISOString()).run();
     await database.prepare(
       `INSERT INTO chat_votes
-        (channel_id, poll_id, kind, option_count, labels_json, status, opened_at, closes_at, closed_at, close_reason, counts_json, voter_count, title, result_text, result_delivery_pending)
-       VALUES (?, 'poll-closed', 'yes_no', 2, '["Yes","No"]', 'closed', ?, ?, ?, 'timer', '[1,0]', 1,
+        (channel_id, poll_id, kind, option_count, labels_json, answer_colors_json, status, opened_at, closes_at, closed_at, close_reason, counts_json, voter_count, title, result_text, result_delivery_pending)
+       VALUES (?, 'poll-closed', 'yes_no', 2, '["Yes","No"]', '["#5b8cff","#ff9f43"]', 'closed', ?, ?, ?, 'timer', '[1,0]', 1,
          'Closed vote', 'Closed: {text.answer}', 1)`,
     ).bind(CHANNEL_ID, new Date(NOW - 60_000).toISOString(), now, now).run();
     const sources = await chatVotingModule.templateUsageSources?.(database as unknown as D1Database, CHANNEL_ID) ?? [];
@@ -671,14 +671,14 @@ describe("text library", () => {
     const now = new Date(NOW).toISOString();
     await database.prepare(
       `INSERT INTO chat_votes
-        (channel_id, poll_id, kind, option_count, labels_json, status, opened_at, closes_at, closed_at, close_reason, counts_json, voter_count, title, result_text, result_delivery_pending)
-       VALUES (?, 'poll-pending-result', 'yes_no', 2, '["Yes","No"]', 'closed', ?, ?, ?, 'timer', '[1,0]', 1,
+        (channel_id, poll_id, kind, option_count, labels_json, answer_colors_json, status, opened_at, closes_at, closed_at, close_reason, counts_json, voter_count, title, result_text, result_delivery_pending)
+       VALUES (?, 'poll-pending-result', 'yes_no', 2, '["Yes","No"]', '["#5b8cff","#ff9f43"]', 'closed', ?, ?, ?, 'timer', '[1,0]', 1,
          'Pending result', 'Result: {text.answer}', 1)`,
     ).bind(CHANNEL_ID, new Date(NOW - 120_000).toISOString(), new Date(NOW - 60_000).toISOString(), now).run();
     await database.prepare(
       `INSERT INTO chat_votes
-        (channel_id, poll_id, kind, option_count, labels_json, status, opened_at, closes_at, close_reason, title, result_text)
-       VALUES (?, 'poll-newer-open', 'yes_no', 2, '["Yes","No"]', 'open', ?, ?, 'timer', 'Newer vote', '{vote.result}')`,
+        (channel_id, poll_id, kind, option_count, labels_json, answer_colors_json, status, opened_at, closes_at, close_reason, title, result_text)
+       VALUES (?, 'poll-newer-open', 'yes_no', 2, '["Yes","No"]', '["#5b8cff","#ff9f43"]', 'open', ?, ?, 'timer', 'Newer vote', '{vote.result}')`,
     ).bind(CHANNEL_ID, now, new Date(NOW + 120_000).toISOString()).run();
     const sources = await chatVotingModule.templateUsageSources?.(database as unknown as D1Database, CHANNEL_ID) ?? [];
     const snapshot = await service.list(CHANNEL_ID, sources);
@@ -709,8 +709,8 @@ describe("text library", () => {
           const now = new Date(NOW).toISOString();
           await database.prepare(
             `INSERT INTO chat_vote_templates
-              (id, channel_id, shortcut, title, labels, free_text_mode, duration_seconds, revision, legacy_alias, last_used_at, created_at, updated_at, result_text)
-             VALUES ('template-race', ?, NULL, 'Concurrent vote', '["Yes","No"]', NULL, 120, 1, NULL, NULL, ?, ?, 'Result: {text.answer}')`,
+              (id, channel_id, shortcut, title, labels, answer_colors, free_text_mode, duration_seconds, revision, legacy_alias, last_used_at, created_at, updated_at, result_text)
+             VALUES ('template-race', ?, NULL, 'Concurrent vote', '["Yes","No"]', '["#5b8cff","#ff9f43"]', NULL, 120, 1, NULL, NULL, ?, ?, 'Result: {text.answer}')`,
           ).bind(CHANNEL_ID, now, now).run();
         }
         return database.batch(statements);
@@ -1758,9 +1758,9 @@ describe("text library", () => {
           const now = new Date(NOW).toISOString();
           await database.prepare(
             `INSERT INTO chat_vote_templates
-              (id, channel_id, shortcut, title, result_text, labels, free_text_mode, duration_seconds,
+              (id, channel_id, shortcut, title, result_text, labels, answer_colors, free_text_mode, duration_seconds,
                revision, legacy_alias, last_used_at, created_at, updated_at)
-             VALUES ('concurrent-result', ?, NULL, 'Concurrent result', ?, '["Yes","No"]', NULL, 120,
+             VALUES ('concurrent-result', ?, NULL, 'Concurrent result', ?, '["Yes","No"]', '["#5b8cff","#ff9f43"]', NULL, 120,
                1, NULL, NULL, ?, ?)`,
           ).bind(CHANNEL_ID, resultText, now, now).run();
         }

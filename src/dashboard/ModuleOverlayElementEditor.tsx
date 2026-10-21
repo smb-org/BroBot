@@ -29,7 +29,7 @@ const moduleElementEditors = new Map(
 
 const moduleEditorReservedHeights: Readonly<Record<string, string>> = {
   "ads.countdown": "calc(var(--s10) * 8)",
-  "chat_voting.tally": "calc(var(--s10) * 8)",
+  "chat_voting.tally": "calc(var(--s10) * 9 + var(--s1))",
   "text_library.block": "calc(var(--s10) * 8)",
   "belabox.status": "calc(var(--s10) * 6)",
   "votekick.tally": "calc(var(--s10) * 6)",
