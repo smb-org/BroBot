@@ -227,6 +227,59 @@ describe("saved chat voting collection", () => {
     expect(discard).toBeDisabled();
   });
 
+  it("preserves a newer unfinished hex edit when an earlier save completes", async () => {
+    let markSaveStarted: (() => void) | undefined;
+    const saveStarted = new Promise<void>((resolve) => { markSaveStarted = resolve; });
+    let finishSave: ((response: Response) => void) | undefined;
+    const pendingResponse = new Promise<Response>((resolve) => { finishSave = resolve; });
+    mount({
+      patchResponse: () => {
+        markSaveStarted?.();
+        return pendingResponse;
+      },
+    });
+    fireEvent.change(await screen.findByRole("textbox", { name: "Frage" }), { target: { value: "Neue Frage" } });
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+    await saveStarted;
+
+    fireEvent.click(screen.getByRole("button", { name: "Farbe für Antwort 1" }));
+    const popover = await screen.findByRole("dialog", { name: "Farbe für Antwort 1" });
+    fireEvent.change(within(popover).getByRole("textbox", { name: "Eigener Hex-Wert" }), { target: { value: "#abc" } });
+    const completeSave = finishSave;
+    if (completeSave === undefined) throw new Error("The pending template save is missing.");
+    await act(async () => {
+      await Promise.resolve().then(() => completeSave(jsonResponse({ template: { ...template, title: "Neue Frage", revision: 2 } })));
+    });
+
+    expect(within(popover).getByRole("textbox", { name: "Eigener Hex-Wert" })).toHaveValue("#abc");
+    expect(screen.getByText("Änderungen ausstehend")).toBeInTheDocument();
+    expect(screen.queryByText("Gespeichert")).not.toBeInTheDocument();
+  });
+
+  it("clears raw color edits when accepting the reloaded server version after a conflict", async () => {
+    const serverTemplate = { ...template, answerColors: ["#2ed3a3", "#ff9f43"], revision: 2 };
+    mount({
+      templateResponses: [[template], [serverTemplate], [serverTemplate], [serverTemplate]],
+      patchResponse: () => Promise.resolve(jsonResponse({ error: "chat_vote_template_conflict" }, 409)),
+    });
+    fireEvent.change(await screen.findByRole("textbox", { name: "Frage" }), { target: { value: "Lokale Frage" } });
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+    await screen.findByRole("button", { name: "Neu laden" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Farbe für Antwort 1" }));
+    const popover = await screen.findByRole("dialog", { name: "Farbe für Antwort 1" });
+    fireEvent.change(within(popover).getByRole("textbox", { name: "Eigener Hex-Wert" }), { target: { value: "#ffffff" } });
+    fireEvent.click(screen.getByRole("button", { name: "Neu laden" }));
+
+    const trigger = screen.getByRole("button", { name: "Farbe für Antwort 1" });
+    await waitFor(() => expect(trigger.style.backgroundColor).toBe("rgb(46, 211, 163)"));
+    expect(screen.getByTestId("chat-vote-color-preview").querySelector(".chat-voting-editor__color-preview-track > span") as HTMLElement).toHaveStyle({ backgroundColor: "rgb(46, 211, 163)" });
+    if (screen.queryByRole("dialog", { name: "Farbe für Antwort 1" }) === null) fireEvent.click(trigger);
+    const reloadedPopover = await screen.findByRole("dialog", { name: "Farbe für Antwort 1" });
+    expect(within(reloadedPopover).getByRole("textbox", { name: "Eigener Hex-Wert" })).toHaveValue("#2ed3a3");
+    expect(screen.getByRole("button", { name: "Speichern" })).toBeDisabled();
+  });
+
   it("keeps a new vote as a two-minute draft until the explicit save action", async () => {
     const { requests, saved } = mount({ templates: [] });
     expect(await screen.findByText("Noch keine gespeicherten Abstimmungen")).toBeInTheDocument();

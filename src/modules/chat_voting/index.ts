@@ -210,8 +210,9 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
       const state = await (await import("./panel/service")).loadChatVotingState(channelId, signal);
       const vote = state.vote;
       if (vote === null || vote.status === "closed") return [];
+      const terms = state.terms ?? [];
       const options = vote.kind === "free_text"
-        ? rankVoteTerms(state.terms ?? []).map(({ term, count, approved }, index) => ({ label: term, count, approved, color: chatVoteDefaultColorAt(index) }))
+        ? rankVoteTerms(terms, terms.length).map(({ term, count, approved }, index) => ({ label: term, count, approved, color: chatVoteDefaultColorAt(index) }))
         : vote.labels.map((label, index) => {
           const color = vote.answerColors[index];
           return { label, count: state.counts?.[index] ?? 0, ...(color === undefined ? {} : { color }) };

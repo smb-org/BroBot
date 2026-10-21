@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { UiProvider } from "../../src/dashboard/ui";
 import { LiveCockpitTiles } from "../../src/dashboard/LiveCockpitParts";
 import { dashboardTexts } from "../../src/dashboard/locale";
+import { chatVotingModule } from "../../src/modules/chat_voting";
 import VoteActionContent from "../../src/modules/chat_voting/panel/action-content";
 import type { ModuleLiveTileSnapshot } from "../../src/modules/contract";
 import { jsonResponse } from "../unit/fixtures";
@@ -74,6 +75,75 @@ describe("live cockpit voting actions", () => {
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: /Timeout aufheben/u }));
     await waitFor(() => expect(requests.mock.calls.some(([input, init]) => requestUrl(input).pathname.endsWith("/ballot-recent/lift") && init?.method === "POST")).toBe(true));
+  });
+
+  it("keeps every free-text term in cockpit totals and approval controls", async () => {
+    const terms = [6, 5, 4, 3, 2, 1].map((count, index) => ({
+      term: `term-${String(index + 1)}`,
+      count,
+      approved: false,
+    }));
+    const requests = vi.fn<typeof fetch>((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels/channel-a/modules/chat_voting/current") {
+        return Promise.resolve(jsonResponse({
+          vote: {
+            id: "poll-free-text",
+            channelId: "channel-a",
+            kind: "free_text",
+            optionCount: 0,
+            labels: [],
+            answerColors: [],
+            title: "Lunch?",
+            status: "open",
+            openedAt: "2030-01-01T12:00:00.000Z",
+            closesAt: "2030-01-01T12:02:00.000Z",
+            requestedDurationSeconds: 120,
+            closedAt: null,
+            closeReason: "timer",
+            counts: null,
+            voterCount: null,
+            textMode: "whole_message",
+            termFilterReady: true,
+          },
+          counts: null,
+          revision: 1,
+          terms,
+          moreTerms: 0,
+          hasOpenBallot: true,
+          defaultDurationSeconds: 120,
+        }));
+      }
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-live" }));
+      if (url.pathname.endsWith("/approve-term")) {
+        return Promise.resolve(jsonResponse({ terms, moreTerms: 0, revision: 2 }));
+      }
+      return Promise.resolve(jsonResponse({ error: "not_found" }, 404));
+    });
+    vi.stubGlobal("fetch", requests);
+    const load = chatVotingModule.liveTile?.load;
+    if (load === undefined) throw new Error("The chat voting live tile is missing.");
+    const snapshots = await load("channel-a", new AbortController().signal);
+
+    expect(snapshots[0]).toMatchObject({ kind: "vote", totalVotes: 21 });
+    render(<UiProvider><LiveCockpitTiles
+      channelId="channel-a"
+      role="operator"
+      snapshots={snapshots}
+      loading={false}
+      failed={false}
+      now={Date.parse("2030-01-01T12:00:30.000Z")}
+      timeZone="Europe/Berlin"
+      onMessage={() => undefined}
+      onRefresh={() => undefined}
+    /></UiProvider>);
+
+    expect(screen.getByText("21 Stimmen gesamt")).toBeInTheDocument();
+    expect(screen.getByText("1 Stimme · 5 %")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Begriff freigeben: term-6" }));
+    await waitFor(() => expect(requests.mock.calls.some(([input, init]) => requestUrl(input).pathname.endsWith("/approve-term") && init?.method === "POST")).toBe(true));
+    const approvalBody = requests.mock.calls.find(([input]) => requestUrl(input).pathname.endsWith("/approve-term"))?.[1]?.body;
+    expect(JSON.parse(approvalBody as string)).toEqual({ pollId: "poll-free-text", term: "term-6" });
   });
 
   it("offers only saved votes enabled for the cockpit start dialog", async () => {

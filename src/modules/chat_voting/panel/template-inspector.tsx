@@ -36,6 +36,11 @@ export interface ChatVoteTemplateInspectorProperties {
   onDelete: (template: ChatVoteTemplate) => Promise<void>;
 }
 
+interface CustomColorDraft {
+  value: string;
+  generation: number;
+}
+
 const durationPreset = (seconds: number): string => seconds === 0 ? "open"
   : seconds === 60 ? "one" : seconds === 120 ? "two" : seconds === 300 ? "five" : "custom";
 
@@ -124,9 +129,22 @@ export function ChatVoteTemplateInspector({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | undefined>();
-  const [customColorDrafts, setCustomColorDrafts] = useState<Readonly<Record<number, string>>>({});
+  const customColorDraftsRef = useRef<Readonly<Record<number, CustomColorDraft>>>({});
+  const customColorEditGeneration = useRef(0);
+  const [customColorDrafts, setCustomColorDrafts] = useState<Readonly<Record<number, CustomColorDraft>>>({});
   const deletingRef = useRef(false);
-  const hasInvalidCustomColorDraft = Object.values(customColorDrafts).some((value) => normalizeChatVoteColor(value) === null);
+  const updateCustomColorDrafts = (
+    update: (current: Readonly<Record<number, CustomColorDraft>>) => Readonly<Record<number, CustomColorDraft>>,
+  ): void => {
+    const next = update(customColorDraftsRef.current);
+    customColorDraftsRef.current = next;
+    setCustomColorDrafts(next);
+  };
+  const clearCustomColorDrafts = (): void => {
+    customColorDraftsRef.current = {};
+    setCustomColorDrafts({});
+  };
+  const hasInvalidCustomColorDraft = Object.values(customColorDrafts).some(({ value }) => normalizeChatVoteColor(value) === null);
   const dirty = canManageContent && (isNew || draft.dirty || hasInvalidCustomColorDraft);
   const shortcutError = serverShortcutError ?? (draft.value.shortcut === null ? null
     : !isValidTemplateShortcut(draft.value.shortcut) ? labels.shortcutInvalid
@@ -134,7 +152,7 @@ export function ChatVoteTemplateInspector({
         : null);
   const answerColorAt = (index: number): string => draft.value.answerColors[index] ?? chatVoteDefaultColorAt(index);
   const answerColorIssue = (index: number): "format" | "contrast" | "duplicate" | null => {
-    const customDraft = customColorDrafts[index];
+    const customDraft = customColorDrafts[index]?.value;
     if (customDraft !== undefined && normalizeChatVoteColor(customDraft) === null) return "format";
     const color = customDraft === undefined ? answerColorAt(index) : normalizeChatVoteColor(customDraft) ?? answerColorAt(index);
     if (draft.value.answerColors.some((existing, otherIndex) => otherIndex !== index && existing === color)) return "duplicate";
@@ -203,12 +221,13 @@ export function ChatVoteTemplateInspector({
         colors.push(draftValue.current.answerColors[index] ?? nextUnusedChatVoteDefaultColor(colors));
       });
     }
-    setCustomColorDrafts({});
+    clearCustomColorDrafts();
     updateDraft({ labels: nextLabels, answerColors: colors });
   };
 
   const changeAnswerColor = (index: number, value: string): void => {
-    setCustomColorDrafts((current) => ({ ...current, [index]: value }));
+    const generation = ++customColorEditGeneration.current;
+    updateCustomColorDrafts((current) => ({ ...current, [index]: { value, generation } }));
     const normalized = normalizeChatVoteColor(value);
     if (normalized === null) return;
     const nextColors = draftValue.current.labels.map((_label, colorIndex) => draftValue.current.answerColors[colorIndex] ?? chatVoteDefaultColorAt(colorIndex));
@@ -223,6 +242,7 @@ export function ChatVoteTemplateInspector({
       return saveInvalidReason;
     }
     const submitted = { ...draftValue.current, labels: [...draftValue.current.labels], answerColors: [...draftValue.current.answerColors] };
+    const submittedColorDrafts = { ...customColorDraftsRef.current };
     if (blankDraft(submitted)) {
       setSaveError(labels.emptyDraftError);
       return labels.emptyDraftError;
@@ -255,6 +275,14 @@ export function ChatVoteTemplateInspector({
       });
       const acceptedDraft = draftFromTemplate(next);
       const current = draftValue.current;
+      const remainingColorDrafts: Record<number, CustomColorDraft> = {};
+      for (const [index, currentColorDraft] of Object.entries(customColorDraftsRef.current)) {
+        const submittedColorDraft = submittedColorDrafts[Number(index)];
+        if (submittedColorDraft === undefined || currentColorDraft.generation !== submittedColorDraft.generation) {
+          remainingColorDrafts[Number(index)] = currentColorDraft;
+        }
+      }
+      updateCustomColorDrafts(() => remainingColorDrafts);
       baseRevision.current = next.revision;
       baselineDraft.current = acceptedDraft;
       draft.accept(acceptedDraft);
@@ -265,9 +293,8 @@ export function ChatVoteTemplateInspector({
         draftValue.current = acceptedDraft;
       }
       setServerShortcutError(null);
-      setCustomColorDrafts({});
       setConflict(false);
-      setSaved(true);
+      setSaved(JSON.stringify(current) === JSON.stringify(submitted) && Object.keys(remainingColorDrafts).length === 0);
       onTemplateSaved(next, template.id);
       return null;
     } catch (error: unknown) {
@@ -305,7 +332,7 @@ export function ChatVoteTemplateInspector({
     setSaveError(undefined);
     setResultTextError(undefined);
     setServerShortcutError(null);
-    setCustomColorDrafts({});
+    clearCustomColorDrafts();
     setConflict(false);
     setSaved(false);
   };
@@ -325,7 +352,7 @@ export function ChatVoteTemplateInspector({
     setSaveError(undefined);
     setResultTextError(undefined);
     setServerShortcutError(null);
-    setCustomColorDrafts({});
+    clearCustomColorDrafts();
     setConflict(false);
   };
 
@@ -357,6 +384,7 @@ export function ChatVoteTemplateInspector({
       baselineDraft.current = nextDraft;
       draftValue.current = nextDraft;
       draft.accept(nextDraft);
+      clearCustomColorDrafts();
       setCustomDurationSelected(false);
       setConflict(false);
       setSaveError(undefined);
@@ -497,7 +525,7 @@ export function ChatVoteTemplateInspector({
                     className="chat-voting-editor__color-field"
                     label={labels.customHexColor}
                     onChange={(value) => { changeAnswerColor(index, value); }}
-                    value={customColorDrafts[index] ?? answerColorAt(index)}
+                    value={customColorDrafts[index]?.value ?? answerColorAt(index)}
                   />
                   <span aria-live="polite" className="chat-voting-editor__color-feedback">
                     {answerColorIssue(index) === "format" ? labels.colorFormatError
@@ -536,7 +564,7 @@ export function ChatVoteTemplateInspector({
               disabled={draft.value.freeTextMode !== null}
               onClick={() => {
                 updateDraft({ answerColors: draft.value.labels.map((_answer, index) => chatVoteDefaultColorAt(index)) });
-                setCustomColorDrafts({});
+                clearCustomColorDrafts();
               }}
             >{labels.restoreDefaults}</Button>
           </div>
