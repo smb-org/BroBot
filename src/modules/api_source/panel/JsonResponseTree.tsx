@@ -34,7 +34,7 @@ interface TreeNode {
 
 const maximumVisibleEntries = 100;
 const rootPath: PathSegment[] = [];
-const pathId = (path: readonly PathSegment[]): string => JSON.stringify(path) ?? "[]";
+const pathId = (path: readonly PathSegment[]): string => JSON.stringify(path);
 const rootId = pathId(rootPath);
 
 const valueType = (value: unknown): JsonValueType => {
@@ -58,7 +58,7 @@ const isBranch = (value: unknown): boolean => entryCount(value) > 0;
 const nodeTypeLabel = (value: unknown, messages: ApiSourceJsonTreeMessages): string => messages.types[valueType(value)];
 
 const previewValue = (value: unknown): string => {
-  if (typeof value === "string") return JSON.stringify(value) ?? "";
+  if (typeof value === "string") return JSON.stringify(value);
   if (typeof value === "number" || typeof value === "boolean" || value === null) return String(value);
   return "";
 };
