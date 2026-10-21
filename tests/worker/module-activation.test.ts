@@ -32,6 +32,18 @@ const migrationStatements = (source: string): string[] => {
 
 const workerEnvironment = env as unknown as Env;
 const database = workerEnvironment.DB;
+const testKey = (byte: number): string => Buffer.from(new Uint8Array(32).fill(byte)).toString("base64url");
+const testKeyRing = (id: string, byte: number): string => JSON.stringify({
+  active: { id, key: testKey(byte) },
+  retired: [],
+});
+const testSessionCookieKeys = testKeyRing("module-activation-cookie", 1);
+const testTokenEncryptionKeys = testKeyRing("module-activation-encryption", 2);
+const testEnvironment = {
+  ...workerEnvironment,
+  SESSION_COOKIE_KEYS: testSessionCookieKeys,
+  TOKEN_ENCRYPTION_KEYS: testTokenEncryptionKeys,
+} as Env;
 
 beforeAll(async () => {
   for (const path of Object.keys(migrationSources).sort((left, right) => left.localeCompare(right))) {
@@ -69,10 +81,10 @@ const activationRequest = async (channelId: string): Promise<Request> => {
 
   const cookie = await createSessionCookie(
     { sessionId },
-    workerEnvironment.SESSION_COOKIE_KEYS,
-    workerEnvironment.SESSION_ENCRYPTION_KEYS ?? "",
+    testSessionCookieKeys,
+    testTokenEncryptionKeys,
   );
-  const csrf = await createCsrfToken(sessionId, workerEnvironment.SESSION_COOKIE_KEYS, now);
+  const csrf = await createCsrfToken(sessionId, testSessionCookieKeys, now);
   return new Request(`https://brobot.example/api/channels/${channelId}/modules/points`, {
     method: "PATCH",
     headers: {
@@ -90,7 +102,7 @@ describe("module activation schedule RPCs", () => {
     await insertChannel(channelId);
     const request = await activationRequest(channelId);
 
-    const response = await panelRouter.fetch(request, workerEnvironment);
+    const response = await panelRouter.fetch(request, testEnvironment);
     const body = await response.json<{ module: { id: string; enabled: boolean }; revision: number }>();
 
     expect(response.status).toBe(200);
