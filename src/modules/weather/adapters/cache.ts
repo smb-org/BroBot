@@ -1,5 +1,5 @@
 import type { NormalizedWeather, WeatherProviderId } from "../contracts";
-import { normalizeCoordinates } from "../domain";
+import { normalizeCoordinates, normalizeWeatherTimestamp } from "../domain";
 import { WEATHER_PROVIDER_ADAPTERS, WeatherProviderError, type WeatherCoordinates } from "./providers";
 
 const WEATHER_CACHE_TTL_MS = 15 * 60 * 1_000;
@@ -27,12 +27,13 @@ const parseWeather = (value: string): NormalizedWeather | null => {
     const parsed: unknown = JSON.parse(value);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
     const row = parsed as Record<string, unknown>;
+    const observedAt = typeof row.observedAt === "string" ? normalizeWeatherTimestamp(row.observedAt) : null;
     return typeof row.temperatureC === "number" && typeof row.feelsLikeC === "number" &&
       typeof row.condition === "string" && typeof row.isDay === "boolean" &&
       typeof row.windSpeedMps === "number" && typeof row.precipitationMm === "number" &&
-      typeof row.humidityPercent === "number" && typeof row.observedAt === "string" &&
+      typeof row.humidityPercent === "number" && observedAt !== null &&
       typeof row.shortForecast === "string"
-      ? row as unknown as NormalizedWeather
+      ? { ...row, observedAt } as unknown as NormalizedWeather
       : null;
   } catch {
     return null;

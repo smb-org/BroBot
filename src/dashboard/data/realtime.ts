@@ -295,6 +295,7 @@ const invalidatePanelResource = (
       return;
     case "channel.library":
       invalidate(queryClient, queryKeys.module(channelId, "text_library", "library"), scheduledQueryRefreshes, resourceRefreshes, channelId);
+      invalidate(queryClient, dashboardDataKeys.templateVariables(channelId), scheduledQueryRefreshes, resourceRefreshes, channelId);
       invalidate(queryClient, queryKeys.module(channelId, "timers", "panel"), scheduledQueryRefreshes, resourceRefreshes, channelId);
       invalidate(queryClient, queryKeys.module(channelId, "faq", "panel"), scheduledQueryRefreshes, resourceRefreshes, channelId);
       invalidate(queryClient, queryKeys.module(channelId, "text_commands", "template-variables"), scheduledQueryRefreshes, resourceRefreshes, channelId);

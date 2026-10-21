@@ -102,11 +102,9 @@ const verifyLocationLayoutTransitions = async (page: Page, viewport: { width: nu
   await installLiveCockpitMocks(page, { channelId: CHANNEL_ID, location: null });
 
   let currentSettings = settings(null);
-  let releaseSettings!: () => void;
-  const settingsReady = new Promise<void>((resolve) => { releaseSettings = resolve; });
+  let settingsMode: "error" | "success" = "error";
   await page.route(`**/api/channels/${CHANNEL_ID}/settings`, async (route) => {
-    await settingsReady;
-    await route.fulfill(json(currentSettings));
+    await route.fulfill(json(currentSettings, settingsMode === "error" ? 503 : 200));
   });
   await page.route(`**/api/channels/${CHANNEL_ID}/settings/location/geocode**`, (route) => route.fulfill(json({ results: [
     { name: "Berlin", admin1: "Berlin", country: "Deutschland", latitude: 52.52, longitude: 13.405, timeZone: "Europe/Berlin" },
@@ -136,10 +134,15 @@ const verifyLocationLayoutTransitions = async (page: Page, viewport: { width: nu
   for (const card of cards) await expect(card).toHaveAttribute("aria-busy", "true");
   const loadingLayout = await captureLiveLayout(page);
 
-  releaseSettings();
+  await expect(page.getByRole("alert")).toBeVisible();
+  const initialErrorLayout = await captureLiveLayout(page);
+  expectSameLiveLayout(loadingLayout, initialErrorLayout);
+
+  settingsMode = "success";
+  await page.getByRole("button", { name: "Erneut versuchen" }).click();
   await expect(page.getByRole("link", { name: "Standort festlegen" }).first()).toBeVisible();
   const missingLayout = await captureLiveLayout(page);
-  expectSameLiveLayout(loadingLayout, missingLayout);
+  expectSameLiveLayout(initialErrorLayout, missingLayout);
 
   await page.getByRole("button", { name: "Standort ändern" }).click();
   await page.getByRole("textbox", { name: "Ort suchen" }).fill("Berlin");

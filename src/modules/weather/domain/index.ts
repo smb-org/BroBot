@@ -4,6 +4,12 @@ import type { NormalizedWeather, WeatherCondition } from "../contracts";
 
 const clamp = (value: number, minimum: number, maximum: number): number => Math.min(maximum, Math.max(minimum, value));
 
+export const normalizeWeatherTimestamp = (value: string): string | null => {
+  const timestamp = /(?:Z|[+-]\d{2}:?\d{2})$/iu.test(value) ? value : `${value}Z`;
+  const epoch = Date.parse(timestamp);
+  return Number.isFinite(epoch) ? new Date(epoch).toISOString() : null;
+};
+
 export const weatherConditionFromMetSymbol = (symbol: string | undefined): WeatherCondition => {
   if (symbol === undefined) return "unknown";
   const code = symbol.toLowerCase().replace(/_(?:day|night|polartwilight)$/u, "");

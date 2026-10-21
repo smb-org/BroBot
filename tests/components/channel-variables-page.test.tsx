@@ -8,7 +8,7 @@ import type { PanelChannelVariablesResponse } from "../../src/dashboard/api";
 import { UiProvider } from "../../src/dashboard/ui";
 import { ToastHost } from "../../src/dashboard/ui/Toast";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
-import { reconcileDashboardRealtimeMessage } from "../../src/dashboard/data/realtime";
+import { reconcileDashboardPanelResourceRevisions, reconcileDashboardRealtimeMessage } from "../../src/dashboard/data/realtime";
 import { dashboardDataKeys } from "../../src/dashboard/data/keys";
 import type { RealtimeMessage } from "../../src/realtime-contract";
 import { jsonResponse } from "../unit/fixtures";
@@ -97,6 +97,31 @@ describe("Channel variables page", () => {
     fireEvent.click(await screen.findByRole("row", { name: /var\.score/u }));
     fireEvent.click(screen.getByRole("button", { name: /\{var\.score\}/u }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("{var.score}"));
+  });
+
+  it("removes a renamed text block token from the catalog after a library revision", async () => {
+    let catalog = [{ name: "text.greeting", moduleId: "text_library", isTextBlock: true, sample: "Hello", description: "Greeting" }];
+    let revisions: Record<string, number> = {};
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname === "/api/channels/kanal-a/template-variables") return Promise.resolve(jsonResponse({ variables: catalog }));
+      if (url.pathname === "/api/channels/kanal-a/revisions") return Promise.resolve(jsonResponse({ revisions }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [], count: 0, maximum: 25 }));
+      if (url.pathname.endsWith("/overlay-tokens")) return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const rendered = render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Module" }));
+    expect(await screen.findByRole("row", { name: /text\.greeting/u })).toBeInTheDocument();
+
+    catalog = [{ name: "text.welcome", moduleId: "text_library", isTextBlock: true, sample: "Welcome", description: "Welcome" }];
+    revisions = { "channel.library": 1 };
+    await act(async () => { await reconcileDashboardPanelResourceRevisions(rendered.queryClient, "kanal-a"); });
+
+    expect(await screen.findByRole("row", { name: /text\.welcome/u })).toBeInTheDocument();
+    expect(screen.queryByRole("row", { name: /text\.greeting/u })).not.toBeInTheDocument();
   });
 
   it("copies parameterized catalog variables with a valid default parameter", async () => {

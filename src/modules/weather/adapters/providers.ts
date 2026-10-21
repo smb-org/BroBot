@@ -1,6 +1,6 @@
 import type { NormalizedWeather, WeatherProviderId } from "../contracts";
 import { readBoundedJsonResponse } from "../../contract";
-import { feelsLikeTemperatureC, weatherConditionFromMetSymbol, weatherConditionFromWmoCode } from "../domain";
+import { feelsLikeTemperatureC, normalizeWeatherTimestamp, weatherConditionFromMetSymbol, weatherConditionFromWmoCode } from "../domain";
 
 export interface WeatherCoordinates {
   latitude: number;
@@ -102,9 +102,9 @@ export const metNorwayWeather: WeatherProviderAdapter = async ({ coordinates, va
   const temperatureC = finiteNumber(details?.air_temperature);
   const windSpeedMps = finiteNumber(details?.wind_speed);
   const humidityPercent = finiteNumber(details?.relative_humidity);
-  const observedAt = stringValue(first?.time);
+  const observedAt = normalizeWeatherTimestamp(stringValue(first?.time) ?? "");
   const symbolCode = stringValue(summary?.symbol_code) ?? "";
-  if (temperatureC === null || windSpeedMps === null || humidityPercent === null || observedAt === null || !Number.isFinite(Date.parse(observedAt))) {
+  if (temperatureC === null || windSpeedMps === null || humidityPercent === null || observedAt === null) {
     throw new Error("MET Norway response did not include a current observation.");
   }
   const condition = weatherConditionFromMetSymbol(symbolCode);
@@ -147,16 +147,16 @@ export const openMeteoWeather: WeatherProviderAdapter = async ({ coordinates, va
   const feelsLikeC = finiteNumber(current?.apparent_temperature);
   const humidityPercent = finiteNumber(current?.relative_humidity_2m);
   const windSpeedMps = finiteNumber(current?.wind_speed_10m);
-  const observedAt = stringValue(current?.time);
+  const observedAt = normalizeWeatherTimestamp(stringValue(current?.time) ?? "");
   const code = finiteNumber(current?.weather_code);
-  if (temperatureC === null || humidityPercent === null || windSpeedMps === null || observedAt === null ||
-      code === null || !Number.isFinite(Date.parse(observedAt))) {
+  if (temperatureC === null || humidityPercent === null || windSpeedMps === null || observedAt === null || code === null) {
     throw new Error("Open-Meteo response did not include a current observation.");
   }
   const condition = weatherConditionFromWmoCode(code);
   const hourlyTimes = hourly?.time;
   const nextHourIndex = Array.isArray(hourlyTimes)
-    ? hourlyTimes.findIndex((time) => typeof time === "string" && Date.parse(time) > Date.parse(observedAt))
+    ? hourlyTimes.findIndex((time) => typeof time === "string" &&
+      Date.parse(normalizeWeatherTimestamp(time) ?? "") > Date.parse(observedAt))
     : -1;
   const hourlyCodes = hourly?.weather_code;
   const hourlyPrecipitation = hourly?.precipitation;

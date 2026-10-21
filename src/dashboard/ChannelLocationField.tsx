@@ -21,6 +21,7 @@ interface ChannelLocationFieldProperties {
   disabled: boolean;
   loading?: boolean;
   readOnlyReasonId?: string;
+  initialLoadError?: { title: string; reason: string; retryLabel: string; retrying: boolean; onRetry: () => void };
 }
 
 export const ChannelLocationField = ({
@@ -34,6 +35,7 @@ export const ChannelLocationField = ({
   disabled,
   loading = false,
   readOnlyReasonId = "channel-location-read-only",
+  initialLoadError,
 }: ChannelLocationFieldProperties): ReactElement => {
   const labels = channelSettingsTexts(language);
   const [opened, setOpened] = useState(false);
@@ -73,36 +75,41 @@ export const ChannelLocationField = ({
 
   return (
     <div className="channel-location-field" aria-label={labels.location} aria-busy={loading}>
-      <div className={`channel-location-field__status${value === null && !loading ? " channel-location-field__status--missing" : ""}`}
-        {...(value === null && !loading ? { role: "status" } : {})} aria-live="polite">
+      <div className={`channel-location-field__status${initialLoadError === undefined && value === null && !loading ? " channel-location-field__status--missing" : ""}${initialLoadError === undefined ? "" : " channel-location-field__status--error"}`}
+        {...(initialLoadError !== undefined ? { role: "alert" } : value === null && !loading ? { role: "status" } : {})} aria-live="polite">
         {loading ? <span className="channel-location-field__skeleton channel-location-field__skeleton--status" />
+          : initialLoadError !== undefined ? <strong title={initialLoadError.title}>{initialLoadError.title}</strong>
           : value === null ? <>
             <StatusLed state="warn" label={labels.locationMissingWarning} dotOnly />
             <strong title={labels.locationMissing}>{labels.locationMissing}</strong>
           </>
             : <strong className="channel-location-field__place" title={value.name}>{value.name}</strong>}
       </div>
-      <div className="channel-location-field__details" title={loading ? undefined : details}>
+      <div className="channel-location-field__details" title={loading ? undefined : initialLoadError?.reason ?? details}>
         {loading ? <span className="channel-location-field__skeleton channel-location-field__skeleton--details" />
-          : details}
+          : initialLoadError?.reason ?? details}
       </div>
       <div className="channel-location-field__actions">
-        <Button variant="secondary" disabled={actionsDisabled}
-          {...(!canEdit ? { describedBy: readOnlyReasonId } : {})}
-          onClick={() => { setOpened(true); setSearchFailed(false); setResults([]); }}>
-          {labels.locationChange}
-        </Button>
-        <Button variant="subtle" className="channel-location-field__remove" disabled={actionsDisabled || value === null}
-          {...(!canEdit ? { describedBy: readOnlyReasonId } : {})}
-          onClick={() => { setRemoveConfirmation(true); }}>
-          {labels.locationRemove}
-        </Button>
-        <Button variant="secondary" icon="clock-hour-4" title={labels.locationTimeZoneTitle}
-          disabled={actionsDisabled || !timeZoneActionAvailable}
-          {...(!canEdit ? { describedBy: readOnlyReasonId } : {})}
-          onClick={applyTimeZone}>
-          {labels.locationTimeZoneAction}
-        </Button>
+        {initialLoadError !== undefined
+          ? <Button variant="secondary" disabled={initialLoadError.retrying} onClick={initialLoadError.onRetry}>{initialLoadError.retryLabel}</Button>
+          : <>
+            <Button variant="secondary" disabled={actionsDisabled}
+              {...(!canEdit ? { describedBy: readOnlyReasonId } : {})}
+              onClick={() => { setOpened(true); setSearchFailed(false); setResults([]); }}>
+              {labels.locationChange}
+            </Button>
+            <Button variant="subtle" className="channel-location-field__remove" disabled={actionsDisabled || value === null}
+              {...(!canEdit ? { describedBy: readOnlyReasonId } : {})}
+              onClick={() => { setRemoveConfirmation(true); }}>
+              {labels.locationRemove}
+            </Button>
+            <Button variant="secondary" icon="clock-hour-4" title={labels.locationTimeZoneTitle}
+              disabled={actionsDisabled || !timeZoneActionAvailable}
+              {...(!canEdit ? { describedBy: readOnlyReasonId } : {})}
+              onClick={applyTimeZone}>
+              {labels.locationTimeZoneAction}
+            </Button>
+          </>}
       </div>
       <p className="muted channel-location-field__hint" title={labels.locationHint}>{labels.locationHint}</p>
 

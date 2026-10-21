@@ -16,7 +16,6 @@ import { queryKeys } from "./data/keys";
 import { dashboardCommonTexts, dashboardLanguage, dashboardTexts, apiErrorText } from "./locale";
 import {
   ConfirmDialog,
-  LoadState,
   LockedReason,
   SaveStatus,
   Section,
@@ -205,16 +204,18 @@ export const ChannelLocationPage = ({ channelId, role, onOpenCommand = () => {},
           </Section>
           <div id="location">
             <Section title={labels.location}>
-              {settingsReady || !settingsQuery.isError
-                ? <ChannelLocationField channelId={channelId} language={language} value={location}
-                    onChange={(value) => { writeDraft({ location: value }); }} channelTimeZone={timeZone || settings?.timeZone || "UTC"}
-                    onSelectChannelTimeZone={(value) => { writeDraft({ timeZone: value }); }} canEdit={canEdit} loading={!settingsReady}
-                    disabled={!settingsReady || settingsQuery.isFetching || pending} readOnlyReasonId={readOnlyReasonId} />
-                : <LoadState className="channel-location-page__location-status" variant="compact-64" status="error"
-                    loading={<span />} empty={<span />} error={<p role="alert">{loadError}</p>}
-                    queryError={{ title: dashboard.errors.dataLoadFailed, message: loadError, onRetry: () => { void settingsQuery.refetch(); } }}>
-                    {null}
-                  </LoadState>}
+              <ChannelLocationField channelId={channelId} language={language} value={location}
+                onChange={(value) => { writeDraft({ location: value }); }} channelTimeZone={timeZone || settings?.timeZone || "UTC"}
+                onSelectChannelTimeZone={(value) => { writeDraft({ timeZone: value }); }} canEdit={canEdit}
+                loading={!settingsReady && !settingsQuery.isError} disabled={!settingsReady || settingsQuery.isFetching || pending}
+                readOnlyReasonId={readOnlyReasonId}
+                {...(!settingsReady && settingsQuery.isError ? { initialLoadError: {
+                  title: dashboard.errors.dataLoadFailed,
+                  reason: loadError,
+                  retryLabel: common.retry,
+                  retrying: settingsQuery.isFetching,
+                  onRetry: () => { void settingsQuery.refetch(); },
+                } } : {})} />
             </Section>
           </div>
         </>,

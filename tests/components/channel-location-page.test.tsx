@@ -7,6 +7,7 @@ import { ChannelLocationPage } from "../../src/dashboard/ChannelLocationPage";
 import { channelSettingsTexts } from "../../src/dashboard/channel-settings-locale";
 import { queryKeys } from "../../src/dashboard/data/keys";
 import { UiProvider } from "../../src/dashboard/ui";
+import { openMeteoWeather } from "../../src/modules/weather/adapters/providers";
 import { jsonResponse } from "../unit/fixtures";
 import { renderWithQuery } from "../query-test-utils";
 
@@ -78,6 +79,7 @@ describe("channel location page", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
     setBrowserLanguage("de-DE");
   });
@@ -546,6 +548,35 @@ describe("channel location page", () => {
     renderWithQuery(<UiProvider><ChannelLocationPage channelId="channel-a" role="manager" /></UiProvider>);
 
     expect(await screen.findByText(new RegExp(expected, "u"))).toBeInTheDocument();
+  });
+
+  it("renders a fresh Open-Meteo observation as just updated in Berlin", async () => {
+    setBrowserLanguage("en-US");
+    vi.stubEnv("TZ", "Europe/Berlin");
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-21T12:00:30.000Z"));
+    const providerResult = await openMeteoWeather({
+      coordinates: { latitude: 52.52, longitude: 13.405 },
+      validators: { etag: null, lastModified: null },
+      now: Date.parse("2026-10-21T12:00:30.000Z"),
+      fetcher: vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+        current: {
+          time: "2026-10-21T12:00",
+          temperature_2m: 18.4,
+          apparent_temperature: 17.8,
+          relative_humidity_2m: 64,
+          precipitation: 0,
+          weather_code: 2,
+          wind_speed_10m: 3.3,
+          is_day: 1,
+        },
+        hourly: { time: ["2026-10-21T12:00", "2026-10-21T13:00"], precipitation: [0, 0], weather_code: [2, 2] },
+      }), { status: 200, headers: { "Content-Type": "application/json" } })),
+    });
+    if (providerResult.weather === undefined) throw new Error("Open-Meteo did not return an observation.");
+    vi.stubGlobal("fetch", livePageFetcher({ weather: { ...liveWeather, weather: providerResult.weather } }));
+    renderWithQuery(<UiProvider><ChannelLocationPage channelId="channel-a" role="manager" /></UiProvider>);
+
+    expect(await screen.findByText(/just updated/u)).toBeInTheDocument();
   });
 
   it("shows a readable weather provider error while keeping sun and moon available", async () => {

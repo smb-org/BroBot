@@ -14,6 +14,8 @@ export interface ModuleQueryWriteOptions<Value> {
   /** Merge the committed result into the primary query before it is revalidated. */
   updateCache: (current: unknown, result: Value) => unknown;
   relatedParts?: readonly ModuleQueryPart[];
+  /** Other channel resources that must be refreshed by the same write. */
+  relatedQueryKeys?: readonly (readonly unknown[])[];
 }
 
 export interface ModuleQueryOptions<Value> {
@@ -164,6 +166,7 @@ export const runModuleQueryWrite = async <Value,>(
       queryKey: moduleQueryKey(channelId, relatedPart.moduleId, relatedPart.part),
       exact: true,
     })),
+    ...(options.relatedQueryKeys ?? []).map((queryKey) => ({ queryKey, exact: true })),
   ];
   await Promise.all(filters.map((filter) => queryClient.cancelQueries(filter)));
   let result: Value;

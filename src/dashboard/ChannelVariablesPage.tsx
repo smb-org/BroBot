@@ -20,7 +20,7 @@ import {
 import { apiErrorText, channelVariablesTexts, dashboardCommonTexts, dashboardLanguage, dashboardTexts } from "./locale";
 import { Button, CollectionPage, ConfirmDialog, EmptyCellValue, Field, Icon, InspectorFieldRow, InspectorSection, ListToolbar, LoadState, LoadStateLines, notify, UnitInput, PageHeader, Select, SwitchRow, TokenChip, useDraftGuard } from "./ui";
 import { CHANNEL_VARIABLE_MAXIMUM_COUNT, CHANNEL_VARIABLE_MAXIMUM_VALUE, CHANNEL_VARIABLE_MINIMUM_VALUE } from "../contracts/values";
-import { dashboardDataKeys, queryKeys } from "./data/keys";
+import { dashboardDataKeys } from "./data/keys";
 import { useDashboardQueryClient } from "./data";
 import { useChannelVariablesQuery, useLegacyOverlayTokensQuery, useOverlaysQuery } from "./data/lists";
 import { registerDashboardNavigationGuard } from "./ui/navigation-guard";
@@ -83,7 +83,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const labels = channelVariablesTexts(language);
   const variablesQuery = useChannelVariablesQuery(channelId);
   const moduleCatalogQuery = useQuery({
-    queryKey: queryKeys.channel(channelId, "template-variables"),
+    queryKey: dashboardDataKeys.templateVariables(channelId),
     queryFn: ({ signal }) => getChannelTemplateVariables(channelId, signal),
     staleTime: 5 * 60 * 1_000,
   });
