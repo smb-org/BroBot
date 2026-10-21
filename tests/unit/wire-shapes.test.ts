@@ -1,3 +1,4 @@
+import { blitzTexts } from "../../src/modules/blitz_round/locale";
 import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
@@ -374,6 +375,12 @@ const realtimeForms = {
 };
 
 const expectedModuleSettings = {
+  blitz_round: {
+    prize: 50, answerTimeSeconds: 60, chatTarget: null,
+    startText: blitzTexts("de").startTextDefault,
+    solvedText: blitzTexts("de").solvedTextDefault,
+    timeoutText: blitzTexts("de").timeoutTextDefault,
+  },
   channel_events: {},
   emote_slots: {
     symbols: [
@@ -861,6 +868,7 @@ describe("serialized contract shapes", () => {
         "ads",
         "api_source",
         "belabox",
+        "blitz_round",
         "channel_events",
         "chat_voting",
         "clips",

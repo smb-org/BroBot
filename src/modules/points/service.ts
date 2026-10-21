@@ -49,7 +49,9 @@ const enabledGames = async (channelId: string, context: ModuleExecutionContext, 
   return modules.MODULES.flatMap((module) => {
     if (!module.requiresModules?.includes("points") || !enabled.has(module.id)) return [];
     const entry = module.navigationEntries?.[0];
-    return [module.id === "emote_slots" ? `${entry?.label[language] ?? "Slot"} !slot` : entry?.label[language] ?? module.id];
+    if (module.id === "emote_slots") return [`${entry?.label[language] ?? "Slot"} !slot`];
+    if (module.id === "blitz_round") return [pointsCatalog[language].chat.blitzGame];
+    return [entry?.label[language] ?? module.id];
   });
 };
 

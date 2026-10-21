@@ -15,9 +15,10 @@ const json = (body: unknown, status = 200) => ({
 });
 
 const moduleState = (id: string, enabled: boolean): PanelModuleState => ({ id, enabled, settings: "{}", mandatory: false });
-const moduleStates = (pointsEnabled: boolean, slotEnabled: boolean): PanelModuleState[] => [
+const moduleStates = (pointsEnabled: boolean, slotEnabled: boolean, blitzEnabled = false): PanelModuleState[] => [
   moduleState("points", pointsEnabled),
   moduleState("emote_slots", slotEnabled),
+  moduleState("blitz_round", blitzEnabled),
 ];
 
 const channelState = (modules: PanelModuleState[]): PanelChannelState => ({
@@ -102,7 +103,7 @@ const mockDashboard = async (page: Page, initialModules: PanelModuleState[], ini
 
   return {
     toggleRequests,
-    setModules: (pointsEnabled: boolean, slotEnabled: boolean) => { modules = moduleStates(pointsEnabled, slotEnabled); },
+    setModules: (pointsEnabled: boolean, slotEnabled: boolean, blitzEnabled = false) => { modules = moduleStates(pointsEnabled, slotEnabled, blitzEnabled); },
     setErrorCode: (value: string | null) => { errorCode = value; },
   };
 };
@@ -124,6 +125,10 @@ const moduleRowGeometry = async (page: Page): Promise<Array<{ href: string; top:
       height: Math.round(rect.height * 100) / 100,
     };
   }));
+
+const moduleWorkspaceRow = (page: Page, moduleId: string) => page
+  .locator(".module-workspace__group .list-row")
+  .filter({ has: page.locator(`a[href$="/modules/${moduleId}"]`) });
 
 const pointsHeaderGeometry = async (page: Page): Promise<{ top: number; height: number; contentTop: number }> => page
   .locator(".module-detail--points")
@@ -153,7 +158,7 @@ const slotHeaderGeometry = async (page: Page): Promise<{ top: number; height: nu
   };
 };
 
-test("locks dependency switches in the reserved reasons and captures both required views (protects=managers see why Slot cannot activate without points and why points cannot deactivate while Slot is active, without a layout shift or request; fails_when=either switch is enabled, the reserved reason is absent, a disabled switch sends a request, or any requested screenshot has the wrong viewport; no_claim=behavior for dependency changes committed by another manager)", async ({ page }, testInfo) => {
+test("locks dependency switches in the reserved reasons and captures both required views (protects=managers see why Slot cannot activate without points and the combined Points lock while Slot and Blitz are active, without a layout shift or request; fails_when=either switch is enabled, the reserved reason is absent, a disabled switch sends a request, or any requested screenshot has the wrong viewport; no_claim=behavior for dependency changes committed by another manager)", async ({ page }, testInfo) => {
   const api = await mockDashboard(page, moduleStates(false, false));
   mkdirSync("test-results/issue-504-ui", { recursive: true });
 
@@ -162,7 +167,7 @@ test("locks dependency switches in the reserved reasons and captures both requir
     await page.goto(`/channels/${channelId}/modules?lang=de`);
     const slotSwitch = page.getByRole("switch", { name: "Slot: Aus" });
     await expect(slotSwitch).toBeDisabled();
-    await expect(page.getByText("Benötigt: Punkte")).toBeVisible();
+    await expect(moduleWorkspaceRow(page, "emote_slots").getByText("Benötigt: Punkte", { exact: true })).toBeVisible();
     await slotSwitch.click({ force: true });
     expect(api.toggleRequests).toEqual([]);
     await page.screenshot({
@@ -171,11 +176,11 @@ test("locks dependency switches in the reserved reasons and captures both requir
     });
   }
 
-  api.setModules(true, true);
+  api.setModules(true, true, true);
   await page.goto(`/channels/${channelId}/modules?lang=de`);
   const pointsSwitch = page.getByRole("switch", { name: "Punkte: Läuft" });
   await expect(pointsSwitch).toBeDisabled();
-  await expect(page.getByText("Erst ausschalten: Slot")).toBeVisible();
+  await expect(moduleWorkspaceRow(page, "points").getByText("Erst ausschalten: Slot, Blitzrunde", { exact: true })).toBeVisible();
   expect(api.toggleRequests).toEqual([]);
 
   api.setModules(false, false);
@@ -184,7 +189,7 @@ test("locks dependency switches in the reserved reasons and captures both requir
     await page.goto(`/channels/${channelId}/modules/emote_slots?lang=de`);
     const slotSwitch = page.getByRole("switch", { name: "Slot" });
     await expect(slotSwitch).toBeDisabled();
-    await expect(page.getByText("Benötigt: Punkte")).toBeVisible();
+    await expect(page.locator(".settings-page--slot > .page-header").getByText("Benötigt: Punkte", { exact: true })).toBeVisible();
     await page.screenshot({
       path: `test-results/issue-504-ui/slot-header-${String(viewport.width)}x${String(viewport.height)}-repeat-${String(testInfo.repeatEachIndex)}.png`,
       fullPage: true,
@@ -264,7 +269,7 @@ test("keeps the Slot header stable while Points toggles at narrow and desktop wi
     api.setModules(false, false);
     await page.setViewportSize(viewport);
     await page.goto(`/channels/${channelId}/modules/emote_slots?lang=de`);
-    await expect(page.getByText("Benötigt: Punkte", { exact: true })).toBeVisible();
+    await expect(page.locator(".settings-page--slot > .page-header").getByText("Benötigt: Punkte", { exact: true })).toBeVisible();
     await expect(page.locator(".slot-jackpot-meta")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Walzen", exact: true })).toBeVisible();
     const lockedGeometry = await slotHeaderGeometry(page);

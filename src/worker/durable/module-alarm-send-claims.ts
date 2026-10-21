@@ -27,12 +27,18 @@ export const claimModuleAlarmSend = async (
   storage: ClaimStorage,
   occurrenceKey: string,
   now: number,
+  retrySendingAfterMs?: number,
 ): Promise<boolean | "rate_limited"> => storage.transaction(async (transaction) => {
   const stored = await transaction.get(MODULE_ALARM_SEND_CLAIMS_STORAGE_KEY);
   const previousClaims = isRecord(stored) ? stored : {};
   const cutoff = now - MODULE_ALARM_SEND_CLAIM_RETENTION_MS;
   const claims = Object.fromEntries(Object.entries(previousClaims).filter(([, value]) => timestampOf(value) >= cutoff));
-  if (Object.hasOwn(claims, occurrenceKey)) return false;
+  const previous = claims[occurrenceKey];
+  if (Object.hasOwn(claims, occurrenceKey)) {
+    // Round results retry an uncertain delivery after the send window; confirmed sends remain final.
+    if (retrySendingAfterMs === undefined || !isRecord(previous) || previous.status !== "sending" ||
+        now - timestampOf(previous) < retrySendingAfterMs) return false;
+  }
   if (!await claimAutomatedChatOutputInTransaction(transaction, now)) return "rate_limited";
   claims[occurrenceKey] = { status: "sending", at: now } satisfies ModuleAlarmSendClaim;
   await transaction.put(MODULE_ALARM_SEND_CLAIMS_STORAGE_KEY, claims);

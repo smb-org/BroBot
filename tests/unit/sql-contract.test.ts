@@ -4,6 +4,7 @@ import path from "node:path";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
+import { blitzQuestionColumns } from "../../src/modules/blitz_round/adapters/d1";
 import { authorizeModuleMutation } from "../../src/worker/module-authorization";
 import {
   actorGuard,
@@ -169,6 +170,8 @@ const sqlGetFixtures = new Map<string, string>([
   ["placeholders", "?, ?, ?"],
   ["channelStateQuery", channelStateQuery],
   ["textCommandSelectColumns", textCommandSelectColumns],
+  ["blitzQuestionColumns", blitzQuestionColumns],
+  ["blitzSearchFilter", " AND search_text LIKE ? ESCAPE '\\'"],
   ["CLAIM_ELIGIBLE_SQL", CLAIM_ELIGIBLE_SQL],
   ["FAQ_CLAIM_ELIGIBLE_SQL", FAQ_CLAIM_ELIGIBLE_SQL],
   ["quotedIdColumn", '"faq_id"'],
@@ -288,16 +291,16 @@ const hasSchemaException = (query: SqlContractQuery): boolean => schemaException
   exception.fileName === query.fileName && query.sql.includes(exception.tableName));
 
 describe("SQL contract", () => {
-  it("produces the expected baseline from all migrations", () => {
+  it("produces the expected baseline from all migrations [protects=blitz_questions has its channel cascade and persisted search_text column; fails_when=the foreign key is absent or the search column is missing; no_claim=does not exercise channel deletion in the worker D1 runtime]", () => {
     const database = prepareBaseline();
     try {
       const objects = database.prepare(
         "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY tbl_name, type DESC, name",
       ).all() as unknown as SchemaObject[];
-      expect(objects.filter((object) => object.type === "table")).toHaveLength(64);
-      expect(objects.filter((object) => object.type === "index")).toHaveLength(51);
-      expect(objects.filter((object) => object.type === "trigger")).toHaveLength(132);
-      expect(objects).toHaveLength(247);
+      expect(objects.filter((object) => object.type === "table")).toHaveLength(65);
+      expect(objects.filter((object) => object.type === "index")).toHaveLength(52);
+      expect(objects.filter((object) => object.type === "trigger")).toHaveLength(135);
+      expect(objects).toHaveLength(252);
 
       const tableColumns = (table: string): Set<string> => new Set(
         (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(({ name }) => name),
@@ -307,6 +310,13 @@ describe("SQL contract", () => {
       ]));
       expect([...tableColumns("channel_stream_state")]).toEqual(expect.arrayContaining([
         "checked_at", "eventsub_changed_at",
+      ]));
+      expect([...tableColumns("blitz_questions")]).toContain("search_text");
+      const blitzQuestionForeignKeys = database.prepare("PRAGMA foreign_key_list(blitz_questions)").all() as {
+        table: string; from: string; to: string; on_delete: string;
+      }[];
+      expect(blitzQuestionForeignKeys).toEqual(expect.arrayContaining([
+        expect.objectContaining({ table: "channels", from: "channel_id", to: "channel_id", on_delete: "CASCADE" }),
       ]));
     } finally {
       database.close();

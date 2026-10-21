@@ -25,8 +25,27 @@ const testSettlement: PointSettlement = ({ round, participants, params }: PointS
   return { movements, result: params.result ?? { payouts } };
 };
 
+const blitzSettlement: PointSettlement = ({ round, participants, params }: PointSettlementInput) => {
+  if (!isRecord(params) || !Number.isSafeInteger(params.prize) || (params.prize as number) < 1 || (params.prize as number) > 10_000) {
+    throw new Error("invalid_settlement_params");
+  }
+  const data = isRecord(round.data) ? round.data : {};
+  if (typeof data.answer !== "string" || data.answer.length === 0) throw new Error("invalid_settlement_params");
+  const prize = params.prize as number;
+  const share = participants.length === 0 ? 0 : Math.floor(prize / participants.length);
+  const winners = participants.map(({ accountId, login }) => ({ accountId, login }));
+  const movements = share === 0 || winners.length === 0
+    ? []
+    : [
+      { accountId: "__house", delta: -share * winners.length },
+      ...winners.map(({ accountId, login }) => ({ accountId, delta: share, login })),
+    ];
+  return { movements, result: { answer: data.answer, winners, share } };
+};
+
 export const POINT_SETTLEMENTS: ReadonlyMap<string, PointSettlement> = new Map([
   ["test", testSettlement],
+  ["blitz", blitzSettlement],
 ]);
 
 export const INSTANT_SETTLEMENTS: ReadonlyMap<string, InstantPointSettlement> = new Map([
