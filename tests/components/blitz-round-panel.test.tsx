@@ -299,6 +299,64 @@ describe("Blitz Round collection panel", () => {
     expect(api.getQuestions()[0]).toMatchObject({ prompt: "STORM", revision: 2 });
   });
 
+  it("selects another question requested during a header save [protects=click Save, request another question row while the question PATCH is pending, and select that row after the save resolves; fails_when=the saved revision remounts the editor and drops the pending row destination; no_claim=the delayed PATCH uses an in-memory HTTP stub and does not verify authentication or D1 writes]", async () => {
+    let releasePatch!: () => void;
+    const patchGate = new Promise<void>((resolve) => { releasePatch = resolve; });
+    const api = installPanelFetch([sampleQuestion, secondQuestion], undefined, false, false, false, undefined, false, { questionPatchGate: patchGate });
+    mountPanel();
+    fireEvent.change(await screen.findByRole("textbox", { name: "Word" }), { target: { value: "STORM" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
+    await waitFor(() => expect(api.submittedQuestionRevisions).toEqual([1]));
+    fireEvent.click(screen.getByRole("button", { name: /Word scramble.*MOON/u }));
+    expect(await screen.findByRole("dialog", { name: "Save changes?" })).toBeInTheDocument();
+
+    act(() => { releasePatch(); });
+
+    const requestedQuestion = await screen.findByRole("button", { name: /Word scramble.*MOON/u });
+    await waitFor(() => expect(requestedQuestion).toHaveAttribute("aria-current", "true"));
+    expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("MOON");
+  });
+
+  it("opens New question requested during a header save [protects=click Save, request New question while the question PATCH is pending, and open a blank question editor after the save resolves; fails_when=the saved revision remounts the editor and drops the pending New question destination; no_claim=the delayed PATCH uses an in-memory HTTP stub and does not verify authentication or D1 writes]", async () => {
+    let releasePatch!: () => void;
+    const patchGate = new Promise<void>((resolve) => { releasePatch = resolve; });
+    const api = installPanelFetch([sampleQuestion], undefined, false, false, false, undefined, false, { questionPatchGate: patchGate });
+    mountPanel();
+    fireEvent.change(await screen.findByRole("textbox", { name: "Word" }), { target: { value: "STORM" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
+    await waitFor(() => expect(api.submittedQuestionRevisions).toEqual([1]));
+    fireEvent.click(screen.getByRole("button", { name: "New question" }));
+    expect(await screen.findByRole("dialog", { name: "Save changes?" })).toBeInTheDocument();
+
+    act(() => { releasePatch(); });
+
+    expect(await screen.findByRole("heading", { name: "New question" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("");
+  });
+
+  it("completes dashboard navigation requested during a header save [protects=registered dashboard navigation waits for the header PATCH, proceeds exactly once after success, and does not cancel the successful route; fails_when=the saved revision drops dashboard navigation, invokes it more than once, or runs the navigation cancellation callback; no_claim=the route transition uses the production guard registry with an in-memory PATCH stub and does not test router rendering or D1 writes]", async () => {
+    let releasePatch!: () => void;
+    const patchGate = new Promise<void>((resolve) => { releasePatch = resolve; });
+    const api = installPanelFetch([sampleQuestion], undefined, false, false, false, undefined, false, { questionPatchGate: patchGate });
+    mountPanel();
+    fireEvent.change(await screen.findByRole("textbox", { name: "Word" }), { target: { value: "STORM" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
+    await waitFor(() => expect(api.submittedQuestionRevisions).toEqual([1]));
+    let navigations = 0;
+    let cancellations = 0;
+    const navigate = (): void => { navigations += 1; };
+    const cancel = (): void => { cancellations += 1; };
+    act(() => { runDashboardNavigationGuards(navigate, cancel); });
+    expect(navigations).toBe(0);
+    expect(await screen.findByRole("dialog", { name: "Save changes?" })).toBeInTheDocument();
+
+    act(() => { releasePatch(); });
+
+    await waitFor(() => expect(navigations).toBe(1));
+    expect(cancellations).toBe(0);
+    expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("STORM");
+  });
+
   it("keeps the pending Settings dialog when a header save fails [protects=failed PATCH after requesting Settings leaves the question editor, unsaved draft, and confirmation available; fails_when=the failed save hides the draft or loses the pending switch confirmation; no_claim=the failed PATCH is simulated by an in-memory HTTP stub and does not verify server error handling]", async () => {
     let releasePatch!: () => void;
     const patchGate = new Promise<void>((resolve) => { releasePatch = resolve; });
