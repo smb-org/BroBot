@@ -29,6 +29,7 @@ import type { ModulePanelProperties } from "../../contract";
 import type { ApiSource, ApiSourceTestResult } from "../contracts";
 import { apiSourcePanelTexts } from "./locale";
 import { ExpressionField } from "./ExpressionField";
+import { JsonResponseTree } from "./JsonResponseTree";
 import { createApiSource, deleteApiSource, loadApiSources, testApiSource, updateApiSource } from "./service";
 
 interface SourceDraft {
@@ -72,6 +73,7 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<ApiSourceTestResult>();
+  const [testedInput, setTestedInput] = useState<{ url: string; expression: string }>();
   const [testRequestError, setTestRequestError] = useState<string>();
   const [formError, setFormError] = useState<string | undefined>();
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
@@ -90,6 +92,7 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
     setConfirmDeleteOpen(false);
     setDeleteError(undefined);
     setTestResult(undefined);
+    setTestedInput(undefined);
     setTestRequestError(undefined);
   };
 
@@ -108,6 +111,7 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
     setCreationStep(0);
     setFormError(undefined);
     setTestResult(undefined);
+    setTestedInput(undefined);
     setTestRequestError(undefined);
   };
 
@@ -120,32 +124,68 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
     setDraftOriginal(initialDraft);
     setFormError(undefined);
     setTestResult(undefined);
+    setTestedInput(undefined);
     setTestRequestError(undefined);
   };
 
   const updateDraft = (patch: Partial<SourceDraft>): void => {
     if (draft === null) return;
     setDraft({ ...draft, ...patch });
-    setTestResult(undefined);
+    // A successful test stays valid for expression edits only; any other tested input invalidates it.
+    const keepsTestedUrl = patch.url === undefined || patch.url.trim() === testedInput?.url;
+    if (testResult?.status !== "ok" || !keepsTestedUrl) {
+      setTestResult(undefined);
+      setTestedInput(undefined);
+    }
     setTestRequestError(undefined);
   };
 
   const testDraft = async (): Promise<void> => {
     if (draft === null || !canEdit || busy || testing) return;
+    const input = { url: draft.url.trim(), expression: draft.expression.trim() };
     setTesting(true);
     setTestResult(undefined);
+    setTestedInput(undefined);
     setTestRequestError(undefined);
     try {
-      setTestResult(await testApiSource(channelId, {
-        url: draft.url.trim(),
-        expression: draft.expression.trim(),
-      }));
+      const result = await testApiSource(channelId, input);
+      setTestResult(result);
+      if (result.status === "ok") setTestedInput(input);
     } catch (failure: unknown) {
       setTestRequestError(apiErrorCode(failure) === "api_source_management_denied" ? labels.denied : labels.testRequestFailed);
     } finally {
       setTesting(false);
     }
   };
+
+  const testResultIsStale = testResult?.status === "ok" && testedInput !== undefined && draft !== null &&
+    (testedInput.url !== draft.url.trim() || testedInput.expression !== draft.expression.trim());
+  const testResultDisplay = <div data-testid="api-source-test-result" className="api-source-panel__test-result">
+    <div className="api-source-panel__test-result-status" aria-live="polite">
+      {testing ? <p role="status">{labels.testing}</p> : null}
+      {testRequestError === undefined ? null : <p className="api-source-test-result__error" role="alert">{testRequestError}</p>}
+      {testResult?.status === "error" ? <p className="api-source-test-result__error" role="alert">
+        {apiSourceFailureText(testResult.reason, locale, testResult.retryAfter)}
+        {testResult.constructName === undefined ? "" : ` · ${testResult.constructName}`}
+        {testResult.httpStatus === undefined ? "" : ` · HTTP ${String(testResult.httpStatus)}`}
+      </p> : null}
+      {testResult?.status === "ok" ? <p role="status">{labels.testSucceeded(testResult.httpStatus, testResult.bytes)}</p> : null}
+    </div>
+    <JsonResponseTree
+      value={testResult?.status === "ok" ? testResult.json : undefined}
+      expression={draft?.expression ?? ""}
+      loading={testing}
+      messages={labels.responseTree}
+      onSelectPath={(expression) => { updateDraft({ expression }); }}
+    />
+    <div className="api-source-panel__test-result-value" aria-live="polite">
+      {testResult?.status === "ok" ? <p>
+        <span>{labels.resultValue}</span>
+        <code className={`mono${testResultIsStale ? " api-source-panel__test-result-value-stale" : ""}`} title={testResult.value}>{testResult.value}</code>
+        {testResultIsStale ? <span role="status">{labels.resultStale}</span> : null}
+      </p> : null}
+    </div>
+  </div>;
 
   const save = async (): Promise<string | null> => {
     if (draft === null || !canEdit || busy || (editingName === null && (creationStep !== 3 || draft.name.trim().length === 0))) return labels.saveFailed;
@@ -359,23 +399,16 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
       {creationStep === 2 ? <>
         <div className="api-source-panel__test-summary">
           <p className="muted"><span>{labels.url}</span><code className="mono">{draft.url || "—"}</code></p>
-          <p className="muted"><span>{labels.expression}</span><code className="mono">{draft.expression || labels.noExpression}</code></p>
         </div>
+        <InspectorFieldRow className="inspector-field-row--stacked" label={labels.expression} help={labels.expressionHint}>
+          <ExpressionField id="api-source-expression" label={labels.expression} value={draft.expression}
+            onChange={(expression) => updateDraft({ expression })} maxLength={512} language={locale}
+            messages={labels.expressionPicker} disabled={!canEdit || busy || testing} rows={3} />
+        </InspectorFieldRow>
         <Button className="api-source-panel__test-button" variant="secondary" type="button" disabled={!canEdit || busy || testing || draft.url.trim().length === 0} onClick={() => { void testDraft(); }}>
           {testing ? labels.testing : labels.test}
         </Button>
-        <div data-testid="api-source-test-result" aria-live="polite" className="api-source-panel__test-result">
-          {testRequestError === undefined ? null : <p className="api-source-test-result__error" role="alert">{testRequestError}</p>}
-          {testResult?.status === "error" ? <p className="api-source-test-result__error" role="alert">
-            {apiSourceFailureText(testResult.reason, locale, testResult.retryAfter)}
-            {testResult.constructName === undefined ? "" : ` · ${testResult.constructName}`}
-            {testResult.httpStatus === undefined ? "" : ` · HTTP ${String(testResult.httpStatus)}`}
-          </p> : null}
-          {testResult?.status === "ok" ? <>
-            <p role="status">{labels.testSucceeded(testResult.httpStatus, testResult.bytes)}</p>
-            <pre className="mono">{JSON.stringify({ json: testResult.json, value: testResult.value }, null, 2)}</pre>
-          </> : null}
-        </div>
+        {testResultDisplay}
       </> : null}
       {creationStep === 3 ? <InspectorFieldRow className="inspector-field-row--stacked" label={labels.name} help={labels.nameHint}>
         <Field label={labels.name} labelHidden value={draft.name}
@@ -433,25 +466,14 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
             onChange={(expression) => updateDraft({ expression })} maxLength={512} language={locale}
             messages={labels.expressionPicker} disabled={!canEdit || busy || testing} />
         </InspectorFieldRow>
-        {draft.expression.trim().length === 0 ? <p className="api-source-panel__whole-response muted" aria-live="polite">{labels.noExpression}</p> : null}
+        {draft.expression.trim().length === 0 ? <p className="muted" aria-live="polite">{labels.noExpression}</p> : null}
         <div className="form-actions">
           <Button type="button" disabled={!canEdit || busy || testing || draft.url.trim().length === 0} onClick={() => { void testDraft(); }}>
             {testing ? labels.testing : labels.test}
           </Button>
           <Button type="button" danger="subtle" disabled={!canEdit || busy || testing} onClick={() => { setDeleteError(undefined); setConfirmDeleteOpen(true); }}>{labels.delete}</Button>
         </div>
-        <div data-testid="api-source-test-result" aria-live="polite" className="api-source-panel__test-result">
-          {testRequestError === undefined ? null : <p className="api-source-test-result__error" role="alert">{testRequestError}</p>}
-          {testResult?.status === "error" ? <p className="api-source-test-result__error" role="alert">
-            {apiSourceFailureText(testResult.reason, locale, testResult.retryAfter)}
-            {testResult.constructName === undefined ? "" : ` · ${testResult.constructName}`}
-            {testResult.httpStatus === undefined ? "" : ` · HTTP ${String(testResult.httpStatus)}`}
-          </p> : null}
-          {testResult?.status === "ok" ? <>
-            <p role="status">{labels.testSucceeded(testResult.httpStatus, testResult.bytes)}</p>
-            <pre className="mono">{JSON.stringify({ json: testResult.json, value: testResult.value }, null, 2)}</pre>
-          </> : null}
-        </div>
+        {testResultDisplay}
       </div>}
     </FormDialog>
     <ConfirmDialog opened={editorGuard.confirmOpen} title={dashboard.module.unsavedChangesTitle}

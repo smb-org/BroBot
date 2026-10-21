@@ -1,5 +1,6 @@
 import type { ModuleLanguage } from "../../contract";
 import type { ExpressionFieldMessages } from "./ExpressionField";
+import type { ApiSourceJsonTreeMessages } from "./JsonResponseTree";
 
 export interface ApiSourcePanelTexts {
   title: string;
@@ -25,6 +26,9 @@ export interface ApiSourcePanelTexts {
   expressionPicker: ExpressionFieldMessages;
   test: string;
   testing: string;
+  responseTree: ApiSourceJsonTreeMessages;
+  resultValue: string;
+  resultStale: string;
   testSucceeded: (httpStatus: number, bytes: number) => string;
   testRequestFailed: string;
   notTested: string;
@@ -83,6 +87,20 @@ const texts: Readonly<Record<ModuleLanguage, ApiSourcePanelTexts>> = {
     },
     test: "Testen",
     testing: "Wird getestet …",
+    responseTree: {
+      treeLabel: "Beispielantwort als JSON-Baum",
+      responseRoot: "Beispielantwort · JSON",
+      emptyKey: "Leerer Schlüssel",
+      loading: "Antwort wird geladen …",
+      empty: "Teste die Quelle, um die Antwort zu sehen.",
+      types: { array: "Array", boolean: "Wahrheitswert", null: "Null", number: "Zahl", object: "Objekt", string: "Text" },
+      moreEntries: (count) => `+${String(count)} weitere`,
+      pathTooLong: "Dieser Pfad überschreitet die erlaubte Ausdruckslänge.",
+      pathUnsupported: "Dieser Pfad wird vom Ausdrucksauswerter nicht unterstützt.",
+      treeBudgetExceeded: "Dieser Zweig kann wegen der Anzeigebegrenzung nicht geöffnet werden.",
+    },
+    resultValue: "Ergebniswert",
+    resultStale: "Bitte erneut testen",
     testSucceeded: (httpStatus, bytes) => `Erfolgreich · HTTP ${String(httpStatus)} · ${String(bytes)} Bytes`,
     testRequestFailed: "Der Test konnte nicht ausgeführt werden.",
     notTested: "Noch nicht abgerufen",
@@ -139,6 +157,20 @@ const texts: Readonly<Record<ModuleLanguage, ApiSourcePanelTexts>> = {
     },
     test: "Test",
     testing: "Testing …",
+    responseTree: {
+      treeLabel: "Sample response as a JSON tree",
+      responseRoot: "Sample response · JSON",
+      emptyKey: "Empty key",
+      loading: "Loading response …",
+      empty: "Run a test to inspect the response.",
+      types: { array: "Array", boolean: "Boolean", null: "Null", number: "Number", object: "Object", string: "String" },
+      moreEntries: (count) => `+${String(count)} more`,
+      pathTooLong: "This path exceeds the allowed expression length.",
+      pathUnsupported: "This path is not supported by the expression evaluator.",
+      treeBudgetExceeded: "This branch cannot open because the response display limit has been reached.",
+    },
+    resultValue: "Resulting value",
+    resultStale: "Needs re-test",
     testSucceeded: (httpStatus, bytes) => `Success · HTTP ${String(httpStatus)} · ${String(bytes)} bytes`,
     testRequestFailed: "The test request could not be completed.",
     notTested: "Not fetched yet",
