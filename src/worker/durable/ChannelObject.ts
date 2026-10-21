@@ -3637,7 +3637,8 @@ export class ChannelObject extends DurableObject<Env> {
         }
         const round = pointRoundRow(this.ctx.storage.sql, roundId);
         const alarmKey = pointRoundAlarmKey(roundId);
-        if (round?.resolve_delivery_state === "delivered" || round?.resolve_delivery_state === "suppressed") {
+        if (round?.resolve_delivery_state === "delivered" || round?.resolve_delivery_state === "suppressed" ||
+            round?.resolve_delivery_state === "failed") {
           this.clearPointRoundAlarmSync(alarmKey);
         } else this.writePointRoundAlarmSync(alarmKey, Date.now());
         return value;
@@ -4077,7 +4078,7 @@ export class ChannelObject extends DurableObject<Env> {
   private async deliverPointRoundResult(roundId: string): Promise<void> {
     const attempt = this.ctx.storage.transactionSync(() =>
       beginPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, Date.now()));
-    if (attempt.outcome === "delivered" || attempt.outcome === "suppressed" || attempt.outcome === "ignored") {
+    if (attempt.outcome === "delivered" || attempt.outcome === "suppressed" || attempt.outcome === "failed" || attempt.outcome === "ignored") {
       this.ctx.storage.transactionSync(() => { this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId)); });
       await this.scheduleEarliestAlarm();
       return;
@@ -4139,12 +4140,11 @@ export class ChannelObject extends DurableObject<Env> {
     );
     const delivered = delivery.sent || delivery.delivery === "delivered";
     const permanentlySuppressed = delivery.reason === "module_disabled";
-    const complete = delivered || permanentlySuppressed;
-    const deliveryState = delivered ? "delivered" : permanentlySuppressed ? "suppressed" : "pending";
+    const deliveryStatus = permanentlySuppressed ? "suppressed" : delivered ? "delivered" : delivery.delivery;
     this.ctx.storage.transactionSync(() => {
-      recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, deliveryState);
-      if (complete) this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
-      else this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), Date.now() + POINTS_ANNOUNCE_RETRY_MS);
+      const state = recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, deliveryStatus);
+      if (state === "pending") this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), Date.now() + POINTS_ANNOUNCE_RETRY_MS);
+      else this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
     });
     await this.scheduleEarliestAlarm();
   }

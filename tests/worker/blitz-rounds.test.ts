@@ -5,6 +5,8 @@ import { createBlitzQuestionRepository } from "../../src/modules/blitz_round/ada
 import { blitzRoundDefaultsForLanguage } from "../../src/modules/blitz_round/locale";
 import { openBlitzRound, processBlitzMessage } from "../../src/modules/blitz_round/service";
 import { modulePoints } from "../../src/worker/module-points";
+import { POINTS_ANNOUNCE_MAX_ATTEMPTS, POINTS_ANNOUNCE_RETRY_MS } from "../../src/worker/durable/points";
+import { claimAutomatedChatOutput } from "../../src/worker/durable/automated-chat-output";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { blitzRoundModule } from "../../src/modules/blitz_round";
 import {
@@ -504,7 +506,7 @@ describe("blitz answers in the channel Durable Object", () => {
     expect(row).toEqual({ resolve_delivery_state: "delivered", operation_count: 1 });
   });
 
-  it("retries the stored result line without booking the prize twice [protects=resolution delivery retries send the committed result while the ledger operation remains singular; fails_when=the stored line is not retried or the payout repeats; no_claim=sendChat is mocked]", async () => {
+  it("retries the stored result line after a transient rate limit without booking the prize twice [protects=resolution delivery retries a rate-limited committed result while the ledger operation remains singular; fails_when=the stored line is not retried or the payout repeats; no_claim=sendChat is mocked and no Twitch delivery is claimed]", async () => {
     const channelId = `blitz-delivery-${crypto.randomUUID()}`;
     const roundId = "blitz-delivery-retry";
     await insertPointChannel(channelId);
@@ -513,7 +515,7 @@ describe("blitz answers in the channel Durable Object", () => {
     const sendChat = vi.fn(() => {
       sendAttempts += 1;
       return Promise.resolve(sendAttempts === 1
-        ? { sent: false, retryable: false, reason: "network_error", delivery: "failed" as const }
+        ? { sent: false, retryable: true, reason: "rate_limited", delivery: "rate_limited" as const }
         : { sent: true, retryable: false, reason: null, delivery: "delivered" as const });
     });
     vi.spyOn(blitzRoundModule, "formatPointRoundResult").mockResolvedValue({ text: "Correct: CLOUD · frostfern · +50 each" });
@@ -544,6 +546,7 @@ describe("blitz answers in the channel Durable Object", () => {
     expect(afterFirstAttempt).toEqual({ deliveryState: "pending", operationCount: 1 });
     expect(sendChat).toHaveBeenCalledOnce();
 
+    vi.setSystemTime(Date.now() + POINTS_ANNOUNCE_RETRY_MS);
     await forcePointAlarm(object, roundId);
     const afterRetry = await runPointObject(object, (_target, state) => state.storage.sql.exec<{
       resolve_delivery_state: string;
@@ -559,6 +562,143 @@ describe("blitz answers in the channel Durable Object", () => {
 
     expect(afterRetry).toEqual({ resolve_delivery_state: "delivered", resolve_delivery_attempts: 2, operation_count: 1 });
     expect(sendChat).toHaveBeenCalledTimes(2);
+    await expect(object.pointBalance("blitz_round", "viewer_one")).resolves.toBe(50);
+  });
+
+  it("parks a permanently rejected result after one attempt so competing automated output can proceed [protects=an AutoMod-style result rejection is parked with its settlement and alarm cleared so the next automated output can claim the shared allowance; fails_when=the result remains pending, retries, loses its settlement, retains an alarm, or blocks the next allowance claim; no_claim=uses a real ChannelObject and DO storage with a mocked chat transport and does not claim Twitch delivered either line]", async () => {
+    const channelId = `blitz-permanent-result-${crypto.randomUUID()}`;
+    const roundId = "blitz-permanent-result";
+    const settlement = { kind: "blitz", params: { prize: 50 } };
+    await insertPointChannel(channelId);
+    const object = blitzObject(pointObject(channelId));
+    let claimOutput: (() => Promise<boolean>) | null = null;
+    const sendChat = vi.fn(async () => {
+      if (claimOutput === null || !await claimOutput()) throw new Error("The first result did not claim the automated output allowance.");
+      return { sent: false, retryable: false, reason: "automod_drop", delivery: "failed" as const };
+    });
+    vi.spyOn(blitzRoundModule, "formatPointRoundResult").mockResolvedValue({ text: "Correct: CLOUD" });
+
+    await runPointObject(object, async (target, state) => {
+      claimOutput = () => claimAutomatedChatOutput(state.storage, Date.now());
+      stubPointRoundChat(target, sendChat);
+      await target.openGameRound("blitz_round", roundId, {
+        durationS: 60,
+        announceText: "Blitz round starts",
+        answer: "CLOUD",
+        settlement,
+      });
+      await target.markGameRoundAnnounced("blitz_round", roundId, Date.now() + 60_000, `round:${roundId}`);
+      await blitzObject(target).answerGameRound("blitz_round", roundId, "msg:permanent-result", "viewer_one", "frostfern", 5, Date.now());
+      await deferPointAlarmWithin(state);
+    });
+    await object.resolveGameRound("blitz_round", roundId, settlement);
+
+    await forcePointAlarm(object, roundId);
+    const parked = await runPointObject(object, (_target, state) => ({
+      round: state.storage.sql.exec<{ state: string; resolve_delivery_state: string; resolve_delivery_attempts: number }>(
+        "SELECT state, resolve_delivery_state, resolve_delivery_attempts FROM game_rounds WHERE round_id = ?", roundId,
+      ).one(),
+      operationCount: state.storage.sql.exec<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM point_operations WHERE operation_id = ?", `round:${roundId}:resolve`,
+      ).one().count,
+      alarm: state.storage.kv.get<Record<string, unknown>>("channel:alarm_schedule")?.[`points:round:${roundId}`] ?? null,
+    }));
+    expect(parked).toEqual({
+      round: { state: "resolved", resolve_delivery_state: "failed", resolve_delivery_attempts: 1 },
+      operationCount: 1,
+      alarm: null,
+    });
+    expect(sendChat).toHaveBeenCalledOnce();
+
+    await runPointObject(object, async (_target, state) => state.storage.deleteAlarm());
+    await object.resolveGameRound("blitz_round", roundId, settlement);
+    const afterReplay = await runPointObject(object, async (_target, state) => ({
+      round: state.storage.sql.exec<{ state: string; resolve_delivery_state: string; resolve_delivery_attempts: number }>(
+        "SELECT state, resolve_delivery_state, resolve_delivery_attempts FROM game_rounds WHERE round_id = ?", roundId,
+      ).one(),
+      operationCount: state.storage.sql.exec<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM point_operations WHERE operation_id = ?", `round:${roundId}:resolve`,
+      ).one().count,
+      scheduledAlarm: state.storage.kv.get<Record<string, unknown>>("channel:alarm_schedule")?.[`points:round:${roundId}`] ?? null,
+      platformAlarm: await state.storage.getAlarm(),
+    }));
+    expect(afterReplay).toEqual({
+      round: { state: "resolved", resolve_delivery_state: "failed", resolve_delivery_attempts: 1 },
+      operationCount: 1,
+      scheduledAlarm: null,
+      platformAlarm: null,
+    });
+    expect(sendChat).toHaveBeenCalledOnce();
+
+    vi.setSystemTime(Date.now() + POINTS_ANNOUNCE_RETRY_MS);
+    await runPointObject(object, async (target) => {
+      const internal = target as unknown as { handlePointRoundAlarm: (alarmKey: string, now: number) => Promise<void> };
+      await internal.handlePointRoundAlarm(`points:round:${roundId}`, Date.now());
+    });
+    const competingOutputClaimed = await runPointObject(object, (_target, state) =>
+      claimAutomatedChatOutput(state.storage, Date.now()));
+    expect(competingOutputClaimed).toBe(true);
+    expect(sendChat).toHaveBeenCalledOnce();
+    await expect(object.pointBalance("blitz_round", "viewer_one")).resolves.toBe(50);
+  });
+
+  it("backs off transient result failures and parks after six attempts [protects=rate-limited result sends retry at the shared five-second interval for at most six attempts while retaining settlement; fails_when=the retry deadline differs, a seventh attempt is possible, settlement changes, or the final alarm remains; no_claim=uses a real ChannelObject with mocked rate-limit responses and does not claim Twitch delivery]", async () => {
+    const channelId = `blitz-transient-result-${crypto.randomUUID()}`;
+    const roundId = "blitz-transient-result";
+    const settlement = { kind: "blitz", params: { prize: 50 } };
+    await insertPointChannel(channelId);
+    const object = blitzObject(pointObject(channelId));
+    const sendChat = vi.fn(() => Promise.resolve({
+      sent: false,
+      retryable: true,
+      reason: "rate_limited",
+      delivery: "rate_limited" as const,
+    }));
+    vi.spyOn(blitzRoundModule, "formatPointRoundResult").mockResolvedValue({ text: "Correct: CLOUD" });
+
+    await runPointObject(object, async (target, state) => {
+      stubPointRoundChat(target, sendChat);
+      await target.openGameRound("blitz_round", roundId, {
+        durationS: 60,
+        announceText: "Blitz round starts",
+        answer: "CLOUD",
+        settlement,
+      });
+      await target.markGameRoundAnnounced("blitz_round", roundId, Date.now() + 60_000, `round:${roundId}`);
+      await blitzObject(target).answerGameRound("blitz_round", roundId, "msg:transient-result", "viewer_one", "frostfern", 5, Date.now());
+      await deferPointAlarmWithin(state);
+    });
+    await object.resolveGameRound("blitz_round", roundId, settlement);
+
+    for (let attempt = 1; attempt <= POINTS_ANNOUNCE_MAX_ATTEMPTS; attempt += 1) {
+      const attemptedAt = Date.now();
+      await forcePointAlarm(object, roundId);
+      const state = await runPointObject(object, (_target, durableState) => ({
+        round: durableState.storage.sql.exec<{ resolve_delivery_state: string; resolve_delivery_attempts: number }>(
+          "SELECT resolve_delivery_state, resolve_delivery_attempts FROM game_rounds WHERE round_id = ?", roundId,
+        ).one(),
+        operationCount: durableState.storage.sql.exec<{ count: number }>(
+          "SELECT COUNT(*) AS count FROM point_operations WHERE operation_id = ?", `round:${roundId}:resolve`,
+        ).one().count,
+        alarm: durableState.storage.kv.get<Record<string, { deadline: number }>>("channel:alarm_schedule")?.[`points:round:${roundId}`] ?? null,
+      }));
+      if (attempt < POINTS_ANNOUNCE_MAX_ATTEMPTS) {
+        expect(state).toMatchObject({
+          round: { resolve_delivery_state: "pending", resolve_delivery_attempts: attempt },
+          operationCount: 1,
+          alarm: { deadline: attemptedAt + POINTS_ANNOUNCE_RETRY_MS },
+        });
+        vi.setSystemTime(Date.now() + POINTS_ANNOUNCE_RETRY_MS);
+      } else {
+        expect(state).toEqual({
+          round: { resolve_delivery_state: "failed", resolve_delivery_attempts: POINTS_ANNOUNCE_MAX_ATTEMPTS },
+          operationCount: 1,
+          alarm: null,
+        });
+      }
+    }
+
+    expect(sendChat).toHaveBeenCalledTimes(POINTS_ANNOUNCE_MAX_ATTEMPTS);
     await expect(object.pointBalance("blitz_round", "viewer_one")).resolves.toBe(50);
   });
 
@@ -739,7 +879,7 @@ describe("blitz answers in the channel Durable Object", () => {
     await insertPointChannel(channelId);
     const object = blitzObject(pointObject(channelId));
     const sendChat = vi.fn<ModuleAlarmContext["sendChat"]>()
-      .mockResolvedValueOnce({ sent: false, retryable: false, reason: "network_error", delivery: "failed" })
+      .mockResolvedValueOnce({ sent: false, retryable: true, reason: "rate_limited", delivery: "rate_limited" })
       .mockResolvedValue({ sent: true, retryable: false, reason: null, delivery: "delivered" });
     vi.spyOn(blitzRoundModule, "formatPointRoundResult").mockResolvedValue({ text: "Correct: CLOUD" });
 

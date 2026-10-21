@@ -15,6 +15,18 @@ export const POINTS_ANNOUNCE_RETRY_MS = 5_000;
 export const POINTS_ANNOUNCE_MAX_ATTEMPTS = 6;
 export const POINTS_ANNOUNCE_AMBIGUOUS_MS = 30_000;
 
+type PointRoundDeliveryStatus = "rate_limited" | "failed" | "delivered" | "ambiguous";
+type PointRoundDeliveryDisposition = "retry" | "park" | "complete";
+
+/** Shared start/result line policy: retry rate limits within the attempt cap, park definite failures, and complete ambiguity. */
+const pointRoundDeliveryDisposition = (
+  status: PointRoundDeliveryStatus,
+  attempts: number,
+): PointRoundDeliveryDisposition => {
+  if (status === "rate_limited") return attempts < POINTS_ANNOUNCE_MAX_ATTEMPTS ? "retry" : "park";
+  return status === "failed" ? "park" : "complete";
+};
+
 type PointsSql = DurableObjectStorage["sql"];
 
 interface OperationRow extends Record<string, string | number | null> {
@@ -51,7 +63,7 @@ interface RoundRow extends Record<string, string | number | null> {
   announce_attempts: number;
   last_attempt_at: number | null;
   prepare_state: "pending" | "delivered";
-  resolve_delivery_state: "pending" | "sending" | "delivered" | "suppressed";
+  resolve_delivery_state: "pending" | "sending" | "delivered" | "suppressed" | "failed";
   resolve_delivery_attempts: number;
   resolve_delivery_last_attempt_at: number | null;
   resolved_at: string | null;
@@ -1611,11 +1623,12 @@ export const recordPointAnnouncementSync = (
 ): { moduleId: string; deadlineAt: number | null; alarmKey: string | null; cancelled: boolean } | null => {
   const round = pointRoundRow(sql, roundId);
   if (round === null || round.state !== "announcing") return null;
-  if (state === "rate_limited" && round.announce_attempts < POINTS_ANNOUNCE_MAX_ATTEMPTS) {
+  const disposition = pointRoundDeliveryDisposition(state, round.announce_attempts);
+  if (disposition === "retry") {
     sql.exec("UPDATE game_rounds SET announce_state = 'rate_limited' WHERE round_id = ?", roundId);
     return { moduleId: round.module_id, deadlineAt: null, alarmKey: round.alarm_key, cancelled: false };
   }
-  if (state === "failed" || state === "rate_limited") {
+  if (disposition === "park") {
     sql.exec("UPDATE game_rounds SET announce_state = 'failed' WHERE round_id = ?", roundId);
     return { moduleId: round.module_id, deadlineAt: null, alarmKey: round.alarm_key, cancelled: true };
   }
@@ -1647,12 +1660,13 @@ export const recoverablePointRounds = (sql: PointsSql): RoundRow[] =>
 export const beginPointRoundResolutionDeliverySync = (sql: PointsSql, roundId: string, now: number): {
   round: RoundRow | null;
   result: unknown;
-  outcome: "attempt" | "pending" | "delivered" | "suppressed" | "ignored";
+  outcome: "attempt" | "pending" | "delivered" | "suppressed" | "failed" | "ignored";
 } => {
   const round = pointRoundRow(sql, roundId);
   if (round === null || round.state !== "resolved") return { round, result: null, outcome: "ignored" };
   if (round.resolve_delivery_state === "delivered") return { round, result: null, outcome: "delivered" };
   if (round.resolve_delivery_state === "suppressed") return { round, result: null, outcome: "suppressed" };
+  if (round.resolve_delivery_state === "failed") return { round, result: null, outcome: "failed" };
   if (!pointRoundDeliveryGateIsCurrentSync(sql, round)) {
     sql.exec(
       `UPDATE game_rounds SET resolve_delivery_state = 'suppressed'
@@ -1661,9 +1675,24 @@ export const beginPointRoundResolutionDeliverySync = (sql: PointsSql, roundId: s
     );
     return { round: { ...round, resolve_delivery_state: "suppressed" }, result: null, outcome: "suppressed" };
   }
-  if (round.resolve_delivery_state === "sending" && round.resolve_delivery_last_attempt_at !== null &&
-      now - round.resolve_delivery_last_attempt_at < POINTS_ANNOUNCE_AMBIGUOUS_MS) {
-    return { round, result: null, outcome: "pending" };
+  if (round.resolve_delivery_state === "sending" && round.resolve_delivery_last_attempt_at !== null) {
+    if (now - round.resolve_delivery_last_attempt_at < POINTS_ANNOUNCE_AMBIGUOUS_MS) {
+      return { round, result: null, outcome: "pending" };
+    }
+    sql.exec(
+      `UPDATE game_rounds SET resolve_delivery_state = 'delivered'
+        WHERE round_id = ? AND state = 'resolved' AND resolve_delivery_state = 'sending'`,
+      roundId,
+    );
+    return { round: { ...round, resolve_delivery_state: "delivered" }, result: null, outcome: "delivered" };
+  }
+  if (round.resolve_delivery_attempts >= POINTS_ANNOUNCE_MAX_ATTEMPTS) {
+    sql.exec(
+      `UPDATE game_rounds SET resolve_delivery_state = 'failed'
+        WHERE round_id = ? AND state = 'resolved' AND resolve_delivery_state = 'pending'`,
+      roundId,
+    );
+    return { round: { ...round, resolve_delivery_state: "failed" }, result: null, outcome: "failed" };
   }
   const operation = sql.exec<{ result_json: string }>(
     "SELECT result_json FROM point_operations WHERE operation_id = ? AND module_id = ?",
@@ -1691,14 +1720,24 @@ export const beginPointRoundResolutionDeliverySync = (sql: PointsSql, roundId: s
 export const recordPointRoundResolutionDeliverySync = (
   sql: PointsSql,
   roundId: string,
-  state: "delivered" | "pending" | "suppressed",
-): void => {
+  status: PointRoundDeliveryStatus | "suppressed",
+): RoundRow["resolve_delivery_state"] | null => {
+  const round = pointRoundRow(sql, roundId);
+  if (round === null || round.state !== "resolved") return null;
+  if (round.resolve_delivery_state === "suppressed") return "suppressed";
+  const disposition = status === "suppressed" ? "park" : pointRoundDeliveryDisposition(status, round.resolve_delivery_attempts);
+  const state = status === "suppressed"
+    ? "suppressed"
+    : disposition === "retry" ? "pending"
+      : disposition === "park" ? "failed"
+        : "delivered";
   sql.exec(
     `UPDATE game_rounds SET resolve_delivery_state = ?
       WHERE round_id = ? AND state = 'resolved' AND resolve_delivery_state != 'suppressed'`,
     state,
     roundId,
   );
+  return state;
 };
 
 export const settlementFromRoundData = (value: unknown): { kind: string; params: unknown } | null => {
