@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactElement } from "react";
 
-import { moduleQueryKey, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { dashboardCommonTexts } from "../../../dashboard/locale";
 import {
   Badge, Button, ChipsInput, CollectionPage, ConfirmDialog, Field, Icon, PageHeader,
@@ -293,10 +293,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
 
   const reloadQuestion = async (questionId: string, session: symbol): Promise<BlitzQuestion> => {
     const latest = await loadBlitzQuestion(channelId, questionId);
-    queryClient.setQueryData(moduleQueryKey(channelId, "blitz_round", "questions:1:"), (current: BlitzQuestionPage | undefined) => {
-      if (current === undefined) return current;
-      return { ...current, questions: current.questions.map((question) => question.id === questionId ? latest : question) };
-    });
+    await queryClient.invalidateQueries({ predicate: (query) => isQuestionListQuery(channelId, query) });
     if (isCurrentEditorSession(session)) {
       setDeleteFailure(null);
       setSelectedQuestion(latest);
@@ -305,8 +302,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   };
 
   const reloadSettings = async (session: symbol): Promise<{ settings: BlitzRoundSettings; revision: number } | null> => {
-    const latest = await loadBlitzSettings(channelId);
-    queryClient.setQueryData(moduleQueryKey(channelId, "blitz_round", "settings"), latest);
+    const latest = await refetchModuleQueryData<{ settings: BlitzRoundSettings; revision: number }>(queryClient, channelId, "blitz_round", "settings");
     return isCurrentEditorSession(session) ? latest : null;
   };
 
@@ -447,9 +443,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
       ? <div className="blitz-panel__settings-loading" aria-live="polite">{settingsQuery.isError
         ? <><p>{labels.loadError}</p><Button disabled={settingsQuery.isFetching} onClick={() => { void settingsQuery.refetch(); }}>{commonLabels.retry}</Button></>
         : labels.saving}</div>
-      : <SettingsEditor channelId={channelId} language={language === "en" ? "en" : "de"} settings={settingsQuery.data.settings} revision={settingsQuery.data.revision} canManage={canManage} onBack={closeSettings} onReload={reloadSettings} registerSwitch={(switcher) => { switchRef.current = switcher; }} registerEditorSession={registerEditorSession} isCurrentEditorSession={isCurrentEditorSession} onSaved={(settings, revision) => {
-        queryClient.setQueryData(moduleQueryKey(channelId, "blitz_round", "settings"), { settings, revision });
-      }} />
+      : <SettingsEditor channelId={channelId} language={language === "en" ? "en" : "de"} settings={settingsQuery.data.settings} revision={settingsQuery.data.revision} canManage={canManage} onBack={closeSettings} onReload={reloadSettings} registerSwitch={(switcher) => { switchRef.current = switcher; }} registerEditorSession={registerEditorSession} isCurrentEditorSession={isCurrentEditorSession} />
     : selectedId === null
       ? <div className="blitz-panel__placeholder"><PageHeader title={labels.title} subtitle={labels.noSelection} /></div>
       : <QuestionEditor
@@ -766,7 +760,7 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
   </div>;
 }
 
-function SettingsEditor({ channelId, language, settings, revision, canManage, onBack, onReload, registerSwitch, registerEditorSession, isCurrentEditorSession, onSaved }: {
+function SettingsEditor({ channelId, language, settings, revision, canManage, onBack, onReload, registerSwitch, registerEditorSession, isCurrentEditorSession }: {
   channelId: string;
   language: "de" | "en";
   settings: BlitzRoundSettings;
@@ -777,7 +771,6 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
   registerSwitch: (switcher: ((proceed: () => void) => void) | null) => void;
   registerEditorSession: (session: symbol) => () => void;
   isCurrentEditorSession: (session: symbol) => boolean;
-  onSaved: (settings: BlitzRoundSettings, revision: number) => void;
 }): ReactElement {
   const labels = blitzTexts(language);
   const queryClient = useDashboardQueryClient();
@@ -807,7 +800,6 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
           baselineRevision: currentRevision,
           updateCache: (_current, next) => next,
         });
-        onSaved(result.settings, result.revision);
         if (!isCurrentEditorSession(session)) return null;
         draft.accept(result.settings);
         setCurrentRevision(result.revision);
@@ -836,7 +828,6 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
     setError(undefined);
     void onReload(session).then((latest) => {
       if (latest === null) return;
-      onSaved(latest.settings, latest.revision);
       if (!isCurrentEditorSession(session)) return;
       draft.accept(latest.settings);
       setCurrentRevision(latest.revision);

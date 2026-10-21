@@ -197,13 +197,13 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
     return Promise.resolve(jsonResponse({ error: "not_found" }, 404));
   });
   vi.stubGlobal("fetch", requests);
-  return { requests, getQuestions: () => questions, deleteQuestion: (id: string) => { questions = questions.filter((question) => question.id !== id); }, updateQuestion: (id: string, update: Partial<BlitzQuestion>) => { questions = questions.map((question) => question.id === id ? { ...question, ...update } : question); }, addQuestion: (question: BlitzQuestion) => { questions = [question, ...questions]; }, setFailQuestionListAfterDelete: (fails: boolean) => { shouldFailQuestionListAfterDelete = fails; }, getSettings: () => settings, getSettingsRevision: () => settingsRevision, submittedSettingsRevisions, submittedQuestionRevisions, submittedDeleteRevisions, postDeleteQuestionListFinished };
+  return { requests, getQuestions: () => questions, deleteQuestion: (id: string) => { questions = questions.filter((question) => question.id !== id); }, updateQuestion: (id: string, update: Partial<BlitzQuestion>) => { questions = questions.map((question) => question.id === id ? { ...question, ...update } : question); }, addQuestion: (question: BlitzQuestion) => { questions = [question, ...questions]; }, setFailQuestionListAfterDelete: (fails: boolean) => { shouldFailQuestionListAfterDelete = fails; }, getSettings: () => settings, getSettingsRevision: () => settingsRevision, updateSettingsFromAnotherManager: (next: BlitzRoundSettings, revision: number) => { settings = { ...next }; settingsRevision = revision; }, submittedSettingsRevisions, submittedQuestionRevisions, submittedDeleteRevisions, postDeleteQuestionListFinished };
 };
 
-const mountPanel = (channelId = "fictional_channel", queryClient?: QueryClient) => renderWithQuery(
+const mountPanel = (channelId = "fictional_channel", queryClient?: QueryClient, gcTime?: number) => renderWithQuery(
   <UiProvider><BlitzRoundPanel channelId={channelId} language="en" /></UiProvider>,
   undefined,
-  queryClient === undefined ? undefined : { queryClient },
+  { ...(queryClient === undefined ? {} : { queryClient }), ...(gcTime === undefined ? {} : { gcTime }) },
 );
 
 afterEach(() => {
@@ -819,7 +819,7 @@ describe("Blitz Round collection panel", () => {
     await waitFor(() => expect(api.getQuestions().some((question) => question.prompt === "STONE")).toBe(true));
   });
 
-  it("reloads a conflicted question by id when it falls beyond the first page [protects=question conflict recovery fetches the selected entity independently of pagination; fails_when=reload searches only page one and leaves a stale draft that cannot continue; no_claim=the paginated question list and HTTP responses use an in-memory stub]", async () => {
+  it("keeps a page-two conflict reload current when switching away and back [protects=reload refreshes the selected question on page two and the next save uses its revision 2 text and revision; fails_when=returning to the question restores revision 1 text or submits revision 1 again; no_claim=the paginated question list and HTTP responses use an in-memory stub and do not verify database isolation]", async () => {
     const questions = Array.from({ length: 26 }, (_, index): BlitzQuestion => ({
       ...sampleQuestion,
       id: `fictional-question-${String(index + 1).padStart(2, "0")}`,
@@ -828,7 +828,7 @@ describe("Blitz Round collection panel", () => {
       answers: ["Saturn"],
     }));
     const api = installPanelFetch(questions, undefined, true);
-    mountPanel();
+    mountPanel("fictional_channel", undefined, 600_000);
     await screen.findByRole("button", { name: /Which planet is number 1\?/u });
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
     await screen.findByRole("button", { name: /Which planet is number 26\?/u });
@@ -841,6 +841,19 @@ describe("Blitz Round collection panel", () => {
 
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Question" })).toHaveValue("MOON"));
     expect(api.requests.mock.calls.some(([input]) => parseUrl(input as RequestInfo).pathname.endsWith("/fictional-question-26"))).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Previous page" }));
+    const firstQuestion = await screen.findByRole("button", { name: /Which planet is number 1\?/u });
+    fireEvent.click(firstQuestion);
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    const pageTwoQuestion = await screen.findByRole("button", { name: /MOON|Which planet is number 26\?/u });
+    fireEvent.click(pageTwoQuestion);
+
+    const questionEditor = await screen.findByRole("textbox", { name: "Question" });
+    await waitFor(() => expect(questionEditor).toHaveValue("MOON"));
+    fireEvent.change(questionEditor, { target: { value: "Which planet has rings?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.submittedQuestionRevisions).toEqual([1, 2]));
   });
 
   it("starts a clean draft after saving while switching to New question [protects=each new-question session has independent editor state; fails_when=the New question editor key is reused and shows the just-saved draft; no_claim=the create request is served by an in-memory HTTP stub]", async () => {
@@ -876,6 +889,38 @@ describe("Blitz Round collection panel", () => {
     await waitFor(() => expect(api.getSettings().prize).toBe(90));
     expect(api.submittedSettingsRevisions).toEqual([1, 2]);
     expect(api.getSettingsRevision()).toBe(3);
+  });
+
+  it("keeps revision 3 from settings revalidation when the editor reopens [protects=runModuleQueryWrite leaves another manager's revision 3 in the settings cache after revalidation and reopening; fails_when=the completed save replaces revision 3 with its revision 2 result and the reopened editor shows stale settings or saves with revision 2; no_claim=the competing manager write is simulated by the in-memory HTTP fixture and does not verify separate D1 connections]", async () => {
+    let releaseRevalidation!: () => void;
+    const revalidationGate = new Promise<void>((resolve) => { releaseRevalidation = resolve; });
+    const api = installPanelFetch([sampleQuestion], undefined, false, false, false, undefined, false, {
+      settingsGetGates: [undefined, revalidationGate],
+    });
+    mountPanel();
+    await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const prize = await screen.findByRole("spinbutton", { name: "Prize" });
+    fireEvent.change(prize, { target: { value: "75" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
+
+    await waitFor(() => expect(api.getSettingsRevision()).toBe(2));
+    await waitFor(() => expect(api.requests.mock.calls.filter(([input, init]) =>
+      parseUrl(input as RequestInfo).pathname.endsWith("/modules/blitz_round/settings") && (init?.method ?? "GET") === "GET")).toHaveLength(2));
+    api.updateSettingsFromAnotherManager({ ...api.getSettings(), prize: 90 }, 3);
+    act(() => { releaseRevalidation(); });
+
+    expect(await screen.findByText("Saved")).toBeInTheDocument();
+    const settingsBack = screen.getAllByRole("button", { name: "Back to questions" }).at(-1);
+    if (settingsBack === undefined) throw new Error("The settings back button was not found.");
+    fireEvent.click(settingsBack);
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const reopenedPrize = await screen.findByRole("spinbutton", { name: "Prize" });
+    await waitFor(() => expect(reopenedPrize).toHaveValue(90));
+
+    fireEvent.change(reopenedPrize, { target: { value: "100" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
+    await waitFor(() => expect(api.submittedSettingsRevisions).toEqual([1, 3]));
   });
 
   it("offers save as new when the edited question was deleted elsewhere [protects=deleted question conflicts retain the draft and expose fixed-place save-as-new and discard choices; fails_when=PATCH deletion shows only a generic error or loses the draft; no_claim=deletion and recreation are simulated by an in-memory HTTP stub]", async () => {
