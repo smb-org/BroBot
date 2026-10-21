@@ -19,12 +19,13 @@ export default function VoteActionContent({ channelId, language, onDraftChange }
   const [title, setTitle] = useState("");
   const [options, setOptions] = useState(["", ""]);
   const [duration, setDuration] = useState("120");
+  const cockpitTemplates = templates?.templates.filter((template) => template.offerInCockpit) ?? [];
 
   useEffect(() => {
     const controller = new AbortController();
     void loadChatVoteTemplates(channelId, controller.signal).then((result) => {
       setTemplates(result);
-      setTemplateId(result.templates[0]?.id ?? null);
+      setTemplateId(result.templates.find((template) => template.offerInCockpit)?.id ?? null);
     }).catch(() => {
       if (!controller.signal.aborted) setFailed(true);
     });
@@ -46,7 +47,7 @@ export default function VoteActionContent({ channelId, language, onDraftChange }
 
   return <div className="live-action-content live-action-content--vote">
     <div className="live-action-content__template-slot" aria-busy={templates === null && !failed}>
-      {templates !== null && templates.templates.length > 0 ? <SegmentChoice
+      {templates !== null && cockpitTemplates.length > 0 ? <SegmentChoice
         label={texts.mode[language]}
         value={mode}
         onChange={(value) => { setMode(value); onDraftChange?.(true); }}
@@ -58,18 +59,18 @@ export default function VoteActionContent({ channelId, language, onDraftChange }
       /> : null}
       {templates === null && !failed ? <p className="live-action-content__status" role="status">{texts.loading[language]}</p> : null}
       {failed ? <p className="live-action-content__status" role="status">{texts.savedUnavailable[language]}</p> : null}
-      {templates !== null && templates.templates.length === 0 ? <p className="live-action-content__status" role="status">{texts.empty[language]}</p> : null}
+      {templates !== null && cockpitTemplates.length === 0 ? <p className="live-action-content__status" role="status">{texts.empty[language]}</p> : null}
     </div>
 
     {mode === "saved" ? <>
-      {templates !== null && templates.templates.length > 0 ? <Select
+      {templates !== null && cockpitTemplates.length > 0 ? <Select
         label={texts.label[language]}
         value={templateId}
         onChange={setTemplateId}
         name="templateId"
         required
         placeholder={texts.choose[language]}
-        options={templates.templates.map((template) => ({ value: template.id, label: template.title }))}
+        options={cockpitTemplates.map((template) => ({ value: template.id, label: template.title }))}
       /> : null}
     </> : <>
       <SegmentChoice

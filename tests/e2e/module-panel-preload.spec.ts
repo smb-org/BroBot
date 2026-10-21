@@ -353,6 +353,9 @@ for (const lazyCase of lazyLayoutCases) {
     const sentinel = page.getByTestId("layout-sentinel");
     if (lazyCase.type === "module") await expect(page.locator(".module-view-fallback")).toBeVisible();
     else await expect(page.locator("[data-module-editor-fallback]")).toBeVisible();
+    if (lazyCase.type === "editor" && lazyCase.kind === "chat_voting.tally") {
+      await expect(page.locator(".module-overlay-element-editor")).toHaveCSS("min-height", "364px");
+    }
     const boxHeightBefore = await reservedBox.evaluate((element) => element.getBoundingClientRect().height);
     const minHeightBefore = await reservedBox.evaluate((element) => getComputedStyle(element).minHeight);
     await page.evaluate(() => { window.scrollTo(0, 120); });

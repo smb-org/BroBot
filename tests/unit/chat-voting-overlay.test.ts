@@ -18,10 +18,11 @@ const tally = (
 });
 
 describe("chat voting tally state", () => {
-  it("defaults the countdown option on and accepts it as an element setting", () => {
+  it("defaults countdown and vote colors on and accepts both as element settings", () => {
     expect(chatVotingOverlayElement.defaultConfig.showCountdown).toBe(true);
-    expect(chatVotingOverlayElement.parseConfig({})).toMatchObject({ showCountdown: true });
-    expect(chatVotingOverlayElement.parseConfig({ showCountdown: false })).toMatchObject({ showCountdown: false });
+    expect(chatVotingOverlayElement.defaultConfig.useVoteColors).toBe(true);
+    expect(chatVotingOverlayElement.parseConfig({})).toMatchObject({ showCountdown: true, useVoteColors: true });
+    expect(chatVotingOverlayElement.parseConfig({ showCountdown: false, useVoteColors: false })).toMatchObject({ showCountdown: false, useVoteColors: false });
   });
 
   it("keeps the newest counts when a delayed tally arrives", () => {
@@ -225,5 +226,13 @@ describe("chat voting tally state", () => {
       revision: 1,
     });
     expect(newPayloadWithoutCompatibilityPreset).toMatchObject({ kind: "options", counts: [1, 2] });
+  });
+
+  it("preserves answer colors from the voting snapshot through realtime tally updates", () => {
+    const color = "#5b8cff";
+    const current = parseTallyState({ ...tally("colored-poll", 1), answerColors: [color, "#ff9f43"] });
+    expect(current?.answerColors).toEqual([color, "#ff9f43"]);
+    expect(mergeTallyState(current, { pollId: "colored-poll", revision: 2, counts: [2, 1] }))
+      .toMatchObject({ answerColors: [color, "#ff9f43"], counts: [2, 1] });
   });
 });

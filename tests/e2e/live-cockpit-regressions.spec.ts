@@ -12,7 +12,7 @@ test("End vote is available to operators while start vote keeps its running coun
     role: "operator",
     modules: [{ id: "chat_voting", enabled: true, settings: "{}" }],
     vote: {
-      id: "vote-regression", channelId, kind: "yes_no", optionCount: 2, labels: ["Ja", "Nein"], title: "Weiter?",
+      id: "vote-regression", channelId, kind: "yes_no", optionCount: 2, labels: ["Ja", "Nein"], answerColors: ["#5b8cff", "#ff9f43"], title: "Weiter?",
       status: "open", openedAt: new Date().toISOString(), closesAt: new Date(Date.now() + 90_000).toISOString(),
       requestedDurationSeconds: 120, closedAt: null, closeReason: "manual", counts: [3, 1], voterCount: 4,
     },
@@ -313,7 +313,7 @@ test("a failed refresh clears an obsolete running-vote lock", async ({ page }) =
     channelId,
     modules: [{ id: "chat_voting", enabled: true, settings: "{}" }],
     vote: {
-      id: "vote-expired", channelId, kind: "yes_no", optionCount: 2, labels: ["Ja", "Nein"], title: "Weiter?",
+      id: "vote-expired", channelId, kind: "yes_no", optionCount: 2, labels: ["Ja", "Nein"], answerColors: ["#5b8cff", "#ff9f43"], title: "Weiter?",
       status: "open", openedAt: new Date().toISOString(), closesAt: new Date(Date.now() + 90_000).toISOString(),
       requestedDurationSeconds: 120, closedAt: null, closeReason: "timer", counts: [3, 1], voterCount: 4,
     },
@@ -563,7 +563,7 @@ test("action tiles center reasonless content and keep vote labels within two lin
     role: "operator",
     modules: [{ id: "chat_voting", enabled: true, settings: "{}" }],
     vote: {
-      id: "vote-geometry", channelId, kind: "yes_no", optionCount: 2, labels: ["Ja", "Nein"], title: "Weiter?",
+      id: "vote-geometry", channelId, kind: "yes_no", optionCount: 2, labels: ["Ja", "Nein"], answerColors: ["#5b8cff", "#ff9f43"], title: "Weiter?",
       status: "open", openedAt: new Date().toISOString(), closesAt: new Date(Date.now() + 90_000).toISOString(),
       requestedDurationSeconds: 120, closedAt: null, closeReason: "manual", counts: [3, 1], voterCount: 4,
     },

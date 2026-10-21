@@ -7,6 +7,46 @@ import Tally from "../../src/modules/chat_voting/overlay/tally";
 describe("chat voting overlay tally", () => {
   afterEach(cleanup);
 
+  it("uses vote answer colors by default and keeps the fixed overlay fill when opted out", () => {
+    const state = {
+      pollId: "colored-poll",
+      status: "open" as const,
+      preset: "yes_no" as const,
+      optionCount: 2,
+      labels: ["Yes", "No"],
+      answerColors: ["#5b8cff", "#ff9f43"],
+      counts: [2, 1],
+      revision: 1,
+    };
+    const { container, rerender } = render(<Tally config={{ layout: "bars", showPercent: true }} state={state} now={Date.now()} language="en" />);
+    const firstFill = container.querySelector(".overlay-tally__fill") as HTMLElement;
+    expect(firstFill.style.backgroundColor).toBe("rgb(91, 140, 255)");
+    expect(firstFill.style.opacity).toBe("1");
+    expect((container.querySelector(".overlay-tally__track") as HTMLElement).style.background).toBe("rgba(127, 127, 127, 0.25)");
+
+    rerender(<Tally config={{ layout: "bars", showPercent: true, useVoteColors: false }} state={state} now={Date.now()} language="en" />);
+    expect((container.querySelector(".overlay-tally__fill") as HTMLElement).style.backgroundColor).toBe("");
+  });
+
+  it("shows answer colors in strip layout while the overlay color switch is enabled", () => {
+    const state = {
+      pollId: "strip-colored-poll",
+      status: "open" as const,
+      preset: "yes_no" as const,
+      optionCount: 2,
+      labels: ["Yes", "No"],
+      answerColors: ["#5b8cff", "#ff9f43"],
+      counts: [2, 1],
+      revision: 1,
+    };
+    const { container, rerender } = render(<Tally config={{ layout: "strip", showPercent: true }} state={state} now={Date.now()} language="en" />);
+    const markers = container.querySelectorAll<HTMLElement>(".overlay-tally__color-marker");
+    expect([...markers].map((marker) => marker.style.backgroundColor)).toEqual(["rgb(91, 140, 255)", "rgb(255, 159, 67)"]);
+
+    rerender(<Tally config={{ layout: "strip", showPercent: true, useVoteColors: false }} state={state} now={Date.now()} language="en" />);
+    expect(container.querySelectorAll(".overlay-tally__color-marker")).toHaveLength(0);
+  });
+
   it("uses the question as a fixed two-line header and retains the generic heading without one", () => {
     const longTitle = "😀".repeat(80);
     const { rerender } = render(<Tally config={{ layout: "bars", showPercent: true, hideAfterCloseSeconds: 15 }} state={{
@@ -68,6 +108,9 @@ describe("chat voting overlay tally", () => {
     expect(screen.queryByText("foxtrot")).not.toBeInTheDocument();
     expect(screen.getByText("?")).toBeInTheDocument();
     expect(screen.getByText("more: 2")).toBeInTheDocument();
+    const rankedFills = document.querySelectorAll<HTMLElement>(".overlay-tally__fill");
+    expect(rankedFills[0]?.style.backgroundColor).toBe("rgb(91, 140, 255)");
+    expect(rankedFills[1]?.style.backgroundColor).toBe("rgb(255, 159, 67)");
 
     cleanup();
     render(<Tally config={{ layout: "bars", showPercent: true, hideAfterCloseSeconds: 15 }} state={{

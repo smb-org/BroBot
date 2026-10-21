@@ -14,6 +14,8 @@ const template: ChatVoteTemplate = {
   shortcut: "shell",
   title: "Shell draft",
   labels: ["Yes", "No"],
+  answerColors: ["#5b8cff", "#ff9f43"],
+  offerInCockpit: true,
   freeTextMode: null,
   durationSeconds: 60,
   revision: 1,

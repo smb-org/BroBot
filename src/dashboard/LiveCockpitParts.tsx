@@ -209,7 +209,7 @@ export const LiveCockpitTiles = ({
               const percent = running.totalVotes === 0 ? 0 : Math.round(option.count * 100 / running.totalVotes);
               return <div className="live-vote-tile__option" key={`${option.label}-${String(index)}`}>
                 <div className="live-vote-tile__option-label"><strong>{option.label}</strong><span>{labels.voteOptionCount(formatNumber(option.count), String(percent))}</span></div>
-                <div className="live-vote-tile__track"><span style={{ width: `${String(percent)}%` }} /></div>
+                <div className="live-vote-tile__track"><span style={{ width: `${String(percent)}%`, ...(option.color === undefined ? {} : { backgroundColor: option.color }) }} /></div>
                 {option.approved === false ? <Button size="compact" variant="subtle" disabled={busy || !roleCanManage} onClick={() => { void approveTerm(running.id, option.label); }}>{labels.approveVoteTerm(option.label)}</Button> : null}
               </div>;
             })}

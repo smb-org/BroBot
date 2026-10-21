@@ -86,7 +86,7 @@ describe("chat vote template migration", () => {
       ]);
       const solo = broken.find((row) => row.legacy_alias === "yesno");
       expect(solo).toBeDefined();
-      expect(templateStartProblem({ labels: JSON.parse(solo?.labels ?? "[]") as string[], freeTextMode: null, durationSeconds: 120 }))
+      expect(templateStartProblem({ labels: JSON.parse(solo?.labels ?? "[]") as string[], freeTextMode: null, durationSeconds: 120, shortcut: "janein", offerInCockpit: true }))
         .toBe("answers");
       expect(database.prepare("SELECT settings FROM channel_modules WHERE channel_id = 'configured'").get())
         .toEqual({ settings: JSON.stringify({

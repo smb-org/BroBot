@@ -1547,7 +1547,7 @@ export type ModuleLiveTileSnapshot =
     kind: "vote";
     id: string;
     title: string | null;
-    options: readonly { label: string; count: number; approved?: boolean }[];
+    options: readonly { label: string; count: number; approved?: boolean; color?: string }[];
     totalVotes: number;
     closesAt: string;
     canExtend: boolean;

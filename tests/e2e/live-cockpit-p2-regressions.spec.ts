@@ -12,7 +12,7 @@ test("End vote keeps its last known poll id after availability refresh fails", a
     role: "operator",
     modules: [{ id: "chat_voting", enabled: true, settings: "{}" }],
     vote: {
-      id: "vote-stale-availability", channelId, kind: "yes_no", optionCount: 2, labels: ["Ja", "Nein"], title: "Weiter?",
+      id: "vote-stale-availability", channelId, kind: "yes_no", optionCount: 2, labels: ["Ja", "Nein"], answerColors: ["#5b8cff", "#ff9f43"], title: "Weiter?",
       status: "open", openedAt: new Date().toISOString(), closesAt: new Date(Date.now() + 90_000).toISOString(),
       requestedDurationSeconds: 120, closedAt: null, closeReason: "timer", counts: [3, 1], voterCount: 4,
     },

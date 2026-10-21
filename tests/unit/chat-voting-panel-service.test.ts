@@ -10,6 +10,8 @@ const template = (id: string, title: string, shortcut: string | null, labels: re
   shortcut,
   title,
   labels,
+  answerColors: labels.map((_label, index) => ["#5b8cff", "#ff9f43", "#2ed3a3", "#ff6fae", "#ffd45c", "#a47bff", "#68aeff", "#ff665c", "#c3ccdd"][index] ?? "#5b8cff"),
+  offerInCockpit: true,
   freeTextMode: null,
   durationSeconds,
   revision: 1,
@@ -38,5 +40,12 @@ describe("chat voting panel template refresh", () => {
     const secondResult = merged.templates.find(({ id }) => id === "second");
     if (secondResult === undefined) throw new Error("The refreshed second template was omitted.");
     expect(templateStartProblem(secondResult)).toBe("answers");
+  });
+
+  it("marks a saved vote unreachable only when neither chat nor the cockpit can start it", () => {
+    const unavailable = { ...template("unavailable", "No entry point", null, ["Yes", "No"], 60), offerInCockpit: false };
+    expect(templateStartProblem(unavailable)).toBe("unreachable");
+    expect(templateStartProblem({ ...unavailable, shortcut: "yesno" })).toBeNull();
+    expect(templateStartProblem({ ...unavailable, offerInCockpit: true })).toBeNull();
   });
 });
