@@ -65,6 +65,7 @@
   .api-source-panel__step .inspector-field-row__info { width: 20px; height: 20px; min-height: 20px; }
   .api-source-panel__step .ui-field__input,
   .api-source-panel__step .ui-expression-field__input { min-width: 0; }
+  .api-source-panel__step[data-step="3"] .ui-expression-field__input { min-height: 0; }
   .api-source-panel__step-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--s2); }
   .api-source-panel__list-toolbar .list-toolbar__status:has(.list-toolbar__reason:not(.sr-only)) { height: auto; min-height: 40px; overflow: visible; }
   .api-source-panel__list-toolbar .list-toolbar__status:has(.list-toolbar__reason:not(.sr-only)) > .ui-load-state__content { grid-template-columns: minmax(0, 1fr); align-items: start; height: auto; min-height: 40px; }

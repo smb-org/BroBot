@@ -386,7 +386,7 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
         <InspectorFieldRow className="inspector-field-row--stacked" label={labels.expression} help={labels.expressionHint}>
           <ExpressionField id="api-source-expression" label={labels.expression} value={draft.expression}
             onChange={(expression) => updateDraft({ expression })} maxLength={512} language={locale}
-            messages={labels.expressionPicker} disabled={!canEdit || busy || testing} />
+            messages={labels.expressionPicker} disabled={!canEdit || busy || testing} rows={3} />
         </InspectorFieldRow>
         <Button className="api-source-panel__test-button" variant="secondary" type="button" disabled={!canEdit || busy || testing || draft.url.trim().length === 0} onClick={() => { void testDraft(); }}>
           {testing ? labels.testing : labels.test}

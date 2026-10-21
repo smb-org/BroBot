@@ -53,7 +53,7 @@ const installSourceMocks = async (page: Page, role: "manager" | "operator" = "ma
         status: "ok",
         httpStatus: 200,
         bytes: 1400,
-        json: { temperature: 21, payload: "x".repeat(1400) },
+        json: { temperature: 21, payload: "x".repeat(1400), ...Object.fromEntries(Array.from({ length: 12 }, (_, index) => [`field${String(index)}`, index])) },
         value: "21",
       }));
     }
@@ -225,9 +225,12 @@ test("the source wizard submits every step from the keyboard and keeps test outp
     await expression.press("Control+Enter");
     await expect(dialog.locator("[data-step='3']")).toBeVisible();
     const summaryCode = dialog.locator("[data-step='3'] .api-source-panel__test-summary code");
-    await expect(summaryCode).toHaveCount(2);
+    await expect(summaryCode).toHaveCount(1);
     const summaryFonts = await summaryCode.evaluateAll((elements) => elements.map((element) => getComputedStyle(element).fontFamily));
-    expect(summaryFonts).toEqual([listFont, listFont]);
+    expect(summaryFonts).toEqual([listFont]);
+    const stepThreeExpression = dialog.getByRole("textbox", { name: "Wert aus der Antwort" });
+    await expect(stepThreeExpression).toHaveValue("$.temperature");
+    expect(await stepThreeExpression.evaluate((element) => getComputedStyle(element).fontFamily)).toBe(listFont);
 
     const output = dialog.getByTestId("api-source-test-result");
     const continueButton = dialog.getByRole("button", { name: "Weiter" });
@@ -237,26 +240,27 @@ test("the source wizard submits every step from the keyboard and keeps test outp
     expect(beforeOutput).not.toBeNull();
     expect(beforeContinue).not.toBeNull();
     expect(beforeDialog).not.toBeNull();
-    if (beforeOutput !== null) expect(beforeOutput.height).toBe(116);
+    if (beforeOutput !== null) expect(beforeOutput.height).toBe(320);
 
     await dialog.getByRole("button", { name: "Testen" }).click();
     await expect(output.getByRole("status")).toContainText("Erfolgreich · HTTP 200");
-    expect(await output.locator("pre").evaluate((element) => getComputedStyle(element).fontFamily)).toBe(listFont);
     const afterOutput = await output.boundingBox();
     const afterContinue = await continueButton.boundingBox();
     const afterDialog = await dialog.boundingBox();
     expect(afterOutput).not.toBeNull();
     expect(afterContinue).not.toBeNull();
     expect(afterDialog).not.toBeNull();
-    const outputStyle = await output.evaluate((element) => ({
+    const outputHeight = await output.evaluate((element) => element.getBoundingClientRect().height);
+    expect(outputHeight).toBe(320);
+    const treeStyle = await output.getByTestId("api-source-json-tree").evaluate((element) => ({
       overflowY: getComputedStyle(element).overflowY,
       height: element.getBoundingClientRect().height,
       scrollHeight: element.scrollHeight,
       clientHeight: element.clientHeight,
     }));
-    expect(outputStyle.overflowY).toBe("auto");
-    expect(outputStyle.height).toBe(116);
-    expect(outputStyle.scrollHeight).toBeGreaterThan(outputStyle.clientHeight);
+    expect(treeStyle.overflowY).toBe("auto");
+    expect(treeStyle.height).toBe(168);
+    expect(treeStyle.scrollHeight).toBeGreaterThan(treeStyle.clientHeight);
     if (beforeContinue !== null && afterContinue !== null) expect(Math.abs(beforeContinue.y - afterContinue.y)).toBeLessThanOrEqual(1);
     if (beforeDialog !== null && afterDialog !== null) expect(Math.abs(beforeDialog.height - afterDialog.height)).toBeLessThanOrEqual(1);
 
