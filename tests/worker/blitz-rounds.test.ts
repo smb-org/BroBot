@@ -47,6 +47,13 @@ interface BlitzPointRoundObject extends PointsWorkerObject {
 
 const blitzObject = (object: PointsWorkerObject): BlitzPointRoundObject => object as BlitzPointRoundObject;
 const testSettlement = { kind: "test", params: { payouts: [] } };
+const testBlitzTokenEncryptionKeys = JSON.stringify({
+  active: {
+    id: "blitz-test-token-encryption",
+    key: Buffer.from(new Uint8Array(32).fill(5)).toString("base64url"),
+  },
+  retired: [],
+});
 const openAnswerRound = async (
   object: BlitzPointRoundObject,
   roundId: string,
@@ -588,9 +595,10 @@ describe("blitz answers in the channel Durable Object", () => {
       createdAt: now,
       updatedAt: now,
     });
-    const encryptionKeys = worker.SESSION_ENCRYPTION_KEYS;
-    if (encryptionKeys === undefined) throw new Error("The worker test environment has no session encryption key.");
-    const appTokenCiphertext = await encryptJson({ token: "test-app-token" }, parseKeyRing(encryptionKeys));
+    const appTokenCiphertext = await encryptJson(
+      { token: "test-app-token" },
+      parseKeyRing(testBlitzTokenEncryptionKeys),
+    );
     await worker.DB.prepare(
       `INSERT INTO twitch_app_access_token (id, access_token_ciphertext, expires_at, created_at, updated_at)
        VALUES (1, ?, ?, ?, ?)
@@ -622,7 +630,11 @@ describe("blitz answers in the channel Durable Object", () => {
     }), { status: 200 }));
     const productionChat: typeof sendChatMessage = (...args) => {
       const productionArgs = [...args] as Parameters<typeof sendChatMessage>;
-      productionArgs[0] = { ...args[0], DB: flakyDatabase };
+      productionArgs[0] = {
+        ...args[0],
+        DB: flakyDatabase,
+        TOKEN_ENCRYPTION_KEYS: testBlitzTokenEncryptionKeys,
+      };
       productionArgs[4] = fetcher;
       return sendChatMessage(...productionArgs);
     };
