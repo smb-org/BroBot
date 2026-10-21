@@ -178,6 +178,27 @@ describe("Text command editor", () => {
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "POST" || init?.method === "PUT")).toBe(false);
   });
 
+  it("opens the canonical command when the initial command name is an alias", async () => {
+    const fetcher = panelFetch({ commands: () => [makeCommand({ name: "weather", aliases: ["wetter"], text: "Canonical response" })] });
+    const consumed = vi.fn<() => void>();
+    vi.stubGlobal("fetch", fetcher);
+    const Harness = () => {
+      const [initialCommand, setInitialCommand] = useState<{ name: string; text: string } | undefined>({ name: "WETTER", text: "Template response" });
+      return <TextCommandsPanel
+        channelId="kanal-a"
+        language="de"
+        {...(initialCommand === undefined ? {} : { initialCommand })}
+        onInitialCommandConsumed={() => { consumed(); setInitialCommand(undefined); }}
+      />;
+    };
+    renderWithQuery(<UiProvider><Harness /></UiProvider>);
+
+    await waitFor(() => expect(consumed).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("textbox", { name: "Befehlsname" })).toHaveValue("weather");
+    expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("Canonical response");
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "POST" || init?.method === "PUT")).toBe(false);
+  });
+
   it("shows cached commands immediately when returning to the module", async () => {
     vi.stubGlobal("fetch", panelFetch());
     const view = renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" /></UiProvider>, undefined, { gcTime: 600_000 });

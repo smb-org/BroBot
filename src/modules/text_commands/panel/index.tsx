@@ -25,7 +25,7 @@ import {
   type CurrencyTokenTarget,
 } from "./editor-state";
 import { commandListReply, TEXT_COMMAND_DEFAULT_TEXTS, TEXT_COMMAND_DEFAULT_USAGE_TEXT } from "../contracts/chat-defaults";
-import { statusForTier, validCommandName } from "../domain";
+import { normalizeCommandName, statusForTier, validCommandName } from "../domain";
 import { invalidTemplateParameters, renderTemplate, templateVariableNames, unknownTemplateVariables, worstCaseTemplateLength, type PanelTemplateWarning, type TemplateVariable } from "../contract";
 import { effectivePanelTemplateVariables, panelTemplateOptions, registeredModuleTemplateGroup } from "../../../dashboard/ui";
 import { createTextCommand, deleteTextCommand, loadTextCommandData, loadRegisteredTemplateVariables, lookupTextGames, saveTextCommand, searchTextGames, setTextCommandEnabled, textBlockNamesForPicker, type TextCommandChannelVariable } from "./service";
@@ -37,8 +37,6 @@ import { templateTextLength } from "../../../contracts/template-text-length";
 import type { ChatOutputTarget } from "../../../contracts/values";
 import type { ModuleRegisteredTemplateVariable } from "../../contract";
 import { formatCharacterCount } from "../../../dashboard/ui/text-length";
-
-const normalizeCommandName = (name: string): string => name.trim().replace(/^!/u, "").toLowerCase();
 
 const updateCommandCache = (current: unknown, command: TextCommand, previousName?: string): TextCommandPanelData => {
   const data = typeof current === "object" && current !== null ? current as Partial<TextCommandPanelData> : {};
@@ -1311,7 +1309,9 @@ const TextCommandsPanelContent = ({
     if (initialCommand === undefined || commandsQuery.isPending || commandsQuery.data === undefined || initialCommandApplied.current || createOpen) return;
     initialCommandApplied.current = true;
     initialSelectionApplied.current = true;
-    const existing = commands.find((command) => command.name === initialCommand.name);
+    const requestedName = normalizeCommandName(initialCommand.name);
+    const existing = commands.find((command) => normalizeCommandName(command.name) === requestedName ||
+      command.aliases.some((alias) => normalizeCommandName(alias) === requestedName));
     guardSwitch(() => {
       generationRef.current += 1;
       setSelectionVersion((current) => current + 1);

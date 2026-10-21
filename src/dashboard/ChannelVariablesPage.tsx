@@ -24,6 +24,7 @@ import { dashboardDataKeys, queryKeys } from "./data/keys";
 import { useDashboardQueryClient } from "./data";
 import { useChannelVariablesQuery, useLegacyOverlayTokensQuery, useOverlaysQuery } from "./data/lists";
 import { registerDashboardNavigationGuard } from "./ui/navigation-guard";
+import { formatTemplateVariableToken, templateVariableParameter } from "./ui/template-text-field-model";
 import { moduleName } from "./module-labels";
 import type { ModuleRegisteredTemplateVariable } from "../modules/contract";
 
@@ -35,6 +36,7 @@ interface ModuleCatalogVariable {
   meaning: string;
   sample: string;
   moduleId: string;
+  parameter?: { value: string };
 }
 
 const EMPTY_MODULE_CATALOG: readonly ModuleRegisteredTemplateVariable[] = [];
@@ -92,12 +94,14 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     .filter((variable) => typeof variable.moduleId === "string" && variable.moduleId !== "host" && variable.moduleId.length > 0 && variable.name.includes("."))
     .map((variable) => {
       const localized = variable.picker?.[language];
+      const parameter = templateVariableParameter(variable.parameters, variable.parameterDefault);
       return {
         name: variable.name,
         label: localized?.label ?? variable.name,
         meaning: localized?.description ?? variable.description ?? variable.localizedDescription?.[language] ?? "",
         sample: localized?.sample ?? variable.sample,
         moduleId: variable.moduleId,
+        ...(parameter === undefined ? {} : { parameter }),
       };
     });
   const maximum = variablesQuery.data?.maximum ?? CHANNEL_VARIABLE_MAXIMUM_COUNT;
@@ -636,7 +640,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
         kind="variable"
         headingLevel="h2"
         title={selectedCatalogVariable.label}
-        pageActions={<TokenChip token={`{${selectedCatalogVariable.name}}`} description={selectedCatalogVariable.meaning} />}
+        pageActions={<TokenChip token={formatTemplateVariableToken(selectedCatalogVariable)} description={selectedCatalogVariable.meaning} />}
       />
     </div>
     <div className="channel-variable-editor__scroll">
@@ -669,7 +673,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
           titleContent={creating ? labels.newVariable : <span className="mono" title={`{var.${draftName || selectedForDisplay?.name || "variable"}}`}>{`{var.`}<wbr />{(draftName || selectedForDisplay?.name || "variable").split("_").map((segment, index, segments) => <Fragment key={`${draftName}-${String(index)}`}>{segment}{index < segments.length - 1 ? <>_<wbr /></> : null}</Fragment>)}{"}"}</span>}
           title={creating ? labels.newVariable : draftName || selectedForDisplay?.name || labels.name}
           pageActions={<div className="channel-variable-editor__page-actions">
-            {!creating && selectedForDisplay !== null ? <TokenChip token={`{var.${selectedForDisplay.name}}`} description={selectedForDisplay.description} /> : null}
+            {!creating && selectedForDisplay !== null ? <TokenChip token={formatTemplateVariableToken({ name: `var.${selectedForDisplay.name}` })} description={selectedForDisplay.description} /> : null}
             <Button variant="neutral" icon="close" iconOnly ariaLabel={labels.close} onClick={requestCloseInspector} disabled={pending || overlayPending} />
           </div>}
           save={{

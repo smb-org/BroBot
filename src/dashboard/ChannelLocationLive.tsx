@@ -7,9 +7,11 @@ import { queryKeys } from "./data/keys";
 import { dashboardLanguage } from "./locale";
 import { locationLiveTexts } from "./channel-settings-locale";
 import { Icon, Section, TokenChip, type IconName } from "./ui";
+import { formatTemplateVariableToken, templateVariableParameter } from "./ui/template-text-field-model";
 import { weatherModuleCatalog, WEATHER_CONDITION_LABELS } from "../modules/weather/contracts/catalog";
 import { sunModuleCatalog } from "../modules/sun/contracts/catalog";
 import { moonModuleCatalog } from "../modules/moon/contracts/catalog";
+import { normalizeCommandName } from "../modules/text_commands/domain";
 import { loadTextCommands } from "../modules/text_commands/panel/service";
 import type { TextCommand } from "../modules/text_commands/contracts";
 import type { WeatherCondition } from "../modules/weather/contracts";
@@ -123,7 +125,9 @@ export function ChannelLocationReference({
       <p className="channel-location-reference__hint">{texts.commandDescription}</p>
       <div className="channel-location-command-list" aria-busy={commandQuery.isPending}>
         {texts.templates.map((template) => {
-          const existing = commands.find((command) => command.name === template.name);
+          const templateName = normalizeCommandName(template.name);
+          const existing = commands.find((command) => normalizeCommandName(command.name) === templateName ||
+            command.aliases.some((alias) => normalizeCommandName(alias) === templateName));
           return <div className="channel-location-command" key={template.name}>
             <div className="channel-location-command__copy">
               <strong className="mono">!{template.name}</strong>
@@ -142,11 +146,18 @@ export function ChannelLocationReference({
       <div className="channel-location-variable-groups">
         {catalogs.map((catalog) => <div className="channel-location-variable-group" key={catalog.id}>
           <strong>{catalog.label}</strong>
-          <div>{Object.entries(catalog.values).map(([name, variable]) => <TokenChip
-            key={name}
-            token={`{${name}}`}
-            description={variable.description}
-          />)}</div>
+          <div>{Object.entries(catalog.values).map(([name, variable]) => {
+            const parameters = "parameters" in variable && (variable.parameters === "range" || variable.parameters === "choices" || variable.parameters === "currency_pair")
+              ? variable.parameters
+              : undefined;
+            const parameterDefault = "parameterDefault" in variable && typeof variable.parameterDefault === "string" ? variable.parameterDefault : undefined;
+            const parameter = templateVariableParameter(parameters, parameterDefault);
+            return <TokenChip
+              key={name}
+              token={formatTemplateVariableToken({ name, ...(parameter === undefined ? {} : { parameter }) })}
+              description={variable.description}
+            />;
+          })}</div>
         </div>)}
       </div>
     </Section>

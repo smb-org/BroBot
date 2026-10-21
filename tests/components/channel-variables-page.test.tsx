@@ -3,6 +3,7 @@ import { useState, type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChannelVariablesPage } from "../../src/dashboard/ChannelVariablesPage";
+import { invalidTemplateParameters } from "../../src/template";
 import type { PanelChannelVariablesResponse } from "../../src/dashboard/api";
 import { UiProvider } from "../../src/dashboard/ui";
 import { ToastHost } from "../../src/dashboard/ui/Toast";
@@ -96,6 +97,34 @@ describe("Channel variables page", () => {
     fireEvent.click(await screen.findByRole("row", { name: /var\.score/u }));
     fireEvent.click(screen.getByRole("button", { name: /\{var\.score\}/u }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("{var.score}"));
+  });
+
+  it("copies parameterized catalog variables with a valid default parameter", async () => {
+    const writeText = vi.fn<(value: string) => Promise<void>>().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname === "/api/channels/kanal-a/template-variables") return Promise.resolve(jsonResponse({
+        variables: [{
+          name: "currency.convert", moduleId: "currency", isTextBlock: false, sample: "11,50 €", description: "Currency conversion.",
+          parameters: "currency_pair", parameterDefault: "USD EUR",
+        }],
+      }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname.endsWith("/overlay-tokens")) return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Module" }));
+    fireEvent.click(await screen.findByRole("row", { name: /currency\.convert/u }));
+    fireEvent.click(await screen.findByRole("button", { name: /\{currency\.convert USD EUR\}/u }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("{currency.convert USD EUR}"));
+    expect(invalidTemplateParameters(writeText.mock.calls[0]?.[0] ?? "", [{
+      name: "currency.convert", maxLength: 32, sample: "11,50 €", parameters: "currency_pair",
+    }])).toEqual([]);
   });
 
   it("shows own-variable errors beside module rows and disables creation until own variables load", async () => {

@@ -14,6 +14,7 @@ import {
   groupTemplateTextFieldOptions,
   prioritizeTemplateTextFieldNamespace,
   reindexGroupedTemplateTextFieldOptions,
+  formatTemplateVariableToken,
   type TemplateTextFieldGroupPresentation,
   type TemplateTextFieldOption,
   type TemplateTextFieldPickerMessages,
@@ -292,7 +293,7 @@ export function TemplateTextField({
     const currentQuery = query;
     if (currentQuery === null) return;
     const parameter = variables?.find((variable) => variable.name === variableName)?.parameter;
-    insertText(`{${variableName}${parameter === undefined ? "" : ` ${parameter.value}`}}`, currentQuery.start - 1, currentQuery.end);
+    insertText(formatTemplateVariableToken({ name: variableName, ...(parameter === undefined ? {} : { parameter }) }), currentQuery.start - 1, currentQuery.end);
   };
 
   const insertUnknownSuggestion = (token: TemplateToken, suggestion: string): void => {
@@ -432,7 +433,7 @@ export function TemplateTextField({
       renderOption={(variable, active) => <>
         <span className="ui-template-text-field__suggestion-copy">
           <span className="ui-template-text-field__suggestion-name">{variable.label ?? variable.name}</span>
-          <span className="ui-template-text-field__suggestion-token">{`{${variable.name}${variable.parameter === undefined ? "" : ` ${variable.parameter.value}`}}`}</span>
+          <span className="ui-template-text-field__suggestion-token">{formatTemplateVariableToken(variable)}</span>
           {active ? <span className="ui-template-text-field__suggestion-description">{variable.description}</span> : null}
         </span>
         <span className={`ui-template-text-field__suggestion-sample${variable.isTextBlock ? " ui-template-text-field__suggestion-sample--tag" : ""}`}>

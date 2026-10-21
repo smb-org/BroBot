@@ -1,5 +1,19 @@
 import type { TemplateVariableGroup } from "../../contracts/values";
+import type { TemplateVariable } from "../../template";
 import type { IconName } from "./Icon";
+
+export const templateVariableParameter = (
+  parameters: TemplateVariable["parameters"] | undefined,
+  parameterDefault?: string,
+): { value: string } | undefined => {
+  if (parameters === undefined) return undefined;
+  const value = parameters === "range" ? "1-100"
+    : parameters === "choices" ? "a|b|c" : parameterDefault ?? "USD EUR";
+  return { value };
+};
+
+export const formatTemplateVariableToken = (variable: { name: string; parameter?: { value: string } }): string =>
+  `{${variable.name}${variable.parameter === undefined ? "" : ` ${variable.parameter.value}`}}`;
 
 type TemplateTextFieldGroupKey = "module" | "channel" | "own" | "text_blocks";
 type TemplateTextFieldOptionKind = "system" | "module" | "channel";

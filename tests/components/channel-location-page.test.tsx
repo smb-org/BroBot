@@ -560,10 +560,10 @@ describe("channel location page", () => {
     expect(document.querySelectorAll(".channel-location-weather-card .channel-location-skeleton").length).toBeGreaterThan(0);
   });
 
-  it("links an existing template command and opens a new template request", async () => {
+  it("matches a template command by alias and opens its canonical command", async () => {
     const onOpenCommand = vi.fn<(name: string) => void>();
     const onCreateCommand = vi.fn<(name: string, response: string) => void>();
-    vi.stubGlobal("fetch", livePageFetcher({ commands: [{ name: "wetter" }] }));
+    vi.stubGlobal("fetch", livePageFetcher({ commands: [{ name: "weather", aliases: ["WETTER"] }] }));
     renderWithQuery(<UiProvider><ChannelLocationPage
       channelId="channel-a"
       role="manager"
@@ -574,8 +574,9 @@ describe("channel location page", () => {
     const commandList = await screen.findByText("!wetter");
     const commandCard = commandList.closest(".channel-location-command");
     expect(commandCard).not.toBeNull();
+    expect(within(commandCard as HTMLElement).queryByRole("button", { name: "Anlegen" })).not.toBeInTheDocument();
     fireEvent.click(await within(commandCard as HTMLElement).findByRole("link", { name: "Vorhanden" }));
-    expect(onOpenCommand).toHaveBeenCalledWith("wetter");
+    expect(onOpenCommand).toHaveBeenCalledWith("weather");
 
     const createButtons = await screen.findAllByRole("button", { name: "Anlegen" });
     fireEvent.click(createButtons[0] as HTMLButtonElement);
