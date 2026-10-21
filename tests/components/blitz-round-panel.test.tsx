@@ -49,7 +49,7 @@ const parseUrl = (input: RequestInfo | URL): URL => input instanceof Request
   ? new URL(input.url)
   : input instanceof URL ? input : new URL(input, "https://brobot.example");
 
-const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Promise<void>, stalePatch = false, settingsConflict = false, patchDeleted = false, settingsPatchGate?: Promise<void>, failQuestionListAfterDelete = false, options: { failPostDeleteQuestionLists?: number; postDeleteQuestionListGate?: Promise<void>; postDeleteQuestionListGates?: ReadonlyArray<{ page: number; search: string; gate: Promise<void> }>; failQuestionPage?: number; failQuestionPageRequests?: number; failPostDeleteQuestionPage?: number; failPostDeleteQuestionPageRequests?: number } = {}) => {
+const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Promise<void>, stalePatch = false, settingsConflict = false, patchDeleted = false, settingsPatchGate?: Promise<void>, failQuestionListAfterDelete = false, options: { failPostDeleteQuestionLists?: number; postDeleteQuestionListGate?: Promise<void>; postDeleteQuestionListGates?: ReadonlyArray<{ page: number; search: string; gate: Promise<void> }>; failQuestionPage?: number; failQuestionPageRequests?: number; failPostDeleteQuestionPage?: number; failPostDeleteQuestionPageRequests?: number; questionPatchGate?: Promise<void>; failQuestionPatch?: boolean } = {}) => {
   let questions = [...initialQuestions];
   let questionDeleted = false;
   let shouldFailQuestionListAfterDelete = failQuestionListAfterDelete;
@@ -144,6 +144,7 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
         questions = questions.filter((candidate) => candidate.id !== id);
         return Promise.resolve(jsonResponse({ error: "question_deleted" }, 409));
       }
+      if (options.failQuestionPatch) return (options.questionPatchGate ?? Promise.resolve()).then(() => jsonResponse({ error: "question_save_failed" }, 503));
       if (existing === undefined) throw new Error("question_missing");
       if (stalePatch) {
         const latest = { ...existing, prompt: "MOON", answers: ["MOON"], revision: existing.revision + 1 };
@@ -155,7 +156,7 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
       }
       const updated = { ...existing, ...body, revision: existing.revision + 1 };
       questions = questions.map((candidate) => candidate.id === id ? updated : candidate);
-      return Promise.resolve(jsonResponse({ question: updated }));
+      return (options.questionPatchGate ?? Promise.resolve()).then(() => jsonResponse({ question: updated }));
     }
     if (url.pathname.includes("/modules/blitz_round/questions/") && method === "DELETE") {
       const id = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
@@ -171,7 +172,7 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
     return Promise.resolve(jsonResponse({ error: "not_found" }, 404));
   });
   vi.stubGlobal("fetch", requests);
-  return { requests, getQuestions: () => questions, deleteQuestion: (id: string) => { questions = questions.filter((question) => question.id !== id); }, setFailQuestionListAfterDelete: (fails: boolean) => { shouldFailQuestionListAfterDelete = fails; }, getSettings: () => settings, getSettingsRevision: () => settingsRevision, submittedSettingsRevisions, submittedQuestionRevisions, submittedDeleteRevisions, postDeleteQuestionListFinished };
+  return { requests, getQuestions: () => questions, deleteQuestion: (id: string) => { questions = questions.filter((question) => question.id !== id); }, addQuestion: (question: BlitzQuestion) => { questions = [question, ...questions]; }, setFailQuestionListAfterDelete: (fails: boolean) => { shouldFailQuestionListAfterDelete = fails; }, getSettings: () => settings, getSettingsRevision: () => settingsRevision, submittedSettingsRevisions, submittedQuestionRevisions, submittedDeleteRevisions, postDeleteQuestionListFinished };
 };
 
 const mountPanel = (channelId = "fictional_channel", queryClient?: QueryClient) => renderWithQuery(
@@ -278,6 +279,44 @@ describe("Blitz Round collection panel", () => {
 
     await waitFor(() => expect(api.getQuestions().some((entry) => entry.prompt === "Which star is closest?")).toBe(true));
     expect(await screen.findByText("Round settings", { exact: true })).toBeInTheDocument();
+  });
+
+  it("completes Settings navigation requested during a header save [protects=click Save, request Settings while the question PATCH is pending, and open Settings after the save resolves; fails_when=the saved revision remounts the editor and drops the pending Settings destination; no_claim=the delayed PATCH uses an in-memory HTTP stub and does not verify authentication or D1 writes]", async () => {
+    let releasePatch!: () => void;
+    const patchGate = new Promise<void>((resolve) => { releasePatch = resolve; });
+    const api = installPanelFetch([sampleQuestion], undefined, false, false, false, undefined, false, { questionPatchGate: patchGate });
+    mountPanel();
+    const word = await screen.findByRole("textbox", { name: "Word" });
+    fireEvent.change(word, { target: { value: "STORM" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
+    await waitFor(() => expect(api.submittedQuestionRevisions).toEqual([1]));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(await screen.findByRole("dialog", { name: "Save changes?" })).toBeInTheDocument();
+
+    act(() => { releasePatch(); });
+
+    expect(await screen.findByText("Round settings", { exact: true })).toBeInTheDocument();
+    expect(api.getQuestions()[0]).toMatchObject({ prompt: "STORM", revision: 2 });
+  });
+
+  it("keeps the pending Settings dialog when a header save fails [protects=failed PATCH after requesting Settings leaves the question editor, unsaved draft, and confirmation available; fails_when=the failed save hides the draft or loses the pending switch confirmation; no_claim=the failed PATCH is simulated by an in-memory HTTP stub and does not verify server error handling]", async () => {
+    let releasePatch!: () => void;
+    const patchGate = new Promise<void>((resolve) => { releasePatch = resolve; });
+    const api = installPanelFetch([sampleQuestion], undefined, false, false, false, undefined, false, { questionPatchGate: patchGate, failQuestionPatch: true });
+    mountPanel();
+    fireEvent.change(await screen.findByRole("textbox", { name: "Word" }), { target: { value: "STORM" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
+    await waitFor(() => expect(api.submittedQuestionRevisions).toEqual([1]));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const confirmation = await screen.findByRole("dialog", { name: "Save changes?" });
+
+    act(() => { releasePatch(); });
+
+    expect(await screen.findByText("The question could not be saved.")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Save changes?" })).toBeInTheDocument();
+    expect(document.querySelector(".blitz-panel__detail input")).toHaveValue("STORM");
+    expect(within(confirmation).getByRole("button", { name: "Save" })).toBeEnabled();
+    expect(screen.queryByText("Round settings", { exact: true })).not.toBeInTheDocument();
   });
 
   it("locks settings confirmation during a delayed PATCH and shares its save [protects=Save-and-switch keeps Discard disabled while the settings PATCH is pending and repeated Save clicks issue one request; fails_when=Discard navigates away during the pending write or two PATCH requests race; no_claim=the delayed PATCH is an in-memory HTTP stub and does not test network cancellation]", async () => {
@@ -690,6 +729,37 @@ describe("Blitz Round collection panel", () => {
     ])?.questions).toEqual([secondQuestion]));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("MOON"));
     expect(screen.queryByRole("button", { name: /Word scramble.*CLOUD/u })).not.toBeInTheDocument();
+    remount.unmount();
+  });
+
+  it("shows a reseeded starter question while cached searches retain its deleted predecessor [protects=after deleting a starter row, remounting with a stale cached search, and reseeding the empty pool with a new id, the new row can be selected; fails_when=the deletion tombstone for the old id hides a reseeded row; no_claim=the seed response is supplied by an in-memory HTTP stub and fresh id generation is verified by the worker test]", async () => {
+    const channelId = "blitz_reseed_after_delete_channel";
+    const starter = { ...sampleQuestion, id: "seed-wolken" };
+    const reseededStarter = { ...starter, id: "fresh-seed-wolken" };
+    const api = installPanelFetch([starter], undefined, false, false, false, undefined, true);
+    const firstMount = mountPanel(channelId);
+    await screen.findByRole("textbox", { name: "Word" });
+    const staleSearchKey = ["channel", channelId, "module", "blitz_round", "questions:1:cl"] as const;
+    firstMount.queryClient.setQueryData(staleSearchKey, { questions: [starter], total: 1, page: 1 } satisfies BlitzQuestionPage);
+
+    fireEvent.click(document.querySelector(".page-header__overflow-trigger") as HTMLButtonElement);
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    const confirmation = await screen.findByRole("dialog", { name: "Delete this question?" });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Delete" }));
+    expect(await screen.findByText("The question pool could not be loaded.")).toBeInTheDocument();
+    expect(api.getQuestions()).toEqual([]);
+
+    firstMount.unmount();
+    const remount = mountPanel(channelId, firstMount.queryClient);
+    expect(await screen.findByRole("button", { name: "Reload" })).toBeInTheDocument();
+    api.addQuestion(reseededStarter);
+    api.setFailQuestionListAfterDelete(false);
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+
+    const reseededRow = await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    fireEvent.click(reseededRow);
+    expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("CLOUD");
+    expect(screen.getByRole("button", { name: /Word scramble.*CLOUD/u })).toHaveAttribute("aria-current", "true");
     remount.unmount();
   });
 

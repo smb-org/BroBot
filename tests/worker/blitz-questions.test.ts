@@ -37,24 +37,55 @@ describe("blitz question D1 repository", () => {
     expect((await createBlitzQuestionRepository(db).list(channelId, 1)).total).toBe(BLITZ_STARTER_WORDS.length);
   });
 
-  it("removes questions with their channel and seeds a recreated channel [protects=deleting a channel cascades its Blitz pool and the actual enable hook seeds the recreated channel; fails_when=old question rows survive deletion or prevent the recreated channel from getting its starter pool; no_claim=channel lifecycle is driven by direct D1 statements rather than the Twitch channel reconciliation flow]", async () => {
+  it("re-seeds an emptied question pool with fresh question ids [protects=an empty pool receives starter questions with identities distinct from previously deleted rows; fails_when=re-seeded starter rows reuse ids that a panel deletion tombstone can still exclude; no_claim=does not exercise panel cache reconciliation or channel lifecycle]", async () => {
+    const channelId = `blitz-reseed-${crypto.randomUUID()}`;
+    const repository = createBlitzQuestionRepository(db);
+    const context = { DB: db, now: new Date().toISOString(), actor: { userId: "fictional_owner" }, authorizeMutation: () => ({ sql: "", values: [] }) };
+    await insertPointChannel(channelId);
+    await db.batch([...await blitzRoundModule.onEnable?.(context, channelId) ?? []]);
+    const originalPool = [
+      ...(await repository.list(channelId, 1)).questions,
+      ...(await repository.list(channelId, 2)).questions,
+    ];
+
+    await db.prepare("DELETE FROM blitz_questions WHERE channel_id = ?").bind(channelId).run();
+    await db.batch([...await blitzRoundModule.onEnable?.(context, channelId) ?? []]);
+    const reseededPool = [
+      ...(await repository.list(channelId, 1)).questions,
+      ...(await repository.list(channelId, 2)).questions,
+    ];
+
+    expect(originalPool).toHaveLength(BLITZ_STARTER_WORDS.length);
+    expect(reseededPool).toHaveLength(BLITZ_STARTER_WORDS.length);
+    expect(reseededPool.map((question) => question.prompt).sort((left, right) => left.localeCompare(right)))
+      .toEqual([...BLITZ_STARTER_WORDS].sort((left, right) => left.localeCompare(right)));
+    expect(reseededPool.every((question) => !originalPool.some((original) => original.id === question.id))).toBe(true);
+  });
+
+  it("removes questions with their channel and reseeds a recreated channel with fresh ids [protects=channel deletion cascades old Blitz rows and enable recreates the full starter pool with identities distinct from old rows; fails_when=old rows survive, the pool is not reseeded, or starter ids are reused; no_claim=channel lifecycle is driven by direct D1 statements rather than the Twitch channel reconciliation flow]", async () => {
     const channelId = `blitz-recreate-${crypto.randomUUID()}`;
     const repository = createBlitzQuestionRepository(db);
     const context = { DB: db, now: new Date().toISOString(), actor: { userId: "fictional_owner" }, authorizeMutation: () => ({ sql: "", values: [] }) };
     await insertPointChannel(channelId);
     await db.batch([...await blitzRoundModule.onEnable?.(context, channelId) ?? []]);
-    expect((await repository.list(channelId, 1)).total).toBe(BLITZ_STARTER_WORDS.length);
+    const originalPool = [
+      ...(await repository.list(channelId, 1)).questions,
+      ...(await repository.list(channelId, 2)).questions,
+    ];
+    expect(originalPool).toHaveLength(BLITZ_STARTER_WORDS.length);
 
     await db.prepare("DELETE FROM channels WHERE channel_id = ?").bind(channelId).run();
     const afterDelete = await db.prepare("SELECT COUNT(*) AS count FROM blitz_questions WHERE channel_id = ?").bind(channelId).first<{ count: number }>();
     await insertPointChannel(channelId);
     await db.batch([...await blitzRoundModule.onEnable?.(context, channelId) ?? []]);
 
-    const recreatedPool = await repository.list(channelId, 1);
+    const recreatedPool = [
+      ...(await repository.list(channelId, 1)).questions,
+      ...(await repository.list(channelId, 2)).questions,
+    ];
     expect(afterDelete).toEqual({ count: 0 });
-    expect(recreatedPool.total).toBe(BLITZ_STARTER_WORDS.length);
-    await expect(db.prepare("SELECT COUNT(*) AS count FROM blitz_questions WHERE channel_id = ? AND question_id = 'seed-wolken'")
-      .bind(channelId).first()).resolves.toEqual({ count: 1 });
+    expect(recreatedPool).toHaveLength(BLITZ_STARTER_WORDS.length);
+    expect(recreatedPool.every((question) => !originalPool.some((original) => original.id === question.id))).toBe(true);
   });
 
   it("creates, edits, disables, searches, and deletes channel-owned questions [protects=question CRUD stays scoped to one channel and preserves enabled state; fails_when=updates leak across channels or disabled rows cannot be searched; no_claim=does not exercise the dashboard form]", async () => {

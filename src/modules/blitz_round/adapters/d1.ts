@@ -119,11 +119,11 @@ export const createBlitzQuestionRepository = (db: D1Database): BlitzQuestionRepo
       .bind(now, channelId, questionId, now).run();
   },
   async seed(channelId, words, now) {
-    const seedRows = words.map((word) => ({ word, searchText: blitzQuestionSearchText(word, [word]) }));
+    const seedRows = words.map((word) => ({ id: crypto.randomUUID(), word, searchText: blitzQuestionSearchText(word, [word]) }));
     const result = await db.prepare(
       `INSERT INTO blitz_questions
         (channel_id, question_id, kind, prompt, answers_json, search_text, enabled, last_used_at, created_at, updated_at)
-       SELECT ?, 'seed-' || lower(json_extract(value, '$.word')), 'scramble', json_extract(value, '$.word'),
+       SELECT ?, json_extract(value, '$.id'), 'scramble', json_extract(value, '$.word'),
          json_array(json_extract(value, '$.word')), json_extract(value, '$.searchText'), 1, NULL, ?, ?
          FROM json_each(?)
         WHERE NOT EXISTS (SELECT 1 FROM blitz_questions WHERE channel_id = ?) RETURNING question_id`,

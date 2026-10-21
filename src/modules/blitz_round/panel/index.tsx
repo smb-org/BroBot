@@ -144,6 +144,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   const [deletePending, setDeletePending] = useState(false);
   const [deleteError, setDeleteError] = useState<string | undefined>();
   const [deleteFailure, setDeleteFailure] = useState<"conflict" | "deleted" | null>(null);
+  const pendingQuestionNavigation = useRef<(() => void) | null>(null);
   const subscribeToDeletedIds = useCallback((subscriber: () => void) => subscribeToDeletedQuestionIds(channelId, subscriber), [channelId]);
   const readDeletedIds = useCallback(() => getDeletedQuestionIds(channelId), [channelId]);
   const deletedQuestionIds = useSyncExternalStore(subscribeToDeletedIds, readDeletedIds, () => EMPTY_DELETED_QUESTION_IDS);
@@ -414,7 +415,14 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
         language={language === "en" ? "en" : "de"}
         canManage={canManage}
         onSave={saveQuestion}
-        onSaved={selectSavedQuestion}
+        onSaved={(saved) => {
+          selectSavedQuestion(saved);
+          const pendingNavigation = pendingQuestionNavigation.current;
+          pendingQuestionNavigation.current = null;
+          if (pendingNavigation === null) return false;
+          pendingNavigation();
+          return true;
+        }}
         deleteFailure={deleteFailure}
         onRequestDelete={requestDelete}
         onOpenDelete={openDeleteConfirmation}
@@ -422,6 +430,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
         onReload={reloadQuestion}
         onDiscardDeleted={discardDeletedQuestion}
         onOpenSettings={openSettings}
+        onQueueNavigation={(destination) => { pendingQuestionNavigation.current = destination; }}
         registerSwitch={(switcher) => { switchRef.current = switcher; }}
         onEdit={cancelPendingDeleteSelection}
       />;
@@ -453,13 +462,13 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   </div>;
 }
 
-function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved, deleteFailure, onRequestDelete, onOpenDelete, onCancelDelete, onReload, onDiscardDeleted, onOpenSettings, registerSwitch, onEdit }: {
+function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved, deleteFailure, onRequestDelete, onOpenDelete, onCancelDelete, onReload, onDiscardDeleted, onOpenSettings, onQueueNavigation, registerSwitch, onEdit }: {
   question: BlitzQuestion | null;
   isNew: boolean;
   language: "de" | "en";
   canManage: boolean;
   onSave: (draft: Draft, revision?: number, saveAsNew?: boolean) => Promise<BlitzQuestion | null>;
-  onSaved: (question: BlitzQuestion) => void;
+  onSaved: (question: BlitzQuestion) => boolean;
   deleteFailure: "conflict" | "deleted" | null;
   onRequestDelete: (questionId: string) => void;
   onOpenDelete: (questionId: string) => void;
@@ -467,6 +476,7 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
   onReload: (questionId: string) => Promise<BlitzQuestion>;
   onDiscardDeleted: () => void;
   onOpenSettings: () => void;
+  onQueueNavigation: (destination: (() => void) | null) => void;
   registerSwitch: (switcher: ((proceed: () => void) => void) | null) => void;
   onEdit: () => void;
 }): ReactElement {
@@ -517,8 +527,8 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
         setAttempted(false);
         setServerConflict(false);
         setServerDeleted(false);
-        onSaved(saved);
-        guard.completeSwitch();
+        const navigationCompletedByParent = onSaved(saved);
+        if (!navigationCompletedByParent) guard.completeSwitch();
         return null;
       } catch (failure: unknown) {
         const code = blitzErrorCode(failure);
@@ -561,6 +571,13 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
   };
 
   const saveDeletedAsNew = (): void => { void save(true); };
+  const requestSettings = (): void => {
+    onQueueNavigation(saving ? onOpenSettings : null);
+    guard.guardSwitch(() => {
+      onQueueNavigation(null);
+      onOpenSettings();
+    }, () => { onQueueNavigation(null); });
+  };
 
   useEffect(() => { saveRef.current = save; });
   useEffect(() => {
@@ -601,7 +618,7 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
       kind="blitz"
       title={isNew ? labels.newQuestion : question?.prompt ?? labels.title}
       badges={<Badge tone="neutral">{draft.value.kind === "scramble" ? labels.scramble : labels.quiz}</Badge>}
-      pageActions={<Button variant="neutral" icon="tabSettings" onClick={() => { guard.guardSwitch(onOpenSettings); }}>{labels.settings}</Button>}
+      pageActions={<Button variant="neutral" icon="tabSettings" onClick={requestSettings}>{labels.settings}</Button>}
       {...(isNew ? {} : { overflow: <Button variant="subtle" danger="subtle" size="compact" onClick={() => {
         if (question === null) return;
         onRequestDelete(question.id);

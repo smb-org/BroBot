@@ -9,11 +9,11 @@ export const BLITZ_STARTER_WORDS = [
 ] as const;
 
 export const blitzStarterSeedStatement = (db: D1Database, channelId: string, now: string, authorization: ModuleMutationAuthorization): D1PreparedStatement => {
-  const seedRows = BLITZ_STARTER_WORDS.map((word) => ({ word, searchText: blitzQuestionSearchText(word, [word]) }));
+  const seedRows = BLITZ_STARTER_WORDS.map((word) => ({ id: crypto.randomUUID(), word, searchText: blitzQuestionSearchText(word, [word]) }));
   return db.prepare(
     `INSERT INTO blitz_questions
       (channel_id, question_id, kind, prompt, answers_json, search_text, enabled, last_used_at, created_at, updated_at)
-     SELECT ?, 'seed-' || lower(json_extract(value, '$.word')), 'scramble', json_extract(value, '$.word'),
+     SELECT ?, json_extract(value, '$.id'), 'scramble', json_extract(value, '$.word'),
        json_array(json_extract(value, '$.word')), json_extract(value, '$.searchText'), 1, NULL, ?, ?
        FROM json_each(?)
       WHERE NOT EXISTS (SELECT 1 FROM blitz_questions WHERE channel_id = ?) ${authorization.sql}`,
