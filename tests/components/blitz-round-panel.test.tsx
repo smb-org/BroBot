@@ -49,7 +49,7 @@ const parseUrl = (input: RequestInfo | URL): URL => input instanceof Request
   ? new URL(input.url)
   : input instanceof URL ? input : new URL(input, "https://brobot.example");
 
-const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Promise<void>, stalePatch = false, settingsConflict = false, patchDeleted = false, settingsPatchGate?: Promise<void>, failQuestionListAfterDelete = false, options: { failPostDeleteQuestionLists?: number; postDeleteQuestionListGate?: Promise<void>; postDeleteQuestionListGates?: ReadonlyArray<{ page: number; search: string; gate: Promise<void> }>; failQuestionPage?: number; failQuestionPageRequests?: number; failPostDeleteQuestionPage?: number; failPostDeleteQuestionPageRequests?: number; questionPatchGate?: Promise<void>; failQuestionPatch?: boolean } = {}) => {
+const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Promise<void>, stalePatch = false, settingsConflict = false, patchDeleted = false, settingsPatchGate?: Promise<void>, failQuestionListAfterDelete = false, options: { failPostDeleteQuestionLists?: number; postDeleteQuestionListGate?: Promise<void>; postDeleteQuestionListGates?: ReadonlyArray<{ page: number; search: string; gate: Promise<void> }>; failQuestionPage?: number; failQuestionPageRequests?: number; failPostDeleteQuestionPage?: number; failPostDeleteQuestionPageRequests?: number; questionPatchGate?: Promise<void>; failQuestionPatch?: boolean; failSettingsGets?: number; settingsGetGate?: Promise<void> } = {}) => {
   let questions = [...initialQuestions];
   let questionDeleted = false;
   let shouldFailQuestionListAfterDelete = failQuestionListAfterDelete;
@@ -62,6 +62,7 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
   const postDeleteQuestionListFinished = new Promise<void>((resolve) => { finishPostDeleteQuestionList = resolve; });
   let settings = { ...initialSettings };
   let settingsRevision = 1;
+  let settingsGetCount = 0;
   let conflictPending = settingsConflict;
   const submittedSettingsRevisions: number[] = [];
   const submittedQuestionRevisions: number[] = [];
@@ -70,7 +71,16 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
     const url = parseUrl(input);
     const method = init?.method ?? (input instanceof Request ? input.method : "GET");
     if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "fictional-csrf-token" }));
-    if (url.pathname.endsWith("/modules/blitz_round/settings") && method === "GET") return Promise.resolve(jsonResponse({ settings, revision: settingsRevision }));
+    if (url.pathname.endsWith("/modules/blitz_round/settings") && method === "GET") {
+      settingsGetCount += 1;
+      const shouldFail = settingsGetCount <= (options.failSettingsGets ?? 0);
+      const response = (): Response => shouldFail
+        ? jsonResponse({ error: "settings_load_failed" }, 503)
+        : jsonResponse({ settings, revision: settingsRevision });
+      return shouldFail && options.settingsGetGate !== undefined
+        ? options.settingsGetGate.then(response)
+        : Promise.resolve(response());
+    }
     if (url.pathname.endsWith("/modules/blitz_round/settings") && method === "PATCH") {
       const body = JSON.parse(typeof init?.body === "string" ? init.body : "null") as { revision: number; settings: BlitzRoundSettings };
       submittedSettingsRevisions.push(body.revision);
@@ -297,6 +307,86 @@ describe("Blitz Round collection panel", () => {
 
     expect(await screen.findByText("Round settings", { exact: true })).toBeInTheDocument();
     expect(api.getQuestions()[0]).toMatchObject({ prompt: "STORM", revision: 2 });
+  });
+
+  it.each(["Settings", "another question row", "New question", "dashboard"] as const)("completes %s navigation requested during a pending save-as-new [protects=Settings, another row, New question, and dashboard navigation requested during deleted-question save-as-new wait for the POST and complete once it succeeds; fails_when=any destination is dropped when the created question remounts the editor; no_claim=the delayed POST and deleted-question conflict use an in-memory HTTP stub and do not verify production authentication or D1 writes]", async (destination) => {
+    let releasePost!: () => void;
+    const postGate = new Promise<void>((resolve) => { releasePost = resolve; });
+    const api = installPanelFetch([sampleQuestion, secondQuestion], postGate, false, false, true);
+    mountPanel();
+    fireEvent.change(await screen.findByRole("textbox", { name: "Word" }), { target: { value: "STONE" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
+    await screen.findByText("This question was deleted elsewhere. Save your draft as a new question or discard it.");
+    fireEvent.click(screen.getByRole("button", { name: "Save as new question" }));
+    await waitFor(() => expect(api.requests.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true));
+
+    let navigations = 0;
+    let cancellations = 0;
+    if (destination === "Settings") fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    else if (destination === "another question row") fireEvent.click(screen.getByRole("button", { name: /Word scramble.*MOON/u }));
+    else if (destination === "New question") fireEvent.click(screen.getByRole("button", { name: "New question" }));
+    else act(() => { runDashboardNavigationGuards(() => { navigations += 1; }, () => { cancellations += 1; }); });
+
+    if (destination === "dashboard") expect(navigations).toBe(0);
+    expect(await screen.findByRole("dialog", { name: "Save changes?" })).toBeInTheDocument();
+    act(() => { releasePost(); });
+
+    if (destination === "Settings") expect(await screen.findByText("Round settings", { exact: true })).toBeInTheDocument();
+    else if (destination === "another question row") {
+      await waitFor(() => expect(screen.getByRole("button", { name: /Word scramble.*MOON/u })).toHaveAttribute("aria-current", "true"));
+      expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("MOON");
+    } else if (destination === "New question") {
+      expect(await screen.findByRole("heading", { name: "New question" })).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("");
+    } else {
+      await waitFor(() => expect(navigations).toBe(1));
+      expect(cancellations).toBe(0);
+      expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("STONE");
+    }
+    expect(api.getQuestions().some((question) => question.prompt === "STONE")).toBe(true);
+  });
+
+  it("retries a failed initial settings load from its fixed error place [protects=the settings error remains visible with Retry and a successful refetch opens the settings form; fails_when=Retry is missing, does not refetch settings, or leaves the error instead of rendering the form; no_claim=initial failure and recovery are supplied by an in-memory HTTP stub]", async () => {
+    let failInitialSettingsGet!: () => void;
+    const settingsGetGate = new Promise<void>((resolve) => { failInitialSettingsGet = resolve; });
+    const api = installPanelFetch([sampleQuestion], undefined, false, false, false, undefined, false, {
+      failSettingsGets: 1,
+      settingsGetGate,
+    });
+    mountPanel();
+    await screen.findByRole("textbox", { name: "Word" });
+    await waitFor(() => expect(api.requests.mock.calls.filter(([input, init]) => parseUrl(input).pathname.endsWith("/modules/blitz_round/settings") && (init?.method ?? "GET") === "GET")).toHaveLength(1));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    act(() => { failInitialSettingsGet(); });
+
+    expect(await screen.findByText("The question pool could not be loaded.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByText("Round settings", { exact: true })).toBeInTheDocument();
+    expect(api.requests.mock.calls.filter(([input, init]) => parseUrl(input).pathname.endsWith("/modules/blitz_round/settings") && (init?.method ?? "GET") === "GET")).toHaveLength(2);
+  });
+
+  it("reopens Settings with a refetch after its initial load failed [protects=reopening Settings after a failed request retries the settings query and renders the form when the service recovers; fails_when=Settings stays on its cached error after reopening; no_claim=the initial failure and recovered settings response use an in-memory HTTP stub]", async () => {
+    let failInitialSettingsGet!: () => void;
+    const settingsGetGate = new Promise<void>((resolve) => { failInitialSettingsGet = resolve; });
+    const api = installPanelFetch([sampleQuestion, secondQuestion], undefined, false, false, false, undefined, false, {
+      failSettingsGets: 1,
+      settingsGetGate,
+    });
+    mountPanel();
+    await screen.findByRole("textbox", { name: "Word" });
+    await waitFor(() => expect(api.requests.mock.calls.filter(([input, init]) => parseUrl(input).pathname.endsWith("/modules/blitz_round/settings") && (init?.method ?? "GET") === "GET")).toHaveLength(1));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    act(() => { failInitialSettingsGet(); });
+    expect(await screen.findByText("The question pool could not be loaded.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to questions" }));
+    fireEvent.click(screen.getByRole("button", { name: /Word scramble.*MOON/u }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    expect(await screen.findByText("Round settings", { exact: true })).toBeInTheDocument();
+    expect(api.requests.mock.calls.filter(([input, init]) => parseUrl(input).pathname.endsWith("/modules/blitz_round/settings") && (init?.method ?? "GET") === "GET")).toHaveLength(2);
   });
 
   it("selects another question requested during a header save [protects=click Save, request another question row while the question PATCH is pending, and select that row after the save resolves; fails_when=the saved revision remounts the editor and drops the pending row destination; no_claim=the delayed PATCH uses an in-memory HTTP stub and does not verify authentication or D1 writes]", async () => {

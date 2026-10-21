@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactElement } from "react";
 
 import { moduleQueryKey, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { dashboardCommonTexts } from "../../../dashboard/locale";
 import {
   Badge, Button, ChipsInput, CollectionPage, ConfirmDialog, Field, Icon, PageHeader,
   registerDashboardNavigationGuard, SegmentChoice, SwitchSection, TemplateTextField, UnitInput, useDraft, useDraftGuard,
@@ -130,6 +131,7 @@ export default function BlitzRoundPanel(properties: ModulePanelProperties): Reac
 
 function BlitzRoundPanelContent({ channelId, language, canManage = true }: ModulePanelProperties): ReactElement {
   const labels = blitzTexts(language);
+  const commonLabels = dashboardCommonTexts(language);
   const queryClient = useDashboardQueryClient();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
@@ -256,7 +258,12 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
     });
   };
 
-  const openSettings = (): void => { cancelPendingDeleteSelection(); setShowSettings(true); setDetailOpen(true); };
+  const openSettings = (): void => {
+    cancelPendingDeleteSelection();
+    if (settingsQuery.isError) void settingsQuery.refetch();
+    setShowSettings(true);
+    setDetailOpen(true);
+  };
   const closeSettings = (): void => {
     cancelPendingDeleteSelection();
     requestSwitch(() => { setShowSettings(false); setDetailOpen(true); });
@@ -412,7 +419,9 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
     : questions.find((question) => question.id === selectedId) ?? null;
   const detail = showSettings
     ? settingsQuery.data === undefined
-      ? <div className="blitz-panel__settings-loading" aria-live="polite">{settingsQuery.isError ? labels.loadError : labels.saving}</div>
+      ? <div className="blitz-panel__settings-loading" aria-live="polite">{settingsQuery.isError
+        ? <><p>{labels.loadError}</p><Button disabled={settingsQuery.isFetching} onClick={() => { void settingsQuery.refetch(); }}>{commonLabels.retry}</Button></>
+        : labels.saving}</div>
       : <SettingsEditor channelId={channelId} language={language === "en" ? "en" : "de"} settings={settingsQuery.data.settings} revision={settingsQuery.data.revision} canManage={canManage} onBack={closeSettings} onReload={reloadSettings} registerSwitch={(switcher) => { switchRef.current = switcher; }} onSaved={(settings, revision) => {
         queryClient.setQueryData(moduleQueryKey(channelId, "blitz_round", "settings"), { settings, revision });
       }} />
@@ -591,7 +600,7 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
     });
   };
 
-  const saveDeletedAsNew = (): void => { void save(true); };
+  const saveDeletedAsNew = (): void => { void save(true, true); };
   const guardSwitchWithPendingDestination = useCallback((proceed: () => void, cancel?: () => void): void => {
     const destination = (): void => {
       onClearPendingNavigation(destination);
