@@ -76,11 +76,13 @@
   .live-action__reason.is-result { visibility: hidden; }
   .live-action__result-link { position: absolute; z-index: 1; right: var(--s2); bottom: var(--s2); left: var(--s2); display: flex; align-items: center; justify-content: center; gap: var(--s1); min-width: 0; overflow: hidden; color: var(--brand-text); font-size: 11px; line-height: 14px; text-decoration: underline; text-overflow: ellipsis; white-space: nowrap; }
   .live-action__result-message { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .live-cockpit__running { display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s3); min-width: 0; min-height: 0; overflow: hidden; }
+  .live-cockpit__running { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s3); min-width: 0; min-height: 0; overflow: hidden; }
   .live-cockpit-reserve { display: flex; flex-direction: column; justify-content: flex-start; min-width: 0; min-height: 0; overflow: hidden; padding: var(--s4); border: 1px solid var(--line); border-radius: var(--r-container); background: var(--surface); }
   .live-cockpit-reserve h2 { margin: 0; color: var(--text); font-size: 14px; font-weight: 600; }
   .live-cockpit-reserve p { max-width: 34ch; margin: var(--s2) 0 0; color: var(--text-3); font-size: 12px; line-height: 1.45; }
-  .live-cockpit-running-tile { gap: var(--s2); }
+  .live-cockpit-running-tile { grid-column: 1; grid-row: 1; gap: var(--s2); }
+  .live-cockpit-ads-tile { grid-column: 2; grid-row: 1; }
+  .live-cockpit-next-tile { grid-column: 1 / -1; grid-row: 2; }
   .live-vote-tile, .live-votekick-tile { display: flex; flex: 1; flex-direction: column; gap: var(--s2); min-width: 0; min-height: 0; }
   .live-vote-tile__header, .live-votekick-tile > header { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); min-width: 0; }
   .live-vote-tile__header > div, .live-votekick-tile > header > div { display: grid; min-width: 0; }
@@ -185,7 +187,7 @@
     .live-cockpit__wall { grid-template-columns: minmax(0, 1fr); overflow: visible; }
     .live-cockpit-actions { grid-column: 1; min-height: 300px; }
     .live-cockpit-actions__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .live-cockpit__running { grid-template-rows: minmax(100px, auto) minmax(100px, auto); }
+    .live-cockpit__running { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: minmax(100px, auto) minmax(100px, auto); }
     .live-cockpit-reserve { min-height: 100px; }
     .live-cockpit__status { margin-top: var(--s4); }
     .live-action__feedback { height: 44px; }
@@ -226,7 +228,8 @@
     .live-cockpit__location-warning span { max-width: none; overflow: visible; text-overflow: clip; white-space: normal; }
     .live-cockpit-actions { grid-column: auto; min-height: auto; padding: var(--s2); }
     .live-cockpit-actions__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .live-cockpit__running { grid-template-rows: none; }
+    .live-cockpit__running { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+    .live-cockpit-running-tile, .live-cockpit-ads-tile, .live-cockpit-next-tile { grid-column: 1; grid-row: auto; }
     .live-cockpit-reserve { min-height: 112px; padding: var(--s3); }
     .live-cockpit__status { justify-content: flex-start; flex-wrap: wrap; padding-top: var(--s2); }
   }

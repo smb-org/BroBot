@@ -126,3 +126,58 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
 };
 
 export const raidSettingsEditorCatalog = (language: DashboardLanguage): SettingsEditorCatalog => catalog[language];
+
+export interface RaidStatePanelTexts {
+  title: string;
+  ready: string;
+  waiting: string;
+  errorStatus: string;
+  loading: string;
+  lastRaid: string;
+  lastShoutout: string;
+  noRaid: string;
+  noShoutout: string;
+  unknownChannel: string;
+  loadingDetails: string;
+  loadError: string;
+  threshold: (value: number | null) => string;
+}
+
+const raidStatePanelCatalog: LocaleCatalog<RaidStatePanelTexts> = {
+  de: {
+    title: "Zustand",
+    ready: "Raid-Erkennung bereit",
+    waiting: "Wartet auf Twitch-Ereignisse",
+    errorStatus: "Ereignisse nicht erreichbar",
+    loading: "Wird geladen …",
+    lastRaid: "Letzter Raid",
+    lastShoutout: "Letzter Shoutout",
+    noRaid: "Noch kein Raid",
+    noShoutout: "Noch kein Shoutout",
+    unknownChannel: "Unbekannter Kanal",
+    loadingDetails: "Raid-Verlauf wird geladen …",
+    loadError: "Der Raid-Verlauf konnte nicht geladen werden.",
+    threshold: (value) => value === null
+      ? "Automatische Shoutouts nutzen die eingestellte Zuschauer-Schwelle."
+      : `Automatische Shoutouts starten ab ${String(value)} Raid-Zuschauern.`,
+  },
+  en: {
+    title: "State",
+    ready: "Raid detection ready",
+    waiting: "Waiting for Twitch events",
+    errorStatus: "Events unavailable",
+    loading: "Loading …",
+    lastRaid: "Last raid",
+    lastShoutout: "Last shoutout",
+    noRaid: "No raid yet",
+    noShoutout: "No shoutout yet",
+    unknownChannel: "Unknown channel",
+    loadingDetails: "Loading raid history …",
+    loadError: "Raid history could not be loaded.",
+    threshold: (value) => value === null
+      ? "Automatic shoutouts use the configured viewer threshold."
+      : `Automatic shoutouts start at ${String(value)} raid viewers.`,
+  },
+};
+
+export const raidStatePanelTexts = (language: DashboardLanguage): RaidStatePanelTexts => raidStatePanelCatalog[language];

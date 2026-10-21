@@ -23,4 +23,15 @@
   .collection-page:has(.members-list-toolbar) .collection-page__list-toolbar { padding-bottom: 4px; }
   .members-collection__load-more { display: flex; min-height: 44px; justify-content: flex-end; margin-top: 8px; }
   .members-collection__load-more > .ui-button, .members-collection__load-more > .button { min-height: 44px; }
+  .role-matrix { min-width: 0; }
+  .role-matrix__disclosure { min-width: 0; }
+  .role-matrix__disclosure > summary { min-height: 40px; color: var(--text-2); cursor: pointer; font-size: 12px; font-weight: 600; }
+  .role-matrix__scroll { box-sizing: border-box; max-width: 100%; max-height: 256px; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; border-radius: var(--r-control); background: var(--surface-well); }
+  .role-matrix__table { width: 100%; min-width: 480px; border-collapse: collapse; font-size: 11px; }
+  .role-matrix__table :is(th, td) { padding: var(--s2); border-bottom: 1px solid var(--line); text-align: left; }
+  .role-matrix__table thead th { position: sticky; z-index: 1; top: 0; color: var(--text-2); background: var(--surface-raised); }
+  .role-matrix__table tbody th { width: 52%; color: var(--text); font-weight: 500; }
+  .role-matrix__table td { width: 16%; color: var(--text-3); text-align: center; }
+  .role-matrix__table td svg { color: var(--text-2); vertical-align: middle; }
+  .role-matrix__scroll:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 }

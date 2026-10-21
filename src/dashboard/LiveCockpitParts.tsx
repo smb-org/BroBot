@@ -17,6 +17,7 @@ import { immediateActionErrorFeedback } from "./immediate-action-errors";
 import { adSnoozeRetryMessage } from "./ad-snooze-retry";
 import { formatRelativeTime } from "./ui/format-relative-time";
 import { Button, ChipGroup, ConfirmDialog, DataTable, Field, FilterBar, Icon } from "./ui";
+import { AdsLiveTile, type AdsLiveSchedule } from "./AdsLiveTile";
 
 type EventFilter = "all" | "raids" | "community" | "chat";
 
@@ -44,6 +45,8 @@ export const LiveCockpitTiles = ({
   channelId,
   role,
   snapshots,
+  failedModules,
+  adsEnabled,
   loading,
   failed,
   now,
@@ -54,6 +57,8 @@ export const LiveCockpitTiles = ({
   channelId: string;
   role: ChannelRole;
   snapshots: readonly ModuleLiveTileSnapshot[];
+  failedModules: readonly string[];
+  adsEnabled: boolean;
   loading: boolean;
   failed: boolean;
   now: number;
@@ -67,13 +72,15 @@ export const LiveCockpitTiles = ({
     .filter((snapshot): snapshot is Extract<ModuleLiveTileSnapshot, { kind: "upcoming" }> => snapshot.kind === "upcoming" && Date.parse(snapshot.at) > now)
     .sort((left, right) => Date.parse(left.at) - Date.parse(right.at))
     .slice(0, 12);
+  const adsSnapshot = snapshots.find((snapshot): snapshot is AdsLiveSchedule => snapshot.kind === "ad_schedule") ?? null;
+  const adsFailed = failedModules.includes("ads");
   const recentVotekicks = snapshots.filter((snapshot): snapshot is Extract<ModuleLiveTileSnapshot, { kind: "votekick_recent" }> => snapshot.kind === "votekick_recent");
   const [busy, setBusy] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<{ id: string; target: string } | null>(null);
   const [cancelError, setCancelError] = useState<string | undefined>();
   const [liftTarget, setLiftTarget] = useState<{ id: string; target: string } | null>(null);
   const [liftError, setLiftError] = useState<string | undefined>();
-  const [snoozeFeedback, setSnoozeFeedback] = useState<{ itemId: string; text: string } | null>(null);
+  const [snoozeFeedback, setSnoozeFeedback] = useState<string | null>(null);
   const roleCanManage = hasRequiredChannelRole(role, "operator");
   const roleCanSnooze = canManage(role);
 
@@ -171,9 +178,9 @@ export const LiveCockpitTiles = ({
     }
   };
 
-  const doSnoozeAd = async (itemId: string, canSnooze: boolean): Promise<void> => {
+  const doSnoozeAd = async (): Promise<void> => {
     if (busy) return;
-    if (!roleCanSnooze || !canSnooze) {
+    if (!roleCanSnooze || adsSnapshot === null || !adsSnapshot.snoozeScopeAvailable || (adsSnapshot.snoozeCount ?? 0) <= 0 || adsSnapshot.nextAdAt === null) {
       onMessage(labels.adSnoozeUnavailable);
       return;
     }
@@ -187,7 +194,7 @@ export const LiveCockpitTiles = ({
       const retryMessage = adSnoozeRetryMessage(error, timeZone, labels.adSnoozeRetryAfter);
       if (retryMessage === null) onMessage(labels.adSnoozeFailed);
       else {
-        setSnoozeFeedback({ itemId, text: retryMessage });
+        setSnoozeFeedback(retryMessage);
         onMessage(retryMessage, "warning");
       }
     } finally {
@@ -227,6 +234,9 @@ export const LiveCockpitTiles = ({
           <ConfirmDialog opened={cancelTarget !== null} title={labels.votekickCancelTitle} description={labels.votekickCancelDescription(cancelTarget?.target ?? running.target)} confirmLabel={labels.votekickCancel} cancelLabel={dashboardCommonTexts().cancel} onConfirm={() => { void doCancelVotekick(); }} onCancel={() => { if (!busy) setCancelTarget(null); }} pending={busy} danger {...(cancelError === undefined ? {} : { error: cancelError })} />
         </div>}
     </section>
+    <AdsLiveTile ads={adsSnapshot} now={now} language={dashboardLanguage()} canManage={roleCanSnooze} moduleActive={adsEnabled}
+      loading={loading && adsEnabled && !adsFailed} failed={adsFailed} snoozeFeedback={snoozeFeedback}
+      onSnooze={() => { void doSnoozeAd(); }} />
     <section className="live-cockpit-reserve live-cockpit-next-tile" data-slot="next-up" aria-label={labels.nextUp}>
       <h2>{labels.recentVotekicks}</h2>
       <div className="live-cockpit-next-list live-cockpit-next-list--recent">
@@ -242,22 +252,10 @@ export const LiveCockpitTiles = ({
       {upcoming.length === 0 ? <p>{loading ? labels.liveDataLoading : failed ? labels.liveDataUnavailable : labels.noUpcomingItems}</p> : <div className="live-cockpit-next-list">
         {upcoming.map((item) => {
           const relative = formatRelativeTime(item.at, new Date(now), dashboardLanguage(), timeZone).label;
-          const title = item.category === "ad" ? labels.nextAdBreak : item.name;
-          const detail = item.category === "ad" && item.detail !== null ? labels.adDuration(item.detail) : item.detail;
-          const retryMessage = snoozeFeedback?.itemId === item.id ? snoozeFeedback.text : null;
-          const snoozeReason = retryMessage ?? (!roleCanSnooze ? dashboardTexts().streamManager.managerOnly
-            : item.canSnooze !== true ? labels.adSnoozeUnavailable : "");
-          const snoozeReasonId = `ad-snooze-reason-${item.id}`;
           return <div className="live-cockpit-next-item" key={`${item.category}:${item.id}`}>
-            <span className="live-cockpit-next-item__icon"><Icon name={item.category === "ad" ? "ad" : "clock-hour-4"} size={16} /></span>
-            <span className="live-cockpit-next-item__copy"><strong>{title}</strong>{detail === null ? null : <small>{detail}</small>}</span>
+            <span className="live-cockpit-next-item__icon"><Icon name="clock-hour-4" size={16} /></span>
+            <span className="live-cockpit-next-item__copy"><strong>{item.name}</strong>{item.detail === null ? null : <small>{item.detail}</small>}</span>
             <time className="live-cockpit-next-item__time" dateTime={item.at} title={new Date(item.at).toLocaleString(dashboardLanguage(), { timeZone })}>{relative}</time>
-            {item.category === "ad" ? <>
-              <Button size="compact" variant="subtle" disabled={busy || !roleCanSnooze || item.canSnooze !== true}
-                {...(snoozeReason === "" ? {} : { describedBy: snoozeReasonId })}
-                onClick={() => { void doSnoozeAd(item.id, item.canSnooze === true); }}>{labels.adSnooze}</Button>
-              <span className={`live-cockpit-next-item__reason${retryMessage === null ? "" : " is-warning"}`} id={snoozeReasonId} aria-live="polite">{snoozeReason}</span>
-            </> : null}
           </div>;
         })}
       </div>}

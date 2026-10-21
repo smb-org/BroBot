@@ -7,6 +7,7 @@ import { SettingsEditor, UiProvider } from "../../src/dashboard/ui";
 import { DEFAULT_VOTEKICK_SETTINGS } from "../../src/modules/votekick/contracts";
 import { votekickSettingsEditorCatalog } from "../../src/modules/votekick/panel/locale";
 import settingsEditor from "../../src/modules/votekick/panel/settings-editor";
+import { VotekickThresholdExample } from "../../src/modules/votekick/panel/threshold-example";
 
 afterEach(() => { cleanup(); });
 
@@ -74,6 +75,30 @@ describe("votekick starter role setting", () => {
 
   it("uses a singular preview character count in English", () => {
     expect(settingsEditor.locales.en.templateMessages.previewCountLabel(1)).toBe("1 character");
+  });
+
+  it("updates the worked threshold example from unsaved settings values", () => {
+    function Harness() {
+      const [settings, setSettings] = useState(DEFAULT_VOTEKICK_SETTINGS);
+      return <UiProvider>
+        <SettingsEditor
+          spec={settingsEditor.spec}
+          sectionId="settings"
+          settings={settings}
+          onChange={(key, next) => { setSettings((current) => ({ ...current, [key]: next })); }}
+          texts={votekickSettingsEditorCatalog("en")}
+          templateMessages={votekickSettingsEditorCatalog("en").templateMessages}
+        />
+        <VotekickThresholdExample minNetVotes={settings.minNetVotes} percent={settings.percent} language="en" />
+      </UiProvider>;
+    }
+
+    render(<Harness />);
+    expect(screen.getByText("7 net yes votes needed")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Minimum net yes votes" }), { target: { value: "8" } });
+    expect(screen.getByText("8 net yes votes needed")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Active chatters percent" }), { target: { value: "30" } });
+    expect(screen.getByText("11 net yes votes needed")).toBeInTheDocument();
   });
 
   it.each(["de", "en"] as const)("shows localized threshold semantics and read-only values for operators (%s)", (language) => {

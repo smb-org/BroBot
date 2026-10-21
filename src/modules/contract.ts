@@ -1544,6 +1544,14 @@ export interface ModuleImmediateActionDefinition {
 
 export type ModuleLiveTileSnapshot =
   | {
+    kind: "ad_schedule";
+    nextAdAt: string | null;
+    duration: number | null;
+    snoozeCount: number | null;
+    snoozeScopeAvailable: boolean;
+    runningBreakEndsAt: string | null;
+  }
+  | {
     kind: "vote";
     id: string;
     title: string | null;
@@ -1570,11 +1578,10 @@ export type ModuleLiveTileSnapshot =
   | {
     kind: "upcoming";
     id: string;
-    category: "timer" | "ad";
+    category: "timer";
     name: string;
     at: string;
     detail: string | null;
-    canSnooze?: boolean;
   };
 
 interface ModuleLiveTileDefinition {

@@ -1,0 +1,275 @@
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
+
+import { DEFAULT_VOTEKICK_SETTINGS } from "../../src/modules/votekick/contracts";
+import { installLiveCockpitMocks } from "./live-cockpit-regression-fixtures";
+
+test.use({ locale: "de-DE", timezoneId: "Europe/Berlin" });
+
+const channelId = "kanal-509-clarity";
+const viewports = [{ width: 1920, height: 1080 }, { width: 390, height: 844 }] as const;
+const modules = ["ads", "chat_voting", "raid", "timers", "votekick"].map((id) => ({ id, enabled: true, settings: "{}" }));
+const members = [
+  { userId: "viewer-509", login: "mira_fox", displayName: "Mira Fox", profileImageUrl: null, role: "manager", joinedAt: "2025-08-13T10:00:00.000Z" },
+  { userId: "operator-509", login: "otto_owl", displayName: "Otto Owl", profileImageUrl: null, role: "operator", joinedAt: "2026-03-04T09:30:00.000Z" },
+  { userId: "owner-509", login: "demo-kanal", displayName: "Demo Kanal", profileImageUrl: null, role: "broadcaster", joinedAt: "2024-01-10T14:15:00.000Z" },
+] as const;
+const json = (value: unknown, status = 200) => ({ status, contentType: "application/json", body: JSON.stringify(value) });
+
+interface Controls {
+  setRaidState: (state: "ready" | "empty") => void;
+  holdRaidState: () => void;
+  releaseRaidState: () => void;
+  setLock: (lock: "idle" | "chat_vote" | "votekick") => void;
+  setAds: (ads: "none" | "upcoming" | "running") => void;
+}
+
+const installMocks = async (page: Page, role: "manager" | "operator"): Promise<Controls> => {
+  let raidState: "ready" | "empty" = "ready";
+  let raidGate: Promise<void> = Promise.resolve();
+  let releaseRaid = (): void => undefined;
+  let lock: "idle" | "chat_vote" | "votekick" = "idle";
+  let ads: "none" | "upcoming" | "running" = "none";
+
+  await installLiveCockpitMocks(page, { channelId, role, modules });
+  await page.route(`**/api/channels/${channelId}/**`, async (route: Route) => {
+    const path = new URL(route.request().url()).pathname.slice(`/api/channels/${channelId}`.length);
+    const method = route.request().method();
+    const now = Date.now();
+    if (path === "/members" && method === "GET") return route.fulfill(json({ members, nextCursor: null, broadcasterCount: 1, viewerUserId: "viewer-509" }));
+    if (path === "/template-variables" || path === "/variables") return route.fulfill(json({ variables: [] }));
+    if (path === "/modules/votekick/settings" && method === "GET") return route.fulfill(json({ settings: DEFAULT_VOTEKICK_SETTINGS, revision: 1, variables: [] }));
+    if (/^\/modules\/[^/]+\/settings$/u.test(path) && method === "GET") return route.fulfill(json({ settings: {}, revision: 1, variables: [] }));
+    if (path === "/modules/raid/state") {
+      await raidGate;
+      return route.fulfill(json(raidState === "ready"
+        ? {
+          ready: true,
+          shoutoutThreshold: 3,
+          lastRaid: { channel: "fuchsbau_tv", viewers: 12, at: new Date(now - 3 * 3_600_000).toISOString() },
+          lastShoutout: { channel: "fuchsbau_tv", at: new Date(now - 3 * 3_600_000).toISOString() },
+        }
+        : { ready: false, shoutoutThreshold: null, lastRaid: null, lastShoutout: null }));
+    }
+    if (path === "/modules/votekick/votekicks" && method === "GET") {
+      const running = lock === "votekick"
+        ? { id: "votekick-509", status: "running", targetUserId: "target-509", targetLogin: "troll_tim", endsAt: new Date(now + 75_000).toISOString() }
+        : null;
+      return route.fulfill(json({ running, votekicks: running === null ? [] : [running], now: new Date(now).toISOString() }));
+    }
+    if (path === "/modules/chat_voting/current") {
+      const vote = lock === "chat_vote"
+        ? { id: "vote-509", status: "open", title: "Was spielen wir als Nächstes?", closesAt: new Date(now + 90_000).toISOString() }
+        : null;
+      return route.fulfill(json({ vote, counts: vote === null ? null : [3, 1], revision: 1, terms: null, moreTerms: null, hasOpenBallot: vote !== null, defaultDurationSeconds: 120 }));
+    }
+    if (path === "/modules/ads/schedule") {
+      return route.fulfill(json({
+        schedule: {
+          nextAdAt: ads === "none" ? null : new Date(now + (ads === "running" ? 40 * 60_000 : 10 * 60_000)).toISOString(),
+          duration: ads === "none" ? null : 60,
+          lastAdAt: null,
+          prerollFreeTime: null,
+          snoozeCount: ads === "none" ? 0 : 2,
+          snoozeRefreshAt: null,
+        },
+        recentAdBreaks: ads === "running" ? [{ timestamp: new Date(now - 20_000).toISOString(), durationSeconds: 90 }] : [],
+        snoozeScopeAvailable: true,
+      }));
+    }
+    return route.fallback();
+  });
+
+  return {
+    setRaidState: (state) => { raidState = state; },
+    holdRaidState: () => { raidGate = new Promise<void>((resolve) => { releaseRaid = resolve; }); },
+    releaseRaidState: () => { releaseRaid(); },
+    setLock: (next) => { lock = next; },
+    setAds: (next) => { ads = next; },
+  };
+};
+
+const open = async (page: Page, viewport: { width: number; height: number }, path: string, prepare?: (controls: Controls) => void, role: "manager" | "operator" = "manager"): Promise<Controls> => {
+  await page.unrouteAll({ behavior: "wait" });
+  await page.setViewportSize(viewport);
+  const controls = await installMocks(page, role);
+  prepare?.(controls);
+  await page.goto(`/channels/${channelId}${path}`);
+  return controls;
+};
+
+const box = async (locator: Locator) => {
+  const result = await locator.boundingBox();
+  if (result === null) throw new Error("Expected a visible element with a bounding box.");
+  return result;
+};
+
+const boxes = (locator: Locator) => locator.evaluateAll((elements) => elements.map((element) => {
+  const { x, y, width, height } = element.getBoundingClientRect();
+  return { x, y, width, height };
+}));
+
+const expectNoHorizontalScroll = async (page: Page): Promise<void> => {
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+};
+
+for (const viewport of viewports) {
+  const size = `${String(viewport.width)}x${String(viewport.height)}`;
+
+  test.describe(size, () => {
+    test("members: the role matrix opens without moving anything outside it", async ({ page }) => {
+      await open(page, viewport, "/members");
+      await page.getByRole("link", { name: /Otto Owl/u }).click();
+      await page.getByRole("tab", { name: "Berechtigungen" }).click();
+      const matrix = page.locator(".role-matrix");
+      await expect(matrix).toBeVisible();
+      await expect(page.locator(".role-matrix__table")).toBeHidden();
+      await expectNoHorizontalScroll(page);
+
+      const summary = matrix.locator("summary");
+      const before = {
+        page: await box(page.locator(".collection-page__heading--page-header")),
+        summary: await box(summary),
+        rows: await boxes(page.locator(".members-collection__rows .list-row")),
+      };
+      await summary.click();
+      await expect(page.locator(".role-matrix__table tbody tr")).toHaveCount(12);
+      await expect(page.locator(".role-matrix__table thead th")).toHaveCount(4);
+      expect(await box(page.locator(".collection-page__heading--page-header"))).toEqual(before.page);
+      expect(await box(summary)).toEqual(before.summary);
+      if (viewport.width >= 1280) expect(await boxes(page.locator(".members-collection__rows .list-row"))).toEqual(before.rows);
+      await expectNoHorizontalScroll(page);
+      // Each cell announces its role and the verdict for screen readers.
+      await expect(page.locator(".role-matrix__table tbody tr").first().locator("td .sr-only").first()).toContainText(/Erlaubt|Nicht erlaubt/u);
+
+      await summary.click();
+      await expect(page.locator(".role-matrix__table")).toBeHidden();
+      expect(await box(summary)).toEqual(before.summary);
+    });
+
+    test("members: the read-only view of an operator still offers the matrix", async ({ page }) => {
+      await open(page, viewport, "/members", undefined, "operator");
+      await page.getByRole("link", { name: /Otto Owl/u }).click();
+      await expect(page.getByRole("tab", { name: "Berechtigungen" })).toHaveCount(0);
+      await expect(page.locator(".role-matrix summary")).toBeVisible();
+      await page.locator(".role-matrix summary").click();
+      await expect(page.locator(".role-matrix__table tbody tr")).toHaveCount(12);
+      await expectNoHorizontalScroll(page);
+    });
+
+    test("raid: the state card shows ready and empty data and loading does not move the settings", async ({ page }) => {
+      const controls = await open(page, viewport, "/modules/raid", (next) => { next.holdRaidState(); });
+      const card = page.getByRole("region", { name: "Zustand" });
+      const column = page.locator(".settings-page__column-stack").first();
+      const editors = page.locator(".ui-settings-editor");
+      await expect(page.locator(".raid-state-card--loading")).toBeVisible();
+      const before = { column: await box(column), editors: await boxes(editors) };
+      controls.releaseRaidState();
+      await expect(card).toContainText("Raid-Erkennung bereit");
+      await expect(card).toContainText("fuchsbau_tv");
+      await expect(card).toContainText("Automatische Shoutouts starten ab 3 Raid-Zuschauern.");
+      expect.soft(await box(column)).toEqual(before.column);
+      expect.soft(await boxes(editors)).toEqual(before.editors);
+      await expectNoHorizontalScroll(page);
+
+      const readyCard = await box(card);
+      await open(page, viewport, "/modules/raid", (next) => { next.setRaidState("empty"); });
+      const emptyCard = page.getByRole("region", { name: "Zustand" });
+      await expect(emptyCard).toContainText("Wartet auf Twitch-Ereignisse");
+      await expect(emptyCard).toContainText("Noch kein Raid");
+      await expect(emptyCard).toContainText("Noch kein Shoutout");
+      expect((await box(emptyCard)).height).toBe(readyCard.height);
+      await expectNoHorizontalScroll(page);
+    });
+
+    test("votekick: the lock card swaps idle and running without moving the form, and the example follows the inputs", async ({ page }) => {
+      const controls = await open(page, viewport, "/modules/votekick");
+      const lock = page.getByRole("region", { name: "Gegenseitige Sperre" });
+      await expect(lock).toContainText("Gerade läuft keine Abstimmung.");
+      await expect(lock).toContainText("Keine Abstimmung aktiv");
+      const columns = page.locator(".ui-editor-shell__columns");
+      const lockBefore = await box(lock);
+      const columnsBefore = await box(columns);
+      const example = page.locator(".votekick-threshold-example");
+      const bodyBefore = await boxes(page.locator(".ui-editor-shell__column"));
+
+      controls.setLock("chat_vote");
+      await expect(lock).toContainText("Was spielen wir als Nächstes? · endet in", { timeout: 12_000 });
+      await expect(lock).toContainText("Abstimmung läuft");
+      expect(await box(lock)).toEqual(lockBefore);
+      expect(await box(columns)).toEqual(columnsBefore);
+      expect(await boxes(page.locator(".ui-editor-shell__column"))).toEqual(bodyBefore);
+
+      controls.setLock("votekick");
+      await expect(lock).toContainText("Votekick gegen troll_tim · endet in", { timeout: 12_000 });
+      expect(await box(lock)).toEqual(lockBefore);
+      expect(await box(columns)).toEqual(columnsBefore);
+      await expectNoHorizontalScroll(page);
+
+      // Defaults are 5 net votes and 20 percent; the example uses 34 active chatters.
+      await expect(example).toContainText("7 Netto-Ja-Stimmen nötig");
+      const minimum = page.getByLabel("Mindest-Netto-Ja-Stimmen");
+      const percent = page.getByLabel("Aktive Chatter in Prozent");
+      const exampleBefore = await box(example);
+      // Typing scrolls the inner container, so compare distances between elements, not viewport positions.
+      const distanceToLock = async () => (await box(example)).y - (await box(lock)).y;
+      const below = await distanceToLock();
+      await minimum.fill("9");
+      await expect(example).toContainText("9 Netto-Ja-Stimmen nötig");
+      await expect(example).toContainText("Mindestens 9 Netto-Ja-Stimmen oder 20 % der aktiven Chatter");
+      await percent.fill("100");
+      await expect(example).toContainText("34 Netto-Ja-Stimmen nötig");
+      for (const value of ["1", "10", "100", "1000", "10000", "100000", "", "0", "7"]) {
+        await minimum.fill(value);
+        expect((await box(example)).height, `example height after typing "${value}"`).toBe(exampleBefore.height);
+      }
+      await percent.fill("");
+      await expect(example).toContainText("Werte prüfen");
+      expect((await box(example)).height).toBe(exampleBefore.height);
+      await percent.fill("20");
+      await minimum.fill("5");
+      await expect(example).toContainText("7 Netto-Ja-Stimmen nötig");
+      expect((await box(example)).height).toBe(exampleBefore.height);
+      expect(await distanceToLock()).toBe(below);
+      await expectNoHorizontalScroll(page);
+    });
+
+    test("cockpit: the ads tile keeps the tile wall fixed across upcoming, running and empty schedules", async ({ page }) => {
+      const controls = await open(page, viewport, "", (next) => { next.setAds("none"); });
+      const tile = page.locator(".live-cockpit-ads-tile");
+      await expect(tile).toHaveAttribute("data-state", "no_schedule");
+      await expect(tile).toContainText("Keine Werbepause geplant");
+      await expect(tile.getByRole("button", { name: /verschieben/iu })).toBeDisabled();
+      const wall = page.locator(".live-cockpit__wall");
+      const children = page.locator(".live-cockpit__wall > *, .live-cockpit__running > *");
+      const reference = { wall: await box(wall), children: await boxes(children), tile: await box(tile) };
+
+      controls.setAds("upcoming");
+      await expect(tile).toHaveAttribute("data-state", "upcoming", { timeout: 15_000 });
+      await expect(tile).toContainText("Verschieben: 2 Joker");
+      await expect(tile.getByRole("button", { name: /verschieben/iu })).toBeEnabled();
+      expect(await box(wall)).toEqual(reference.wall);
+      expect(await boxes(children)).toEqual(reference.children);
+      expect(await box(tile)).toEqual(reference.tile);
+      await expectNoHorizontalScroll(page);
+
+      controls.setAds("running");
+      await expect(tile).toHaveAttribute("data-state", "running", { timeout: 15_000 });
+      await expect(tile).toContainText("Werbepause läuft");
+      await expect(tile).toContainText("Restzeit");
+      expect(await box(wall)).toEqual(reference.wall);
+      expect(await boxes(children)).toEqual(reference.children);
+      expect(await box(tile)).toEqual(reference.tile);
+      await expectNoHorizontalScroll(page);
+
+      controls.setAds("none");
+      await expect(tile).toHaveAttribute("data-state", "no_schedule", { timeout: 15_000 });
+      expect(await boxes(children)).toEqual(reference.children);
+    });
+
+    test("cockpit: the removed ad entry no longer shows up under Next up", async ({ page }) => {
+      await open(page, viewport, "", (next) => { next.setAds("upcoming"); });
+      await expect(page.locator(".live-cockpit-ads-tile")).toHaveAttribute("data-state", "upcoming");
+      await expect(page.locator(".live-cockpit-next-tile .live-cockpit-next-item")).toHaveCount(0);
+    });
+  });
+}

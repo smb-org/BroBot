@@ -1398,7 +1398,7 @@ describe("Dashboard skeleton", () => {
     fireEvent.click(await screen.findByRole("link", { name: /Moderation/ }));
     const editor = await screen.findByRole("region", { name: "Mitglied bearbeiten: Moderation" });
     expect(within(editor).getByText(reason)).toBeInTheDocument();
-    expect(within(editor).queryByRole("group")).not.toBeInTheDocument();
+    expect(within(editor).queryByRole("radio")).not.toBeInTheDocument();
     expect(within(editor).queryByRole("combobox")).not.toBeInTheDocument();
     expect(within(editor).queryByRole("button", { name: "Entziehen" })).not.toBeInTheDocument();
     expect(within(editor).getAllByText("Moderation").length).toBeGreaterThan(0);
@@ -2121,7 +2121,7 @@ describe("Dashboard skeleton", () => {
     const actions = await screen.findByRole("region", { name: "Sofortaktionen" });
     const events = await screen.findByRole("region", { name: "Ereignisse" });
     expect(screen.queryByRole("region", { name: "Module" })).not.toBeInTheDocument();
-    expect(document.querySelectorAll(".live-cockpit-reserve")).toHaveLength(3);
+    expect(document.querySelectorAll(".live-cockpit-reserve")).toHaveLength(4);
     const runningNow = screen.getByRole("region", { name: "Läuft gerade" });
     const nextUp = screen.getByRole("region", { name: "Als Nächstes" });
     expect(actions.compareDocumentPosition(runningNow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

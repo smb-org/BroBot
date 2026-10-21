@@ -1,6 +1,82 @@
 import type { DashboardLanguage, LocaleCatalog } from "../../../dashboard/locale";
 import type { SettingsEditorCatalog } from "../../../dashboard/ui";
 
+export interface VotekickThresholdExampleTexts {
+  lead: (count: number) => string;
+  result: (threshold: number | null) => string;
+  summary: (minNetVotes: number | null, percent: number | null) => string;
+}
+
+const thresholdExampleCatalog: LocaleCatalog<VotekickThresholdExampleTexts> = {
+  de: {
+    lead: (count) => `Rechenbeispiel · ${String(count)} aktive Chatter`,
+    result: (threshold) => threshold === null ? "Werte prüfen" : `${String(threshold)} Netto-Ja-Stimmen nötig`,
+    summary: (minimum, percent) => minimum === null || percent === null
+      ? "Mindest-Netto-Ja-Stimmen und Chatter-Anteil bestimmen gemeinsam die Schwelle."
+      : `Mindestens ${String(minimum)} Netto-Ja-Stimmen oder ${String(percent)} % der aktiven Chatter, aufgerundet.`,
+  },
+  en: {
+    lead: (count) => `Worked example · ${String(count)} active chatters`,
+    result: (threshold) => threshold === null ? "Check the values" : `${String(threshold)} net yes votes needed`,
+    summary: (minimum, percent) => minimum === null || percent === null
+      ? "The minimum net yes votes and chatter share together determine the threshold."
+      : `At least ${String(minimum)} net yes votes or ${String(percent)}% of active chatters, rounded up.`,
+  },
+};
+
+export const votekickThresholdExampleTexts = (language: DashboardLanguage): VotekickThresholdExampleTexts => thresholdExampleCatalog[language];
+
+export interface VotekickLockCardTexts {
+  title: string;
+  running: string;
+  available: string;
+  loading: string;
+  error: string;
+  currentVote: (title: string, remaining: string) => string;
+  ballotUnknown: string;
+  noVote: string;
+  explanation: string;
+  chatVote: string;
+  votekick: (target: string) => string;
+  unknownTarget: string;
+  unknownTime: string;
+}
+
+const lockCardCatalog: LocaleCatalog<VotekickLockCardTexts> = {
+  de: {
+    title: "Gegenseitige Sperre",
+    running: "Abstimmung läuft",
+    available: "Keine Abstimmung aktiv",
+    loading: "Abstimmungsstatus wird geladen …",
+    error: "Der Abstimmungsstatus konnte nicht geladen werden.",
+    currentVote: (title, remaining) => `${title} · endet in ${remaining}`,
+    ballotUnknown: "Eine Abstimmung ist aktiv. Details werden noch geladen.",
+    noVote: "Gerade läuft keine Abstimmung.",
+    explanation: "Votekicks und Chat-Abstimmungen teilen sich dieselbe Sperre im Kanal.",
+    chatVote: "Chat-Abstimmung",
+    votekick: (target) => `Votekick gegen ${target}`,
+    unknownTarget: "unbekannt",
+    unknownTime: "—",
+  },
+  en: {
+    title: "Mutual lock",
+    running: "A vote is running",
+    available: "No vote is active",
+    loading: "Loading voting status …",
+    error: "Voting status could not be loaded.",
+    currentVote: (title, remaining) => `${title} · ends in ${remaining}`,
+    ballotUnknown: "A vote is active. Its details are still loading.",
+    noVote: "No vote is running right now.",
+    explanation: "Votekicks and chat votes share one ballot lock for this channel.",
+    chatVote: "Chat vote",
+    votekick: (target) => `Votekick against ${target}`,
+    unknownTarget: "unknown user",
+    unknownTime: "—",
+  },
+};
+
+export const votekickLockCardTexts = (language: DashboardLanguage): VotekickLockCardTexts => lockCardCatalog[language];
+
 const templateMessages: LocaleCatalog<SettingsEditorCatalog["templateMessages"]> = {
   de: {
     countLabel: (count, maximum) => `${String(count)} von ${String(maximum)} Zeichen`,

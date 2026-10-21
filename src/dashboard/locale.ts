@@ -1450,6 +1450,20 @@ export interface DashboardTexts {
     adSnoozeFailed: string;
     adSnoozeRetryAfter: (time: string) => string;
     adSnoozeUnavailable: string;
+    adTileUpcoming: string;
+    adTileImminent: string;
+    adTileNoSchedule: string;
+    adTileError: string;
+    adTileLoading: string;
+    adTileDisabled: string;
+    adTileCountdown: (time: string) => string;
+    adTileRunning: string;
+    adTileRunningDetails: string;
+    adTileRunningCountdown: (time: string) => string;
+    adTileJokers: (count: string) => string;
+    adTileNoJokers: string;
+    adTileScopeMissing: string;
+    adTileScheduleUnavailable: string;
     events: string;
     eventsFilterLabel: string;
     eventsAll: string;
@@ -2072,6 +2086,20 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       adSnoozeFailed: "Werbepause konnte nicht verschoben werden.",
       adSnoozeRetryAfter: (time) => `Erneut möglich ab ${time}.`,
       adSnoozeUnavailable: "Werbepause lässt sich nicht weiter verschieben.",
+      adTileUpcoming: "Geplant",
+      adTileImminent: "Bald",
+      adTileNoSchedule: "Keine Werbepause geplant",
+      adTileError: "Werbeplan nicht erreichbar",
+      adTileLoading: "Werbeplan wird geladen",
+      adTileDisabled: "Werbung ist ausgeschaltet",
+      adTileCountdown: (time) => `in ${time}`,
+      adTileRunning: "Werbepause läuft",
+      adTileRunningDetails: "Werbepause läuft",
+      adTileRunningCountdown: (time) => `Restzeit ${time}`,
+      adTileJokers: (count) => `Verschieben: ${count} Joker`,
+      adTileNoJokers: "Keine Verschiebungen mehr verfügbar.",
+      adTileScopeMissing: "Die Twitch-Berechtigung zum Verschieben fehlt.",
+      adTileScheduleUnavailable: "Werbeplan konnte nicht geladen werden.",
       events: "Ereignisse",
       eventsFilterLabel: "Ereignisse filtern",
       eventsAll: "Alle",
@@ -2681,6 +2709,20 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       adSnoozeFailed: "The ad break could not be postponed.",
       adSnoozeRetryAfter: (time) => `Try again after ${time}.`,
       adSnoozeUnavailable: "This ad break cannot be postponed again.",
+      adTileUpcoming: "Scheduled",
+      adTileImminent: "Imminent",
+      adTileNoSchedule: "No ad break scheduled",
+      adTileError: "Ad schedule unavailable",
+      adTileLoading: "Loading ad schedule",
+      adTileDisabled: "Ads are turned off",
+      adTileCountdown: (time) => `in ${time}`,
+      adTileRunning: "Break running",
+      adTileRunningDetails: "The ad break is running",
+      adTileRunningCountdown: (time) => `${time} remaining`,
+      adTileJokers: (count) => `Postpone: ${count} ${count === "1" ? "joker" : "jokers"}`,
+      adTileNoJokers: "No postponements left.",
+      adTileScopeMissing: "The Twitch permission to postpone ads is missing.",
+      adTileScheduleUnavailable: "The ad schedule could not be loaded.",
       events: "Events",
       eventsFilterLabel: "Filter events",
       eventsAll: "All",

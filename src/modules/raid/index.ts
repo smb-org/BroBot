@@ -5,6 +5,7 @@ import { processRaid } from "./service";
 import { settingsVariableReferences } from "../contract";
 import { raidTemplateVariableGroupLabels } from "./contracts/template-variable-catalog";
 import { raidImmediateActionTexts } from "./action-locale";
+import { raidRoutes } from "./routes";
 
 const raidPanelIcon = { paths: ["m4 17 5-10 3 6 2-4 6 8H4Z", "M8 19h8"] } as const;
 
@@ -43,7 +44,10 @@ export const raidModule: BotModule<typeof raidSettingsSchema> = {
     textShortTarget: "channel_default",
   },
   eventSubTypes: ["channel.raid"],
+  routes: raidRoutes,
   settingsEditor: () => import("./panel/settings-editor"),
+  panel: () => import("./panel/state"),
+  settingsEditorRelatedParts: ["state"],
   actions: [{
     id: "send-shoutout",
     name: raidImmediateActionTexts.name,

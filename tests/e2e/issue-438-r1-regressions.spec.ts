@@ -21,7 +21,7 @@ const viewports = [
   { width: 1280, height: 800 },
   { width: 390, height: 844 },
 ] as const;
-type Issue438MockOptions = { settingsLoading?: boolean; role?: ChannelRole; systemError?: boolean; membersError?: boolean };
+type Issue438MockOptions = { settingsLoading?: boolean; raidStateLoading?: boolean; role?: ChannelRole; systemError?: boolean; membersError?: boolean };
 const json = (value: unknown, status = 200) => ({ status, contentType: "application/json", body: JSON.stringify(value) });
 
 interface MockControls {
@@ -29,6 +29,10 @@ interface MockControls {
   failNextPatch: () => void;
   settingsStarted: Promise<void>;
   releaseSettings: () => void;
+  raidStateStarted: Promise<void>;
+  releaseRaidState: () => void;
+  setAdsScheduled: (scheduled: boolean) => void;
+  setChatVoteActive: (active: boolean) => void;
 }
 
 const installIssue438Mocks = async (page: Page, options: Issue438MockOptions = {}): Promise<MockControls> => {
@@ -41,6 +45,12 @@ const installIssue438Mocks = async (page: Page, options: Issue438MockOptions = {
   const moduleRevision = new Map<string, number>();
   for (const id of [channelId, otherChannelId]) for (const module of initialModules) moduleRevision.set(`${id}:${module.id}`, 1);
   let nextPatchFails = false;
+  let adsScheduled = false;
+  let chatVoteActive = false;
+  let releaseRaidState = (): void => undefined;
+  let markRaidStateStarted = (): void => undefined;
+  const raidStateStarted = new Promise<void>((resolve) => { markRaidStateStarted = resolve; });
+  const raidStateGate = options.raidStateLoading ? new Promise<void>((resolve) => { releaseRaidState = resolve; }) : Promise.resolve();
   let releaseSettings = (): void => undefined;
   let markSettingsStarted = (): void => undefined;
   const settingsStarted = new Promise<void>((resolve) => { markSettingsStarted = resolve; });
@@ -109,6 +119,35 @@ const installIssue438Mocks = async (page: Page, options: Issue438MockOptions = {
       if (module === undefined) return route.fulfill(json({ error: "module_missing" }, 404));
       return route.fulfill(json({ module: { ...module, revision }, revision }));
     }
+    if (matchedChannelId !== undefined && path === `/api/channels/${matchedChannelId}/modules/raid/state`) {
+      markRaidStateStarted();
+      await raidStateGate;
+      return route.fulfill(json({ ready: true, shoutoutThreshold: 3, lastRaid: null, lastShoutout: null }));
+    }
+    if (matchedChannelId !== undefined && path === `/api/channels/${matchedChannelId}/modules/votekick/votekicks`) {
+      return route.fulfill(json({ running: null, votekicks: [], now: new Date().toISOString() }));
+    }
+    if (matchedChannelId !== undefined && path === `/api/channels/${matchedChannelId}/modules/chat_voting/current`) {
+      const vote = chatVoteActive ? { id: "chat-vote-509", status: "open", title: "What should we play?", closesAt: new Date(Date.now() + 90_000).toISOString() } : null;
+      return route.fulfill(json({ vote, counts: vote === null ? null : [3, 1], revision: 1, terms: null, moreTerms: null, hasOpenBallot: chatVoteActive, defaultDurationSeconds: 120 }));
+    }
+    if (matchedChannelId !== undefined && path === `/api/channels/${matchedChannelId}/modules/ads/schedule`) {
+      return route.fulfill(json({
+        schedule: {
+          nextAdAt: adsScheduled ? new Date(Date.now() + 10 * 60_000).toISOString() : null,
+          duration: adsScheduled ? 60 : null,
+          lastAdAt: null,
+          prerollFreeTime: null,
+          snoozeCount: adsScheduled ? 2 : 0,
+          snoozeRefreshAt: null,
+        },
+        recentAdBreaks: [],
+        snoozeScopeAvailable: true,
+      }));
+    }
+    if (matchedChannelId !== undefined && path === `/api/channels/${matchedChannelId}/modules/timers/timers`) {
+      return route.fulfill(json({ timers: [] }));
+    }
     if (matchedChannelId !== undefined && path === `/api/channels/${matchedChannelId}/modules/text_commands/commands`) return route.fulfill(json({ commands: [] }));
     if (matchedChannelId !== undefined && path === `/api/channels/${matchedChannelId}/variables`) return route.fulfill(json({ variables: [] }));
     if (matchedChannelId !== undefined && path === `/api/channels/${matchedChannelId}/members/search`) return route.fulfill(json({ user: inviteUser }));
@@ -146,6 +185,10 @@ const installIssue438Mocks = async (page: Page, options: Issue438MockOptions = {
     failNextPatch: () => { nextPatchFails = true; },
     settingsStarted,
     releaseSettings: () => { releaseSettings(); },
+    raidStateStarted,
+    releaseRaidState: () => { releaseRaidState(); },
+    setAdsScheduled: (scheduled) => { adsScheduled = scheduled; },
+    setChatVoteActive: (active) => { chatVoteActive = active; },
   };
 };
 
@@ -453,4 +496,82 @@ test("member detail is a plain full-width column and closing returns focus to it
   await page.keyboard.press("Enter");
   await expect(editor).toHaveCount(0);
   await expect(row).toBeFocused();
+});
+
+test("issue 509 clarity cards fit affected pages at desktop and mobile widths", async ({ page }, testInfo) => {
+  test.setTimeout(300_000);
+
+  for (const viewport of [{ width: 1920, height: 1080 }, { width: 390, height: 844 }]) {
+    await freshRoute(page, viewport, `/channels/${channelId}/members`);
+    await page.getByRole("link", { name: /Mira Fox/u }).click();
+    const memberPage = page.locator(".collection-page");
+    const memberPageBefore = await box(memberPage);
+    await page.getByRole("tab", { name: /Berechtigungen|Permissions/u }).click();
+    await page.getByText(/Berechtigungen ansehen|View permissions/u).click();
+    await expect(page.locator(".role-matrix__table tbody tr")).toHaveCount(12);
+    expect(await box(memberPage)).toEqual(memberPageBefore);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`issue-509-members-${String(viewport.width)}.png`) });
+
+    await freshRoute(page, viewport, `/channels/${channelId}/modules/raid`);
+    const raidCard = page.getByRole("region", { name: "Zustand" });
+    await expect(raidCard).toContainText("Raid-Erkennung bereit");
+    expect(await raidCard.boundingBox()).not.toBeNull();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`issue-509-raid-${String(viewport.width)}.png`) });
+
+    await freshRoute(page, viewport, `/channels/${channelId}/modules/votekick`);
+    await expect(page.getByRole("region", { name: "Gegenseitige Sperre" })).toContainText("Gerade läuft keine Abstimmung.");
+    expect(await page.locator(".votekick-threshold-example").boundingBox()).not.toBeNull();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`issue-509-votekick-${String(viewport.width)}.png`) });
+
+    await freshRoute(page, viewport, `/channels/${channelId}/modules/ads`);
+    await expect(page.getByRole("heading", { name: "Werbung" })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`issue-509-ads-${String(viewport.width)}.png`) });
+  }
+});
+
+test("issue 509 ad state changes keep the live cockpit tile wall fixed", async ({ page }, testInfo) => {
+  for (const viewport of [{ width: 1920, height: 1080 }, { width: 390, height: 844 }]) {
+    const controls = await freshRoute(page, viewport, `/channels/${channelId}`);
+    const tile = page.locator(".live-cockpit-ads-tile");
+    await expect(tile).toHaveAttribute("data-state", "no_schedule");
+    await page.screenshot({ path: testInfo.outputPath(`issue-509-live-ads-empty-${String(viewport.width)}.png`) });
+    const wallBefore = await box(page.locator(".live-cockpit__wall"));
+    controls.setAdsScheduled(true);
+    await expect(tile).toHaveAttribute("data-state", "upcoming", { timeout: 12_000 });
+    expect(await box(page.locator(".live-cockpit__wall"))).toEqual(wallBefore);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`issue-509-live-ads-upcoming-${String(viewport.width)}.png`) });
+  }
+});
+
+test("issue 509 raid and mutual-lock cards update without moving adjacent content", async ({ page }, testInfo) => {
+  for (const viewport of [{ width: 1920, height: 1080 }, { width: 390, height: 844 }]) {
+    const controls = await freshRoute(page, viewport, `/channels/${channelId}/modules/raid`, { raidStateLoading: true });
+    await controls.raidStateStarted;
+    const raidColumn = page.locator(".settings-page__column-stack").first();
+    const raidCard = page.getByRole("region", { name: "Zustand" });
+    const messageEditor = raidColumn.locator(".ui-settings-editor");
+    const columnBefore = await box(raidColumn);
+    const editorBefore = await box(messageEditor);
+    controls.releaseRaidState();
+    await expect(raidCard).toContainText("Raid-Erkennung bereit");
+    expect(await box(raidColumn)).toEqual(columnBefore);
+    expect(await box(messageEditor)).toEqual(editorBefore);
+    await page.evaluate(() => { window.scrollTo(0, 0); });
+    await page.screenshot({ path: testInfo.outputPath(`issue-509-raid-state-${String(viewport.width)}.png`) });
+
+    const voteControls = await freshRoute(page, viewport, `/channels/${channelId}/modules/votekick`);
+    const lockCard = page.getByRole("region", { name: "Gegenseitige Sperre" });
+    await expect(lockCard).toContainText("Gerade läuft keine Abstimmung.");
+    const lockBoxBefore = await box(lockCard);
+    const columnsBefore = await box(page.locator(".ui-editor-shell__columns"));
+    voteControls.setChatVoteActive(true);
+    await expect(lockCard).toContainText("What should we play?", { timeout: 12_000 });
+    expect(await box(lockCard)).toEqual(lockBoxBefore);
+    expect(await box(page.locator(".ui-editor-shell__columns"))).toEqual(columnsBefore);
+  }
 });

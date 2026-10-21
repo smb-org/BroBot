@@ -1,0 +1,10 @@
+@layer components.modules {
+  .votekick-lock-card { display: grid; grid-template-rows: auto minmax(42px, auto) minmax(32px, auto); gap: var(--s3); box-sizing: border-box; min-width: 0; min-height: 156px; padding: var(--s4); border-radius: var(--r-container); background: var(--surface-well); }
+  .votekick-lock-card__header { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); min-width: 0; }
+  .votekick-lock-card h2 { margin: 0; color: var(--text); font-size: 14px; font-weight: 600; }
+  .votekick-lock-card__header > span { flex: none; color: var(--text-3); font-size: 11px; }
+  .votekick-lock-card__header > span.is-running { color: var(--warn); }
+  .votekick-lock-card__main { display: flex; align-items: center; min-width: 0; margin: 0; overflow: hidden; color: var(--text); font-size: 13px; font-weight: 600; line-height: 1.4; text-overflow: ellipsis; }
+  .votekick-lock-card__reserved { min-height: 32px; margin: 0; color: var(--text-3); font-size: 11px; line-height: 1.45; }
+  @media (max-width: 639px) { .votekick-lock-card { padding: var(--s3); } }
+}

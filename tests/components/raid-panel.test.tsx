@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ModulePage } from "../../src/dashboard/module-panels";
 import { UiProvider } from "../../src/dashboard/ui";
+import { RaidStateCard } from "../../src/modules/raid/panel/state";
 import { jsonResponse } from "../unit/fixtures";
 import { renderWithQuery } from "../query-test-utils";
 
@@ -14,6 +15,12 @@ const settings = {
   textShort: "Klein {channel} {viewers}",
   textLongTarget: "channel_default",
   textShortTarget: "channel_default",
+};
+const raidState = {
+  ready: true,
+  shoutoutThreshold: 3,
+  lastRaid: { channel: "friendly_raider", viewers: 42, at: "2026-10-20T10:00:00.000Z" },
+  lastShoutout: { channel: "friendly_raider", at: "2026-10-20T10:01:00.000Z" },
 };
 const initialLanguage = Object.getOwnPropertyDescriptor(window.navigator, "language");
 
@@ -33,10 +40,13 @@ const renderRaid = (fetcher: typeof fetch, ownRole: "manager" | "operator" = "ma
 const settingsFetch = (patch: (body: unknown) => Response = (body) => {
   const request = body as { revision: number; settings: typeof settings };
   return jsonResponse({ settings: request.settings, revision: request.revision + 1, warnings: [] });
-}) =>
+}, state: typeof raidState | null = raidState) =>
   vi.fn<typeof fetch>((input, init) => {
     const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
     if (path.endsWith("/settings") && init?.method === "PATCH") return Promise.resolve(patch(typeof init.body === "string" ? JSON.parse(init.body) as unknown : null));
+    if (path === "/api/channels/kanal-a/modules/raid/state") return Promise.resolve(jsonResponse(state ?? {
+      ready: false, shoutoutThreshold: null, lastRaid: null, lastShoutout: null,
+    }));
     if (path.includes("/modules/raid/") && path.endsWith("/settings")) return Promise.resolve(jsonResponse({ settings, revision: 1, variables: [] }));
     if (path === "/api/channels/kanal-a/settings") return Promise.resolve(jsonResponse({ defaultChatTarget: "source_only", defaultChatTargetRevision: 1, timeZone: "Europe/Berlin", revision: 1 }));
     if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
@@ -55,6 +65,7 @@ describe("Raid settings editor declaration", () => {
     renderRaid(fetcher);
 
     expect(await screen.findByRole("heading", { level: 1, name: "Raid-Ankündigungen & Shoutout" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Zustand" })).toHaveTextContent("friendly_raider");
     expect(await screen.findByRole("textbox", { name: "Voller Raid-Text" })).toBeInTheDocument();
     expect(document.querySelector(".settings-page__columns--2")).not.toBeNull();
     expect(screen.queryByRole("tab")).not.toBeInTheDocument();
@@ -73,6 +84,16 @@ describe("Raid settings editor declaration", () => {
     fireEvent.click(shoutout);
     expect(shoutout).toBeChecked();
     expect(await screen.findByRole("spinbutton", { name: "Shoutout-Schwelle" })).toBeEnabled();
+  });
+
+  it("keeps the state card reserved when the channel has no raids or shoutouts yet", async () => {
+    renderRaid(settingsFetch(undefined, null));
+
+    const card = await screen.findByRole("region", { name: "Zustand" });
+    expect(card).toHaveTextContent("Noch kein Raid");
+    expect(card).toHaveTextContent("Noch kein Shoutout");
+    expect(card.querySelector(".raid-state-card__reserved")).toBeInTheDocument();
+    expect(card).not.toHaveTextContent(/Cooldown|Abklingzeit/u);
   });
 
   it("keeps a draft after a 409 concurrent settings change", async () => {
@@ -130,5 +151,15 @@ describe("Raid settings editor declaration", () => {
     expect(number).toHaveAttribute("aria-invalid", "true");
     expect(fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1);
     expect(number).toHaveValue(null);
+  });
+});
+
+describe("RaidStateCard", () => {
+  it("keeps a reserved message slot when loading the event log fails", () => {
+    renderWithQuery(<UiProvider><RaidStateCard state={null} status="error" language="en" now={Date.now()} /></UiProvider>);
+    const card = screen.getByRole("region", { name: "State" });
+    expect(card).toHaveTextContent("Raid history could not be loaded.");
+    expect(card.querySelector(".raid-state-card__reserved")).toBeInTheDocument();
+    expect(card).not.toHaveTextContent(/cooldown/iu);
   });
 });
