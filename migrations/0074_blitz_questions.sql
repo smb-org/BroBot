@@ -4,6 +4,7 @@ CREATE TABLE blitz_questions (
   kind TEXT NOT NULL CHECK (kind IN ('scramble', 'quiz')),
   prompt TEXT NOT NULL,
   answers_json TEXT NOT NULL,
+  search_text TEXT NOT NULL,
   enabled INTEGER NOT NULL DEFAULT 1,
   revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
   last_used_at TEXT,

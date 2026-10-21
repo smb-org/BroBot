@@ -4,7 +4,7 @@ import { canManage } from "../../contracts/values";
 import type { ModuleRouteEnvironment } from "../contract";
 import { BLITZ_QUESTION_MAXIMUM_COUNT, BLITZ_ROUND_MODULE_ID } from "./contracts";
 import { validateBlitzQuestion } from "./domain/questions";
-import { blitzQuestionColumns, createBlitzQuestionRepository, mapBlitzQuestionRow, type BlitzQuestionRow } from "./adapters/d1";
+import { blitzQuestionColumns, blitzQuestionSearchText, createBlitzQuestionRepository, mapBlitzQuestionRow, type BlitzQuestionRow } from "./adapters/d1";
 import { loadEnabledBlitzSettings, openBlitzRound } from "./service";
 
 type BlitzRouteContext = Context<ModuleRouteEnvironment>;
@@ -48,10 +48,10 @@ blitzRoundRoutes.post("/questions", async (context) => {
   const input = parsed.value;
   const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
-    `INSERT INTO blitz_questions (channel_id, question_id, kind, prompt, answers_json, enabled, last_used_at, created_at, updated_at)
-     SELECT ?, ?, ?, ?, ?, ?, NULL, ?, ?
+    `INSERT INTO blitz_questions (channel_id, question_id, kind, prompt, answers_json, search_text, enabled, last_used_at, created_at, updated_at)
+     SELECT ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?
       WHERE (SELECT COUNT(*) FROM blitz_questions WHERE channel_id = ?) < ? ${authorization.sql}`,
-  ).bind(channelId, questionId, input.kind, input.prompt, JSON.stringify(input.answers), input.enabled ? 1 : 0,
+  ).bind(channelId, questionId, input.kind, input.prompt, JSON.stringify(input.answers), blitzQuestionSearchText(input.prompt, input.answers), input.enabled ? 1 : 0,
     now, now, channelId, BLITZ_QUESTION_MAXIMUM_COUNT, ...authorization.values);
   const auditStatement = context.get("prepareModuleAudit")({
     channelId, moduleId: BLITZ_ROUND_MODULE_ID, action: "blitz_round.question.created",
@@ -84,10 +84,10 @@ blitzRoundRoutes.patch("/questions/:questionId", async (context) => {
   const input = parsed.value;
   const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
-    `UPDATE blitz_questions SET kind = ?, prompt = ?, answers_json = ?, enabled = ?, revision = revision + 1, updated_at = ?
+    `UPDATE blitz_questions SET kind = ?, prompt = ?, answers_json = ?, search_text = ?, enabled = ?, revision = revision + 1, updated_at = ?
       WHERE channel_id = ? AND question_id = ? AND revision = ? ${authorization.sql}
       RETURNING ${blitzQuestionColumns}`,
-  ).bind(input.kind, input.prompt, JSON.stringify(input.answers), input.enabled ? 1 : 0, now,
+  ).bind(input.kind, input.prompt, JSON.stringify(input.answers), blitzQuestionSearchText(input.prompt, input.answers), input.enabled ? 1 : 0, now,
     channelId, questionId, expectedRevision, ...authorization.values);
   const auditStatement = context.get("prepareModuleAudit")({
     channelId, moduleId: BLITZ_ROUND_MODULE_ID, action: "blitz_round.question.updated",

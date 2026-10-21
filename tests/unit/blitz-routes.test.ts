@@ -95,8 +95,8 @@ describe("blitz question HTTP writes", () => {
         if (!interleaved) {
           interleaved = true;
           await env.DB.prepare(
-            "UPDATE blitz_questions SET prompt = ?, answers_json = ?, revision = revision + 1, updated_at = ? WHERE channel_id = ? AND question_id = ?",
-          ).bind("Another manager's edit", JSON.stringify(["Sun", "Helios"]), "2100-01-01T00:00:01.000Z", channelId, created.question.id).run();
+            "UPDATE blitz_questions SET prompt = ?, answers_json = ?, search_text = ?, revision = revision + 1, updated_at = ? WHERE channel_id = ? AND question_id = ?",
+          ).bind("Another manager's edit", JSON.stringify(["Sun", "Helios"]), "another manager's edit sun helios", "2100-01-01T00:00:01.000Z", channelId, created.question.id).run();
         }
         return result;
       },

@@ -40,9 +40,10 @@ const parseUrl = (input: RequestInfo | URL): URL => input instanceof Request
   ? new URL(input.url)
   : input instanceof URL ? input : new URL(input, "https://brobot.example");
 
-const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Promise<void>, stalePatch = false, settingsConflict = false, patchDeleted = false, settingsPatchGate?: Promise<void>, failQuestionListAfterDelete = false) => {
+const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Promise<void>, stalePatch = false, settingsConflict = false, patchDeleted = false, settingsPatchGate?: Promise<void>, failQuestionListAfterDelete = false, options: { failPostDeleteQuestionLists?: number; postDeleteQuestionListGate?: Promise<void> } = {}) => {
   let questions = [...initialQuestions];
   let questionDeleted = false;
+  let failedPostDeleteQuestionLists = 0;
   let settings = { ...initialSettings };
   let settingsRevision = 1;
   let conflictPending = settingsConflict;
@@ -80,9 +81,16 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
     }
     if (url.pathname.endsWith("/modules/blitz_round/questions") && method === "GET") {
       if (failQuestionListAfterDelete && questionDeleted) return Promise.resolve(jsonResponse({ error: "question_list_failed" }, 503));
+      if (questionDeleted && failedPostDeleteQuestionLists < (options.failPostDeleteQuestionLists ?? 0)) {
+        failedPostDeleteQuestionLists += 1;
+        return Promise.resolve(jsonResponse({ error: "question_list_failed" }, 503));
+      }
       const page = Number(url.searchParams.get("page") ?? "1");
       const start = (page - 1) * BLITZ_QUESTION_PAGE_SIZE;
-      return Promise.resolve(jsonResponse({ questions: questions.slice(start, start + BLITZ_QUESTION_PAGE_SIZE), total: questions.length, page }));
+      const response = (): Response => jsonResponse({ questions: questions.slice(start, start + BLITZ_QUESTION_PAGE_SIZE), total: questions.length, page });
+      return questionDeleted && options.postDeleteQuestionListGate !== undefined
+        ? options.postDeleteQuestionListGate.then(response)
+        : Promise.resolve(response());
     }
     if (url.pathname.endsWith("/modules/blitz_round/questions") && method === "POST") {
       const body = JSON.parse(typeof init?.body === "string" ? init.body : "null") as Omit<BlitzQuestion, "id" | "revision" | "lastUsedAt" | "createdAt" | "updatedAt">;
@@ -535,6 +543,65 @@ describe("Blitz Round collection panel", () => {
         typeof query.queryKey[4] === "string" && query.queryKey[4].startsWith("questions:"),
     });
     expect(cachedLists.every((query) => !view.queryClient.getQueryData<BlitzQuestionPage>(query.queryKey)?.questions.some((question) => question.id === sampleQuestion.id))).toBe(true);
+  });
+
+  it("keeps a newer selection and draft when the post-delete refresh finishes [protects=deleting A then selecting and editing C during a delayed refresh leaves C selected with its draft; fails_when=the stale delete refresh selects B or replaces C's draft; no_claim=the delayed list response is simulated by an in-memory HTTP stub]", async () => {
+    let releaseRefresh!: () => void;
+    const refreshGate = new Promise<void>((resolve) => { releaseRefresh = resolve; });
+    const thirdQuestion: BlitzQuestion = { ...sampleQuestion, id: "fictional-question-stone", prompt: "STONE", answers: ["STONE"] };
+    const api = installPanelFetch([sampleQuestion, secondQuestion, thirdQuestion], undefined, false, false, false, undefined, false, {
+      postDeleteQuestionListGate: refreshGate,
+    });
+    mountPanel();
+    await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+
+    fireEvent.click(document.querySelector(".page-header__overflow-trigger") as HTMLButtonElement);
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    const confirmation = await screen.findByRole("dialog", { name: "Delete this question?" });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Delete" }));
+
+    try {
+      await waitFor(() => expect(api.getQuestions()).toHaveLength(2));
+      await waitFor(() => expect(api.requests.mock.calls.filter(([input, init]) => {
+        const url = parseUrl(input);
+        return url.pathname.endsWith("/modules/blitz_round/questions") && (init?.method ?? "GET") === "GET";
+      })).toHaveLength(2));
+      fireEvent.click(screen.getByRole("button", { name: /Word scramble.*STONE/u }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "STORM" } });
+      act(() => { releaseRefresh(); });
+
+      await waitFor(() => expect(screen.getByRole("button", { name: /Word scramble.*STONE/u })).toHaveAttribute("aria-current", "true"));
+      expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("STORM");
+    } finally {
+      act(() => { releaseRefresh(); });
+    }
+  });
+
+  it("clamps to the remaining page when retrying a failed delete refresh [protects=after deleting question 26 and one failed page-2 refresh, retry loads page 1 of the remaining 25 questions; fails_when=retry leaves page 2 selected with an empty list; no_claim=the paginated repository is simulated by an in-memory HTTP stub]", async () => {
+    const questions = Array.from({ length: 26 }, (_, index): BlitzQuestion => ({
+      ...sampleQuestion,
+      id: `fictional-question-${String(index + 1).padStart(2, "0")}`,
+      kind: "quiz",
+      prompt: `Which planet is number ${String(index + 1)}?`,
+      answers: ["Saturn"],
+    }));
+    const api = installPanelFetch(questions, undefined, false, false, false, undefined, false, { failPostDeleteQuestionLists: 1 });
+    mountPanel();
+    await screen.findByRole("button", { name: /Which planet is number 1\?/u });
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Which planet is number 26\?/u }));
+    fireEvent.click(document.querySelector(".page-header__overflow-trigger") as HTMLButtonElement);
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    const confirmation = await screen.findByRole("dialog", { name: "Delete this question?" });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Delete" }));
+
+    expect(await screen.findByText("The question pool could not be loaded.")).toBeInTheDocument();
+    expect(screen.getByText("Page 2 of 1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+
+    await waitFor(() => expect(screen.getByText("Page 1 of 1")).toBeInTheDocument());
+    expect(await screen.findByRole("button", { name: /Which planet is number 1\?/u })).toHaveAttribute("aria-current", "true");
+    expect(api.getQuestions()).toHaveLength(25);
   });
 
   it("keeps delete intent through saving a question draft [protects=edit existing question to Delete to Save opens confirmation for the saved revision and confirming deletes it; fails_when=the revision-keyed editor remount drops the pending delete or DELETE uses a stale revision; no_claim=the component uses an in-memory HTTP stub and does not verify production authentication or D1 isolation]", async () => {

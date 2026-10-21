@@ -37,6 +37,16 @@ export const mapBlitzQuestionRow = (row: BlitzQuestionRow): BlitzQuestion => {
 
 export const blitzQuestionColumns = `question_id, revision, kind, prompt, answers_json, enabled, last_used_at, created_at, updated_at`;
 
+const normalizeBlitzQuestionSearchText = (value: string): string => value
+  .toLocaleLowerCase("de")
+  .replaceAll("\u00e4", "ae")
+  .replaceAll("\u00f6", "oe")
+  .replaceAll("\u00fc", "ue")
+  .replaceAll("\u00df", "ss");
+
+export const blitzQuestionSearchText = (prompt: string, answers: readonly string[]): string =>
+  normalizeBlitzQuestionSearchText([prompt, ...answers].join(" "));
+
 const validate = (input: BlitzQuestionInput): BlitzQuestionInput => {
   const checked = validateBlitzQuestion(input);
   if (!checked.ok) throw new Error(checked.code);
@@ -46,15 +56,15 @@ const validate = (input: BlitzQuestionInput): BlitzQuestionInput => {
 export const createBlitzQuestionRepository = (db: D1Database): BlitzQuestionRepository => ({
   async list(channelId, page, search = "") {
     const boundedPage = Math.max(1, Math.trunc(page));
-    const term = search.trim().slice(0, 120);
-    const blitzSearchFilter = term.length === 0 ? "" : " AND (prompt LIKE ? ESCAPE '\\' OR answers_json LIKE ? ESCAPE '\\')";
+    const term = normalizeBlitzQuestionSearchText(search.trim().slice(0, 120));
+    const blitzSearchFilter = term.length === 0 ? "" : " AND search_text LIKE ? ESCAPE '\\'";
     const pattern = `%${term.replace(/[\\%_]/gu, "\\$&")}%`;
     const count = await db.prepare(`SELECT COUNT(*) AS total FROM blitz_questions WHERE channel_id = ?${blitzSearchFilter}`)
-      .bind(channelId, ...(term.length === 0 ? [] : [pattern, pattern])).first<{ total: number }>();
+      .bind(channelId, ...(term.length === 0 ? [] : [pattern])).first<{ total: number }>();
     const rows = await db.prepare(
       `SELECT ${blitzQuestionColumns} FROM blitz_questions WHERE channel_id = ?${blitzSearchFilter}
         ORDER BY updated_at DESC, question_id LIMIT ? OFFSET ?`,
-    ).bind(channelId, ...(term.length === 0 ? [] : [pattern, pattern]), BLITZ_QUESTION_PAGE_SIZE,
+    ).bind(channelId, ...(term.length === 0 ? [] : [pattern]), BLITZ_QUESTION_PAGE_SIZE,
       (boundedPage - 1) * BLITZ_QUESTION_PAGE_SIZE).all<BlitzQuestionRow>();
     return { questions: rows.results.map(mapBlitzQuestionRow), total: count?.total ?? 0, page: boundedPage };
   },
@@ -68,10 +78,10 @@ export const createBlitzQuestionRepository = (db: D1Database): BlitzQuestionRepo
     const input = validate(value);
     const id = crypto.randomUUID();
     const result = await db.prepare(
-      `INSERT INTO blitz_questions (channel_id, question_id, kind, prompt, answers_json, enabled, last_used_at, created_at, updated_at)
-       SELECT ?, ?, ?, ?, ?, ?, NULL, ?, ?
+      `INSERT INTO blitz_questions (channel_id, question_id, kind, prompt, answers_json, search_text, enabled, last_used_at, created_at, updated_at)
+       SELECT ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?
         WHERE (SELECT COUNT(*) FROM blitz_questions WHERE channel_id = ?) < ?`,
-    ).bind(channelId, id, input.kind, input.prompt, JSON.stringify(input.answers), input.enabled ? 1 : 0,
+    ).bind(channelId, id, input.kind, input.prompt, JSON.stringify(input.answers), blitzQuestionSearchText(input.prompt, input.answers), input.enabled ? 1 : 0,
       now, now, channelId, BLITZ_QUESTION_MAXIMUM_COUNT).run();
     if (result.meta.changes === 0) throw new Error("question_limit_reached");
     const created = await this.get(channelId, id);
@@ -81,9 +91,10 @@ export const createBlitzQuestionRepository = (db: D1Database): BlitzQuestionRepo
   async update(channelId, questionId, revision, value, now) {
     const input = validate(value);
     const result = await db.prepare(
-      `UPDATE blitz_questions SET kind = ?, prompt = ?, answers_json = ?, enabled = ?, revision = revision + 1, updated_at = ?
+      `UPDATE blitz_questions SET kind = ?, prompt = ?, answers_json = ?, search_text = ?, enabled = ?, revision = revision + 1, updated_at = ?
         WHERE channel_id = ? AND question_id = ? AND revision = ?`,
-    ).bind(input.kind, input.prompt, JSON.stringify(input.answers), input.enabled ? 1 : 0, now, channelId, questionId, revision).run();
+    ).bind(input.kind, input.prompt, JSON.stringify(input.answers), blitzQuestionSearchText(input.prompt, input.answers), input.enabled ? 1 : 0,
+      now, channelId, questionId, revision).run();
     return result.meta.changes === 0 ? null : this.get(channelId, questionId);
   },
   async delete(channelId, questionId, revision) {
@@ -108,13 +119,15 @@ export const createBlitzQuestionRepository = (db: D1Database): BlitzQuestionRepo
       .bind(now, channelId, questionId, now).run();
   },
   async seed(channelId, words, now) {
+    const seedRows = words.map((word) => ({ word, searchText: blitzQuestionSearchText(word, [word]) }));
     const result = await db.prepare(
       `INSERT INTO blitz_questions
-        (channel_id, question_id, kind, prompt, answers_json, enabled, last_used_at, created_at, updated_at)
-       SELECT ?, 'seed-' || lower(value), 'scramble', value, json_array(value), 1, NULL, ?, ?
+        (channel_id, question_id, kind, prompt, answers_json, search_text, enabled, last_used_at, created_at, updated_at)
+       SELECT ?, 'seed-' || lower(json_extract(value, '$.word')), 'scramble', json_extract(value, '$.word'),
+         json_array(json_extract(value, '$.word')), json_extract(value, '$.searchText'), 1, NULL, ?, ?
          FROM json_each(?)
         WHERE NOT EXISTS (SELECT 1 FROM blitz_questions WHERE channel_id = ?) RETURNING question_id`,
-    ).bind(channelId, now, now, JSON.stringify(words), channelId).all<{ question_id: string }>();
+    ).bind(channelId, now, now, JSON.stringify(seedRows), channelId).all<{ question_id: string }>();
     return result.results.length;
   },
 });

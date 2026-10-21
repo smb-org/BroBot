@@ -27,6 +27,13 @@ interface Draft {
   enabled: boolean;
 }
 
+interface PostDeleteRefresh {
+  deletingId: string;
+  page: number;
+  search: string;
+  interactionVersion: number;
+}
+
 const blankDraft = (): Draft => ({ kind: "scramble", prompt: "", answers: [], enabled: true });
 const fromQuestion = (question: BlitzQuestion | null): Draft => question === null
   ? blankDraft()
@@ -57,12 +64,15 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   const [deleteError, setDeleteError] = useState<string | undefined>();
   const [deleteFailure, setDeleteFailure] = useState<"conflict" | "deleted" | null>(null);
   const [questionListRefreshError, setQuestionListRefreshError] = useState(false);
+  const navigationEditVersion = useRef(0);
+  const pendingDeleteRefresh = useRef<PostDeleteRefresh | null>(null);
   const switchRef = useRef<((proceed: () => void) => void) | null>(null);
   const questionsQuery = useModuleQuery(channelId, "blitz_round", `questions:${String(page)}:${search}`, (signal) => loadBlitzQuestions(channelId, page, search, signal));
   const settingsQuery = useModuleQuery(channelId, "blitz_round", "settings", (signal) => loadBlitzSettings(channelId, signal));
   const data = questionsQuery.data;
   const questions = data?.questions ?? [];
   const maxPage = Math.max(1, Math.ceil((data?.total ?? 0) / BLITZ_QUESTION_PAGE_SIZE));
+  const markNavigationOrEdit = (): void => { navigationEditVersion.current += 1; };
 
   if (selectedId === null && data !== undefined) {
     const first = data.questions[0] ?? null;
@@ -76,6 +86,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   };
 
   const chooseQuestion = (question: BlitzQuestion): void => {
+    markNavigationOrEdit();
     if (selectedId === question.id && !showSettings) {
       setDetailOpen(true);
       return;
@@ -89,20 +100,26 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
     });
   };
 
-  const newQuestion = (): void => requestSwitch(() => {
-    setSearch("");
-    setPage(1);
-    setQuestionListRefreshError(false);
-    setShowSettings(false);
-    setDeleteFailure(null);
-    setSelectedId(NEW_QUESTION);
-    setNewQuestionSession((session) => session + 1);
-    setSelectedQuestion(null);
-    setDetailOpen(true);
-  });
+  const newQuestion = (): void => {
+    markNavigationOrEdit();
+    requestSwitch(() => {
+      setSearch("");
+      setPage(1);
+      setQuestionListRefreshError(false);
+      setShowSettings(false);
+      setDeleteFailure(null);
+      setSelectedId(NEW_QUESTION);
+      setNewQuestionSession((session) => session + 1);
+      setSelectedQuestion(null);
+      setDetailOpen(true);
+    });
+  };
 
-  const openSettings = (): void => { setShowSettings(true); setDetailOpen(true); };
-  const closeSettings = (): void => requestSwitch(() => { setShowSettings(false); setDetailOpen(true); });
+  const openSettings = (): void => { markNavigationOrEdit(); setShowSettings(true); setDetailOpen(true); };
+  const closeSettings = (): void => {
+    markNavigationOrEdit();
+    requestSwitch(() => { setShowSettings(false); setDetailOpen(true); });
+  };
 
   const saveQuestion = useCallback(async (draft: Draft, revision?: number, saveAsNew = false): Promise<BlitzQuestion | null> => {
     const input = questionInput(draft);
@@ -132,6 +149,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   };
 
   const discardDeletedQuestion = (): void => {
+    markNavigationOrEdit();
     setDeleteFailure(null);
     setSelectedId(NEW_QUESTION);
     setNewQuestionSession((session) => session + 1);
@@ -141,6 +159,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   };
 
   const selectSavedQuestion = (saved: BlitzQuestion): void => {
+    markNavigationOrEdit();
     setDeleteFailure(null);
     setSelectedId(saved.id);
     setSelectedQuestion(saved);
@@ -164,8 +183,42 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
       ? selectedQuestion
       : questions.find((question) => question.id === deleteIntent.questionId) ?? null;
 
+  const refreshAfterDelete = async (refresh: PostDeleteRefresh): Promise<void> => {
+    try {
+      const refreshed = await loadBlitzQuestions(channelId, refresh.page, refresh.search);
+      queryClient.setQueryData(
+        moduleQueryKey(channelId, "blitz_round", `questions:${String(refresh.page)}:${refresh.search}`),
+        refreshed,
+      );
+      const nextPage = Math.min(refresh.page, Math.max(1, Math.ceil(refreshed.total / BLITZ_QUESTION_PAGE_SIZE)));
+      const nextPageData = nextPage === refresh.page
+        ? refreshed
+        : await loadBlitzQuestions(channelId, nextPage, refresh.search);
+      if (nextPage !== refresh.page) {
+        queryClient.setQueryData(moduleQueryKey(channelId, "blitz_round", `questions:${String(nextPage)}:${refresh.search}`), nextPageData);
+      }
+      if (navigationEditVersion.current === refresh.interactionVersion) {
+        if (nextPage !== refresh.page) setPage(nextPage);
+        const next = nextPageData.questions.find((question) => question.id !== refresh.deletingId) ?? null;
+        setSelectedId(next?.id ?? NEW_QUESTION);
+        setSelectedQuestion(next);
+        setShowSettings(false);
+      }
+      setQuestionListRefreshError(false);
+      if (pendingDeleteRefresh.current === refresh) pendingDeleteRefresh.current = null;
+    } catch {
+      setQuestionListRefreshError(true);
+    }
+  };
+
   const confirmDelete = async (): Promise<void> => {
     if (deleteIntent === null || deleteQuestion === null) return;
+    const refresh: PostDeleteRefresh = {
+      deletingId: deleteIntent.questionId,
+      page,
+      search,
+      interactionVersion: navigationEditVersion.current,
+    };
     setDeletePending(true);
     setDeleteError(undefined);
     try {
@@ -180,7 +233,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
         return;
       }
 
-      const deletingId = deleteIntent.questionId;
+      const deletingId = refresh.deletingId;
       const questionListsFilter = {
         predicate: (query: { queryKey: readonly unknown[] }) => query.queryKey[0] === "channel" &&
           query.queryKey[1] === channelId && query.queryKey[2] === "module" && query.queryKey[3] === "blitz_round" &&
@@ -196,53 +249,40 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
       await queryClient.invalidateQueries({ ...questionListsFilter, refetchType: "none" });
 
       const currentList = queryClient.getQueryData<BlitzQuestionPage>(
-        moduleQueryKey(channelId, "blitz_round", `questions:${String(page)}:${search}`),
+        moduleQueryKey(channelId, "blitz_round", `questions:${String(refresh.page)}:${refresh.search}`),
       );
       const currentSelection = currentList?.questions.find((question) => question.id !== deletingId) ?? null;
-      setSelectedId(currentSelection?.id ?? NEW_QUESTION);
-      setSelectedQuestion(currentSelection);
-      setShowSettings(false);
-      setDeleteIntent((intent) => intent?.questionId === deletingId ? null : intent);
-
-      try {
-        const refreshed = await questionsQuery.refetch();
-        if (refreshed.isError || refreshed.data === undefined) {
-          setQuestionListRefreshError(true);
-          return;
-        }
-        const nextPage = Math.min(page, Math.max(1, Math.ceil(refreshed.data.total / BLITZ_QUESTION_PAGE_SIZE)));
-        const nextPageData = nextPage === page
-          ? refreshed.data
-          : await loadBlitzQuestions(channelId, nextPage, search);
-        if (nextPage !== page) {
-          queryClient.setQueryData(moduleQueryKey(channelId, "blitz_round", `questions:${String(nextPage)}:${search}`), nextPageData);
-          setPage(nextPage);
-        }
-        const next = nextPageData.questions.find((question) => question.id !== deletingId) ?? null;
-        setSelectedId(next?.id ?? NEW_QUESTION);
-        setSelectedQuestion(next);
-        setQuestionListRefreshError(false);
-      } catch {
-        setQuestionListRefreshError(true);
+      if (navigationEditVersion.current === refresh.interactionVersion) {
+        setSelectedId(currentSelection?.id ?? NEW_QUESTION);
+        setSelectedQuestion(currentSelection);
+        setShowSettings(false);
       }
+      setDeleteIntent((intent) => intent?.questionId === deletingId ? null : intent);
+      pendingDeleteRefresh.current = refresh;
+      await refreshAfterDelete(refresh);
     } finally {
       setDeletePending(false);
     }
   };
 
   const retryQuestionList = (): void => {
+    const refresh = pendingDeleteRefresh.current;
+    if (refresh !== null) {
+      void refreshAfterDelete(refresh);
+      return;
+    }
     void questionsQuery.refetch().then((result) => { setQuestionListRefreshError(result.isError); });
   };
 
   const toolbar = <div className="blitz-panel__toolbar">
     <div className="blitz-panel__toolbar-top">
-      <Field variant="search" label={labels.search} clearLabel={labels.clearSearch} value={search} onChange={(value) => { setSearch(value); setPage(1); setQuestionListRefreshError(false); }} placeholder={labels.searchPlaceholder} />
+      <Field variant="search" label={labels.search} clearLabel={labels.clearSearch} value={search} onChange={(value) => { markNavigationOrEdit(); setSearch(value); setPage(1); setQuestionListRefreshError(false); }} placeholder={labels.searchPlaceholder} />
       <Button variant="primary" icon="add" disabled={!canManage} onClick={newQuestion}>{labels.addQuestion}</Button>
     </div>
     <div className="blitz-panel__pagination" aria-label={labels.questions}>
-      <Button size="compact" icon="collapse" iconOnly ariaLabel={labels.previousPage} disabled={page <= 1} onClick={() => { setPage((current) => Math.max(1, current - 1)); setQuestionListRefreshError(false); }} />
+      <Button size="compact" icon="collapse" iconOnly ariaLabel={labels.previousPage} disabled={page <= 1} onClick={() => { markNavigationOrEdit(); setPage((current) => Math.max(1, current - 1)); setQuestionListRefreshError(false); }} />
       <span>{labels.pageCount(page, maxPage)}</span>
-      <Button size="compact" disabled={page >= maxPage} onClick={() => { setPage((current) => Math.min(maxPage, current + 1)); setQuestionListRefreshError(false); }}>{labels.nextPage}</Button>
+      <Button size="compact" disabled={page >= maxPage} onClick={() => { markNavigationOrEdit(); setPage((current) => Math.min(maxPage, current + 1)); setQuestionListRefreshError(false); }}>{labels.nextPage}</Button>
       <span className="blitz-panel__count">{labels.questionCount(data?.total ?? 0)}</span>
     </div>
   </div>;
@@ -296,6 +336,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
         onDiscardDeleted={discardDeletedQuestion}
         onOpenSettings={openSettings}
         registerSwitch={(switcher) => { switchRef.current = switcher; }}
+        onEdit={markNavigationOrEdit}
       />;
 
   return <div className="blitz-panel">
@@ -308,7 +349,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
       detail={detail}
       detailOpen={detailOpen}
       backLabel={labels.back}
-      onCloseDetail={() => { requestSwitch(() => { setDetailOpen(false); }); }}
+      onCloseDetail={() => { markNavigationOrEdit(); requestSwitch(() => { setDetailOpen(false); }); }}
     />
     <ConfirmDialog
       opened={deleteIntent?.opened === true && deleteQuestion !== null}
@@ -325,7 +366,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   </div>;
 }
 
-function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved, deleteFailure, onRequestDelete, onOpenDelete, onCancelDelete, onReload, onDiscardDeleted, onOpenSettings, registerSwitch }: {
+function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved, deleteFailure, onRequestDelete, onOpenDelete, onCancelDelete, onReload, onDiscardDeleted, onOpenSettings, registerSwitch, onEdit }: {
   question: BlitzQuestion | null;
   isNew: boolean;
   language: "de" | "en";
@@ -340,6 +381,7 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
   onDiscardDeleted: () => void;
   onOpenSettings: () => void;
   registerSwitch: (switcher: ((proceed: () => void) => void) | null) => void;
+  onEdit: () => void;
 }): ReactElement {
   const labels = blitzTexts(language);
   const draft = useDraft(fromQuestion(question));
@@ -486,13 +528,13 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
         value={draft.value.kind}
         options={typeOptions}
         disabled={!canManage || saving}
-        onChange={(kind) => { draft.setValue((current) => ({ ...current, kind, answers: kind === "scramble" ? [] : current.answers })); setPendingAnswer(""); setAttempted(false); }}
+        onChange={(kind) => { onEdit(); draft.setValue((current) => ({ ...current, kind, answers: kind === "scramble" ? [] : current.answers })); setPendingAnswer(""); setAttempted(false); }}
         reserveError
       />
       <Field
         label={draft.value.kind === "scramble" ? labels.word : labels.prompt}
         value={draft.value.prompt}
-        onChange={(prompt) => { draft.setValue((current) => ({ ...current, prompt })); setAttempted(false); }}
+        onChange={(prompt) => { onEdit(); draft.setValue((current) => ({ ...current, prompt })); setAttempted(false); }}
         disabled={!canManage || saving}
         maxLength={draft.value.kind === "scramble" ? 16 : 120}
         countLabel={(count, maximum) => `${String(count)} / ${String(maximum)}`}
@@ -503,8 +545,8 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
         listLabel={labels.acceptedAnswers}
         values={draft.value.answers}
         pending={pendingAnswer}
-        onPendingChange={setPendingAnswer}
-        onChange={(answers) => { if (draft.value.kind === "quiz") draft.setValue((current) => ({ ...current, answers })); }}
+        onPendingChange={(answer) => { onEdit(); setPendingAnswer(answer); }}
+        onChange={(answers) => { if (draft.value.kind === "quiz") { onEdit(); draft.setValue((current) => ({ ...current, answers })); } }}
         placeholder={labels.answerPlaceholder}
         disabled={!canManage || saving}
         max={10}
@@ -523,7 +565,7 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
       <SwitchSection
         title={labels.enabled}
         checked={draft.value.enabled}
-        onChange={(enabled) => { draft.setValue((current) => ({ ...current, enabled })); }}
+        onChange={(enabled) => { onEdit(); draft.setValue((current) => ({ ...current, enabled })); }}
         hint={labels.enabledHint}
         disabled={!canManage || saving}
       />

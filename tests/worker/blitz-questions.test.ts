@@ -82,12 +82,24 @@ describe("blitz question D1 repository", () => {
     expect(await repository.delete(channelId, created.id, 2)).toBe(true);
   });
 
+  it("finds a German scramble with either umlaut case [protects=saving KÄSE makes both käse and KÄSE searches return the question; fails_when=SQLite case folding misses the lowercase umlaut query; no_claim=does not exercise dashboard search rendering]", async () => {
+    const channelId = `blitz-search-umlaut-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const repository = createBlitzQuestionRepository(db);
+    await repository.create(channelId, {
+      kind: "scramble", prompt: "KÄSE", answers: ["KÄSE"], enabled: true,
+    }, new Date().toISOString());
+
+    expect((await repository.list(channelId, 1, "käse")).questions).toHaveLength(1);
+    expect((await repository.list(channelId, 1, "KÄSE")).questions).toHaveLength(1);
+  });
+
   it("enforces the pool cap when concurrent creates compete for the last slot [protects=the D1 insert guard limits each channel to 500 questions atomically; fails_when=both last-slot creates succeed or neither does; no_claim=does not stress distributed D1 write latency]", async () => {
     const channelId = `blitz-limit-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     await db.prepare(`WITH RECURSIVE numbers(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM numbers WHERE value < 499)
-      INSERT INTO blitz_questions (channel_id, question_id, kind, prompt, answers_json, enabled, created_at, updated_at)
-      SELECT ?, 'fictional-' || value, 'quiz', 'Which star?', '["Sun"]', 1, ?, ? FROM numbers`)
+      INSERT INTO blitz_questions (channel_id, question_id, kind, prompt, answers_json, search_text, enabled, created_at, updated_at)
+      SELECT ?, 'fictional-' || value, 'quiz', 'Which star?', '["Sun"]', 'which star? sun', 1, ?, ? FROM numbers`)
       .bind(channelId, "2100-01-01T00:00:00.000Z", "2100-01-01T00:00:00.000Z").run();
     const repository = createBlitzQuestionRepository(db);
     const input = { kind: "quiz" as const, prompt: "Which star?", answers: ["Sun"], enabled: true };
