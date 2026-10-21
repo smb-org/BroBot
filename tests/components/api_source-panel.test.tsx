@@ -144,13 +144,17 @@ describe("API source panel query lifecycle", () => {
       const method = init?.method ?? "GET";
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
       if (url.pathname.endsWith("/sources") && method === "GET") return Promise.resolve(jsonResponse({ sources: [] }));
-      if (url.pathname.endsWith("/sources/test") && method === "POST") return Promise.resolve(jsonResponse({
-        status: "ok",
-        httpStatus: 200,
-        bytes: 15,
-        json: Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`field${String(index)}`, `value ${String(index)}`])),
-        value: "21",
-      }));
+      if (url.pathname.endsWith("/sources/test") && method === "POST") {
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) as { expression?: unknown } : {};
+        const value = body.expression === "$.temperature" ? "21" : "sunny";
+        return Promise.resolve(jsonResponse({
+          status: "ok",
+          httpStatus: 200,
+          bytes: 15,
+          json: { temperature: 21, weather: { status: "sunny" } },
+          value,
+        }));
+      }
       return Promise.resolve(jsonResponse({}, 404));
     });
     renderPanel(fetcher);
@@ -161,18 +165,79 @@ describe("API source panel query lifecycle", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Value from the response" }), {
-      target: { value: "$.temperature" },
+      target: { value: "$.weather.status" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     const resultArea = screen.getByTestId("api-source-test-result");
     expect(resultArea).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Test" }));
 
-    expect(await screen.findByText(/21/u)).toBeInTheDocument();
+    expect(await screen.findByRole("treeitem", { name: /status.*String.*sunny/u })).toBeInTheDocument();
+    const temperature = screen.getByRole("treeitem", { name: /temperature/u });
+    const temperatureRow = temperature.querySelector(".api-source-json-tree__item");
+    if (!(temperatureRow instanceof HTMLElement)) throw new Error("Temperature tree row is missing.");
+    fireEvent.click(temperatureRow);
+    expect(screen.getByRole("textbox", { name: "Value from the response" })).toHaveValue("$.temperature");
+    expect(screen.getByRole("treeitem", { name: /status.*String.*sunny/u })).toBeInTheDocument();
+    expect(resultArea.querySelector(".api-source-panel__test-result-value")).toHaveTextContent(/Resulting value\s*sunny\s*Needs re-test/u);
+    expect(screen.getByText("sunny", { selector: ".api-source-panel__test-result-value code" }))
+      .toHaveClass("api-source-panel__test-result-value-stale");
+
+    const expression = screen.getByRole("textbox", { name: "Value from the response" });
+    fireEvent.change(expression, { target: { value: "$.manual" } });
+    expect(screen.getByRole("treeitem", { name: /temperature.*Number.*21/u })).toBeInTheDocument();
+    expect(resultArea.querySelector(".api-source-panel__test-result-value")).toHaveTextContent(/Resulting value\s*sunny\s*Needs re-test/u);
+
+    const keyboardLeaf = screen.getByRole("treeitem", { name: /temperature.*Number.*21/u });
+    keyboardLeaf.focus();
+    fireEvent.keyDown(keyboardLeaf, { key: "Enter" });
+    expect(keyboardLeaf).toHaveFocus();
+    expect(screen.getByRole("textbox", { name: "Value from the response" })).toHaveValue("$.temperature");
+
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+    expect(await screen.findByText("21", { selector: ".api-source-panel__test-result-value code" })).toBeInTheDocument();
     expect(fetcher).toHaveBeenCalledWith("/api/channels/kanal-a/modules/api_source/sources/test", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ url: "https://api.example.test/weather", expression: "$.weather.status" }),
+    }));
+    expect(fetcher).toHaveBeenLastCalledWith("/api/channels/kanal-a/modules/api_source/sources/test", expect.objectContaining({
       method: "POST",
       body: JSON.stringify({ url: "https://api.example.test/weather", expression: "$.temperature" }),
     }));
+  });
+
+  it("drops the tested response when the web address changes after going back", async () => {
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      const method = init?.method ?? "GET";
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+      if (url.pathname.endsWith("/sources") && method === "GET") return Promise.resolve(jsonResponse({ sources: [] }));
+      if (url.pathname.endsWith("/sources/test") && method === "POST") {
+        return Promise.resolve(jsonResponse({ status: "ok", httpStatus: 200, bytes: 15, json: { fromA: 1 }, value: "1" }));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    renderPanel(fetcher);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Create source" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Web address" }), {
+      target: { value: "https://a.example.test/data" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Value from the response" }), { target: { value: "$.fromA" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+    expect(await screen.findByRole("treeitem", { name: /fromA/u })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Web address" }), { target: { value: "https://b.example.test/data" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(screen.queryByRole("treeitem", { name: /fromA/u })).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
   });
 
   it("requires a test attempt before naming a source and shows the typed test failure", async () => {
@@ -204,6 +269,8 @@ describe("API source panel query lifecycle", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Test" }));
 
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("The endpoint did not respond in time.");
+    expect(within(dialog).getByRole("tree", { name: "Sample response as a JSON tree" })).toBeInTheDocument();
+    expect(within(dialog).getByText("Run a test to inspect the response.")).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Continue" })).toBeEnabled();
     fireEvent.click(within(dialog).getByRole("button", { name: "Continue" }));
     expect(within(dialog).getByRole("textbox", { name: "Name" })).toBeInTheDocument();
@@ -292,7 +359,7 @@ describe("API source panel query lifecycle", () => {
     expect(within(dialog).getByText("Step 3 of 4")).toBeInTheDocument();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Test" }));
-    expect(await within(dialog).findByRole("status")).toHaveTextContent("Success · HTTP 200");
+    await waitFor(() => { expect(within(dialog).getByRole("status")).toHaveTextContent("Success · HTTP 200"); });
     fireEvent.submit(form as HTMLFormElement);
     expect(within(dialog).getByText("Step 4 of 4")).toBeInTheDocument();
 

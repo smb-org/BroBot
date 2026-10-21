@@ -56,7 +56,7 @@ const propertySets: Readonly<Record<string, readonly string[]>> = {
   number: ["type", "value", "position"],
   path: ["type", "steps", "group"],
   string: ["type", "value", "position"],
-  variable: ["type", "value", "position"],
+  variable: ["type", "value", "position", "predicate"],
   value: ["type", "value", "position"],
 };
 
@@ -140,6 +140,11 @@ const inspectAst = (root: unknown): string | null => {
       else reject(`${type} property ${property ?? "<unknown>"}`);
     }
 
+    if (type === "variable" && Object.hasOwn(value, "predicate") &&
+        !(value.value === "" && (role === "expression" || role === "path_step") && Array.isArray(value.predicate))) {
+      reject(`${functionNameOf(value)} predicate`);
+    }
+
     switch (type) {
       case "binary":
         if (role !== "expression" || !positionIsValid(value) || !binaryOperators.has(String(value.value))) {
@@ -160,7 +165,8 @@ const inspectAst = (root: unknown): string | null => {
           reject("function call syntax");
         }
         if (typeof functionValue !== "string" || !allowedFunctions.has(functionValue)) reject(functionName);
-        if (isAstNode(procedure) && (procedure.type !== "variable" || !ownKeysAreAllowed(procedure, propertySets.variable ?? []))) {
+        if (isAstNode(procedure) && (procedure.type !== "variable" || Object.hasOwn(procedure, "predicate") ||
+            !ownKeysAreAllowed(procedure, propertySets.variable ?? []))) {
           reject(procedure.type === "variable" ? `${functionName} predicate` : `${functionName} function reference`);
         }
         if (!Array.isArray(value.arguments)) reject(`${functionName} arguments`);
@@ -199,7 +205,8 @@ const inspectAst = (root: unknown): string | null => {
         break;
       }
       case "name":
-        if (role !== "path_step" || typeof value.value !== "string" || value.value.length === 0 || !positionIsValid(value)) {
+        // JSONata uses a quoted empty name to address an object's empty-string key.
+        if (role !== "path_step" || typeof value.value !== "string" || !positionIsValid(value)) {
           reject("path field name");
         }
         if (value.stages !== undefined && !Array.isArray(value.stages)) reject("path stages");
@@ -246,6 +253,7 @@ const inspectAst = (root: unknown): string | null => {
       let childRole: AstRole = "expression";
       if (type === "path" && key === "steps") childRole = "path_step";
       else if (type === "name" && key === "stages") childRole = "path_stage";
+      else if (type === "variable" && key === "predicate") childRole = "path_stage";
       else if (type === "filter" && key === "expr") childRole = "array_index";
       else if (type === "function" && key === "procedure") childRole = "function_procedure";
       walkValue(child, depth + 1, childRole);
@@ -298,6 +306,42 @@ export const inspectApiSourceExpression = (expression: string): ApiSourceExpress
 };
 
 export const validateJsonataExpression = (expression: string): boolean => inspectApiSourceExpression(expression) === null;
+
+export type ApiSourceJsonPathResult =
+  | { expression: string; reason: null }
+  | { expression: null; reason: "too_long" | "unsupported" };
+
+const isIdentifierSafePathKey = (key: string): boolean => /^[A-Za-z_][A-Za-z0-9_]*$/u.test(key);
+const jsonataPathLiterals = new Set(["true", "false", "null"]);
+
+export const createApiSourceJsonPath = (segments: readonly (string | number)[]): ApiSourceJsonPathResult => {
+  let expression = "$";
+  let fieldCount = 0;
+  let indexCount = 0;
+  for (const segment of segments) {
+    if (typeof segment === "number") {
+      if (!Number.isSafeInteger(segment) || segment < 0) {
+        return { expression: null, reason: "unsupported" };
+      }
+      expression += `[${String(segment)}]`;
+      indexCount += 1;
+      continue;
+    }
+    expression += isIdentifierSafePathKey(segment) && !jsonataPathLiterals.has(segment)
+      ? `.${segment}`
+      : `.${JSON.stringify(segment)}`;
+    fieldCount += 1;
+  }
+
+  if (expression.length > API_SOURCE_MAXIMUMS.expressionLength) return { expression: null, reason: "too_long" };
+  // JSONata paths contain a root variable, one optional path node, one node per
+  // field, and a filter plus integer node for each array index.
+  const pathNodeCount = segments.some((segment) => typeof segment === "string") ? 2 : 1;
+  if (segments.length > 0 && pathNodeCount + fieldCount + indexCount * 2 > JSONATA_LIMITS.maximumAstNodes) {
+    return { expression: null, reason: "unsupported" };
+  }
+  return { expression, reason: null };
+};
 
 const cappedAppend = (current: string, next: string): string => {
   const remaining = API_SOURCE_MAXIMUMS.outputLength - current.length;

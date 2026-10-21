@@ -41,7 +41,7 @@ const installSourceRoute = async (page: Page, role: "manager" | "operator" = "ma
     if (pathname.endsWith("/sources/test") && route.request().method() === "POST") {
       return route.fulfill(json(testResult === "timeout"
         ? { status: "error", reason: "timeout", httpStatus: 504 }
-        : { status: "ok", httpStatus: 200, bytes: 1400, json: { temperature: 21, payload: "x".repeat(1400) }, value: "21" }));
+        : { status: "ok", httpStatus: 200, bytes: 1400, json: { temperature: 21, payload: "x".repeat(1400), ...Object.fromEntries(Array.from({ length: 12 }, (_, index) => [`field${String(index)}`, index])) }, value: "21" }));
     }
     if (route.request().method() === "GET") return route.fulfill(json({ sources }));
     return route.fallback();
@@ -441,14 +441,19 @@ test("source wizard guards dirty drafts and keeps narrow summaries inside the di
   await expect(output).toContainText("Erfolgreich · HTTP 200");
   const outputStyle = await output.evaluate((element) => {
     const style = getComputedStyle(element);
-    return { borderStyle: style.borderStyle, backgroundColor: style.backgroundColor, overflowY: style.overflowY, height: element.clientHeight, scrollHeight: element.scrollHeight };
+    return { borderStyle: style.borderStyle, backgroundColor: style.backgroundColor };
   });
   expect(outputStyle.borderStyle).toBe("solid");
   expect(outputStyle.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
-  expect(outputStyle.overflowY).toBe("auto");
-  expect(outputStyle.scrollHeight).toBeGreaterThan(outputStyle.height);
+  const treeStyle = await output.getByTestId("api-source-json-tree").evaluate((element) => ({
+    overflowY: getComputedStyle(element).overflowY,
+    height: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }));
+  expect(treeStyle.overflowY).toBe("auto");
+  expect(treeStyle.scrollHeight).toBeGreaterThan(treeStyle.height);
   expect(dialogBox).not.toBeNull();
-  if (dialogBox !== null) expect(dialogBox.height).toBeLessThan(650);
+  if (dialogBox !== null) expect(dialogBox.height).toBeLessThanOrEqual(844 - 32);
 
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog", { name: "Ungespeicherte Änderungen" })).toBeVisible();
@@ -479,7 +484,7 @@ test("source wizard displays typed test failures inside its bounded result panel
   expect(dialogBox).not.toBeNull();
   if (resultBox !== null && dialogBox !== null) {
     expect(resultBox.width).toBeLessThanOrEqual(dialogBox.width);
-    expect(resultBox.height).toBeLessThan(220);
+    expect(resultBox.height).toBeLessThanOrEqual(320);
   }
 });
 

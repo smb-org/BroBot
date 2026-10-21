@@ -22,6 +22,7 @@ interface ExpressionFieldProps {
   language: ModuleLanguage;
   messages: ExpressionFieldMessages;
   disabled?: boolean;
+  rows?: number;
 }
 
 interface PendingSelection {
@@ -31,7 +32,7 @@ interface PendingSelection {
 
 const isLegacyCompositionKey = (event: object): boolean => Reflect.get(event, "keyCode") === 229;
 
-export function ExpressionField({ id, label, value, onChange, maxLength, language, messages, disabled = false }: ExpressionFieldProps): ReactElement {
+export function ExpressionField({ id, label, value, onChange, maxLength, language, messages, disabled = false, rows = 14 }: ExpressionFieldProps): ReactElement {
   const generatedId = useId();
   const fieldId = id || `expression-${generatedId}`;
   const listboxId = `${fieldId}-functions`;
@@ -146,7 +147,7 @@ export function ExpressionField({ id, label, value, onChange, maxLength, languag
               aria-controls={pickerOpen ? listboxId : undefined}
               aria-activedescendant={pickerOpen ? activeOptionId : undefined}
               className="ui-expression-field__input mono"
-              rows={14}
+              rows={rows}
               maxLength={maxLength}
               spellCheck={false}
               value={value}
