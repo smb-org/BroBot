@@ -199,7 +199,8 @@ const inspectAst = (root: unknown): string | null => {
         break;
       }
       case "name":
-        if (role !== "path_step" || typeof value.value !== "string" || value.value.length === 0 || !positionIsValid(value)) {
+        // JSONata uses a quoted empty name to address an object's empty-string key.
+        if (role !== "path_step" || typeof value.value !== "string" || !positionIsValid(value)) {
           reject("path field name");
         }
         if (value.stages !== undefined && !Array.isArray(value.stages)) reject("path stages");
@@ -298,6 +299,42 @@ export const inspectApiSourceExpression = (expression: string): ApiSourceExpress
 };
 
 export const validateJsonataExpression = (expression: string): boolean => inspectApiSourceExpression(expression) === null;
+
+export type ApiSourceJsonPathResult =
+  | { expression: string; reason: null }
+  | { expression: null; reason: "too_long" | "unsupported" };
+
+const isIdentifierSafePathKey = (key: string): boolean => /^[A-Za-z_][A-Za-z0-9_]*$/u.test(key);
+const jsonataPathLiterals = new Set(["true", "false", "null"]);
+
+export const createApiSourceJsonPath = (segments: readonly (string | number)[]): ApiSourceJsonPathResult => {
+  let expression = "$";
+  let fieldCount = 0;
+  let indexCount = 0;
+  for (const [position, segment] of segments.entries()) {
+    if (typeof segment === "number") {
+      if (!Number.isSafeInteger(segment) || segment < 0 || position === 0) {
+        return { expression: null, reason: "unsupported" };
+      }
+      expression += `[${String(segment)}]`;
+      indexCount += 1;
+      continue;
+    }
+    expression += isIdentifierSafePathKey(segment) && !jsonataPathLiterals.has(segment)
+      ? `.${segment}`
+      : `.${JSON.stringify(segment)}`;
+    fieldCount += 1;
+  }
+
+  if (expression.length > API_SOURCE_MAXIMUMS.expressionLength) return { expression: null, reason: "too_long" };
+  // JSONata paths contain one path and root-variable node, one node per field,
+  // and a filter plus integer node for each array index. A leading index would
+  // become a predicate on the root variable, which the evaluator rejects.
+  if (segments.length > 0 && 2 + fieldCount + indexCount * 2 > JSONATA_LIMITS.maximumAstNodes) {
+    return { expression: null, reason: "unsupported" };
+  }
+  return { expression, reason: null };
+};
 
 const cappedAppend = (current: string, next: string): string => {
   const remaining = API_SOURCE_MAXIMUMS.outputLength - current.length;
