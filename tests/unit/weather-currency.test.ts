@@ -134,6 +134,46 @@ describe("weather data providers", () => {
     expect(requestUrl(metFetcher.mock.calls[0]?.[0])).toContain("lat=52.5200");
   });
 
+  it("normalizes Open-Meteo UTC timestamps from the provider and existing cache entries", async () => {
+    const database = new TestD1Database();
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response(openMeteoFixture));
+    const input = {
+      coordinates: { latitude: 52.52, longitude: 13.405 },
+      validators: { etag: null, lastModified: null },
+      now: NOW,
+    };
+
+    try {
+      const fresh = await openMeteoWeather({ ...input, fetcher });
+      expect(fresh.weather?.observedAt).toBe("2026-09-27T12:00:00.000Z");
+
+      const cachedWeather: NormalizedWeather = {
+        temperatureC: 12.3,
+        feelsLikeC: 11.5,
+        condition: "rain",
+        isDay: true,
+        windSpeedMps: 2.4,
+        precipitationMm: 0.6,
+        humidityPercent: 75,
+        observedAt: "2026-09-27T12:00",
+        shortForecast: "rain",
+      };
+      await database.prepare(
+        "INSERT INTO weather_cache (provider, location_key, latitude, longitude, payload_json, expires_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ).bind("open_meteo", "52.5200,13.4050", 52.52, 13.405, JSON.stringify(cachedWeather),
+        new Date(NOW + 60_000).toISOString(), new Date(NOW).toISOString()).run();
+
+      const cached = await readWeatherCache(database as unknown as D1Database, "open_meteo", 52.52, 13.405, NOW);
+      const cachedResponse = await fetchCachedWeather(database as unknown as D1Database, "open_meteo", 52.52, 13.405, NOW, fetcher);
+
+      expect(cached?.weather.observedAt).toBe("2026-09-27T12:00:00.000Z");
+      expect(cachedResponse.weather.observedAt).toBe("2026-09-27T12:00:00.000Z");
+      expect(fetcher).toHaveBeenCalledOnce();
+    } finally {
+      database.close();
+    }
+  });
+
   it("caches by provider and rounded coordinates and honors provider expiry", async () => {
     const database = new TestD1Database();
     try {

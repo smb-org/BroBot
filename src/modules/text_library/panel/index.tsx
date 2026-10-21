@@ -11,6 +11,7 @@ import { ActionMenu, Badge, Button, ChatPreview, CollectionPage, ConfirmDialog, 
 import { templateVariableNames } from "../../contract";
 import { dashboardCommonTexts, systemTemplateVariableLocale } from "../../../dashboard/locale";
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { dashboardDataKeys } from "../../../dashboard/data/keys";
 import { templateTextLength } from "../../../contracts/template-text-length";
 import { textLibraryTexts } from "./locale";
 import { estimateEmbeddedBlockOverflow } from "./embedded-block-overflow";
@@ -193,6 +194,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
   ): Promise<Value> => runModuleQueryWrite(queryClient, channelId, "text_library", "library", mutation, {
       baselineRevision,
       updateCache,
+      relatedQueryKeys: [dashboardDataKeys.templateVariables(channelId)],
       relatedParts: [
         { moduleId: "text_commands", part: "template-variables" },
         { moduleId: "faq", part: "panel" },

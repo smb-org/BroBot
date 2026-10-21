@@ -345,7 +345,7 @@ test("the location warning opens Ort & Wetter and both time zone and chat defaul
   await page.getByRole("textbox", { name: "Ort suchen" }).fill("Berlin");
   await page.getByRole("button", { name: "Suchen" }).click();
   await page.getByRole("option", { name: /Berlin/u }).click();
-  await expect(page.locator(".channel-location-field__current")).toContainText("Berlin, Berlin, Deutschland");
+  await expect(page.locator(".channel-location-field__status")).toContainText("Berlin, Berlin, Deutschland");
   expect(mocks.settingsState().location).toBeNull();
   const locationSaved = page.waitForResponse((response) => response.url().endsWith(`/api/channels/${channelId}/settings/location`) && response.request().method() === "PATCH");
   await page.getByRole("button", { name: "Speichern", exact: true }).click();

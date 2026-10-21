@@ -1,9 +1,11 @@
 import type { NormalizedWeather, WeatherProviderId } from "../contracts";
-import { normalizeCoordinates } from "../domain";
-import { WEATHER_PROVIDER_ADAPTERS, type WeatherCoordinates } from "./providers";
+import { normalizeCoordinates, normalizeWeatherTimestamp } from "../domain";
+import { WEATHER_PROVIDER_ADAPTERS, WeatherProviderError, type WeatherCoordinates } from "./providers";
 
 const WEATHER_CACHE_TTL_MS = 15 * 60 * 1_000;
 const MET_NORWAY_MAX_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
+const WEATHER_FAILURE_CACHE_TTL_MS = 60 * 1_000;
+const WEATHER_FAILURE_CACHE_PAYLOAD = "{\"unavailable\":true}";
 
 interface WeatherCacheRow {
   payload_json: string;
@@ -18,17 +20,20 @@ export interface CachedWeather {
   coordinates: WeatherCoordinates & { key: string };
 }
 
+const weatherRefreshes = new Map<string, Promise<CachedWeather>>();
+
 const parseWeather = (value: string): NormalizedWeather | null => {
   try {
     const parsed: unknown = JSON.parse(value);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
     const row = parsed as Record<string, unknown>;
+    const observedAt = typeof row.observedAt === "string" ? normalizeWeatherTimestamp(row.observedAt) : null;
     return typeof row.temperatureC === "number" && typeof row.feelsLikeC === "number" &&
       typeof row.condition === "string" && typeof row.isDay === "boolean" &&
       typeof row.windSpeedMps === "number" && typeof row.precipitationMm === "number" &&
-      typeof row.humidityPercent === "number" && typeof row.observedAt === "string" &&
+      typeof row.humidityPercent === "number" && observedAt !== null &&
       typeof row.shortForecast === "string"
-      ? row as unknown as NormalizedWeather
+      ? { ...row, observedAt } as unknown as NormalizedWeather
       : null;
   } catch {
     return null;
@@ -78,6 +83,26 @@ export const fetchCachedWeather = async (
   fetcher: typeof fetch = fetch,
 ): Promise<CachedWeather> => {
   const coordinates = normalizeCoordinates(latitude, longitude);
+  const refreshKey = `${provider}:${coordinates.key}`;
+  const inFlight = weatherRefreshes.get(refreshKey);
+  if (inFlight !== undefined) return inFlight;
+
+  const refresh = fetchWeatherForCoordinates(db, provider, coordinates, now, fetcher);
+  weatherRefreshes.set(refreshKey, refresh);
+  const cleanup = (): void => {
+    if (weatherRefreshes.get(refreshKey) === refresh) weatherRefreshes.delete(refreshKey);
+  };
+  void refresh.then(cleanup, cleanup);
+  return refresh;
+};
+
+const fetchWeatherForCoordinates = async (
+  db: D1Database,
+  provider: WeatherProviderId,
+  coordinates: WeatherCoordinates & { key: string },
+  now: number,
+  fetcher: typeof fetch,
+): Promise<CachedWeather> => {
   const row = await db.prepare(
     `SELECT payload_json, expires_at, etag, last_modified
        FROM weather_cache WHERE provider = ? AND location_key = ?`,
@@ -87,16 +112,59 @@ export const fetchCachedWeather = async (
   if (cached !== null && Number.isFinite(cacheExpiresAt) && cacheExpiresAt > now) {
     return { weather: cached, expiresAt: cacheExpiresAt, coordinates };
   }
-  const result = await WEATHER_PROVIDER_ADAPTERS[provider]({
-    coordinates,
-    validators: { etag: row?.etag ?? null, lastModified: row?.last_modified ?? null },
-    fetcher,
-    now,
-  });
+  if (row?.payload_json === WEATHER_FAILURE_CACHE_PAYLOAD && Number.isFinite(cacheExpiresAt) && cacheExpiresAt > now) {
+    throw new Error("Weather provider is in its retry cooldown.");
+  }
+  let result;
+  try {
+    result = await WEATHER_PROVIDER_ADAPTERS[provider]({
+      coordinates,
+      validators: { etag: row?.etag ?? null, lastModified: row?.last_modified ?? null },
+      fetcher,
+      now,
+    });
+  } catch (error) {
+    const requestedDelay = error instanceof WeatherProviderError ? error.retryAfterMs : null;
+    const cooldown = requestedDelay ?? WEATHER_FAILURE_CACHE_TTL_MS;
+    const expiresAt = now + cooldown;
+    await writeWeatherCache(
+      db,
+      provider,
+      coordinates,
+      WEATHER_FAILURE_CACHE_PAYLOAD,
+      expiresAt,
+      null,
+      null,
+      now,
+    );
+    throw error;
+  }
   const expiresAt = cacheExpiry(provider, result.expiresAt, now, result.notModified);
   const weather = result.notModified ? cached : result.weather ?? null;
   if (weather === null) throw new Error("Weather provider returned no reusable observation.");
-  const expiresAtIso = new Date(expiresAt).toISOString();
+  await writeWeatherCache(
+    db,
+    provider,
+    coordinates,
+    JSON.stringify(weather),
+    expiresAt,
+    result.etag ?? row?.etag ?? null,
+    result.lastModified ?? row?.last_modified ?? null,
+    now,
+  );
+  return { weather, expiresAt, coordinates };
+};
+
+const writeWeatherCache = async (
+  db: D1Database,
+  provider: WeatherProviderId,
+  coordinates: WeatherCoordinates & { key: string },
+  payload: string,
+  expiresAt: number,
+  etag: string | null,
+  lastModified: string | null,
+  now: number,
+): Promise<void> => {
   await db.prepare(
     `INSERT INTO weather_cache (provider, location_key, latitude, longitude, payload_json, expires_at, etag, last_modified, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -109,11 +177,10 @@ export const fetchCachedWeather = async (
     coordinates.key,
     coordinates.latitude,
     coordinates.longitude,
-    JSON.stringify(weather),
-    expiresAtIso,
-    result.etag ?? row?.etag ?? null,
-    result.lastModified ?? row?.last_modified ?? null,
+    payload,
+    new Date(expiresAt).toISOString(),
+    etag,
+    lastModified,
     new Date(now).toISOString(),
   ).run();
-  return { weather, expiresAt, coordinates };
 };

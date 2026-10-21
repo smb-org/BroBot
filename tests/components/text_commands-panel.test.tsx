@@ -157,6 +157,48 @@ describe("Text command editor", () => {
     else Object.defineProperty(Range.prototype, "getBoundingClientRect", originalRangeBounds);
   });
 
+  it("opens a template request as an unsaved prefilled command", async () => {
+    const fetcher = panelFetch();
+    const consumed = vi.fn<() => void>();
+    vi.stubGlobal("fetch", fetcher);
+    const Harness = () => {
+      const [initialCommand, setInitialCommand] = useState<{ name: string; text: string } | undefined>({ name: "wetter", text: "In {weather.place} sind es {weather.temp}." });
+      return <TextCommandsPanel
+        channelId="kanal-a"
+        language="de"
+        {...(initialCommand === undefined ? {} : { initialCommand })}
+        onInitialCommandConsumed={() => { consumed(); setInitialCommand(undefined); }}
+      />;
+    };
+    renderWithQuery(<UiProvider><Harness /></UiProvider>);
+
+    await waitFor(() => expect(consumed).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("textbox", { name: "Befehlsname" })).toHaveValue("wetter");
+    expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("In {weather.place} sind es {weather.temp}.");
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "POST" || init?.method === "PUT")).toBe(false);
+  });
+
+  it("opens the canonical command when the initial command name is an alias", async () => {
+    const fetcher = panelFetch({ commands: () => [makeCommand({ name: "weather", aliases: ["wetter"], text: "Canonical response" })] });
+    const consumed = vi.fn<() => void>();
+    vi.stubGlobal("fetch", fetcher);
+    const Harness = () => {
+      const [initialCommand, setInitialCommand] = useState<{ name: string; text: string } | undefined>({ name: "WETTER", text: "Template response" });
+      return <TextCommandsPanel
+        channelId="kanal-a"
+        language="de"
+        {...(initialCommand === undefined ? {} : { initialCommand })}
+        onInitialCommandConsumed={() => { consumed(); setInitialCommand(undefined); }}
+      />;
+    };
+    renderWithQuery(<UiProvider><Harness /></UiProvider>);
+
+    await waitFor(() => expect(consumed).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("textbox", { name: "Befehlsname" })).toHaveValue("weather");
+    expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("Canonical response");
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "POST" || init?.method === "PUT")).toBe(false);
+  });
+
   it("shows cached commands immediately when returning to the module", async () => {
     vi.stubGlobal("fetch", panelFetch());
     const view = renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" /></UiProvider>, undefined, { gcTime: 600_000 });
@@ -1739,5 +1781,17 @@ describe("Text command editor", () => {
 
     expect(await screen.findByRole("region", { name: "Eigenschaften von !clip" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /!clip/u })).toHaveAttribute("aria-current", "true");
+  });
+
+  it("does not fall back to a different command when the requested selection is missing", async () => {
+    vi.stubGlobal("fetch", panelFetch({ commands: () => [makeCommand(), makeCommand({ name: "clip" })] }));
+    renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" initialSelection="wetter" /></UiProvider>);
+
+    const list = await commandList();
+    await within(list).findByText("!hallo");
+
+    expect(list.querySelector(".text-command-row[aria-current='true']")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Eigenschaften von !hallo" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Eigenschaften von !clip" })).not.toBeInTheDocument();
   });
 });

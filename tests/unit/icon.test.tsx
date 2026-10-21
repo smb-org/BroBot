@@ -5,6 +5,16 @@ import { Icon, type IconName } from "../../src/dashboard/ui/Icon";
 
 const iconNames: Readonly<Record<IconName, true>> = {
   ad: true,
+  cloud: true,
+  "cloud-fog": true,
+  "cloud-lightning": true,
+  "cloud-moon": true,
+  "cloud-rain": true,
+  "cloud-snow": true,
+  "cloud-sun": true,
+  moon: true,
+  sun: true,
+  wind: true,
   shoutout: true,
   clip: true,
   boss: true,

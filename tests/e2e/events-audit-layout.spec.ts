@@ -98,6 +98,7 @@ const mockApi = async (page: Page, options: MockApiOptions = {}): Promise<{ revi
       const variableEntries = typeof options.variableEntries === "function" ? options.variableEntries() : options.variableEntries ?? channelVariables;
       return route.fulfill(json({ variables: variableEntries, count: variableEntries.length, maximum: 25 }, options.variableStatus));
     }
+    if (pathname === `/api/channels/${channelId}/template-variables`) return route.fulfill(json({ variables: [] }));
     if (pathname === `/api/channels/${channelId}/overlay-tokens`) return route.fulfill(json({ tokens: options.legacyTokens ?? [], nextOffset: null }));
     if (pathname === `/api/channels/${channelId}/overlays`) return route.fulfill(json({ overlays: [], maximum: 20, elementMaximum: 20 }));
     if (pathname === `/api/channels/${channelId}/revisions`) {
@@ -321,8 +322,8 @@ test("variables collection keeps the editor in its column without horizontal ove
     expect((await box(descriptionCells.first())).width).toBeGreaterThan((await box(table.locator(".channel-variables-table__value").first())).width);
     if (width <= 639) {
       const descriptionBox = await box(selectedRow.locator(".channel-variables-table__description"));
-      const resetBox = await box(selectedRow.locator(".channel-variables-table__reset"));
-      expect(descriptionBox.right).toBeLessThanOrEqual(resetBox.x + 1);
+      const valueBox = await box(selectedRow.locator(".channel-variables-table__value"));
+      expect(descriptionBox.right).toBeLessThanOrEqual(valueBox.x + 1);
       const variableName = await box(selectedRow.locator("th[scope='row']"));
       expect(variableName.width).toBeGreaterThanOrEqual(descriptionBox.width - 1);
     }

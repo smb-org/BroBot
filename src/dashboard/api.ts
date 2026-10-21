@@ -22,6 +22,8 @@ import type {
 import type { ChannelControlDuration, ChannelRole, ChatOutputTarget, OverlayElementKind } from "../contracts/values";
 import type { ModuleRegisteredTemplateVariable } from "../modules/contract";
 import type { DryRunRequest, DryRunResponse } from "../contracts/dry-run";
+import type { NormalizedWeather } from "../modules/weather/contracts";
+import type { SunDay, SunAltitudeInterval } from "../modules/sun/domain";
 
 import { PanelApiError } from "../contracts/panel-error";
 
@@ -595,6 +597,57 @@ export const getChannelTemplateVariables = async (
   );
   return response.variables;
 };
+
+export type PanelWeatherCurrent =
+  | { status: "location_missing" }
+  | { status: "provider_error"; reason: "upstream_unavailable" }
+  | {
+      status: "ok";
+      location: { name: string; timeZone: string };
+      weather: NormalizedWeather;
+      expiresAt: string;
+      showFahrenheit: boolean;
+    };
+
+export type PanelSunToday =
+  | { status: "location_missing" }
+  | { status: "ok"; day: SunDay; goldenHourIntervals: readonly SunAltitudeInterval[]; blueHourIntervals: readonly SunAltitudeInterval[]; nextDawnAt: string | null };
+
+export type PanelMoonToday =
+  | { status: "location_missing" }
+  | {
+      status: "ok";
+      phase: string;
+      illumination: number;
+      riseAt: string | null;
+      setAt: string | null;
+      nextRiseAt: string | null;
+      state: "normal" | "always_up" | "always_down" | "no_crossing";
+    };
+
+export const getChannelWeatherCurrent = (
+  channelId: string,
+  signal?: AbortSignal,
+): Promise<PanelWeatherCurrent> => requestJson<PanelWeatherCurrent>(
+  `${modulePath(channelId, "weather")}/current`,
+  requestOptions(signal),
+);
+
+export const getChannelSunToday = (
+  channelId: string,
+  signal?: AbortSignal,
+): Promise<PanelSunToday> => requestJson<PanelSunToday>(
+  `${modulePath(channelId, "sun")}/today`,
+  requestOptions(signal),
+);
+
+export const getChannelMoonToday = (
+  channelId: string,
+  signal?: AbortSignal,
+): Promise<PanelMoonToday> => requestJson<PanelMoonToday>(
+  `${modulePath(channelId, "moon")}/today`,
+  requestOptions(signal),
+);
 
 export interface PanelChannelVariableRecord {
   channelId: string;

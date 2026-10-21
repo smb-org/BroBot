@@ -42,7 +42,7 @@ test("location removal stays disabled during a time-zone save and does not erase
   await expect(page.locator(".ui-select__search-input")).toBeDisabled();
   await expect(page.locator(".channel-location-field__actions > .ui-button").first()).toBeDisabled();
   await expect(page.locator(".channel-location-field__remove")).toBeDisabled();
-  await expect(page.locator(".channel-location-field__suggestion .ui-button")).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Zeitzone übernehmen", includeHidden: true })).toBeDisabled();
   await expect(page.locator(".ui-save-bar__discard")).toBeDisabled();
   await expect(confirmRemoval).toBeDisabled();
   await confirmRemoval.evaluate((button: HTMLButtonElement) => { button.click(); });

@@ -5,6 +5,7 @@ import { canManage } from "../../contracts/values";
 import type { ModuleRouteEnvironment } from "../contract";
 import { DEFAULT_MOON_ERROR_TEXTS, readMoonSettings } from "./adapters/d1";
 import { MOON_ERROR_TEXT_MAX_LENGTH } from "./contracts";
+import { calculateMoonDay, calculateMoonState, localDateInTimeZone, nextMoonEvents } from "./domain";
 
 const updateSchema = z.object({
   revision: z.number().int().min(1),
@@ -17,6 +18,26 @@ const channelIdOf = (context: { req: { param: (name: string) => string | undefin
 const errorText = (value: string, fallback: string): string => value.trim().length === 0 ? fallback : value.trim();
 
 export const moonRoutes = new Hono<ModuleRouteEnvironment>();
+
+moonRoutes.get("/today", async (context) => {
+  const location = await context.get("channelLocation")(channelIdOf(context));
+  if (location === null) return context.json({ status: "location_missing" as const });
+  const now = Date.now();
+  const localDate = localDateInTimeZone(now, location.timeZone);
+  const locationForEvents = { latitude: location.latitude, longitude: location.longitude, timeZone: location.timeZone };
+  const day = calculateMoonDay(locationForEvents, localDate);
+  const events = nextMoonEvents(locationForEvents, now);
+  const state = calculateMoonState(now);
+  return context.json({
+    status: "ok" as const,
+    phase: state.phase,
+    illumination: state.illumination,
+    riseAt: day.riseAt,
+    setAt: day.setAt,
+    nextRiseAt: events.riseAts[0] ?? null,
+    state: day.state,
+  });
+});
 
 moonRoutes.get("/unavailable-texts", async (context) => {
   return context.json(await readMoonSettings(context.env.DB, channelIdOf(context)));
