@@ -47,6 +47,7 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
   let conflictPending = settingsConflict;
   const submittedSettingsRevisions: number[] = [];
   const submittedQuestionRevisions: number[] = [];
+  const submittedDeleteRevisions: number[] = [];
   const requests = vi.fn<typeof fetch>((input, init) => {
     const url = parseUrl(input);
     const method = init?.method ?? (input instanceof Request ? input.method : "GET");
@@ -111,13 +112,18 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
     }
     if (url.pathname.includes("/modules/blitz_round/questions/") && method === "DELETE") {
       const id = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
+      const revision = Number(url.searchParams.get("revision") ?? "0");
+      submittedDeleteRevisions.push(revision);
+      const existing = questions.find((candidate) => candidate.id === id);
+      if (existing === undefined) return Promise.resolve(jsonResponse({ error: "question_not_found" }, 404));
+      if (revision !== existing.revision) return Promise.resolve(jsonResponse({ error: "question_conflict", current: existing }, 409));
       questions = questions.filter((candidate) => candidate.id !== id);
       return Promise.resolve(jsonResponse({ removed: true }));
     }
     return Promise.resolve(jsonResponse({ error: "not_found" }, 404));
   });
   vi.stubGlobal("fetch", requests);
-  return { requests, getQuestions: () => questions, deleteQuestion: (id: string) => { questions = questions.filter((question) => question.id !== id); }, getSettings: () => settings, getSettingsRevision: () => settingsRevision, submittedSettingsRevisions, submittedQuestionRevisions };
+  return { requests, getQuestions: () => questions, deleteQuestion: (id: string) => { questions = questions.filter((question) => question.id !== id); }, getSettings: () => settings, getSettingsRevision: () => settingsRevision, submittedSettingsRevisions, submittedQuestionRevisions, submittedDeleteRevisions };
 };
 
 const mountPanel = () => renderWithQuery(<UiProvider><BlitzRoundPanel channelId="fictional_channel" language="en" /></UiProvider>);
@@ -500,6 +506,27 @@ describe("Blitz Round collection panel", () => {
     const firstQuestion = await screen.findByRole("button", { name: /Which planet is number 1\?/u });
     expect(firstQuestion).toHaveAttribute("aria-current", "true");
     expect(api.getQuestions()).toHaveLength(25);
+  });
+
+  it("keeps delete intent through saving a question draft [protects=edit existing question to Delete to Save opens confirmation for the saved revision and confirming deletes it; fails_when=the revision-keyed editor remount drops the pending delete or DELETE uses a stale revision; no_claim=the component uses an in-memory HTTP stub and does not verify production authentication or D1 isolation]", async () => {
+    const api = installPanelFetch([sampleQuestion]);
+    mountPanel();
+    await screen.findByRole("textbox", { name: "Word" });
+    fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "STORM" } });
+    fireEvent.click(document.querySelector(".page-header__overflow-trigger") as HTMLButtonElement);
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    const saveGuard = await screen.findByRole("dialog", { name: "Save changes?" });
+    fireEvent.click(within(saveGuard).getByRole("button", { name: "Save" }));
+
+    const deleteConfirmation = await screen.findByRole("dialog", { name: "Delete this question?" });
+    expect(document.querySelector(".blitz-panel__detail input")).toHaveValue("STORM");
+    expect(api.getQuestions()[0]).toMatchObject({ id: sampleQuestion.id, prompt: "STORM", revision: 2 });
+    fireEvent.click(within(deleteConfirmation).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(api.getQuestions()).toHaveLength(0));
+    expect(api.submittedQuestionRevisions).toEqual([1]);
+    expect(api.submittedDeleteRevisions).toEqual([2]);
   });
 
   it("shows the scramble limit while keeping quiz prompts at 120 characters [protects=scramble word field uses a 16-character limit and quiz prompt uses 120; fails_when=the scramble field advertises a limit its validator rejects; no_claim=does not measure translated glyph widths]", async () => {

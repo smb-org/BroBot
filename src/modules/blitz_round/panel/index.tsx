@@ -52,6 +52,10 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   const [selectedQuestion, setSelectedQuestion] = useState<BlitzQuestion | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [deleteIntent, setDeleteIntent] = useState<{ questionId: string; opened: boolean } | null>(null);
+  const [deletePending, setDeletePending] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | undefined>();
+  const [deleteFailure, setDeleteFailure] = useState<"conflict" | "deleted" | null>(null);
   const switchRef = useRef<((proceed: () => void) => void) | null>(null);
   const questionsQuery = useModuleQuery(channelId, "blitz_round", `questions:${String(page)}:${search}`, (signal) => loadBlitzQuestions(channelId, page, search, signal));
   const settingsQuery = useModuleQuery(channelId, "blitz_round", "settings", (signal) => loadBlitzSettings(channelId, signal));
@@ -77,6 +81,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
     }
     requestSwitch(() => {
       setShowSettings(false);
+      setDeleteFailure(null);
       setSelectedId(question.id);
       setSelectedQuestion(question);
       setDetailOpen(true);
@@ -87,6 +92,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
     setSearch("");
     setPage(1);
     setShowSettings(false);
+    setDeleteFailure(null);
     setSelectedId(NEW_QUESTION);
     setNewQuestionSession((session) => session + 1);
     setSelectedQuestion(null);
@@ -108,6 +114,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
 
   const reloadQuestion = async (questionId: string): Promise<BlitzQuestion> => {
     const latest = await loadBlitzQuestion(channelId, questionId);
+    setDeleteFailure(null);
     queryClient.setQueryData(moduleQueryKey(channelId, "blitz_round", "questions:1:"), (current: BlitzQuestionPage | undefined) => {
       if (current === undefined) return current;
       return { ...current, questions: current.questions.map((question) => question.id === questionId ? latest : question) };
@@ -123,6 +130,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   };
 
   const discardDeletedQuestion = (): void => {
+    setDeleteFailure(null);
     setSelectedId(NEW_QUESTION);
     setNewQuestionSession((session) => session + 1);
     setSelectedQuestion(null);
@@ -131,28 +139,60 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   };
 
   const selectSavedQuestion = (saved: BlitzQuestion): void => {
+    setDeleteFailure(null);
     setSelectedId(saved.id);
     setSelectedQuestion(saved);
   };
 
-  const onDeleted = async (revision: number): Promise<void> => {
-    const deletingId = selectedId;
-    if (deletingId === null || deletingId === NEW_QUESTION) return;
-    await deleteBlitzQuestion(channelId, deletingId, revision);
-    const refreshed = await questionsQuery.refetch();
-    const total = refreshed.data?.total ?? 0;
-    const nextPage = Math.min(page, Math.max(1, Math.ceil(total / BLITZ_QUESTION_PAGE_SIZE)));
-    const nextPageData = nextPage === page
-      ? refreshed.data
-      : await loadBlitzQuestions(channelId, nextPage, search);
-    if (nextPage !== page && nextPageData !== undefined) {
-      queryClient.setQueryData(moduleQueryKey(channelId, "blitz_round", `questions:${String(nextPage)}:${search}`), nextPageData);
-      setPage(nextPage);
+  const requestDelete = (questionId: string): void => {
+    setDeleteIntent({ questionId, opened: false });
+    setDeleteError(undefined);
+    setDeleteFailure(null);
+  };
+  const openDeleteConfirmation = (questionId: string): void => {
+    setDeleteIntent((intent) => intent?.questionId === questionId ? { ...intent, opened: true } : intent);
+  };
+  const cancelDelete = (questionId: string): void => {
+    setDeleteIntent((intent) => intent?.questionId === questionId ? null : intent);
+  };
+
+  const deleteQuestion = deleteIntent === null
+    ? null
+    : selectedQuestion?.id === deleteIntent.questionId
+      ? selectedQuestion
+      : questions.find((question) => question.id === deleteIntent.questionId) ?? null;
+
+  const confirmDelete = async (): Promise<void> => {
+    if (deleteIntent === null || deleteQuestion === null) return;
+    setDeletePending(true);
+    setDeleteError(undefined);
+    try {
+      await deleteBlitzQuestion(channelId, deleteIntent.questionId, deleteQuestion.revision);
+      const deletingId = deleteIntent.questionId;
+      const refreshed = await questionsQuery.refetch();
+      const total = refreshed.data?.total ?? 0;
+      const nextPage = Math.min(page, Math.max(1, Math.ceil(total / BLITZ_QUESTION_PAGE_SIZE)));
+      const nextPageData = nextPage === page
+        ? refreshed.data
+        : await loadBlitzQuestions(channelId, nextPage, search);
+      if (nextPage !== page && nextPageData !== undefined) {
+        queryClient.setQueryData(moduleQueryKey(channelId, "blitz_round", `questions:${String(nextPage)}:${search}`), nextPageData);
+        setPage(nextPage);
+      }
+      const next = nextPageData?.questions[0] ?? null;
+      setSelectedId(next?.id ?? NEW_QUESTION);
+      setSelectedQuestion(next);
+      setShowSettings(false);
+      setDeleteIntent((intent) => intent?.questionId === deletingId ? null : intent);
+    } catch (failure: unknown) {
+      const code = blitzErrorCode(failure);
+      if (code === "question_conflict" || code === "question_deleted") {
+        setDeleteIntent(null);
+        setDeleteFailure(code === "question_conflict" ? "conflict" : "deleted");
+      } else setDeleteError(labels.deleteError);
+    } finally {
+      setDeletePending(false);
     }
-    const next = nextPageData?.questions[0] ?? null;
-    setSelectedId(next?.id ?? NEW_QUESTION);
-    setSelectedQuestion(next);
-    setShowSettings(false);
   };
 
   const toolbar = <div className="blitz-panel__toolbar">
@@ -209,7 +249,10 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
         canManage={canManage}
         onSave={saveQuestion}
         onSaved={selectSavedQuestion}
-        onDelete={onDeleted}
+        deleteFailure={deleteFailure}
+        onRequestDelete={requestDelete}
+        onOpenDelete={openDeleteConfirmation}
+        onCancelDelete={cancelDelete}
         onReload={reloadQuestion}
         onDiscardDeleted={discardDeletedQuestion}
         onOpenSettings={openSettings}
@@ -228,17 +271,32 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
       backLabel={labels.back}
       onCloseDetail={() => { requestSwitch(() => { setDetailOpen(false); }); }}
     />
+    <ConfirmDialog
+      opened={deleteIntent?.opened === true && deleteQuestion !== null}
+      title={labels.deleteTitle}
+      description={labels.deleteConfirm}
+      confirmLabel={labels.delete}
+      cancelLabel={labels.cancel}
+      danger
+      pending={deletePending}
+      {...(deleteError === undefined ? {} : { error: deleteError })}
+      onCancel={() => { if (deleteIntent !== null) cancelDelete(deleteIntent.questionId); }}
+      onConfirm={() => { void confirmDelete(); }}
+    />
   </div>;
 }
 
-function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved, onDelete, onReload, onDiscardDeleted, onOpenSettings, registerSwitch }: {
+function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved, deleteFailure, onRequestDelete, onOpenDelete, onCancelDelete, onReload, onDiscardDeleted, onOpenSettings, registerSwitch }: {
   question: BlitzQuestion | null;
   isNew: boolean;
   language: "de" | "en";
   canManage: boolean;
   onSave: (draft: Draft, revision?: number, saveAsNew?: boolean) => Promise<BlitzQuestion | null>;
   onSaved: (question: BlitzQuestion) => void;
-  onDelete: (revision: number) => Promise<void>;
+  deleteFailure: "conflict" | "deleted" | null;
+  onRequestDelete: (questionId: string) => void;
+  onOpenDelete: (questionId: string) => void;
+  onCancelDelete: (questionId: string) => void;
   onReload: (questionId: string) => Promise<BlitzQuestion>;
   onDiscardDeleted: () => void;
   onOpenSettings: () => void;
@@ -251,8 +309,6 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
   const [saveError, setSaveError] = useState<string | undefined>();
   const [serverConflict, setServerConflict] = useState(false);
   const [serverDeleted, setServerDeleted] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | undefined>();
   const [attempted, setAttempted] = useState(false);
   const validation = validateBlitzQuestion({
     ...draft.value,
@@ -338,54 +394,34 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
 
   const saveDeletedAsNew = (): void => { void save(true); };
 
-  const remove = async (): Promise<void> => {
-    if (question === null) return;
-    setSaving(true);
-    setDeleteError(undefined);
-    try {
-      await onDelete(question.revision);
-      setDeleteOpen(false);
-    } catch (failure: unknown) {
-      const code = blitzErrorCode(failure);
-      if (code === "question_conflict") {
-        setServerConflict(true);
-        setSaveError(labels.conflict);
-        setDeleteOpen(false);
-      } else if (code === "question_deleted") {
-        setServerDeleted(true);
-        setSaveError(labels.questionDeletedConflict);
-        setDeleteOpen(false);
-      } else setDeleteError(labels.deleteError);
-    } finally {
-      setSaving(false);
-    }
-  };
-
   useEffect(() => { saveRef.current = save; });
   useEffect(() => {
     registerSwitch(guardSwitch);
     return () => { registerSwitch(null); };
   }, [guardSwitch, registerSwitch]);
   useEffect(() => registerDashboardNavigationGuard(guardSwitch), [guardSwitch]);
-
   const typeOptions = [
     { value: "scramble" as const, label: labels.scramble },
     { value: "quiz" as const, label: labels.quiz },
   ];
   const localError = attempted && !validation.ok ? labels.validationError(validation.code) : undefined;
+  const hasServerConflict = serverConflict || deleteFailure === "conflict";
+  const hasServerDeleted = serverDeleted || deleteFailure === "deleted";
+  const visibleSaveError = deleteFailure === "conflict" ? labels.conflict
+    : deleteFailure === "deleted" ? labels.questionDeletedConflict : saveError;
   const saveProps = {
     dirty: draft.dirty || pendingAnswer.trim().length > 0,
     persistent: true,
     pending: saving,
-    discardOnConflict: serverDeleted,
-    ...(serverDeleted && !isNew ? { conflict: { message: labels.questionDeletedConflict, reloadLabel: labels.saveAsNew, onReload: saveDeletedAsNew } }
-      : serverConflict && !isNew ? { conflict: { message: labels.conflict, reloadLabel: labels.reload, onReload: reloadCurrent } } : {}),
-    ...(saveError === undefined ? {} : { error: saveError }),
+    discardOnConflict: hasServerDeleted,
+    ...(hasServerDeleted && !isNew ? { conflict: { message: labels.questionDeletedConflict, reloadLabel: labels.saveAsNew, onReload: saveDeletedAsNew } }
+      : hasServerConflict && !isNew ? { conflict: { message: labels.conflict, reloadLabel: labels.reload, onReload: reloadCurrent } } : {}),
+    ...(visibleSaveError === undefined ? {} : { error: visibleSaveError }),
     invalid,
     invalidMessage: labels.invalidAnswer,
     onSave: () => { void save(); },
     onInvalidSave: () => { setAttempted(true); },
-    onDiscard: serverDeleted ? onDiscardDeleted : reset,
+    onDiscard: hasServerDeleted ? onDiscardDeleted : reset,
     saveLabel: labels.save,
     discardLabel: labels.discard,
     savedLabel: labels.saved,
@@ -398,7 +434,11 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
       title={isNew ? labels.newQuestion : question?.prompt ?? labels.title}
       badges={<Badge tone="neutral">{draft.value.kind === "scramble" ? labels.scramble : labels.quiz}</Badge>}
       pageActions={<Button variant="neutral" icon="tabSettings" onClick={() => { guard.guardSwitch(onOpenSettings); }}>{labels.settings}</Button>}
-      {...(isNew ? {} : { overflow: <Button variant="subtle" danger="subtle" size="compact" onClick={() => { guard.guardSwitch(() => { setDeleteError(undefined); setDeleteOpen(true); }); }}><Icon name="remove" size={16} />{labels.delete}</Button> })}
+      {...(isNew ? {} : { overflow: <Button variant="subtle" danger="subtle" size="compact" onClick={() => {
+        if (question === null) return;
+        onRequestDelete(question.id);
+        guard.guardSwitch(() => { onOpenDelete(question.id); }, () => { onCancelDelete(question.id); });
+      }}><Icon name="remove" size={16} />{labels.delete}</Button> })}
       save={saveProps}
     />
     <div className="blitz-panel__editor">
@@ -448,20 +488,8 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
         hint={labels.enabledHint}
         disabled={!canManage || saving}
       />
-      <div className="blitz-panel__error-slot" role="status" aria-live="polite">{saveError ?? "\u00a0"}</div>
+      <div className="blitz-panel__error-slot" role="status" aria-live="polite">{visibleSaveError ?? "\u00a0"}</div>
     </div>
-    <ConfirmDialog
-      opened={deleteOpen}
-      title={labels.deleteTitle}
-      description={labels.deleteConfirm}
-      confirmLabel={labels.delete}
-      cancelLabel={labels.cancel}
-      danger
-      pending={saving}
-      {...(deleteError === undefined ? {} : { error: deleteError })}
-      onCancel={() => { setDeleteOpen(false); }}
-      onConfirm={() => { void remove(); }}
-    />
     <ConfirmDialog
       opened={guard.confirmOpen}
       title={labels.unsavedTitle}
