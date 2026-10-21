@@ -4114,7 +4114,8 @@ export class ChannelObject extends DurableObject<Env> {
       resolvedAt: attempt.round.resolved_at ?? new Date().toISOString(),
     };
     const formatted = await formatter(context, result);
-    const rowIsCurrent = (): boolean => {
+    const rowIsCurrent = async (): Promise<boolean> => {
+      await this.reconcilePointModuleActivation(module.id, true);
       const current = pointRoundRow(this.ctx.storage.sql, roundId);
       return current !== null && current.state === "resolved" && current.resolve_delivery_state === "sending" &&
         current.resolve_delivery_attempts === attempt.round?.resolve_delivery_attempts &&

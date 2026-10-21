@@ -627,6 +627,77 @@ describe("blitz answers in the channel Durable Object", () => {
     await expect(object.pointBalance("blitz_round", "viewer_one")).resolves.toBe(50);
   });
 
+  it("reconciles D1 activation before result delivery after formatting [protects=D1 last_disabled_revision is reconciled after result formatting while the real DO retains the resolved round and settlement; fails_when=the stale result reaches chat or delivery remains pending or delivered after disable revision 2 and re-enable revision 3; no_claim=uses real D1 and ChannelObject with activation toggles inside the awaited formatter and a mocked chat transport]", async () => {
+    const channelId = `blitz-stale-result-${crypto.randomUUID()}`;
+    const roundId = "blitz-stale-result";
+    const worker = env as unknown as { DB: D1Database };
+    const settlement = { kind: "blitz", params: { prize: 50 } };
+    await insertPointChannel(channelId);
+    await worker.DB.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'blitz_round', 1, ?, 1)")
+      .bind(channelId, JSON.stringify(blitzRoundDefaultsForLanguage("en"))).run();
+    const object = blitzObject(pointObject(channelId));
+    const postedTexts: string[] = [];
+    const formatResult = vi.spyOn(blitzRoundModule, "formatPointRoundResult").mockImplementation(async (context) => {
+      await context.DB.prepare("UPDATE channel_modules SET enabled = 0, revision = 2, last_disabled_revision = 2 WHERE channel_id = ? AND module_id = 'blitz_round'")
+        .bind(channelId).run();
+      await context.DB.prepare("UPDATE channel_modules SET enabled = 1, revision = 3 WHERE channel_id = ? AND module_id = 'blitz_round'")
+        .bind(channelId).run();
+      return { text: "Correct: CLOUD" };
+    });
+    const sendChat = vi.fn<ModuleAlarmContext["sendChat"]>(async (text, _idempotencyKey, _attributions, stillValid) => {
+      if (stillValid !== undefined && !await stillValid()) {
+        return { sent: false, retryable: false, reason: "module_disabled", delivery: "failed" };
+      }
+      postedTexts.push(text);
+      return { sent: true, retryable: false, reason: null, delivery: "delivered" };
+    });
+
+    await runPointObject(object, async (target, state) => {
+      await target.setGameModuleGate("blitz_round", false, 1);
+      const runtime = target as unknown as { moduleAlarmContext: (...args: unknown[]) => ModuleAlarmContext };
+      const original = runtime.moduleAlarmContext.bind(target);
+      Object.assign(target, {
+        moduleAlarmContext: (...args: unknown[]) => ({ ...original(...args), sendChat }),
+      });
+      await target.openGameRound("blitz_round", roundId, {
+        durationS: 60,
+        announceText: "Blitz round starts",
+        answer: "CLOUD",
+        settlement,
+      });
+      await target.markGameRoundAnnounced("blitz_round", roundId, Date.now() + 60_000, `round:${roundId}`);
+      await blitzObject(target).answerGameRound("blitz_round", roundId, "msg:stale-result", "viewer_one", "frostfern", 5, Date.now());
+      await deferPointAlarmWithin(state);
+    });
+    await object.resolveGameRound("blitz_round", roundId, settlement);
+
+    await forcePointAlarm(object, roundId);
+
+    const finalState = await runPointObject(object, (_target, state) => ({
+      round: state.storage.sql.exec<{ gate_revision: number; state: string; resolve_delivery_state: string }>(
+        "SELECT gate_revision, state, resolve_delivery_state FROM game_rounds WHERE round_id = ?", roundId,
+      ).one(),
+      gate: state.storage.sql.exec<{ closed: number; revision: number; last_disabled_revision: number }>(
+        "SELECT closed, revision, last_disabled_revision FROM module_gates WHERE module_id = 'blitz_round'",
+      ).one(),
+      operationCount: state.storage.sql.exec<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM point_operations WHERE operation_id = ?", `round:${roundId}:resolve`,
+      ).one().count,
+      alarm: state.storage.kv.get<Record<string, unknown>>("channel:alarm_schedule")?.[`points:round:${roundId}`] ?? null,
+    }));
+
+    expect(finalState).toEqual({
+      round: { gate_revision: 1, state: "resolved", resolve_delivery_state: "suppressed" },
+      gate: { closed: 0, revision: 3, last_disabled_revision: 2 },
+      operationCount: 1,
+      alarm: null,
+    });
+    expect(postedTexts).toEqual([]);
+    expect(sendChat).toHaveBeenCalledOnce();
+    expect(formatResult).toHaveBeenCalledOnce();
+    await expect(object.pointBalance("blitz_round", "viewer_one")).resolves.toBe(50);
+  });
+
   it("suppresses a pending result across a rapid disable and re-enable [protects=disable revision 2 terminates retries for a round opened at revision 1 while retaining its single settlement; fails_when=re-enable revives the stale result announcement, leaves its alarm scheduled, or changes the committed payout; no_claim=gate revisions and sendChat are driven through a real ChannelObject with mocked transport]", async () => {
     const channelId = `blitz-disable-result-${crypto.randomUUID()}`;
     const roundId = "blitz-disabled-result-retry";
