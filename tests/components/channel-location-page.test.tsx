@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { PanelChannelSettings } from "../../src/dashboard/api";
@@ -21,15 +21,63 @@ const settings: PanelChannelSettings = {
 const inputUrl = (input: RequestInfo | URL): string =>
   input instanceof Request ? input.url : input instanceof URL ? input.href : input;
 
+const setBrowserLanguage = (language: string): void => {
+  Object.defineProperty(window.navigator, "language", { value: language, configurable: true });
+};
+
 const renderPage = (role: "manager" | "operator" = "manager") => {
   vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse(settings))));
   return renderWithQuery(<UiProvider><ChannelLocationPage channelId="channel-a" role={role} /></UiProvider>);
 };
 
+const berlinSettings: PanelChannelSettings = {
+  ...settings,
+  location: { name: "Berlin", latitude: 52.52, longitude: 13.405, timeZone: "Europe/Berlin" },
+};
+
+const liveWeather = {
+  status: "ok",
+  location: { name: "Berlin", timeZone: "Europe/Berlin" },
+  weather: {
+    temperatureC: 18.4, feelsLikeC: 17.8, condition: "partly_cloudy", isDay: true, windSpeedMps: 3.3,
+    precipitationMm: 0, humidityPercent: 64, observedAt: "2026-10-21T11:30:00.000Z", shortForecast: "rain",
+  },
+  expiresAt: "2026-10-21T12:10:00.000Z",
+  showFahrenheit: false,
+};
+
+const liveSun = {
+  status: "ok",
+  day: {
+    localDate: "2026-10-21", sunriseAt: "2026-10-21T05:18:00.000Z", sunsetAt: "2026-10-21T17:52:00.000Z",
+    dawnAt: "2026-10-21T04:10:00.000Z", duskAt: "2026-10-21T19:05:00.000Z",
+    solarNoonAt: "2026-10-21T11:35:00.000Z", dayLengthMinutes: 754, polarState: "normal",
+  },
+  goldenHourIntervals: [{ startAt: "2026-10-21T15:40:00.000Z", endAt: "2026-10-21T16:28:00.000Z" }],
+  blueHourIntervals: [{ startAt: "2026-10-21T17:52:00.000Z", endAt: "2026-10-21T18:35:00.000Z" }],
+};
+
+const liveMoon = {
+  status: "ok", phase: "waxing_gibbous", illumination: 74,
+  riseAt: "2026-10-21T18:42:00.000Z", setAt: "2026-10-21T06:15:00.000Z", nextRiseAt: "2026-10-21T18:42:00.000Z", state: "normal",
+};
+
+const livePageFetcher = (overrides: Record<string, unknown> = {}) => vi.fn<typeof fetch>((input) => {
+  const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+  const pathname = url.pathname;
+  if (pathname.endsWith("/settings")) return Promise.resolve(jsonResponse(berlinSettings));
+  if (pathname.endsWith("/modules/weather/current")) return Promise.resolve(jsonResponse(overrides.weather ?? liveWeather));
+  if (pathname.endsWith("/modules/sun/today")) return Promise.resolve(jsonResponse(overrides.sun ?? liveSun));
+  if (pathname.endsWith("/modules/moon/today")) return Promise.resolve(jsonResponse(overrides.moon ?? liveMoon));
+  if (pathname.endsWith("/modules/text_commands/commands")) return Promise.resolve(jsonResponse({ commands: overrides.commands ?? [], variables: [] }));
+  return Promise.resolve(jsonResponse({}, 404));
+});
+
 describe("channel location page", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    setBrowserLanguage("de-DE");
   });
 
   it("shows the channel time zone and a missing-location warning together", async () => {
@@ -38,7 +86,7 @@ describe("channel location page", () => {
 
     expect(await screen.findByRole("heading", { name: labels.pageTitle })).toBeInTheDocument();
     expect(await screen.findByRole("combobox", { name: labels.timeZone })).toHaveValue("Europe/Berlin");
-    expect(screen.getByText("Standort fehlt")).toBeInTheDocument();
+    expect(screen.getAllByText("Standort fehlt").length).toBeGreaterThan(0);
   });
 
   it("shows read-only time-zone properties and one reason for disabled location actions to operators", async () => {
@@ -99,5 +147,173 @@ describe("channel location page", () => {
       expect(screen.queryByRole("button", { name: "Speichern" })).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Erneut versuchen" })).toBeEnabled();
     });
+  });
+
+  it("keeps the live weather card structure while values are loading", async () => {
+    let resolveWeather!: (response: Response) => void;
+    const pendingWeather = new Promise<Response>((resolve) => { resolveWeather = resolve; });
+    const fetcher = livePageFetcher();
+    fetcher.mockImplementation((input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse(berlinSettings));
+      if (url.pathname.endsWith("/modules/weather/current")) return pendingWeather;
+      if (url.pathname.endsWith("/modules/sun/today")) return Promise.resolve(jsonResponse(liveSun));
+      if (url.pathname.endsWith("/modules/moon/today")) return Promise.resolve(jsonResponse(liveMoon));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const { container } = renderWithQuery(<UiProvider><ChannelLocationPage channelId="channel-a" role="manager" /></UiProvider>);
+
+    await waitFor(() => {
+      const card = container.querySelector(".channel-location-weather-card");
+      expect(card).not.toBeNull();
+      expect(card).toHaveAttribute("aria-busy", "true");
+      expect(card?.children).toHaveLength(4);
+      expect(card?.querySelectorAll(".channel-location-skeleton")).toHaveLength(6);
+    });
+    expect(await screen.findByRole("heading", { name: "Aktuelles Wetter" })).toBeInTheDocument();
+    await waitFor(() => resolveWeather(jsonResponse(liveWeather)));
+  });
+
+  it("renders the same sun and moon event rows while values are loading", async () => {
+    const fetcher = livePageFetcher();
+    fetcher.mockImplementation((input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse(berlinSettings));
+      if (url.pathname.endsWith("/modules/weather/current") || url.pathname.endsWith("/modules/sun/today") || url.pathname.endsWith("/modules/moon/today")) {
+        return new Promise<Response>(() => {});
+      }
+      return Promise.resolve(jsonResponse({ commands: [], variables: [] }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const { container } = renderWithQuery(<UiProvider><ChannelLocationPage channelId="channel-a" role="manager" /></UiProvider>);
+
+    const sunCard = await waitFor(() => {
+      const card = container.querySelector(".channel-location-sun-card");
+      expect(card).toHaveAttribute("aria-busy", "true");
+      return card;
+    });
+    const moonCard = container.querySelector(".channel-location-moon-card");
+    expect(moonCard).toHaveAttribute("aria-busy", "true");
+    expect(sunCard?.querySelectorAll(".channel-location-sun-events > div")).toHaveLength(8);
+    expect(moonCard?.querySelectorAll(".channel-location-moon-events > div")).toHaveLength(3);
+    expect(screen.getByText("Abenddämmerung").closest("div")?.querySelector(".channel-location-skeleton")).not.toBeNull();
+    expect(screen.getByText("Tageslänge").closest("div")?.querySelector(".channel-location-skeleton")).not.toBeNull();
+  });
+
+  it("renders current weather, sun and moon values for a saved location", async () => {
+    vi.stubGlobal("fetch", livePageFetcher());
+    const { container } = renderWithQuery(<UiProvider><ChannelLocationPage channelId="channel-a" role="manager" /></UiProvider>);
+
+    expect(await screen.findByText("18,4 °C")).toBeInTheDocument();
+    expect(screen.getByText(/13:30/u)).toBeInTheDocument();
+    expect(await screen.findByText("Sonne heute")).toBeInTheDocument();
+    expect((await screen.findAllByText("Mond")).length).toBeGreaterThan(0);
+    expect(screen.getByText("74 % beleuchtet")).toBeInTheDocument();
+    expect(screen.getByText("17:40–18:28")).toBeInTheDocument();
+    expect(screen.getByText("19:52–20:35")).toBeInTheDocument();
+    expect(container.querySelectorAll(".channel-location-sun-events > div")).toHaveLength(8);
+    expect(container.querySelectorAll(".channel-location-moon-events > div")).toHaveLength(3);
+    expect(container.querySelector(".channel-location-weather-card")?.children).toHaveLength(4);
+    expect(container.querySelectorAll(".channel-location-weather-card .channel-location-skeleton")).toHaveLength(0);
+    expect(screen.getByText("Abenddämmerung").closest("div")).toHaveTextContent("21:05");
+    expect(screen.getByText("Tageslänge").closest("div")).toHaveTextContent("12 Std. 34 Min.");
+  });
+
+  it("shows missing solar crossings safely during a polar day", async () => {
+    vi.stubGlobal("fetch", livePageFetcher({
+      sun: {
+        ...liveSun,
+        day: {
+          ...liveSun.day,
+          sunriseAt: null,
+          sunsetAt: null,
+          dawnAt: null,
+          duskAt: null,
+          dayLengthMinutes: null,
+          polarState: "day",
+        },
+        goldenHourIntervals: [],
+        blueHourIntervals: [],
+        nextDawnAt: "2026-10-22T04:10:00.000Z",
+      },
+    }));
+    const { container } = renderWithQuery(<UiProvider><ChannelLocationPage channelId="channel-a" role="manager" /></UiProvider>);
+
+    expect(await screen.findByText("Sonnenaufgang")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Sonnenaufgang").closest("div")).toHaveTextContent("—"));
+    expect(screen.getByText("Sonnenaufgang").closest("div")).toHaveTextContent("—");
+    expect(screen.getByText("Sonnenuntergang").closest("div")).toHaveTextContent("—");
+    expect(container.querySelector(".channel-location-sun-card")).not.toHaveTextContent("Invalid Date");
+  });
+
+  it("shows the location settings link in live cards when the saved location is missing", async () => {
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse(settings));
+      return Promise.resolve(jsonResponse({ status: "location_missing" }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    renderWithQuery(<UiProvider><ChannelLocationPage channelId="channel-a" role="manager" /></UiProvider>);
+
+    expect((await screen.findAllByRole("link", { name: "Standort festlegen" })).length).toBe(3);
+    expect(screen.getAllByText("Standort fehlt")).toHaveLength(1);
+    const cards = Array.from(document.querySelectorAll<HTMLElement>(".channel-location-live-empty"));
+    expect(cards).toHaveLength(3);
+    expect(cards[0]).toHaveTextContent("Wetterdaten werden mit einem Kanalstandort angezeigt.");
+    expect(cards[1]).toHaveTextContent("Sonnenzeiten werden mit einem Kanalstandort angezeigt.");
+    expect(cards[2]).toHaveTextContent("Mondphase und Aufgangszeiten werden mit einem Kanalstandort angezeigt.");
+    expect(cards.map((card) => card.querySelector("svg"))).not.toContain(null);
+    expect(document.querySelector(".channel-location-weather-card")).not.toHaveTextContent("—");
+    expect(document.querySelector(".channel-location-sun-card")).not.toHaveTextContent("—");
+    expect(document.querySelector(".channel-location-moon-card")).not.toHaveTextContent("—");
+  });
+
+  it.each([
+    ["de-DE", "gerade aktualisiert"],
+    ["en-US", "just updated"],
+  ])("uses fresh-update wording in %s", async (language, expected) => {
+    setBrowserLanguage(language);
+    vi.stubGlobal("fetch", livePageFetcher({ weather: {
+      ...liveWeather,
+      weather: { ...liveWeather.weather, observedAt: new Date(Date.now() - 30_000).toISOString() },
+    } }));
+    renderWithQuery(<UiProvider><ChannelLocationPage channelId="channel-a" role="manager" /></UiProvider>);
+
+    expect(await screen.findByText(new RegExp(expected, "u"))).toBeInTheDocument();
+  });
+
+  it("shows a readable weather provider error while keeping sun and moon available", async () => {
+    vi.stubGlobal("fetch", livePageFetcher({ weather: { status: "provider_error", reason: "upstream_unavailable" } }));
+    renderWithQuery(<UiProvider><ChannelLocationPage channelId="channel-a" role="manager" /></UiProvider>);
+
+    expect(await screen.findByText("Wetterdienst gerade nicht erreichbar")).toBeInTheDocument();
+    expect(await screen.findByText("Sonne heute")).toBeInTheDocument();
+    expect((await screen.findAllByText("Mond")).length).toBeGreaterThan(0);
+    expect(screen.getByText("74 % beleuchtet")).toBeInTheDocument();
+    expect(document.querySelector(".channel-location-weather-card")?.children).toHaveLength(4);
+    expect(document.querySelectorAll(".channel-location-weather-card .channel-location-skeleton").length).toBeGreaterThan(0);
+  });
+
+  it("links an existing template command and opens a new template request", async () => {
+    const onOpenCommand = vi.fn<(name: string) => void>();
+    const onCreateCommand = vi.fn<(name: string, response: string) => void>();
+    vi.stubGlobal("fetch", livePageFetcher({ commands: [{ name: "wetter" }] }));
+    renderWithQuery(<UiProvider><ChannelLocationPage
+      channelId="channel-a"
+      role="manager"
+      onOpenCommand={onOpenCommand}
+      onCreateCommand={onCreateCommand}
+    /></UiProvider>);
+
+    const commandList = await screen.findByText("!wetter");
+    const commandCard = commandList.closest(".channel-location-command");
+    expect(commandCard).not.toBeNull();
+    fireEvent.click(await within(commandCard as HTMLElement).findByRole("link", { name: "Vorhanden" }));
+    expect(onOpenCommand).toHaveBeenCalledWith("wetter");
+
+    const createButtons = await screen.findAllByRole("button", { name: "Anlegen" });
+    fireEvent.click(createButtons[0] as HTMLButtonElement);
+    expect(onCreateCommand).toHaveBeenCalledWith("sonne", expect.stringContaining("{sun.rise}"));
   });
 });

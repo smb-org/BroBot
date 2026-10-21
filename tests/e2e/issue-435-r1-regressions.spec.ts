@@ -372,7 +372,7 @@ test("location and data source pages scroll in the shell main with a fixed heade
       expect(before.mainOverflowY, `${kind} main scrolls at ${String(viewport.width)}px`).toBe("auto");
       expect(before.mainTabIndex).toBe(-1);
       expect(before.innerScrollRegions, `${kind} has no unintended nested scroll regions`).toEqual([]);
-      if (kind === "location") expect(before.locationColumnOverflowY).toEqual(["visible", "visible"]);
+      if (kind === "location") expect(before.locationColumnOverflowY).toEqual(["visible", "visible", "visible"]);
       if (kind === "location" && viewport.width === 390) {
         expect(before.locationSectionGap, "location sections keep their natural mobile spacing").not.toBeNull();
         expect(before.locationSectionGap ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(40);

@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { useQuery } from "@tanstack/react-query";
 import "./ChannelVariablesPage.css";
 
 import {
@@ -7,6 +8,7 @@ import {
   deleteChannelVariable,
   fetchOverlay,
   fetchOverlays,
+  getChannelTemplateVariables,
   PanelApiError,
   saveOverlay,
   updateChannelVariable,
@@ -16,12 +18,26 @@ import {
   type PanelOverlayElement,
 } from "./api";
 import { apiErrorText, channelVariablesTexts, dashboardCommonTexts, dashboardLanguage, dashboardTexts } from "./locale";
-import { Button, CollectionPage, ConfirmDialog, EmptyCellValue, Field, Icon, InspectorFieldRow, InspectorSection, ListToolbar, LoadState, LoadStateLines, notify, UnitInput, PageHeader, Select, SwitchRow, useDraftGuard } from "./ui";
+import { Button, CollectionPage, ConfirmDialog, EmptyCellValue, Field, Icon, InspectorFieldRow, InspectorSection, ListToolbar, LoadState, LoadStateLines, notify, UnitInput, PageHeader, Select, SwitchRow, TokenChip, useDraftGuard } from "./ui";
 import { CHANNEL_VARIABLE_MAXIMUM_COUNT, CHANNEL_VARIABLE_MAXIMUM_VALUE, CHANNEL_VARIABLE_MINIMUM_VALUE } from "../contracts/values";
-import { dashboardDataKeys } from "./data/keys";
+import { dashboardDataKeys, queryKeys } from "./data/keys";
 import { useDashboardQueryClient } from "./data";
 import { useChannelVariablesQuery, useLegacyOverlayTokensQuery, useOverlaysQuery } from "./data/lists";
 import { registerDashboardNavigationGuard } from "./ui/navigation-guard";
+import { moduleName } from "./module-labels";
+import type { ModuleRegisteredTemplateVariable } from "../modules/contract";
+
+type VariableCatalogFilter = "all" | "own" | "module";
+
+interface ModuleCatalogVariable {
+  name: string;
+  label: string;
+  meaning: string;
+  sample: string;
+  moduleId: string;
+}
+
+const EMPTY_MODULE_CATALOG: readonly ModuleRegisteredTemplateVariable[] = [];
 
 interface VariableDefinitionDraft {
   name: string;
@@ -64,13 +80,32 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const language = dashboardLanguage();
   const labels = channelVariablesTexts(language);
   const variablesQuery = useChannelVariablesQuery(channelId);
+  const moduleCatalogQuery = useQuery({
+    queryKey: queryKeys.channel(channelId, "template-variables"),
+    queryFn: ({ signal }) => getChannelTemplateVariables(channelId, signal),
+    staleTime: 5 * 60 * 1_000,
+  });
   const legacyTokensQuery = useLegacyOverlayTokensQuery(channelId);
   const queryClient = useDashboardQueryClient();
   const variables = variablesQuery.data?.variables ?? EMPTY_VARIABLES;
+  const moduleCatalogVariables: ModuleCatalogVariable[] = (moduleCatalogQuery.data ?? EMPTY_MODULE_CATALOG)
+    .filter((variable) => typeof variable.moduleId === "string" && variable.moduleId !== "host" && variable.moduleId.length > 0 && variable.name.includes("."))
+    .map((variable) => {
+      const localized = variable.picker?.[language];
+      return {
+        name: variable.name,
+        label: localized?.label ?? variable.name,
+        meaning: localized?.description ?? variable.description ?? variable.localizedDescription?.[language] ?? "",
+        sample: localized?.sample ?? variable.sample,
+        moduleId: variable.moduleId,
+      };
+    });
   const maximum = variablesQuery.data?.maximum ?? CHANNEL_VARIABLE_MAXIMUM_COUNT;
   const loading = variablesQuery.isPending;
   const loadFailed = variablesQuery.isError;
   const [search, setSearch] = useState("");
+  const [catalogFilter, setCatalogFilter] = useState<VariableCatalogFilter>("all");
+  const [selectedCatalogName, setSelectedCatalogName] = useState<string | null>(null);
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [selectedSnapshot, setSelectedSnapshot] = useState<PanelChannelVariable | null>(null);
   const [creating, setCreating] = useState(false);
@@ -140,6 +175,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
 
   const selected = useMemo(() => variables.find((variable) => variable.name === selectedName) ?? null, [selectedName, variables]);
   const selectedForDisplay = selected ?? (selectedSnapshot?.name === selectedName ? selectedSnapshot : null);
+  const selectedCatalogVariable = moduleCatalogVariables.find((variable) => variable.name === selectedCatalogName) ?? null;
   const definitionConflict = !creating && selectedName !== null && selected === null && definitionBaseline !== null;
   const legacyRenameWarning = canManageContent && selected !== null && hasTokens(legacyTokensQuery.data?.pages[0]) && normalizedVariableName(draftName) !== selected.name;
   const draftValue = editingValue ? inlineValue : draftSetValue;
@@ -203,6 +239,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const draftInvalid = nameInvalid || typeof draftValue !== "number" || !Number.isInteger(draftValue) || draftValue < CHANNEL_VARIABLE_MINIMUM_VALUE || draftValue > CHANNEL_VARIABLE_MAXIMUM_VALUE;
   const beginCreate = (): void => {
     setCreating(true);
+    setSelectedCatalogName(null);
     setSelectedVariableName(null);
     setSelectedSnapshot(null);
     setDefinitionBaseline(null);
@@ -221,6 +258,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     setNewOverlayName("");
   };
   const selectVariable = (variable: PanelChannelVariable): void => {
+    setSelectedCatalogName(null);
     setCreating(false);
     setEditingValue(false);
     setSelectedVariableName(variable.name);
@@ -257,6 +295,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     onInitialSelectionConsumed?.(initialSelection);
   }, [initialSelection, loading, onInitialSelectionConsumed, variables]);
   const closeInspector = (): void => {
+    setSelectedCatalogName(null);
     setCreating(false);
     setSelectedVariableName(null);
     setSelectedSnapshot(null);
@@ -380,6 +419,28 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     if (!creating && variable.name === selectedName) return;
     navigationGuard.guardSwitch(() => { selectVariable(variable); });
   };
+  const requestSelectCatalogVariable = (variable: ModuleCatalogVariable): void => {
+    if (pending || overlayPending || selectedCatalogName === variable.name) return;
+    navigationGuard.guardSwitch(() => {
+      setCreating(false);
+      setSelectedVariableName(null);
+      setSelectedSnapshot(null);
+      setDefinitionBaseline(null);
+      setSelectedCatalogName(variable.name);
+      setEditingValue(false);
+      setValueEdited(false);
+      setSaved(false);
+      setSaveError(undefined);
+    });
+  };
+  const changeCatalogFilter = (filter: VariableCatalogFilter): void => {
+    if (filter === catalogFilter) return;
+    if (selectedCatalogName !== null) {
+      navigationGuard.guardSwitch(() => { setSelectedCatalogName(null); setCatalogFilter(filter); });
+      return;
+    }
+    setCatalogFilter(filter);
+  };
   const requestCloseInspector = (): void => {
     if (pending || overlayPending) return;
     navigationGuard.guardSwitch(closeInspector);
@@ -478,10 +539,20 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   };
 
   const query = search.trim().toLocaleLowerCase();
-  const visibleVariables = query.length === 0 ? variables : variables.filter((variable) => `${variable.name} ${variable.description}`.toLocaleLowerCase().includes(query));
-  const listStatus = loading && variables.length === 0 ? "loading"
-    : variables.length === 0 ? loadFailed ? "error" : "empty"
-      : visibleVariables.length === 0 ? "empty" : "success";
+  const ownMatches = query.length === 0 ? variables : variables.filter((variable) => `${variable.name} ${variable.description}`.toLocaleLowerCase().includes(query));
+  const moduleMatches = query.length === 0 ? moduleCatalogVariables : moduleCatalogVariables.filter((variable) =>
+    `${variable.name} ${variable.label} ${variable.meaning}`.toLocaleLowerCase().includes(query));
+  const visibleVariables = catalogFilter === "module" ? [] : ownMatches;
+  const visibleModuleVariables = catalogFilter === "own" ? [] : moduleMatches;
+  const visibleCount = visibleVariables.length + visibleModuleVariables.length;
+  const catalogLoading = catalogFilter !== "own" && moduleCatalogQuery.isPending;
+  const ownLoading = catalogFilter !== "module" && loading && variables.length === 0;
+  const catalogError = catalogFilter === "module" ? labels.catalogLoadError : variablesLoadError;
+  const listStatus = catalogLoading || ownLoading ? "loading"
+    : visibleCount === 0
+      ? (catalogFilter !== "module" && variables.length === 0 && loadFailed) || (catalogFilter === "module" && moduleCatalogQuery.isError) ? "error" : "empty"
+      : "success";
+  const providerName = selectedCatalogVariable === null ? "" : moduleName(selectedCatalogVariable.moduleId, language);
   const toolbar = <>
     <ListToolbar
       searchLabel={labels.search}
@@ -504,6 +575,15 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
       } } : {})}
       {...(query.length === 0 ? {} : { activeFilters: `${labels.search}: ${search.trim()}`, activeFiltersLabel: dashboardCommonTexts().activeFilters, resetLabel: dashboardCommonTexts().reset, onReset: () => { setSearch(""); } })}
     />
+    <div className="channel-variable-catalog-filter" role="group" aria-label={labels.catalogFilterLabel}>
+      {(["all", "own", "module"] as const).map((filter) => <button
+        key={filter}
+        type="button"
+        aria-pressed={catalogFilter === filter}
+        onClick={() => { changeCatalogFilter(filter); }}
+      >{filter === "all" ? labels.catalogAll : filter === "own" ? labels.catalogOwn : labels.catalogModules}</button>)}
+    </div>
+    {catalogFilter !== "own" && moduleCatalogQuery.isError ? <p className="muted" role="alert">{labels.catalogLoadError}</p> : null}
     {!canManageContent && !creating && selectedForDisplay === null ? <p className="muted channel-variables-permission-note" role="note">{labels.managementLocked}</p> : null}
   </>;
   const list = <section className="channel-variables-list" aria-label={labels.list}>
@@ -512,31 +592,69 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
       status={listStatus}
       loading={<LoadStateLines rows={8} height={34} />}
       empty={<p className="empty-state">{variables.length === 0 ? labels.empty : dashboardCommonTexts().noMatches}</p>}
-      error={<p role="alert">{variablesLoadError}</p>}
-      queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: variablesLoadError, onRetry: () => { void refresh().catch(() => undefined); } }}
-    >{visibleVariables.length === 0 ? null : <div className="table-wrap channel-variables-table-wrap">
+      error={<p role="alert">{catalogError}</p>}
+      queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: catalogError, onRetry: () => {
+        if (catalogFilter === "module") void moduleCatalogQuery.refetch();
+        else void refresh().catch(() => undefined);
+      } }}
+    >{visibleCount === 0 ? null : <div className="table-wrap channel-variables-table-wrap">
       <table className="table channel-variables-table">
         <thead><tr>
           <th scope="col">{labels.name}</th>
           <th scope="col">{labels.description}</th>
           <th scope="col" className="channel-variables-table__value-heading">{labels.value}</th>
-          <th scope="col" className="channel-variables-table__reset-heading"><span className="sr-only">{labels.resetOnStreamStart}</span><Icon name="reload" size={16} /></th>
         </tr></thead>
-        <tbody>{visibleVariables.map((variable) => (
-          <tr key={variable.name} tabIndex={0} aria-selected={variable.name === selectedName} onClick={() => { requestSelectVariable(variable); }} onKeyDown={(event) => {
+        <tbody>
+          {visibleVariables.map((variable) => <tr key={`own:${variable.name}`} tabIndex={0} aria-selected={variable.name === selectedName} onClick={() => { requestSelectVariable(variable); }} onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") { event.preventDefault(); requestSelectVariable(variable); }
           }}>
-            <th scope="row" className="mono" aria-label={`{var.${variable.name}}`} title={`{var.${variable.name}}`}><span className="channel-variables-table__name">{`{var.${variable.name}}`}</span></th>
+            <th scope="row" className="mono" aria-label={`{var.${variable.name}}`} title={`{var.${variable.name}}`}>
+              <span className="channel-variables-table__name">{`{var.${variable.name}}`}</span>
+              <span className="channel-variables-table__source">{labels.catalogOwnSource}{variable.resetOnStreamStart ? <span role="img" aria-label={labels.resetOnStreamStart} title={labels.resetOnStreamStart}><Icon name="reload" size={16} /></span> : null}</span>
+            </th>
             <td className="channel-variables-table__description" title={variable.description || labels.noDescription}><span className="channel-variables-table__description-text">{variable.description || <EmptyCellValue />}</span></td>
             <td className="number channel-variables-table__value">{new Intl.NumberFormat(language).format(variable.value)}</td>
-            <td className="channel-variables-table__reset">
-              {variable.resetOnStreamStart ? <span role="img" aria-label={labels.resetOnStreamStart} title={labels.resetOnStreamStart}><Icon name="reload" size={16} /></span> : <EmptyCellValue />}
-            </td>
-          </tr>
-        ))}</tbody>
+          </tr>)}
+          {visibleModuleVariables.map((variable) => <tr key={`module:${variable.name}`} tabIndex={0} aria-selected={variable.name === selectedCatalogName} onClick={() => { requestSelectCatalogVariable(variable); }} onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") { event.preventDefault(); requestSelectCatalogVariable(variable); }
+          }}>
+            <th scope="row" className="mono" aria-label={`{${variable.name}}`} title={`{${variable.name}}`}>
+              <span className="channel-variables-table__name">{`{${variable.name}}`}</span>
+              <span className="channel-variables-table__source">{labels.catalogModuleSource(moduleName(variable.moduleId, language))}</span>
+            </th>
+            <td className="channel-variables-table__description" title={variable.meaning}><span className="channel-variables-table__description-text">{variable.meaning || <EmptyCellValue />}</span></td>
+            <td className="number channel-variables-table__value channel-variables-table__value--sample" title={variable.sample}>{variable.sample}</td>
+          </tr>)}
+        </tbody>
       </table>
     </div>}</LoadState>
   </section>;
+
+  const moduleDetail = selectedCatalogVariable === null ? null : <div className="channel-variable-module-detail">
+    <div className="channel-variable-editor__header">
+      <PageHeader
+        kind="variable"
+        headingLevel="h2"
+        title={selectedCatalogVariable.label}
+        pageActions={<TokenChip token={`{${selectedCatalogVariable.name}}`} description={selectedCatalogVariable.meaning} />}
+      />
+    </div>
+    <div className="channel-variable-editor__scroll">
+      <InspectorSection title={labels.generalSection}>
+        <dl className="properties channel-variable-definition-properties">
+          <div><dt>{labels.catalogMeaning}</dt><dd>{selectedCatalogVariable.meaning || labels.noDescription}</dd></div>
+          <div><dt>{labels.catalogExample}</dt><dd className="number">{selectedCatalogVariable.sample}</dd></div>
+        </dl>
+        <p className="muted" role="note">{labels.catalogReadOnly}</p>
+        <a className="channel-variable-catalog-provider" href={`/channels/${encodeURIComponent(channelId)}/modules/${encodeURIComponent(selectedCatalogVariable.moduleId)}`}>
+          {labels.catalogProvidedBy(providerName)}
+        </a>
+      </InspectorSection>
+    </div>
+  </div>;
+  const emptyDetail = selectedForDisplay === null && !creating && selectedCatalogVariable === null
+    ? <div className="channel-variable-catalog-empty" role="status">{labels.catalogSelectHint}</div>
+    : null;
 
   const editor = creating || selectedForDisplay !== null ? (
     <div className="channel-variable-editor" aria-label={creating ? labels.newVariable : labels.title}>
@@ -550,7 +668,10 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
           headingLevel="h2"
           titleContent={creating ? labels.newVariable : <span className="mono" title={`{var.${draftName || selectedForDisplay?.name || "variable"}}`}>{`{var.`}<wbr />{(draftName || selectedForDisplay?.name || "variable").split("_").map((segment, index, segments) => <Fragment key={`${draftName}-${String(index)}`}>{segment}{index < segments.length - 1 ? <>_<wbr /></> : null}</Fragment>)}{"}"}</span>}
           title={creating ? labels.newVariable : draftName || selectedForDisplay?.name || labels.name}
-          pageActions={<Button variant="neutral" icon="close" iconOnly ariaLabel={labels.close} onClick={requestCloseInspector} disabled={pending || overlayPending} />}
+          pageActions={<div className="channel-variable-editor__page-actions">
+            {!creating && selectedForDisplay !== null ? <TokenChip token={`{var.${selectedForDisplay.name}}`} description={selectedForDisplay.description} /> : null}
+            <Button variant="neutral" icon="close" iconOnly ariaLabel={labels.close} onClick={requestCloseInspector} disabled={pending || overlayPending} />
+          </div>}
           save={{
             persistent: true,
             dirty: draftDirty,
@@ -688,8 +809,8 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
       heading={<PageHeader kind="variable" title={labels.title} subtitle={labels.pageDescription} />}
       toolbar={toolbar}
       list={list}
-      detail={editor}
-      detailOpen={creating || selectedForDisplay !== null}
+      detail={moduleDetail ?? editor ?? emptyDetail}
+      detailOpen={creating || selectedForDisplay !== null || moduleDetail !== null}
       backLabel={labels.backToList}
       closeDetailDisabled={pending || overlayPending}
       onCloseDetail={requestCloseInspector}

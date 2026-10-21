@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 import type { ChannelRole } from "../contracts/values";
 import { canManage } from "../contracts/values";
 import { PanelApiError, saveChannelLocation, saveChannelTimeZone, type PanelChannelLocation, type PanelChannelSettings } from "./api";
+import { ChannelLocationLiveCards, ChannelLocationReference } from "./ChannelLocationLive";
 import { ChannelLocationField } from "./ChannelLocationField";
 import { ChannelTimeZoneField } from "./ChannelTimeZoneField";
 import { mergeChannelSettingsResponse } from "./channel-settings-cache";
@@ -34,7 +35,12 @@ interface ChannelSettingsDraft {
   location: PanelChannelLocation | null;
 }
 
-export const ChannelLocationPage = ({ channelId, role }: { channelId: string; role: ChannelRole }): ReactElement => {
+export const ChannelLocationPage = ({ channelId, role, onOpenCommand = () => {}, onCreateCommand = () => {} }: {
+  channelId: string;
+  role: ChannelRole;
+  onOpenCommand?: (name: string) => void;
+  onCreateCommand?: (name: string, response: string) => void;
+}): ReactElement => {
   const language = dashboardLanguage();
   const labels = channelSettingsTexts(language);
   const dashboard = dashboardTexts();
@@ -191,32 +197,50 @@ export const ChannelLocationPage = ({ channelId, role }: { channelId: string; ro
       meta={labels.pageDescription}
       {...(saveCluster === undefined ? {} : { saveStatus: saveCluster })}
       columns={[
-        <Section key="time-zone" title={labels.timeZoneSection}>
-          {!canEdit ? <dl className="channel-location-page__properties">
-            <div><dt>{labels.timeZone}</dt><dd>{settingsReady ? timeZone : "—"}</dd></div>
-          </dl> : <ChannelTimeZoneField label={labels.timeZone} hint={labels.timeZoneHint} value={timeZone}
-            onChange={(value) => { writeDraft({ timeZone: value }); }} canEdit disabled={!settingsReady || settingsQuery.isFetching || pending} />}
-          {!canEdit ? <LockedReason id={readOnlyReasonId} reason={labels.readOnly} /> : null}
-        </Section>,
-        <Section key="location" title={labels.location}>
-          <LoadState variant="panel-260"
-            status={!settingsReady ? settingsQuery.isError || settings !== undefined ? "error" : "loading" : "success"}
-            loading={<LoadStateLines rows={2} height={58} />}
-            empty={<LoadStateLines rows={2} height={58} />}
-            error={<p role="alert">{loadError}</p>}
-            queryError={{ title: dashboard.errors.dataLoadFailed, message: loadError, onRetry: () => { void settingsQuery.refetch(); } }}>
-            {!settingsReady ? null : <>
-              {location === null ? <div className="channel-location-page__warning" role="status">
-                <StatusLed state="warn" label={labels.locationMissingWarning} dotOnly />
-                <div><strong>{labels.locationMissing}</strong><span>{labels.locationMissingWarning}</span></div>
-              </div> : null}
-              <ChannelLocationField channelId={channelId} language={language} value={location}
-                onChange={(value) => { writeDraft({ location: value }); }} channelTimeZone={timeZone}
-                onSelectChannelTimeZone={(value) => { writeDraft({ timeZone: value }); }} canEdit={canEdit}
-                disabled={settingsQuery.isFetching || pending} readOnlyReasonId={readOnlyReasonId} />
-            </>}
-          </LoadState>
-        </Section>,
+        <>
+          <Section key="time-zone" title={labels.timeZoneSection}>
+            {!canEdit ? <dl className="channel-location-page__properties">
+              <div><dt>{labels.timeZone}</dt><dd>{settingsReady ? timeZone : "—"}</dd></div>
+            </dl> : <ChannelTimeZoneField label={labels.timeZone} hint={labels.timeZoneHint} value={timeZone}
+              onChange={(value) => { writeDraft({ timeZone: value }); }} canEdit disabled={!settingsReady || settingsQuery.isFetching || pending} />}
+            {!canEdit ? <LockedReason id={readOnlyReasonId} reason={labels.readOnly} /> : null}
+          </Section>
+          <div id="location">
+            <Section title={labels.location}>
+              <LoadState variant="compact-64" reserveHeight="calc(var(--s10) * 3)"
+                status={!settingsReady ? settingsQuery.isError || settings !== undefined ? "error" : "loading" : "success"}
+                loading={<LoadStateLines rows={2} height={56} />}
+                empty={<LoadStateLines rows={2} height={56} />}
+                error={<p role="alert">{loadError}</p>}
+                queryError={{ title: dashboard.errors.dataLoadFailed, message: loadError, onRetry: () => { void settingsQuery.refetch(); } }}>
+                {!settingsReady ? null : <>
+                  {location === null ? <div className="channel-location-page__warning" role="status">
+                    <StatusLed state="warn" label={labels.locationMissingWarning} dotOnly />
+                    <div><strong>{labels.locationMissing}</strong><span>{labels.locationMissingWarning}</span></div>
+                  </div> : null}
+                  <ChannelLocationField channelId={channelId} language={language} value={location}
+                    onChange={(value) => { writeDraft({ location: value }); }} channelTimeZone={timeZone}
+                    onSelectChannelTimeZone={(value) => { writeDraft({ timeZone: value }); }} canEdit={canEdit}
+                    disabled={settingsQuery.isFetching || pending} readOnlyReasonId={readOnlyReasonId} />
+                </>}
+              </LoadState>
+            </Section>
+          </div>
+        </>,
+        <ChannelLocationLiveCards
+          key="live"
+          channelId={channelId}
+          locationLoaded={settingsReady}
+          hasLocation={settingsReady && settings.location !== null}
+          locationRevision={settings?.locationRevision ?? 1}
+          timeZone={timeZone || settings?.timeZone || "UTC"}
+        />,
+        <ChannelLocationReference
+          key="reference"
+          channelId={channelId}
+          onOpenCommand={onOpenCommand}
+          onCreateCommand={onCreateCommand}
+        />,
       ]}
     />
     <ConfirmDialog opened={navigationGuard.confirmOpen} title={dashboard.module.unsavedChangesTitle}

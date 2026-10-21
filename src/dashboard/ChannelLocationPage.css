@@ -15,8 +15,83 @@
   .channel-location-page__warning > div { display: grid; min-width: 0; gap: 2px; }
   .channel-location-page__warning strong { font-size: 13px; }
   .channel-location-page__warning span { color: var(--text-2); font-size: 12px; line-height: 1.4; }
+  .channel-location-live-column, .channel-location-reference-column { display: grid; align-content: start; gap: var(--s4); min-width: 0; }
+  .channel-location-weather-card, .channel-location-sun-card, .channel-location-moon-card { position: relative; box-sizing: border-box; min-width: 0; padding: var(--s3); border-radius: var(--r-container); background: var(--surface-raised); }
+  .channel-location-weather-card { display: grid; }
+  .channel-location-weather-card--empty { display: flex; align-items: stretch; }
+  .channel-location-skeleton { display: inline-block; width: 4.25em; max-width: 100%; height: .85em; vertical-align: middle; border-radius: var(--r-control); background: var(--surface-hover); }
+  .channel-location-skeleton--short { width: 2.75em; }
+  .channel-location-skeleton--wide { width: 5.75em; }
+  .channel-location-skeleton--temperature { width: 4.5em; height: 1em; }
+  .channel-location-weather-card__heading { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); color: var(--text-2); font-size: 12px; }
+  .channel-location-weather-card__heading > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .channel-location-weather-card__icon { color: var(--content-weather-sun); }
+  .channel-location-weather-card__temperature { min-height: var(--s10); overflow: hidden; color: var(--content-temperature-mild); font-family: var(--font-mono); font-size: 26px; font-variant-numeric: tabular-nums; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
+  .channel-location-weather-card__condition { display: flex; align-items: baseline; gap: var(--s2); min-height: var(--s8); overflow: hidden; font-weight: 500; }
+  .channel-location-weather-card__condition span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .channel-location-weather-card__condition span:last-child { color: var(--text-2); font-size: 12px; font-weight: 400; }
+  .channel-location-weather-card__footer { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: var(--s2); min-height: var(--s8); border-top: 1px solid var(--line); color: var(--text-2); font-size: 12px; }
+  .channel-location-weather-card__footer > span:first-child { display: inline-flex; flex: none; align-items: center; gap: var(--s1); }
+  .channel-location-weather-card__footer > span:last-child { flex: 1 1 auto; min-width: 0; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+  .channel-location-live-status { display: flex; min-width: 0; align-items: center; margin-top: var(--s2); color: var(--text-2); font-size: 12px; line-height: 1.4; }
+  .channel-location-live-empty { display: grid; width: 100%; min-width: 0; grid-template-columns: auto minmax(0, 1fr); align-content: center; align-items: center; gap: var(--s2); color: var(--text-2); font-size: 12px; line-height: 1.45; }
+  .channel-location-weather-card--empty .channel-location-live-empty > svg { color: var(--content-weather-sun); }
+  .channel-location-sun-card { min-height: 0; }
+  .channel-location-live-card--empty { display: flex; align-items: stretch; }
+  .channel-location-sun-card.channel-location-live-card--empty .channel-location-live-empty > svg { color: var(--content-sun-icon); }
+  .channel-location-moon-card.channel-location-live-card--empty .channel-location-live-empty > svg { color: var(--content-moon-lit); }
+  .channel-location-sun-card__heading { display: flex; align-items: center; gap: var(--s2); min-height: 24px; color: var(--content-sun-icon); }
+  .channel-location-sun-card__heading span { margin-left: auto; color: var(--text-3); font-size: 11px; }
+  .channel-location-sun-arc { position: relative; height: 28px; margin: var(--s3) 6px var(--s1); }
+  .channel-location-sun-arc__line { position: absolute; top: 13px; right: 0; left: 0; height: 2px; border-radius: 999px; background: linear-gradient(90deg, var(--content-sun-dawn), var(--content-sun-sunrise), var(--content-sun-noon), var(--content-sun-golden), var(--content-sun-sunset), var(--content-sun-blue-hour)); }
+  .channel-location-sun-arc__point { position: absolute; z-index: 1; top: 9px; left: var(--position); width: 9px; height: 9px; border: 2px solid var(--surface-raised); border-radius: 50%; background: var(--phase-color); transform: translateX(-50%); }
+  .channel-location-sun-arc__now { position: absolute; z-index: 2; top: 5px; left: var(--position); width: 16px; height: 16px; border: 2px solid var(--content-sun-noon); border-radius: 50%; background: var(--content-sun-golden); transform: translateX(-50%); }
+  .channel-location-sun-arc__labels { position: relative; min-height: var(--s8); margin-top: var(--s1); color: var(--text-3); font-family: var(--font-mono); font-size: 10px; font-variant-numeric: tabular-nums; }
+  .channel-location-sun-arc__labels > span:first-child, .channel-location-sun-arc__labels > span:nth-child(2) { position: absolute; top: 0; }
+  .channel-location-sun-arc__labels > span:first-child { left: 0; }
+  .channel-location-sun-arc__labels > span:nth-child(2) { right: 0; }
+  .channel-location-sun-arc__now-label { position: absolute; top: var(--s4); left: clamp(14%, var(--position), 86%); transform: translateX(-50%); white-space: nowrap; }
+  .channel-location-sun-arc__now-label--start { left: 0; transform: none; }
+  .channel-location-sun-arc__now-label--end { right: 0; left: auto; transform: none; text-align: right; }
+  .channel-location-sun-next { display: flex; justify-content: space-between; gap: var(--s2); min-height: 38px; align-items: center; margin-top: var(--s2); border-top: 1px solid var(--line); color: var(--text-3); font-size: 11px; }
+  .channel-location-sun-next > span, .channel-location-sun-next strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .channel-location-sun-next strong { color: var(--text-2); text-align: right; }
+  .channel-location-sun-events { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s2) var(--s3); margin: var(--s2) 0 0; }
+  .channel-location-sun-events > div, .channel-location-moon-events > div { display: grid; gap: 2px; min-width: 0; }
+  .channel-location-sun-events dt { display: flex; min-width: 0; align-items: center; gap: 5px; overflow: hidden; color: var(--text-3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+  .channel-location-sun-events dt span { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--phase-color); }
+  .channel-location-sun-events dd, .channel-location-moon-events dd { min-width: 0; margin: 0; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+  .channel-location-sun-events__interval { width: fit-content; padding: 2px var(--s2); border-radius: 999px; white-space: nowrap; }
+  .channel-location-sun-events__interval--golden { color: var(--content-sun-golden-ink); background: var(--content-sun-golden-chip); }
+  .channel-location-sun-events__interval--blue { color: var(--content-sun-blue-ink); background: var(--content-sun-blue-chip); }
+  .channel-location-moon-card { min-height: 0; }
+  .channel-location-moon-card__phase { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: var(--s2); min-height: 42px; }
+  .channel-location-moon-card__phase strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .channel-location-moon-card__phase svg { color: var(--content-moon-lit); fill: var(--content-moon-lit); stroke: var(--content-moon-shadow); }
+  .channel-location-moon-card__phase span { color: var(--text-2); font-size: 12px; white-space: nowrap; }
+  .channel-location-moon-events { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s2); margin: var(--s2) 0 0; padding-top: var(--s2); border-top: 1px solid var(--line); }
+  .channel-location-moon-events dt { overflow: hidden; color: var(--text-3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+  .channel-location-reference__hint { margin: 0 0 var(--s2); color: var(--text-3); font-size: 12px; line-height: 1.45; }
+  .channel-location-command-list { display: grid; }
+  .channel-location-command { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--s3); min-width: 0; padding: var(--s2) 0; border-bottom: 1px solid var(--line); }
+  .channel-location-command:last-child { border-bottom: 0; }
+  .channel-location-command__copy { display: grid; gap: 3px; min-width: 0; }
+  .channel-location-command__copy strong { color: var(--text); font-size: 12px; }
+  .channel-location-command__copy span { color: var(--text-3); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
+  .channel-location-command__action { display: inline-flex; min-width: 86px; min-height: var(--control-height); align-items: center; justify-content: center; padding: 0 var(--s2); border: 1px solid var(--line); border-radius: var(--r-control); background: transparent; color: var(--brand-text); font: inherit; font-size: 11px; text-decoration: none; white-space: nowrap; cursor: pointer; }
+  .channel-location-command__action:hover { background: var(--surface-hover); }
+  .channel-location-command__action:disabled { color: var(--text-3); cursor: not-allowed; }
+  .channel-location-command__action-placeholder { width: 86px; height: var(--control-height); border-radius: var(--r-control); background: var(--surface-hover); }
+  .channel-location-variable-groups { display: grid; gap: var(--s3); }
+  .channel-location-variable-group { display: grid; gap: var(--s2); min-width: 0; }
+  .channel-location-variable-group > strong { color: var(--text-2); font-size: 12px; }
+  .channel-location-variable-group > div { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+  .channel-location-variable-group .ui-token-chip { max-width: 100%; }
   @media (max-width: 600px) {
-    .channel-location-page .settings-page > .page-header { margin-bottom: 8px; padding-bottom: 8px; }
     .channel-location-page .settings-page__columns { align-content: start; padding: 8px 0; }
+    .channel-location-page .settings-page__column { min-height: 0; }
+    .channel-location-sun-events { column-gap: var(--s2); }
+    .channel-location-moon-events { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
+  @media (max-width: 600px) { .channel-location-page .settings-page > .page-header { margin-bottom: 8px; padding-bottom: 8px; } }
 }

@@ -530,6 +530,18 @@ export interface ChannelVariablesTexts {
   variableMissing: string;
   reconnectConflict: string;
   legacyRenameWarning: string;
+  catalogFilterLabel: string;
+  catalogAll: string;
+  catalogOwn: string;
+  catalogModules: string;
+  catalogLoadError: string;
+  catalogMeaning: string;
+  catalogExample: string;
+  catalogReadOnly: string;
+  catalogSelectHint: string;
+  catalogOwnSource: string;
+  catalogModuleSource: (moduleName: string) => string;
+  catalogProvidedBy: (moduleName: string) => string;
 }
 
 const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
@@ -562,6 +574,10 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     openEditor: "Editor öffnen", reconnect: "Neu verbinden", variableMissing: "Variable fehlt — neu wählen.",
     reconnectConflict: "Das Overlay-Element wurde inzwischen geändert. Lade die Seite neu, bevor du es verbindest.",
     legacyRenameWarning: "Alte Links mit #var=… zeigen diese Variable nach der Umbenennung nicht mehr an.",
+    catalogFilterLabel: "Variablen filtern", catalogAll: "Alle", catalogOwn: "Eigene", catalogModules: "Module",
+    catalogLoadError: "Modulvariablen konnten nicht geladen werden.", catalogMeaning: "Bedeutung", catalogExample: "Beispielwert",
+    catalogReadOnly: "Diese Modulvariable ist schreibgeschützt.", catalogSelectHint: "Wähle eine Variable aus der Liste, um Details und Verwendungen zu sehen.",
+    catalogOwnSource: "Eigene Variable", catalogModuleSource: (moduleName) => `Modul · ${moduleName}`, catalogProvidedBy: (moduleName) => `Wird bereitgestellt von ${moduleName}`,
   },
   en: {
     title: "Channel variables", pageDescription: "Manage numeric variables, their current values, and where they are used.", list: "Variables", search: "Search variables", countSuffix: "variables", limitSuffix: "variables used", filteredSuffix: "variables", create: "Create variable",
@@ -592,6 +608,10 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     openEditor: "Open editor", reconnect: "Reconnect", variableMissing: "Variable missing — choose it again.",
     reconnectConflict: "This overlay element has changed. Reload the page before reconnecting it.",
     legacyRenameWarning: "Old links using #var=… will stop showing this variable after it is renamed.",
+    catalogFilterLabel: "Filter variables", catalogAll: "All", catalogOwn: "Own", catalogModules: "Modules",
+    catalogLoadError: "Module variables could not be loaded.", catalogMeaning: "Meaning", catalogExample: "Example value",
+    catalogReadOnly: "This module variable is read-only.", catalogSelectHint: "Select a variable from the list to see its details and uses.",
+    catalogOwnSource: "Own variable", catalogModuleSource: (moduleName) => `Module · ${moduleName}`, catalogProvidedBy: (moduleName) => `Provided by ${moduleName}`,
   },
 };
 

@@ -1,13 +1,15 @@
 import {
-  AlertTriangle, ArrowUp, BellRing, Braces, Check, ChevronLeft, Clock, Copy, Crown, Diamond, ExternalLink, Film, GripVertical, Image, Info, KeyRound, Layers,
+  AlertTriangle, ArrowUp, BellRing, Braces, Check, ChevronLeft, Clock, Cloud, CloudFog, CloudLightning, CloudMoon, CloudRain, CloudSnow, CloudSun, Copy, Crown, Diamond, ExternalLink, Film, GripVertical, Image, Info, KeyRound, Layers,
   Lock, MapPin, Megaphone, MessageSquareText, Minus, MoreVertical, Pause, Pencil, Play, Plus, Radio, RadioTower, RefreshCw, Search, Settings,
-  SlidersHorizontal, Square, Star, Sword, Trash2, Type, User, UserMinus, UserPlus, Users, Video, Volume2, VolumeX, Vote, X, Zap,
+  SlidersHorizontal, Square, Star, Sun, Moon, Wind, Sword, Trash2, Type, User, UserMinus, UserPlus, Users, Video, Volume2, VolumeX, Vote, X, Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ReactElement } from "react";
 
 const glyphs = {
   ad: Megaphone, shoutout: User, clip: Film, vote: Vote, boss: Crown, blitz: Zap,
+  cloud: Cloud, "cloud-fog": CloudFog, "cloud-lightning": CloudLightning, "cloud-moon": CloudMoon,
+  "cloud-rain": CloudRain, "cloud-snow": CloudSnow, "cloud-sun": CloudSun, moon: Moon, sun: Sun, wind: Wind,
   add: Plus, remove: Trash2, close: X, copy: Copy, copied: Check,
   reload: RefreshCw, search: Search, lock: Lock, external: ExternalLink,
   warning: AlertTriangle, jumpToTop: ArrowUp, collapse: ChevronLeft,

@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleRouteEnvironment } from "../../src/modules/contract";
 import { sunRoutes } from "../../src/modules/sun/routes";
@@ -8,6 +8,7 @@ import { prepareModuleAudit } from "../../src/worker/module-audit";
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { panelRouter } from "../../src/worker/panel/routes";
+import { readChannelLocation } from "../../src/worker/db/channel-settings";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 
@@ -27,6 +28,7 @@ const appFor = (database: D1Database, publishedHostEvents: string[] = []): Hono<
   app.use("*", async (context, next) => {
     context.set("channelRole", "manager");
     context.set("actor", { userId: ACTOR_ID, sessionId: "sun-route-session" });
+    context.set("channelLocation", (channelId) => readChannelLocation(database, channelId));
     context.set("authorizeManagementMutation", () => ({ sql: "AND 1 = 1", values: [] }));
     context.set("prepareModuleAudit", (entry, changedAt) =>
       prepareModuleAudit(database, ACTOR_ID, changedAt, entry));
@@ -50,6 +52,7 @@ const requestFor = (revision: number, nextTexts = errorTexts): Request =>
   });
 
 afterEach(() => {
+  vi.useRealTimers();
   for (const database of databases.splice(0)) database.close();
 });
 
@@ -172,5 +175,42 @@ describe("sun settings via the real worker router", () => {
         en: "Sun data is currently unavailable.",
       },
     });
+  });
+});
+
+describe("sun today route", () => {
+  it("returns today's solar events and golden and blue hour intervals as ISO instants", async () => {
+    const database = await createDatabase();
+    await database.prepare(
+      "UPDATE channels SET location_name = ?, location_latitude = ?, location_longitude = ?, location_time_zone = ? WHERE channel_id = ?",
+    ).bind("Berlin", 52.52, 13.405, "Europe/Berlin", CHANNEL_ID).run();
+    vi.setSystemTime(new Date("2026-10-21T12:00:00.000Z"));
+    const app = appFor(database as unknown as D1Database);
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/today`), {
+      DB: database as unknown as D1Database,
+    });
+    const body = await response.json<{ status: string; day?: { localDate: string; sunriseAt: string | null; sunsetAt: string | null }; goldenHourIntervals?: { startAt: string; endAt: string }[]; blueHourIntervals?: { startAt: string; endAt: string }[]; nextDawnAt?: string | null }>();
+
+    expect(response.status).toBe(200);
+    expect(body.status).toBe("ok");
+    expect(body.day?.localDate).toBe("2026-10-21");
+    expect(Number.isFinite(Date.parse(body.day?.sunriseAt ?? ""))).toBe(true);
+    expect(Number.isFinite(Date.parse(body.day?.sunsetAt ?? ""))).toBe(true);
+    expect(body.nextDawnAt === null || Date.parse(body.nextDawnAt ?? "") > Date.now()).toBe(true);
+    expect(body.goldenHourIntervals?.every(({ startAt, endAt }) => Date.parse(startAt) < Date.parse(endAt))).toBe(true);
+    expect(body.blueHourIntervals?.every(({ startAt, endAt }) => Date.parse(startAt) < Date.parse(endAt))).toBe(true);
+  });
+
+  it("returns a missing-location state for channel members without a saved place", async () => {
+    const database = await createDatabase();
+    const app = appFor(database as unknown as D1Database);
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/today`), {
+      DB: database as unknown as D1Database,
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "location_missing" });
   });
 });

@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState, type ReactElement } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChannelVariablesPage } from "../../src/dashboard/ChannelVariablesPage";
 import type { PanelChannelVariablesResponse } from "../../src/dashboard/api";
@@ -27,14 +27,18 @@ const variable = {
 const setBrowserLanguage = (language: string): void => {
   Object.defineProperty(window.navigator, "language", { value: language, configurable: true });
 };
+let originalClipboardDescriptor: PropertyDescriptor | undefined;
 
 describe("Channel variables page", () => {
+  beforeEach(() => { originalClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard"); });
   afterEach(() => {
     cleanup();
     for (const toast of toastsSnapshot()) dismissToast(toast.id);
     vi.useRealTimers();
     vi.unstubAllGlobals();
     setBrowserLanguage("de-DE");
+    if (originalClipboardDescriptor === undefined) Reflect.deleteProperty(navigator, "clipboard");
+    else Object.defineProperty(navigator, "clipboard", originalClipboardDescriptor);
   });
 
   it("keeps the variable save cluster in the fixed editor header", async () => {
@@ -50,6 +54,48 @@ describe("Channel variables page", () => {
     expect(within(header as HTMLElement).getByRole("button", { name: "Verwerfen" })).toBeDisabled();
     expect(within(header as HTMLElement).getByRole("button", { name: "Speichern" })).toBeDisabled();
     expect(container.querySelector(".inspector-actions")).toBeNull();
+  });
+
+  it("filters the variable catalog and copies a module token", async () => {
+    const writeText = vi.fn<(value: string) => Promise<void>>().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname === "/api/channels/kanal-a/template-variables") return Promise.resolve(jsonResponse({
+        variables: [
+          { name: "var.score", moduleId: "host", isTextBlock: false, sample: "1234", description: "Current score", maxLength: 10, source: "channel" },
+          { name: "weather.temp", moduleId: "weather", isTextBlock: false, sample: "18.4 °C", maxLength: 100, picker: {
+            de: { label: "Temperatur", description: "Aktuelle Temperatur am Kanalstandort.", sample: "18,4 °C" },
+            en: { label: "Temperature", description: "Current temperature at the channel location.", sample: "18.4 °C" },
+          } },
+        ],
+      }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname.endsWith("/overlay-tokens")) return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+
+    expect(screen.getByText("Wähle eine Variable aus der Liste, um Details und Verwendungen zu sehen.")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Module" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Module" }));
+    expect(await screen.findByText("Aktuelle Temperatur am Kanalstandort.")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("row", { name: /weather\.temp/u }));
+    expect(screen.getAllByText("18,4 °C").length).toBeGreaterThan(0);
+    expect(screen.getByText("Diese Modulvariable ist schreibgeschützt.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Wird bereitgestellt von Wetter" })).toHaveAttribute("href", "/channels/kanal-a/modules/weather");
+    expect(screen.getAllByText("Wird bereitgestellt von Wetter")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: /\{weather.temp\}/u }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("{weather.temp}"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Eigene" }));
+    expect(await screen.findByText("Current score")).toBeInTheDocument();
+    expect(screen.getByText("Eigene Variable")).toBeInTheDocument();
+    expect(screen.queryByText("Aktuelle Temperatur am Kanalstandort.")).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("row", { name: /var\.score/u }));
+    fireEvent.click(screen.getByRole("button", { name: /\{var\.score\}/u }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("{var.score}"));
   });
 
   it("saves an edited value with the definition before switching to another variable", async () => {
@@ -180,7 +226,7 @@ describe("Channel variables page", () => {
     render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage={false} onOpenCommand={() => {}} /></UiProvider>);
 
     const table = await screen.findByRole("table");
-    expect(table.querySelectorAll("thead th")).toHaveLength(4);
+    expect(table.querySelectorAll("thead th")).toHaveLength(3);
     expect(table.querySelector("tbody th")).toHaveClass("mono");
     expect(table.querySelector(".channel-variables-table__description")).toHaveClass("channel-variables-table__description");
     expect(table.querySelector(".channel-variables-table__value")).toHaveClass("number");
@@ -481,6 +527,7 @@ describe("Channel variables page", () => {
       const method = init?.method ?? "GET";
       requests.push({ path: url.pathname, method, ...(typeof init?.body === "string" ? { body: init.body } : {}) });
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/template-variables") return Promise.resolve(jsonResponse({ variables: [] }));
       if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [detached], count: 1, maximum: 25 }));
       if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && method === "GET") return Promise.resolve(jsonResponse({ overlay }));
       if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && method === "PUT") return Promise.resolve(jsonResponse({ overlay: { ...overlay, revision: 5 } }));
@@ -528,6 +575,7 @@ describe("Channel variables page", () => {
       const method = init?.method ?? "GET";
       requests.push({ path: url.pathname, method });
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/template-variables") return Promise.resolve(jsonResponse({ variables: [] }));
       if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [detached], count: 1, maximum: 25 }));
       if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && method === "GET") return Promise.resolve(jsonResponse({ overlay }));
       return Promise.reject(new Error(`Unexpected request ${method} ${url.pathname}`));
@@ -569,8 +617,12 @@ describe("Channel variables page", () => {
       const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
       if (url.pathname.endsWith("/revisions")) return Promise.resolve(jsonResponse({ revisions }));
       if (url.pathname.endsWith("/overlay-tokens")) return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
-      variableRequestCount++;
-      return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
+      if (url.pathname.endsWith("/variables")) {
+        variableRequestCount++;
+        return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
     });
     vi.stubGlobal("fetch", fetcher);
 

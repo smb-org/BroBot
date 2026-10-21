@@ -1,9 +1,10 @@
 import { Hono } from "hono";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleRouteEnvironment } from "../../src/modules/contract";
 import { weatherRoutes } from "../../src/modules/weather/routes";
 import { prepareModuleAudit } from "../../src/worker/module-audit";
+import { readChannelLocation } from "../../src/worker/db/channel-settings";
 import { insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -18,11 +19,18 @@ const createDatabase = async (): Promise<TestD1Database> => {
   return database;
 };
 
+const setLocation = async (database: TestD1Database): Promise<void> => {
+  await database.prepare(
+    "UPDATE channels SET location_name = ?, location_latitude = ?, location_longitude = ?, location_time_zone = ? WHERE channel_id = ?",
+  ).bind("Berlin", 52.52, 13.405, "Europe/Berlin", CHANNEL_ID).run();
+};
+
 const appFor = (database: TestD1Database, role: "manager" | "operator" = "manager", events: string[] = []) => {
   const app = new Hono<ModuleRouteEnvironment>();
   app.use("*", async (context, next) => {
     context.set("channelRole", role);
     context.set("actor", { userId: ACTOR_ID, sessionId: "weather-settings-session" });
+    context.set("channelLocation", (channelId) => readChannelLocation(database as unknown as D1Database, channelId));
     context.set("authorizeManagementMutation", () => ({ sql: "AND 1 = 1", values: [] }));
     context.set("prepareModuleAudit", (entry, changedAt) =>
       prepareModuleAudit(database as unknown as D1Database, ACTOR_ID, changedAt, entry));
@@ -37,6 +45,8 @@ const appFor = (database: TestD1Database, role: "manager" | "operator" = "manage
 };
 
 afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
   for (const database of databases.splice(0)) database.close();
 });
 
@@ -97,5 +107,73 @@ describe("weather settings", () => {
       body: JSON.stringify({ revision: 1, provider: "met_norway", showFahrenheit: false, errorTexts: { de: "", en: "" } }),
     }), environment);
     expect(denied.status).toBe(403);
+  });
+});
+
+describe("current weather route", () => {
+  it("returns the cached observation and expiry for a saved location", async () => {
+    const database = await createDatabase();
+    await setLocation(database);
+    vi.setSystemTime(new Date("2026-10-21T12:00:00.000Z"));
+    const weather = {
+      temperatureC: 18.4,
+      feelsLikeC: 17.8,
+      condition: "partly_cloudy",
+      isDay: true,
+      windSpeedMps: 3.3,
+      precipitationMm: 0,
+      humidityPercent: 64,
+      observedAt: "2026-10-21T11:30:00.000Z",
+      shortForecast: "rain",
+    };
+    await database.prepare(
+      "INSERT INTO weather_cache (provider, location_key, latitude, longitude, payload_json, expires_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ).bind("met_norway", "52.5200,13.4050", 52.52, 13.405, JSON.stringify(weather), "2026-10-21T12:10:00.000Z", "2026-10-21T11:00:00.000Z").run();
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+    const app = appFor(database, "operator");
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/current`), {
+      DB: database as unknown as D1Database,
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      status: "ok",
+      location: { name: "Berlin", timeZone: "Europe/Berlin" },
+      weather,
+      expiresAt: "2026-10-21T12:10:00.000Z",
+      showFahrenheit: false,
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("reports a missing saved location without requesting provider data", async () => {
+    const database = await createDatabase();
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+    const app = appFor(database, "operator");
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/current`), {
+      DB: database as unknown as D1Database,
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "location_missing" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("returns a typed provider error while keeping the current values route readable", async () => {
+    const database = await createDatabase();
+    await setLocation(database);
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(() => Promise.reject(new Error("upstream detail must not leak"))));
+    const app = appFor(database, "operator");
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/current`), {
+      DB: database as unknown as D1Database,
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "provider_error", reason: "upstream_unavailable" });
   });
 });

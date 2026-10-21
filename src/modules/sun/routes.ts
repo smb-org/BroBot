@@ -5,6 +5,7 @@ import { canManage } from "../../contracts/values";
 import type { ModuleRouteEnvironment } from "../contract";
 import { DEFAULT_SUN_ERROR_TEXTS, readSunSettings } from "./adapters/d1";
 import { SUN_ERROR_TEXT_MAX_LENGTH } from "./contracts";
+import { calculateSunAltitudeIntervals, calculateSunDay, localDateInTimeZone } from "./domain";
 
 const updateSchema = z.object({
   revision: z.number().int().min(1),
@@ -17,6 +18,22 @@ const channelIdOf = (context: { req: { param: (name: string) => string | undefin
 const errorText = (value: string, fallback: string): string => value.trim().length === 0 ? fallback : value.trim();
 
 export const sunRoutes = new Hono<ModuleRouteEnvironment>();
+
+sunRoutes.get("/today", async (context) => {
+  const location = await context.get("channelLocation")(channelIdOf(context));
+  if (location === null) return context.json({ status: "location_missing" as const });
+  const localDate = localDateInTimeZone(Date.now(), location.timeZone);
+  const coordinates = { latitude: location.latitude, longitude: location.longitude, timeZone: location.timeZone };
+  const [year, month, day] = localDate.split("-").map(Number);
+  const nextLocalDate = new Date(Date.UTC(year ?? 0, (month ?? 1) - 1, (day ?? 1) + 1)).toISOString().slice(0, 10);
+  return context.json({
+    status: "ok" as const,
+    day: calculateSunDay({ ...coordinates, localDate }),
+    goldenHourIntervals: calculateSunAltitudeIntervals(coordinates, localDate, 1, "golden"),
+    blueHourIntervals: calculateSunAltitudeIntervals(coordinates, localDate, 1, "blue"),
+    nextDawnAt: calculateSunDay({ ...coordinates, localDate: nextLocalDate }).dawnAt,
+  });
+});
 
 sunRoutes.get("/error-texts", async (context) => {
   return context.json(await readSunSettings(context.env.DB, channelIdOf(context)));

@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { canManage } from "../../contracts/values";
 import type { ModuleRouteEnvironment } from "../contract";
+import { fetchCachedWeather } from "./adapters/cache";
 import { DEFAULT_WEATHER_ERROR_TEXTS, readWeatherSettings } from "./adapters/d1";
 import { WEATHER_ERROR_TEXT_MAX_LENGTH, WEATHER_PROVIDERS } from "./contracts";
 
@@ -21,6 +22,31 @@ const normalizedError = (value: string, fallback: string): string => value.trim(
 export const weatherRoutes = new Hono<ModuleRouteEnvironment>();
 
 weatherRoutes.get("/provider-settings", async (context) => context.json(await readWeatherSettings(context.env.DB, channelIdOf(context))));
+
+weatherRoutes.get("/current", async (context) => {
+  const channelId = channelIdOf(context);
+  const location = await context.get("channelLocation")(channelId);
+  if (location === null) return context.json({ status: "location_missing" as const });
+  const settings = await readWeatherSettings(context.env.DB, channelId);
+  try {
+    const result = await fetchCachedWeather(
+      context.env.DB,
+      settings.provider,
+      location.latitude,
+      location.longitude,
+      Date.now(),
+    );
+    return context.json({
+      status: "ok" as const,
+      location: { name: location.name, timeZone: location.timeZone },
+      weather: result.weather,
+      expiresAt: new Date(result.expiresAt).toISOString(),
+      showFahrenheit: settings.showFahrenheit,
+    });
+  } catch {
+    return context.json({ status: "provider_error" as const, reason: "upstream_unavailable" as const });
+  }
+});
 
 weatherRoutes.patch("/provider-settings", async (context) => {
   if (!canManage(context.get("channelRole"))) return context.json({ error: "weather_settings_denied" }, 403);

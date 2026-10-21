@@ -173,7 +173,7 @@ test("location page uses the settings-page header gap and aligns the saved place
 
     const headerBox = await page.locator(".channel-location-page .settings-page > .page-header").boundingBox();
     const header = page.locator(".channel-location-page .settings-page > .page-header");
-    const firstSectionHeading = await page.locator(".channel-location-page .settings-page__column:first-child .ui-section__heading").boundingBox();
+    const firstSectionHeading = await page.locator(".channel-location-page .settings-page__column:first-child .ui-section__heading").first().boundingBox();
     const headerBorder = await header.evaluate((element) => Number.parseFloat(getComputedStyle(element).borderBottomWidth));
     expect(headerBox).not.toBeNull();
     expect(firstSectionHeading).not.toBeNull();

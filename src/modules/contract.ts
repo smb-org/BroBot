@@ -1452,6 +1452,10 @@ export interface ModulePanelProperties {
    *  mount (e.g. text_commands selects the command by name); most modules
    *  ignore it. */
   initialSelection?: string;
+  /** Unsaved text-command draft requested by a template shortcut. */
+  initialCommand?: { name: string; text: string };
+  /** Clears the host-owned initial command request after the editor opens. */
+  onInitialCommandConsumed?: () => void;
   /** Opens a saved chat trigger in the dry-run workspace. */
   onOpenTestArea?: (moduleId: "text_commands" | "faq", entryId: string) => void;
 }
@@ -1643,6 +1647,8 @@ export interface ModuleRouteVariables {
   session: { userId: string; sessionId: string; login?: string };
   channelRole: ChannelRole;
   actor: { userId: string; sessionId: string };
+  /** Reads the saved location only for the authorized channel route. */
+  channelLocation: (channelId: string) => Promise<ModuleChannelLocation | null>;
   authorizeMutation: AuthorizeModuleMutation;
   authorizeManagementMutation: AuthorizeModuleMutation;
   /** Returns secret access bound to the authorized route channel and mounted module. */

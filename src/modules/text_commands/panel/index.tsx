@@ -101,10 +101,10 @@ const draftFromCommand = (command: TextCommand): CommandDraft => ({
   },
 });
 
-const newCommandDraft = (): CommandDraft => ({
-  name: "",
+const newCommandDraft = (prefill?: { name: string; text: string }): CommandDraft => ({
+  name: prefill?.name ?? "",
   enabled: true,
-  text: "",
+  text: prefill?.text ?? "",
   usageText: "",
   kind: "text",
   minimumTier: "everyone",
@@ -117,7 +117,7 @@ const newCommandDraft = (): CommandDraft => ({
   chatTarget: null,
   variableAction: null,
   timeoutAction: null,
-  kindDrafts: { text: { text: "", usageText: "", variableAction: null, timeoutAction: null } },
+  kindDrafts: { text: { text: prefill?.text ?? "", usageText: "", variableAction: null, timeoutAction: null } },
 });
 
 type CommandTemplateField = "text" | "usageText" | "timeoutFallbackText";
@@ -1209,6 +1209,8 @@ const TextCommandsPanel = (props: {
   botIsModerator?: boolean | null;
   onCloseInspector?: () => void;
   initialSelection?: string;
+  initialCommand?: { name: string; text: string };
+  onInitialCommandConsumed?: () => void;
   onOpenTestArea?: (moduleId: "text_commands" | "faq", entryId: string) => void;
 }): ReactElement => <TextCommandsPanelContent key={props.channelId} {...props} />;
 
@@ -1220,6 +1222,8 @@ const TextCommandsPanelContent = ({
   botIsModerator = null,
   onCloseInspector,
   initialSelection,
+  initialCommand,
+  onInitialCommandConsumed,
   onOpenTestArea,
 }: {
   channelId: string;
@@ -1229,6 +1233,8 @@ const TextCommandsPanelContent = ({
   botIsModerator?: boolean | null;
   onCloseInspector?: () => void;
   initialSelection?: string;
+  initialCommand?: { name: string; text: string };
+  onInitialCommandConsumed?: () => void;
   onOpenTestArea?: (moduleId: "text_commands" | "faq", entryId: string) => void;
 }): ReactElement => {
   const labels = textCommandsTexts(language);
@@ -1259,6 +1265,7 @@ const TextCommandsPanelContent = ({
   const registerGuard = useCallback((next: ((proceed: () => void, cancel?: () => void) => void) | null): void => { guardRef.current = next; }, []);
   useEffect(() => registerDashboardNavigationGuard(guardSwitch), [guardSwitch]);
   const initialSelectionApplied = useRef(false);
+  const initialCommandApplied = useRef(false);
 
   const refresh = useCallback(async (force = false): Promise<TextCommand[]> => {
     const cached = queryClient.getQueryData<TextCommandPanelData>(moduleQueryKey(channelId, "text_commands", "commands"));
@@ -1299,6 +1306,28 @@ const TextCommandsPanelContent = ({
   }, [commandsQuery.isError, labels.loadError]);
 
   useEffect(() => {
+    if (initialCommand === undefined || commandsQuery.isPending || commandsQuery.data === undefined || initialCommandApplied.current || createOpen) return;
+    initialCommandApplied.current = true;
+    initialSelectionApplied.current = true;
+    const existing = commands.find((command) => command.name === initialCommand.name);
+    guardSwitch(() => {
+      generationRef.current += 1;
+      setSelectionVersion((current) => current + 1);
+      if (existing !== undefined) {
+        setCreateOpen(false);
+        setMobileDetailOpen(true);
+        selectName(existing.name);
+      } else {
+        closeSelection();
+        setCreateOpen(true);
+        setMobileDetailOpen(true);
+      }
+      onInitialCommandConsumed?.();
+    });
+  }, [closeSelection, commands, commandsQuery.data, commandsQuery.isPending, createOpen, guardSwitch, initialCommand, onInitialCommandConsumed, selectName]);
+
+  useEffect(() => {
+    if (initialCommand !== undefined) return;
     if (commandsQuery.isPending || commandsQuery.data === undefined || initialSelectionApplied.current || createOpen) return;
     const target = commands.find((command) => command.name === initialSelection) ?? (window.matchMedia("(max-width: 767px)").matches ? undefined : commands[0]);
     initialSelectionApplied.current = true;
@@ -1309,7 +1338,7 @@ const TextCommandsPanelContent = ({
       setMobileDetailOpen(initialSelection !== undefined);
       selectName(target.name);
     });
-  }, [commands, commandsQuery.data, commandsQuery.isPending, createOpen, guardSwitch, initialSelection, selectName, selectedName]);
+  }, [commands, commandsQuery.data, commandsQuery.isPending, createOpen, guardSwitch, initialCommand, initialSelection, selectName, selectedName]);
 
   const selected = useMemo(() => commands.find((command) => command.name === selectedName)
     ?? (preservedRename?.to === selectedName ? commands.find((command) => command.name === preservedRename.from) ?? null : null), [commands, preservedRename, selectedName]);
@@ -1484,7 +1513,7 @@ const TextCommandsPanelContent = ({
     registeredVariablesPending={registeredVariablesQuery.isPending}
     registeredVariablesRefreshError={registeredVariablesQuery.isRefetchError}
     onRetryRegisteredVariables={() => { void registeredVariablesQuery.refetch(); }}
-    initial={newCommandDraft()}
+    initial={newCommandDraft(initialCommand)}
     command={null}
     commands={commands}
     channelVariables={channelVariables}

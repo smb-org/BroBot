@@ -157,6 +157,23 @@ describe("Text command editor", () => {
     else Object.defineProperty(Range.prototype, "getBoundingClientRect", originalRangeBounds);
   });
 
+  it("opens a template request as an unsaved prefilled command", async () => {
+    const fetcher = panelFetch();
+    const consumed = vi.fn<() => void>();
+    vi.stubGlobal("fetch", fetcher);
+    renderWithQuery(<UiProvider><TextCommandsPanel
+      channelId="kanal-a"
+      language="de"
+      initialCommand={{ name: "wetter", text: "In {weather.place} sind es {weather.temp}." }}
+      onInitialCommandConsumed={consumed}
+    /></UiProvider>);
+
+    expect(await screen.findByRole("textbox", { name: "Befehlsname" })).toHaveValue("wetter");
+    expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("In {weather.place} sind es {weather.temp}.");
+    await waitFor(() => expect(consumed).toHaveBeenCalledTimes(1));
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "POST" || init?.method === "PUT")).toBe(false);
+  });
+
   it("shows cached commands immediately when returning to the module", async () => {
     vi.stubGlobal("fetch", panelFetch());
     const view = renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" /></UiProvider>, undefined, { gcTime: 600_000 });
