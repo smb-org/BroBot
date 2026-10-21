@@ -17,6 +17,7 @@ const openVote: ChatVote = {
   kind: "yes_no",
   optionCount: 2,
   labels: ["Yes", "No"],
+  answerColors: ["#5b8cff", "#ff9f43"],
   title: null,
   status: "open",
   openedAt: "2026-10-04T10:00:00.000Z",
@@ -33,6 +34,7 @@ const openTextVote: ChatVote = {
   kind: "free_text",
   optionCount: 0,
   labels: [],
+  answerColors: [],
   title: null,
   textMode: "first_word",
   termFilterReady: true,
@@ -45,6 +47,8 @@ const savedTemplate: ChatVoteTemplate = {
   title: "Dinner",
   resultText: "Danke {vote.result}",
   labels: ["Pizza", "Burger"],
+  answerColors: ["#5b8cff", "#ff9f43"],
+  offerInCockpit: true,
   freeTextMode: null,
   durationSeconds: 300,
   revision: 1,
@@ -144,7 +148,7 @@ describe("chat voting event service", () => {
     const result = await processChatVotingMessage(eventWithText("!vote essen", ["moderator"]), repository, context);
 
     expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({
-      kind: "options", labels: ["Pizza", "Burger"], title: "Dinner", resultText: "Danke {vote.result}", requestedDurationSeconds: 300,
+      kind: "options", labels: ["Pizza", "Burger"], answerColors: ["#5b8cff", "#ff9f43"], title: "Dinner", resultText: "Danke {vote.result}", requestedDurationSeconds: 300,
     }), undefined, {
       id: savedTemplate.id,
       revision: savedTemplate.revision,
@@ -178,6 +182,42 @@ describe("chat voting event service", () => {
     if (action?.kind !== "overlay") throw new Error("A bookkeeping failure suppressed the opened overlay action.");
     expect(action).toMatchObject({ type: "opened", elementKind: "chat_voting.tally" });
     expect(typeof action.payload.pollId).toBe("string");
+  });
+
+  it("starts a chat-only saved vote through its shortcut and snapshots its answer colors", async () => {
+    const chatOnlyTemplate = { ...savedTemplate, offerInCockpit: false, answerColors: ["#2ed3a3", "#ff6fae"] };
+    const insertOpen = vi.fn<ChatVotingRepository["insertOpen"]>(() => Promise.resolve("inserted"));
+    const templates = templateRepositoryWith({ templateByShortcut: vi.fn(() => Promise.resolve(chatOnlyTemplate)) });
+
+    await processChatVotingMessage(
+      eventWithText("!vote essen", ["moderator"]),
+      repositoryWith({ insertOpen, templates }),
+      executionContext(),
+    );
+
+    expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({
+      answerColors: ["#2ed3a3", "#ff6fae"],
+      labels: ["Pizza", "Burger"],
+    }), undefined, expect.objectContaining({ id: savedTemplate.id }));
+  });
+
+  it("starts a free-text shortcut without retaining fixed-answer colors", async () => {
+    const freeTextTemplate = { ...savedTemplate, freeTextMode: "first_word" as const };
+    const insertOpen = vi.fn<ChatVotingRepository["insertOpen"]>(() => Promise.resolve("inserted"));
+    const templates = templateRepositoryWith({ templateByShortcut: vi.fn(() => Promise.resolve(freeTextTemplate)) });
+
+    await processChatVotingMessage(
+      eventWithText("!vote essen", ["moderator"]),
+      repositoryWith({ insertOpen, templates }),
+      executionContext(),
+    );
+
+    expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "free_text",
+      labels: [],
+      answerColors: [],
+      textMode: "first_word",
+    }), undefined, expect.objectContaining({ id: savedTemplate.id }));
   });
 
   it("replies with an unknown-shortcut message and starts nothing", async () => {

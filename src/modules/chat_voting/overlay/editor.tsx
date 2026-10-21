@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 
 import type { OverlayElementEditorProps } from "../../contract";
+import { SwitchRow } from "../../../dashboard/ui";
 import { chatVotingOverlayLabels } from "./locale";
 
 const ChatVotingOverlayEditor = ({ config, onChange, language = "en", readOnly = false, readOnlyReason }: OverlayElementEditorProps): ReactElement => {
@@ -8,24 +9,33 @@ const ChatVotingOverlayEditor = ({ config, onChange, language = "en", readOnly =
   const layout = config.layout === "strip" ? "strip" : "bars";
   const showPercent = config.showPercent !== false;
   const showCountdown = config.showCountdown !== false;
+  const useVoteColors = config.useVoteColors !== false;
   const hideAfterCloseSeconds = typeof config.hideAfterCloseSeconds === "number" ? config.hideAfterCloseSeconds : 15;
   const width = typeof config.width === "number" ? config.width : 480;
   const disabledProps = readOnly ? { title: readOnlyReason, "aria-describedby": readOnlyReason === undefined ? undefined : "overlay-editor-readonly-reason" } : {};
 
   return <div className="config-section">
-    <label className="config-field">
-      <span>{labels.layout}</span>
-      <select
-        aria-label={labels.layout}
-        value={layout}
+    <div style={{ display: "grid", gap: "var(--s2)" }}>
+      <SwitchRow
+        label={labels.useVoteColors}
+        checked={useVoteColors}
         disabled={readOnly}
-        {...disabledProps}
-        onChange={(event) => { if (!readOnly) onChange({ ...config, layout: event.currentTarget.value }); }}
-      >
-        <option value="strip">{labels.strip}</option>
-        <option value="bars">{labels.bars}</option>
-      </select>
-    </label>
+        onChange={(checked) => { if (!readOnly) onChange({ ...config, useVoteColors: checked }); }}
+      />
+      <label className="config-field">
+        <span>{labels.layout}</span>
+        <select
+          aria-label={labels.layout}
+          value={layout}
+          disabled={readOnly}
+          {...disabledProps}
+          onChange={(event) => { if (!readOnly) onChange({ ...config, layout: event.currentTarget.value }); }}
+        >
+          <option value="strip">{labels.strip}</option>
+          <option value="bars">{labels.bars}</option>
+        </select>
+      </label>
+    </div>
     <label className="config-field">
       <span>{labels.showCountdown}</span>
       <input

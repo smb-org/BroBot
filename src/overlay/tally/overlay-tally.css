@@ -67,6 +67,31 @@
   flex-direction: row;
 }
 
+.overlay-tally__options--strip .overlay-tally__option--colored {
+  min-height: 1.5em;
+  min-width: 0;
+}
+
+.overlay-tally__options--strip .overlay-tally__option--colored .overlay-tally__caption {
+  align-items: center;
+  flex-wrap: nowrap;
+  height: 1.5em;
+  min-width: 0;
+}
+
+.overlay-tally__options--strip .overlay-tally__option--colored .overlay-tally__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overlay-tally__options--strip .overlay-tally__option--colored .overlay-tally__count {
+  flex: none;
+  white-space: nowrap;
+}
+
 .overlay-tally__options--terms .overlay-tally__option {
   min-height: 2.3em;
   min-width: 0;
@@ -77,6 +102,29 @@
   display: flex;
   justify-content: space-between;
   gap: 0.5em;
+}
+
+.overlay-tally__color-marker {
+  width: 0.72em;
+  height: 0.72em;
+  flex: none;
+  border-radius: 50%;
+}
+
+.overlay-tally__label--strip-colored {
+  display: flex;
+  align-items: center;
+  gap: 0.18em;
+  min-width: 0;
+  padding-inline-start: 0.15em;
+  overflow: hidden;
+}
+
+.overlay-tally__label-copy {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .overlay-tally__options--terms .overlay-tally__caption {

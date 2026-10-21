@@ -75,7 +75,7 @@ test("vote action keeps its draft while templates load and guards every close pa
     if (pathname === `/api/channels/${channelId}/modules/chat_voting/templates`) {
       await templatesGate;
       await route.fulfill(json({
-        templates: [{ id: "saved-vote", title: "Gespeicherte Frage", labels: ["Ja", "Nein"], durationSeconds: 120 }],
+        templates: [{ id: "saved-vote", title: "Gespeicherte Frage", labels: ["Ja", "Nein"], answerColors: ["#5b8cff", "#ff9f43"], offerInCockpit: true, durationSeconds: 120 }],
         count: 1,
         maximum: 100,
       }));

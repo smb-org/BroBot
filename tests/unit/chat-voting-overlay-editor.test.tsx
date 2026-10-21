@@ -18,4 +18,15 @@ describe("chat voting overlay editor", () => {
     fireEvent.click(checkbox);
     expect(onChange).toHaveBeenCalledWith({ showCountdown: false });
   });
+
+  it("takes colors from the vote by default and saves an explicit opt-out", () => {
+    const onChange = vi.fn();
+    render(<ChatVotingOverlayEditor config={{}} onChange={onChange} language="en" />);
+
+    const checkbox = screen.getByRole("switch", { name: "Take colours from the voting" });
+    expect(checkbox).toBeChecked();
+    expect(screen.getByRole("combobox", { name: "Layout" }).parentElement?.parentElement?.style.gap).toBe("var(--s2)");
+    fireEvent.click(checkbox);
+    expect(onChange).toHaveBeenCalledWith({ useVoteColors: false });
+  });
 });

@@ -13,6 +13,8 @@ const template: ChatVoteTemplate = {
   title: "Welche Idee soll unser Chat heute ausprobieren?",
   resultText: "Danke fürs Abstimmen! {vote.result}",
   labels: ["Pizza", "Burger", "Döner"],
+  answerColors: ["#5b8cff", "#ff9f43", "#2ed3a3"],
+  offerInCockpit: true,
   freeTextMode: null,
   durationSeconds: 120,
   revision: 1,

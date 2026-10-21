@@ -20,8 +20,8 @@ describe("chat voting template variable references", () => {
     ).bind("fictional-channel", JSON.stringify({ startText: "Vote: {var.score}", resultText: "Final score: {var.score}" })).run();
     await database.prepare(
       `INSERT INTO chat_vote_templates
-        (id, channel_id, shortcut, title, labels, free_text_mode, duration_seconds, revision, legacy_alias, last_used_at, created_at, updated_at, result_text)
-       VALUES ('template-dinner', 'fictional-channel', NULL, 'Dinner vote', '["Pizza","Burger"]', NULL, 120, 1, NULL, NULL,
+        (id, channel_id, shortcut, title, labels, answer_colors, free_text_mode, duration_seconds, revision, legacy_alias, last_used_at, created_at, updated_at, result_text)
+       VALUES ('template-dinner', 'fictional-channel', NULL, 'Dinner vote', '["Pizza","Burger"]', '["#5b8cff","#ff9f43"]', NULL, 120, 1, NULL, NULL,
          '2026-10-04T10:00:00.000Z', '2026-10-04T10:00:00.000Z', 'Dinner result: {var.score}')`,
     ).run();
     await database.prepare(
@@ -30,14 +30,14 @@ describe("chat voting template variable references", () => {
     ).run();
     await database.prepare(
       `INSERT INTO chat_votes
-        (channel_id, poll_id, kind, option_count, labels_json, status, opened_at, closes_at, close_reason, title, result_text)
-       VALUES ('fictional-channel', 'poll-open', 'yes_no', 2, '["Yes","No"]', 'open',
+        (channel_id, poll_id, kind, option_count, labels_json, answer_colors_json, status, opened_at, closes_at, close_reason, title, result_text)
+       VALUES ('fictional-channel', 'poll-open', 'yes_no', 2, '["Yes","No"]', '["#5b8cff","#ff9f43"]', 'open',
          '2026-10-04T10:00:00.000Z', '2026-10-04T10:02:00.000Z', 'timer', 'Running vote', 'Running result: {var.score}')`,
     ).run();
     await database.prepare(
       `INSERT INTO chat_votes
-        (channel_id, poll_id, kind, option_count, labels_json, status, opened_at, closes_at, closed_at, close_reason, counts_json, voter_count, title, result_text)
-       VALUES ('fictional-channel', 'poll-closed', 'yes_no', 2, '["Yes","No"]', 'closed',
+        (channel_id, poll_id, kind, option_count, labels_json, answer_colors_json, status, opened_at, closes_at, closed_at, close_reason, counts_json, voter_count, title, result_text)
+       VALUES ('fictional-channel', 'poll-closed', 'yes_no', 2, '["Yes","No"]', '["#5b8cff","#ff9f43"]', 'closed',
          '2026-10-03T10:00:00.000Z', '2026-10-03T10:02:00.000Z', '2026-10-03T10:01:00.000Z', 'timer', '[1,0]', 1,
          'Closed vote', 'Closed result: {var.score}')`,
     ).run();
@@ -89,8 +89,8 @@ describe("chat voting template variable references", () => {
     await insertChannel(database, "fictional-channel");
     await database.prepare(
       `INSERT INTO chat_vote_templates
-        (id, channel_id, shortcut, title, labels, free_text_mode, duration_seconds, revision, legacy_alias, last_used_at, created_at, updated_at, result_text)
-       VALUES ('template-dinner', 'fictional-channel', NULL, 'Dinner vote', '["Pizza","Burger"]', NULL, 120, 1, NULL, NULL,
+        (id, channel_id, shortcut, title, labels, answer_colors, free_text_mode, duration_seconds, revision, legacy_alias, last_used_at, created_at, updated_at, result_text)
+       VALUES ('template-dinner', 'fictional-channel', NULL, 'Dinner vote', '["Pizza","Burger"]', '["#5b8cff","#ff9f43"]', NULL, 120, 1, NULL, NULL,
          '2026-10-04T10:00:00.000Z', '2026-10-04T10:00:00.000Z', 'Result: {text.summary}')`,
     ).run();
 

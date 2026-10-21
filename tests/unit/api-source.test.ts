@@ -464,17 +464,17 @@ describe("API source deletion guard", () => {
     const closedAt = new Date(NOW - 60_000).toISOString();
     await database.prepare(
       `INSERT INTO chat_votes
-        (channel_id, poll_id, kind, option_count, labels_json, status, opened_at, closes_at, closed_at,
+        (channel_id, poll_id, kind, option_count, labels_json, answer_colors_json, status, opened_at, closes_at, closed_at,
          close_reason, counts_json, voter_count, title, result_text, result_delivery_pending)
-       VALUES (?, 'poll-migrated-result', 'yes_no', 2, '["Yes","No"]', 'closed', ?, ?, ?, 'timer',
+       VALUES (?, 'poll-migrated-result', 'yes_no', 2, '["Yes","No"]', '["#5b8cff","#ff9f43"]', 'closed', ?, ?, ?, 'timer',
          '[1,0]', 1, 'Historical vote', 'Result: {api.sunset}', 1)`,
     ).bind(CHANNEL_ID, openedAt, closedAt, closedAt).run();
     const latestOpenedAt = new Date(NOW - 30_000).toISOString();
     await database.prepare(
       `INSERT INTO chat_votes
-        (channel_id, poll_id, kind, option_count, labels_json, status, opened_at, closes_at, closed_at,
+        (channel_id, poll_id, kind, option_count, labels_json, answer_colors_json, status, opened_at, closes_at, closed_at,
          close_reason, counts_json, voter_count, title, result_text)
-       VALUES (?, 'poll-latest-result', 'yes_no', 2, '["Yes","No"]', 'closed', ?, ?, ?, 'timer',
+       VALUES (?, 'poll-latest-result', 'yes_no', 2, '["Yes","No"]', '["#5b8cff","#ff9f43"]', 'closed', ?, ?, ?, 'timer',
          '[1,0]', 1, 'Latest vote', 'Result without source')`,
     ).bind(CHANNEL_ID, latestOpenedAt, closedAt, closedAt).run();
     await database.prepare(
@@ -545,18 +545,18 @@ describe("API source deletion guard", () => {
     ).bind(CHANNEL_ID, JSON.stringify({ data: { "api_source.sunset": "true" } }), JSON.stringify(["Sunset: {api.sunset}"])).run();
     await database.prepare(
       `INSERT INTO chat_vote_templates
-        (id, channel_id, shortcut, title, labels, free_text_mode, duration_seconds, revision, legacy_alias, last_used_at, created_at, updated_at, result_text)
-       VALUES ('template-sunset', ?, NULL, 'Dinner vote', '["Pizza","Burger"]', NULL, 120, 1, NULL, NULL, ?, ?, 'Result: {api.sunset}')`,
+        (id, channel_id, shortcut, title, labels, answer_colors, free_text_mode, duration_seconds, revision, legacy_alias, last_used_at, created_at, updated_at, result_text)
+       VALUES ('template-sunset', ?, NULL, 'Dinner vote', '["Pizza","Burger"]', '["#5b8cff","#ff9f43"]', NULL, 120, 1, NULL, NULL, ?, ?, 'Result: {api.sunset}')`,
     ).bind(CHANNEL_ID, now, now).run();
     await database.prepare(
       `INSERT INTO chat_votes
-        (channel_id, poll_id, kind, option_count, labels_json, status, opened_at, closes_at, close_reason, title, result_text)
-       VALUES (?, 'poll-open-sunset', 'yes_no', 2, '["Yes","No"]', 'open', ?, ?, 'timer', 'Running vote', 'Running: {api.sunset}')`,
+        (channel_id, poll_id, kind, option_count, labels_json, answer_colors_json, status, opened_at, closes_at, close_reason, title, result_text)
+       VALUES (?, 'poll-open-sunset', 'yes_no', 2, '["Yes","No"]', '["#5b8cff","#ff9f43"]', 'open', ?, ?, 'timer', 'Running vote', 'Running: {api.sunset}')`,
     ).bind(CHANNEL_ID, now, new Date(NOW + 120_000).toISOString()).run();
     await database.prepare(
       `INSERT INTO chat_votes
-        (channel_id, poll_id, kind, option_count, labels_json, status, opened_at, closes_at, closed_at, close_reason, counts_json, voter_count, title, result_text)
-       VALUES (?, 'poll-closed-sunset', 'yes_no', 2, '["Yes","No"]', 'closed', ?, ?, ?, 'timer', '[1,0]', 1,
+        (channel_id, poll_id, kind, option_count, labels_json, answer_colors_json, status, opened_at, closes_at, closed_at, close_reason, counts_json, voter_count, title, result_text)
+       VALUES (?, 'poll-closed-sunset', 'yes_no', 2, '["Yes","No"]', '["#5b8cff","#ff9f43"]', 'closed', ?, ?, ?, 'timer', '[1,0]', 1,
          'Closed vote', 'Closed: {api.sunset}')`,
     ).bind(CHANNEL_ID, new Date(NOW - 60_000).toISOString(), now, now).run();
     await database.prepare(
@@ -661,8 +661,8 @@ describe("API source deletion guard", () => {
         const now = new Date(NOW).toISOString();
         await database.prepare(
           `INSERT INTO chat_vote_templates
-            (id, channel_id, shortcut, title, labels, free_text_mode, duration_seconds, revision, legacy_alias, last_used_at, created_at, updated_at, result_text)
-           VALUES ('template-race', ?, NULL, 'Racing vote', '["Yes","No"]', NULL, 120, 1, NULL, NULL, ?, ?, 'Result: {api.sunset}')`,
+            (id, channel_id, shortcut, title, labels, answer_colors, free_text_mode, duration_seconds, revision, legacy_alias, last_used_at, created_at, updated_at, result_text)
+           VALUES ('template-race', ?, NULL, 'Racing vote', '["Yes","No"]', '["#5b8cff","#ff9f43"]', NULL, 120, 1, NULL, NULL, ?, ?, 'Result: {api.sunset}')`,
         ).bind(CHANNEL_ID, now, now).run();
       },
     );

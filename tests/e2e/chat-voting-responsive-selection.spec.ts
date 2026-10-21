@@ -11,8 +11,8 @@ const routeJson = async (page: Page, path: string, value: unknown): Promise<void
 test("the automatically opened desktop vote keeps its guarded draft across responsive changes", async ({ page }) => {
   const timestamp = "2030-01-01T12:00:00.000Z";
   const templates: ChatVoteTemplate[] = [
-    { id: "template-auto", channelId: "channel-a", shortcut: "auto", title: "Automatically opened", resultText: "{vote.result}", labels: ["Yes", "No"], freeTextMode: null, durationSeconds: 60, revision: 1, legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp },
-    { id: "template-next", channelId: "channel-a", shortcut: "next", title: "Next vote", resultText: "{vote.result}", labels: ["Up", "Down"], freeTextMode: null, durationSeconds: 120, revision: 1, legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp },
+    { id: "template-auto", channelId: "channel-a", shortcut: "auto", title: "Automatically opened", resultText: "{vote.result}", labels: ["Yes", "No"], answerColors: ["#5b8cff", "#ff9f43"], offerInCockpit: true, freeTextMode: null, durationSeconds: 60, revision: 1, legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp },
+    { id: "template-next", channelId: "channel-a", shortcut: "next", title: "Next vote", resultText: "{vote.result}", labels: ["Up", "Down"], answerColors: ["#5b8cff", "#ff9f43"], offerInCockpit: true, freeTextMode: null, durationSeconds: 120, revision: 1, legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp },
   ];
   await routeJson(page, "/api/channels/channel-a/modules/chat_voting/current", {
     vote: null, counts: null, revision: 1, terms: null, moreTerms: null, hasOpenBallot: false, defaultDurationSeconds: 60,

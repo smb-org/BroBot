@@ -8,6 +8,7 @@ const count = Number(parameters.get("terms") ?? "0");
 const mobile = parameters.get("mobile") === "1";
 const narrow = parameters.get("narrow") === "1";
 const standard = parameters.get("preset") === "standard";
+const colored = parameters.get("colored") === "1";
 const width = narrow ? 200 : mobile ? 390 : 1920;
 const title = parameters.has("title") ? parameters.get("title") || null : null;
 const countdownMode = parameters.get("countdown") ?? "none";
@@ -50,6 +51,7 @@ const overlay = {
         "A deliberately long affirmative choice that wraps at narrow widths",
         "A deliberately long negative choice that wraps at narrow widths",
       ] : [],
+      ...(standard && colored ? { answerColors: ["#5b8cff", "#ff9f43"] } : {}),
       counts: standard ? [1, 2] : [],
       terms,
       termFilterReady: true,

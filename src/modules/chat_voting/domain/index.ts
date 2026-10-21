@@ -5,7 +5,7 @@ import type { ChatVoteTemplate, ChatVoteTerm, ChatVotingKind, ChatVotingPreset, 
 import { chatVotingFreeTextOptionText } from "../contracts/chat-defaults";
 
 export type VoteCommand =
-  | { kind: "start"; voteKind: ChatVotingKind; preset: ChatVotingPreset; optionCount: number; labels?: readonly string[]; textMode?: ChatVotingTextMode; title: string | null; durationSeconds?: number; resultText?: string }
+  | { kind: "start"; voteKind: ChatVotingKind; preset: ChatVotingPreset; optionCount: number; labels?: readonly string[]; answerColors?: readonly string[]; textMode?: ChatVotingTextMode; title: string | null; durationSeconds?: number; resultText?: string }
   | { kind: "template"; shortcut: string }
   | { kind: "legacyAlias"; alias: "yesno" | "scale" | "zeroOne" | "oneTwo"; title: string | null }
   | { kind: "again" }
@@ -43,14 +43,15 @@ export const isValidTemplateShortcut = (shortcut: string | null): boolean =>
   shortcut === null || (/^[a-z][a-z0-9_-]{0,23}$/u.test(shortcut) &&
     !(CHAT_VOTE_TEMPLATE_RESERVED_SHORTCUTS as readonly string[]).includes(shortcut));
 
-export type TemplateStartProblem = "answers" | "duration" | null;
+export type TemplateStartProblem = "answers" | "duration" | "unreachable" | null;
 
 export const templateStartProblem = (
-  template: Pick<ChatVoteTemplate, "labels" | "freeTextMode" | "durationSeconds">,
+  template: Pick<ChatVoteTemplate, "labels" | "freeTextMode" | "durationSeconds" | "shortcut" | "offerInCockpit">,
 ): TemplateStartProblem => {
   if (!Number.isSafeInteger(template.durationSeconds) || template.durationSeconds < 0 || template.durationSeconds > 14_400) {
     return "duration";
   }
+  if (template.shortcut === null && !template.offerInCockpit) return "unreachable";
   if (template.freeTextMode !== null) return null;
   return validateVoteLabels(template.labels, 2, 9) ? null : "answers";
 };
@@ -64,6 +65,7 @@ export const chatVoteTemplateConfiguration = (
     voteKind,
     optionCount: voteKind === "free_text" ? 0 : template.labels.length,
     ...(voteKind === "free_text" ? { textMode: template.freeTextMode ?? "first_word" } : { labels: template.labels }),
+    ...(voteKind === "free_text" ? {} : { answerColors: template.answerColors }),
     title: normalizeVoteTitle(titleOverride ?? template.title),
     durationSeconds: template.durationSeconds,
     resultText: template.resultText ?? "{vote.result}",

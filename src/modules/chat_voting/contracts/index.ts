@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { DEFAULT_CHAT_VOTING_START_TEXT } from "./chat-defaults";
 import { templateTextLength } from "../../../contracts/template-text-length";
+import { chatVoteAnswerColorsSchema } from "./chat-vote-colors-schema";
 
 export { DEFAULT_CHAT_VOTING_START_TEXT, DEFAULT_CHAT_VOTING_START_TEXT_EN } from "./chat-defaults";
 
@@ -64,6 +65,7 @@ export interface ChatVote {
   kind: ChatVotingKind;
   optionCount: number;
   labels: readonly string[];
+  answerColors: readonly string[];
   title: string | null;
   resultText?: string | null;
   textMode?: ChatVotingTextMode | null;
@@ -100,6 +102,8 @@ export interface ChatVoteTemplate {
   title: string;
   resultText?: string;
   labels: readonly string[];
+  answerColors: readonly string[];
+  offerInCockpit: boolean;
   freeTextMode: ChatVotingTextMode | null;
   durationSeconds: number;
   revision: number;
@@ -114,6 +118,26 @@ export interface ChatVoteTemplateDraft {
   title: string;
   resultText?: string;
   labels: readonly string[];
+  answerColors: readonly string[];
+  offerInCockpit: boolean;
   freeTextMode: ChatVotingTextMode | null;
   durationSeconds: number;
 }
+
+export const chatVoteTemplateDraftSchema = z.object({
+  shortcut: z.string().nullable(),
+  title: z.string().refine((title) => Array.from(title).length <= CHAT_VOTING_TITLE_MAX_LENGTH),
+  resultText: z.string().optional(),
+  labels: z.array(z.string()).max(9),
+  answerColors: chatVoteAnswerColorsSchema,
+  freeTextMode: z.enum(["first_word", "whole_message"]).nullable(),
+  durationSeconds: z.number().int().min(0).max(CHAT_VOTING_HARD_LIMIT_MS / 1_000),
+  offerInCockpit: z.boolean(),
+}).superRefine((template, context) => {
+  if (template.answerColors.length !== template.labels.length) {
+    context.addIssue({ code: "custom", path: ["answerColors"], message: "Each answer needs one color." });
+  }
+  if (template.shortcut === null && !template.offerInCockpit) {
+    context.addIssue({ code: "custom", path: ["offerInCockpit"], message: "Add a shortcut or offer this vote in the cockpit." });
+  }
+});

@@ -552,7 +552,7 @@ test("saving a dirty saved vote retries after a failed explicit save", async ({ 
   const timestamp = "2030-01-01T12:00:00.000Z";
   let template: ChatVoteTemplate = {
     id: "template-start-save", channelId: "channel-a", shortcut: "dinner", title: "Dinner",
-    labels: ["Pizza", "Pasta"], freeTextMode: null, durationSeconds: 60, revision: 1,
+    labels: ["Pizza", "Pasta"], answerColors: ["#5b8cff", "#ff9f43"], offerInCockpit: true, freeTextMode: null, durationSeconds: 60, revision: 1,
     legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
   };
   let failNextSave = true;
@@ -604,7 +604,7 @@ test("template conflict keeps the draft until Reload accepts the latest version"
   const timestamp = "2030-01-01T12:00:00.000Z";
   let latest: ChatVoteTemplate = {
     id: "template-conflict", channelId: "channel-a", shortcut: "conflict", title: "Original",
-    labels: ["First", "Second"], freeTextMode: null, durationSeconds: 60, revision: 1,
+    labels: ["First", "Second"], answerColors: ["#5b8cff", "#ff9f43"], offerInCockpit: true, freeTextMode: null, durationSeconds: 60, revision: 1,
     legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
   };
   let patchCount = 0;
@@ -645,7 +645,7 @@ test("a server shortcut conflict stays on its field and preserves the rest of th
   const timestamp = "2030-01-01T12:00:00.000Z";
   const template: ChatVoteTemplate = {
     id: "template-shortcut-conflict", channelId: "channel-a", shortcut: "first", title: "Original",
-    labels: ["First", "Second"], freeTextMode: null, durationSeconds: 60, revision: 1,
+    labels: ["First", "Second"], answerColors: ["#5b8cff", "#ff9f43"], offerInCockpit: true, freeTextMode: null, durationSeconds: 60, revision: 1,
     legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
   };
   await routeJson(page, "/api/csrf", { token: "csrf" });
@@ -736,7 +736,7 @@ test("a second save preserves edits made while a newly created vote is being ack
       const draft = await route.request().postDataJSON() as Partial<ChatVoteTemplate>;
       template = {
         id: "template-created-again", channelId: "channel-a", shortcut: null, title: draft.title ?? "",
-        labels: draft.labels ?? [], freeTextMode: null, durationSeconds: 60, revision: 1, legacyAlias: null,
+        labels: draft.labels ?? [], answerColors: draft.answerColors ?? [], offerInCockpit: draft.offerInCockpit ?? true, freeTextMode: null, durationSeconds: 60, revision: 1, legacyAlias: null,
         lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
       };
       await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ template }) });
@@ -780,7 +780,7 @@ test("the saved vote inspector keeps its draft while leaving vote starts to the 
   const timestamp = "2030-01-01T12:00:00.000Z";
   const template: ChatVoteTemplate = {
     id: "template-running-note", channelId: "channel-a", shortcut: "running", title: "A deliberately long saved question that needs room to wrap clearly",
-    labels: ["Yes", "No"], freeTextMode: null, durationSeconds: 60, revision: 1,
+    labels: ["Yes", "No"], answerColors: ["#5b8cff", "#ff9f43"], offerInCockpit: true, freeTextMode: null, durationSeconds: 60, revision: 1,
     legacyAlias: null, lastUsedAt: null, createdAt: timestamp, updatedAt: timestamp,
   };
   await routeJson(page, "/api/csrf", { token: "csrf" });

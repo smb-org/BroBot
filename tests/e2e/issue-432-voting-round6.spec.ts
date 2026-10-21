@@ -13,6 +13,8 @@ const baseTemplate: ChatVoteTemplate = {
   title: "Welche Idee gewinnt?",
   resultText: "{vote.result}",
   labels: ["Pizza", "Burger"],
+  answerColors: ["#5b8cff", "#ff9f43"],
+  offerInCockpit: true,
   freeTextMode: null,
   durationSeconds: 120,
   revision: 1,
