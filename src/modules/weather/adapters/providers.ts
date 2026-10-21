@@ -20,6 +20,13 @@ interface WeatherProviderResponse {
   lastModified: string | null;
 }
 
+export class WeatherProviderError extends Error {
+  public constructor(message: string, public readonly retryAfterMs: number | null) {
+    super(message);
+    this.name = "WeatherProviderError";
+  }
+}
+
 export type WeatherProviderAdapter = (input: {
   coordinates: WeatherCoordinates;
   validators: WeatherValidators;
@@ -39,6 +46,15 @@ const expiryFromHeaders = (headers: Headers, now: number): number | null => {
   if (Number.isFinite(expiresAt)) return expiresAt;
   const maxAge = /(?:^|,)\s*max-age=(\d+)/iu.exec(headers.get("Cache-Control") ?? "")?.[1];
   return maxAge === undefined ? null : now + Number(maxAge) * 1_000;
+};
+
+const retryAfterFromHeaders = (headers: Headers, now: number): number | null => {
+  const value = headers.get("Retry-After");
+  if (value === null) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000;
+  const retryAt = Date.parse(value);
+  return Number.isFinite(retryAt) ? Math.max(0, retryAt - now) : null;
 };
 
 const request = async (
@@ -67,7 +83,7 @@ export const metNorwayWeather: WeatherProviderAdapter = async ({ coordinates, va
   const response = await request("met_norway", url, validators, fetcher);
   const metadata = responseMetadata(response, now);
   if (response.status === 304) return { notModified: true, ...metadata };
-  if (!response.ok) throw new Error(`MET Norway returned HTTP ${String(response.status)}.`);
+  if (!response.ok) throw new WeatherProviderError(`MET Norway returned HTTP ${String(response.status)}.`, retryAfterFromHeaders(response.headers, now));
   const payload: unknown = await readBoundedJsonResponse(response);
   const properties = record(record(payload)?.properties);
   const timeseries = properties?.timeseries;
@@ -118,7 +134,7 @@ export const openMeteoWeather: WeatherProviderAdapter = async ({ coordinates, va
   const response = await request("open_meteo", url, validators, fetcher);
   const metadata = responseMetadata(response, now);
   if (response.status === 304) return { notModified: true, ...metadata };
-  if (!response.ok) throw new Error(`Open-Meteo returned HTTP ${String(response.status)}.`);
+  if (!response.ok) throw new WeatherProviderError(`Open-Meteo returned HTTP ${String(response.status)}.`, retryAfterFromHeaders(response.headers, now));
   const payload: unknown = await readBoundedJsonResponse(response);
   const current = record(record(payload)?.current);
   const hourly = record(record(payload)?.hourly);

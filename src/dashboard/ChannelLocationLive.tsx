@@ -201,7 +201,7 @@ const SunCard = ({ data, loading, failed, missingLocation, timeZone, now, channe
   const markerBounds = events.length < 2 ? null : [events[0]?.time ?? 0, events.at(-1)?.time ?? 0] as const;
   const hasEventRange = events.length >= 2;
   const nowPosition = markerBounds === null || markerBounds[1] <= markerBounds[0]
-    ? 50
+    ? localTimePosition(now, timeZone)
     : clampPercent(((now - markerBounds[0]) / (markerBounds[1] - markerBounds[0])) * 100);
   const nextEvent = events.find((event) => event.time > now) ?? (data?.nextDawnAt === null || data?.nextDawnAt === undefined
     ? undefined
@@ -214,14 +214,16 @@ const SunCard = ({ data, loading, failed, missingLocation, timeZone, now, channe
   const message = failed ? texts.temporaryError : null;
   const nowBeforeDawn = markerBounds !== null && now < markerBounds[0];
   const nowAfterDusk = markerBounds !== null && now > markerBounds[1];
+  const goldenHour = selectCurrentOrNextInterval(data?.goldenHourIntervals ?? [], now);
+  const blueHour = selectCurrentOrNextInterval(data?.blueHourIntervals ?? [], now);
 
   const displayEvents = [
     { label: texts.dawn, at: day?.dawnAt, color: "var(--content-sun-dawn)" },
     { label: texts.sunrise, at: day?.sunriseAt, color: "var(--content-sun-sunrise)" },
     { label: texts.solarNoon, at: day?.solarNoonAt, color: "var(--content-sun-noon)" },
-    { label: texts.goldenHour, at: data?.goldenHourIntervals[0]?.startAt, value: formatInterval(data?.goldenHourIntervals[0], timeZone, language), color: "var(--content-sun-golden)" },
+    { label: texts.goldenHour, at: goldenHour?.startAt, value: formatInterval(goldenHour, timeZone, language), color: "var(--content-sun-golden)" },
     { label: texts.sunset, at: day?.sunsetAt, color: "var(--content-sun-sunset)" },
-    { label: texts.blueHour, at: data?.blueHourIntervals[0]?.startAt, value: formatInterval(data?.blueHourIntervals[0], timeZone, language), color: "var(--content-sun-blue-hour)" },
+    { label: texts.blueHour, at: blueHour?.startAt, value: formatInterval(blueHour, timeZone, language), color: "var(--content-sun-blue-hour)" },
     { label: texts.dusk, at: day?.duskAt, color: "var(--content-sun-dawn)" },
   ];
 
@@ -240,12 +242,12 @@ const SunCard = ({ data, loading, failed, missingLocation, timeZone, now, channe
       <span className={`channel-location-sun-arc__now-label${nowBeforeDawn ? " channel-location-sun-arc__now-label--start" : nowAfterDusk ? " channel-location-sun-arc__now-label--end" : ""}`}
         style={{ "--position": `${String(nowPosition)}%` } as CSSProperties}>{texts.now} · {formatTime(new Date(now).toISOString(), timeZone, language)}</span>
     </div>
-    <div className="channel-location-sun-next"><span>{texts.nextPhase}</span><strong>{data === null ? <LiveValueSkeleton size="wide" /> : nextEvent === undefined ? readOnlyContent : texts.nextPhaseIn(nextEvent.label, formatDuration(Math.ceil((nextEvent.time - now) / 60_000), language))}</strong></div>
+    <div className="channel-location-sun-next"><span>{texts.nextPhase}</span><strong>{data === null ? <LiveValueSkeleton size="wide" /> : day?.polarState === "day" ? texts.polarDay : day?.polarState === "night" ? texts.polarNight : nextEvent === undefined ? readOnlyContent : texts.nextPhaseIn(nextEvent.label, formatDuration(Math.ceil((nextEvent.time - now) / 60_000), language))}</strong></div>
     <dl className="channel-location-sun-events">
       {displayEvents.map((event) => <div key={event.label}><dt><span style={{ "--phase-color": event.color } as CSSProperties} />{event.label}</dt><dd className={`number${event.label === texts.goldenHour ? " channel-location-sun-events__interval channel-location-sun-events__interval--golden" : event.label === texts.blueHour ? " channel-location-sun-events__interval channel-location-sun-events__interval--blue" : ""}`}>{data === null ? <LiveValueSkeleton /> : "value" in event ? event.value : formatTime(event.at, timeZone, language)}</dd></div>)}
       <div><dt>{texts.dayLength}</dt><dd className="number">{dayLength}</dd></div>
     </dl>
-    {message === null ? null : <div className="channel-location-live-status" role="status">{message}</div>}
+    <div className="channel-location-live-status" {...(message === null ? {} : { role: "status" })}>{message}</div>
   </div>;
 };
 
@@ -279,7 +281,7 @@ const MoonCard = ({ data, loading, failed, missingLocation, timeZone, now, chann
     <dl className="channel-location-moon-events">
       {fields.map((field) => <div key={field.label}><dt>{field.label}</dt><dd className="number">{field.value ?? (data === null ? <LiveValueSkeleton /> : formatTime(field.at, timeZone, language))}</dd></div>)}
     </dl>
-    {message === null ? null : <div className="channel-location-live-status" role="status">{message}</div>}
+    <div className="channel-location-live-status" {...(message === null ? {} : { role: "status" })}>{message}</div>
   </div>;
 };
 
@@ -345,9 +347,9 @@ const sunMarkers = (data: Extract<PanelSunToday, { status: "ok" }> | null): { la
     { label: texts.dawn, at: data.day.dawnAt, color: "var(--content-sun-dawn)" },
     { label: texts.sunrise, at: data.day.sunriseAt, color: "var(--content-sun-sunrise)" },
     { label: texts.solarNoon, at: data.day.solarNoonAt, color: "var(--content-sun-noon)" },
-    { label: texts.goldenHour, at: data.goldenHourIntervals[0]?.startAt ?? null, color: "var(--content-sun-golden)" },
+    ...data.goldenHourIntervals.map((interval) => ({ label: texts.goldenHour, at: interval.startAt, color: "var(--content-sun-golden)" })),
     { label: texts.sunset, at: data.day.sunsetAt, color: "var(--content-sun-sunset)" },
-    { label: texts.blueHour, at: data.blueHourIntervals[0]?.startAt ?? null, color: "var(--content-sun-blue-hour)" },
+    ...data.blueHourIntervals.map((interval) => ({ label: texts.blueHour, at: interval.startAt, color: "var(--content-sun-blue-hour)" })),
     { label: texts.dusk, at: data.day.duskAt, color: "var(--content-sun-dawn)" },
   ];
   const markers: { label: string; at: string; time: number; color: string }[] = [];
@@ -357,6 +359,25 @@ const sunMarkers = (data: Extract<PanelSunToday, { status: "ok" }> | null): { la
     if (Number.isFinite(time)) markers.push({ ...event, at: event.at, time });
   }
   return markers.sort((left, right) => left.time - right.time);
+};
+
+const selectCurrentOrNextInterval = <Interval extends { startAt: string; endAt: string }>(
+  intervals: readonly Interval[],
+  now: number,
+): Interval | undefined => {
+  const valid = intervals.filter((interval) => Number.isFinite(Date.parse(interval.startAt)) && Number.isFinite(Date.parse(interval.endAt)))
+    .slice()
+    .sort((left, right) => Date.parse(left.startAt) - Date.parse(right.startAt));
+  return valid.find((interval) => Date.parse(interval.startAt) <= now && Date.parse(interval.endAt) >= now)
+    ?? valid.find((interval) => Date.parse(interval.startAt) > now)
+    ?? valid.at(-1);
+};
+
+const localTimePosition = (now: number, timeZone: string): number => {
+  const parts = new Intl.DateTimeFormat("en", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(now);
+  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? 0);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value ?? 0);
+  return clampPercent(((hour * 60 + minute) / (24 * 60)) * 100);
 };
 
 const markerPosition = (time: number, bounds: readonly [number, number] | null): number =>

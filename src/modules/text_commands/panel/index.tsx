@@ -1256,6 +1256,7 @@ const TextCommandsPanelContent = ({
   const registeredVariables = useMemo(() => registeredVariablesQuery.data ?? [], [registeredVariablesQuery.data]);
   const { selectedKey: selectedName, select: selectName, rowRef, close: closeSelection } = useInspectorSelection<string>();
   const [createOpen, setCreateOpen] = useState(false);
+  const [createInitialDraft, setCreateInitialDraft] = useState<CommandDraft | null>(null);
   const guardRef = useRef<((proceed: () => void, cancel?: () => void) => void) | null>(null);
   const guardSwitch = useCallback((proceed: () => void, cancel?: () => void): void => {
     const guard = guardRef.current;
@@ -1283,6 +1284,7 @@ const TextCommandsPanelContent = ({
     if (token !== generationRef.current) return;
     generationRef.current += 1;
     setCreateOpen(false);
+    setCreateInitialDraft(null);
     if (preserveEditor && selectedName !== null && selectedName !== name) setPreservedRename({ from: selectedName, to: name });
     selectName(name);
     if (!preserveEditor && (selectedName !== name || createOpen)) setSelectionVersion((current) => current + 1);
@@ -1315,9 +1317,11 @@ const TextCommandsPanelContent = ({
       setSelectionVersion((current) => current + 1);
       if (existing !== undefined) {
         setCreateOpen(false);
+          setCreateInitialDraft(null);
         setMobileDetailOpen(true);
         selectName(existing.name);
       } else {
+          setCreateInitialDraft(newCommandDraft(initialCommand));
         closeSelection();
         setCreateOpen(true);
         setMobileDetailOpen(true);
@@ -1350,6 +1354,7 @@ const TextCommandsPanelContent = ({
     guardSwitch(() => {
       generationRef.current += 1;
       setCreateOpen(false);
+      setCreateInitialDraft(null);
       closeSelection();
       setMobileDetailOpen(false);
       setSelectionVersion((current) => current + 1);
@@ -1360,6 +1365,7 @@ const TextCommandsPanelContent = ({
     guardSwitch(() => {
       generationRef.current += 1;
       setCreateOpen(false);
+      setCreateInitialDraft(null);
       setMobileDetailOpen(false);
       setSelectionVersion((current) => current + 1);
     });
@@ -1367,6 +1373,7 @@ const TextCommandsPanelContent = ({
   const openCreate = (): void => guardSwitch(() => {
     generationRef.current += 1;
     closeSelection();
+    setCreateInitialDraft(null);
     setCreateOpen(true);
     setMobileDetailOpen(true);
     setSelectionVersion((current) => current + 1);
@@ -1379,6 +1386,7 @@ const TextCommandsPanelContent = ({
     guardSwitch(() => {
       generationRef.current += 1;
       setCreateOpen(false);
+      setCreateInitialDraft(null);
       selectName(name);
       setMobileDetailOpen(true);
       setSelectionVersion((current) => current + 1);
@@ -1513,7 +1521,7 @@ const TextCommandsPanelContent = ({
     registeredVariablesPending={registeredVariablesQuery.isPending}
     registeredVariablesRefreshError={registeredVariablesQuery.isRefetchError}
     onRetryRegisteredVariables={() => { void registeredVariablesQuery.refetch(); }}
-    initial={newCommandDraft(initialCommand)}
+    initial={createInitialDraft ?? newCommandDraft()}
     command={null}
     commands={commands}
     channelVariables={channelVariables}

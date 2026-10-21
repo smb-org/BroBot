@@ -235,7 +235,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const nameInvalid = !variableNamePattern.test(normalizedVariableName(draftName));
   const definitionDraftDirty = creating || definitionBaseline === null || normalizedVariableName(draftName) !== definitionBaseline.name ||
     draftDescription !== definitionBaseline.description || draftReset !== definitionBaseline.resetOnStreamStart;
-  const createDisabled = !canManageContent || variables.length >= maximum || pending || overlayPending;
+  const createDisabled = !canManageContent || variables.length >= maximum || pending || overlayPending || variablesQuery.data === undefined;
   const draftInvalid = nameInvalid || typeof draftValue !== "number" || !Number.isInteger(draftValue) || draftValue < CHANNEL_VARIABLE_MINIMUM_VALUE || draftValue > CHANNEL_VARIABLE_MAXIMUM_VALUE;
   const beginCreate = (): void => {
     setCreating(true);
@@ -568,7 +568,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
         reasonVisible: false,
       }}
       usage={{ count: variables.length, maximum, ...(query.length === 0 ? {} : { filteredCount: visibleVariables.length }), copy: { countSuffix: labels.countSuffix, filteredInfix: dashboardCommonTexts().of, filteredSuffix: labels.filteredSuffix, limitInfix: dashboardCommonTexts().of, limitSuffix: labels.limitSuffix, loadedSuffix: dashboardCommonTexts().loaded } }}
-      {...(loadFailed && variables.length > 0 ? { queryError: {
+      {...(loadFailed && visibleCount > 0 && catalogFilter !== "module" ? { queryError: {
         title: dashboardTexts().errors.dataLoadFailed,
         message: variablesLoadError,
         onRetry: () => { void refresh().catch(() => undefined); },

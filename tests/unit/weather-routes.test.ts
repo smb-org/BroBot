@@ -47,6 +47,7 @@ const appFor = (database: TestD1Database, role: "manager" | "operator" = "manage
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   for (const database of databases.splice(0)) database.close();
 });
 
@@ -175,5 +176,66 @@ describe("current weather route", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "provider_error", reason: "upstream_unavailable" });
+  });
+
+  it("caches provider failures for the location cooldown", async () => {
+    const database = await createDatabase();
+    await setLocation(database);
+    const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(new Response(null, { status: 503 })));
+    vi.stubGlobal("fetch", fetcher);
+    const app = appFor(database, "operator");
+    const request = () => app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/current`), {
+      DB: database as unknown as D1Database,
+    });
+
+    await request();
+    await request();
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("honors Retry-After when extending a provider failure cooldown", async () => {
+    const database = await createDatabase();
+    await setLocation(database);
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-21T12:00:00.000Z"));
+    const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(new Response(null, {
+      status: 503,
+      headers: { "Retry-After": "120" },
+    })));
+    vi.stubGlobal("fetch", fetcher);
+    const app = appFor(database, "operator");
+    const request = () => app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/current`), {
+      DB: database as unknown as D1Database,
+    });
+
+    await request();
+    now.mockReturnValue(Date.parse("2026-10-21T12:01:00.000Z"));
+    await request();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    now.mockReturnValue(Date.parse("2026-10-21T12:02:01.000Z"));
+    await request();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("coalesces concurrent cache misses into one provider request", async () => {
+    const database = await createDatabase();
+    await setLocation(database);
+    let release!: (response: Response) => void;
+    const waitingResponse = new Promise<Response>((resolve) => { release = resolve; });
+    const fetcher = vi.fn<typeof fetch>(() => waitingResponse);
+    vi.stubGlobal("fetch", fetcher);
+    const app = appFor(database, "operator");
+    const request = () => app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/current`), {
+      DB: database as unknown as D1Database,
+    });
+
+    const first = request();
+    const second = request();
+    await vi.waitFor(() => { expect(fetcher).toHaveBeenCalledTimes(1); });
+    release(new Response(null, { status: 503 }));
+    await Promise.all([first, second]);
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 });

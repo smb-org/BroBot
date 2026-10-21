@@ -98,6 +98,25 @@ describe("Channel variables page", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("{var.score}"));
   });
 
+  it("shows own-variable errors beside module rows and disables creation until own variables load", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ error: "unavailable" }, 500));
+      if (url.pathname === "/api/channels/kanal-a/template-variables") return Promise.resolve(jsonResponse({ variables: [
+        { name: "weather.temp", moduleId: "weather", isTextBlock: false, sample: "18 °C", description: "Current temperature." },
+      ] }));
+      if (url.pathname.endsWith("/overlay-tokens")) return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+
+    expect(await screen.findByRole("row", { name: /weather\.temp/u })).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Kanalvariablen konnten nicht geladen werden.");
+    expect(screen.getByRole("button", { name: "Erneut versuchen" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Variable anlegen" })).toBeDisabled();
+  });
+
   it("saves an edited value with the definition before switching to another variable", async () => {
     const otherVariable = { ...variable, name: "other", value: 7, description: "Other value", resetOnStreamStart: false };
     const requests: Array<{ path: string; method: string; body?: string }> = [];

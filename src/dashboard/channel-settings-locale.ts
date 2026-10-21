@@ -52,6 +52,8 @@ export interface LocationLiveTexts {
   sun: string;
   nextPhase: string;
   nextPhaseIn: (phase: string, duration: string) => string;
+  polarDay: string;
+  polarNight: string;
   dawn: string;
   sunrise: string;
   solarNoon: string;
@@ -170,6 +172,8 @@ const liveTexts: Readonly<Record<"de" | "en", LocationLiveTexts>> = {
     sun: "Sonne heute",
     nextPhase: "Nächster Abschnitt",
     nextPhaseIn: (phase, duration) => `${phase} in ${duration}`,
+    polarDay: "Polartag",
+    polarNight: "Polarnacht",
     dawn: "Morgendämmerung",
     sunrise: "Sonnenaufgang",
     solarNoon: "Sonnenhöchststand",
@@ -216,6 +220,8 @@ const liveTexts: Readonly<Record<"de" | "en", LocationLiveTexts>> = {
     sun: "Sun today",
     nextPhase: "Next phase",
     nextPhaseIn: (phase, duration) => `${phase} in ${duration}`,
+    polarDay: "Polar day",
+    polarNight: "Polar night",
     dawn: "Dawn",
     sunrise: "Sunrise",
     solarNoon: "Solar noon",

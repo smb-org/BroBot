@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { PanelChannelSettings } from "../../src/dashboard/api";
@@ -77,6 +77,7 @@ describe("channel location page", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     setBrowserLanguage("de-DE");
   });
 
@@ -220,7 +221,86 @@ describe("channel location page", () => {
     expect(screen.getByText("Tageslänge").closest("div")).toHaveTextContent("12 Std. 34 Min.");
   });
 
+  it("keeps sun and moon status slots in place through refresh errors and recovery", async () => {
+    let refreshFails = false;
+    let weatherFails = false;
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse(berlinSettings));
+      if (url.pathname.endsWith("/modules/weather/current")) return Promise.resolve(jsonResponse(weatherFails
+        ? { status: "provider_error", reason: "upstream_unavailable" }
+        : liveWeather));
+      if (url.pathname.endsWith("/modules/sun/today")) return Promise.resolve(refreshFails ? jsonResponse({}, 503) : jsonResponse(liveSun));
+      if (url.pathname.endsWith("/modules/moon/today")) return Promise.resolve(refreshFails ? jsonResponse({}, 503) : jsonResponse(liveMoon));
+      if (url.pathname.endsWith("/modules/text_commands/commands")) return Promise.resolve(jsonResponse({ commands: [], variables: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const { container, queryClient } = renderWithQuery(<UiProvider><ChannelLocationPage channelId="channel-a" role="manager" /></UiProvider>);
+
+    const sunSlot = await waitFor(() => {
+      const slot = container.querySelector(".channel-location-sun-card .channel-location-live-status");
+      expect(slot).not.toBeNull();
+      return slot as HTMLElement;
+    });
+    const moonSlot = container.querySelector(".channel-location-moon-card .channel-location-live-status");
+    const weatherSlot = container.querySelector(".channel-location-weather-card__footer > span:last-child");
+    await waitFor(() => {
+      expect(container.querySelector(".channel-location-weather-card")).toHaveAttribute("aria-busy", "false");
+      expect(container.querySelector(".channel-location-sun-card")).toHaveAttribute("aria-busy", "false");
+      expect(container.querySelector(".channel-location-moon-card")).toHaveAttribute("aria-busy", "false");
+    });
+    expect(moonSlot).not.toBeNull();
+    expect(sunSlot).toBeEmptyDOMElement();
+    expect(moonSlot).toBeEmptyDOMElement();
+    expect(weatherSlot).toHaveTextContent("aktualisiert");
+
+    const refreshModule = async (moduleId: "weather" | "sun" | "moon"): Promise<void> => {
+      const query = queryClient.getQueryCache().getAll().find((candidate) => candidate.queryKey[3] === moduleId);
+      if (query === undefined) throw new Error(`The ${moduleId} query is missing`);
+      await queryClient.refetchQueries({ queryKey: query.queryKey, exact: true });
+    };
+
+    refreshFails = true;
+    weatherFails = true;
+    await act(async () => {
+      await Promise.all([
+        refreshModule("weather"),
+        refreshModule("sun"),
+        refreshModule("moon"),
+      ]);
+    });
+    await waitFor(() => expect(fetcher.mock.calls.filter(([input]) => inputUrl(input).endsWith("/weather/current")).length).toBe(2));
+    expect(container.querySelector(".channel-location-weather-card__footer > span:last-child")).toBe(weatherSlot);
+    expect(weatherSlot).toHaveTextContent("Wetterdienst gerade nicht erreichbar");
+    await waitFor(() => expect(fetcher.mock.calls.filter(([input]) => inputUrl(input).endsWith("/sun/today")).length).toBe(2));
+    expect(container.querySelector(".channel-location-sun-card .channel-location-live-status")).toBe(sunSlot);
+    expect(container.querySelector(".channel-location-moon-card .channel-location-live-status")).toBe(moonSlot);
+    expect(sunSlot).toHaveTextContent("Daten konnten nicht geladen werden.");
+    expect(moonSlot).toHaveTextContent("Daten konnten nicht geladen werden.");
+
+    refreshFails = false;
+    weatherFails = false;
+    await act(async () => {
+      await Promise.all([
+        refreshModule("weather"),
+        refreshModule("sun"),
+        refreshModule("moon"),
+      ]);
+    });
+    expect(container.querySelector(".channel-location-sun-card .channel-location-live-status")).toBe(sunSlot);
+    expect(container.querySelector(".channel-location-moon-card .channel-location-live-status")).toBe(moonSlot);
+    await waitFor(() => {
+      expect(fetcher.mock.calls.filter(([input]) => inputUrl(input).endsWith("/weather/current")).length).toBe(3);
+      expect(fetcher.mock.calls.filter(([input]) => inputUrl(input).endsWith("/sun/today")).length).toBe(3);
+      expect(sunSlot).toBeEmptyDOMElement();
+      expect(moonSlot).toBeEmptyDOMElement();
+      expect(weatherSlot).toHaveTextContent("aktualisiert");
+    });
+  });
+
   it("shows missing solar crossings safely during a polar day", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-21T12:00:00.000Z"));
     vi.stubGlobal("fetch", livePageFetcher({
       sun: {
         ...liveSun,
@@ -244,7 +324,53 @@ describe("channel location page", () => {
     await waitFor(() => expect(screen.getByText("Sonnenaufgang").closest("div")).toHaveTextContent("—"));
     expect(screen.getByText("Sonnenaufgang").closest("div")).toHaveTextContent("—");
     expect(screen.getByText("Sonnenuntergang").closest("div")).toHaveTextContent("—");
+    expect(screen.getByText("Polartag")).toBeInTheDocument();
+    expect(parseFloat(container.querySelector(".channel-location-sun-arc__now")?.getAttribute("style")?.match(/--position: ([\d.]+)%/u)?.[1] ?? "50")).toBeCloseTo(58.3, 0);
     expect(container.querySelector(".channel-location-sun-card")).not.toHaveTextContent("Invalid Date");
+  });
+
+  it.each([
+    ["de-DE", "Polarnacht"],
+    ["en-US", "Polar night"],
+  ])("shows explicit polar night text in %s", async (language, expected) => {
+    setBrowserLanguage(language);
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-21T12:00:00.000Z"));
+    vi.stubGlobal("fetch", livePageFetcher({
+      sun: {
+        ...liveSun,
+        day: { ...liveSun.day, sunriseAt: null, sunsetAt: null, dawnAt: null, duskAt: null, dayLengthMinutes: null, polarState: "night" },
+        goldenHourIntervals: [],
+        blueHourIntervals: [],
+        nextDawnAt: null,
+      },
+    }));
+    const { container } = renderWithQuery(<UiProvider><ChannelLocationPage channelId="channel-a" role="manager" /></UiProvider>);
+
+    expect(await screen.findByText(expected)).toBeInTheDocument();
+    expect(parseFloat(container.querySelector(".channel-location-sun-arc__now")?.getAttribute("style")?.match(/--position: ([\d.]+)%/u)?.[1] ?? "50")).toBeCloseTo(58.3, 0);
+  });
+
+  it("uses every golden and blue hour interval and summarizes the upcoming interval", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-21T12:00:00.000Z"));
+    vi.stubGlobal("fetch", livePageFetcher({
+      sun: {
+        ...liveSun,
+        goldenHourIntervals: [
+          { startAt: "2026-10-21T06:00:00.000Z", endAt: "2026-10-21T06:48:00.000Z" },
+          { startAt: "2026-10-21T15:10:00.000Z", endAt: "2026-10-21T15:58:00.000Z" },
+        ],
+        blueHourIntervals: [
+          { startAt: "2026-10-21T04:35:00.000Z", endAt: "2026-10-21T05:18:00.000Z" },
+          { startAt: "2026-10-21T15:52:00.000Z", endAt: "2026-10-21T16:35:00.000Z" },
+        ],
+      },
+    }));
+    const { container } = renderWithQuery(<UiProvider><ChannelLocationPage channelId="channel-a" role="manager" /></UiProvider>);
+
+    expect(await screen.findByText("17:10–17:58")).toBeInTheDocument();
+    expect(screen.getByText("17:52–18:35")).toBeInTheDocument();
+    expect(screen.getByText("Goldene Stunde in 3 Std. 10 Min.")).toBeInTheDocument();
+    expect(container.querySelectorAll(".channel-location-sun-arc__point")).toHaveLength(9);
   });
 
   it("shows the location settings link in live cards when the saved location is missing", async () => {

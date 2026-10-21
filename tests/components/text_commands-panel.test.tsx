@@ -161,16 +161,20 @@ describe("Text command editor", () => {
     const fetcher = panelFetch();
     const consumed = vi.fn<() => void>();
     vi.stubGlobal("fetch", fetcher);
-    renderWithQuery(<UiProvider><TextCommandsPanel
-      channelId="kanal-a"
-      language="de"
-      initialCommand={{ name: "wetter", text: "In {weather.place} sind es {weather.temp}." }}
-      onInitialCommandConsumed={consumed}
-    /></UiProvider>);
+    const Harness = () => {
+      const [initialCommand, setInitialCommand] = useState<{ name: string; text: string } | undefined>({ name: "wetter", text: "In {weather.place} sind es {weather.temp}." });
+      return <TextCommandsPanel
+        channelId="kanal-a"
+        language="de"
+        {...(initialCommand === undefined ? {} : { initialCommand })}
+        onInitialCommandConsumed={() => { consumed(); setInitialCommand(undefined); }}
+      />;
+    };
+    renderWithQuery(<UiProvider><Harness /></UiProvider>);
 
+    await waitFor(() => expect(consumed).toHaveBeenCalledTimes(1));
     expect(await screen.findByRole("textbox", { name: "Befehlsname" })).toHaveValue("wetter");
     expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("In {weather.place} sind es {weather.temp}.");
-    await waitFor(() => expect(consumed).toHaveBeenCalledTimes(1));
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "POST" || init?.method === "PUT")).toBe(false);
   });
 
