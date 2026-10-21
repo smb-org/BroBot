@@ -49,7 +49,7 @@ const parseUrl = (input: RequestInfo | URL): URL => input instanceof Request
   ? new URL(input.url)
   : input instanceof URL ? input : new URL(input, "https://brobot.example");
 
-const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Promise<void>, stalePatch = false, settingsConflict = false, patchDeleted = false, settingsPatchGate?: Promise<void>, failQuestionListAfterDelete = false, options: { failPostDeleteQuestionLists?: number; postDeleteQuestionListGate?: Promise<void>; postDeleteQuestionListGates?: ReadonlyArray<{ page: number; search: string; gate: Promise<void> }>; failQuestionPage?: number; failQuestionPageRequests?: number; failPostDeleteQuestionPage?: number; failPostDeleteQuestionPageRequests?: number; questionPatchGate?: Promise<void>; failQuestionPatch?: boolean; failSettingsGets?: number; settingsGetGate?: Promise<void> } = {}) => {
+const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Promise<void>, stalePatch = false, settingsConflict = false, patchDeleted = false, settingsPatchGate?: Promise<void>, failQuestionListAfterDelete = false, options: { failPostDeleteQuestionLists?: number; postDeleteQuestionListGate?: Promise<void>; postDeleteQuestionListGates?: ReadonlyArray<{ page: number; search: string; gate: Promise<void> }>; failQuestionPage?: number; failQuestionPageRequests?: number; failPostDeleteQuestionPage?: number; failPostDeleteQuestionPageRequests?: number; questionPatchGate?: Promise<void>; failQuestionPatch?: boolean; failSettingsGets?: number; settingsGetGate?: Promise<void>; settingsGetGates?: ReadonlyArray<Promise<void> | undefined>; questionGetGates?: ReadonlyArray<{ questionId: string; gate: Promise<void> }>; deleteGate?: Promise<void> } = {}) => {
   let questions = [...initialQuestions];
   let questionDeleted = false;
   let shouldFailQuestionListAfterDelete = failQuestionListAfterDelete;
@@ -58,6 +58,7 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
   let failedPostDeletePageLists = 0;
   let postDeleteQuestionListRequests = 0;
   const usedPostDeleteQuestionListGates = new Set<number>();
+  const usedQuestionGetGates = new Set<number>();
   let finishPostDeleteQuestionList!: () => void;
   const postDeleteQuestionListFinished = new Promise<void>((resolve) => { finishPostDeleteQuestionList = resolve; });
   let settings = { ...initialSettings };
@@ -77,6 +78,8 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
       const response = (): Response => shouldFail
         ? jsonResponse({ error: "settings_load_failed" }, 503)
         : jsonResponse({ settings, revision: settingsRevision });
+      const settingsGetGate = options.settingsGetGates?.[settingsGetCount - 1];
+      if (settingsGetGate !== undefined) return settingsGetGate.then(response);
       return shouldFail && options.settingsGetGate !== undefined
         ? options.settingsGetGate.then(response)
         : Promise.resolve(response());
@@ -102,8 +105,18 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
     }
     if (url.pathname.includes("/modules/blitz_round/questions/") && method === "GET") {
       const id = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
-      const question = questions.find((candidate) => candidate.id === id);
-      return Promise.resolve(question === undefined ? jsonResponse({ error: "question_not_found" }, 404) : jsonResponse({ question }));
+      const readQuestion = (): Response => {
+        const question = questions.find((candidate) => candidate.id === id);
+        return question === undefined ? jsonResponse({ error: "question_not_found" }, 404) : jsonResponse({ question });
+      };
+      const gatedQuestionIndex = options.questionGetGates?.findIndex((entry, index) =>
+        !usedQuestionGetGates.has(index) && entry.questionId === id) ?? -1;
+      if (gatedQuestionIndex >= 0) {
+        usedQuestionGetGates.add(gatedQuestionIndex);
+        const gate = options.questionGetGates?.[gatedQuestionIndex]?.gate;
+        if (gate !== undefined) return gate.then(readQuestion);
+      }
+      return Promise.resolve(readQuestion());
     }
     if (url.pathname.endsWith("/modules/blitz_round/questions") && method === "GET") {
       const page = Number(url.searchParams.get("page") ?? "1");
@@ -172,17 +185,19 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
       const id = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
       const revision = Number(url.searchParams.get("revision") ?? "0");
       submittedDeleteRevisions.push(revision);
-      const existing = questions.find((candidate) => candidate.id === id);
-      if (existing === undefined) return Promise.resolve(jsonResponse({ error: "question_deleted" }, 409));
-      if (revision !== existing.revision) return Promise.resolve(jsonResponse({ error: "question_conflict", current: existing }, 409));
-      questions = questions.filter((candidate) => candidate.id !== id);
-      questionDeleted = true;
-      return Promise.resolve(jsonResponse({ removed: true }));
+      return (options.deleteGate ?? Promise.resolve()).then(() => {
+        const existing = questions.find((candidate) => candidate.id === id);
+        if (existing === undefined) return jsonResponse({ error: "question_deleted" }, 409);
+        if (revision !== existing.revision) return jsonResponse({ error: "question_conflict", current: existing }, 409);
+        questions = questions.filter((candidate) => candidate.id !== id);
+        questionDeleted = true;
+        return jsonResponse({ removed: true });
+      });
     }
     return Promise.resolve(jsonResponse({ error: "not_found" }, 404));
   });
   vi.stubGlobal("fetch", requests);
-  return { requests, getQuestions: () => questions, deleteQuestion: (id: string) => { questions = questions.filter((question) => question.id !== id); }, addQuestion: (question: BlitzQuestion) => { questions = [question, ...questions]; }, setFailQuestionListAfterDelete: (fails: boolean) => { shouldFailQuestionListAfterDelete = fails; }, getSettings: () => settings, getSettingsRevision: () => settingsRevision, submittedSettingsRevisions, submittedQuestionRevisions, submittedDeleteRevisions, postDeleteQuestionListFinished };
+  return { requests, getQuestions: () => questions, deleteQuestion: (id: string) => { questions = questions.filter((question) => question.id !== id); }, updateQuestion: (id: string, update: Partial<BlitzQuestion>) => { questions = questions.map((question) => question.id === id ? { ...question, ...update } : question); }, addQuestion: (question: BlitzQuestion) => { questions = [question, ...questions]; }, setFailQuestionListAfterDelete: (fails: boolean) => { shouldFailQuestionListAfterDelete = fails; }, getSettings: () => settings, getSettingsRevision: () => settingsRevision, submittedSettingsRevisions, submittedQuestionRevisions, submittedDeleteRevisions, postDeleteQuestionListFinished };
 };
 
 const mountPanel = (channelId = "fictional_channel", queryClient?: QueryClient) => renderWithQuery(
@@ -627,6 +642,144 @@ describe("Blitz Round collection panel", () => {
     expect(api.requests.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
     releasePost();
     expect(await screen.findByText("Round settings", { exact: true })).toBeInTheDocument();
+  });
+
+  it.each([
+    "question save",
+    "save as new",
+    "delete",
+    "conflict reload",
+    "deleted-question recovery",
+    "settings save",
+    "settings reload",
+    "delete list refetch",
+  ] as const)("keeps the current draft when a delayed %s completion belongs to an older editor session [protects=delayed save, save-as-new, delete, conflict reload, deleted-question recovery, settings save, settings reload, and post-delete list refresh completions cannot replace a draft in a newer editor session; fails_when=a completion selects or remounts over the question being edited after the manager moves on; no_claim=the delayed network responses are controlled by an in-memory component-test HTTP stub and do not verify production authentication or D1 concurrency]", async (operation) => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const questions = operation === "delete list refetch" ? questionPoolWith26() : [sampleQuestion, secondQuestion];
+    const api = installPanelFetch(questions, operation === "save as new" ? gate : undefined, false, operation === "settings reload",
+      operation === "save as new", operation === "settings save" ? gate : undefined, false, {
+        ...(operation === "question save" ? { questionPatchGate: gate } : {}),
+        ...(operation === "conflict reload" || operation === "deleted-question recovery"
+          ? { questionGetGates: [{ questionId: sampleQuestion.id, gate }] } : {}),
+        ...(operation === "delete" ? { deleteGate: gate } : {}),
+        ...(operation === "settings reload" ? { settingsGetGates: [undefined, undefined, gate] } : {}),
+        ...(operation === "delete list refetch" ? { postDeleteQuestionListGates: [{ page: 1, search: "", gate }] } : {}),
+      });
+    const view = mountPanel();
+
+    const questionRow = (question: BlitzQuestion): HTMLButtonElement => screen.getByRole("button", { name: new RegExp(question.prompt, "u") });
+    const returnToCloudAndEdit = async (): Promise<void> => {
+      fireEvent.click(questionRow(secondQuestion));
+      fireEvent.click(questionRow(sampleQuestion));
+      const word = await screen.findByRole("textbox", { name: "Word" });
+      await waitFor(() => expect(word).toHaveValue("CLOUD"));
+      fireEvent.change(word, { target: { value: "RAIN" } });
+    };
+    const moveToAnotherPanelAndEdit = async (): Promise<void> => {
+      view.rerender(<UiProvider><BlitzRoundPanel channelId="temporary_channel" language="en" /></UiProvider>);
+      await screen.findByRole("textbox", { name: "Word" });
+      view.rerender(<UiProvider><BlitzRoundPanel channelId="fictional_channel" language="en" /></UiProvider>);
+      const word = await screen.findByRole("textbox", { name: "Word" });
+      fireEvent.change(word, { target: { value: "RAIN" } });
+    };
+    const openDeleteConfirmation = async (): Promise<void> => {
+      fireEvent.click(document.querySelector(".page-header__overflow-trigger") as HTMLButtonElement);
+      fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+      const confirmation = await screen.findByRole("dialog", { name: "Delete this question?" });
+      fireEvent.click(within(confirmation).getByRole("button", { name: "Delete" }));
+    };
+    const triggerDeleteConflict = async (): Promise<void> => {
+      api.updateQuestion(sampleQuestion.id, { prompt: "MOON", answers: ["MOON"], revision: 2 });
+      await openDeleteConfirmation();
+      await screen.findByRole("button", { name: "Reload question" });
+    };
+    const releaseAndFlush = async (): Promise<void> => {
+      await act(async () => {
+        release();
+        await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
+      });
+    };
+
+    try {
+      if (operation === "question save") {
+        const word = await screen.findByRole("textbox", { name: "Word" });
+        fireEvent.change(word, { target: { value: "STORM" } });
+        fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
+        await waitFor(() => expect(api.submittedQuestionRevisions).toEqual([1]));
+        await moveToAnotherPanelAndEdit();
+      } else if (operation === "save as new") {
+        const word = await screen.findByRole("textbox", { name: "Word" });
+        fireEvent.change(word, { target: { value: "STORM" } });
+        fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
+        await screen.findByText("This question was deleted elsewhere. Save your draft as a new question or discard it.");
+        fireEvent.click(screen.getByRole("button", { name: "Save as new question" }));
+        await waitFor(() => expect(api.requests.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true));
+        await moveToAnotherPanelAndEdit();
+      } else if (operation === "delete") {
+        await screen.findByRole("textbox", { name: "Word" });
+        await openDeleteConfirmation();
+        await waitFor(() => expect(api.requests.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(true));
+        await moveToAnotherPanelAndEdit();
+      } else if (operation === "conflict reload" || operation === "deleted-question recovery") {
+        await screen.findByRole("textbox", { name: "Word" });
+        await triggerDeleteConflict();
+        fireEvent.click(screen.getByRole("button", { name: "Reload question" }));
+        await waitFor(() => expect(api.requests.mock.calls.some(([input]) => parseUrl(input).pathname.endsWith(`/${sampleQuestion.id}`))).toBe(true));
+        if (operation === "deleted-question recovery") api.deleteQuestion(sampleQuestion.id);
+        await returnToCloudAndEdit();
+      } else if (operation === "settings save") {
+        await screen.findByRole("textbox", { name: "Word" });
+        fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+        const prize = await screen.findByRole("spinbutton", { name: "Prize" });
+        fireEvent.change(prize, { target: { value: "75" } });
+        fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
+        await waitFor(() => expect(api.requests.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true));
+        await moveToAnotherPanelAndEdit();
+      } else if (operation === "settings reload") {
+        await screen.findByRole("textbox", { name: "Word" });
+        fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+        const prize = await screen.findByRole("spinbutton", { name: "Prize" });
+        fireEvent.change(prize, { target: { value: "75" } });
+        fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
+        await waitFor(() => expect(api.submittedSettingsRevisions).toEqual([1]));
+        await waitFor(() => expect(api.getSettingsRevision()).toBe(2));
+        await screen.findByText("Round settings changed elsewhere. Load the saved version before continuing.");
+        fireEvent.click(screen.getByRole("button", { name: "Load server settings" }));
+        await waitFor(() => expect(api.requests.mock.calls.filter(([input, init]) => parseUrl(input).pathname.endsWith("/modules/blitz_round/settings") && (init?.method ?? "GET") === "GET")).toHaveLength(3));
+        await moveToAnotherPanelAndEdit();
+      } else {
+        await screen.findByRole("button", { name: /Which planet is number 1\?/u });
+        fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+        const lastQuestion = await screen.findByRole("button", { name: /Which planet is number 26\?/u });
+        fireEvent.click(lastQuestion);
+        view.queryClient.removeQueries({ queryKey: ["channel", "fictional_channel", "module", "blitz_round", "questions:1:"] });
+        const pageOneGets = (): number => api.requests.mock.calls.filter(([input, init]) => {
+          const url = parseUrl(input);
+          return url.pathname.endsWith("/modules/blitz_round/questions") && (init?.method ?? "GET") === "GET" && url.searchParams.get("page") === "1";
+        }).length;
+        const initialPageOneGets = pageOneGets();
+        await openDeleteConfirmation();
+        await waitFor(() => expect(api.getQuestions()).toHaveLength(25));
+        await waitFor(() => expect(pageOneGets()).toBe(initialPageOneGets + 1));
+        const word = await screen.findByRole("textbox", { name: "Word" });
+        await waitFor(() => expect(word).toHaveValue(""));
+        fireEvent.change(word, { target: { value: "STORM" } });
+      }
+
+      if (operation === "delete list refetch") {
+        await releaseAndFlush();
+        expect(await screen.findByRole("heading", { name: "New question" })).toBeInTheDocument();
+        expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("STORM");
+        expect(screen.queryByRole("dialog", { name: "Save changes?" })).not.toBeInTheDocument();
+      } else {
+        await releaseAndFlush();
+        await waitFor(() => expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("RAIN"));
+        if (operation === "conflict reload") expect(document.querySelector(".collection-page__detail .page-header__title-row")?.textContent).toContain("CLOUD");
+      }
+    } finally {
+      act(() => { release(); });
+    }
   });
 
   it("keeps a conflicted question draft until the manager chooses reload [protects=stale edits show the fixed save-bar reload action without replacing local text; fails_when=the failed save loses the draft or offers no reload at the fixed save area; no_claim=the simulated conflict uses a local HTTP stub and does not verify D1 transaction isolation]", async () => {
