@@ -206,6 +206,40 @@ describe("API source panel query lifecycle", () => {
     }));
   });
 
+  it("drops the tested response when the web address changes after going back", async () => {
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      const method = init?.method ?? "GET";
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+      if (url.pathname.endsWith("/sources") && method === "GET") return Promise.resolve(jsonResponse({ sources: [] }));
+      if (url.pathname.endsWith("/sources/test") && method === "POST") {
+        return Promise.resolve(jsonResponse({ status: "ok", httpStatus: 200, bytes: 15, json: { fromA: 1 }, value: "1" }));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    renderPanel(fetcher);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Create source" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Web address" }), {
+      target: { value: "https://a.example.test/data" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Value from the response" }), { target: { value: "$.fromA" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+    expect(await screen.findByRole("treeitem", { name: /fromA/u })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Web address" }), { target: { value: "https://b.example.test/data" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(screen.queryByRole("treeitem", { name: /fromA/u })).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+  });
+
   it("requires a test attempt before naming a source and shows the typed test failure", async () => {
     const fetcher = vi.fn<typeof fetch>((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");

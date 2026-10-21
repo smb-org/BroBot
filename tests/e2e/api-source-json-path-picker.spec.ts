@@ -160,3 +160,23 @@ test("a 24-level response keeps keys, disclosures and leaves visible and clickab
   await leaf.locator(":scope > .api-source-json-tree__item").click();
   await expect(dialog.getByRole("textbox", { name: "Value from the response" })).toHaveValue(`$${".a".repeat(levels)}.leaf`);
 });
+
+test("changing the web address after a test drops the old response tree", async ({ page }) => {
+  await installApiMocks(page, { fromA: 1 }, () => "1");
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await openTestStep(page, "$.fromA");
+
+  const dialog = page.getByRole("dialog", { name: "Create data source" });
+  await dialog.getByRole("button", { name: "Test" }).click();
+  await expect(dialog.getByRole("treeitem", { name: /fromA/u })).toBeVisible();
+
+  await dialog.getByRole("button", { name: "Back" }).click();
+  await dialog.getByRole("button", { name: "Back" }).click();
+  await dialog.getByRole("textbox", { name: "Web address" }).fill("https://b.example.test/weather");
+  await dialog.getByRole("button", { name: "Continue" }).click();
+  await dialog.getByRole("button", { name: "Continue" }).click();
+
+  await expect(dialog.getByRole("button", { name: "Test" })).toBeVisible();
+  await expect(dialog.getByRole("treeitem", { name: /fromA/u })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "Continue" })).toBeDisabled();
+});

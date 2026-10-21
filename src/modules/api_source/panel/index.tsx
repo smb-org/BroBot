@@ -131,7 +131,9 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
   const updateDraft = (patch: Partial<SourceDraft>): void => {
     if (draft === null) return;
     setDraft({ ...draft, ...patch });
-    if (testResult?.status !== "ok") {
+    // A successful test stays valid for expression edits only; any other tested input invalidates it.
+    const keepsTestedUrl = patch.url === undefined || patch.url.trim() === testedInput?.url;
+    if (testResult?.status !== "ok" || !keepsTestedUrl) {
       setTestResult(undefined);
       setTestedInput(undefined);
     }
