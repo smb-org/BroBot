@@ -336,6 +336,7 @@ export function ChatVoteTemplateInspector({
         icon={null}
         title={labels.title}
         titleContent={title}
+        titleTooltip={title}
         headingLevel="h2"
         {...(canManageContent ? { saveStatus: <SaveStatus
           dirty={dirty}

@@ -1133,6 +1133,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
       icon={null}
       title={labels.title}
       titleContent={isCreate ? labels.add : <span className="mono">!{command.name}</span>}
+      titleTooltip={isCreate ? labels.add : `!${command.name}`}
       headingLevel="h2"
       {...(pageMeta === undefined ? {} : { meta: pageMeta })}
       badge={<StatusLed state="ok" label={labels.ready} />}
