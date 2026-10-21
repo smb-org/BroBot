@@ -696,11 +696,10 @@ describe("Blitz Round collection panel", () => {
     const view = mountPanel();
 
     const questionRow = (question: BlitzQuestion): HTMLButtonElement => screen.getByRole("button", { name: new RegExp(question.prompt, "u") });
-    const returnToCloudAndEdit = async (): Promise<void> => {
+    const returnToCurrentQuestionAndEdit = async (): Promise<void> => {
       fireEvent.click(questionRow(secondQuestion));
-      fireEvent.click(questionRow(sampleQuestion));
       const word = await screen.findByRole("textbox", { name: "Word" });
-      await waitFor(() => expect(word).toHaveValue("CLOUD"));
+      await waitFor(() => expect(word).toHaveValue("MOON"));
       fireEvent.change(word, { target: { value: "RAIN" } });
     };
     const moveToAnotherPanelAndEdit = async (): Promise<void> => {
@@ -754,7 +753,7 @@ describe("Blitz Round collection panel", () => {
         fireEvent.click(screen.getByRole("button", { name: "Reload question" }));
         await waitFor(() => expect(api.requests.mock.calls.some(([input]) => parseUrl(input).pathname.endsWith(`/${sampleQuestion.id}`))).toBe(true));
         if (operation === "deleted-question recovery") api.deleteQuestion(sampleQuestion.id);
-        await returnToCloudAndEdit();
+        await returnToCurrentQuestionAndEdit();
       } else if (operation === "settings save") {
         await screen.findByRole("textbox", { name: "Word" });
         fireEvent.click(screen.getByRole("button", { name: "Settings" }));
@@ -803,7 +802,7 @@ describe("Blitz Round collection panel", () => {
       } else {
         await releaseAndFlush();
         await waitFor(() => expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("RAIN"));
-        if (operation === "conflict reload") expect(document.querySelector(".collection-page__detail .page-header__title-row")?.textContent).toContain("CLOUD");
+        if (operation === "conflict reload") expect(document.querySelector(".collection-page__detail .page-header__title-row")?.textContent).toContain("MOON");
       }
     } finally {
       act(() => { release(); });
@@ -1426,6 +1425,62 @@ describe("Blitz Round collection panel", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
     await waitFor(() => expect(api.getQuestions()[0]).toMatchObject({ prompt: "STORMY", revision: 3 }));
     expect(api.submittedQuestionRevisions).toEqual([1, 2]);
+  });
+
+  it("fetches fresh detail before opening a new editor session [protects=reopening cached revision 1 after the server advances to revision 2 initializes the editor from revision 2; fails_when=the editor shows cached CLOUD or skips the fresh detail request; no_claim=the warm cache and server response use an in-memory component-test stub]", async () => {
+    const latestQuestion: BlitzQuestion = { ...sampleQuestion, prompt: "STORM", answers: ["STORM"], revision: 2 };
+    const api = installPanelFetch([latestQuestion]);
+    renderWithQuery(
+      <UiProvider><BlitzRoundPanel channelId="fictional_channel" language="en" /></UiProvider>,
+      undefined,
+      {
+        gcTime: 60_000,
+        staleTime: 60_000,
+        initialData: [{
+          queryKey: ["channel", "fictional_channel", "module", "blitz_round", `question:${sampleQuestion.id}`],
+          data: sampleQuestion,
+        }],
+      },
+    );
+
+    expect(await screen.findByRole("textbox", { name: "Word" })).toHaveValue("STORM");
+    expect(api.requests.mock.calls.filter(([input, init]) =>
+      parseUrl(input).pathname.endsWith(`/modules/blitz_round/questions/${sampleQuestion.id}`) && (init?.method ?? "GET") === "GET",
+    )).toHaveLength(1);
+  });
+
+  it("keeps revision 3 after a delayed revision 2 save [protects=a delayed save response cannot replace revision 3 already fetched into detail cache, and reopening uses revision 3 for the next save; fails_when=switching away and back shows revision 2 or the next PATCH submits revision 2; no_claim=the competing manager and delayed PATCH use an in-memory component-test stub]", async () => {
+    let releasePatch!: () => void;
+    const patchGate = new Promise<void>((resolve) => { releasePatch = resolve; });
+    const api = installPanelFetch([sampleQuestion, secondQuestion], undefined, false, false, false, undefined, false, { questionPatchGate: patchGate });
+    const view = mountPanel("fictional_channel", undefined, 60_000);
+
+    try {
+      fireEvent.change(await screen.findByRole("textbox", { name: "Word" }), { target: { value: "STORM" } });
+      fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
+      await waitFor(() => expect(api.submittedQuestionRevisions).toEqual([1]));
+
+      const revisionThree: BlitzQuestion = { ...sampleQuestion, prompt: "RIVER", answers: ["RIVER"], revision: 3 };
+      api.updateQuestion(sampleQuestion.id, revisionThree);
+      const detailKey = ["channel", "fictional_channel", "module", "blitz_round", `question:${sampleQuestion.id}`] as const;
+      await view.queryClient.query({ queryKey: detailKey, queryFn: () => revisionThree, staleTime: 0 });
+      expect(view.queryClient.getQueryData<BlitzQuestion>(detailKey)).toMatchObject({ prompt: "RIVER", revision: 3 });
+
+      await act(async () => { releasePatch(); await Promise.resolve(); });
+      await screen.findByRole("button", { name: /Word scramble.*RIVER/u });
+      expect(view.queryClient.getQueryData<BlitzQuestion>(detailKey)).toMatchObject({ prompt: "RIVER", revision: 3 });
+      fireEvent.click(await screen.findByRole("button", { name: /Word scramble.*MOON/u }));
+      await waitFor(() => expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("MOON"));
+      fireEvent.click(await screen.findByRole("button", { name: /Word scramble.*RIVER/u }));
+      await waitFor(() => expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("RIVER"));
+
+      fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "RIVERINE" } });
+      fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
+      await waitFor(() => expect(api.getQuestions()[0]).toMatchObject({ prompt: "RIVERINE", revision: 4 }));
+      expect(api.submittedQuestionRevisions).toEqual([1, 3]);
+    } finally {
+      act(() => { releasePatch(); });
+    }
   });
 
   it("opens current question detail from a stale search before the list refetch finishes [protects=a cached CLOUD row opens the current STORM revision from its detail query and saves with revision 2 while its list refetch is pending; fails_when=the editor copies CLOUD revision 1 from the stale row and shows or submits it; no_claim=the external edit and delayed list response use an in-memory component-test stub]", async () => {
