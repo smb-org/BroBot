@@ -1,6 +1,8 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { Profiler, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { Dialog } from "../../src/dashboard/ui";
 import { JsonResponseTree } from "../../src/modules/api_source/panel/JsonResponseTree";
 import type { ApiSourceJsonTreeMessages } from "../../src/modules/api_source/panel/JsonResponseTree";
 
@@ -21,7 +23,7 @@ describe("API source JSON response tree", () => {
 
   it("renders object, array, and leaf types", () => {
     render(<JsonResponseTree value={{ temperature: 21, days: ["today"], enabled: true, missing: null, "": "empty key" }}
-      messages={messages} onSelectPath={vi.fn()} />);
+      expression="" messages={messages} onSelectPath={vi.fn()} />);
 
     const tree = screen.getByRole("tree", { name: messages.treeLabel });
     expect(within(tree).getByRole("treeitem", { name: /Response.*Object/iu })).toBeInTheDocument();
@@ -34,7 +36,7 @@ describe("API source JSON response tree", () => {
 
   it("expands and collapses nested entries", () => {
     render(<JsonResponseTree value={{ weather: { daily: { sunrise: "06:18" } } }}
-      messages={messages} onSelectPath={vi.fn()} />);
+      expression="" messages={messages} onSelectPath={vi.fn()} />);
 
     const daily = screen.getByRole("treeitem", { name: /daily/u });
     expect(daily).toHaveAttribute("aria-expanded", "false");
@@ -49,14 +51,28 @@ describe("API source JSON response tree", () => {
   });
 
   it("moves focus and expands or collapses with the arrow keys", () => {
-    render(<JsonResponseTree value={{ weather: { daily: { sunrise: "06:18" } } }}
-      messages={messages} onSelectPath={vi.fn()} />);
+    render(<>
+      <button type="button">Before tree</button>
+      <JsonResponseTree value={{ weather: { daily: { sunrise: "06:18" } } }}
+        expression="" messages={messages} onSelectPath={vi.fn()} />
+      <button type="button">After tree</button>
+    </>);
 
     const response = screen.getByRole("treeitem", { name: /Response/iu });
     response.focus();
     fireEvent.keyDown(response, { key: "ArrowDown" });
     const weather = screen.getByRole("treeitem", { name: /weather/u });
     expect(weather).toHaveFocus();
+    expect(weather).toHaveAttribute("tabindex", "0");
+    expect(response).toHaveAttribute("tabindex", "-1");
+
+    screen.getByRole("button", { name: "After tree" }).focus();
+    expect(weather).toHaveAttribute("tabindex", "0");
+    weather.focus();
+    expect(weather).toHaveFocus();
+    expect(weather).toHaveAttribute("tabindex", "0");
+    expect(response).toHaveAttribute("tabindex", "-1");
+
     fireEvent.keyDown(weather, { key: "ArrowDown" });
     const daily = screen.getByRole("treeitem", { name: /daily/u });
     fireEvent.keyDown(daily, { key: "ArrowRight" });
@@ -74,19 +90,83 @@ describe("API source JSON response tree", () => {
     expect(screen.getByRole("treeitem", { name: /weather/u })).toHaveFocus();
   });
 
+  it("moves focus without rerendering the tree", () => {
+    let commitCount = 0;
+    render(<Profiler id="json-response-tree" onRender={() => { commitCount += 1; }}>
+      <JsonResponseTree value={{ first: 1, second: 2 }} expression="" messages={messages} onSelectPath={vi.fn()} />
+    </Profiler>);
+    const committedBeforeFocus = commitCount;
+
+    const response = screen.getByRole("treeitem", { name: /Response/iu });
+    response.focus();
+    fireEvent.keyDown(response, { key: "ArrowDown" });
+
+    expect(screen.getByRole("treeitem", { name: /first/u })).toHaveFocus();
+    expect(commitCount).toBe(committedBeforeFocus);
+  });
+
   it("selects a leaf path when clicked or activated from the keyboard", () => {
     const onSelectPath = vi.fn();
-    render(<JsonResponseTree value={{ weather: { temperature: 21 } }} messages={messages} onSelectPath={onSelectPath} />);
+    render(<JsonResponseTree value={{ weather: { temperature: 21 } }} expression="" messages={messages} onSelectPath={onSelectPath} />);
 
     const leaf = screen.getByRole("treeitem", { name: /temperature/u });
     const leafRow = leaf.querySelector(".api-source-json-tree__item");
     if (!(leafRow instanceof HTMLElement)) throw new Error("Temperature tree row is missing.");
     fireEvent.click(leafRow);
     expect(onSelectPath).toHaveBeenLastCalledWith("$.weather.temperature");
+    expect(onSelectPath).toHaveBeenCalledTimes(1);
+    onSelectPath.mockClear();
     fireEvent.keyDown(leaf, { key: "Enter" });
     expect(onSelectPath).toHaveBeenLastCalledWith("$.weather.temperature");
+    expect(onSelectPath).toHaveBeenCalledTimes(1);
+    onSelectPath.mockClear();
     fireEvent.keyDown(leaf, { key: " " });
     expect(onSelectPath).toHaveBeenLastCalledWith("$.weather.temperature");
+    expect(onSelectPath).toHaveBeenCalledTimes(1);
+  });
+
+  it("selects root array leaves using generated numeric root paths", () => {
+    const onSelectPath = vi.fn();
+    render(<JsonResponseTree value={[{ v: 1 }, { v: 2 }]} expression="" messages={messages} onSelectPath={onSelectPath} />);
+
+    const firstValue = screen.getByRole("treeitem", { name: /v, Number, 1/u });
+    const row = firstValue.querySelector(".api-source-json-tree__item");
+    if (!(row instanceof HTMLElement)) throw new Error("First root array value row is missing.");
+    fireEvent.click(row);
+
+    expect(onSelectPath).toHaveBeenCalledOnce();
+    expect(onSelectPath).toHaveBeenCalledWith("$[0].v");
+  });
+
+  it("derives selected leaves from the current expression", () => {
+    const onSelectPath = vi.fn();
+    const view = render(<JsonResponseTree value={{ weather: { temperature: 21, enabled: true } }}
+      expression="$.weather.temperature" messages={messages} onSelectPath={onSelectPath} />);
+
+    const temperature = screen.getByRole("treeitem", { name: /temperature/u });
+    const enabled = screen.getByRole("treeitem", { name: /enabled/u });
+    expect(temperature).toHaveAttribute("aria-selected", "true");
+    expect(enabled).toHaveAttribute("aria-selected", "false");
+
+    view.rerender(<JsonResponseTree value={{ weather: { temperature: 21, enabled: true } }}
+      expression="$.weather.enabled" messages={messages} onSelectPath={onSelectPath} />);
+
+    expect(screen.getByRole("treeitem", { name: /temperature/u })).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByRole("treeitem", { name: /enabled/u })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("allows Escape from a tree item to close its dialog", async () => {
+    const EscapeDialog = () => {
+      const [opened, setOpened] = useState(true);
+      return <Dialog opened={opened} title="JSON response" onClose={() => { setOpened(false); }}>
+        <JsonResponseTree value={{ weather: { temperature: 21 } }} expression="" messages={messages} onSelectPath={vi.fn()} />
+      </Dialog>;
+    };
+    render(<EscapeDialog />);
+
+    fireEvent.keyDown(await screen.findByRole("treeitem", { name: /Response/iu }), { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "JSON response" })).not.toBeInTheDocument());
   });
 
   it("keeps long responses bounded and explains paths the evaluator cannot accept", () => {
@@ -97,7 +177,7 @@ describe("API source JSON response tree", () => {
       ...Array.from({ length: 101 }, (_, index): [string, number] => [`entry${String(index)}`, index]),
     ];
     const value = Object.fromEntries(entries);
-    render(<JsonResponseTree value={value} messages={messages} onSelectPath={vi.fn()} />);
+    render(<JsonResponseTree value={value} expression="" messages={messages} onSelectPath={vi.fn()} />);
 
     const longLeaf = screen.getByRole("treeitem", { name: /long/u });
     expect(longLeaf).toHaveAttribute("title", longValue);
@@ -106,5 +186,16 @@ describe("API source JSON response tree", () => {
     expect(screen.queryByRole("treeitem", { name: /entry100/u })).not.toBeInTheDocument();
     expect(screen.getByRole("treeitem", { name: /not selectable/u })).toHaveAttribute("aria-disabled", "true");
     expect(screen.getByRole("treeitem", { name: /not selectable/u })).toHaveAttribute("title", messages.pathTooLong);
+  });
+
+  it("keeps a broad nested response within the global tree item budget", () => {
+    const value = Object.fromEntries(Array.from({ length: 100 }, (_unused, arrayIndex) => [
+      `array${String(arrayIndex)}`,
+      Array.from({ length: 100 }, (_unusedValue, valueIndex) => valueIndex),
+    ]));
+    render(<JsonResponseTree value={value} expression="" messages={messages} onSelectPath={vi.fn()} />);
+
+    expect(screen.getAllByRole("treeitem").length).toBeLessThanOrEqual(500);
+    expect(screen.getAllByText(/^\+\d+ more$/u).length).toBeGreaterThan(0);
   });
 });

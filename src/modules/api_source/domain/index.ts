@@ -56,7 +56,7 @@ const propertySets: Readonly<Record<string, readonly string[]>> = {
   number: ["type", "value", "position"],
   path: ["type", "steps", "group"],
   string: ["type", "value", "position"],
-  variable: ["type", "value", "position"],
+  variable: ["type", "value", "position", "predicate"],
   value: ["type", "value", "position"],
 };
 
@@ -140,6 +140,11 @@ const inspectAst = (root: unknown): string | null => {
       else reject(`${type} property ${property ?? "<unknown>"}`);
     }
 
+    if (type === "variable" && Object.hasOwn(value, "predicate") &&
+        !(value.value === "" && (role === "expression" || role === "path_step") && Array.isArray(value.predicate))) {
+      reject(`${functionNameOf(value)} predicate`);
+    }
+
     switch (type) {
       case "binary":
         if (role !== "expression" || !positionIsValid(value) || !binaryOperators.has(String(value.value))) {
@@ -160,7 +165,8 @@ const inspectAst = (root: unknown): string | null => {
           reject("function call syntax");
         }
         if (typeof functionValue !== "string" || !allowedFunctions.has(functionValue)) reject(functionName);
-        if (isAstNode(procedure) && (procedure.type !== "variable" || !ownKeysAreAllowed(procedure, propertySets.variable ?? []))) {
+        if (isAstNode(procedure) && (procedure.type !== "variable" || Object.hasOwn(procedure, "predicate") ||
+            !ownKeysAreAllowed(procedure, propertySets.variable ?? []))) {
           reject(procedure.type === "variable" ? `${functionName} predicate` : `${functionName} function reference`);
         }
         if (!Array.isArray(value.arguments)) reject(`${functionName} arguments`);
@@ -247,6 +253,7 @@ const inspectAst = (root: unknown): string | null => {
       let childRole: AstRole = "expression";
       if (type === "path" && key === "steps") childRole = "path_step";
       else if (type === "name" && key === "stages") childRole = "path_stage";
+      else if (type === "variable" && key === "predicate") childRole = "path_stage";
       else if (type === "filter" && key === "expr") childRole = "array_index";
       else if (type === "function" && key === "procedure") childRole = "function_procedure";
       walkValue(child, depth + 1, childRole);
@@ -311,9 +318,9 @@ export const createApiSourceJsonPath = (segments: readonly (string | number)[]):
   let expression = "$";
   let fieldCount = 0;
   let indexCount = 0;
-  for (const [position, segment] of segments.entries()) {
+  for (const segment of segments) {
     if (typeof segment === "number") {
-      if (!Number.isSafeInteger(segment) || segment < 0 || position === 0) {
+      if (!Number.isSafeInteger(segment) || segment < 0) {
         return { expression: null, reason: "unsupported" };
       }
       expression += `[${String(segment)}]`;
@@ -327,10 +334,10 @@ export const createApiSourceJsonPath = (segments: readonly (string | number)[]):
   }
 
   if (expression.length > API_SOURCE_MAXIMUMS.expressionLength) return { expression: null, reason: "too_long" };
-  // JSONata paths contain one path and root-variable node, one node per field,
-  // and a filter plus integer node for each array index. A leading index would
-  // become a predicate on the root variable, which the evaluator rejects.
-  if (segments.length > 0 && 2 + fieldCount + indexCount * 2 > JSONATA_LIMITS.maximumAstNodes) {
+  // JSONata paths contain a root variable, one optional path node, one node per
+  // field, and a filter plus integer node for each array index.
+  const pathNodeCount = segments.some((segment) => typeof segment === "string") ? 2 : 1;
+  if (segments.length > 0 && pathNodeCount + fieldCount + indexCount * 2 > JSONATA_LIMITS.maximumAstNodes) {
     return { expression: null, reason: "unsupported" };
   }
   return { expression, reason: null };

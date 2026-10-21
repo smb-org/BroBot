@@ -161,6 +161,7 @@ function ApiSourcePanelContent({ channelId, language, canManage }: ModulePanelPr
     </div>
     <JsonResponseTree
       value={testResult?.status === "ok" ? testResult.json : undefined}
+      expression={draft?.expression ?? ""}
       loading={testing}
       messages={labels.responseTree}
       onSelectPath={(expression) => { updateDraft({ expression }); }}

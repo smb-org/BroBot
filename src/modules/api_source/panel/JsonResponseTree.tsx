@@ -20,6 +20,7 @@ export interface ApiSourceJsonTreeMessages {
 
 interface JsonResponseTreeProps {
   value: unknown;
+  expression: string;
   loading?: boolean;
   messages: ApiSourceJsonTreeMessages;
   onSelectPath: (expression: string) => void;
@@ -30,9 +31,18 @@ interface TreeNode {
   key: string;
   path: PathSegment[];
   value: unknown;
+  expanded: boolean;
+  children: TreeNode[];
+  moreCount: number;
+}
+
+interface PlannedTreeNode {
+  node: TreeNode;
+  itemCount: number;
 }
 
 const maximumVisibleEntries = 100;
+const maximumRenderedTreeItems = 500;
 const rootPath: PathSegment[] = [];
 const pathId = (path: readonly PathSegment[]): string => JSON.stringify(path);
 const rootId = pathId(rootPath);
@@ -77,50 +87,90 @@ const initialExpandedNodes = (value: unknown): Set<string> => {
   return expanded;
 };
 
-const visibleNodeIds = (value: unknown, expanded: ReadonlySet<string>): string[] => {
-  if (value === undefined) return [rootId];
-  const ids: string[] = [];
-  const visit = (current: unknown, path: PathSegment[]): void => {
+const createTreePlan = (value: unknown, expanded: ReadonlySet<string>): { root: TreeNode; focusableIds: string[] } => {
+  const build = (current: unknown, path: PathSegment[], key: string, budget: number): PlannedTreeNode | null => {
+    if (budget < 1) return null;
+
     const id = pathId(path);
-    ids.push(id);
-    if (!expanded.has(id)) return;
-    for (const [key, child] of entriesFor(current)) {
-      const segment: PathSegment = Array.isArray(current) ? Number(key) : key;
-      visit(child, [...path, segment]);
+    const entries = entriesFor(current);
+    const totalCount = entryCount(current);
+    const children: TreeNode[] = [];
+    let remaining = budget - 1;
+
+    if (totalCount > 0 && expanded.has(id)) {
+      for (const [entryIndex, [entryKey, child]] of entries.entries()) {
+        const hasMoreAfter = entryIndex < entries.length - 1 || totalCount > entries.length;
+        const childBudget = remaining - (hasMoreAfter ? 1 : 0);
+        if (childBudget < 1) break;
+
+        const segment: PathSegment = Array.isArray(current) ? Number(entryKey) : entryKey;
+        const childPath = [...path, segment];
+        const childKey = Array.isArray(current) ? `[${entryKey}]` : entryKey;
+        const plannedChild = build(child, childPath, childKey, childBudget);
+        if (plannedChild === null) break;
+        children.push(plannedChild.node);
+        remaining -= plannedChild.itemCount;
+      }
     }
+
+    let moreCount = children.length > 0 ? totalCount - children.length : 0;
+    if (moreCount > 0) {
+      if (remaining > 0) remaining -= 1;
+      else {
+        children.length = 0;
+        moreCount = 0;
+        remaining = budget - 1;
+      }
+    }
+
+    return {
+      node: { id, key, path, value: current, expanded: children.length > 0, children, moreCount },
+      itemCount: budget - remaining,
+    };
   };
-  visit(value, rootPath);
-  return ids;
+
+  const plannedRoot = build(value, rootPath, "", maximumRenderedTreeItems);
+  if (plannedRoot === null) throw new Error("The JSON response tree budget must allow the root item.");
+
+  const focusableIds: string[] = [];
+  const visit = (node: TreeNode): void => {
+    focusableIds.push(node.id);
+    for (const child of node.children) visit(child);
+  };
+  visit(plannedRoot.node);
+  return { root: plannedRoot.node, focusableIds };
 };
 
-export function JsonResponseTree({ value, loading = false, messages, onSelectPath }: JsonResponseTreeProps): ReactElement {
+export function JsonResponseTree({ value, expression, loading = false, messages, onSelectPath }: JsonResponseTreeProps): ReactElement {
   const defaultExpanded = useMemo(() => initialExpandedNodes(value), [value]);
   const [expandedState, setExpandedState] = useState(() => ({ value, expanded: defaultExpanded }));
   const expanded = expandedState.value === value ? expandedState.expanded : defaultExpanded;
-  const [focusedId, setFocusedId] = useState(rootId);
-  const [selectedExpression, setSelectedExpression] = useState<string | undefined>(undefined);
+  const treePlan = useMemo(() => createTreePlan(value, expanded), [value, expanded]);
+  const focusableIds = treePlan.focusableIds;
   const itemRefs = useRef(new Map<string, HTMLDivElement>());
-  const shouldMoveFocus = useRef(false);
-  const focusableIds = useMemo(() => visibleNodeIds(value, expanded), [value, expanded]);
-  const activeId = focusableIds.includes(focusedId) ? focusedId : rootId;
+  const activeIdRef = useRef(rootId);
 
   useLayoutEffect(() => {
-    if (!shouldMoveFocus.current) return;
-    shouldMoveFocus.current = false;
-    itemRefs.current.get(activeId)?.focus();
-  }, [activeId, focusableIds]);
+    const nextId = focusableIds.includes(activeIdRef.current) ? activeIdRef.current : rootId;
+    activeIdRef.current = nextId;
+    for (const id of focusableIds) itemRefs.current.get(id)?.setAttribute("tabindex", id === nextId ? "0" : "-1");
+  }, [focusableIds]);
 
   const updateExpanded = (nextExpanded: Set<string>): void => {
     setExpandedState({ value, expanded: nextExpanded });
   };
 
-  const setFocus = (id: string): void => {
-    if (id === activeId) {
-      itemRefs.current.get(id)?.focus();
-      return;
+  const setActiveId = (id: string): void => {
+    if (activeIdRef.current !== id) {
+      itemRefs.current.get(activeIdRef.current)?.setAttribute("tabindex", "-1");
+      activeIdRef.current = id;
     }
-    shouldMoveFocus.current = true;
-    setFocusedId(id);
+    itemRefs.current.get(id)?.setAttribute("tabindex", "0");
+  };
+
+  const setFocus = (id: string): void => {
+    setActiveId(id);
+    itemRefs.current.get(id)?.focus();
   };
 
   const toggleExpanded = (id: string): void => {
@@ -131,10 +181,9 @@ export function JsonResponseTree({ value, loading = false, messages, onSelectPat
   };
 
   const renderNode = (node: TreeNode, isRoot = false): ReactElement => {
-    const entries = entriesFor(node.value);
-    const branch = entries.length > 0;
+    const branch = isBranch(node.value);
     const nodeId = node.id;
-    const isExpanded = branch && expanded.has(nodeId);
+    const isExpanded = branch && node.expanded;
     const generatedPath = branch ? null : createApiSourceJsonPath(node.path);
     const disabledReason = generatedPath?.reason === "too_long" ? messages.pathTooLong
       : generatedPath?.reason === "unsupported" ? messages.pathUnsupported : undefined;
@@ -146,10 +195,13 @@ export function JsonResponseTree({ value, loading = false, messages, onSelectPat
     const title = disabledReason === undefined
       ? isLongString ? node.value as string : undefined
       : isLongString ? `${disabledReason} ${node.value as string}` : disabledReason;
-    const childCount = entryCount(node.value);
 
     const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+      const handledKey = event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "ArrowRight" ||
+        event.key === "ArrowLeft" || event.key === "Enter" || event.key === " ";
+      if (!handledKey) return;
       event.stopPropagation();
+
       const index = focusableIds.indexOf(nodeId);
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
@@ -162,11 +214,8 @@ export function JsonResponseTree({ value, loading = false, messages, onSelectPat
         event.preventDefault();
         if (!isExpanded) toggleExpanded(nodeId);
         else {
-          const firstEntry = entries[0];
-          if (firstEntry !== undefined) {
-            const segment: PathSegment = Array.isArray(node.value) ? Number(firstEntry[0]) : firstEntry[0];
-            setFocus(pathId([...node.path, segment]));
-          }
+          const firstChild = node.children[0];
+          if (firstChild !== undefined) setFocus(firstChild.id);
         }
         return;
       }
@@ -180,7 +229,6 @@ export function JsonResponseTree({ value, loading = false, messages, onSelectPat
         event.preventDefault();
         if (branch) toggleExpanded(nodeId);
         else if (generatedPath?.expression !== null && generatedPath?.expression !== undefined) {
-          setSelectedExpression(generatedPath.expression);
           onSelectPath(generatedPath.expression);
         }
       }
@@ -197,11 +245,14 @@ export function JsonResponseTree({ value, loading = false, messages, onSelectPat
       aria-label={accessibleName}
       aria-expanded={branch ? isExpanded : undefined}
       aria-disabled={disabledReason === undefined ? undefined : true}
-      aria-selected={generatedPath === null || generatedPath.expression === null ? undefined : selectedExpression === generatedPath.expression}
+      aria-selected={generatedPath === null || generatedPath.expression === null ? undefined : expression === generatedPath.expression}
       title={title}
-      tabIndex={activeId === nodeId ? 0 : -1}
+      tabIndex={nodeId === rootId ? 0 : -1}
       data-tree-node-id={nodeId}
-      onFocus={() => { setFocusedId(nodeId); }}
+      onFocus={(event) => {
+        event.stopPropagation();
+        setActiveId(nodeId);
+      }}
       onKeyDown={onKeyDown}
     >
       <div
@@ -209,11 +260,9 @@ export function JsonResponseTree({ value, loading = false, messages, onSelectPat
         onClick={(event) => {
           event.stopPropagation();
           if (disabledReason !== undefined) return;
-          setFocusedId(nodeId);
-          itemRefs.current.get(nodeId)?.focus();
+          setFocus(nodeId);
           if (branch) toggleExpanded(nodeId);
           else if (generatedPath?.expression !== null && generatedPath?.expression !== undefined) {
-            setSelectedExpression(generatedPath.expression);
             onSelectPath(generatedPath.expression);
           }
         }}
@@ -226,31 +275,36 @@ export function JsonResponseTree({ value, loading = false, messages, onSelectPat
         {displayPreview.length === 0 ? null : <code className="api-source-json-tree__value mono">{displayPreview}</code>}
       </div>
       {branch && isExpanded ? <div role="group" className="api-source-json-tree__children">
-        {entries.map(([key, child]) => {
-          const segment: PathSegment = Array.isArray(node.value) ? Number(key) : key;
-          const childPath = [...node.path, segment];
-          return renderNode({
-            id: pathId(childPath),
-            key: Array.isArray(node.value) ? `[${key}]` : key,
-            path: childPath,
-            value: child,
-          });
-        })}
-        {childCount > maximumVisibleEntries ? <div className="api-source-json-tree__item api-source-json-tree__item--more" role="treeitem" aria-disabled="true" tabIndex={-1}>
-            <span className="api-source-json-tree__disclosure" aria-hidden="true" />
-            <span className="api-source-json-tree__key">{messages.moreEntries(childCount - maximumVisibleEntries)}</span>
-          </div> : null}
+        {node.children.map((child) => renderNode(child))}
+        {node.moreCount > 0 ? <div className="api-source-json-tree__item api-source-json-tree__item--more" role="treeitem" aria-disabled="true" tabIndex={-1}>
+          <span className="api-source-json-tree__disclosure" aria-hidden="true" />
+          <span className="api-source-json-tree__key">{messages.moreEntries(node.moreCount)}</span>
+        </div> : null}
       </div> : null}
     </div>;
   };
 
   const placeholder = value === undefined;
   const root = placeholder
-    ? <div className="api-source-json-tree__item api-source-json-tree__item--placeholder" role="treeitem" tabIndex={0} aria-label={loading ? messages.loading : messages.empty} data-tree-node-id={rootId}>
+    ? <div
+      ref={(element) => {
+        if (element === null) itemRefs.current.delete(rootId);
+        else itemRefs.current.set(rootId, element);
+      }}
+      className="api-source-json-tree__item api-source-json-tree__item--placeholder"
+      role="treeitem"
+      tabIndex={0}
+      aria-label={loading ? messages.loading : messages.empty}
+      data-tree-node-id={rootId}
+      onFocus={(event) => {
+        event.stopPropagation();
+        setActiveId(rootId);
+      }}
+    >
       <span className="api-source-json-tree__disclosure" aria-hidden="true" />
       <span className="api-source-json-tree__key">{loading ? messages.loading : messages.empty}</span>
     </div>
-    : renderNode({ id: rootId, key: messages.responseRoot, path: rootPath, value }, true);
+    : renderNode(treePlan.root, true);
 
   return <div className="api-source-json-tree" role="tree" aria-label={messages.treeLabel} data-testid="api-source-json-tree">
     {root}
