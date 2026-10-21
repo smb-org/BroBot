@@ -4,7 +4,7 @@ import { canManage } from "../../contracts/values";
 import type { ModuleRouteEnvironment } from "../contract";
 import { BLITZ_QUESTION_MAXIMUM_COUNT, BLITZ_ROUND_MODULE_ID } from "./contracts";
 import { validateBlitzQuestion } from "./domain/questions";
-import { createBlitzQuestionRepository } from "./adapters/d1";
+import { blitzQuestionColumns, createBlitzQuestionRepository, mapBlitzQuestionRow, type BlitzQuestionRow } from "./adapters/d1";
 import { loadEnabledBlitzSettings, openBlitzRound } from "./service";
 
 type BlitzRouteContext = Context<ModuleRouteEnvironment>;
@@ -85,7 +85,8 @@ blitzRoundRoutes.patch("/questions/:questionId", async (context) => {
   const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
     `UPDATE blitz_questions SET kind = ?, prompt = ?, answers_json = ?, enabled = ?, revision = revision + 1, updated_at = ?
-      WHERE channel_id = ? AND question_id = ? AND revision = ? ${authorization.sql}`,
+      WHERE channel_id = ? AND question_id = ? AND revision = ? ${authorization.sql}
+      RETURNING ${blitzQuestionColumns}`,
   ).bind(input.kind, input.prompt, JSON.stringify(input.answers), input.enabled ? 1 : 0, now,
     channelId, questionId, expectedRevision, ...authorization.values);
   const auditStatement = context.get("prepareModuleAudit")({
@@ -100,7 +101,9 @@ blitzRoundRoutes.patch("/questions/:questionId", async (context) => {
     if (current.revision !== expectedRevision) return context.json({ error: "question_conflict", current }, 409);
     return denied(context);
   }
-  return context.json({ question: await questionRepository.get(channelId, questionId) });
+  const saved = result?.results[0] as BlitzQuestionRow | undefined;
+  if (saved === undefined) return context.json({ error: "question_save_failed" }, 500);
+  return context.json({ question: mapBlitzQuestionRow(saved) });
 });
 
 blitzRoundRoutes.delete("/questions/:questionId", async (context) => {
@@ -115,7 +118,8 @@ blitzRoundRoutes.delete("/questions/:questionId", async (context) => {
   const now = new Date().toISOString();
   const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
-    `DELETE FROM blitz_questions WHERE channel_id = ? AND question_id = ? AND revision = ? ${authorization.sql}`,
+    `DELETE FROM blitz_questions WHERE channel_id = ? AND question_id = ? AND revision = ? ${authorization.sql}
+      RETURNING ${blitzQuestionColumns}`,
   ).bind(channelId, questionId, revision, ...authorization.values);
   const auditStatement = context.get("prepareModuleAudit")({
     channelId, moduleId: BLITZ_ROUND_MODULE_ID, action: "blitz_round.question.deleted",
@@ -128,7 +132,9 @@ blitzRoundRoutes.delete("/questions/:questionId", async (context) => {
     if (current.revision !== revision) return context.json({ error: "question_conflict", current }, 409);
     return denied(context);
   }
-  return context.json({ removed: true });
+  const removed = result?.results[0] as BlitzQuestionRow | undefined;
+  if (removed === undefined) return context.json({ error: "question_delete_failed" }, 500);
+  return context.json({ removed: true, question: mapBlitzQuestionRow(removed) });
 });
 
 blitzRoundRoutes.post("/start", async (context) => {

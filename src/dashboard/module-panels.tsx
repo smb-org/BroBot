@@ -1284,7 +1284,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
             active: effectiveEnabled,
             onToggle: (nextEnabled: boolean) => {
               if (nextEnabled === effectiveEnabled) return;
-              if (moduleId === "chat_voting") runDashboardNavigationGuards(onToggle, () => undefined);
+              if (!nextEnabled) runDashboardNavigationGuards(onToggle, () => undefined);
               else onToggle();
             },
             switchTitle: `${details.name}: ${statusWord(effectiveEnabled)}`,

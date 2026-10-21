@@ -44,6 +44,10 @@ describe("blitz question HTTP writes", () => {
     expect(invalid.status).toBe(400);
     const remove = await panelRouter.fetch(await request("fictional_editor", "DELETE", `${suffix}?revision=2`), env);
     expect(remove.status).toBe(200);
+    await expect(remove.json()).resolves.toMatchObject({
+      removed: true,
+      question: { id: created.question.id, enabled: false, revision: 2 },
+    });
     expect(await database.prepare("SELECT COUNT(*) AS count FROM blitz_questions WHERE channel_id = ?").bind(channelId).first()).toEqual({ count: 0 });
     const audits = await database.prepare("SELECT action FROM audit_log WHERE channel_id = ? AND module_id = ? ORDER BY rowid").bind(channelId, "blitz_round").all<{ action: string }>();
     expect(audits.results.map(({ action }) => action)).toEqual([
@@ -77,6 +81,38 @@ describe("blitz question HTTP writes", () => {
       error: "question_conflict",
       current: { prompt: quiz.prompt, answers: ["Sun", "Sol"], enabled: true, revision: 2 },
     });
+  });
+
+  it("returns this manager's saved revision when another manager saves before the response [protects=the PATCH response keeps the exact snapshot returned by its successful write; fails_when=an interleaved later save changes the response to revision 3; no_claim=the interleaving is deterministic in the SQLite D1 route harness rather than separate Cloudflare connections]", async () => {
+    const env = await setup("manager");
+    const create = await panelRouter.fetch(await request("fictional_editor", "POST", "", quiz), env);
+    const created = await create.json<{ question: { id: string } }>();
+    let interleaved = false;
+    const interleavedDb = {
+      prepare: (sql: string) => env.DB.prepare(sql),
+      batch: async (statements: Parameters<D1Database["batch"]>[0]) => {
+        const result = await env.DB.batch(statements);
+        if (!interleaved) {
+          interleaved = true;
+          await env.DB.prepare(
+            "UPDATE blitz_questions SET prompt = ?, answers_json = ?, revision = revision + 1, updated_at = ? WHERE channel_id = ? AND question_id = ?",
+          ).bind("Another manager's edit", JSON.stringify(["Sun", "Helios"]), "2100-01-01T00:00:01.000Z", channelId, created.question.id).run();
+        }
+        return result;
+      },
+    } as D1Database;
+    const patchEnv = { ...env, DB: interleavedDb };
+
+    const firstEdit = await panelRouter.fetch(await request("fictional_editor", "PATCH", `/${created.question.id}`, {
+      ...quiz, answers: ["Sun", "Sol"], revision: 1,
+    }), patchEnv);
+
+    expect(firstEdit.status).toBe(200);
+    await expect(firstEdit.json()).resolves.toMatchObject({
+      question: { answers: ["Sun", "Sol"], prompt: quiz.prompt, revision: 2 },
+    });
+    await expect(env.DB.prepare("SELECT prompt, revision FROM blitz_questions WHERE channel_id = ? AND question_id = ?")
+      .bind(channelId, created.question.id).first()).resolves.toEqual({ prompt: "Another manager's edit", revision: 3 });
   });
 
   it("rejects a stale question deletion and returns the current question [protects=delete uses the question's expected revision and cannot erase an edit made after the manager loaded it; fails_when=a stale delete removes the newer question or returns no current entity; no_claim=does not exercise concurrent requests across separate database connections]", async () => {

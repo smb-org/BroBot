@@ -72,6 +72,26 @@ const gotoPanel = async (page: Page): Promise<void> => {
   await expect(page.locator(".collection-page")).toBeVisible();
 };
 
+const setupBlitzModulePage = async (page: Page) => {
+  const settings = blitzRoundDefaultsForLanguage("en");
+  await installLiveCockpitMocks(page, { channelId: "fictional_channel", modules: [
+    { id: "points", enabled: true, settings: "{}" },
+    { id: "blitz_round", enabled: true, settings: JSON.stringify(settings) },
+  ] });
+  await setupPanelRoutes(page, [question("fictional-module-question", "Which planet has rings?")]);
+  const toggleRequests: unknown[] = [];
+  await page.route("**/api/channels/fictional_channel/modules/blitz_round", async (route) => {
+    if (route.request().method() !== "PATCH") return route.fallback();
+    toggleRequests.push(route.request().postDataJSON());
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      module: { id: "blitz_round", enabled: false, settings: JSON.stringify(settings), mandatory: false }, revision: 2,
+    }) });
+  });
+  await page.goto("/channels/fictional_channel/modules/blitz_round?lang=en");
+  await expect(page.locator(".blitz-panel")).toBeVisible();
+  return { toggleRequests };
+};
+
 test("pool CRUD keeps collection geometry steady [protects=question creation, editing, disable and delete preserve the collection layout; fails_when=a mutation is lost or detail controls move with added feedback; no_claim=does not verify production authentication or external chat delivery]", async ({ page }) => {
   const pool = await setupPanelRoutes(page, [
     question("fictional-question-cloud", "Which planet has rings?"),
@@ -147,6 +167,39 @@ test("desktop question detail keeps title, save cluster, and actions in one head
     expect((titleBounds?.x ?? 0) + (titleBounds?.width ?? 0)).toBeLessThan(saveBounds?.x ?? 0);
     expect((saveBounds?.x ?? 0) + (saveBounds?.width ?? 0)).toBeLessThan(actionsBounds?.x ?? 0);
   }
+});
+
+test("module deactivation asks before discarding an unsaved question and cancel keeps its draft [protects=Blitz question drafts remain editable when a manager cancels module deactivation; fails_when=deactivation sends its PATCH before confirmation or cancel loses the prompt draft; no_claim=does not verify saving the draft through the confirmation dialog]", async ({ page }) => {
+  const labels = blitzTexts("en");
+  const api = await setupBlitzModulePage(page);
+  await page.getByRole("button", { name: /Which planet has rings/ }).click();
+  const prompt = page.getByRole("textbox", { name: labels.prompt, exact: true });
+  await prompt.fill("An unsaved Blitz question");
+
+  await page.locator(".module-detail--blitz_round > .module-detail-heading").getByRole("switch").click();
+
+  const confirmation = page.getByRole("dialog", { name: labels.unsavedTitle });
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole("button", { name: labels.continueEditing, exact: true }).click();
+  await expect(prompt).toHaveValue("An unsaved Blitz question");
+  expect(api.toggleRequests).toEqual([]);
+});
+
+test("module deactivation asks before discarding unsaved round settings and cancel keeps the draft [protects=Blitz settings drafts remain editable when a manager cancels module deactivation; fails_when=deactivation sends its PATCH before confirmation or cancel loses the settings draft; no_claim=does not verify saving the settings through the confirmation dialog]", async ({ page }) => {
+  const labels = blitzTexts("en");
+  const api = await setupBlitzModulePage(page);
+  await page.getByRole("button", { name: labels.settings, exact: true }).click();
+  const startMessage = page.getByRole("textbox", { name: labels.startText, exact: true });
+  await expect(startMessage).toBeVisible();
+  await startMessage.fill("An unsaved round announcement");
+
+  await page.locator(".module-detail--blitz_round > .module-detail-heading").getByRole("switch").click();
+
+  const confirmation = page.getByRole("dialog", { name: labels.unsavedTitle });
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole("button", { name: labels.continueEditing, exact: true }).click();
+  await expect(startMessage).toHaveValue("An unsaved round announcement");
+  expect(api.toggleRequests).toEqual([]);
 });
 
 test("cockpit action is hidden when disabled and locks enabled modules for running rounds or empty pools [protects=only enabled Blitz modules contribute an action and enabled actions display the required lock reason; fails_when=a disabled module contributes a tile or enabled modules lack their running-round or empty-pool lock; no_claim=does not prove the atomic DO open rejects a simultaneous start]", async ({ page }) => {

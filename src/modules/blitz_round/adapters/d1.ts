@@ -7,7 +7,7 @@ import {
 import { validateBlitzQuestion } from "../domain/questions";
 import type { BlitzQuestionRepository } from "../repository";
 
-interface BlitzQuestionRow {
+export interface BlitzQuestionRow {
   question_id: string;
   revision: number;
   kind: "scramble" | "quiz";
@@ -19,7 +19,7 @@ interface BlitzQuestionRow {
   updated_at: string;
 }
 
-const mapRow = (row: BlitzQuestionRow): BlitzQuestion => {
+export const mapBlitzQuestionRow = (row: BlitzQuestionRow): BlitzQuestion => {
   let answers: unknown;
   try { answers = JSON.parse(row.answers_json) as unknown; } catch { answers = []; }
   return {
@@ -56,13 +56,13 @@ export const createBlitzQuestionRepository = (db: D1Database): BlitzQuestionRepo
         ORDER BY updated_at DESC, question_id LIMIT ? OFFSET ?`,
     ).bind(channelId, ...(term.length === 0 ? [] : [pattern, pattern]), BLITZ_QUESTION_PAGE_SIZE,
       (boundedPage - 1) * BLITZ_QUESTION_PAGE_SIZE).all<BlitzQuestionRow>();
-    return { questions: rows.results.map(mapRow), total: count?.total ?? 0, page: boundedPage };
+    return { questions: rows.results.map(mapBlitzQuestionRow), total: count?.total ?? 0, page: boundedPage };
   },
   async get(channelId, questionId) {
     const row = await db.prepare(
       `SELECT ${blitzQuestionColumns} FROM blitz_questions WHERE channel_id = ? AND question_id = ?`,
     ).bind(channelId, questionId).first<BlitzQuestionRow>();
-    return row === null ? null : mapRow(row);
+    return row === null ? null : mapBlitzQuestionRow(row);
   },
   async create(channelId, value, now) {
     const input = validate(value);
@@ -101,7 +101,7 @@ export const createBlitzQuestionRepository = (db: D1Database): BlitzQuestionRepo
       `SELECT ${blitzQuestionColumns} FROM blitz_questions WHERE channel_id = ? AND enabled = 1
         ORDER BY (last_used_at IS NOT NULL), last_used_at, random() LIMIT 1`,
     ).bind(channelId).first<BlitzQuestionRow>();
-    return row === null ? null : mapRow(row);
+    return row === null ? null : mapBlitzQuestionRow(row);
   },
   async markUsed(channelId, questionId, now) {
     await db.prepare("UPDATE blitz_questions SET last_used_at = ? WHERE channel_id = ? AND question_id = ? AND (last_used_at IS NULL OR last_used_at < ?)")
