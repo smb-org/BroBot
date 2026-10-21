@@ -147,21 +147,30 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   const [deleteError, setDeleteError] = useState<string | undefined>();
   const [deleteFailure, setDeleteFailure] = useState<"conflict" | "deleted" | null>(null);
   const pendingDestination = useRef<(() => void) | null>(null);
-  const headerSavePending = useRef(false);
+  const questionSavePending = useRef(false);
+  const activeQuestionEditorSession = useRef<symbol | null>(null);
   const subscribeToDeletedIds = useCallback((subscriber: () => void) => subscribeToDeletedQuestionIds(channelId, subscriber), [channelId]);
   const readDeletedIds = useCallback(() => getDeletedQuestionIds(channelId), [channelId]);
   const deletedQuestionIds = useSyncExternalStore(subscribeToDeletedIds, readDeletedIds, () => EMPTY_DELETED_QUESTION_IDS);
   const pendingDeleteSelection = useRef<string | null>(null);
   const switchRef = useRef<((proceed: () => void) => void) | null>(null);
-  const queuePendingDestination = useCallback((destination: () => void): void => {
-    if (headerSavePending.current || pendingDestination.current !== null) pendingDestination.current = destination;
+  const queuePendingDestination = useCallback((destination: () => void): boolean => {
+    if (questionSavePending.current || pendingDestination.current !== null) pendingDestination.current = destination;
+    return questionSavePending.current;
   }, []);
   const clearPendingDestination = useCallback((destination: () => void): void => {
     if (pendingDestination.current === destination) pendingDestination.current = null;
   }, []);
-  const setHeaderSavePending = useCallback((pending: boolean): void => {
-    headerSavePending.current = pending;
+  const setQuestionSavePending = useCallback((pending: boolean): void => {
+    questionSavePending.current = pending;
   }, []);
+  const registerQuestionEditorSession = useCallback((session: symbol): (() => void) => {
+    activeQuestionEditorSession.current = session;
+    return () => {
+      if (activeQuestionEditorSession.current === session) activeQuestionEditorSession.current = null;
+    };
+  }, []);
+  const isCurrentQuestionEditorSession = useCallback((session: symbol): boolean => activeQuestionEditorSession.current === session, []);
   const pageQuery = useModuleQuery(channelId, "blitz_round", `questions:${String(page)}:${search}`, (signal) => loadBlitzQuestions(channelId, page, search, signal));
   const knownTotal = pageQuery.data?.total ?? lastKnownQuestionTotal(channelId, search, queryClient);
   const maxPage = knownTotal === undefined ? undefined : Math.max(1, Math.ceil(knownTotal / BLITZ_QUESTION_PAGE_SIZE));
@@ -434,8 +443,8 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
         language={language === "en" ? "en" : "de"}
         canManage={canManage}
         onSave={saveQuestion}
-        onSaved={(saved) => {
-          selectSavedQuestion(saved);
+        onSaved={(saved, session) => {
+          if (isCurrentQuestionEditorSession(session)) selectSavedQuestion(saved);
           const destination = pendingDestination.current;
           pendingDestination.current = null;
           return destination;
@@ -449,7 +458,9 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
         onOpenSettings={openSettings}
         onQueueNavigation={queuePendingDestination}
         onClearPendingNavigation={clearPendingDestination}
-        onHeaderSavePendingChange={setHeaderSavePending}
+        onSavePendingChange={setQuestionSavePending}
+        isCurrentEditorSession={isCurrentQuestionEditorSession}
+        registerEditorSession={registerQuestionEditorSession}
         registerSwitch={(switcher) => { switchRef.current = switcher; }}
         onEdit={cancelPendingDeleteSelection}
       />;
@@ -481,13 +492,13 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   </div>;
 }
 
-function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved, deleteFailure, onRequestDelete, onOpenDelete, onCancelDelete, onReload, onDiscardDeleted, onOpenSettings, onQueueNavigation, onClearPendingNavigation, onHeaderSavePendingChange, registerSwitch, onEdit }: {
+function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved, deleteFailure, onRequestDelete, onOpenDelete, onCancelDelete, onReload, onDiscardDeleted, onOpenSettings, onQueueNavigation, onClearPendingNavigation, onSavePendingChange, isCurrentEditorSession, registerEditorSession, registerSwitch, onEdit }: {
   question: BlitzQuestion | null;
   isNew: boolean;
   language: "de" | "en";
   canManage: boolean;
   onSave: (draft: Draft, revision?: number, saveAsNew?: boolean) => Promise<BlitzQuestion | null>;
-  onSaved: (question: BlitzQuestion) => (() => void) | null;
+  onSaved: (question: BlitzQuestion, session: symbol) => (() => void) | null;
   deleteFailure: "conflict" | "deleted" | null;
   onRequestDelete: (questionId: string) => void;
   onOpenDelete: (questionId: string) => void;
@@ -495,9 +506,11 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
   onReload: (questionId: string) => Promise<BlitzQuestion>;
   onDiscardDeleted: () => void;
   onOpenSettings: () => void;
-  onQueueNavigation: (destination: () => void) => void;
+  onQueueNavigation: (destination: () => void) => boolean;
   onClearPendingNavigation: (destination: () => void) => void;
-  onHeaderSavePendingChange: (pending: boolean) => void;
+  onSavePendingChange: (pending: boolean) => void;
+  isCurrentEditorSession: (session: symbol) => boolean;
+  registerEditorSession: (session: symbol) => () => void;
   registerSwitch: (switcher: ((proceed: () => void) => void) | null) => void;
   onEdit: () => void;
 }): ReactElement {
@@ -516,15 +529,17 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
   const input = questionInput(draft.value);
   const invalid = input === null || (draft.value.kind === "quiz" && pendingAnswer.trim().length > 0);
   const reset = (): void => { draft.reset(); setPendingAnswer(""); setSaveError(undefined); setAttempted(false); };
+  const editorSession = useRef(Symbol());
   const saveRef = useRef<() => Promise<string | null>>(() => Promise.resolve(null));
   const saveInFlight = useRef<Promise<string | null> | null>(null);
   const parentCompletionInProgress = useRef(false);
   const guard = useDraftGuard(draft.dirty || pendingAnswer.trim().length > 0, () => saveRef.current(), reset);
   const { guardSwitch } = guard;
 
-  const save = async (saveAsNew = false, fromHeader = false): Promise<string | null> => {
+  const save = async (saveAsNew = false): Promise<string | null> => {
     if (saveInFlight.current !== null) return saveInFlight.current;
     const operation = (async (): Promise<string | null> => {
+      const session = editorSession.current;
       setAttempted(true);
       setSaveError(undefined);
       if (!canManage) return labels.roleLocked;
@@ -538,19 +553,22 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
         return message;
       }
       setSaving(true);
-      if (fromHeader) onHeaderSavePendingChange(true);
+      onSavePendingChange(true);
       try {
         const saved = await onSave(draft.value, question?.revision, saveAsNew);
         if (saved === null) {
-          setSaveError(labels.saveError);
+          if (isCurrentEditorSession(session)) setSaveError(labels.saveError);
           return labels.saveError;
         }
-        draft.accept(fromQuestion(saved));
-        setPendingAnswer("");
-        setAttempted(false);
-        setServerConflict(false);
-        setServerDeleted(false);
-        const pendingDestination = onSaved(saved);
+        const isCurrentSession = isCurrentEditorSession(session);
+        if (isCurrentSession) {
+          draft.accept(fromQuestion(saved));
+          setPendingAnswer("");
+          setAttempted(false);
+          setServerConflict(false);
+          setServerDeleted(false);
+        }
+        const pendingDestination = onSaved(saved, session);
         if (pendingDestination === null) guard.completeSwitch();
         else {
           parentCompletionInProgress.current = true;
@@ -560,6 +578,7 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
         }
         return null;
       } catch (failure: unknown) {
+        if (!isCurrentEditorSession(session)) return blitzErrorCode(failure) ?? labels.saveError;
         const code = blitzErrorCode(failure);
         const message = code === "question_limit_reached" ? labels.questionLimit
           : code === "question_conflict" ? labels.conflict
@@ -569,8 +588,8 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
         if (code === "question_deleted") setServerDeleted(true);
         return message;
       } finally {
-        if (fromHeader) onHeaderSavePendingChange(false);
-        setSaving(false);
+        onSavePendingChange(false);
+        if (isCurrentEditorSession(session)) setSaving(false);
       }
     })();
     saveInFlight.current = operation;
@@ -600,18 +619,19 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
     });
   };
 
-  const saveDeletedAsNew = (): void => { void save(true, true); };
+  const saveDeletedAsNew = (): void => { void save(true); };
   const guardSwitchWithPendingDestination = useCallback((proceed: () => void, cancel?: () => void): void => {
     const destination = (): void => {
       onClearPendingNavigation(destination);
       proceed();
     };
-    onQueueNavigation(destination);
+    const savePending = onQueueNavigation(destination);
+    if (savePending && !draft.dirty && pendingAnswer.trim().length === 0) return;
     guardSwitch(destination, () => {
       onClearPendingNavigation(destination);
       if (!parentCompletionInProgress.current) cancel?.();
     });
-  }, [guardSwitch, onClearPendingNavigation, onQueueNavigation]);
+  }, [draft.dirty, guardSwitch, onClearPendingNavigation, onQueueNavigation, pendingAnswer]);
   const requestSettings = (): void => { guardSwitchWithPendingDestination(onOpenSettings); };
 
   useEffect(() => { saveRef.current = save; });
@@ -619,6 +639,7 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
     registerSwitch(guardSwitchWithPendingDestination);
     return () => { registerSwitch(null); };
   }, [guardSwitchWithPendingDestination, registerSwitch]);
+  useEffect(() => registerEditorSession(editorSession.current), [registerEditorSession]);
   useEffect(() => registerDashboardNavigationGuard(guardSwitchWithPendingDestination), [guardSwitchWithPendingDestination]);
   const typeOptions = [
     { value: "scramble" as const, label: labels.scramble },
@@ -639,7 +660,7 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
     ...(visibleSaveError === undefined ? {} : { error: visibleSaveError }),
     invalid,
     invalidMessage: labels.invalidAnswer,
-    onSave: () => { void save(false, true); },
+    onSave: () => { void save(false); },
     onInvalidSave: () => { setAttempted(true); },
     onDiscard: hasServerDeleted ? onDiscardDeleted : reset,
     saveLabel: labels.save,

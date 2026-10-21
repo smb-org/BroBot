@@ -173,7 +173,7 @@ const installPanelFetch = (initialQuestions: BlitzQuestion[] = [], postGate?: Pr
       const revision = Number(url.searchParams.get("revision") ?? "0");
       submittedDeleteRevisions.push(revision);
       const existing = questions.find((candidate) => candidate.id === id);
-      if (existing === undefined) return Promise.resolve(jsonResponse({ error: "question_not_found" }, 404));
+      if (existing === undefined) return Promise.resolve(jsonResponse({ error: "question_deleted" }, 409));
       if (revision !== existing.revision) return Promise.resolve(jsonResponse({ error: "question_conflict", current: existing }, 409));
       questions = questions.filter((candidate) => candidate.id !== id);
       questionDeleted = true;
@@ -739,6 +739,34 @@ describe("Blitz Round collection panel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save as new question" }));
 
     await waitFor(() => expect(api.getQuestions().some((question) => question.prompt === "STONE")).toBe(true));
+  });
+
+  it("holds New question navigation during a clean deleted-question save-as-new [protects=a New question destination waits for the clean save-as-new POST, then opens a blank draft; fails_when=the editor switches before the POST settles or the created question overrides the requested destination; no_claim=the remote deletion and delayed POST are simulated by an in-memory HTTP stub]", async () => {
+    let releasePost!: () => void;
+    const postGate = new Promise<void>((resolve) => { releasePost = resolve; });
+    const api = installPanelFetch([sampleQuestion], postGate);
+    mountPanel();
+    await screen.findByRole("textbox", { name: "Word" });
+
+    api.deleteQuestion(sampleQuestion.id);
+    fireEvent.click(document.querySelector(".page-header__overflow-trigger") as HTMLButtonElement);
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    const deleteDialog = await screen.findByRole("dialog", { name: "Delete this question?" });
+    fireEvent.click(within(deleteDialog).getByRole("button", { name: "Delete" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Save as new question" }));
+    await waitFor(() => expect(api.requests.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true));
+
+    fireEvent.click(screen.getByRole("button", { name: "New question" }));
+    expect(screen.getByRole("heading", { name: "CLOUD" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "New question" })).not.toBeInTheDocument();
+
+    act(() => { releasePost(); });
+
+    expect(await screen.findByRole("heading", { name: "New question" })).toBeInTheDocument();
+    const newQuestion = await screen.findByRole("textbox", { name: "Word" });
+    fireEvent.change(newQuestion, { target: { value: "STORM" } });
+    expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("STORM");
+    expect(api.getQuestions().some((question) => question.prompt === "CLOUD")).toBe(true);
   });
 
   it("selects the first remaining question after deleting the only item on the last page [protects=deleting question 26 from a 26-question pool clamps to page 1 and selects its first question; fails_when=the panel remains on invalid page 2 or shows an empty detail; no_claim=the paginated repository is mocked]", async () => {
