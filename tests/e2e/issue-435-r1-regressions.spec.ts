@@ -81,11 +81,12 @@ const assertLocationLayout = async (page: Page): Promise<void> => {
   const field = page.locator(".channel-location-field");
   expect(await field.evaluate((element) => getComputedStyle(element).borderTopWidth)).toBe("0px");
   expect(await field.evaluate((element) => getComputedStyle(element).minHeight)).not.toBe("230px");
-  expect(await page.locator(".channel-location-field__current svg").count()).toBe(0);
-  const coordinates = page.locator(".channel-location-field__coordinates");
-  if (await coordinates.count() > 0) {
-    const coordinatesStyle = await coordinates.evaluate((element) => getComputedStyle(element).fontSize);
-    expect(Number.parseFloat(coordinatesStyle)).toBeLessThanOrEqual(12);
+  const status = page.locator(".channel-location-field__status");
+  expect(await status.locator("svg").count()).toBe(0);
+  const details = page.locator(".channel-location-field__details");
+  if (await details.count() > 0) {
+    const detailsStyle = await details.evaluate((element) => getComputedStyle(element).fontSize);
+    expect(Number.parseFloat(detailsStyle)).toBeLessThanOrEqual(12);
   }
   const removeStyle = await page.getByRole("button", { name: "Standort entfernen" }).evaluate((element) => getComputedStyle(element).backgroundColor);
   expect(removeStyle).toBe("rgba(0, 0, 0, 0)");
@@ -132,10 +133,10 @@ test("location changes stay in the page draft until Speichern", async ({ page })
     await page.setViewportSize(viewport);
     await assertLocationLayout(page);
   }
-  await expect(page.locator(".channel-location-field__current")).toContainText("Berlin");
+  await expect(page.locator(".channel-location-field__status")).toContainText("Berlin");
   expect(requests).toHaveLength(0);
   await page.getByRole("button", { name: "Verwerfen" }).click();
-  await expect(page.locator(".channel-location-field__current")).not.toContainText("Berlin");
+  await expect(page.locator(".channel-location-field__status")).not.toContainText("Berlin");
   expect(requests).toHaveLength(0);
 
   await openLocationSearch(page);
@@ -145,7 +146,7 @@ test("location changes stay in the page draft until Speichern", async ({ page })
 
   await page.getByRole("button", { name: "Standort entfernen" }).click();
   await page.getByRole("button", { name: "Standort entfernen", exact: true }).last().click();
-  await expect(page.locator(".channel-location-field__current")).toBeEmpty();
+  await expect(page.locator(".channel-location-field__status")).toHaveText("Standort fehlt");
   expect(requests).toHaveLength(1);
   const save = page.waitForRequest((request) => request.url().endsWith(`/api/channels/${channelId}/settings/location`) && request.method() === "PATCH");
   await page.getByRole("button", { name: "Speichern", exact: true }).click();

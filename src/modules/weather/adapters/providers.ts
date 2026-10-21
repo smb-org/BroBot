@@ -51,10 +51,15 @@ const expiryFromHeaders = (headers: Headers, now: number): number | null => {
 const retryAfterFromHeaders = (headers: Headers, now: number): number | null => {
   const value = headers.get("Retry-After");
   if (value === null) return null;
-  const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000;
-  const retryAt = Date.parse(value);
-  return Number.isFinite(retryAt) ? Math.max(0, retryAt - now) : null;
+  const retryAfter = value.trim();
+  if (/^\d+$/u.test(retryAfter)) {
+    const delayMs = Number(retryAfter) * 1_000;
+    return Number.isSafeInteger(delayMs) && Number.isFinite(new Date(now + delayMs).getTime()) ? delayMs : null;
+  }
+  const retryAt = Date.parse(retryAfter);
+  return Number.isFinite(retryAt) && retryAt > now && Number.isFinite(new Date(retryAt).getTime())
+    ? retryAt - now
+    : null;
 };
 
 const request = async (

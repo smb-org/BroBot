@@ -30,23 +30,35 @@ const EMPTY_COMMANDS: readonly TextCommand[] = [];
 export function ChannelLocationLiveCards({ channelId, locationLoaded, hasLocation, locationRevision, timeZone }: LiveCardProps): ReactElement {
   const language = dashboardLanguage();
   const texts = locationLiveTexts(language);
+  const weatherPart = `current:${String(locationRevision)}`;
+  const sunPart = `today:${String(locationRevision)}`;
+  const moonPart = `today:${String(locationRevision)}`;
   const weatherQuery = useQuery({
-    queryKey: queryKeys.module(channelId, "weather", `current:${String(locationRevision)}`),
+    queryKey: queryKeys.module(channelId, "weather", weatherPart),
     queryFn: ({ signal }) => getChannelWeatherCurrent(channelId, signal),
     enabled: hasLocation,
     refetchInterval: LIVE_REFRESH_INTERVAL_MS,
+    placeholderData: (previousData, previousQuery) =>
+      previousQuery?.queryKey[1] === channelId &&
+      previousQuery.queryKey[3] === "weather" && previousQuery.queryKey[4] === weatherPart ? previousData : undefined,
   });
   const sunQuery = useQuery({
-    queryKey: queryKeys.module(channelId, "sun", `today:${String(locationRevision)}`),
+    queryKey: queryKeys.module(channelId, "sun", sunPart),
     queryFn: ({ signal }) => getChannelSunToday(channelId, signal),
     enabled: hasLocation,
     refetchInterval: LIVE_REFRESH_INTERVAL_MS,
+    placeholderData: (previousData, previousQuery) =>
+      previousQuery?.queryKey[1] === channelId &&
+      previousQuery.queryKey[3] === "sun" && previousQuery.queryKey[4] === sunPart ? previousData : undefined,
   });
   const moonQuery = useQuery({
-    queryKey: queryKeys.module(channelId, "moon", `today:${String(locationRevision)}`),
+    queryKey: queryKeys.module(channelId, "moon", moonPart),
     queryFn: ({ signal }) => getChannelMoonToday(channelId, signal),
     enabled: hasLocation,
     refetchInterval: LIVE_REFRESH_INTERVAL_MS,
+    placeholderData: (previousData, previousQuery) =>
+      previousQuery?.queryKey[1] === channelId &&
+      previousQuery.queryKey[3] === "moon" && previousQuery.queryKey[4] === moonPart ? previousData : undefined,
   });
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {

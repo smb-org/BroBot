@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleRouteEnvironment } from "../../src/modules/contract";
+import * as sunDomain from "../../src/modules/sun/domain";
 import { sunRoutes } from "../../src/modules/sun/routes";
 import { readSunSettings } from "../../src/modules/sun/adapters/d1";
 import { prepareModuleAudit } from "../../src/worker/module-audit";
@@ -53,6 +54,7 @@ const requestFor = (revision: number, nextTexts = errorTexts): Request =>
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   for (const database of databases.splice(0)) database.close();
 });
 
@@ -226,6 +228,45 @@ describe("sun today route", () => {
       expect(Date.parse(interval.startAt)).toBeCloseTo(expected[index]?.[0] ?? 0, -6);
       expect(Date.parse(interval.endAt)).toBeCloseTo(expected[index]?.[1] ?? 0, -6);
     }
+  });
+
+  it("does not widen the blue-hour scan when Reykjavik has no blue-hour interval", async () => {
+    const database = await createDatabase();
+    await database.prepare(
+      "UPDATE channels SET location_name = ?, location_latitude = ?, location_longitude = ?, location_time_zone = ? WHERE channel_id = ?",
+    ).bind("Reykjavik", 64.15, -21.95, "Atlantic/Reykjavik", CHANNEL_ID).run();
+    vi.setSystemTime(new Date("2026-06-21T12:00:00.000Z"));
+    const calculateIntervals = vi.spyOn(sunDomain, "calculateSunAltitudeIntervals");
+    const app = appFor(database as unknown as D1Database);
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/today`), {
+      DB: database as unknown as D1Database,
+    });
+    const body = await response.json<{ status: string; blueHourIntervals?: { startAt: string; endAt: string }[] }>();
+
+    expect(body.status).toBe("ok");
+    expect(body.blueHourIntervals).toEqual([]);
+    expect(calculateIntervals.mock.calls.filter((call) => call[3] === "blue")).toHaveLength(1);
+  });
+
+  it("reuses solar intervals for the same rounded location, time zone, and local date", async () => {
+    const database = await createDatabase();
+    await database.prepare(
+      "UPDATE channels SET location_name = ?, location_latitude = ?, location_longitude = ?, location_time_zone = ? WHERE channel_id = ?",
+    ).bind("Valdivia", -39.82, -73.24, "America/Santiago", CHANNEL_ID).run();
+    vi.setSystemTime(new Date("2026-11-04T12:00:00.000Z"));
+    const calculateIntervals = vi.spyOn(sunDomain, "calculateSunAltitudeIntervals");
+    const app = appFor(database as unknown as D1Database);
+    const request = () => app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/today`), {
+      DB: database as unknown as D1Database,
+    });
+
+    await request();
+    const callsAfterFirstRequest = calculateIntervals.mock.calls.length;
+    await request();
+
+    expect(callsAfterFirstRequest).toBeGreaterThan(0);
+    expect(calculateIntervals).toHaveBeenCalledTimes(callsAfterFirstRequest);
   });
 
   it("returns concrete golden and blue intervals for Berlin's local day", async () => {

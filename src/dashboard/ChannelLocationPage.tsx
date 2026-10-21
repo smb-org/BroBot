@@ -17,12 +17,10 @@ import { dashboardCommonTexts, dashboardLanguage, dashboardTexts, apiErrorText }
 import {
   ConfirmDialog,
   LoadState,
-  LoadStateLines,
   LockedReason,
   SaveStatus,
   Section,
   SettingsPage,
-  StatusLed,
   registerDashboardNavigationGuard,
   useDraftGuard,
 } from "./ui";
@@ -207,23 +205,16 @@ export const ChannelLocationPage = ({ channelId, role, onOpenCommand = () => {},
           </Section>
           <div id="location">
             <Section title={labels.location}>
-              <LoadState variant="compact-64" reserveHeight="calc(var(--s10) * 3)"
-                status={!settingsReady ? settingsQuery.isError || settings !== undefined ? "error" : "loading" : "success"}
-                loading={<LoadStateLines rows={2} height={56} />}
-                empty={<LoadStateLines rows={2} height={56} />}
-                error={<p role="alert">{loadError}</p>}
-                queryError={{ title: dashboard.errors.dataLoadFailed, message: loadError, onRetry: () => { void settingsQuery.refetch(); } }}>
-                {!settingsReady ? null : <>
-                  {location === null ? <div className="channel-location-page__warning" role="status">
-                    <StatusLed state="warn" label={labels.locationMissingWarning} dotOnly />
-                    <div><strong>{labels.locationMissing}</strong><span>{labels.locationMissingWarning}</span></div>
-                  </div> : null}
-                  <ChannelLocationField channelId={channelId} language={language} value={location}
-                    onChange={(value) => { writeDraft({ location: value }); }} channelTimeZone={timeZone}
-                    onSelectChannelTimeZone={(value) => { writeDraft({ timeZone: value }); }} canEdit={canEdit}
-                    disabled={settingsQuery.isFetching || pending} readOnlyReasonId={readOnlyReasonId} />
-                </>}
-              </LoadState>
+              {settingsReady || !settingsQuery.isError
+                ? <ChannelLocationField channelId={channelId} language={language} value={location}
+                    onChange={(value) => { writeDraft({ location: value }); }} channelTimeZone={timeZone || settings?.timeZone || "UTC"}
+                    onSelectChannelTimeZone={(value) => { writeDraft({ timeZone: value }); }} canEdit={canEdit} loading={!settingsReady}
+                    disabled={!settingsReady || settingsQuery.isFetching || pending} readOnlyReasonId={readOnlyReasonId} />
+                : <LoadState className="channel-location-page__location-status" variant="compact-64" status="error"
+                    loading={<span />} empty={<span />} error={<p role="alert">{loadError}</p>}
+                    queryError={{ title: dashboard.errors.dataLoadFailed, message: loadError, onRetry: () => { void settingsQuery.refetch(); } }}>
+                    {null}
+                  </LoadState>}
             </Section>
           </div>
         </>,

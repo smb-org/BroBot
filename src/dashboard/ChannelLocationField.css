@@ -1,10 +1,14 @@
 @layer components.pages {
-  .channel-location-field { display: grid; gap: var(--s3); width: 100%; min-width: 0; padding-top: var(--s3); }
-  .channel-location-field__heading { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: var(--s2); min-width: 0; }
-  .channel-location-field__heading p { max-width: 48ch; margin: 0; }
-  .channel-location-field__current { display: grid; justify-items: start; gap: 2px; min-width: 0; text-align: left; }
-  .channel-location-field__place { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .channel-location-field__coordinates { max-width: 100%; overflow: hidden; font-size: 11px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+  .channel-location-field { display: grid; gap: var(--s2); width: 100%; min-width: 0; }
+  .channel-location-field__status { display: flex; min-width: 0; min-height: var(--s5); align-items: center; gap: var(--s2); overflow: hidden; white-space: nowrap; }
+  .channel-location-field__status strong { min-width: 0; overflow: hidden; font-size: var(--text-field-label); line-height: var(--s5); text-overflow: ellipsis; }
+  .channel-location-field__status--missing { color: var(--color-orange-text); }
+  .channel-location-field__status > .status-led { flex: none; }
+  .channel-location-field__place { max-width: 100%; }
+  .channel-location-field__details { display: -webkit-box; min-width: 0; height: calc(var(--s5) * 2); overflow: hidden; color: var(--text-2); font-size: var(--text-number); font-variant-numeric: tabular-nums; line-height: var(--s5); -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .channel-location-field__skeleton { display: block; max-width: 100%; height: var(--s2); border-radius: var(--r-control); background: var(--surface-hover); }
+  .channel-location-field__skeleton--status { width: calc(var(--s10) * 6); }
+  .channel-location-field__skeleton--details { width: calc(var(--s10) * 9); }
   .channel-location-field__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); min-width: 0; }
   .channel-location-field__actions > .ui-button { width: auto; }
   .channel-location-field__remove { min-height: 36px; padding-inline: var(--s2); border-color: transparent; color: var(--error); background: transparent; }
@@ -19,10 +23,5 @@
   .channel-location-field__result-action { flex: none; color: var(--brand-text); }
   .channel-location-dialog { display: grid; gap: var(--s3); }
   .channel-location-dialog > p { margin: 0; }
-  .channel-location-field__suggestion { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: var(--s2); min-width: 0; padding-top: var(--s2); border-top: 1px solid var(--line); }
-  .channel-location-field__suggestion > span { min-width: 0; overflow-wrap: anywhere; }
-  @media (max-width: 639px) {
-    .channel-location-field__heading { grid-template-columns: minmax(0, 1fr); align-items: start; gap: var(--s2); }
-    .channel-location-field__current { justify-items: start; text-align: left; }
-  }
+  .channel-location-field__hint { min-width: 0; margin: 0; line-height: var(--s5); }
 }

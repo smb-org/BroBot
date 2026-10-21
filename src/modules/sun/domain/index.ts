@@ -330,13 +330,32 @@ export interface SunAltitudeInterval {
   endAt: string;
 }
 
+export interface SunAltitudeIntervalResolution {
+  intervals: readonly SunAltitudeInterval[];
+  unresolvedIntervals: readonly { startAt: string | null; endAt: string | null }[];
+}
+
 /** Calculate all local golden-hour or blue-hour intervals from altitude crossings. */
-export const calculateSunAltitudeIntervals = (
+export function calculateSunAltitudeIntervals(
   location: Omit<CalculateSunDayInput, "localDate">,
   firstLocalDate: string,
   dayCount: number,
   kind: "golden" | "blue",
-): readonly SunAltitudeInterval[] => {
+): readonly SunAltitudeInterval[];
+export function calculateSunAltitudeIntervals(
+  location: Omit<CalculateSunDayInput, "localDate">,
+  firstLocalDate: string,
+  dayCount: number,
+  kind: "golden" | "blue",
+  includeUnresolvedEndpoints: true,
+): SunAltitudeIntervalResolution;
+export function calculateSunAltitudeIntervals(
+  location: Omit<CalculateSunDayInput, "localDate">,
+  firstLocalDate: string,
+  dayCount: number,
+  kind: "golden" | "blue",
+  includeUnresolvedEndpoints = false,
+): readonly SunAltitudeInterval[] | SunAltitudeIntervalResolution {
   const starts: string[] = [];
   const ends: string[] = [];
   for (let offset = 0; offset < dayCount; offset += 1) {
@@ -358,22 +377,46 @@ export const calculateSunAltitudeIntervals = (
 
   starts.sort((left, right) => Date.parse(left) - Date.parse(right));
   ends.sort((left, right) => Date.parse(left) - Date.parse(right));
+  const scanStart = Date.parse(localMidnightInTimeZone(firstLocalDate, location.timeZone));
+  const afterLastDate = shiftLocalDate(firstLocalDate, dayCount);
+  const scanEnd = Date.parse(localMidnightInTimeZone(afterLastDate, location.timeZone));
+  const altitudeIsInPhase = (instant: number): boolean => {
+    const altitude = solarAltitude(instant, location.latitude, location.longitude);
+    return kind === "golden" ? altitude >= -4 && altitude <= 6 : altitude >= -6 && altitude < -4;
+  };
+  const unresolvedIntervals: { startAt: string | null; endAt: string | null }[] = [];
   const intervals: SunAltitudeInterval[] = [];
   let endIndex = 0;
-  // ponytail: a start whose matching end falls beyond the scanned window (near the poles,
-  // a golden/blue-hour interval can run for days) has no `endAt` here and is silently
-  // dropped, so the phase reports unavailable instead of an open-ended interval. Upgrade
-  // path: extend the scan window when a phase is still ongoing at the window edge.
-  for (const startAt of starts) {
+  let startIndex = 0;
+  if (includeUnresolvedEndpoints && altitudeIsInPhase(scanStart)) {
+    const firstEndIndex = ends.findIndex((endAt) => Date.parse(endAt) > scanStart);
+    const firstEndAt = ends[firstEndIndex];
+    if (firstEndAt === undefined) {
+      if (altitudeIsInPhase(scanEnd)) unresolvedIntervals.push({ startAt: null, endAt: null });
+      startIndex = starts.length;
+    } else {
+      unresolvedIntervals.push({ startAt: null, endAt: firstEndAt });
+      endIndex = firstEndIndex + 1;
+      startIndex = starts.findIndex((startAt) => Date.parse(startAt) > Date.parse(firstEndAt));
+      if (startIndex < 0) startIndex = starts.length;
+    }
+  }
+
+  for (const startAt of starts.slice(startIndex)) {
     while (ends[endIndex] !== undefined && Date.parse(ends[endIndex] ?? "") <= Date.parse(startAt)) endIndex += 1;
     const endAt = ends[endIndex];
     if (endAt !== undefined) {
       intervals.push({ startAt, endAt });
       endIndex += 1;
+    } else if (includeUnresolvedEndpoints) {
+      unresolvedIntervals.push({ startAt, endAt: null });
     }
   }
-  return intervals.sort((left, right) => Date.parse(left.startAt) - Date.parse(right.startAt));
-};
+  const orderedIntervals = intervals.sort((left, right) => Date.parse(left.startAt) - Date.parse(right.startAt));
+  return includeUnresolvedEndpoints
+    ? { intervals: orderedIntervals, unresolvedIntervals }
+    : orderedIntervals;
+}
 
 const formatSunTime = (instant: number, timeZone: string, language: ModuleLanguage): string =>
   new Intl.DateTimeFormat(language === "de" ? "de-DE" : "en-US", {

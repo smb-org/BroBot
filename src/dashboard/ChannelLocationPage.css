@@ -10,11 +10,7 @@
   .channel-location-page__properties > div { display: grid; gap: 4px; }
   .channel-location-page__properties dt { color: var(--text-3); font-size: 12px; }
   .channel-location-page__properties dd { margin: 0; overflow-wrap: anywhere; }
-  .channel-location-page__warning { display: flex; min-width: 0; align-items: flex-start; gap: var(--s2); color: var(--color-orange-text); }
-  .channel-location-page__warning > .status-led { flex: none; margin-top: 2px; }
-  .channel-location-page__warning > div { display: grid; min-width: 0; gap: 2px; }
-  .channel-location-page__warning strong { font-size: 13px; }
-  .channel-location-page__warning span { color: var(--text-2); font-size: 12px; line-height: 1.4; }
+  .channel-location-page__location-status { min-width: 0; }
   .channel-location-live-column, .channel-location-reference-column { display: grid; align-content: start; gap: var(--s4); min-width: 0; }
   .channel-location-weather-card, .channel-location-sun-card, .channel-location-moon-card { position: relative; box-sizing: border-box; min-width: 0; padding: var(--s3); border-radius: var(--r-container); background: var(--surface-raised); }
   .channel-location-live-card { display: grid; }

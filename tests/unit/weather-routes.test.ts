@@ -252,13 +252,16 @@ describe("current weather route", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
-  it("caps an absurd Retry-After cooldown at 24 hours", async () => {
+  it.each([
+    ["numeric seconds", "172800"],
+    ["HTTP-date", "Fri, 23 Oct 2026 12:00:00 GMT"],
+  ])("honors a provider Retry-After deadline beyond 24 hours (%s)", async (_label, retryAfter) => {
     const database = await createDatabase();
     await setLocation(database);
     const now = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-21T12:00:00.000Z"));
     const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(new Response(null, {
       status: 429,
-      headers: { "Retry-After": "172800" },
+      headers: { "Retry-After": retryAfter },
     })));
     vi.stubGlobal("fetch", fetcher);
     const app = appFor(database, "operator");
@@ -267,11 +270,11 @@ describe("current weather route", () => {
     });
 
     await request();
-    now.mockReturnValue(Date.parse("2026-10-22T11:59:59.000Z"));
+    now.mockReturnValue(Date.parse("2026-10-22T12:00:01.000Z"));
     await request();
     expect(fetcher).toHaveBeenCalledTimes(1);
 
-    now.mockReturnValue(Date.parse("2026-10-22T12:00:01.000Z"));
+    now.mockReturnValue(Date.parse("2026-10-23T12:00:01.000Z"));
     await request();
     expect(fetcher).toHaveBeenCalledTimes(2);
   });

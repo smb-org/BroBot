@@ -93,13 +93,50 @@ describe("channel location page", () => {
 
   it("shows read-only time-zone properties and one reason for disabled location actions to operators", async () => {
     const labels = channelSettingsTexts("de");
-    renderPage("operator");
+    const { container } = renderPage("operator");
 
+    await waitFor(() => expect(container.querySelector(".channel-location-field")).toHaveAttribute("aria-busy", "false"));
     const locationChange = await screen.findByRole("button", { name: labels.locationChange });
     expect(screen.queryByRole("combobox", { name: labels.timeZone })).not.toBeInTheDocument();
     expect(screen.getByText("Europe/Berlin")).toBeInTheDocument();
     expect(locationChange).toBeDisabled();
     expect(screen.getAllByText(labels.readOnly)).toHaveLength(1);
+  });
+
+  it("keeps the location rows shared across loading, missing, and set states", async () => {
+    const labels = channelSettingsTexts("de");
+    let resolveSettings!: (response: Response) => void;
+    const settingsResponse = new Promise<Response>((resolve) => { resolveSettings = resolve; });
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      return url.pathname.endsWith("/settings") ? settingsResponse : Promise.resolve(jsonResponse({ commands: [], variables: [] }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const { container, queryClient } = renderWithQuery(<UiProvider><ChannelLocationPage channelId="channel-a" role="manager" /></UiProvider>);
+    const getRows = (): HTMLElement[] => Array.from(container.querySelectorAll<HTMLElement>(
+      ".channel-location-field__status, .channel-location-field__details, .channel-location-field__actions",
+    ));
+
+    expect(getRows()).toHaveLength(3);
+    expect(container.querySelectorAll(".channel-location-field__skeleton")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: labels.locationChange })).toBeDisabled();
+    expect(container.querySelector(".channel-location-page__location-sizing")).toBeNull();
+    expect(container.querySelector(".channel-location-page__warning--reserved")).toBeNull();
+
+    resolveSettings(jsonResponse(settings));
+    await waitFor(() => expect(container.querySelector(".channel-location-field")).toHaveAttribute("aria-busy", "false"));
+    expect(container.querySelector(".channel-location-field__status")).toHaveTextContent(labels.locationMissing);
+    expect(container.querySelectorAll(".channel-location-field__skeleton")).toHaveLength(0);
+    expect(screen.getByRole("button", { name: labels.locationChange })).toBeEnabled();
+    expect(screen.getByRole("button", { name: labels.locationRemove })).toBeDisabled();
+    expect(getRows()).toHaveLength(3);
+
+    queryClient.setQueryData(queryKeys.channel("channel-a", "settings"), berlinSettings);
+    await waitFor(() => expect(container.querySelector(".channel-location-field__status")).toHaveTextContent("Berlin"));
+    expect(screen.getByText("52.52, 13.40 · Europe/Berlin", { selector: ".channel-location-field__details" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: labels.locationRemove })).toBeEnabled();
+    expect(getRows()).toHaveLength(3);
+    expect(container.querySelector("[aria-hidden='true'].channel-location-field")).toBeNull();
   });
 
   it("keeps a time zone change as a draft until the page save is pressed", async () => {
@@ -220,6 +257,40 @@ describe("channel location page", () => {
     expect(container.querySelectorAll(".channel-location-weather-card > .channel-location-live-card__content .channel-location-skeleton")).toHaveLength(0);
     expect(screen.getByText("Abenddämmerung").closest("div")).toHaveTextContent("21:05");
     expect(screen.getByText("Tageslänge").closest("div")).toHaveTextContent("12 Std. 34 Min.");
+  });
+
+  it("shows loading cards after the saved-location revision changes while new data is delayed", async () => {
+    let delayLiveResponses = false;
+    const pendingResponse = new Promise<Response>(() => {});
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname.endsWith("/modules/weather/current")) return delayLiveResponses ? pendingResponse : Promise.resolve(jsonResponse(liveWeather));
+      if (url.pathname.endsWith("/modules/sun/today")) return delayLiveResponses ? pendingResponse : Promise.resolve(jsonResponse(liveSun));
+      if (url.pathname.endsWith("/modules/moon/today")) return delayLiveResponses ? pendingResponse : Promise.resolve(jsonResponse(liveMoon));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const props = { channelId: "channel-a", locationLoaded: true, hasLocation: true, timeZone: "Europe/Berlin" };
+    const { container, rerender } = renderWithQuery(
+      <UiProvider><ChannelLocationLiveCards {...props} locationRevision={1} /></UiProvider>,
+    );
+
+    expect(await screen.findByText("18,4 °C")).toBeInTheDocument();
+    expect(await screen.findByText("74 % beleuchtet")).toBeInTheDocument();
+
+    delayLiveResponses = true;
+    rerender(<UiProvider><ChannelLocationLiveCards {...props} locationRevision={2} /></UiProvider>);
+
+    await waitFor(() => {
+      for (const selector of [".channel-location-weather-card", ".channel-location-sun-card", ".channel-location-moon-card"]) {
+        expect(container.querySelector(selector)).toHaveAttribute("aria-busy", "true");
+      }
+    });
+    expect(screen.queryByText("18,4 °C")).not.toBeInTheDocument();
+    expect(screen.queryByText("74 % beleuchtet")).not.toBeInTheDocument();
+    expect(fetcher.mock.calls.filter(([input]) => inputUrl(input).includes("/modules/weather/current")).length).toBe(2);
+    expect(fetcher.mock.calls.filter(([input]) => inputUrl(input).includes("/modules/sun/today")).length).toBe(2);
+    expect(fetcher.mock.calls.filter(([input]) => inputUrl(input).includes("/modules/moon/today")).length).toBe(2);
   });
 
   it("keeps sun and moon status slots in place through refresh errors and recovery", async () => {

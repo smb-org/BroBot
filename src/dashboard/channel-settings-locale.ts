@@ -28,8 +28,8 @@ export interface ChannelSettingsTexts {
   cancel: string;
   locationSaveFailed: string;
   locationSearchFailed: string;
-  locationTimeZoneSuggestion: (timeZone: string) => string;
   locationTimeZoneAction: string;
+  locationTimeZoneTitle: string;
   defaultChatTarget: string;
   defaultChatTargetHint: string;
 }
@@ -109,8 +109,8 @@ const texts: Readonly<Record<"de" | "en", ChannelSettingsTexts>> = {
     cancel: "Abbrechen",
     locationSaveFailed: "Der Standort konnte nicht gespeichert werden.",
     locationSearchFailed: "Orte konnten nicht gesucht werden.",
-    locationTimeZoneSuggestion: (timeZone) => `Kanalzeitzone auf ${timeZone} setzen?`,
     locationTimeZoneAction: "Zeitzone übernehmen",
+    locationTimeZoneTitle: "Setzt die Kanalzeitzone auf die Zeitzone des Standorts.",
     defaultChatTarget: "Standard-Chat-Ziel",
     defaultChatTargetHint: "Wird für Einträge verwendet, die kein eigenes Chat-Ziel festlegen.",
   },
@@ -144,8 +144,8 @@ const texts: Readonly<Record<"de" | "en", ChannelSettingsTexts>> = {
     cancel: "Cancel",
     locationSaveFailed: "Location could not be saved.",
     locationSearchFailed: "Locations could not be searched.",
-    locationTimeZoneSuggestion: (timeZone) => `Set channel time zone to ${timeZone}?`,
-    locationTimeZoneAction: "Apply time zone",
+    locationTimeZoneAction: "Use location time zone",
+    locationTimeZoneTitle: "Sets the channel time zone to the location's time zone.",
     defaultChatTarget: "Default chat target",
     defaultChatTargetHint: "Used by entries that do not set their own chat target.",
   },
