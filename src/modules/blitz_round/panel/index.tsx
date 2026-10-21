@@ -68,9 +68,14 @@ const recordDeletedQuestion = (channelId: string, questionId: string): void => {
   updateDeletedQuestionIds(channelId, new Set([...getDeletedQuestionIds(channelId), questionId]));
 };
 
-const reconcileDeletedQuestions = (channelId: string, fetchedQuestions: readonly BlitzQuestion[]): void => {
-  const fetchedIds = new Set(fetchedQuestions.map((question) => question.id));
-  const remaining = new Set([...getDeletedQuestionIds(channelId)].filter((questionId) => fetchedIds.has(questionId)));
+const reconcileDeletedQuestions = (channelId: string, queryClient: DashboardQueryClient): void => {
+  const cachedQuestionIds = new Set<string>();
+  queryClient.getQueryCache().findAll({ predicate: (query) => isQuestionListQuery(channelId, query) }).forEach((query) => {
+    const data = query.state.data as BlitzQuestionPage | undefined;
+    if (!Array.isArray(data?.questions)) return;
+    data.questions.forEach((question) => cachedQuestionIds.add(question.id));
+  });
+  const remaining = new Set([...getDeletedQuestionIds(channelId)].filter((questionId) => cachedQuestionIds.has(questionId)));
   updateDeletedQuestionIds(channelId, remaining);
 };
 
@@ -156,12 +161,12 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   useEffect(() => {
     return queryClient.getQueryCache().subscribe((event) => {
       if (event.type !== "updated" || event.action.type !== "success" || event.action.manual) return;
-      if (!isQuestionListQuery(channelId, event.query) || questionListSearch(event.query) !== search) return;
+      if (!isQuestionListQuery(channelId, event.query)) return;
       const refreshed = event.query.state.data as BlitzQuestionPage | undefined;
       if (!Array.isArray(refreshed?.questions)) return;
 
       const excludedIds = getDeletedQuestionIds(channelId);
-      if (selectedId !== null && excludedIds.has(selectedId) && !refreshed.questions.some((question) => question.id === selectedId)) {
+      if (questionListSearch(event.query) === search && selectedId !== null && excludedIds.has(selectedId) && !refreshed.questions.some((question) => question.id === selectedId)) {
         const nextQuestion = firstRemainingQuestion(channelId, search, queryClient, excludedIds);
         const proceed = (): void => {
           setDeleteFailure(null);
@@ -181,7 +186,7 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
         else switchRef.current(proceed);
       }
 
-      if (excludedIds.size > 0) reconcileDeletedQuestions(channelId, refreshed.questions);
+      if (excludedIds.size > 0) reconcileDeletedQuestions(channelId, queryClient);
     });
   }, [channelId, deletedQuestionIds, queryClient, search, selectedId]);
 
@@ -348,7 +353,12 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
   };
 
   const retryQuestionList = (): void => {
-    void pageQuery.refetch();
+    const requestedPages = new Set([page, effectivePage]);
+    void queryClient.refetchQueries({
+      predicate: (query) => isQuestionListQuery(channelId, query) && questionListSearch(query) === search &&
+        requestedPages.has(questionListPage(query)) && query.state.status === "error",
+      type: "all",
+    });
   };
 
   const toolbar = <div className="blitz-panel__toolbar">
@@ -357,9 +367,9 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
       <Button variant="primary" icon="add" disabled={!canManage} onClick={newQuestion}>{labels.addQuestion}</Button>
     </div>
     <div className="blitz-panel__pagination" aria-label={labels.questions}>
-      <Button size="compact" icon="collapse" iconOnly ariaLabel={labels.previousPage} disabled={effectivePage <= 1} onClick={() => { cancelPendingDeleteSelection(); setPage(Math.max(1, effectivePage - 1)); }} />
+      <Button size="compact" icon="collapse" iconOnly ariaLabel={labels.previousPage} disabled={page <= 1} onClick={() => { cancelPendingDeleteSelection(); setPage(Math.max(1, page - 1)); }} />
       <span>{labels.pageCount(effectivePage, maxPage ?? effectivePage)}</span>
-      <Button size="compact" disabled={maxPage === undefined || effectivePage >= maxPage} onClick={() => { cancelPendingDeleteSelection(); setPage(Math.min(maxPage ?? effectivePage, effectivePage + 1)); }}>{labels.nextPage}</Button>
+      <Button size="compact" disabled={maxPage === undefined || page >= maxPage} onClick={() => { cancelPendingDeleteSelection(); setPage(Math.min(maxPage ?? page, page + 1)); }}>{labels.nextPage}</Button>
       <span className="blitz-panel__count">{labels.questionCount(knownTotal ?? 0)}</span>
     </div>
   </div>;
