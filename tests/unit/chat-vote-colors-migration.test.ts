@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const migration = readFileSync(resolve(import.meta.dirname, "../../migrations/0074_chat_vote_answer_colors.sql"), "utf8");
+const migration = readFileSync(resolve(import.meta.dirname, "../../migrations/0075_chat_vote_answer_colors.sql"), "utf8");
 
 describe("chat vote answer colors migration", () => {
   it("backfills saved and running vote palettes by answer index and offers existing templates in the cockpit", () => {
