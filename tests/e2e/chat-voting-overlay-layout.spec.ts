@@ -198,8 +198,9 @@ test("colored strip rows keep counters on one line and labels readable at a 360p
   const measurements: Array<{
     documentWidth: number;
     rowHeights: number[];
-    markerWidths: number[];
-    markerAndGapWidths: number[];
+    markerFontSizeRatios: number[];
+    markerAndGapFontSizeRatios: number[];
+    markerStartGaps: number[];
     labelWidths: number[];
     labelsTruncate: boolean[];
     countWhiteSpaces: string[];
@@ -219,11 +220,19 @@ test("colored strip rows keep counters on one line and labels readable at a 360p
       return {
         documentWidth: document.documentElement.scrollWidth,
         rowHeights: rows.map((row) => row.getBoundingClientRect().height),
-        markerWidths: markers.map((marker) => marker.getBoundingClientRect().width),
-        markerAndGapWidths: markers.map((marker) => {
-          const label = marker.parentElement;
-          return marker.getBoundingClientRect().width + Number.parseFloat(getComputedStyle(label as Element).gap);
+        markerFontSizeRatios: markers.map((marker) => {
+          const fontSize = Number.parseFloat(getComputedStyle(marker).fontSize);
+          return marker.getBoundingClientRect().width / fontSize;
         }),
+        markerAndGapFontSizeRatios: markers.map((marker) => {
+          const label = marker.parentElement;
+          const labelStyle = getComputedStyle(label as Element);
+          const fontSize = Number.parseFloat(getComputedStyle(marker).fontSize);
+          return (marker.getBoundingClientRect().width
+            + Number.parseFloat(labelStyle.gap)
+            + Number.parseFloat(labelStyle.paddingInlineStart)) / fontSize;
+        }),
+        markerStartGaps: markers.map((marker) => Number.parseFloat(getComputedStyle(marker.parentElement as Element).paddingInlineStart)),
         labelWidths: labels.map((label) => label.getBoundingClientRect().width),
         // A coloured label wraps its text in a copy span; the span is the element that truncates.
         labelsTruncate: labels.map((label) => {
@@ -243,12 +252,13 @@ test("colored strip rows keep counters on one line and labels readable at a 360p
   expect(plain?.documentWidth).toBeLessThanOrEqual(390);
   expect(colored?.documentWidth).toBeLessThanOrEqual(390);
   // Uncoloured rows keep the original behaviour: no marker, no truncation, text may wrap.
-  expect(plain?.markerWidths).toEqual([]);
+  expect(plain?.markerFontSizeRatios).toEqual([]);
   expect(plain?.labelsTruncate.some(Boolean)).toBe(false);
   expect(plain?.countWhiteSpaces).toEqual(["normal", "normal"]);
   // Coloured rows use compact markers, truncate labels and keep counters on one line at equal heights.
-  expect(colored?.markerWidths).toEqual([8, 8]);
-  expect(colored?.markerAndGapWidths.every((width) => width <= 10)).toBe(true);
+  expect(colored?.markerFontSizeRatios.every((ratio) => ratio >= 0.7 && ratio <= 0.75)).toBe(true);
+  expect(colored?.markerAndGapFontSizeRatios.every((ratio) => ratio <= 1.2)).toBe(true);
+  expect(colored?.markerStartGaps.every((gap) => gap > 0)).toBe(true);
   expect(colored?.labelsTruncate.every(Boolean)).toBe(true);
   expect(colored?.countWhiteSpaces).toEqual(["nowrap", "nowrap"]);
   expect(new Set(colored?.rowHeights).size).toBe(1);

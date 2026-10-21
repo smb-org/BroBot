@@ -126,7 +126,8 @@ export function ChatVoteTemplateInspector({
   const [deleteError, setDeleteError] = useState<string | undefined>();
   const [customColorDrafts, setCustomColorDrafts] = useState<Readonly<Record<number, string>>>({});
   const deletingRef = useRef(false);
-  const dirty = canManageContent && (isNew || draft.dirty);
+  const hasInvalidCustomColorDraft = Object.values(customColorDrafts).some((value) => normalizeChatVoteColor(value) === null);
+  const dirty = canManageContent && (isNew || draft.dirty || hasInvalidCustomColorDraft);
   const shortcutError = serverShortcutError ?? (draft.value.shortcut === null ? null
     : !isValidTemplateShortcut(draft.value.shortcut) ? labels.shortcutInvalid
       : templates.some((entry) => entry.id !== template.id && entry.shortcut === draft.value.shortcut) ? labels.shortcutDuplicate
@@ -402,7 +403,8 @@ export function ChatVoteTemplateInspector({
           warnings={dirty ? [labels.unsaved] : []}
           warningStatusLabel={(_warnings, justSaved) => justSaved ? labels.saved : labels.unsaved}
           {...(saveError === undefined ? {} : { error: saveError })}
-          invalid={saveInvalidReason !== null}
+          invalid={saveInvalidReason !== null && !hasInvalidCustomColorDraft}
+          saveDisabled={hasInvalidCustomColorDraft}
           {...(saveInvalidReason === null ? {} : { invalidMessage: labels.invalid, onInvalidSave: () => { setSaveError(labels.invalid); } })}
           {...(conflict ? { conflict: { message: labels.saveConflict, reloadLabel: labels.conflictReload, onReload: () => { void reloadConflict(); } } } : {})}
           discardOnConflict

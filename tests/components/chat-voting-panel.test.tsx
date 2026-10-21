@@ -188,6 +188,45 @@ describe("saved chat voting collection", () => {
       .toBe("Mindestens 3:1 Kontrast im Cockpit und auf Overlay-Balken.");
   });
 
+  it("tracks and discards an unfinished custom color from a clean saved template", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    const secondTemplate = { ...template, id: "template-weekend", title: "Wochenende" };
+    const { requests } = mount({ templates: [template, secondTemplate] });
+    fireEvent.click(await screen.findByRole("link", { name: /Abendessen/u }));
+
+    const save = screen.getByRole("button", { name: "Speichern" });
+    const discard = screen.getByRole("button", { name: "Verwerfen" });
+    expect(screen.getByText("Gespeichert")).toBeInTheDocument();
+    expect(save).toBeDisabled();
+    expect(discard).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Farbe für Antwort 1" }));
+    const popover = await screen.findByRole("dialog", { name: "Farbe für Antwort 1" });
+    const hex = within(popover).getByRole("textbox", { name: "Eigener Hex-Wert" });
+    fireEvent.change(hex, { target: { value: "#abc" } });
+
+    expect(within(popover).getByText("Hex-Farbe im Format #5b8cff eingeben.")).toBeInTheDocument();
+    expect(screen.getByText("Änderungen ausstehend")).toBeInTheDocument();
+    expect(save).toBeDisabled();
+    expect(discard).toBeEnabled();
+    fireEvent.click(save);
+    expect(requests.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Farbe für Antwort 1" }));
+    fireEvent.click(screen.getByRole("link", { name: /Wochenende/u }));
+    const guard = await screen.findByRole("dialog", { name: "Änderungen verwerfen?" });
+    fireEvent.click(within(guard).getByRole("button", { name: "Weiter bearbeiten" }));
+    fireEvent.click(screen.getByRole("button", { name: "Farbe für Antwort 1" }));
+    const reopenedPopover = await screen.findByRole("dialog", { name: "Farbe für Antwort 1" });
+    expect(within(reopenedPopover).getByRole("textbox", { name: "Eigener Hex-Wert" })).toHaveValue("#abc");
+
+    fireEvent.click(discard);
+    expect(within(reopenedPopover).getByRole("textbox", { name: "Eigener Hex-Wert" })).toHaveValue("#5b8cff");
+    expect(screen.getByText("Gespeichert")).toBeInTheDocument();
+    expect(save).toBeDisabled();
+    expect(discard).toBeDisabled();
+  });
+
   it("keeps a new vote as a two-minute draft until the explicit save action", async () => {
     const { requests, saved } = mount({ templates: [] });
     expect(await screen.findByText("Noch keine gespeicherten Abstimmungen")).toBeInTheDocument();

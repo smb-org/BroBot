@@ -105,8 +105,8 @@
 }
 
 .overlay-tally__color-marker {
-  width: 8px;
-  height: 8px;
+  width: 0.72em;
+  height: 0.72em;
   flex: none;
   border-radius: 50%;
 }
@@ -114,8 +114,9 @@
 .overlay-tally__label--strip-colored {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 0.18em;
   min-width: 0;
+  padding-inline-start: 0.15em;
   overflow: hidden;
 }
 
