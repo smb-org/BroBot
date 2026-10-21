@@ -1356,6 +1356,31 @@ describe("Blitz Round collection panel", () => {
     expect(api.submittedDeleteRevisions).toEqual([2]);
   });
 
+  it("refreshes every cached search list after a save [protects=a cached search revisited after saving CLOUD as STORM shows STORM and the next save sends the new revision; fails_when=save refreshes only the active list so the cached search reopens stale CLOUD and the next save conflicts; no_claim=the list cache and HTTP responses use an in-memory component-test stub]", async () => {
+    const api = installPanelFetch([sampleQuestion, secondQuestion]);
+    mountPanel("fictional_channel", undefined, 60_000);
+    await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    const search = screen.getByRole("textbox", { name: "Search questions" });
+    fireEvent.change(search, { target: { value: "o" } });
+    await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    fireEvent.change(search, { target: { value: "" } });
+    await screen.findByRole("button", { name: /Word scramble.*MOON/u });
+
+    fireEvent.click(screen.getByRole("button", { name: /Word scramble.*CLOUD/u }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Word" }), { target: { value: "STORM" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
+    await waitFor(() => expect(api.getQuestions()[0]).toMatchObject({ prompt: "STORM", revision: 2 }));
+    fireEvent.click(await screen.findByRole("button", { name: /Word scramble.*MOON/u }));
+
+    fireEvent.change(search, { target: { value: "o" } });
+    fireEvent.click(await screen.findByRole("button", { name: /Word scramble.*STORM/u }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("STORM"));
+    fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "STORMY" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
+    await waitFor(() => expect(api.getQuestions()[0]).toMatchObject({ prompt: "STORMY", revision: 3 }));
+    expect(api.submittedQuestionRevisions).toEqual([1, 2]);
+  });
+
   it("shows the scramble limit while keeping quiz prompts at 120 characters [protects=scramble word field uses a 16-character limit and quiz prompt uses 120; fails_when=the scramble field advertises a limit its validator rejects; no_claim=does not measure translated glyph widths]", async () => {
     installPanelFetch([sampleQuestion]);
     mountPanel();

@@ -287,9 +287,9 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
     const saved = selectedId === NEW_QUESTION || saveAsNew
       ? await createBlitzQuestion(channelId, input)
       : await updateBlitzQuestion(channelId, selectedId ?? "", revision ?? 1, input);
-    await questionsQuery.refetch();
+    await queryClient.invalidateQueries({ predicate: (query) => isQuestionListQuery(channelId, query) });
     return isCurrentEditorSession(session) ? saved : null;
-  }, [channelId, isCurrentEditorSession, questionsQuery, selectedId]);
+  }, [channelId, isCurrentEditorSession, queryClient, selectedId]);
 
   const reloadQuestion = async (questionId: string, session: symbol): Promise<BlitzQuestion> => {
     const latest = await loadBlitzQuestion(channelId, questionId);
