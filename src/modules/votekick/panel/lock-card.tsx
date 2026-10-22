@@ -61,15 +61,16 @@ export const VotekickLockCard = ({ state, status, language, now }: {
     state.kind === "chat_vote" ? state.title ?? words.chatVote : words.votekick(state.target ?? words.unknownTarget),
     remainingTime(state.until, now, words.unknownTime),
   );
-  const body = status === "error" ? words.error
+  const body = status === "error" ? " "
     : status === "loading" ? words.loading
       : state === null ? words.noVote
         : state.kind === "unknown" ? words.ballotUnknown : title;
+  const reserved = status === "error" ? words.error : words.explanation;
 
   return <section className="votekick-lock-card" aria-label={words.title} data-state={status}>
-    <header className="votekick-lock-card__header"><h2>{words.title}</h2><span className={active ? "is-running" : ""}>{status === "loading" ? words.loading : status === "error" ? words.error : active ? words.running : words.available}</span></header>
+    <header className="votekick-lock-card__header"><h2>{words.title}</h2><span className={active ? "is-running" : ""}>{status === "loading" ? words.loading : status === "error" ? words.errorStatus : active ? words.running : words.available}</span></header>
     <p className="votekick-lock-card__main" aria-live="polite">{body || " "}</p>
-    <p className="votekick-lock-card__reserved">{words.explanation}</p>
+    <p className="votekick-lock-card__reserved" aria-live="polite">{reserved}</p>
   </section>;
 };
 

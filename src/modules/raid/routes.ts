@@ -39,7 +39,7 @@ export const raidRoutes = new Hono<ModuleRouteEnvironment>();
 
 raidRoutes.get("/state", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
-  const [moduleRow, subscription, events] = await Promise.all([
+  const [moduleRow, subscription, lastRaid, lastShoutout] = await Promise.all([
     context.env.DB.prepare("SELECT enabled, settings FROM channel_modules WHERE channel_id = ? AND module_id = 'raid'")
       .bind(channelId).first<RaidModuleRow>(),
     context.env.DB.prepare(
@@ -48,13 +48,16 @@ raidRoutes.get("/state", async (context) => {
     ).bind(channelId).first<RaidSubscriptionRow>(),
     context.env.DB.prepare(
       `SELECT code, created_at, detail_json FROM event_log
-        WHERE channel_id = ? AND (
-          (module_id = 'channel_events' AND code IN ('channel_events.raid.incoming', 'channel_events.shoutout.sent'))
-          OR code IN ('host.shoutout.sent', 'raid.shoutout')
-        )
+        WHERE channel_id = ? AND code = 'channel_events.raid.incoming'
         ORDER BY created_at DESC, event_id DESC
-        LIMIT 100`,
-    ).bind(channelId).all<RaidStateEventRow>(),
+        LIMIT 1`,
+    ).bind(channelId).first<RaidStateEventRow>(),
+    context.env.DB.prepare(
+      `SELECT code, created_at, detail_json FROM event_log
+        WHERE channel_id = ? AND code IN ('channel_events.shoutout.sent', 'host.shoutout.sent')
+        ORDER BY created_at DESC, event_id DESC
+        LIMIT 1`,
+    ).bind(channelId).first<RaidStateEventRow>(),
   ]);
   const settings = (() => {
     try {
@@ -64,23 +67,23 @@ raidRoutes.get("/state", async (context) => {
     }
   })();
   const parsedSettings = settings !== null && settings.success ? settings.data : null;
-  const lastRaid = events.results.find((event) => event.code === "channel_events.raid.incoming");
-  const lastShoutout = events.results.find((event) => [
-    "channel_events.shoutout.sent",
-    "host.shoutout.sent",
-    "raid.shoutout",
-  ].includes(event.code));
+  const lastShoutoutChannel = lastShoutout === null ? null : (() => {
+    const detail = parseDetail(lastShoutout.detail_json);
+    return lastShoutout.code === "host.shoutout.sent"
+      ? textField(detail, "toLogin") ?? textField(detail, "to")
+      : textField(detail, "target");
+  })();
 
   return context.json({
     ready: moduleRow?.enabled === 1 && subscription?.status === "enabled",
     shoutoutThreshold: parsedSettings?.shoutoutThreshold ?? null,
-    lastRaid: lastRaid === undefined ? null : {
+    lastRaid: lastRaid === null ? null : {
       channel: textField(parseDetail(lastRaid.detail_json), "source"),
       viewers: numberField(parseDetail(lastRaid.detail_json), "viewers"),
       at: lastRaid.created_at,
     },
-    lastShoutout: lastShoutout === undefined ? null : {
-      channel: textField(parseDetail(lastShoutout.detail_json), "target"),
+    lastShoutout: lastShoutout === null ? null : {
+      channel: lastShoutoutChannel,
       at: lastShoutout.created_at,
     },
   });

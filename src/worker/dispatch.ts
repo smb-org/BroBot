@@ -538,7 +538,12 @@ const runActions = async (
       }
       if (action.kind === "shoutout") {
         let targetChannelId: string;
-        if ("targetLogin" in action) {
+        let targetLogin: string | undefined;
+        if ("targetChannelId" in action) {
+          targetChannelId = action.targetChannelId;
+          targetLogin = "targetLogin" in action ? action.targetLogin : undefined;
+        } else {
+          targetLogin = action.targetLogin;
           try {
             const user = await fetchTwitchUserByLogin(fetcher, environment as unknown as Env, action.targetLogin, "app");
             if (user === null) {
@@ -556,12 +561,11 @@ const runActions = async (
             });
             continue;
           }
-        } else {
-          targetChannelId = action.targetChannelId;
         }
         const result = await sendShoutout(environment, channelId, targetChannelId, fetcher);
+        const successDetail = targetLogin === undefined ? result.detail : { ...result.detail, toLogin: targetLogin };
         diagnostics.push(result.sent
-          ? { code: "host.shoutout.sent" satisfies EventCode, detail: result.detail }
+          ? { code: "host.shoutout.sent" satisfies EventCode, detail: successDetail }
           : { code: "host.shoutout.failed" satisfies EventCode, detail: { cause: result.reason, ...result.detail } });
         continue;
       }

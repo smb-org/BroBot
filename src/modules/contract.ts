@@ -380,7 +380,7 @@ type ModuleDiagnosticDetailKey =
   | "messageId" | "moderator" | "moduleId" | "name" | "outcome" | "person" | "alias"
   | "reason" | "recipient" | "remainingSeconds" | "requiredTier" | "response"
   | "scheduledAt" | "scheduledFor" | "scope" | "seconds" | "source"
-  | "sourceChannelId" | "startedAt" | "status" | "streamState" | "target" | "targetChannelId" | "variable"
+  | "sourceChannelId" | "startedAt" | "status" | "streamState" | "target" | "targetChannelId" | "toLogin" | "variable"
   | "text" | "threshold" | "tier" | "triggerLogin" | "twitchMessage" | "type" | "viewers";
 
 export interface ModuleDiagnostic {
@@ -444,6 +444,7 @@ export type ModuleAction =
   | { kind: "clip"; cooldownSeconds: number; postClipLinkInChat: boolean; chatLinkTemplate: string }
   | { kind: "announcement"; text: string; target?: ChatOutputTarget; automated?: boolean }
   | { kind: "shoutout"; targetChannelId: string }
+  | { kind: "shoutout"; targetChannelId: string; targetLogin: string }
   | { kind: "shoutout"; targetLogin: string }
   | {
     kind: "timeout";

@@ -412,7 +412,7 @@ const RaidSettingsPanelMount = ({ module, channelId, language, canManageContent 
     properties={{ channelId, language, canManage: canManageContent, canOperate: true }}
     loadingFallback={<LoadStateLines rows={4} height={24} />}
     renderError={(retry) => <LoadState
-      variant="panel-320"
+      variant="panel-0"
       status="error"
       loading={null}
       empty={null}
@@ -863,7 +863,9 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     columns={module.id === "raid"
       ? [
         <div className="settings-page__column-stack" key="raid-state">
-          <RaidSettingsPanelMount module={module} channelId={channelId} language={language} canManageContent={canManageContent} />
+          <div className="raid-settings-state-reserve">
+            <RaidSettingsPanelMount module={module} channelId={channelId} language={language} canManageContent={canManageContent} />
+          </div>
           {settingsEditor("messages", fieldErrors)}
         </div>,
         <div className="settings-page__column-stack" key="raid-shoutout">{settingsEditor("shoutout", fieldErrors)}</div>,

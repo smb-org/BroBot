@@ -96,6 +96,15 @@ describe("Raid settings editor declaration", () => {
     expect(card).not.toHaveTextContent(/Cooldown|Abklingzeit/u);
   });
 
+  it("keeps the raid state slot reserved around the lazy panel", async () => {
+    renderRaid(settingsFetch());
+
+    const card = await screen.findByRole("region", { name: "Zustand" });
+    const reserve = document.querySelector(".raid-settings-state-reserve");
+    expect(reserve).toBeInTheDocument();
+    expect(reserve).toContainElement(card);
+  });
+
   it("keeps a draft after a 409 concurrent settings change", async () => {
     const fetcher = settingsFetch(() => jsonResponse({ error: "module_settings_changed_concurrently" }, 409));
     renderRaid(fetcher);

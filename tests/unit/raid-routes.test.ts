@@ -95,6 +95,59 @@ describe("Raid state route", () => {
     });
   });
 
+  it("does not show a planned raid shoutout as a successful shoutout", async () => {
+    const database = await databaseFor();
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    await insertEvent(database, "channel-a", "planned-shoutout", "raid.shoutout", { sourceChannelId: "raider-id" }, "2026-10-20T10:01:00.000Z");
+
+    const response = await panelRouter.fetch(
+      await requestFor("manager-a", "/api/channels/channel-a/modules/raid/state"), environmentFor(database),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({ lastShoutout: null });
+  });
+
+  it("uses the destination login from a confirmed host shoutout", async () => {
+    const database = await databaseFor();
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    await insertEvent(database, "channel-a", "host-shoutout", "host.shoutout.sent", {
+      from: "channel-a", to: "target-user-id", toLogin: "friendly_raider", status: 204,
+    }, "2026-10-20T10:01:00.000Z");
+
+    const response = await panelRouter.fetch(
+      await requestFor("manager-a", "/api/channels/channel-a/modules/raid/state"), environmentFor(database),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      lastShoutout: { channel: "friendly_raider", at: "2026-10-20T10:01:00.000Z" },
+    });
+  });
+
+  it("keeps the latest raid when more than 100 shoutouts follow it", async () => {
+    const database = await databaseFor();
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    await insertEvent(database, "channel-a", "oldest-raid", "channel_events.raid.incoming", {
+      source: "friendly_raider", viewers: 34,
+    }, "2026-10-20T10:00:00.000Z");
+    for (let index = 0; index < 101; index += 1) {
+      const sequence = String(index).padStart(3, "0");
+      await insertEvent(database, "channel-a", `host-shoutout-${sequence}`, "host.shoutout.sent", {
+        from: "channel-a", to: `target-${sequence}`, toLogin: `target_${sequence}`, status: 204,
+      }, `2026-10-20T10:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}.000Z`);
+    }
+
+    const response = await panelRouter.fetch(
+      await requestFor("manager-a", "/api/channels/channel-a/modules/raid/state"), environmentFor(database),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      lastRaid: { channel: "friendly_raider", viewers: 34, at: "2026-10-20T10:00:00.000Z" },
+    });
+  });
+
   it("requires membership and rejects reads for another tenant", async () => {
     const database = await databaseFor();
     await insertLoginIdentityAndSession(database, "manager-a");

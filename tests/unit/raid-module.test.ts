@@ -60,7 +60,7 @@ describe("Raid module", () => {
     }));
 
     expect(result.actions).toEqual([
-      { kind: "shoutout", targetChannelId: "quelle-1" },
+      { kind: "shoutout", targetChannelId: "quelle-1", targetLogin: "quelle" },
       { kind: "chat", text: "Willkommen quelle mit 8 Zuschauern!", target: "source_only" },
     ]);
   });
@@ -156,7 +156,7 @@ describe("Raid module", () => {
     }));
 
     expect(result.actions).toEqual([
-      { kind: "shoutout", targetChannelId: "quelle-1" },
+      { kind: "shoutout", targetChannelId: "quelle-1", targetLogin: "quelle" },
       { kind: "chat", text: "quelle/0", target: "source_only" },
     ]);
   });
@@ -198,7 +198,7 @@ describe("Raid module", () => {
     };
     expect(raidSettingsSchema.safeParse(settings).success).toBe(true);
     expect(processRaid(event(incomingRaid(8), settings)).actions).toEqual([
-      { kind: "shoutout", targetChannelId: "quelle-1" },
+      { kind: "shoutout", targetChannelId: "quelle-1", targetLogin: "quelle" },
     ]);
     expect(processRaid(event(incomingRaid(2), settings)).actions).toEqual([
       { kind: "chat", text: "Danke quelle", target: "source_only" },

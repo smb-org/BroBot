@@ -24,6 +24,7 @@ export interface VotekickLockCardTexts {
   running: string;
   available: string;
   loading: string;
+  errorStatus: string;
   error: string;
   currentVote: (title: string, remaining: string) => string;
   ballotUnknown: string;
@@ -41,6 +42,7 @@ const lockCardCatalog: LocaleCatalog<VotekickLockCardTexts> = {
     running: "Abstimmung läuft",
     available: "Keine Abstimmung aktiv",
     loading: "Abstimmungsstatus wird geladen …",
+    errorStatus: "Nicht verfügbar",
     error: "Der Abstimmungsstatus konnte nicht geladen werden.",
     currentVote: (title, remaining) => `${title} · endet in ${remaining}`,
     ballotUnknown: "Eine Abstimmung ist aktiv. Details werden noch geladen.",
@@ -56,6 +58,7 @@ const lockCardCatalog: LocaleCatalog<VotekickLockCardTexts> = {
     running: "A vote is running",
     available: "No vote is active",
     loading: "Loading voting status …",
+    errorStatus: "Unavailable",
     error: "Voting status could not be loaded.",
     currentVote: (title, remaining) => `${title} · ends in ${remaining}`,
     ballotUnknown: "A vote is active. Its details are still loading.",

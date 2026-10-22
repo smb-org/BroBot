@@ -37,4 +37,13 @@ describe("VotekickLockCard", () => {
     expect(card).toHaveTextContent(copy);
     expect(container.querySelector(".votekick-lock-card__reserved")).toBeInTheDocument();
   });
+
+  it("keeps the short error status in the header and the full explanation in the reserved body", () => {
+    render(<UiProvider><VotekickLockCard state={null} status="error" language="en" now={Date.now()} /></UiProvider>);
+    const card = screen.getByRole("region", { name: "Mutual lock" });
+
+    expect(card.querySelector(".votekick-lock-card__header")).toHaveTextContent("Unavailable");
+    expect(card.querySelector(".votekick-lock-card__header")).not.toHaveTextContent("Voting status could not be loaded.");
+    expect(card.querySelector(".votekick-lock-card__reserved")).toHaveTextContent("Voting status could not be loaded.");
+  });
 });
