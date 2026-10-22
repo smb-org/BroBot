@@ -674,7 +674,7 @@ moduleRouter.post("/api/channels/:channelId/broadcast/markers", async (context) 
   };
   if (!await managementStillAuthorized()) return context.json({ error: "broadcast_manage_denied" }, 403);
 
-  const identity = await getLoginIdentity(context.env.DB, channelId);
+  let identity = await getLoginIdentity(context.env.DB, channelId);
   const grantHref = `/auth/channels/${encodeURIComponent(channelId)}/broadcaster-scopes/broadcast`;
   if (identity === null || identity.status !== "connected") {
     return context.json({ result: "failed" } satisfies StreamMarkerResult);
@@ -692,26 +692,54 @@ moduleRouter.post("/api/channels/:channelId/broadcast/markers", async (context) 
   if (accessToken === null) return context.json({ result: "token_expired" } satisfies StreamMarkerResult);
 
   if (!await managementStillAuthorized()) return context.json({ error: "broadcast_manage_denied" }, 403);
-  let result: HelixResult<{ data?: unknown }>;
-  try {
-    result = await context.get("measureServerTiming")("helix", () => context.get("helixRequest")<{ data?: unknown }>({
+  const createMarker = (token: string): Promise<HelixResult<{ data?: unknown }>> =>
+    context.get("measureServerTiming")("helix", () => context.get("helixRequest")<{ data?: unknown }>({
       url: "https://api.twitch.tv/helix/streams/markers",
-      query: { user_id: channelId },
-      accessToken,
+      accessToken: token,
       clientId: context.env.TWITCH_CLIENT_ID,
       method: "POST",
-      body: { description: "BroBot marker" },
+      body: { user_id: channelId, description: "BroBot marker" },
     }));
+  let result: HelixResult<{ data?: unknown }>;
+  try {
+    result = await createMarker(accessToken);
   } catch {
     return context.json({ result: "failed" } satisfies StreamMarkerResult);
+  }
+
+  if (!result.ok && result.status === 401) {
+    let refreshedIdentity: LoginIdentityRecord | null;
+    try {
+      refreshedIdentity = await refreshLoginIdentityTokens(context.env, identity, nowIso());
+    } catch {
+      return context.json({ result: "token_expired" } satisfies StreamMarkerResult);
+    }
+    if (refreshedIdentity === null || refreshedIdentity.status !== "connected") {
+      return context.json({ result: "token_expired" } satisfies StreamMarkerResult);
+    }
+    identity = refreshedIdentity;
+    if (!loginIdentityHasBroadcastScope(identity)) {
+      return context.json({ result: "scope_missing", error: "broadcast_scope_missing", grantHref } satisfies StreamMarkerResult);
+    }
+    let refreshedToken: string | null;
+    try {
+      refreshedToken = await decryptLoginIdentityAccessToken(identity, context.env);
+    } catch {
+      return context.json({ result: "token_expired" } satisfies StreamMarkerResult);
+    }
+    if (refreshedToken === null) return context.json({ result: "token_expired" } satisfies StreamMarkerResult);
+    if (!await managementStillAuthorized()) return context.json({ error: "broadcast_manage_denied" }, 403);
+    try {
+      result = await createMarker(refreshedToken);
+    } catch {
+      return context.json({ result: "failed" } satisfies StreamMarkerResult);
+    }
   }
 
   if (!result.ok) {
     if (result.status === 404) return context.json({ result: "offline" } satisfies StreamMarkerResult);
     if (result.status === 401) return context.json({ result: "token_expired" } satisfies StreamMarkerResult);
-    if (result.status === 403) {
-      return context.json({ result: "scope_missing", error: "broadcast_scope_missing", grantHref } satisfies StreamMarkerResult);
-    }
+    if (result.status === 403) return context.json({ result: "not_broadcaster" } satisfies StreamMarkerResult);
     if (result.status === 429) {
       const retryAfter = result.retryAfter == null
         ? 1

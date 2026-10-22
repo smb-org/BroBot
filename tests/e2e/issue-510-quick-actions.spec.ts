@@ -10,6 +10,7 @@ const setupQuickActionCockpit = async (
   deferCounterLoad = false,
   includeStreamMarker = false,
   streamState = "online",
+  viewerUserId = "viewer-510",
 ) => {
   const modules = [
     { id: "text_commands", enabled: true, settings: "{}" },
@@ -55,7 +56,7 @@ const setupQuickActionCockpit = async (
       return;
     }
     if (pathname === "/api/channels") {
-      await route.fulfill(json({ channels: [channel], bot: channel.bot, viewerUserId: "viewer-510" }));
+      await route.fulfill(json({ channels: [channel], bot: channel.bot, viewerUserId }));
       return;
     }
     if (pathname === `/api/channels/${channelId}/overview`) {
@@ -279,7 +280,7 @@ test("keeps Counter Run disabled and guarded while its variable request is pendi
 });
 
 test("shows the stream marker at desktop and mobile widths and keeps the grid fixed after feedback and scope changes", async ({ page }, testInfo) => {
-  const actions = await setupQuickActionCockpit(page, () => {}, false, true);
+  const actions = await setupQuickActionCockpit(page, () => {}, false, true, "online", channelId);
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto(`/channels/${channelId}`);
 
@@ -320,5 +321,19 @@ test("keeps an offline stream marker visible and disabled with its reason", asyn
   await expect(marker).toBeVisible();
   await expect(marker).toBeDisabled();
   await expect(page.getByText("Der Stream ist offline.").first()).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test("shows the owner-only scope reason without a grant link to a manager who is not the channel owner", async ({ page }) => {
+  const actions = await setupQuickActionCockpit(page, () => {}, false, true);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/channels/${channelId}`);
+
+  const marker = page.getByRole("button", { name: "Stream-Marker setzen" });
+  await expect(marker).toBeVisible();
+  await actions.setMarkerScopeAvailable(false);
+  await expect(marker).toBeDisabled({ timeout: 8_000 });
+  await expect(page.getByText("Nur der Kanalinhaber kann diese Berechtigung erteilen.").first()).toBeVisible();
+  await expect(page.getByRole("link", { name: /Berechtigung erteilen/u })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });

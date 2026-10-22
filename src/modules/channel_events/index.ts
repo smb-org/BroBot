@@ -24,16 +24,16 @@ const streamMarkerGrantHref = (channelId: string): string =>
   `/auth/channels/${encodeURIComponent(channelId)}/broadcaster-scopes/broadcast`;
 
 const streamMarkerScopeCondition: ModuleImmediateActionCondition = {
-  check: async ({ channelId, signal }) => {
+  check: async ({ channelId, viewerUserId, signal }) => {
     const { fetchStreamMarkerAvailability } = await import("../../dashboard/api");
     try {
       const availability = await fetchStreamMarkerAvailability(channelId, signal);
       return availability.manageScopeAvailable
         ? { reason: null }
-        : {
+        : viewerUserId === channelId ? {
           reason: streamMarkerActionTexts.scopeMissing,
           link: { href: streamMarkerGrantHref(channelId), label: streamMarkerActionTexts.scopeGrant },
-        };
+        } : { reason: streamMarkerActionTexts.scopeOwnerOnly };
     } catch (error: unknown) {
       if (signal.aborted) throw error;
       return { reason: streamMarkerActionTexts.scopeCheckFailed };
@@ -46,7 +46,7 @@ const markerPositionText = (positionSeconds: number): string => {
   return `${String(Math.floor(wholeSeconds / 60))}:${String(wholeSeconds % 60).padStart(2, "0")}`;
 };
 
-const streamMarkerAction = async (channelId: string) => {
+const streamMarkerAction = async (channelId: string, viewerUserId: string | null | undefined) => {
   const { createStreamMarker } = await import("../../dashboard/api");
   const result = await createStreamMarker(channelId);
   if (result.result === "created") {
@@ -54,11 +54,12 @@ const streamMarkerAction = async (channelId: string) => {
   }
   if (result.result === "scope_missing") {
     return {
-      message: streamMarkerActionTexts.scopeMissing,
+      message: (viewerUserId === channelId ? streamMarkerActionTexts.scopeMissing : streamMarkerActionTexts.scopeOwnerOnly),
       tone: "error" as const,
-      link: { href: result.grantHref, label: streamMarkerActionTexts.scopeGrant },
+      ...(viewerUserId === channelId ? { link: { href: result.grantHref, label: streamMarkerActionTexts.scopeGrant } } : {}),
     };
   }
+  if (result.result === "not_broadcaster") return { message: streamMarkerActionTexts.notBroadcaster, tone: "error" as const };
   if (result.result === "offline") return { message: streamMarkerActionTexts.offline, tone: "error" as const };
   if (result.result === "rate_limited") {
     return { message: streamMarkerActionTexts.rateLimited(String(result.retryAfter)), tone: "info" as const };
@@ -86,7 +87,7 @@ export const channelEventsModule: BotModule<typeof settingsSchema> = {
     conditions: ["streamLive", streamMarkerScopeCondition],
     requiredRole: "manager",
     errorMessage: streamMarkerActionTexts.error,
-    execute: async ({ channelId }) => streamMarkerAction(channelId),
+    execute: async ({ channelId, viewerUserId }) => streamMarkerAction(channelId, viewerUserId),
   }],
   handleEvent: (event) => processChannelEvent(event),
 };

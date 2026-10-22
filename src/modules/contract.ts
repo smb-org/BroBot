@@ -1503,6 +1503,7 @@ type ModuleImmediateActionAvailability = {
 
 interface ModuleImmediateActionConditionContext {
   channelId: string;
+  viewerUserId?: string | null;
   streamState: ChannelStreamState | null | undefined;
   botConnected?: boolean | null | undefined;
   language: ModuleLanguage;
@@ -1522,6 +1523,7 @@ export interface ModuleImmediateActionContentProperties {
 
 interface ModuleImmediateActionExecutionProperties extends ModuleImmediateActionContentProperties {
   formData: FormData;
+  viewerUserId?: string | null;
   pollId?: string;
 }
 

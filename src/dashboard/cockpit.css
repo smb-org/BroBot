@@ -73,7 +73,6 @@
   .live-action__reason.is-locked { color: var(--warn); }
   .live-action__reason.has-error { color: var(--error); }
   .live-action__reason.is-availability-warning { color: var(--warn); }
-  .live-action__reason.is-result { visibility: hidden; }
   .live-action__availability-link { position: absolute; z-index: 1; right: var(--s2); bottom: var(--s2); left: var(--s2); display: grid; grid-auto-rows: 12px; min-width: 0; overflow: hidden; text-align: center; font-size: 10px; line-height: 12px; }
   .live-action__availability-message { overflow: hidden; color: var(--warn); text-overflow: ellipsis; white-space: nowrap; }
   .live-action__availability-link a { overflow: hidden; color: var(--brand-text); text-decoration: underline; text-overflow: ellipsis; white-space: nowrap; }
