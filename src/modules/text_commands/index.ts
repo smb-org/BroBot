@@ -16,8 +16,10 @@ import { processTextCommandMessage } from "./service";
 import { commandFromMessage } from "./domain";
 import type { TextCommand } from "./contracts";
 import { moduleVariableRenameTarget } from "../contract";
-import type { ModuleVariableReferences } from "../contract";
+import type { ModuleImmediateActionCondition, ModuleVariableReferences } from "../contract";
 import { prepareModerationReason } from "../contracts/moderation";
+import { rememberLastCounterVariable } from "./panel/counter-selection";
+import { textCommandQuickActionTexts } from "./panel/quick-action-locale";
 
 const variableReferences: ModuleVariableReferences = {
   async usages(db, channelId, name) {
@@ -68,6 +70,23 @@ const variableReferences: ModuleVariableReferences = {
 };
 
 const settingsSchema = z.object({});
+
+const counterHasVariables: ModuleImmediateActionCondition = {
+  check: async ({ channelId, signal }) => {
+    const { variables } = await (await import("../../dashboard/api")).fetchChannelVariables(channelId, signal);
+    const available = variables.some((variable) => Number.isFinite(variable.value));
+    return { reason: available ? null : textCommandQuickActionTexts.counter.noVariables };
+  },
+};
+
+const botIsConnected: ModuleImmediateActionCondition = {
+  check: async ({ channelId, botConnected, signal }) => {
+    const connected = typeof botConnected === "boolean"
+      ? botConnected
+      : (await (await import("../../dashboard/api")).fetchChannelOverview(channelId, signal)).bot?.status === "connected";
+    return { reason: connected ? null : textCommandQuickActionTexts.testMessage.botNotConnected };
+  },
+};
 
 const textCommandBlockCodes = new Set<string>([
   "text_commands.disabled",
@@ -223,6 +242,42 @@ export const textCommandModule: BotModule<typeof settingsSchema> = {
   settingsSchema,
   defaultSettings: {},
   eventSubTypes: ["channel.chat.message"],
+  actions: [
+    {
+      id: "counter-plus-one",
+      name: textCommandQuickActionTexts.counter.name,
+      icon: "counter",
+      conditions: ["streamLive", counterHasVariables],
+      requiredRole: "operator",
+      content: { presentation: "popover", requiresReadiness: true, load: () => import("./panel/action-content") },
+      errorMessage: textCommandQuickActionTexts.counter.error,
+      execute: async ({ channelId, formData }) => {
+        const variableName = formData.get("variableName");
+        if (typeof variableName !== "string" || variableName.length === 0) throw new Error("counter_variable_missing");
+        const { variable } = await (await import("../../dashboard/api")).changeChannelVariableValue(channelId, variableName, "add", 1);
+        rememberLastCounterVariable(channelId, variableName);
+        return { message: textCommandQuickActionTexts.counter.success(String(variable.value)) };
+      },
+    },
+    {
+      id: "send-test-message",
+      name: textCommandQuickActionTexts.testMessage.name,
+      icon: "test-message",
+      conditions: ["streamLive", botIsConnected],
+      requiredRole: "operator",
+      errorMessage: textCommandQuickActionTexts.testMessage.error,
+      execute: async ({ channelId }) => {
+        const { sendTestMessage } = await import("../../dashboard/api");
+        const result = await sendTestMessage(channelId);
+        if (result.result === "sent") return { message: textCommandQuickActionTexts.testMessage.sent, tone: "success" as const };
+        if (result.result === "identity_missing") return { message: textCommandQuickActionTexts.testMessage.identityMissing, tone: "error" as const };
+        if (result.result === "rate_limited") {
+          return { message: textCommandQuickActionTexts.testMessage.rateLimited(String(result.retryAfter)), tone: "info" as const };
+        }
+        return { message: textCommandQuickActionTexts.testMessage.dropped, tone: "error" as const };
+      },
+    },
+  ],
   onEnable: (context, channelId) => initializeListCommand(
     context.DB,
     channelId,

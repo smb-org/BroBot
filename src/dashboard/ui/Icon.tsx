@@ -8,6 +8,7 @@ import type { ReactElement } from "react";
 
 const glyphs = {
   ad: Megaphone, shoutout: User, clip: Film, vote: Vote, boss: Crown, blitz: Zap,
+  counter: Plus, "test-message": MessageSquareText,
   cloud: Cloud, "cloud-fog": CloudFog, "cloud-lightning": CloudLightning, "cloud-moon": CloudMoon,
   "cloud-rain": CloudRain, "cloud-snow": CloudSnow, "cloud-sun": CloudSun, moon: Moon, sun: Sun, wind: Wind,
   add: Plus, remove: Trash2, close: X, copy: Copy, copied: Check,

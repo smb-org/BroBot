@@ -1386,6 +1386,9 @@ export const DashboardApp = (): ReactElement => {
   const paletteControls = overviewForHeader !== null && overviewForHeader.channelId === paletteChannel?.channelId
     ? overviewForHeader.controls
     : paletteChannel?.controls;
+  const paletteBotConnected = overviewForHeader !== null && overviewForHeader.channelId === paletteChannel?.channelId
+    ? overviewForHeader.bot?.status === "connected"
+    : paletteChannel?.bot?.status === "connected";
   const dashboardMode = dashboardModeForRoute(route);
   const selectPalette = (nextPalette: Palette): void => {
     setPalette(nextPalette);
@@ -1639,6 +1642,7 @@ export const DashboardApp = (): ReactElement => {
           route={route}
           isPlatformAdmin={isPlatform}
           {...(channels.status === "success" ? { botSignedIn } : {})}
+          botConnected={paletteBotConnected}
           streamState={paletteStreamState}
           {...(paletteControls === undefined ? {} : { channelControls: paletteControls })}
           onRefreshChannelState={refreshChannelState}

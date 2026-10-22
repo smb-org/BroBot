@@ -19,6 +19,8 @@ const iconNames: Readonly<Record<IconName, true>> = {
   clip: true,
   boss: true,
   blitz: true,
+  counter: true,
+  "test-message": true,
   add: true,
   remove: true,
   close: true,
@@ -76,11 +78,11 @@ describe("Icon", () => {
       const { container, unmount } = render(<Icon name={name} size={20} />);
       const svg = container.querySelector("svg");
       expect(svg, name).not.toBeNull();
-      expect(svg).toHaveAttribute("aria-hidden", "true");
-      expect(svg).toHaveAttribute("focusable", "false");
-      expect(svg).toHaveAttribute("stroke-width", "1.5");
-      expect(svg).toHaveAttribute("width", "20");
-      expect(svg).toHaveAttribute("height", "20");
+      expect(svg?.getAttribute("aria-hidden")).toBe("true");
+      expect(svg?.getAttribute("focusable")).toBe("false");
+      expect(svg?.getAttribute("stroke-width")).toBe("1.5");
+      expect(svg?.getAttribute("width")).toBe("20");
+      expect(svg?.getAttribute("height")).toBe("20");
       unmount();
     }
   });

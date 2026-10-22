@@ -47,4 +47,16 @@ describe("editor seam styles", () => {
     expect(styles).toMatch(/\.module-glyph \{[^}]*fill: none; stroke: currentColor; stroke-width: 1\.5; stroke-linecap: round; stroke-linejoin: round;/u);
     expect(styles).toContain(".command-palette-module-icon { width: 20px; height: 20px; }");
   });
+
+  it("reserves fixed command palette rows and moves narrow descriptions below their titles", () => {
+    const desktopRow = styles.match(/\.command-palette__list \[cmdk-item\] \{([^}]+)\}/u)?.[1] ?? "";
+    expect(desktopRow).toContain("height: 42px;");
+    expect(desktopRow).toContain("min-height: 42px;");
+    const mobileStart = styles.indexOf("@media (max-width: 639px)", styles.indexOf(".command-palette__list [cmdk-item]"));
+    const mobileEnd = mobileStart < 0 ? -1 : styles.indexOf("\n}", mobileStart);
+    const mobileStyles = mobileStart < 0 || mobileEnd < 0 ? "" : styles.slice(mobileStart, mobileEnd);
+    expect(mobileStyles).toMatch(/\.command-palette__list \[cmdk-item\] \{[^}]*height: 58px;[^}]*min-height: 58px;/u);
+    expect(mobileStyles).toMatch(/\.command-palette__item-copy \{[^}]*grid-row: 1;/u);
+    expect(mobileStyles).toMatch(/\.command-palette__inline-reason \{[^}]*grid-row: 2;/u);
+  });
 });

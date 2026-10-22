@@ -42,6 +42,7 @@ import { variableRouter } from "./variable-routes";
 import { overlayRouter } from "./overlay-routes";
 import { overlayAccessRouter } from "./overlay-access-routes";
 import { channelLocationRouter } from "./channel-location-routes";
+import { quickActionRouter } from "./quick-action-routes";
 import { EVENT_TONES, MANAGING_ROLES, canManage, type EventCode, type EventTone } from "../../contracts/values";
 import { auditSubjectUserId, isAuditArea } from "../../dashboard/audit/areas";
 import { apiErrorDetail } from "../../modules/contract";
@@ -238,6 +239,7 @@ panelRouter.route("/", variableRouter);
 panelRouter.route("/", overlayRouter);
 panelRouter.route("/", overlayAccessRouter);
 panelRouter.route("/", channelLocationRouter);
+panelRouter.route("/", quickActionRouter);
 
 panelRouter.get("/api/channels/:channelId/settings", requireChannelAuthorization(), async (context) => {
   const row = await context.env.DB.prepare(
